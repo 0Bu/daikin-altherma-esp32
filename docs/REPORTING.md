@@ -82,7 +82,12 @@ below and edit them out by hand before you post.
 
 ## What is removed, and what deliberately is not
 
-The device replaces these fourteen values with `<redacted>` and **keeps the field itself**:
+The device replaces these fourteen values with `<redacted>` and **keeps the field itself**.
+A value you have **not set** is the exception: it stays empty rather than becoming
+`<redacted>`, because an unset field has nothing to hide and substituting one would claim you
+have a broker, a room source or a HomeHub that you do not — which is the first thing anyone
+reading your report needs to know.
+
 
 | Field | Why it goes |
 |---|---|

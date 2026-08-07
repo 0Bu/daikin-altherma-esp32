@@ -4243,7 +4243,17 @@ static void test_redact() {
     // normalised the untouched case would change /status for every ordinary request.
     CHECK(redact_or("MyHomeNetwork", true) == REDACTED);
     CHECK(redact_or("MyHomeNetwork", false) == "MyHomeNetwork");
-    CHECK(redact_or("", true) == REDACTED);   // an empty value still redacts: absence is not privacy
+    CHECK(redact_or("", true) == REDACTED);   // the PRIMITIVE substitutes whatever it is handed
+
+    // The /status builder wraps its identifier fields in redact_identifier instead, which leaves an
+    // UNSET one alone. "<redacted>" over an empty value invents an identifier the installation does
+    // not have, and a bug report then cannot be read for the first thing triage needs from it: which
+    // optional sources this device is even running. mqtt.broker is the sharpest case — empty IS the
+    // disabled state, so every broker-less device used to report a hidden broker.
+    CHECK(redact_identifier("203.0.113.27:1883", true) == REDACTED);
+    CHECK(redact_identifier("203.0.113.27:1883", false) == "203.0.113.27:1883");
+    CHECK(redact_identifier("", true).empty());     // not set -> nothing to hide, and nothing invented
+    CHECK(redact_identifier("", false).empty());
 
     // One CHECK per shipped log statement. If a diag_printf() is reworded, the matching line here is
     // what fails — the leak itself is invisible (a correct-looking log line with a real hostname).
@@ -5314,6 +5324,44 @@ static void test_heating_curve_diagnosis() {
     Config no_weather = dependencies;
     no_weather.weather_enabled = false;
     CHECK(heating_curve_diagnosis_armed(no_weather));
+
+    // ── The snapshot the evaluator never touched ────────────────────────────────────────────────
+    // The sampler lives on the MQTT publish task, which safe mode never creates (main.cpp skips every
+    // optional consumer). /status still derives `armed` from the configuration at request time, so it
+    // published armed=true beside the evaluator's default Off/Disabled — and "disabled" is the
+    // evaluator's word for "no room source is mapped", which is exactly what the reader has already
+    // done. The UI, keying on the state, then told them to set up the source configured one row below.
+    CHECK(heating_curve_sampler_inactive(true, HeatingCurveState::Off,
+                                         HeatingCurveReason::Disabled));
+    CHECK(heating_curve_reported_reason(true, HeatingCurveState::Off,
+                                        HeatingCurveReason::Disabled) ==
+          HeatingCurveReason::SamplerInactive);
+    CHECK(std::string(heating_curve_reason_name(HeatingCurveReason::SamplerInactive)) ==
+          "sampler_inactive");
+    CHECK(static_cast<unsigned>(HeatingCurveReason::SamplerInactive) == 14);
+
+    // NOT armed + Off/Disabled is the ordinary unconfigured device (and, since arming also requires a
+    // broker, a fully-mapped room source whose broker was cleared). It keeps the evaluator's word.
+    CHECK(!heating_curve_sampler_inactive(false, HeatingCurveState::Off,
+                                          HeatingCurveReason::Disabled));
+    CHECK(heating_curve_reported_reason(false, HeatingCurveState::Off,
+                                        HeatingCurveReason::Disabled) ==
+          HeatingCurveReason::Disabled);
+    // A RUNNING evaluator assigns s_.armed before any gate, so it can never produce armed + Off; every
+    // state it does produce must pass through untouched, whatever the configuration says about arming.
+    for (bool armed_cfg : {false, true}) {
+        for (HeatingCurveState st : {HeatingCurveState::Recording, HeatingCurveState::Hold,
+                                     HeatingCurveState::Degraded, HeatingCurveState::Blocked}) {
+            for (HeatingCurveReason rs : {HeatingCurveReason::SampleRecorded,
+                                          HeatingCurveReason::SamplingInterval,
+                                          HeatingCurveReason::RoomUnavailable,
+                                          HeatingCurveReason::HomeHubUnavailable,
+                                          HeatingCurveReason::PlantInactive,
+                                          HeatingCurveReason::NonHeatingMode}) {
+                CHECK(heating_curve_reported_reason(armed_cfg, st, rs) == rs);
+            }
+        }
+    }
 }
 
 static void test_weather_forecast_contract() {

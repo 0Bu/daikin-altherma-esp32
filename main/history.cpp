@@ -149,6 +149,38 @@ inline void advance_raster_locked(int64_t now_us, uint32_t bucket) {
     s_have_bucket = true;
 }
 
+// The board's own memory, read BEFORE any lock: heap_caps_get_largest_free_block takes the heap's
+// internal lock, and taking that under ours would invent a lock order this file has no reason to
+// have (CLAUDE.md → never allocate while holding a mutex; the same argument applies to a second,
+// unrelated lock). Both are plain reads of a counter — nothing allocates.
+struct BoardSample {
+    HistorySample free_heap = HISTORY_NO_READING;
+    HistorySample max_alloc = HISTORY_NO_READING;
+};
+
+inline BoardSample sample_board() {
+    BoardSample b;
+    b.free_heap = logic::history_bytes_tenths_kib(esp_get_free_heap_size());
+    b.max_alloc = logic::history_bytes_tenths_kib(
+        heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+    return b;
+}
+
+// A BOARD trend has no row to resolve: its label and unit are fixed, it is never absent, and no page
+// can hold it over. A SPOT sample, folded like any other — the 5-minute bucket keeps the last one, so
+// a transient dip between samples is not captured. That is the right shape for the question these
+// answer (is the heap DRIFTING), and /status.sys.min_free_heap still carries the since-boot floor.
+inline void fold_board_locked(const BoardSample& board) {
+    for (size_t t = 0; t < TREND_COUNT; t++) {
+        const logic::TrendDef& d = logic::TRENDS[t];
+        if (!board_trend(d)) continue;
+        Trend& tr = s_ring[t];
+        copy_field(tr.label, sizeof(tr.label), d.label);
+        copy_field(tr.unit, sizeof(tr.unit), d.unit);
+        tr.ring.fold(d.kind == logic::TrendKind::FreeHeap ? board.free_heap : board.max_alloc);
+    }
+}
+
 inline void reset_circulation_locked(uint32_t bucket) {
     if (!s_circulation_reset_requested.exchange(false)) return;
     const size_t completed = logic::history_completed_samples(bucket);
@@ -165,9 +197,22 @@ inline void fold_circulation_locked(const CirculationPumpSample& circulation) {
         const logic::TrendDef& d = logic::TRENDS[t];
         if (!circulation_trend(d)) continue;
         Trend& tr = s_ring[t];
+        // NO SOURCE CONFIGURED -> no label, and /status.history.rows therefore omits the row
+        // entirely, which is how every other optional source states its absence (modbus_rows and
+        // env3_rows are gated on their stack being enabled). Labelling it unconditionally offered a
+        // trend the device can never fill, so the Diagnostics card drew "no readings yet" under a row
+        // that says "not configured" — an absent feature reported as an empty chart, which is exactly
+        // what logic/history.hpp's rule refuses. The ring is left untouched: the raster still commits
+        // it, so the pending NO_READING becomes an honest gap and a source configured LATER starts on
+        // the same 24-hour axis as every other series.
+        if (!circulation.configured) {
+            tr.label[0] = '\0';
+            tr.unit[0] = '\0';
+            continue;
+        }
         copy_field(tr.label, sizeof(tr.label), d.label);
         copy_field(tr.unit, sizeof(tr.unit), d.unit);
-        const HistorySample sample = circulation.configured && circulation.known
+        const HistorySample sample = circulation.known
             ? static_cast<HistorySample>(circulation.on ? 10 : 0) : HISTORY_NO_READING;
         tr.ring.fold(sample);
     }
@@ -196,6 +241,34 @@ void history_modbus_reset() {
 
 void history_circulation_reset() {
     s_circulation_reset_requested.store(true);
+}
+
+// The BOARD's own 24-hour trends (free heap, largest contiguous block) — their ONE producer.
+//
+// They used to be folded inside history_record(), which is reached only from poll_once(), which the
+// poll task calls only once a profile is resolved. A bus that never answers keeps the profile on
+// "auto" forever, so on exactly the board someone is debugging — wrong RX/TX, unplugged X10A cable,
+// unit powered down — the two memory curves recorded nothing, their labels stayed empty and
+// /status.history.rows omitted them: an unrelated board-health feature disappearing because a heat
+// pump was unreachable. poll_once()'s own UART-init early return had the same effect on a resolved
+// profile.
+//
+// So the sampling lives here and the poll task calls it unconditionally at the top of every cycle,
+// before it decides whether to detect or to sweep. One owner, no branch that can skip it — which is
+// what makes the regression structurally unavailable rather than merely fixed. These trends are
+// independent of the heat-pump identity in every other respect already (history_reset() exempts
+// them, trend_row_matches refuses to resolve them against a row); this makes their PRODUCER
+// independent too.
+void history_record_board() {
+    if (!s_mtx) return;
+    const BoardSample board = sample_board();
+    const int64_t now_us = esp_timer_get_time();
+    const uint32_t bucket = logic::history_bucket(now_us);
+
+    Lock lk(s_mtx);
+    if (!lk.held) return;
+    advance_raster_locked(now_us, bucket);
+    fold_board_locked(board);
 }
 
 void history_record_circulation() {
@@ -291,16 +364,6 @@ void history_record(const CachedValue* v, size_t n) {
     const int64_t now_us = esp_timer_get_time();
     const uint32_t bucket = logic::history_bucket(now_us);
 
-    // The board's own memory, read BEFORE the lock: heap_caps_get_largest_free_block takes the
-    // heap's internal lock, and taking that under ours would invent a lock order this file has no
-    // reason to have (CLAUDE.md → never allocate while holding a mutex; the same argument applies to
-    // taking a second, unrelated lock). Both are plain reads of a counter — nothing allocates.
-    // A SPOT sample, folded like any other: the 5-minute bucket keeps the last one, so a transient
-    // dip between samples is not captured. That is the right shape for the question these answer —
-    // is the heap DRIFTING — and /status.sys.min_free_heap still carries the since-boot floor.
-    const HistorySample free_heap = logic::history_bytes_tenths_kib(esp_get_free_heap_size());
-    const HistorySample max_alloc =
-        logic::history_bytes_tenths_kib(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
     const CirculationPumpSample circulation = circulation_pump_sample();
 
     Lock lk(s_mtx);
@@ -347,14 +410,11 @@ void history_record(const CachedValue* v, size_t n) {
             continue;
         }
 
-        // A BOARD trend has no row to resolve: its label and unit are fixed, it is never absent, and
-        // no page can hold it over. Sampled above, outside the lock, like everything else here.
-        if (board_trend(d)) {
-            copy_field(tr.label, sizeof(tr.label), d.label);
-            copy_field(tr.unit, sizeof(tr.unit), d.unit);
-            tr.ring.fold(d.kind == logic::TrendKind::FreeHeap ? free_heap : max_alloc);
-            continue;
-        }
+        // A BOARD trend is recorded by history_record_board() alone, on the poll task's
+        // unconditional top-of-cycle tick. It must NOT also be folded here: this function is reached
+        // only through poll_once(), i.e. only once a profile is resolved, and folding it in both
+        // places is what let a single owner look like two (see history_record_board).
+        if (board_trend(d)) continue;
 
         if (d.kind == logic::TrendKind::CirculationState) continue;
         const int idx = selected[t];

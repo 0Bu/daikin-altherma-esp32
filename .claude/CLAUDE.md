@@ -246,6 +246,28 @@ point at once. The GLOB is the fix, not the wrapper — `test_ui_*.mjs` already 
 these did not. A glob matching nothing exits 2 rather than reporting success, since "no tests found"
 must never look like "all tests passed" in the very script written to stop a check from disappearing.
 
+Both globs also carry the SOURCE-ABSENCE MATRIX, which is why it needed no runner of its own:
+`test/test_source_absence_contract.mjs` rides the contract glob and `test/test_ui_absence_matrix.mjs`
+the UI one. It asks the question every other gate answers about a device where everything is
+configured and answering — what happens when it is NOT. Every source here except the board is
+optional (broker, room source, circulation witness, HomeHub, ENV III, weather location, X10A bus)
+and safe mode removes all of them at once, so absence is a CROSS PRODUCT rather than a state. That
+product is where this project has repeatedly shipped defects with every other gate green: the
+board's own heap trends stopped recording because the X10A bus did not answer; the heating-curve
+card told a reader to set up the room source they had configured; the circulation row answered a
+cleared broker with "waiting", forever, with no cause; an unconfigured witness was offered an empty
+24-hour chart; and `?redact=1` invented identifiers for sources the device did not have. The
+firmware half asserts over SOURCE TEXT (who owns a ring, which gate a trend list is behind, whether
+`configured` is read from the config or from a task that may never have started), the browser half
+executes the real card renderers over the real removal shapes. `tools/absence/selftest.sh` is the
+load-bearing part and a CI `gates` step of its own: BOTH halves assert over text, so a check that
+has stopped matching the code it describes reports SUCCESS — it re-seeds each shipped defect and has
+already caught one of its own assertions written so that it could never fire. The judgement half is
+the `/absence-review` skill, a CONDITIONAL PR-merge gate; the regex in
+`.claude/hooks/require-absence-review.sh` is the ONLY definition of that set. Conditional is
+defensible here for the schematic's reason and not domain-review's: a source's lifecycle is created
+in one route, torn down in one place, reported in one builder and rendered in one card family.
+
 (Three more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
 `scripts/run-pages-publish-tests.sh`, git-only, relevant when `scripts/publish-pages-branch.sh` or
 `scripts/build-pages.sh` changes; `scripts/run-web-installer-plan-tests.sh`, python-only, the
@@ -1335,6 +1357,11 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 so the domain audit still sees the converter's intrinsic semantics, and an unknown
                 code falls through to the bare code rather than inventing a description
                 (docs/REGISTERS.md §"error codes", docs/HOME_ASSISTANT.md).
+                circulation_source.hpp = the read-only MQTT power witness for the potable-water
+                circulation pump: exact-topic/path validation, the ON/OFF hysteresis and the
+                pulse-train confirmation tracker. Its absence is a first-class state — the checkup's
+                DHW-loss attribution treats the witness as OPTIONAL evidence and never fabricates a
+                verdict without it.
                 redact.hpp = what a diagnostic snapshot must NOT carry when it leaves the device,
                 for GET /status?redact=1 + GET /diag?redact=1 (the web UI's "Report a bug" action,
                 docs/REPORTING.md). In the DEVICE rather than in www/js/app_state.js because the browser
@@ -1443,7 +1470,18 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 pair (free_heap/max_alloc, KiB) carry their
                 own fixed labels because no profile
                 has one to give; trend_row_matches refuses them against a row even when the row is
-                crafted to look like their (0,0) locator. Two absences are
+                crafted to look like their (0,0) locator. The BOARD pair has its own producer,
+                history_record_board(), which the poll task calls at the top of EVERY cycle before it
+                decides whether to detect or to sweep — never history_record(), which is reached only
+                through poll_once() and therefore only once a profile is RESOLVED. Folded there they
+                vanished on a board whose X10A never answers (the profile stays "auto" forever), so
+                the two heap curves that answer "is the heap drifting" were absent from
+                /status.history.rows on exactly the board being debugged: an unrelated feature dying
+                because a different subsystem was unreachable. One owner, no branch that can skip it.
+                The CIRCULATION ring is gated the other way: with no source configured its label is
+                CLEARED, so /status stops offering the trend entirely rather than offering one the
+                device can never fill (the modbus_rows/env3_rows rule, applied to the third source —
+                an absent feature is stated by absence, never by an empty chart). Two absences are
                 distinguished (NO_READING vs HELD_OVER) and history_store COMPOSES
                 ou_reading_held_over rather than restating it, so a change to which pages freeze
                 reaches the trends automatically. That is the load-bearing half for outdoor air:
@@ -2130,8 +2168,19 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   1s evaluation (`off|recording|hold|degraded|blocked` and `disabled|sample_recorded|
                   sampling_interval|room_unavailable|x10a_unavailable|homehub_unavailable|
                   plant_gate_unknown|plant_inactive|forecast_unavailable|clock_invalid|
-                  heating_mode_unknown|non_heating_mode`), mirrored as stable numeric codes. Codes
-                  3/4 remain unused after removal of deadband/rate-limit semantics. Nullable raw
+                  heating_mode_unknown|non_heating_mode|sampler_inactive`), mirrored as stable
+                  numeric codes. Codes 3/4 remain unused after removal of deadband/rate-limit
+                  semantics. `sampler_inactive` (14) is the one reason /status can report that the
+                  evaluator never emits: the sampler lives on the MQTT publish task, which SAFE MODE
+                  never creates, so its snapshot stays default-constructed at Off/Disabled while
+                  `armed` is derived from the saved room mapping at request time. Published raw that
+                  was a payload contradicting itself, and "disabled" is the evaluator's word for "no
+                  room source is mapped" — so the card told the reader to set up the source sitting
+                  configured one row below it. logic/heating_curve_diagnosis.hpp's
+                  heating_curve_reported_reason substitutes it (host-tested, and narrow: every state
+                  a RUNNING evaluator produces passes through untouched). Clearing the BROKER is a
+                  different state and stays `disabled`, because arming requires mqtt_uri — so that
+                  one genuinely is disarmed. Nullable raw
                   errors are facts only while eligible/recorded; sequence + absolute timestamp form
                   the durable event contract. Room error is not an LWT offset. There is no actuator
                   result in this block and cannot be one.
@@ -2346,6 +2395,14 @@ GET  /status?redact=1   the bug-report form of /status: the fourteen reporter-id
                   person — and the circulation witness adds the same pair one source over, its topic
                   normally embedding a smart-plug device id. The count is DERIVED from the call sites by the redaction audit, so this
                   list and logic/redact.hpp's cannot silently disagree with the builder again.
+                  An UNSET field is left EMPTY rather than substituted (redact_identifier, not the
+                  raw redact_or primitive): "<redacted>" over an empty value manufactures an
+                  identifier that does not exist, and the first question triage asks of a frozen
+                  report is which optional sources the installation is even running. mqtt.broker is
+                  the sharpest case — empty IS the disabled state, so every broker-less device used
+                  to report a hidden broker. The empty string is kept rather than a null so the
+                  field's TYPE does not change with the flag; weather_forecast.latitude/longitude
+                  reach the same answer from the other side by emitting null when unconfigured.
                   The KEY is always emitted — an omitted field is indistinguishable from an older
                   build that never had it, and "which build produced this?" is the first question a
                   frozen report must answer. Substituted where each value is WRITTEN, never as a

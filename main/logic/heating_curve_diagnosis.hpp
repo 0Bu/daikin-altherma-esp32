@@ -37,6 +37,15 @@ enum class HeatingCurveReason : uint8_t {
     ClockInvalid        = 11,
     HeatingModeUnknown  = 12,
     NonHeatingMode      = 13,
+    // The sampler is not RUNNING at all — it lives on the MQTT publish task, which does not exist
+    // when the broker is unconfigured (mqtt_ha.cpp returns before creating it) or when the board came
+    // up in safe mode (main.cpp skips every optional consumer). The snapshot is then still
+    // default-constructed, i.e. Off/Disabled, while `armed` is derived from the saved room mapping at
+    // request time — so /status reported `armed:true` beside `reason:"disabled"`, and the UI, keying
+    // on the state alone, told the reader to set up the very room source sitting configured one row
+    // below. This reason exists so those two situations stop sharing a wording: Disabled means "no
+    // room source is mapped", this one means "one is, and nothing is evaluating it".
+    SamplerInactive     = 14,
 };
 
 inline const char* heating_curve_state_name(HeatingCurveState state) {
@@ -64,8 +73,32 @@ inline const char* heating_curve_reason_name(HeatingCurveReason reason) {
     case HeatingCurveReason::ClockInvalid:        return "clock_invalid";
     case HeatingCurveReason::HeatingModeUnknown:  return "heating_mode_unknown";
     case HeatingCurveReason::NonHeatingMode:      return "non_heating_mode";
+    case HeatingCurveReason::SamplerInactive:     return "sampler_inactive";
     }
     return "clock_invalid";
+}
+
+// Is this snapshot one the evaluator never produced?
+//
+// The evaluator assigns `s_.armed = in.armed` before anything else, so a snapshot it HAS touched can
+// never carry armed=true together with Off/Disabled — that combination means the reporting surface
+// computed `armed` from the configuration while the sampler's task was never created (no broker, or
+// safe mode). /status is the only surface that can see it: the MQTT heartbeat exists only when the
+// task does. Pure so the substitution is asserted rather than re-derived at the call site, and so it
+// stays one rule if a second reporting surface ever appears.
+inline bool heating_curve_sampler_inactive(bool armed_by_config, HeatingCurveState state,
+                                           HeatingCurveReason reason) {
+    return armed_by_config && state == HeatingCurveState::Off &&
+           reason == HeatingCurveReason::Disabled;
+}
+
+// The reason a reporting surface should publish, given what the configuration says about arming.
+// Identity in every ordinary case; SamplerInactive exactly when the snapshot is untouched.
+inline HeatingCurveReason heating_curve_reported_reason(bool armed_by_config,
+                                                        HeatingCurveState state,
+                                                        HeatingCurveReason reason) {
+    return heating_curve_sampler_inactive(armed_by_config, state, reason)
+         ? HeatingCurveReason::SamplerInactive : reason;
 }
 
 struct HeatingCurveInputs {

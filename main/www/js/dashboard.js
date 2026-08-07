@@ -260,15 +260,32 @@ function firmwareRow(version) {
     `<div class="vdesc-p">${esc(t("card.firmware_help"))}</div>`);
 }
 
+// The circulation witness's own condition, as ONE rule — the same shape roomSourceStatus() has, and
+// for the same reason: it is read three times (the tongue's assessment line, the row's status colour
+// and its accessible name), and three copies of a ladder is the drift this project keeps paying for.
+//
+// The BROKER branch is why this exists at all. The witness is an MQTT subscription, so clearing the
+// broker silences it completely — and this row used to answer that with "waiting for a message",
+// forever, while the room source one row up in the same card said so plainly (`ref.broker_off`). A
+// row that cannot say why it is empty is a row that reads as a broken sensor.
+function circulationSourceStatus(c, mqtt) {
+  if (!c.configured) return { key: "not_configured", text: t("circ.not_configured"), cls: "dim" };
+  if (!mqtt.configured) return { key: "broker_off", text: t("circ.broker_off"), cls: "err" };
+  if (c.error) return { key: "unavailable", text: t("circ.unavailable"), cls: "err" };
+  if (c.has_value && c.fresh) {
+    return { key: "live", cls: "ok",
+      text: c.state === "on" ? t("circ.running")
+          : c.state === "off" ? t("circ.stopped") : t("circ.checking") };
+  }
+  if (c.has_value) return { key: "stale", text: t("circ.stale"), cls: "warn" };
+  return { key: "waiting", text: t("circ.waiting"), cls: "warn" };
+}
+
 function circulationSettingsCardHtml() {
   const c = S.status?.circulation_source || {};
-  let value = t("circ.not_configured");
-  if (c.configured) {
-    if (c.error) value = t("circ.unavailable");
-    else if (c.has_value && c.fresh) {
-      value = c.state === "on" ? t("circ.running") : c.state === "off" ? t("circ.stopped") : t("circ.checking");
-    } else value = c.has_value ? t("circ.stale") : t("circ.waiting");
-  }
+  const mqtt = S.status?.mqtt || {};
+  const status = circulationSourceStatus(c, mqtt);
+  const value = status.text;
   let body = `<div class="vdesc-p">${esc(t("circ.settings_help"))}</div>`;
   if (c.configured) {
     const source = c.name || "MQTT";
@@ -287,8 +304,16 @@ function circulationSettingsCardHtml() {
   }
   body += typeof histHtml === "function" ? histHtml("circulation_state", "", t("circ.row")) : "";
   const sourceName = c.configured ? (c.name || "MQTT") : t("circ.not_configured");
-  const right = `<button class="settings-split-action vrow-val settings-wrap${c.configured ? "" : " dim"}" type="button" ` +
-    `data-act="circulation" aria-label="${esc(`${t("circ.title")}: ${sourceName}`)}">` +
+  // The face NAMES the source and states its condition in colour — the room-source row's shape. That
+  // makes the colour load-bearing, so DESIGN.md §9 requires the accessible name to spell the same
+  // condition out in words; before this the row carried neither, and a witness that had gone silent
+  // looked exactly like one that was running.
+  // On an UNCONFIGURED row the name IS the status ("Not configured"), so appending it again reads as
+  // "Not configured · Not configured" to a screen reader. Append the condition only where it says
+  // something the name does not.
+  const ariaState = value === sourceName ? "" : ` · ${value}`;
+  const right = `<button class="settings-split-action vrow-val settings-wrap ${status.cls}" type="button" ` +
+    `data-act="circulation" aria-label="${esc(`${t("circ.title")}: ${sourceName}${ariaState}`)}">` +
     `<span>${esc(sourceName)}</span>${editIcon}</button>`;
   const row = settingsInfoRow("diagnostics:circulation", "diagnostics-circulation-detail",
     t("circ.row"), right, body, "", "circulation_state");
@@ -484,7 +509,21 @@ function roomSourceDetailHtml(r, mqtt, temperature, setpoint, age) {
 //    two rows below it, which is the opposite of a diagnosis. The room reason (`disabled` — the
 //    thermostat is switched off; `stale`; `non_heating_mode`; …) is already on /status and says
 //    exactly what is wrong, so it is what gets printed.
-function dynamicStateRow(d, room, weather, modbus) {
+//  - SAMPLER_INACTIVE means the device is ARMED — a room source is mapped and a broker is configured
+//    — and yet nothing is evaluating it, because the task the sampler lives on was never created.
+//    That is safe mode. "Set up a room source" would send the reader to fix the one thing already
+//    done, so this names the real state and says the recording resumes by itself.
+//  - OFF plus a CONFIGURED room source is the other half of the same mistake, and it is not the same
+//    state: arming also requires a broker (heating_curve_diagnosis_armed), so clearing the broker
+//    disarms a fully-configured room source. The old copy told those users to set up the source they
+//    were looking at.
+function dynamicStateRow(d, room, weather, modbus, mqtt, sys) {
+  if (d.reason === "sampler_inactive") {
+    return { key: sys.safe_mode ? "dyn.state_safe_mode" : "dyn.state_inactive",
+             cls: "warn", help: "dyn.state_help_inactive" };
+  }
+  if (d.state === "off" && room.configured && !mqtt.configured)
+    return { key: "dyn.state_no_broker", cls: "warn", help: "dyn.state_help_no_broker" };
   if (d.state === "recording")
     return { key: "dyn.state_recording", cls: "ok", help: "dyn.state_help_recording" };
   if (d.state === "degraded")
@@ -541,7 +580,7 @@ function dynamicControlCardHtml() {
   // The STATE, not an imaginary operating mode. What a reader needs is why no sample exists yet;
   // through the summer the honest answer ("the plant is not heating") must NOT be styled as a fault,
   // because it is the expected state for months.
-  const st = dynamicStateRow(d, r, w, modbus);
+  const st = dynamicStateRow(d, r, w, modbus, mqtt, S.status?.sys || {});
   // The state tongue carries WHAT THIS IS before what it is doing. That paragraph used to hang off
   // the Firmware switch, which is where a reader met the feature first; with the switch gone the
   // first row of its own card is that place, and a card whose title is the only thing explaining it

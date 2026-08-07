@@ -43,8 +43,8 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The fourteen /status values http_status.cpp passes through redact_or. Listed here rather than only
-// at the call sites so the set is reviewable in one place:
+// The fourteen /status values http_status.cpp passes through redact_identifier (via its jstr_r
+// wrapper). Listed here rather than only at the call sites so the set is reviewable in one place:
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker
 //   reference_temperature.name  reference_temperature.topic
 //   circulation_source.name  circulation_source.topic
@@ -66,6 +66,30 @@ inline constexpr std::size_t REDACTED_STATUS_FIELDS = 14;
 // straight into json_quote(), which copies anyway.
 inline std::string redact_or(const std::string& value, bool on) {
     return on ? std::string(REDACTED) : value;
+}
+
+// The same substitution, applied only to a value that is actually SET — this is what the /status
+// builder wraps its identifier fields in.
+//
+// An UNSET field carries nothing to hide, and "<redacted>" over one manufactures an identifier that
+// does not exist: a report from a device with no room source, no circulation witness, no HomeHub and
+// no syslog collector reads exactly like a report from a device that has all four and scrubbed them.
+// That is the first question triage asks of a frozen report (.claude/skills/bug-triage) — which
+// optional sources is this installation even running — and answering it wrongly costs a round trip
+// to the reporter for a fact the payload already had. mqtt.broker is the sharpest case: empty IS the
+// disabled state, so the redacted form asserted a broker on every device that has none.
+//
+// The empty string is kept rather than a JSON null so the field's TYPE does not change with the
+// flag, and the KEY is still always emitted — a dropped field would forge the "older build" signal
+// the header rule above exists to prevent. weather_forecast.latitude/longitude reach the same answer
+// from the other side (they emit null when unconfigured, redacted or not); this is that rule for the
+// identifiers that are strings.
+//
+// Note this is deliberately NOT a change to redact_or() itself: the primitive still substitutes
+// whatever it is handed, because a caller that has already decided a value is present must not have
+// that decision quietly reversed by an empty-string edge case.
+inline std::string redact_identifier(const std::string& value, bool on) {
+    return on && !value.empty() ? std::string(REDACTED) : value;
 }
 
 // One diag-line rule: everything between the end of `marker` and the next `end` is replaced.

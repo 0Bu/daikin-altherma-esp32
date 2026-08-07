@@ -88,7 +88,12 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-use-case-review.sh\"",
             "statusMessage": "Running complete UI use-case gate\u2026"
-          }
+          },
+        {
+          "type": "command",
+          "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh\"",
+          "statusMessage": "Checking source-absence gate\u2026"
+        }
         ]
       },
       {
@@ -117,7 +122,12 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-use-case-review.sh\"",
             "statusMessage": "Running complete UI use-case gate\u2026"
-          }
+          },
+        {
+          "type": "command",
+          "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh\"",
+          "statusMessage": "Checking source-absence gate\u2026"
+        }
         ]
       }
     ],

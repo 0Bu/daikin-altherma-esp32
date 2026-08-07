@@ -177,8 +177,16 @@ let circulationHtml = sandbox.__renderCirculation();
 let circulationButton = circulationHtml.match(/<button[^>]*data-act="circulation"[\s\S]*?<\/button>/)?.[0] || "";
 assert.match(circulationButton, /<span>Example pump model<\/span>/,
   "the editable row header must identify the configured pump");
-assert.doesNotMatch(circulationButton, /Läuft|Steht|Prüft|Nicht verfügbar/,
+// The VISIBLE face keeps the pump's name — the status must not take its place. It is scoped to the
+// span rather than the whole button on purpose: the row now states its condition in COLOUR too, and
+// DESIGN.md §9 requires a colour-only face to spell that condition out in its accessible name (the
+// room-source row above does exactly this). Asserting over the entire button conflated "the visible
+// text was replaced" with "the screen reader was told", and only the first is the rule.
+assert.doesNotMatch(circulationButton.match(/<span>[\s\S]*?<\/span>/)?.[0] || "",
+  /Läuft|Steht|Prüft|Nicht verfügbar/,
   "the moment status belongs to the diagnostic tongue, not in place of the pump name");
+assert.match(circulationButton, /aria-label="[^"]*Example pump model · Läuft"/,
+  "a row whose face carries its condition in colour must say that condition in its accessible name");
 let circulationTongue = circulationHtml.match(/id="diagnostics-circulation-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
 assert.match(circulationTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> Läuft/);
 assert.match(circulationTongue, /<div class="vhist vhist-state">TIMELINE/,
