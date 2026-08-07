@@ -9648,16 +9648,72 @@ static void test_availability() {
         CHECK(value_available(*d, true, 0.0));    // 0 °C brine is a reading, not an absence
     }
 
-    // The three 0x20 rows #224 also lists are deliberately NOT here: an outdoor coil, a suction pipe
-    // and a liquid line sit AT 0 °C for much of a heating season, so withholding their zero would
-    // cost a real reading far more often than it removes a false one. They still publish.
+    // ── Page 0x20: the LOW-side rows stay published, the HIGH-side one is conditional (#224) ─────
+    // The outdoor coil (the evaporator in heating) and the suction pipe are on the LOW side, and the
+    // only witness the catalog carries is the HIGH side. A coil at 0 °C while the refrigerant
+    // condenses at 49 °C is an ordinary January afternoon, not a contradiction — so these two must
+    // stay Always, and must stay published EVEN WITH a strong witness present. That second
+    // assertion is the load-bearing one: it is what stops someone widening the liquid-line rule to
+    // "all three 0x20 zeros" and silently withholding a real winter reading.
     const ValueDef ou_hx{0x20, 2, 105, 2, 1, "O/U Heat Exch. Temp."};
     const ValueDef suction{0x20, 6, 105, 2, 1, "Suction pipe temp."};
-    const ValueDef liquid{0x20, 10, 105, 2, 1, "Liquid pipe temp.(R6T)"};
-    for (const ValueDef* d : {&ou_hx, &suction, &liquid}) {
+    const SaturationWitness hot{true, 49.0};
+    for (const ValueDef* d : {&ou_hx, &suction}) {
         CHECK(availability_policy(*d) == AvailabilityPolicy::Always);
         CHECK(value_available(*d, true, 0.0));
+        CHECK(value_available(*d, true, 0.0, nullptr, 0, hot));   // witness present: still published
     }
+
+    // The LIQUID LINE is the high side, so the same witness refutes its zero: liquid temperature =
+    // condensing temperature - subcooling, and 0.00 against 49 °C claims ~49 K of it.
+    // ALL THREE air-source spellings carry the rule (29 + 6 + 4 = 39 catalog rows); the geothermal
+    // Leaving brine temp.(R6T) at the identical coordinate must never reach it.
+    const ValueDef liq_r6t{0x20, 10, 105, 2, 1, "Liquid pipe temp.(R6T)"};
+    const ValueDef liq_r3t{0x20, 10, 105, 2, 1, "Liquid temperature(R3T)"};
+    const ValueDef liq_bare{0x20, 10, 105, 2, 1, "Liquid pipe temp."};
+    for (const ValueDef* d : {&liq_r6t, &liq_r3t, &liq_bare}) {
+        CHECK(availability_policy(*d) == AvailabilityPolicy::ZeroAbsentAboveSaturation);
+        // 1. witness present and REFUTING -> withheld
+        CHECK(!value_available(*d, true, 0.0, nullptr, 0, hot));
+        // 2. witness present and AGREEING (the circuit is cold, so 0 °C is reachable) -> PUBLISHED.
+        //    This is the half that makes the rule conditional rather than flat, and it is what a
+        //    reversed comparison would break while every other case still passed.
+        CHECK(value_available(*d, true, 0.0, nullptr, 0, SaturationWitness{true, 5.0}));
+        // 3. no witness at all (no witness row, page silent, sensor absent) -> PUBLISHED (fails open)
+        CHECK(value_available(*d, true, 0.0));
+        CHECK(value_available(*d, true, 0.0, nullptr, 0, SaturationWitness{false, 49.0}));
+        // 4. a real reading is never touched, whatever the witness says
+        CHECK(value_available(*d, true, 44.0, nullptr, 0, hot));
+        CHECK(value_available(*d, true, -0.1, nullptr, 0, hot));   // exact zero, not a band
+        CHECK(value_available(*d, true, 0.1, nullptr, 0, hot));
+        // 5. a text/enum row has no number to judge
+        CHECK(value_available(*d, false, 0.0, nullptr, 0, hot));
+    }
+    // The bound is a strict >, so a witness exactly AT the ceiling does not withhold.
+    CHECK(value_available(liq_r6t, true, 0.0, nullptr, 0,
+                          SaturationWitness{true, LIQUID_LINE_SAT_CEILING}));
+
+    // The GEOTHERMAL row at the very same coordinate: brine LEAVING a ground loop sits at 0 °C in
+    // normal operation, so it must be untouched even under a refuting witness.
+    const ValueDef brine_out_r6t{0x20, 10, 105, 2, 1, "Leaving brine temp.(R6T)"};
+    CHECK(availability_rule(brine_out_r6t) == nullptr);
+    CHECK(availability_policy(brine_out_r6t) == AvailabilityPolicy::Always);
+    CHECK(value_available(brine_out_r6t, true, 0.0, nullptr, 0, hot));
+
+    // The catalog-wide reach of this rule — every 0x20/10 spelling in every profile, in both
+    // directions — is pinned in test_availability_catalog() below, beside the other ledger reaches.
+
+    // THE WITNESS-ROW GATE. The capture may only read the witness bytes out of a profile that
+    // DECLARES that row; on a model without it those bytes are whatever that model puts there, and a
+    // pressure read off them would be an invented witness — the one direction that must be
+    // impossible, since a witness can only ever take a reading away.
+    const ValueDef with_witness[] = {{0x62, 15, 405, 2, 1, "Pressure sensor(T)"}};
+    const ValueDef no_witness[]   = {{0x62, 11, 105, 1, 2, "Water pressure"},
+                                     {0x62, 15, 105, 2, 2, "Refrigerant pressure sensor"}};
+    CHECK(profile_has_saturation_witness(with_witness, 1));
+    CHECK(!profile_has_saturation_witness(no_witness, 2));   // the bar twin alone is not a witness
+    CHECK(!profile_has_saturation_witness(nullptr, 0));
+    CHECK(!profile_has_saturation_witness(with_witness, 0));
 
     // ── Expansion valve pulses: raw 0xFFF8 is not a position ─────────────────────────────────────
     // BYTE LEVEL, because the whole finding is about which integer arrives on the wire. conv 151 is
@@ -9802,6 +9858,7 @@ static void test_availability() {
     int profiles_total = 0, evap_rows = 0, cond_rows = 0, suppressed = 0, odd_label = 0;
     int eev_rows = 0, conv151_rows = 0, page_absence_rows = 0;
     int zero_rows = 0, fan1_rows = 0, fan2_rows = 0, cout_rows = 0, geo_shared_rows = 0;
+    int liq_rows = 0, liq_brine_rows = 0;
     for (const auto& p : def::profiles) {
         profiles_total++;
         const auto view = def::resolved(p);
@@ -9850,10 +9907,40 @@ static void test_availability() {
                     CHECK(value_available(d, true, 0.0));
                 }
             }
-            // The three 0x20 rows #224 lists are deliberately unadjudicated — 0 °C is where an
-            // outdoor coil, a suction line and a liquid line live for much of a heating season.
-            if (d.reg == 0x20 && (d.offset == 2 || d.offset == 6 || d.offset == 10))
+            // The 0x20 zero rows #224 lists, split by WHICH SIDE OF THE CIRCUIT they sit on — the
+            // fact that decides whether the one available witness can say anything about them.
+            // The outdoor coil (evaporator) and the suction pipe are LOW side and the witness is
+            // HIGH side, so they stay unadjudicated: 0 °C is where they live for much of a heating
+            // season and no high-side reading contradicts that.
+            if (d.reg == 0x20 && (d.offset == 2 || d.offset == 6))
                 CHECK(pol == AvailabilityPolicy::Always);
+            // The liquid line IS the high side, so its zero is conditional on the witness. Both
+            // directions, catalog-wide: every air-source spelling carries the rule, and the
+            // geothermal brine row at the identical coordinate never does — a leaving brine
+            // temperature really does sit at 0 °C.
+            if (d.reg == 0x20 && d.offset == 10 && d.conv == 105) {
+                if (logic::lwt_ci_contains(d.label, "brine")) {
+                    liq_brine_rows++;
+                    CHECK(availability_rule(d) == nullptr);
+                    CHECK(pol == AvailabilityPolicy::Always);
+                    CHECK(value_available(d, true, 0.0, nullptr, 0, SaturationWitness{true, 49.0}));
+                } else {
+                    liq_rows++;
+                    CHECK(logic::lwt_ci_contains(d.label, "liquid"));
+                    CHECK(pol == AvailabilityPolicy::ZeroAbsentAboveSaturation);
+                    CHECK(availability_rule(d)->ceiling == LIQUID_LINE_SAT_CEILING);
+                    CHECK(row_publishable(d));   // the row is real; only the refuted zero is withheld
+                    // refuting witness withholds, agreeing witness and absent witness do not
+                    CHECK(!value_available(d, true, 0.0, nullptr, 0, SaturationWitness{true, 49.0}));
+                    CHECK(value_available(d, true, 0.0, nullptr, 0, SaturationWitness{true, 5.0}));
+                    CHECK(value_available(d, true, 0.0));
+                }
+            }
+            // Nothing OUTSIDE that coordinate may acquire the conditional verdict — a rule whose
+            // whole justification is "this row is on the high side" must not spread to rows nobody
+            // established that for.
+            if (pol == AvailabilityPolicy::ZeroAbsentAboveSaturation)
+                CHECK(d.reg == 0x20 && d.offset == 10 && d.conv == 105);
             // The pulse ceiling and conv 151 must be the SAME set, in both directions. Left to
             // right: nothing but an expansion valve may acquire a ceiling meant for one. Right to
             // left: every conv-151 row is covered, since a coordinate the ledger missed would
@@ -9904,6 +9991,35 @@ static void test_availability() {
     // count means a profile was added or the generator's page-0x10 input moved, and either is a
     // reason to re-read the adjudication rather than let it silently re-scope itself.
     CHECK(profiles_total == 45);
+    // The liquid line's reach, hardcoded for the same reason as the two above: a changed count means
+    // the generator emitted a FOURTH air-source spelling (which would otherwise escape the rule
+    // silently) or moved a geothermal row into it (which would withhold a real 0 °C brine reading).
+    // Either is a reason to re-read the adjudication, not to let it re-scope itself.
+    CHECK(liq_rows == 39);         // 29 "Liquid pipe temp.(R6T)" + 6 "Liquid temperature(R3T)" + 4 bare
+    CHECK(liq_brine_rows == 4);    // "Leaving brine temp.(R6T)" — reaches the ledger, told nothing
+    // HOW FAR THE RULE CAN ACTUALLY REACH, which is much narrower than the 39 rows that carry it and
+    // must be stated rather than left implied. The witness row (0x62/15 conv 405) exists on only 8
+    // profiles, so on the other 31 liquid-line profiles the rule is ARMED BUT PERMANENTLY SILENT and
+    // every zero publishes. That is the intended fail-open, not a gap to close by loosening the
+    // witness — and the reference unit
+    // (altherma_ebla_edla_d_series_4_8kw_monobloc) is one of the 8, which is what makes the rule
+    // verifiable on real hardware at all. Every witness-carrying profile also carries the liquid
+    // line, so there is no profile whose witness judges nothing.
+    int witness_profiles = 0, witness_and_liquid = 0;
+    for (const auto& p : def::profiles) {
+        if (!profile_has_saturation_witness(p.values, p.count)) continue;
+        witness_profiles++;
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].reg == 0x20 && p.values[i].offset == 10 && p.values[i].conv == 105) {
+                witness_and_liquid++;
+                break;
+            }
+    }
+    CHECK(witness_profiles == 8);
+    CHECK(witness_and_liquid == witness_profiles);
+    CHECK(profile_has_saturation_witness(
+        def::lookup("altherma_ebla_edla_d_series_4_8kw_monobloc").values,
+        def::lookup("altherma_ebla_edla_d_series_4_8kw_monobloc").count));
     CHECK(evap_rows == 44 && cond_rows == 44);
     CHECK(evap_rows == suppressed);
     CHECK(odd_label == 1);   // exactly one family spells the re-decoded register differently

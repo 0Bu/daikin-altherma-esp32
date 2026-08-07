@@ -4,6 +4,7 @@
 // in logic/convert.hpp (host-tested); this only formats.
 #include <cstddef>
 #include <string>
+#include "logic/availability.hpp"
 #include "logic/value_def.hpp"
 
 namespace daik {
@@ -16,7 +17,14 @@ namespace daik {
 // a refrigerant pressure from a water one (a 0-bar refrigerant reading is an unreported transducer, a
 // 0-bar water reading is a drained system) — see logic/convert.hpp. Optional: omitting it keeps the
 // °C-envelope filtering and skips only the pressure rule.
+//
+// `sat` is the CROSS-PAGE saturation witness (logic/availability.hpp): the refrigerant condensing
+// temperature decoded from the hydronic page, which is what lets a high-side row's exact zero be
+// refuted by a simultaneously-measured quantity. Optional and FAILS OPEN — a default-constructed
+// witness means "not known", never "the zero is fine", so a caller without one publishes the value
+// exactly as before.
 bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int rtype,
-               std::string& out, const ValueDef* profile = nullptr, size_t count = 0);
+               std::string& out, const ValueDef* profile = nullptr, size_t count = 0,
+               SaturationWitness sat = {});
 
 } // namespace daik

@@ -57,6 +57,26 @@ static int                   s_no_match = 0;
 // at REST; this one exists because the values #194 is about are only wrong while the unit runs.
 static logic::RawCaptureState s_raw_capture;
 
+// The CROSS-PAGE saturation witness, carried from the PREVIOUS cycle (logic/availability.hpp).
+// Poll-task-owned, RAM only, no mutex: poll_once() runs on poll_task alone and nothing else reads
+// this.
+//
+// It has to be carried because the sweep reads pages in table order and the witness page (0x62,
+// hydronic) comes AFTER the page it judges (0x20, outdoor) — so this cycle's witness does not exist
+// yet when the outdoor rows decode. The three ways out were: read the witness page twice (a second
+// bus round-trip every cycle, on the one resource this firmware is careful with), restructure the
+// sweep into read-all-then-decode (moves every row's verdict out of value_available() and into a
+// post-pass, so hp_poll and mqtt_ha could disagree about a row set — the one thing row_publishable()
+// exists to prevent), or accept a witness that is one cycle old. The last is nearly free and the
+// staleness is bounded at one poll interval (1 s), against a condensing temperature that moves by
+// well under a kelvin in that time and a bound with 20 K of headroom.
+//
+// It EXPIRES rather than persisting: every cycle overwrites it with what that cycle captured, so a
+// witness page that stops answering leaves a default-constructed (ok=false) value within one cycle
+// and the rule falls open. A stale witness must never outlive the reply it came from — that would
+// be the held-over-reading substitution one page over.
+static SaturationWitness      s_sat_witness;
+
 // RAII guard around s_mtx (same idiom as config.cpp), used by every take in this file. It matters
 // most for the readers: they copy std::strings OUT of s_stats/s_cache under the lock, so they can
 // throw std::bad_alloc mid-critical-section. Releasing on unwind makes that a skipped read (every
@@ -131,6 +151,16 @@ static void poll_once() {
     uint8_t raw10[32]; int raw10_len = -1;
     uint8_t raw20[32]; int raw20_len = -1;
 
+    // This cycle's saturation witness, captured as the witness page goes by and published to the
+    // carry at the end of the sweep. The rows decoded THIS cycle are judged against the PREVIOUS
+    // cycle's value (see s_sat_witness) — the witness page is read after the page it judges.
+    const SaturationWitness sat_in = s_sat_witness;
+    SaturationWitness       sat_out;                  // default: not captured -> next cycle fails open
+    // The BASE table, like rtype above: the witness is a generated pressure row and the supplement
+    // carries no conv-405 row (def/overlay.hpp's static_assert pins that).
+    const bool has_sat_witness_row =
+        profile_has_saturation_witness(prof.values, prof.count);
+
     for (size_t i = 0; i < view.count(); i++) {
         // Unpublishable rows never contribute a queryable register: a page whose rows are ALL
         // unpublishable is not read at all, saving one bus round-trip per cycle. The page still
@@ -176,6 +206,20 @@ static void poll_once() {
             len = paylen;
         }
 
+        // Capture the CROSS-PAGE saturation witness as its page goes by, for the NEXT cycle's
+        // page-0x20 rows (logic/availability.hpp). Decoded through the ordinary converter with this
+        // profile's own refrigerant curve, so the witness is the same number the row publishes —
+        // never a second, looser decode of the same bytes. conv 405 refuses bar <= 0, so a unit
+        // whose pressure sensor does not report leaves r.ok false and the witness stays absent.
+        // GATED on the profile declaring the row: on a model that does not, these bytes are whatever
+        // that model puts there, and a witness read off them would be invented.
+        if (reg == SAT_WITNESS_REG && has_sat_witness_row &&
+            SAT_WITNESS_OFFSET + 2 <= paylen) {
+            const ValueDef w{SAT_WITNESS_REG, SAT_WITNESS_OFFSET, SAT_WITNESS_CONV, 2, 1, "sat"};
+            const Reading  r = convert(w, payload + SAT_WITNESS_OFFSET, rtype);
+            if (r.ok && !r.unimpl) { sat_out.ok = true; sat_out.temp_c = r.value; }
+        }
+
         for (size_t k = 0; k < view.count(); k++) {
             if (view[k].reg != reg) continue;
             if (!row_publishable(view[k])) continue;   // decoded for nobody (see the loop above)
@@ -194,11 +238,15 @@ static void poll_once() {
             // The whole table goes along: reading_plausible needs it to tell a refrigerant pressure
             // (0 bar impossible) from the water one (0 bar = a drained system, and real). The BASE
             // table is the right argument here — see the profile_refrigerant note above.
-            if (hp_format(def, payload, paylen, rtype, val, prof.values, prof.count))
+            if (hp_format(def, payload, paylen, rtype, val, prof.values, prof.count, sat_in))
                 cv.value = val;
             fresh.push_back(std::move(cv));
         }
     }
+
+    // Publish this cycle's capture for the next one. Unconditional, so a witness page that went
+    // silent expires within one cycle instead of authorizing a withholding forever.
+    s_sat_witness = sat_out;
 
     // ── SOURCE freshness: which of these readings is the outdoor unit still measuring? ────────────
     // The outdoor unit refreshes its OWN pages (0x20 sensors, 0x21 inverter) only while it RUNS;
