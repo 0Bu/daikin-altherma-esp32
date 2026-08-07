@@ -23,7 +23,12 @@ Builds for the **esp32s3** target only.
 > task at all. A cross-cutting catalog of the
 > platform features this firmware implements (Secure Boot v2 signing, OTA + health gate,
 > ESP-IDF component inventory, diagnostics) is [`docs/FEATURES.md`](../docs/FEATURES.md) — keep it
-> current with the `feature-docs` skill when a technical feature lands or changes. The MQTT/HA entity
+> current with the `feature-docs` skill when a technical feature lands or changes. Its SIBLING is
+> [`docs/PLANT.md`](../docs/PLANT.md), which carries the features whose subject is the PLANT rather
+> than the board — the 24-hour checkup, the Open-Meteo forecast, the optional ENV III climate input
+> and heating-curve diagnosis. The split is the scope rule each file states: FEATURES.md keeps the
+> platform half of those features (the I2C driver, the evidence-before-save rule), PLANT.md what
+> they measure and infer. Same skill maintains both. The MQTT/HA entity
 > contract as seen from Home Assistant is [`docs/HOME_ASSISTANT.md`](../docs/HOME_ASSISTANT.md), and
 > the implemented read-only MCP surface is [`docs/MCP.md`](../docs/MCP.md). User-facing docs:
 > [`README.md`](../README.md), [`docs/README.md`](../docs/README.md),
@@ -630,8 +635,10 @@ env3.cpp        OPTIONAL local climate sensor — the M5Stack ENV III Grove unit
                 so a time-series subscriber sees the sensor's real 10s cadence instead of a gap that
                 reads like a dropout. The QMP6988's own temperature is decoded and DISCARDED — one
                 quantity, one sensor, so nothing has to explain which of two temperatures a reading
-                is. Deliberately NOT in /values, the trend rings, the checkup or the schematic: those
-                describe the heat pump, and an accessory on the board is not a plant reading. NOT
+                is. Deliberately NOT in /values or the checkup: those describe the heat pump, and an
+                accessory on the board is not a plant reading. It DOES carry its own 24-hour rings
+                (ENV3_HISTORIES in logic/env3.hpp, served as the separate GET /history?source=env3
+                rather than mixed into the X10A trend set) and one schematic pill. NOT
                 watchdog-subscribed either — every transaction is bounded by a 100ms I2C timeout, so
                 the loop cannot wedge the way a silent UART can
 weather_forecast.cpp  the Open-Meteo forecast client (provider + model pinned in code:

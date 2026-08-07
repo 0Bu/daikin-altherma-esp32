@@ -42,11 +42,21 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
 2. **Locate the catalog entry.** Find the matching section **and** the feature-matrix row at the top
    of FEATURES.md. Most features appear in both — update both, plus the ESP-IDF inventory (§11) if a
    component was added.
-3. **Write the entry code-verified.** State what the feature does, point at the file with a
-   repo-relative markdown link (targets are relative to `docs/`, e.g. `../main/wifi.cpp`), and label
-   the status honestly (`✅` shipping / `🧪` host-tested logic / `🟡` partial / `🔭` planned). Copy
-   exact numbers from the source — sensor counts, `CHECK` count, partition sizes, `CONFIG_*` names —
-   never round or guess.
+3. **Write the entry code-verified — and SHORT.** State what the feature does in **one line** in the
+   matrix and **at most two or three** in its section, point at the file with a repo-relative
+   markdown link (targets are relative to `docs/`, e.g. `../main/wifi.cpp`), and label the status
+   honestly (`✅` shipping / `🧪` host-tested logic / `🟡` partial / `🔭` planned). Copy exact numbers
+   from the source — sensor counts, `CHECK` count, partition sizes, `CONFIG_*` names — never round or
+   guess, and prefer omitting a volatile count to restating one that will drift.
+
+   **What does NOT go in the entry** — this is the failure mode this file actually has, not a
+   hypothetical one: the catalog once reached 1510 lines, a third of it inside "the short version"
+   matrix, because each new feature appended its full rationale to a table cell. Keep out the bug
+   that motivated the feature (→ the issue), the measurement that settled it (→ the issue or
+   `ARCHITECTURE.md`), the field-by-field API listing (→ `.claude/CLAUDE.md` → HTTP API), and the
+   per-header reasoning (→ the header's own comment). A reader comes here to learn *that* a mechanism
+   exists and *where* it lives; every line past that belongs somewhere it can be found on purpose.
+   If an entry needs more room, the deep-dive doc is the room.
 4. **Promote, don't just append, when a stub goes real.** If `ota_update.cpp`'s download or
    `mcp_server.cpp` graduates from TODO, change the label everywhere it appears (matrix + section +
    inventory) and delete the "planned" wording.
@@ -66,6 +76,11 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
   point at is worse than an omitted feature.
 - **A catalog, not a tutorial.** It records what *this* firmware does and where — it is not a
   copy/paste guide for reusing a feature in another project. Keep entries descriptive, not how-to.
+- **A catalog, not an archive.** An index earns its keep by being readable end to end; a feature
+  stated in one line is worth more than the same feature stated in twenty. When editing an existing
+  entry, leave it **no longer than you found it** — the growth here has always been incremental, one
+  defensible paragraph at a time. Prune while you are in there.
+- **Ids are stable keys.** Never renumber or reuse a matrix id; a gap means a retired feature.
 - **Don't rename the file or restructure sections** without reason — other docs, the README and
   [`.claude/CLAUDE.md`](../../CLAUDE.md) may link to `docs/FEATURES.md` and its anchors.
 - **The project convention holds:** always write the full name `daikin-altherma-esp32`, and don't name
