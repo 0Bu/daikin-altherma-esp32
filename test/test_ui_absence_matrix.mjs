@@ -424,6 +424,33 @@ for (const scenario of SCENARIOS) {
       `${scenario.name}: an armed-but-inactive sampler must name why it is not recording`);
     checks++;
   }
+
+  // RULE 8 — the optional outdoor axis must blame only ITSELF. A healthy ENV III with no value in
+  // the diagnosis means the RECORDER stopped, not the sensor: clearing the broker disarms the
+  // sampler while the sensor keeps measuring, and warning there sends the reader to check hardware
+  // that is fine. Only a running recorder that is not being fed may warn, and an absent sensor is
+  // never a fault at all — the axis gates no sampling.
+  // Scoped to the diagnosis row: the ESP32 card's Hardware button carries the same data-act.
+  const outdoorItem = rendered.dynamicControlCardHtml
+    .match(/data-desc="dynamic:outdoor"[\s\S]*?<\/button>[\s\S]*?<\/button>/)?.[0] || "";
+  const outdoorFace = outdoorItem.match(/<button[^>]*data-act="board"[\s\S]*?<\/button>/)?.[0] || "";
+  if (outdoorFace) {
+    const sensorOk = status.env3 && status.env3.enabled && status.env3.fresh;
+    const axisMissing = status.heating_curve.outdoor_temperature_c == null;
+    const recording = status.heating_curve.armed &&
+      status.heating_curve.reason !== "sampler_inactive";
+    if (axisMissing && (!sensorOk || !recording)) {
+      assert.doesNotMatch(outdoorFace, /vrow-val settings-wrap (?:warn|err)/,
+        `${scenario.name}: the outdoor axis must not report a fault when the sensor is absent ` +
+        `or the recorder is not running`);
+      checks++;
+    }
+    if (sensorOk && axisMissing && !recording) {
+      assert.ok(rendered.dynamicControlCardHtml.includes(ui.t("dyn.outdoor_status_idle")),
+        `${scenario.name}: a healthy sensor with a stopped recorder must name the recorder`);
+      checks++;
+    }
+  }
 }
 
 // The board's own memory trends are the case that must survive EVERY plant absence: they describe

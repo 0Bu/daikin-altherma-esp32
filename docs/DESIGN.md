@@ -1327,9 +1327,20 @@ vocabulary exactly:
    Deleting the forecast only stops Open-Meteo traffic; sampling remains armed and the state is
    "recording without forecast" when a heating window is otherwise valid. The
    room-source row opens the exact MQTT topic, current and target temperature paths, source timestamp
-   and maximum age; the weather row opens its location modal.
+   and maximum age; the weather row opens its location modal; the measured-outdoor row opens Board
+   hardware, where ENV III is configured.
    Advanced optional enabled/HVAC-mode mappings remain API-compatible but are not ordinary UI fields.
-   ENV III remains a separate board accessory and never substitutes for Daikin R1T.
+   ENV III remains a separate board accessory and never substitutes for Daikin R1T — the row records
+   it as the recorded sample's own OUTDOOR AXIS, beside the forecast rather than in place of any
+   plant reading, and the two labels keep MEASURED apart from FORECAST so one outdoor number cannot
+   be read as the other — and the row does NOT repeat the neighbour's "Optionale", both because
+   the dim unconfigured state and the tongue already carry it and because at a phone width that
+   longer label squeezed the value column until the reading split from its unit. Its number is the one the DIAGNOSIS holds, never `/status.env3` read a
+   second time: a live sensor whose value has not reached the sampler must not render green here
+   while the state row reports the recording stopped, which is the same-input rule above seen from
+   the other side. It follows the setup-step rule too — an absent sensor is **dim**, since the axis
+   gates no sampling and its absence is not a fault; only a RUNNING recorder that is not being fed
+   turns amber, because only then is the sensor the thing to go and look at.
 
    Every row has a pull-out explanation tongue. Live room and weather values are not repeated as an
    unexplained green summary line: while the card is enabled, the tongue names status, quantity,
