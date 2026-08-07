@@ -165,6 +165,10 @@ inline bool copy_field(char* dst, size_t max, const char* src) {
 bool                  s_persist_dirty = false;
 logic::HistoryRestore s_persist_verdict = logic::HistoryRestore::NoRecord;
 
+// Armed only when this boot ADOPTED its rings, spent by the first detection — see
+// history_reset_on_detect() for why detection alone is not evidence that the unit changed.
+bool s_adopt_detect_grace = false;
+
 // WHAT THE SEAL COVERS — and the one field it deliberately does not.
 //
 // `pending`, the bucket currently being folded, is EXCLUDED. Including it is the obvious choice and
@@ -528,6 +532,9 @@ void history_start() {
                                                        P().catalog_fp, want_fp, P().crc, persist_crc());
     if (s_persist_verdict == logic::HistoryRestore::Accept) {
         persist_adopt(esp_timer_get_time());
+        // The rings carry the previous identity in their labels, so this boot's first detection can
+        // defer to the per-row check rather than wiping on sight — history_reset_on_detect().
+        s_adopt_detect_grace = true;
         diag_printf("history: rings kept across a %s reset (RAM survived)\n",
                     crash_reason_slug(reason));
     } else {
@@ -547,6 +554,34 @@ void history_reset() {
     // reset to history_record(), like checkup_reset(), so one task performs both reset and reseed
     // under the existing history mutex.
     s_reset_requested.store(true);
+}
+
+// The DETECTION path's reset — hp_detect_run's only entry, and separate from history_reset() for a
+// reason that only became visible on a board with a bus attached.
+//
+// Detection resolves a profile on EVERY boot: the model is RAM-only by design, so there is nothing
+// persisted to compare it against and the sweep always runs. Treating "detection resolved" as "the
+// observation identity changed" was therefore correct while the rings died at every reboot anyway —
+// and became wrong the moment .noinit started carrying them across one. Measured on the live board:
+// history_start() adopted all 46 rings ("persist":"accept"), and four seconds later this reset threw
+// the 31 X10A rings away again, leaving only HomeHub and ENV III. The feature delivered nothing on
+// exactly the boards that have a heat pump attached.
+//
+// A board WITHOUT a bus never reaches this call — the profile stays "auto" — which is why the bench
+// board showed a complete restore and could not have caught it. The absence of the bus hid it.
+//
+// So the first detection after an ADOPTED boot defers to a better-informed check instead of guessing.
+// The adopted rings still carry the previous identity in their labels, and history_record() already
+// compares those against the newly resolved ones per row (history_row_identity_changed) and wipes if
+// and only if the unit really is a different one — the same rule that protects a running board from
+// a mid-session model change, now simply allowed to answer for a reboot too. A generic fallback or a
+// swapped unit spells its rows differently and is still wiped; a re-detect of the same unit is not.
+//
+// ONE boot, ONE detection: every later call resets exactly as before, so a genuine re-detect, a link
+// rewire or a /set_hp model change is unaffected.
+void history_reset_on_detect() {
+    if (s_adopt_detect_grace) { s_adopt_detect_grace = false; return; }
+    history_reset();
 }
 
 void history_modbus_reset() {

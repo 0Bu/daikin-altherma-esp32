@@ -342,8 +342,15 @@ static bool poll_detect() {                                    // returns true i
     // The profile/link now names a new observation identity. This is deliberately before the
     // same-cycle poll: both rolling observations consume the reset before accepting the newly
     // resolved unit, so neither can splice the prior physical identity into its first sample.
+    //
+    // The history takes the DETECT-path entry rather than history_reset(): detection resolves on
+    // every boot, so on a board whose rings survived in .noinit this fired seconds after they were
+    // adopted and threw the whole X10A day away again. history_reset_on_detect() lets that first
+    // detection defer to the per-row identity check, which can actually tell a re-detect of the same
+    // unit from a different one; every later call resets exactly as before. The checkup has no such
+    // problem — it is not persisted, so a reboot starts it over regardless.
     checkup_reset();
-    history_reset();
+    history_reset_on_detect();
     config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
                      d.eeprom);
     return true;
