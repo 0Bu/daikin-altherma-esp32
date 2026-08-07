@@ -134,6 +134,16 @@ const fetch = async (url, options = {}) => {
       ok: true, test_proof: 83, power_w: 5.7, state: "on", retained: false,
     });
   }
+  if (fetchState.mode === "mqtt_base_reject" && url === "/set_mqtt")
+    return response(false, {
+      code: "mqtt_base_not_sluggable",
+      error: "Base topic must contain a letter or digit",
+    }, 400);
+  if (fetchState.mode === "mqtt_base_unknown_code" && url === "/set_mqtt")
+    return response(false, {
+      code: "mqtt_base_future_rule",
+      error: "Base topic violates a rule this UI predates",
+    }, 400);
   if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
   if (url === "/status") return response(true, {});
   return response(true, { reboot: false, saved: false });
@@ -225,7 +235,7 @@ const ui = context.__ui;
 
 ui.S.status = {
   wifi: { ssid: "DemoNet" },
-  mqtt: { broker: "203.0.113.27:1883", has_creds: false },
+  mqtt: { broker: "203.0.113.27:1883", has_creds: false, base: "daikin-altherma-esp32", base_custom: false },
   reference_temperature: {
     configured: true, name: "Living room", topic: "sensor/living-room/status",
     temperature_path: "temperature.tC", setpoint_path: "target.tC",
@@ -732,6 +742,79 @@ for (const scenario of invalid) {
   assert.equal(fetchState.calls.length, 0, `${item.name}: invalid input must not POST`);
   assert.equal(document.getElementById(item.modal).hidden, false, `${item.name}: invalid input stays editable`);
 }
+
+// ── MQTT base topic ───────────────────────────────────────────────────────────────────────────
+// The base topic is this INSTALLATION's identity: two boards sharing it share their retained topics,
+// their metrics series and their Home Assistant device, silently. The field must therefore actually
+// reach the device, and a refusal must land on the field that caused it — blaming the broker box for
+// a bad base topic sends the user to edit the one input that was correct.
+const mqttCase = cases.find((item) => item.modal === "mqttModal");
+
+// 1. Prefilled with the EFFECTIVE base from /status, not left blank (blank reads as "not set" for a
+//    value the device is definitely publishing under), and submitted with the rest of the form.
+fetchState.mode = "ok";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(mqttCase);
+assert.equal(document.getElementById("mqBase").value, "daikin-altherma-esp32",
+  "the MQTT modal must prefill the base topic the device actually publishes under");
+document.getElementById("mqBase").value = "  daikin-bench-2  ";
+await document.getElementById("mqttForm").fire("submit");
+await settle();
+const mqttSave = fetchState.calls.find((call) => call.url === "/set_mqtt");
+assert.ok(mqttSave, "Save must POST /set_mqtt");
+assert.equal(mqttSave.body.base, "daikin-bench-2",
+  "the base topic must be sent, trimmed — a stray space is a different topic to a broker");
+
+// 2. A coded refusal lands on the BASE field with the German translation of that exact code, and
+//    leaves the broker field alone. The browser keeps no copy of the rules (logic/mqtt_base.hpp owns
+//    them), so this path is the only feedback the user gets.
+fetchState.mode = "mqtt_base_reject";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(mqttCase);
+document.getElementById("mqBase").value = "___";
+await document.getElementById("mqttForm").fire("submit");
+await settle();
+assert.equal(document.getElementById("mqttModal").hidden, false,
+  "a rejected base topic must keep the dialog open");
+assert.equal(document.getElementById("mqBaseError").hidden, false,
+  "a rejected base topic must show its error on the base field");
+assert.ok(document.getElementById("mqBaseError").textContent.includes("Buchstaben"),
+  "the base-topic refusal must be translated from its machine code");
+assert.equal(document.getElementById("mqError").hidden, true,
+  "a base-topic refusal must not blame the broker field");
+assert.equal(ui.S.busy, false, "a rejected base topic must release the Save button");
+
+// 3. A code this UI has no string for still lands on the base field, showing the device's own
+//    English text rather than a raw "err.<code>" key — a firmware that grows a rule ahead of these
+//    translations degrades to untranslated, never to nonsense or to the wrong field.
+fetchState.mode = "mqtt_base_unknown_code";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(mqttCase);
+document.getElementById("mqBase").value = "whatever";
+await document.getElementById("mqttForm").fire("submit");
+await settle();
+assert.equal(document.getElementById("mqBaseError").hidden, false,
+  "an unknown base-topic code must still show on the base field");
+assert.equal(document.getElementById("mqBaseError").textContent,
+  "Base topic violates a rule this UI predates",
+  "an untranslated code must fall back to the device's English text, not the i18n key");
+assert.equal(document.getElementById("mqError").hidden, true,
+  "an unknown base-topic code must not blame the broker field");
+
+// 4. A non-base rejection still lands on the BROKER field — the routing must not have inverted.
+fetchState.mode = "reject";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(mqttCase);
+await document.getElementById("mqttForm").fire("submit");
+await settle();
+assert.equal(document.getElementById("mqError").hidden, false,
+  "an ordinary MQTT rejection must still show on the broker field");
+assert.equal(document.getElementById("mqBaseError").hidden, true,
+  "an ordinary MQTT rejection must not blame the base-topic field");
 
 // The bug dialog has a two-stage action instead of a configuration form.
 const bug = cases.find((item) => item.modal === "bugModal");

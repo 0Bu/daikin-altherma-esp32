@@ -64,6 +64,7 @@
 #include "logic/fault_state.hpp"
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/heartbeat.hpp"
+#include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
 #include "logic/reference_temperature.hpp"
@@ -2278,7 +2279,10 @@ void mqtt_ha_start() {
         diag_printf("mqtt: reference receive queue alloc failed\n");
     }
 
-    s_base   = CONFIG_DAIKIN_MQTT_BASE_TOPIC;
+    // The installation's base topic: the persisted value when set, else the compile-time default.
+    // Resolved ONCE, here, because the thirteen topics and the HA node id below all derive from it —
+    // a second copy of the empty-means-default rule is how one of them would end up on another base.
+    s_base   = mqtt_base_effective(config().mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC);
     s_node   = device_node_id(s_base);   // HA device id: the installation, NOT this board
     s_board  = board_id();               // this board: MQTT client id + dev.ids merge key
     s_prefix = CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX;

@@ -112,7 +112,8 @@ const HEALTHY = () => ({
     error: "", samples: 120, errors: 0, pins_avail: [1, 2], presets: [] },
   wifi: { ssid: "DemoNet", ip: "203.0.113.170", rssi: -55, connected: true, bssid: "AA:BB:CC:DD:EE:FF",
     mac: "02:00:00:00:00:01", std: "Wi-Fi 4", rolled_back: false },
-  mqtt: { configured: true, connected: true, tls: false, has_creds: false, broker: "203.0.113.27:1883" },
+  mqtt: { configured: true, connected: true, tls: false, has_creds: false, broker: "203.0.113.27:1883",
+          base: "daikin-altherma-esp32", base_custom: false },
   reference_temperature: { configured: true, name: "Example rm", topic: "fixtures/room/status",
     temperature_path: "temperature", setpoint_path: "setpoint", timestamp_path: "ts",
     enabled_path: "on", hvac_mode_path: "mode", max_age_s: 300, subscribed: true, has_value: true,
@@ -169,7 +170,10 @@ const REMOVE = {
   // The broker is cleared. Both MQTT-backed sources stay SAVED — that is the state that produced two
   // of the three defects above, and it is reachable in one tap (edit the broker, save an empty one).
   mqtt(s) {
-    s.mqtt = { configured: false, connected: false, tls: false, has_creds: false, broker: "" };
+    // base/base_custom come from the CONFIG, not from the broker link, so http_status.cpp still
+    // emits them with no broker — an installation keeps its identity while MQTT is switched off.
+    s.mqtt = { configured: false, connected: false, tls: false, has_creds: false, broker: "",
+               base: "daikin-altherma-esp32", base_custom: false };
     s.reference_temperature = { ...s.reference_temperature, subscribed: false, has_value: false,
       temperature_c: null, has_setpoint: false, setpoint_c: null, fresh: false,
       freshness_reason: "no_value", control_eligible: false, room_error_k: null, reason: "no_value",

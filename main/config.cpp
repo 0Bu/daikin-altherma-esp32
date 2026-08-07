@@ -99,6 +99,11 @@ void config_load() {
         c.wifi_ssid_backup = b.wifi_ssid_backup;       c.wifi_pass_backup = b.wifi_pass_backup;
         c.wifi_rollback_active = b.wifi_rollback_active; c.wifi_rolled_back = b.wifi_rolled_back;
         c.mqtt_uri = b.mqtt_uri;   c.mqtt_user = b.mqtt_user;   c.mqtt_pass = b.mqtt_pass;
+        // Gated on has_mqtt_base only for symmetry with the other appended blocks — a pre-v16 blob
+        // decodes the member empty anyway, and empty already MEANS the compile-time default
+        // (logic/mqtt_base.hpp). There is deliberately no Kconfig fallback to apply here: unlike the
+        // board block, "absent" and "default" are the same state for this field.
+        if (b.has_mqtt_base) c.mqtt_base = b.mqtt_base;
         if (b.has_ref_temp) {
             c.ref_temp_name = b.ref_temp_name; c.ref_temp_topic = b.ref_temp_topic;
             c.ref_temp_path = b.ref_temp_path; c.ref_temp_time_path = b.ref_temp_time_path;
@@ -344,6 +349,7 @@ bool config_save(const Config& requested, bool require_link) {
     b.wifi_ssid_backup = c.wifi_ssid_backup;   b.wifi_pass_backup = c.wifi_pass_backup;
     b.wifi_rollback_active = c.wifi_rollback_active; b.wifi_rolled_back = c.wifi_rolled_back;
     b.mqtt_uri = c.mqtt_uri;   b.mqtt_user = c.mqtt_user;   b.mqtt_pass = c.mqtt_pass;
+    b.mqtt_base = c.mqtt_base;
     b.ref_temp_name = c.ref_temp_name; b.ref_temp_topic = c.ref_temp_topic;
     b.ref_temp_path = c.ref_temp_path; b.ref_temp_time_path = c.ref_temp_time_path;
     b.ref_temp_setpoint_path = c.ref_temp_setpoint_path;

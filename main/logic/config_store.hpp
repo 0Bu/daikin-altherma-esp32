@@ -144,6 +144,14 @@ struct ConfigBlob {
     // active-low), and silently decoding "absent" would turn that user's working indicator off.
     // Absent is not the same as configured-off, and only the caller knows the compile-time default.
     bool        has_board = false;
+    // ── v16: this installation's MQTT base topic ────────────────────────────────────────────────
+    // ONE writer (the httpd task, POST /set_mqtt), so it needs no self-healing per-key treatment,
+    // exactly like the board block, the channel and the language. EMPTY means "the compile-time
+    // CONFIG_DAIKIN_MQTT_BASE_TOPIC", which is both the pre-v16 behaviour and the current default —
+    // so a device upgraded onto this build publishes under precisely the base it already used, and
+    // `has_mqtt_base` need consult no Kconfig fallback the way `has_board` must.
+    std::string mqtt_base;
+    bool        has_mqtt_base = false;   // FALSE when the decoded blob predates v16
 };
 
 inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
@@ -156,7 +164,8 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // + selected flag, v13 appends room setpoint/enabled/HVAC mappings, and v14 appends one byte that
 // carried the OFF/SHADOW dynamic-LWT mode and is now retired — written zero, ignored on read, since
 // the diagnosis arms itself from its configured sources; v15 appends the independent circulation-
-// pump MQTT power mapping. Current firmware
+// pump MQTT power mapping, and v16 appends this installation's MQTT base topic (empty = the
+// compile-time default, so the upgrade is a no-op for every existing device). Current firmware
 // derives HomeHub enabled solely from whether mb_host is empty;
 // v5-v8 actuation bits decode OFF and every pre-v14 controller mode migrates OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
@@ -164,7 +173,7 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced the
 // field — the fallback path is the legacy per-key layout, which a device written by a blob-era build
 // has never populated.
-inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 15;
+inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 16;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
@@ -275,6 +284,9 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_u32(v, c.circulation_on_tenths_w);
     detail::blob_put_u32(v, c.circulation_off_tenths_w);
     detail::blob_put_u32(v, c.circulation_confirm_s);
+    // v16 block: the installation's MQTT base topic. Written even when empty — empty IS the value
+    // meaning "compile-time default", and the length prefix makes it one exact two-byte body.
+    detail::blob_put_str(v, c.mqtt_base);
     detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
     return v;
 }
@@ -404,12 +416,16 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
             !get_u32(c.circulation_off_tenths_w) || !get_u32(c.circulation_confirm_s)) return false;
         c.has_circulation = true;
     }
+    if (version >= 16) {
+        if (!get_str(c.mqtt_base)) return false;
+        c.has_mqtt_base = true;
+    }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block
     // v7 after the reference-source strings, v8/v9 after timestamp/max-age, and v10 after the
     // Open-Meteo location, v11 after ENV III, v12 after the explicit board identity, v13 after the
-    // three room-control mapping strings, v14 after its one retired byte, and v15 after the
-    // circulation-pump source mapping and thresholds.
+    // three room-control mapping strings, v14 after its one retired byte, v15 after the
+    // circulation-pump source mapping and thresholds, and v16 after the MQTT base topic.
     // v6 and v9 change a flag's meaning without changing the HomeHub block's size, as does v14's
     // retirement of the mode byte — the LENGTH is the contract here, not what a byte still means.
     // Accepting a prefix would let a truncated v2 decode as a valid v1 with silently-default pins.

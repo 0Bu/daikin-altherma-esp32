@@ -75,11 +75,19 @@ menu "Daikin Altherma Configuration"
         string "MQTT base topic prefix"
         default "daikin-altherma-esp32"
         help
-            Base topic for this installation: the x10a/modbus/heartbeat/heating_curve/crash topics
-            sit directly under it, e.g. "daikin-altherma-esp32/x10a". It is also the HA installation identity — the
-            slugified base topic ("daikin_altherma_esp32") is the discovery node id, so replacing
-            the board keeps one X10A/diagnostics device in Home Assistant. The Modbus topic remains
-            MQTT-only. Two boards on one broker therefore need two base topics.
+            DEFAULT base topic for this installation: the x10a/modbus/heartbeat/heating_curve/crash
+            topics sit directly under it, e.g. "daikin-altherma-esp32/x10a". It is also the HA
+            installation identity — the slugified base topic ("daikin_altherma_esp32") is the
+            discovery node id, so replacing the board keeps one X10A/diagnostics device in Home
+            Assistant. The Modbus topic remains MQTT-only. Two boards on one broker therefore need
+            two base topics.
+
+            This is only the DEFAULT: the base topic is a runtime setting (POST /set_mqtt, the web
+            UI's MQTT modal, persisted in the config blob) because CI publishes ONE esp32s3 image
+            while the base topic is a per-INSTALLATION fact — so the "two boards need two base
+            topics" rule above was unsatisfiable for anyone running the published build. An empty
+            stored value means this default, which is what every device carried before the setting
+            existed. See logic/mqtt_base.hpp.
 
     # ── OTA ───────────────────────────────────────────────────────────────────
     config DAIKIN_OTA_MANIFEST_URL

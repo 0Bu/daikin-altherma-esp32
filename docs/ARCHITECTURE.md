@@ -1298,7 +1298,11 @@ The Home Assistant bridge:
   Neither link can write: X10A has no write command by protocol, and no source file can
   build or issue a Modbus frame for the HomeHub (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
 - **One HA installation device.** Its id is the slugified MQTT base topic
-  (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), so replacing the ESP32
+  (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), which is a **runtime**
+  setting (`POST /set_mqtt` field `base`, `logic/mqtt_base.hpp`) precisely because it names the
+  installation: CI publishes one image, so two boards left on the shared default become one device.
+  A base that slugifies to nothing is refused rather than absorbed by `device_node_id()`'s `"daikin"`
+  fallback, which would re-create that collision. Replacing the ESP32
   keeps the device with its entities, history and long-term statistics — where the old MAC-derived
   `daikin_<mac3>` produced a second device and restarted every statistic. The board's MAC id lives
   on as the **MQTT client id** (unique per connection) and a **second `dev.ids` entry** (HA matches a

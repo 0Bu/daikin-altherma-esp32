@@ -36,6 +36,12 @@ struct Config {
     std::string mqtt_uri;          // "" = MQTT disabled
     std::string mqtt_user;
     std::string mqtt_pass;
+    // This installation's MQTT base topic; "" = the compile-time CONFIG_DAIKIN_MQTT_BASE_TOPIC
+    // default, which is what every device carried before the field existed (logic/mqtt_base.hpp).
+    // Runtime because CI publishes ONE esp32s3 image while the base topic is a PER-INSTALLATION
+    // fact: two boards sharing it share their retained topics, their metrics series and their Home
+    // Assistant device — silently, since every individual value stays plausible (#215).
+    std::string mqtt_base;
     // One exact MQTT source for the living-room sample. An empty topic disables capture;
     // dot-separated paths select current/target, source timestamp and optional heating eligibility.
     // Without a timestamp path only a live non-retained MQTT arrival may be fresh; retained values
