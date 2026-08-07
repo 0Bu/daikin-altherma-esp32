@@ -42,7 +42,12 @@ alone — those are Claude Code skills in this repo's .claude/ directory and are
 - [ ] `/feature-docs` run if a technical feature changed — `docs/FEATURES.md` catalog synced
 - [ ] `/domain-review` run — required on EVERY merge: values verified physically right, sensible and authentic (a PR that cannot reach a value clears in seconds, but say what you checked)
 - [ ] `/schematic-review` run if the dashboard schematic changed — the drawing still tells the truth about the plant, and every reading is on the part that measures it
-- [ ] `/ui-use-case-review` clean — merge gate @ `<short-sha>` (required if UI behavior changed)
+- [ ] `/ui-use-case-review` clean — merge gate @ <short-sha> (required if UI behavior changed)
+<!-- The stamp must be a BARE sha after the `@` — the gate matches `@[[:space:]]*[0-9a-f]{7,40}`
+     (.claude/hooks/pr-gate-lib.sh), so wrapping it in backticks parses as no stamp at all and the
+     merge is refused with "ticked but carries no @ <sha> stamp". Get it with
+     `git rev-parse --short=12 HEAD`. -->
+
 <!-- `/ui-gif` is deliberately NOT a gate: re-recording is local-only, so a merge could never be the
      moment it happens. Run it when the dashboard drawing has moved on enough that the README's
      recording misrepresents it — on its own schedule, not this PR's. -->

@@ -81,6 +81,31 @@ set -e
 
 [ "$suite_rc" -eq 2 ] || { echo "ui selftest: failing suite did not block merge" >&2; exit 1; }
 [ "$stamp_rc" -eq 2 ] || { echo "ui selftest: stale review stamp did not block merge" >&2; exit 1; }
+
+# The hook failing closed is only half of it: the PR TEMPLATE has to teach a stamp the hook can
+# actually read. It shipped the sha wrapped in backticks, which the `@[[:space:]]*[0-9a-f]{7,40}`
+# matcher sees as no stamp at all, so a body filled in literally from the template was refused —
+# three times (PR #99, #343, #381) before anyone fixed the template rather than remembering. Fill
+# the real template's own line with a real sha and require the gate to accept it.
+tpl_line="$(grep -m1 'merge gate @' "$proj/.github/pull_request_template.md" || true)"
+[ -n "$tpl_line" ] || { echo "ui selftest: no 'merge gate @' line in the PR template" >&2; exit 1; }
+tpl_body="$(printf '%s' "$tpl_line" | sed 's/\[ \]/[x]/; s/<short-sha>/abcdef123456/')"
+
+cat > "$hook_tmp/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr view") printf '{"body":"%s","headRefOid":"abcdef1234567890"}\n' "$UI_GATE_BODY" ;;
+  "pr diff") printf 'main/www/js/settings.js\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$hook_tmp/bin/gh"
+
+printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" CLAUDE_PROJECT_DIR="$hook_tmp" \
+  UI_GATE_BODY="$tpl_body" bash "$hook_tmp/.claude/hooks/require-ui-use-case-review.sh" \
+  || { echo "ui selftest: the PR template's stamp line is NOT accepted by the merge gate — a body filled in from the template would be refused" >&2; exit 1; }
+
 rm -rf "$hook_tmp"
 
 echo "ui selftest: merge hook accepts current proof and blocks failing or stale proof"
+echo "ui selftest: the PR template teaches a stamp the merge gate accepts"
