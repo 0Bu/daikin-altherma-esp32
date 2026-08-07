@@ -56,6 +56,19 @@ try {
   assert.doesNotThrow(() => new vm.Script(script[1], { filename: "index.min.html" }),
     "the JavaScript in the shipped minified page must parse");
 
+  // Comment stripping must cover all THREE languages.  It covered only the two inline assets until
+  // the markup shell was measured: index.html is spliced in raw, so its load-bearing drawing and
+  // layout commentary was compressed into the image and served to every browser — 39 KB of source,
+  // 14 KB gzipped, 9.5% of this budget, spent on text no client can read.  Nothing failed; the page
+  // rendered perfectly and the budget simply drained.  Assert the SOURCE still has comments too, so
+  // a future index.html that happens to carry none cannot make this pass vacuously.
+  assert.ok(/<!--/.test(html), "index.html must still keep its source comments (this test's premise)");
+  const shellOnly = minified
+    .replace(/<style>[\s\S]*?<\/style>/, "")
+    .replace(/<script>[\s\S]*?<\/script>/, "");
+  assert.ok(!/<!--/.test(shellOnly),
+    "shipped markup must carry no HTML comments — the source keeps them, the artefact must not");
+
   const cmake = fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8");
   assert.match(cmake, /set\(UI_GZIP_MAX_BYTES 153600\)/,
     "CMake and the host contract must share the 150 KiB budget");
@@ -85,6 +98,55 @@ try {
   assert.deepEqual(Array.from(fixtureContext.fixtureResult),
     ["Request failed for register 7.", "Request failed."],
     "nested template literal text must remain byte-for-byte meaningful after minification");
+
+  // Markup stripping deletes bytes from the page, so its refusals matter more than its yield: a
+  // wrongly-stripped page still parses and still renders, and shows the loss only where the
+  // markup used to be.  Exercise each guard on a fixture rather than trusting that today's
+  // index.html happens not to contain the shapes.
+  const markupCase = (name, body) => {
+    const src = path.join(work, `${name}.html`);
+    const gz = path.join(work, `${name}.html.gz`);
+    fs.writeFileSync(src, body);
+    const proc = childProcess.spawnSync("python3", [
+      tool, "--input", src, "--output", gz, "--max-gzip-bytes", String(budget),
+    ], { cwd: root, encoding: "utf8" });
+    return {
+      status: proc.status,
+      stderr: proc.stderr,
+      page: proc.status === 0 ? zlib.gunzipSync(fs.readFileSync(gz)).toString("utf8") : "",
+    };
+  };
+  const assets = "<style> .x { color: red; } </style><script>var a=1;</script>";
+
+  const stripped = markupCase("markup-strip",
+    `<div id="keep"><!-- explanatory note --><span>text</span></div>${assets}`);
+  assert.equal(stripped.status, 0, stripped.stderr);
+  assert.ok(!stripped.page.includes("explanatory note"), "markup comments must be stripped");
+  assert.ok(stripped.page.includes('<div id="keep">') && stripped.page.includes("<span>text</span>"),
+    "stripping a comment must leave the markup around it untouched");
+
+  // A `<!--` inside a raw-text element is character data the browser PRINTS.  index.html has two
+  // such elements (the bug-report textareas); treating one as a comment would silently delete
+  // everything up to the next `-->`.
+  const rawText = markupCase("markup-rawtext",
+    `<textarea id="t">a <!-- literal --> b</textarea><!-- real --><p>after</p>${assets}`);
+  assert.equal(rawText.status, 0, rawText.stderr);
+  assert.ok(rawText.page.includes("a <!-- literal --> b"),
+    "text inside a raw-text element must survive markup stripping verbatim");
+  assert.ok(!rawText.page.includes("<!-- real -->") && rawText.page.includes("<p>after</p>"),
+    "a genuine comment beside a protected element must still go");
+
+  // An unterminated comment would match to end-of-document and take real markup with it.
+  const unterminated = markupCase("markup-unterminated",
+    `<div><!-- never closed <p>content</p></div>${assets}`);
+  assert.notEqual(unterminated.status, 0, "an unterminated markup comment must fail the build");
+  assert.match(unterminated.stderr, /unterminated comment would swallow real markup/);
+
+  // A conditional comment carries markup, not commentary — removing it deletes content.
+  const conditional = markupCase("markup-conditional",
+    `<div><!--[if IE]><p>legacy</p><![endif]--></div>${assets}`);
+  assert.notEqual(conditional.status, 0, "a conditional comment must fail the build");
+  assert.match(conditional.stderr, /conditional comment/);
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
 }

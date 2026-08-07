@@ -2043,7 +2043,18 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 issue named: permuting the registry cannot change the pick, now that criterion (4) is
                 the lowest profile id rather than file order (see detect.hpp above).
 www/            web UI sources (index.html + style.css + app.sources fragments -> one gzipped page)
-                + setup.html.
+                + setup.html. WRITE THE COMMENTS: the sources are documentation and the artefact
+                carries none of them — tools/web_asset/minify_and_gzip.py strips HTML, CSS and JS
+                comments alike under the 153600-byte delivery budget (main/CMakeLists.txt's
+                UI_GZIP_MAX_BYTES, pinned by test/test_ui_delivery_contract.mjs). Markup was the
+                one language it did NOT cover until the budget was measured per fragment: index.html
+                is spliced in RAW, so 39 KB of drawing/layout commentary shipped in the image at 14 KB
+                gzipped — 9.5% of the budget — with every gate green, because a page that is 14 KB
+                too big renders exactly as well as one that is not. The budget is a BUILD-BREAKING
+                limit, so the cost arrives as an unrelated feature's CI failure, months later. Only
+                comments are stripped from markup; HTML indentation stays (whitespace between inline
+                elements is significant, and ~1.1 KB is not worth a layout defect that renders
+                correctly on the machine that made it).
                 The dashboard SCHEMATIC (the inline SVG in index.html, its sc-* CSS and its
                 INSPECT/I18N bindings) has its own gate — scripts/run-schematic-audit.sh + the
                 /schematic-review skill: a pill can name a physically correct value and still be

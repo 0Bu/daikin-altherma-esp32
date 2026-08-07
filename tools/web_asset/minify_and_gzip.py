@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""Minify the embedded dashboard's inline CSS/JS, then write deterministic gzip.
+"""Minify the embedded dashboard's inline HTML/CSS/JS, then write deterministic gzip.
 
 The editable HTML, CSS and JavaScript deliberately keep their explanatory comments.  Only the
 firmware artefact is reduced.  The minifiers are vendored, syntax-preserving implementations so
 the ESP-IDF build remains offline and does not acquire a Node toolchain.
+
+Comment stripping covers all THREE languages.  It once covered only the two inline assets, and the
+asymmetry was invisible because it fails in the one direction nothing measures: the markup shell is
+spliced in raw, so index.html's 39 KB of load-bearing drawing/layout commentary was compressed into
+the image and served to every browser — 14 KB gzipped, 9.5% of the delivery budget, spent on text no
+client can read.  A comment is documentation for the reader of the SOURCE in whichever language it
+is written; the artefact should carry none of them.
 """
 
 from __future__ import annotations
 
 import argparse
 import gzip
+import re
 import sys
 from pathlib import Path
 
@@ -198,6 +206,80 @@ def minify_javascript(source: str) -> str:
     return protector.restore(reduced)
 
 
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+# Elements whose content is raw text, so a `<!--` inside one is CHARACTER DATA the browser prints,
+# not a comment.  index.html has two (the bug-report form's textareas).  Set them aside before
+# stripping for the reason TemplateProtector exists: a rule that is safe only because someone
+# grepped the tree once stops being safe the first time an editor types into the wrong element.
+_RAW_TEXT_ELEMENT = re.compile(r"<(textarea|pre)\b[^>]*>.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
+
+
+def strip_html_comments(markup: str) -> str:
+    """Drop `<!-- ... -->` from ONE markup shell, failing closed on anything it cannot prove safe.
+
+    Two refusals, both because the damage would be silent — a stripped page still parses, still
+    renders, and shows the loss only where the deleted markup was:
+
+    * A CONDITIONAL comment (`<!--[if ...]>`) carries markup that must survive; removing it deletes
+      content rather than commentary.
+    * A `<!--` the regex does not consume is a comment that never closes, so the match would run to
+      the end of the document and take real markup with it.  Counting proves every opener was
+      matched; raw-text elements are protected out of the string first, so a `<!--` typed into a
+      textarea is neither counted nor stripped.
+    """
+    if "<!--[if" in markup:
+        raise ValueError("conditional comment in markup shell; it carries markup, not commentary")
+
+    protected: list[str] = []
+
+    def hide(match: re.Match[str]) -> str:
+        protected.append(match.group(0))
+        return f"\x00RAWTEXT{len(protected) - 1}\x00"
+
+    if "\x00" in markup:
+        raise ValueError("NUL byte in markup shell; raw-text protection needs it as a sentinel")
+    markup = _RAW_TEXT_ELEMENT.sub(hide, markup)
+
+    openers = markup.count("<!--")
+    stripped, removed = _HTML_COMMENT.subn("", markup)
+    if removed != openers:
+        raise ValueError(
+            f"markup shell has {openers} '<!--' but {removed} closed comments; "
+            "an unterminated comment would swallow real markup"
+        )
+
+    for index, raw in enumerate(protected):
+        stripped = stripped.replace(f"\x00RAWTEXT{index}\x00", raw, 1)
+    return stripped
+
+
+def minify_markup_shell(page: str, transform) -> str:
+    """Apply `transform` to the page OUTSIDE its inline `<style>` and `<script>` blocks.
+
+    The assets are minified by their own language's minifier and must not be re-processed: a `<!--`
+    inside a JS string or a CSS content value is neither a comment nor this function's business.
+    The spans are sorted rather than assumed to be in `<style>`-then-`<script>` order, because
+    nothing enforces that order and getting it wrong would silently transform an asset block
+    instead of the shell beside it.
+    """
+    spans = []
+    for start, end, label in (("<style>", "</style>", "style"), ("<script>", "</script>", "script")):
+        if page.count(start) != 1 or page.count(end) != 1:
+            raise ValueError(f"expected exactly one inline {label} block")
+        begin = page.index(start)
+        spans.append((begin, page.index(end, begin) + len(end)))
+    spans.sort()
+
+    pieces = []
+    cursor = 0
+    for begin, finish in spans:
+        pieces.append(transform(page[cursor:begin]))
+        pieces.append(page[begin:finish])
+        cursor = finish
+    pieces.append(transform(page[cursor:]))
+    return "".join(pieces)
+
+
 def replace_exactly_one(page: str, start: str, end: str, transform, label: str) -> str:
     """Transform one inline asset and fail closed if the assembled page shape drifts."""
     if page.count(start) != 1 or page.count(end) != 1:
@@ -215,13 +297,18 @@ def minify_page(page: str) -> str:
         lambda css: rcssmin.cssmin(css, keep_bang_comments=True),
         "inline style",
     )
-    return replace_exactly_one(
+    page = replace_exactly_one(
         page,
         "<script>",
         "</script>",
         minify_javascript,
         "inline script",
     )
+    # Markup LAST, so the two asset blocks are already reduced and are skipped by span rather than
+    # by a second parse of the source shape.  Indentation is deliberately left alone: whitespace
+    # between inline elements is significant in HTML, and collapsing it is worth ~1.1 KB gzipped
+    # against a class of layout defects that render perfectly on the machine that made the change.
+    return minify_markup_shell(page, strip_html_comments)
 
 
 def positive_int(value: str) -> int:
