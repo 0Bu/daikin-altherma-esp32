@@ -267,8 +267,39 @@ assert.equal(
 );
 assert.equal(
   ui.metric({ id: "fault", verdict: "info", active: null }),
-  "Seen in window · current state unknown",
+  "Occurred in the last 24 h · current state unknown",
 );
+
+// NOTE on the fault row covers three different device states, and the assessment sentence is the
+// only place that distinction is stated. A generic per-verdict sentence there ("a notable value or
+// pattern") reads as a heuristic finding about a measurement, which this row never reports.
+const faultWarningNow = ui.detail({ id: "fault", verdict: "info", active: 1 });
+assert.match(faultWarningNow, /label="Value:">Warning active<\/detail>/);
+assert.match(faultWarningNow, /NOTE — The unit is reporting a warning or caution right now, not an error/);
+assert.match(faultWarningNow, /“Operation” card/, "an active class must point at the code");
+const faultCleared = ui.detail({ id: "fault", verdict: "info", active: 0 });
+assert.match(faultCleared, /NOTE — Nothing is being reported right now\./);
+assert.match(faultCleared, /cleared on its own, which is why this row is not OK/);
+assert.doesNotMatch(faultCleared, /“Operation” card/,
+                    "a cleared message has no current code to look up");
+assert.match(ui.detail({ id: "fault", verdict: "info", active: null }),
+             /NOTE — A message appeared during the last 24 hours\./);
+assert.match(ui.detail({ id: "fault", verdict: "warn", active: 1 }),
+             /WARNING — The unit is reporting an error right now\./);
+// Every other check keeps the shared per-verdict copy — this override is the fault row's alone.
+assert.match(ui.detail({ id: "pressure", verdict: "info", min_bar: 0.9 }),
+             /NOTE — Worth knowing about, but not proof of a defect\./);
+for (const lang of ["en", "de"]) {
+  ui.setLang(lang);
+  for (const c of [{ id: "fault", verdict: "warn", active: 1 },
+                   { id: "fault", verdict: "info", active: 1 },
+                   { id: "fault", verdict: "info", active: 0 },
+                   { id: "fault", verdict: "info", active: null }]) {
+    assert.doesNotMatch(ui.detail(c), /check\.detail\./,
+                        `fault copy must exist in ${lang}`);
+  }
+}
+ui.setLang("en");
 
 // Observed evidence is rounded down. A one-second shortfall must not overstate the collected time;
 // the longer target remains available in the payload without bloating the collapsed row.
@@ -419,7 +450,7 @@ context.S.status.health = {
 ui.setLang("en");
 card = ui.card();
 assert.match(card, /<value>NOTE<\/value>/);
-assert.match(card, /label="Value:">Seen in window<\/detail>/);
+assert.match(card, /label="Value:">Occurred in the last 24 h · not active now<\/detail>/);
 assert.doesNotMatch(card, /future_check|must-not-render/);
 context.S.status.health.checks = [{ id: "future_check", verdict: "warn" }];
 assert.equal(ui.card(), "", "unknown-only payload must not render an empty or guessed card");
