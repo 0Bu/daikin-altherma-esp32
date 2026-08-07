@@ -22,6 +22,9 @@
 #        /status.modbus.enabled is the one optional-source flag reporting a TASK, not the config
 #     7. a cleared broker left unnamed on the circulation row, the state it answered with
 #        "waiting for a message" forever
+#     8. the outdoor-axis row offering a second door into the Board Hardware modal — the one seed
+#        here that pins a CHECK rather than a shipped defect, because that guard's first version
+#        could not fire (see the seed for why the row's own shape defeated it)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -162,6 +165,30 @@ assert seed != s, "seed 7 did not apply — the broker branch moved"
 open(p, "w").write(seed)
 SEED7
 expect_red "a cleared broker unnamed on the circulation row" run_ui
+restore
+
+# 8. Give the outdoor-axis row its configuration action back. The ENV III has exactly ONE editor —
+#    the Board Hardware modal on the ESP32 card, which saves it atomically beside the board identity
+#    that decides whether the Grove port exists at all — and this row was a second door into it,
+#    offering hardware configuration from a card that reports EVIDENCE.
+#
+#    This seed is here for a sharper reason than the seven above, and it is the only one pinning a
+#    check rather than a shipped defect: the first version of that guard COULD NOT FIRE. Restoring
+#    the action turns the row from a whole-row accordion back into a SPLIT row, so a face matched up
+#    to the first </button> stops at the info toggle and never contains the `data-act` it looks for —
+#    the guard reported success on precisely the change it exists to catch. Measured, not reasoned.
+python3 - "$TMP/main/www/js/dashboard.js" <<'SEED8'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace(
+    'return dynamicInfoRow("outdoor", t("dyn.outdoor"), value, cls, body);',
+    'return dynamicInfoRow("outdoor", t("dyn.outdoor"), value, cls, body, "board", t("board.title"));',
+    1)
+assert seed != s, "seed 8 did not apply — the outdoor axis row's return moved"
+open(p, "w").write(seed)
+SEED8
+expect_red "the outdoor axis offering a second door into the Board Hardware modal" run_ui
 restore
 
 if [ "$fail" -ne 0 ]; then
