@@ -1153,7 +1153,7 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 a dismissal on a fault boot that never wrote a dump — which is most of them
 logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, registers, value_def,
                 config_model,
-                config_store, discovery, ha_device, detect, history, json, mqtt_group, mqtt_uri, homehub_map, heartbeat, crashinfo,
+                config_store, discovery, ha_device, detect, history, json, mqtt_base, mqtt_group, mqtt_uri, homehub_map, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ui_lang,
                 http_body, http_surface, query_flag, redact, mcp, timestamp, uart_plan, detect_backoff,
@@ -1723,6 +1723,30 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 reassembly, a mid-body close and a stalled peer are host-tested; the IDF return-code
                 mapping stays in http_common.cpp. A timeout is retried at most BODY_MAX_IDLE times —
                 unbounded retries would park the single httpd task on one silent client.
+                mqtt_base.hpp = WHICH BASE TOPIC this installation publishes under — the runtime half
+                of what was a compile-time-only fact. Every message topic sits directly under it and
+                device_node_id(base) slugifies it into the HA discovery node id, so it IS the
+                installation identity. Kconfig's help had always stated the consequence ("two boards
+                on one broker need two base topics") while the value was compile-time ONLY and CI
+                publishes exactly ONE esp32s3 image — so the requirement was unsatisfiable for anyone
+                running the published build, and every board flashed from a feed shared one base BY
+                CONSTRUCTION. What that costs is not noise but IDENTITY: both boards write the same
+                retained topics (each holds whoever published last), a metrics consumer sees ONE
+                series per field because the labels are identical (two interleaved uptime counters
+                read as a sawtooth — measured, that inflated resets(uptime[7d]) from ~50 real reboots
+                to 16272 and doubled the daily sample count, #215), and HA merges them into one device
+                whose entities flip between two units. None of it announces itself; every individual
+                value stays plausible. Same rule board_presets.hpp applies to the LED and the button:
+                a PER-INSTALLATION fact cannot live in Kconfig when CI ships one binary. EMPTY means
+                the compile-time default, which is what makes the upgrade a no-op with no migration —
+                absent and default are the same state here, unlike the board block, where the caller
+                must seed Kconfig. Refusals carry a machine code per RULE (the ENV III pattern, so the
+                bilingual UI translates without the API losing its one wording), and the load-bearing
+                rule is the last one: a base that slugifies to NOTHING is refused, because
+                device_node_id() would fall back to the constant "daikin" and put two boards back on
+                one HA device — the exact collision the setting exists to end, re-created by a value
+                that passed every other check. The browser keeps NO second copy of any of it (the
+                lwt_select lesson); it sends the string and renders the device's coded refusal
                 mqtt_uri.hpp = the broker-URI split (host/port/TLS) behind the /set_mqtt pre-flight.
                 Its scheme defaults track esp-mqtt's OWN (mqtt 1883, mqtts 8883, ws 80, wss 443) —
                 the probe must dial the port the client will: 1883/8883 for ws(s) probed a port
@@ -2034,7 +2058,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT, syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; the v15 external circulation-power witness (name/topic/paths/max_age/on+off thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against); and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v15 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter. |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT (broker, credentials AND this installation's base topic, v16); syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; the v15 external circulation-power witness (name/topic/paths/max_age/on+off thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against); and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v16 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter. |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -2128,10 +2152,16 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   /set_wifi was UNDONE by the credential rollback — sticky until the next /set_wifi,
                   and the only trace of it, since the rollback reboots and the SSID shown is just the
                   old one again),
-                  mqtt{configured,connected,tls,has_creds,broker,error} (has_creds = whether creds are
+                  mqtt{configured,connected,tls,has_creds,broker,base,base_custom,error} (has_creds =
+                  whether creds are
                   stored, never their value; read from the CONFIG not the client — creds outlive a
                   disabled broker, which is exactly the state the UI must offer to clear via
-                  /set_mqtt's clear_creds),
+                  /set_mqtt's clear_creds. `base` is always the EFFECTIVE base topic — the
+                  compile-time default when nothing is stored — since reporting "" would make a
+                  default device look unconfigured to the modal that prefills it; `base_custom` is
+                  the separate fact of whether the user has STATED one, which is what the UI needs
+                  before offering to reset it. The string is redacted, the bool is not: "is this the
+                  default?" is diagnostic, the word the user chose is not),
                   reference_temperature{configured,name,topic,temperature_path,setpoint_path,
                   timestamp_path,enabled_path,hvac_mode_path,max_age_s,subscribed,has_value,
                   source_id,calibration_k,temperature_min_c,temperature_max_c,temperature_c,
@@ -2406,16 +2436,19 @@ GET  /diag[?verbose=0|1][?clear=1][?redact=1]   in-memory diag log. ?redact=1 sc
                   to CHUNKED: a replacement is longer than most values it replaces, so the redacted
                   text can GROW past the static dump buffer, and the alternatives are a second ~8 KB
                   .bss buffer or a ~6 KB contiguous heap allocation
-GET  /status?redact=1   the bug-report form of /status: the fourteen reporter-identifying values
-                  (wifi.ssid/ip/bssid/mac, mqtt.broker, reference_temperature.name/topic,
-                  circulation_source.name/topic,
+GET  /status?redact=1   the bug-report form of /status: every reporter-identifying value
+                  (wifi.ssid/ip/bssid/mac, mqtt.broker, mqtt.base,
+                  reference_temperature.name/topic, circulation_source.name/topic,
                   weather_forecast.latitude/longitude, syslog.host, ntp.server, modbus.host — the
-                  last is the saved HomeHub LAN address or `.local` hostname) read "<redacted>".
-                  FOUR entries are in the set for a reason the network addresses are not: the
+                  last is the saved HomeHub LAN address or `.local` hostname) reads "<redacted>".
+                  Read the set off logic/redact.hpp rather than this list, which is a convenience
+                  copy. SOME entries are in it for a reason the network addresses are not: the
                   coordinates are the reporter's HOUSE to six decimals,
                   reference_temperature.name is a word the user typed — usually a room, sometimes a
-                  person — and the circulation witness adds the same pair one source over, its topic
-                  normally embedding a smart-plug device id. The count is DERIVED from the call sites by the redaction audit, so this
+                  person, the circulation witness adds the same pair one source over (its topic
+                  normally embedding a smart-plug device id), and mqtt.base is one they typed that
+                  also becomes the installation's HA
+                  device id. The count is DERIVED from the call sites by the redaction audit, so this
                   list and logic/redact.hpp's cannot silently disagree with the builder again.
                   An UNSET field is left EMPTY rather than substituted (redact_identifier, not the
                   raw redact_or primitive): "<redacted>" over an empty value manufactures an
@@ -2474,7 +2507,7 @@ POST /set_wifi    {ssid,pass} -> validate (ssid 1-32 chars; pass empty[open] or 
                   absent SSID or a slow DHCP is no evidence against them and gets 180 s, long enough
                   for a rebooting router. wifi.cpp clears the reason on STA_CONNECTED, so an earlier
                   refusal can't outlive the association that disproved it.
-POST /set_mqtt    {broker,user,pass,clear_creds} -> pre-flight the broker synchronously (DNS -> TCP
+POST /set_mqtt    {broker,user,pass,clear_creds,base} -> pre-flight the broker synchronously (DNS -> TCP
                   probe -> short-lived esp-mqtt CONNECT/auth, mirroring mqtt_ha's creds-require-mqtts://
                   policy) -> on success persist + reboot; on failure 400 {ok:false,error} and nothing is
                   saved. Unchanged settings short-circuit to {ok:true,reboot:false} (no probe, no reboot).
@@ -2488,6 +2521,31 @@ POST /set_mqtt    {broker,user,pass,clear_creds} -> pre-flight the broker synchr
                   authenticated mqtts:// broker can never migrate to an anonymous mqtt:// one: disable
                   + re-add both send empty creds -> both keep -> the kept creds then 400 every
                   plaintext broker ("Credentials require mqtts://"). Only a flash erase escaped that.
+                  BASE TOPIC: `base` is this INSTALLATION's MQTT base topic (logic/mqtt_base.hpp),
+                  runtime because CI publishes ONE esp32s3 image while the base is a per-installation
+                  fact — CONFIG_DAIKIN_MQTT_BASE_TOPIC is now only the DEFAULT, and an empty stored
+                  value MEANS that default, so the upgrade is a no-op for every deployed device and
+                  needs no migration. OPTIONAL and absent means KEEP, never "reset to the default":
+                  the dashboard always sends it, but this is a documented ROUTE — a script, or a
+                  browser still holding a cached pre-v16 bundle, posts broker+creds alone, and
+                  defaulting on absence would move a deliberately-renamed installation back onto the
+                  shared base. Rules
+                  are checked BEFORE the broker pre-flight (free and local, versus a DNS lookup + up
+                  to ~8 s of the httpd task) and each refusal carries its own machine code beside the
+                  English text — the ENV III pattern, so the bilingual UI translates without the API
+                  losing its one wording. The browser deliberately keeps NO second copy of the rules:
+                  the load-bearing one is that the base must still slugify to something, since
+                  device_node_id() falls back to the constant "daikin" and would put two boards back
+                  on ONE HA device — the exact collision this setting exists to end. Changing it
+                  RENAMES the installation (new HA device, history stays with the old one), FORKS
+                  every metrics series (a collector carries the topic as a LABEL, so the two halves
+                  never overlap and a query pinned to one reads the other as absent — the firmware's
+                  own state->x10a migration cost exactly that), and strands
+                  the previous base's retained topics, which the firmware deliberately does NOT
+                  retract — and the reason is the setting's own purpose: a base may be SHARED by a
+                  second board, so a device sweeping it on the way out would delete the retained state
+                  of the installation it was colliding with. That is the user's call
+                  (docs/HOME_ASSISTANT.md carries the sweep).
 POST /set_syslog  {host,port} -> validate port range -> persist + reboot. Empty host disables syslog.
                   Unchanged settings short-circuit to {ok:true,reboot:false}, same as /set_mqtt and
                   /set_ntp — a re-save of identical values would otherwise reboot for nothing.

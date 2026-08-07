@@ -56,6 +56,7 @@
 #include "logic/profile_view.hpp"
 #include "logic/ou_stale.hpp"
 #include "logic/cop_scope.hpp"
+#include "logic/mqtt_base.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/reference_temperature.hpp"
 #include "logic/weather_forecast.hpp"
@@ -1850,6 +1851,74 @@ static void test_published_kind() {
     // An unimplemented id never publishes, so its kind is arbitrary — but it must still be a KIND,
     // not a crash or a third value.
     CHECK(published_kind(999) == PublishedKind::Number);
+}
+
+static void test_mqtt_base() {
+    // WHICH base topic this installation publishes under (logic/mqtt_base.hpp). The setting exists
+    // because two boards on one base become ONE thing to every consumer — one set of retained
+    // topics, one metrics series per field, one HA device — silently, since each individual value
+    // stays plausible (#215).
+    MqttBaseRefusal refusal;
+
+    // Empty is VALID and means the compile-time default. This is the whole no-migration property:
+    // every already-deployed device decodes empty and keeps publishing exactly where it did.
+    CHECK(mqtt_base_valid(""));
+    CHECK(mqtt_base_effective("", "daikin-altherma-esp32") == "daikin-altherma-esp32");
+    CHECK(mqtt_base_effective("bench-2", "daikin-altherma-esp32") == "bench-2");
+    // A null compiled default cannot produce a "null" topic string.
+    CHECK(mqtt_base_effective("", nullptr).empty());
+
+    // Ordinary shapes, including the multi-segment one a broker layout may want.
+    CHECK(mqtt_base_valid("daikin-altherma-esp32"));
+    CHECK(mqtt_base_valid("home/heating/daikin-altherma-esp32"));
+    CHECK(mqtt_base_valid("d"));
+
+    // Wildcards: meaningless in a topic being PUBLISHED to, and a broker refuses the PUBLISH — which
+    // would present as "MQTT quietly stopped working" after a save that answered ok.
+    CHECK(!mqtt_base_valid("daikin/#", &refusal));
+    CHECK(!mqtt_base_valid("daikin/+/x", &refusal));
+    // The broker's own reserved tree.
+    CHECK(!mqtt_base_valid("$SYS/daikin", &refusal));
+    // Leading/trailing slash and empty segments produce "//" in every derived topic.
+    CHECK(!mqtt_base_valid("/daikin", &refusal));
+    CHECK(!mqtt_base_valid("daikin/", &refusal));
+    CHECK(!mqtt_base_valid("home//daikin", &refusal));
+    // Control bytes are forbidden in MQTT topic names; a space is legal but unusable at a CLI.
+    CHECK(!mqtt_base_valid(std::string("daikin\n2"), &refusal));
+    CHECK(!mqtt_base_valid("daikin bench", &refusal));
+    // Length bound.
+    CHECK(mqtt_base_valid(std::string(MQTT_BASE_MAX_LEN, 'a')));
+    CHECK(!mqtt_base_valid(std::string(MQTT_BASE_MAX_LEN + 1, 'a'), &refusal));
+
+    // THE LOAD-BEARING ONE. device_node_id() falls back to the constant "daikin" when a base
+    // slugifies to nothing, so a base of "___" would put two boards back on ONE Home Assistant
+    // device — the exact collision this setting exists to end, re-created by a value that passes
+    // every other rule. It must be refused here, not absorbed by the fallback.
+    CHECK(!mqtt_base_valid("___", &refusal));
+    CHECK(!mqtt_base_valid("-", &refusal));
+    CHECK(device_node_id("___") == "daikin");        // the fallback the rule above exists to avoid
+
+    // Every refusal must hand back a non-empty code AND message: http_config.cpp interpolates both
+    // into JSON unescaped, so an empty one is an error with no text and a null would be a crash.
+    // The CODE is what the bilingual UI keys on, so a blank one silently loses the translation.
+    for (const char* bad : {"daikin/#", "$SYS/x", "/daikin", "daikin/", "home//daikin", "___",
+                            "daikin bench"}) {
+        MqttBaseRefusal r;
+        CHECK(!mqtt_base_valid(bad, &r));
+        CHECK(r.code != nullptr && r.code[0] != '\0' && r.message != nullptr && r.message[0] != '\0');
+    }
+    // One code PER RULE — a single "invalid base topic" code would make the UI say the same thing
+    // about a 70-character name and about one that would collide in Home Assistant.
+    MqttBaseRefusal wild, slug;
+    CHECK(!mqtt_base_valid("daikin/#", &wild) && !mqtt_base_valid("___", &slug));
+    CHECK(std::string(wild.code) != std::string(slug.code));
+    // A PASSING base must leave the refusal untouched, so a caller that forgets to check the return
+    // value cannot read a stale reason out of it.
+    MqttBaseRefusal untouched;
+    CHECK(mqtt_base_valid("daikin-altherma-esp32", &untouched));
+    CHECK(std::string(untouched.code).empty() && std::string(untouched.message).empty());
+    // A distinct base really does yield a distinct HA device id — the point of the whole exercise.
+    CHECK(device_node_id("daikin-altherma-esp32") != device_node_id("daikin-bench-2"));
 }
 
 static void test_mqtt_uri() {
@@ -4400,6 +4469,9 @@ static void test_config_store() {
     CHECK(circ_rt.circulation_max_age_s == 120 && circ_rt.circulation_on_tenths_w == 30 &&
           circ_rt.circulation_off_tenths_w == 10 && circ_rt.circulation_confirm_s == 60);
 
+    // v16's base topic is exercised after `restamp` and `out` come into scope, below.
+    CHECK(b.has_mqtt_base && b.mqtt_base.empty());
+
     // The other flag combination, and a negative-looking port stored as-is.
     ConfigBlob c; c.wifi_rolled_back = true; c.wifi_rollback_active = false; c.syslog_port = 65535;
     std::vector<uint8_t> cb = config_blob_serialize(c);
@@ -4425,11 +4497,16 @@ static void test_config_store() {
         v[v.size()-4] = k & 0xFF; v[v.size()-3] = (k>>8) & 0xFF;
         v[v.size()-2] = (k>>16) & 0xFF; v[v.size()-1] = (k>>24) & 0xFF;
     };
+    // The v16 tail every serialized blob now carries: a length-prefixed base topic, EMPTY in every
+    // fixture below, so exactly its two length bytes. Named once and ADDED to each older-version
+    // suffix rather than folded into the literals, so appending v17 is one edit here instead of
+    // fifteen scattered ones — and so each literal still reads as "the blocks v<N> predates".
+    const size_t base_suffix_bytes = 2;
     const size_t circ_suffix_bytes = 2 + circ.circulation_name.size() +
         2 + circ.circulation_topic.size() + 2 + circ.circulation_power_path.size() +
         2 + circ.circulation_time_path.size() + 16;
     std::vector<uint8_t> v14 = circ_buf;
-    v14.erase(v14.end() - 4 - circ_suffix_bytes, v14.end() - 4);
+    v14.erase(v14.end() - 4 - (circ_suffix_bytes + base_suffix_bytes), v14.end() - 4);
     v14[4] = 14;
     restamp(v14);
     ConfigBlob v14_rt;
@@ -4455,7 +4532,7 @@ static void test_config_store() {
     board.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 15);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 16);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -4485,9 +4562,9 @@ static void test_config_store() {
     // the 1-byte v4 language and the 11-byte v5 HomeHub block (empty mb_host [2] + mb_port u32 +
     // mb_unit_id u32 + 1 flag byte), three empty v7 strings (6 bytes), and the empty v8 timestamp
     // path + max-age u32 (6 bytes), weather (9), ENV III (9), board identity (2), and the three
-    // empty v13 room-control strings (6), v14 controller mode (1), and the empty/default v15
-    // circulation-source block (24) = 89 bytes.
-    v1.erase(v1.end() - 4 - 89, v1.end() - 4);
+    // empty v13 room-control strings (6), v14 controller mode (1), the empty/default v15
+    // circulation-source block (24), and the empty v16 base topic (2) = 91 bytes.
+    v1.erase(v1.end() - 4 - (89 + base_suffix_bytes), v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -4498,9 +4575,39 @@ static void test_config_store() {
     CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
     // A TRUNCATED v14 must not decode with a partial room-control/mode suffix.
     std::vector<uint8_t> trunc = bb;
-    trunc.erase(trunc.end() - 4 - 6, trunc.end() - 4);    // drop the three empty v13 strings
+    trunc.erase(trunc.end() - 4 - 6, trunc.end() - 4);    // lop six bytes off the tail
     restamp(trunc);
     CHECK(!config_blob_deserialize(trunc.data(), trunc.size(), out));
+
+    // ── v16: the installation's MQTT base topic ──────────────────────────────────────────────────
+    // The default blob round-tripped above carries it EMPTY and still reports has_mqtt_base, because
+    // empty is a VALUE here ("use the compile-time default"), not an absence — which is what makes
+    // this upgrade a no-op for every deployed device: nothing to migrate, nothing to seed.
+    ConfigBlob base_blob;
+    base_blob.wifi_ssid = "net";
+    base_blob.mqtt_base = "daikin-bench-2";
+    const std::vector<uint8_t> base_buf = config_blob_serialize(base_blob);
+    ConfigBlob base_rt;
+    CHECK(config_blob_deserialize(base_buf.data(), base_buf.size(), base_rt));
+    CHECK(base_rt.has_mqtt_base && base_rt.mqtt_base == "daikin-bench-2" && base_rt.wifi_ssid == "net");
+    // A genuine v15 blob (the build immediately before this field) must still decode — the same
+    // upgrade guarantee v1 and v2 got — and report the base absent rather than refusing the blob and
+    // taking the user's credentials down with it.
+    std::vector<uint8_t> v15 = base_buf;
+    v15.erase(v15.end() - 4 - 16, v15.end() - 4);   // drop the "daikin-bench-2" string (2 len + 14)
+    v15[4] = 15;
+    restamp(v15);
+    ConfigBlob v15_rt;
+    CHECK(config_blob_deserialize(v15.data(), v15.size(), v15_rt));
+    CHECK(!v15_rt.has_mqtt_base && v15_rt.mqtt_base.empty() && v15_rt.wifi_ssid == "net");
+    CHECK(v15_rt.has_circulation);              // every earlier block still decoded
+    // The exact-length rule still bites in the other direction: a blob STAMPED v16 whose base string
+    // was truncated away must be REJECTED, not accepted as a v15 with a silently-default base — the
+    // same reason a truncated v2 must not decode as a v1 with default pins.
+    std::vector<uint8_t> v16_short = base_buf;
+    v16_short.erase(v16_short.end() - 4 - 16, v16_short.end() - 4);
+    restamp(v16_short);                         // still stamped v16, but the body now ends too early
+    CHECK(!config_blob_deserialize(v16_short.data(), v16_short.size(), out));
 
     // ── v3: the OTA update channel ───────────────────────────────────────────────────────────────
     ConfigBlob chan; chan.wifi_ssid = "net"; chan.ota_channel = 1;   // 1 = dev
@@ -4516,7 +4623,7 @@ static void test_config_store() {
     // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
     // stored" from "explicitly release"; both mean release, only the diag line differs.
     std::vector<uint8_t> v2 = bb;
-    v2.erase(v2.end() - 4 - 76, v2.end() - 4);           // drop v3 through v15
+    v2.erase(v2.end() - 4 - (76 + base_suffix_bytes), v2.end() - 4);   // drop v3 through v16
     v2[4] = 2;
     restamp(v2);
     ConfigBlob pre;
@@ -4540,7 +4647,7 @@ static void test_config_store() {
     // v3 blob and must still decode — the channel survives, and the absent language reads as auto
     // (has_lang == false, ui_lang == 0), so the browser keeps auto-detecting exactly as before.
     std::vector<uint8_t> v3 = lbv;
-    v3.erase(v3.end() - 4 - 75, v3.end() - 4);           // drop v4 through v15
+    v3.erase(v3.end() - 4 - (75 + base_suffix_bytes), v3.end() - 4);   // drop v4 through v16
     v3[4] = 3;
     restamp(v3);
     ConfigBlob prel;
@@ -4557,7 +4664,7 @@ static void test_config_store() {
     mb.mb_host = "homehub-524288-abc.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 15);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 16);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
@@ -4581,7 +4688,7 @@ static void test_config_store() {
     // index would make these checks assert nothing at all.
     ConfigBlob consent_src = mb; consent_src.mb_host = "homehub-524288-abc.local";
     std::vector<uint8_t> consent = config_blob_serialize(consent_src);
-    const size_t flag_byte = consent.size() - 5 - 63;    // HomeHub flag byte, before the v7+ tail
+    const size_t flag_byte = consent.size() - 5 - 63 - base_suffix_bytes;   // HomeHub flag byte, before the v7+ tail
     CHECK((consent[flag_byte] & 2u) != 0);               // offset pinned by the mirror bit
     CHECK((consent[flag_byte] & 1u) == 0);               // the encoder never sets the consent bit
     consent[flag_byte] |= 1u;
@@ -4596,7 +4703,7 @@ static void test_config_store() {
     // The immediately preceding v6 build could persist enabled+empty as Auto. Preserve its wire
     // shape as an upgrade fixture: current firmware must ignore that bit and decode empty as Off.
     std::vector<uint8_t> legacy_v6_auto = mbb;
-    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - 63, legacy_v6_auto.end() - 4);
+    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - (63 + base_suffix_bytes), legacy_v6_auto.end() - 4);
     legacy_v6_auto[4] = 6;
     legacy_v6_auto[legacy_v6_auto.size() - 5] |= 2u;
     restamp(legacy_v6_auto);
@@ -4606,7 +4713,7 @@ static void test_config_store() {
     // A v5 empty-host blob also decodes disabled. Its historical flag was ambiguous, so it cannot
     // arm discovery in the current explicit-search contract.
     std::vector<uint8_t> v5 = mbb;
-    v5.erase(v5.end() - 4 - 63, v5.end() - 4);           // v5 predates v7 through v15
+    v5.erase(v5.end() - 4 - (63 + base_suffix_bytes), v5.end() - 4);   // v5 predates v7 through v16
     v5[4] = 5;
     v5[v5.size() - 5] &= static_cast<uint8_t>(~2u);      // HomeHub flag byte immediately before CRC
     restamp(v5);
@@ -4616,7 +4723,7 @@ static void test_config_store() {
     // v8 carried the same bit as an inert placeholder. It stays inert forever now that the write
     // path is gone: the transport survives the migration and nothing decodes a consent flag.
     std::vector<uint8_t> v8 = mbb;
-    v8.erase(v8.end() - 4 - 51, v8.end() - 4);           // v8 predates weather/ENV III/identity/v13-v15
+    v8.erase(v8.end() - 4 - (51 + base_suffix_bytes), v8.end() - 4);   // predates weather/ENV III/identity/v13-v16
     v8[4] = 8;
     restamp(v8);
     ConfigBlob v8rt;
@@ -4626,7 +4733,7 @@ static void test_config_store() {
     // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
     // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.
     std::vector<uint8_t> v4 = mbb;
-    v4.erase(v4.end() - 4 - 74, v4.end() - 4);           // drop v5 through v15
+    v4.erase(v4.end() - 4 - (74 + base_suffix_bytes), v4.end() - 4);   // drop v5 through v16
     v4[4] = 4;
     restamp(v4);
     ConfigBlob v4rt;
@@ -4658,7 +4765,7 @@ static void test_config_store() {
 
     // v13 already has room control but predates the controller mode; it must migrate OFF.
     std::vector<uint8_t> v13 = refb;
-    v13.erase(v13.end() - 4 - 25, v13.end() - 4);
+    v13.erase(v13.end() - 4 - (25 + base_suffix_bytes), v13.end() - 4);
     v13[4] = 13;
     restamp(v13);
     ConfigBlob v13rt;
@@ -4671,7 +4778,7 @@ static void test_config_store() {
                                  2 + ref.ref_temp_enabled_path.size() +
                                  2 + ref.ref_temp_hvac_mode_path.size();
     std::vector<uint8_t> v12 = refb;
-    v12.erase(v12.end() - 4 - (v13_ref_bytes + 25), v12.end() - 4);
+    v12.erase(v12.end() - 4 - (v13_ref_bytes + 25 + base_suffix_bytes), v12.end() - 4);
     v12[4] = 12;
     restamp(v12);
     ConfigBlob v12rt;
@@ -4682,7 +4789,7 @@ static void test_config_store() {
     // The hardware-tested capture slice wrote v7 with only name/topic/value-path. It must migrate
     // in place: keep that mapping, add no imaginary timestamp path, and use the 10-minute default.
     std::vector<uint8_t> v7 = refb;
-    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 20 + v13_ref_bytes + 25),
+    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 20 + v13_ref_bytes + 25 + base_suffix_bytes),
              v7.end() - 4);
     v7[4] = 7;
     restamp(v7);
@@ -4693,7 +4800,7 @@ static void test_config_store() {
 
     // A genuine v6 blob still carries every earlier setting and reports the new mapping absent.
     std::vector<uint8_t> v6 = mbb;
-    v6.erase(v6.end() - 4 - 63, v6.end() - 4);
+    v6.erase(v6.end() - 4 - (63 + base_suffix_bytes), v6.end() - 4);
     v6[4] = 6;
     restamp(v6);
     ConfigBlob v6rt;
@@ -4714,7 +4821,7 @@ static void test_config_store() {
           weatherrt.weather_longitude_e6 == 13404954);
     // A genuine v10 blob keeps weather but predates ENV III and explicit board identity.
     std::vector<uint8_t> v10 = weatherb;
-    v10.erase(v10.end() - 4 - 42, v10.end() - 4);
+    v10.erase(v10.end() - 4 - (42 + base_suffix_bytes), v10.end() - 4);
     v10[4] = 10;
     restamp(v10);
     ConfigBlob v10rt;
@@ -4732,7 +4839,7 @@ static void test_config_store() {
     // v11 already carried ENV III but no explicit board id. It remains readable so the load path can
     // migrate the old `board_set` statement instead of losing credentials or sensor wiring.
     std::vector<uint8_t> v11 = envbuf;
-    v11.erase(v11.end() - 4 - 33, v11.end() - 4);
+    v11.erase(v11.end() - 4 - (33 + base_suffix_bytes), v11.end() - 4);
     v11[4] = 11;
     restamp(v11);
     ConfigBlob v11rt;
@@ -4742,7 +4849,7 @@ static void test_config_store() {
 
     // A v9 upgrade predates both independent outdoor sources and remains disabled by default.
     std::vector<uint8_t> v9 = weatherb;
-    v9.erase(v9.end() - 4 - 51, v9.end() - 4);
+    v9.erase(v9.end() - 4 - (51 + base_suffix_bytes), v9.end() - 4);
     v9[4] = 9;
     restamp(v9);
     ConfigBlob v9rt;
@@ -9800,6 +9907,7 @@ int main() {
     test_detect();
     test_json();
     test_mqtt_group();
+    test_mqtt_base();
     test_mqtt_uri();
     test_modbus();
     test_modbus_snapshot();

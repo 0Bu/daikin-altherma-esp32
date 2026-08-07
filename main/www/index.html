@@ -786,6 +786,15 @@
         <input type="checkbox" id="mqClearCreds">
         <span data-i18n="mqtt.clear">Remove stored credentials — connect anonymously</span>
       </label>
+      <!-- The installation's base topic. Prefilled with the one actually in use (/status.mqtt.base),
+           so the common case is "leave it alone"; it only has to be changed when a SECOND board
+           joins the same broker, which otherwise shares this one's topics, series and HA device. -->
+      <label class="field">
+        <span class="field-label plain" data-i18n="mqtt.base">Base topic</span>
+        <input class="input" name="base" id="mqBase" placeholder="daikin-altherma-esp32" autocomplete="off">
+      </label>
+      <p class="hint err" id="mqBaseError" hidden></p>
+      <p class="hint" data-i18n="mqtt.base_hint">One base topic per device. A second board on this broker needs its own, or the two share their topics, their metrics and their Home Assistant device. Changing it renames this installation in Home Assistant and leaves the old retained topics behind on the broker.</p>
       <p class="hint" data-i18n="mqtt.hint">A username or password requires an encrypted TLS connection (mqtts://, for example mqtts://host:8883). Leave the host empty to disable MQTT.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="mqCancel" data-i18n="btn.cancel">Cancel</button>

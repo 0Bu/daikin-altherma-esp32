@@ -108,6 +108,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 66 | **Complete UI interaction merge gate** — the assembled production UI is *executed* in a deterministic DOM harness, covering every modal in the production registry | ✅ 🧪 | [`test_ui_use_cases.mjs`](../test/test_ui_use_cases.mjs), [`run-ui-use-case-tests.sh`](../scripts/run-ui-use-case-tests.sh) |
 | 68 | **Source-boundary contract gate** — source-text assertions about `main/*.cpp` the host suite structurally cannot make (task, order, and which file is entitled) | ✅ | [`run-contract-tests.sh`](../scripts/run-contract-tests.sh), [`test_heating_curve_diagnosis_contract.mjs`](../test/test_heating_curve_diagnosis_contract.mjs) |
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
+| 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 
 ---
 
@@ -320,7 +321,7 @@ other.
 
 - **✅ 🧪 HA MQTT auto-discovery.** One retained discovery config per value of the active profile,
   pointing at a shared grouped source topic republished only when the payload changes. The node id
-  is the slugified **base topic**, not the board's MAC, so replacing the ESP32 keeps the HA device
+  is the slugified **base topic** (a runtime setting since blob v16), not the board's MAC, so replacing the ESP32 keeps the HA device
   with its entities and statistics instead of creating a second one.
 - **✅ 🧪 The entity id carries the register group.** `uniq_id` and the discovery topic's last
   segment are `<group>_<object_id>`, because both are **flat** namespaces while a label is unique
@@ -496,7 +497,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | Value adjudication | `availability`, `conv_override`, `label_override`, `fault_state`, `ou_stale`, `lwt_select`, `cop_scope`, `feature_gate`, `profile_view` |
 | Detection | `detect`, `detect_backoff`, `uart_plan` |
 | Config & board | `config_model`, `config_store`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
-| MQTT / HA | `discovery`, `ha_device`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus` |
+| MQTT / HA | `discovery`, `ha_device`, `mqtt_base`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus` |
 | HTTP | `http_body`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `redact` |
 | OTA & boot | `health_gate`, `version_cmp`, `ota_manifest`, `ota_channel`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason` |
 | Network policy | `wifi_rollback`, `link_watch`, `syslog_policy`, `timestamp` |

@@ -23,6 +23,7 @@
 #include "logic/history.hpp"
 #include "logic/http_cache.hpp"
 #include "logic/convert.hpp"   // conv_is_binary — /values marks a bit-flag row from its converter id
+#include "logic/mqtt_base.hpp"  // mqtt_base_effective — report the base actually published under
 #include "logic/mqtt_group.hpp" // is_json_number — keep numeric HomeHub values numeric in /values
 #include "logic/crashinfo.hpp"
 #include "logic/detect.hpp"
@@ -362,7 +363,15 @@ void http_append_status_json(std::string& j, bool redact) {
          ",\"connected\":" + (m.connected ? "true" : "false") +
          ",\"tls\":" + (m.tls ? "true" : "false") +
          ",\"has_creds\":" + ((!c.mqtt_user.empty() || !c.mqtt_pass.empty()) ? "true" : "false") +
-         ",\"broker\":" + jstr_r(m.broker, redact) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error)) + "},";
+         ",\"broker\":" + jstr_r(m.broker, redact) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error));
+    // The installation's base topic, ALWAYS the effective one — the empty stored value means "the
+    // compile-time default" (logic/mqtt_base.hpp), and reporting "" would make a default device look
+    // unconfigured to the modal that has to prefill this field. `base_custom` is the separate fact:
+    // whether the user has stated a base, which is what the UI needs to know before offering Reset.
+    // Redacted like reference_temperature.name and for the same reason — it is a word the user typed,
+    // and it becomes this installation's Home Assistant device id.
+    j += ",\"base\":" + jstr_r(mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC), redact) +
+         ",\"base_custom\":" + std::string(c.mqtt_base.empty() ? "false" : "true") + "},";
     // One exact MQTT-backed living-room source. Freshness and canonical eligibility remain separate:
     // a disabled thermostat may still expose a trustworthy temperature but cannot emit room_error_k.
     const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);

@@ -43,9 +43,9 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The fourteen /status values http_status.cpp passes through redact_identifier (via its jstr_r
+// The fifteen /status values http_status.cpp passes through redact_identifier (via its jstr_r
 // wrapper). Listed here rather than only at the call sites so the set is reviewable in one place:
-//   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker
+//   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  mqtt.base
 //   reference_temperature.name  reference_temperature.topic
 //   circulation_source.name  circulation_source.topic
 //   weather_forecast.latitude  weather_forecast.longitude
@@ -54,13 +54,17 @@ inline constexpr const char* REDACTED = "<redacted>";
 // manually or filled by the explicit discovery button. The room source's name and topic joined with
 // #62 — a topic is a path through the reporter's own broker and often carries a room or a device
 // name, and the name field is one the user typed. The circulation source follows the same privacy
-// boundary: its Shelly topic normally embeds a device id.
+// boundary: its Shelly topic normally embeds a device id. mqtt.base joined when the base topic
+// became runtime-settable: it is a word the user typed AND it becomes the installation's Home
+// Assistant device id, so it carries whatever they chose to call their house. Its companion
+// `base_custom` is a bool and stays in the clear — "is this the default?" is diagnostic, the string
+// itself is not.
 //
 // The COUNT is checked (tools/redact/check_diag_coverage.py derives it from the call sites), which
 // it was not until this comment and that constant had drifted two fields apart in silence. What is
 // still only a review point is the direction no count can see: a NEW identifying field that nobody
 // wrapped at all. It never reaches the redactor, so it never reaches this number either.
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 14;
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 15;
 
 // Field-level substitution for the /status builder. Returns by value because every caller feeds it
 // straight into json_quote(), which copies anyway.

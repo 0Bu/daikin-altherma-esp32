@@ -182,7 +182,58 @@ entity's `<group>_<object_id>`). The id therefore names
 the **installation, not the board**: replace the ESP32 (or erase its flash and set it up again) and
 the replacement publishes exactly the same unique ids, so HA keeps the same device, the same
 entities, and their whole history and long-term statistics. Two boards on one broker therefore need
-two base topics (`CONFIG_DAIKIN_MQTT_BASE_TOPIC`, compile-time), keeping installations distinct.
+two base topics, keeping installations distinct.
+
+**Set the base topic per device — Settings → MQTT → Base topic** (`POST /set_mqtt`, field `base`;
+`CONFIG_DAIKIN_MQTT_BASE_TOPIC` is now only the DEFAULT, used when nothing is stored). This matters
+because CI publishes one firmware image: every board flashed from the release or dev feed starts on
+the same base, so a second board — a bench unit, a spare, a second heat pump — silently *joins* the
+first installation rather than forming its own. What that looks like is not an error message:
+
+- both boards write the same retained topics, so `<base>/heartbeat`, `<base>/x10a` and `<base>/crash`
+  each hold whichever published last;
+- a metrics consumer sees one series per field, because the labels are identical — two interleaved
+  uptime counters read as a sawtooth, which is how one of this project's own reboot investigations
+  came to count 16 272 restarts in a week that had roughly fifty;
+- Home Assistant merges them into ONE device whose entities flip between two units.
+
+Every individual value stays plausible throughout, which is why this is worth setting deliberately
+rather than discovering later.
+
+> **Changing the base topic renames the installation.** The device publishes under the new base after
+> the reboot, and Home Assistant sees a *new* device: the old one remains, with every entity
+> permanently unavailable, and history and statistics stay with it — they key on the old entity ids
+> and nothing carries them across.
+>
+> **It also forks every metrics series**, which is the consequence that bites later and quietly. A
+> collector like Telegraf carries the MQTT topic as a *label*, so the series before and after the
+> change have the same metric name and different labels, with no overlap — a query pinned to either
+> one reports the other half as *absent* rather than failing. This project has already paid for that
+> once: the firmware's own `<base>/state` → `<base>/x10a` migration split the X10A history at
+> 2026-07-31, and a long-window analysis read "no data before 01-08" on a plant that had been
+> publishing continuously. After a base change, union both in any query spanning it:
+> `{topic=~"<old-base>|<new-base>"}` (or the `/…` suffixes that apply). The old retained topics are **not** cleaned up by the firmware
+> either — and the reason is stronger than "it no longer owns them". The whole point of this setting
+> is that a base topic may be **shared by a second board**; a device that swept the old base on its way
+> out would delete the retained state of the very installation it was colliding with. Retracting is
+> therefore the user's call, not the firmware's. So set the base topic when **commissioning** a board,
+> not on a running installation whose history you want to keep.
+>
+> To clear what the old base left behind — the data topics, then the discovery configs under the old
+> slugified node id (`my-old-base` → `my_old_base`):
+>
+> ```bash
+> mosquitto_sub -h <broker> -t '<old-base>/#' -v --retained-only -W 2 | awk '{print $1}' | xargs -r -I{} mosquitto_pub -h <broker> -r -n -t {}
+> ```
+>
+> ```bash
+> mosquitto_sub -h <broker> -t 'homeassistant/+/<old_node>/#' -v --retained-only -W 2 | awk '{print $1}' | xargs -r -I{} mosquitto_pub -h <broker> -r -n -t {}
+> ```
+>
+> (`-r -n` publishes an empty retained message, which deletes the topic; for a discovery config that
+> also removes the entity, and the device disappears with its last one.) Run the second one while HA
+> is connected, for the reason the swap note below gives. Do **not** run either against a base a board
+> is still publishing under — it will simply republish, and you will have deleted nothing.
 The retired Modbus discovery topics keep their `_modbus` namespace only as cleanup targets. They are
 deleted on every broker connection and never republished, while `<base>/modbus` remains available to
 ordinary MQTT consumers.

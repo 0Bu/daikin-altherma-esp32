@@ -227,7 +227,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings, **v14 (retired dynamic-LWT mode byte, now written zero and ignored)** and v15 the external circulation-power witness (topic/paths/thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against). Preset id and board pins are one atomic statement. A non-empty `mb_host` polls; empty disables the stack. Older blobs remain readable; the v9 actuation-consent bit and v14 mode byte are discarded because what they gated no longer exists. Heating-curve diagnosis derives arming from the timestamped room mapping; forecast is optional. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings, **v14 (retired dynamic-LWT mode byte, now written zero and ignored)** v15 the external circulation-power witness (topic/paths/thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against) and v16 this installation's MQTT base topic (empty = the compile-time default, so the upgrade is a no-op). Preset id and board pins are one atomic statement. A non-empty `mb_host` polls; empty disables the stack. Older blobs remain readable; the v9 actuation-consent bit and v14 mode byte are discarded because what they gated no longer exists. Heating-curve diagnosis derives arming from the timestamped room mapping; forecast is optional. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `board_set` | **Legacy migration input only.** Pre-v12 builds stored this bit without a concrete preset id. On upgrade, `true` plus an exact historical field match is migrated to the same board the old UI displayed; untouched defaults (`false`) remain unidentified. New saves store `board_user_set` and the stable preset id atomically in `cfg`. |
@@ -428,10 +428,14 @@ POST /set_wifi                     # { ssid, pass } → validate (ssid 1-32; pas
                                    #   reboot; on failure 400 {ok:false,error} (nothing saved). Backs up
                                    #   the old creds + auto-rolls-back if the new network fails to
                                    #   connect (see ARCHITECTURE.md → Web UI config flow)
-POST /set_mqtt                     # { broker, user?, pass?, clear_creds? } → pre-flight the broker
+POST /set_mqtt                     # { broker, user?, pass?, clear_creds?, base? } → pre-flight the broker
                                    #   (DNS/TCP/connect+auth) → on success persist + reboot, on failure
                                    #   400 {ok:false,error} (nothing saved). Empty user+pass keeps stored
                                    #   creds; clear_creds:true removes them (anonymous); "" broker disables.
+                                   #   base = this installation's MQTT base topic (logic/mqtt_base.hpp);
+                                   #   ABSENT means keep, "" means the compile-time default. Checked
+                                   #   before the broker pre-flight; each refusal carries a machine
+                                   #   code (mqtt_base_wildcard, mqtt_base_not_sluggable, …).
 POST /test_ref_temp                # { name, topic, temperature_path, setpoint_path, timestamp_path,
                                    #   enabled_path?, hvac_mode_path?, max_age_s }
                                    #   → temporarily subscribe on the existing authenticated MQTT
@@ -554,7 +558,11 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   a TLS port. An explicit scheme is always honoured. Reason surfaces in `/status.mqtt`.
 - **Node id:** the slugified base topic (`daikin-altherma-esp32` → `daikin_altherma_esp32`). It
   identifies the *device* in each discovery config's `uniq_id`/`dev.ids`, but is **not** part of the
-  message topics — those sit directly under `<base>` (one board per base topic). Board-independent
+  message topics — those sit directly under `<base>` (one board per base topic). The base topic is a
+  **runtime setting** (Settings → MQTT → Base topic, `POST /set_mqtt` field `base`), because CI
+  publishes one image while the base is a per-installation fact: two boards left on the shared
+  default share their retained topics, their metrics series and their HA device, silently.
+  `CONFIG_DAIKIN_MQTT_BASE_TOPIC` is the default an empty stored value means. Board-independent
   on purpose: **swap the ESP32 and Home Assistant keeps the same device and entities** (and their
   statistics). The board's own `daikin_<mac3>` remains the MQTT client id and a second `dev.ids`
   entry so an install from a MAC-identified build is merged, not duplicated — see

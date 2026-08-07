@@ -36,6 +36,10 @@ function fillMqtt() {
   // signal, and it only has anything to do when credentials are actually stored (mqtt.has_creds).
   $("mqUser").value = "";
   $("mqPass").value = "";
+  // Prefilled with the EFFECTIVE base — /status reports the compile-time default when nothing is
+  // stored, so this field always shows where the device actually publishes rather than a blank that
+  // reads like "not set". Submitting it unchanged is a no-op the firmware short-circuits.
+  $("mqBase").value = m.base || "";
   setMqttClear(false);
   $("mqClearRow").hidden = !m.has_creds;
 }
@@ -51,6 +55,7 @@ function setMqttClear(on) {
 function openMqtt() {
   fillMqtt();
   $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true;
+  $("mqBase").classList.remove("invalid"); $("mqBaseError").hidden = true;
   openPopup("mqttModal");
 }
 function closeMqtt() { closePopup("mqttModal"); }

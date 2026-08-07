@@ -15,6 +15,7 @@
 #include "hp_poll.hpp"
 #include "logic/config_model.hpp"
 #include "logic/env3.hpp"
+#include "logic/mqtt_base.hpp"  // mqtt_base_valid — the installation base topic's rules, host-tested
 #include "logic/mqtt_uri.hpp"   // parse_mqtt_uri — host/port/TLS split, host-tested
 #include "logic/reference_temperature.hpp"
 #include "logic/weather_forecast.hpp"
@@ -54,9 +55,11 @@ static esp_err_t send_err(httpd_req_t* req, const char* status, const char* msg)
     return http_send_json(req, (std::string("{\"ok\":false,\"error\":\"") + msg + "\"}").c_str());
 }
 
-// ENV III reachability failures carry a stable code so the bilingual UI can translate them while
-// direct API clients still receive a useful English explanation.  All values are internal literals.
-static esp_err_t send_env3_err(httpd_req_t* req, const char* status,
+// A rejection carrying a stable machine `code` beside the English `error`, so the bilingual UI can
+// translate it while direct API clients still receive a useful explanation. Both arguments are
+// internal literals by contract — like send_err above, this does no escaping, so neither may ever
+// carry caller-supplied text.
+static esp_err_t send_err_code(httpd_req_t* req, const char* status,
                                const char* code, const char* msg) {
     httpd_resp_set_status(req, status);
     std::string body = "{\"ok\":false,\"code\":\"";
@@ -65,6 +68,13 @@ static esp_err_t send_env3_err(httpd_req_t* req, const char* status,
     body += msg;
     body += "\"}";
     return http_send_json(req, body.c_str());
+}
+
+// ENV III reachability failures were the first users of the coded shape above; the name is kept so
+// their call sites still read as what they are.
+static esp_err_t send_env3_err(httpd_req_t* req, const char* status,
+                               const char* code, const char* msg) {
+    return send_err_code(req, status, code, msg);
 }
 
 // Shared test-before-persist gate for the standalone compatibility endpoint and the integrated
@@ -296,9 +306,24 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     std::string user        = js(j, "user");
     std::string pass        = js(j, "pass");
     const bool  clear_creds = jb(j, "clear_creds", false);
+    // OPTIONAL, and absent must mean "keep", not "reset to the compile-time default". The dashboard
+    // always sends it, but this is a documented HTTP route: a script, or a browser still holding a
+    // cached pre-v16 bundle, posts broker+credentials alone — and defaulting on absence would move a
+    // deliberately-renamed installation back onto the shared base and merge it with another board.
+    const bool  base_given  = cJSON_HasObjectItem(j, "base");
+    std::string base        = js(j, "base");
     cJSON_Delete(j);
 
     Config c = config();
+    if (!base_given) base = c.mqtt_base;
+    {
+        // Refused BEFORE the broker pre-flight: this check is free and local, while the pre-flight
+        // costs a DNS lookup, a TCP probe and up to ~8 s of the httpd task. Rejecting the cheap way
+        // round also means a bad base topic never spends a TLS session to be told so.
+        MqttBaseRefusal refusal;
+        if (!mqtt_base_valid(base, &refusal))
+            return send_err_code(req, "400 Bad Request", refusal.code, refusal.message);
+    }
     // The modal never prefills credentials (/status deliberately doesn't expose them), so the fields
     // come back empty whenever the user didn't retype them. An empty user AND pass therefore means
     // "keep the stored credentials" — NOT "clear them". Without this, editing only the broker would
@@ -315,7 +340,7 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
         user = c.mqtt_user;
         pass = c.mqtt_pass;
     }
-    if (broker == c.mqtt_uri && user == c.mqtt_user && pass == c.mqtt_pass) {
+    if (broker == c.mqtt_uri && user == c.mqtt_user && pass == c.mqtt_pass && base == c.mqtt_base) {
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
     }
 
@@ -434,6 +459,13 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     c.mqtt_uri  = broker;
     c.mqtt_user = user;
     c.mqtt_pass = pass;
+    // Applies on the reboot below, like the broker itself: mqtt_ha.cpp resolves the base ONCE at
+    // bridge start and derives thirteen topics plus the HA node id from it, so there is nothing to
+    // re-point live. The retained topics under the PREVIOUS base are deliberately NOT retracted —
+    // the old base is gone by the time a new bridge could delete anything, and a board that no
+    // longer owns a topic must not be the thing that deletes it (docs/HOME_ASSISTANT.md carries the
+    // broker-side sweep, the same manual step a board swap already needs).
+    c.mqtt_base = base;
     // The broker just pre-flighted clean, so a failure here is NVS, not the user's input — don't
     // reboot into the old broker while telling them the new one was accepted.
     if (!config_save(c)) {

@@ -265,6 +265,12 @@ function wireRestOfApp() {
       toast(t("toast.check_broker"), "err");
       return;
     }
+    // The base topic is deliberately NOT re-validated here. Its rules live in logic/mqtt_base.hpp,
+    // where CI gates them against the very slug function that decides the Home Assistant device id;
+    // a looser copy in JS would re-open exactly the collision the setting exists to close (the
+    // lwt_select lesson). The device refuses with a machine code, which mapError turns into the
+    // localized sentence below — one definition of the rule, translated rather than duplicated.
+    let baseRejected = false;
     saveReboot("/set_mqtt", {
       broker,
       // user is an opaque credential like pass — NOT trimmed. Spaces can be significant in a broker
@@ -272,9 +278,25 @@ function wireRestOfApp() {
       user: $("mqUser").value,
       pass: $("mqPass").value,
       clear_creds: $("mqClearCreds").checked,   // explicit credential clear (blank fields keep them)
+      base: $("mqBase").value.trim(),
     }, {
       btn: "mqBtn",
-      showError: (msg) => { $("mqBroker").classList.add("invalid"); $("mqError").textContent = msg; $("mqError").hidden = false; },
+      mapError: (code, message) => {
+        baseRejected = typeof code === "string" && code.indexOf("mqtt_base_") === 0;
+        // An unknown mqtt_base_* code still lands on the right field with the device's own English
+        // text: t() returns the KEY when there is no string for it, so a firmware that grows a rule
+        // ahead of these translations degrades to untranslated rather than to blaming the broker
+        // field or printing a bare "err.mqtt_base_…" at the user.
+        if (!baseRejected) return message;
+        const key = "err." + code;
+        const localized = t(key);
+        return localized === key ? message : localized;
+      },
+      showError: (msg) => {
+        const field = baseRejected ? "mqBase" : "mqBroker";
+        const box   = baseRejected ? "mqBaseError" : "mqError";
+        $(field).classList.add("invalid"); $(box).textContent = msg; $(box).hidden = false;
+      },
       close: closeMqtt,
       then: renderApp,
       busyMsg: t("toast.verifying_mqtt"),   // the endpoint pre-flights the broker (DNS→TCP→CONNECT)
