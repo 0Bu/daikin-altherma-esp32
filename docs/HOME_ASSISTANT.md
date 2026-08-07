@@ -401,8 +401,14 @@ nobody measured:
   (renaming it would fork the statistics); the pre-quarantine range is simply wrong data.
 - **The field is not populated on this unit.** `Target Cond. Temp.` reads raw `0x0000` through an
   entire compressor cycle. The entity stays (the field *can* be populated) but an
-  exact zero from that row is withheld. This is adjudicated per row, never globally: a real
-  thermistor crosses 0 °C every winter and must keep saying so.
+  exact zero from that row is withheld. Three more joined it: the page-`0x21` *Fan1 Fin temp.*,
+  *Fan2 Fin temp.* and *Compressor outlet temperature*, each measured at exactly `0.0 °C` across
+  1140 consecutive **running** samples while the inverter heatsink beside them read up to 55.5 °C and
+  ambient never fell below 17.5 °C. This is adjudicated per row, never globally: a real thermistor
+  crosses 0 °C every winter and must keep saying so — and on a **geothermal** unit the same registers
+  carry brine and evaporating-refrigerant temperatures, which live at 0 °C, so each rule names the
+  air-source row it is about and leaves those alone. **Upgrading:** if these three showed a flat
+  `0.0 °C` before, they go *unknown* on a unit that does not have the sensors.
 - **The hardware behind a whole register page is not fitted.** Pages `0xA0` and `0xA1` describe a
   *second* outdoor unit. On an installation that does not have one, `0xA1` answers with 16 zero bytes
   and `0xA0` reports no O/U MPU id (`0xFFFF`) while asserting no output — so every row on that page

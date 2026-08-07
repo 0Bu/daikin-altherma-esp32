@@ -1216,9 +1216,28 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 marker, reading_plausible() catches a number that is IMPOSSIBLE, ValueDef::no_publish
                 carries what the GENERATOR knew. What is left is a field that decodes to an entirely
                 ordinary number which measures nothing, and only per-row evidence can name it. THREE
-                ROW verdicts exist; TWO are currently in force. ZeroMeansAbsent (Target Cond. Temp. 0x10/8
-                — raw 0x0000 through a full compressor cycle, which is also why ou_stale.hpp already
-                calls it a useless witness) withholds only that exact value. A FOURTH verdict is not
+                ROW verdicts exist; TWO are currently in force. ZeroMeansAbsent withholds only an exact
+                zero from an adjudicated row, and FOUR rows carry it: Target Cond. Temp. 0x10/8 (raw
+                0x0000 through a full compressor cycle, which is also why ou_stale.hpp already calls it
+                a useless witness) plus #224's page-0x21 Fan1/Fan2 Fin temp. and Compressor outlet
+                temperature. Those three are MEASURED, not argued: 0x21 stops being refreshed at rest
+                (ou_stale), so every stored sample is a RUNNING sample — 1140 over 7 days, in each of
+                which INV fin temp. at 0x21/4 (same page, same converter) read 16.5-55.5 °C, the
+                discharge pipe 28.5-101 °C and ambient never fell below 17.5 °C, while all three read
+                exactly 0.0. THE LABEL IS PART OF THE KEY for them, and it is load-bearing rather than
+                defensive: the catalog puts Brine inlet/outlet temp. and Refrig. temp. evap. In/Out at
+                those SAME (reg, offset, conv) coordinates on the geothermal profiles, and brine and
+                evaporating refrigerant sit AT 0 °C in normal operation — a coordinate-only rule would
+                delete those units' most load-bearing reading exactly where it matters. That is NOT the
+                label MATCHING lwt_select.hpp warns against (a pattern hunting for a quantity); it is an
+                exact discriminator among the spellings the catalog demonstrably carries, the same key
+                label_override.hpp uses, pinned in BOTH directions by the catalog test (19/19/21
+                adjudicated rows, 10 shared geothermal rows that reach the ledger and are told nothing).
+                The three 0x20 rows #224 also lists (outdoor coil, suction pipe, liquid line) are
+                deliberately NOT adjudicated: 0 °C is where those sensors LIVE for much of a heating
+                season, so withholding their zero would cost a real reading far more often than it
+                removes a false one — the trade inverts, and they still need their own evidence.
+                A FOURTH verdict is not
                 about a row at all: PAGE_ABSENCE_RULES is keyed on the register PAGE and reaches every
                 row on it, because "the hardware behind this reply is not fitted" is a fact about the
                 page. Both entries are the ABSENT SECOND OUTDOOR UNIT of #224 — 0xA1 answers with 16
@@ -1261,8 +1280,11 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 verdict moved to logic/conv_override.hpp. A quarantine and a mis-decode are
                 different findings; recording them as one makes the fix look like a suppression
                 quietly lifted. Keyed on (page, offset, converter) — the
-                row's STRUCTURAL identity, never its label (the lwt_select lesson) and deliberately
-                NOT scoped to a profile id, since both rows sit at byte-identical coordinates in
+                row's STRUCTURAL identity — plus, where that coordinate is demonstrably NOT one
+                quantity, the exact generated label as a fourth component (the three 0x21 zero rows
+                above, and nothing else; the lwt_select lesson forbids a label PATTERN hunting for a
+                quantity, not an exact discriminator between spellings the catalog carries). Never a
+                profile id, since both rows sit at byte-identical coordinates in
                 every generated table and a per-id list would claim a per-model fact nobody
                 established. The catalog test is the load-bearing half: it proves each rule selects
                 the adjudicated quantity across all 45 profiles — INCLUDING altherma_lt_d7_e_bml,
