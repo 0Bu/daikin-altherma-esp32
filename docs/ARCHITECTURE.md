@@ -421,7 +421,22 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `logic/label_override.hpp` uses. The three `0x20` rows #224 also lists (outdoor coil, suction pipe,
   liquid line) are deliberately **not** adjudicated: 0 °C is where those sensors live for much of a
   heating season, so withholding their zero would cost a real reading far more often than it removes
-  a false one. `AboveRangeIsAbsent`
+  a false one. The attempt to close them anyway is **recorded in the ledger as a refusal**, because
+  the obvious fix looks available and is not: a *conditional* zero rule keyed on the unit's own
+  saturation temperatures in the **same 16-byte reply** (`0x20/12` *High Pressure(T)*, `0x20/14`
+  *Low Pressure(T)*, conv 405) would invert the winter objection rather than accept it — in the
+  January where the coil really does sit at 0 °C the saturation temperature is near 0 °C too, so the
+  condition switches *itself* off and the real reading publishes, on any model, in any season. It
+  fails because **the witness does not exist** on the only installation available: those transducers
+  read exactly 0.0 bar in 56433/56433 published samples over 120 days, at rest and at 42 rps alike,
+  and conv 405 drops `bar <= 0` before it converts, so neither `(T)` row has ever published one
+  sample in the store's whole retention. That is the rule's own safety property firing — so it would
+  be *permanently silent* on the very unit whose zeros motivated it, and its live verification is
+  unperformable on this board forever. The cross-page `0x62/15` conv-405 twin *does* publish here
+  (3.2–64.1 °C over the same 1419 running samples) and is a **separate** proposal needing its own
+  evidence: `value_available()` is handed only the decoded row's own page reply, so reaching it needs
+  cross-page state this ledger has never carried, plus an argument about how the two pages' sample
+  instants relate (`0x20` holds over at rest, `0x62` does not). `AboveRangeIsAbsent`
   is the **expansion
   valve** pulse rows (conv 151): 30 days of published samples run 0-474 pulses and then carry six
   samples of exactly `0xFFF8`, with **nothing in between** — a discrete out-of-band integer rather

@@ -262,13 +262,71 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // a heatsink or compressor-outlet temperature at exactly zero is a rare transit, not the
     // quantity's normal operating point. It is NOT acceptable for the 0x20 rows this issue also
     // lists (outdoor coil, suction pipe, liquid line), where 0 °C is where those sensors LIVE for
-    // much of a heating season; those stay published and still need their own evidence.
+    // much of a heating season. Those stay published — see the REFUSAL recorded below, which is
+    // the outcome of trying to close them and is deliberately kept beside the rules it did not
+    // become.
     {0x21, 6, 105, "Fan1 Fin temp.", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
      "#224: exactly 0.0 in 1140/1140 running samples while INV fin read 16.5-55.5 and ambient >=17.5"},
     {0x21, 8, 105, "Fan2 Fin temp.", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
      "#224: same, and a 4-8 kW monobloc has one fan — there is no second fan inverter to measure"},
     {0x21, 10, 105, "Compressor outlet temperature", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
      "#224: exactly 0.0 in 1140/1140 running samples while the discharge pipe it feeds read 101 °C"},
+
+    // ── Page 0x20 outdoor coil / suction / liquid line — REFUSED, and why (#224) ─────────────────
+    // NO RULE IS ADDED HERE. This block is the record of an adjudication that was attempted and
+    // failed its evidence gate, kept because the next person to read the three zeros below will
+    // reach for exactly the rule that does not work, and an absent entry cannot say why.
+    //
+    //     0x20/2  conv 105  O/U Heat Exch. Temp.      exactly 0.0 in 1419/1419 running samples
+    //     0x20/6  conv 105  Suction pipe temp.        exactly 0.0 in 1419/1419 running samples
+    //     0x20/10 conv 105  Liquid temperature(R3T)   exactly 0.0 in 1419/1419 running samples
+    //
+    // (7 days, min == max == 0.0 on each, selected on INV frequency > 0. The same page's Heat
+    // exchanger mid-temp., same converter, never drops below 3.0 °C in those samples, so the page
+    // is live and the reply is being decoded — the standard 0x21 argument, reproduced exactly.)
+    //
+    // The proposed close was a CONDITIONAL zero rule rather than a flat one, and the design was
+    // sound: page 0x20 carries the unit's own saturation temperatures in the same 16-byte reply
+    // (0x20/12 High Pressure(T), 0x20/14 Low Pressure(T), both conv 405), value_available() is
+    // already handed the whole raw page, and a coil reading 0.00 while the refrigerant in the same
+    // sample boils at +7 °C is refuted rather than merely unlikely. It also inverts the winter
+    // objection that blocks a flat rule: in the January where the coil really does sit at 0 °C the
+    // saturation temperature is near 0 °C too — that is WHY the coil is there — so the condition
+    // switches itself off and the real reading publishes, on any model, in any season.
+    //
+    // IT IS REFUSED BECAUSE THE WITNESS DOES NOT EXIST ON THE ONLY INSTALLATION AVAILABLE, and the
+    // failure is structural rather than marginal:
+    //
+    //   • The 0x20 pressure transducers read exactly 0.0 bar in 56433/56433 published samples over
+    //     120 days — max 0.0 on BOTH High Pressure (0x20/12) and Low Pressure (0x20/14), at rest
+    //     and at 42 rps alike. Those transducers are themselves unpopulated on this unit.
+    //   • conv 405 drops bar <= 0 before it converts (r.ok stays false), so High Pressure(T) and
+    //     Low Pressure(T) have never published ONE sample in the whole retention of the reference
+    //     store. The witness is not near zero; it is absent.
+    //   • That is the rule's own advertised safety property firing — "a unit without a low-side
+    //     pressure sensor produces no witness, so the rule stays silent instead of guessing" — and
+    //     it means the rule would be PERMANENTLY SILENT on the very unit whose zeros motivated it.
+    //     It could never withhold anything here, and its live verification (three rows against a
+    //     non-zero LP(T) with the compressor running) is unperformable on this board, forever.
+    //
+    // Shipping it anyway would put an unexercised conditional into the ledger whose only supporting
+    // evidence is the absence of evidence, and have it fire first on a model nobody has measured —
+    // which is the claim #224 exists to refuse. So the three rows STAY PUBLISHED. A visible zero
+    // someone can question is better than an invisible withheld reading nobody can.
+    //
+    // THE CROSS-PAGE WITNESS IS NOT A LOOPHOLE TO TAKE. Page 0x62/15 conv 405 (Pressure sensor(T))
+    // DOES publish on this unit — 3.2 to 64.1 °C across those same 1419 running samples, 1st
+    // percentile 8.6 °C, only 2 samples under 5 °C — so it would refute a 0.00 coil on the numbers.
+    // It is deliberately not built: it is a DIFFERENT PAGE, and value_available() is handed only
+    // the reply of the row being decoded, so reaching it needs cross-page state this ledger has
+    // never carried and a separate argument about how two pages' sample instants relate (0x20 holds
+    // over at rest, 0x62 does not). That is its own proposal needing its own evidence, not this one
+    // with a wider reach.
+    //
+    // 0x20/10 fails a second, independent way, which is worth keeping even if the first is ever
+    // resolved: its natural witness is the HIGH side, carried by 23 of 44 profile tables against 43
+    // for the low side, and the liquid line's offset from it (subcooling) is mode-dependent in a way
+    // the low-side rows' is not. No clean mode-independent bound can be stated from the same reply.
 
     // The four 0xA1 rows USED TO BE HERE, one ZeroPageMeansAbsent entry each. The verdict has not
     // changed — it moved to PAGE_ABSENCE_RULES above, where a fact about a page is stated once and
