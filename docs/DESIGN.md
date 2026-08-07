@@ -1317,8 +1317,9 @@ vocabulary exactly:
    elsewhere in the UI. The compact right side reports whether the single room-temperature source is
    configured; the weather row names its configured provider. The room-source modal remains
    test-before-persist; Delete removes the saved mapping and captured value. Retained data
-   without trusted source time fails closed, and `/status` plus the numeric heartbeat retain the full
-   canonical and diagnosis evidence. No UI path sends a setpoint or HomeHub write.
+   without trusted source time fails closed, and `/status` plus the grouped numeric
+   `<base>/heating_curve` topic retain the full canonical and diagnosis evidence. No UI path sends a
+   setpoint or HomeHub write.
 
 **Only domain readings and settings live in the cards.** The generic *Report a bug* action was the
 (then single) card's last row through v1.0.0-dev.199 and is in the footer line below all of them now:

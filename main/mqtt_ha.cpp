@@ -27,9 +27,10 @@
 //     topic are flat namespaces while a label is unique only within its page (#221). The configs an
 //     older build published under a superseded identity — the MAC node id, and the un-grouped entity
 //     ids — are retracted in one pass before any replacement goes out.
-//   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish the board/link diagnostics JSON
-//     (logic/heartbeat.hpp) to <base>/heartbeat — diagnostics, not real-time telemetry, so unlike the
-//     source value topics it's a fixed cadence, not publish-on-change.
+//   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish board/link diagnostics
+//     (logic/heartbeat.hpp) to <base>/heartbeat and the separately grouped room-source/heating-curve
+//     evidence (logic/heating_curve_mqtt.hpp) to <base>/heating_curve. Both use a fixed cadence,
+//     unlike real-time source topics which publish on change.
 //   • Once per (re)connect: RETAIN the boot-time crash summary (logic/crashinfo.hpp) on <base>/crash
 //     ONLY when the reset was a real fault or a core-dump is still in flash. On a normal boot, probe
 //     the topic and delete it only if the broker still holds an older crash; a clean broker gets no
@@ -61,6 +62,7 @@
 #include "logic/discovery.hpp"
 #include "logic/env3.hpp"
 #include "logic/fault_state.hpp"
+#include "logic/heating_curve_mqtt.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
@@ -201,7 +203,7 @@ struct Lock {
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
 static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_avail, s_x10a,
                    s_modbus, s_weather, s_env3, s_retired_weather, s_retired_modbus_status,
-                   s_legacy_state, s_heartbeat, s_crash;
+                   s_legacy_state, s_heartbeat, s_heating_curve_topic, s_crash;
 static std::string s_announced_profile;               // profile we last published discovery for (mqtt_task only)
 static std::string s_last_x10a_json;                  // per-topic dedup guards (mqtt_task only)
 static std::string s_last_modbus_json;
@@ -246,9 +248,9 @@ static bool         s_crash_dump_pub      = false;     // mqtt_task-only: `cored
 static bool         s_crash_notable_pub   = false;     // mqtt_task-only: was that sync a crash publish or cleanup probe?
 
 // Cumulative publish counters for the heartbeat's mqtt_{count,fails,reconnects} — see mqtt_publish().
-// pub_ok/pub_fail are touched only on the publish task (mqtt_publish + publish_heartbeat both run
-// there), so they stay plain; reconnects is bumped on the EVENT task and read on the publish task, so
-// it is atomic.
+// pub_ok/pub_fail are touched only on the publish task (every helper funnels through mqtt_publish),
+// so they stay plain; reconnects is bumped on the EVENT task and read on the publish task, so it is
+// atomic.
 static uint32_t s_mqtt_pub_ok   = 0;
 static uint32_t s_mqtt_pub_fail = 0;
 static std::atomic<uint32_t> s_mqtt_reconnects{0};
@@ -846,8 +848,8 @@ static void publish_heartbeat() {
     f.wifi_connected  = wi.connected;
     f.wifi_rssi       = wi.rssi;
     f.wifi_reconnects = wifi_reconnect_count();
-    // Pre-render the MAC strings here (keeps logic/heartbeat.hpp IDF-free, same as `time`). The STA's
-    // own MAC is always present; the AP BSSID only while associated ("" -> JSON null, like /status).
+    // Pre-render the MAC strings here to keep logic/heartbeat.hpp IDF-free. The STA's own MAC is
+    // always present; the AP BSSID only while associated ("" -> JSON null, like /status).
     char mac_str[18];
     std::snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                   wi.mac[0], wi.mac[1], wi.mac[2], wi.mac[3], wi.mac[4], wi.mac[5]);
@@ -872,8 +874,25 @@ static void publish_heartbeat() {
     f.rx_fails        = hp.rx_fail_total;
     f.last_ok_s       = hp.last_ok_s;
     f.ou_held_over    = hp.ou_held_over;
+    const ModbusStatus mbs = mb_status();
+    f.modbus_enabled   = mbs.enabled;
+    f.modbus_connected = mbs.connected;
+    f.modbus_rx        = mbs.rx_ok;
+    f.modbus_fails     = mbs.rx_fail;
+    f.modbus_stack_min_free_words = mbs.task_stack_min_free_words;
+    const std::string js = build_heartbeat_json(f);
+    mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
+}
+
+// Publish the accepted room observation and read-only heating-curve diagnosis on their own domain
+// topic. Keeping these out of HeartbeatFields makes the board/link payload independent of any room
+// mapping or heating policy; the nested objects keep related evidence together for generic MQTT
+// browsers while retaining numeric leaves for Telegraf/VictoriaMetrics.
+static void publish_heating_curve_telemetry() {
+    const Config cfg = config();
+    HeatingCurveMqttFields f;
     const ReferenceTemperatureStatus rt = reference_temperature_status();
-    const uint64_t room_now_ms = f.uptime_ms;
+    const uint64_t room_now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
     int64_t room_now_unix_s = -1;
     int32_t room_now_sub_ms = 0;
     time_now(room_now_unix_s, room_now_sub_ms);
@@ -911,45 +930,37 @@ static void publish_heartbeat() {
     f.room_messages = rt.messages;
     f.room_errors = rt.errors;
     f.room_rejections = rt.rejections;
-    const ModbusStatus mbs = mb_status();
-    f.modbus_enabled   = mbs.enabled;
-    f.modbus_connected = mbs.connected;
-    f.modbus_rx        = mbs.rx_ok;
-    f.modbus_fails     = mbs.rx_fail;
-    f.modbus_stack_min_free_words = mbs.task_stack_min_free_words;
-    // Numeric MQTT metrics use 0 for "no request/source yet"; unlike the enum values 1/2 this does
-    // not invent InternalController provenance on a freshly booted, inactive device.
 
-    // The controller is evaluated every mqtt_task cycle, not on the publication cadence. This copy
-    // therefore already reflects paused/disconnected fail-closed transitions.
+    // Evaluation runs every mqtt_task cycle, outside the publication gate. This is the latest
+    // fail-closed snapshot, not a second evaluation tied to the 10-second reporting cadence.
     const logic::HeatingCurveSnapshot diagnosis = heating_curve_status();
-    f.heating_curve_method_version = logic::HEATING_CURVE_DIAGNOSIS_METHOD_VERSION;
-    f.heating_curve_armed = diagnosis.armed;
-    f.heating_curve_state = static_cast<uint8_t>(diagnosis.state);
-    f.heating_curve_reason = static_cast<uint8_t>(diagnosis.reason);
-    f.heating_curve_sample_eligible = diagnosis.sample_eligible;
-    f.heating_curve_forecast_available = diagnosis.forecast_available;
-    f.heating_curve_plant_gate_known = diagnosis.plant_gate_known;
-    f.heating_curve_plant_gate_active = diagnosis.plant_gate_active;
-    f.heating_curve_heating_mode_known = diagnosis.heating_mode_known;
-    f.heating_curve_heating_mode_active = diagnosis.heating_mode_active;
-    f.heating_curve_has_current_room_error = diagnosis.has_current_room_error;
-    f.heating_curve_has_last_sample = diagnosis.has_last_sample;
-    f.heating_curve_has_room_source_time = diagnosis.room_has_source_time;
-    f.heating_curve_room_age_known = diagnosis.room_age_known;
-    f.heating_curve_current_room_error_k = diagnosis.current_room_error_k;
-    f.heating_curve_last_sample_room_error_k = diagnosis.last_sample_room_error_k;
-    f.heating_curve_room_source_unix_s = diagnosis.room_source_unix_s;
-    f.heating_curve_room_age_s = diagnosis.room_age_s;
-    f.heating_curve_last_sample_unix_s = diagnosis.last_sample_unix_s;
-    f.heating_curve_sequence = diagnosis.sequence;
-    f.heating_curve_evaluations = diagnosis.evaluations;
-    f.heating_curve_samples = diagnosis.samples;
-    f.heating_curve_holds = diagnosis.holds;
-    f.heating_curve_blocks = diagnosis.blocks;
+    f.method_version = logic::HEATING_CURVE_DIAGNOSIS_METHOD_VERSION;
+    f.armed = diagnosis.armed;
+    f.state = static_cast<uint8_t>(diagnosis.state);
+    f.reason = static_cast<uint8_t>(diagnosis.reason);
+    f.sample_eligible = diagnosis.sample_eligible;
+    f.forecast_available = diagnosis.forecast_available;
+    f.plant_gate_known = diagnosis.plant_gate_known;
+    f.plant_gate_active = diagnosis.plant_gate_active;
+    f.heating_mode_known = diagnosis.heating_mode_known;
+    f.heating_mode_active = diagnosis.heating_mode_active;
+    f.has_current_room_error = diagnosis.has_current_room_error;
+    f.has_last_sample = diagnosis.has_last_sample;
+    f.has_diagnosis_room_source_time = diagnosis.room_has_source_time;
+    f.diagnosis_room_age_known = diagnosis.room_age_known;
+    f.current_room_error_k = diagnosis.current_room_error_k;
+    f.last_sample_room_error_k = diagnosis.last_sample_room_error_k;
+    f.diagnosis_room_source_unix_s = diagnosis.room_source_unix_s;
+    f.diagnosis_room_age_s = diagnosis.room_age_s;
+    f.last_sample_unix_s = diagnosis.last_sample_unix_s;
+    f.sequence = diagnosis.sequence;
+    f.evaluations = diagnosis.evaluations;
+    f.samples = diagnosis.samples;
+    f.holds = diagnosis.holds;
+    f.blocks = diagnosis.blocks;
 
-    const std::string js = build_heartbeat_json(f);
-    mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
+    const std::string js = build_heating_curve_mqtt_json(f);
+    mqtt_publish(s_heating_curve_topic, js.c_str(), static_cast<int>(js.size()), 0, 0);
 }
 
 // Reassemble a possibly-fragmented MQTT DATA event without allocating. Every complete frame is
@@ -2033,11 +2044,12 @@ static void mqtt_task(void*) {
                     ha_retire_elapsed_s = 0;
                 }
 
-                // Fixed HEARTBEAT_INTERVAL_S cadence — diagnostics, not real-time telemetry, so it
-                // doesn't need the source topics' every-cycle publish-on-change treatment.
+                // Fixed HEARTBEAT_INTERVAL_S cadence for both technical heartbeat and the separate
+                // heating-curve domain snapshot; neither needs every-cycle publish-on-change.
                 heartbeat_elapsed_s += delay_s;
                 if (heartbeat_elapsed_s >= HEARTBEAT_INTERVAL_S) {
                     publish_heartbeat();
+                    publish_heating_curve_telemetry();
                     // The crash topic is RETAINED but otherwise only published once per connect, so a
                     // dump pulled + cleared (/coredump?clear=1) mid-session would leave HA's "Crash
                     // Dump Waiting" ON until the next reconnect (and, for an orphan-dump-only boot,
@@ -2216,6 +2228,7 @@ void mqtt_ha_start() {
     s_retired_modbus_status = retired_modbus_status_topic(s_base);
     s_legacy_state = legacy_state_topic(s_base);
     s_heartbeat = heartbeat_topic(s_base);
+    s_heating_curve_topic = heating_curve_topic(s_base);
     s_crash     = crash_topic(s_base);
     if (!build_client(false)) return;                          // policy error already surfaced
     // mqtt_task starts this no-LWT client immediately for inbound reference observations. Every

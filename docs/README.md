@@ -600,8 +600,10 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   JSON of heap, uptime, WiFi/MQTT/bus counters, each field prefixed by its block name: `wifi_rssi`,
   `wifi_mac`, `wifi_bssid`, `mqtt_count`, `bus_rx_received`, …, plus `bus_ou_held_over`, which is
   *source* freshness rather than link health: it says the outdoor unit stopped refreshing its own
-  pages, so its readings are missing from the X10A topic while the bus itself is fine) and
-  `<base>/crash` (retained;
+  pages, so its readings are missing from the X10A topic while the bus itself is fine),
+  `<base>/heating_curve` (non-retained, schema-versioned room-source and read-only diagnosis evidence,
+  grouped as `room` plus `diagnosis.{gates,room_evidence,last_sample,counters}` rather than mixed into
+  the technical heartbeat), and `<base>/crash` (retained;
   **crash-only** — a "dump waiting" flag, published once per (re)connect but ONLY when the boot is
   *notable*: a real fault or a dump still in flash. A normal boot publishes nothing on a clean broker;
   the bridge first probes for an older retained crash and deletes it only when one actually exists,
@@ -609,8 +611,9 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   a crash entity — it lives on the heartbeat's own "Reset Reason" sensor (the old duplicate "Last
   Reset Reason" crash entity was dropped). Republished on the heartbeat cadence if the "dump waiting"
   flag *or the notability* changes, so neither clearing a dump nor deleting the report in the web UI
-  (`POST /crash/dismiss`) can leave it latched ON)
-  each expose their own `entity_category: diagnostic` HA sensors. The crash topic carries only the
+  (`POST /crash/dismiss`) can leave it latched ON).
+  Heartbeat and crash expose `entity_category: diagnostic` HA sensors; the heating-curve topic is
+  MQTT/metrics-only. The crash topic carries only the
   reason + a hex backtrace — never a secret or the raw dump; pull the full dump from `GET /coredump`
   and decode it with `scripts/decode-coredump.sh`.
   Two heartbeat entities — *Device Time* and *WiFi Quality* — were retired under the same rule as

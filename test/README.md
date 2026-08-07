@@ -212,6 +212,9 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   while offline) + the 18 diagnostic HA discovery configs (incl. the WiFi MAC/BSSID), and the two
   RETIRED ones — "Device Time" and "WiFi Quality" — pinned absent from the payload AND from the live
   table, since a duplicate that survives in the JSON is the same duplicate with nobody watching it.
+- `logic/heating_curve_mqtt.hpp` — the separate `<base>/heating_curve` topic and its exact
+  schema-versioned, grouped `room`/`diagnosis` JSON, including null absence semantics and numeric
+  boolean leaves; room/heating-curve fields are pinned absent from the heartbeat.
 - `logic/crashinfo.hpp` — reset-reason slug/fault classification, the last_crash / MQTT crash JSON +
   text bundle (incl. backtrace clamp), and the crash diagnostic HA discovery configs.
 - `logic/bootlog.hpp` — the once-per-boot syslog records: the build-identity line (absent fields
