@@ -1315,8 +1315,19 @@ vocabulary exactly:
    Every row has a pull-out explanation tongue. Live room and weather values are not repeated as an
    unexplained green summary line: while the card is enabled, the tongue names status, quantity,
    time/freshness and provenance in separate labelled paragraphs, matching the value explanations
-   elsewhere in the UI. The compact right side reports whether the single room-temperature source is
-   configured; the weather row names its configured provider. The room-source modal remains
+   elsewhere in the UI. The compact right side **names** the single room-temperature source — the
+   saved Bezeichnung, falling back to "MQTT" for a mapping saved without one — exactly as the
+   Anlagendiagnose row above it names the configured pump, and the weather row names its configured
+   provider. It read "Konfiguriert" through v1.0.0-dev.347: a word that restated what the presence
+   of any value already said, in the one place on the row that could have identified WHICH
+   thermostat is being read. Whether a mapping is saved at all is still a fact about the row, so it
+   did not vanish — it leads the tongue as its own labelled paragraph, and the unconfigured row
+   states it there too. That makes this a §5.6 Connections row in shape, so it takes that rule
+   whole, **including the second half**: the face carries the condition in colour, and the
+   accessible name spells that condition out in words (§9) — the freshness word, or the block's own
+   reason where the reading is current but cannot produce a verdict, since "Aktuell" in the
+   accessible name of an amber row is the two-rows-disagreeing failure above, folded into one row.
+   The room-source modal remains
    test-before-persist; Delete removes the saved mapping and captured value. Retained data
    without trusted source time fails closed, and `/status` plus the grouped numeric
    `<base>/heating_curve` topic retain the full canonical and diagnosis evidence. No UI path sends a

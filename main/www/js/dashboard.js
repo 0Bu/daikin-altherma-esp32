@@ -306,10 +306,16 @@ function esp32CardHtml() {
 // interaction as Board Hardware: the label owns the otherwise empty left area and toggles its
 // explanation tongue; a compact value on the right opens an editor only where one exists. This
 // keeps status/explanation and configuration as two explicit actions on configured and empty rows.
-function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", title = "") {
+// `ariaState` is DESIGN.md §9's escape hatch, not decoration: a row whose face states a NAME conveys
+// its status by colour alone, which §5.6 permits for the Connections rows only because their
+// accessible names spell that status out in words. The room source is that shape now, so it passes
+// the state here; a row whose visible value already IS its state passes nothing and reads as before.
+function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", title = "",
+                        ariaState = "") {
+  const aria = ariaState ? `${title}: ${value} · ${ariaState}` : `${title}: ${value}`;
   const right = action
     ? `<button class="settings-split-action dynamic-config-open vrow-val settings-wrap ${valueCls}" ` +
-      `type="button" data-act="${action}" aria-label="${esc(`${title}: ${value}`)}">` +
+      `type="button" data-act="${action}" aria-label="${esc(aria)}">` +
       `<span>${esc(value)}</span>${editIcon}</button>`
     : `<span class="settings-info-value vrow-val settings-wrap ${valueCls}">${esc(value)}</span>`;
   return settingsInfoRow(`dynamic:${key}`, `dynamic-${key}-detail`, label, right, bodyHtml,
@@ -360,20 +366,45 @@ const ROOM_BLOCK_LINES = {
   missing_hvac_mode:          "dyn.room_no_flag",
 };
 
-function roomSourceDetailHtml(r, mqtt, temperature, setpoint, age) {
-  let statusKey = "waiting", detail = t("ref.detail.waiting");
-  if (!mqtt.configured) { statusKey = "unavailable"; detail = t("ref.broker_off"); }
-  else if (r.error) { statusKey = "unavailable"; detail = t("ref.detail.error", r.error); }
-  else if (r.has_value && r.fresh) { statusKey = "fresh"; detail = t("ref.detail.fresh"); }
-  else if (r.has_value) {
-    statusKey = "stale";
-    detail = r.freshness_reason === "retained_without_timestamp" ? t("ref.time_untrusted")
+// What the row header calls the configured source. ONE fallback for a mapping saved without a name
+// (the name is cosmetic and may be empty), shared by the row value and the tongue's source line, so
+// the two can never call the same source by two different words.
+function roomSourceName(r) { return r.name || "MQTT"; }
+
+// The source's own condition, as ONE rule. It is read twice — by the tongue, which prints it with
+// its explanation, and by the row's accessible name, which is now the only place a screen-reader
+// user meets it (the face carries the source's NAME and states the condition in colour). A second
+// copy of this ladder is the drift this project keeps paying for, so there is one.
+function roomSourceStatus(r, mqtt) {
+  if (!mqtt.configured) return { key: "unavailable", detail: t("ref.broker_off") };
+  if (r.error) return { key: "unavailable", detail: t("ref.detail.error", r.error) };
+  if (r.has_value && r.fresh) return { key: "fresh", detail: t("ref.detail.fresh") };
+  if (r.has_value) return { key: "stale",
+    detail: r.freshness_reason === "retained_without_timestamp" ? t("ref.time_untrusted")
       : r.freshness_reason === "clock_unsynced" ? t("ref.clock_unsynced")
-      : t("ref.detail.stale");
-  }
+      : t("ref.detail.stale") };
+  return { key: "waiting", detail: t("ref.detail.waiting") };
+}
+
+// What the row's accessible name says INSTEAD of the colour. A reading that is current but cannot
+// produce a verdict is the case the colour renders warn while "Aktuell" would read fine, so the
+// block reason wins over the freshness word — the same precedence the tongue's Verwertbar note has.
+function roomSourceAriaState(r, mqtt) {
+  if (r.has_value && r.fresh && !r.control_eligible && ROOM_BLOCK_LINES[r.reason])
+    return t(ROOM_BLOCK_LINES[r.reason]);
+  return t(`ref.status.${roomSourceStatus(r, mqtt).key}`);
+}
+
+function roomSourceDetailHtml(r, mqtt, temperature, setpoint, age) {
+  const { key: statusKey, detail } = roomSourceStatus(r, mqtt);
 
   const retained = r.has_value && r.retained ? ` · ${t("ref.retained")}` : "";
-  let html = descNoteHtml(t("ref.detail.status_label"),
+  // The CONFIGURATION state leads the tongue, because the row header no longer states it: it names
+  // the source instead (the circulation row's rule — a name is what a reader recognises, while
+  // "Configured" only said that a form had been filled in). Whether a mapping is saved at all is
+  // still a fact about this row, so it is stated here rather than dropped.
+  let html = descNoteHtml(t("ref.detail.configuration_label"), t("dyn.configured"));
+  html += descNoteHtml(t("ref.detail.status_label"),
     `${t(`ref.status.${statusKey}`)} — ${detail}${retained}`);
   // A source that is CURRENT but not usable for a verdict is the case that used to render as a
   // plain green "Configured" while the state row above it reported the diagnosis blocked. Say so
@@ -386,8 +417,7 @@ function roomSourceDetailHtml(r, mqtt, temperature, setpoint, age) {
       html += descNoteHtml(t("ref.detail.setpoint_label"), t("ref.detail.setpoint", setpoint));
     html += descNoteHtml(t("ref.detail.age_label"), t("ref.detail.age", age));
   }
-  const sourceName = r.name || "MQTT";
-  return html + descNoteHtml(t("ref.detail.source_label"), t("ref.detail.source", sourceName));
+  return html + descNoteHtml(t("ref.detail.source_label"), t("ref.detail.source", roomSourceName(r)));
 }
 
 // state + reason -> one plain-language line, its severity class and its explanation. Keyed on the
@@ -468,12 +498,18 @@ function dynamicControlCardHtml() {
   let rows = dynamicInfoRow("state", t("dyn.state"), t(st.key), st.cls,
     `<div class="vdesc-p">${esc(t("dyn.card_help"))}</div>` +
     `<div class="vdesc-p">${esc(t(st.help))}</div>`);
-  const sourceValue = r.configured ? t("dyn.configured") : t("dyn.not_configured");
+  // The row header IDENTIFIES the source, exactly as the circulation row does: which thermostat is
+  // being read is what a reader recognises and can check against their own installation, while
+  // "Configured" repeated a fact the presence of a value already carries. The configuration state
+  // itself moves into the tongue, where the unconfigured case says so too.
+  const sourceValue = r.configured ? roomSourceName(r) : t("dyn.not_configured");
   const sourceBody = (r.configured
-    ? roomSourceDetailHtml(r, mqtt, temperature, setpoint, age) : "") +
+    ? roomSourceDetailHtml(r, mqtt, temperature, setpoint, age)
+    : descNoteHtml(t("ref.detail.configuration_label"), t("dyn.not_configured"))) +
     `<div class="vdesc-p">${esc(t("ref.hint"))}</div>`;
   rows += dynamicInfoRow("room-sources", t("dyn.room_source"), sourceValue, sourceCls,
-    sourceBody, "ref-temp", t("ref.title"));
+    sourceBody, "ref-temp", t("ref.title"),
+    r.configured ? roomSourceAriaState(r, mqtt) : "");
   let weatherCls = "dim";
   let outdoor = "", solar = "";
   if (w.configured && w.has_value) {

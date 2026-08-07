@@ -104,6 +104,10 @@ class Element {
       return text[key] ?? key;
     },
     setHtml: (id, html) => { elements[id].innerHTML = html; },
+    // descriptions.js is not among the fragments this harness loads, but every settings card that
+    // states a source's configuration renders through it. Stubbed here like esc/t so a card gaining
+    // one explanation note does not fail as a missing global.
+    descNoteHtml: (lead, text) => `<div class="vdesc-p"><span class="vdesc-n">${lead}</span> ${text}</div>`,
     hasHist: () => false,
     setLangFromStatus: () => { languageHydrations += 1; },
     renderOtaDashboardStatus: () => { dashboardStatusPaints += 1; },
@@ -193,6 +197,10 @@ function elementsFor(...ids) {
       return text[key] ?? key;
     },
     setHtml: (id, html) => { elements[id].innerHTML = html; },
+    // descriptions.js is not among the fragments this harness loads, but every settings card that
+    // states a source's configuration renders through it. Stubbed here like esc/t so a card gaining
+    // one explanation note does not fail as a missing global.
+    descNoteHtml: (lead, text) => `<div class="vdesc-p"><span class="vdesc-n">${lead}</span> ${text}</div>`,
     hasHist: () => false,
     renderOtaDashboardStatus: () => { dashboardStatusPaints += 1; },
     j: async () => ({ state: "updating", progress: 48, current: "1.4.72-dev.333", channel: "dev" }),
