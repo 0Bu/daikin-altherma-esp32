@@ -42,8 +42,8 @@ struct HeartbeatFields {
     bool        wifi_connected  = false;
     int8_t      wifi_rssi       = 0;   // valid only if wifi_connected
     uint32_t    wifi_reconnects = 0;   // cumulative since boot (wifi_reconnect_count())
-    // Pre-rendered "AA:BB:CC:DD:EE:FF" MAC strings so this header stays IDF-free (same contract as
-    // `time`): wifi_mac is this STA's own MAC (always present); wifi_bssid is the associated AP's MAC
+    // Pre-rendered "AA:BB:CC:DD:EE:FF" MAC strings so this header stays IDF-free: wifi_mac is this
+    // STA's own MAC (always present); wifi_bssid is the associated AP's MAC
     // ("" while offline -> JSON null, since there is no AP). Both let an HA/Telegraf consumer pin a
     // heartbeat to a specific board and see which AP it roamed onto — the /status.wifi.mac/.bssid
     // pair, now on the diagnostics stream too.
@@ -51,56 +51,9 @@ struct HeartbeatFields {
     std::string wifi_bssid;
 
     bool        mqtt_connected  = false;
-    uint32_t    mqtt_count      = 0;   // cumulative successful publishes (state+heartbeat+discovery)
+    uint32_t    mqtt_count      = 0;   // successful publishes (state+heartbeat+heating_curve+discovery)
     uint32_t    mqtt_fails      = 0;   // cumulative failed esp_mqtt_client_publish() calls
     uint32_t    mqtt_reconnects = 0;   // cumulative RE-connects (excludes the first-ever connect)
-
-    // Canonical single-room input (#288). Numeric-only companions ensure the existing Telegraf JSON
-    // parser archives what firmware accepted, not merely the raw publisher document. Unavailable
-    // numbers render null; the validity flags and stable reason code explain why.
-    bool        room_temperature_valid = false;
-    bool        room_setpoint_valid = false;
-    bool        room_control_eligible = false;
-    bool        room_has_source_time = false;
-    bool        room_age_known = false;
-    double      room_temperature_c = 0.0;
-    double      room_setpoint_c = 0.0;
-    double      room_error_k = 0.0;
-    int64_t     room_source_unix_s = -1;
-    uint64_t    room_age_s = 0;
-    uint8_t     room_reason_code = 1;
-    uint32_t    room_messages = 0;
-    uint32_t    room_errors = 0;
-    uint32_t    room_rejections = 0;
-
-    // Versioned HEATING-CURVE DIAGNOSIS telemetry. This is raw room-error evidence sampled in a
-    // confirmed heating window, not a leaving-water command or calibrated correction. `sequence`
-    // plus the absolute `last_sample_unix_s` is the event contract: unlike the retired ephemeral
-    // proposal flag it cannot disappear between 10-second heartbeat publications.
-    uint8_t     heating_curve_method_version = 0;
-    bool        heating_curve_armed = false;
-    uint8_t     heating_curve_state = 0;
-    uint8_t     heating_curve_reason = 0;
-    bool        heating_curve_sample_eligible = false;
-    bool        heating_curve_forecast_available = false;
-    bool        heating_curve_plant_gate_known = false;
-    bool        heating_curve_plant_gate_active = false;
-    bool        heating_curve_heating_mode_known = false;
-    bool        heating_curve_heating_mode_active = false;
-    bool        heating_curve_has_current_room_error = false;
-    bool        heating_curve_has_last_sample = false;
-    bool        heating_curve_has_room_source_time = false;
-    bool        heating_curve_room_age_known = false;
-    double      heating_curve_current_room_error_k = 0.0;
-    double      heating_curve_last_sample_room_error_k = 0.0;
-    int64_t     heating_curve_room_source_unix_s = -1;
-    uint64_t    heating_curve_room_age_s = 0;
-    int64_t     heating_curve_last_sample_unix_s = -1;
-    uint32_t    heating_curve_sequence = 0;
-    uint32_t    heating_curve_evaluations = 0;
-    uint32_t    heating_curve_samples = 0;
-    uint32_t    heating_curve_holds = 0;
-    uint32_t    heating_curve_blocks = 0;
 
     bool        bus_connected  = false;   // hp_stats().connected — X10A link up this cycle
     char        bus_proto      = '?';
@@ -206,64 +159,6 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"mqtt_count\":"; j += std::to_string(f.mqtt_count);
     j += ",\"mqtt_fails\":"; j += std::to_string(f.mqtt_fails);
     j += ",\"mqtt_reconnects\":"; j += std::to_string(f.mqtt_reconnects);
-    // Canonical room input. source_id is stable human provenance; Telegraf intentionally drops the
-    // string and stores the adjacent numeric evidence under the stable heartbeat measurement/topic.
-    j += ",\"room_source_id\":\"living_room\"";
-    j += ",\"room_calibration_k\":0";
-    j += ",\"room_temperature_valid\":"; j += f.room_temperature_valid ? "1" : "0";
-    j += ",\"room_setpoint_valid\":"; j += f.room_setpoint_valid ? "1" : "0";
-    j += ",\"room_control_eligible\":"; j += f.room_control_eligible ? "1" : "0";
-    j += ",\"room_temperature_c\":";
-    j += f.room_temperature_valid ? std::to_string(f.room_temperature_c) : "null";
-    j += ",\"room_setpoint_c\":";
-    j += f.room_setpoint_valid ? std::to_string(f.room_setpoint_c) : "null";
-    j += ",\"room_error_k\":";
-    j += f.room_control_eligible ? std::to_string(f.room_error_k) : "null";
-    j += ",\"room_source_unix_s\":";
-    j += f.room_has_source_time ? std::to_string(f.room_source_unix_s) : "null";
-    j += ",\"room_age_s\":";
-    j += f.room_age_known ? std::to_string(f.room_age_s) : "null";
-    j += ",\"room_reason_code\":"; j += std::to_string(f.room_reason_code);
-    j += ",\"room_messages\":"; j += std::to_string(f.room_messages);
-    j += ",\"room_errors\":"; j += std::to_string(f.room_errors);
-    j += ",\"room_rejections\":"; j += std::to_string(f.room_rejections);
-    // Heating-curve diagnosis v2. Numeric-only so the existing Telegraf parser archives every field.
-    j += ",\"heating_curve_method_version\":";
-    j += std::to_string(f.heating_curve_method_version);
-    j += ",\"heating_curve_armed\":"; j += f.heating_curve_armed ? "1" : "0";
-    j += ",\"heating_curve_state\":"; j += std::to_string(f.heating_curve_state);
-    j += ",\"heating_curve_reason\":"; j += std::to_string(f.heating_curve_reason);
-    j += ",\"heating_curve_sample_eligible\":";
-    j += f.heating_curve_sample_eligible ? "1" : "0";
-    j += ",\"heating_curve_current_room_error_k\":";
-    j += f.heating_curve_has_current_room_error
-       ? std::to_string(f.heating_curve_current_room_error_k) : "null";
-    j += ",\"heating_curve_last_sample_room_error_k\":";
-    j += f.heating_curve_has_last_sample
-       ? std::to_string(f.heating_curve_last_sample_room_error_k) : "null";
-    j += ",\"heating_curve_forecast_available\":";
-    j += f.heating_curve_forecast_available ? "1" : "0";
-    j += ",\"heating_curve_plant_gate_known\":";
-    j += f.heating_curve_plant_gate_known ? "1" : "0";
-    j += ",\"heating_curve_plant_gate_active\":";
-    j += f.heating_curve_plant_gate_active ? "1" : "0";
-    j += ",\"heating_curve_heating_mode_known\":";
-    j += f.heating_curve_heating_mode_known ? "1" : "0";
-    j += ",\"heating_curve_heating_mode_active\":";
-    j += f.heating_curve_heating_mode_active ? "1" : "0";
-    j += ",\"heating_curve_room_source_unix_s\":";
-    j += f.heating_curve_has_room_source_time
-       ? std::to_string(f.heating_curve_room_source_unix_s) : "null";
-    j += ",\"heating_curve_room_age_s\":";
-    j += f.heating_curve_room_age_known ? std::to_string(f.heating_curve_room_age_s) : "null";
-    j += ",\"heating_curve_last_sample_unix_s\":";
-    j += f.heating_curve_has_last_sample
-       ? std::to_string(f.heating_curve_last_sample_unix_s) : "null";
-    j += ",\"heating_curve_sequence\":"; j += std::to_string(f.heating_curve_sequence);
-    j += ",\"heating_curve_evaluations\":"; j += std::to_string(f.heating_curve_evaluations);
-    j += ",\"heating_curve_samples\":"; j += std::to_string(f.heating_curve_samples);
-    j += ",\"heating_curve_holds\":"; j += std::to_string(f.heating_curve_holds);
-    j += ",\"heating_curve_blocks\":"; j += std::to_string(f.heating_curve_blocks);
     // bus_*
     j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
     j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";

@@ -69,12 +69,24 @@ const evaluate = task.indexOf("evaluate_heating_curve(ref_config, hp)");
 const publishGate = task.indexOf("if (gate.publish_cycle)");
 assert.ok(frames >= 0 && evaluate > frames && publishGate > evaluate,
   "diagnosis must consume inbound room data before evaluation and outside the publish gate");
+const heartbeatPublish = task.indexOf("publish_heartbeat()", publishGate);
+const telemetryPublish = task.indexOf("publish_heating_curve_telemetry()", publishGate);
+assert.ok(heartbeatPublish > publishGate && telemetryPublish > heartbeatPublish,
+  "technical heartbeat and grouped heating-curve telemetry must publish together inside the X10A gate");
 
 const heartbeat = read("main/logic/heartbeat.hpp");
-assert.match(heartbeat, /heating_curve_last_sample_unix_s/);
-assert.match(heartbeat, /heating_curve_sequence/);
-assert.doesNotMatch(heartbeat, /lwt_controller_|proposal_produced|last_decision_ms/,
+assert.doesNotMatch(heartbeat, /room_(?:source|temperature|setpoint|control|error|age|messages|rejections)|heating_curve_/,
+  "room-source and heating-curve domain telemetry must stay out of the board/link heartbeat");
+const telemetry = read("main/logic/heating_curve_mqtt.hpp");
+assert.match(telemetry, /return base \+ "\/heating_curve"/);
+assert.match(telemetry, /\\"room\\"/);
+assert.match(telemetry, /\\"diagnosis\\"/);
+assert.match(telemetry, /last_sample_unix_s/);
+assert.match(telemetry, /sequence/);
+assert.doesNotMatch(telemetry, /lwt_controller_|proposal_produced|last_decision_ms/,
   "retired one-cycle proposal events and actuator telemetry must not survive the diagnosis migration");
+assert.match(mqtt, /publish_heating_curve_telemetry\(\)/);
+assert.match(mqtt, /mqtt_publish\(s_heating_curve_topic/);
 
 // Walk the COMPLETE main tree recursively. The former non-recursive scan skipped main/def entirely,
 // so its claim about "every firmware source" covered only 119 of 169 C++ files.

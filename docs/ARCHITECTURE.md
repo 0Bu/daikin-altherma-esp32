@@ -644,10 +644,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
   is up and the device is publishing while the outdoor unit simply is not measuring, and a consumer
   that only had bus health would read the vanished outdoor keys as a broken link. Deliberately not
   typed as a fault: a resting outdoor unit is the normal state of a heat pump for most of the day.
-  Includes
-  the SNTP wall clock (`sntp_time.cpp`) as a `device_class: "timestamp"` sensor — HA's native
-  "last updated N ago" entity, rendering `null` (unsynced) as its normal "unknown" state rather than
-  a fabricated epoch date.
+- `logic/heating_curve_mqtt.hpp` — the IDF-free, schema-versioned `<base>/heating_curve` payload.
+  It keeps the accepted `room` source separate from derived `diagnosis` state and groups diagnosis
+  gates, room evidence, the durable last-sample event and counters rather than adding domain fields
+  to the technical heartbeat. Numeric boolean leaves remain `1`/`0` for the deployed metrics parser.
 - `logic/heating_curve_diagnosis.hpp` — the deterministic, allocation- and I/O-free heating-curve
   diagnosis sampler, method version 2. It
   records the **raw** reference-room deviation at most once per 30 minutes during confirmed normal
@@ -1396,9 +1396,11 @@ The Home Assistant bridge:
   the matching `"pl_on":"1"`/`"pl_off":"0"`; without it the entity inherits HA's `"ON"`/`"OFF"`
   defaults and sits at `unknown`. (The crash topic keeps `true`/`false` + a `| lower` template: it is
   an event payload, not a metrics stream, and its `binary_sensor` already reads correctly.)
+  Room-source and heating-curve fields are deliberately absent; those belong to the domain topic
+  below.
   - **Board**: `version`, `platform`, `uptime_s` + a `"Ddd+HH:MM:SS.mmm"` `uptime` display string
     (`format_uptime`), `free_heap` / `min_free_heap` / `max_alloc` (largest free block — the
-    binding OOM limit on this firmware), `reset_reason`, `time` (SNTP wall clock, null until synced).
+    binding OOM limit on this firmware), and `reset_reason`.
     `reset_reason` is joined by **`reset_reason_code`** (the raw `CrashReason` value — the same number
     `/status.last_crash` publishes as `reason_code`, so there is one vocabulary) and **`reset_fault`**
     (`crash_reason_is_fault` as `1`/`0`). Both exist because a metrics pipeline keeps numeric fields
@@ -1412,7 +1414,7 @@ The Home Assistant bridge:
     — the `/status.wifi.mac`/`.bssid` pair, now on the diagnostics stream too.
   - **`mqtt_*`**: `mqtt_connected`, `mqtt_count`/`mqtt_fails` (every `esp_mqtt_client_publish()` call
     funnels through one `mqtt_publish()` wrapper in `mqtt_ha.cpp` so these cover
-    discovery+state+heartbeat+LWT, not just one topic), `mqtt_reconnects` (cumulative, excludes the
+    discovery+state+heartbeat+heating-curve evidence+LWT, not just one topic), `mqtt_reconnects` (cumulative, excludes the
     first-ever connect).
   - **`bus_*`**: the X10A stats already tracked in `HpStats` — `bus_connected`, `bus_proto`,
     `bus_registers`, `bus_values`, `bus_last_ok_s`, `bus_rx_received` / `bus_rx_fails` (cumulative
@@ -1455,6 +1457,15 @@ The Home Assistant bridge:
   permanently-`unavailable` duplicates. Their uniq_ids are **burned**: `test_entity_identity()`
   refuses to let a live entity claim one back, since it would inherit the corpse rather than get a
   fresh registry entry.
+- **Heating-curve topic** `<base>/heating_curve` (not retained) carries domain evidence separately
+  from board/link health, built by `logic/heating_curve_mqtt.hpp` (host-tested). Top-level
+  `schema_version` is `1`; `room` contains the accepted live room mapping, while `diagnosis` contains
+  method/state/reason plus nested `gates`, `room_evidence`, `last_sample` and `counters`. Nullable
+  values state absence explicitly, and boolean facts use numeric `1`/`0` so Telegraf/VictoriaMetrics
+  retain them. It is published immediately after heartbeat on the same 10-second, X10A-gated
+  cadence, but has no Home Assistant Discovery entities. The former flat heartbeat `room_*` and
+  `heating_curve_*` keys are removed rather than duplicated; because heartbeat is not retained, no
+  broker tombstone is needed. Direct consumers must move to the grouped paths.
 - **TLS default-on with credentials** (mqtts, CA-verified via the mbedTLS certificate bundle). If
   credentials are set but the URI is not `mqtts://`, the bridge **refuses to connect** and reports
   the reason in `/status.mqtt` rather than sending them in cleartext — no silent plaintext fallback.
@@ -1465,7 +1476,7 @@ The Home Assistant bridge:
   publish), and a reset gated on publishing would false-trip. It **also** feeds once per publish
   inside `mqtt_publish()` (the funnel every message goes through), mirroring `poll_once`'s
   per-register reset: a single (re)connect cycle bursts ~30 publishes (discovery + crash + state +
-  heartbeat) and each `esp_mqtt_client_publish()` can block up to the client network timeout, so
+  heartbeat + heating-curve evidence) and each `esp_mqtt_client_publish()` can block up to the client network timeout, so
   without a per-publish feed a slow-but-alive link could push one burst past the 20 s budget. So only
   a publish that genuinely wedges reboots the device; see *The poll engine → Task Watchdog* for the
   shared mechanism.

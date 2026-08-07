@@ -33,6 +33,7 @@
 #include "logic/detect_backoff.hpp"
 #include "logic/discovery.hpp"
 #include "logic/heating_curve_diagnosis.hpp"
+#include "logic/heating_curve_mqtt.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
 #include "logic/health_gate.hpp"
@@ -1970,23 +1971,6 @@ static void test_heartbeat() {
                "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_reconnects\":3,"
                "\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\",\"wifi_bssid\":\"00:11:22:33:44:55\","
                "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
-               "\"room_source_id\":\"living_room\",\"room_calibration_k\":0,"
-               "\"room_temperature_valid\":0,\"room_setpoint_valid\":0,\"room_control_eligible\":0,"
-               "\"room_temperature_c\":null,\"room_setpoint_c\":null,\"room_error_k\":null,"
-               "\"room_source_unix_s\":null,\"room_age_s\":null,\"room_reason_code\":1,"
-               "\"room_messages\":0,\"room_errors\":0,\"room_rejections\":0,"
-               "\"heating_curve_method_version\":0,\"heating_curve_armed\":0,"
-               "\"heating_curve_state\":0,\"heating_curve_reason\":0,"
-               "\"heating_curve_sample_eligible\":0,"
-               "\"heating_curve_current_room_error_k\":null,"
-               "\"heating_curve_last_sample_room_error_k\":null,"
-               "\"heating_curve_forecast_available\":0,"
-               "\"heating_curve_plant_gate_known\":0,\"heating_curve_plant_gate_active\":0,"
-               "\"heating_curve_heating_mode_known\":0,\"heating_curve_heating_mode_active\":0,"
-               "\"heating_curve_room_source_unix_s\":null,\"heating_curve_room_age_s\":null,"
-               "\"heating_curve_last_sample_unix_s\":null,\"heating_curve_sequence\":0,"
-               "\"heating_curve_evaluations\":0,\"heating_curve_samples\":0,"
-               "\"heating_curve_holds\":0,\"heating_curve_blocks\":0,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
@@ -2026,74 +2010,76 @@ static void test_heartbeat() {
     // fact use numeric 1/0 so a metrics consumer keeps them.
     CHECK(j.find("\"modbus_connected\":0,") != std::string::npos);
     CHECK(j.find("\"modbus_connected\":false") == std::string::npos);   // number, not a dropped bool
-    HeartbeatFields roomf;
-    roomf.room_temperature_valid = true;
-    roomf.room_setpoint_valid = true;
-    roomf.room_control_eligible = true;
-    roomf.room_has_source_time = true;
-    roomf.room_age_known = true;
-    roomf.room_temperature_c = 20.5;
-    roomf.room_setpoint_c = 22.0;
-    roomf.room_error_k = 1.5;
-    roomf.room_source_unix_s = 1785830400;
-    roomf.room_age_s = 17;
-    roomf.room_reason_code = static_cast<uint8_t>(ReferenceRoomReason::Eligible);
-    roomf.room_messages = 42;
-    roomf.room_errors = 2;
-    roomf.room_rejections = 7;
-    const std::string roomj = build_heartbeat_json(roomf);
-    CHECK(roomj.find("\"room_source_id\":\"living_room\"") != std::string::npos);
-    CHECK(roomj.find("\"room_calibration_k\":0,") != std::string::npos);
-    CHECK(roomj.find("\"room_temperature_valid\":1,") != std::string::npos);
-    CHECK(roomj.find("\"room_setpoint_valid\":1,") != std::string::npos);
-    CHECK(roomj.find("\"room_control_eligible\":1,") != std::string::npos);
-    CHECK(roomj.find("\"room_temperature_c\":20.500000,") != std::string::npos);
-    CHECK(roomj.find("\"room_setpoint_c\":22.000000,") != std::string::npos);
-    CHECK(roomj.find("\"room_error_k\":1.500000,") != std::string::npos);
-    CHECK(roomj.find("\"room_source_unix_s\":1785830400,") != std::string::npos);
-    CHECK(roomj.find("\"room_age_s\":17,") != std::string::npos);
-    CHECK(roomj.find("\"room_reason_code\":0,") != std::string::npos);
-    CHECK(roomj.find("\"room_messages\":42,") != std::string::npos);
-    CHECK(roomj.find("\"room_errors\":2,") != std::string::npos);
-    CHECK(roomj.find("\"room_rejections\":7,") != std::string::npos);
-    HeartbeatFields cf;
-    cf.heating_curve_method_version = 2;
-    cf.heating_curve_armed = true;
-    cf.heating_curve_state = 3;
-    cf.heating_curve_reason = 10;
-    cf.heating_curve_sample_eligible = true;
-    cf.heating_curve_forecast_available = true;
-    cf.heating_curve_plant_gate_known = true;
-    cf.heating_curve_plant_gate_active = true;
-    cf.heating_curve_heating_mode_known = true;
-    cf.heating_curve_heating_mode_active = true;
-    cf.heating_curve_has_current_room_error = true;
-    cf.heating_curve_has_last_sample = true;
-    cf.heating_curve_has_room_source_time = true;
-    cf.heating_curve_room_age_known = true;
-    cf.heating_curve_current_room_error_k = -2.9;
-    cf.heating_curve_last_sample_room_error_k = -2.8;
-    cf.heating_curve_room_source_unix_s = 1770000000;
-    cf.heating_curve_room_age_s = 12;
-    cf.heating_curve_last_sample_unix_s = 1770000001;
-    cf.heating_curve_sequence = 7;
-    cf.heating_curve_evaluations = 12;
-    cf.heating_curve_samples = 7;
-    cf.heating_curve_holds = 2;
-    cf.heating_curve_blocks = 3;
-    const std::string cj = build_heartbeat_json(cf);
-    CHECK(cj.find("\"heating_curve_method_version\":2,") != std::string::npos);
-    CHECK(cj.find("\"heating_curve_armed\":1,") != std::string::npos);
-    CHECK(cj.find("\"heating_curve_state\":3,") != std::string::npos);
-    CHECK(cj.find("\"heating_curve_reason\":10,") != std::string::npos);
-    CHECK(cj.find("\"heating_curve_current_room_error_k\":-2.900000,") != std::string::npos);
-    CHECK(cj.find("\"heating_curve_last_sample_room_error_k\":-2.800000,") != std::string::npos);
-    CHECK(cj.find("\"heating_curve_heating_mode_active\":1,") != std::string::npos);
-    CHECK(cj.find("\"heating_curve_room_source_unix_s\":1770000000,") != std::string::npos);
-    CHECK(cj.find("\"heating_curve_room_age_s\":12,") != std::string::npos);
-    CHECK(cj.find("\"heating_curve_last_sample_unix_s\":1770000001,") != std::string::npos);
-    CHECK(cj.find("\"heating_curve_samples\":7,") != std::string::npos);
+    // Room-source and heating-curve domain data have their own topic and grouped payload. Nothing
+    // from that contract may leak back into the technical heartbeat.
+    CHECK(j.find("room_source") == std::string::npos);
+    CHECK(j.find("room_temperature") == std::string::npos);
+    CHECK(j.find("heating_curve") == std::string::npos);
+    CHECK(heating_curve_topic(base) == "daikin-altherma-esp32/heating_curve");
+    HeatingCurveMqttFields cf;
+    cf.room_temperature_valid = true;
+    cf.room_setpoint_valid = true;
+    cf.room_control_eligible = true;
+    cf.room_has_source_time = true;
+    cf.room_age_known = true;
+    cf.room_temperature_c = 20.5;
+    cf.room_setpoint_c = 22.0;
+    cf.room_error_k = 1.5;
+    cf.room_source_unix_s = 1785830400;
+    cf.room_age_s = 17;
+    cf.room_reason_code = static_cast<uint8_t>(ReferenceRoomReason::Eligible);
+    cf.room_messages = 42;
+    cf.room_errors = 2;
+    cf.room_rejections = 7;
+    cf.method_version = 2;
+    cf.armed = true;
+    cf.state = 3;
+    cf.reason = 10;
+    cf.sample_eligible = true;
+    cf.forecast_available = true;
+    cf.plant_gate_known = true;
+    cf.plant_gate_active = true;
+    cf.heating_mode_known = true;
+    cf.heating_mode_active = true;
+    cf.has_current_room_error = true;
+    cf.has_last_sample = true;
+    cf.has_diagnosis_room_source_time = true;
+    cf.diagnosis_room_age_known = true;
+    cf.current_room_error_k = -2.9;
+    cf.last_sample_room_error_k = -2.8;
+    cf.diagnosis_room_source_unix_s = 1770000000;
+    cf.diagnosis_room_age_s = 12;
+    cf.last_sample_unix_s = 1770000001;
+    cf.sequence = 7;
+    cf.evaluations = 12;
+    cf.samples = 7;
+    cf.holds = 2;
+    cf.blocks = 3;
+    const std::string cj = build_heating_curve_mqtt_json(cf);
+    CHECK(cj == "{\"schema_version\":1,\"room\":{"
+                "\"source_id\":\"living_room\",\"calibration_k\":0,"
+                "\"temperature_valid\":1,\"setpoint_valid\":1,\"control_eligible\":1,"
+                "\"temperature_c\":20.500000,\"setpoint_c\":22.000000,\"error_k\":1.500000,"
+                "\"source_unix_s\":1785830400,\"age_s\":17,\"reason_code\":0,"
+                "\"counters\":{\"messages\":42,\"errors\":2,\"rejections\":7}},"
+                "\"diagnosis\":{\"method_version\":2,\"armed\":1,\"state\":3,\"reason\":10,"
+                "\"sample_eligible\":1,\"forecast_available\":1,"
+                "\"gates\":{\"plant_known\":1,\"plant_active\":1,"
+                "\"heating_mode_known\":1,\"heating_mode_active\":1},"
+                "\"room_evidence\":{\"current_error_k\":-2.900000,"
+                "\"source_unix_s\":1770000000,\"age_s\":12},"
+                "\"last_sample\":{\"room_error_k\":-2.800000,\"unix_s\":1770000001,"
+                "\"sequence\":7},\"counters\":{\"evaluations\":12,\"samples\":7,"
+                "\"holds\":2,\"blocks\":3}}}");
     CHECK(cj.find("lwt_controller_") == std::string::npos);
+    const std::string empty_curve = build_heating_curve_mqtt_json(HeatingCurveMqttFields{});
+    CHECK(empty_curve.find("\"temperature_c\":null") != std::string::npos);
+    CHECK(empty_curve.find("\"setpoint_c\":null") != std::string::npos);
+    CHECK(empty_curve.find("\"current_error_k\":null") != std::string::npos);
+    CHECK(empty_curve.find("\"room_error_k\":null") != std::string::npos);
+    CHECK(empty_curve.find("\"unix_s\":null") != std::string::npos);
+    CHECK(empty_curve.find("true") == std::string::npos);
+    CHECK(empty_curve.find("false") == std::string::npos);
     HeartbeatFields mf; mf.modbus_enabled = true; mf.modbus_connected = true;
     mf.modbus_rx = 12; mf.modbus_fails = 3; mf.modbus_stack_min_free_words = 731;
     const std::string mj = build_heartbeat_json(mf);
