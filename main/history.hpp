@@ -82,6 +82,15 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
 // folds the first sample of the newly resolved unit. HomeHub is an independent source and remains.
 void history_reset();
 
+// The DETECTION path's entry to the above, and hp_detect_run's only one. Detection runs on EVERY
+// boot (the model is RAM-only by design), so "a profile resolved" is not evidence that the unit
+// changed — and on a boot that adopted its rings from .noinit, wiping on sight threw away the day
+// that region had just preserved. The first detection after an adopted boot therefore defers to
+// history_record()'s per-row identity check, which compares the surviving labels against the newly
+// resolved ones and is strictly better informed. Every later call resets exactly as history_reset()
+// does. See the definition for what this cost on a live board.
+void history_reset_on_detect();
+
 // Start a new HomeHub observation identity after host, port or unit-id changes. Like the X10A
 // reset, elapsed positions remain explicit gaps on the common boot-aligned 24-hour raster.
 void history_modbus_reset();
