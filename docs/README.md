@@ -7,7 +7,9 @@ interval is fixed at 1 s) — and updated over the air. User guide: [../README.m
 
 For a cross-cutting catalog of the **platform features** this firmware implements — Secure Boot v2
 signing, OTA + rollback health gate, the polled live UI, the ESP-IDF component inventory,
-diagnostics, WiFi resilience — see [**FEATURES.md**](FEATURES.md).
+diagnostics, WiFi resilience — see [**FEATURES.md**](FEATURES.md). The features whose subject is the
+**plant** rather than the board — the 24-hour checkup, the Open-Meteo forecast, the optional ENV III
+climate input and heating-curve diagnosis — are in [**PLANT.md**](PLANT.md).
 
 ---
 
