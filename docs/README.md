@@ -611,7 +611,10 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   pages, so its readings are missing from the X10A topic while the bus itself is fine),
   `<base>/heating_curve` (non-retained, schema-versioned room-source and read-only diagnosis evidence,
   grouped as `room` plus `diagnosis.{gates,room_evidence,last_sample,counters}` rather than mixed into
-  the technical heartbeat), and `<base>/crash` (retained;
+  the technical heartbeat; schema v2 adds the optional outdoor axis — `diagnosis.outdoor_available`
+  and `last_sample.outdoor_temperature_c`, the outdoor air temperature as it stood at the recorded
+  event where an ENV III sensor is configured and fresh, `null` otherwise and never `0`), and
+  `<base>/crash` (retained;
   **crash-only** — a "dump waiting" flag, published once per (re)connect but ONLY when the boot is
   *notable*: a real fault or a dump still in flash. A normal boot publishes nothing on a clean broker;
   the bridge first probes for an older retained crash and deletes it only when one actually exists,

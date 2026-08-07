@@ -31,6 +31,20 @@ assert.match(evalBody,
   /if \(!in\.homehub_connected\)[\s\S]*if \(!in\.plant_gate_known\)[\s\S]*if \(!in\.plant_gate_active\)[\s\S]*if \(!in\.heating_mode_known\)[\s\S]*if \(!in\.heating_mode_active\)[\s\S]*if \(!in\.room_control_eligible[\s\S]*if \(!in\.x10a_connected\)/,
   "evaluation order must prove active normal space HEATING before accepting room evidence");
 
+// The optional ENV III outdoor axis is CONTEXT recorded with an event, never a condition for one.
+// A gate here would silently stop sampling on every installation without the accessory — the one
+// failure mode that looks like the feature merely being idle.
+assert.doesNotMatch(evalBody, /in\.outdoor_available[^;]*\)\s*return\s+(?:blocked|hold)\(/,
+  "an absent outdoor sensor must never block or hold a sample");
+assert.doesNotMatch(evalBody, /if \([^)]*outdoor[^)]*\)\s*return/,
+  "no branch of the evaluation may depend on the outdoor axis");
+assert.match(diagnosis, /has_last_sample_outdoor = s_\.has_outdoor_temperature;/,
+  "the recorded event must take the outdoor flag as it stood at that event");
+const resetStart = diagnosis.indexOf("void reset_samples()");
+const resetBody = diagnosis.slice(resetStart, diagnosis.indexOf("}", resetStart));
+assert.match(resetBody, /has_last_sample_outdoor = false/,
+  "disarming clears sample memory, and the outdoor value must not outlive it");
+
 const config = read("main/logic/config_model.hpp");
 assert.doesNotMatch(config, /dynamic_lwt_mode/,
   "no operator mode may be stored: diagnosis arming is derived");

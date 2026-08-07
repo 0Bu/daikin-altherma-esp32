@@ -849,6 +849,14 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, con
     in.heating_mode_known = mbs.heating_mode_known;
     in.heating_mode_active = mbs.heating_mode_active;
     in.forecast_available = cfg.weather_enabled && wx.available && wx_freshness.fresh;
+    // Optional local outdoor-air axis for the recorded event. Gated on the SAME two conditions the
+    // ENV III MQTT document uses (fresh AND plausible), so a reading this firmware refuses to
+    // publish can never be attached to a sample instead. Absent sensor -> absent field; sampling
+    // itself is unaffected, which is why nothing here touches `armed` or any gate.
+    const Env3Status env3 = env3_status();
+    in.outdoor_available = env3.fresh && env3_sample_plausible(
+        env3.temperature_c, env3.humidity_pct, env3.pressure_hpa);
+    in.outdoor_temperature_c = static_cast<double>(env3.temperature_c);
     in.now_ms = static_cast<int64_t>(now_ms);
     in.now_unix_s = now_unix_s;
     in.room_has_source_time = rt.has_value && rt.has_source_time;
@@ -976,6 +984,9 @@ static void publish_heating_curve_telemetry() {
     f.reason = static_cast<uint8_t>(diagnosis.reason);
     f.sample_eligible = diagnosis.sample_eligible;
     f.forecast_available = diagnosis.forecast_available;
+    f.outdoor_available = diagnosis.has_outdoor_temperature;
+    f.has_last_sample_outdoor = diagnosis.has_last_sample_outdoor;
+    f.last_sample_outdoor_temperature_c = diagnosis.last_sample_outdoor_temperature_c;
     f.plant_gate_known = diagnosis.plant_gate_known;
     f.plant_gate_active = diagnosis.plant_gate_active;
     f.heating_mode_known = diagnosis.heating_mode_known;

@@ -7,7 +7,11 @@
 
 namespace daik {
 
-inline constexpr uint8_t HEATING_CURVE_MQTT_SCHEMA_VERSION = 1;
+// v2 adds the optional local outdoor-air axis (`outdoor_available` plus
+// `last_sample.outdoor_temperature_c`). Purely additive, and the SAMPLING METHOD is untouched — the
+// room error is still derived exactly as in v1, so `method_version` deliberately stays 2 and archived
+// events remain comparable across this change. The schema version is what describes payload SHAPE.
+inline constexpr uint8_t HEATING_CURVE_MQTT_SCHEMA_VERSION = 2;
 
 struct HeatingCurveMqttFields {
     // Canonical single-room input (#288). Unavailable numbers render null; numeric validity flags
@@ -35,6 +39,9 @@ struct HeatingCurveMqttFields {
     uint8_t     reason = 0;
     bool        sample_eligible = false;
     bool        forecast_available = false;
+    bool        outdoor_available = false;
+    bool        has_last_sample_outdoor = false;
+    double      last_sample_outdoor_temperature_c = 0.0;
     bool        plant_gate_known = false;
     bool        plant_gate_active = false;
     bool        heating_mode_known = false;
@@ -94,6 +101,7 @@ inline std::string build_heating_curve_mqtt_json(const HeatingCurveMqttFields& f
     j += ",\"reason\":"; j += std::to_string(f.reason);
     j += ",\"sample_eligible\":"; j += f.sample_eligible ? "1" : "0";
     j += ",\"forecast_available\":"; j += f.forecast_available ? "1" : "0";
+    j += ",\"outdoor_available\":"; j += f.outdoor_available ? "1" : "0";
     j += ",\"gates\":{";
     j += "\"plant_known\":"; j += f.plant_gate_known ? "1" : "0";
     j += ",\"plant_active\":"; j += f.plant_gate_active ? "1" : "0";
@@ -112,6 +120,12 @@ inline std::string build_heating_curve_mqtt_json(const HeatingCurveMqttFields& f
     j += ",\"last_sample\":{";
     j += "\"room_error_k\":";
     j += f.has_last_sample ? std::to_string(f.last_sample_room_error_k) : "null";
+    // The outdoor axis AS RECORDED WITH THIS EVENT, not the live reading: an event archived by a
+    // metrics consumer must carry the temperature it was actually taken at. Null keeps "no sensor at
+    // that moment" distinguishable from a real 0 C.
+    j += ",\"outdoor_temperature_c\":";
+    j += f.has_last_sample_outdoor
+       ? std::to_string(f.last_sample_outdoor_temperature_c) : "null";
     j += ",\"unix_s\":";
     j += f.has_last_sample ? std::to_string(f.last_sample_unix_s) : "null";
     j += ",\"sequence\":"; j += std::to_string(f.sequence);

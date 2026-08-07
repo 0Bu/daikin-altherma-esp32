@@ -79,6 +79,15 @@ struct HeatingCurveInputs {
     bool heating_mode_known = false;
     bool heating_mode_active = false;
     bool forecast_available = false;
+    // Optional LOCAL outdoor-air context for a recorded event, from the ENV III accessory when one
+    // is configured and its sample is fresh. A room error alone cannot separate a heating curve that
+    // is too STEEP from one shifted too HIGH: +0.5 K at -5 C and +0.5 K at +12 C ask for opposite
+    // corrections and produce an identical record without this axis. Deliberately NOT a gate — an
+    // installation without the sensor samples exactly as before, so this only widens what an event
+    // carries. The caller owns freshness; an unavailable or non-finite value records as absent
+    // rather than as a zero that would read like 0 C.
+    bool outdoor_available = false;
+    double outdoor_temperature_c = 0.0;
     int64_t now_ms = -1;
     int64_t now_unix_s = -1;
     bool room_has_source_time = false;
@@ -96,6 +105,11 @@ struct HeatingCurveSnapshot {
     bool has_current_room_error = false;
     bool has_last_sample = false;
     bool forecast_available = false;
+    // Live outdoor context, and the value AS IT STOOD at the recorded event. The two are separate
+    // because the sensor may fail between events: the last sample keeps the reading it was taken
+    // with, and a later sample without the sensor clears it rather than inheriting an older one.
+    bool has_outdoor_temperature = false;
+    bool has_last_sample_outdoor = false;
     bool plant_gate_known = false;
     bool plant_gate_active = false;
     bool heating_mode_known = false;
@@ -103,6 +117,8 @@ struct HeatingCurveSnapshot {
 
     double current_room_error_k = 0.0;
     double last_sample_room_error_k = 0.0;
+    double outdoor_temperature_c = 0.0;
+    double last_sample_outdoor_temperature_c = 0.0;
     bool room_has_source_time = false;
     int64_t room_source_unix_s = -1;
     bool room_age_known = false;
@@ -124,6 +140,11 @@ public:
         s_.sample_eligible = false;
         s_.has_current_room_error = false;
         s_.forecast_available = in.forecast_available;
+        // Recorded beside the forecast flag and BEFORE the arming check, like every other piece of
+        // optional context: it is reported whatever the state, and no branch below reads it.
+        s_.has_outdoor_temperature =
+            in.outdoor_available && std::isfinite(in.outdoor_temperature_c);
+        s_.outdoor_temperature_c = s_.has_outdoor_temperature ? in.outdoor_temperature_c : 0.0;
         s_.plant_gate_known = in.plant_gate_known;
         s_.plant_gate_active = in.plant_gate_known && in.plant_gate_active;
         s_.heating_mode_known = in.heating_mode_known;
@@ -173,6 +194,11 @@ public:
 
         s_.has_last_sample = true;
         s_.last_sample_room_error_k = in.room_error_k;
+        // Assigned UNCONDITIONALLY with the event: a sample taken while the sensor is missing must
+        // clear the previous event's reading, never inherit it under a new timestamp.
+        s_.has_last_sample_outdoor = s_.has_outdoor_temperature;
+        s_.last_sample_outdoor_temperature_c =
+            s_.has_outdoor_temperature ? in.outdoor_temperature_c : 0.0;
         s_.last_sample_unix_s = in.now_unix_s;
         last_sample_ms_ = in.now_ms;
         s_.sequence++;
@@ -201,6 +227,8 @@ private:
         last_sample_ms_ = -1;
         s_.has_last_sample = false;
         s_.last_sample_room_error_k = 0.0;
+        s_.has_last_sample_outdoor = false;
+        s_.last_sample_outdoor_temperature_c = 0.0;
         s_.last_sample_unix_s = -1;
     }
 

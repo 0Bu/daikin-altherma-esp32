@@ -674,6 +674,20 @@ host-testable core is unusually large and valuable, because the risky parts are 
   comparison evidence; deleting it must not stop local sampling or make location disclosure a
   prerequisite. There is no mode enum, live blob field or route; v14's retired byte is written zero
   and ignored.
+  THE OUTDOOR AXIS is the second optional input, from ENV III when one is configured and its sample
+  is fresh **and** plausible — the same pair that gates the ENV III MQTT document, so a reading this
+  firmware refuses to publish cannot reach a sample instead. It is recorded **with the event**
+  (`last_sample_outdoor_temperature_c`) beside the live value, because a room error alone cannot
+  separate a curve that is too STEEP from one shifted too HIGH: `+0.5 K` at −5 °C and at +12 °C ask
+  for opposite corrections and record identically without it. Like the forecast it is CONTEXT and
+  never a gate, but the bar is stricter — the forecast at least splits Recording from Degraded,
+  while nothing at all branches on this. No state, reason or counter moves with or without the
+  sensor, and `test_heating_curve_diagnosis_contract.mjs` refuses a `blocked`/`hold` on it: a gate
+  here would silently stop sampling on every board lacking the accessory, indistinguishable from the
+  feature being idle. Absent or non-finite records as null rather than `0` (a freezing day), a
+  sample taken without the sensor CLEARS the previous event's reading instead of inheriting it under
+  a fresh timestamp, and disarming drops it with the rest of sample memory. Adding it did not move
+  `method_version`: the room error is derived exactly as before, so archived events stay comparable.
   THE GATE ORDER inside `evaluate()` is load-bearing. HomeHub connectivity and input register 53
   first prove normal space operation; input register 38 then distinguishes Heating from Cooling;
   only after those gates may room/X10A/clock evidence form a sample. An idle summer plant is a neutral
@@ -1309,7 +1323,12 @@ The Home Assistant bridge:
   pressure as measurement sensors. Their availability is `all`: both the device LWT must be online
   and the corresponding JSON key must exist, so `{}` makes only the ENV III entities unavailable.
   Disabling the sensor retracts both the state topic and all three discovery configs. ENV III is
-  never folded into X10A or HomeHub state. The ENV task independently folds valid samples into three
+  never folded into X10A or HomeHub state. Its ONE consumer inside the firmware is the heating-curve
+  diagnosis above, which records the temperature as optional context with each event — never as a
+  condition for one. Note the firmware cannot know WHERE the sensor is mounted: beside the indoor
+  unit this is room air, while over a long I²C run to a sheltered outdoor position it is genuine
+  outdoor air, and only the latter makes the diagnosis axis meaningful. The device states the
+  reading, not its meaning; anything downstream that depends on the placement has to record it. The ENV task independently folds valid samples into three
   static 5-minute/24-hour rings; `/history?...&source=env3` serves them to the Board Hardware infobox,
   so X10A loss cannot stop the outdoor-climate history. `<base>/modbus` is a separate flat retained JSON object, published only
   for an enabled HomeHub stack and intentionally not referenced by HA discovery. Int16 enum values
@@ -1475,7 +1494,10 @@ The Home Assistant bridge:
   fresh registry entry.
 - **Heating-curve topic** `<base>/heating_curve` (not retained) carries domain evidence separately
   from board/link health, built by `logic/heating_curve_mqtt.hpp` (host-tested). Top-level
-  `schema_version` is `1`; `room` contains the accepted live room mapping, while `diagnosis` contains
+  `schema_version` is `2` (v2 added `diagnosis.outdoor_available` and
+  `diagnosis.last_sample.outdoor_temperature_c`, purely additively; `method_version` stayed `2`,
+  since the sampling method is unchanged and payload SHAPE is what the schema version describes);
+  `room` contains the accepted live room mapping, while `diagnosis` contains
   method/state/reason plus nested `gates`, `room_evidence`, `last_sample` and `counters`. Nullable
   values state absence explicitly, and boolean facts use numeric `1`/`0` so Telegraf/VictoriaMetrics
   retain them. It is published immediately after heartbeat on the same 10-second, X10A-gated

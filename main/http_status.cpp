@@ -457,6 +457,12 @@ void http_append_status_json(std::string& j, bool redact) {
        ? std::to_string(heating_curve.last_sample_room_error_k) : "null";
     j += ",\"last_sample_unix_s\":";
     j += heating_curve.has_last_sample ? std::to_string(heating_curve.last_sample_unix_s) : "null";
+    j += ",\"outdoor_temperature_c\":";
+    j += heating_curve.has_outdoor_temperature
+       ? std::to_string(heating_curve.outdoor_temperature_c) : "null";
+    j += ",\"last_sample_outdoor_temperature_c\":";
+    j += heating_curve.has_last_sample_outdoor
+       ? std::to_string(heating_curve.last_sample_outdoor_temperature_c) : "null";
     j += ",\"forecast_available\":"; j += heating_curve.forecast_available ? "true" : "false";
     j += ",\"plant_gate_known\":"; j += heating_curve.plant_gate_known ? "true" : "false";
     j += ",\"plant_gate_active\":"; j += heating_curve.plant_gate_active ? "true" : "false";
