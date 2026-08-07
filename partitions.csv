@@ -8,9 +8,20 @@
 # MQTT and the heat-pump model/pin config survive upgrades. otadata tracks the active slot;
 # a blank otadata (after a full erase) boots ota_0. Keep nvs offset/size stable across
 # versions or old config is stranded.
+#
+# `hist` fills the 8 KB that was already unused between coredump (ends 0x1e000) and ota_0, which has
+# to start on a 64 KB boundary. It holds a COARSE 24-hour snapshot of the trend rings, written once
+# per intentional reboot so a history survives an OTA (main/history.cpp). Placed here rather than in
+# nvs because nvs is 24 KB, holds the WiFi credentials, and this does not fit in it either way.
+#
+# IT IS OPTIONAL AT RUNTIME, and it has to be: esp_https_ota writes the inactive APP slot and never
+# the partition table at 0x8000, so a device updated over the air keeps the table it was flashed
+# with and has no such partition. The firmware treats a missing lookup as an absent feature, and the
+# only way a deployed board gains it is a re-flash over USB / the web installer.
 nvs,       data, nvs,     0x9000,   0x6000,
 otadata,   data, ota,     0xf000,   0x2000,
 phy_init,  data, phy,     0x11000,  0x1000,
 coredump,  data, coredump, 0x12000,  0xc000,
+hist,      data, undefined, 0x1e000, 0x2000,
 ota_0,     app,  ota_0,   0x20000,  0x1f0000,
 ota_1,     app,  ota_1,   0x210000, 0x1f0000,

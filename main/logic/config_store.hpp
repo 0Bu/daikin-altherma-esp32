@@ -25,14 +25,33 @@ namespace daik {
 
 // CRC-32/ISO-HDLC (reflected, poly 0xEDB88320) — the usual zlib/PNG CRC. Self-contained so the blob's
 // integrity check is host-testable rather than reliant on esp_rom_crc32. CRC(b"123456789") == 0xCBF43926.
-inline uint32_t config_crc32(const uint8_t* data, size_t len) {
-    uint32_t crc = 0xFFFFFFFFu;
+//
+// Split into a STREAMING core and the one-shot wrapper the blob uses, because a second consumer
+// arrived that cannot hand over one contiguous buffer: logic/history_persist.hpp seals the trend
+// rings, whose committed fields (`buf`/`count`/`head`) must be covered while the open bucket's
+// `pending` must NOT be — a CRC that included it would go stale on every fold and a crash mid-bucket
+// would then discard a day of readings that were perfectly intact. Streaming is what lets the seal
+// pick its fields. The alternative was a second copy of this polynomial loop somewhere else in the
+// firmware, which is the one thing this project does not do with a rule.
+//
+// `crc` is the RUNNING state, not a finished value: seed with CONFIG_CRC32_INIT, feed each region in
+// order, then finalize. Feeding regions A then B gives the same answer as feeding their
+// concatenation, which is the whole property a caller relies on.
+inline constexpr uint32_t CONFIG_CRC32_INIT = 0xFFFFFFFFu;
+
+inline uint32_t config_crc32_update(uint32_t crc, const uint8_t* data, size_t len) {
     for (size_t i = 0; i < len; i++) {
         crc ^= data[i];
         for (int b = 0; b < 8; b++)
             crc = (crc >> 1) ^ (0xEDB88320u & (~(crc & 1u) + 1u));   // mask = -(crc & 1), branchless
     }
-    return crc ^ 0xFFFFFFFFu;
+    return crc;
+}
+
+inline uint32_t config_crc32_final(uint32_t crc) { return crc ^ 0xFFFFFFFFu; }
+
+inline uint32_t config_crc32(const uint8_t* data, size_t len) {
+    return config_crc32_final(config_crc32_update(CONFIG_CRC32_INIT, data, len));
 }
 
 // The credential + service fields persisted as one atomic blob (NOT the RX/TX/proto link cache).

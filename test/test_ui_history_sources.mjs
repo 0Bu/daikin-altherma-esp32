@@ -15,10 +15,10 @@ assert.ok(style.lastIndexOf(".vhist-state-on.mb { background: var(--src-mb); }")
           style.lastIndexOf(".vhist-state-on.sg-recommended"),
   "the lower Modbus lane's petrol source colour must win over every categorical state fill");
 assert.match(firmwareHistory,
-  /if \(!s_have_bucket\)[\s\S]*?history_completed_samples\(bucket\)[\s\S]*?s_ring\)[\s\S]*?reset_with_gaps\(completed\)/m,
+  /if \(!s_have_bucket\)[\s\S]*?history_completed_samples\(bucket\)[\s\S]*?P\(\)\.ring\)[\s\S]*?reset_with_gaps\(completed\)/m,
   "X10A and board rings must seed the elapsed boot raster even when polling starts late");
 assert.match(firmwareHistory,
-  /if \(!s_mb_have_bucket\)[\s\S]*?history_completed_samples\(bucket\)[\s\S]*?s_mb_ring\)[\s\S]*?reset_with_gaps\(completed\)/m,
+  /if \(!s_mb_have_bucket\)[\s\S]*?history_completed_samples\(bucket\)[\s\S]*?P\(\)\.mb_ring\)[\s\S]*?reset_with_gaps\(completed\)/m,
   "HomeHub rings must use the same boot-aligned raster when enabled later");
 assert.match(firmwareHistory, /void history_record\([^)]*\) \{\s*if \(!s_mtx\) return;\s*if \(!v\) n = 0;/m,
   "an empty X10A sweep must still advance board histories and the shared gap raster");

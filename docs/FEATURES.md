@@ -110,6 +110,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
 | 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 71 | **Pinned stack contract on the `/status` builder** — `-Os` on that one translation unit, because ~9 KB of its 11.8 KB frame was a `-Og` slot-allocation artefact, not live data | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp) |
+| 72 | **Reboot-surviving 24-hour trends** — `.noinit` DRAM for any reset that kept power, plus a coarse snapshot in the optional `hist` partition across an OTA; both gated on a derived trend-catalog fingerprint, the stored one spliced by absolute wall-clock bucket | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
 
 ---
 
@@ -376,6 +377,22 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   cached, so a dump erased mid-session cannot strand a banner. A dump whose `app_elf_sha256` does not
   match the **running** build — an orphan that survived an OTA — is erased on **proof**, so
   `coredump` never advertises a download the decoder would reject.
+- **✅ 🧪 The 24-hour trends survive a reboot** ([`logic/history_persist.hpp`](../main/logic/history_persist.hpp)).
+  Still not in NVS — that would be ~100k writes a year in the partition holding the WiFi credentials —
+  but the rings now live in `.noinit` DRAM, so every reset that kept power keeps them at no RAM cost
+  and a ~26.5 KB *smaller* flash image (`.data` no longer carries an initialiser for them). An OTA
+  moves the image's sections, so a coarse 30-minute snapshot goes to the optional 8 KB `hist`
+  partition from a shutdown handler. A power loss takes both and stays unrecovered on purpose — only
+  a medium off this board could survive it, and that is a different feature with a different owner.
+  The coarse path is spliced in **behind** the live samples by
+  absolute wall-clock bucket, and is skipped entirely without an anchor on both sides; a source that
+  has not reported yet is waited for rather than skipped, and the block's write-side padding is
+  trimmed first so a restored ring reports the span it actually covers instead of a full day of empty
+  slots. **`BinaryEvent` rows are OR-folded rather than decimated** — defrosts and BUH pulses are
+  shorter than one bucket, so keeping one bucket in six would erase them from a restored day. Both paths are
+  gated on a fingerprint derived from the trend catalog itself, because a ring is addressed by its
+  index and a reordered table would hand one sensor's day to another. `/status.history.persist` names
+  the outcome, so a chart that emptied itself has a stated cause.
 - **✅ Offline symbolication** ([`decode-coredump.sh`](../scripts/decode-coredump.sh)): the raw image
   is symbolized against the matching **unstripped `.elf`** CI archives per build. The dump embeds
   `app_elf_sha256` and the device reports the same, so a wrong ELF is *caught*, not silently

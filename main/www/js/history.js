@@ -1391,9 +1391,9 @@ const MODEL_DESCRIPTIONS = {
   // than living on /status alone.
   free_heap: {
     what: "RAM that is currently unused by the firmware. Short changes are normal because WiFi, MQTT and web requests allocate temporary memory; the 24-hour trend is more useful than one reading.",
-    normal: "a broadly stable line with temporary dips that recover. A persistent downward trend can indicate retained allocations and should be investigated. A restart begins a new trend because the history itself is stored in RAM.",
+    normal: "a broadly stable line with temporary dips that recover. A persistent downward trend can indicate retained allocations and should be investigated. A restart that kept power carries the trend over; losing power starts a new one, and a firmware update keeps at most a coarse outline.",
     de: { what: "Arbeitsspeicher, den die Firmware gerade nicht verwendet. Kurze Schwankungen sind normal, weil WLAN, MQTT und Web-Anfragen vorübergehend Speicher belegen; der 24-Stunden-Verlauf ist aussagekräftiger als ein Einzelwert.",
-          normal: "eine insgesamt stabile Linie mit vorübergehenden Einbrüchen, die sich erholen. Ein dauerhaft fallender Verlauf kann auf nicht freigegebenen Speicher hinweisen und sollte untersucht werden. Nach einem Neustart beginnt ein neuer Verlauf, weil auch die Historie im RAM liegt." } },
+          normal: "eine insgesamt stabile Linie mit vorübergehenden Einbrüchen, die sich erholen. Ein dauerhaft fallender Verlauf kann auf nicht freigegebenen Speicher hinweisen und sollte untersucht werden. Ein Neustart mit erhaltener Spannung übernimmt den Verlauf; ein Spannungsverlust beginnt einen neuen, ein Firmware-Update behält höchstens einen groben Umriss." } },
   max_alloc: {
     what: "The largest contiguous block of free RAM. Some operations, including TLS setup and OTA work, need one sufficiently large block even when the total free RAM is higher.",
     normal: "it is always at or below total free RAM. If total free RAM stays stable while this value keeps falling, the heap is becoming fragmented; that can make a large allocation fail before all RAM is used.",

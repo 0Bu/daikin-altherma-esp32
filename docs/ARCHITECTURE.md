@@ -913,6 +913,52 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    held-over rule earns its place — a sample taken while the compressor rests is stored as *held
    over*, not as the number the frozen outdoor page keeps returning (`logic/history.hpp`,
    composing `logic/ou_stale.hpp`).
+
+   **The rings survive a reboot** (`logic/history_persist.hpp`). They are still not in NVS — a
+   576-byte blob rewritten every five minutes would be ~100k writes a year in the partition holding
+   the WiFi credentials — but "not in NVS" no longer means "gone on every restart". Two media,
+   each covering exactly what the other structurally cannot:
+
+   * **`.noinit` DRAM.** The ring arrays are simply no longer zeroed at startup, so any reset that
+     kept power (a `/set_*` save, an OTA install, a panic, the task watchdog, the recovery button)
+     keeps the readings. It costs no flash write and no extra RAM — it is the *same* memory the
+     route serves, not a shadow copy — and the flash image shrank by ~26.5 KB, because `.data` no
+     longer carries an initialiser for rings that are about to be overwritten anyway. It needs no
+     clock, and that is a property of the medium rather than an assumption: if the bytes survived,
+     power was never lost, so the downtime is bounded to about a second. The one seam is the bucket
+     that was open when the device went down — it is dropped, so the restored series can be up to
+     one `HISTORY_DT_S` adrift on the axis. It cannot survive an OTA: the new image's sections move.
+   * **The optional `hist` partition.** A coarse (30-minute) snapshot written once per intentional
+     reboot from an `esp_restart` shutdown handler — one 8 KB erase and ~4.4 KB of writes, a few
+     hundred writes a year against a 100k-cycle part. This is what carries a history across an OTA.
+     It is absent on every board updated over the air, because a partition table is not delivered by
+     OTA (see *NVS namespaces* in `.claude/CLAUDE.md`).
+
+   **Losing power stays unrecovered, on purpose.** The only medium that could survive it is one that
+   is not on this board, and moving the plant history off the device is a different feature with a
+   different owner — the broker already stores every published value (`docs/HOME_ASSISTANT.md`).
+   Nothing here pretends otherwise: `/status.history.persist` reports `power_cycle` and the rings
+   start empty, exactly as they always did.
+
+   The coarse path is **spliced in behind** the live samples at the absolute wall-clock bucket
+   each sample was taken in, never appended — appending would slide a day-old curve onto today. It
+   is skipped entirely while the clock is unsynced *or* before the live side has committed its first
+   bucket: a splice needs an absolute anchor on **both** sides, and there is no honest default for a
+   missing one. A source that has not reported yet is **waited for** rather than skipped, bounded at
+   six buckets, because the cursor only moves forward and a HomeHub that powers up late would
+   otherwise lose its twelve rings for the whole boot. The block's write-side padding is trimmed
+   before splicing, or a ring holding one reading would claim a 24-hour span it never recorded.
+   **`BinaryEvent` rows are OR-folded rather than decimated** — those rows exist because defrosts and
+   BUH pulses are shorter than a bucket, so keeping one bucket in six would erase them from a
+   restored day; any ON in the group makes the coarse slot ON, which widens what the slot means
+   without inventing anything. Both paths are gated on a **catalog fingerprint** over every trend id, kind, locator
+   and the ring geometry, because a ring is addressed by its index — insert or reorder a trend and
+   slot 12 stops meaning what it meant when the bytes were written, which would hand the expansion
+   valve's day to the DHW tank. The seal deliberately excludes the open bucket's `pending`: covering
+   it would leave the CRC stale for all but microseconds of every five minutes, so a crash — the case
+   this exists for most — would discard a day of intact readings essentially always.
+   `/status.history.persist` names how this boot's rings came to be, so a chart that emptied itself
+   has a stated cause instead of looking like a defect.
    The independent HomeHub task feeds twelve additional rings through `history_record_modbus()` — eight
    measurement concepts plus BSH, 3-way-valve, Quiet and Smart-Grid state timelines explicitly named in
    `logic/homehub_map.hpp`. Both recorders use the same monotonic 5-minute bucket id, returned as `b0`

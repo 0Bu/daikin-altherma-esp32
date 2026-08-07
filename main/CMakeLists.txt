@@ -40,6 +40,7 @@ idf_component_register(
         "${CMAKE_CURRENT_SOURCE_DIR}/www/heat_pump_icon.png"
     REQUIRES
         nvs_flash
+        esp_partition
         esp_wifi
         esp_event
         esp_netif

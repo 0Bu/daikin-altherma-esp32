@@ -668,7 +668,14 @@ void http_append_status_json(std::string& j, bool redact) {
     // with successive += like everything else here: a `a + b + c` chain materialises every
     // intermediate at once, all live in one frame on the httpd task's stack (CLAUDE.md → Memory
     // constraints, the v1.0.12 stack overflow — which happened on THIS task).
-    j += "\"history\":{\"dt\":" + std::to_string(logic::HISTORY_DT_S) + ",\"rows\":[";
+    j += "\"history\":{\"dt\":" + std::to_string(logic::HISTORY_DT_S);
+    // How this boot's rings came to be. "accept" = adopted across a reset that kept power; anything
+    // else NAMES why they started empty. Reported because a chart that emptied itself otherwise
+    // reads as a defect: "wrong_catalog" after an update and "power_cycle" after a power failure are
+    // both correct behaviour, and only the device can tell which one happened.
+    j += ",\"persist\":";
+    j += jstr(history_persist_state());
+    j += ",\"rows\":[";
     bool first_trend = true;
     for (size_t t = 0; t < logic::TREND_COUNT; t++) {
         char lbl[80];
