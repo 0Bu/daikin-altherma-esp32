@@ -38,6 +38,7 @@ const labels = {
   "ref.stale": "veraltet",
   "ref.error": "Fehler",
   "ref.hint": "Raumquellen-Erklärung",
+  "ref.detail.configuration_label": "Konfiguration:",
   "ref.detail.status_label": "Status:",
   "ref.status.fresh": "Aktuell",
   "ref.status.stale": "Veraltet",
@@ -229,8 +230,10 @@ assert.equal((html.match(/class="settings-info-value/g) || []).length, 2,
 assert.doesNotMatch(html, /settings-source-summary|Konfiguriert · 25,1 °C|Open-Meteo · 22,6 °C \/ 2 h/,
   "obsolete green summary lines must not duplicate values inside the tongues");
 const roomTongue = html.match(/<div class="vdesc-body settings-info-tongue" id="dynamic-room-sources-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
-assert.equal((roomTongue.match(/class="vdesc-p"/g) || []).length, 6,
-  "room tongue must explain status, current value, target, age, source and configuration");
+assert.equal((roomTongue.match(/class="vdesc-p"/g) || []).length, 7,
+  "room tongue must explain configuration state, status, current value, target, age, source and setup");
+assert.match(roomTongue, /<span class="vdesc-n">Konfiguration:<\/span> Konfiguriert/,
+  "the configuration state left the row header, so the tongue must state it");
 assert.match(roomTongue, /<span class="vdesc-n">Raumtemperatur:<\/span> 25,1 °C ist die aktuelle Raumtemperatur\./);
 assert.match(roomTongue, /<span class="vdesc-n">Solltemperatur:<\/span> 22 °C ist der Raumsollwert\./);
 assert.match(roomTongue, /<span class="vdesc-n">Alter:<\/span> Messwert vor 17 s übernommen\./);
@@ -251,8 +254,15 @@ assert.match(weatherTongue, /Wetter-Konfiguration/,
 assert.doesNotMatch(weatherTongue, /Wetter-Einrichtung/,
   "configured weather must not repeat coordinate-entry guidance");
 const roomButton = html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "";
-assert.match(roomButton, /<span>Konfiguriert<\/span>/,
-  "the compact room-source value must describe its configuration state");
+assert.match(roomButton, /<span>Example rm<\/span>/,
+  "the compact room-source value must name the configured source, like the circulation row");
+assert.doesNotMatch(roomButton, /<span>Konfiguriert<\/span>/,
+  "the configuration state belongs in the tongue, not in place of the source name");
+// DESIGN.md §9/§5.6: a row whose face is a NAME states its condition in colour, which is allowed
+// only because the accessible name says it in words. Dropping the state word from BOTH would make
+// this the one row a screen-reader or colourblind user cannot read the status of.
+assert.match(roomButton, /aria-label="Raumtemperaturquelle: Example rm · Aktuell"/,
+  "the accessible name must spell out the status the colour is carrying");
 assert.doesNotMatch(html, /1 Quelle|Raumtemperaturquellen/,
   "the single room-temperature input must not be presented as a source count or plural collection");
 assert.doesNotMatch(roomButton, /25,1 °C|vor 17 s/,
@@ -279,6 +289,8 @@ assert.equal((html.match(/<span>Nicht konfiguriert<\/span>/g) || []).length, 2,
   "each empty editable source must expose Not configured as its popup value");
 assert.ok(html.includes("Raumquellen-Erklärung") && html.includes("Wetter-Einrichtung"),
   "unconfigured sources must still explain how their inputs work");
+assert.match(html, /id="dynamic-room-sources-detail"[^]*<span class="vdesc-n">Konfiguration:<\/span> Nicht konfiguriert/,
+  "an empty room source must state its configuration state in the tongue too");
 assert.doesNotMatch(html, /Wetter-Konfiguration/,
   "unconfigured weather must show setup guidance instead of configured-source guidance");
 
@@ -289,6 +301,11 @@ assert.match(html, /id="dynamic-weather-detail"[^]*<span class="vdesc-n">Status:
   "a configured weather fetch must keep the tongue and explain the in-progress state");
 assert.match(html, /id="dynamic-room-sources-detail"[^]*<span class="vdesc-n">Status:<\/span> Nicht verfügbar — Messwert verworfen\./,
   "a configured source error must be explained in its tongue");
+// The name is cosmetic and may be empty. The row header still has to identify SOMETHING, and it must
+// be the same word the tongue's source line uses — one fallback, not two.
+assert.match(html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "",
+  /<span>MQTT<\/span>/,
+  "a configured source saved without a name must fall back to the tongue's own source word");
 assert.doesNotMatch(html, /data-act="env3"|dynamic-env3-status/,
   "ENV III configuration must live exclusively in Board Hardware");
 
@@ -349,6 +366,8 @@ assert.match(html, /Raumthermostat ausgeschaltet/,
 const blockedRoomButton = html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "";
 assert.match(blockedRoomButton, /class="[^"]*\bwarn\b/,
   "the source that is blocking the diagnosis must not be the one row rendered as OK");
+assert.match(blockedRoomButton, /aria-label="Raumtemperaturquelle: Example rm · Raumthermostat ausgeschaltet"/,
+  "a current-but-unusable source must name the block in its accessible name, not merely go orange");
 assert.match(html, /<span class="vdesc-n">Verwertbar:<\/span> Raumthermostat ausgeschaltet/,
   "the source tongue must give the same reason as the state row");
 
