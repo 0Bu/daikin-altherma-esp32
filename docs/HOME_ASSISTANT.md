@@ -351,7 +351,7 @@ first entities built this way; since #221 it is the general rule, and the catalo
 
 ### Values the firmware refuses to publish
 
-Three things can make a catalog row absent from `<base>/x10a`, and all three state absence *by*
+Four things can make a catalog row absent from `<base>/x10a`, and all four state absence *by*
 absence — the key is simply not in the payload and HA shows *unknown*, rather than a plausible number
 nobody measured:
 
@@ -368,6 +368,15 @@ nobody measured:
   entire compressor cycle. The entity stays (the field *can* be populated) but an
   exact zero from that row is withheld. This is adjudicated per row, never globally: a real
   thermistor crosses 0 °C every winter and must keep saying so.
+- **The hardware behind a whole register page is not fitted.** Pages `0xA0` and `0xA1` describe a
+  *second* outdoor unit. On an installation that does not have one, `0xA1` answers with 16 zero bytes
+  and `0xA0` reports no O/U MPU id (`0xFFFF`) while asserting no output — so every row on that page
+  is withheld together rather than published as four 0 °C thermistors and an expansion valve at 0
+  pulses ([#224](https://github.com/0Bu/daikin-altherma-esp32/issues/224)). The entities stay, and
+  the signature is re-checked against the live reply every cycle: an installation that *does* have
+  the second unit answers differently and sees all of them normally. **Upgrading:** if these entities
+  showed numbers before, they go *unknown* — the numbers were never measurements. Their recorder
+  history is left alone, so a long-range graph shows the old flat line ending.
 - **The outdoor unit is resting.** The outdoor unit refreshes its own register pages (`0x20`
   sensors, `0x21` inverter) only while it runs; stopped, it keeps answering with the last run's
   numbers. Measured against a HomeHub reference: exact agreement at every point while the compressor

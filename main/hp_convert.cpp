@@ -21,9 +21,11 @@ bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int
     // 0 °C on a row that is simply not populated on this unit (#209 defect 2). Applied here, beside
     // reading_plausible and for the same reason, so convert() keeps its intrinsic per-converter
     // semantics and the domain audit still sees them unchanged.
-    // Page-context policies need the same payload this value was decoded from. In particular, an
-    // all-zero 0xA1 reply identifies an absent second-outdoor-unit page; a zero in one populated
-    // thermistor row does not. Passing the whole current reply keeps that distinction structural.
+    // The PAGE-level rules need the same payload this value was decoded from: an all-zero 0xA1
+    // reply, or a 0xA0 reply reporting no O/U MPU id and asserting no output, identifies an absent
+    // second outdoor unit — while a zero in one populated thermistor row does not. Passing the whole
+    // current reply keeps that distinction structural, and it is what lets the verdict reach a row
+    // that carries a value rule of its own (0xA0/8, the expansion valve).
     if (!value_available(def, r.ok, r.value, payload, static_cast<size_t>(payload_len))) return false;
     if (!r.ok && r.text[0] == '\0') return false;
     // conv 204 (fault code) gets an English description appended when the table covers it. Exact

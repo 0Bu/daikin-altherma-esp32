@@ -399,15 +399,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
   else answers a narrower question — `convert()` handles the wire format's own `0x8000` no-data
   marker, `reading_plausible()` catches a number that is *impossible*, `ValueDef::no_publish` carries
   what the generator knew. What is left is a field that decodes to an entirely ordinary number which
-  is not a measurement of anything, and only per-row evidence can identify it. Four verdicts exist;
-  three are in force. `ZeroMeansAbsent` (`Target Cond. Temp.`'s raw `0x0000`, flat through a full
-  compressor cycle) withholds only that exact value, because a global "0 °C is unavailable" rule
-  would destroy every thermistor reading that crosses zero. `ZeroPageMeansAbsent` resolves the
-  page-level subset of #224 without making that mistake: `0xA1`, the second-outdoor-unit Water-HX
-  page, returned 16 zero bytes including its unit-family setting flags through the measured DHW
-  compressor cycle. Its four analog rows are withheld only while the complete reply through byte 9
-  is all zero; one non-zero byte proves the page populated and preserves even an individual exact
-  0 °C. A short reply cannot reach the flags and therefore proves no absence. `AboveRangeIsAbsent`
+  is not a measurement of anything, and only per-row evidence can identify it. Three row verdicts
+  exist and two are in force. `ZeroMeansAbsent` (`Target Cond. Temp.`'s raw `0x0000`, flat through a
+  full compressor cycle) withholds only that exact value, because a global "0 °C is unavailable" rule
+  would destroy every thermistor reading that crosses zero. `AboveRangeIsAbsent`
   is the **expansion
   valve** pulse rows (conv 151): 30 days of published samples run 0-474 pulses and then carry six
   samples of exactly `0xFFF8`, with **nothing in between** — a discrete out-of-band integer rather
@@ -434,6 +429,27 @@ host-testable core is unusually large and valuable, because the risky parts are 
   catalog test proves the rule selects the adjudicated quantity across all 45 profiles. Adding a rule is an adjudication
   with the same evidentiary bar as `tools/domain/audit_exceptions.txt`, not a way to make an
   inconvenient number disappear.
+  A **fourth** verdict is not about a row at all. `PAGE_ABSENCE_RULES` is keyed on the register
+  **page** and reaches every row on it, because "the hardware behind this reply is not fitted" is a
+  fact about the page rather than about any one field. Two are in force, both the **absent second
+  outdoor unit** of [#224](https://github.com/0Bu/daikin-altherma-esp32/issues/224). `0xA1` (Water-HX)
+  answers with 16 zero bytes including its unit-family setting flags at byte 9, so the signature is
+  `AllBytesZero`. `0xA0` needed a different witness, and it is the reason the rule is page-keyed at
+  all: that reply is **not** all-zero — it reads `00 00 80 0c 00 00 00 00 00 00 ff ff 00 00 00 00`,
+  and both non-zero fields are themselves absence markers (the O/U MPU id at bytes 10-11 reads
+  `0xFFFF`, i.e. no MPU answers, while the operation words at 12-13 have never had a bit set). So the
+  `UnidentifiedUnit` signature requires both, and anything ambiguous publishes. Behind that signature
+  three rows published exactly `0.0 °C` for 316 771 consecutive samples over 60 days, and `0xA0/2`
+  published something worse than a zero: `89.6-192.0 °C`, seven distinct values in seven days and
+  every one an exact multiple of `12.8 °C` — its raw low byte never leaves `0x00`/`0x80`, which is
+  not how a thermistor read at 0.1 °C resolution behaves, and `reading_plausible()` cannot refuse it
+  because 192 °C is inside the ±200 °C envelope. Each signature is re-evaluated against the **live**
+  reply every cycle, which is what makes a page rule safe across all 45 profiles where a static
+  per-model claim would not be: an installation that *has* the second unit answers with something the
+  signature does not match, and every row on the page publishes untouched — including `0xA0/8`, which
+  keeps its own `AboveRangeIsAbsent` ceiling. That composition is why the page fact could not stay a
+  row entry: a row already carrying a value rule cannot carry a second one, and a row a future
+  generator run adds to the page would be covered by nothing.
 - `logic/conv_override.hpp` — the **converter adjudication** (#194): which converter a generated row
   is actually *encoded* with, when the id the offline generator emitted is demonstrably the wrong
   one. Sibling of the availability ledger, separate on purpose — that one asks "is this a
