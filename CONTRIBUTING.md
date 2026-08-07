@@ -297,6 +297,15 @@ attaches the artifacts. Say in the PR what you did and didn't verify.
   notice. The firmware build is the only compile of `main/*.cpp`, so these fire in CI, not in
   `run-mock-tests.sh`. Don't relax a flag to get green: each hit is the defect class it was pinned
   for.
+- **So is the optimisation level of ONE file.** The same `main/CMakeLists.txt` compiles
+  `http_status.cpp` at `-Os` while the rest of the project builds at ESP-IDF's default `-Og`. That is
+  not a tidy-up someone forgot to finish: `http_append_status_json()` has overflowed a task stack
+  twice, and at `-Og` its frame reached 11776 bytes — against ~2.2 KB of actual locals, the rest
+  being one stack slot per string temporary in a 760-line function. `-Os` takes it to 3744 and the
+  deepest httpd path (`POST /mcp`, which reuses the same builder) from 14512 bytes of a 16384 stack
+  to 6480. Deleting that one line silently restores a ~1.8 KB margin. If you touch it, re-measure —
+  the frame is read off the ELF's `entry a1,N`, never off an idle heap reading, and the command is in
+  [`.claude/CLAUDE.md`](.claude/CLAUDE.md) under "Memory constraints".
 - **There is deliberately no clang-tidy or cppcheck gate**, and that was measured rather than
   assumed. Over `main/logic/` + `main/def/`, a blanket config reports ~7000 findings — over half of
   them this project's own `CHECK` macro — and a curated bug-finding set reports ~50 with **zero** real

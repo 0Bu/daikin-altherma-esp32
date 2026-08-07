@@ -109,6 +109,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 68 | **Source-boundary contract gate** — source-text assertions about `main/*.cpp` the host suite structurally cannot make (task, order, and which file is entitled) | ✅ | [`run-contract-tests.sh`](../scripts/run-contract-tests.sh), [`test_heating_curve_diagnosis_contract.mjs`](../test/test_heating_curve_diagnosis_contract.mjs) |
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
 | 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
+| 71 | **Pinned stack contract on the `/status` builder** — `-Os` on that one translation unit, because ~9 KB of its 11.8 KB frame was a `-Og` slot-allocation artefact, not live data | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp) |
 
 ---
 
@@ -554,6 +555,15 @@ Four properties of that core are worth naming because they are not obvious from 
   Kconfig key would hold ESP-IDF and the managed components to a contract that is not ours to demand,
   and `sdkconfig.defaults` is hashed into the ccache key, so a diagnostic-only change there would
   discard every cached object it cannot invalidate.
+- **✅ A pinned stack contract on the `/status` builder.** The same `main/CMakeLists.txt` compiles
+  `http_status.cpp` at `-Os` while everything else builds at ESP-IDF's default `-Og`, because
+  `http_append_status_json()` has overflowed a task stack twice and at `-Og` its frame reached
+  **11776 bytes** against ~2.2 KB of actual locals — the rest one stack slot per string temporary in
+  a 760-line function. `-Os` takes it to **3744**, and the deepest httpd path (`POST /mcp`, which
+  reuses the same builder) from 14512 bytes of a 16384 stack to 6480; the stack itself was left at
+  16384. The trade — less exact backtraces in the one file whose core dumps mattered — and the
+  reproduce command are stated where the pin lives and in [`.claude/CLAUDE.md`](../.claude/CLAUDE.md)
+  under "Memory constraints".
 - **🔭 No generic static-analyser gate — measured, not assumed.** Recorded here so it is not
   re-litigated: clang-tidy over the pure headers reports thousands of findings on a blanket config
   (over half of them this project's own `CHECK` macro) and, curated to bug-finding checks, roughly
