@@ -106,9 +106,12 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
 # Assemble, minify and pre-compress the web UI at build time. The sources are split for edit locality —
 # www/index.html, www/style.css and the ordered JavaScript fragments in www/app.sources — and
 # inline_assets.cmake splices them back into the ONE self-contained page the device serves.
-# The editable sources keep their load-bearing comments; the offline Python step strips CSS/JS
-# comments and whitespace from the artefact only, then produces deterministic gzip.  The size
-# budget makes UI growth a build failure instead of silently multiplying TCP windows again.
+# The editable sources keep their load-bearing comments; the offline Python step strips HTML, CSS
+# and JS comments plus asset whitespace from the artefact only, then produces deterministic gzip.
+# All THREE languages, because the markup was the one that leaked: index.html is spliced in raw, so
+# until it was measured its 39 KB of drawing/layout commentary shipped inside the image — 14 KB
+# gzipped, 9.5% of this budget, on text no browser can read.  The size budget makes UI growth a
+# build failure instead of silently multiplying TCP windows again.
 # Symbols: _binary_index_html_gz_{start,end} (see h_index in http_status.cpp).
 set(APP_JS_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/www/app.sources")
 set(UI_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_and_gzip.py")

@@ -255,6 +255,12 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   can otherwise starve the download of a socket) and the TCP windows doubled. A **150 KiB gzip hard
   limit** on the UI fails the build before asset growth can silently justify more buffers.
 
+  The sources keep their load-bearing comments and the artefact carries none: the offline minifier
+  ([`minify_and_gzip.py`](../tools/web_asset/minify_and_gzip.py)) strips **HTML, CSS and JS**
+  comments alike — markup included, since `index.html` is spliced in raw and its commentary was
+  otherwise served to every client. Markup stripping is comments only (HTML whitespace is
+  significant) and fails the build rather than guess on an unterminated or conditional comment.
+
 ### Captive-portal provisioning
 
 First boot with no WiFi config comes up as SoftAP `daikin-altherma-esp32-setup`. A hand-rolled
