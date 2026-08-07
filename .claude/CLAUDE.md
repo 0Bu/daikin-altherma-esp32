@@ -1278,7 +1278,27 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 The three 0x20 rows #224 also lists (outdoor coil, suction pipe, liquid line) are
                 deliberately NOT adjudicated: 0 °C is where those sensors LIVE for much of a heating
                 season, so withholding their zero would cost a real reading far more often than it
-                removes a false one — the trade inverts, and they still need their own evidence.
+                removes a false one — the trade inverts. The attempt to close them anyway is
+                RECORDED AS A REFUSAL beside the rules it did not become, because the obvious fix
+                looks available and is not. It was a CONDITIONAL zero rule keyed on the unit's own
+                saturation temperatures in the SAME 16-byte reply (0x20/12 High Pressure(T),
+                0x20/14 Low Pressure(T), conv 405), which would have inverted the winter objection
+                rather than accepting it — in the January where the coil really sits at 0 °C the
+                saturation temperature is near 0 °C too, so the condition switches ITSELF off and
+                the real reading publishes on any model in any season. It fails because THE WITNESS
+                DOES NOT EXIST on the only installation available: the 0x20 transducers read exactly
+                0.0 bar in 56433/56433 published samples over 120 days (at rest and at 42 rps
+                alike), and conv 405 drops bar <= 0 before converting, so both (T) rows have never
+                published ONE sample in the store's whole retention. That is the rule's own safety
+                property firing, and it means the rule would be PERMANENTLY SILENT on the very unit
+                whose zeros motivated it, with its live verification unperformable on this board
+                forever — an unexercised conditional whose only evidence is the absence of evidence,
+                firing first on a model nobody has measured. The cross-page 0x62/15 conv 405 twin
+                DOES publish here (3.2-64.1 °C over the same 1419 running samples) and is a
+                SEPARATE proposal needing its own evidence, not this one with a wider reach:
+                value_available() is handed only the decoded row's own page reply, so reaching it
+                needs cross-page state this ledger has never carried plus an argument about how two
+                pages' sample instants relate (0x20 holds over at rest, 0x62 does not).
                 A FOURTH verdict is not
                 about a row at all: PAGE_ABSENCE_RULES is keyed on the register PAGE and reaches every
                 row on it, because "the hardware behind this reply is not fitted" is a fact about the
