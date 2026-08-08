@@ -15,6 +15,7 @@
 #include "def/signatures.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
+#include "heap_guard.hpp"
 #include "history.hpp"
 #include "hp_poll.hpp"
 #include "hp_modbus.hpp"
@@ -48,7 +49,6 @@
 #include "esp_wifi.h"
 #include "esp_timer.h"
 #include "esp_system.h"
-#include "esp_heap_caps.h"
 #include "esp_partition.h"
 #include "esp_core_dump.h"
 #include "diag_log.hpp"
@@ -840,11 +840,17 @@ void http_append_status_json(std::string& j, bool redact) {
     // the largest CONTIGUOUS block (the true OOM ceiling on this heap-tight chip). reset_reason reuses
     // the boot-time cached reason (diag_crash.cpp) mapped via logic/reset_reason.hpp; safe_mode is the
     // latched boot-loop recovery flag (safe_mode.cpp — true once too many crash boots accumulated, so
-    // poll + MQTT were skipped). Small numbers + a short slug appended to the existing builder — no
-    // large contiguous allocation, and nothing here is a `+` chain.
+    // poll + MQTT were skipped). heap_restarts is how many CONSECUTIVE heap-watchdog restarts
+    // preceded this boot (heap_guard.cpp): that restart is an esp_restart(), so reset_reason reads
+    // "sw" — the same value a config save produces — and without this field a board restarting
+    // itself every five minutes would be indistinguishable from one somebody kept saving settings
+    // on, which is exactly the unattributable reboot this block exists to prevent. 0 on any ordinary
+    // boot. Small numbers + a short slug appended to the existing builder — no large contiguous
+    // allocation, and nothing here is a `+` chain.
     j += "\"sys\":{\"free_heap\":" + std::to_string(esp_get_free_heap_size()) +
          ",\"min_free_heap\":" + std::to_string(esp_get_minimum_free_heap_size()) +
-         ",\"max_alloc\":" + std::to_string(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)) +
+         ",\"max_alloc\":" + std::to_string(heap_largest_internal_block()) +
+         ",\"heap_restarts\":" + std::to_string(heap_guard_restarts()) +
          ",\"reset_reason\":" + jstr(reset_reason_name(diag_crash_info().reason)) +
          ",\"safe_mode\":" + (safe_mode_active() ? "true" : "false") + "},";
 

@@ -1067,24 +1067,54 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   assert.match(absent.de, /keine elektrische Aufnahme/, "the absent case names the missing input");
 
   // Every reason the production code can set must be one of the codes covered above.
-  // Scraped per LINE, not per `copBlock = "x"`: one of the four is assigned through a ternary
-  // (`copBlock = heaterQuiet ? null : "buh_no_r2t"`), which a naive assignment regex misses — and a
-  // scrape that silently finds three of four would make this assertion pass by not looking.
+  //
+  // The scrape must read the rule WHERE IT LIVES, and three of the four moved: the COP-scope
+  // cascade is now `copPlan()`, which RETURNS `block: "tank_heater"`, and liveData merely copies
+  // `plan.block` into `d.copBlock`. Only `mb_scope` is still a direct assignment. That matters more
+  // than it sounds, because the assignment regex below also matches the FIRST `=` of a `===`, so
+  // the INSPECT explainer's own `d.copBlock === "tank_heater"` comparisons would keep feeding the
+  // set: the assertion would go on passing while comparing the explainer table against ITSELF, and
+  // a block reason with no sentence would sail through. Measured — with the old
+  // `/\bcopBlock\s*=\s*…/` scrape, a fifth code returned from `copPlan` and explained nowhere
+  // passed this file with exit 0.
+  //
+  // So: `=(?!=)` excludes comparisons, and the copPlan BODY is scraped for its returned `block:`
+  // literals. Both halves are required to be non-empty — a rule that has moved again must fail
+  // LOUDLY here rather than quietly reduce what is checked, which is the whole failure mode this
+  // block keeps being bitten by.
+  //
+  // [a-z0-9_] — `buh_no_r2t` carries a DIGIT, and a name pattern without one silently found three
+  // of four while the assertion still read as if it had checked them all.
   const covered = new Set(seen.values());
   const src = fs.readFileSync(new URL("../main/www/js/schematic.js", import.meta.url), "utf8");
-  // Scoped to the copBlock ASSIGNMENT EXPRESSION, not the whole line: these are written as
-  // `{ d.copScope = "plant"; d.copBlock = "tank_heater"; … }`, so a per-line scrape also collects
-  // copScope's values and the set stops meaning what it says.
-  // [a-z0-9_] — `buh_no_r2t` carries a DIGIT, and a name pattern without one silently found three of
-  // four while the assertion still read as if it had checked them all.
-  const set = new Set();
-  for (const m of src.matchAll(/\bcopBlock\s*=\s*([^;}\n]*)/g))
-    for (const q of m[1].matchAll(/"([a-z0-9_]+)"/g)) set.add(q[1]);
+
+  // (a) direct assignments — `d.copBlock = "mb_scope"`, never `d.copBlock === "…"`.
+  const assigned = new Set();
+  for (const m of src.matchAll(/\bcopBlock\s*=(?!=)\s*([^;}\n]*)/g))
+    for (const q of m[1].matchAll(/"([a-z0-9_]+)"/g)) assigned.add(q[1]);
+
+  // (b) the copPlan cascade's returned reasons. Scoped to that function's body so the surrounding
+  // file cannot contribute; an empty body means the rule was renamed or inlined and the scrape has
+  // stopped seeing it.
+  const planBody = src.match(/const copPlan\s*=[\s\S]*?\n};/);
+  assert.ok(planBody, "copPlan must remain an addressable named rule this scrape can read");
+  // Scoped to the `block:` VALUE EXPRESSION, not to a literal directly after the colon: the last
+  // arm is `block: heaterQuiet ? null : "buh_no_r2t"`, and a pattern demanding a bare string finds
+  // three of four — the same ternary trap the assignment scrape documents one paragraph up, which
+  // is why the `deepEqual` below names all four rather than merely checking each found one.
+  const planned = new Set();
+  for (const m of planBody[0].matchAll(/\bblock:\s*([^,}\n]*)/g))
+    for (const q of m[1].matchAll(/"([a-z0-9_]+)"/g)) planned.add(q[1]);
+
+  assert.ok(assigned.size > 0, "the assignment scrape must still find at least one block reason");
+  assert.ok(planned.size > 0, "the copPlan scrape must still find at least one block reason");
+
+  const set = new Set([...assigned, ...planned]);
   assert.deepEqual([...set].sort(), ["buh_no_r2t", "mb_scope", "no_pel", "tank_heater"],
-    "the scrape must find exactly the four block reasons liveData assigns");
+    "the scrape must find exactly the four block reasons the production code can set");
   for (const block of set)
     assert.ok(covered.has(block),
-      `copBlock "${block}" is set by liveData but has no explainer sentence`);
+      `copBlock "${block}" is set by the production code but has no explainer sentence`);
 }
 
 console.log("UI source matrix: arbitration, Smart-Grid and mode-aware cooling semantics correct");

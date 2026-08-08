@@ -109,3 +109,52 @@ rm -rf "$hook_tmp"
 
 echo "ui selftest: merge hook accepts current proof and blocks failing or stale proof"
 echo "ui selftest: the PR template teaches a stamp the merge gate accepts"
+
+# Re-seed the COP-block-reason scrape going self-referential. The four reasons used to be assigned
+# as literals inside liveData(); when the cascade moved into copPlan() only `mb_scope` stayed a
+# direct assignment, and the scrape's `copBlock\s*=` also matched the FIRST `=` of the INSPECT
+# explainer's own `d.copBlock === "tank_heater"` comparisons. So it went on finding all four — by
+# reading the explainer table against ITSELF — and a block reason with no bilingual sentence passed
+# with exit 0. The COP pill would then show a bare "—" with nothing saying why, which is exactly
+# what the pel explainer's two distinct sentences exist to prevent.
+#
+# Two mutations, because the two halves fail differently: a NEW reason the explainer does not cover,
+# and the rule being renamed out of the scrape's reach (which must fail loudly rather than quietly
+# check less). A fresh tree — the mutations above would confuse an unrelated contract.
+matrix_tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$matrix_tmp"; [ -z "${hook_tmp:-}" ] || rm -rf "$hook_tmp"' EXIT
+mkdir -p "$matrix_tmp/main" "$matrix_tmp/test" "$matrix_tmp/tools"
+cp -R "$proj/main/www" "$matrix_tmp/main/www"
+cp -R "$proj/main/def" "$matrix_tmp/main/def"
+cp -R "$proj/tools/ui" "$matrix_tmp/tools/ui"
+cp -R "$proj/tools/uigif" "$matrix_tmp/tools/uigif"
+cp "$proj/test/test_ui_source_matrix.mjs" "$matrix_tmp/test/"
+
+# Sanity: the unmutated copy must PASS, or the two failures below prove nothing.
+(cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >/dev/null 2>&1) || {
+  echo "ui selftest: the source-matrix contract does not pass on an unmutated tree — the COP-reason cases below would be vacuous" >&2
+  exit 1; }
+
+cp "$matrix_tmp/main/www/js/schematic.js" "$matrix_tmp/schematic.orig"
+
+# (a) a fifth reason the production cascade can return, explained nowhere.
+sed 's|^\(  if (pelSrc == null)\)|  if (pelSrc === "XX")   return { scope: "plant",  block: "ghost_code",  postBuh: false };\n\1|' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+grep -q 'ghost_code' "$matrix_tmp/main/www/js/schematic.js" || {
+  echo "ui selftest: could not seed the unexplained COP block reason — the copPlan cascade has moved" >&2; exit 1; }
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >/dev/null 2>&1); then
+  echo "ui selftest: a COP block reason with no bilingual explainer escaped the source-matrix contract" >&2
+  exit 1
+fi
+
+# (b) the rule renamed, i.e. no longer addressable by the scrape.
+sed 's|const copPlan =|const copPlanRenamed =|' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >/dev/null 2>&1); then
+  echo "ui selftest: the COP-reason scrape passed while it could no longer read the rule it claims to check" >&2
+  exit 1
+fi
+
+rm -rf "$matrix_tmp"
+
+echo "ui selftest: an unexplained COP block reason, and a scrape that stopped reading the rule, are both detected"

@@ -29,10 +29,35 @@ const diagnosis = read("main/logic/heating_curve_diagnosis.hpp");
 // UART-init early return did the same to a resolved profile.
 assert.match(history, /void history_record_board\(\)\s*\{[\s\S]*?advance_raster_locked\([\s\S]*?fold_board_locked\(/,
   "history_record_board() must advance the shared raster and fold the board trends");
-assert.match(poll,
-  /history_record_board\(\);\s*\n\s*if \(config\(\)\.profile == "auto"\)/,
+// The assertion is that nothing BRANCHES between the record and the detect/sweep decision — not that
+// the two lines are adjacent. heap_guard_sample() is the other unconditional cycle-top reading of the
+// board's own state (it decides whether an exhausted heap has stopped recovering, logic/heap_watchdog
+// .hpp), and it belongs in exactly the same place for exactly the same reason, so the pattern admits
+// sibling STATEMENTS while still refusing an `if` or a `return`.
+// `^\s*` (multiline) anchors the call to the START of its line, so it is a STATEMENT rather than a
+// branch consequent. Without it the pattern anchors on the call text wherever it appears, and
+// `if (something) history_record_board();` matches exactly as well as the unconditional form — the
+// assertion would then permit the very defect it was written for, since the board trends' original
+// failure was being reachable only when the heat pump was.
+const prologue = poll.match(
+  /^\s*history_record_board\(\);((?:\s*\n\s*(?:\/\/[^\n]*|[A-Za-z_][A-Za-z0-9_:]*\([^;]*\);))*)\s*\n\s*if \(config\(\)\.profile == "auto"\)/m);
+assert.ok(prologue,
   "the poll task must record the board trends BEFORE it decides whether to detect or to sweep — " +
   "inside either branch is what made them depend on the heat pump being reachable");
+// The heap watchdog rides that same guarantee: it samples on the one path in this task that no
+// branch can skip. Behind the detect/sweep decision it would stop watching the heap on exactly the
+// board whose X10A never answers — the absence the assertion above exists for, one feature over.
+//
+// Asserted against the CAPTURED PROLOGUE — the run of comments and bare statements the match above
+// proved contains no branch — and not as a second, free-standing "these two calls are near each
+// other" search. That distinction is the whole assertion: a proximity pattern spans the `if` line
+// happily, so it holds just as well when the call has been moved INSIDE the detect branch. Measured
+// — with the previous `[\s\S]{0,600}?` form, moving `heap_guard_sample()` behind
+// `if (config().profile == "auto")` passed this file with exit 0, which is precisely the defect the
+// board trends already shipped once, one feature over.
+assert.ok(prologue[1].includes("heap_guard_sample();"),
+  "heap_guard_sample() must sit with history_record_board() at the unconditional top of the cycle, " +
+  "before the detect/sweep branch — not merely somewhere nearby");
 // ...and exactly one owner: a second fold inside history_record() would put them back behind
 // poll_once(), which is the branch that could skip them.
 assert.doesNotMatch(history, /fold_board_locked\([^)]*\);[\s\S]*?fold_board_locked\(/,

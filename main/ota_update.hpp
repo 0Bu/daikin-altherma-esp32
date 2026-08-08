@@ -42,4 +42,10 @@ struct OtaStatus {
 };
 OtaStatus ota_status();
 
+// Is a check or a download in flight? Separate from ota_status() because the caller is the heap
+// watchdog (heap_guard.cpp), which runs when allocation is failing: copying an OtaStatus copies four
+// std::strings out under the lock and can itself throw std::bad_alloc, on the one path that must
+// stay allocation-free. This reads the same mutex-guarded bool and returns it.
+bool ota_busy();
+
 } // namespace daik

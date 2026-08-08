@@ -8,6 +8,7 @@
 #include "diag_log.hpp"
 #include "hp_comm.hpp"
 #include "hp_convert.hpp"
+#include "heap_guard.hpp"
 #include "hp_detect.hpp"
 #include "history.hpp"
 #include "logic/availability.hpp"
@@ -25,7 +26,9 @@
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/semphr.h"
+#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
 #include <atomic>
 #include <cstdio>
@@ -86,11 +89,9 @@ static SaturationWitness      s_sat_witness;
 // non-allocating and cannot throw, but they take it through Lock as well: it costs nothing, and it
 // keeps a later edit that adds an allocating field to a commit from silently reintroducing the bug.
 namespace {
-struct Lock {
-    explicit Lock(SemaphoreHandle_t m) : m_(m) { if (m_) xSemaphoreTake(m_, portMAX_DELAY); }
-    ~Lock() { if (m_) xSemaphoreGive(m_); }
-    SemaphoreHandle_t m_;
-};
+// The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
+// This used to be a private copy here; nine of them had drifted into two different shapes.
+using Lock = SemGuard;
 }  // namespace
 
 static void poll_once() {
@@ -424,6 +425,12 @@ static void poll_task(void*) {
             // answers — wrong pins, unplugged cable, unit off — recorded no heap curve at all, on
             // exactly the board someone is debugging. Cheap: two counter reads and one mutex.
             history_record_board();
+            // Same cadence, same reasoning, one step further: the trends RECORD the heap, this
+            // decides what to do when it has been unusable for so long that no transient explains it
+            // (logic/heap_watchdog.hpp). Here rather than in a task of its own because this site is
+            // already unconditional, already 1 Hz and already reads the heap — and adding a resident
+            // task to watch the largest contiguous block would spend the very resource it measures.
+            heap_guard_sample();
             if (config().profile == "auto") {
                 // Silent-bus detect backoff: sweep at the poll floor at first, then stretch toward the
                 // ceiling the longer the bus stays quiet (logic/detect_backoff.hpp). Applied by SKIPPING
@@ -481,7 +488,7 @@ void hp_poll_start() {
     // core dump is the only place to check this (CLAUDE.md -> Memory constraints). If a future change
     // gives this task a large builder or a deep call chain again, raise it in the SAME commit — and
     // note that a builder shared by two tasks is only ever as safe as its smallest stack.
-    if (xTaskCreate(poll_task, "hp_poll", 8192, nullptr, 5, nullptr) != pdPASS)
+    if (xTaskCreate(poll_task, "hp_poll", 8192, nullptr, TASK_PRIO_POLL, nullptr) != pdPASS)
         diag_printf("hp_poll: poll task alloc failed — X10A polling disabled this boot\n");
 }
 

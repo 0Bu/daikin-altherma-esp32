@@ -29,7 +29,9 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
+#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/semphr.h"
+#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
 #include <cstring>
 #include <exception>
@@ -54,11 +56,9 @@ OtaStatus         s_status;
 // and the two sides then guard s_status with DIFFERENT locks — no mutual exclusion at all, in the
 // one construct whose entire job is to provide it.
 SemaphoreHandle_t s_mtx = xSemaphoreCreateMutex();
-struct Lock {
-    explicit Lock(SemaphoreHandle_t m) : m_(m) { if (m_) xSemaphoreTake(m_, portMAX_DELAY); }
-    ~Lock() { if (m_) xSemaphoreGive(m_); }
-    SemaphoreHandle_t m_;
-};
+// The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
+// This used to be a private copy here; nine of them had drifted into two different shapes.
+using Lock = SemGuard;
 
 // One OTA operation at a time. Guarded by s_mtx (not a bare bool): /ota/check and /ota/update are
 // both reachable from the network and a double-tap in the UI must not spawn two TLS sessions.
@@ -69,7 +69,7 @@ bool s_busy = false;
 // would leave almost nothing spare. The task is transient and only ever exists one at a time, so
 // the extra 2 KB is borrowed, not resident.
 constexpr int  kTaskStack     = 10240;
-constexpr int  kTaskPrio      = 4;      // same as the health-gate task; below poll/httpd
+constexpr UBaseType_t kTaskPrio = TASK_PRIO_OTA;   // see main/task_config.hpp for the tiers
 constexpr int  kHttpTimeoutMs = 15000;
 constexpr int  kOtaBufSize    = 2048;   // download chunk; deliberately small (contiguous heap)
 constexpr size_t kManifestMax = 1024;   // the real manifest is ~200 B; anything larger is not ours
@@ -428,6 +428,14 @@ void ota_update_async(bool allow_downgrade) {
         ESP_LOGW("ota", "update ignored: an OTA operation is already running");
 }
 
+bool ota_busy() {
+    // Deliberately NOT ota_status().state != "idle": that builder copies four std::strings out and
+    // also takes the CONFIG mutex, and its one caller here is the heap watchdog running on a heap
+    // that is failing. This critical section allocates nothing at all.
+    Lock lk(s_mtx);
+    return s_busy;
+}
+
 OtaStatus ota_status() {
     // The channel is answered from the LIVE config, not from whatever the last check left behind:
     // /ota/status is what the UI reads back after POST /set_ota, and before any check has run there
@@ -488,7 +496,7 @@ void ota_health_gate_arm() {
     // If the gate task can't be created, a PENDING_VERIFY OTA image is never marked valid and the
     // bootloader will roll it back on the next reboot — safe, but say so (a silent failure looks like
     // a healthy commit that never happened).
-    if (xTaskCreate(health_gate_task, "ota_health", 3072, nullptr, 4, nullptr) != pdPASS)
+    if (xTaskCreate(health_gate_task, "ota_health", 3072, nullptr, TASK_PRIO_OTA_GATE, nullptr) != pdPASS)
         ESP_LOGE("ota", "health-gate task alloc failed — a pending OTA image will roll back on reboot");
 }
 

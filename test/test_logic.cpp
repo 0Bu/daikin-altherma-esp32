@@ -23,6 +23,7 @@
 #include "logic/raw_capture.hpp"
 #include "logic/captive.hpp"
 #include "logic/boot_guard.hpp"
+#include "logic/heap_watchdog.hpp"
 #include "logic/button.hpp"
 #include "logic/led_pattern.hpp"
 #include "logic/bootlog.hpp"
@@ -2359,6 +2360,45 @@ static void test_boot_guard() {
     c = boot_next_fail_count(c);
     CHECK(c == BOOT_FAIL_THRESHOLD && boot_should_enter_safe_mode(c));
 
+    // The healthy-uptime timer arms on an ordinary boot and is REFUSED while safe mode is latched.
+    CHECK(boot_healthy_timer_arms(false));
+    CHECK(!boot_healthy_timer_arms(true));
+
+    // The PROPERTY that condition exists for, asserted over a run of boots rather than as two
+    // return values: once safe mode is latched, a further crash reset must still find the counter
+    // above the threshold and re-latch at once. Arming the timer in safe mode zeroes that counter
+    // BOOT_HEALTHY_S into the recovery boot, so the next crash starts from scratch and the device
+    // brings the full stack — the configuration already proven to crash four times — back up for
+    // another BOOT_FAIL_THRESHOLD rounds. Run with the guard and without it, and count the boots
+    // that started the poll engine + MQTT.
+    auto full_stack_boots = [](bool arm_in_safe_mode) {
+        int  fails      = 0;
+        bool latched    = false;
+        bool was_crash  = false;
+        int  full_stack = 0;
+        for (int i = 0; i < 12; i++) {
+            // safe_mode_begin()
+            if (was_crash) {
+                fails   = boot_next_fail_count(fails);
+                latched = boot_should_enter_safe_mode(fails);
+            } else {
+                fails   = 0;
+                latched = false;
+            }
+            if (!latched) full_stack++;
+            // safe_mode_arm_healthy(), then BOOT_HEALTHY_S of uptime. A full-stack boot never
+            // reaches it here (the fault takes the device down first); a safe-mode boot always does.
+            if ((arm_in_safe_mode || boot_healthy_timer_arms(latched)) && latched) fails = 0;
+            was_crash = true;   // the fault also lives behind a subsystem safe mode keeps running
+        }
+        return full_stack;
+    };
+    // Guarded: exactly BOOT_FAIL_THRESHOLD full-stack boots, then it parks for good — a latch.
+    CHECK(full_stack_boots(/*arm_in_safe_mode=*/false) == BOOT_FAIL_THRESHOLD);
+    // Unguarded (the shipped defect): every safe-mode boot throws the evidence away, so the device
+    // keeps returning to the configuration that crashed it — strictly more full-stack boots.
+    CHECK(full_stack_boots(/*arm_in_safe_mode=*/true) > BOOT_FAIL_THRESHOLD);
+
     // Crash classification: ONLY panic / int-wdt / task-wdt / other-wdt / brownout accumulate.
     CHECK(boot_reset_was_crash(4));    // panic
     CHECK(boot_reset_was_crash(5));    // int_wdt
@@ -2378,6 +2418,92 @@ static void test_boot_guard() {
     // Consistency with the shared reset vocabulary: the crash codes boot_guard counts are a SUBSET of
     // crashinfo's fault set (both agree these five are faults), guarding against the enum drifting apart.
     for (int code : {4, 5, 6, 7, 9}) CHECK(boot_reset_was_crash(code) && crash_reason_is_fault(code));
+}
+
+static void test_heap_watchdog() {
+    // A healthy heap says nothing, repeatedly. `Ok` twice over is the state the device is in for
+    // essentially its whole life, so it must cost no log line and no state change.
+    HeapWatchdog w;
+    CHECK(heap_watch(w, {HEAP_CRITICAL_BYTES, 1000, false}).action == HeapAction::Ok);
+    CHECK(heap_watch(w, {64 * 1024, 2000, false}).action == HeapAction::Ok);
+    CHECK(!w.critical);
+
+    // Dropping below the threshold ARMS a run; staying below WATCHES it; the elapsed time reported
+    // is the run's own, not the configured hold.
+    HeapVerdict v = heap_watch(w, {HEAP_CRITICAL_BYTES - 1, 10000, false});
+    CHECK(v.action == HeapAction::Armed && v.critical_ms == 0 && w.critical);
+    v = heap_watch(w, {512, 70000, false});
+    CHECK(v.action == HeapAction::Watching && v.critical_ms == 60000);
+    CHECK(heap_restart_in_ms(v.critical_ms) == HEAP_CRITICAL_HOLD_MS - 60000);
+
+    // One sample back above the threshold ends the run — and reports how long it ran, which is the
+    // difference between "the device healed itself" and a silence the reader has to interpret.
+    v = heap_watch(w, {HEAP_CRITICAL_BYTES, 90000, false});
+    CHECK(v.action == HeapAction::Recovered && v.critical_ms == 80000 && !v.ota_excused);
+    CHECK(!w.critical);
+    // ...and the NEXT healthy sample is silent again rather than repeating the recovery.
+    CHECK(heap_watch(w, {64 * 1024, 91000, false}).action == HeapAction::Ok);
+
+    // The hold has to ELAPSE. One sample short is still Watching; reaching it exactly fires.
+    HeapWatchdog h;
+    CHECK(heap_watch(h, {0, 0, false}).action == HeapAction::Armed);
+    CHECK(heap_watch(h, {0, HEAP_CRITICAL_HOLD_MS - 1, false}).action == HeapAction::Watching);
+    v = heap_watch(h, {0, HEAP_CRITICAL_HOLD_MS, false});
+    CHECK(v.action == HeapAction::Restart && v.critical_ms == HEAP_CRITICAL_HOLD_MS);
+    CHECK(heap_restart_in_ms(v.critical_ms) == 0);
+    // A fired run keeps firing while it lasts (the sample site decides whether it may still act),
+    // and the countdown saturates at 0 instead of wrapping into a ~49-day figure.
+    CHECK(heap_watch(h, {0, HEAP_CRITICAL_HOLD_MS * 2, false}).action == HeapAction::Restart);
+    CHECK(heap_restart_in_ms(HEAP_CRITICAL_HOLD_MS + 1) == 0);
+
+    // A 32-bit millisecond wrap inside the hold window must measure the TRUE elapsed time. Naive
+    // signed subtraction would go hugely negative here and never fire; naive unsigned comparison of
+    // absolute values would fire instantly. Arm 1 s before the wrap, then sample 1 s after it.
+    HeapWatchdog wrap;
+    const uint32_t before = 0xFFFFFFFFu - 999u;
+    CHECK(heap_watch(wrap, {0, before, false}).action == HeapAction::Armed);
+    v = heap_watch(wrap, {0, 1000u, false});
+    CHECK(v.action == HeapAction::Watching && v.critical_ms == 2000);
+
+    // An OTA holds the largest allocations this firmware ever makes, so a low reading during one
+    // proves nothing. It CLEARS the run rather than pausing it: a run that started before the
+    // download must not resume its clock afterwards and fire mid-install.
+    HeapWatchdog o;
+    CHECK(heap_watch(o, {0, 0, false}).action == HeapAction::Armed);
+    v = heap_watch(o, {0, 60000, /*ota_busy=*/true});
+    CHECK(v.action == HeapAction::Recovered && v.ota_excused && v.critical_ms == 60000);
+    CHECK(!o.critical);
+    // The clock really did restart: HEAP_CRITICAL_HOLD_MS after the EXCUSAL is only Armed+Watching,
+    // where a merely-paused run would already have fired.
+    CHECK(heap_watch(o, {0, 61000, false}).action == HeapAction::Armed);
+    CHECK(heap_watch(o, {0, 61000 + HEAP_CRITICAL_HOLD_MS - 1, false}).action == HeapAction::Watching);
+    // An OTA running while the heap is HEALTHY again is an ordinary recovery, not an excusal — the
+    // two get different sentences in the log, so they must not collapse into one flag.
+    HeapWatchdog e;
+    CHECK(heap_watch(e, {0, 0, false}).action == HeapAction::Armed);
+    v = heap_watch(e, {64 * 1024, 1000, /*ota_busy=*/true});
+    CHECK(v.action == HeapAction::Recovered && !v.ota_excused);
+
+    // The restart LADDER is bounded, and the bound is on the count that PRECEDED this boot.
+    for (uint8_t n = 0; n < HEAP_MAX_CONSECUTIVE_RESTARTS; n++) CHECK(heap_may_restart(n));
+    CHECK(!heap_may_restart(HEAP_MAX_CONSECUTIVE_RESTARTS));
+    CHECK(!heap_may_restart(255));
+
+    // The persisted breadcrumb can only ever UNDER-count. Over-counting would SUPPRESS a restart the
+    // device needs, so every unusable value reads as 0 rather than as the cap.
+    CHECK(heap_restart_count_sane(0) == 0);
+    CHECK(heap_restart_count_sane(3) == 3);
+    CHECK(heap_restart_count_sane(HEAP_MAX_CONSECUTIVE_RESTARTS) == HEAP_MAX_CONSECUTIVE_RESTARTS);
+    CHECK(heap_restart_count_sane(-1) == 0);
+    CHECK(heap_restart_count_sane(-999999) == 0);
+    CHECK(heap_restart_count_sane(HEAP_MAX_CONSECUTIVE_RESTARTS + 1) == 0);
+    CHECK(heap_restart_count_sane(2147483647) == 0);
+    // A sane count always leaves the ladder able to act — the whole point of failing this way round.
+    CHECK(heap_may_restart(heap_restart_count_sane(2147483647)));
+
+    // The threshold is stated in the units the sample is taken in, and sits far below the smallest
+    // contiguous block this firmware's own pre-flight (http_config.cpp) will start work at.
+    CHECK(HEAP_CRITICAL_BYTES < 12u * 1024u);
 }
 
 static void test_health_gate() {
@@ -2899,8 +3025,26 @@ static void test_crashinfo() {
     CHECK(coredump_is_reportable(true, false));
     CHECK(!coredump_is_reportable(false, false));
     CHECK(!coredump_is_reportable(true, true));
-    CHECK(coredump_erase_failure_blocks_dismiss(false));
-    CHECK(!coredump_erase_failure_blocks_dismiss(true));
+    // A real erase FAILURE on current-firmware evidence still blocks: the dump may remain
+    // downloadable, and a dismissal would assert it is gone.
+    const int kFail = 0x103;   // ESP_ERR_INVALID_STATE — a stand-in for "the erase genuinely failed"
+    CHECK(coredump_erase_failure_blocks_dismiss(kFail, false));
+    CHECK(!coredump_erase_failure_blocks_dismiss(kFail, true));
+    // ESP_OK obviously permits it...
+    CHECK(!coredump_erase_failure_blocks_dismiss(0, false));
+    CHECK(!coredump_erase_failure_blocks_dismiss(0, true));
+    // ...and so does ESP_ERR_NOT_FOUND, which is the whole point: it means the board has no
+    // `coredump` partition at all — the state of every device flashed before one existed and
+    // upgraded over the air since, because OTA never rewrites the partition table (partitions.csv).
+    // There is nothing to destroy, so the dismissal's other job — clearing the report — must still
+    // happen. Blocking it answered 500 forever, and a fault reset carries no dump often enough
+    // (a stack overflow overruns it) that those boards saw a banner no action could clear.
+    CHECK(!coredump_erase_failure_blocks_dismiss(ESP_ERR_NOT_FOUND_MIRROR, false));
+    CHECK(!coredump_erase_failure_blocks_dismiss(ESP_ERR_NOT_FOUND_MIRROR, true));
+    // The exemption is NARROW by construction — neighbouring error codes must not inherit it, or
+    // "erase failed" would start reading as "nothing to erase".
+    CHECK(coredump_erase_failure_blocks_dismiss(ESP_ERR_NOT_FOUND_MIRROR - 1, false));
+    CHECK(coredump_erase_failure_blocks_dismiss(ESP_ERR_NOT_FOUND_MIRROR + 1, false));
 
     // An orphan core-dump with no fault reason is still notable (a dump is waiting to be pulled).
     CrashInfo orphan;
@@ -10284,6 +10428,7 @@ int main() {
     test_wifi_rollback();
     test_reset_reason();
     test_boot_guard();
+    test_heap_watchdog();
     test_health_gate();
     test_captive();
     test_http_body();

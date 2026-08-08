@@ -27,7 +27,9 @@
 #include "esp_timer.h"
 #include "mdns.h"
 #include "freertos/FreeRTOS.h"
+#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/semphr.h"
+#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
 #include <sys/socket.h>
 #include <netdb.h>
@@ -108,11 +110,9 @@ struct MbFailure {
 // RAII guard around s_mtx (same idiom as hp_poll.cpp/config.cpp): releases on unwind so a
 // std::bad_alloc thrown while copying strings out never strands the mutex.
 namespace {
-struct Lock {
-    explicit Lock(SemaphoreHandle_t m) : m_(m) { if (m_) xSemaphoreTake(m_, portMAX_DELAY); }
-    ~Lock() { if (m_) xSemaphoreGive(m_); }
-    SemaphoreHandle_t m_;
-};
+// The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
+// This used to be a private copy here; nine of them had drifted into two different shapes.
+using Lock = SemGuard;
 }  // namespace
 
 
@@ -848,7 +848,7 @@ static void mb_task_start_if_enabled() {
         s_status.enabled = true;
         s_backoff.silent = 0;
         s_next_try_us    = 0;
-        if (xTaskCreate(mb_task, "hp_modbus", 6144, nullptr, 4, &s_task) != pdPASS) {
+        if (xTaskCreate(mb_task, "hp_modbus", 6144, nullptr, TASK_PRIO_MODBUS, &s_task) != pdPASS) {
             s_task = nullptr;
             s_status.enabled = false;
             alloc_failed = true;

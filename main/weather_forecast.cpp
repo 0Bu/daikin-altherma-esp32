@@ -10,7 +10,9 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
+#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/semphr.h"
+#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
 #include <algorithm>
 #include <cmath>
@@ -27,7 +29,7 @@ namespace {
 constexpr size_t kPayloadMax = 8 * 1024;
 constexpr int kHttpTimeoutMs = 20000;
 constexpr int kTaskStack = 12288;
-constexpr int kTaskPrio = 3;
+constexpr UBaseType_t kTaskPrio = TASK_PRIO_WEATHER;   // see main/task_config.hpp
 constexpr const char* kProvider = "open-meteo";
 constexpr const char* kModel = "icon_seamless";
 
@@ -35,11 +37,9 @@ WeatherForecastStatus s_status;
 SemaphoreHandle_t s_mtx = xSemaphoreCreateMutex();
 TaskHandle_t s_task = nullptr;
 
-struct Lock {
-    explicit Lock(SemaphoreHandle_t m) : m_(m) { if (m_) xSemaphoreTake(m_, portMAX_DELAY); }
-    ~Lock() { if (m_) xSemaphoreGive(m_); }
-    SemaphoreHandle_t m_;
-};
+// The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
+// This used to be a private copy here; nine of them had drifted into two different shapes.
+using Lock = SemGuard;
 
 std::string open_meteo_url(const Config& cfg) {
     // Only formatter-produced signed decimals enter this URL. `forecast_hours=6` is deliberately

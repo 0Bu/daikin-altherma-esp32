@@ -81,6 +81,17 @@ static void healthy_timer_cb(void* arg) {
 }
 
 void safe_mode_arm_healthy() {
+    // Refused while safe mode is latched — see boot_healthy_timer_arms() for why staying up with the
+    // poll engine and MQTT switched off is not evidence that the fault is gone. Said out loud rather
+    // than skipped silently: a counter that deliberately does NOT age out looks like a bug to the
+    // next person reading /diag, and the line names the way out.
+    if (!boot_healthy_timer_arms(s_safe_mode)) {
+        diag_printf("boot: SAFE MODE — healthy timer NOT armed; with the poll engine and MQTT down, "
+                    "staying up says nothing about the fault. Fix the config or install a newer "
+                    "build — any clean reboot clears the counter\n");
+        return;
+    }
+
     if (s_healthy_timer != nullptr) {
         diag_printf("boot: healthy timer already armed\n");
         return;

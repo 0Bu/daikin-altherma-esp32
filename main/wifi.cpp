@@ -17,6 +17,7 @@
 #include "ping/ping_sock.h"
 #include "lwip/ip_addr.h"
 #include "freertos/FreeRTOS.h"
+#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -419,7 +420,7 @@ bool wifi_start_sta() {
     // hp_poll takes 8192). The canary (CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY) turns an
     // overflow into a reboot — which would land during the memory-pressure wedge this watchdog
     // exists to break, i.e. exactly when it must not.
-    if (xTaskCreate(wifi_watchdog_task, "wifi_wd", 4096, nullptr, 4, nullptr) != pdPASS)
+    if (xTaskCreate(wifi_watchdog_task, "wifi_wd", 4096, nullptr, TASK_PRIO_WIFI_WD, nullptr) != pdPASS)
         diag_printf("wifi: watchdog task alloc failed — ghost-association recovery disabled this boot\n");
     return true;
 }

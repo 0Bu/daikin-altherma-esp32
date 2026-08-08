@@ -121,6 +121,16 @@ jobs:
       - name: Verify the logic coverage gate still has teeth
         run: ./tools/coverage/selftest.sh
 
+      # The presenter-parity CHECK itself rides the step above (run-mock-tests.sh ends with it, in
+      # every mode, where a C++ compiler is already guaranteed) — running it again here would only
+      # pay for the same 200-row sweep twice. What needs its own step is its SELFTEST: both sides of
+      # a parity gate are code, and the failure mode of any comparison is that it quietly stops
+      # comparing, which reports the loudest possible green. This re-seeds each way the browser copy
+      # can drift from the C++ rule — including the mixed-zone row this project has already shipped
+      # once — and fails if any of them survives.
+      - name: Verify the presenter-parity gate still has teeth
+        run: ./tools/presenter/selftest.sh
+
       # One source of truth for the whole device UI. It executes every test_ui_*.mjs contract, the
       # HomeHub/MCP interaction boundaries and a behavioral matrix over the production one-time
       # wiring: every shipped modal, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, and the

@@ -17,6 +17,11 @@ bool safe_mode_active();
 
 // One-shot timer: after BOOT_HEALTHY_S of continuous uptime, clear the crash counter so a single old
 // crash doesn't accumulate with a much later, unrelated one. Arm once after services are up.
+//
+// A NO-OP while safe mode is latched (logic/boot_guard.hpp's boot_healthy_timer_arms), which is what
+// makes safe mode a latch rather than a cycle: uptime earned with the poll engine and MQTT down is
+// evidence about the recovery surface, not about the fault that is still in the config. The caller
+// may therefore call this unconditionally — the guard lives here, not at the call site.
 void safe_mode_arm_healthy();
 
 } // namespace daik

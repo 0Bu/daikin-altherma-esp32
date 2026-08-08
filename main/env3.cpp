@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/task.h"
 
 #include <cmath>
@@ -302,7 +303,7 @@ void env3_start() {
     g_runtime.status.started = true;
     g_runtime.status.error = "collecting";
     portEXIT_CRITICAL(&g_mux);
-    if (xTaskCreate(task, "env3", 4096, nullptr, 4, nullptr) != pdPASS) {
+    if (xTaskCreate(task, "env3", 4096, nullptr, TASK_PRIO_ENV3, nullptr) != pdPASS) {
         publish_error("task_start_failed");
         ESP_LOGE("env3", "task start failed");
         return;

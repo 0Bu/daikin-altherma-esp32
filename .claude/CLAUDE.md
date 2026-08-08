@@ -68,7 +68,7 @@ logic with the plain system toolchain (no ESP-IDF/Docker/board), so decoding/con
 changes can be *verified*, not just reasoned about, even in a cloud session:
 
 ```bash
-scripts/run-mock-tests.sh --coverage  # host logic tests + 95% executable-line coverage floor
+scripts/run-mock-tests.sh --coverage  # host logic tests + 95% coverage floor + presenter parity
 tools/coverage/selftest.sh   # prove the coverage gate rejects an under-covered production line
 scripts/run-contract-tests.sh     # do the firmware's SOURCE boundaries still hold? (node-only)
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
@@ -427,12 +427,54 @@ them swapped. Both flash over native USB-Serial/JTAG without a BOOT-button dance
 ## Architecture (component map)
 
 ```
-main.cpp        boot: NVS, config, safe-mode guard, WiFi(STA)|setup-AP, SNTP, mDNS, HTTP, MQTT, poll, OTA gate
+main.cpp        boot: NVS, config, safe-mode guard, WiFi(STA)|setup-AP, SNTP, mDNS, HTTP, MQTT, poll, OTA gate.
+                The sequence runs inside an EXCEPTION BOUNDARY (boot_sequence/boot_failed): app_main is
+                a C frame boundary like every handler and task loop here, and boot allocates, so an
+                escape used to reach std::terminate anonymously. It abort()s with the phase named —
+                abort and NOT esp_restart, because boot_reset_was_crash classifies a "sw" reset as
+                INTENTIONAL and clears the crash counter on it, so a boot that always threw would
+                restart forever without ever accumulating one crash boot. A panic COUNTS, writes a
+                dump, and reaches safe mode after four
 safe_mode.cpp   boot-loop safe mode (logic/boot_guard.hpp): counts crash-only boots in NVS "daik_cfg"
                 (boot_fails); past BOOT_FAIL_THRESHOLD it latches -> main.cpp skips the poll engine + MQTT
                 bridge (WiFi + web UI + OTA stay up) so a bad config (e.g. wrong RX/TX pins) is fixable
                 in-browser, not over USB; a clean/intentional reboot resets the count, and a
-                BOOT_HEALTHY_S-uptime timer clears it. Drives /status.sys.safe_mode + the UI recovery banner
+                BOOT_HEALTHY_S-uptime timer clears it. That timer is NOT armed while safe mode is
+                latched (boot_healthy_timer_arms), and that one condition is what makes this a LATCH
+                rather than a CYCLE: safe mode runs with the poll engine and MQTT down — precisely
+                where a config crash-loop lives — so surviving 30 s there is evidence about the
+                RECOVERY SURFACE, not about the fault. Armed, it cleared the counter 30 s into every
+                recovery boot, so the next crash reset started from zero and brought the full stack
+                back up on the configuration already proven to crash four times; the device then
+                spent BOOT_FAIL_THRESHOLD boots crash-looping for each one it was fixable in.
+                Nothing is stranded by refusing: ANY non-crash reset zeroes the counter and every
+                intentional exit is one (a /set_* save, an OTA install, a power cycle, the recovery
+                button), so safe mode ends when somebody acts on it and only then.
+                Drives /status.sys.safe_mode + the UI recovery banner
+heap_guard.cpp  THE HEAP WATCHDOG's device glue (logic/heap_watchdog.hpp) — the escalation every other
+                OOM guard here deliberately lacks. handle_all answers 503, each allocating task loop
+                catches std::bad_alloc and skips the cycle keeping its last good state, a publish is
+                dropped: all correct for a TRANSIENT shortage, and none of them asks what happens
+                when it never recovers. Composed, they describe a device that is powered, associated,
+                answering 503 to everything and republishing nothing, indefinitely, reporting no
+                fault — a HANG, which is worse than a crash (a crash reboots in seconds and leaves a
+                reset reason, a core dump and a syslog record; a wedge looks like a powered-off
+                device and heals never). So a largest CONTIGUOUS INTERNAL block under
+                HEAP_CRITICAL_BYTES for HEAP_CRITICAL_HOLD_MS unbroken becomes a deliberate
+                esp_restart, capped at HEAP_MAX_CONSECUTIVE_RESTARTS by the NVS "heap_rst"
+                breadcrumb (an i32, not a formatted string: the whole restart path stays
+                allocation-free on a heap that is by definition failing). An in-flight OTA CLEARS the
+                run rather than pausing it — a paused run could resume its clock and fire mid-install.
+                Also the home of heap_largest_internal_block(), THE ONE largest-block sampler: every
+                reporting site (history's max_alloc trend, the MQTT heartbeat, /status.sys.max_alloc,
+                /set_mqtt's pre-flight) used MALLOC_CAP_DEFAULT, which answers from PSRAM on a board
+                that has it (sdkconfig.defaults offers CONFIG_SPIRAM), so all four would have
+                reported megabytes of headroom while internal DRAM sat at a few hundred bytes.
+                Sampled by hp_poll at the top of every cycle beside history_record_board(), the one
+                path in that task no branch can skip — so NOT in safe mode, which does not start the
+                poll task; that is stated rather than hidden, and is defensible because safe mode has
+                already shut down the five largest allocators and is itself the reachable minimal
+                state a restart would be trying to reach
 config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot WiFi rollback backup +
                 link cache (pins/proto) in NVS "daik_cfg"; model (profile/fingerprint) RAM-only
                 (config_set_model); mutex-guarded. Writers commit only the fields they OWN: the two
@@ -606,7 +648,10 @@ hp_modbus.cpp   THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source of rea
                 space-heating window from a DHW cycle (register 52) or a standstill. On /status.modbus
                 as plant_gate_known/plant_gate_active — known=false means the register did not answer
                 and must NEVER read as an inactive plant.
-hp_poll.cpp     poll engine task: X10A ONLY — the HomeHub is a separate stack in hp_modbus.cpp with
+hp_poll.cpp     poll engine task: X10A ONLY. Calls heap_guard_sample() at the top of every cycle,
+                beside history_record_board() and for the same reason (the one path in this task no
+                branch can skip; test_source_absence_contract.mjs pins both). The HomeHub is a
+                separate stack in hp_modbus.cpp with
                 its own task and cache, so nothing here branches on a transport and this task's 8192
                 stack is the one it ran on for months. (auto-detect if profile=="auto") profile
                 registers -> query -> decode -> thread-safe cache. It PUBLISHES to no client — the
@@ -1202,10 +1247,21 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 written after boot, a single monotonic false->true store no reader needs a lock for.
                 A dump-only republish test would have left HA's retained crash record standing after
                 a dismissal on a fault boot that never wrote a dump — which is most of them
+rtos_guard.hpp  THE ONE unwind-safe RAII mutex guard (daik::SemGuard), aliased as `Lock` in each of
+                the nine files that used to define its own. Two shapes had already diverged about
+                whether a failed take is noticed, and a per-file struct is invisible to its
+                neighbour. Adds a BOUNDED/zero-wait acquire for the callback contexts that must not
+                block (esp-mqtt's event task), which neither old shape could express
+task_config.hpp THE task PRIORITY table (TASK_PRIO_*). Relative priority is a property of the SYSTEM
+                — only meaningful beside the other eleven — so it is declared once instead of as
+                twelve bare literals docs/ARCHITECTURE.md's task inventory had nothing to drift
+                against. STACK SIZES deliberately stay at their call sites: each is justified by that
+                task's own measured deepest frame, and a shared table of them would invite exactly
+                the copy-the-neighbour sizing the memory section warns about
 logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, registers, value_def,
                 config_model,
                 config_store, discovery, ha_device, detect, history, json, mqtt_base, mqtt_group, mqtt_uri, homehub_map, heartbeat, crashinfo,
-                bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch,
+                bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch, heap_watchdog,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ui_lang,
                 http_body, http_surface, query_flag, redact, mcp, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
@@ -1528,7 +1584,15 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 derived figures AND the inspector's leaving-water rows. A looser second copy of the
                 pattern is the failure mode to watch for: it re-opens exactly the substitution this
                 header exists to prevent (it matched the bizone kit's MIXED leaving-water row), and
-                being a copy, the CI gate on this rule no longer covers it.
+                being a copy, the CI gate on this rule no longer covers it. THAT GAP IS NOW CLOSED
+                mechanically — scripts/check-presenter-parity.sh diffs the browser's copies of this
+                rule, cop_scope's two and ou_stale's page set against these headers over every
+                distinct (label, register) pair the catalog produces. The rule to keep is that both
+                copies stay ADDRESSABLE: the gate calls named functions (lwtIsPreBuh,
+                lwtIsMeasurement, isPostBuhRow, copPlan, OU_HELD_PAGES), and a rule folded back into
+                its caller exits 2 as unreachable rather than passing by comparing nothing — which
+                is also why copPlan takes the two heater TRI-STATES and collapses them itself, since
+                a step performed in the caller is a step no comparison can reach.
                 history.hpp = the 24-hour trends: WHICH rows get one, WHEN a stored sample is a
                 measurement rather than a repeat of one, the ring mechanics, and WHICH SAMPLE a
                 PINNED readout still refers to (history_pin_index — a tap in the web UI pins the
@@ -2183,7 +2247,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT (broker, credentials AND this installation's base topic, v16); syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; the v15 external circulation-power witness (name/topic/paths/max_age/on+off thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against); and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v16 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter. |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT (broker, credentials AND this installation's base topic, v16); syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; the v15 external circulation-power witness (name/topic/paths/max_age/on+off thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against); and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v16 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter, and `heap_rst` the heap watchdog's consecutive-restart breadcrumb (i32, cleared on any ordinary boot, capped so a restart LOOP is bounded). |
 
 **Flash partitions beyond NVS.** `hist` (0x1e000, 8 KB) fills the gap that already existed between
 `coredump` and `ota_0`'s 64 KB boundary, and holds the COARSE 24-hour trend snapshot `history.cpp`
@@ -2420,9 +2484,13 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   remains false for wire compatibility. The plant-gate pair also reaches MQTT through
                   the `<base>/heating_curve` document's diagnosis.gates block — as EVIDENCE for the
                   diagnosis, never as a writable entity: there is no actuator here to mirror,
-                  sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode} — heap
-                  headroom (free / since-boot low-water / largest-contiguous) + why the device last
-                  booted, ALWAYS present (unlike last_crash, and unlike the MQTT heartbeat needs no
+                  sys{free_heap,min_free_heap,max_alloc,heap_restarts,reset_reason,safe_mode} — heap
+                  headroom (free / since-boot low-water / largest-contiguous INTERNAL, via
+                  heap_guard.hpp's one sampler) + how many consecutive heap-watchdog restarts preceded
+                  this boot (0 on an ordinary one; the restart is an esp_restart, so reset_reason
+                  reads the same "sw" a config save produces and without this field a board
+                  restarting itself every five minutes is indistinguishable from one somebody kept
+                  saving settings on) + why the device last booted, ALWAYS present (unlike last_crash, and unlike the MQTT heartbeat needs no
                   broker); reset_reason via logic/reset_reason.hpp, safe_mode = the latched boot-loop
                   recovery flag (safe_mode.cpp; true once too many crash boots accumulated -> poll +
                   MQTT skipped),
@@ -3037,7 +3105,14 @@ doesn't strand a lock: a mutex taken with a raw `xSemaphoreTake` is *not* releas
 unwinds, so every reader then blocks `portMAX_DELAY` and the device wedges into a watchdog reboot —
 worse than the crash the guard prevents. Either keep the critical section non-allocating (stage the
 work in locals, `swap`/move it in — `poll_once`'s commit) or take the lock through an RAII guard
-(`hp_poll.cpp`'s `Lock`, for readers that must copy strings out under the lock). The status mutexes
+(`main/rtos_guard.hpp`'s `daik::SemGuard`, aliased as `Lock` in every file that takes one — for
+readers that must copy strings out under the lock). That guard is SHARED, and it did not use to be:
+nine files carried their own copy, in two shapes that had already diverged about whether a failed
+take was noticed. A per-file struct is invisible to the file beside it, so nothing could choose
+between them — and only one of the shapes can express the BOUNDED/try-lock acquire that a callback
+context needs (esp-mqtt's own event task, where the guard-the-allocation route is unavailable).
+`diag_log.cpp` deliberately keeps its bare takes: its critical sections are pure `memcpy`, i.e. the
+first route above, and converting them would be style rather than safety. The status mutexes
 in syslog.cpp and mqtt_ha.cpp take the first route: `set_status` stores the error as a string-LITERAL
 pointer, never a `std::string`, so the writer cannot allocate at all — load-bearing for mqtt_ha's,
 which runs on esp-mqtt's own unguarded event task where the rule above is unavailable.

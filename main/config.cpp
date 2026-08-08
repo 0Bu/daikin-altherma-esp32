@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include <cstdlib>          // abort() — the fail-stop when the config mutex can't be created
 #include <vector>
 
@@ -50,11 +51,9 @@ static void seed_board_defaults(Config& c) {
 // RAII guard around g_mtx. Releases on exception too, so a std::bad_alloc thrown while copying
 // g_cfg's std::strings can't leave the mutex held (which would deadlock every later config() call).
 namespace {
-struct Lock {
-    explicit Lock(SemaphoreHandle_t m) : m_(m) { if (m_) xSemaphoreTake(m_, portMAX_DELAY); }
-    ~Lock() { if (m_) xSemaphoreGive(m_); }
-    SemaphoreHandle_t m_;
-};
+// The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
+// This used to be a private copy here; nine of them had drifted into two different shapes.
+using Lock = SemGuard;
 }  // namespace
 
 // Return a CONSISTENT SNAPSHOT (by value) taken under the lock: a reader never observes a torn

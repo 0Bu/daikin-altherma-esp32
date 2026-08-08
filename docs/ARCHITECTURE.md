@@ -1807,6 +1807,19 @@ alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB �
   burst of config-save reboots that must never be mistaken for a crash-loop. A one-shot timer clears
   the counter after `BOOT_HEALTHY_S` (30 s) of continuous uptime, so a single old crash doesn't
   accumulate with a much later, unrelated one.
+- **That timer is not armed while safe mode is latched** (`boot_healthy_timer_arms()`), and this one
+  condition is the difference between a **latch** and a **cycle**. Safe mode comes up with the poll
+  engine and the MQTT bridge down — precisely the subsystems a config crash-loop lives behind — so
+  surviving 30 s in it is evidence about the *recovery surface*, not about the fault still sitting in
+  the config. Armed there, it cleared the counter 30 s into every recovery boot, so the next crash
+  reset started from zero and brought the full stack back up on the configuration already proven to
+  crash four times: the device spent `BOOT_FAIL_THRESHOLD` boots crash-looping for every one boot it
+  was fixable in, and the owner's browser window into it was one boot in five. Refusing to arm
+  strands nothing, because *any* non-crash reset already zeroes the counter and every intentional way
+  out of safe mode is one — a `/set_*` save, an OTA install, a power cycle, the recovery button — so
+  safe mode ends the moment somebody acts on it, and only then. The refusal is said out loud on
+  `/diag` rather than skipped silently: a counter that deliberately does not age out looks like a bug
+  to the next person reading the log, and the line names the way out.
 - **Every one of those NVS writes is checked, and the diag line reports what was *persisted*, not
   what was intended.** The counter is the whole mechanism: if the bump can't be written (full NVS,
   worn flash) each crash boot re-reads the same stale value and the threshold is never reached — the
@@ -1821,6 +1834,16 @@ alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB �
   on). The full recovery surface (`/set_wifi`, `/set_mqtt`, `/set_hp`, and — once #9 lands — factory
   reset / import) stays available. `/status.sys.safe_mode` is `true` and the UI shows a warn-accented
   **Recovery mode** banner. The counter lives in `daik_cfg`, so a factory reset wipes it too.
+
+- **An exception escaping the boot sequence is routed into this same machinery.** `app_main` wraps
+  `boot_sequence()` in a `try/catch` (`main.cpp`) because it is a C frame boundary like every handler
+  and task loop this firmware already guards, and boot allocates — `config_load()`, `http_start()`
+  and the service starts below them all can throw `std::bad_alloc`. It `abort()`s with the phase
+  named. `abort()` rather than `esp_restart()` is the load-bearing choice: a "sw" reset is exactly
+  what `boot_reset_was_crash()` classifies as *intentional* and uses to **clear** the counter, so a
+  boot sequence that threw every time would restart forever without ever accumulating a single crash
+  boot — the failure mode safe mode exists to end, made permanent by the mechanism meant to end it. A
+  panic counts, writes a core dump, and reaches safe mode after four.
 
 This is distinct from the image anti-brick recovery above; both are covered in
 [SECURITY.md](SECURITY.md) → Boot recovery.
@@ -1956,6 +1979,38 @@ place:
 
 The board/platform is reported by `/status.platform` — read by `/status` consumers and the web UI's
 paste-ready crash bundle, no longer a row on any Settings card.
+
+## Concurrency: tasks and priorities
+
+Every `xTaskCreate` in this firmware takes its priority from `main/task_config.hpp`, so the ordering
+below is the code rather than a description of it. Stack sizes stay at the call sites, where each is
+justified by that task's own measured deepest frame — see [Memory constraints](#memory-constraints)
+for why a shared table of sizes would be the wrong shape.
+
+| Prio | Task | Owner | Why this tier |
+|:----:|------|-------|---------------|
+| 5 | `hp_poll` | `hp_poll.cpp` | Owns the X10A UART and is Task-Watchdog-subscribed: a delayed cycle is a step toward a watchdog reboot. |
+| 5 | `captive_dns` | `captive_dns.cpp` | Must answer a joining phone's connectivity probe inside that probe's own timeout, or the captive portal never pops. Setup mode only. |
+| 4 | `mqtt_pub` | `mqtt_ha.cpp` | The HA bridge publisher, and the inbound room / circulation sources that ride the same client. |
+| 4 | `hp_modbus` | `hp_modbus.cpp` | The second, independent HomeHub source. No task at all while `mb_host` is empty. |
+| 4 | `env3` | `env3.cpp` | The optional ENV III sensor. No task at all unless enabled on an M5Stack board. |
+| 4 | `wifi_wd` | `wifi.cpp` | The ghost-association watchdog: periodic, latency-tolerant, but must run when due. |
+| 4 | `ota` / `ota_health` | `ota_update.cpp` | Transient. The download holds a TLS peer that will time out. |
+| 3 | `syslog_task` | `syslog.cpp` | Best-effort UDP; a late datagram costs nothing. Opt-in. |
+| 3 | `weather` | `weather_forecast.cpp` | A 45-minute fetch cadence. Opt-in. |
+| 3 | `recovery_btn` | `recovery_button.cpp` | Debounced sampling of a human-scale action. Opt-in (`btn_gpio` defaults to -1). |
+| 2 | `status_led` | `status_led.cpp` | Cosmetic, below everything: a dropped tick costs nothing, since the next recomputes the pattern from scratch. |
+
+The `esp_http_server` task and esp-mqtt's own event task are created by ESP-IDF with their own
+Kconfig-set priorities and are not in this table. Six of the eleven above are optional and simply do
+not exist when their feature is unconfigured — which is why the source-absence matrix
+(`test/test_source_absence_contract.mjs`) treats absence as a state rather than an error.
+
+Every one of them that allocates also self-guards: an escaping `std::bad_alloc` at a task boundary
+reaches `std::terminate` and reboots the board. And every mutex any of them takes goes through the
+one `daik::SemGuard` in `main/rtos_guard.hpp` — which replaced nine per-file copies that had drifted
+into two shapes disagreeing about whether a failed take is noticed, and which adds the bounded /
+try-lock acquire a callback context needs.
 
 ## Memory constraints
 
