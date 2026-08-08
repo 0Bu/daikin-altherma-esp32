@@ -425,7 +425,12 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   it, so a restart can never land mid-install — the device restarts deliberately, leaving a
   `heap_rst` breadcrumb on `/status.sys.heap_restarts` and giving up after five consecutive tries.
   Sampled at the top of the poll cycle beside the board trends, which is the one path in that task no
-  branch can skip. Two deliberate limits: **`MALLOC_CAP_INTERNAL`**, not `MALLOC_CAP_DEFAULT` —
+  branch can skip. Arming and recovering ask **different thresholds** — a run opens under 4 KB and
+  closes only above 8 KB — because answering both with one number let a heap hovering *at* the line
+  reset its own countdown on ordinary allocator churn and never restart, measured on hardware while
+  `/status` and `/values` were already answering 503 (#399); the `Armed`/`Recovered` narration is
+  throttled like the countdown line for the same 6 KB-diag-ring reason, with suppressed transitions
+  counted rather than dropped silently. Two deliberate limits: **`MALLOC_CAP_INTERNAL`**, not `MALLOC_CAP_DEFAULT` —
   the latter answers from PSRAM on a board that has it, so every largest-block figure in the firmware
   now goes through one shared sampler rather than five call sites each spelling out a mask — and
   **not covered in safe mode**, where the poll task does not run; safe mode has already shut down the

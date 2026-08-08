@@ -463,8 +463,21 @@ heap_guard.cpp  THE HEAP WATCHDOG's device glue (logic/heap_watchdog.hpp) — th
                 HEAP_CRITICAL_BYTES for HEAP_CRITICAL_HOLD_MS unbroken becomes a deliberate
                 esp_restart, capped at HEAP_MAX_CONSECUTIVE_RESTARTS by the NVS "heap_rst"
                 breadcrumb (an i32, not a formatted string: the whole restart path stays
-                allocation-free on a heap that is by definition failing). An in-flight OTA CLEARS the
-                run rather than pausing it — a paused run could resume its clock and fire mid-install.
+                allocation-free on a heap that is by definition failing). ARMING and RECOVERING ask
+                DIFFERENT thresholds, and the asymmetry is load-bearing rather than tidy: a run opens
+                below HEAP_CRITICAL_BYTES but closes only above HEAP_RECOVERY_BYTES (2x it). Answering
+                both with one number is #399 — measured on the bench board, a heap hovering AT the
+                threshold ended its run every second or two on ordinary ~512 B allocator churn, reset
+                the 300 s clock and NEVER restarted, while /status and /values were already answering
+                503, i.e. while the device sat in the exact wedge this exists to escape. The band is
+                deliberately modest rather than the 12 KB /set_mqtt's pre-flight wants: it only has to
+                reject flicker, and demanding more would restart a board whose recovery was real.
+                The Armed/Recovered NARRATION is throttled like the Watching line for the same
+                6 KB-diag-ring reason (that run put 78 Armed lines against 4 Watching, leaving /diag
+                89% heap: text with the boot line already evicted); suppressed transitions are counted
+                and reported, so a throttled log still says the heap was flapping. An in-flight OTA
+                CLEARS the run rather than pausing it — a paused run could resume its clock and fire
+                mid-install.
                 Also the home of heap_largest_internal_block(), THE ONE largest-block sampler: every
                 reporting site (history's max_alloc trend, the MQTT heartbeat, /status.sys.max_alloc,
                 /set_mqtt's pre-flight) used MALLOC_CAP_DEFAULT, which answers from PSRAM on a board
