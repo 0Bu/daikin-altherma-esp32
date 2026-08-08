@@ -689,14 +689,17 @@
                  is open. -->
             <div class="inspect" id="inspect">
               <div class="inspect-card" id="inspCard" hidden>
+                <!-- Title and headline reading are ONE wrapping pair (style.css .inspect-head): the
+                     value drops to its own line under the title as soon as the two stop fitting side
+                     by side. The mono source line is deliberately OUTSIDE that pair — it is a long
+                     verbatim register name, so it takes the card's full width and never shares a
+                     line with the reading. -->
                 <div class="inspect-head">
-                  <div class="inspect-id">
-                    <div class="inspect-title" id="inspTitle"></div>
-                    <div class="inspect-src mono" id="inspSrc"></div>
-                  </div>
+                  <div class="inspect-title" id="inspTitle"></div>
                   <div class="inspect-now num" id="inspNow"></div>
                   <button class="inspect-x" type="button" id="inspClose" aria-label="Close">✕</button>
                 </div>
+                <div class="inspect-src mono" id="inspSrc"></div>
                 <div class="inspect-body" id="inspBody"></div>
                 <!-- The headline row's 24-hour trend, when the firmware keeps one for it. Same
                      sparkline the value list draws (app.js histHtml): description first, then the
