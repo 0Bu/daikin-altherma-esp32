@@ -847,10 +847,22 @@ void http_append_status_json(std::string& j, bool redact) {
     // on, which is exactly the unattributable reboot this block exists to prevent. 0 on any ordinary
     // boot. Small numbers + a short slug appended to the existing builder — no large contiguous
     // allocation, and nothing here is a `+` chain.
+    //
+    // Beside them, what that headroom already COST while the board DID survive (#380): cycles the two
+    // 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches — a reading
+    // dropped, or (poll) never read at all; mqtt_quiesced is the publisher standing aside on purpose
+    // while an OTA download owns the heap (logic/ota_quiesce.hpp), the same gap with a stated cause.
+    // The three of them complete the sequence the two figures above start: min_free_heap says how
+    // close the board came, these say what it lost getting there, and heap_restarts says when it did
+    // not get there at all. Three atomic loads and three plain integers.
+    const MqttSkipStats skips = mqtt_skip_stats();
     j += "\"sys\":{\"free_heap\":" + std::to_string(esp_get_free_heap_size()) +
          ",\"min_free_heap\":" + std::to_string(esp_get_minimum_free_heap_size()) +
          ",\"max_alloc\":" + std::to_string(heap_largest_internal_block()) +
          ",\"heap_restarts\":" + std::to_string(heap_guard_restarts()) +
+         ",\"mqtt_skipped\":" + std::to_string(skips.skipped) +
+         ",\"mqtt_quiesced\":" + std::to_string(skips.quiesced) +
+         ",\"poll_skipped\":" + std::to_string(hp_skipped_cycles()) +
          ",\"reset_reason\":" + jstr(reset_reason_name(diag_crash_info().reason)) +
          ",\"safe_mode\":" + (safe_mode_active() ? "true" : "false") + "},";
 

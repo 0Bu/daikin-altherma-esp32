@@ -1027,7 +1027,7 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A p
                 since it is an event payload, not a metrics stream) of
                 heap(free/min-free/largest-block)/uptime/reset_reason/wifi(rssi+reconnects+MAC+BSSID,
                 mac always present, bssid null offline)/mqtt(pub count+fails+reconnects)/X10A bus
-                (rx_received/rx_fails/bus_ou_held_over) stats, 18 diagnostic HA entities streamed
+                (rx_received/rx_fails/bus_ou_held_over) stats, 21 diagnostic HA entities streamed
                 independently of profile detection. TWO are RETIRED (RETIRED_HEARTBEAT_SENSORS), under
                 the rule that already retired the crash topic's "Last Reset Reason": an entity
                 repeating what another entity on the same device says is not a second reading, it is a

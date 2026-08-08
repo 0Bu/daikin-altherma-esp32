@@ -173,7 +173,8 @@ undone by the credential rollback — sticky until the next one; drives the roll
 (`has_creds` = whether credentials are stored, never what they are — gates the modal's remove-credentials
 checkbox),
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
-`sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode}` (heap headroom + last boot reason,
+`sys{free_heap,min_free_heap,max_alloc,mqtt_skipped,mqtt_quiesced,poll_skipped,reset_reason,safe_mode}`
+(heap headroom, what it already cost in dropped/held publish + poll cycles (#380), and last boot reason,
 always present; the UI reads `safe_mode` for the recovery banner and `free_heap`/`max_alloc` for the
 ESP32 card's two trended memory rows (§5.6) — `min_free_heap` and the reset reason stay diagnostics
 served to `/status` readers, the MQTT heartbeat's diagnostic entities and `/diag`),

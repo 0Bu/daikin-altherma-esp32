@@ -50,6 +50,12 @@ static DetectBackoff         s_backoff;
 static int64_t               s_next_detect_us = 0;
 static std::atomic<bool>     s_detect_reset{false};
 
+// Poll cycles the OOM guard below dropped (#380, hp_poll.hpp → hp_skipped_cycles). Written from the
+// catch handler and read from the MQTT publish task, so it is atomic; relaxed is enough because
+// nothing is ordered against it and a reader one cycle behind is reading a counter that moves once
+// a second at worst. Not in s_stats: that mutex must not be taken on the path out of an OOM.
+static std::atomic<uint32_t> s_cycles_skipped{0};
+
 // Consecutive bus-answering sweeps that matched no profile. Poll-task-owned, RAM only, like the
 // backoff above. Falling back to `generic` costs ~46 rows including every derived figure, so it
 // waits for corroboration rather than acting on one sweep (detect_commit_no_match, #214).
@@ -452,8 +458,15 @@ static void poll_task(void*) {
             }
             if (config().profile != "auto") poll_once();       // then poll it (same cycle if resolved)
         } catch (const std::exception& e) {
+            // COUNT FIRST, then log. diag_printf allocates, so on the heap that caused this it can
+            // throw again — and a second throw inside the handler is std::terminate, i.e. the reboot
+            // this guard exists to avoid. An atomic increment cannot fail, so the counter records the
+            // cycle even when the log line describing it never makes it into the ring (#380: the ring
+            // was the ONLY evidence, and a chatty boot overwrites it).
+            s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             diag_printf("poll: cycle skipped (%s)\n", e.what());
         } catch (...) {
+            s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             diag_printf("poll: cycle skipped (oom?)\n");
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));     // fixed 1 s cadence
@@ -514,6 +527,8 @@ HpStats hp_stats() {
                  : static_cast<int32_t>((esp_timer_get_time() - s_last_ok_us) / 1000000);
     return st;
 }
+
+uint32_t hp_skipped_cycles() { return s_cycles_skipped.load(std::memory_order_relaxed); }
 
 void hp_poll_reconfigure() {
     // POST /detect and POST /set_hp (new pins) run on the httpd task and put profile back to "auto".
