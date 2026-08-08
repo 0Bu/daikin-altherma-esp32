@@ -1310,6 +1310,68 @@ What it costs is stated plainly: the screen is up to one cadence behind (~1 s on
 values), and each tick is an HTTP request rather than a frame. On a dashboard for a heat pump whose
 poll engine reads the bus at 1 Hz and whose motion is CSS, neither is perceptible.
 
+## Network transport (WiFi, or the optional wire)
+
+Two transports can carry this device, and exactly one thing above them knows it: `main.cpp`'s boot
+fork. The HTTP server, MQTT, syslog, SNTP, OTA and mDNS all run unchanged over either — an Ethernet
+board is not a variant of the firmware, it is the same firmware with a different cable.
+
+**The wire is optional and DETECTED, not configured.** CI publishes one `esp32s3` image, so the
+W5500 controller (`net.cpp`) cannot be a compile-time board choice. At boot the firmware reads the
+chip's `VERSIONR` identity register over SPI; a board without one **frees the SPI bus again** and is
+byte-for-byte the device it was before — no netif, no driver, no task, no event handler. `GPIO5–8`
+stay ordinary offerable pads, which matters because they are exactly what a XIAO breaks out and what
+[BOARDS.md](BOARDS.md) offers for X10A on an AtomS3 Lite header.
+
+**The probe refuses to run over a pad the firmware already drives.** It clocks SCLK and asserts CS;
+if X10A, an enabled ENV III, the indicator or the button owns one of the four, there is simply no
+Ethernet this boot (`logic/net_link.hpp` → `net_eth_probe_allowed`). The alternative is edges on the
+heat pump's service bus, whose symptom — a bus that answers erratically at boot — is the hardest
+thing in this project to attribute to its cause.
+
+**The boot fork, in order, and each step is a host-tested rule:**
+
+| Step | Rule | Why it is a rule and not an `if` |
+|---|---|---|
+| 1. Ask the wire | `net_eth_start()` | Two questions, two deadlines: "is a cable connected" is answered by the PHY in ~4 s, "will DHCP answer" gets 3 × `CONFIG_DAIKIN_ETH_WAIT_S`. One timer for both made a credential-less board sit dark for a whole lease window before its setup AP appeared. |
+| 2. Maybe the radio | `net_wifi_start_needed(eth_up, configured)` | A wired board does not spend ~50 KB of heap and a second netif on a radio nothing will route over. |
+| 3. Maybe the portal | `net_portal_needed(eth_up, wifi_up)` | **The load-bearing one.** A wired board with no stored SSID would otherwise open an OPEN SoftAP nobody is coming to configure — and that AP restricts the HTTP surface, withholding the entire API from the LAN the device is reachable on. |
+
+**The trust surface follows the AP, not the radio.** `logic/http_surface.hpp`'s
+`http_surface_for(setup_ap_running)` replaced a test on `esp_wifi_get_mode() == WIFI_MODE_STA`. That
+test was wrong in both directions once a wire existed: a wired board has no station (so the API
+would be withheld from the cable), while "a wire is up, therefore trust" re-opens F01, because the
+setup AP can be radiating at the same time and `esp_http_server` registers routes per **server**, not
+per interface. Only the AP's own existence is the correct input. `test/test_transport_contract.mjs`
+pins that over source text, along with the two gates above and the probe guard.
+
+**Both transports may hold a lease at once** — a board that fell back to WiFi and later had a cable
+plugged in. The wire wins: the Ethernet netif is created with `route_prio` 128, above
+`WIFI_STA_DEF`'s 100 (ESP-IDF ships `ETH_DEF` at 50). Be precise about what that buys. **Off-link**
+destinations — the broker, syslog, SNTP, the OTA feed, Open-Meteo — follow `netif_default` and so
+follow this priority. **On-link** destinations do not consult it at all: lwIP's `ip4_route()` walks
+`netif_list` and takes the first matching subnet. With both interfaces on one /24 that is whichever
+registered first. The asymmetry is accepted rather than fought — forcing per-packet source selection
+across two netifs on one subnet means overriding the stack's routing, and the case it would improve
+is the runtime hot-plug, where WiFi is already running anyway. The benefit this transport exists for
+lives in the boot-with-cable path, where there IS no second netif.
+
+**Pulling the cable from a board that came up wired is answered by a reboot.** Such a board has no
+station running, and growing one at runtime would put the boot fork in a second place where it can
+drift — with a blocking boot window, a duplicate mDNS/watchdog setup and a possible fall into the
+setup portal, all from an event handler on a live device. So `net_eth_fallback_step()` counts ~30 s
+of proven silence and restarts, which re-runs the real fork (no cable → WiFi → portal). It costs ~5 s
+of an outage that has already started, the trend rings survive it (`.noinit`, see
+[history persistence](#the-24-hour-trend-rings-historycpp)), and it is deferred while an OTA is
+installing. A board with **no** configured WiFi never counts at all: there is nothing to fall back
+to, so rebooting would only replace a device waiting for its cable with the same device minus its
+uptime and its diag ring. The wire is reclaimed silently if it returns.
+
+**What the wire costs, honestly:** ~64 KB of flash in the one published image that every board pays
+for, and — on the AtomS3 Lite specifically — the ENV III sensor, because the PoE base covers the
+whole side header and only the Grove port (which X10A needs) is left. That is a per-installation
+trade, stated in [BOARDS.md](BOARDS.md) rather than discovered.
+
 ## WiFi / LAN connectivity (reconnect + watchdog)
 
 **Modem sleep is disabled** (`esp_wifi_set_ps(WIFI_PS_NONE)` right after `esp_wifi_start()`). The
@@ -2037,6 +2099,7 @@ for why a shared table of sizes would be the wrong shape.
 | 4 | `hp_modbus` | `hp_modbus.cpp` | The second, independent HomeHub source. No task at all while `mb_host` is empty. |
 | 4 | `env3` | `env3.cpp` | The optional ENV III sensor. No task at all unless enabled on an M5Stack board. |
 | 4 | `wifi_wd` | `wifi.cpp` | The ghost-association watchdog: periodic, latency-tolerant, but must run when due. |
+| 4 | `eth_fb` | `net.cpp` | Watches for the cable being pulled from a board that came up WIRED, and decides a reboot — so it must not sit behind a long publish. Exists only on such a board. |
 | 4 | `ota` / `ota_health` | `ota_update.cpp` | Transient. The download holds a TLS peer that will time out. |
 | 3 | `syslog_task` | `syslog.cpp` | Best-effort UDP; a late datagram costs nothing. Opt-in. |
 | 3 | `weather` | `weather_forecast.cpp` | A 45-minute fetch cadence. Opt-in. |
@@ -2044,8 +2107,8 @@ for why a shared table of sizes would be the wrong shape.
 | 2 | `status_led` | `status_led.cpp` | Cosmetic, below everything: a dropped tick costs nothing, since the next recomputes the pattern from scratch. |
 
 The `esp_http_server` task and esp-mqtt's own event task are created by ESP-IDF with their own
-Kconfig-set priorities and are not in this table. Six of the eleven above are optional and simply do
-not exist when their feature is unconfigured — which is why the source-absence matrix
+Kconfig-set priorities and are not in this table. Seven of the twelve above are optional and simply
+do not exist when their feature is unconfigured — which is why the source-absence matrix
 (`test/test_source_absence_contract.mjs`) treats absence as a state rather than an error.
 
 Every one of them that allocates also self-guards: an escaping `std::bad_alloc` at a task boundary

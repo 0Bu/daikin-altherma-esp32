@@ -22,6 +22,40 @@ namespace daik {
 
 enum class HttpSurface { SetupAp, TrustedLan };
 
+// WHICH surface this boot serves. The input is the one fact that actually decides it: is the OPEN
+// provisioning SoftAP running (provisioning.cpp knows, because it started it)?
+//
+// This replaced a test on the WiFi MODE — `esp_wifi_get_mode(&m) == ESP_OK && m == WIFI_MODE_STA`,
+// with every other answer falling to SetupAp. That was correct while WiFi was the only transport
+// and became wrong in BOTH directions the moment a wire could carry the device:
+//
+//   • A board on Ethernet with no stored credentials never starts WiFi at all, so the mode reads
+//     WIFI_MODE_NULL and the whole API — /status, /values, the config routes, OTA, MCP — would be
+//     withheld from the LAN it is reachable on. The device would answer only the captive shell,
+//     with no way to configure it and no radio to fix that through.
+//   • The inverse, "a wire is up, therefore trust", is the F01 defect wearing a new hat: the setup
+//     AP can be running at the same time (a cable plugged into a board that had already opened its
+//     portal), and esp_http_server registers routes per SERVER, not per interface — so one open
+//     radio client would reach everything.
+//
+// Keying on the AP itself is the only formulation that is right in both: the restricted surface
+// exists because an unauthenticated radio can associate, so it is the AP's existence — not the
+// absence of a station, and not the presence of a wire — that must decide. It also fails closed by
+// construction rather than by a defensive `== ESP_OK`: there is no error case in a bool the
+// firmware itself wrote.
+// A THIRD shape was considered and deferred, so it is not re-derived: give the setup portal its
+// OWN httpd with only the provisioning handlers and never create the full server in that boot, as
+// the sibling firmware does (its provisioning_run() is documented as never returning). That is the
+// stronger boundary — the full route set cannot be registered because it does not exist, so there
+// is no flag to read wrongly and no assertion for a later refactor to simplify away. It is not what
+// this firmware does because the portal here serves more than two handlers (the favicon, the
+// captive catch-all, the SPA shell) and both surfaces have shared one server since F01 was fixed by
+// gating REGISTRATION rather than by splitting the server. Revisit it as its own change, not as a
+// rider on one that needs the runtime answer anyway.
+inline HttpSurface http_surface_for(bool setup_ap_running) {
+    return setup_ap_running ? HttpSurface::SetupAp : HttpSurface::TrustedLan;
+}
+
 // Does `surface` expose a route at `path` with the given method? On the trusted LAN, everything.
 // On the open setup AP, ONLY: GET / , GET /index.html (setup.html), GET /favicon.ico (an inert
 // static asset), and POST /set_wifi (submit credentials). Every other route —

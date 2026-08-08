@@ -206,4 +206,77 @@ menu "Daikin Altherma Configuration"
         help
             Port of the Syslog server (usually 514). NVS "syslog_port" overrides this.
 
+    # ── Ethernet (W5500 over SPI) ─────────────────────────────────────────────
+    # OPTIONAL SECOND TRANSPORT, detected at runtime — not a board variant. CI publishes ONE
+    # esp32s3 image, so this cannot be a per-board compile-time choice: the image carries the
+    # driver, net.cpp reads the W5500's identity register once at boot, and a board without the
+    # controller frees the SPI bus again and pays nothing but that one probe.
+    #
+    # The pin defaults are the M5Stack ATOMIC PoE Base's, which is the only Ethernet hardware this
+    # firmware is written for; the AtomS3 Lite's side header carries exactly GPIO5/6/7/8 and the
+    # base occupies all of it. The same four pads are broken out on the Seeed XIAO ESP32-S3, so a
+    # hand-wired W5500 module works there too.
+    #
+    # Consequence worth stating where the pins are set: on the AtomS3 Lite the base leaves ONLY the
+    # Grove port (GPIO1/2) free, which X10A needs — so an Ethernet install has no pins left for the
+    # optional ENV III sensor. That is a per-installation trade, not a firmware-wide one
+    # (docs/BOARDS.md).
+    config DAIKIN_ETH_ENABLED
+        bool "Ethernet: W5500 over SPI (M5Stack ATOMIC PoE Base)"
+        default y
+        select ETH_USE_SPI_ETHERNET
+        select ETH_SPI_ETHERNET_W5500
+        help
+            Compile in the optional wired transport. The controller is DETECTED at boot; with none
+            present the firmware behaves exactly as a WiFi-only build. Turn this off only to
+            reclaim the ~40 KB of flash the esp_eth + W5500 driver costs.
+
+    config DAIKIN_ETH_SPI_SCLK
+        int "Ethernet SPI SCLK GPIO"
+        default 5
+        depends on DAIKIN_ETH_ENABLED
+
+    config DAIKIN_ETH_SPI_CS
+        int "Ethernet SPI CS GPIO"
+        default 6
+        depends on DAIKIN_ETH_ENABLED
+
+    config DAIKIN_ETH_SPI_MISO
+        int "Ethernet SPI MISO GPIO"
+        default 7
+        depends on DAIKIN_ETH_ENABLED
+
+    config DAIKIN_ETH_SPI_MOSI
+        int "Ethernet SPI MOSI GPIO"
+        default 8
+        depends on DAIKIN_ETH_ENABLED
+
+    config DAIKIN_ETH_SPI_CLOCK_MHZ
+        int "Ethernet SPI clock (MHz)"
+        default 20
+        depends on DAIKIN_ETH_ENABLED
+        help
+            20 MHz is what Espressif's own W5500 CI configuration uses. The part is specified far
+            higher; the Grove-length wiring on a stacked base is not.
+
+    config DAIKIN_ETH_POLL_MS
+        int "Ethernet RX poll interval (ms)"
+        default 10
+        depends on DAIKIN_ETH_ENABLED
+        help
+            The ATOMIC PoE Base routes SCLK/CS/MISO/MOSI and power only — there is no interrupt
+            line to wire, so the driver polls. This bounds RX LATENCY, not throughput: each poll
+            drains everything queued in the W5500's 16 KB buffer. ESP-IDF ships a CI configuration
+            for exactly this mode at the same 10 ms.
+
+    config DAIKIN_ETH_WAIT_S
+        int "Ethernet DHCP wait (s)"
+        default 20
+        depends on DAIKIN_ETH_ENABLED
+        help
+            How long to wait for a lease once the PHY reports a live cable, per attempt (net.cpp
+            spends up to three of these). Deliberately generous: a wired board should not start its
+            WiFi radio because a DHCP server was slow. Whether a cable is connected AT ALL is a
+            separate, much shorter question the driver answers in seconds.
+
 endmenu

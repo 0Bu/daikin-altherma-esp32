@@ -18,6 +18,12 @@ climate input and heating-curve diagnosis — are in [**PLANT.md**](PLANT.md).
 - **Targets:** esp32s3 only. The **M5Stack AtomS3 Lite** is the board the wiring guide is written
   for; the **Seeed XIAO ESP32-S3** is the board the compile-time pin defaults are written for.
   **≥ 4 MB flash** (dual-OTA layout: two ~2 MB app slots). No PSRAM required.
+- **Network:** WiFi, or — optionally and detected at boot — a **W5500 Ethernet controller on SPI**,
+  in practice an M5Stack ATOMIC PoE Base under the AtomS3 Lite, so one cable carries power and the
+  LAN. A board without a controller behaves exactly as before; a wired one starts no radio and opens
+  no setup portal. On the AtomS3 Lite the base occupies the whole side header, which costs the
+  optional ENV III sensor — the trade and the pins are in [BOARDS.md](BOARDS.md), the boot fork and
+  the trust surface in [ARCHITECTURE.md](ARCHITECTURE.md) and [SECURITY.md](SECURITY.md).
 - **Heat-pump link:** the X10A port is a 5 V TTL UART at **9600 8E1**. The ESP maps any two free
   GPIOs to a hardware UART (`RX_PIN` ← X10A pin 2 / HP-TX, `TX_PIN` → X10A pin 3 / HP-RX). The
   USB/native-USB console is a *separate* UART, so device logs never collide with the HP link.

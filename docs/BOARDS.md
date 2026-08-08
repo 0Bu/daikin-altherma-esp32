@@ -27,9 +27,10 @@ firmware contains no display driver, display role, or remote-display MQTT path.
 | **USB-Serial/JTAG** *(strongly preferred)* | `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` — the serial console and the browser (Web Serial) installer. A board with only an external USB-UART bridge needs the console reconfigured. |
 
 **Not required:** PSRAM (`CONFIG_SPIRAM` is off — the heap discipline in
-[ARCHITECTURE.md](ARCHITECTURE.md) assumes internal RAM only), Bluetooth, Ethernet, or an SD slot.
-None of them are used. A display is outside the supported hardware scope rather than an unused
-optional peripheral.
+[ARCHITECTURE.md](ARCHITECTURE.md) assumes internal RAM only), Bluetooth, or an SD slot. None of
+them are used. A display is outside the supported hardware scope rather than an unused optional
+peripheral. **Ethernet is OPTIONAL and detected** — see *Wired networking* below; a board without a
+controller behaves exactly as it did before the transport existed.
 
 ---
 
@@ -180,6 +181,58 @@ temperature-measurement range of **−40–120 °C**. Its highest stated accurac
 from **0–60 °C**; the separately listed operating-temperature range is also **0–60 °C**. M5Stack
 does not state an IP weather-protection rating. For outdoor use, mount the unit in a ventilated,
 sheltered enclosure rather than exposing it directly to rain, condensation or full sun.
+
+---
+
+## Wired networking (M5Stack ATOMIC PoE Base, W5500)
+
+Optional. One cable then carries **both power and the LAN**, which is the point in a cellar or
+utility room where no access point reaches — the device still reads X10A over its own service lead
+and the HomeHub over the network.
+
+| | |
+|---|---|
+| Controller | WIZnet **W5500** over SPI, polled (the base routes no interrupt line) |
+| Pins | **SCLK 5 · CS 6 · MISO 7 · MOSI 8** (`CONFIG_DAIKIN_ETH_SPI_*`) |
+| Detected | at boot, by reading the W5500's `VERSIONR` register — nothing to configure |
+| Power | PoE, or the base's own input; the ESP32 is powered through the base |
+
+**Nothing is configured.** The firmware probes those four pads once at boot. Found → the wire is
+brought up, and if it gets a lease the WiFi radio is never started and no setup portal is opened.
+Not found → the SPI bus is freed and the board is exactly what it was. The same single `esp32s3`
+image serves both, like every other board difference here.
+
+**On the AtomS3 Lite this costs you ENV III, and there is no way around it.** The base seats on the
+side header and covers **every pin it carries** (`5, 6, 7, 8, 38`) — four of them are the SPI bus
+itself. That leaves the Grove port (`GPIO1/2`), which X10A needs. So:
+
+| | AtomS3 Lite, PoE base | AtomS3 Lite, no base |
+|---|---|---|
+| X10A | Grove — **RX 1 / TX 2** | Grove `1/2`, or header pins |
+| ENV III | **not attachable** | Grove, or two header pins |
+| Ethernet | GPIO 5/6/7/8 (the base) | — |
+
+A Grove hub does **not** rescue the sensor, and it is worth knowing why before buying one: a hub is
+a passive fan-out of the same four wires. That works for I²C, where a bus is shared and every device
+is addressed — but X10A is a **UART**, so a second device on the same pair is a collision, not a
+bus. The firmware states the conflict rather than letting you find it: once a controller is
+detected, those four pads disappear from every pin picker and a `POST /set_env3` or `/set_board`
+naming one is refused.
+
+The **XIAO ESP32-S3** breaks out the same four pads, so a hand-wired W5500 module works there and
+leaves enough pins for X10A *and* ENV III — at the cost of the soldering and the case that the PoE
+base exists to avoid.
+
+**What it looks like when it is running.** The Connections tile grows an *Ethernet* row (no pencil —
+there is nothing to configure) showing the negotiated speed, or one of two distinct problems: *no
+cable*, or *cable connected, no address* (a DHCP or VLAN issue). `/status.net` carries the same facts
+for a script. The WiFi row stays visible and says *offline*, truthfully — the radio really is off.
+
+**Pull the cable and the board reboots**, once, after ~30 s, and comes back up on WiFi if
+credentials are stored. That is deliberate: a board that came up wired has no radio running, and the
+reboot re-runs the same boot decision instead of duplicating it. The 24-hour trends survive it. With
+no WiFi configured it does not reboot at all — it simply waits for the wire, and takes it back when
+it returns.
 
 ---
 

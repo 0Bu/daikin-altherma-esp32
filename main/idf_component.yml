@@ -14,3 +14,9 @@ dependencies:
   # cannot be driven with gpio_set_level — this component is what makes the M5Stack AtomS3 Lite's
   # onboard RGB LED usable from the same image that drives the XIAO's plain one.
   espressif/led_strip: "^3.0.0"
+  # w5500: the SPI Ethernet controller behind the OPTIONAL wired transport (net.cpp). ESP-IDF 6.0
+  # moved the SPI Ethernet chip drivers OUT of the core `esp_eth` component — that component now
+  # ships only the MAC/PHY framework and the internal EMAC — so the W5500 MAC/PHY pair is pulled in
+  # from the registry exactly like cjson and mqtt were when they were extracted. Pinned ^2.0.0,
+  # which is the line built against the 6.x esp_eth API.
+  espressif/w5500: "^2.0.0"

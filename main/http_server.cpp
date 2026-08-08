@@ -5,7 +5,7 @@
 #include "http_handlers.hpp"
 #include "esp_http_server.h"
 #include "esp_log.h"
-#include "esp_wifi.h"   // esp_wifi_get_mode — pick the HTTP trust surface (F01)
+#include "provisioning.hpp"   // provisioning_ap_active — picks the HTTP trust surface (F01)
 
 namespace daik {
 
@@ -55,24 +55,21 @@ void http_start() {
         ESP_LOGE("http", "server start failed");
         return;
     }
-    // Pick the trust surface from the WiFi mode, FAILING CLOSED: only a definitely-detected station
-    // mode (WIFI_MODE_STA, the normal path) is the trusted LAN. Any esp_wifi_get_mode() error, or
-    // AP/APSTA/NULL (the setup portal runs AP — provisioning.cpp), falls to the restricted
-    // setup-AP surface. A security boundary must never WIDEN on an unreadable mode: the previous
-    // `!= AP && != APSTA` test treated a query error as trusted-LAN and would have exposed /coredump,
-    // /diag and the config/OTA/MCP surface to an unauthenticated radio client (F01). Decided ONCE
-    // here: http_start() runs after wifi_start_sta()/provisioning_start_ap() have set the mode.
-    // logic/http_surface.hpp owns which routes each surface exposes.
-    wifi_mode_t mode = WIFI_MODE_NULL;
-    const bool sta_trusted = (esp_wifi_get_mode(&mode) == ESP_OK && mode == WIFI_MODE_STA);
-    const HttpSurface surface = sta_trusted ? HttpSurface::TrustedLan : HttpSurface::SetupAp;
+    // Pick the trust surface from the ONE fact that decides it: is the OPEN provisioning SoftAP
+    // running? logic/http_surface.hpp's http_surface_for() carries the reasoning, including why
+    // this replaced a test on the WiFi MODE — that test read WIFI_MODE_NULL on a board carried by
+    // an Ethernet cable (the radio is deliberately never started there, main.cpp) and would have
+    // withheld the entire API from the LAN the device is reachable on, with no radio to fix it
+    // through. Decided ONCE here: http_start() runs after the transport fork has settled.
+    const bool ap_up          = provisioning_ap_active();
+    const HttpSurface surface = http_surface_for(ap_up);
 
     http_register_status(s_server, surface);
     http_register_config(s_server, surface);
     http_register_ota(s_server, surface);
     http_register_mcp(s_server, surface);
     http_register_captive(s_server);   // catch-all — both surfaces, keep last so specific routes win
-    ESP_LOGI("http", "server on :80 (%s surface)", sta_trusted ? "trusted-LAN" : "setup-AP");
+    ESP_LOGI("http", "server on :80 (%s surface)", ap_up ? "setup-AP" : "trusted-LAN");
 }
 
 httpd_handle_t http_server_handle() {

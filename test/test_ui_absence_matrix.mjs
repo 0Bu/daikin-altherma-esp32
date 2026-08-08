@@ -473,6 +473,44 @@ for (const id of ["free_heap", "max_alloc"]) {
     `a board memory trend must survive every absent plant source ("${id}" was dropped)`);
 }
 
+// ── The TRANSPORT's own presence/absence ───────────────────────────────────────────────────────
+// The optional wire (net.cpp) is not a plant SOURCE, so it has no REMOVE entry — but it has the
+// same failure shape the scenarios above exist for: a state where the honest thing to render is
+// nothing at all, and three where rendering the wrong one misleads. On a board with no controller
+// the row must be ABSENT, not an empty or "unavailable" row — the modbus/env3 rule applied to a
+// transport. And "no cable" must never be worded as the same thing as "cable, but no address":
+// they call for opposite actions (plug something in, versus fix DHCP or the VLAN).
+const WIRED = [
+  { name: "no controller",        eth: { supported: true, present: false }, row: false },
+  { name: "controller, no cable", eth: { supported: true, present: true, link: false, lease: false },
+    cls: "err",  key: "conn.eth_no_cable" },
+  { name: "cable, no lease",      eth: { supported: true, present: true, link: true, lease: false },
+    cls: "warn", key: "conn.eth_no_lease" },
+  { name: "up",                   eth: { supported: true, present: true, link: true, lease: true,
+    speed_mbps: 100, full_duplex: true }, cls: "ok", value: "100 Mbit/s" },
+];
+for (const c of WIRED) {
+  ui.S.status = { ...HEALTHY(), net: { kind: c.eth.lease ? "eth" : "wifi", ip: "", eth: c.eth } };
+  const rows = ui.connLinks().filter((r) => r.label === "Ethernet");
+  if (c.row === false) {
+    assert.equal(rows.length, 0,
+      "a board with no Ethernet controller must render NO Ethernet row, not an empty one");
+    checks++;
+    continue;
+  }
+  assert.equal(rows.length, 1, `${c.name}: exactly one Ethernet row`);
+  assert.equal(rows[0].cls, c.cls, `${c.name}: tone must distinguish this state`);
+  if (c.key) {
+    assert.equal(rows[0].value, ui.t(c.key), `${c.name}: must use its own translated wording`);
+    assert.notEqual(ui.t(c.key), ui.t("conn.offline"),
+      `${c.name}: must not be worded as the generic offline state`);
+  }
+  if (c.value) assert.ok(rows[0].value.includes(c.value), `${c.name}: must state the negotiated link`);
+  checks++;
+}
+assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
+  "no cable and no address are different problems and must read differently");
+
 console.log(`UI absence matrix: ${SCENARIOS.length} source combinations, ${checks} rules held`);
 
 // Exported so a local visual review can drive the REAL assembled UI from the same fixtures, rather

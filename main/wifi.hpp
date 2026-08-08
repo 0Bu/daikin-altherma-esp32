@@ -35,6 +35,17 @@ struct WifiInfo {
 };
 WifiInfo wifi_info();
 
+// Does a WiFi station EXIST this boot? False on a board that came up wired (net.cpp), where the
+// radio is deliberately never started, and false in the setup portal (that is a SoftAP, not a
+// station). Distinct from wifi_link_up() below: a station that is retrying an association is
+// running and not up, and only the first of those two facts says whether a lost wire has anything
+// to fall back on (logic/net_link.hpp's net_eth_fallback_step).
+bool wifi_running();
+
+// Does the station hold a DHCP lease RIGHT NOW? The transport-neutral question is net_is_up()
+// (net.hpp); this is the WiFi half of it, and the guard that makes reading the AP record safe.
+bool wifi_link_up();
+
 // Cumulative count of successful RE-connects since boot (the first-ever GOT_IP doesn't count) —
 // for the MQTT heartbeat (logic/heartbeat.hpp). Every drop the endless-reconnect handler recovers
 // from (router reboot, roaming, a delivered deauth, a watchdog-forced re-association) increments
