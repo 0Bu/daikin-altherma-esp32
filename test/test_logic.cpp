@@ -2436,13 +2436,21 @@ static void test_heap_watchdog() {
     CHECK(v.action == HeapAction::Watching && v.critical_ms == 60000);
     CHECK(heap_restart_in_ms(v.critical_ms) == HEAP_CRITICAL_HOLD_MS - 60000);
 
-    // One sample back above the threshold ends the run — and reports how long it ran, which is the
-    // difference between "the device healed itself" and a silence the reader has to interpret.
+    // Merely TOUCHING the arm threshold does NOT end the run. This CHECK used to assert the
+    // opposite, and asserting the opposite is what #399 was: on hardware a heap hovering at exactly
+    // HEAP_CRITICAL_BYTES ended its run every second or two, reset the 300 s clock, and never
+    // restarted — while /status and /values were already answering 503, i.e. while the device was in
+    // the very wedge the watchdog exists to escape.
     v = heap_watch(w, {HEAP_CRITICAL_BYTES, 90000, false});
-    CHECK(v.action == HeapAction::Recovered && v.critical_ms == 80000 && !v.ota_excused);
+    CHECK(v.action == HeapAction::Watching && w.critical);
+
+    // Climbing clear of the BAND ends it — and reports how long it ran, which is the difference
+    // between "the device healed itself" and a silence the reader has to interpret.
+    v = heap_watch(w, {HEAP_RECOVERY_BYTES, 95000, false});
+    CHECK(v.action == HeapAction::Recovered && v.critical_ms == 85000 && !v.ota_excused);
     CHECK(!w.critical);
     // ...and the NEXT healthy sample is silent again rather than repeating the recovery.
-    CHECK(heap_watch(w, {64 * 1024, 91000, false}).action == HeapAction::Ok);
+    CHECK(heap_watch(w, {64 * 1024, 96000, false}).action == HeapAction::Ok);
 
     // The hold has to ELAPSE. One sample short is still Watching; reaching it exactly fires.
     HeapWatchdog h;
@@ -2483,6 +2491,43 @@ static void test_heap_watchdog() {
     CHECK(heap_watch(e, {0, 0, false}).action == HeapAction::Armed);
     v = heap_watch(e, {64 * 1024, 1000, /*ota_busy=*/true});
     CHECK(v.action == HeapAction::Recovered && !v.ota_excused);
+
+    // OSCILLATION across the threshold — the input class that had NO coverage here, and the one a
+    // real heap actually presents on its way down (#399). Every CHECK above feeds a monotonic
+    // scripted sequence; a heap hovering AT HEAP_CRITICAL_BYTES was found on hardware to end its run
+    // every second or two, reset the 300 s clock and never restart, while /status and /values were
+    // already answering 503. The run must SURVIVE the flicker.
+    HeapWatchdog osc;
+    CHECK(heap_watch(osc, {HEAP_CRITICAL_BYTES - 512, 0, false}).action == HeapAction::Armed);
+    for (uint32_t t = 1000; t < HEAP_CRITICAL_HOLD_MS; t += 1000) {
+        // Alternate either side of the ARM threshold, exactly as the board did. Touching
+        // HEAP_CRITICAL_BYTES is not a recovery; only clearing HEAP_RECOVERY_BYTES is.
+        const size_t block = (t / 1000) % 2 ? HEAP_CRITICAL_BYTES : HEAP_CRITICAL_BYTES - 512;
+        CHECK(heap_watch(osc, {block, t, false}).action == HeapAction::Watching);
+    }
+    CHECK(heap_watch(osc, {HEAP_CRITICAL_BYTES, HEAP_CRITICAL_HOLD_MS, false}).action == HeapAction::Restart);
+
+    // ...and the band is a BAND, not a second threshold to sit on: clearing it really does end the
+    // run, or the fix would have turned a watchdog that never fires into one that never stops.
+    HeapWatchdog band;
+    CHECK(heap_watch(band, {0, 0, false}).action == HeapAction::Armed);
+    CHECK(heap_watch(band, {HEAP_RECOVERY_BYTES - 1, 1000, false}).action == HeapAction::Watching);
+    CHECK(heap_watch(band, {HEAP_RECOVERY_BYTES, 2000, false}).action == HeapAction::Recovered);
+    // Inside the band with no run open: neither arms nor narrates. Ok, both sides of the arm line.
+    CHECK(heap_watch(band, {HEAP_CRITICAL_BYTES, 3000, false}).action == HeapAction::Ok);
+    CHECK(heap_watch(band, {HEAP_RECOVERY_BYTES - 1, 4000, false}).action == HeapAction::Ok);
+    // Below the ARM threshold it still arms — the band must not have raised the bar for arming.
+    CHECK(heap_watch(band, {HEAP_CRITICAL_BYTES - 1, 5000, false}).action == HeapAction::Armed);
+
+    // The excusal keys on the RECOVERY level too, or an OTA during a flicker would be filed as the
+    // heap having healed: inside the band the heap has NOT climbed clear, so the OTA is what ended
+    // the run and the log must say so.
+    HeapWatchdog ox;
+    CHECK(heap_watch(ox, {0, 0, false}).action == HeapAction::Armed);
+    v = heap_watch(ox, {HEAP_RECOVERY_BYTES - 1, 1000, /*ota_busy=*/true});
+    CHECK(v.action == HeapAction::Recovered && v.ota_excused);
+
+    CHECK(HEAP_RECOVERY_BYTES > HEAP_CRITICAL_BYTES);
 
     // The restart LADDER is bounded, and the bound is on the count that PRECEDED this boot.
     for (uint8_t n = 0; n < HEAP_MAX_CONSECUTIVE_RESTARTS; n++) CHECK(heap_may_restart(n));

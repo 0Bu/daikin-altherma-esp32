@@ -69,6 +69,31 @@ namespace daik {
 // either.
 inline constexpr size_t HEAP_CRITICAL_BYTES = 4096;
 
+// What it takes to declare a critical run OVER. Deliberately NOT the same number, and the asymmetry
+// is the whole point: arming and recovering are different questions, and answering both with 4096
+// made a heap hovering AT the threshold end its run every second or two, reset the 300 s clock, and
+// never restart at all.
+//
+// Measured on the bench board (#399), at exactly that heap level, while the run kept resetting:
+//     /status  503     /values  503     /diag  200
+// which is verbatim the wedge the top of this header exists to escape — "answering 503 to every
+// request, republishing nothing, indefinitely, reporting no fault". The device was IN it and the
+// watchdog had disarmed itself over a ~512 B flicker of ordinary allocator churn.
+//
+// So a largest block of exactly HEAP_CRITICAL_BYTES is not a recovery, and calling it one is the
+// bug: /status is ~7 KB and /values ~6 KB, and http_config.cpp's /set_mqtt pre-flight already
+// refuses even a PLAINTEXT probe below 12 KB. 2x is a FACTOR rather than a fitted constant — the
+// threshold is defined as the point below which normal operation's allocations cannot be served, so
+// twice it is the nearest defensible statement of "genuinely clear of that", and it moves with the
+// threshold if the threshold is ever re-argued.
+//
+// It is deliberately modest rather than set at the 12 KB the pre-flight wants. The band is only
+// there to reject flicker: a heap that has really climbed back to 8 KB has headroom, and demanding
+// more would keep a run open — and eventually restart the board — over a recovery that was real.
+// Under-restarting is the safe direction here, since the existing per-cycle bad_alloc guards still
+// handle everything a restart would have papered over.
+inline constexpr size_t HEAP_RECOVERY_BYTES = 2 * HEAP_CRITICAL_BYTES;
+
 // How long it must stay below that, without a single sample recovering, before we act. Long enough
 // that no burst — an OTA, a /diag dump, a detect sweep, several concurrent browser polls — can reach
 // it, since all of those resolve in seconds.
@@ -146,17 +171,25 @@ inline HeapVerdict heap_watch(HeapWatchdog& w, const HeapSample& s) {
     // skipping the sample: skipping would let a critical run that started BEFORE the download resume
     // its clock afterwards and fire mid-install, which is the one restart that could leave a
     // half-written slot behind.
-    if (s.ota_busy || s.largest_block >= HEAP_CRITICAL_BYTES) {
+    // ENDING a run and OPENING one are asked with different thresholds (see HEAP_RECOVERY_BYTES):
+    // a run ends only once the block is clear of the band, while a new one opens only below
+    // HEAP_CRITICAL_BYTES. In between, an OPEN run keeps running and a CLOSED one stays closed —
+    // which is what stops a flickering heap from resetting its own countdown forever.
+    if (s.ota_busy || s.largest_block >= HEAP_RECOVERY_BYTES) {
         if (!w.critical) return {HeapAction::Ok, 0, false};
         // Ending a run is worth a line: it is the difference between "the device healed itself" and
         // a silence the reader would have to interpret.
         const uint32_t ran = static_cast<uint32_t>(s.now_ms - w.since_ms);
-        // Excused means the OTA is what saved it — the heap itself is still below the threshold. An
-        // OTA running while the heap is healthy again is an ordinary recovery, not an excusal.
-        const bool excused = s.ota_busy && s.largest_block < HEAP_CRITICAL_BYTES;
+        // Excused means the OTA is what saved it — the heap itself has not climbed clear of the
+        // band. An OTA running while the heap is genuinely recovered is an ordinary recovery, not an
+        // excusal.
+        const bool excused = s.ota_busy && s.largest_block < HEAP_RECOVERY_BYTES;
         w.critical = false;
         return {HeapAction::Recovered, ran, excused};
     }
+    // Inside the band with no run open: not critical enough to arm, not clear enough to be worth a
+    // line. Ok is the honest answer — the previous sample said the same thing.
+    if (!w.critical && s.largest_block >= HEAP_CRITICAL_BYTES) return {HeapAction::Ok, 0, false};
     if (!w.critical) {
         w.critical = true;
         w.since_ms = s.now_ms;

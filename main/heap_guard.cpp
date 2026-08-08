@@ -29,7 +29,51 @@ uint8_t      s_restarts = 0;      // consecutive watchdog restarts this boot inh
 bool         s_exhausted_logged = false;
 uint32_t     s_watch_minutes = 0; // countdown lines already emitted for the current critical run
 
+// Transition (Armed/Recovered) narration budget. The Watching line below has always been throttled,
+// for a reason stated there — the diag ring is 6 KB, and a line a second evicts the episode's own
+// evidence before the restart it is meant to explain. The transitions next to it were not, and on
+// the bench board that is exactly what happened (#399): 78 Armed against 4 Watching, and /diag was
+// 89% heap: narration with the boot line already gone.
+//
+// HEAP_RECOVERY_BYTES is the real fix — a transition now needs a swing across the whole band rather
+// than a ~512 B flicker, so these are rare by construction. This is the second line of defence, for
+// a workload that swings wider than predicted: the log budget must not depend on having guessed the
+// allocation pattern right.
+//
+// The FIRST transition after a quiet period is always logged — an episode must keep its anchor,
+// which is precisely what the Watching throttle preserves by never suppressing the Armed line.
+// Suppressed transitions are COUNTED and reported on the next line that does go out, so a throttled
+// log still says the heap was flapping instead of quietly looking stable.
+constexpr uint32_t TRANSITION_QUIET_MS = 60000;
+uint32_t s_last_transition_ms = 0;
+bool     s_transition_logged  = false;   // false until the first transition of this boot
+uint32_t s_suppressed         = 0;
+
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
+
+// May this Armed/Recovered line go out now? Bumps the budget when it says yes, counts when it says
+// no. The Restart line never asks — a deliberate reboot is always worth its one line.
+bool transition_may_log(uint32_t now) {
+    if (s_transition_logged && static_cast<uint32_t>(now - s_last_transition_ms) < TRANSITION_QUIET_MS) {
+        s_suppressed++;
+        return false;
+    }
+    s_last_transition_ms = now;
+    s_transition_logged  = true;
+    return true;
+}
+
+// Emitted as its own line rather than appended to the caller's format string: the callers already
+// build their message from several runtime values, and threading an optional tail through each of
+// them is how a format string acquires a wrong argument.
+void note_suppressed() {
+    if (s_suppressed == 0) return;
+    diag_printf("heap: %lu further transition(s) in the last %lus were not logged — the heap is "
+                "flapping across the critical band\n",
+                static_cast<unsigned long>(s_suppressed),
+                static_cast<unsigned long>(TRANSITION_QUIET_MS / 1000));
+    s_suppressed = 0;
+}
 
 } // namespace
 
@@ -74,11 +118,14 @@ void heap_guard_sample() {
 
         case HeapAction::Armed:
             s_watch_minutes = 0;
+            if (!transition_may_log(s.now_ms)) return;
+            note_suppressed();
             diag_printf("heap: largest internal block %u B < %u B — restart in %lus unless it "
-                        "recovers\n",
+                        "recovers past %u B\n",
                         static_cast<unsigned>(s.largest_block),
                         static_cast<unsigned>(HEAP_CRITICAL_BYTES),
-                        static_cast<unsigned long>(heap_restart_in_ms(0) / 1000));
+                        static_cast<unsigned long>(heap_restart_in_ms(0) / 1000),
+                        static_cast<unsigned>(HEAP_RECOVERY_BYTES));
             return;
 
         case HeapAction::Watching: {
@@ -98,6 +145,8 @@ void heap_guard_sample() {
         case HeapAction::Recovered:
             s_exhausted_logged = false;
             s_watch_minutes    = 0;
+            if (!transition_may_log(s.now_ms)) return;
+            note_suppressed();
             if (v.ota_excused)
                 diag_printf("heap: critical run of %lus set aside — an OTA is in flight and holds "
                             "the largest allocations this firmware makes\n",
@@ -123,15 +172,23 @@ void heap_guard_sample() {
                 return;
             }
             {
+                // Flush the flap count BEFORE the restart line: this is the last chance it has to
+                // reach syslog, and "the heap was flapping" is part of why the device rebooted.
+                note_suppressed();
                 const int32_t next = static_cast<int32_t>(s_restarts) + 1;
                 // Best-effort: a failed write costs the NEXT boot its knowledge of this one, which
                 // under-counts (see heap_restart_count_sane) and is the safe direction. It must not
                 // stop the restart — the wedge is the thing being escaped.
                 const esp_err_t err = nvs_set_i32(HEAP_RESTARTS_KEY, next);
-                diag_printf("heap: largest internal block %u B < %u B for %lus — restarting "
-                            "deliberately (%ld/%u)%s\n",
+                // States the RECOVERY threshold, not the arm one. With hysteresis the firing sample
+                // can legitimately sit between the two — it did on the board, at 4608 B — and
+                // printing "< 4096 B" beside a 4608 B reading is a log line asserting something
+                // untrue about the number next to it. What the run actually proves is that the heap
+                // never climbed clear.
+                diag_printf("heap: largest internal block %u B never cleared %u B for %lus — "
+                            "restarting deliberately (%ld/%u)%s\n",
                             static_cast<unsigned>(s.largest_block),
-                            static_cast<unsigned>(HEAP_CRITICAL_BYTES),
+                            static_cast<unsigned>(HEAP_RECOVERY_BYTES),
                             static_cast<unsigned long>(v.critical_ms / 1000),
                             static_cast<long>(next),
                             static_cast<unsigned>(HEAP_MAX_CONSECUTIVE_RESTARTS),
