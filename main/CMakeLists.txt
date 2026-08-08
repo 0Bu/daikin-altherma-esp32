@@ -3,6 +3,7 @@ idf_component_register(
         "main.cpp"
         "config.cpp"
         "nvs_storage.cpp"
+        "net.cpp"
         "wifi.cpp"
         "weather_forecast.cpp"
         "hp_comm.cpp"
@@ -56,6 +57,8 @@ idf_component_register(
         esp_driver_i2c
         esp_driver_gpio
         esp_driver_rmt
+        esp_driver_spi
+        esp_eth
         led_strip
         mqtt
         esp_timer

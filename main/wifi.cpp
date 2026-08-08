@@ -13,7 +13,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
-#include "mdns.h"
+#include "net.hpp"
 #include "ping/ping_sock.h"
 #include "lwip/ip_addr.h"
 #include "freertos/FreeRTOS.h"
@@ -252,11 +252,13 @@ static void wifi_watchdog_task(void*) {
     }
 }
 
-static void start_mdns() {
-    if (mdns_init() != ESP_OK) return;
-    mdns_hostname_set(CONFIG_DAIKIN_HOSTNAME);
-    mdns_service_add(nullptr, "_http", "_tcp", 80, nullptr, 0);
-}
+// True once esp_wifi_start() has run in STA mode this boot, cleared again by wifi_stop_sta(). It
+// answers "is there a radio to fall back on", which a board that came up on Ethernet needs and
+// cannot get from s_wifi_connected (a station retrying an association is running but not up).
+static std::atomic<bool> s_sta_running{false};
+
+bool wifi_running() { return s_sta_running.load(); }
+bool wifi_link_up() { return s_wifi_connected.load(); }
 
 // Tear the STA stack fully down so the caller can bring up the AP setup portal on a clean WiFi
 // state (provisioning_start_ap() re-runs esp_wifi_init(), which aborts if WiFi is still up). Only
@@ -267,6 +269,7 @@ static void wifi_stop_sta() {
     if (s_h_ip)   { esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, s_h_ip);  s_h_ip = nullptr; }
     esp_wifi_stop();
     esp_wifi_deinit();
+    s_sta_running = false;
     if (s_sta_netif) { esp_netif_destroy_default_wifi(s_sta_netif); s_sta_netif = nullptr; }
     if (s_events) { vEventGroupDelete(s_events); s_events = nullptr; }
 }
@@ -329,6 +332,7 @@ bool wifi_start_sta() {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());
+    s_sta_running = true;
 
     // Disable WiFi modem sleep. The IDF default is WIFI_PS_MIN_MODEM: the radio sleeps between
     // DTIM beacons and only wakes at the DTIM interval to pull buffered downlink packets, which
@@ -411,7 +415,7 @@ bool wifi_start_sta() {
                         "a later connect failure may restore it\n", stale_backup.c_str());
     }
 
-    start_mdns();
+    net_mdns_start();
     // Ghost-association watchdog. Started only once online; it self-guards on s_wifi_connected.
     // 4096, not 3072: this task now reports through diag_printf (so its decisions reach /diag +
     // syslog, not just the serial console), and that call chain nests syslog_send inside

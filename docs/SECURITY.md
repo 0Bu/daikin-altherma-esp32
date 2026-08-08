@@ -21,9 +21,31 @@ and the OTA-signing / key lifecycle.
   WiFi/MQTT secrets — is **withheld** on the AP and registered only once the device is on the
   configured STA network (the trusted LAN). So a nearby client can join the device to WiFi but cannot
   read a core dump, read live state, or reconfigure it. The boundary is one host-tested policy
-  (`logic/http_surface.hpp`) applied at registration time in `http_start()`, which reads the WiFi
-  mode (`esp_wifi_get_mode()`) to pick the surface; a withheld GET falls through to the setup page, a
-  withheld POST 404s.
+  (`logic/http_surface.hpp`) applied at registration time in `http_start()`; a withheld GET falls
+  through to the setup page, a withheld POST 404s.
+- **The surface is decided by whether that AP is running — not by the WiFi mode.** It used to be
+  picked from `esp_wifi_get_mode() == WIFI_MODE_STA`, which was correct while a radio was the only
+  way this device could be on a network. With the optional wired transport it is wrong in **both**
+  directions, and each direction is a real defect: a board carried by an Ethernet cable never starts
+  a station at all, so the mode reads `WIFI_MODE_NULL` and the entire API — including everything
+  needed to configure the device — would be withheld from the LAN it is reachable on, with no radio
+  to fix that through; while the tempting inverse ("a wire is up, therefore trust") re-opens the
+  original hole, because the setup AP can be radiating at the same moment (a cable plugged into a
+  board that had already opened its portal) and `esp_http_server` registers routes per **server**,
+  not per interface — one open radio client would reach everything. Keying on the AP's own existence
+  is the only formulation that is right in both cases: the restricted surface exists *because* an
+  unauthenticated radio can associate. `http_surface_for(setup_ap_running)` is host-tested, and
+  `test/test_transport_contract.mjs` asserts over source text that nothing reintroduces the mode
+  check or opens the portal outside its gate.
+- **Why a runtime flag and not two servers.** The stronger construction is to give the portal its
+  own HTTP server and never create the full one in that boot, so the protected routes cannot be
+  registered at all. This firmware does not do that: both surfaces have shared one server since F01
+  was closed by gating registration, and the portal here serves more than the two provisioning
+  handlers. The flag is host-tested and pinned over source text instead. Recorded so the choice is
+  not re-litigated: splitting the server is a defensible separate change, not a defect in this one.
+- **A wired board does not open the setup AP at all.** With a cable holding a lease there is no open
+  radio surface on the device, whether or not WiFi credentials are stored — the portal exists to
+  collect credentials, and a device already on the LAN needs none.
 - **`GET /coredump` streams a raw crash memory image.** It exists for post-crash diagnostics and is
   subject to the same no-auth trust boundary as the rest of the API — but a core dump is more
   sensitive than the other endpoints: it is an ELF snapshot of task stacks/RAM that **can contain

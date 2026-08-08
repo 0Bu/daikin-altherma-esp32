@@ -60,16 +60,39 @@ inline constexpr int BOARD_PINS_MAX = 28;
 // — the single-reservation call shape from before the button existed — compiling and meaning
 // exactly what it did, so adding a second reservation didn't require touching every call site and
 // test at once. -1 in any field means "nothing reserved there".
+// EIGHT slots, not four, since the optional W5500 Ethernet controller (logic/net_link.hpp) claims
+// four pads of its own on top of whatever the caller already reserves — and it claims them in
+// EVERY direction, exactly like the four above: an X10A pin, an ENV III pin, the indicator and the
+// button are each refused on a pad the SPI bus is clocking. Merging is `plus()` rather than a
+// wider constructor because the two sets are learned in different places (the config vs. a
+// hardware probe), and a call site that forgets the merge should read as a missing `.plus(...)`,
+// not as a silently dropped argument.
 struct ReservedPins {
-    int pin_a = -1;
-    int pin_b = -1;
-    int pin_c = -1;
-    int pin_d = -1;
+    static constexpr int MAX = 8;
+    int pins[MAX] = {-1, -1, -1, -1, -1, -1, -1, -1};
     constexpr ReservedPins() = default;
     constexpr ReservedPins(int a, int b = -1, int c = -1, int d = -1)
-        : pin_a(a), pin_b(b), pin_c(c), pin_d(d) {}
+        : pins{a, b, c, d, -1, -1, -1, -1} {}
     constexpr bool claims(int pin) const {
-        return pin >= 0 && (pin == pin_a || pin == pin_b || pin == pin_c || pin == pin_d);
+        if (pin < 0) return false;
+        for (int i = 0; i < MAX; i++)
+            if (pins[i] == pin) return true;
+        return false;
+    }
+    // Union of two reservations. Pins that do not fit are DROPPED rather than silently wrapping,
+    // and the tests pin that eight is enough for every set this firmware builds (four config pins
+    // + four SPI pads); a ninth reservation is a compile-time-visible change to MAX, not a
+    // reservation that quietly stops being enforced.
+    constexpr ReservedPins plus(const ReservedPins& other) const {
+        ReservedPins out = *this;
+        int slot = 0;
+        for (int i = 0; i < MAX; i++) {
+            if (other.pins[i] < 0) continue;
+            while (slot < MAX && out.pins[slot] >= 0) slot++;
+            if (slot >= MAX) break;
+            out.pins[slot] = other.pins[i];
+        }
+        return out;
     }
 };
 

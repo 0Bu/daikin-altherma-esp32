@@ -45,6 +45,7 @@
 // No-op if mqtt_uri is empty. Memory-safe: discovery is one small publish per value; the state JSON
 // is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
+#include "net.hpp"
 #include "config.hpp"
 #include "checkup.hpp"
 #include "def/overlay.hpp"
@@ -915,6 +916,12 @@ static void publish_heartbeat() {
                       wi.bssid[0], wi.bssid[1], wi.bssid[2], wi.bssid[3], wi.bssid[4], wi.bssid[5]);
         f.wifi_bssid = bssid_str;
     }
+    // The transport, so a wired board is not read as permanently offline by a consumer that only
+    // has wifi_connected to go on (logic/heartbeat.hpp states why these are numbers).
+    const EthInfo eth = net_eth_info();
+    f.net_link    = static_cast<uint8_t>(net_kind());
+    f.eth_present = eth.present;
+    f.eth_link    = eth.link;
     f.mqtt_connected  = s_connected;
     f.mqtt_count      = s_mqtt_pub_ok;
     f.mqtt_fails      = s_mqtt_pub_fail;

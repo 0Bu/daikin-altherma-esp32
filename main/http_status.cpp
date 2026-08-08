@@ -37,6 +37,7 @@
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
 #include "mqtt_ha.hpp"
+#include "net.hpp"
 #include "ota_update.hpp"
 #include "safe_mode.hpp"
 #include "sntp_time.hpp"
@@ -213,7 +214,8 @@ void http_append_status_json(std::string& j, bool redact) {
     // reserved pins from the live config, the same two inputs /set_hp validation and config_load
     // use, rather than a #if block copied in here.
     int pins[BOARD_PINS_MAX];
-    int npins = board_pins_offerable(pins, BOARD_PINS_MAX, hw_octal_spi(), config_reserved_pins(c));
+    int npins = board_pins_offerable(pins, BOARD_PINS_MAX, hw_octal_spi(),
+                                     config_reserved_pins(c).plus(net_eth_reserved_pins()));
     j += "\"pins_avail\":[";
     for (int i = 0; i < npins; i++) { if (i) j += ","; j += std::to_string(pins[i]); }
     j += "],";
@@ -225,7 +227,8 @@ void http_append_status_json(std::string& j, bool redact) {
     // applies in the other direction. Drives the ESP32 card's hardware rows; /set_board writes them
     // back.
     int lpins[BOARD_LOCAL_PINS_MAX];
-    int nlpins = board_pins_local(lpins, BOARD_LOCAL_PINS_MAX, hw_octal_spi(), config_board_reserved_pins(c));
+    int nlpins = board_pins_local(lpins, BOARD_LOCAL_PINS_MAX, hw_octal_spi(),
+                                  config_board_reserved_pins(c).plus(net_eth_reserved_pins()));
     // Appended piece by piece with `+=` rather than as one `a + b + c + …` chain. A chain has to
     // materialise EVERY intermediate std::string at once — each one a live object in this frame — and
     // this function overflowed the httpd task's stack doing exactly that (see http_server.cpp for the
@@ -281,7 +284,7 @@ void http_append_status_json(std::string& j, bool redact) {
         // pads stay unavailable for ENV III.
         int bipins[BOARD_I2C_PINS_MAX];
         const int nbipins = board_preset_i2c_pins_offerable(
-            presets[i], bipins, BOARD_I2C_PINS_MAX, hw_octal_spi(), config_link_pins(c));
+            presets[i], bipins, BOARD_I2C_PINS_MAX, hw_octal_spi(), config_link_pins(c).plus(net_eth_reserved_pins()));
         j += ",\"i2c_pins\":[";
         for (int k = 0; k < nbipins; ++k) { if (k) j += ","; j += std::to_string(bipins[k]); }
         j += "]";
@@ -299,10 +302,10 @@ void http_append_status_json(std::string& j, bool redact) {
     const Env3Status env = env3_status();
     int epins[BOARD_I2C_PINS_MAX];
     const int nepins = board_preset_i2c_pins_offerable(
-        selected_board, epins, BOARD_I2C_PINS_MAX, hw_octal_spi(), config_link_pins(c));
+        selected_board, epins, BOARD_I2C_PINS_MAX, hw_octal_spi(), config_link_pins(c).plus(net_eth_reserved_pins()));
     const Env3Preset* epresets[ENV3_PRESETS_MAX];
     const int nepre = env3_presets_offerable(epresets, ENV3_PRESETS_MAX, selected_board, hw_octal_spi(),
-                                             config_link_pins(c));
+                                             config_link_pins(c).plus(net_eth_reserved_pins()));
     const bool env_fresh = env_enabled && env.fresh;
     char env_temp[24] = {0}, env_hum[24] = {0}, env_press[24] = {0};
     if (env_fresh) {
@@ -355,6 +358,43 @@ void http_append_status_json(std::string& j, bool redact) {
          // not render this yet (a banner lands with the web-UI write-feedback work, PR #65) — for
          // now it is the API's answer to "did my save actually stick?".
          ",\"rolled_back\":" + std::string(c.wifi_rolled_back ? "true" : "false") + "},";
+    // WHICH TRANSPORT carries the device, and what the optional wire is doing. A separate block
+    // from "wifi" rather than a widening of it, because the two describe different hardware and a
+    // reader must be able to tell "no radio configured" from "no radio because there is a cable":
+    // on a wired board the wifi block above is entirely honest — not connected, no RSSI, no BSSID —
+    // and would be indistinguishable from a broken install without this.
+    //
+    // `ip` is the ACTIVE transport's address, so a client has one field to read instead of a rule
+    // to re-derive; it is empty (never a stale one) while nothing holds a lease. `eth.supported`
+    // says whether this BUILD carries the driver at all, which is what lets the UI hide the row
+    // rather than show a permanently absent feature — the modbus_rows/env3_rows rule applied to a
+    // transport. The pins are reported even with no controller present, since "where would it go"
+    // is the question docs/BOARDS.md answers and the one a user wiring one asks.
+    const EthInfo eth = net_eth_info();
+    const EthPins eth_pins = net_eth_pins();
+    char eth_mac_str[18] = {0};
+    if (eth.present)
+        snprintf(eth_mac_str, sizeof(eth_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 eth.mac[0], eth.mac[1], eth.mac[2], eth.mac[3], eth.mac[4], eth.mac[5]);
+    const NetLink kind = net_kind();
+    j += "\"net\":{\"kind\":";  j += jstr(net_link_str(kind));
+    j += ",\"ip\":";            j += jstr_r(kind == NetLink::Eth ? eth.ip
+                                          : kind == NetLink::Wifi ? wi.ip : "", redact);
+    j += ",\"eth\":{\"supported\":"; j += net_eth_pins_valid(eth_pins) ? "true" : "false";
+    j += ",\"present\":";       j += eth.present ? "true" : "false";
+    j += ",\"link\":";          j += eth.link ? "true" : "false";
+    j += ",\"lease\":";         j += eth.lease ? "true" : "false";
+    j += ",\"ip\":";            j += jstr_r(eth.ip, redact);
+    j += ",\"mac\":";           j += eth.present ? jstr_r(eth_mac_str, redact) : "null";
+    // Speed/duplex are the PHY's, so they mean something only while a cable is negotiated; null
+    // rather than a plausible-looking 10/half on an unplugged port.
+    j += ",\"speed_mbps\":";    j += eth.link ? std::to_string(eth.speed_mbps) : "null";
+    j += ",\"full_duplex\":";   j += eth.link ? (eth.full_duplex ? "true" : "false") : "null";
+    j += ",\"pins\":{\"sclk\":"; j += std::to_string(eth_pins.sclk);
+    j += ",\"cs\":";            j += std::to_string(eth_pins.cs);
+    j += ",\"miso\":";          j += std::to_string(eth_pins.miso);
+    j += ",\"mosi\":";          j += std::to_string(eth_pins.mosi);
+    j += "}}},";
     // has_creds says only WHETHER credentials are stored — never what they are (/status stays
     // secret-free). Read from the CONFIG, not from MqttStatus: creds outlive a disabled broker, and
     // that is exactly the state the UI must offer to clear. It drives the MQTT modal's "remove

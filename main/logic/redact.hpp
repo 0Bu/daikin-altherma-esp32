@@ -43,9 +43,10 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The fifteen /status values http_status.cpp passes through redact_identifier (via its jstr_r
+// The eighteen /status values http_status.cpp passes through redact_identifier (via its jstr_r
 // wrapper). Listed here rather than only at the call sites so the set is reviewable in one place:
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  mqtt.base
+//   net.ip  net.eth.ip  net.eth.mac
 //   reference_temperature.name  reference_temperature.topic
 //   circulation_source.name  circulation_source.topic
 //   weather_forecast.latitude  weather_forecast.longitude
@@ -58,13 +59,18 @@ inline constexpr const char* REDACTED = "<redacted>";
 // became runtime-settable: it is a word the user typed AND it becomes the installation's Home
 // Assistant device id, so it carries whatever they chose to call their house. Its companion
 // `base_custom` is a bool and stays in the clear — "is this the default?" is diagnostic, the string
-// itself is not.
+// itself is not. The three net.* fields joined with the optional wired transport: an Ethernet lease
+// is a LAN address exactly like the station's, and the controller's MAC is the same kind of
+// board-identifying value wifi.mac already was — an OUI plus a unique tail. What deliberately stays
+// in the clear beside them is every BOOLEAN and the four SPI pin numbers: "is a cable negotiated",
+// "does this build carry the driver" and "which pads would it use" identify nobody, and they are
+// the first things a triage reader needs from a report filed by a wired board.
 //
 // The COUNT is checked (tools/redact/check_diag_coverage.py derives it from the call sites), which
 // it was not until this comment and that constant had drifted two fields apart in silence. What is
 // still only a review point is the direction no count can see: a NEW identifying field that nobody
 // wrapped at all. It never reaches the redactor, so it never reaches this number either.
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 15;
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 18;
 
 // Field-level substitution for the /status builder. Returns by value because every caller feeds it
 // straight into json_quote(), which copies anyway.

@@ -20,7 +20,8 @@
 //       probe's own timeout, or the captive portal never pops and the device looks unprovisionable.
 //   4 — supervisors and bridge publishers: periodic, latency-tolerant, but expected to run promptly
 //       when due. The MQTT bridge, the second (HomeHub) source, the optional ENV III sensor, the
-//       connectivity watchdog, and the two OTA tasks — which hold a TLS peer that will time out.
+//       connectivity watchdog, the wired-link loss watch (which decides a reboot, so it must not
+//       sit behind a long publish), and the two OTA tasks — which hold a TLS peer that will time out.
 //   3 — local reporting with relaxed deadlines: best-effort UDP syslog, the 45-minute weather fetch,
 //       and the recovery button's debounced sampling.
 //   2 — cosmetics. The status indicator is below everything: a dropped tick costs nothing (the next
@@ -37,6 +38,7 @@ inline constexpr UBaseType_t TASK_PRIO_MQTT        = 4;  // mqtt_ha.cpp         
 inline constexpr UBaseType_t TASK_PRIO_MODBUS      = 4;  // hp_modbus.cpp       the second, independent HomeHub source
 inline constexpr UBaseType_t TASK_PRIO_ENV3        = 4;  // env3.cpp            optional ENV III climate sensor
 inline constexpr UBaseType_t TASK_PRIO_WIFI_WD     = 4;  // wifi.cpp            ghost-association watchdog
+inline constexpr UBaseType_t TASK_PRIO_ETH_FALLBACK = 4; // net.cpp             wired-link loss watch (wired boots only)
 inline constexpr UBaseType_t TASK_PRIO_OTA         = 4;  // ota_update.cpp      manifest check / download (transient)
 inline constexpr UBaseType_t TASK_PRIO_OTA_GATE    = 4;  // ota_update.cpp      one-shot rollback health gate
 inline constexpr UBaseType_t TASK_PRIO_SYSLOG      = 3;  // syslog.cpp          best-effort UDP forwarder (opt-in)

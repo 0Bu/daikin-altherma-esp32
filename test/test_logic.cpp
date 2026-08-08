@@ -79,6 +79,7 @@
 #include "logic/hexdump.hpp"
 #include "logic/timestamp.hpp"
 #include "logic/uart_plan.hpp"
+#include "logic/net_link.hpp"
 #include "logic/wifi_rollback.hpp"
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
@@ -838,10 +839,10 @@ static void test_config_model() {
     CHECK(board_hw_valid(b, why, 48, false));
     // The mirror image: with the indicator + button configured, /set_hp must not be able to take
     // their pins. config_reserved_pins is the one accessor both sides read.
-    CHECK(config_reserved_pins(b).pin_a == 35 && config_reserved_pins(b).pin_b == 41);
+    CHECK(config_reserved_pins(b).claims(35) && config_reserved_pins(b).claims(41));
     // ...and the mirror accessor names the OTHER pair, for the LED/button pickers. Two factories,
     // one anonymous two-slot struct: which pins are spoken for is stated at the call site.
-    CHECK(config_link_pins(b).pin_a == 44 && config_link_pins(b).pin_b == 43);
+    CHECK(config_link_pins(b).claims(44) && config_link_pins(b).claims(43));
     CHECK(config_link_pins(b).claims(44) && config_link_pins(b).claims(43));
     CHECK(!config_link_pins(b).claims(35) && !config_link_pins(b).claims(-1));
     Config steal = b;
@@ -854,7 +855,7 @@ static void test_config_model() {
     // With no board hardware configured, both pins are free again.
     Config none;
     none.rx_pin = 35; none.tx_pin = 41;
-    CHECK(config_reserved_pins(none).pin_a == -1 && config_reserved_pins(none).pin_b == -1);
+    CHECK(!config_reserved_pins(none).claims(0) && !config_reserved_pins(none).claims(21));
     CHECK(!validate(none, why, 48, false, config_reserved_pins(none)));   // 41 is JTAG: never an X10A pin
     none.tx_pin = 43;
     CHECK(validate(none, why, 48, false, config_reserved_pins(none)));    // 35 is fine on a Quad build
@@ -2067,6 +2068,7 @@ static void test_heartbeat() {
     f.wifi_reconnects = 3;
     f.wifi_mac        = "A1:B2:C3:D4:E5:F6";
     f.wifi_bssid      = "00:11:22:33:44:55";
+    f.net_link        = static_cast<uint8_t>(NetLink::Wifi);
     f.mqtt_connected  = true;
     f.mqtt_count      = 89282;
     f.mqtt_fails      = 0;
@@ -2094,6 +2096,7 @@ static void test_heartbeat() {
                "\"reset_reason\":\"panic\",\"reset_reason_code\":4,\"reset_fault\":1,"
                "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_reconnects\":3,"
                "\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\",\"wifi_bssid\":\"00:11:22:33:44:55\","
+               "\"net_link\":1,\"eth_present\":0,\"eth_link\":0,"
                "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
                "\"mqtt_skipped\":337,\"mqtt_quiesced\":42,\"poll_skipped\":32,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
@@ -2974,9 +2977,9 @@ static void test_led_pattern() {
     CHECK(led_phase(in) == LedPhase::SetupPortal);
     in.ap_mode = false;
 
-    in.sta_mode = true;
+    in.link_mode = true;
     CHECK(led_phase(in) == LedPhase::Connecting);            // associated? not yet
-    in.wifi_connected = true;
+    in.link_up = true;
     CHECK(led_phase(in) == LedPhase::BusDown);               // WiFi up, X10A silent
     in.hp_connected = true;
     CHECK(led_phase(in) == LedPhase::Healthy);               // MQTT unconfigured is NOT a fault
@@ -2993,7 +2996,7 @@ static void test_led_pattern() {
     // NORMAL state of a board someone is deliberately factory-resetting. Gating the warning on a
     // fault would hide it in exactly the case it exists for.
     LedInputs healthy;
-    healthy.sta_mode = healthy.wifi_connected = healthy.hp_connected = true;
+    healthy.link_mode = healthy.link_up = healthy.hp_connected = true;
     CHECK(led_phase(healthy) == LedPhase::Healthy);
     healthy.signal = LedSignal::WipeArmed;
     CHECK(led_phase(healthy) == LedPhase::WipeArmed);
@@ -6065,6 +6068,98 @@ static void test_mcp() {
     deep += std::string(18, ']');
     deep += "}";
     CHECK(parse(deep).error == -32700);
+}
+
+// ── The wired transport's rules (logic/net_link.hpp) ────────────────────────────────────────────
+// Every one of these is a decision the boot sequence used to make implicitly, correctly, for a
+// device that could only have a radio. They are asserted here because the failure mode of each is
+// invisible on a bench board with a cable in it and expensive in a utility room without one.
+static void test_net_link() {
+    // Who carries the route. The wire wins whenever it has a lease; BOTH being held at once is the
+    // normal state of a board that fell back to WiFi and later had a cable plugged in.
+    CHECK(net_link_active(false, false) == NetLink::None);
+    CHECK(net_link_active(false, true)  == NetLink::Wifi);
+    CHECK(net_link_active(true,  false) == NetLink::Eth);
+    CHECK(net_link_active(true,  true)  == NetLink::Eth);
+    CHECK(std::string(net_link_str(NetLink::None)) == "none");
+    CHECK(std::string(net_link_str(NetLink::Wifi)) == "wifi");
+    CHECK(std::string(net_link_str(NetLink::Eth))  == "eth");
+    // The numeric form rides the MQTT heartbeat, so the values are a published contract.
+    CHECK(static_cast<int>(NetLink::None) == 0);
+    CHECK(static_cast<int>(NetLink::Wifi) == 1);
+    CHECK(static_cast<int>(NetLink::Eth)  == 2);
+
+    // The boot fork. A wired board does not start its radio…
+    CHECK(!net_wifi_start_needed(/*eth*/true,  /*configured*/true));
+    CHECK(!net_wifi_start_needed(/*eth*/true,  /*configured*/false));
+    CHECK( net_wifi_start_needed(/*eth*/false, /*configured*/true));
+    CHECK(!net_wifi_start_needed(/*eth*/false, /*configured*/false));
+    // …and, the load-bearing half, does not open a captive portal it has no reason to run. Without
+    // this a wired board with no stored SSID would sit behind an OPEN SoftAP that also restricts
+    // the HTTP surface — the whole API withheld from the LAN it is reachable on.
+    CHECK(!net_portal_needed(/*eth*/true,  /*wifi_up*/false));
+    CHECK(!net_portal_needed(/*eth*/true,  /*wifi_up*/true));
+    CHECK(!net_portal_needed(/*eth*/false, /*wifi_up*/true));
+    CHECK( net_portal_needed(/*eth*/false, /*wifi_up*/false));
+
+    // Losing the wire. A live lease, or a running radio, is nothing to act on.
+    EthFallbackWatch w;
+    CHECK(net_eth_fallback_step(w, /*lease*/true, /*wifi_running*/false, /*configured*/true) ==
+          EthFallbackAction::Idle);
+    CHECK(net_eth_fallback_step(w, false, /*wifi_running*/true, true) == EthFallbackAction::Idle);
+    // No configured network to come back on: never reboot. Rebooting would replace a board waiting
+    // for its cable with a board waiting for its cable, minus its uptime and its diag ring.
+    for (int i = 0; i < 20; i++)
+        CHECK(net_eth_fallback_step(w, false, false, /*configured*/false) == EthFallbackAction::Idle);
+    // Proven gone AND there is a radio to come back on -> restart, but only after the grace run.
+    for (int i = 0; i < ETH_FALLBACK_PERIODS - 1; i++)
+        CHECK(net_eth_fallback_step(w, false, false, true) == EthFallbackAction::Wait);
+    CHECK(net_eth_fallback_step(w, false, false, true) == EthFallbackAction::Restart);
+    // The run is spent by the verdict, so a caller that refuses (an OTA is installing) re-earns it
+    // instead of asserting Restart on every later period.
+    CHECK(net_eth_fallback_step(w, false, false, true) == EthFallbackAction::Wait);
+    // A single healthy sample clears the run: a switch rebooting must not accumulate across a
+    // recovery toward a reboot nobody needed.
+    w = EthFallbackWatch{};
+    CHECK(net_eth_fallback_step(w, false, false, true) == EthFallbackAction::Wait);
+    CHECK(net_eth_fallback_step(w, true,  false, true) == EthFallbackAction::Idle);
+    for (int i = 0; i < ETH_FALLBACK_PERIODS - 1; i++)
+        CHECK(net_eth_fallback_step(w, false, false, true) == EthFallbackAction::Wait);
+
+    // The pads. Four real, distinct GPIOs or there is no Ethernet.
+    const EthPins ok{5, 6, 7, 8};
+    CHECK(net_eth_pins_valid(ok));
+    CHECK(!net_eth_pins_valid(EthPins{-1, 6, 7, 8}));
+    CHECK(!net_eth_pins_valid(EthPins{5, 5, 7, 8}));
+    CHECK(!net_eth_pins_valid(EthPins{5, 6, 7, 7}));
+    CHECK(ok.claims(5) && ok.claims(8) && !ok.claims(4) && !ok.claims(-1));
+    CHECK(ok.reserved().claims(6) && ok.reserved().claims(7) && !ok.reserved().claims(1));
+
+    // The probe may not drive a pad the firmware already uses. This is the destructive one: on an
+    // AtomS3 Lite with X10A moved to the header pins (docs/BOARDS.md offers exactly 5/6), the
+    // probe's clock and chip-select would land on the heat pump's service bus.
+    CHECK(net_eth_probe_allowed(ok, ReservedPins{}));
+    CHECK(net_eth_probe_allowed(ok, ReservedPins{1, 2}));            // X10A on Grove — no overlap
+    CHECK(!net_eth_probe_allowed(ok, ReservedPins{5, 6}));           // X10A on the header pads
+    CHECK(!net_eth_probe_allowed(ok, ReservedPins{35, 41, 2, 1}.plus(ReservedPins{7})));
+    CHECK(!net_eth_probe_allowed(EthPins{-1, -1, -1, -1}, ReservedPins{}));
+
+    // ReservedPins now merges two sets, because the Ethernet pads are learned from a PROBE while
+    // the other four come from the config — and both must reach every picker.
+    const ReservedPins merged = ReservedPins{35, 41, 1, 2}.plus(ok.reserved());
+    for (int p : {35, 41, 1, 2, 5, 6, 7, 8}) CHECK(merged.claims(p));
+    CHECK(!merged.claims(9));
+    CHECK(!merged.claims(-1));
+    // Eight slots is exactly the largest set this firmware builds (four config pins + four pads);
+    // a ninth would be silently dropped, so the bound is asserted rather than assumed.
+    CHECK(ReservedPins::MAX == 8);
+
+    // The trust surface now keys on the AP itself, not on the WiFi mode: a wired board never starts
+    // a station, and reading that absence as "untrusted" withheld the whole API from the cable.
+    CHECK(http_surface_for(true)  == HttpSurface::SetupAp);
+    CHECK(http_surface_for(false) == HttpSurface::TrustedLan);
+    CHECK(!http_surface_serves(http_surface_for(true), "/status", false));
+    CHECK(http_surface_serves(http_surface_for(false), "/status", false));
 }
 
 static void test_http_surface() {
@@ -10504,6 +10599,7 @@ int main() {
     test_heating_curve_diagnosis();
     test_weather_forecast_contract();
     test_mcp();
+    test_net_link();
     test_http_surface();
     test_lwt_select();
     test_ou_stale();

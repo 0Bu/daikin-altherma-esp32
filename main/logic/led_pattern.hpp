@@ -40,10 +40,10 @@ enum class LedSignal : uint8_t {
 };
 
 enum class LedPhase : uint8_t {
-    Off,           // no WiFi mode / indicator idle
+    Off,           // no transport at all this boot / indicator idle
     SetupPortal,   // SoftAP provisioning portal up
-    Connecting,    // STA, not associated yet
-    Healthy,       // WiFi + X10A up, MQTT connected or not configured
+    Connecting,    // a transport exists but holds no address yet
+    Healthy,       // link + X10A up, MQTT connected or not configured
     BusDown,       // X10A link down — outranks MqttDown (the bus is the point of the device)
     MqttDown,      // X10A up, but a configured broker is not connected
     WipeArmed,
@@ -65,8 +65,13 @@ struct LedPattern {
 // mqtt_status() / hp_stats() before calling in, so this stays allocation-free and IDF-free).
 struct LedInputs {
     bool      ap_mode        = false;   // SoftAP or APSTA — any live SoftAP means "setup"
-    bool      sta_mode       = false;
-    bool      wifi_connected = false;
+    // NOT WiFi-specific, and deliberately not named so: since the optional wired transport
+    // (net.cpp) a board can hold an address with no radio started at all. `link_mode` = some
+    // transport exists this boot (a station, or a detected Ethernet controller); `link_up` = it
+    // holds an address. Reading these as WiFi facts is what would render a perfectly healthy wired
+    // board as the Off pattern — dark, while it serves the whole API over the cable.
+    bool      link_mode      = false;
+    bool      link_up        = false;
     bool      mqtt_configured = false;
     bool      mqtt_connected  = false;
     bool      hp_connected    = false;
@@ -81,8 +86,8 @@ inline LedPhase led_phase(const LedInputs& in) {
     if (in.signal == LedSignal::WipeArmed) return LedPhase::WipeArmed;
 
     if (in.ap_mode)  return LedPhase::SetupPortal;
-    if (!in.sta_mode) return LedPhase::Off;
-    if (!in.wifi_connected) return LedPhase::Connecting;
+    if (!in.link_mode) return LedPhase::Off;
+    if (!in.link_up) return LedPhase::Connecting;
 
     const bool mqtt_ok = !in.mqtt_configured || in.mqtt_connected;   // unconfigured is not a fault
     if (in.hp_connected && mqtt_ok) return LedPhase::Healthy;

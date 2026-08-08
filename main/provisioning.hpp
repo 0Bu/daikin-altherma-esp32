@@ -7,4 +7,10 @@ namespace daik {
 
 void provisioning_start_ap();
 
+// Is the OPEN setup SoftAP running right now? THE input to the HTTP trust surface
+// (logic/http_surface.hpp's http_surface_for): the restricted route set exists because an
+// unauthenticated radio client can associate, so it is this AP's existence that must decide —
+// not the absence of a WiFi station, which a board carried by an Ethernet cable also has.
+bool provisioning_ap_active();
+
 } // namespace daik

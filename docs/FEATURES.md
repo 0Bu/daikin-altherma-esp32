@@ -115,6 +115,8 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 74 | **Presenter-parity gate** — the browser's copies of the leaving-water / post-BUH / COP-scope / held-over-page rules are diffed against the C++ headers over the whole catalog, so "host-tested" stops meaning "the copy that does not ship is tested" | ✅ 🧪 | [`presenter_golden_dump.cpp`](../test/presenter_golden_dump.cpp), [`presenter_parity.mjs`](../tools/presenter/presenter_parity.mjs), [`selftest.sh`](../tools/presenter/selftest.sh) |
 | 75 | **One unwind-safe mutex guard** for the whole firmware, replacing nine per-file copies that had drifted into two shapes — plus a bounded/try-lock mode for the callback contexts that must not block | ✅ | [`rtos_guard.hpp`](../main/rtos_guard.hpp) |
 | 76 | **Central task-priority table** — relative priority is a property of the system, so it is declared in one place instead of as twelve bare literals the ordering had to be reconstructed from | ✅ | [`task_config.hpp`](../main/task_config.hpp) |
+| 77 | **Optional wired transport (W5500 / PoE)** — a second network transport detected at boot from one SPI identity register, with the boot fork (wire → radio → portal), the route priority, the pulled-cable reboot and the probe's refusal to drive a configured pad as host-tested rules | ✅ 🧪 | [`logic/net_link.hpp`](../main/logic/net_link.hpp), [`net.cpp`](../main/net.cpp), [`test_transport_contract.mjs`](../test/test_transport_contract.mjs) |
+| 78 | **Transport-independent HTTP trust surface** — the restricted provisioning route set follows the OPEN setup AP's existence rather than the WiFi mode, so a wired board is not locked out of its own API and a live AP cannot be widened by a cable | ✅ 🧪 | [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_server.cpp`](../main/http_server.cpp) |
 
 ---
 
@@ -235,6 +237,10 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
 - **Connect to the *strongest* AP, not the first heard** — `WIFI_ALL_CHANNEL_SCAN` +
   `WIFI_CONNECT_AP_BY_SIGNAL`, so a multi-AP/mesh SSID does not latch a distant AP. SAE tuning
   (`failure_retry_cnt`, `sae_pwe_h2e = BOTH`) absorbs transient WPA3 handshake failures.
+- **An optional wired transport.** A W5500 on SPI (an ATOMIC PoE Base in practice) is *detected* at
+  boot from one identity register, so one image serves both — [`net.cpp`](../main/net.cpp). A wired
+  board starts no radio and opens no setup portal; the boot fork, the route priority and the
+  pulled-cable reboot are host-tested rules in [`logic/net_link.hpp`](../main/logic/net_link.hpp).
 - **Endless reconnect with a first-boot budget.** A boot-time failure spends a bounded budget and
   then opens the setup portal; once ever online, a drop reconnects **forever**, unconditionally on
   the disconnect reason — the reason codes that look like bad credentials are also the transient
@@ -696,8 +702,9 @@ Four properties of that core are worth naming because they are not obvious from 
   leaves a required check pending forever); ccache is carried across runs, keyed on the toolchain +
   `sdkconfig.defaults` rather than a hash of the workflow file; a PR publishes nothing; and every job
   carries a timeout.
-- **Managed components** ([`idf_component.yml`](../main/idf_component.yml)): `mdns`, `cjson` and
-  `mqtt` are pulled as managed components (the latter two extracted from IDF core in v6.0).
+- **Managed components** ([`idf_component.yml`](../main/idf_component.yml)): `mdns`, `cjson`, `mqtt`,
+  `led_strip` and `w5500` are pulled as managed components (`cjson`/`mqtt`/`w5500` were all extracted
+  from IDF core in v6.0).
 
 ---
 
@@ -741,6 +748,9 @@ Every ESP-IDF component this firmware links, and what it powers (from
 | `esp_driver_i2c` | optional ENV III SHT30 + QMP6988 climate sensor |
 | `esp_driver_gpio` | status indicator (GPIO back-end), recovery-button input + pin config |
 | `esp_driver_rmt` | RMT peripheral behind the WS2812 indicator back-end |
+| `esp_driver_spi` | SPI master behind the optional W5500 Ethernet controller |
+| `esp_eth` | MAC/PHY framework for the optional wired transport |
+| `w5500` (managed) | the W5500 MAC/PHY pair — ESP-IDF 6.0 moved the SPI Ethernet drivers out of `esp_eth` |
 | `led_strip` (managed) | WS2812 pixel driver — an addressable LED encodes colour in pulse timings |
 | `esp_timer` | uptime, poll/serial timing |
 | `mdns` (managed) | `<hostname>.local` discovery + the explicit HomeHub browse |

@@ -21,7 +21,8 @@
 #include "logic/reference_temperature.hpp"
 #include "logic/weather_forecast.hpp"
 #include "hp_modbus.hpp"        // mb_reconfigure — start/stop the second, independent stack
-#include "mqtt_ha.hpp"           // mqtt_reference_reconfigure — apply its exact subscription live
+#include "mqtt_ha.hpp"          // mqtt_reference_reconfigure — apply its exact subscription live
+#include "net.hpp"              // net_eth_reserved_pins — the pads a detected W5500 is clocking
 #include "weather_forecast.hpp"
 
 #include "cJSON.h"
@@ -86,7 +87,8 @@ static esp_err_t env3_save_preflight(httpd_req_t* req, const Config& current,
                                      Config& proposed, bool& allowed) {
     allowed = false;
     std::string reason;
-    if (!env3_config_valid(proposed, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
+    if (!env3_config_valid(proposed, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(),
+                           net_eth_reserved_pins())) {
         return send_err(req, "400 Bad Request", reason.c_str());
     }
     switch (env3_save_check(current, proposed)) {
@@ -775,7 +777,8 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // Pass the real Kconfig-derived octal-SPI + status-LED facts (config.cpp) so validate() rejects a
     // chip-reserved GPIO — a flash/strapping/JTAG pad the UI dropdown never offers but a raw curl POST
     // could send — with the pin named, instead of range-accepting it and persisting a crash-loop pair.
-    if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(), config_reserved_pins(c)))
+    if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(),
+                  config_reserved_pins(c).plus(net_eth_reserved_pins())))
         return send_err(req, "400 Bad Request", reason.c_str());
     // This route OWNS the pin cache, unlike the service routes whose link writes are only
     // best-effort maintenance. Require all three cache keys; on failure RAM stays untouched, so
@@ -966,7 +969,8 @@ static esp_err_t set_board(httpd_req_t* req) {
 
     // Checks the pins against the chip AND against the X10A link in the same snapshot, so neither
     // side can steal the other's GPIO whichever endpoint is called second (logic/config_model.hpp).
-    if (!board_hw_valid(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi()))
+    if (!board_hw_valid(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(),
+                        net_eth_reserved_pins()))
         return send_err(req, "400 Bad Request", reason.c_str());
 
     bool env_allowed = false;

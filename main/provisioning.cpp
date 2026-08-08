@@ -16,6 +16,11 @@
 
 namespace daik {
 
+// Set once the SoftAP is actually up; read by http_start() to pick the trust surface.
+static bool s_ap_active = false;
+
+bool provisioning_ap_active() { return s_ap_active; }
+
 static const char* TAG = "prov";
 
 // RFC 8910 DHCP option 114 (Captive-Portal Identification). NOT const and NOT a local: IDF stores
@@ -90,6 +95,10 @@ void provisioning_start_ap() {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     ESP_ERROR_CHECK(esp_wifi_start());
+    // Before the DNS/captive plumbing, not after: http_start() reads this to pick its trust
+    // surface, and an AP that is radiating while the flag still says "no portal" is the one
+    // ordering that would widen the surface on an open radio.
+    s_ap_active = true;
 
     offer_self_as_dns();
     captive_dns_start();   // resolves every lookup to 192.168.4.1 -> captive-portal auto-popup

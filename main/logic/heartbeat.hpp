@@ -50,6 +50,22 @@ struct HeartbeatFields {
     std::string wifi_mac;
     std::string wifi_bssid;
 
+    // WHICH TRANSPORT carries the device (logic/net_link.hpp's NetLink as its raw number: 0 none,
+    // 1 wifi, 2 eth), plus whether a wired controller is present and negotiated. A NUMBER for the
+    // reason reset_reason_code is one — Telegraf keeps numeric fields and drops strings — and it is
+    // here rather than only on /status because without it a wired board reads as permanently
+    // OFFLINE in a metrics store: wifi_connected sits at 0 forever, truthfully, while the device is
+    // up and publishing the very series that say so. Nothing else in this payload can distinguish
+    // "no network" from "a network with no radio in it".
+    //
+    // Deliberately NO new HA entity for any of the three: a wired install is the minority case, and
+    // the transport is already visible where it matters (the dashboard's ESP32 card, /status.net).
+    // An entity that reads "wifi" on every existing board forever is one more thing to rule out,
+    // which is exactly the test that retired "Device Time" and "WiFi Quality".
+    uint8_t     net_link      = 0;
+    bool        eth_present   = false;
+    bool        eth_link      = false;
+
     bool        mqtt_connected  = false;
     uint32_t    mqtt_count      = 0;   // successful publishes (state+heartbeat+heating_curve+discovery)
     uint32_t    mqtt_fails      = 0;   // cumulative failed esp_mqtt_client_publish() calls
@@ -177,6 +193,10 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"wifi_bssid\":";
     if (f.wifi_bssid.empty()) j += "null";
     else { j += "\""; j += f.wifi_bssid; j += "\""; }
+    // net_* — the transport, as numbers (see the field comments).
+    j += ",\"net_link\":";    j += std::to_string(static_cast<int>(f.net_link));
+    j += ",\"eth_present\":"; j += f.eth_present ? "1" : "0";
+    j += ",\"eth_link\":";    j += f.eth_link ? "1" : "0";
     // mqtt_*
     j += ",\"mqtt_connected\":"; j += f.mqtt_connected ? "1" : "0";
     j += ",\"mqtt_count\":"; j += std::to_string(f.mqtt_count);

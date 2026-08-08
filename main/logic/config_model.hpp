@@ -318,8 +318,13 @@ inline ReservedPins config_env3_reserved_pins(const Config& c) {
 // Lite's button is on GPIO41). What they may NOT do is collide: with each other, or with the X10A
 // link, in either direction. Checking it here as well as in validate() is not redundant — the two
 // routes can be called in either order, and whichever runs second must see the other's pins.
+// `extra` is a reservation the CONFIG cannot state — in practice the four SPI pads an actually
+// detected W5500 is clocking (net.hpp's net_eth_reserved_pins()). It is a parameter rather than
+// another config_*_pins() factory because its source is a hardware PROBE, not a stored setting:
+// this header must stay answerable on the host, where no bus exists. Defaults to empty, so every
+// existing caller and test keeps its exact meaning.
 inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 48,
-                           bool octal_spi = true) {
+                           bool octal_spi = true, ReservedPins extra = {}) {
     if (!led_type_valid(c.led_type)) { reason = "led_type unknown"; return false; }
     if (c.led_gpio >= 0) {
         if (!gpio_in_range(c.led_gpio, max_gpio))          { reason = "led_gpio out of range";  return false; }
@@ -334,6 +339,8 @@ inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 
         if (c.env3_enabled && (c.btn_gpio == c.env3_sda || c.btn_gpio == c.env3_scl)) { reason = "btn_gpio is in use by ENV III"; return false; }
         if (c.btn_gpio == c.led_gpio)                      { reason = "btn_gpio and led_gpio must differ"; return false; }
     }
+    if (c.led_gpio >= 0 && extra.claims(c.led_gpio)) { reason = "led_gpio is in use by Ethernet"; return false; }
+    if (c.btn_gpio >= 0 && extra.claims(c.btn_gpio)) { reason = "btn_gpio is in use by Ethernet"; return false; }
     return true;
 }
 

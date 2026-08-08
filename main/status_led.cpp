@@ -3,6 +3,7 @@
 // from the runtime config so ONE published image serves both reference boards.
 #include "status_led.hpp"
 #include "config.hpp"
+#include "net.hpp"
 #include "wifi.hpp"
 #include "mqtt_ha.hpp"
 #include "hp_poll.hpp"
@@ -69,19 +70,23 @@ bool sleep_slices(int ms, LedSignal at_start) {
 // One repeat of the current phase's pattern. Split out of the task loop so the loop can guard it —
 // see there for why.
 void status_led_tick() {
+    // The SETUP phase is still a WiFi-mode question — a live SoftAP is what "setup" means. The
+    // other two are not, and stopped being the moment a cable could carry this board: link_mode /
+    // link_up are answered by net.hpp across BOTH transports, so a wired board shows Healthy
+    // instead of the Off pattern a WIFI_MODE_NULL read would have given it — an indicator saying
+    // the board is doing nothing while it serves the whole API over the wire.
     wifi_mode_t mode = WIFI_MODE_NULL;
     esp_wifi_get_mode(&mode);
 
     LedInputs in;
     in.ap_mode  = (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA);
-    in.sta_mode = (mode == WIFI_MODE_STA);
+    in.link_mode = !in.ap_mode && (mode == WIFI_MODE_STA || net_eth_present());
     // Only read the status snapshots the phase actually needs — each of these copies std::strings
     // out from under a lock, so skipping them in the AP/override cases is a real saving on a tight
     // heap (and it is exactly the case where the heap is least predictable).
-    if (in.sta_mode) {
-        const WifiInfo wi = wifi_info();
-        in.wifi_connected = wi.connected;
-        if (wi.connected) {
+    if (in.link_mode) {
+        in.link_up = net_is_up();
+        if (in.link_up) {
             const MqttStatus ms = mqtt_status();
             const HpStats    hp = hp_stats();
             in.mqtt_configured = ms.configured;

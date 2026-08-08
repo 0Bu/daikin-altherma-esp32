@@ -541,6 +541,33 @@ wifi.cpp        STA bring-up (all-channel scan -> strongest AP by RSSI) + endles
                 hostname (option 12) + mDNS; wifi_info() also reports the associated AP's BSSID + PHY
                 standard + this STA's MAC; wifi_reconnect_count() — cumulative RE-connects since boot,
                 for the MQTT heartbeat
+net.cpp         the OPTIONAL WIRED TRANSPORT — a W5500 Ethernet controller on SPI, in practice an
+                M5Stack AtomS3 Lite seated on an ATOMIC PoE Base where one cable carries power and
+                the LAN. A SECOND TRANSPORT, not a second SOURCE: unlike the HomeHub or ENV III it
+                observes nothing, it carries the same MQTT/syslog/SNTP/OTA/HTTP traffic the radio
+                would, so nothing above it branches on which one is in use. Runtime-DETECTED, never
+                a board variant (CI publishes one image): net_eth_probe() reads the W5500's VERSIONR
+                identity register once and a board without one FREES THE SPI BUS AGAIN, leaving
+                GPIO5-8 exactly as it found them — they are ordinary offerable pads on a XIAO, and
+                docs/BOARDS.md offers 5/6 for X10A. The probe REFUSES to run at all when one of the
+                four pads is already the X10A link, an enabled ENV III, the indicator or the button
+                (logic/net_link.hpp's net_eth_probe_allowed): it drives a clock and a chip-select,
+                and on a board with X10A moved to the header those edges land on the heat pump's
+                service bus — an X10A link answering erratically at boot, the hardest symptom here
+                to attribute. Bring-up asks TWO questions with TWO deadlines, because answering them
+                with one timer made a credential-less board sit dark for a whole lease window before
+                its setup AP appeared: "is a cable connected" (the PHY, ~4 s) and only then "will
+                DHCP answer" (3 x CONFIG_DAIKIN_ETH_WAIT_S). The netif gets route_prio 128, above
+                WIFI_STA_DEF's 100 (IDF ships ETH_DEF at 50), so the wire takes the DEFAULT route
+                when both hold a lease — off-link only; on-link traffic follows netif_list order and
+                that asymmetry is accepted, since the benefit lives in the boot-with-cable path
+                where WiFi is never started at all. A pulled cable on a board that came up wired is
+                answered by a deliberate REBOOT after ~30 s (net_eth_fallback_step): such a board
+                has no station running, and growing one at runtime would duplicate the boot fork in
+                a second place where it can drift — the reboot re-runs the real one, and #391's
+                .noinit rings survive it. It defers while an OTA is installing. mDNS moved here from
+                wifi.cpp (net_mdns_start, idempotent): a wired board — the case where the LAN is
+                most likely the only way in — silently had no <hostname>.local name at all
 sntp_time.cpp   SNTP client (esp_netif_sntp, config().ntp_server — NVS "ntp_server" override of
                 CONFIG_DAIKIN_NTP_SERVER default "pool.ntp.org", runtime-editable via POST /set_ntp
                 exactly like syslog_host/POST /set_syslog) — started right after WiFi(STA)|setup-AP
@@ -1272,7 +1299,7 @@ task_config.hpp THE task PRIORITY table (TASK_PRIO_*). Relative priority is a pr
                 task's own measured deepest frame, and a shared table of them would invite exactly
                 the copy-the-neighbour sizing the memory section warns about
 logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, registers, value_def,
-                config_model,
+                config_model, net_link,
                 config_store, discovery, ha_device, detect, history, json, mqtt_base, mqtt_group, mqtt_uri, homehub_map, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch, heap_watchdog,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ui_lang,
@@ -1836,6 +1863,22 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 wiring fault. Belt AND braces: signatures.hpp builds its mask over def::profiles (the
                 BASE tables) and never sees a view at all — the test asserts the braces, since the belt
                 is what a refactor would remove
+                net_link.hpp = WHICH TRANSPORT carries the device, and what the firmware may do
+                about it — the pure half of net.cpp. Four rules, each here because getting it wrong
+                is invisible on a desk with a cable in it: who wins the route (the wire, and lwIP is
+                MADE to agree rather than assumed to); the BOOT FORK, where a wired board starts no
+                radio (~50 KB of heap and a second netif on one subnet) and — the load-bearing half
+                — opens no captive portal, since a device already on the LAN needs no credentials
+                and that AP would RESTRICT the HTTP surface, withholding the whole API from the very
+                cable it is reachable on; the pulled-cable verdict, a grace-counted REBOOT rather
+                than an immediate one (a switch rebooting looks exactly like a pulled cable for a
+                few seconds) and never on a board with no WiFi configured, where rebooting would
+                only cost an uptime and a diag ring to arrive back at the same wait; and whether the
+                identity PROBE may drive those pads at all. The trust surface itself moved to
+                http_surface.hpp's http_surface_for(setup_ap_running), which is the only formulation
+                right in both directions — keying on the STATION was wrong for a wired board, and
+                keying on the WIRE re-opens F01, because the setup AP can be radiating at the same
+                time and esp_http_server registers routes per SERVER, not per interface
                 feature_gate.hpp = which derived features may HONESTLY run on the detected model, and
                 the answer when they cannot: DISABLE, NEVER DEGRADE (#69 step 0.2 / #110 Part C). The
                 same rule the UI already applies three times — lwt_select blanks ΔT/heat/COP rather
@@ -2465,7 +2508,21 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   `method_version` — the room error is derived exactly as before, so archived events
                   stay comparable; the MQTT payload's own `schema_version` went 1 -> 2 instead,
                   since payload SHAPE is what changed,
-                  syslog{configured,resolved,reachable,host,port,error},
+                  net{kind,ip,eth{supported,present,link,lease,ip,mac,speed_mbps,full_duplex,
+                pins{sclk,cs,miso,mosi}}} — WHICH TRANSPORT carries the device ("none"|"wifi"|"eth")
+                and what the optional wire is doing (net.cpp). A separate block from wifi{} rather
+                than a widening of it: on a wired board the wifi block is entirely honest — not
+                connected, no RSSI, no BSSID — and would be indistinguishable from a broken install
+                without this. `ip` is the ACTIVE transport's address so a client reads one field
+                instead of re-deriving a rule; `supported` says whether this BUILD carries the
+                driver, which is what lets the UI hide the row rather than render a permanently
+                absent feature. `link` (a cable is negotiated) is deliberately separate from `lease`
+                (DHCP answered): "no cable" and "cable in, no address" call for opposite actions.
+                speed/duplex are null without a link rather than a plausible-looking 10/half; ip and
+                mac are redacted like their wifi twins, while every BOOLEAN and the four pin numbers
+                stay in the clear — they identify nobody and are the first thing a triage reader
+                needs from a wired board's report,
+                syslog{configured,resolved,reachable,host,port,error},
                   ota{channel} — "release"|"dev", the FEED the next OTA check reads (POST /set_ota).
                   On /status and not only /ota/status because the Settings Firmware card renders its
                   selector from /status like every other setting; a device can be SET to a channel it

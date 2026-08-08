@@ -2,8 +2,10 @@
 //
 // Boot flow:
 //   1. NVS + runtime config load (config.cpp; defaults from Kconfig).
-//   2. WiFi: if configured -> STA (with the endless-reconnect + gateway watchdog); else start
-//      the captive setup portal (provisioning.cpp, SoftAP "daikin-altherma-esp32-setup").
+//   2. Network transport: the OPTIONAL wired link first (net.cpp — a W5500 on SPI, in practice an
+//      ATOMIC PoE Base; absent on every board without one and then a single register read), else
+//      WiFi STA if configured, else the captive setup portal (provisioning.cpp, SoftAP
+//      "daikin-altherma-esp32-setup"). A wired board never opens that portal.
 //   3. SNTP (wall clock), mDNS (<hostname>.local), HTTP server (:80), MQTT/HA bridge, OTA health gate.
 //   4. Heat-pump poll engine (hp_poll.cpp): owns the X10A UART, polls each interval, fills the
 //      value cache the web UI / MQTT read.
@@ -29,6 +31,7 @@
 #include "hp_modbus.hpp"
 #include "http_server.hpp"
 #include "mqtt_ha.hpp"
+#include "net.hpp"
 #include "ota_update.hpp"
 #include "provisioning.hpp"
 #include "recovery_button.hpp"
@@ -87,13 +90,32 @@ static void boot_sequence() {
     ESP_LOGI(TAG, "cfg: profile=%s proto=%c rx=%d tx=%d",
              cfg.profile.c_str(), static_cast<char>(cfg.proto), cfg.rx_pin, cfg.tx_pin);
 
-    // --- Networking: STA or captive setup portal ---
-    // wifi_start_sta() returns false on a first-boot connect failure (creds presumed wrong) after
-    // tearing the STA stack back down, so the portal comes up on a clean WiFi state. Runtime drops
-    // (once online) are handled forever by wifi.cpp's reconnect handler + gateway watchdog.
-    if (!daik::wifi_configured() || !daik::wifi_start_sta()) {
+    // --- Networking: Ethernet, then STA, then the captive setup portal ---
+    // THE ORDER IS THE POLICY, and each step is a host-tested rule in logic/net_link.hpp rather
+    // than an `if` invented here:
+    //
+    //   1. The wire is asked FIRST, and cheaply. net_eth_start() answers in ~4 s when no cable is
+    //      connected (the PHY reports link as soon as auto-negotiation completes) and only then
+    //      spends a DHCP deadline. On a board with no W5500 at all it is one SPI register read.
+    //   2. WiFi starts only if the wire did NOT come up (net_wifi_start_needed): a wired board must
+    //      not pay ~50 KB of heap and a second netif for a radio nothing will route over.
+    //   3. The portal opens only if NEITHER did (net_portal_needed). This is the rule a wire makes
+    //      load-bearing: a wired board with no stored SSID has wifi_up == false and would otherwise
+    //      open an OPEN SoftAP nobody is coming to configure — while that AP restricts the HTTP
+    //      surface (logic/http_surface.hpp), withholding the whole API from the LAN the device is
+    //      actually reachable on.
+    //
+    // wifi_start_sta() still returns false on a first-boot connect failure (creds presumed wrong)
+    // after tearing the STA stack down, so the portal comes up on a clean WiFi state. Runtime drops
+    // are handled forever by wifi.cpp's reconnect handler + gateway watchdog; a runtime loss of the
+    // WIRE on a board that has no station running is handled by net_eth_fallback_start() below.
+    const bool eth_up = daik::net_eth_start();
+    bool wifi_up = false;
+    if (daik::net_wifi_start_needed(eth_up, daik::wifi_configured()))
+        wifi_up = daik::wifi_start_sta();
+    if (daik::net_portal_needed(eth_up, wifi_up))
         daik::provisioning_start_ap();   // SoftAP + captive portal; serves www/setup.html
-    }
+    daik::net_eth_fallback_start();      // no-op unless the wire is what carries this boot
 
     // --- Wall clock ---
     // The network stack was initialized once above. Harmless to start before the STA has an IP (or

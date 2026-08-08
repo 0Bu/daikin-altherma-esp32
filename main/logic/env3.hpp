@@ -209,15 +209,19 @@ inline int env3_history_index(const char* id) {
     return -1;
 }
 
+// `extra`: see board_hw_valid() — the SPI pads of a DETECTED Ethernet controller, which no stored
+// setting can express. On an AtomS3 Lite seated on a PoE base this is what turns "ENV III is
+// unavailable" from a surprise into a stated refusal, since the base occupies the whole header and
+// leaves only the Grove port, which X10A needs (docs/BOARDS.md).
 inline bool env3_config_valid(const Config& c, std::string& reason, int max_gpio = 48,
-                              bool octal_spi = true) {
+                              bool octal_spi = true, ReservedPins extra = {}) {
     if (!c.env3_enabled) return true;
     if (!env3_board_supported(c)) {
         reason = "ENV III requires a selected M5Stack board preset"; return false;
     }
     if (c.env3_sda == c.env3_scl) { reason = "ENV III SDA and SCL must differ"; return false; }
     const BoardPreset* board = board_selected_preset(c);
-    const ReservedPins used = config_env3_reserved_pins(c);
+    const ReservedPins used = config_env3_reserved_pins(c).plus(extra);
     if (!gpio_in_range(c.env3_sda, max_gpio) ||
         !board_preset_i2c_pin_offerable(board, c.env3_sda, octal_spi, used)) {
         reason = "ENV III SDA is unavailable or already in use"; return false;

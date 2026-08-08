@@ -1141,8 +1141,31 @@ function connLinks() {
   const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, sy = S.status?.syslog || {}, nt = S.status?.ntp || {};
   const links = [];
 
+  // THE WIRE, when there is one. A board on Ethernet has no radio started at all (main.cpp), so its
+  // WiFi row below is truthfully "offline" — and that reads as a fault unless this row says what is
+  // actually carrying the device. Shown only when a controller was DETECTED: on every board without
+  // one there is no wire to have an opinion about, and a permanently-absent row is the thing the
+  // modbus/env3 cards already refuse to render (an absent feature is stated by absence).
+  //
+  // No pencil: unlike WiFi there is nothing to configure — the transport is decided by whether a
+  // cable is plugged in, which no dialog can change.
+  const eth = S.status?.net?.eth || {};
+  if (eth.present) {
+    const speed = eth.speed_mbps != null
+      ? `${eth.speed_mbps} Mbit/s${eth.full_duplex ? " " + t("conn.eth_fd") : ""}` : "";
+    links.push({ label: "Ethernet",
+      cls: eth.lease ? "ok" : eth.link ? "warn" : "err",
+      // The three states are genuinely different and a user acts differently on each: no cable, a
+      // cable with no lease (a DHCP or VLAN problem), and a working link.
+      value: eth.lease ? esc(speed || t("conn.connected"))
+           : eth.link  ? t("conn.eth_no_lease") : t("conn.eth_no_cable"),
+      state: eth.lease ? t("conn.connected") : eth.link ? t("conn.eth_no_lease") : t("conn.eth_no_cable") });
+  }
+
   // WiFi has no "connecting" state in /status (just connected: true/false), so it is a two-state
-  // ok/err row — signal bars keep their own strength-based tone regardless.
+  // ok/err row — signal bars keep their own strength-based tone regardless. On a wired board it is
+  // deliberately still shown as offline rather than hidden: the radio really is off, and the row
+  // above says why.
   if (w.connected && (w.rssi != null || w.ssid)) {
     links.push({ edit: "wifi", label: w.std || "Wi-Fi", cls: "ok",
       value: (w.rssi != null ? signalBars(w.rssi) : "") +

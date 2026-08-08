@@ -93,6 +93,11 @@ const I18N = {
     "group.Modbus": "Modbus",
     "conn.title": "Connections", "conn.offline": "Offline", "conn.disabled": "Disabled",
     "conn.connecting": "Connecting…", "conn.connected": "Connected", "conn.resolving": "Resolving…",
+    // The wired transport's three states. "No cable" and "no address" look identical from the
+    // outside and call for opposite actions — plug something in, versus fix DHCP/the VLAN — so they
+    // are two strings, not one "not connected".
+    "conn.eth_no_cable": "No cable", "conn.eth_no_lease": "Cable connected, no address",
+    "conn.eth_fd": "full duplex",
     "conn.enabled": "Enabled", "conn.enabled_noping": "Enabled, host not answering ping",
     "conn.synced": "Synced", "conn.syncing": "Syncing…",
     "conn.error": (e) => "Error: " + e, "conn.connected_to": (s) => "Connected to " + s,
@@ -592,6 +597,8 @@ const I18N = {
     "group.Modbus": "Modbus",
     "conn.title": "Verbindungen", "conn.offline": "Offline", "conn.disabled": "Deaktiviert",
     "conn.connecting": "Verbinde…", "conn.connected": "Verbunden", "conn.resolving": "Löse auf…",
+    "conn.eth_no_cable": "Kein Kabel", "conn.eth_no_lease": "Kabel verbunden, keine Adresse",
+    "conn.eth_fd": "Vollduplex",
     "conn.enabled": "Aktiv", "conn.enabled_noping": "Aktiv, Host antwortet nicht auf Ping",
     "conn.synced": "Synchronisiert", "conn.syncing": "Synchronisiere…",
     "conn.error": (e) => "Fehler: " + e, "conn.connected_to": (s) => "Verbunden mit " + s,
