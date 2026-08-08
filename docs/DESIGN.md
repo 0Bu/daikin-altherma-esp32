@@ -1617,6 +1617,26 @@ page under near-identical cards). Specific:
   ~1.15× **together** — otherwise the mobile-sized column reads small and sparse on a big screen (a
   wall-mounted tablet), lots of empty margin around little content. The bump lives in **one** media
   block so the ramp stays coherent; it never changes the single-column layout, only its size.
+- **A label and its reading stack rather than squeeze.** Every row in this UI is one pair — the name
+  of a thing on the left, what it currently reads on the right — and the reading is `nowrap`, because
+  breaking "46.3 °C" over two lines reads as two numbers. A `nowrap` item cannot give ground, so on a
+  narrow phone whatever the row is short of comes out of the **name**, and it comes out all at once:
+  "SMART-GRID-ANFORDERUNG ÜBER MODBUS" set six words deep in a 110px column beside "Freier Betrieb",
+  "I/U operation mode" three lines deep in 70px beside "Heizen + Warmwasser", and — worst — an
+  inspector's mono source line set **one character per line, sixteen lines tall**, with the title
+  printed over the reading. So the pair **wraps**: when the two stop fitting side by side, the
+  reading moves to its own line under the name, right-aligned in the same column it always occupied
+  (`margin-left: auto`, since `space-between` would flush a lone item to the *left*, under the name,
+  where a reading looks like a second label). Three rows carry it — the schematic inspector's head,
+  the value rows and the split Settings rows — with a **different break rule** in each, and the
+  difference is the point. The inspector's title breaks on `flex-basis: auto`, i.e. exactly when it
+  can no longer sit beside the reading, because there the title is the thing being read. A value row
+  breaks on a **share** (the label keeps 55%), because a content-sized basis would send *every* long
+  catalog label's reading to a second line and double the height of a list whose two-line labels read
+  perfectly well. Where a row's two halves are separate tap targets (Settings), the row's vertical
+  padding sits on the **buttons**, never on the row with the buttons reaching back through it: reach-back
+  targets overlap once the halves stack, and the lower one silently takes the upper one's taps.
+  German is the width that decides all of this, and it is measured at 320px, not reasoned about.
 - Wide content (long value tables) never causes horizontal page scroll; the table scrolls in its card.
 - Long modal content scrolls inside the visible dynamic viewport; the background page is locked until
   the final dialog closes, including iOS Safari with its expanding/collapsing browser bars.

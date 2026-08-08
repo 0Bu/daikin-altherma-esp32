@@ -349,17 +349,39 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   background: var(--brand-tint); border: 1px solid var(--line); border-radius: var(--r-tile);
   padding: 12px 14px;
 }
-.inspect-head { display: flex; align-items: baseline; gap: 12px; }
-.inspect-id { flex: 1; min-width: 0; }
-.inspect-title { font-size: 12px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--fg); }
+/* NAME ABOVE, READING BELOW — as soon as the two stop fitting on one line. The pair is a WRAPPING
+   flex line, and the title's `flex-basis: auto` is what makes the break content-aware rather than a
+   width guess: an item's hypothetical size is its own max-content width, so the line breaks exactly
+   when the title can no longer sit beside the reading, and never earlier. A short pair
+   ("COP" · "3.0", "Außen" · "6.8 °C") therefore keeps the compact single line it always had.
+   It replaces a `flex: 1; min-width: 0` column beside a `nowrap` reading, which could only resolve
+   the conflict by squeezing the title: "SMART-GRID-ANFORDERUNG ÜBER MODBUS" was set six words deep
+   in a 110 px column beside "Freier Betrieb", and the worst case set the source line ONE CHARACTER
+   per line, 16 lines tall, with the title printed over the reading. A nowrap item cannot shrink, so
+   whatever the container is short of comes out of the text column alone — measured, not reasoned:
+   every one of those cases is in the harness of `docs/DESIGN.md` §9's narrow-width rule.
+   The close button leaves the flow for the card's corner: in the flex line it would have wrapped
+   with the reading, and its own tap target is 12 px of glyph, which ::before widens to a thumb. */
+.inspect-head {
+  position: relative; display: flex; flex-wrap: wrap; align-items: baseline;
+  column-gap: 12px; row-gap: 2px; padding-right: 20px;
+}
+.inspect-title { flex: 1 1 auto; min-width: 0;
+  font-size: 12px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--fg); }
 /* The /values row this pill is drawn from — names the source so a reading can be traced to the
-   register list below, and stays verbatim English like every other value label. */
-.inspect-src { font-size: 11px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
-.inspect-now { font-size: 19px; font-weight: 700; color: var(--fg); white-space: nowrap; }
+   register list below, and stays verbatim English like every other value label. Its own block under
+   the head rather than a second line inside the title column: these are the catalog's longest
+   strings ("Leaving water temp. before BUH (R1T)"), so sharing a line with a 19 px reading is what
+   broke them into a character-wide ribbon. `overflow-wrap: anywhere` stays as the last resort for a
+   register name with no break opportunity in it at all. */
+.inspect-src { font-size: 11px; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
+.inspect-now { flex: 0 0 auto; max-width: 100%;
+  font-size: 19px; font-weight: 700; color: var(--fg); white-space: nowrap; }
 .inspect-x {
-  flex: none; align-self: flex-start; font: inherit; font-size: 13px; line-height: 1;
+  position: absolute; top: -2px; right: -4px; font: inherit; font-size: 13px; line-height: 1;
   background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 0 2px 4px;
 }
+.inspect-x::before { content: ""; position: absolute; inset: -11px; }
 .inspect-x:hover { color: var(--fg); }
 .inspect-body { font-size: 13.5px; color: var(--muted); line-height: 1.55; margin-top: 9px; }
 .inspect-env-state { color: var(--fg); font-weight: 650; }
@@ -520,10 +542,26 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .section-badge.ok::before  { background: var(--ok); }
 .section-badge.err::before { background: var(--err); }
 .section-badge.dim::before { background: var(--muted); }
+/* Label left, reading right — and the reading moves to its OWN line rather than crushing the label
+   when the two stop fitting. A reading is `nowrap` (splitting "46.3 °C" across two lines would read
+   as two numbers), so it cannot give ground: everything the row is short of comes out of the label,
+   which is why "I/U operation mode" was set three lines deep in a 70 px column beside
+   "Heizen + Warmwasser" — and why the chevron behind it pushed the whole page 11 px wider than the
+   phone, giving the dashboard a horizontal scrollbar.
+   The 55% basis is the break rule and is deliberately NOT `auto`: with a content-sized basis every
+   long catalog label ("Leaving water temp. before BUH (R1T)" is wider than a 320 px card on its own)
+   would send its reading to a second line, doubling the height of a list whose two-line labels read
+   perfectly well today. Stated as a share rather than a pixel floor because the card itself shrinks
+   with the screen. So: ordinary readings stay where they were, and only one wide enough to leave the
+   label under ~45% of the row drops below it — where `margin-left: auto` keeps it in its own column
+   instead of `space-between` flushing a lone item to the left, under the label, where a reading
+   reads as a second label. */
 .vrow {
-  display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
-  padding: 9px 0; border-top: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline;
+  gap: 14px; row-gap: 2px; padding: 9px 0; border-top: 1px solid var(--line);
 }
+.vrow > .vrow-label { flex: 1 1 55%; min-width: 0; }
+.vrow > .vrow-val, .vrow > .vrow-end { margin-left: auto; }
 .vrow-label { font-size: 14.5px; color: var(--muted); }
 /* full-width value line (e.g. the model name in the Model card) — wraps instead of squeezing a row */
 .vname { font-size: 15px; font-weight: 600; color: var(--fg); line-height: 1.35; padding: 9px 0; border-top: 1px solid var(--line); }
@@ -554,19 +592,26 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vrow-btn:hover .vrow-label, .vrow-btn:hover .vrow-val { color: var(--brand-strong); }
 /* Split Settings rows deliberately have two adjacent areas: the label expands an explainer, while
    the compact value opens configuration when one exists. The row keeps the exact same padding and
-   line height as every other .vrow; pseudo-elements extend both button targets through that padding
-   without making the visible row taller. Hardware and Dynamic control share this geometry. */
-.settings-split-row { min-height: calc(1.5em + 18px); }
+   line height as every other .vrow — the 9 px is on the two BUTTONS rather than on the row, so each
+   tap target covers its own line's padding and nothing else. It used to be the row's padding with a
+   `::before { inset: -9px 0 }` reaching back through it, which is the same target while the two sit
+   side by side and the wrong one the moment they stack: the label's downward reach and the value's
+   upward reach would then overlap in the gap between the two lines, and the value — painted later —
+   would take taps meant for the explainer above it.
+   THE ROW WRAPS (the .inspect-head rule, one screen over): a long label and a long value stack
+   instead of squeezing, since neither side can shrink below its longest word and the value is the
+   one that loses — "Nicht konfiguriert" was set three lines deep in a 63 px column beside
+   "Warmwasser-Zirkulationspumpe". The value keeps `margin-left: auto`, so it stays on the right in
+   both arrangements rather than sliding under the label. Hardware and Dynamic control share this
+   geometry. */
+.settings-split-row { min-height: calc(1.5em + 18px); flex-wrap: wrap; padding: 0; row-gap: 0; }
 .settings-split-info, .settings-split-action {
-  position: relative; min-height: 0; padding: 0; border: 0; background: none; cursor: pointer;
+  position: relative; min-height: 0; padding: 9px 0; border: 0; background: none; cursor: pointer;
   font-family: inherit; line-height: inherit; color: inherit; -webkit-tap-highlight-color: transparent;
-}
-.settings-split-info::before, .settings-split-action::before {
-  content: ""; position: absolute; inset: -9px 0;
 }
 .settings-whole-info-row {
   width: 100%; font: inherit; background: none; border: 0; cursor: pointer; text-align: left;
-  color: inherit; -webkit-tap-highlight-color: transparent;
+  color: inherit; -webkit-tap-highlight-color: transparent; flex-wrap: wrap; row-gap: 2px;
 }
 .settings-whole-info-label {
   min-width: 0; display: inline-flex; align-items: center; gap: 7px; text-align: left;
@@ -574,11 +619,16 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .settings-split-info {
   flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 7px; text-align: left;
 }
+/* `margin-left: auto` rather than the row's `justify-content: space-between`: once the row can wrap,
+   space-between puts a value that dropped to its own line at the LEFT edge, under the label, where
+   it reads as a second label. This keeps the reading in its column in both arrangements.
+   The width cap goes with it — it existed to stop a long value eating the label, which the wrap now
+   does properly; capping a value that already has a line to itself only makes it wrap again. */
 .settings-split-action {
-  flex: 0 1 auto; min-width: 0; max-width: 72%; display: inline-flex; align-items: center;
-  justify-content: flex-end; gap: 6px; text-align: right;
+  flex: 0 1 auto; min-width: 0; max-width: 100%; margin-left: auto; display: inline-flex;
+  align-items: center; justify-content: flex-end; gap: 6px; text-align: right;
 }
-.settings-info-value { flex: 0 1 auto; min-width: 0; max-width: 72%; text-align: right; }
+.settings-info-value { flex: 0 1 auto; min-width: 0; max-width: 100%; margin-left: auto; text-align: right; }
 .settings-split-action > span { min-width: 0; overflow-wrap: anywhere; }
 .settings-split-action .vcard-edit-icon { flex: none; }
 .settings-split-info:hover .vrow-label,
@@ -1118,8 +1168,11 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
   .conn-detail { font-size: 15px; }
   .conn-row { padding: 14px 0; }
   .vrow, .vname { padding-top: 11px; padding-bottom: 11px; }
-  .settings-split-row { min-height: calc(1.5em + 22px); }
-  .settings-split-info::before, .settings-split-action::before { inset-block: -11px; }
+  /* `.vrow` above this line re-pads every row to 11px, and a split row's padding lives on its two
+     BUTTONS — without taking it back off the row the two would add up and the row would stand 22px
+     taller than the rest of the card at exactly this breakpoint. */
+  .settings-split-row { min-height: calc(1.5em + 22px); padding-block: 0; }
+  .settings-split-info, .settings-split-action { padding-block: 11px; }
   .inspect-src { font-size: 13.5px; }
   .inspect-title { font-size: 13.5px; }
   .inspect-now { font-size: 21px; }

@@ -69,12 +69,29 @@ assert.match(html, /class="pin-grid board-pin-grid"[\s\S]*id="bdLedPinRow"[\s\S]
   "LED and reset-button pin selectors must share one two-column row");
 assert.match(style, /\.pin-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/,
   "the shared board and ENV pin row must remain a real two-column grid");
-assert.match(style, /\.settings-split-info, \.settings-split-action\s*\{[^}]*min-height:\s*0;[^}]*padding:\s*0;/,
-  "split Settings actions must not add height inside the standard value row");
+// The standard value row is 1.5em plus 9px above and below, and each of the two buttons must be
+// tappable through the whole of it. That is the property; the MECHANISM moved, because the original
+// one — the row owning the padding and each button reaching back through it with
+// `::before { inset: -9px 0 }` — is only right while the two sit side by side. Once the row is
+// allowed to WRAP (a long label above its own value, instead of crushing the value into a 63px
+// column), the label's downward reach and the value's upward reach overlap in the gap between the
+// two lines, and the value, painted later, takes taps meant for the explainer above it. Carrying
+// the padding on the buttons themselves is the same target with none of that: each covers its own
+// line and stops there, at exactly the same visible row height.
+assert.match(style, /\.settings-split-row\s*\{[^}]*padding:\s*0;/,
+  "the split row hands its vertical padding to its two buttons");
+assert.match(style, /\.settings-split-info, \.settings-split-action\s*\{[^}]*min-height:\s*0;[^}]*padding:\s*9px 0;/,
+  "split Settings actions must carry the standard row padding as their own target, adding no height");
+assert.doesNotMatch(style, /\.settings-split-(?:info|action)::before/,
+  "the reach-back pseudo targets must stay gone — stacked, they steal each other's taps");
+assert.match(style, /@media \(min-width: 600px\)[\s\S]*\.settings-split-info, \.settings-split-action\s*\{[^}]*padding-block:\s*11px;/,
+  "the split targets must track the larger standard padding on tablet and desktop");
+assert.match(style, /\.settings-split-row\s*\{[^}]*flex-wrap:\s*wrap;/,
+  "a label and a value that cannot share a line must stack, not squeeze");
+assert.match(style, /\.settings-split-action\s*\{[^}]*margin-left:\s*auto;/,
+  "a value on its own line must stay in its right-hand column, not read as a second label");
 assert.match(style, /\.settings-split-info, \.settings-split-action\s*\{[^}]*-webkit-tap-highlight-color:\s*transparent;/,
   "iOS must not paint the enlarged split-button hit areas while they are tapped");
-assert.match(style, /\.settings-split-info::before, \.settings-split-action::before\s*\{[^}]*inset:\s*-9px 0;/,
-  "compact split actions must retain full-row click targets through the row padding");
 assert.match(style, /\.settings-split-info\s*\{[^}]*flex:\s*1 1 auto;/,
   "the explanation action must own the otherwise empty left-hand row area");
 assert.match(style, /\.settings-whole-info-row\s*\{[^}]*width:\s*100%;[^}]*cursor:\s*pointer;/,
@@ -83,8 +100,6 @@ assert.match(style, /\.settings-whole-info-label\s*\{[^}]*display:\s*inline-flex
   "the full-row target must keep the label and chevron grouped at the left");
 assert.match(style, /\.settings-split-action\s*\{[^}]*flex:\s*0 1 auto;/,
   "the board editor action must shrink-wrap the visible board name instead of owning empty row space");
-assert.doesNotMatch(style, /\.settings-split-row\s*\{[^}]*padding:/,
-  "split Settings rows must inherit exactly the standard value-row padding");
 assert.match(style, /\.settings-split-row\s*\{[^}]*min-height:\s*calc\(1\.5em \+ 18px\)/,
   "split Settings rows must match the standard mobile line height plus vertical padding");
 assert.match(style, /@media \(min-width: 600px\)[\s\S]*\.settings-split-row\s*\{[^}]*min-height:\s*calc\(1\.5em \+ 22px\)/,
