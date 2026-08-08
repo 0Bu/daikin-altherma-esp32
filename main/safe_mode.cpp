@@ -17,6 +17,9 @@ namespace daik {
 static const char* BOOT_FAILS_KEY = "boot_fails";
 
 static bool s_safe_mode = false;
+// A string LITERAL, never a std::string: this is read by the /status builder and set on a path the
+// heap watchdog reaches when allocation is already failing, so it must not be able to allocate.
+static const char* s_cause = nullptr;
 static esp_timer_handle_t s_healthy_timer = nullptr;
 
 void safe_mode_begin() {
@@ -27,6 +30,7 @@ void safe_mode_begin() {
         // Commit BEFORE the risky subsystems so the bump survives another crash.
         const esp_err_t err = nvs_set_i32(BOOT_FAILS_KEY, next);
         s_safe_mode = boot_should_enter_safe_mode(next);
+        if (s_safe_mode) s_cause = "crash_loop";
         if (err == ESP_OK) {
             diag_printf("boot: crash reset, crash_boots=%d%s\n",
                         next, s_safe_mode ? " -> SAFE MODE (poll + MQTT paused)" : "");
@@ -51,10 +55,20 @@ void safe_mode_begin() {
                             "keep accumulating and may false-trip safe mode\n", esp_err_to_name(err));
         }
         s_safe_mode = false;
+        s_cause     = nullptr;
     }
 }
 
 bool safe_mode_active() { return s_safe_mode; }
+
+const char* safe_mode_cause() { return s_safe_mode ? s_cause : nullptr; }
+
+// See safe_mode.hpp. Deliberately does NOT write boot_fails: this boot is not a crash boot, and
+// recording it as one would make the NEXT genuine crash arrive with a head start it did not earn.
+void safe_mode_latch_heap() {
+    s_safe_mode = true;
+    s_cause     = "heap";
+}
 
 static void healthy_timer_cb(void* arg) {
     if (nvs_get_i32(BOOT_FAILS_KEY, 0) != 0) {

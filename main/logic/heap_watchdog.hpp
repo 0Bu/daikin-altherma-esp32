@@ -148,6 +148,32 @@ inline constexpr bool heap_may_restart(uint8_t consecutive) {
     return consecutive < HEAP_MAX_CONSECUTIVE_RESTARTS;
 }
 
+// Must a boot that INHERITED this many consecutive restarts come up MINIMAL — safe mode, with the
+// poll engine and the MQTT bridge never started?
+//
+// This is what the ladder ends in, and it replaces "stay up, degraded" (#407). That answer was
+// measured on hardware and it did not do what it claimed: the cap's stated reason for stopping is
+// that staying up "keeps the web UI and OTA reachable so a newer build can be installed", and at the
+// heap level which produces the cap it does not. HTTP survived about seven minutes and then decayed
+// past even the 503 the handle_all trampoline is supposed to return — /favicon.ico still answered
+// 200 with an empty body while every allocating route dropped the connection. The device ended
+// permanently in the wedge the watchdog exists to escape, with the one escape hatch shut.
+//
+// The five largest allocators in this firmware are exactly the ones safe mode does not start, so
+// coming up minimal is the move that has a chance of leaving enough contiguous heap for /status,
+// /ota/* and the web UI. It is BEST EFFORT and must be described as such: safe mode frees what the
+// poll engine and the MQTT bridge were holding, so it rescues a shortage those two caused, and does
+// nothing at all for a leak somewhere else. It improves the odds; it does not promise reachability.
+//
+// Composed rather than restated, so the ladder and its ending can never disagree about where the cap
+// is. Note the ASYMMETRY with heap_restart_count_sane(): an unreadable breadcrumb reads as 0, so it
+// under-counts, so it can only ever fail towards a NORMAL boot. Forcing a device into safe mode on a
+// garbled byte would take away the heat pump readings that are the point of the product, which is
+// the one direction this must not fail in.
+inline constexpr bool heap_boot_must_be_minimal(uint8_t consecutive) {
+    return !heap_may_restart(consecutive);
+}
+
 // How many consecutive watchdog restarts the persisted breadcrumb represents. Anything that is not
 // one of ours — a negative value, or a count past the cap from a garbled or future writer — reads as
 // 0, so an unusable breadcrumb can only ever UNDER-count. That direction is deliberate: under-counting

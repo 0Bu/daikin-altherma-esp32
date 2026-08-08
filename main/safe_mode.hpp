@@ -15,6 +15,28 @@ void safe_mode_begin();
 // The latched safe-mode flag — drives /status.sys.safe_mode and the main.cpp boot wiring.
 bool safe_mode_active();
 
+// WHY this boot is minimal, as a stable slug for /status.sys.safe_mode_cause, or nullptr when it is
+// not. Two causes reach the same state by different routes and need DIFFERENT advice, which is the
+// whole reason this exists rather than a bare bool:
+//
+//   "crash_loop" — BOOT_FAIL_THRESHOLD crash boots accumulated. The configuration is the suspect,
+//                  and the RX/TX pins are the first thing to check.
+//   "heap"       — the heap watchdog exhausted its restart ladder (#407). The configuration is
+//                  almost certainly fine; checking the pins would send the reader to fix something
+//                  that is already correct, which is exactly what a recovery banner must not do.
+const char* safe_mode_cause();
+
+// Latch safe mode for THIS boot because the heap watchdog gave up, not because boots were crashing.
+// Called from heap_guard_begin(), which runs after safe_mode_begin() and before main.cpp's
+// `if (!safe_mode_active())` gate — so the poll engine and the MQTT bridge are never started at all,
+// rather than being started and then found to be the thing eating the heap.
+//
+// It does NOT touch the crash counter: this boot is not a crash boot and must not be recorded as
+// one. The state lasts exactly this boot, because heap_guard_begin() consumes the breadcrumb that
+// caused it — so a power cycle gives the full stack a fresh attempt, which is what somebody who has
+// just installed a newer build wants, and costs at most one more ladder if they have not.
+void safe_mode_latch_heap();
+
 // One-shot timer: after BOOT_HEALTHY_S of continuous uptime, clear the crash counter so a single old
 // crash doesn't accumulate with a much later, unrelated one. Arm once after services are up.
 //

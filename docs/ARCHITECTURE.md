@@ -1911,6 +1911,11 @@ alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB �
   burst of config-save reboots that must never be mistaken for a crash-loop. A one-shot timer clears
   the counter after `BOOT_HEALTHY_S` (30 s) of continuous uptime, so a single old crash doesn't
   accumulate with a much later, unrelated one.
+- **Safe mode has a second entry route.** Besides the crash counter, `heap_guard.cpp` latches it when
+  the heap watchdog's restart ladder is exhausted (#407) — the boot inheriting the full count comes up
+  minimal instead of staying up wedged, and `/status.sys.safe_mode_cause` reports `"heap"` rather than
+  `"crash_loop"` so the recovery banner does not send that reader to check their RX/TX pins. It does
+  not touch `boot_fails`: that boot is not a crash boot.
 - **That timer is not armed while safe mode is latched** (`boot_healthy_timer_arms()`), and this one
   condition is the difference between a **latch** and a **cycle**. Safe mode comes up with the poll
   engine and the MQTT bridge down — precisely the subsystems a config crash-loop lives behind — so

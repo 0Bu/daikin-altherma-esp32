@@ -31,6 +31,10 @@
 #        which went green because the assertion covering it was a PROXIMITY search that spans an `if`
 #    10. the board trends made conditional IN PLACE — seed 1's defect written in one line, which
 #        went green because the assertion anchored on the call TEXT rather than on a statement
+#    11. the end-of-ladder minimal boot decided AFTER main.cpp's safe-mode gate, so the poll engine
+#        and the MQTT bridge start anyway and take the heap the minimal boot exists to leave free
+#    12. that latch deleted outright, which ends the restart ladder back in the unreachable
+#        degraded state #407 was filed about
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -231,6 +235,36 @@ assert seed != s, "seed 10 did not apply — the call site moved"
 open(p, "w").write(seed)
 PY
 expect_red "the board trends made conditional in place" run_contract
+restore
+
+# 11. #407's end-of-ladder: the minimal boot decided AFTER main.cpp's safe-mode gate. It would then
+#     arrive once the poll engine and the MQTT bridge had already started and taken the heap the
+#     minimal boot exists to leave free — the state reads "safe mode" while nothing was actually
+#     kept out of it.
+python3 - "$TMP/main/main.cpp" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("    daik::heap_guard_begin();", "", 1)
+assert seed != s, "seed 11 did not apply — heap_guard_begin()'s call site moved"
+seed = seed.replace("    daik::ota_health_gate_arm();",
+                    "    daik::heap_guard_begin();\n    daik::ota_health_gate_arm();", 1)
+open(p, "w").write(seed)
+PY2
+expect_red "the end-of-ladder minimal boot decided after the safe-mode gate" run_contract
+restore
+
+# 12. ...and the latch removed altogether, so the ladder ends back in the unreachable degraded state
+#     #407 was filed about.
+python3 - "$TMP/main/heap_guard.cpp" <<'PY2'
+import sys, re
+p = sys.argv[1]
+s = open(p).read()
+seed = re.sub(r"\n\s*safe_mode_latch_heap\(\);", "", s, count=1)
+assert seed != s, "seed 12 did not apply — the latch call moved"
+open(p, "w").write(seed)
+PY2
+expect_red "the end-of-ladder safe-mode latch deleted" run_contract
 restore
 
 if [ "$fail" -ne 0 ]; then

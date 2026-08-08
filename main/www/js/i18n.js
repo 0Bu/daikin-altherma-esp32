@@ -52,6 +52,10 @@ const I18N = {
     "sys.warning_line": (c) => "Warning · " + c + " — check the heat pump.",
     "sys.polled": (s) => `Polled ${s}s ago`,
     "recovery.title": "Recovery mode",
+    // Two causes reach recovery mode and need OPPOSITE advice. The crash-loop text sends the
+    // reader to the configuration; saying that after a heap give-up would send them to fix
+    // something that is already correct (/status.sys.safe_mode_cause picks between them).
+    "recovery.meta_heap": "The device ran out of memory repeatedly and restarted itself. It is now running with the heat pump connection and MQTT switched off, so the web interface stays reachable. The configuration is most likely fine — install a newer firmware version under Settings. A power cycle retries the full stack.",
     "recovery.meta": "The device restarted repeatedly and entered recovery mode. Communication with the heat pump and MQTT are paused. Check the configuration — especially the RX/TX pins on the Protocol card in Settings — then restart the device.",
     "rollback.title": "WiFi change failed — rolled back",
     "rollback.meta": (back) => `The device could not connect with the new WiFi settings. It restored the previous network${back} and restarted. Check the network name and password under Settings → Connections, then try again.`,
@@ -556,6 +560,7 @@ const I18N = {
     "sys.warning_line": (c) => "Warnung · " + c + " — Wärmepumpe prüfen.",
     "sys.polled": (s) => `vor ${s}s abgefragt`,
     "recovery.title": "Wiederherstellungsmodus",
+    "recovery.meta_heap": "Dem Ger\u00e4t ist wiederholt der Speicher ausgegangen, es hat sich daraufhin selbst neu gestartet. Es l\u00e4uft jetzt ohne Verbindung zur W\u00e4rmepumpe und ohne MQTT, damit die Weboberfl\u00e4che erreichbar bleibt. Die Konfiguration ist h\u00f6chstwahrscheinlich in Ordnung \u2014 installiere unter Einstellungen eine neuere Firmware. Ein Stromauszug versucht es erneut mit allem.",
     "recovery.meta": "Das Gerät wurde mehrfach neu gestartet und ist deshalb im Wiederherstellungsmodus. Die Verbindung zur Wärmepumpe und MQTT sind pausiert. Prüfe die Konfiguration — besonders die RX/TX-Pins auf der Protokoll-Karte in den Einstellungen — und starte das Gerät danach neu.",
     "rollback.title": "WLAN-Änderung fehlgeschlagen — zurückgesetzt",
     "rollback.meta": (back) => `Mit den neuen WLAN-Einstellungen konnte sich das Gerät nicht verbinden. Es hat das vorherige Netzwerk${back} wiederhergestellt und neu gestartet. Prüfe unter Einstellungen → Verbindungen den Netzwerknamen und das Passwort und versuche es erneut.`,

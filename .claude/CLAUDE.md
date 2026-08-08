@@ -439,7 +439,10 @@ safe_mode.cpp   boot-loop safe mode (logic/boot_guard.hpp): counts crash-only bo
                 (boot_fails); past BOOT_FAIL_THRESHOLD it latches -> main.cpp skips the poll engine + MQTT
                 bridge (WiFi + web UI + OTA stay up) so a bad config (e.g. wrong RX/TX pins) is fixable
                 in-browser, not over USB; a clean/intentional reboot resets the count, and a
-                BOOT_HEALTHY_S-uptime timer clears it. That timer is NOT armed while safe mode is
+                BOOT_HEALTHY_S-uptime timer clears it. A SECOND route reaches the same state:
+                heap_guard.cpp latches it when the heap watchdog exhausts its restart ladder (#407),
+                without touching the crash counter — that boot is not a crash boot. safe_mode_cause()
+                names which route it was. That timer is NOT armed while safe mode is
                 latched (boot_healthy_timer_arms), and that one condition is what makes this a LATCH
                 rather than a CYCLE: safe mode runs with the poll engine and MQTT down — precisely
                 where a config crash-loop lives — so surviving 30 s there is evidence about the
@@ -472,6 +475,20 @@ heap_guard.cpp  THE HEAP WATCHDOG's device glue (logic/heap_watchdog.hpp) — th
                 503, i.e. while the device sat in the exact wedge this exists to escape. The band is
                 deliberately modest rather than the 12 KB /set_mqtt's pre-flight wants: it only has to
                 reject flicker, and demanding more would restart a board whose recovery was real.
+                THE LADDER ENDS IN SAFE MODE, not in "stay up degraded" (#407): the boot that
+                inherits the full count latches safe mode in heap_guard_begin — BEFORE main.cpp's
+                gate, so the poll engine and the MQTT bridge are never started rather than started
+                and then found to be eating the heap. That also BOUNDS the ladder by construction:
+                safe mode creates no poll task, and heap_guard_sample is only called from it. The
+                old answer was measured and did not do what it claimed — at the heap level that
+                produces the cap, HTTP decayed within ~7 minutes past even the 503 the handle_all
+                trampoline returns, so the device sat permanently in the wedge with the escape hatch
+                the cap existed to keep open shut. It is BEST EFFORT and says so: safe mode frees
+                what those two subsystems held, so it rescues a shortage they caused and does
+                nothing for a leak elsewhere. /status.sys.safe_mode_cause distinguishes "heap" from
+                "crash_loop" because the two need OPPOSITE advice — the crash-loop banner sends the
+                reader to the RX/TX pins, which after a heap give-up is sending them to fix
+                something already correct.
                 The Armed/Recovered NARRATION is throttled like the Watching line for the same
                 6 KB-diag-ring reason (that run put 78 Armed lines against 4 Watching, leaving /diag
                 89% heap: text with the boot line already evicted); suppressed transitions are counted
@@ -2563,7 +2580,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   remains false for wire compatibility. The plant-gate pair also reaches MQTT through
                   the `<base>/heating_curve` document's diagnosis.gates block — as EVIDENCE for the
                   diagnosis, never as a writable entity: there is no actuator here to mirror,
-                  sys{free_heap,min_free_heap,max_alloc,heap_restarts,reset_reason,safe_mode} — heap
+                  sys{free_heap,min_free_heap,max_alloc,heap_restarts,reset_reason,safe_mode,safe_mode_cause} — heap
                   headroom (free / since-boot low-water / largest-contiguous INTERNAL, via
                   heap_guard.hpp's one sampler) + how many consecutive heap-watchdog restarts preceded
                   this boot (0 on an ordinary one; the restart is an esp_restart, so reset_reason

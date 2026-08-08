@@ -431,7 +431,12 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   it, so a restart can never land mid-install — the device restarts deliberately, leaving a
   `heap_rst` breadcrumb on `/status.sys.heap_restarts` and giving up after five consecutive tries.
   Sampled at the top of the poll cycle beside the board trends, which is the one path in that task no
-  branch can skip. Arming and recovering ask **different thresholds** — a run opens under 4 KB and
+  branch can skip. The ladder **ends in safe mode** rather than in a degraded stay-up: the boot that
+  inherits the full count never starts the poll engine or the MQTT bridge, which both frees what
+  those two were holding and bounds the ladder by construction (safe mode creates no poll task, and
+  the sampler is only called from it). That replaced a stay-up state measured on hardware to lose
+  HTTP entirely within ~7 minutes — the recovery surface the cap existed to keep (#407);
+  `/status.sys.safe_mode_cause` separates it from a crash loop, because the two need opposite advice. Arming and recovering ask **different thresholds** — a run opens under 4 KB and
   closes only above 8 KB — because answering both with one number let a heap hovering *at* the line
   reset its own countdown on ordinary allocator churn and never restart, measured on hardware while
   `/status` and `/values` were already answering 503 (#399); the `Armed`/`Recovered` narration is

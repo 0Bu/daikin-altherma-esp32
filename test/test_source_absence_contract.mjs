@@ -140,3 +140,20 @@ assert.match(status,
 
 console.log("source absence: board trends own their producer, absent sources state absence, " +
             "armed-but-inactive is named, redaction invents nothing");
+
+// #407 — the END of the restart ladder. The boot that inherited the full count must come up MINIMAL,
+// and that decision has to be made in heap_guard_begin(), which main.cpp runs BEFORE its
+// `if (!safe_mode_active())` gate. Made anywhere later it would arrive after the poll engine and the
+// MQTT bridge had already started and taken the heap the minimal boot exists to leave free.
+//
+// This is also what BOUNDS the ladder: safe mode never creates the poll task, heap_guard_sample() is
+// only ever called from it, so no further restart is reachable. Asserted over source text because
+// it is a claim about which file calls what in which order — the one thing the host suite, which
+// links the pure headers alone, structurally cannot see.
+const guard = fs.readFileSync(new URL("../main/heap_guard.cpp", import.meta.url), "utf8");
+assert.match(guard, /heap_boot_must_be_minimal\(s_restarts\)[\s\S]{0,200}?safe_mode_latch_heap\(\)/,
+  "heap_guard_begin() must latch safe mode for a boot that inherited the full restart count");
+const mainSrc = fs.readFileSync(new URL("../main/main.cpp", import.meta.url), "utf8");
+assert.ok(mainSrc.indexOf("heap_guard_begin()") < mainSrc.indexOf("safe_mode_active()"),
+  "heap_guard_begin() must run BEFORE main.cpp's safe-mode gate, or the minimal boot starts the very "
+  + "subsystems it exists to leave unstarted");
