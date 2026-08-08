@@ -2165,8 +2165,17 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 all (X10A ESTIMATES it from CT clamps at an assumed 230 V, so pairing a measurement
                 with an estimate would hide which is which); setpoints, other modes and faults are not
                 readings and no trend addresses them. Offset 56 (Smart-Grid) is the one deliberate
-                exception in the other direction: it carries a state TIMELINE with no X10A concept
-                to pair against
+                exception in the other direction: it carries a state TIMELINE and stays unpaired
+                even though X10A DOES report a Smart-Grid state (the 0x60/11 contact bits, which the
+                browser falls back to for the BOOST pill when no gateway is configured). A `concept`
+                is the licence to STAND IN automatically, and these two are not the same subject:
+                holding 56 is the request an energy manager WROTE, the contact pair is the physical
+                SG-Ready TERMINAL. A network-driven plant leaves those contacts unwired and reading
+                00 — a current, plausible "Free running" that would silently displace a live boost.
+                So the fallback is one-directional and lives in the browser, where the gateway always
+                wins and the inspector names whichever instrument answered (docs/DESIGN.md §5.3); a
+                `concept` here would make the substitution automatic and bidirectional, which is the
+                same-quantity-same-point rule this table exists to enforce
                 timestamp.hpp = rfc3339_utc(unix_s, ms) — the ONE UTC formatter the SNTP wall clock
                 (sntp_time.cpp) renders through, for syslog.cpp's RFC 5424 TIMESTAMP field,
                 /status.ntp.time, and mqtt_ha.cpp's heartbeat "time" field. A negative unix_s

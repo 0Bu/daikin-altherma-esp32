@@ -835,6 +835,24 @@ const x10aSmartGridRow = () => {
 // stable name; the exact state is written in the inspector and in the target's accessible name.
 const sgModeText = (mode) => mode == null ? "—" : t(`sg.mode${mode}`);
 
+// Does this installation HAVE a HomeHub? The SAVED ADDRESS, which is the firmware's own gate
+// (`mb_host` non-empty dials it, empty disables the stack outright) and the only modbus field here
+// that is a CONFIG fact. `enabled` is not: safe mode never calls mb_start(), so it reports false on
+// a plant with a perfectly good gateway saved — the one place /status states a task fact where its
+// siblings state a config fact. Reading `enabled` to answer "does this plant own a gateway" is
+// therefore right in every state except the one where the whole stack is down, which is exactly
+// when the question gets asked.
+const mbConfigured = () => !!(S.status && S.status.modbus && S.status.modbus.host);
+
+// WHICH instrument the Smart-Grid inspector should describe. Normally that is simply whoever
+// answered (liveData's d.sgSrc). The case this helper exists for is the one where NOBODY did:
+// sgSrc is null, and defaulting to the Modbus wording then tells a reader with no gateway that the
+// HomeHub is not reporting — naming a device their plant does not contain, which is the same
+// wrong-source complaint this card started with. With no reading to attribute, describe the
+// instrument the installation actually HAS — a question about its CONFIG, never about which link
+// happens to be up, or safe mode would re-describe every gateway plant as a contact-only one.
+const sgInspectIsX10a = (d) => (d && d.sgSrc) ? d.sgSrc === "X10A" : !mbConfigured();
+
 // ── WHICH SOURCE ANSWERS A PLANT STATE ─────────────────────────────────────────────────────────
 // One rule, one place. X10A leads while its link is LIVE and carries the row; otherwise a LIVE
 // gateway answers; otherwise nobody does and the caller blanks.

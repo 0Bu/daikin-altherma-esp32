@@ -239,12 +239,33 @@ function liveData() {
     // HomeHub holding offset 56 is the EXTERNAL Smart-Grid request. It is intentionally independent
     // of the plant's operating mode: mode 2 proves that evcc's boost reached the controller, while
     // the DHW flag / valve / flow separately prove whether the controller acted on it.
+    // X10A may answer where the HomeHub cannot — see the note below the literal.
     sgMode: mbSmartGridMode(),
+    // Which instrument answered sgMode ("MB" | "X10A" | null). Set below.
+    sgSrc: null,
     // Source provenance for schematic fields. Normally empty: X10A leads. A field is added only
     // when liveData replaces an unavailable X10A reading with the independent HomeHub register;
     // renderLive then gives that pill the petrol source colour and the inspector names the register.
     mbFields: new Set(),
   };
+  // Smart Grid deliberately does NOT go through stateOf(), and the priority is the REVERSE of every
+  // other paired state. Those all have ONE physical subject both buses report, so "whoever is live
+  // answers" is safe. These two are different subjects: holding 56 is the request an energy manager
+  // WROTE, while the X10A pair is the physical SG-Ready terminal input — docs/REGISTERS.md puts it at
+  // 0x60/11 bits 1-2, inside a byte of external inputs beside the flow switch, the tariff contact,
+  // the solar input and the thermal protectors. They can legitimately disagree, and one direction is
+  // dangerous: an evcc boost written over Modbus leaves UNWIRED contacts reading 00, i.e. a perfectly
+  // current "Free running". Letting X10A lead would therefore print a true reading of the wrong
+  // instrument under the pill's one name — the substitution logic/homehub_map.hpp refuses for every
+  // other concept, and why offset 56 carries no `concept` pairing. So a HomeHub that answers always
+  // wins, and X10A speaks only where nothing else does: a plant with no gateway at all, which used
+  // to leave this pill blank while the contacts were being read and listed two cards below.
+  d.sgSrc = d.sgMode != null ? "MB" : null;
+  if (d.sgMode == null) {
+    // Already gated on x10aDown() inside, so a retained X10A cache cannot answer here either.
+    const sgX10a = x10aSmartGridMode();
+    if (sgX10a != null) { d.sgMode = sgX10a; d.sgSrc = "X10A"; }
+  }
   // X10A leads when it can state a speed. When its whole link is down (or a profile has no speed
   // row), the live HomeHub compressor flag supplies only the activity fact — never an invented rps.
   d.compressorOn = !x10aDown() && d.rps != null ? d.rps > 0 : mbBool(31);
@@ -383,7 +404,10 @@ function liveData() {
     // The paired plant STATES survive, because they are no longer X10A values: stateOf() already
     // refused the retained X10A bit and returned the gateway's (or nothing). Clearing them here is
     // what used to blank the pump and the demand next to readings that were arriving.
-    const KEEP = new Set(["pumpOn", "compressorOn", "valveDhw", "spaceOp", "bsh", "quiet", "sgMode", "mbFields"]);
+    // sgSrc rides with sgMode: a preserved value whose provenance was blanked would let the
+    // inspector name the wrong instrument, which is the one thing that pill's copy must get right.
+    const KEEP = new Set(["pumpOn", "compressorOn", "valveDhw", "spaceOp", "bsh", "quiet", "sgMode",
+                          "sgSrc", "mbFields"]);
     Object.keys(d).forEach((k) => { if (!KEEP.has(k)) d[k] = null; });
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
     MB_PAIRS.forEach((p) => takeMb(p.fld, p.cid));
@@ -728,17 +752,43 @@ const INSPECT = {
     env3: true,
   },
   sgrequest: {
-    t: { en: "Smart-Grid request via Modbus", de: "Smart-Grid-Anforderung über Modbus" },
+    // Title, explainer and chart all follow d.sgSrc — the instrument that ACTUALLY answered. The
+    // HomeHub register and the X10A contacts are different subjects (see liveData), so a fixed
+    // "via Modbus" over an X10A-sourced number would be a false provenance on a correct reading.
+    // The pill's FACE is unchanged either way: on a plant with no gateway every reading is X10A, so
+    // marking this one would be noise, and DESIGN.md keeps provenance in the inspector regardless.
+    // Both titles are deliberately the SAME LENGTH as each other. Measured at 390 px with a
+    // "Recommended on" headline beside it, this title already wraps to five lines; the natural
+    // "…via X10A contacts" / "…über X10A-Kontakte" took it to six, i.e. this change would have made
+    // the narrow layout worse than it found it. "via X10A" names the instrument and the explainer
+    // directly below says SG-Ready input contacts in full, so nothing is lost but the sixth line.
+    t: (d) => sgInspectIsX10a(d)
+      ? { en: "Smart-Grid request via X10A", de: "Smart-Grid-Anforderung über X10A" }
+      : { en: "Smart-Grid request via Modbus", de: "Smart-Grid-Anforderung über Modbus" },
     trend: "smart_grid_mode",
-    trendSource: "modbus",
-    what: {
-      en: "The external Smart-Grid request read back from the HomeHub: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started.",
-      de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit. Ebenso wenig belegt er, dass eine angeforderte Speicherladung bereits begonnen hat.",
-    },
+    // Each source keeps its OWN 24-hour ring, so the chart must show the lane the headline came from
+    // rather than a lane that may be empty (or, worse, the other instrument's day).
+    trendSource: (d) => (sgInspectIsX10a(d) ? "x10a" : "modbus"),
+    what: (d) => sgInspectIsX10a(d)
+      ? {
+        en: "The external Smart-Grid request as the unit's own SG-Ready input contacts report it: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started. These are the physical terminals, so a request sent to the plant over a network instead of a wired contact need not appear here.",
+        de: "Die externe Smart-Grid-Anforderung, wie die SG-Ready-Eingangskontakte der Anlage sie melden: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit. Ebenso wenig belegt er, dass eine angeforderte Speicherladung bereits begonnen hat. Es sind die physischen Klemmen — eine Anforderung, die statt über einen verdrahteten Kontakt über das Netzwerk an die Anlage geht, muss hier nicht erscheinen.",
+      }
+      : {
+        en: "The external Smart-Grid request read back from the HomeHub: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started.",
+        de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit. Ebenso wenig belegt er, dass eine angeforderte Speicherladung bereits begonnen hat.",
+      },
     head: (d) => sgModeText(d && d.sgMode),
+    // Modes 0, 1 and 3 name no instrument ("the external energy manager", or nothing), so they read
+    // correctly from either source and are deliberately left as one sentence each. Only the two that
+    // DO name a reporter are split — and the unavailable case names none at all, since blaming a
+    // HomeHub is wrong on a plant that has none.
     now: (d) => !d || d.sgMode == null
-      ? { en: "No current Smart-Grid value is available from the HomeHub.",
-          de: "Vom HomeHub ist gerade kein aktueller Smart-Grid-Wert verfügbar." }
+      ? { en: "No current Smart-Grid value is available.",
+          de: "Es ist gerade kein aktueller Smart-Grid-Wert verfügbar." }
+      : d.sgMode === 2 && d.sgSrc === "X10A"
+      ? { en: "The SG-Ready contacts report Recommended on. This is the Smart-Grid state energy managers such as evcc use for boost. It requests extra buffering; DHW mode, the 3-way valve and flow separately show whether the unit is actually charging the tank.",
+          de: "Die SG-Ready-Kontakte melden Empfehlung ein. Diesen Smart-Grid-Zustand verwenden Energiemanager wie evcc als Boost. Er fordert zusätzliches Puffern an; Warmwasser-Betriebsart, 3-Wege-Ventil und Durchfluss zeigen separat, ob die Anlage den Speicher tatsächlich lädt." }
       : d.sgMode === 2
       ? { en: "The HomeHub reports Recommended on. This is the Smart-Grid state energy managers such as evcc use for boost. It requests extra buffering; DHW mode, the 3-way valve and flow separately show whether the unit is actually charging the tank.",
           de: "Der HomeHub meldet Empfehlung ein. Diesen Smart-Grid-Zustand verwenden Energiemanager wie evcc als Boost. Er fordert zusätzliches Puffern an; Warmwasser-Betriebsart, 3-Wege-Ventil und Durchfluss zeigen separat, ob die Anlage den Speicher tatsächlich lädt." }
@@ -1496,7 +1546,10 @@ function renderInspectHist(e, row) {
   const pair = MB_PAIRS.find((p) => p.insp === S.insp);
   const pairedId = pair && hasModbusHist(pair.cid) ? pair.cid : "";
   const trendId = e && typeof e.trend === "function" ? e.trend(S.live) : e && e.trend;
-  const trendSource = e && e.trendSource || "";
+  // Function-capable like `trend` above, and for the same reason: an entry whose SOURCE depends on
+  // which instrument answered this second cannot state it as a constant (INSPECT.sgrequest).
+  const trendSource = (e && (typeof e.trendSource === "function" ? e.trendSource(S.live)
+                                                                 : e.trendSource)) || "";
   const offered = (id) => trendSource === "modbus" ? hasModbusHist(id)
     : trendSource === "x10a" ? hasHist(id) : hasHist(id) || hasModbusHist(id);
   const explicitId = trendId && offered(trendId) ? trendId : "";

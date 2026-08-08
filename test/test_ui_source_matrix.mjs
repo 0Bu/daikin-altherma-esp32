@@ -45,7 +45,14 @@ const M_FLAG = (off, label, on, concept = null) => ({
 function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements = {} }) {
   const context = {
     S: {
-      status: { hp: { connected: x10a }, modbus: { enabled: mbEnabled, connected: mbConnected } },
+      // The saved ADDRESS rides with `enabled`, because that is the shape http_status.cpp emits: the
+      // stack only ever starts from a non-empty mb_host, so an enabled gateway with no address is
+      // not a device state, and a fixture carrying one is a test of the fixture. It matters because
+      // `host` is the one modbus field that stays a CONFIG fact in safe mode, where `enabled` drops
+      // to false on a plant whose gateway is perfectly well configured.
+      status: { hp: { connected: x10a },
+                modbus: { enabled: mbEnabled, connected: mbConnected,
+                          host: mbEnabled ? "203.0.113.30" : "" } },
       _values: values,
       _modbus: modbus,
     },
@@ -470,9 +477,11 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(d.mbFields.has("out"), true);
 }
 
-// ── The Modbus-only Smart-Grid request is visible while BOTH stacks are live ───────────────────
-// It is not an X10A fallback: the normal installation has X10A and HomeHub side by side, and that
-// is exactly where the dashboard must prove that evcc's mode-2 boost reached the controller.
+// ── The HomeHub Smart-Grid request LEADS wherever it answers ───────────────────────────────────
+// The normal installation has X10A and HomeHub side by side, and that is exactly where the dashboard
+// must prove that evcc's mode-2 boost reached the controller. X10A answers only where the gateway
+// says nothing at all (next block) — this priority is the REVERSE of stateOf()'s, deliberately, and
+// the second half of this block is why.
 {
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
                   values: [LWT_X], modbus: [LWT_M, SG(2)] });
@@ -480,13 +489,96 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(c.mbSmartGridMode(), 2, "mode 2 must reach the live schematic");
   assert.equal(c.mbForInspect("sgrequest")?.value, 2,
     "the inspector must remain traceable to the Modbus row while X10A is live");
-  assert.equal(c.INSPECT.sgrequest.trendSource, "modbus",
-    "the Modbus request inspector must not render the independent X10A Smart-Grid lane");
+  assert.equal(c.INSPECT.sgrequest.trendSource({ sgSrc: "MB" }), "modbus",
+    "a HomeHub-sourced request inspector must not render the independent X10A lane");
   assert.equal(c.sgModeText(2), "sg.mode2");
   assert.match(SOURCE, /classList\.toggle\("sg-boost-on", d\.sgMode === 2\)/,
     "only mode 2 may apply the active Boost colour");
   assert.doesNotMatch(SOURCE, /sg-request-on/,
     "the former all-nonzero request visibility rule must stay removed");
+
+  // THE CASE THAT FIXES THE PRIORITY. The two sources are different subjects: holding 56 is the
+  // request an energy manager WROTE, the X10A pair is the physical SG-Ready terminal. On an
+  // installation driven over the network the contacts are unwired and read 00 — a current,
+  // plausible "Free running" that must never displace the boost the gateway is reporting.
+  const contradicted = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                             values: [LWT_X, X_SG(1, false), X_SG(2, false)],
+                             modbus: [LWT_M, SG(2)] });
+  assert.equal(contradicted.x10aSmartGridMode(), 0, "the unwired contacts really do read mode 0");
+  const cd = contradicted.liveData();
+  assert.equal(cd.sgMode, 2, "a live HomeHub request outranks a contradicting contact pair");
+  assert.equal(cd.sgSrc, "MB", "and the inspector must attribute it to the HomeHub");
+}
+
+// The inspector's copy fields are {en, de} objects (or functions returning one). Read both halves
+// explicitly: a source-aware sentence that is only corrected in English is half a fix.
+const EN = (o) => (o && o.en) || "";
+const DE = (o) => (o && o.de) || "";
+const SG_INSP = (c, d) => c.INSPECT.sgrequest;
+
+// ── With NO HomeHub, the SG-Ready contacts answer the pill instead of leaving it blank ─────────
+// The firmware already decodes and lists them (x10aSmartGridRow), so a blank pill was the dashboard
+// declining to draw a reading it had. The provenance travels with the value: the two sources are
+// different instruments, so a fixed "via Modbus" title over a contact reading would be false.
+{
+  for (const [c1, c2, mode] of [[false, false, 0], [false, true, 1],
+                                [true, false, 2], [true, true, 3]]) {
+    const c = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                    values: [LWT_X, X_SG(1, c1), X_SG(2, c2)] });
+    const d = c.liveData();
+    assert.equal(d.sgMode, mode, `no gateway: contacts ${+c1}${+c2} must reach the pill as ${mode}`);
+    assert.equal(d.sgSrc, "X10A", "no gateway: the value is attributed to the contacts");
+    assert.equal(c.INSPECT.sgrequest.trendSource(d), "x10a",
+      "the chart must show the X10A lane the headline came from");
+    assert.match(EN(c.INSPECT.sgrequest.t(d)), /X10A/,
+      "the inspector title must name the contacts, never Modbus");
+    assert.match(EN(c.INSPECT.sgrequest.what(d)), /SG-Ready/,
+      "the explainer must describe the physical contacts, not a HomeHub read-back");
+  }
+  // Mode 2 keeps its full boost explanation on this path, attributed to the contacts.
+  const boost = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                      values: [LWT_X, X_SG(1, true), X_SG(2, false)] });
+  const bd = boost.liveData();
+  assert.match(EN(SG_INSP(boost, bd).now(bd)), /SG-Ready contacts report Recommended on/);
+  assert.match(DE(SG_INSP(boost, bd).now(bd)), /SG-Ready-Kontakte melden Empfehlung ein/,
+    "the German sentence must be corrected too, with its own plural verb");
+  for (const half of [EN, DE])
+    assert.doesNotMatch(half(SG_INSP(boost, bd).now(bd)), /HomeHub/,
+      "a contact-sourced boost must not credit a gateway this plant does not have");
+  assert.match(DE(SG_INSP(boost, bd).t(bd)), /X10A/,
+    "the German title names the contacts too");
+  assert.match(SOURCE, /classList\.toggle\("sg-boost-on", d\.sgMode === 2\)/,
+    "the Boost colour keys on the mode alone, so it fires on either source");
+}
+
+// Neither source: the pill blanks and the copy blames no instrument — "the HomeHub is not
+// answering" is wrong on a plant that has no HomeHub.
+{
+  const none = ctx({ x10a: true, mbEnabled: false, mbConnected: false, values: [LWT_X] });
+  const d = none.liveData();
+  assert.equal(d.sgMode, null, "no contacts and no gateway: nothing to state");
+  assert.equal(d.sgSrc, null);
+  assert.equal(none.sgModeText(d.sgMode), "—");
+  for (const half of [EN, DE])
+    assert.doesNotMatch(half(SG_INSP(none, d).now(d)), /HomeHub|X10A|SG-Ready/,
+      "the unavailable sentence must not name a source that was never consulted");
+  // One contact alone cannot invent a mode, so a half-readable pair blanks rather than guessing.
+  const half = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                     values: [LWT_X, X_SG(1, true)] });
+  assert.equal(half.liveData().sgMode, null, "a single contact must not become a four-state mode");
+
+  // With nothing to attribute, the explainer must still describe the instrument this installation
+  // HAS. Defaulting to the HomeHub wording tells a reader with no gateway that a device they do not
+  // own is not reporting — the same wrong-source complaint this card started with.
+  assert.match(EN(SG_INSP(none, d).t(d)), /X10A/,
+    "with no gateway and no value, the title must not name Modbus");
+  assert.equal(SG_INSP(none, d).trendSource(d), "x10a",
+    "and the empty chart must be the lane this plant could ever fill");
+  const hub = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [LWT_X], modbus: [] });
+  const hd = hub.liveData();
+  assert.equal(hd.sgMode, null, "a live gateway that does not carry offset 56 states nothing");
+  assert.match(EN(SG_INSP(hub, hd).t(hd)), /via Modbus/,
+    "but on a plant that HAS a gateway the Modbus wording stays");
 }
 
 // A stale HomeHub cache is not an active request, and invalid enum values are not guessed into one.

@@ -412,6 +412,20 @@ Body, ordered:
    phase. Only Recommended on contributes to the separate sampled Boost-duration total. It
    stays separate from the tank branch because the request is not proof that the controller has
    started a DHW charge.
+   **Its two sources are ranked the opposite way round to every other paired state**, and that is
+   deliberate rather than an oversight. The others have one physical subject both buses report, so
+   `stateOf()`'s "X10A leads, a live gateway answers otherwise" is safe. These are two different
+   subjects: HomeHub holding `56` is the request an energy manager *wrote*, while the X10A pair is
+   the physical SG-Ready terminal input (`docs/REGISTERS.md` `0x60`/11 bits 1–2, in a byte of
+   external inputs beside the flow switch, the tariff contact and the solar input). An installation
+   driven over the network leaves those contacts unwired and reading `00` — a current, plausible
+   *Free running* — so a live HomeHub always outranks them, and the contacts answer only where no
+   gateway does. That case is a plant with no HomeHub at all, where the firmware already decodes and
+   lists the contacts and the pill used to blank beside them. Whichever instrument answers, the
+   inspector title, explainer and 24-hour lane name **that** one; with nothing to attribute, they
+   describe the instrument the installation actually has, never a gateway it does not contain. The
+   pill's face is unchanged either way — on a gateway-less plant every reading is X10A, so marking
+   this one would be noise, and provenance belongs in the inspector regardless.
    **The schematic never hides.** When the X10A link drops, retained X10A values are never left on
    screen: animations stop, the 3-way-valve label falls back to a bare "3WV" unless the independent
    HomeHub can state its position, and every reading neither source can currently supply blanks to
