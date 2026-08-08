@@ -11,9 +11,25 @@ const firmwareHistory = fs.readFileSync(new URL("../main/history.cpp", import.me
 const mqtt = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*z-index:\s*2[^}]*white-space:\s*pre;/,
   "state tooltips must paint over the timeline and honor only their deliberate vertical breaks");
-assert.ok(style.lastIndexOf(".vhist-state-on.mb { background: var(--src-mb); }") >
-          style.lastIndexOf(".vhist-state-on.sg-recommended"),
-  "the lower Modbus lane's petrol source colour must win over every categorical state fill");
+// Source outline and state fill are SEPARATE visual channels (DESIGN.md). A blanket source fill on
+// the HomeHub lane repaints every phase one colour, which is not a cosmetic loss: it erased all four
+// Smart-Grid modes into a single bar, and that bar read as a STATE, because petrol is the legend
+// swatch for "Recommended on". A plant running free for a day showed 24 h of Boost directly under a
+// Boost total of a few hours derived from the same samples. Strip comments first — the CSS explains
+// why the rule is absent, and that prose must not satisfy the check for it.
+const cssRules = style.replace(/\/\*[\s\S]*?\*\//g, "");
+assert.doesNotMatch(cssRules, /\.vhist-state-on\.mb\b/,
+  "no source colour may override a categorical state fill on the HomeHub lane");
+const stateFill = (cls) => {
+  const rule = cssRules.match(new RegExp(`\\.vhist-state-on\\.${cls}\\b[^{}]*\\{([^}]*)\\}`));
+  assert.ok(rule, `${cls} must own a state fill`);
+  const bg = rule[1].match(/background:\s*([^;]+);/);
+  assert.ok(bg, `${cls} must declare a background`);
+  return bg[1].trim();
+};
+const sgFills = ["sg-free", "sg-forced-off", "sg-recommended", "sg-forced-on"].map(stateFill);
+assert.equal(new Set(sgFills).size, 4,
+  "each of the four Smart-Grid modes must be distinguishable by its own fill");
 assert.match(firmwareHistory,
   /if \(!s_have_bucket\)[\s\S]*?history_completed_samples\(bucket\)[\s\S]*?P\(\)\.ring\)[\s\S]*?reset_with_gaps\(completed\)/m,
   "X10A and board rings must seed the elapsed boot raster even when polling starts late");
