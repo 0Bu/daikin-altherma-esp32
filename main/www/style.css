@@ -721,10 +721,12 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-source.mb { color: var(--src-mb); }
 .vhist-source.mb i { background: var(--src-mb); }
 .vhist-source small { color: inherit; font-size: 10.5px; }
-/* Component states are categorical timelines, not numeric curves. Every valid X10A state owns a
-   labelled colour in the state legend; missing samples alone are hatched. HomeHub keeps its petrol
-   fill across every valid phase. Put the source name directly on its lane instead of making the eye
-   map a detached source legend onto two otherwise identical full-width bars. */
+/* Component states are categorical timelines, not numeric curves. Every valid state owns a labelled
+   colour in the state legend, on EVERY source lane; missing samples alone are hatched. Source is the
+   OTHER visual channel — the lane's own name and its track outline — so a HomeHub phase is coloured
+   by what it says, never by who said it (DESIGN.md §"Source outline and state fill are separate
+   visual channels"). Put the source name directly on its lane instead of making the eye map a
+   detached source legend onto two otherwise identical full-width bars. */
 .vhist-state-graph { padding-top: 58px; }
 /* State readouts are intentionally overlaid on the timeline. They can be taller than the reserved
    strip because each source/state/interval/duration field is stacked vertically; keep the bubble
@@ -773,12 +775,19 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-state-on.sg-forced-off, .vhist-level.sg-forced-off i {
   background: var(--err);
 }
+/* Petrol is mode 2 on PURPOSE, and it is a state colour rather than a source one: the schematic's
+   permanent BOOST pill turns petrol for exactly this mode, so the pill and its timeline agree. */
 .vhist-state-on.sg-recommended, .vhist-level.sg-recommended i {
   background: var(--src-mb);
 }
-/* Source identity wins the cascade for the lower lane. Keep this after every state-fill rule: the
-   state class still drives X10A and the tooltip wording, but must not repaint Modbus cyan/orange. */
-.vhist-state-on.mb { background: var(--src-mb); }
+/* There is deliberately NO `.vhist-state-on.mb` source fill here. One used to sit after every rule
+   above and repaint the whole HomeHub lane petrol, which erased the state channel on the four
+   timelines that HAVE a Modbus lane (Smart Grid, BSH, the 3-way valve, Quiet): all four Smart-Grid
+   modes, and both sides of every binary pair, rendered as one solid bar. On Smart Grid that bar was
+   also read as a STATE, because petrol is the legend swatch for "Recommended on" — so a plant that
+   ran free all day showed 24 h of Boost, directly under a Boost total of a few hours computed from
+   the same samples. Source stays legible through the channels DESIGN.md assigns it: the lane's
+   petrol name and the track's petrol outline. */
 
 .modal-subtitle { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
