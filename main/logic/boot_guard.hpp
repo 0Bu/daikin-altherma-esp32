@@ -34,6 +34,28 @@ inline int boot_next_fail_count(int32_t stored) {
     return cur + 1;
 }
 
+// May the healthy-uptime timer be armed on THIS boot? Everywhere EXCEPT while safe mode is latched
+// — and that single condition is the difference between a LATCH and a
+// crash-crash-crash-crash-then-one-quiet-boot CYCLE.
+//
+// Safe mode brings the device up with the X10A poll engine and the MQTT bridge DOWN, which is
+// precisely where a config crash-loop lives (a wrong RX/TX pair wedging the poll task, a decode
+// that panics on one unit's reply, a publish burst that exhausts the heap). So surviving
+// BOOT_HEALTHY_S in safe mode is evidence about the RECOVERY surface — WiFi, the web UI, OTA — and
+// says nothing whatever about the fault. Clearing the counter on it hands the next reboot the full
+// stack again: it crashes again, and the counter climbs from zero. The device then spends
+// BOOT_FAIL_THRESHOLD boots crash-looping for every one boot it is fixable in, which is the reboot
+// loop this guard exists to end, merely slowed down — and the owner's browser window into it is one
+// boot in five rather than a device that simply stays reachable.
+//
+// Nothing is stranded by refusing to arm. ANY non-crash reset already zeroes the counter in
+// safe_mode_begin's else branch, and every intentional way out of safe mode is one: a /set_* save,
+// an OTA install, a power cycle, the recovery button's factory reset. Safe mode therefore ends the
+// moment somebody acts on it, and only then — which is the whole point of latching.
+inline constexpr bool boot_healthy_timer_arms(bool safe_mode_latched) {
+    return !safe_mode_latched;
+}
+
 // Does this reset reason count as a CRASH for safe-mode accumulation? Deliberately NARROWER than
 // crashinfo's crash_reason_is_fault(): ONLY panic / interrupt-wdt / task-wdt / other-wdt / brownout
 // accumulate. A clean power-on, an intentional software reboot (config save / OTA), a deep-sleep /

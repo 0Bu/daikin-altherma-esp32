@@ -3,6 +3,7 @@
 // storage, one mutex, and the fold from the poll cycle's values into a bucket.
 #include "history.hpp"
 #include "diag_log.hpp"
+#include "heap_guard.hpp"
 #include "logic/binary_semantics.hpp"
 #include "logic/env3.hpp"
 #include "logic/history_persist.hpp"
@@ -12,12 +13,14 @@
 #include "sntp_time.hpp"
 
 #include "esp_attr.h"           // __NOINIT_ATTR — the whole of step 1 rests on this one attribute
-#include "esp_heap_caps.h"      // heap_caps_get_largest_free_block — the max_alloc trend
+// esp_heap_caps.h is deliberately absent: the largest-free-block sample now goes through
+// heap_guard.hpp's ONE internal-DRAM sampler, so no site here spells out a capability mask.
 #include "esp_partition.h"      // the optional `hist` snapshot partition
 #include "esp_system.h"         // esp_get_free_heap_size — the free_heap trend
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 
 #include <atomic>
 #include <cmath>
@@ -133,16 +136,11 @@ std::atomic<bool> s_mb_reset_requested{false};
 std::atomic<bool> s_circulation_reset_requested{false};
 SemaphoreHandle_t s_mtx = nullptr;
 
-// RAII lock, same idiom as hp_poll.cpp/config.cpp. Everything inside a critical section here is a
-// plain int16/char copy — nothing allocates, so an unwind cannot strand the mutex.
-struct Lock {
-    SemaphoreHandle_t m;
-    bool held;
-    explicit Lock(SemaphoreHandle_t mtx) : m(mtx), held(mtx && xSemaphoreTake(mtx, portMAX_DELAY) == pdTRUE) {}
-    ~Lock() { if (held) xSemaphoreGive(m); }
-    Lock(const Lock&) = delete;
-    Lock& operator=(const Lock&) = delete;
-};
+// The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
+// This used to be a private copy here; nine of them had drifted into two different shapes.
+// Everything inside a critical section in this file is a plain integer copy — nothing allocates —
+// so the unwind safety is belt-and-braces here rather than the reason the guard is used.
+using Lock = SemGuard;
 
 // The value parse lives in logic/history.hpp (history_parse_tenths) so nonnumeric legacy/corrupt
 // values and sentinel collisions are refused in host-tested code rather than on-device surprises.
@@ -318,7 +316,7 @@ inline BoardSample sample_board() {
     BoardSample b;
     b.free_heap = logic::history_bytes_tenths_kib(esp_get_free_heap_size());
     b.max_alloc = logic::history_bytes_tenths_kib(
-        heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+        heap_largest_internal_block());
     return b;
 }
 
@@ -618,7 +616,7 @@ void history_record_board() {
 
     {
         Lock lk(s_mtx);
-        if (!lk.held) return;
+        if (!lk.acquired()) return;
         advance_raster_locked(now_us, bucket);
         fold_board_locked(board);
         persist_seal_locked();
@@ -637,7 +635,7 @@ void history_record_circulation() {
     const uint32_t bucket = logic::history_bucket(now_us);
 
     Lock lk(s_mtx);
-    if (!lk.held) return;
+    if (!lk.acquired()) return;
     advance_raster_locked(now_us, bucket);
     reset_circulation_locked(bucket);
     fold_circulation_locked(circulation);
@@ -727,7 +725,7 @@ void history_record(const CachedValue* v, size_t n) {
     const CirculationPumpSample circulation = circulation_pump_sample();
 
     Lock lk(s_mtx);
-    if (!lk.held) return;
+    if (!lk.acquired()) return;
 
     // Every X10A and board ring shares the monotonic boot epoch. If polling starts late, seed the
     // already-completed part of the 24-hour window with explicit gaps instead of giving each source
@@ -818,7 +816,7 @@ void history_record_modbus(const CachedValue* v, size_t n) {
     }
 
     Lock lk(s_mtx);
-    if (!lk.held) return;
+    if (!lk.acquired()) return;
     if (!s_mb_have_bucket) {
         const size_t completed = logic::history_completed_samples(bucket);
         for (auto& ring : P().mb_ring) ring.reset_with_gaps(completed);
@@ -863,7 +861,7 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
     }
 
     Lock lk(s_mtx);
-    if (!lk.held) return;
+    if (!lk.acquired()) return;
     if (!s_env3_have_bucket) {
         const size_t completed = logic::history_completed_samples(bucket);
         for (auto& ring : P().env3_ring) ring.reset_with_gaps(completed);
@@ -893,7 +891,7 @@ size_t history_snapshot(size_t t, HistorySample* out, size_t max) {
     if (t >= TREND_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
     // Do not expose the old physical identity while its deferred reset is waiting for the poll task.
-    if (!lk.held || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
+    if (!lk.acquired() || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
         (s_circulation_reset_requested.load() && circulation_trend(logic::TRENDS[t]))) return 0;
     return P().ring[t].ring.snapshot(out, max);
 }
@@ -901,14 +899,14 @@ size_t history_snapshot(size_t t, HistorySample* out, size_t max) {
 size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max) {
     if (t >= HOMEHUB_HISTORY_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
-    if (!lk.held || s_mb_reset_requested.load()) return 0;
+    if (!lk.acquired() || s_mb_reset_requested.load()) return 0;
     return P().mb_ring[t].snapshot(out, max);
 }
 
 size_t history_env3_snapshot(size_t t, HistorySample* out, size_t max) {
     if (t >= ENV3_HISTORY_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
-    if (!lk.held) return 0;
+    if (!lk.acquired()) return 0;
     return P().env3_ring[t].snapshot(out, max);
 }
 
@@ -923,7 +921,7 @@ static size_t copy_under_lock(const char* src, char* out, size_t max) {
 int32_t history_newest_age_s() {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    if (!lk.held || s_last_commit_us < 0) return -1;
+    if (!lk.acquired() || s_last_commit_us < 0) return -1;
     const int64_t age_us = esp_timer_get_time() - s_last_commit_us;
     return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
 }
@@ -931,7 +929,7 @@ int32_t history_newest_age_s() {
 int32_t history_modbus_newest_age_s() {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    if (!lk.held || s_mb_reset_requested.load() || s_mb_last_commit_us < 0) return -1;
+    if (!lk.acquired() || s_mb_reset_requested.load() || s_mb_last_commit_us < 0) return -1;
     const int64_t age_us = esp_timer_get_time() - s_mb_last_commit_us;
     return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
 }
@@ -939,7 +937,7 @@ int32_t history_modbus_newest_age_s() {
 int32_t history_env3_newest_age_s() {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    if (!lk.held || s_env3_last_commit_us < 0) return -1;
+    if (!lk.acquired() || s_env3_last_commit_us < 0) return -1;
     const int64_t age_us = esp_timer_get_time() - s_env3_last_commit_us;
     return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
 }
@@ -951,20 +949,20 @@ static int64_t oldest_bucket_under_lock(int64_t newest, size_t sample_count) {
 int64_t history_oldest_bucket(size_t sample_count) {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    return lk.held ? oldest_bucket_under_lock(s_last_commit_bucket, sample_count) : -1;
+    return lk.acquired() ? oldest_bucket_under_lock(s_last_commit_bucket, sample_count) : -1;
 }
 
 int64_t history_modbus_oldest_bucket(size_t sample_count) {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    return lk.held && !s_mb_reset_requested.load()
+    return lk.acquired() && !s_mb_reset_requested.load()
         ? oldest_bucket_under_lock(s_mb_last_commit_bucket, sample_count) : -1;
 }
 
 int64_t history_env3_oldest_bucket(size_t sample_count) {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    return lk.held ? oldest_bucket_under_lock(s_env3_last_commit_bucket, sample_count) : -1;
+    return lk.acquired() ? oldest_bucket_under_lock(s_env3_last_commit_bucket, sample_count) : -1;
 }
 
 // ── Splicing an older snapshot in behind the live samples ───────────────────────────────────────
@@ -1022,7 +1020,7 @@ static bool history_splice_snapshot(HistorySource src, size_t idx, const logic::
                                     size_t n, uint32_t stride, int64_t newest_bucket) {
     if (!s_mtx) return false;
     Lock lk(s_mtx);
-    if (!lk.held) return false;
+    if (!lk.acquired()) return false;
     // The same guard the live reader uses: never rebuild a ring whose physical identity is about to
     // be discarded anyway.
     if (src == HistorySource::X10a && s_reset_requested.load()) return false;
@@ -1037,7 +1035,7 @@ size_t history_label(size_t t, char* out, size_t max) {
     out[0] = '\0';
     if (t >= TREND_COUNT || !s_mtx) return 0;
     Lock lk(s_mtx);
-    if (!lk.held || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
+    if (!lk.acquired() || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
         (s_circulation_reset_requested.load() && circulation_trend(logic::TRENDS[t]))) return 0;
     return copy_under_lock(P().ring[t].label, out, max);
 }
@@ -1047,7 +1045,7 @@ size_t history_unit(size_t t, char* out, size_t max) {
     out[0] = '\0';
     if (t >= TREND_COUNT || !s_mtx) return 0;
     Lock lk(s_mtx);
-    if (!lk.held || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
+    if (!lk.acquired() || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
         (s_circulation_reset_requested.load() && circulation_trend(logic::TRENDS[t]))) return 0;
     return copy_under_lock(P().ring[t].unit, out, max);
 }

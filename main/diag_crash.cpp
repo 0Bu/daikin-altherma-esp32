@@ -128,18 +128,29 @@ const CrashInfo& diag_crash_info() { return s_ci; }
 // read s_ci concurrently. That is a single byte store which only ever goes false -> true, so a
 // concurrent reader sees one state or the other and both are self-consistent renderings of the same
 // CrashInfo — no lock, and none of the paths involved may take one anyway (see CLAUDE.md).
+// The IDF-free mirror in logic/crashinfo.hpp must be the real value, or the rule above would key on
+// a code the device never returns and quietly go back to blocking every dismissal on a board with no
+// coredump partition.
+static_assert(ESP_ERR_NOT_FOUND_MIRROR == ESP_ERR_NOT_FOUND,
+              "logic/crashinfo.hpp's ESP_ERR_NOT_FOUND mirror has drifted from esp_err.h");
+
 bool diag_crash_dismiss() {
     esp_err_t err = esp_core_dump_image_erase();
-    if (err != ESP_OK && coredump_erase_failure_blocks_dismiss(s_foreign_coredump)) {
+    if (coredump_erase_failure_blocks_dismiss(static_cast<int>(err), s_foreign_coredump)) {
         diag_printf("crash: dismiss failed — coredump erase: %s\n", esp_err_to_name(err));
         return false;
     }
+    // Three ways to get here, and they are three different facts about the device rather than one
+    // outcome, so each says which it was: the dump was destroyed; there was no partition holding one
+    // (an OTA-upgraded board flashed before `coredump` existed, per partitions.csv); or the residue
+    // is a proven-foreign image already suppressed everywhere it could be reported.
+    const char* how = err == ESP_OK           ? "dump erased"
+                    : err == ESP_ERR_NOT_FOUND ? "no coredump partition on this board — nothing to erase"
+                                               : "foreign dump residue suppressed";
     if (err != ESP_OK)
-        diag_printf("crash: foreign coredump residue erase failed again: %s — report may still be dismissed\n",
-                    esp_err_to_name(err));
+        diag_printf("crash: coredump erase returned %s — %s\n", esp_err_to_name(err), how);
     s_ci.dismissed = true;
-    diag_printf("crash: report dismissed (reset=%s, %s)\n", crash_reason_slug(s_ci.reason),
-                err == ESP_OK ? "dump erased" : "foreign dump residue suppressed");
+    diag_printf("crash: report dismissed (reset=%s, %s)\n", crash_reason_slug(s_ci.reason), how);
     return true;
 }
 

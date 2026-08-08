@@ -297,7 +297,11 @@ assert.match(html, /id="mqBtn"[^>]*data-i18n="btn\.save"/,
   "the idle MQTT action must retain the concise Save label");
 assert.match(app, /saveReboot\("\/set_mqtt"[\s\S]*busyLabel: "btn\.verifying"/,
   "the MQTT save action must remain visibly in verification state during the pre-flight");
-assert.match(httpConfig, /heap_caps_get_largest_free_block[\s\S]*503 Service Unavailable[\s\S]*Device busy; retry MQTT verification[\s\S]*esp_mqtt_client_init[\s\S]*ctx\.connected[\s\S]*config_save\(c\)/,
+// heap_largest_internal_block() rather than heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT):
+// the pre-flight has to weigh its TLS session against INTERNAL DRAM, which is the heap that binds.
+// DEFAULT answers from PSRAM on a board that has it, and a probe waved through on megabytes of
+// PSRAM headroom is the reboot this guard exists to prevent.
+assert.match(httpConfig, /heap_largest_internal_block[\s\S]*503 Service Unavailable[\s\S]*Device busy; retry MQTT verification[\s\S]*esp_mqtt_client_init[\s\S]*ctx\.connected[\s\S]*config_save\(c\)/,
   "insufficient probe resources or a failed MQTT CONNECT must return before config_save");
 assert.doesNotMatch(httpConfig, /skipping broker connect probe[\s\S]*saving anyway/,
   "the broker pre-flight must never persist after skipping MQTT CONNECT/auth");

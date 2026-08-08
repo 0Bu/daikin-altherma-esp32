@@ -16,6 +16,9 @@
 #include "esp_netif.h"
 #include "nvs_flash.h"
 
+#include <cstdlib>      // abort — the deliberate ending for a boot sequence that threw
+#include <exception>
+
 #include "config.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
@@ -29,6 +32,7 @@
 #include "ota_update.hpp"
 #include "provisioning.hpp"
 #include "recovery_button.hpp"
+#include "heap_guard.hpp"
 #include "safe_mode.hpp"
 #include "sntp_time.hpp"
 #include "status_led.hpp"
@@ -37,7 +41,7 @@
 
 static const char* TAG = "main";
 
-extern "C" void app_main() {
+static void boot_sequence() {
     // --- NVS ---
     // A full partition or a newer-IDF layout is recoverable: erase + retry. ANY other error (and the
     // residual after a failed erase/retry) is NOT ignored — the old code checked only the two known
@@ -76,6 +80,7 @@ extern "C" void app_main() {
     daik::status_led_start();
     daik::recovery_button_start();
     daik::safe_mode_begin();             // crash-loop guard: count crash boots, latch safe mode past threshold
+    daik::heap_guard_begin();            // read + clear the heap-watchdog restart breadcrumb this boot inherited
     daik::syslog_init();
     const daik::Config& cfg = daik::config();
     ESP_LOGI(TAG, "daikin-altherma-esp32 %s", esp_app_get_description()->version);
@@ -123,4 +128,43 @@ extern "C" void app_main() {
     }
     daik::ota_health_gate_arm();         // keep rollback armed until this image proves healthy
     daik::safe_mode_arm_healthy();       // clear the crash counter after BOOT_HEALTHY_S of continuous uptime
+}
+
+// An escape from the boot sequence, named and then made to count.
+//
+// app_main is a C frame boundary like every HTTP handler and task loop this firmware already guards
+// (CLAUDE.md → "Every allocating FreeRTOS task loop must self-guard"): an exception that leaves it
+// reaches std::terminate and abort()s ANONYMOUSLY, with the reset reason the only evidence that
+// anything happened. And boot is not a fanciful place to throw — config_load(), http_start() and the
+// service starts below it all allocate, on a device whose whole memory section is about
+// std::bad_alloc being reachable.
+//
+// ABORT is the deliberate choice among the three endings, and the other two are actively wrong here:
+//   • RETURNING would leave a half-initialised firmware claiming to run — some services up, some
+//     not, and /status reporting a device that does not exist.
+//   • esp_restart() looks like the careful option and is the worst one: safe_mode_begin() classifies
+//     a "sw" reset as an INTENTIONAL reboot and CLEARS the crash counter on it (boot_reset_was_crash
+//     excludes it by name, so a provisioning burst cannot false-trip safe mode). A boot sequence
+//     that throws every time would therefore restart forever without ever accumulating a single
+//     crash boot — the one failure mode safe mode exists to end, made permanent by the mechanism
+//     meant to end it.
+//   • abort() panics, which is a crash reset: it writes a core dump, and it COUNTS. Four of them and
+//     safe_mode latches, the poll engine and MQTT stay down, and the device comes up on the web UI
+//     where the configuration that caused it can be fixed. The existing machinery does the work.
+[[noreturn]] static void boot_failed(const char* what) {
+    // Serial first, because it is the only sink guaranteed to exist this early — the diag ring may
+    // not be initialised, and syslog certainly is not.
+    ESP_LOGE(TAG, "boot sequence threw (%s) — aborting so this counts as a crash boot", what);
+    daik::diag_printf("boot: FAILED — boot sequence threw (%s)\n", what);
+    abort();
+}
+
+extern "C" void app_main() {
+    try {
+        boot_sequence();
+    } catch (const std::exception& e) {
+        boot_failed(e.what());
+    } catch (...) {
+        boot_failed("unknown exception");
+    }
 }

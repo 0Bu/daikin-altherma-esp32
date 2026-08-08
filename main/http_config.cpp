@@ -11,6 +11,7 @@
 #include "checkup.hpp"
 #include "config.hpp"
 #include "env3.hpp"
+#include "heap_guard.hpp"
 #include "history.hpp"
 #include "hp_poll.hpp"
 #include "logic/config_model.hpp"
@@ -31,7 +32,8 @@
 #include "soc/soc_caps.h"   // SOC_GPIO_PIN_COUNT — per-target GPIO count for pin validation
 
 #include "esp_crt_bundle.h"
-#include "esp_heap_caps.h"   // largest-free-block guard before a transient TLS validation session
+// esp_heap_caps.h is deliberately absent: the largest-free-block sample now goes through
+// heap_guard.hpp's ONE internal-DRAM sampler, so no site here spells out a capability mask.
 #include "mqtt_client.h"
 #include "wifi.hpp"
 #include "diag_log.hpp"      // diag_printf — record when a low-heap probe is skipped
@@ -404,7 +406,7 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
         const size_t need = is_tls ? 48u * 1024u : 12u * 1024u;
         MqttValidateCtx ctx{};                       // error_msg zero-inits to nullptr
         ctx.sem = xSemaphoreCreateBinary();
-        if (!ctx.sem || heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT) < need) {
+        if (!ctx.sem || heap_largest_internal_block() < need) {
             if (ctx.sem) vSemaphoreDelete(ctx.sem);
             diag_printf("mqtt: broker connect probe deferred: insufficient contiguous heap; not saving\n");
             return send_err(req, "503 Service Unavailable", "Device busy; retry MQTT verification");

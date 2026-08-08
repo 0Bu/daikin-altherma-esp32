@@ -78,3 +78,10 @@ else
     "$CXX" -std=c++17 -Wall -Wextra -Werror -Imain -o "$BUILD_DIR/logic_tests" test/test_logic.cpp
     "$BUILD_DIR/logic_tests"
 fi
+
+# The host suite gates the C++ copy of the leaving-water / post-BUH / COP-scope / held-over-page
+# rules. Those four headers each say they have no firmware caller — they exist to gate a rule the
+# BROWSER applies — so gating only the C++ leaves the copy that actually ships unchecked. Run here
+# rather than as a step of its own because this is where a C++ compiler is already guaranteed, and
+# because a rule change and its parity failure belong in the same command.
+"$(dirname "$0")/check-presenter-parity.sh"

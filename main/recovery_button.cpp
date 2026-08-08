@@ -13,6 +13,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/task.h"
 
 namespace daik {
@@ -131,7 +132,7 @@ void button_task(void*) {
 void recovery_button_start() {
     const Config c = config();
     if (c.btn_gpio < 0) return;   // no button configured — the default
-    if (xTaskCreate(button_task, "recovery_btn", 3072, nullptr, 3, nullptr) != pdPASS)
+    if (xTaskCreate(button_task, "recovery_btn", 3072, nullptr, TASK_PRIO_BUTTON, nullptr) != pdPASS)
         ESP_LOGW("button", "recovery-button task alloc failed — factory-reset button disabled this boot");
 }
 

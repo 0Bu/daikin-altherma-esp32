@@ -38,11 +38,18 @@ const rowHeldOver = (r, d) => !!(d && d.ouHeldOver && r && OU_HELD_PAGES.include
 //   Tier 2 = any leaving/outlet-water measurement that is NOT a setpoint / mixed-zone / post-BUH.
 const lwtWater = (l) => l.includes("leaving water") || l.includes("outlet water") || l.includes("inflow");
 const lwtReject = (l) => l.includes("setpoint") || l.includes("mixed") || l.includes("r2t") || l.includes("after buh") || l.includes("after buffer");
+// The two tiers as NAMED predicates over a raw label, one per C++ twin (lwt_is_pre_buh /
+// lwt_is_measurement). Named rather than inlined into the find() callbacks below because
+// scripts/check-presenter-parity.sh calls them directly with the whole def/ catalog's labels and
+// diffs the answers against the C++ — a rule nothing can address is a rule nothing can gate, which
+// is how this copy drifted far enough to match the bizone kit's MIXED leaving-water row.
+const lwtIsPreBuh = (l) => lwtWater(l) && !lwtReject(l) && l.includes("r1t");
+const lwtIsMeasurement = (l) => lwtWater(l) && !lwtReject(l);
 const lwtRow = () => {
   const vals = (S._values || []).filter((x) => x.value != null);
   const low = (x) => (x.label || "").toLowerCase();
-  let r = vals.find((x) => { const l = low(x); return lwtWater(l) && !lwtReject(l) && l.includes("r1t"); });
-  if (!r) r = vals.find((x) => { const l = low(x); return lwtWater(l) && !lwtReject(l); });
+  let r = vals.find((x) => lwtIsPreBuh(low(x)));
+  if (!r) r = vals.find((x) => lwtIsMeasurement(low(x)));
   return r || null;
 };
 const vLwt = () => {
@@ -60,13 +67,39 @@ const vLwt = () => {
 // to separate those two today, but that is how one row was spelled, not a property of the data; a
 // row on a page the outdoor unit stops refreshing is a held-over reading whatever it is called, and
 // a held-over temperature must never reach a heat figure presented as current.
+// Named for lwtIsPreBuh's reason: this is the addressable twin of cop_is_post_buh(label, reg), and
+// the parity gate calls it with the catalog's own (label, page) pairs.
+const isPostBuhRow = (l, reg) =>
+  !OU_HELD_PAGES.includes(reg) && l.includes("r2t") &&
+  !l.includes("setpoint") && !l.includes("mixed") && lwtWater(l);
 const postBuhRow = () => {
   const vals = (S._values || []).filter((x) => x.value != null);
-  return vals.find((x) => {
-    const l = (x.label || "").toLowerCase();
-    return !OU_HELD_PAGES.includes(x.reg) && l.includes("r2t") &&
-           !l.includes("setpoint") && !l.includes("mixed") && lwtWater(l);
-  }) || null;
+  return vals.find((x) => isPostBuhRow((x.label || "").toLowerCase(), x.reg)) || null;
+};
+// WHICH COP a quotient would be, and when it is none — the addressable twin of
+// logic/cop_scope.hpp's cop_plan(), same branches in the same order. A named function rather than a
+// cascade inlined in liveData() so scripts/check-presenter-parity.sh can enumerate the whole input
+// space (3 electrical sources x 9 backup-heater step pairs x 3 tank-heater states x post-BUH row or
+// not = 162 combinations) against the C++ and diff every answer; a rule spelled out inside a
+// 200-line builder can only be tested through everything around it.
+//
+// It takes the two heaters as the RAW tri-states they arrive as (null = this profile carries no such
+// row) and collapses them here, rather than being handed two ready-made booleans. That is not
+// tidiness: the collapse is the rule's most dangerous step — UNKNOWN is not OFF, and off is the
+// PERMISSIVE branch, so guessing it is exactly what ships the collapsed quotient — and a step
+// computed in the caller is a step the parity gate would have to re-implement to reach, which would
+// make the gate a third copy of the very thing it is comparing. Measured: while these two lines sat
+// in liveData(), the selftest's "unknown tank heater treated as off" mutation passed the gate.
+const copPlan = (pelSrc, buh1, buh2, bsh, pbOk) => {
+  const heaterQuiet = (buh1 != null || buh2 != null) && !(buh1 === true || buh2 === true);
+  const tankQuiet   = bsh != null && bsh !== true;
+  if (pelSrc == null)    return { scope: null,    block: "no_pel",      postBuh: false };
+  if (pelSrc === "INV")  return { scope: "hp",    block: null,          postBuh: false };
+  // Checked before the numerator is picked: no choice of row answers the tank heater, so claiming
+  // one would imply a pairing that does not exist.
+  if (!tankQuiet)        return { scope: "plant", block: "tank_heater", postBuh: false };
+  if (pbOk)              return { scope: "plant", block: null,          postBuh: true  };
+  return { scope: "plant", block: heaterQuiet ? null : "buh_no_r2t", postBuh: false };
 };
 const fmt1 = (n) => (n == null ? "—" : n.toFixed(1));
 const fmt0 = (n) => (n == null ? "—" : String(Math.round(n)));
@@ -316,20 +349,10 @@ function liveData() {
   // The row must also have a usable number and a return temperature to pair with, or it cannot
   // carry the boundary — fall through to the no-row branch, which blocks while the heater fires.
   const pbOk   = pbRow != null && Number.isFinite(pbT) && d.ret != null;
-  const buhKnown = d.buh1 != null || d.buh2 != null;
-  const buhOn    = d.buh1 === true || d.buh2 === true;
-  // UNKNOWN is not OFF, for either heater. Off is the permissive branch, so guessing it is exactly
-  // what would ship the collapsed quotient — the mirror of ou_stale's "unknown rps is not stopped".
-  const heaterQuiet = buhKnown && !buhOn;
-  const tankQuiet   = d.bsh != null && d.bsh !== true;
-  if (d.pelSrc == null)      { d.copScope = null;    d.copBlock = "no_pel";     d.copPostBuh = false; }
-  else if (d.pelSrc === "INV") { d.copScope = "hp";  d.copBlock = null;         d.copPostBuh = false; }
-  // Checked before the numerator is picked: no choice of row answers the tank heater, so claiming
-  // one would imply a pairing that does not exist.
-  else if (!tankQuiet)       { d.copScope = "plant"; d.copBlock = "tank_heater"; d.copPostBuh = false; }
-  else if (pbOk)             { d.copScope = "plant"; d.copBlock = null;         d.copPostBuh = true;  }
-  else                       { d.copScope = "plant"; d.copBlock = heaterQuiet ? null : "buh_no_r2t";
-                               d.copPostBuh = false; }
+  // Both heaters go in as the raw tri-states; copPlan owns the "UNKNOWN is not OFF" collapse, so it
+  // is one rule in one place and the parity gate can reach it.
+  const plan = copPlan(d.pelSrc, d.buh1, d.buh2, d.bsh, pbOk);
+  d.copScope = plan.scope; d.copBlock = plan.block; d.copPostBuh = plan.postBuh;
   // The COP's own heat figure: the same formula as d.pth, across whichever outlet the scope needs.
   const copDt = d.copPostBuh ? pbT - d.ret : d.dt;
   const copRaw = d.flow != null && copDt != null ? d.flow / 60 * 4.186 * copDt : null;

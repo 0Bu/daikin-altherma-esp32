@@ -16,9 +16,11 @@
 #include "lwip/etharp.h"
 #include "lwip/netif.h"
 #include "freertos/FreeRTOS.h"
+#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include <cstring>
 #include <cstdio>
 #include <new>
@@ -46,11 +48,9 @@ static const char* s_error = "";   // string literal only — assigned by set_st
 // take/give pairs so an exception on a reader can't strand the mutex — which would block every later
 // syslog_status()/set_status() at portMAX_DELAY and wedge the device.
 namespace {
-struct Lock {
-    explicit Lock(SemaphoreHandle_t m) : m_(m) { if (m_) xSemaphoreTake(m_, portMAX_DELAY); }
-    ~Lock() { if (m_) xSemaphoreGive(m_); }
-    SemaphoreHandle_t m_;
-};
+// The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
+// This used to be a private copy here; nine of them had drifted into two different shapes.
+using Lock = SemGuard;
 }  // namespace
 
 // File-scope so the control block + semaphore outlive any in-flight esp_ping session: the ping's
@@ -439,7 +439,7 @@ void syslog_init() {
         }
         // 6144: this task runs getaddrinfo() + raw socket()/sendto() directly on its own stack (unlike
         // esp-mqtt, whose socket work lives in an internal task). 4096 is too thin for that call chain.
-    }, "syslog_task", 6144, nullptr, 3, nullptr))
+    }, "syslog_task", 6144, nullptr, TASK_PRIO_SYSLOG, nullptr))
         diag_printf("syslog: task alloc failed — syslog forwarding disabled this boot\n");
 }
 

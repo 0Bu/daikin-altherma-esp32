@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/task.h"
 #include "led_strip.h"
 #include <atomic>
@@ -198,7 +199,7 @@ void status_led_start() {
     if (c.led_gpio < 0) return;   // no indicator on this board — nothing to drive
     // Purely cosmetic, so a failed task is harmless — but don't swallow the allocation failure
     // silently. 3 KB (up from 2 KB): the WS2812 path calls into led_strip/RMT from this stack.
-    if (xTaskCreate(status_led_task, "status_led", 3072, nullptr, 2, nullptr) != pdPASS)
+    if (xTaskCreate(status_led_task, "status_led", 3072, nullptr, TASK_PRIO_LED, nullptr) != pdPASS)
         ESP_LOGW("led", "status-LED task alloc failed — indicator disabled this boot");
 }
 

@@ -111,6 +111,10 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 71 | **Pinned stack contract on the `/status` builder** — `-Os` on that one translation unit, because ~9 KB of its 11.8 KB frame was a `-Og` slot-allocation artefact, not live data | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp) |
 | 72 | **Reboot-surviving 24-hour trends** — `.noinit` DRAM for any reset that kept power, plus a coarse snapshot in the optional `hist` partition across an OTA; both gated on a derived trend-catalog fingerprint, the stored one spliced by absolute wall-clock bucket | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
+| 73 | **Heap watchdog** — the escalation every other OOM guard here deliberately lacks: sustained exhaustion of the largest *internal* contiguous block becomes a deliberate restart with a persisted, capped breadcrumb, because a wedge that never recovers is worse than a crash | ✅ 🧪 | [`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp), [`heap_guard.cpp`](../main/heap_guard.cpp) |
+| 74 | **Presenter-parity gate** — the browser's copies of the leaving-water / post-BUH / COP-scope / held-over-page rules are diffed against the C++ headers over the whole catalog, so "host-tested" stops meaning "the copy that does not ship is tested" | ✅ 🧪 | [`presenter_golden_dump.cpp`](../test/presenter_golden_dump.cpp), [`presenter_parity.mjs`](../tools/presenter/presenter_parity.mjs), [`selftest.sh`](../tools/presenter/selftest.sh) |
+| 75 | **One unwind-safe mutex guard** for the whole firmware, replacing nine per-file copies that had drifted into two shapes — plus a bounded/try-lock mode for the callback contexts that must not block | ✅ | [`rtos_guard.hpp`](../main/rtos_guard.hpp) |
+| 76 | **Central task-priority table** — relative priority is a property of the system, so it is declared in one place instead of as twelve bare literals the ordering had to be reconstructed from | ✅ | [`task_config.hpp`](../main/task_config.hpp) |
 
 ---
 
@@ -205,7 +209,21 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   **different** failure class from image rollback — both OTA slots share one NVS, so rolling back
   the *image* cannot fix a *config* crash-loop (wrong RX/TX pins). It counts **crash-only** boots and
   past a threshold brings the device up minimally (WiFi + web UI + OTA, no poll/MQTT), so the bad
-  setting is fixable in the browser instead of over USB.
+  setting is fixable in the browser instead of over USB. It **latches**: the healthy-uptime timer
+  that ages the crash counter out is not armed while safe mode is active, because staying up with the
+  poll engine and MQTT switched off is evidence about the *recovery surface*, not about the fault
+  still sitting in the config. Arming it there produced a cycle rather than a latch — the counter
+  cleared 30 s into every recovery boot, so the next crash reset started from zero and brought the
+  full stack back up on the configuration already proven to crash. Nothing is stranded by refusing:
+  any non-crash reset zeroes the counter, and every intentional way out (a `/set_*` save, an OTA
+  install, a power cycle, the recovery button) is one — so safe mode ends when somebody acts on it,
+  and only then.
+- **✅ An exception boundary around the boot sequence** ([`main.cpp`](../main/main.cpp)): `app_main`
+  is a C frame boundary like every handler and task loop this firmware already guards, and boot
+  allocates. An escape used to reach `std::terminate` anonymously. It now `abort()`s with the phase
+  named — deliberately `abort()` and not `esp_restart()`, because a "sw" reset is what `boot_guard`
+  classifies as *intentional* and uses to **clear** the crash counter, so a boot that always threw
+  would have restarted forever without ever accumulating one crash boot.
 
 ---
 
@@ -393,6 +411,25 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   gated on a fingerprint derived from the trend catalog itself, because a ring is addressed by its
   index and a reordered table would hand one sensor's day to another. `/status.history.persist` names
   the outcome, so a chart that emptied itself has a stated cause.
+- **✅ 🧪 The heap watchdog** ([`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp),
+  [`heap_guard.cpp`](../main/heap_guard.cpp)). Every other OOM guard in this firmware turns "out of
+  memory" into "recover and continue" — `handle_all` answers 503, an allocating task loop catches
+  `std::bad_alloc` and skips the cycle keeping its last good state, a publish is dropped — and each
+  is right to, for a **transient** shortage. Nothing asked what happens when it never recovers.
+  Composed, those guards describe a device that is powered, associated, answering 503 to everything
+  and republishing nothing, indefinitely, while reporting no fault at all: a hang, which is the worst
+  failure shape available, because a crash reboots in seconds and leaves a reset reason, a core dump
+  and a syslog record, whereas a wedge looks exactly like a powered-off device and heals never. So
+  when the largest **contiguous internal** block has stayed under 4 KB for five unbroken minutes —
+  long enough that no burst can reach it, and an in-flight OTA *clears* the run rather than pausing
+  it, so a restart can never land mid-install — the device restarts deliberately, leaving a
+  `heap_rst` breadcrumb on `/status.sys.heap_restarts` and giving up after five consecutive tries.
+  Sampled at the top of the poll cycle beside the board trends, which is the one path in that task no
+  branch can skip. Two deliberate limits: **`MALLOC_CAP_INTERNAL`**, not `MALLOC_CAP_DEFAULT` —
+  the latter answers from PSRAM on a board that has it, so every largest-block figure in the firmware
+  now goes through one shared sampler rather than five call sites each spelling out a mask — and
+  **not covered in safe mode**, where the poll task does not run; safe mode has already shut down the
+  five largest allocators and is itself the reachable state a restart would be trying to produce.
 - **✅ Offline symbolication** ([`decode-coredump.sh`](../scripts/decode-coredump.sh)): the raw image
   is symbolized against the matching **unstripped `.elf`** CI archives per build. The dump embeds
   `app_elf_sha256` and the device reports the same, so a wrong ELF is *caught*, not silently
@@ -406,7 +443,15 @@ Everything needed to explain a crash *after the fact*, from the field, without a
 - **✅ 🧪 Deleting a crash report** (`POST /crash/dismiss`): a *device* action rather than a per-page
   hide — status, the retained topic and every browser agree at once. **Erase first, mark second**, so
   a failed erase answers `500` and marks nothing rather than reporting "no crash" with the dump still
-  downloadable. RAM-only by design: a persisted dismissal could suppress a *new* crash.
+  downloadable. RAM-only by design: a persisted dismissal could suppress a *new* crash. The one
+  erase result that does **not** block it is `ESP_ERR_NOT_FOUND`, which means the board has no
+  `coredump` partition at all — the state of every device flashed before one existed and upgraded
+  over the air since, because OTA writes the inactive app slot and never the partition table
+  ([`partitions.csv`](../partitions.csv) states the same premise for `hist`). There is nothing to
+  destroy there, so the dismissal's other job — clearing the report — must still happen; treating it
+  as a failure answered `500` forever, and a fault reset carries no dump often enough (a stack
+  overflow overruns it) that those boards saw exactly the banner no action could clear. Every other
+  error still blocks, because then a dump may genuinely still be downloadable.
 - **✅ 🧪 18-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): a
   **flat** JSON of heap (free / min-free / largest-free-block, the true OOM limit), uptime, reset
   reason, WiFi RSSI + reconnects + MAC/BSSID, MQTT counters and X10A bus stats — published
@@ -523,17 +568,31 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | Config & board | `config_model`, `config_store`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
 | MQTT / HA | `discovery`, `ha_device`, `mqtt_base`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus` |
 | HTTP | `http_body`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `redact` |
-| OTA & boot | `health_gate`, `version_cmp`, `ota_manifest`, `ota_channel`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason` |
+| OTA & boot | `health_gate`, `version_cmp`, `ota_manifest`, `ota_channel`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |
 | Network policy | `wifi_rollback`, `link_watch`, `syslog_policy`, `timestamp` |
 | On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |
 | Local I/O | `led_pattern`, `button` |
 
 Four properties of that core are worth naming because they are not obvious from the list:
 
-- **🧪 Rules with no firmware caller are still gated.** `lwt_select`, `ou_stale`, `cop_scope` and
-  `feature_gate` exist so a **browser** rule is asserted against the whole `def/` catalog in CI. A
-  looser second copy of a rule is not a test of the rule — it re-opens exactly the substitution the
-  header was written to prevent, outside the gate's reach.
+- **🧪 Rules with no firmware caller are still gated — and so is the copy that ships.**
+  `lwt_select`, `ou_stale` and `cop_scope` exist so a **browser** rule is asserted
+  against the whole `def/` catalog in CI, and those three are exactly what the parity gate below
+  covers. (`feature_gate` is caller-less too, but for the other reason: it is a policy the browser
+  cites rather than re-implements, so there is no second copy to diff.)
+  On its own that gates the C++ copy and says nothing about
+  the JavaScript one, which is the copy the user gets: a looser second copy is not a test of the
+  rule, and this project has paid for that once, when a leaving-water pattern in the browser matched
+  the bizone kit's **mixed-zone** row and put a correct number on the wrong sensor in ΔT, heat output
+  and COP at once. [`check-presenter-parity.sh`](../scripts/check-presenter-parity.sh) closes it: a
+  host dumper emits golden decisions from the real headers over every distinct (label, register) pair
+  the catalog produces plus one adversarial label per structural trap, and the **production**
+  `schematic.js` re-decides the identical inputs in the DOM-free VM harness the UI suite already
+  uses. Nothing in the checker re-implements a rule — that would be a third copy, and drift is the
+  whole finding — which is also why the tri-state "UNKNOWN is not OFF" collapse had to move *into*
+  the browser's `copPlan` to be reachable at all. A renamed or inlined-away rule exits 2 rather than
+  passing by comparing nothing, and [`selftest.sh`](../tools/presenter/selftest.sh) re-seeds each way
+  the two can diverge — including the shipped mixed-zone defect.
 - **🧪 Metric identity is frozen.** A published row reaches the metrics store and Home Assistant
   under identifiers derived from its **label**, so editing a label retires one series and starts
   another at zero with no error anywhere. `test_metric_identity()` freezes the complete identifier

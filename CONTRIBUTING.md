@@ -26,7 +26,7 @@ so a failure here fails the build anyway — with one deliberate exception, `run
 which CI does **not** run (see below).
 
 ```bash
-scripts/run-mock-tests.sh --coverage # host logic tests + 95% production-line floor
+scripts/run-mock-tests.sh --coverage # host logic tests + 95% floor + presenter parity
 scripts/run-contract-tests.sh      # do the firmware's SOURCE boundaries still hold?
 scripts/run-domain-audit.sh        # is the value catalog physically RIGHT?
 scripts/run-description-audit.sh   # can a user find out what each value IS?
@@ -45,6 +45,22 @@ aggregate executable-line coverage in those production headers. The test driver 
 profiles do not count toward the percentage. Details in [`test/README.md`](test/README.md). If you
 touch the coverage tooling itself, run `tools/coverage/selftest.sh` — the same argument as every
 other selftest here: a floor that has stopped failing turns a percentage into decoration.
+
+It **ends with the presenter-parity gate**
+([`scripts/check-presenter-parity.sh`](scripts/check-presenter-parity.sh), runnable on its own).
+Three headers here — `lwt_select`, `cop_scope` and `ou_stale` — say in their own comments that they
+have no firmware caller: they exist so CI can gate a rule the **browser** applies, and those three
+are exactly what the gate covers. (`feature_gate` is caller-less too, but for the other reason — it
+is a policy the browser cites rather than re-implements, so there is no second copy to diff.)
+That gates the C++ copy and says nothing about the JavaScript one, which is the copy your users get,
+and this project has already paid for the difference: a looser leaving-water pattern in
+`main/www/js/schematic.js` matched the bizone kit's *mixed-zone* row, putting a correct number on the
+wrong sensor in ΔT, heat output and COP at once. The gate compiles a host dumper against the real
+headers and the real `def/` catalog, then has the **production** `schematic.js` re-decide the same
+inputs in the DOM-free VM harness the UI suite already uses, and diffs. If you change either copy,
+change both in the same commit; if you *restructure* the browser side, keep the rules addressable as
+named bindings — a rule folded back into its caller makes the gate exit 2 as unreachable rather than
+pass by comparing nothing. Run `tools/presenter/selftest.sh` if you touch the gate itself.
 
 `run-contract-tests.sh` covers what the host suite structurally cannot. `test_logic.cpp` links the
 IDF-free headers, so it proves what a rule *decides* — never that the firmware still calls it from

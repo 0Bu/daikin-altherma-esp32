@@ -51,6 +51,7 @@
 #include "def/registry.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
+#include "heap_guard.hpp"
 #include "env3.hpp"
 #include "hp_poll.hpp"
 #include "hp_modbus.hpp"
@@ -76,14 +77,15 @@
 
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
-#include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "mqtt_client.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
+#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/semphr.h"
+#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
@@ -222,11 +224,9 @@ static uint32_t s_circulation_runtime_max_age_s = CIRC_SOURCE_MAX_AGE_DEFAULT_S;
 // so a throw on a reader (the broker copy in mqtt_status) can't strand the mutex and wedge every
 // later reader/writer at portMAX_DELAY.
 namespace {
-struct Lock {
-    explicit Lock(SemaphoreHandle_t m) : m_(m) { if (m_) xSemaphoreTake(m_, portMAX_DELAY); }
-    ~Lock() { if (m_) xSemaphoreGive(m_); }
-    SemaphoreHandle_t m_;
-};
+// The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
+// This used to be a private copy here; nine of them had drifted into two different shapes.
+using Lock = SemGuard;
 }  // namespace
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
@@ -882,7 +882,7 @@ static void publish_heartbeat() {
     f.uptime_ms       = static_cast<uint64_t>(esp_timer_get_time() / 1000);
     f.free_heap       = esp_get_free_heap_size();
     f.min_free_heap   = esp_get_minimum_free_heap_size();
-    f.max_alloc       = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+    f.max_alloc       = heap_largest_internal_block();
     // One cached boot reason (diag_crash.cpp), three renderings: the slug a human reads, the raw
     // code a metrics store can keep, and the fault flag an alert fires on. Bound once so all three
     // are demonstrably the same reading rather than three lookups that only look identical.
@@ -2305,7 +2305,7 @@ void mqtt_ha_start() {
     // Hardware coredump: the 4 KiB task hit the ESP32-S3 stack-end watchpoint while building the
     // heartbeat after Config gained the reference-source strings. heartbeat.hpp no longer creates
     // chained temporary strings, and 6 KiB restores explicit headroom for future bounded mappings.
-    if (xTaskCreate(mqtt_task, "mqtt_pub", 6144, nullptr, 4, nullptr) != pdPASS) {
+    if (xTaskCreate(mqtt_task, "mqtt_pub", 6144, nullptr, TASK_PRIO_MQTT, nullptr) != pdPASS) {
         // No task -> the client was built but never started, so neither subscriptions nor publishes
         // are possible. Release it and say so rather than looking configured-but-silent in /status.
         esp_mqtt_client_destroy(s_client);

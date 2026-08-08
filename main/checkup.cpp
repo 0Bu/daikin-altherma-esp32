@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 
 #include <atomic>
 
@@ -30,16 +31,11 @@ SemaphoreHandle_t     s_mtx = nullptr;
 std::atomic<bool>     s_reset_requested{false};
 std::atomic<bool>     s_dhw_reset_requested{false};
 
-// RAII lock, same idiom as history.cpp/hp_poll.cpp. Everything inside a critical section here is a
-// plain integer copy — nothing allocates, so an unwind cannot strand the mutex.
-struct Lock {
-    SemaphoreHandle_t m;
-    bool held;
-    explicit Lock(SemaphoreHandle_t mtx) : m(mtx), held(mtx && xSemaphoreTake(mtx, portMAX_DELAY) == pdTRUE) {}
-    ~Lock() { if (held) xSemaphoreGive(m); }
-    Lock(const Lock&) = delete;
-    Lock& operator=(const Lock&) = delete;
-};
+// The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
+// This used to be a private copy here; nine of them had drifted into two different shapes.
+// Everything inside a critical section in this file is a plain integer copy — nothing allocates —
+// so the unwind safety is belt-and-braces here rather than the reason the guard is used.
+using Lock = SemGuard;
 
 // The row a locator addresses, or -1. Composes logic/checkup.hpp's pure predicate rather than taking
 // the parallel-array checkup_select(): building (reg, off, conv) views for ~116 rows would cost a
@@ -186,7 +182,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     const uint32_t bucket = logic::checkup_bucket(now);
 
     Lock lk(s_mtx);
-    if (!lk.held) return;
+    if (!lk.acquired()) return;
 
     // A request can arrive while an old-link sweep is in flight. If this cycle consumes it, discard
     // the whole sample after clearing state; otherwise the tail of old poll A would seed the window
@@ -227,7 +223,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 logic::CheckupReport checkup_report() {
     if (!s_mtx) return logic::CheckupReport{};
     Lock lk(s_mtx);
-    if (!lk.held) return logic::CheckupReport{};
+    if (!lk.acquired()) return logic::CheckupReport{};
     // Only the record path consumes a reset, because it can also discard the in-flight sample.
     // Until then expose an empty report, never stale identity A and never consume the guard early.
     if (s_reset_requested.load()) return logic::CheckupReport{};

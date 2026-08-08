@@ -25,6 +25,12 @@
 #     8. the outdoor-axis row offering a second door into the Board Hardware modal — the one seed
 #        here that pins a CHECK rather than a shipped defect, because that guard's first version
 #        could not fire (see the seed for why the row's own shape defeated it)
+#   firmware, appended (numbers keep growing rather than being re-grouped — a seed's number is how
+#   it is referred to elsewhere, so renumbering costs more than the tidier ordering is worth)
+#     9. the heap watchdog gated behind the detect/sweep branch — seed 1's defect one feature over,
+#        which went green because the assertion covering it was a PROXIMITY search that spans an `if`
+#    10. the board trends made conditional IN PLACE — seed 1's defect written in one line, which
+#        went green because the assertion anchored on the call TEXT rather than on a statement
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -189,6 +195,42 @@ assert seed != s, "seed 8 did not apply — the outdoor axis row's return moved"
 open(p, "w").write(seed)
 SEED8
 expect_red "the outdoor axis offering a second door into the Board Hardware modal" run_ui
+restore
+
+# 9. Seed 1's defect, one feature over: the HEAP WATCHDOG moved behind the detect/sweep branch. It
+#    samples at the same unconditional cycle top and for the same reason, so gated there it stops
+#    watching the heap on exactly the board whose X10A never answers — the board most likely to be
+#    in trouble, and the absence seed 1 exists for. Kept as its own seed rather than folded into
+#    seed 1 because the two failed DIFFERENTLY: the assertion covering this one was written as a
+#    proximity search (`history_record_board();[\s\S]{0,600}?heap_guard_sample();`), which spans the
+#    `if` line happily, so it went green with the call sitting inside the branch.
+python3 - "$TMP/main/hp_poll.cpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace('            heap_guard_sample();\n            if (config().profile == "auto") {',
+                 '            if (config().profile == "auto") {\n                heap_guard_sample();', 1)
+assert seed != s, "seed 9 did not apply — the heap watchdog's call site moved"
+open(p, "w").write(seed)
+PY
+expect_red "the heap watchdog sampling only once a profile is resolved" run_contract
+restore
+
+# 10. The same assertion's OTHER blind spot, and the one that makes it a check rather than a
+#     landmark: anchoring on the call TEXT rather than on a statement. `if (…) history_record_board();`
+#     contains the anchor just as well as the unconditional form, so the pattern permitted the board
+#     trends to be made conditional IN PLACE — which is seed 1's defect written in one line instead
+#     of two.
+python3 - "$TMP/main/hp_poll.cpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace('            history_record_board();',
+                 '            if (config().profile != "auto") history_record_board();', 1)
+assert seed != s, "seed 10 did not apply — the call site moved"
+open(p, "w").write(seed)
+PY
+expect_red "the board trends made conditional in place" run_contract
 restore
 
 if [ "$fail" -ne 0 ]; then
