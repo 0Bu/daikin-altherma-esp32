@@ -2610,6 +2610,29 @@ static void test_heap_watchdog() {
 
     CHECK(HEAP_RECOVERY_BYTES > HEAP_CRITICAL_BYTES);
 
+    // THE END OF THE LADDER (#407): the boot that inherits the full count comes up MINIMAL, and
+    // every boot below it comes up normally. Composed from heap_may_restart rather than restated, so
+    // the ladder and its ending cannot disagree about where the cap is.
+    for (uint8_t n = 0; n < HEAP_MAX_CONSECUTIVE_RESTARTS; n++) CHECK(!heap_boot_must_be_minimal(n));
+    CHECK(heap_boot_must_be_minimal(HEAP_MAX_CONSECUTIVE_RESTARTS));
+    CHECK(heap_boot_must_be_minimal(255));
+    // An ordinary boot is never minimal — the common case, and the one a wrong rule would punish.
+    CHECK(!heap_boot_must_be_minimal(0));
+    // The two halves must agree in BOTH directions, or a boot could be told to restart AND to come
+    // up minimal, or neither.
+    for (int n = 0; n <= 255; n++) {
+        const uint8_t c = static_cast<uint8_t>(n);
+        CHECK(heap_may_restart(c) != heap_boot_must_be_minimal(c));
+    }
+    // A garbled breadcrumb must fail towards a NORMAL boot, never into safe mode: forcing safe mode
+    // takes away the heat pump readings that are the point of the device. This is the asymmetry
+    // heap_restart_count_sane already states, seen from the consumer that would suffer from it.
+    CHECK(!heap_boot_must_be_minimal(heap_restart_count_sane(-1)));
+    CHECK(!heap_boot_must_be_minimal(heap_restart_count_sane(2147483647)));
+    CHECK(!heap_boot_must_be_minimal(heap_restart_count_sane(HEAP_MAX_CONSECUTIVE_RESTARTS + 1)));
+    // ...but a breadcrumb that legitimately reads the cap still does.
+    CHECK(heap_boot_must_be_minimal(heap_restart_count_sane(HEAP_MAX_CONSECUTIVE_RESTARTS)));
+
     // The restart LADDER is bounded, and the bound is on the count that PRECEDED this boot.
     for (uint8_t n = 0; n < HEAP_MAX_CONSECUTIVE_RESTARTS; n++) CHECK(heap_may_restart(n));
     CHECK(!heap_may_restart(HEAP_MAX_CONSECUTIVE_RESTARTS));

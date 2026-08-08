@@ -904,7 +904,12 @@ void http_append_status_json(std::string& j, bool redact) {
          ",\"mqtt_quiesced\":" + std::to_string(skips.quiesced) +
          ",\"poll_skipped\":" + std::to_string(hp_skipped_cycles()) +
          ",\"reset_reason\":" + jstr(reset_reason_name(diag_crash_info().reason)) +
-         ",\"safe_mode\":" + (safe_mode_active() ? "true" : "false") + "},";
+         ",\"safe_mode\":" + (safe_mode_active() ? "true" : "false") +
+         // WHY it is minimal, so the recovery banner can give advice that fits the cause: a
+         // crash loop points at the configuration (the RX/TX pins first), a heap give-up does
+         // not, and telling that reader to check their pins sends them to fix something that
+         // is already correct. null whenever safe_mode is false.
+         ",\"safe_mode_cause\":" + (safe_mode_cause() ? jstr(safe_mode_cause()) : "null") + "},";
 
     // NTP: its own top-level block (not folded into sys), mirroring syslog{} — it is a runtime-
     // configurable network service like syslog/MQTT (POST /set_ntp -> NVS "ntp_server"), not a static

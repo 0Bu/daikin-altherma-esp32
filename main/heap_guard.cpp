@@ -6,6 +6,7 @@
 #include "logic/heap_watchdog.hpp"
 #include "diag_log.hpp"
 #include "nvs_storage.hpp"
+#include "safe_mode.hpp"
 #include "ota_update.hpp"
 
 #include "freertos/FreeRTOS.h"
@@ -87,6 +88,25 @@ void heap_guard_begin() {
     s_restarts = heap_restart_count_sane(nvs_get_i32(HEAP_RESTARTS_KEY, 0));
     if (s_restarts == 0) return;   // the ordinary case writes nothing at all
 
+    // THE END OF THE LADDER (#407). A boot that inherited the full count is the one the cap used to
+    // let come up with everything running and then sit there, wedged and unreachable, five minutes
+    // later. It now comes up MINIMAL instead — and this is the right place for that decision rather
+    // than the sample site, because here the poll engine and the MQTT bridge have not started yet:
+    // the heap is freed from the first second of the boot, not 300 s into it, and there is nothing
+    // to tear down (which the header rejects doing, since deinit paths allocate).
+    //
+    // It also ENDS the ladder by construction rather than by counting: safe mode never creates the
+    // poll task, heap_guard_sample() is only ever called from it, so no further restart is reachable
+    // from this state. What the sample site's own cap branch guards is now the case where that
+    // invariant has been broken.
+    if (heap_boot_must_be_minimal(s_restarts)) {
+        safe_mode_latch_heap();
+        diag_printf("heap: %u consecutive restarts did not fix the shortage — coming up MINIMAL "
+                    "(poll engine + MQTT never started) so the web UI and OTA have the heap to "
+                    "answer. Install a newer build; a power cycle retries the full stack\n",
+                    static_cast<unsigned>(s_restarts));
+    }
+
     // Clear it NOW, so the count only ever spans restarts this guard actually made: a device that
     // reaches this line again without the watchdog having re-written the key in between has had an
     // ordinary boot, and the run is over.
@@ -163,9 +183,15 @@ void heap_guard_sample() {
                 // every subsequent sample.
                 if (!s_exhausted_logged) {
                     s_exhausted_logged = true;
-                    diag_printf("heap: still critical after %lus, but %u consecutive restarts have "
-                                "not fixed it — staying up, degraded. Install a newer build or "
-                                "power-cycle to reset the count\n",
+                    // Not reachable while the invariant holds: a boot that inherited the full count
+                    // comes up in safe mode (heap_guard_begin), and safe mode never creates the poll
+                    // task this function is called from. Kept, and worded as the anomaly it would
+                    // be, because deleting it would remove the only thing bounding the ladder if
+                    // that invariant is ever broken — and an unbounded restart loop is a worse
+                    // failure than the wedge.
+                    diag_printf("heap: still critical after %lus at the restart cap (%u) while NOT "
+                                "minimal — the end-of-ladder safe-mode latch did not take. Staying "
+                                "up rather than restarting forever; install a newer build\n",
                                 static_cast<unsigned long>(v.critical_ms / 1000),
                                 static_cast<unsigned>(s_restarts));
                 }

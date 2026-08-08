@@ -576,13 +576,19 @@ function renderRecoveryBanner() {
   if (!(S.status?.sys?.safe_mode)) { el.hidden = true; return; }
   // LANG is part of the draw signature: changing the device override must repaint a banner that is
   // already visible, while identical status polls in the same language still avoid DOM churn.
-  const rsig = `1:${LANG}`;
+  // The CAUSE is part of the signature as well as the language: the same banner is reached from a
+  // crash loop and from the heap watchdog giving up, and the two need opposite advice — one says
+  // check the configuration, the other says the configuration is fine, install a newer build. An
+  // unknown or absent cause falls back to the crash-loop wording, which is the older behaviour and
+  // the only one an older firmware can produce.
+  const cause = S.status?.sys?.safe_mode_cause === "heap" ? "heap" : "crash_loop";
+  const rsig = `${cause}:${LANG}`;
   if (!el.hidden && el.dataset.on === rsig) return;   // already shown in this language
   el.dataset.on = rsig;
   el.innerHTML =
     `<div class="crash-head"><span class="crash-ico">!</span>` +
     `<div class="crash-txt"><div class="crash-title">${esc(t("recovery.title"))}</div>` +
-    `<div class="crash-meta">${esc(t("recovery.meta"))}</div></div></div>`;
+    `<div class="crash-meta">${esc(t(cause === "heap" ? "recovery.meta_heap" : "recovery.meta"))}</div></div></div>`;
   el.hidden = false;
 }
 

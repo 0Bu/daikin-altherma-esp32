@@ -136,6 +136,64 @@ assertPersistentBannerRepaints(
   { sys: { safe_mode: true } },
 );
 
+// The SAME banner is reached from two causes that need OPPOSITE advice (#407): a crash loop points
+// at the configuration — the RX/TX pins first — while the heap watchdog giving up means the
+// configuration is almost certainly fine and a newer build is the fix. Naming the pins there sends
+// the reader to correct something that is already correct, which is the failure the absence rules
+// call out by name.
+//
+// Two halves, because they are two different claims and this harness can only see one of them: the
+// RENDERER picks a key (asserted here, where `t` is a stub that echoes its key), and the DICTIONARY
+// decides what that key says (asserted against the real i18n.js below).
+{
+  const paintKey = (cause) => {
+    const status = { sys: { safe_mode: true, safe_mode_cause: cause } };
+    const target = element();
+    const context = languageContext(status, target);
+    const { api } = productionApi(appStateSource, ["S", "renderRecoveryBanner"], context);
+    api.S.status = status;
+    api.renderRecoveryBanner();
+    return target.innerHTML;
+  };
+  assert.match(paintKey("heap"), /recovery\.meta_heap/,
+    "a heap give-up must render its OWN sentence, not the crash-loop one");
+  assert.doesNotMatch(paintKey("crash_loop"), /recovery\.meta_heap/,
+    "a crash loop must keep the configuration advice");
+  // An older firmware sends no cause at all, and an unknown one may arrive from a newer device than
+  // this bundle. Both must fall back to the crash-loop wording — the only thing either can honestly
+  // say — and never to the heap text, which asserts a cause nobody established.
+  assert.equal(paintKey(undefined), paintKey("crash_loop"),
+    "an absent cause must render exactly the crash-loop banner");
+  assert.equal(paintKey("something_newer"), paintKey("crash_loop"),
+    "an unknown cause must fall back to the crash-loop banner");
+}
+
+// The dictionary half: both languages carry the new key, and the advice actually differs in the way
+// that matters. A half-translated pair is exactly how one language silently keeps the wrong advice.
+{
+  const i18n = readAppFragments(["i18n.js"]);
+  // i18n.js is a page fragment, so it reaches for browser globals at load time (navigator.language
+  // for the auto-detect, localStorage for the stored override). Stub only what loading needs — the
+  // dictionaries themselves are plain data and the point of reading the REAL file is that no second
+  // copy of the copy can drift.
+  const ctx = vm.createContext({
+    navigator: { language: "en" },
+    localStorage: { getItem: () => null, setItem: () => {} },
+    document: { getElementById: () => null, documentElement: {} },
+  });
+  vm.runInContext(`${i18n}; globalThis.__I18N = I18N;`, ctx, { filename: "main/www/js/i18n.js" });
+  for (const lang of ["en", "de"]) {
+    const dict = ctx.__I18N[lang];
+    assert.ok(dict["recovery.meta_heap"],
+      `[${lang}] the heap recovery banner has no copy — the row would render its raw key`);
+    assert.match(dict["recovery.meta"], /RX\/TX/,
+      `[${lang}] the crash-loop banner must still name the pins as the first thing to check`);
+    assert.doesNotMatch(dict["recovery.meta_heap"], /RX\/TX/,
+      `[${lang}] the heap banner must not send the reader to the pins — they are not the cause`);
+  }
+}
+
+
 assertPersistentBannerRepaints(
   "renderRollbackBanner",
   { wifi: { rolled_back: true, ssid: "fallback" } },
