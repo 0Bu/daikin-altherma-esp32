@@ -95,7 +95,7 @@ const context = vm.createContext({
 
 vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   this.__ui = { S, t, esp32CardHtml, dynamicControlCardHtml, circulationSettingsCardHtml,
-                connLinks, liveData, histHtml };`, context, { filename: "main/www/app.sources" });
+                connLinks, liveData, histHtml, INSPECT };`, context, { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────────────────────
@@ -366,6 +366,25 @@ for (const scenario of SCENARIOS) {
   }
   // liveData() is the schematic's snapshot rather than markup; it must survive the same states.
   assert.doesNotThrow(() => ui.liveData(), `${scenario.name}: liveData() threw`);
+
+  // RULE 3b — a pill whose SOURCE depends on which systems exist must never describe one that does
+  // not. The Smart-Grid request is the only pill with two possible instruments (the HomeHub register
+  // and the X10A SG-Ready contacts), so it is the only one that can name the wrong one — and it did:
+  // the explainer said "read back from the HomeHub" on every plant, including those that have never
+  // had a gateway. Asserted over BOTH languages, because a sentence corrected in one is half fixed.
+  {
+    const d = ui.liveData();
+    const e = ui.INSPECT.sgrequest;
+    const copy = [e.t(d), e.what(d), e.now(d)].flatMap((o) => [o.en, o.de]).join(" ");
+    if (scenario.remove.includes("homehub")) {
+      assert.doesNotMatch(copy, /HomeHub|Modbus/,
+        `${scenario.name}: the Smart-Grid pill named a gateway this plant does not have`);
+    } else {
+      assert.doesNotMatch(copy, /X10A|SG-Ready/,
+        `${scenario.name}: the Smart-Grid pill credited the contacts while the gateway answers`);
+    }
+    checks++;
+  }
 
   // RULE 3 — never tell someone to configure what they have configured.
   for (const copy of SETUP_COPY) {
