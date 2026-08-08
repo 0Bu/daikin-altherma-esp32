@@ -50,6 +50,7 @@
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
+#include "logic/ota_quiesce.hpp"
 #include "logic/link_watch.hpp"
 #include "logic/feature_gate.hpp"
 #include "logic/history.hpp"
@@ -1995,6 +1996,52 @@ static void test_mqtt_uri() {
     CHECK(parse_mqtt_uri("[fe80::1]", host, port, tls) && host == "[fe80::1]" && port == 1883 && !tls);
 }
 
+// #380 — the publish task stands aside while an OTA download owns the heap, BOUNDED so a download
+// that never finishes cannot silence the bridge for the rest of the boot.
+static void test_ota_quiesce() {
+    OtaQuiesceState st;
+
+    // No download: never hold off, and the budget stays untouched.
+    for (int i = 0; i < 1000; i++) CHECK(!ota_quiesce_step(st, false));
+    CHECK(st.held == 0);
+    CHECK(!ota_quiesce_exhausted(st, false));
+
+    // Download running: hold off every cycle, up to and including the cap.
+    for (uint32_t i = 0; i < OTA_QUIESCE_MAX_CYCLES; i++) {
+        CHECK(ota_quiesce_step(st, true));
+        CHECK(st.held == i + 1);
+    }
+    CHECK(ota_quiesce_exhausted(st, true));
+
+    // THE LOAD-BEARING CASE. The flag is set by another task and cleared on ITS exit paths; a stall
+    // behind a dead TCP connection, a wedged TLS read or a missed clear must not mean silence
+    // forever. Past the cap the publisher resumes and takes its chances with the OOM guard — which
+    // is exactly the behaviour that shipped before this file existed, so the worst case of the fix
+    // is the status quo, not a new failure mode.
+    for (int i = 0; i < 100; i++) CHECK(!ota_quiesce_step(st, true));
+    CHECK(st.held == OTA_QUIESCE_MAX_CYCLES);   // saturates; no wrap on a long-running download
+
+    // The download ends -> the budget is restored IN FULL. A board that installs many updates over a
+    // long uptime must get the whole hold-off for each one, not a share of a per-boot allowance.
+    CHECK(!ota_quiesce_step(st, false));
+    CHECK(st.held == 0);
+    CHECK(!ota_quiesce_exhausted(st, false));
+    CHECK(ota_quiesce_step(st, true));
+    CHECK(st.held == 1);
+
+    // A download shorter than the budget (every real one: tens of seconds against a 5-minute cap)
+    // leaves no residue for the next.
+    OtaQuiesceState brief;
+    for (int i = 0; i < 30; i++) CHECK(ota_quiesce_step(brief, true));
+    CHECK(!ota_quiesce_step(brief, false));
+    CHECK(brief.held == 0);
+
+    // The cap must be long enough to cover a real install and short enough to bound the outage. At
+    // the 1 s publish cadence: minutes, not seconds, and not the rest of the boot.
+    CHECK(OTA_QUIESCE_MAX_CYCLES >= 60);
+    CHECK(OTA_QUIESCE_MAX_CYCLES <= 900);
+}
+
 static void test_heartbeat() {
     const std::string base = "daikin-altherma-esp32", node = device_node_id(base),
                       board = "daikin_abc123";   // installation id + this board's own id
@@ -2033,6 +2080,11 @@ static void test_heartbeat() {
     f.rx_received     = 763732;
     f.rx_fails        = 2;
     f.last_ok_s       = 1;
+    // #380 — the cycles that produced nothing. The two skip figures are the real 30-day counts off
+    // the wired board's syslog (337 publishes, 32 sweeps); mqtt_quiesced is the deliberate hold-off.
+    f.mqtt_skipped    = 337;
+    f.mqtt_quiesced   = 42;
+    f.poll_skipped    = 32;
     const std::string j = build_heartbeat_json(f);
     // FLAT payload: the former wifi/mqtt/bus sub-objects are gone, each field carried under its block
     // name as a prefix (wifi_connected, mqtt_count, bus_rx_received, …). MAC/BSSID ride the wifi_ set.
@@ -2043,6 +2095,7 @@ static void test_heartbeat() {
                "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_reconnects\":3,"
                "\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\",\"wifi_bssid\":\"00:11:22:33:44:55\","
                "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
+               "\"mqtt_skipped\":337,\"mqtt_quiesced\":42,\"poll_skipped\":32,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
@@ -2071,6 +2124,29 @@ static void test_heartbeat() {
         CHECK(rj.find("\"reset_reason_code\":" + std::to_string(code) + ",") != std::string::npos);
         CHECK(rj.find(std::string("\"reset_fault\":") + (crash_reason_is_fault(code) ? "1" : "0") + ",")
               != std::string::npos);
+    }
+    // ── #380: the loss has to be COUNTABLE, not just loggable ──
+    // 337 dropped publishes and 32 dropped sweeps in 30 days existed only as `/diag` lines in a ring
+    // a chatty boot overwrites. Same numeric-consumer rule as reset_reason_code above: quoted, these
+    // would be dropped by Telegraf's json parser and the fix would look done while changing nothing.
+    CHECK(j.find("\"mqtt_skipped\":337,")  != std::string::npos);
+    CHECK(j.find("\"mqtt_quiesced\":42,")  != std::string::npos);
+    CHECK(j.find("\"poll_skipped\":32,")   != std::string::npos);
+    CHECK(j.find("\"mqtt_skipped\":\"")    == std::string::npos);
+    CHECK(j.find("\"mqtt_quiesced\":\"")   == std::string::npos);
+    CHECK(j.find("\"poll_skipped\":\"")    == std::string::npos);
+    // …and each must reach HA as its own diagnostic entity. A counter with no consumer is how this
+    // stayed invisible in the first place, so the payload field alone is not the fix.
+    for (const char* path : {"mqtt_skipped", "mqtt_quiesced", "poll_skipped"}) {
+        bool found = false;
+        for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++) {
+            if (std::string(HEARTBEAT_SENSORS[i].json_path) != path) continue;
+            found = true;
+            // A since-boot counter, and a reboot ends every episode these count — so HA's long-term
+            // statistics must read the reset as a reset, not as a cliff down to zero.
+            CHECK(std::string(HEARTBEAT_SENSORS[i].state_class) == "total_increasing");
+        }
+        CHECK(found);
     }
     // The two always-zero bus counters are gone: the X10A protocol has no write command, so they
     // could never be anything but 0. Neither was ever an HA entity, so nothing is orphaned.
@@ -2211,7 +2287,9 @@ static void test_heartbeat() {
     // value_template points at the heartbeat topic (not a heat-pump source topic).
     const std::string hb = heartbeat_topic(base);
     const std::string av = availability_topic(base);
-    CHECK(HEARTBEAT_SENSOR_COUNT == 18);   // -2: device_time, wifi_quality (RETIRED_HEARTBEAT_SENSORS)
+    // -2: device_time, wifi_quality (RETIRED_HEARTBEAT_SENSORS); +3 in #380: mqtt_skipped,
+    // mqtt_quiesced, poll_skipped — the cycles that produced nothing.
+    CHECK(HEARTBEAT_SENSOR_COUNT == 21);
     const HeartbeatSensor& rssi = HEARTBEAT_SENSORS[0];
     CHECK(std::string(rssi.object_id) == "wifi_signal");
     std::string dt = heartbeat_discovery_topic("homeassistant", node, rssi);
@@ -10463,6 +10541,7 @@ int main() {
     test_modbus_snapshot();
     test_homehub();
     test_homehub_map();
+    test_ota_quiesce();
     test_heartbeat();
     test_crashinfo();
     test_bootlog();

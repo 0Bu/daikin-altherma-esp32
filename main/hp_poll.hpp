@@ -75,6 +75,14 @@ size_t   hp_values_capacity();
 size_t   hp_values_snapshot(CachedValue* out, size_t max);
 HpStats  hp_stats();
 
+// Poll cycles the task guard DROPPED — a sweep that threw (std::bad_alloc under OTA/TLS heap
+// pressure) and never reached the bus (#380). Deliberately NOT a field of HpStats: every counter in
+// there describes a cycle that RAN, is committed by poll_once() under the stats mutex, and is read
+// by callers asking "how is the bus doing?". These cycles never got that far — folding them in would
+// have the sweep's own commit path report the cycles where no commit happened. Lock-free and
+// allocation-free, because the increment happens inside the OOM catch handler.
+uint32_t hp_skipped_cycles();
+
 // Signal the poll task to re-read config (called by /set_hp after config_save).
 void hp_poll_reconfigure();
 

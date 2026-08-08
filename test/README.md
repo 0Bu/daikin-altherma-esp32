@@ -209,7 +209,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   guard, encode round-trip + range/sentinel rejects) and the `homehub-*` mDNS filter.
 - `logic/heartbeat.hpp` — uptime formatting, the flat heartbeat JSON (each
   field prefixed by its block name — `wifi_rssi`/`wifi_mac`/`bus_rx_received` — with rssi/bssid null
-  while offline) + the 18 diagnostic HA discovery configs (incl. the WiFi MAC/BSSID), and the two
+  while offline) + the 21 diagnostic HA discovery configs (incl. the WiFi MAC/BSSID), and the two
   RETIRED ones — "Device Time" and "WiFi Quality" — pinned absent from the payload AND from the live
   table, since a duplicate that survives in the JSON is the same duplicate with nobody watching it.
 - `logic/heating_curve_mqtt.hpp` — the separate `<base>/heating_curve` topic and its exact

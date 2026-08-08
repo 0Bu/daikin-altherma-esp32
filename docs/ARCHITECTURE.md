@@ -722,7 +722,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   outside 1–65535 — caught at parse time because the probe's `htons()` would truncate `:65537` to
   `:1` and call a wrong port reachable).
 - `logic/heartbeat.hpp` — the board/link diagnostics JSON (a flat object, each field prefixed by its
-  block name: `wifi_rssi`, `wifi_mac`, `bus_rx_received`, …) + its 18 diagnostic HA discovery configs
+  block name: `wifi_rssi`, `wifi_mac`, `bus_rx_received`, …) + its 21 diagnostic HA discovery configs
   and the two RETIRED ones whose retained configs must still be deleted, with uptime formatting
   pinned to known-good samples. Carries
   `bus_ou_held_over` — **source** freshness, which is a different fact from `bus_connected`: the link
@@ -1570,6 +1570,22 @@ The Home Assistant bridge:
     funnels through one `mqtt_publish()` wrapper in `mqtt_ha.cpp` so these cover
     discovery+state+heartbeat+heating-curve evidence+LWT, not just one topic), `mqtt_reconnects` (cumulative, excludes the
     first-ever connect).
+    Beside them, the two counters for cycles that produced **nothing** (#380). `mqtt_fails` counts a
+    failed publish *call*; neither of these ever reached one, so before they existed the loss was
+    invisible outside a `/diag` ring the next chatty boot overwrites — 337 dropped publishes in 30
+    days on the wired board, 125 of them in the last 24 hours, every one immediately before an OTA
+    reboot. **`mqtt_skipped`** is a cycle that threw (`std::bad_alloc`, caught by the task guard) and
+    lost the reading; **`mqtt_quiesced`** is a cycle the publisher stood aside for **on purpose**
+    because an OTA download owned the heap (`logic/ota_quiesce.hpp`, see OTA below). Two counters
+    rather than one "cycles lost", so the fix is legible in the store: the intended shape is
+    `quiesced` stepping once per install while `skipped` stops rising at all, which a combined
+    counter could not tell apart from no change whatsoever.
+  - **`poll_skipped`**: the same question asked of the X10A poll task, and the worse half of it — a
+    skipped publish drops a value that was read, a skipped sweep means the read never happened, so
+    `history.cpp` records a `NO_READING` indistinguishable from a bus fault and every `bus_*` counter
+    below stays silent because nothing was attempted. 32 in the same 30 days. Sourced from
+    `hp_skipped_cycles()` and deliberately **not** from `HpStats`: every counter in there is
+    committed by `poll_once()` for a cycle that *ran*.
   - **`bus_*`**: the X10A stats already tracked in `HpStats` — `bus_connected`, `bus_proto`,
     `bus_registers`, `bus_values`, `bus_last_ok_s`, `bus_rx_received` / `bus_rx_fails` (cumulative
     successful/failed register reads, `HpStats.rx_ok`/`rx_fail_total`), `bus_crc_err` /
@@ -1583,10 +1599,14 @@ The Home Assistant bridge:
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the source value topics, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than
-  only on change. 18 diagnostic HA entities (WiFi signal/reconnects/MAC/BSSID, heap
+  only on change. 21 diagnostic HA entities (WiFi signal/reconnects/MAC/BSSID, heap
   free/min-free/largest-block, uptime, last reset reason, X10A bus status/held-over/CRC/timeout/rx
   errors/rx received, MQTT
-  publish count/fails/reconnects — tagged `"ent_cat":"diagnostic"`) point at this topic via their own
+  publish count/fails/reconnects, and the three #380 loss counters —
+  `mqtt_skipped`/`mqtt_quiesced`/`poll_skipped`, `total_increasing` so HA's long-term statistics read
+  the reboot that ends every such episode as a counter reset rather than a cliff; entities and not
+  payload-only like `modbus_*`, because a loss nobody can put on a dashboard is exactly how this
+  stayed invisible for 337 dropped publishes — tagged `"ent_cat":"diagnostic"`) point at this topic via their own
   discovery configs, streamed once per
   connection independently of heat-pump profile detection — so they show up even while the model is
   still "auto". Cumulative since-boot counters get `"stat_cla":"total_increasing"` (not
@@ -1681,7 +1701,11 @@ Structure:
     (HTTP, MQTT) need no lock for it.
   - **Always-on system health (no fault required).** `http_append_status_json()` also carries a
     compact `sys` block — `free_heap` / `min_free_heap` (since-boot low-water, the leak indicator) /
-    `max_alloc` (largest contiguous block, the true OOM ceiling), the `reset_reason` slug (via
+    `max_alloc` (largest contiguous block, the true OOM ceiling), what that headroom already **cost**
+    (`mqtt_skipped` / `mqtt_quiesced` / `poll_skipped` — the #380 counters described under the
+    heartbeat above; reported here as well as on the heartbeat because the heartbeat needs a broker,
+    and an installation whose MQTT is misconfigured is exactly where someone is asking why values
+    keep disappearing), the `reset_reason` slug (via
     `logic/reset_reason.hpp`, reusing the same vocabulary as `last_crash`) and a `safe_mode` flag
     (always `false` until the boot-loop safe-mode feature lands). These answer "why did it reboot?"
     and "is the heap leaking?" from the LAN **on every boot** and **without a
@@ -1771,6 +1795,24 @@ Structure:
   The web installer carves prepared sparse parts from the merged
   image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
   as the OTA feed (esp-web-tools and the device load the same file).
+- **The publisher stands aside during the download** (`logic/ota_quiesce.hpp`, #380). An install is a
+  known, bounded, self-inflicted memory event: the TLS session plus the download buffer claim the
+  largest contiguous block on a heap whose binding limit *is* that block. The MQTT publish task used
+  to meet it by throwing `std::bad_alloc` on its next cycle — guard catches it, cycle skipped, reading
+  gone, once per second until the install finished (125 in one day, with `min_free_heap` bottoming out
+  at **812 B**). It now checks `ota_download_active()` above the first allocation of the cycle and
+  skips deliberately: the same missing second, spending none of the block the download needs, and
+  counted as `mqtt_quiesced` instead of vanishing into a log ring. The flag is a lock-free
+  `std::atomic<bool>` armed by an RAII guard across `esp_https_ota_begin`…`finish`/`abort` — **not**
+  `ota_status().state`, which copies three `std::string`s out under the mutex the OTA task holds, so
+  asking "is the heap under pressure?" would itself allocate, once a second, on the task the pressure
+  is aimed at. The download window has seven exits, which is why the flag is cleared by a destructor
+  rather than by hand at each. The hold-off is **bounded** (`OTA_QUIESCE_MAX_CYCLES`, 300 cycles ≈ 5
+  min at the 1 s cadence): a download stalled behind a dead connection must not silence the bridge for
+  the rest of the boot, so past the cap the publisher resumes and takes its chances with the OOM guard
+  — the behaviour that shipped before, i.e. the worst case of this fix is the status quo. The
+  watchdog is fed above the check, and esp-mqtt runs keepalive on its own task, so a quiesced minute
+  is a gap in HA rather than an `offline`.
 - **Boot recovery / anti-brick** — an unsigned app aborts pre-`app_main`, so only the bootloader can
   recover, and only via a recorded previous OTA slot; a direct USB flash of an unsigned build both
   crash-loops and blanks the otadata rollback record. Contained by the pre-flash guard

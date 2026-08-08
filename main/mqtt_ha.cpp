@@ -68,9 +68,11 @@
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
+#include "logic/ota_quiesce.hpp"   // stand aside while an OTA download owns the heap (#380)
 #include "logic/reference_temperature.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/weather_mqtt.hpp"
+#include "ota_update.hpp"          // ota_download_active — the flag the quiesce above reads
 #include "sntp_time.hpp"
 #include "weather_forecast.hpp"
 #include "wifi.hpp"
@@ -283,6 +285,14 @@ static bool         s_crash_notable_pub   = false;     // mqtt_task-only: was th
 static uint32_t s_mqtt_pub_ok   = 0;
 static uint32_t s_mqtt_pub_fail = 0;
 static std::atomic<uint32_t> s_mqtt_reconnects{0};
+
+// Publish cycles that produced NOTHING, split by cause — the heartbeat's mqtt_skipped/mqtt_quiesced
+// (#380). Both are written only on the publish task, but they are read by the /status builder on the
+// httpd task, so they are atomic rather than plain like pub_ok/pub_fail above. `skipped` is bumped
+// from inside the OOM catch handler, where an atomic add is the only kind of bookkeeping that is
+// guaranteed not to throw a second time.
+static std::atomic<uint32_t> s_mqtt_skipped{0};
+static std::atomic<uint32_t> s_mqtt_quiesced{0};
 
 // Heartbeat is diagnostics, not real-time telemetry — publish on a fixed cadence rather than on
 // every poll cycle.
@@ -909,6 +919,11 @@ static void publish_heartbeat() {
     f.mqtt_count      = s_mqtt_pub_ok;
     f.mqtt_fails      = s_mqtt_pub_fail;
     f.mqtt_reconnects = s_mqtt_reconnects;
+    // The cycles that produced nothing (#380). poll_skipped comes from the OTHER task's counter, not
+    // from `hp` above: hp_stats() describes cycles that RAN, and a sweep that threw never committed.
+    f.mqtt_skipped    = s_mqtt_skipped.load(std::memory_order_relaxed);
+    f.mqtt_quiesced   = s_mqtt_quiesced.load(std::memory_order_relaxed);
+    f.poll_skipped    = hp_skipped_cycles();
     f.bus_connected   = hp.connected;
     f.bus_proto       = static_cast<char>(cfg.proto);
     f.registers       = hp.registers;
@@ -1919,6 +1934,9 @@ static void mqtt_task(void*) {
     int ha_retire_elapsed_s = HA_RETIRE_INTERVAL_S;
     MqttPublishGateState publish_gate = MqttPublishGateState::SubscriberOnly;
     bool publisher_promotion_failed = false;
+    OtaQuiesceState ota_quiesce;                       // hold-off budget for the current download
+    bool ota_quiesce_logged     = false;               // one diag line per download, not per cycle
+    bool ota_quiesce_cap_logged = false;               // and one if that budget ever runs out
 
     // Broker reachability and inbound observation do not depend on X10A. This first client carries
     // no installation LWT, and the gate below still encloses EVERY explicit publish. It can therefore
@@ -1934,6 +1952,43 @@ static void mqtt_task(void*) {
         // publish, or a long MQTT disconnect (no publishes) would false-trip the timeout.
         esp_task_wdt_reset();
         const int delay_s = POLL_INTERVAL_S;
+
+        // STAND ASIDE while an OTA download owns the heap (#380). Placed above the try, before the
+        // first allocation of the cycle: everything below this point builds std::strings, and on the
+        // heap an esp_https_ota session leaves behind, the largest of them is what throws. Skipping
+        // the cycle on purpose costs the same second of data the bad_alloc cost, spends none of the
+        // block the download needs, and — unlike the throw — says so in a counter.
+        //
+        // The watchdog is fed ABOVE this, so a long download cannot false-trip it. The broker
+        // connection is unaffected: esp-mqtt runs keepalive on its own task, so a publisher that
+        // publishes nothing for a minute stays connected and HA sees a gap, not an `offline`.
+        // Bounded by logic/ota_quiesce.hpp — a download that never finishes must not silence the
+        // bridge for the rest of the boot.
+        const bool ota_busy = ota_download_active();
+        if (ota_quiesce_step(ota_quiesce, ota_busy)) {
+            s_mqtt_quiesced.fetch_add(1, std::memory_order_relaxed);
+            if (!ota_quiesce_logged) {                 // once per download; the ring is small
+                diag_printf("mqtt: holding off publishes during the OTA download\n");
+                ota_quiesce_logged = true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
+            continue;
+        }
+        // Not holding off this cycle — either no download is running, or the budget above ran out
+        // while one still is. Those two are worth telling apart in the log: the second means the
+        // publisher is back to competing with a TLS session for the heap, so a `publish skipped` can
+        // legitimately reappear and it is not a regression of this fix. Once per episode, then
+        // rearmed when the download ends.
+        if (ota_quiesce_exhausted(ota_quiesce, ota_busy)) {
+            if (!ota_quiesce_cap_logged) {
+                diag_printf("mqtt: OTA hold-off budget spent after %u cycles, publishing again\n",
+                            static_cast<unsigned>(OTA_QUIESCE_MAX_CYCLES));
+                ota_quiesce_cap_logged = true;
+            }
+        } else {
+            ota_quiesce_logged     = false;            // rearm both lines for the next download
+            ota_quiesce_cap_logged = false;
+        }
 
         try {
             const HpStats hp = hp_stats();
@@ -2136,8 +2191,15 @@ static void mqtt_task(void*) {
                 }
             }
         } catch (const std::exception& e) {
+            // COUNT FIRST, then log — diag_printf allocates, so on the heap that caused this it can
+            // throw again, and a throw inside a catch handler is std::terminate (the reboot this
+            // guard exists to prevent). The atomic add cannot fail, so the cycle is recorded even
+            // when the line describing it never reaches the ring — which is the whole complaint in
+            // #380: the ring was the only evidence, and a chatty boot overwrites it.
+            s_mqtt_skipped.fetch_add(1, std::memory_order_relaxed);
             diag_printf("mqtt: publish skipped (%s)\n", e.what());
         } catch (...) {
+            s_mqtt_skipped.fetch_add(1, std::memory_order_relaxed);
             diag_printf("mqtt: publish skipped (oom?)\n");
         }
         vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
@@ -2320,6 +2382,15 @@ MqttStatus mqtt_status() {
     Lock lk(s_mtx);
     MqttStatus st = s_status;   // reader may allocate under an RAII lock (the broker std::string copy)
     st.error = s_error;         // error is kept as a literal pointer; stringified here, under the lock
+    return st;
+}
+
+MqttSkipStats mqtt_skip_stats() {
+    // No lock: both are atomics, and s_mtx guards s_status/s_error, not these. Taking it here would
+    // put the /status builder behind the publish task's status writes for two counter reads.
+    MqttSkipStats st;
+    st.skipped  = s_mqtt_skipped.load(std::memory_order_relaxed);
+    st.quiesced = s_mqtt_quiesced.load(std::memory_order_relaxed);
     return st;
 }
 

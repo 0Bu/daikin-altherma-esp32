@@ -56,7 +56,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 11 | Core dump to flash + offline symbolication, with a proven **orphan dump** erased so no undecodable download is ever offered | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT and cleared when the boot is unremarkable | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
-| 13 | 18-entity device **heartbeat** diagnostics stream, published independently of profile detection | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
+| 13 | 21-entity device **heartbeat** diagnostics stream, published independently of profile detection | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** (a router reboot never strands the bridge) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** — recovers a ghost association no event reports | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`logic/link_watch.hpp`](../main/logic/link_watch.hpp) |
 | 16 | Captive-portal provisioning (AP-only, typed SSID, UDP:53 catch-all, 302 probe redirect + RFC 8910 option 114) | ✅ 🧪 | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp), [`logic/captive.hpp`](../main/logic/captive.hpp) |
@@ -457,14 +457,19 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   as a failure answered `500` forever, and a fault reset carries no dump often enough (a stack
   overflow overruns it) that those boards saw exactly the banner no action could clear. Every other
   error still blocks, because then a dump may genuinely still be downloadable.
-- **✅ 🧪 18-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): a
+- **✅ 🧪 21-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): a
   **flat** JSON of heap (free / min-free / largest-free-block, the true OOM limit), uptime, reset
   reason, WiFi RSSI + reconnects + MAC/BSSID, MQTT counters and X10A bus stats — published
   independently of profile detection, so board health is visible while the model is still `auto`.
   The reset reason rides as a slug **and** as numbers, because a metrics pipeline keeps numeric
   fields and drops strings. `bus_ou_held_over` reports **source** freshness rather than link health.
+  `mqtt_skipped` / `mqtt_quiesced` / `poll_skipped` count the 1 s cycles that produced **nothing** —
+  an OOM guard catch, a deliberate OTA hold-off, and a sweep that never reached the bus (#380). They
+  are the counters that made a silent loss visible: 337 dropped publishes in 30 days had existed only
+  as lines in a `/diag` ring the next chatty boot overwrites.
 - **✅ 🧪 Always-on system health**: `/status.sys` carries heap headroom, the since-boot low-water
-  mark, the largest contiguous block, the reset-reason slug and the safe-mode flag. Unlike
+  mark, the largest contiguous block, the three #380 cycle-loss counters, the reset-reason slug and
+  the safe-mode flag. Unlike
   `last_crash` it is present on **every** boot, and unlike the heartbeat it needs **no broker**.
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the firmware that
   produced any dump, and the syslog boot line puts the same hash in the **log stream**.
@@ -772,7 +777,7 @@ a **connectivity-proving health gate** rather than a naive uptime timer. It ship
 embedded and gzipped into the app image** (polled, after a WebSocket push proved it could die
 silently), an **ICMP watchdog** that recovers WiFi ghost-associations no event reports, and a
 **field-debuggable crash story** — flash core dumps, offline symbolication against an sha-matched
-ELF, a retained MQTT crash topic and an 18-entity heartbeat. The risky parts — decode, CRC, config,
+ELF, a retained MQTT crash topic and a 21-entity heartbeat. The risky parts — decode, CRC, config,
 discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified on the host**
 and gated in CI, and a second family of audits asks the question tests cannot: whether a
 well-formed value is *physically true*, whether the drawing that shows it is *right*, and whether a

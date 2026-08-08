@@ -54,6 +54,29 @@ struct HeartbeatFields {
     uint32_t    mqtt_count      = 0;   // successful publishes (state+heartbeat+heating_curve+discovery)
     uint32_t    mqtt_fails      = 0;   // cumulative failed esp_mqtt_client_publish() calls
     uint32_t    mqtt_reconnects = 0;   // cumulative RE-connects (excludes the first-ever connect)
+    // WHAT NEVER GOT PUBLISHED, and why — the counters #380 was opened for. `mqtt_fails` above counts
+    // a failed publish CALL; neither of these ever reached one, so until now the loss was invisible
+    // outside a `/diag` ring that the next chatty boot overwrites. Both count cycles of the 1 s
+    // publish task, so either against uptime_s reads directly as "fraction of seconds this board had
+    // nothing to say".
+    //
+    // mqtt_skipped  — the cycle THREW (std::bad_alloc; the task guard caught it) and the reading is
+    //                 gone. The wired board logged 337 of these in 30 days, 125 in the last of them,
+    //                 every one immediately before an OTA reboot.
+    // mqtt_quiesced — the cycle stood aside DELIBERATELY because an OTA download owned the heap
+    //                 (logic/ota_quiesce.hpp). Same missing second, stated reason.
+    //
+    // Kept as two counters rather than one "cycles lost" precisely so the fix is legible in the
+    // store: the intended shape after #380 is `quiesced` stepping once per install while `skipped`
+    // stops rising at all, and a combined counter could not tell that from no change whatsoever.
+    uint32_t    mqtt_skipped    = 0;
+    uint32_t    mqtt_quiesced   = 0;
+
+    // The same question asked of the X10A poll task, and the WORSE half of it: a skipped publish
+    // drops a value that was read, a skipped poll means the read never happened — so history.cpp
+    // records a NO_READING indistinguishable from a bus fault, and the bus counters below stay
+    // silent because nothing was attempted. 32 of these in the same 30 days.
+    uint32_t    poll_skipped   = 0;
 
     bool        bus_connected  = false;   // hp_stats().connected — X10A link up this cycle
     char        bus_proto      = '?';
@@ -159,6 +182,11 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"mqtt_count\":"; j += std::to_string(f.mqtt_count);
     j += ",\"mqtt_fails\":"; j += std::to_string(f.mqtt_fails);
     j += ",\"mqtt_reconnects\":"; j += std::to_string(f.mqtt_reconnects);
+    // Cycles that produced nothing — an OOM skip and a deliberate OTA hold-off (#380).
+    j += ",\"mqtt_skipped\":"; j += std::to_string(f.mqtt_skipped);
+    j += ",\"mqtt_quiesced\":"; j += std::to_string(f.mqtt_quiesced);
+    // poll_* — the X10A sweep that never ran, so nothing below was even attempted.
+    j += ",\"poll_skipped\":"; j += std::to_string(f.poll_skipped);
     // bus_*
     j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
     j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";
@@ -231,6 +259,14 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     {"sensor",        "mqtt_count",       "MQTT Publishes",      "mqtt_count",       "",    "",                 "total_increasing"},
     {"sensor",        "mqtt_fails",       "MQTT Publish Fails",  "mqtt_fails",       "",    "",                 "total_increasing"},
     {"sensor",        "mqtt_reconnects",  "MQTT Reconnects",     "mqtt_reconnects",  "",    "",                 "total_increasing"},
+    // The three #380 loss counters. Entities, not payload-only like the modbus_* block, because the
+    // whole point of the issue is that this loss had no consumer: it is the thing to ALERT on, and a
+    // number nobody can put on a dashboard is how it stayed invisible for 337 dropped publishes.
+    // `total_increasing` so HA's long-term statistics read a reboot as a counter reset rather than a
+    // cliff — and a reboot is exactly what ends every episode these count.
+    {"sensor",        "mqtt_skipped",     "MQTT Cycles Skipped", "mqtt_skipped",     "",    "",                 "total_increasing"},
+    {"sensor",        "mqtt_quiesced",    "MQTT Cycles Held (OTA)", "mqtt_quiesced", "",    "",                 "total_increasing"},
+    {"sensor",        "poll_skipped",     "X10A Cycles Skipped", "poll_skipped",     "",    "",                 "total_increasing"},
 };
 inline constexpr int HEARTBEAT_SENSOR_COUNT =
     sizeof(HEARTBEAT_SENSORS) / sizeof(HEARTBEAT_SENSORS[0]);

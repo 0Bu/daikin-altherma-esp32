@@ -96,6 +96,14 @@ its block name as a prefix (`wifi_connected`, `wifi_rssi`, `wifi_mac`, `wifi_bss
 associated AP's BSSID ride the `wifi_` set, so a heartbeat can be pinned to a specific board and the AP
 it roamed onto.
 
+Three fields count the one-second publish/poll cycles that produced **nothing**, each its own
+`total_increasing` diagnostic entity: `mqtt_skipped` (the publish cycle threw `std::bad_alloc` under
+heap pressure and the reading was lost), `mqtt_quiesced` (the publisher stood aside deliberately
+while an OTA download owned the heap) and `poll_skipped` (the X10A sweep never ran, so the value was
+never read at all). They are worth an automation: `mqtt_skipped` rising outside an update window
+means the board is losing data to something other than its own installer. Because a reboot ends every
+such episode, `total_increasing` is what lets HA's long-term statistics read the reset as a reset.
+
 Room-source and heating-curve evidence lives separately on `<base>/heating_curve` (not retained),
 published on the same 10-second reporting cadence. Its schema-versioned JSON is grouped by meaning:
 `room` contains the firmware-accepted live input, and `diagnosis` contains the derived, durable

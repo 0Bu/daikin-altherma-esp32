@@ -33,6 +33,7 @@
 #include "freertos/semphr.h"
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
+#include <atomic>
 #include <cstring>
 #include <exception>
 #include <string>
@@ -63,6 +64,24 @@ using Lock = SemGuard;
 // One OTA operation at a time. Guarded by s_mtx (not a bare bool): /ota/check and /ota/update are
 // both reachable from the network and a double-tap in the UI must not spawn two TLS sessions.
 bool s_busy = false;
+
+// "A download is in flight" — the ONE piece of OTA state read from outside on a per-second cadence
+// (ota_download_active(), see the header for why this is not s_status.state). Deliberately NOT under
+// s_mtx: the reader is the MQTT publish task standing aside for exactly the heap event this marks,
+// and making it take the lock the OTA task holds — or copy strings to read it — would spend the
+// resource it is trying to save. A stale read costs one published cycle either way, so relaxed
+// ordering is enough and no reader can ever block on the writer.
+std::atomic<bool> s_downloading{false};
+
+// Scope guard for the flag. The download window has SEVEN exits — begin failure, an unreadable
+// descriptor, two refused-version gates, a failed transfer, a truncated one, and success into
+// esp_restart() — and a flag cleared by hand at each is a flag that a later exit path forgets. A
+// missed clear latches the publisher off for OTA_QUIESCE_MAX_CYCLES on every cycle for the rest of
+// the boot (logic/ota_quiesce.hpp caps the damage; it should never have to).
+struct DownloadFlag {
+    DownloadFlag()  { s_downloading.store(true,  std::memory_order_relaxed); }
+    ~DownloadFlag() { s_downloading.store(false, std::memory_order_relaxed); }
+};
 
 // A TLS handshake alone wants ~6 KB of stack, and fetch_manifest_version() puts another
 // kManifestMax (1 KB) frame on top of it — 8192 (what the IDF OTA examples use, with no such local)
@@ -249,6 +268,12 @@ void run_update(bool allow_downgrade) {
     esp_https_ota_config_t ota = {};
     ota.http_config            = &http;
 
+    // From here to the end of the function the TLS session and the download buffer are on the heap.
+    // Armed BEFORE begin(), because begin() is where the handshake allocates — a publisher woken by
+    // the tick in between would meet the pressure with no warning. Cleared on every exit below by
+    // the destructor, and left set on the success path (esp_restart() ends the boot anyway).
+    DownloadFlag downloading;
+
     esp_https_ota_handle_t h = nullptr;
     esp_err_t e = esp_https_ota_begin(&ota, &h);
     if (e != ESP_OK || !h) {
@@ -414,6 +439,8 @@ bool start(bool update, bool allow_downgrade = false) {
 const char* ota_img_suffix() {
     return "";   // esp32s3 is the only target, no suffix needed
 }
+
+bool ota_download_active() { return s_downloading.load(std::memory_order_relaxed); }
 
 void ota_check_async(int64_t /*browser_epoch_ms*/) {
     // browser_epoch_ms stays plumbed (the route parses ?ms=) but gates nothing: TLS certificate

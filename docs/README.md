@@ -346,7 +346,8 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        share_pct is null for a positive sub-percent ratio; raw
                                    #        defrost_s/run_s preserve and adjudicate it. NOT GET /diag,
                                    #        which is the log ring.
-                                   #   sys:{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode},
+                                   #   sys:{free_heap,min_free_heap,max_alloc,mqtt_skipped,mqtt_quiesced,
+                                   #        poll_skipped,reset_reason,safe_mode},
                                    #   last_crash: null | {reason,reason_code,fault,coredump,
                                    #        task,pc,backtrace[],corrupted,elf_sha256},
                                    #   detect:{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,
