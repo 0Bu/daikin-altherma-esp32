@@ -110,7 +110,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
 | 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 71 | **Pinned stack contract on the `/status` builder** — `-Os` on that one translation unit, because ~9 KB of its 11.8 KB frame was a `-Og` slot-allocation artefact, not live data | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp) |
-| 72 | **Reboot-surviving 24-hour trends** — `.noinit` DRAM for any reset that kept power, plus a coarse snapshot in the optional `hist` partition across an OTA; both gated on a derived trend-catalog fingerprint, the stored one spliced by absolute wall-clock bucket | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
+| 72 | **Reboot-surviving 24-hour trends** — `.noinit` DRAM for any reset that kept power, plus a coarse snapshot in the optional `history` partition across an OTA; both gated on a derived trend-catalog fingerprint, the stored one spliced by absolute wall-clock bucket | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
 | 79 | **Reboot-surviving plant checkup** — the 24-hour window rides the same `.noinit` DRAM, sealed with a layout fingerprint over every row locator and counting threshold; the model is re-checked at detection and safe mode never adopts | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`checkup.cpp`](../main/checkup.cpp) |
 | 73 | **Heap watchdog** — the escalation every other OOM guard here deliberately lacks: sustained exhaustion of the largest *internal* contiguous block becomes a deliberate restart with a persisted, capped breadcrumb, because a wedge that never recovers is worse than a crash | ✅ 🧪 | [`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp), [`heap_guard.cpp`](../main/heap_guard.cpp) |
 | 74 | **Presenter-parity gate** — the browser's copies of the leaving-water / post-BUH / COP-scope / held-over-page rules are diffed against the C++ headers over the whole catalog, so "host-tested" stops meaning "the copy that does not ship is tested" | ✅ 🧪 | [`presenter_golden_dump.cpp`](../test/presenter_golden_dump.cpp), [`presenter_parity.mjs`](../tools/presenter/presenter_parity.mjs), [`selftest.sh`](../tools/presenter/selftest.sh) |
@@ -405,7 +405,7 @@ Everything needed to explain a crash *after the fact*, from the field, without a
 - **✅ 🧪 The 24-hour plant checkup survives a reboot** ([`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp)).
   The same `.noinit` mechanism one feature down, for the measurement that tolerates a reboot worst:
   the window is 24 h and the requirements are hours, so losing it loses the *verdict*. `.noinit` only
-  — the `hist` partition is absent on every over-the-air-updated board, so a second tenant would buy
+  — the `history` partition is absent on every over-the-air-updated board, so a second tenant would buy
   nothing there. The seal excludes the open hour, the lifecycle is carried as a duration (the
   monotonic anchors restart), and a **layout fingerprint** over the geometry, every row locator and
   every counting threshold invalidates the record when an update changes what a stored counter means.
@@ -415,7 +415,7 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   Still not in NVS — that would be ~100k writes a year in the partition holding the WiFi credentials —
   but the rings now live in `.noinit` DRAM, so every reset that kept power keeps them at no RAM cost
   and a ~26.5 KB *smaller* flash image (`.data` no longer carries an initialiser for them). An OTA
-  moves the image's sections, so a coarse 30-minute snapshot goes to the optional 8 KB `hist`
+  moves the image's sections, so a coarse 30-minute snapshot goes to the optional 8 KB `history`
   partition from a shutdown handler. A power loss takes both and stays unrecovered on purpose — only
   a medium off this board could survive it, and that is a different feature with a different owner.
   The coarse path is spliced in **behind** the live samples by
@@ -473,7 +473,7 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   erase result that does **not** block it is `ESP_ERR_NOT_FOUND`, which means the board has no
   `coredump` partition at all — the state of every device flashed before one existed and upgraded
   over the air since, because OTA writes the inactive app slot and never the partition table
-  ([`partitions.csv`](../partitions.csv) states the same premise for `hist`). There is nothing to
+  ([`partitions.csv`](../partitions.csv) states the same premise for `history`). There is nothing to
   destroy there, so the dismissal's other job — clearing the report — must still happen; treating it
   as a failure answered `500` forever, and a fault reset carries no dump often enough (a stack
   overflow overruns it) that those boards saw exactly the banner no action could clear. Every other

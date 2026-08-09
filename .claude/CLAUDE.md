@@ -868,7 +868,7 @@ history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/hist
                 POWER (a /set_* save, an OTA install, a panic, the task watchdog) keeps the readings
                 at zero cost — the same memory, no shadow copy, and the flash image SHRANK by ~26.5 KB
                 because .data no longer carries an initialiser for them; and a COARSE 30-minute
-                snapshot is written to the optional 8 KB `hist` partition from an esp_restart
+                snapshot is written to the optional 8 KB `history` partition from an esp_restart
                 shutdown handler, which is what survives an OTA (the .noinit region cannot: the new
                 image's sections move). LOSING POWER stays unrecovered ON PURPOSE — only a medium
                 off this board could survive it, and taking the plant history off the device is a
@@ -895,7 +895,7 @@ history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/hist
                 #35-#39 substitution arriving through a firmware update. The seal EXCLUDES the open
                 bucket's `pending`, and that is load-bearing: covering it would make the CRC stale
                 for all but microseconds of every five minutes, so a crash — the case this exists for
-                most — would discard a day of intact readings essentially always. The `hist` partition
+                most — would discard a day of intact readings essentially always. The `history` partition
                 is OPTIONAL BY CONSTRUCTION: esp_https_ota writes the app slot and never the table at
                 0x8000, so a device updated over the air has no such partition and the feature is
                 simply absent there (feature_gate.hpp's rule), reachable only by a re-flash. A factory
@@ -942,7 +942,7 @@ checkup.cpp     the 24-hour PLANT CHECKUP behind /status.health and the dashboar
                 one completed hour after 9.9 h of uptime and a single OTA took it back to zero, on a
                 device following the `dev` channel where an owner who keeps up to date may never
                 reach 24 h at all. Only .noinit and deliberately NOT history's second, flash medium:
-                the reference board reports "no `hist` partition", because esp_https_ota writes the
+                the reference board reports "no `history` partition", because esp_https_ota writes the
                 app slot and never the partition table, so every OTA-updated device lacks it and a
                 second tenant would have bought this nothing on the very board that motivated it.
                 That same board also DISPROVES history_persist.hpp's claim that .noinit "cannot
@@ -2395,7 +2395,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 |-----------|---------|
 | `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT (broker, credentials AND this installation's base topic, v16); syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; the v15 external circulation-power witness (name/topic/paths/max_age/on+off thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against); and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v16 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter, and `heap_rst` the heap watchdog's consecutive-restart breadcrumb (i32, cleared on any ordinary boot, capped so a restart LOOP is bounded). |
 
-**Flash partitions beyond NVS.** `hist` (0x1e000, 8 KB) fills the gap that already existed between
+**Flash partitions beyond NVS.** `history` (0x1e000, 8 KB) fills the gap that already existed between
 `coredump` and `ota_0`'s 64 KB boundary, and holds the COARSE 24-hour trend snapshot `history.cpp`
 writes from an `esp_restart` shutdown handler. It is deliberately NOT in `nvs`: 24 KB shared with the
 WiFi credentials cannot hold it, and it would put the credentials' partition under write traffic for

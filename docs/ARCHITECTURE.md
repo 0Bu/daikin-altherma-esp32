@@ -984,7 +984,7 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
      power was never lost, so the downtime is bounded to about a second. The one seam is the bucket
      that was open when the device went down — it is dropped, so the restored series can be up to
      one `HISTORY_DT_S` adrift on the axis. It cannot survive an OTA: the new image's sections move.
-   * **The optional `hist` partition.** A coarse (30-minute) snapshot written once per intentional
+   * **The optional `history` partition.** A coarse (30-minute) snapshot written once per intentional
      reboot from an `esp_restart` shutdown handler — one 8 KB erase and ~4.4 KB of writes, a few
      hundred writes a year against a 100k-cycle part. This is what carries a history across an OTA.
      It is absent on every board updated over the air, because a partition table is not delivered by

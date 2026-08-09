@@ -15,7 +15,7 @@
 #include "esp_attr.h"           // __NOINIT_ATTR — the whole of step 1 rests on this one attribute
 // esp_heap_caps.h is deliberately absent: the largest-free-block sample now goes through
 // heap_guard.hpp's ONE internal-DRAM sampler, so no site here spells out a capability mask.
-#include "esp_partition.h"      // the optional `hist` snapshot partition
+#include "esp_partition.h"      // the optional `history` snapshot partition
 #include "esp_system.h"         // esp_get_free_heap_size — the free_heap trend
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -458,7 +458,7 @@ int64_t source_anchor_bucket_locked(HistorySource src) {
     return logic::history_bucket_from_unix(unix_s - age_s);
 }
 
-// ── The `hist` partition ────────────────────────────────────────────────────────────────────────
+// ── The `history` partition ────────────────────────────────────────────────────────────────────────
 // A COARSE snapshot of every ring, written once per intentional reboot. It exists for the one case
 // the .noinit region structurally cannot cover: an OTA moves the new image's sections, so the bytes
 // are not where the new build looks for them.
@@ -1050,7 +1050,7 @@ size_t history_unit(size_t t, char* out, size_t max) {
     return copy_under_lock(P().ring[t].unit, out, max);
 }
 
-// ── The `hist` partition: write on the way out, splice back on the way in ───────────────────────
+// ── The `history` partition: write on the way out, splice back on the way in ───────────────────────
 namespace {
 
 // Fill one 48-slot block RIGHT-ALIGNED: the newest coarse sample always lands in the last slot, so
@@ -1236,12 +1236,12 @@ void history_flash_forget() {
 }
 
 static void history_flash_start() {
-    s_flash_part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "hist");
+    s_flash_part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "history");
     if (!s_flash_part) {
         // ABSENT, not broken. A device updated over the air keeps the partition table it was
         // flashed with — esp_https_ota writes the app slot alone — so this is the normal state for
         // every board that has not been re-flashed over USB since the table changed.
-        diag_printf("history: no `hist` partition — reboot snapshot unavailable on this board\n");
+        diag_printf("history: no `history` partition — reboot snapshot unavailable on this board\n");
         return;
     }
     const esp_err_t e = esp_register_shutdown_handler(history_flash_save);

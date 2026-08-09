@@ -135,7 +135,7 @@ size_t history_label(size_t t, char* out, size_t max);
 // like a bug — logic/history_persist.hpp's HistoryRestore vocabulary.
 const char* history_persist_state();
 
-// Write the coarse snapshot to the optional `hist` partition. Registered as an esp_restart shutdown
+// Write the coarse snapshot to the optional `history` partition. Registered as an esp_restart shutdown
 // handler by history_start(), so the ordinary caller is the reboot itself.
 void history_flash_save();
 

@@ -27,9 +27,9 @@
 // It does NOT cover a power cycle, and nothing here pretends otherwise: /status.health.persist
 // reports "power_cycle" and the window starts empty, exactly as it always did.
 //
-// history_persist.hpp also runs a COARSE snapshot through the optional `hist` flash partition for
+// history_persist.hpp also runs a COARSE snapshot through the optional `history` flash partition for
 // the case it says .noinit "cannot" cover. That is deliberately NOT mirrored here, for a reason the
-// reference board settles rather than assumes: it reports `no hist partition — reboot snapshot
+// reference board settles rather than assumes: it reports `no `history` partition — reboot snapshot
 // unavailable on this board`, because esp_https_ota writes the app slot and never the partition
 // table, so every over-the-air-updated device lacks it and only a USB re-flash grants it. A second
 // tenant in a partition most deployed boards do not have would have bought this feature nothing on
