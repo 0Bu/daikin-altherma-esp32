@@ -420,10 +420,17 @@ constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, n
 // Treating that as ineligible — which is what "unknown is not off" means everywhere else in this
 // header — discarded the entire accumulated hour. On the reference installation that is not a
 // corner case but the NORMAL case: 47 timeouts in 8.2 h of uptime, i.e. one relevant page missing
-// roughly every hour, against a segment that needs an unbroken hour. The check therefore reported
-// `collecting`, 0 min of 6 h, forever, on a plant whose R5T, valve, pump and BSH rows were all
-// present and correct — the same replayed 24 h yields 12 completed windows when the drop-outs are
-// removed. Nothing else in the checkup behaves this way: checkup_step simply does not accrue the
+// roughly every hour, against a segment that needs an unbroken hour.
+//
+// MEASURED, because the first account of this was overstated and the correction is the interesting
+// part. Replaying that installation's real 24 h through this header — drop-outs injected at the
+// observed rate, 25 seeds — the old rule completes a mean of 6.1 windows (min 4, max 9) against the
+// 12 the same day yields with perfect vision, and this one 11.6 (min 10). So the cost is roughly
+// HALF the evidence and therefore about twice as long to reach DHW_LOSS_REQUIRED_S — not a check
+// that never speaks. What the owner sees is the front of that distribution: through the first 8.2 h
+// of a boot only two windows are achievable at all, the drop-outs took both, and the card read
+// `collecting`, 0 min of 6 h, on a plant whose R5T, valve, pump and BSH rows were all present and
+// correct. Nothing else in the checkup behaves this way: checkup_step simply does not accrue the
 // second it could not read, and keeps everything it already measured.
 //
 // So a sample the firmware could not READ is BLIND time, not a state change: the tank did not start

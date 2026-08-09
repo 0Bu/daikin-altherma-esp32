@@ -654,8 +654,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
   minutes of settling after tank charging — each judged on a row the sweep could actually READ. A row
   that did not answer this cycle is *blind time*, not a disqualifying state: since every input rides
   the X10A sweep, where one silent page removes all of its rows from that sample, treating an unread
-  second as ineligible discarded the whole accumulated hour, and at the reference installation's
-  timeout rate no window ever completed. Blind time is bounded twice — no single unobserved run long
+  second as ineligible discarded the whole accumulated hour. Replayed over the reference
+  installation's real 24 h at its observed timeout rate, that cost about half the achievable windows
+  — roughly doubling the time to a verdict, and showing as a flat "0 min of 6 h" for the first hours
+  of a boot, when only one or two windows are possible at all. Blind time is bounded twice — no single unobserved run long
   enough to hide a tank charge, and a per-window total inside the same 90% evidence rule — and is
   subtracted from the seconds the window reports as observed. A drop of at least 0.4 K inside ten
   minutes is treated as draw-like contamination and discards that segment; a drop that accumulated
