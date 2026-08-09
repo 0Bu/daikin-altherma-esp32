@@ -64,8 +64,10 @@ no observed seconds rather than an attributed loss.
 **Missing evidence is not a plant state.** All its inputs ride the X10A sweep, where one page that
 does not answer removes all of that page's rows from the cycle. Treating that unread second as
 *ineligible* discarded the whole accumulated hour, which on the reference installation happened
-about once an hour against a window needing sixty clean minutes — so the check read "0 min of 6 h"
-indefinitely with every row it needed present and correct. A sample the firmware could not read is
+about once an hour against a window needing sixty clean minutes. Replayed over that installation's
+real 24 h, the old rule kept about half the achievable windows — so it roughly doubled the time to a
+verdict, and in the first hours of a boot, when only one or two windows are possible at all, it read
+"0 min of 6 h" with every row it needed present and correct. A sample the firmware could not read is
 therefore **blind time**, bounded so no unobserved stretch can hide a tank charge and subtracted
 from the seconds the window claims to have observed. A state the sweep *can* see still ends the
 window, and a draw hidden inside a blind stretch is still caught against the temperature anchor

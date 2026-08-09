@@ -1382,9 +1382,15 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 valve/pump/BSH on 0x60, R5T on 0x61. A candidate segment has to survive an unbroken
                 hour, so treating that one unread second as ineligible discarded the accumulated
                 hour: 47 timeouts in 8.2 h of uptime is one relevant page missing roughly every
-                hour, against a window that needs sixty clean minutes. `collecting`, 0 min of 6 h,
-                forever, while every row it needs was present and correct — the same 24 h replayed
-                without the drop-outs yields twelve completed windows. So a sample the firmware
+                hour, against a window that needs sixty clean minutes. MEASURED over that
+                installation's real 24 h with drop-outs at the observed rate (25 seeds), the old rule
+                completes a mean of 6.1 windows against the 12 perfect vision yields and the fixed
+                rule's 11.6 — so it cost HALF the evidence and about twice the time to a verdict,
+                which is the claim, and "it never completes one" was the first, overstated version of
+                it. What the OWNER sees is the front of that distribution: only two windows are
+                achievable in the first 8.2 h of a boot at all, the drop-outs took both, and the card
+                read `collecting`, 0 min of 6 h, while every row it needs was present and correct.
+                So a sample the firmware
                 could not READ is now BLIND time rather than a state change (the tank does not start
                 charging because a UART read timed out), carried under two bounds that stop a window
                 being assembled out of absence — a single unobserved RUN long enough to hide a tank
