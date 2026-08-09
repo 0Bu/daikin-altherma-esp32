@@ -363,10 +363,16 @@ struct DhwLossState {
     uint32_t segment_circulation_on_s = 0;
     uint32_t circulation_off_run_s = 0;
     uint32_t settle_remaining_s = 0;
+    // Seconds inside the candidate segment during which the plant was NOT OBSERVED — a page that
+    // timed out this sweep, or a gap past CHECKUP_MAX_GAP_S. Tracked rather than fatal; see
+    // dhw_loss_step's blindness rule.
+    uint32_t segment_blind_s = 0;
+    uint32_t blind_run_s = 0;
 
     void reset_segment() {
         segment_start_us = draw_anchor_us = -1;
         segment_circulation_known_s = segment_circulation_on_s = 0;
+        segment_blind_s = 0;
     }
 };
 
@@ -404,19 +410,58 @@ constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
 // arithmetic suggests.
 constexpr int      DHW_LOSS_DRAW_DROP_TENTHS = 4;        // ~1.85 K/h effective, see above
 constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, not a Daikin limit
+// ── BLINDNESS: missing evidence is not a disqualifying plant state ─────────────────────────────
+// A candidate segment has to survive a full hour, and every input it needs arrives from the X10A
+// sweep — where ONE page that does not answer removes ALL of its rows from that cycle's sample
+// (hp_poll.cpp replaces the cache wholesale with the rows that answered). The valve, the internal
+// pump and the BSH live on page 0x60 and R5T on 0x61, so a single timed-out read makes the whole
+// sample unreadable for one second out of 3600.
+//
+// Treating that as ineligible — which is what "unknown is not off" means everywhere else in this
+// header — discarded the entire accumulated hour. On the reference installation that is not a
+// corner case but the NORMAL case: 47 timeouts in 8.2 h of uptime, i.e. one relevant page missing
+// roughly every hour, against a segment that needs an unbroken hour. The check therefore reported
+// `collecting`, 0 min of 6 h, forever, on a plant whose R5T, valve, pump and BSH rows were all
+// present and correct — the same replayed 24 h yields 12 completed windows when the drop-outs are
+// removed. Nothing else in the checkup behaves this way: checkup_step simply does not accrue the
+// second it could not read, and keeps everything it already measured.
+//
+// So a sample the firmware could not READ is BLIND time, not a state change: the tank did not start
+// charging because a UART read timed out. It is carried, budgeted and — the half that keeps this
+// honest — SUBTRACTED from the seconds the window claims to have observed.
+//
+// Both bounds exist to stop a window being assembled out of absence. The RUN bound is the load-
+// bearing one: a tank charge cannot start, run and finish inside it, so no unobserved stretch can
+// hide the event that arms the settle timer. The TOTAL is the same 90%-evidence shape the
+// circulation witness already uses.
+constexpr uint32_t DHW_LOSS_BLIND_RUN_MAX_S = 120;
+constexpr uint32_t DHW_LOSS_BLIND_MAX_PCT   = 10;
 constexpr uint32_t DHW_LOSS_CIRC_KNOWN_PCT = 90;
 constexpr uint32_t DHW_LOSS_CIRC_MIN_ON_S = 5 * 60;
 constexpr uint32_t DHW_LOSS_CIRC_OFF_SETTLE_S = 2 * 3600;
 constexpr uint32_t DHW_LOSS_REQUIRED_S = 6 * 3600;       // plus a complete 24 h lifecycle for clear
 
+// Book `blind` unobserved seconds against the candidate segment. Returns false when the segment can
+// no longer be assembled out of what was actually seen, and the caller ends it.
+inline bool dhw_loss_blind_ok(DhwLossState& st, uint32_t blind) {
+    // Saturating, like the two event counters: a wrap would turn a permanently blind board into a
+    // segment that looks fully observed.
+    st.blind_run_s = std::min<uint32_t>(UINT32_MAX - blind, st.blind_run_s) + blind;
+    st.segment_blind_s = std::min<uint32_t>(UINT32_MAX - blind, st.segment_blind_s) + blind;
+    return st.blind_run_s <= DHW_LOSS_BLIND_RUN_MAX_S &&
+           st.segment_blind_s <= DHW_LOSS_WINDOW_S * DHW_LOSS_BLIND_MAX_PCT / 100;
+}
+
 inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSample& s,
                           int64_t now_us) {
     uint32_t dt = 0;
+    uint32_t gap_s = 0;
     bool continuous = false;
     if (st.last_us >= 0 && now_us >= st.last_us) {
         const int64_t gap_us = now_us - st.last_us;
+        gap_s = static_cast<uint32_t>(now_us / 1000000 - st.last_us / 1000000);
         if (gap_us <= static_cast<int64_t>(CHECKUP_MAX_GAP_S) * 1000000) {
-            dt = static_cast<uint32_t>(now_us / 1000000 - st.last_us / 1000000);
+            dt = gap_s;
             continuous = true;
         }
     }
@@ -442,7 +487,10 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
         return;
     }
     if (!continuous) {
-        st.reset_segment();
+        // Past CHECKUP_MAX_GAP_S the firmware was not watching — a wedged read, a burst of timed-out
+        // pages, a reboot. That is BLIND time of a known length, not a plant state, so it is
+        // budgeted exactly like an unreadable row rather than discarding the hour outright.
+        if (!dhw_loss_blind_ok(st, gap_s)) st.reset_segment();
         return;
     }
     if (st.settle_remaining_s) {
@@ -451,12 +499,35 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
         return;
     }
 
-    // Baseline method: valve on space, internal water pump off, BSH off, and a plausible R5T.
-    const bool eligible = states_known && !s.valve_dhw && !s.pump_on && !s.bsh_on &&
-                          s.r5t_ok && s.r5t_tenths >= 0 && s.r5t_tenths <= 900;
-    if (!eligible) {
+    // A state the sweep could SEE that is incompatible with a standing tank ends the segment. The
+    // two charge witnesses already returned above; what is left is the internal pump (space heating
+    // stirs the hydronics R5T sits in) and an R5T outside the plausible band. `known` is required on
+    // each: an unread row is judged one branch further down, never here.
+    const bool disqualified = (s.pump_known && s.pump_on) ||
+                              (s.r5t_ok && (s.r5t_tenths < 0 || s.r5t_tenths > 900));
+    if (disqualified) {
         st.reset_segment();
         return;
+    }
+
+    // Nothing said the tank is busy — but did the sweep actually READ it? A page that did not answer
+    // leaves every row on it absent from this sample (hp_poll replaces the cache with the rows that
+    // answered), and the tank did not change state because a UART read timed out.
+    if (!states_known || !s.r5t_ok) {
+        if (!dhw_loss_blind_ok(st, dt)) st.reset_segment();
+        return;
+    }
+
+    if (st.blind_run_s) {
+        // Vision is back. Judge the whole unobserved stretch against the anchor that was standing
+        // when it began — a draw hidden inside it shows up here as one accumulated drop — and only
+        // then re-arm the anchor at a temperature that was actually measured.
+        if (st.draw_anchor_us >= 0 &&
+            st.draw_anchor_tenths - s.r5t_tenths >= DHW_LOSS_DRAW_DROP_TENTHS)
+            st.reset_segment();
+        st.draw_anchor_us = now_us;
+        st.draw_anchor_tenths = s.r5t_tenths;
+        st.blind_run_s = 0;
     }
 
     if (st.draw_anchor_us < 0 || now_us < st.draw_anchor_us ||
@@ -487,9 +558,14 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     const uint32_t elapsed_s = static_cast<uint32_t>((now_us - st.segment_start_us) / 1000000);
     if (elapsed_s < DHW_LOSS_WINDOW_S) return;
     const int drop_tenths = std::max(0, st.segment_start_tenths - s.r5t_tenths);
+    // The RATE is per wall-clock hour: both endpoints are measured and the tank cooled for the whole
+    // span whether or not the firmware was looking. The EVIDENCE CLOCK is not — observed_s counts
+    // only the seconds actually watched, so a window can never be assembled out of absence and
+    // `0 min of 6 h` keeps meaning what it says.
+    const uint32_t observed_s = elapsed_s - std::min(elapsed_s, st.segment_blind_s);
     const int loss_tenths_k_h = static_cast<int>(
         static_cast<uint64_t>(drop_tenths) * DHW_LOSS_WINDOW_S / elapsed_s);
-    b.observed_s = checkup_add_u16(b.observed_s, elapsed_s);
+    b.observed_s = checkup_add_u16(b.observed_s, observed_s);
     b.circulation_known_s = checkup_add_u16(
         b.circulation_known_s, st.segment_circulation_known_s);
     b.circulation_on_s = checkup_add_u16(b.circulation_on_s, st.segment_circulation_on_s);
@@ -500,8 +576,11 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
 
     if (loss_tenths_k_h >= DHW_LOSS_HIGH_TENTHS_K_H) {
         b.high_windows = checkup_add_u8(b.high_windows, 1);
+        // Against the OBSERVED seconds, not the span: the witness is only decoded on cycles this
+        // segment could see, so measuring its coverage against blind time would charge it for
+        // silence on a different bus.
         const bool source_covered = st.segment_circulation_known_s * 100u >=
-                                    elapsed_s * DHW_LOSS_CIRC_KNOWN_PCT;
+                                    observed_s * DHW_LOSS_CIRC_KNOWN_PCT;
         if (source_covered && st.segment_circulation_on_s >= DHW_LOSS_CIRC_MIN_ON_S)
             b.high_with_pump = checkup_add_u8(b.high_with_pump, 1);
         else if (source_covered && st.segment_circulation_on_s == 0 &&
@@ -514,6 +593,10 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     st.segment_start_us = now_us;
     st.segment_start_tenths = s.r5t_tenths;
     st.segment_circulation_known_s = st.segment_circulation_on_s = 0;
+    // The blind budget is PER WINDOW like the two circulation counters beside it. Carrying it over
+    // would let the first hour's drop-outs spend the second hour's allowance, so a long quiet
+    // stretch would grow steadily more likely to be rejected the further into it the plant got.
+    st.segment_blind_s = 0;
 }
 
 // Do not sample a pump's first minute as the day's hydraulic minimum. Ramp-up, valve motion and air

@@ -7963,6 +7963,94 @@ static void test_checkup() {
         CHECK(settle_st.segment_start_us < 0 && settle_b.windows == 0);
     }
 
+    {
+        // A PAGE THAT DID NOT ANSWER IS MISSING EVIDENCE, NOT A PLANT STATE. Every input this check
+        // needs rides the X10A sweep, where one timed-out read removes all of that page's rows from
+        // the cycle (hp_poll replaces the cache with the rows that answered) — valve/pump/BSH on
+        // 0x60, R5T on 0x61. Treating that second as ineligible discarded the whole accumulated
+        // hour, and on the reference installation (47 timeouts in 8.2 h of uptime) that meant the
+        // check reported `collecting`, 0 min of 6 h, on a plant whose rows were all present: the
+        // same 24 h replayed without the drop-outs yields 12 completed windows.
+        //
+        // One second of blindness per hour, at the poll cadence, on an otherwise perfect standing
+        // tank. `blind_at` returns the completed windows plus the seconds the window CLAIMS to have
+        // observed, because the second half is what keeps the first honest.
+        auto blind_at = [](int blind_from_s, int blind_len_s, bool drop_page_60,
+                           int* observed_out) {
+            DhwLossState st; DhwLossBucket b; CheckupSample s;
+            s.valve_dhw = s.pump_on = s.bsh_on = false;
+            s.circulation_configured = s.circulation_known = true;
+            s.circulation_on = false;
+            for (int sec = 0; sec <= 3700; sec++) {
+                const bool blind = sec >= blind_from_s && sec < blind_from_s + blind_len_s;
+                s.valve_known = s.pump_known = s.bsh_known = !(blind && drop_page_60);
+                s.r5t_ok = !(blind && !drop_page_60);
+                s.r5t_tenths = 500 - sec / 720;          // 0.5 K/h — a healthy standing tank
+                dhw_loss_step(st, b, s, static_cast<int64_t>(sec) * 1000000);
+            }
+            if (observed_out) *observed_out = b.observed_s;
+            return static_cast<int>(b.windows);
+        };
+        int observed = 0;
+        CHECK(blind_at(1800, 1, true, &observed) == 1);   // page 0x60 silent for one cycle
+        CHECK(observed == 3599);                          // the blind second is NOT claimed as seen
+        CHECK(blind_at(1800, 1, false, &observed) == 1);  // page 0x61 (R5T) silent for one cycle
+        CHECK(observed == 3599);
+        CHECK(blind_at(1800, 30, true, &observed) == 1);  // a 30 s burst is still only a gap
+        CHECK(observed == 3570);
+
+        // …but a window may not be assembled out of absence. Both bounds end the segment: a single
+        // unobserved RUN long enough to hide a tank charge, and a TOTAL past the 90%-evidence shape
+        // the circulation witness already uses.
+        CHECK(blind_at(1800, DHW_LOSS_BLIND_RUN_MAX_S + 1, true, nullptr) == 0);
+        int spread = 0;
+        {
+            DhwLossState st; DhwLossBucket b; CheckupSample s;
+            s.valve_dhw = s.pump_on = s.bsh_on = false;
+            s.circulation_configured = s.circulation_known = true;
+            for (int sec = 0; sec <= 3700; sec++) {
+                const bool blind = (sec % 6) == 0;        // ~17% of the hour, every run short
+                s.valve_known = s.pump_known = s.bsh_known = !blind;
+                s.r5t_ok = true;
+                s.r5t_tenths = 500 - sec / 720;
+                dhw_loss_step(st, b, s, static_cast<int64_t>(sec) * 1000000);
+            }
+            spread = b.windows;
+        }
+        CHECK(spread == 0);
+
+        // A DRAW hidden inside a blind run is still caught: the anchor standing when vision was lost
+        // is what the first sighted sample is judged against, before it is re-armed.
+        {
+            DhwLossState st; DhwLossBucket b; CheckupSample s;
+            s.valve_dhw = s.pump_on = s.bsh_on = false;
+            s.circulation_configured = s.circulation_known = true;
+            for (int sec = 0; sec <= 3700; sec++) {
+                const bool blind = sec >= 1800 && sec < 1830;
+                s.valve_known = s.pump_known = s.bsh_known = true;
+                s.r5t_ok = !blind;
+                s.r5t_tenths = sec < 1800 ? 500 : 494;    // 0.6 K vanished while unobserved
+                dhw_loss_step(st, b, s, static_cast<int64_t>(sec) * 1000000);
+            }
+            CHECK(b.windows == 0);
+        }
+
+        // And a state the sweep CAN see stays disqualifying. The fix separates "unknown" from
+        // "known and busy"; it must not make the second permissive.
+        {
+            DhwLossState st; DhwLossBucket b; CheckupSample s;
+            s.valve_known = s.pump_known = s.bsh_known = true;
+            s.valve_dhw = s.bsh_on = false;
+            s.r5t_ok = true;
+            for (int sec = 0; sec <= 3700; sec++) {
+                s.pump_on = sec == 1800;                  // one second of space-heating circulation
+                s.r5t_tenths = 500 - sec / 720;
+                dhw_loss_step(st, b, s, static_cast<int64_t>(sec) * 1000000);
+            }
+            CHECK(b.windows == 0);
+        }
+    }
+
     // --- verdicts -------------------------------------------------------------------------------
     // Full capability and a complete evidence window unless a case says otherwise.
     CheckupCoverage full;

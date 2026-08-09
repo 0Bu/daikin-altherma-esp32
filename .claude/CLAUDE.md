@@ -1375,6 +1375,25 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 carry that claim alone" — so the way past it is a second source, not a looser rule.
                 It still refuses what it cannot see: a window whose pump state is unknown buys no
                 observed seconds, so the check answers `collecting` rather than attributing a loss.
+                That refusal has a BOUNDARY, and getting it wrong is what made the check report
+                nothing at all on the reference installation for a whole day at a time. Its inputs
+                all ride the X10A sweep, where ONE page that does not answer removes ALL of its rows
+                from that cycle's sample (hp_poll replaces the cache with the rows that answered) —
+                valve/pump/BSH on 0x60, R5T on 0x61. A candidate segment has to survive an unbroken
+                hour, so treating that one unread second as ineligible discarded the accumulated
+                hour: 47 timeouts in 8.2 h of uptime is one relevant page missing roughly every
+                hour, against a window that needs sixty clean minutes. `collecting`, 0 min of 6 h,
+                forever, while every row it needs was present and correct — the same 24 h replayed
+                without the drop-outs yields twelve completed windows. So a sample the firmware
+                could not READ is now BLIND time rather than a state change (the tank does not start
+                charging because a UART read timed out), carried under two bounds that stop a window
+                being assembled out of absence — a single unobserved RUN long enough to hide a tank
+                charge, and a TOTAL past the same 90%-evidence shape the circulation witness uses —
+                and SUBTRACTED from the seconds the window claims to have observed. The other half
+                is unchanged and is what keeps the split honest: a state the sweep CAN see (valve on
+                DHW, BSH on, internal pump running, an implausible R5T) still ends the segment, and
+                a draw hidden inside a blind run is still caught, because the anchor standing when
+                vision was lost is what the first sighted sample is judged against.
                 availability.hpp = the ADJUDICATED per-row answer to "is this decoded number a
                 MEASUREMENT, or merely something the firmware could decode?" (#209). Every other gate
                 answers something narrower: convert() handles the wire format's own 0x8000 no-data
