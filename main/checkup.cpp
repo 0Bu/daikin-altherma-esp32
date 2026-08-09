@@ -216,9 +216,18 @@ void checkup_start() {
         P().ring.carried_span_us  = P().span_us;
         s_model_fp = P().model_fp;
         s_adopt_detect_grace = true;
-        diag_printf("checkup: window kept across a %s reset (%u h observed, RAM survived)\n",
-                    crash_reason_slug(reason),
-                    static_cast<unsigned>(P().span_us / 3600000000LL));
+        // Reported in h AND min. Whole hours alone round the first successful restore of a board's
+        // life down to "0 h observed" — the seal lands at the hourly commit, so the carried span is
+        // 0.999 h — which reads as "kept nothing" at exactly the moment this first works, and sends
+        // a reader after a defect that is not there. This line is the ONLY human-readable evidence
+        // that the restore did anything; there is no UI for it.
+        //
+        // It is the window's LIFECYCLE SPAN, not its evidence: covered_s is the seconds actually
+        // observed and is reported separately on /status.health. The two are close on a board that
+        // was watching continuously and are not the same quantity.
+        const unsigned mins = static_cast<unsigned>(P().span_us / 60000000LL);
+        diag_printf("checkup: window kept across a %s reset (%u h %u min observed, RAM survived)\n",
+                    crash_reason_slug(reason), mins / 60, mins % 60);
     } else {
         persist_wipe();
         // Not noise: "wrong_layout" after an update explains a card that emptied itself for a reason
