@@ -7,8 +7,8 @@
 // even if that best-effort erase fails, suppressed for this boot so `coredump` never advertises a
 // download espcoredump would reject on a version mismatch (#215).
 // The reason + summary are boot-time FACTS and stay cached — the summary is never re-parsed from
-// flash on a request path (http_append_status_json also runs in the poll task's WS broadcaster,
-// which only self-guards std::bad_alloc by dropping the frame).
+// flash on a request path (http_append_status_json is a request-path builder, and re-parsing a
+// core-dump image per /status poll would put a flash read and an allocation on it).
 //
 // The `coredump` flag is the ONE field that is NOT a boot-time fact: the image it describes can be
 // erased while the device runs (GET /coredump?clear=1), so a cached copy goes stale and claims a

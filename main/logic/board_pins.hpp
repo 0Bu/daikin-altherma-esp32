@@ -119,9 +119,11 @@ inline BoardPins board_pins(const char* /*target*/ = nullptr, bool octal_spi = t
 // the button dead. The dropdown must not recommend a pin the firmware itself is using.
 //
 // Writes into a CALLER-owned buffer and returns the count, rather than returning a shared static
-// list: http_append_status_json() runs on the httpd task AND on the poll task's WS broadcaster, so
-// a filtered static would be a data race between them. Returns pins strictly ascending, like
-// board_pins(). Size `out` with BOARD_PINS_MAX.
+// list: a filtered static is a data race the moment two callers filter it differently, and the
+// filter is per-request (it depends on the live config). That was a live race while
+// http_append_status_json() ran on the httpd task AND on the poll task's WS broadcaster; the
+// broadcaster is gone (#241) and the buffer stays, because the property it buys is not the caller
+// count. Returns pins strictly ascending, like board_pins(). Size `out` with BOARD_PINS_MAX.
 inline int board_pins_offerable(int* out, int cap, bool octal_spi, ReservedPins rsv = {}) {
     BoardPins bp = board_pins(nullptr, octal_spi);
     int n = 0;

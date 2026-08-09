@@ -59,8 +59,21 @@ void net_mdns_start() {
         diag_printf("net: mDNS init failed — <hostname>.local will not resolve this boot\n");
         return;
     }
-    mdns_hostname_set(CONFIG_DAIKIN_HOSTNAME);
-    mdns_service_add(nullptr, "_http", "_tcp", 80, nullptr, 0);
+    // Both results are CHECKED, for the same reason the init above is: the failure is otherwise
+    // SILENT. The responder is running, so nothing anywhere reports a fault — the name simply never
+    // resolves, and the symptom reaching the user is "the device disappeared" with the diag ring
+    // saying nothing at all. It is worst on a WIRED board, which has no setup AP to fall back to and
+    // for which <hostname>.local is the one address anybody knows. The name is deliberately NOT
+    // interpolated (it is a compile-time constant, and the neighbouring line already states it as
+    // literal text — an identifier-shaped argument is what the redaction audit exists to question).
+    esp_err_t err = mdns_hostname_set(CONFIG_DAIKIN_HOSTNAME);
+    if (err != ESP_OK)
+        diag_printf("net: mDNS hostname set failed (%s) — <hostname>.local will not resolve this boot\n",
+                    esp_err_to_name(err));
+    err = mdns_service_add(nullptr, "_http", "_tcp", 80, nullptr, 0);
+    if (err != ESP_OK)
+        diag_printf("net: mDNS _http service add failed (%s) — the device will not be discoverable\n",
+                    esp_err_to_name(err));
 }
 
 // ── pins ─────────────────────────────────────────────────────────────────────────────────────

@@ -60,7 +60,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** (a router reboot never strands the bridge) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** — recovers a ghost association no event reports | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`logic/link_watch.hpp`](../main/logic/link_watch.hpp) |
 | 16 | Captive-portal provisioning (AP-only, typed SSID, UDP:53 catch-all, 302 probe redirect + RFC 8910 option 114) | ✅ 🧪 | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp), [`logic/captive.hpp`](../main/logic/captive.hpp) |
-| 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
+| 17 | mDNS + DHCP hostname (option 12) | ✅ | [`net.cpp`](../main/net.cpp) (mDNS, either transport), [`wifi.cpp`](../main/wifi.cpp) (DHCP name) |
 | 18 | In-app WiFi re-config + **reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp) |
 | 19 | X10A auto-detection — sweep → fingerprint → model, with a retried page probe, a second-sweep confirmation before `generic`, and an **order-independent** representative pick | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
 | 20 | **IDF-free host-tested logic core** (§8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
@@ -770,6 +770,7 @@ Every ESP-IDF component this firmware links, and what it powers (from
 | `esp_timer` | uptime, poll/serial timing |
 | `mdns` (managed) | `<hostname>.local` discovery + the explicit HomeHub browse |
 | `espcoredump` | core dump to flash + `esp_core_dump_get_summary` |
+| `esp_partition` | the optional `history` snapshot partition, the `GET /coredump` stream, the OTA running-slot lookup |
 | `cjson` (managed) | POST body parsing (`http_config.cpp`) |
 
 **Compile-time defaults** live in [`main/Kconfig.projbuild`](../main/Kconfig.projbuild). Only some

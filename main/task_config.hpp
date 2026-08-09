@@ -2,10 +2,12 @@
 // The firmware's FreeRTOS task PRIORITIES, in one place.
 //
 // Every xTaskCreate site used to spell its priority as a bare literal in its own file, so the only
-// way to answer "what preempts what?" was to grep twelve files and sort the answers by hand — and
-// docs/ARCHITECTURE.md's task inventory, which states the ordering in prose, had nothing to drift
-// against. Relative priority is a property of the SYSTEM, not of any one module: it is only
-// meaningful next to the other eleven, so it is declared next to them.
+// way to answer "what preempts what?" was to grep every one of them and sort the answers by hand —
+// and docs/ARCHITECTURE.md's task inventory, which states the ordering in prose, had nothing to
+// drift against. Relative priority is a property of the SYSTEM, not of any one module: it is only
+// meaningful next to the others, so it is declared next to them. (Counts are deliberately not
+// written here: the table below IS the count, and a number in this comment would be the first
+// thing to go stale — TASK_PRIO_ETH_FALLBACK arrived without moving it.)
 //
 // STACK SIZES deliberately stay at the call sites. They are the opposite kind of fact — each one is
 // justified by what that particular task's deepest call chain does (syslog's getaddrinfo + socket

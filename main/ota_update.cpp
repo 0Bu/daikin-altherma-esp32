@@ -500,30 +500,75 @@ static void health_gate_task(void*) {
         vTaskDelete(nullptr);   // not a rollback-armed OTA image (USB flash / already valid) -> nothing to do
         return;
     }
+    // ONE line per boot rather than one per 5 s cycle: an allocation failure that persists for the
+    // whole 600 s cap would otherwise write 120 identical lines into the 6 KB diag ring and evict the
+    // boot record this window exists to explain — heap_guard.cpp's throttle, for the same reason.
+    bool skip_reported = false;
     for (int elapsed = 0;; elapsed += kHealthPollS) {
-        const bool connected = wifi_info().connected;
-        const HealthVerdict v = health_gate_decide(elapsed, kHealthBaseWindowS, kHealthHardCapS,
-                                                   wifi_configured(), connected);
-        if (v == HealthVerdict::Commit) {
-            esp_ota_mark_app_valid_cancel_rollback();
-            ESP_LOGI("ota", "image marked valid (health gate passed after %ds, wifi=%d)", elapsed, connected);
-            break;
-        }
-        if (v == HealthVerdict::GiveUp) {
-            ESP_LOGW("ota", "health gate: no connectivity after %ds; leaving image PENDING_VERIFY "
-                            "-> next reboot rolls back to the previous firmware", elapsed);
-            break;
+        // THE BODY SELF-GUARDS, like every other allocating task loop here (.claude/CLAUDE.md), and
+        // it is worth saying why it counts as one: wifi_info() is POD and health_gate_decide() is
+        // pure, but wifi_configured() reads config() BY VALUE — ~10 std::string copies for a bool.
+        // The window this task runs in is the worst possible place to leave that unguarded: 90-600 s
+        // into an OTA boot, i.e. exactly when the MQTT discovery burst and a TLS session put the
+        // heap at its peak. An escape is std::terminate -> reboot, and a reboot while PENDING_VERIFY
+        // ROLLS BACK the image — so the failure mode is not "this board reboots" but "a healthy
+        // update is reverted on every board that took it", arriving through the update path itself.
+        // Skipping a cycle is safe and is the conservative direction: no verdict is reached, elapsed
+        // still advances, and the hard cap still ends the window by leaving the image PENDING_VERIFY.
+        try {
+            const bool connected = wifi_info().connected;
+            const HealthVerdict v = health_gate_decide(elapsed, kHealthBaseWindowS, kHealthHardCapS,
+                                                       wifi_configured(), connected);
+            if (v == HealthVerdict::Commit) {
+                // The return value decides whether this image survives the next reboot, so it is not
+                // one to discard: a failed commit leaves the image PENDING_VERIFY and the bootloader
+                // reverts it, and logging the success line over that call would report the opposite
+                // of what happened — on the one path where the evidence has to be right.
+                const esp_err_t e = esp_ota_mark_app_valid_cancel_rollback();
+                if (e == ESP_OK)
+                    ESP_LOGI("ota", "image marked valid (health gate passed after %ds, wifi=%d)",
+                             elapsed, connected);
+                else
+                    diag_printf("ota: health gate passed but marking the image valid failed (%s) — "
+                                "the next reboot rolls back to the previous firmware\n",
+                                esp_err_to_name(e));
+                break;
+            }
+            if (v == HealthVerdict::GiveUp) {
+                ESP_LOGW("ota", "health gate: no connectivity after %ds; leaving image PENDING_VERIFY "
+                                "-> next reboot rolls back to the previous firmware", elapsed);
+                break;
+            }
+        } catch (const std::exception& ex) {
+            if (!skip_reported) {
+                skip_reported = true;
+                diag_printf("ota: health-gate cycle skipped (%s) — still observing\n", ex.what());
+            }
+        } catch (...) {
+            if (!skip_reported) {
+                skip_reported = true;
+                diag_printf("ota: health-gate cycle skipped (unknown exception) — still observing\n");
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(kHealthPollS * 1000));
     }
     vTaskDelete(nullptr);
 }
 
+// 4096, raised from 3072 in the same commit that gave the loop its try/catch — the guard is the
+// reason, not a round number. The deepest frame is unchanged (config() BY VALUE, ~656 B of Config
+// plus its std::string copies), but a task that previously could only std::terminate now UNWINDS,
+// and CLAUDE.md's memory section measures that path at ~700 B below the throwing frame. Adding it
+// to a stack sized before it existed is how a guard against OOM becomes a stack overflow during
+// one — the failure it was added to prevent, in the shape this firmware has already shipped twice
+// (#241, #318). The right way to settle the number is off the ELF, which a cloud session cannot
+// build; 1 KB is the conservative direction and it is TRANSIENT, since this task deletes itself
+// once the window closes.
 void ota_health_gate_arm() {
     // If the gate task can't be created, a PENDING_VERIFY OTA image is never marked valid and the
     // bootloader will roll it back on the next reboot — safe, but say so (a silent failure looks like
     // a healthy commit that never happened).
-    if (xTaskCreate(health_gate_task, "ota_health", 3072, nullptr, TASK_PRIO_OTA_GATE, nullptr) != pdPASS)
+    if (xTaskCreate(health_gate_task, "ota_health", 4096, nullptr, TASK_PRIO_OTA_GATE, nullptr) != pdPASS)
         ESP_LOGE("ota", "health-gate task alloc failed — a pending OTA image will roll back on reboot");
 }
 

@@ -253,8 +253,9 @@ inline int board_preset_i2c_pins_offerable(const BoardPreset* preset, int* out, 
 //                build serves a user who has moved the link onto the pad a preset wants.
 //
 // Writes borrowed pointers into a CALLER-owned buffer (size it with BOARD_PRESETS_MAX) and returns
-// the count, like board_pins_offerable(): http_append_status_json() runs on the httpd task AND on
-// the poll task's WS broadcaster, so a filtered shared static would be a data race between them. The
+// the count, like board_pins_offerable() and for the same reason: the filter is per-request, so a
+// shared static would be a data race between any two callers that disagree about it (it was one
+// while http_append_status_json() also ran on the poll task's WS broadcaster, removed in #241). The
 // pointed-to table is immutable and has static storage duration, so the pointers stay valid.
 inline int board_presets_offerable(const BoardPreset** out, int cap, bool octal_spi,
                                    ReservedPins link = {}) {

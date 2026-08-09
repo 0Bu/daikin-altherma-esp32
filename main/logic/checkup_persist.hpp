@@ -21,7 +21,7 @@
 // keeps up to date may never reach 24 h at all.
 //
 // ── One medium, and the honest limit ────────────────────────────────────────────────────────────
-// .noinit DRAM only. The rings are 1178 bytes and they were already static, so this costs no RAM,
+// .noinit DRAM only. The rings are 1186 bytes and they were already static, so this costs no RAM,
 // no flash write and no new partition — the arrays simply stop being initialised at startup.
 //
 // It does NOT cover a power cycle, and nothing here pretends otherwise: /status.health.persist

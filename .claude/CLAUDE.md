@@ -231,8 +231,10 @@ right order, or from the only file entitled to: "no source can frame a Modbus wr
 about a whole component, and the only instrument that can settle it is source TEXT. So each
 `test/test_*_contract.mjs` reads the relevant firmware tree and asserts a boundary —
 the X10A-gated MQTT lifecycle, the single X10A-free tombstone exception, the explicit-action-only
-mDNS browse, the embedded-UI delivery budget (#371) and the heating-curve CONSENT/DIAGNOSIS
-boundary. Count them with the glob rather than from this sentence; a fifth landed here without
+mDNS browse, the embedded-UI delivery budget (#371), the wired-transport boundary (#405: the trust
+surface keys on the setup AP, the boot fork gates radio and portal, the probe never drives a
+configured pad) and the heating-curve CONSENT/DIAGNOSIS
+boundary. Count them with the glob rather than from this sentence; two have landed here without
 moving it. The last recursively scans all C++
 sources and asserts that no write entry point, actuator type, FC06/FC16 function vocabulary, echo
 parser or value encoder survives. It pins the current consent shape: saving the room source starts
@@ -297,7 +299,7 @@ subscript is bounds-checked; structs carry NSDMIs) — and the defects this proj
 fixes for are domain and resource-budget defects, which are not in a linter's language. So there is
 deliberately no `.clang-tidy` file either: an inert config reads like a guarantee while doing nothing.
 What that survey DID find was the opposite gap. `main/logic/` was never the exposed half — it has
-`-Wall -Wextra -Werror`, 6300+ lines of host tests and seven audits. `main/*.cpp` was: 28 files where
+`-Wall -Wextra -Werror`, 10000+ lines of host tests and seven audits. `main/*.cpp` was: the files where
 every shipped crash happened, carrying no warning policy of its own while THREE comments in it
 (`nvs_storage.hpp`'s `[[nodiscard]]`, `hp_comm.cpp`'s unreachable return, `logic/timestamp.hpp`'s
 `%d` cast) were written as though a warning class were fatal. What that half lacked was not an
@@ -316,7 +318,7 @@ perform, so enforcing them would buy re-stamping rather than re-recording. Count
 `sed -n '/^  gates:/,/^  build:/p' .github/workflows/build.yml | grep -c 'run: \./\(scripts\|tools\)/'`
 rather than trusting a number written here, which drifts the moment one is added — and scope the
 count to the JOB, since the same pattern run over the whole file also picks up the `build` job's own
-script steps (22 workflow-wide vs 17 gates today), i.e. answers a different question than the one
+script steps (24 workflow-wide vs 19 gates today), i.e. answers a different question than the one
 being asked. Actions bills every JOB rounded up to a whole
 minute, so N ~15 s jobs cost N billed minutes for well under one minute of work. The same budget rule shapes the rest of
 `.github/workflows/build.yml`, and it is worth knowing before editing it: the ~5-minute firmware
@@ -795,10 +797,11 @@ weather_forecast.cpp  the Open-Meteo forecast client (provider + model pinned in
                 icon_seamless), optional comparison evidence for heating-curve diagnosis. Own task,
                 and its 12288 stack is the largest of the tasks this firmware creates itself (only
                 the httpd worker's 16384 is bigger) for the reason CLAUDE.md's stack section states —
-                TLS + HTTP + JSON on one frame — with the loop body under a try/catch —
-                though only the `catch (const std::exception&)` half: unlike mqtt_task, poll_task,
-                mb_task and syslog_task it carries no `catch (...)`, so a non-std throw still unwinds
-                past the task boundary into std::terminate and reboots the board. Cadence 45 min on success, 5 min on
+                TLS + HTTP + JSON on one frame — with the loop body under BOTH halves of the task
+                guard (`catch (const std::exception&)` and `catch (...)`), like mqtt_task, poll_task,
+                mb_task and syslog_task: the second half is the one this task shipped without, and
+                without it a non-std throw unwound past the task boundary into std::terminate.
+                Cadence 45 min on success, 5 min on
                 failure, and POST /set_weather only NOTIFIES it, so the request path does no DNS, TLS
                 or JSON work. Skipped in safe mode. THE SAVED LOCATION IS THE WHOLE GATE (#357): the
                 loop checks cfg.weather_enabled and idles on a 60 s notify-wait BEFORE the URL is
@@ -1349,16 +1352,17 @@ rtos_guard.hpp  THE ONE unwind-safe RAII mutex guard (daik::SemGuard), aliased a
                 neighbour. Adds a BOUNDED/zero-wait acquire for the callback contexts that must not
                 block (esp-mqtt's event task), which neither old shape could express
 task_config.hpp THE task PRIORITY table (TASK_PRIO_*). Relative priority is a property of the SYSTEM
-                — only meaningful beside the other eleven — so it is declared once instead of as
-                twelve bare literals docs/ARCHITECTURE.md's task inventory had nothing to drift
-                against. STACK SIZES deliberately stay at their call sites: each is justified by that
+                — only meaningful beside the others — so it is declared once instead of as one bare
+                literal per xTaskCreate site, which docs/ARCHITECTURE.md's task inventory had nothing
+                to drift against. The table is the count; a number written beside it is not (the
+                wired-link watch was added to the table and to neither prose copy of "twelve"). STACK SIZES deliberately stay at their call sites: each is justified by that
                 task's own measured deepest frame, and a shared table of them would invite exactly
                 the copy-the-neighbour sizing the memory section warns about
 logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, registers, value_def,
                 config_model, net_link,
                 config_store, discovery, ha_device, detect, history, json, mqtt_base, mqtt_group, mqtt_uri, homehub_map, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch, heap_watchdog,
-                wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ui_lang,
+                wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ota_quiesce, ui_lang,
                 http_body, http_surface, query_flag, redact, mcp, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale, cop_scope, profile_view, feature_gate, availability,
@@ -1367,10 +1371,14 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 binary_semantics, circulation_source, env3, heating_curve_diagnosis,
                 heating_curve_mqtt, hp_query_log, http_cache, modbus_snapshot, mqtt_publish_gate,
                 open_meteo, reference_temperature, weather_forecast, weather_mqtt,
-                history_persist, plant_gate).
+                history_persist).
                 The list is the DIRECTORY, not a curated subset: a header missing from it reads as
                 "there is no pure rule for that", which is the one thing this inventory must never
-                say about a rule that exists — ten of them had accumulated unlisted.
+                say about a rule that exists — ten of them had accumulated unlisted. It drifts in the
+                OTHER direction too, and that half reads worse: `plant_gate` sat here naming a file
+                that has never existed (the gate is two fields of heating_curve_diagnosis.hpp), so
+                the inventory invented a pure rule instead of omitting one. Diff it against `ls
+                main/logic/` rather than reading it — both errors are invisible from inside the list.
                 checkup.hpp = the 24-HOUR PLANT CHECKUP (#208) — the third question the dashboard
                 asks, after "what is it doing now" (the schematic) and "what did this reading do
                 today" (history.hpp): IS ANYTHING WORTH REPORTING. Counted events and window minima,

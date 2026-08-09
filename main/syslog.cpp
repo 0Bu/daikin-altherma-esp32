@@ -185,10 +185,11 @@ static SendResult syslog_sendto(const struct sockaddr_in& dest, const char* text
     // "-" — never a fabricated pre-epoch date. A collector conventionally substitutes its own receive
     // time for "-", so a boot's first few lines (sent before the client's first sync lands) just carry
     // a slightly-later effective timestamp rather than a wrong one.
-    // rfc3339_utc() returns (a short-lived, heap-allocating) std::string; syslog_task's loop has no
-    // top-level OOM guard (unlike mqtt_task/poll_task), so an escaping std::bad_alloc here would
-    // unwind straight into std::terminate. Fall back to the NILVALUE instead — one skipped timestamp
-    // costs nothing, an escaping exception costs a reboot.
+    // rfc3339_utc() returns (a short-lived, heap-allocating) std::string. Caught HERE rather than
+    // left to syslog_task's own top-level guard, which would be the wrong granularity: that guard
+    // skips a whole cycle, and losing the datagram is a strictly worse answer than sending it with
+    // the NILVALUE a collector already substitutes its own receive time for — and the once-per-boot
+    // crash replay reaches this same function, where a skipped cycle would drop the crash record.
     const char* ts_str = "-";
     std::string ts;
     try {
