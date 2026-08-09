@@ -82,6 +82,34 @@ assert.ok(startAt < pollAt && histAt < pollAt,
   "history_start() and checkup_start() must run BEFORE the poll task: both adopt or wipe .noinit " +
   "rings without a lock, which is only sound while no producer exists");
 
+// ── 1c. Every .noinit region must be UNINITIALISED storage ─────────────────────────────────────
+// `__NOINIT_ATTR` places an object in a NOLOAD section; it does NOT stop C++ from initialising it.
+// Both ring types here carry non-static data member initialisers, several non-zero, so a PLAIN
+// definition gets an implicit default constructor that runs at startup and re-initialises exactly
+// those members — while the bare scalars around them (magic, version, crc) are left untouched.
+//
+// That is not a theoretical hazard. It shipped: the checkup's window was rejected on the reference
+// board as `bad_crc` after a real reboot, because the header survived and passed the magic, version
+// and layout checks while the rings had been quietly reset under it. It reads as corrupted DRAM and
+// is a missing four characters. history.cpp had already solved it with a union carrying a
+// user-provided empty constructor, and documented why — and the second implementation reintroduced
+// the bug anyway, which is exactly when a mechanical check earns its place.
+//
+// Asserted over source text because it is a property of a DECLARATION that no host test can reach:
+// the failure is created by the compiler, downstream of anything `logic/` can see.
+for (const f of ["main/history.cpp", "main/checkup.cpp"]) {
+  const src = read(f);
+  const decls = [...src.matchAll(/__NOINIT_ATTR\s+(\w+)\s+(\w+)\s*;/g)];
+  assert.ok(decls.length > 0, `${f} must still declare its .noinit region`);
+  for (const [, type] of decls) {
+    const def = new RegExp(`union\\s+${type}\\s*\\{[\\s\\S]*?${type}\\(\\)\\s*\\{\\s*\\}`);
+    assert.match(src, def,
+      `${f}: __NOINIT_ATTR ${type} must be a UNION with a user-provided empty constructor, or the ` +
+      `members carrying data-member initialisers are silently re-initialised at every boot while ` +
+      `the bare scalars beside them survive — the shape that reports as bad_crc`);
+  }
+}
+
 // ── 2. An unconfigured source is stated by ABSENCE, never by an empty chart ─────────────────────
 // The circulation ring used to be labelled unconditionally, so /status.history.rows offered a trend
 // the device could never fill and the Diagnostics card drew "no readings yet" under a row reading

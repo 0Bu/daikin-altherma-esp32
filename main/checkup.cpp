@@ -27,7 +27,7 @@ namespace {
 // startup, which is the entire mechanism: whatever the previous boot left is what checkup_start()
 // gets to judge. The in-flight states stay ORDINARY statics below and are deliberately never
 // restored; a reboot is the discontinuity both step functions already handle.
-struct PersistStore {
+struct PersistedCheckup {
     uint32_t magic;
     uint16_t version;
     uint16_t reserved;
@@ -38,10 +38,33 @@ struct PersistStore {
     logic::CheckupRing  ring;
     logic::DhwLossRing  dhw;
 };
+
+// UNINITIALISED STORAGE, and the UNION is what makes it that — history.cpp's PersistStore carries
+// the same construction for the same reason, and this file shipped the bug it exists to prevent.
+//
+// `CheckupRing`/`DhwLossRing` carry non-static data member initialisers, several of them non-zero
+// (`min_bar`/`max_loss_tenths_k_h` start at CHECKUP_ABSENT). A plain struct definition therefore
+// gets an implicit default constructor that RUNS at startup and re-initialises exactly those two
+// members — while `magic`, `version`, `layout_fp`, `model_fp`, `span_us` and `crc`, being bare
+// scalars with no initialiser, are left untouched in .noinit.
+//
+// The result is the worst possible shape and is precisely what the reference board reported: the
+// header survives the reboot and passes the magic, version and layout checks, the rings do not, and
+// the record is rejected as `bad_crc` — a memory-fault verdict for a compiler doing its job. It
+// looked like corrupted DRAM and was a missing four characters.
+//
+// A union with a user-provided empty constructor emits no initialisation at all, which is the
+// standard C++ way to say "these bytes are whatever they were". checkup_start() then initialises
+// them explicitly on every boot that does not adopt them, so nothing is read before it is written.
+union PersistStore {
+    PersistedCheckup v;
+    PersistStore() {}      // deliberately leaves v untouched
+    ~PersistStore() {}
+};
 __NOINIT_ATTR PersistStore s_store;
 
-logic::CheckupRing& s_ring     = s_store.ring;
-logic::DhwLossRing& s_dhw_ring = s_store.dhw;
+// One name for the region, so no call site has to know about the union.
+inline PersistedCheckup& P() { return s_store.v; }
 logic::CheckupState s_state;
 logic::DhwLossState s_dhw_state;
 
@@ -117,37 +140,37 @@ bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int
 // clock; the observed lifecycle rides as `span_us` instead.
 uint32_t persist_crc() {
     uint32_t crc = CONFIG_CRC32_INIT;
-    const auto& r = s_store.ring;
+    const auto& r = P().ring;
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(r.buf), sizeof(r.buf));
     crc = config_crc32_update(crc, &r.count, sizeof(r.count));
     crc = config_crc32_update(crc, &r.head, sizeof(r.head));
     crc = config_crc32_update(crc, &r.age_buckets, sizeof(r.age_buckets));
-    const auto& d = s_store.dhw;
+    const auto& d = P().dhw;
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(d.buf), sizeof(d.buf));
     crc = config_crc32_update(crc, &d.count, sizeof(d.count));
     crc = config_crc32_update(crc, &d.head, sizeof(d.head));
-    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&s_store.span_us),
-                              sizeof(s_store.span_us));
-    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&s_store.model_fp),
-                              sizeof(s_store.model_fp));
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().span_us),
+                              sizeof(P().span_us));
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().model_fp),
+                              sizeof(P().model_fp));
     return config_crc32_final(crc);
 }
 
 // Re-seal after a commit. The ONLY writer of the record's header, so the seal and the bytes it
 // covers cannot drift apart.
 void persist_seal() {
-    s_store.magic     = logic::CHECKUP_PERSIST_MAGIC;
-    s_store.version   = logic::CHECKUP_PERSIST_VERSION;
-    s_store.reserved  = 0;
-    s_store.layout_fp = logic::checkup_layout_fingerprint();
-    s_store.model_fp  = s_model_fp;
-    s_store.span_us   = s_ring.span_us();
-    s_store.crc       = persist_crc();
+    P().magic     = logic::CHECKUP_PERSIST_MAGIC;
+    P().version   = logic::CHECKUP_PERSIST_VERSION;
+    P().reserved  = 0;
+    P().layout_fp = logic::checkup_layout_fingerprint();
+    P().model_fp  = s_model_fp;
+    P().span_us   = P().ring.span_us();
+    P().crc       = persist_crc();
 }
 
 void persist_wipe() {
-    s_ring.reset();
-    s_dhw_ring.reset();
+    P().ring.reset();
+    P().dhw.reset();
     persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
 }                       // reset is consumed asynchronously, after checkup_reset_on_detect set it
 
@@ -164,7 +187,7 @@ bool apply_reset_locked() {
 
 bool apply_dhw_reset_locked() {
     if (!s_dhw_reset_requested.exchange(false)) return false;
-    s_dhw_ring.reset();
+    P().dhw.reset();
     s_dhw_state = logic::DhwLossState{};
     persist_seal();
     return true;
@@ -178,24 +201,24 @@ bool apply_dhw_reset_locked() {
 void checkup_start() {
     const uint32_t want_fp = logic::checkup_layout_fingerprint();
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
-    s_persist_verdict = logic::checkup_restore_verdict(reason, s_store.magic, s_store.version,
-                                                       s_store.layout_fp, want_fp,
-                                                       s_store.crc, persist_crc(),
+    s_persist_verdict = logic::checkup_restore_verdict(reason, P().magic, P().version,
+                                                       P().layout_fp, want_fp,
+                                                       P().crc, persist_crc(),
                                                        safe_mode_active());
     if (s_persist_verdict == logic::CheckupRestore::Accept) {
         // Adopt the completed buckets in place. The open hour is dropped (it is outside the seal),
         // the monotonic anchors restart, and the lifecycle the previous boot observed is carried
         // across as a duration — see CheckupRing::carried_span_us.
-        s_ring.pending      = logic::CheckupBucket{};
-        s_dhw_ring.pending  = logic::DhwLossBucket{};
-        s_ring.first_sample_us  = -1;
-        s_ring.latest_sample_us = -1;
-        s_ring.carried_span_us  = s_store.span_us;
-        s_model_fp = s_store.model_fp;
+        P().ring.pending      = logic::CheckupBucket{};
+        P().dhw.pending  = logic::DhwLossBucket{};
+        P().ring.first_sample_us  = -1;
+        P().ring.latest_sample_us = -1;
+        P().ring.carried_span_us  = P().span_us;
+        s_model_fp = P().model_fp;
         s_adopt_detect_grace = true;
         diag_printf("checkup: window kept across a %s reset (%u h observed, RAM survived)\n",
                     crash_reason_slug(reason),
-                    static_cast<unsigned>(s_store.span_us / 3600000000LL));
+                    static_cast<unsigned>(P().span_us / 3600000000LL));
     } else {
         persist_wipe();
         // Not noise: "wrong_layout" after an update explains a card that emptied itself for a reason
@@ -327,7 +350,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     const bool discard_dhw_sample = apply_dhw_reset_locked();
     s_cov       = coverage;
     s_fault_now = s.fault;
-    s_ring.observe(now);
+    P().ring.observe(now);
 
     // Close the old hour before folding the current sample. For a continuous boundary, zero only
     // the cross-boundary duration while retaining the prior tri-state witnesses: step() can then
@@ -341,17 +364,17 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
                 gap_us <= static_cast<int64_t>(logic::CHECKUP_MAX_GAP_S) * 1000000;
         }
         const uint32_t skipped = logic::checkup_skipped(s_state.bucket, bucket);
-        s_ring.commit(skipped);
-        s_dhw_ring.commit(skipped);
+        P().ring.commit(skipped);
+        P().dhw.commit(skipped);
         persist_seal();          // the sealed bytes change ONLY here; see persist_crc()
         if (continuous_boundary) s_state.last_us = now; // dt=0, edge witnesses intentionally kept
-        logic::checkup_step(s_state, s_ring.pending, s, now);
+        logic::checkup_step(s_state, P().ring.pending, s, now);
         if (!discard_dhw_sample)
-            logic::dhw_loss_step(s_dhw_state, s_dhw_ring.pending, s, now);
+            logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     } else {
-        logic::checkup_step(s_state, s_ring.pending, s, now);
+        logic::checkup_step(s_state, P().ring.pending, s, now);
         if (!discard_dhw_sample)
-            logic::dhw_loss_step(s_dhw_state, s_dhw_ring.pending, s, now);
+            logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     }
     s_state.bucket      = bucket;
     s_state.have_bucket = true;
@@ -365,9 +388,9 @@ logic::CheckupReport checkup_report() {
     // Until then expose an empty report, never stale identity A and never consume the guard early.
     if (s_reset_requested.load()) return logic::CheckupReport{};
     return logic::checkup_evaluate(
-        logic::checkup_aggregate(s_ring), s_cov, s_fault_now,
+        logic::checkup_aggregate(P().ring), s_cov, s_fault_now,
         s_dhw_reset_requested.load() ? logic::DhwLossWindow{}
-                                     : logic::dhw_loss_aggregate(s_dhw_ring));
+                                     : logic::dhw_loss_aggregate(P().dhw));
 }
 
 } // namespace daik
