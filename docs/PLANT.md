@@ -55,12 +55,27 @@ raised only by a strict increase of one exact counter between comparable samples
 absolute non-zero value. Any check concluding the *absence* of a pattern needs a complete lifecycle
 and at least 90 % valid evidence for its own signal — a stable counter does not prove absence.
 
+**DHW standing loss needed a second source before it could be a check at all** (#361). The cooling
+rate alone does not separate the two causes — a healthy tank loses ~0.3 K/h without DHW circulation
+and ~1.2 K/h with it — so an external power meter on the circulation pump (`POST /set_circulation`)
+says which a given hour was. The witness is optional, and a window whose pump state is unknown buys
+no observed seconds rather than an attributed loss.
+
+**Missing evidence is not a plant state.** All its inputs ride the X10A sweep, where one page that
+does not answer removes all of that page's rows from the cycle. Treating that unread second as
+*ineligible* discarded the whole accumulated hour, which on the reference installation happened
+about once an hour against a window needing sixty clean minutes — so the check read "0 min of 6 h"
+indefinitely with every row it needed present and correct. A sample the firmware could not read is
+therefore **blind time**, bounded so no unobserved stretch can hide a tank charge and subtracted
+from the seconds the window claims to have observed. A state the sweep *can* see still ends the
+window, and a draw hidden inside a blind stretch is still caught against the temperature anchor
+standing when vision was lost.
+
 **Deliberately not built**, each because the bus cannot support the claim: an absolute minimum-flow
 threshold (model-specific over a 3–18 kW catalog, and the unit raises its own error anyway — so the
 flow minimum is *reported* with no verdict attached), a flat daily start count (24 starts is one an
-hour in January and a control problem in April, so the mean run length is what knows the load),
-inferred 3-way-valve leakage (the sensors sit upstream of the diverter, and a measured healthy plant
-would trip it daily), and any overall "healthy" verdict.
+hour in January and a control problem in April, so the mean run length is what knows the load), and
+any overall "healthy" verdict.
 
 ---
 

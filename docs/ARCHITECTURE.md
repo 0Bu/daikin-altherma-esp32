@@ -651,8 +651,16 @@ host-testable core is unusually large and valuable, because the risky parts are 
 
   **DHW heat loss adds one independent witness without overstating causality.** A candidate window
   requires the 3-way valve outside DHW, the internal water pump and BSH off, plausible R5T, and 45
-  minutes of settling after tank charging. A drop of at least 0.4 K inside ten minutes is treated as
-  draw-like contamination and discards that segment. The remaining non-overlapping one-hour windows
+  minutes of settling after tank charging — each judged on a row the sweep could actually READ. A row
+  that did not answer this cycle is *blind time*, not a disqualifying state: since every input rides
+  the X10A sweep, where one silent page removes all of its rows from that sample, treating an unread
+  second as ineligible discarded the whole accumulated hour, and at the reference installation's
+  timeout rate no window ever completed. Blind time is bounded twice — no single unobserved run long
+  enough to hide a tank charge, and a per-window total inside the same 90% evidence rule — and is
+  subtracted from the seconds the window reports as observed. A drop of at least 0.4 K inside ten
+  minutes is treated as draw-like contamination and discards that segment; a drop that accumulated
+  while unobserved is judged against the anchor standing when vision was lost, before that anchor is
+  re-armed. The remaining non-overlapping one-hour windows
   report their maximum R5T drop; at least 0.8 K/h is an `Info` project heuristic, while `Ok` requires
   a complete 24-hour lifecycle and six clean hours. When configured, the board subscribes to the
   Shelly's exact MQTT status topic and uses mapped active power with hysteresis, freshness and
@@ -660,7 +668,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   confirmation window are one activity train; OFF still needs an uninterrupted confirmation window.
   A high window is labelled “with pump” only with at least five minutes of confirmed
   run time, and “pump off” only after at least two hours of confirmed off time plus 90% source
-  coverage. R5T is a point sensor in a stratified tank: even high loss with the external pump off is
+  coverage — measured against the window's observed seconds, since the witness is only decoded on
+  cycles the segment could see and must not be charged for an unrelated bus going quiet. R5T is a point sensor in a stratified tank: even high loss with the external pump off is
   not proof of a leaking diverter/check valve, a gravity loop, insulation loss or a draw.
 
   The card also deliberately omits claims the available inputs cannot support: 3-way-valve leakage
