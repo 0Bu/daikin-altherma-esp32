@@ -65,6 +65,23 @@ assert.doesNotMatch(history, /fold_board_locked\([^)]*\);[\s\S]*?fold_board_lock
 assert.match(history, /if \(board_trend\(d\)\) continue;/,
   "history_record()'s row loop must SKIP board trends, leaving them to history_record_board()");
 
+// ── 1b. The .noinit restore is decided BEFORE a producer task exists ───────────────────────────
+// checkup_start() and history_start() adopt or wipe ~30 KB of prior state by reading memory nothing
+// has initialised. That is only single-threaded — and therefore lock-free, which is how both are
+// written — while no task can be folding into those rings yet. Ordering is the whole safety
+// argument, and it lives in one file, so a source-text check is exactly the instrument for it:
+// moving either call after hp_poll_start()/mqtt_start() would race a producer against a wipe, and
+// nothing else here could see it.
+const mainCpp = read("main/main.cpp");
+const startAt   = mainCpp.indexOf("checkup_start()");
+const histAt    = mainCpp.indexOf("history_start()");
+const pollAt    = mainCpp.indexOf("hp_poll_start(");
+assert.ok(startAt > 0 && histAt > 0 && pollAt > 0,
+  "main.cpp must start the trends, the checkup and the poll task");
+assert.ok(startAt < pollAt && histAt < pollAt,
+  "history_start() and checkup_start() must run BEFORE the poll task: both adopt or wipe .noinit " +
+  "rings without a lock, which is only sound while no producer exists");
+
 // ── 2. An unconfigured source is stated by ABSENCE, never by an empty chart ─────────────────────
 // The circulation ring used to be labelled unconditionally, so /status.history.rows offered a trend
 // the device could never fill and the Diagnostics card drew "no readings yet" under a row reading

@@ -54,6 +54,7 @@
 #include "logic/link_watch.hpp"
 #include "logic/feature_gate.hpp"
 #include "logic/history.hpp"
+#include "logic/checkup_persist.hpp"
 #include "logic/history_persist.hpp"
 #include "logic/lwt_select.hpp"
 #include "logic/profile_view.hpp"
@@ -9760,6 +9761,120 @@ static void test_feature_gate() {
     CHECK(!uc5_supported(ghost_cov));
 }
 
+// ── logic/checkup_persist.hpp ───────────────────────────────────────────────────────────────────
+// The checkup's window is the part of this firmware that tolerates a reboot WORST: the window is
+// 24 h and the requirements are hours long, so losing it loses the verdict rather than a few
+// samples. These pin what may be re-adopted and, more importantly, what may not.
+static void test_checkup_persist() {
+    using namespace logic;
+
+    const uint32_t fp = checkup_layout_fingerprint();
+    const uint32_t crc = 0xAABBCCDDu;
+
+    // The happy path, and then every refusal in the order the verdict function ranks them: the
+    // cheapest, most explanatory one must win, or a power-cycled board full of garbage gets reported
+    // as a memory fault and sends a reader hunting for one that is not there.
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, fp, fp, crc, crc)
+          == CheckupRestore::Accept);
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::POWERON), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, fp, fp, crc, crc)
+          == CheckupRestore::PowerCycle);
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), 0,
+                                  CHECKUP_PERSIST_VERSION, fp, fp, crc, crc)
+          == CheckupRestore::NoRecord);
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION + 1, fp, fp, crc, crc)
+          == CheckupRestore::WrongVersion);
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, fp ^ 1u, fp, crc, crc)
+          == CheckupRestore::WrongLayout);
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, fp, fp, crc, crc ^ 1u)
+          == CheckupRestore::BadCrc);
+
+    // A PANIC is the boot whose preceding hours matter most, so it must adopt; a BROWNOUT must not,
+    // because the supply dipped and the contents are not proven — refused rather than left to the
+    // CRC, exactly as the trends refuse it.
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::PANIC), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, fp, fp, crc, crc)
+          == CheckupRestore::Accept);
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::BROWNOUT), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, fp, fp, crc, crc)
+          == CheckupRestore::PowerCycle);
+
+    // SAFE MODE refuses outright, ahead of every intactness question, and it is the rule that is not
+    // about the bytes: safe mode never starts the poll task, so nothing would age an adopted window
+    // — it would sit frozen at its pre-reboot content, presented as a live 24-hour assessment, for
+    // as long as the latch holds. Evidence outliving its source, which is exactly what the checkup's
+    // own honesty rules exist to prevent.
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, fp, fp, crc, crc, /*safe_mode=*/true)
+          == CheckupRestore::SafeMode);
+    // ...and it outranks even a power cycle, so the reported reason is the one a reader can act on.
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::POWERON), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, fp, fp, crc, crc, /*safe_mode=*/true)
+          == CheckupRestore::SafeMode);
+    CHECK(std::string(checkup_restore_slug(CheckupRestore::SafeMode)) == "safe_mode");
+
+    // Every verdict says something distinct on /diag and /status.health.persist.
+    CHECK(std::string(checkup_restore_slug(CheckupRestore::Accept)) == "accept");
+    CHECK(std::string(checkup_restore_slug(CheckupRestore::WrongLayout)) == "wrong_layout");
+    CHECK(std::string(checkup_restore_slug(CheckupRestore::ModelChanged)) == "model_changed");
+    CHECK(std::string(checkup_restore_slug(CheckupRestore::PowerCycle)) == "power_cycle");
+
+    // The layout fingerprint is the half a CRC cannot do. A bucket is a pile of anonymous counters:
+    // nothing in `buh_s` says which row it came from, so an update that moved a locator or a
+    // counting threshold would hand the previous build's numbers to a check that now means something
+    // else by them. The fingerprint has to be STABLE across calls and SENSITIVE to that.
+    CHECK(checkup_layout_fingerprint() == fp);
+    CHECK(fp != 0);
+
+    // The model identity is separate and is compared at detection. Different profile, different
+    // window; the same profile re-detected on a fresh boot is the same unit and keeps its day.
+    CHECK(checkup_model_fingerprint("altherma3_r_erga") ==
+          checkup_model_fingerprint("altherma3_r_erga"));
+    CHECK(checkup_model_fingerprint("altherma3_r_erga") !=
+          checkup_model_fingerprint("altherma_top_grade"));
+    CHECK(checkup_model_fingerprint("generic") != checkup_model_fingerprint(nullptr));
+    // A prefix must not collide with the longer id it is a prefix of — the NUL is fed deliberately.
+    CHECK(checkup_model_fingerprint("altherma_gshp") != checkup_model_fingerprint("altherma_gshp2"));
+
+    // ── the carried lifecycle ────────────────────────────────────────────────────────────────────
+    // first/latest_sample_us are MONOTONIC and restart at zero, so a restore cannot adopt them: the
+    // previous boot's span rides as a duration instead. Without this the restored window would
+    // report full_span() == false for another 24 h and every `ok` verdict would stay suppressed on
+    // evidence the device actually has.
+    CheckupRing r;
+    r.observe(0);
+    r.observe(20LL * 3600 * 1000000);          // 20 h in this boot
+    CHECK(!r.full_span());
+    CHECK(r.span_us() == 20LL * 3600 * 1000000);
+
+    CheckupRing restored;
+    restored.carried_span_us = 20LL * 3600 * 1000000;   // ...carried across a reboot
+    CHECK(!restored.full_span());
+    restored.observe(0);
+    restored.observe(5LL * 3600 * 1000000);              // plus 5 h in the new boot
+    CHECK(restored.span_us() == 25LL * 3600 * 1000000);
+    CHECK(restored.full_span());
+
+    // reset() must clear it too, or an explicit re-detect would hand a brand-new window a lifecycle
+    // it never observed — a green verdict bought with the previous unit's uptime.
+    restored.reset();
+    CHECK(restored.carried_span_us == 0);
+    CHECK(restored.span_us() == 0);
+    CHECK(!restored.full_span());
+
+    // The seal excludes `pending`, so a restore drops the open hour. Its counters must not survive
+    // into the adopted window: a partial hour was never a completed bucket.
+    CheckupRing open;
+    open.pending.covered_s = 1234;
+    open.pending.starts = 7;
+    open.pending = CheckupBucket{};
+    CHECK(open.pending.covered_s == 0 && open.pending.starts == 0);
+}
+
 // ── logic/history_persist.hpp ───────────────────────────────────────────────────────────────────
 // Persisting the rings is the one feature here whose failure mode is a CONFIDENTLY WRONG chart
 // rather than an absent one, so the tests are written against the ways a restore can be wrong while
@@ -10803,6 +10918,7 @@ int main() {
     test_tie_break_reach();
     test_entity_identity();
     test_feature_gate();
+    test_checkup_persist();
     test_history_persist();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);

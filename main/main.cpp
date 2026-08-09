@@ -25,6 +25,7 @@
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "env3.hpp"
+#include "checkup.hpp"
 #include "history.hpp"
 #include "syslog.hpp"
 #include "hp_poll.hpp"
@@ -129,6 +130,7 @@ static void boot_sequence() {
     // History has two independent producer tasks. Create their shared lock before either starts —
     // and before HTTP can ask for a snapshot — rather than racing two lazy creators on first boot.
     daik::history_start();
+    daik::checkup_start();   // same rule: judge .noinit before a producer task exists
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (!daik::safe_mode_active()) {
         daik::env3_start();              // optional outdoor climate sensor (no-op unless configured)

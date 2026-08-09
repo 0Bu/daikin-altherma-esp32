@@ -111,6 +111,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 71 | **Pinned stack contract on the `/status` builder** — `-Os` on that one translation unit, because ~9 KB of its 11.8 KB frame was a `-Og` slot-allocation artefact, not live data | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp) |
 | 72 | **Reboot-surviving 24-hour trends** — `.noinit` DRAM for any reset that kept power, plus a coarse snapshot in the optional `hist` partition across an OTA; both gated on a derived trend-catalog fingerprint, the stored one spliced by absolute wall-clock bucket | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
+| 79 | **Reboot-surviving plant checkup** — the 24-hour window rides the same `.noinit` DRAM, sealed with a layout fingerprint over every row locator and counting threshold; the model is re-checked at detection and safe mode never adopts | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`checkup.cpp`](../main/checkup.cpp) |
 | 73 | **Heap watchdog** — the escalation every other OOM guard here deliberately lacks: sustained exhaustion of the largest *internal* contiguous block becomes a deliberate restart with a persisted, capped breadcrumb, because a wedge that never recovers is worse than a crash | ✅ 🧪 | [`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp), [`heap_guard.cpp`](../main/heap_guard.cpp) |
 | 74 | **Presenter-parity gate** — the browser's copies of the leaving-water / post-BUH / COP-scope / held-over-page rules are diffed against the C++ headers over the whole catalog, so "host-tested" stops meaning "the copy that does not ship is tested" | ✅ 🧪 | [`presenter_golden_dump.cpp`](../test/presenter_golden_dump.cpp), [`presenter_parity.mjs`](../tools/presenter/presenter_parity.mjs), [`selftest.sh`](../tools/presenter/selftest.sh) |
 | 75 | **One unwind-safe mutex guard** for the whole firmware, replacing nine per-file copies that had drifted into two shapes — plus a bounded/try-lock mode for the callback contexts that must not block | ✅ | [`rtos_guard.hpp`](../main/rtos_guard.hpp) |
@@ -401,6 +402,15 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   cached, so a dump erased mid-session cannot strand a banner. A dump whose `app_elf_sha256` does not
   match the **running** build — an orphan that survived an OTA — is erased on **proof**, so
   `coredump` never advertises a download the decoder would reject.
+- **✅ 🧪 The 24-hour plant checkup survives a reboot** ([`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp)).
+  The same `.noinit` mechanism one feature down, for the measurement that tolerates a reboot worst:
+  the window is 24 h and the requirements are hours, so losing it loses the *verdict*. `.noinit` only
+  — the `hist` partition is absent on every over-the-air-updated board, so a second tenant would buy
+  nothing there. The seal excludes the open hour, the lifecycle is carried as a duration (the
+  monotonic anchors restart), and a **layout fingerprint** over the geometry, every row locator and
+  every counting threshold invalidates the record when an update changes what a stored counter means.
+  Two refusals stop the window outliving its source: safe mode never adopts, since nothing there would
+  age it, and the poll loop keeps the clock running while the bus is unidentified.
 - **✅ 🧪 The 24-hour trends survive a reboot** ([`logic/history_persist.hpp`](../main/logic/history_persist.hpp)).
   Still not in NVS — that would be ~100k writes a year in the partition holding the WiFi credentials —
   but the rings now live in `.noinit` DRAM, so every reset that kept power keeps them at no RAM cost

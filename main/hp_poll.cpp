@@ -404,7 +404,7 @@ static bool poll_detect() {                                    // returns true i
     // detection defer to the per-row identity check, which can actually tell a re-detect of the same
     // unit from a different one; every later call resets exactly as before. The checkup has no such
     // problem — it is not persisted, so a reboot starts it over regardless.
-    checkup_reset();
+    checkup_reset_on_detect(d.best.empty() ? "generic" : d.best.c_str());
     history_reset_on_detect();
     config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
                      d.eeprom);
@@ -438,6 +438,18 @@ static void poll_task(void*) {
             // task to watch the largest contiguous block would spend the very resource it measures.
             heap_guard_sample();
             if (config().profile == "auto") {
+                // Keep the CHECKUP's clock running while the bus is unidentified. The window is now
+                // adopted from .noinit at boot (logic/checkup_persist.hpp), and a board whose X10A
+                // stops answering across a reboot — a pulled cable, a /set_hp onto wrong pins —
+                // never resolves a profile, never reaches poll_once(), and would therefore present
+                // the FROZEN pre-reboot day as a live 24-hour assessment: evidence that outlives the
+                // source it came from, which is the one thing the checkup's own honesty rules exist
+                // to prevent. An empty sample books no observed seconds and ages the ring, so the
+                // stale hours are pushed out within the day and every check falls back to what it
+                // can still evidence. Coverage is empty because it is TRUE: no profile is resolved.
+                // Deliberately here rather than beside history_record_board() above — a resolved
+                // profile must be fed by poll_once() alone, or two samples would share one instant.
+                checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{});
                 // Silent-bus detect backoff: sweep at the poll floor at first, then stretch toward the
                 // ceiling the longer the bus stays quiet (logic/detect_backoff.hpp). Applied by SKIPPING
                 // sweep ticks — the top-of-loop esp_task_wdt_reset() above still fires every second, so

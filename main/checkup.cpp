@@ -4,9 +4,14 @@
 #include "checkup.hpp"
 #include "diag_log.hpp"
 #include "logic/checkup.hpp"
+#include "logic/checkup_persist.hpp"  // WHEN a persisted window may be believed
+#include "logic/crashinfo.hpp"        // crash_reason_slug — one reset vocabulary
 #include "logic/history.hpp"     // history_parse_tenths — the ONE parse of a cached value
+#include "safe_mode.hpp"         // safe_mode_active — nothing ages the window there
 #include "mqtt_ha.hpp"           // independent circulation-pump electrical witness
 
+#include "esp_attr.h"            // __NOINIT_ATTR — the whole of the restore rests on this attribute
+#include "esp_system.h"          // esp_reset_reason
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -18,10 +23,32 @@ namespace daik {
 
 namespace {
 
-logic::CheckupRing  s_ring;
+// The two rings and their seal, in .noinit DRAM — see logic/checkup_persist.hpp. Not initialised at
+// startup, which is the entire mechanism: whatever the previous boot left is what checkup_start()
+// gets to judge. The in-flight states stay ORDINARY statics below and are deliberately never
+// restored; a reboot is the discontinuity both step functions already handle.
+struct PersistStore {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    uint32_t layout_fp;
+    uint32_t model_fp;      // which unit the buckets describe (checked at detect, not here)
+    int64_t  span_us;       // lifecycle observed up to the last commit, carried as a duration
+    uint32_t crc;
+    logic::CheckupRing  ring;
+    logic::DhwLossRing  dhw;
+};
+__NOINIT_ATTR PersistStore s_store;
+
+logic::CheckupRing& s_ring     = s_store.ring;
+logic::DhwLossRing& s_dhw_ring = s_store.dhw;
 logic::CheckupState s_state;
-logic::DhwLossRing  s_dhw_ring;
 logic::DhwLossState s_dhw_state;
+
+logic::CheckupRestore s_persist_verdict = logic::CheckupRestore::NoRecord;
+// The first detection after an ADOPTED boot defers to the model check instead of wiping on sight.
+bool s_adopt_detect_grace = false;
+uint32_t s_model_fp = 0;
 // Capability of the CURRENT converter-adjudicated profile. hp_poll derives it from the profile rows,
 // not from successful reads, so a timeout reduces evidence without pretending the feature vanished.
 // Replacing instead of OR-latching it is important when model detection changes at runtime.
@@ -77,15 +104,61 @@ bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int
     return tenths(v[i], out);
 }
 
+// WHAT THE SEAL COVERS — and the fields it deliberately does not.
+//
+// `pending` is EXCLUDED, for history.cpp's reason: it changes on every fold, i.e. once a second, so
+// a seal covering it would be stale for all but microseconds of every hour — and a panic, the case
+// this exists for most, would land in the stale window essentially always and discard a whole
+// intact day. Excluded, the sealed bytes change only at a COMMIT, so the seal written after one
+// stays valid right up to the next. The open hour is dropped on restore, which is the honest answer
+// anyway: a partial hour was never a completed bucket.
+//
+// first/latest_sample_us are excluded because they are MONOTONIC and meaningless in the next boot's
+// clock; the observed lifecycle rides as `span_us` instead.
+uint32_t persist_crc() {
+    uint32_t crc = CONFIG_CRC32_INIT;
+    const auto& r = s_store.ring;
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(r.buf), sizeof(r.buf));
+    crc = config_crc32_update(crc, &r.count, sizeof(r.count));
+    crc = config_crc32_update(crc, &r.head, sizeof(r.head));
+    crc = config_crc32_update(crc, &r.age_buckets, sizeof(r.age_buckets));
+    const auto& d = s_store.dhw;
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(d.buf), sizeof(d.buf));
+    crc = config_crc32_update(crc, &d.count, sizeof(d.count));
+    crc = config_crc32_update(crc, &d.head, sizeof(d.head));
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&s_store.span_us),
+                              sizeof(s_store.span_us));
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&s_store.model_fp),
+                              sizeof(s_store.model_fp));
+    return config_crc32_final(crc);
+}
+
+// Re-seal after a commit. The ONLY writer of the record's header, so the seal and the bytes it
+// covers cannot drift apart.
+void persist_seal() {
+    s_store.magic     = logic::CHECKUP_PERSIST_MAGIC;
+    s_store.version   = logic::CHECKUP_PERSIST_VERSION;
+    s_store.reserved  = 0;
+    s_store.layout_fp = logic::checkup_layout_fingerprint();
+    s_store.model_fp  = s_model_fp;
+    s_store.span_us   = s_ring.span_us();
+    s_store.crc       = persist_crc();
+}
+
+void persist_wipe() {
+    s_ring.reset();
+    s_dhw_ring.reset();
+    persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
+}                       // reset is consumed asynchronously, after checkup_reset_on_detect set it
+
 bool apply_reset_locked() {
     if (!s_reset_requested.exchange(false)) return false;
     s_dhw_reset_requested.store(false);
-    s_ring.reset();
     s_state = logic::CheckupState{};
-    s_dhw_ring.reset();
     s_dhw_state = logic::DhwLossState{};
     s_cov = logic::CheckupCoverage{};
     s_fault_now = daik::FaultClass::Unknown;
+    persist_wipe();     // clears both rings AND the record, so the next boot cannot re-adopt them
     return true;
 }
 
@@ -93,15 +166,78 @@ bool apply_dhw_reset_locked() {
     if (!s_dhw_reset_requested.exchange(false)) return false;
     s_dhw_ring.reset();
     s_dhw_state = logic::DhwLossState{};
+    persist_seal();
     return true;
 }
 
 } // namespace
 
+// Judge what the previous boot left in .noinit. Called from app_main BEFORE any producer task
+// exists, so the whole decision is single-threaded and needs no lock — the same property
+// history_start() relies on.
+void checkup_start() {
+    const uint32_t want_fp = logic::checkup_layout_fingerprint();
+    const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
+    s_persist_verdict = logic::checkup_restore_verdict(reason, s_store.magic, s_store.version,
+                                                       s_store.layout_fp, want_fp,
+                                                       s_store.crc, persist_crc(),
+                                                       safe_mode_active());
+    if (s_persist_verdict == logic::CheckupRestore::Accept) {
+        // Adopt the completed buckets in place. The open hour is dropped (it is outside the seal),
+        // the monotonic anchors restart, and the lifecycle the previous boot observed is carried
+        // across as a duration — see CheckupRing::carried_span_us.
+        s_ring.pending      = logic::CheckupBucket{};
+        s_dhw_ring.pending  = logic::DhwLossBucket{};
+        s_ring.first_sample_us  = -1;
+        s_ring.latest_sample_us = -1;
+        s_ring.carried_span_us  = s_store.span_us;
+        s_model_fp = s_store.model_fp;
+        s_adopt_detect_grace = true;
+        diag_printf("checkup: window kept across a %s reset (%u h observed, RAM survived)\n",
+                    crash_reason_slug(reason),
+                    static_cast<unsigned>(s_store.span_us / 3600000000LL));
+    } else {
+        persist_wipe();
+        // Not noise: "wrong_layout" after an update explains a card that emptied itself for a reason
+        // nobody could otherwise reconstruct, and "bad_crc" on a board that was never power-cycled
+        // is a memory fault worth seeing.
+        diag_printf("checkup: window starts empty (%s)\n",
+                    logic::checkup_restore_slug(s_persist_verdict));
+    }
+}
+
+const char* checkup_persist_state() { return logic::checkup_restore_slug(s_persist_verdict); }
+
 void checkup_reset() {
     // Do not create/take the mutex from the httpd task. The poll task remains its sole creator, and
     // only the record path consumes this request under that mutex; reports stay empty until then.
     s_reset_requested.store(true);
+}
+
+// Detection resolves a profile on EVERY boot — the model is RAM-only by design — so "detection
+// resolved" is NOT evidence that the unit changed. Treating it as such was harmless while the window
+// died at every reboot anyway; the moment .noinit carries it across, it would adopt the window at
+// boot and throw it away four seconds later, on exactly the boards that have a heat pump attached.
+// That is the defect history.cpp shipped and documented, avoided here rather than rediscovered.
+//
+// So the FIRST detection after an adopted boot compares the resolved profile against the one the
+// record was written under and keeps the window only if it is the same unit. Every later call resets
+// exactly as before, so a genuine re-detect, a link rewire or a /set_hp model change is unaffected.
+void checkup_reset_on_detect(const char* profile_id) {
+    const uint32_t fp = logic::checkup_model_fingerprint(profile_id);
+    if (s_adopt_detect_grace) {
+        s_adopt_detect_grace = false;
+        if (fp == s_model_fp) {
+            diag_printf("checkup: restored window belongs to this unit (%s) — kept\n",
+                        profile_id ? profile_id : "?");
+            return;
+        }
+        s_persist_verdict = logic::CheckupRestore::ModelChanged;
+        diag_printf("checkup: restored window was another unit — discarded for %s\n",
+                    profile_id ? profile_id : "?");
+    }
+    s_model_fp = fp;
+    checkup_reset();
 }
 
 void checkup_dhw_reset() {
@@ -207,6 +343,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         const uint32_t skipped = logic::checkup_skipped(s_state.bucket, bucket);
         s_ring.commit(skipped);
         s_dhw_ring.commit(skipped);
+        persist_seal();          // the sealed bytes change ONLY here; see persist_crc()
         if (continuous_boundary) s_state.last_us = now; // dt=0, edge witnesses intentionally kept
         logic::checkup_step(s_state, s_ring.pending, s, now);
         if (!discard_dhw_sample)

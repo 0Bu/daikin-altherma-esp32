@@ -787,6 +787,12 @@ void http_append_status_json(std::string& j, bool redact) {
         const logic::CheckupReport hr = checkup_report();
         j += "\"health\":{\"covered_s\":";
         j += std::to_string(hr.covered_s);
+        // How this boot's WINDOW came to be, for the reason the trends report it one block up:
+        // "accept" = adopted across a reset that kept power, anything else NAMES why the card
+        // started collecting again. A checkup that emptied itself otherwise reads as a defect, and
+        // only the device can tell a power cut from a firmware update that moved the layout.
+        j += ",\"persist\":";
+        j += jstr(checkup_persist_state());
         j += ",\"full_span\":";
         j += hr.full_span ? "true" : "false";
         j += ",\"available\":";
