@@ -199,6 +199,16 @@ bool apply_dhw_reset_locked() {
 // exists, so the whole decision is single-threaded and needs no lock — the same property
 // history_start() relies on.
 void checkup_start() {
+    // Create the lock HERE, not on first use. It used to be allocated lazily by the poll task inside
+    // checkup_record(), which meant the httpd task's checkup_report() read the raw handle while
+    // another core was writing it — an unsynchronized read of the very pointer that synchronizes
+    // everything else in this file. Benign in practice (a report one cycle early is empty either
+    // way), and free to remove: app_main calls this before any producer task exists, which is the
+    // same property history_start() already relies on for the identical creation.
+    if (!s_mtx) {
+        s_mtx = xSemaphoreCreateMutex();
+        if (!s_mtx) diag_printf("checkup: mutex alloc failed — observation disabled this boot\n");
+    }
     const uint32_t want_fp = logic::checkup_layout_fingerprint();
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
     s_persist_verdict = logic::checkup_restore_verdict(reason, P().magic, P().version,
@@ -241,8 +251,9 @@ void checkup_start() {
 const char* checkup_persist_state() { return logic::checkup_restore_slug(s_persist_verdict); }
 
 void checkup_reset() {
-    // Do not create/take the mutex from the httpd task. The poll task remains its sole creator, and
-    // only the record path consumes this request under that mutex; reports stay empty until then.
+    // A request, not the act: the reset is consumed by the record path under the mutex, on the poll
+    // task that owns the rings. An atomic flag keeps this callable from the httpd task (and from
+    // detection) without either taking a lock held once a second by the other.
     s_reset_requested.store(true);
 }
 
@@ -278,13 +289,7 @@ void checkup_dhw_reset() {
 
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
                     const logic::CheckupCoverage& coverage) {
-    if (!s_mtx) {
-        s_mtx = xSemaphoreCreateMutex();           // created on the poll task, the only creator
-        if (!s_mtx) {
-            diag_printf("checkup: mutex alloc failed — observation disabled this boot\n");
-            return;
-        }
-    }
+    if (!s_mtx) return;   // checkup_start() creates it; absent means its alloc failed -> no observation
     if (!v && n) return;
 
     logic::CheckupSample s;
