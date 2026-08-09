@@ -2842,6 +2842,10 @@ static void test_board_presets() {
     CHECK(all[0].vendor == BoardVendor::M5Stack);
     CHECK(all[0].led_gpio == 35 && all[0].led_type == 1 && !all[0].led_inverted);
     CHECK(all[0].btn_gpio == 41 && all[0].btn_active_low);
+    const int atom_x10a[] = {1, 2, 5, 6, 7, 8, 38};
+    CHECK(all[0].x10a_pin_count == static_cast<int>(sizeof(atom_x10a) / sizeof(atom_x10a[0])));
+    CHECK(all[0].x10a_pin_count <= BOARD_X10A_PINS_MAX);
+    for (int i = 0; i < all[0].x10a_pin_count; ++i) CHECK(all[0].x10a_pins[i] == atom_x10a[i]);
     const int atom_i2c[] = {1, 2, 5, 6, 7, 8, 38};
     CHECK(all[0].i2c_pin_count == static_cast<int>(sizeof(atom_i2c) / sizeof(atom_i2c[0])));
     CHECK(all[0].i2c_pin_count <= BOARD_I2C_PINS_MAX);
@@ -2852,6 +2856,10 @@ static void test_board_presets() {
     CHECK(all[1].vendor == BoardVendor::Seeed);
     CHECK(all[1].led_gpio == 21 && all[1].led_type == 0 && all[1].led_inverted);
     CHECK(all[1].btn_gpio == -1);               // no button broken out — never guess a pin for one
+    const int xiao_x10a[] = {1, 2, 4, 5, 6, 7, 8, 9, 43, 44};
+    CHECK(all[1].x10a_pin_count == static_cast<int>(sizeof(xiao_x10a) / sizeof(xiao_x10a[0])));
+    CHECK(all[1].x10a_pin_count <= BOARD_X10A_PINS_MAX);
+    for (int i = 0; i < all[1].x10a_pin_count; ++i) CHECK(all[1].x10a_pins[i] == xiao_x10a[i]);
     CHECK(all[1].i2c_pins == nullptr && all[1].i2c_pin_count == 0);
     CHECK(board_preset_by_key("m5stack_atoms3_lite") == &all[0]);
     CHECK(board_preset_by_id(BoardPresetId::SeeedXiaoEsp32S3) == &all[1]);
@@ -2891,6 +2899,25 @@ static void test_board_presets() {
     // NOT for the X10A picker is the exact asymmetry this preset depends on (board_pins.hpp).
     CHECK(board_pin_local_io(41, /*octal_spi=*/false));
     CHECK(!board_pin_offerable(41, /*octal_spi=*/false));
+
+    // X10A uses the selected board's physical header inventory in addition to the generic chip
+    // safety policy. ENV III reservations remove its active pair from Atom, while a chip-safe but
+    // unexposed pin (XIAO GPIO10 / Atom GPIO44) never appears and never validates.
+    CHECK(board_preset_x10a_pin_offerable(&all[0], 1, false));
+    CHECK(board_preset_x10a_pin_offerable(&all[0], 38, false));
+    CHECK(!board_preset_x10a_pin_offerable(&all[0], 44, false));
+    CHECK(board_preset_x10a_pin_offerable(&all[1], 44, false));
+    CHECK(!board_preset_x10a_pin_offerable(&all[1], 10, false));
+    int x10a_buf[BOARD_X10A_PINS_MAX];
+    const int atom_without_env = board_preset_x10a_pins_offerable(
+        &all[0], x10a_buf, BOARD_X10A_PINS_MAX, false, ReservedPins{2, 1});
+    CHECK(atom_without_env == 5);
+    CHECK(x10a_buf[0] == 5 && x10a_buf[1] == 6 && x10a_buf[2] == 7 &&
+          x10a_buf[3] == 8 && x10a_buf[4] == 38);
+    for (int i = 0; i < atom_without_env; ++i)
+        CHECK(board_preset_x10a_pin_offerable(&all[0], x10a_buf[i], false, ReservedPins{2, 1}));
+    CHECK(board_preset_x10a_pins_offerable(&all[1], x10a_buf, 3, false) == 3);
+    CHECK(board_preset_x10a_pins_offerable(nullptr, x10a_buf, BOARD_X10A_PINS_MAX, false) == 0);
 
     // ENV III uses the selected board's TESTED connector inventory, not every safe chip pad.
     // GPIO39 is exposed but deliberately unavailable after failed ENV III hardware tests; GPIO10 is

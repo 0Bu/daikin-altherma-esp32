@@ -97,13 +97,16 @@ The board the compile-time pin defaults are written for, so it needs no pin conf
 
 ## Picking pins on a different board
 
-The dropdown (`/status.pins_avail`, driven by `logic/board_pins.hpp`) is a **chip-level** safe list —
-every GPIO the ESP32-S3 itself doesn't reserve for boot flash, PSRAM, strapping, USB-JTAG or JTAG,
-minus the status LED's pin (`DAIKIN_STATUS_LED_GPIO`, default 21) since the firmware drives that one
-itself. It is **not** aware of any specific vendor board's silkscreen, since firmware has no way to
-learn which of a chip's pins are actually wired to a header on the PCB it's soldered to. To find your
-two wires on a board other than the two above, cross-reference that dropdown against your board's
-own pinout diagram — here's that cross-reference already done for the boards that have come up:
+The dropdown (`/status.pins_avail`) always starts with the **chip-level** safe list from
+`logic/board_pins.hpp`: GPIOs not reserved for boot flash, PSRAM, strapping, USB-JTAG or JTAG. When
+**M5Stack AtomS3 Lite** or **Seeed XIAO ESP32-S3** has been explicitly selected under *Hardware*,
+the board preset then narrows that list to pads the PCB actually exposes. An enabled ENV III sensor,
+the status LED, recovery button and detected Ethernet base remove their occupied GPIOs as well.
+
+With **Custom** selected, the firmware cannot know which chip pads an unknown PCB routes to a header,
+so the dropdown remains the generic chip-safe list. Cross-reference it against that board's pinout.
+Here is the physical cross-reference executed automatically for the two presets and useful manually
+for other boards:
 
 | Board | Chip | Safe pins this board breaks out | Exceptions (broken out but NOT in the dropdown) |
 | :--- | :--- | :--- | :--- |
@@ -116,8 +119,8 @@ them in the RX/TX dropdown under **⚙ Settings → Protocol** (`POST /set_hp`) 
 [README.md § Wiring — X10A](../README.md#wiring--x10a-breaker-off) for why the firmware won't find
 them on its own until you do.
 
-That table is deliberately the generic **X10A UART** policy. ENV III is stricter about physical and
-tested board pins: with **M5Stack AtomS3 Lite** selected, its I²C dropdown contains only
+The first two rows are also the board-specific **X10A UART** inventories in the preset table. ENV III
+has its own physical and hardware-tested inventory: with **M5Stack AtomS3 Lite** selected, its I²C dropdown contains only
 `1, 2, 5, 6, 7, 8, 38`. GPIO39 remains excluded even though it is physically exposed, because ENV III
 communication on that pad was not reliable in hardware tests. Use Grove GPIO2/1 or two offered
 header pins such as GPIO7/8.

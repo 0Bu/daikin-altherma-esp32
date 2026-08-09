@@ -202,15 +202,30 @@ function settingsValueInfoRow(scope, key, label, value, valueCls, help) {
     `<div class="vdesc-p">${esc(help)}</div>`, "", "", true);
 }
 
-// RX/TX pin dropdown row — shown only when auto-detection hasn't locked a working pin pair, so the
-// user picks from the chip's safe GPIOs (logic/board_pins.hpp → /status.pins_avail).
-// The current pin is always an option even if it's off-list (e.g. a stale/custom value).
-function pinSelRow(label, id, val, pins, key, help) {
-  const list = (val != null && !pins.includes(val)) ? [val, ...pins].sort((a, b) => a - b) : pins;
+// RX/TX pin dropdown row — shown only when auto-detection hasn't locked a working pin pair. For a
+// concrete board, /status.pins_avail is already narrowed to its physical headers and live
+// reservations, so an old board-foreign value must not be resurrected here. Custom boards retain
+// that compatibility fallback: only their owner can know whether an off-list stored pad is wired.
+function pinSelRow(label, id, val, pins, key, help, keepOffList = true) {
+  const list = (keepOffList && val != null && !pins.includes(val))
+    ? [val, ...pins].sort((a, b) => a - b) : pins;
   const opts = list.map((p) => `<option value="${p}"${p === val ? " selected" : ""}>${p}</option>`).join("");
   const select = `<select class="input mono num pin-sel" id="${id}" aria-label="${esc(label)}">${opts}</select>`;
   return settingsInfoRow(`protocol:${key}`, `protocol-${key}-detail`, label, select,
     `<div class="vdesc-p">${esc(help)}</div>`);
+}
+
+// Resolve a distinct editable pair when a newly selected concrete board still carries an old
+// board's cached link (XIAO 44/43 on Atom is the common transition). The dropdown may contain only
+// offerable pins, yet changing either select must submit two usable values. Keep either current pin
+// that is valid; fill only the absent side(s) from the ordered server list.
+function boardLinkPickerValues(rx, tx, pins, restricted) {
+  if (!restricted) return { rx, tx };
+  let nextRx = pins.includes(rx) ? rx : null;
+  let nextTx = pins.includes(tx) && tx !== nextRx ? tx : null;
+  if (nextRx == null) nextRx = pins.find((p) => p !== nextTx) ?? null;
+  if (nextTx == null) nextTx = pins.find((p) => p !== nextRx) ?? null;
+  return { rx: nextRx, tx: nextTx };
 }
 
 // The update-channel row (Firmware card): which published feed the next OTA check reads. Two feeds
@@ -347,9 +362,11 @@ function esp32CardHtml() {
   const proto = hp.proto === "I" ? "X10A-I" : hp.proto === "S" ? "X10A-S" : "—";
   const pinsLocked = hp.connected || (typeof hp.last_ok_s === "number" && hp.last_ok_s >= 0 && hp.last_ok_s <= 30);
   const avail = Array.isArray(s.pins_avail) ? s.pins_avail : [];
+  const boardRestricted = !!(s.board?.preset_id && s.board.preset_id !== "custom");
+  const picker = boardLinkPickerValues(hp.rx, hp.tx, avail, boardRestricted);
   const pinRow = (label, id, val, other, key, help) => pinsLocked
     ? settingsValueInfoRow("protocol", key, label, val != null ? String(val) : "—", "mono num", help)
-    : pinSelRow(label, id, val, avail.filter((p) => p !== other), key, help);
+    : pinSelRow(label, id, val, avail.filter((p) => p !== other), key, help, !boardRestricted);
   // ESP32 — the board's onboard hardware and its own health. READINGS AND SETTINGS ONLY; the one
   // action this card family used to carry ("Report a bug") is in the Settings footer line now
   // (index.html #footBug), a rare escape hatch that read as one more board fact under "Largest free block".
@@ -363,8 +380,10 @@ function esp32CardHtml() {
       hp.connected ? t("card.online") : t("card.offline"), hp.connected ? "ok" : "err", t("card.hplink_help")) +
     settingsValueInfoRow("protocol", "framing", t("card.protocol"), hp.connected ? proto : "—", "",
       t("card.protocol_help")) +
-    pinRow(t("card.rxpin"), "e32Rx", hp.rx, hp.tx, "rx", t("card.rxpin_help")) +
-    pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx, "tx", t("card.txpin_help"));
+    pinRow(t("card.rxpin"), "e32Rx", pinsLocked ? hp.rx : picker.rx,
+      pinsLocked ? hp.tx : picker.tx, "rx", t("card.rxpin_help")) +
+    pinRow(t("card.txpin"), "e32Tx", pinsLocked ? hp.tx : picker.tx,
+      pinsLocked ? hp.rx : picker.rx, "tx", t("card.txpin_help"));
   // Firmware — running build, update feed and language. No heating-curve switch: that diagnosis arms
   // itself from the two sources configured on its own card, so a switch here would have been a
   // second statement of a fact the configuration already makes — and an unreachable one, since the

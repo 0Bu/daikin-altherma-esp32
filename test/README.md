@@ -124,7 +124,9 @@ when LED/reset are disabled. It also covers the integrated ENV III section: hidd
 Custom/Seeed, visible for M5Stack, with safe distinct SDA/SCL defaults, the board-physical AtomS3
 Lite I2C set (explicitly excluding GPIO39 and unexposed chip pads), automatic proof of the selected or
 reversed order before persistence, an explicit disable payload, and three live/history charts in the
-expanded Hardware infobox.
+expanded Hardware infobox. The Settings renderer additionally proves that concrete Atom/XIAO X10A
+selectors contain only board-exposed, currently unreserved pins, while Custom retains its generic
+chip-safe compatibility behavior.
 
 `node test/test_ui_checkup.mjs` executes the production plant-diagnostics card renderer without a
 browser. It pins status-only collapsed rows, values and assessments in the row explainers, the
