@@ -932,9 +932,48 @@ checkup.cpp     the 24-hour PLANT CHECKUP behind /status.health and the dashboar
                 protection-retry counters. Storage + mutex only; every rule is the host-tested
                 logic/checkup.hpp. Fed by the poll task at 1 Hz beside history_record, with the
                 compressor state HANDED OVER rather than re-derived (one answer to "is it running",
-                so the checkup and the held-over marking cannot disagree). 24 one-hour buckets in
-                .bss, RAM-only for history.cpp's reason — the difference is that here the
-                consequence is STATED rather than absorbed: covered_s reports how much of the day was
+                so the checkup and the held-over marking cannot disagree). 24 one-hour buckets, not
+                in NVS for history.cpp's reason — and, since logic/checkup_persist.hpp, "not in NVS"
+                no longer means "gone at every reboot" here either. The rings sit in .noinit DRAM
+                (1224 B beside history's 29020), so any reset that KEPT POWER carries the window
+                across at zero cost in RAM, flash and partitions. This is where a reboot hurts MOST
+                of anything on this board: the window is 24 h and the requirements are hours, so
+                losing it loses the VERDICT rather than a few samples — measured, the DHW check had
+                one completed hour after 9.9 h of uptime and a single OTA took it back to zero, on a
+                device following the `dev` channel where an owner who keeps up to date may never
+                reach 24 h at all. Only .noinit and deliberately NOT history's second, flash medium:
+                the reference board reports "no `hist` partition", because esp_https_ota writes the
+                app slot and never the partition table, so every OTA-updated device lacks it and a
+                second tenant would have bought this nothing on the very board that motivated it.
+                That same board also DISPROVES history_persist.hpp's claim that .noinit "cannot
+                survive an OTA" — it kept its trend rings across a real one. The sections CAN move;
+                on an ordinary incremental build they did not, and the seal is what makes the
+                difference safe rather than lucky. The seal covers the completed buckets and
+                EXCLUDES `pending` (history's argument verbatim: it changes once a second, so a seal
+                over it would be stale whenever a panic actually landed) and excludes
+                first/latest_sample_us, which are MONOTONIC and meaningless in the next boot's clock
+                — the observed lifecycle rides as CheckupRing::carried_span_us instead, or the
+                restored window would report full_span() false for another 24 h on evidence it has.
+                The in-flight CheckupState/DhwLossState are NOT restored: a reboot is exactly the
+                discontinuity both step functions handle, and restoring them would book a compressor
+                start that may never have happened. A LAYOUT fingerprint (geometry, every row
+                locator, every counting threshold) invalidates the record automatically when an
+                update changes what a counter means — a bucket is a pile of anonymous counters, so a
+                valid CRC over silently re-meaning bytes is the failure a CRC alone cannot see. The
+                MODEL is a second identity, checked at DETECTION rather than at boot because that is
+                when the answer exists: checkup_reset_on_detect() keeps the window only if the
+                resolved profile matches the one it was recorded under, which is the trap
+                history.cpp shipped and documented (detection resolves every boot, so treating it as
+                "the identity changed" adopts the window and throws it away four seconds later, on
+                exactly the boards that have a heat pump attached). /status.health.persist names the
+                outcome. TWO refusals are about the window OUTLIVING ITS SOURCE rather than about the
+                bytes, and both are states persistence CREATED: SAFE MODE never adopts, because it
+                does not start the poll task and nothing would age the ring — a frozen pre-reboot day
+                would be presented as a live 24-hour assessment for as long as the latch holds; and
+                the poll task feeds an EMPTY sample every cycle while the profile is still "auto", so
+                a board whose X10A stops answering across a reboot ages the adopted evidence out
+                within the day instead of freezing it (the empty sample books no observed seconds —
+                it only advances the clock). What has NOT changed is the honesty: covered_s reports how much of the day was
                 actually observed and every check answers `collecting` until it has enough, so a
                 board that rebooted an hour ago cannot show a green verdict it has no evidence for.
                 NOT derived from the trend rings, which is the one thing that looks obvious and is
@@ -1324,11 +1363,11 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale, cop_scope, profile_view, feature_gate, availability,
                 fault_state,
-                raw_capture, conv_override, label_override, checkup,
+                raw_capture, conv_override, label_override, checkup, checkup_persist,
                 binary_semantics, circulation_source, env3, heating_curve_diagnosis,
                 heating_curve_mqtt, hp_query_log, http_cache, modbus_snapshot, mqtt_publish_gate,
                 open_meteo, reference_temperature, weather_forecast, weather_mqtt,
-                history_persist).
+                history_persist, plant_gate).
                 The list is the DIRECTORY, not a curated subset: a header missing from it reads as
                 "there is no pure rule for that", which is the one thing this inventory must never
                 say about a rule that exists — ten of them had accumulated unlisted.
@@ -2636,7 +2675,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   takes, so a request is model-independent); the LABEL is how the DETECTED profile
                   spells that row, which is what lets the UI attach a trend to the value row it is
                   already rendering. Rows this profile does not carry are omitted entirely,
-                  health{covered_s,full_span,available,assessable,evaluated,status,
+                  health{covered_s,persist,full_span,available,assessable,evaluated,status,
                   checks[{id,verdict,evidence,observed_s,required_s,…}]} — the 24-hour plant CHECKUP
                   (logic/checkup.hpp, checkup.cpp), judged on the DEVICE: `status` is the worst
                   verdict across the checks and `covered_s` how much of the day was actually

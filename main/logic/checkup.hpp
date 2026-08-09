@@ -230,6 +230,12 @@ struct CheckupRing {
     uint8_t      age_buckets = 0;           // elapsed bucket boundaries, saturates at 24
     int64_t      first_sample_us = -1;       // real lifecycle anchor; bucket boundaries are phase-shifted
     int64_t      latest_sample_us = -1;
+    // Lifecycle already observed in an EARLIER boot, carried across by the .noinit restore
+    // (logic/checkup_persist.hpp). It has to be a DURATION rather than a restored anchor pair:
+    // first/latest_sample_us are MONOTONIC and restart at zero every boot, so a restored pair would
+    // be measured against a clock that no longer exists — `latest - first` would go negative and
+    // full_span() would answer false for as long as the ring lived.
+    int64_t      carried_span_us = 0;
     CheckupBucket pending;                  // the hour currently being accumulated
 
     void reset() {
@@ -239,6 +245,7 @@ struct CheckupRing {
         age_buckets = 0;
         first_sample_us = -1;
         latest_sample_us = -1;
+        carried_span_us = 0;
         pending = CheckupBucket{};
     }
 
@@ -251,10 +258,16 @@ struct CheckupRing {
         if (latest_sample_us < 0 || now_us >= latest_sample_us) latest_sample_us = now_us;
     }
 
-    bool full_span() const {
-        return first_sample_us >= 0 && latest_sample_us >= first_sample_us &&
-               latest_sample_us - first_sample_us >= CHECKUP_WINDOW_US;
+    // This boot's observed lifecycle plus whatever an earlier boot carried in. Split out from
+    // full_span() so the restore has something to state and a test something to read.
+    int64_t span_us() const {
+        const int64_t live = (first_sample_us >= 0 && latest_sample_us >= first_sample_us)
+                           ? latest_sample_us - first_sample_us
+                           : 0;
+        return live + carried_span_us;
     }
+
+    bool full_span() const { return span_us() >= CHECKUP_WINDOW_US; }
 
     void push(const CheckupBucket& b) {
         buf[head] = b;

@@ -309,14 +309,17 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        "wrong_catalog" after an update, "bad_crc", "no_record",
                                    #        "wrong_version". A chart that emptied itself has a
                                    #        stated cause instead of looking like a defect.
-                                   #   health:{covered_s,full_span,status,available,assessable,evaluated,
+                                   #   health:{covered_s,persist,full_span,status,available,assessable,evaluated,
                                    #        checks:[{id,verdict,evidence,observed_s,required_s,…}]},
                                    #        # rolling X10A operating OBSERVATION, not a whole-plant
                                    #        health certificate. Storage is 23 completed 1 h buckets
-                                   #        plus the pending hour, so represented span is <=24 h;
-                                   #        RAM-only: reboot, explicit /detect, profile selection or
-                                   #        RX/TX-pin change starts a new X10A lifecycle; a HomeHub-only
-                                   #        edit does not. A reset discards an in-flight old-link sample.
+                                   #        plus the pending hour, so represented span is <=24 h.
+                                   #        In .noinit RAM: a reset that KEPT POWER carries the window
+                                   #        across and `persist` says so ("accept"), else it names why
+                                   #        the window started empty ("power_cycle", "wrong_layout",
+                                   #        "model_changed", "safe_mode", "bad_crc"). An explicit /detect, profile
+                                   #        selection or RX/TX-pin change starts a new X10A lifecycle;
+                                   #        a HomeHub-only edit does not. A reset discards an in-flight old-link sample.
                                    #        covered_s is coarse card context only. Each check's
                                    #        observed_s is its own valid evidence and required_s its
                                    #        gate; absence-of-pattern checks require full_span plus

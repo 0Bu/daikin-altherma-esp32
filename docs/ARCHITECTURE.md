@@ -607,7 +607,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
      the new identity. The ring retains 23 completed one-hour buckets plus the pending hour, so its
      represented span is never more than 24 hours. `full_span` is anchored to the first and latest
      monotonic samples, not to phase-shifted bucket boundaries, and records that a real 24-hour
-     lifecycle has elapsed. Signal clocks derive whole seconds from the difference of absolute
+     lifecycle has elapsed — plus whatever an earlier boot carried in, since those anchors restart at
+     zero and the restored lifecycle therefore rides as a duration rather than as a timestamp pair
+     (`logic/checkup_persist.hpp`). Signal clocks derive whole seconds from the difference of absolute
      timestamps, so the serial sweep's sub-second fractions telescope instead of being lost on every
      interval; the 15-second continuity cutoff still compares exact microseconds. A check that
      concludes absence of a pattern additionally needs at least 90% valid evidence from its own
@@ -1056,8 +1058,9 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    so page loss becomes missing evidence rather than either “unsupported” or zero. Every rule — row
    identity, edge handling, evidence clocks and verdict/evidence class — lives in the host-tested
    `logic/checkup.hpp`; storage is 23 completed one-hour buckets plus the pending hour in static
-   initialized RAM (`.data`, because absence sentinels are non-zero), never 24 completed buckets plus
-   an accidental 25th open hour. See *The host-tested logic core* for why a
+   `.noinit` RAM, never 24 completed buckets plus an accidental 25th open hour. `.noinit` rather than
+   `.data` since `logic/checkup_persist.hpp`: a reset that keeps power carries the window across, and
+   the flash image lost the initialiser it used to carry for it. See *The host-tested logic core* for why a
    row is addressed by (page, offset, **converter**) here and by (page, offset, unit) in the trends.
 5. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
    the cache; they never touch the UART. X10A, HomeHub and ENV III trends are not published to MQTT — they exist for

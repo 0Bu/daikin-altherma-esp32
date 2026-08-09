@@ -43,9 +43,32 @@ that are not judgements carry the honesty:
   a green verdict it has no evidence for.
 
 Storage is 23 completed one-hour buckets plus the pending hour, so the represented span is never an
-almost-25-hour "24 h"; `full_span` is computed from real first/latest monotonic timestamps. A reboot,
-an explicit re-detection, or a profile or RX/TX identity change resets the window rather than mixing
-an in-flight old-link sample into it; HomeHub-only edits do not.
+almost-25-hour "24 h"; `full_span` is computed from real first/latest monotonic timestamps. An
+explicit re-detection, or a profile or RX/TX identity change, resets the window rather than mixing an
+in-flight old-link sample into it; HomeHub-only edits do not.
+
+**A reboot no longer does.** This is the measurement that tolerates one worst: the window is 24 h and
+the requirements are hours, so losing it loses the *verdict*, not a few samples — and a device on the
+`dev` channel that keeps up to date may never reach 24 h at all. The rings therefore live in
+`.noinit` DRAM, so any reset that kept power carries them across at no cost in RAM, flash or a
+partition. A power cut still does not, and `/status.health.persist` names which happened rather than
+letting a card that emptied itself read as a defect.
+
+Two things guard the adoption, because ~1.2 KB of prior state is claimed in one act. A **layout
+fingerprint** over the geometry, every row locator and every counting threshold invalidates the
+record whenever a firmware update changes what a stored counter means — a bucket is a pile of
+anonymous counters, so a valid checksum over silently re-meaning bytes is exactly what a checksum
+cannot catch. And the **model** is checked at detection rather than at boot, because that is when
+the answer exists: the window is kept only if the resolved profile is the one it was recorded under.
+The in-flight edge state is deliberately not restored — a reboot is a discontinuity, and restoring
+it would book a compressor start that may never have happened.
+
+Two refusals exist because persistence can make evidence **outlive its source**, which is the one
+thing the window must never do. Safe mode never adopts: it does not run the poll loop, so nothing
+would age the window and a frozen pre-reboot day would read as a live assessment for as long as the
+latch holds. And while the bus is still unidentified the poll loop feeds an empty sample every
+second — booking no observed time, only advancing the clock — so a board whose X10A stops answering
+across a reboot ages the adopted evidence out within the day rather than freezing it.
 
 **Claim strength is explicit per check**, because these are not equally strong statements: the
 current unit fault is direct `device` state; cycling and the defrost ratio are `heuristic` and raise

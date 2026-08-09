@@ -4,17 +4,21 @@
 // is host-tested; this file is the static ring, one mutex, and the fold from a poll cycle's cached
 // values into the open hour.
 //
-// STATIC (.data), never heap — the same argument history.hpp makes: the binding limit on this board
-// is the largest CONTIGUOUS free block, and a static array does not compete for it. The non-zero
-// absence sentinels make this initialized data rather than .bss. 24 one-hour buckets cost
-// logic/checkup.hpp's CHECKUP_BYTES.
+// STATIC, never heap — the same argument history.hpp makes: the binding limit on this board is the
+// largest CONTIGUOUS free block, and a static array does not compete for it. 24 one-hour buckets
+// cost logic/checkup.hpp's CHECKUP_BYTES.
 //
-// RAM only, and deliberately not persisted. Hourly buckets in NVS would be ~24 writes a day into the
-// partition that holds the WiFi credentials, for a convenience — the same trade history.hpp already
-// refused for the trends. The consequence is STATED rather than hidden: a reboot or an explicit X10A
-// re-detection/profile/pin identity change empties the window, and every check reports the coverage
-// it actually has (logic/checkup.hpp's Collecting verdict) instead of a green light bought with no
-// evidence. A HomeHub-only edit is a separate source and deliberately does not reset X10A history.
+// Still not in NVS — hourly buckets there would be ~24 writes a day into the partition holding the
+// WiFi credentials, for a convenience, and that trade is refused exactly as history.hpp refuses it.
+// What "not in NVS" no longer means is "gone at every reboot": the rings live in .noinit DRAM, so
+// any reset that KEPT POWER — a /set_* save, an OTA install, a panic, the task watchdog — carries
+// them across at no cost in RAM, flash or a partition (logic/checkup_persist.hpp). LOSING POWER is
+// still unrecovered and still stated rather than hidden: /status.health.persist names why the window
+// started empty, and every check reports the coverage it actually has (logic/checkup.hpp's
+// Collecting verdict) instead of a green light bought with no evidence.
+//
+// An explicit X10A re-detection, profile or pin identity change still empties the window. A
+// HomeHub-only edit is a separate source and deliberately does not.
 #include "hp_poll.hpp"          // CachedValue
 #include "logic/checkup.hpp"
 
@@ -32,6 +36,19 @@ namespace daik {
 // and here it would be how a compressor start gets counted by one rule and not the other.
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
                     const logic::CheckupCoverage& coverage);
+
+// Judge what the previous boot left in .noinit and adopt or wipe it. app_main calls this ONCE,
+// before any producer task exists, which is what makes the decision single-threaded and lock-free.
+void checkup_start();
+
+// How this boot's window came to be — logic/checkup_persist.hpp's CheckupRestore vocabulary, on
+// /status.health.persist. A card that emptied itself otherwise reads as a defect.
+const char* checkup_persist_state();
+
+// The reset a DETECTION asks for. Not checkup_reset(): detection resolves a profile on every boot,
+// so "detection resolved" is not evidence that the unit changed — the first call after an adopted
+// boot keeps the window if the profile matches the one it was recorded under.
+void checkup_reset_on_detect(const char* profile_id);
 
 // Start a new observation identity after explicit X10A re-detection, link rewiring or profile
 // selection. Cross-task safe: only record consumes it under the checkup mutex and discards that
