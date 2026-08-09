@@ -15,6 +15,7 @@
 #include "history.hpp"
 #include "hp_poll.hpp"
 #include "logic/config_model.hpp"
+#include "logic/board_presets.hpp"
 #include "logic/env3.hpp"
 #include "logic/mqtt_base.hpp"  // mqtt_base_valid — the installation base topic's rules, host-tested
 #include "logic/mqtt_uri.hpp"   // parse_mqtt_uri — host/port/TLS split, host-tested
@@ -780,6 +781,17 @@ static esp_err_t set_hp(httpd_req_t* req) {
     if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(),
                   config_reserved_pins(c).plus(net_eth_reserved_pins())))
         return send_err(req, "400 Bad Request", reason.c_str());
+    // A selected preset adds the PCB fact the generic ESP32-S3 validator cannot know: only pads
+    // physically routed to this board's headers may carry X10A. Custom intentionally stays generic.
+    // Apply the same live reservations as /status.pins_avail so a raw/stale request cannot persist
+    // an ENV III, local-peripheral or Ethernet collision that the dropdown has already withheld.
+    if (const BoardPreset* board = board_selected_preset(c)) {
+        const ReservedPins used = config_reserved_pins(c).plus(net_eth_reserved_pins());
+        if (!board_preset_x10a_pin_offerable(board, c.rx_pin, hw_octal_spi(), used))
+            return send_err(req, "400 Bad Request", "rx_pin is not available on selected board");
+        if (!board_preset_x10a_pin_offerable(board, c.tx_pin, hw_octal_spi(), used))
+            return send_err(req, "400 Bad Request", "tx_pin is not available on selected board");
+    }
     // This route OWNS the pin cache, unlike the service routes whose link writes are only
     // best-effort maintenance. Require all three cache keys; on failure RAM stays untouched, so
     // there is no new link to hand the poll engine and reconfigure must be skipped.

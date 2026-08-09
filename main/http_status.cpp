@@ -191,6 +191,7 @@ static esp_err_t h_captive(httpd_req_t* req) {
 // funded a reboot where a 503 would have done. Keep it that way: this is a request-path builder.
 void http_append_status_json(std::string& j, bool redact) {
     const Config& c = config();
+    const BoardPreset* selected_board = board_selected_preset(c);
     HpStats     hp  = hp_stats();
     MqttStatus  m   = mqtt_status();
     ReferenceTemperatureStatus rt = reference_temperature_status();
@@ -207,15 +208,18 @@ void http_append_status_json(std::string& j, bool redact) {
     char elf_sha[65] = {0};
     esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
     j += "\"app_elf_sha256\":" + jstr(elf_sha) + ",";
-    // GPIOs the UI offers in the RX/TX pin dropdown: the ESP32-S3 chip-safe set, reserving
-    // GPIO33-37 only when this build's flash/PSRAM actually run Octal I/O, and dropping the pins
-    // this firmware itself drives — the status indicator and the recovery button
-    // (logic/board_pins.hpp). The octal-SPI fact comes from config.cpp's hw_octal_spi() and the
-    // reserved pins from the live config, the same two inputs /set_hp validation and config_load
-    // use, rather than a #if block copied in here.
+    // GPIOs the UI offers in the RX/TX pin dropdown. A concrete selected board narrows the generic
+    // ESP32-S3 chip-safe set to pads its PCB actually exposes; Custom keeps the generic list because
+    // only its owner knows that board's headers. In both cases the live reservation removes the
+    // status indicator, recovery button and enabled ENV III pair, and Ethernet removes its SPI pads.
+    // The same board table and reservations also gate /set_hp below, so the picker cannot advertise
+    // a physically absent or already occupied GPIO that the request path would nevertheless accept.
     int pins[BOARD_PINS_MAX];
-    int npins = board_pins_offerable(pins, BOARD_PINS_MAX, hw_octal_spi(),
-                                     config_reserved_pins(c).plus(net_eth_reserved_pins()));
+    const ReservedPins x10a_used = config_reserved_pins(c).plus(net_eth_reserved_pins());
+    int npins = selected_board
+        ? board_preset_x10a_pins_offerable(selected_board, pins, BOARD_PINS_MAX,
+                                            hw_octal_spi(), x10a_used)
+        : board_pins_offerable(pins, BOARD_PINS_MAX, hw_octal_spi(), x10a_used);
     j += "\"pins_avail\":[";
     for (int i = 0; i < npins; i++) { if (i) j += ","; j += std::to_string(pins[i]); }
     j += "],";
@@ -243,7 +247,6 @@ void http_append_status_json(std::string& j, bool redact) {
     // Explicit board identity, atomically persisted with the hardware values. `user_set=false`
     // means untouched build defaults; `preset_id=custom` means the user deliberately saved manual
     // hardware. No consumer has to infer Atom/XIAO from pins.
-    const BoardPreset* selected_board = board_selected_preset(c);
     j += ",\"user_set\":";            j += c.board_user_set ? "true" : "false";
     j += ",\"preset_id\":";           j += jstr(c.board_user_set ? board_preset_key(c.board_preset_id) : "");
     j += ",\"preset_name\":";         j += jstr(selected_board ? selected_board->name : "");

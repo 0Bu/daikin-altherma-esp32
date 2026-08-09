@@ -45,9 +45,12 @@ inline const char* board_vendor_name(BoardVendor vendor) {
 }
 
 // The five LED/button members mirror the board-local fields of Config (config_model.hpp), so applying
-// a preset remains a field-for-field copy with nowhere for a translation bug to hide. `i2c_pins` is
-// different: it is immutable board metadata used to narrow an external-accessory picker to pads that
-// physically exist on this board. It is not persisted because the preset id already names the fact.
+// a preset remains a field-for-field copy with nowhere for a translation bug to hide. `x10a_pins`
+// and `i2c_pins` are different: they are immutable board metadata used to narrow external-bus
+// pickers to pads that physically exist on this board. They are not persisted because the preset id
+// already names the fact. Keep the two inventories separate even where they currently match: UART
+// suitability and hardware-proven I2C suitability are different claims (GPIO39 on Atom is the
+// concrete reason not to collapse them).
 struct BoardPreset {
     BoardPresetId id;
     const char* key;               // stable JSON/config key; display name may change independently
@@ -58,6 +61,8 @@ struct BoardPreset {
     bool        led_inverted;    // GPIO type only; a WS2812 encodes "off" as the zero colour
     int         btn_gpio;        // -1 = no button broken out (the XIAO) — NOT "user must wire one"
     bool        btn_active_low;
+    const int*  x10a_pins;       // physically exposed GPIOs allowed for the X10A UART
+    int         x10a_pin_count;
     const int*  i2c_pins;        // physically exposed GPIOs allowed for an external I2C accessory
     int         i2c_pin_count;
 };
@@ -65,7 +70,14 @@ struct BoardPreset {
 // Upper bound on a returned list, for sizing a caller's buffer. Asserted against the real table
 // host-side so it cannot silently drift.
 inline constexpr int BOARD_PRESETS_MAX = 2;
+inline constexpr int BOARD_X10A_PINS_MAX = 10;
 inline constexpr int BOARD_I2C_PINS_MAX = 8;
+
+// Board-physical X10A inventories from docs/BOARDS.md. Every entry must additionally pass the
+// generic chip/build safety rule below; the table answers only the fact that rule cannot know:
+// whether the PCB actually routes the pad to a usable connector/header.
+inline constexpr int ATOMS3_LITE_X10A_PINS[] = {1, 2, 5, 6, 7, 8, 38};
+inline constexpr int XIAO_ESP32S3_X10A_PINS[] = {1, 2, 4, 5, 6, 7, 8, 9, 43, 44};
 
 // AtomS3 Lite pin map C124: Grove G1/G2 and side-header G5-G8/G38 are usable for ENV III. Although
 // GPIO39 is physically exposed beside GPIO38, repeated ENV III tests on separate AtomS3 Lite boards
@@ -86,13 +98,16 @@ inline const BoardPreset* board_presets_all(int& count) {
         // the X10A picker, which is exactly the asymmetry board_pins.hpp's local-I/O set exists for.
         {BoardPresetId::M5StackAtomS3Lite, "m5stack_atoms3_lite",
          "M5Stack AtomS3 Lite", BoardVendor::M5Stack, 35, 1, false, 41, true,
+         ATOMS3_LITE_X10A_PINS, static_cast<int>(sizeof(ATOMS3_LITE_X10A_PINS) / sizeof(int)),
          ATOMS3_LITE_I2C_PINS, static_cast<int>(sizeof(ATOMS3_LITE_I2C_PINS) / sizeof(int))},
         // Plain single-colour LED, ACTIVE LOW (pin driven LOW = lit). No button broken out, so the
         // preset leaves the recovery button off rather than guessing a free pin for the user to
         // solder to: an unconfigured input floats, and a floating pin that reads "pressed" for five
         // seconds factory-resets a board nobody touched (recovery_button.cpp).
         {BoardPresetId::SeeedXiaoEsp32S3, "seeed_xiao_esp32s3",
-         "Seeed XIAO ESP32-S3", BoardVendor::Seeed, 21, 0, true, -1, true, nullptr, 0},
+         "Seeed XIAO ESP32-S3", BoardVendor::Seeed, 21, 0, true, -1, true,
+         XIAO_ESP32S3_X10A_PINS, static_cast<int>(sizeof(XIAO_ESP32S3_X10A_PINS) / sizeof(int)),
+         nullptr, 0},
     };
     count = (int)(sizeof(presets) / sizeof(presets[0]));
     return presets;
@@ -173,6 +188,30 @@ inline BoardPresetId board_legacy_preset_id(const Config& c) {
 inline BoardVendor board_selected_vendor(const Config& c) {
     const BoardPreset* preset = board_selected_preset(c);
     return preset ? preset->vendor : BoardVendor::Unknown;
+}
+
+// Board-aware X10A pins. board_pin_offerable() remains the chip/build authority; the preset adds
+// the physical connector/header membership the ESP32-S3 cannot discover. Runtime reservations
+// remove GPIOs currently driven by the status LED, recovery button, ENV III or Ethernet. A Custom
+// board has no inventory and deliberately continues to use the generic chip-safe path at the call
+// site rather than pretending an empty preset means no usable pins.
+inline bool board_preset_x10a_pin_offerable(const BoardPreset* preset, int pin, bool octal_spi,
+                                            ReservedPins used = {}) {
+    if (!preset || !board_pin_offerable(pin, octal_spi, used)) return false;
+    for (int i = 0; i < preset->x10a_pin_count; ++i)
+        if (preset->x10a_pins[i] == pin) return true;
+    return false;
+}
+
+inline int board_preset_x10a_pins_offerable(const BoardPreset* preset, int* out, int cap,
+                                             bool octal_spi, ReservedPins used = {}) {
+    if (!preset || !out || cap <= 0) return 0;
+    int n = 0;
+    for (int i = 0; i < preset->x10a_pin_count && n < cap; ++i) {
+        const int pin = preset->x10a_pins[i];
+        if (board_preset_x10a_pin_offerable(preset, pin, octal_spi, used)) out[n++] = pin;
+    }
+    return n;
 }
 
 // Board-aware external-I2C pins. The generic X10A list intentionally withholds every dedicated

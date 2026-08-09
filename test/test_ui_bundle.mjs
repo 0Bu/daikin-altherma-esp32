@@ -208,6 +208,15 @@ assert.match(httpConfig, /board_preset_by_key\(preset_key\)[\s\S]*board_identity
   "the device must reject unknown board preset ids");
 assert.match(boardPresets, /inline const BoardPreset\* board_selected_preset[\s\S]*return board_preset_by_id\(c\.board_preset_id\);/,
   "selected board identity must not be re-derived from configurable LED/reset values");
+assert.match(httpStatus,
+  /selected_board\s*\?\s*board_preset_x10a_pins_offerable\([\s\S]*:\s*board_pins_offerable\(/,
+  "status must narrow X10A pins to a concrete board and retain the generic list only for Custom");
+assert.match(httpConfig,
+  /board_selected_preset\(c\)[\s\S]*board_preset_x10a_pin_offerable\(board, c\.rx_pin[\s\S]*board_preset_x10a_pin_offerable\(board, c\.tx_pin/,
+  "the X10A request path must reject board-foreign RX/TX pins instead of relying on UI filtering");
+assert.match(app,
+  /function boardLinkPickerValues\([\s\S]*const boardRestricted = [^;]*preset_id[\s\S]*!boardRestricted/,
+  "the picker must not resurrect a stale board-foreign pin for a concrete board");
 assert.match(httpStatus, /const bool env_supported = env3_board_supported\(c\);[\s\S]*j \+= env_supported \? "true" : "false";/,
   "status must expose the selected board vendor and the derived ENV III support decision");
 assert.match(httpConfig, /if \(c\.env3_enabled && !env3_board_supported\(c\)\) c\.env3_enabled = false;/,

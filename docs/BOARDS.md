@@ -239,11 +239,11 @@ it returns.
 ## Other ESP32-S3 boards
 
 Any board meeting *What the firmware requires* works; you supply the pin knowledge the firmware
-cannot discover. There is no board-ID EEPROM on an ESP32-S3, so the firmware genuinely **cannot
-know** which of the chip's pins your board breaks out — it only knows which ones the *chip* reserves
-([`logic/board_pins.hpp`](../main/logic/board_pins.hpp)). Cross-reference `/status.pins_avail`
-against your board's pinout; [WIRING.md](WIRING.md) has that cross-reference already done for the
-boards that have come up, including the Waveshare ESP32-S3-DevKitC-1.
+cannot discover. There is no board-ID EEPROM on an ESP32-S3. An explicitly selected AtomS3 Lite or
+XIAO preset is therefore the user's board statement and narrows `/status.pins_avail` to that board's
+documented headers. With *Custom* selected, the firmware only knows which pins the *chip* reserves
+([`logic/board_pins.hpp`](../main/logic/board_pins.hpp)); cross-reference the generic list against the
+unknown board's pinout. [WIRING.md](WIRING.md) includes the Waveshare ESP32-S3-DevKitC-1 example.
 
 For the indicator and the button, read your board's schematic for the onboard LED pin, its polarity
 (or whether it is a WS2812), and any free momentary switch, then enter them under

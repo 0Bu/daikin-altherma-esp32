@@ -513,6 +513,41 @@ assert.match(html, /<button class="vrow settings-whole-info-row settings-info-ro
 for (const explanation of ["Verbindungs-Erklärung", "Protokoll-Erklärung", "RX-Erklärung", "TX-Erklärung",
                            "Firmware-Erklärung", "Kanal-Erklärung", "Sprach-Erklärung"])
   assert.ok(html.includes(explanation), `Protocol/Firmware explanation must include: ${explanation}`);
+
+// A concrete board is authoritative for the editable X10A inventory. Old XIAO defaults may still
+// be cached immediately after Atom was selected, but they must neither reappear as options nor make
+// both selects fall onto the same first GPIO. The first interaction submits the distinct suggested
+// board pair. Custom keeps the legacy off-list value because its physical headers are unknowable.
+S.status.board = { preset_id: "m5stack_atoms3_lite" };
+S.status.pins_avail = [1, 2, 5, 6, 7, 8, 38];
+S.status.hp = { connected: false, proto: "", rx: 44, tx: 43, last_ok_s: 31 };
+html = sandbox.__renderEsp32();
+let rxSelect = html.match(/<select[^>]*id="e32Rx"[\s\S]*?<\/select>/)?.[0] || "";
+let txSelect = html.match(/<select[^>]*id="e32Tx"[\s\S]*?<\/select>/)?.[0] || "";
+assert.doesNotMatch(rxSelect, /value="44"|value="43"/,
+  "Atom RX options must not resurrect XIAO-only cached pins");
+assert.doesNotMatch(txSelect, /value="44"|value="43"/,
+  "Atom TX options must not resurrect XIAO-only cached pins");
+assert.match(rxSelect, /value="1" selected/, "an invalid cached pair must start at Atom GPIO1 for RX");
+assert.match(txSelect, /value="2" selected/, "the suggested Atom TX must stay distinct from RX");
+
+S.status.pins_avail = [5, 6, 7, 8, 38]; // ENV III owns Grove GPIO2/1
+html = sandbox.__renderEsp32();
+rxSelect = html.match(/<select[^>]*id="e32Rx"[\s\S]*?<\/select>/)?.[0] || "";
+txSelect = html.match(/<select[^>]*id="e32Tx"[\s\S]*?<\/select>/)?.[0] || "";
+assert.doesNotMatch(rxSelect + txSelect, /value="[12]"/,
+  "enabled ENV III pins must stay absent from both X10A selectors");
+assert.match(rxSelect, /value="5" selected/);
+assert.match(txSelect, /value="6" selected/);
+
+S.status.board = { preset_id: "custom" };
+S.status.pins_avail = [1, 2, 5];
+html = sandbox.__renderEsp32();
+rxSelect = html.match(/<select[^>]*id="e32Rx"[\s\S]*?<\/select>/)?.[0] || "";
+txSelect = html.match(/<select[^>]*id="e32Tx"[\s\S]*?<\/select>/)?.[0] || "";
+assert.match(rxSelect, /value="44" selected/, "Custom must retain its explicitly stored off-list RX pin");
+assert.match(txSelect, /value="43" selected/, "Custom must retain its explicitly stored off-list TX pin");
+
 assert.match(html, /id="e32Chan"[^]*<option value="dev" selected>Development<\/option>/,
   "the update selector must survive the split explanation row");
 assert.match(html, /id="e32Lang"[^]*<option value="auto" selected>Browser<\/option>/,
