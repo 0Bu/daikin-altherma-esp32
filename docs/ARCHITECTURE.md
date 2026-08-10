@@ -1197,7 +1197,12 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    **`BinaryEvent` rows are OR-folded rather than decimated** — those rows exist because defrosts and
    BUH pulses are shorter than a bucket, so keeping one bucket in six would erase them from a
    restored day; any ON in the group makes the coarse slot ON, which widens what the slot means
-   without inventing anything. Both paths are gated on a **catalog fingerprint** over every trend id, kind, locator
+   without inventing anything. A consecutive OTA also keeps the previous snapshot's **absolute
+   30-minute grid phase** when it re-encodes the sparse restored ring. Without that alignment, a
+   new boot whose newest five-minute bucket has a different phase selects the five deliberate gaps
+   between each restored coarse point and overwrites an intact day with an almost-empty record. The
+   aligned anchor may trail the newest live bucket by at most five buckets, but every retained point
+   stays at the instant it was actually sampled. Both paths are gated on a **catalog fingerprint** over every trend id, kind, locator
    and the ring geometry, because a ring is addressed by its index — insert or reorder a trend and
    slot 12 stops meaning what it meant when the bytes were written, which would hand the expansion
    valve's day to the DHW tank. The seal deliberately excludes the open bucket's `pending`: covering
@@ -2114,6 +2119,14 @@ Structure:
   Switching *back* (dev → the last release) is a downgrade by version, which the gate below refuses
   unless the request explicitly carries `?downgrade=1`; the web UI sends it only after the user
   picks a channel and confirms. Without that the release channel would be a one-way door.
+- **Heap-bounded manifest TLS.** The lock-free flag read by the MQTT publisher covers the complete
+  OTA network operation, beginning before the manifest handshake rather than only at
+  `esp_https_ota_begin()`. The OTA task holds it for 1.1 seconds before opening TLS so the
+  once-per-second publisher can finish its current cycle and stand aside; the same bounded
+  `logic/ota_quiesce.hpp` budget prevents a stalled operation from silencing MQTT indefinitely.
+  `http_client_diag.cpp` returns the TLS evidence it logs, so an init OOM or
+  `ESP_ERR_MBEDTLS_SSL_SETUP_FAILED` is cleaned up and retried exactly once. DNS, TCP, certificate,
+  HTTP and payload failures remain single-attempt failures with their original diagnostic class.
 - **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): the running app verifies
   the signature before installing. Fully implemented (`ota_update.cpp`) — manifest check,
   `esp_https_ota` download into the inactive slot, the **two-point downgrade gate** (manifest

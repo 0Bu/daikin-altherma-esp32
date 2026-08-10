@@ -256,7 +256,9 @@ history.cpp     24-hour trend rings: STATIC, in .noinit DRAM (never heap — the
                 largest CONTIGUOUS block; never NVS — ~100k writes/yr beside the WiFi creds).
                 THREE instruments (x10a/modbus/env3), never merged — separate liveness. Survives
                 power-kept resets in place; a COARSE 30-min snapshot in the optional `history`
-                partition covers OTA; POWER LOSS stays unrecovered ON PURPOSE. Every restore path
+                partition covers OTA and reuses its absolute grid phase when a restored sparse
+                ring is saved again, so consecutive OTAs cannot re-encode the deliberate gaps;
+                POWER LOSS stays unrecovered ON PURPOSE. Every restore path
                 is sealed by a CATALOG FINGERPRINT (rings are addressed by INDEX — reordering
                 trends would hand one row's day to another, #35–#39 via update); the seal EXCLUDES
                 the open bucket. NO_READING vs HELD_OVER distinguished; POST /detect discards
@@ -317,8 +319,9 @@ ota_update.cpp  pull-based signed OTA. Channel read FRESH on every check (releas
                 TWO-POINT downgrade gate: manifest version AND the image's own esp_app_desc_t,
                 exact match required; ?downgrade=1 relaxes ORDER only, never signature, never
                 persisted. Both network ops on ONE on-demand task, one at a time (two TLS sessions
-                fight over the largest block). The publisher QUIESCES during a download
-                (logic/ota_quiesce.hpp, bounded)
+                fight over the largest block). The publisher QUIESCES from before manifest TLS
+                setup through the download (logic/ota_quiesce.hpp, bounded); only init-OOM and TLS
+                setup allocation failures get one cleanup-and-retry
 status_led.cpp  status indicator: TWO back-ends (GPIO / WS2812) behind one host-tested pattern
                 table (logic/led_pattern.hpp). Pin+driver+polarity are RUNTIME (CI ships ONE
                 image; boards disagree). X10A-down outranks MQTT-down. Button override pre-empts

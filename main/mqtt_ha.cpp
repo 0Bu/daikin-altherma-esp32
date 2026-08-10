@@ -72,7 +72,7 @@
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
-#include "logic/ota_quiesce.hpp"   // stand aside while an OTA download owns the heap (#380)
+#include "logic/ota_quiesce.hpp"   // stand aside while an OTA network op owns the heap (#380)
 #include "logic/reference_temperature.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/weather_mqtt.hpp"
@@ -1895,8 +1895,8 @@ static void mqtt_task(void*) {
     int ha_retire_elapsed_s = HA_RETIRE_INTERVAL_S;
     MqttPublishGateState publish_gate = MqttPublishGateState::SubscriberOnly;
     bool publisher_promotion_failed = false;
-    OtaQuiesceState ota_quiesce;                       // hold-off budget for the current download
-    bool ota_quiesce_logged     = false;               // one diag line per download, not per cycle
+    OtaQuiesceState ota_quiesce;                       // hold-off budget for the current operation
+    bool ota_quiesce_logged     = false;               // one diag line per operation, not per cycle
     bool ota_quiesce_cap_logged = false;               // and one if that budget ever runs out
 
     // Broker reachability and inbound observation do not depend on X10A. This first client carries
@@ -1921,8 +1921,9 @@ static void mqtt_task(void*) {
         stack_watch_sample(StackWatch::Mqtt);
         const int delay_s = POLL_INTERVAL_S;
 
-        // STAND ASIDE while an OTA download owns the heap (#380). Placed above the try, before the
-        // first allocation of the cycle: everything below this point builds std::strings, and on the
+        // STAND ASIDE while an OTA network operation owns the heap (#380). Placed above the try,
+        // before the first allocation of the cycle: everything below this point builds std::strings,
+        // and on the
         // heap an esp_https_ota session leaves behind, the largest of them is what throws. Skipping
         // the cycle on purpose costs the same second of data the bad_alloc cost, spends none of the
         // block the download needs, and — unlike the throw — says so in a counter.
@@ -1935,8 +1936,8 @@ static void mqtt_task(void*) {
         const bool ota_busy = ota_download_active();
         if (ota_quiesce_step(ota_quiesce, ota_busy)) {
             s_mqtt_quiesced.fetch_add(1, std::memory_order_relaxed);
-            if (!ota_quiesce_logged) {                 // once per download; the ring is small
-                diag_printf("mqtt: holding off publishes during the OTA download\n");
+            if (!ota_quiesce_logged) {                 // once per operation; the ring is small
+                diag_printf("mqtt: holding off publishes during the OTA network operation\n");
                 ota_quiesce_logged = true;
             }
             vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));

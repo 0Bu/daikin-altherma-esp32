@@ -28,27 +28,30 @@ void http_client_log_init_failure(const char* label, const HttpClientProbe& befo
                 static_cast<unsigned long>(after.stack_free_bytes));
 }
 
-void http_client_log_open_failure(const char* label, esp_http_client_handle_t client,
-                                  esp_err_t opened, const HttpClientProbe& before) noexcept {
+HttpClientOpenFailure http_client_log_open_failure(const char* label,
+                                                   esp_http_client_handle_t client,
+                                                   esp_err_t opened,
+                                                   const HttpClientProbe& before) noexcept {
     const int socket_errno = esp_http_client_get_errno(client);
-    int       mbedtls_error = 0;
-    int       verify_flags = 0;
-    const esp_err_t tls_error = esp_http_client_get_and_clear_last_tls_error(
-        client, &mbedtls_error, &verify_flags);
+    HttpClientOpenFailure failure;
+    failure.opened = opened;
+    failure.tls_error = esp_http_client_get_and_clear_last_tls_error(
+        client, &failure.mbedtls_error, &failure.verify_flags);
     const HttpClientProbe after = http_client_probe();
     diag_printf("netdiag: %s open=%s/0x%lx errno=%d tls=%s/0x%lx mbed=%d verify=0x%x "
                 "heap=%u/%u->%u/%u stack=%lu->%lu\n",
                 label, esp_err_to_name(opened),
                 static_cast<unsigned long>(static_cast<uint32_t>(opened)), socket_errno,
-                esp_err_to_name(tls_error),
-                static_cast<unsigned long>(static_cast<uint32_t>(tls_error)), mbedtls_error,
-                static_cast<unsigned>(verify_flags),
+                esp_err_to_name(failure.tls_error),
+                static_cast<unsigned long>(static_cast<uint32_t>(failure.tls_error)),
+                failure.mbedtls_error, static_cast<unsigned>(failure.verify_flags),
                 static_cast<unsigned>(before.free_internal),
                 static_cast<unsigned>(before.largest_internal),
                 static_cast<unsigned>(after.free_internal),
                 static_cast<unsigned>(after.largest_internal),
                 static_cast<unsigned long>(before.stack_free_bytes),
                 static_cast<unsigned long>(after.stack_free_bytes));
+    return failure;
 }
 
 }  // namespace daik

@@ -1,5 +1,5 @@
 #pragma once
-// Should a periodic publisher HOLD OFF this cycle because an OTA download owns the heap?
+// Should a periodic publisher HOLD OFF this cycle because an OTA network operation owns the heap?
 //
 // An `esp_https_ota` install is a known, bounded, self-inflicted memory event: the TLS session plus
 // the download buffer claim the largest contiguous block on a heap whose binding limit IS that
@@ -42,7 +42,8 @@ struct OtaQuiesceState {
 
 // Advance the hold-off for one cycle. Returns true if THIS cycle should be skipped.
 //
-// `ota_active` is the device-side "a download is in flight right now" flag (ota_download_active()).
+// `ota_active` is the device-side "an OTA network operation is in flight" flag
+// (ota_download_active(); historical name, now including manifest TLS setup).
 // The counter resets the moment the download ends, so a device that installs many updates over a
 // long uptime gets the full budget for each one rather than a budget shared across the boot.
 inline bool ota_quiesce_step(OtaQuiesceState& st, bool ota_active) {

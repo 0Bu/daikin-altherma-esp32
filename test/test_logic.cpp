@@ -10780,6 +10780,38 @@ static void test_history_persist() {
     CHECK(history_coarse_encode(full, 10, 6, coarse, 0) == 0);
     CHECK(history_coarse_encode(full, 10, 6, nullptr, 4) == 0);
 
+    // A second OTA must keep the first snapshot's absolute 30-minute phase. The first restore is
+    // sparse in the new boot's five-minute ring; re-encoding from the new boot's newest bucket
+    // selects only the gaps when the two phases differ, which is the live .397 -> .398 -> .399
+    // history-loss witness. Aligning to the previous anchor preserves the actual old samples and
+    // merely leaves the newest coarse point up to five buckets behind.
+    HistorySample shifted[20];
+    for (auto& s : shifted) s = HISTORY_NO_READING;
+    shifted[4] = 104; shifted[10] = 110; shifted[16] = 116; // old grid, one point per six
+    shifted[19] = 119;                                      // new boot's different phase
+    HistorySample shifted_coarse[HISTORY_COARSE_SAMPLES];
+    size_t shifted_n = history_coarse_encode(shifted, 20, 6, shifted_coarse,
+                                              HISTORY_COARSE_SAMPLES);
+    CHECK(shifted_n == 4);
+    CHECK(history_is_absent(shifted_coarse[0]));
+    CHECK(history_is_absent(shifted_coarse[1]));
+    CHECK(history_is_absent(shifted_coarse[2]));
+    CHECK(shifted_coarse[3] == 119);                        // old day was erased before this fix
+    const int64_t aligned = history_coarse_aligned_anchor(1019, 1016, 6);
+    CHECK(aligned == 1016);
+    const size_t aligned_skip = static_cast<size_t>(1019 - aligned);
+    shifted_n = history_coarse_encode(shifted, 20, 6, shifted_coarse,
+                                      HISTORY_COARSE_SAMPLES, false, aligned_skip);
+    CHECK(shifted_n == 3);
+    CHECK(shifted_coarse[0] == 104);
+    CHECK(shifted_coarse[1] == 110);
+    CHECK(shifted_coarse[2] == 116);
+    CHECK(history_coarse_aligned_anchor(1019, INT64_MIN, 6) == 1019);
+    CHECK(history_coarse_aligned_anchor(INT64_MIN, 1016, 6) == INT64_MIN);
+    CHECK(history_coarse_aligned_anchor(1019, 1016, 0) == 1019);
+    CHECK(history_coarse_aligned_anchor(-1, -4, 6) == -4); // modulo floors on the negative side
+    CHECK(history_coarse_aligned_anchor(INT64_MAX, INT64_MIN + 1, 6) == INT64_MAX - 2);
+
     // --- event rows are OR-folded, not decimated --------------------------------------------------
     // A defrost or a BUH step is shorter than one 5-minute bucket, which is why these rows are
     // event-folded going in. Decimating them going out would drop five buckets in six and a restored
