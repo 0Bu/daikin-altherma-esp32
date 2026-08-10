@@ -38,6 +38,7 @@ const httpConfig = fs.readFileSync(new URL("../main/http_config.cpp", import.met
 const httpStatus = fs.readFileSync(new URL("../main/http_status.cpp", import.meta.url), "utf8");
 const boardPresets = fs.readFileSync(new URL("../main/logic/board_presets.hpp", import.meta.url), "utf8");
 const mqttHa = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
+const referenceLogic = fs.readFileSync(new URL("../main/logic/reference_temperature.hpp", import.meta.url), "utf8");
 const dialogs = [...html.matchAll(/<[^>]+class="modal-card"[^>]+role="dialog"[^>]*>/g)].map((m) => m[0]);
 assert.equal(dialogs.length, 10, "every custom popup must remain identifiable as a dialog");
 for (const dialog of dialogs)
@@ -98,16 +99,26 @@ assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+ circulationSettings
   "plant and heating-curve diagnostics must render after Firmware at the bottom");
 // A source that is CURRENT but cannot produce a verdict must not be the one row that looks fine
 // while the state row above it reports the diagnosis blocked.
-assert.match(app, /sourceCls = !r\.fresh \? "warn" : r\.control_eligible \? "ok" : "warn"/,
+assert.match(app, /if \(!r\.control_eligible\)[\s\S]{0,180}?key: "unusable"[\s\S]{0,120}?cls: "warn"/,
   "a fresh but ineligible room source must not render as OK");
+assert.match(app, /return \{ key: "usable", detail: "", cls: "ok" \}/,
+  "only an overall usable room source may render as OK");
 // The blocked line must name the room source's OWN reason, from one table both the state row and
 // the source explanation read, so the two cannot give different accounts of one block.
 assert.match(app, /const ROOM_BLOCK_LINES = \{[\s\S]*disabled:\s*"dyn\.room_off"/,
   "the room block reasons must be a single shared table");
+const roomBlockTable = app.match(/const ROOM_BLOCK_LINES = \{[\s\S]*?\n\};/)?.[0] || "";
+const referenceReasons = [...referenceLogic.matchAll(/case ReferenceRoomReason::\w+:\s+return "([^"]+)"/g)]
+  .map((match) => match[1]).filter((reason) => !["eligible", "not_configured"].includes(reason));
+for (const reason of referenceReasons)
+  assert.match(roomBlockTable, new RegExp(`\\b${reason}:`),
+    `room-source UI must translate the firmware reason ${reason}`);
 assert.match(app, /d\.reason === "room_unavailable"[\s\S]{0,200}?ROOM_BLOCK_LINES\[room\.reason\]/,
   "a blocked diagnosis must say WHY the room source is unusable");
-assert.match(app, /ROOM_BLOCK_LINES\[r\.reason\]\)\s*\n?\s*html \+= descNoteHtml/,
-  "the source tongue must state the same reason the state row does");
+assert.match(app, /function roomSourceStatus\([\s\S]*key: "unusable", detail: t\(ROOM_BLOCK_LINES\[r\.reason\]/,
+  "the source verdict must read the same reason table as the state row");
+assert.match(app, /const sourceStatus = roomSourceStatus\(r, mqtt\);\s*const sourceCls = sourceStatus\.cls/,
+  "the source colour must come from the same overall verdict as its visible status");
 assert.match(app, /return vcard\(t\("dyn\.card"\), rows\);/,
   "the bottom card must render without a maturity pill");
 assert.doesNotMatch(app, /"dyn\.experimental"|section-badge\.experimental/,
@@ -258,6 +269,10 @@ assert.match(html, /id="rtDeleteBtn"[^>]*data-i18n="ref\.delete"[\s\S]*id="rtBtn
   "Delete must replace the separate Test action while Save remains immediately actionable");
 assert.doesNotMatch(html, /id="rtTestBtn"|id="rtTestResult"/,
   "the room-source dialog must not retain a separate Test action or stale proof result");
+assert.match(html, /data-i18n="ref\.save_help"/,
+  "the live-test-before-save fact belongs briefly beside Save, not in every status tongue");
+assert.doesNotMatch(app, /One MQTT source is supported|Es wird eine MQTT-Quelle unterstützt/,
+  "the room-source status must not carry the former generic subscription and delete manual");
 assert.doesNotMatch(app, /shelly1pmminig4-fixture00003\/status\/switch:0/,
   "an untouched profile must not carry the obsolete Shelly device-temperature preset");
 assert.doesNotMatch(app, /\$\("rtEnabledPath"\)|\$\("rtHvacModePath"\)/,
@@ -278,7 +293,7 @@ assert.match(mqttHa, /service_reference_probe_frame[\s\S]*reference_timestamp_mo
   "the transient test and saved source must share the backward-timestamp rejection");
 assert.match(app, /r\.retained[\s\S]*ref\.retained/,
   "the captured-value UI must identify retained MQTT messages");
-assert.match(app, /r\.freshness_reason === "retained_without_timestamp"[\s\S]*ref\.time_untrusted/,
+assert.match(app, /retained_without_timestamp: t\("ref\.time_untrusted"\)/,
   "retained values without source time must be shown as untrusted, never fresh");
 
 // The circulation witness is a second read-only exact MQTT mapping. It consumes actual active power,

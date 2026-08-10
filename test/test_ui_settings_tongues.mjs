@@ -28,7 +28,6 @@ const labels = {
   "dyn.strategy_help": "Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu kalt.",
   "dyn.card": "Heizkurven-Diagnose",
   "dyn.not_configured": "Nicht konfiguriert",
-  "dyn.configured": "Konfiguriert",
   "dyn.outdoor": "Gemessene Außenluft",
   "dyn.outdoor_detail_status": "Status",
   "dyn.outdoor_detail_now": "Aktueller Messwert",
@@ -46,30 +45,33 @@ const labels = {
   "ref.ago": "vor {0} s",
   "ref.now": "jetzt",
   "ref.waiting": "Warte auf Daten",
-  "ref.retained": "retained",
   "ref.stale": "veraltet",
   "ref.error": "Fehler",
-  "ref.hint": "Raumquellen-Erklärung",
-  "ref.detail.configuration_label": "Konfiguration:",
+  "ref.broker_off": "MQTT-Broker deaktiviert",
+  "ref.retained": "vom Broker gespeichert",
+  "ref.time_untrusted": "Retained-Wert ohne vertrauenswürdige Messzeit",
+  "ref.clock_unsynced": "Geräteuhr nicht synchronisiert",
+  "ref.age_unknown": "unbekannt",
   "ref.detail.status_label": "Status:",
-  "ref.status.fresh": "Aktuell",
+  "ref.status.not_configured": "Nicht eingerichtet",
+  "ref.status.usable": "Verwendbar",
+  "ref.status.unusable": "Nicht verwendbar",
+  "ref.status.error": "Fehler",
   "ref.status.stale": "Veraltet",
   "ref.status.waiting": "Wartet",
   "ref.status.unavailable": "Nicht verfügbar",
-  "ref.status.inactive": "Aus",
-  "ref.detail.fresh": "Messwert geprüft.",
-  "ref.detail.stale": "Messwert wird nicht verwendet.",
-  "ref.detail.waiting": "Noch kein Messwert.",
-  "ref.detail.inactive": "Erfassung durch Firmware-Schalter ausgeschaltet.",
-  "ref.detail.error": "Messwert verworfen.",
+  "ref.detail.setup": "MQTT-Quelle über den Stift hinzufügen",
+  "ref.detail.stale": "Messwert ist älter als zulässig",
+  "ref.detail.waiting": "Noch keinen MQTT-Messwert empfangen",
+  "ref.detail.error": "MQTT-Nachricht verworfen: bad payload",
   "ref.detail.temperature_label": "Raumtemperatur:",
-  "ref.detail.temperature": "{0} °C ist die aktuelle Raumtemperatur.",
+  "ref.detail.temperature": "{0} °C",
   "ref.detail.setpoint_label": "Solltemperatur:",
-  "ref.detail.setpoint": "{0} °C ist der Raumsollwert.",
-  "ref.detail.age_label": "Alter:",
-  "ref.detail.age": "Messwert {0} übernommen.",
-  "ref.detail.source_label": "Quelle:",
-  "ref.detail.source": "{0} via MQTT.",
+  "ref.detail.setpoint": "{0} °C",
+  "ref.detail.last_measurement_label": "Letzter Messwert:",
+  "ref.detail.last_measurement": "{0}",
+  "ref.detail.last_measurement_stale": "{0} · zulässig: höchstens {1} s",
+  "ref.detail.purpose": "Die Diagnose vergleicht Raum- und Solltemperatur, um langfristig zu erkennen, ob die Heizkurve zu hoch oder zu niedrig liegt. Die Wärmepumpe wird nicht gesteuert.",
   "wx.title": "Wetterprognose",
   "wx.fetching": "Wird geladen",
   "wx.waiting": "Warte auf Daten",
@@ -131,8 +133,8 @@ const labels = {
   "dyn.state_setup_room": "Raumquelle einrichten",
   "dyn.state_setup_weather": "Standort einrichten",
   "dyn.room_off": "Raumthermostat ausgeschaltet",
+  "dyn.room_invalid_payload": "Ungültige MQTT-Nachricht",
   "dyn.state_help_room": "Raumblock-Erklärung",
-  "ref.detail.eligibility_label": "Verwertbar:",
   "aria.ota": "Nach Firmware-Updates suchen",
   "ota.title_check": "Nach Updates suchen",
   "settings.diagnostics": "Anlagendiagnose",
@@ -345,14 +347,16 @@ assert.equal((html.match(/class="settings-info-value/g) || []).length, 3,
 assert.doesNotMatch(html, /settings-source-summary|Konfiguriert · 25,1 °C|Open-Meteo · 22,6 °C \/ 2 h/,
   "obsolete green summary lines must not duplicate values inside the tongues");
 const roomTongue = html.match(/<div class="vdesc-body settings-info-tongue" id="dynamic-room-sources-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
-assert.equal((roomTongue.match(/class="vdesc-p"/g) || []).length, 7,
-  "room tongue must explain configuration state, status, current value, target, age, source and setup");
-assert.match(roomTongue, /<span class="vdesc-n">Konfiguration:<\/span> Konfiguriert/,
-  "the configuration state left the row header, so the tongue must state it");
-assert.match(roomTongue, /<span class="vdesc-n">Raumtemperatur:<\/span> 25,1 °C ist die aktuelle Raumtemperatur\./);
-assert.match(roomTongue, /<span class="vdesc-n">Solltemperatur:<\/span> 22 °C ist der Raumsollwert\./);
-assert.match(roomTongue, /<span class="vdesc-n">Alter:<\/span> Messwert vor 17 s übernommen\./);
-assert.match(roomTongue, /<span class="vdesc-n">Quelle:<\/span> Example rm via MQTT\./);
+assert.equal((roomTongue.match(/class="vdesc-p"/g) || []).length, 5,
+  "a healthy room tongue needs its verdict, values, latest-reading time and one purpose paragraph");
+assert.match(roomTongue, /<span class="vdesc-n">Status:<\/span> Verwendbar/);
+assert.match(roomTongue, /<span class="vdesc-n">Raumtemperatur:<\/span> 25,1 °C/);
+assert.match(roomTongue, /<span class="vdesc-n">Solltemperatur:<\/span> 22 °C/);
+assert.match(roomTongue, /<span class="vdesc-n">Letzter Messwert:<\/span> vor 17 s/);
+assert.match(roomTongue, /Letzter Messwert:[^]*vergleicht Raum- und Solltemperatur[^]*Heizkurve zu hoch oder zu niedrig[^]*nicht gesteuert/,
+  "the purpose and no-control boundary must follow the latest reading");
+assert.doesNotMatch(roomTongue, /Konfiguration:|Quelle:|via MQTT|Messwert geprüft|Plausibilitäts-/,
+  "the live status must not repeat saved-form state, implementation details or validation prose");
 const weatherTongue = html.match(/<div class="vdesc-body settings-info-tongue" id="dynamic-weather-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
 assert.equal((weatherTongue.match(/class="vdesc-p"/g) || []).length, 5,
   "the healthy weather tongue must keep four live-evidence paragraphs plus its configuration help");
@@ -376,7 +380,7 @@ assert.doesNotMatch(roomButton, /<span>Konfiguriert<\/span>/,
 // DESIGN.md §9/§5.6: a row whose face is a NAME states its condition in colour, which is allowed
 // only because the accessible name says it in words. Dropping the state word from BOTH would make
 // this the one row a screen-reader or colourblind user cannot read the status of.
-assert.match(roomButton, /aria-label="Raumtemperaturquelle: Example rm · Aktuell"/,
+assert.match(roomButton, /aria-label="Raumtemperaturquelle: Example rm · Verwendbar"/,
   "the accessible name must spell out the status the colour is carrying");
 assert.doesNotMatch(html, /1 Quelle|Raumtemperaturquellen/,
   "the single room-temperature input must not be presented as a source count or plural collection");
@@ -385,7 +389,7 @@ assert.doesNotMatch(roomButton, /25,1 °C|vor 17 s/,
 const weatherButton = html.match(/<button[^>]*data-act="weather"[\s\S]*?<\/button>/)?.[0] || "";
 assert.match(weatherButton, /<span>Open-Meteo<\/span>/,
   "the compact weather-provider value must be the popup action");
-for (const explanation of ["Anlage heizt nicht", "Raumquellen-Erklärung", "Wetter-Konfiguration",
+for (const explanation of ["Anlage heizt nicht", "Wetter-Konfiguration",
                            "Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu kalt."])
   assert.ok(html.includes(explanation), `dynamic explanation tongue must include: ${explanation}`);
 
@@ -405,10 +409,10 @@ assert.equal((html.match(/<span>Nicht konfiguriert<\/span>/g) || []).length, 2,
   "each empty editable source must expose Not configured as its popup value");
 assert.match(html, /data-desc="dynamic:outdoor"[\s\S]*?class="settings-info-value[^"]*">Nicht konfiguriert<\/span>/,
   "the outdoor axis says the same thing PASSIVELY — it reports the sensor, it does not edit it");
-assert.ok(html.includes("Raumquellen-Erklärung") && html.includes("Wetter-Einrichtung"),
-  "unconfigured sources must still explain how their inputs work");
-assert.match(html, /id="dynamic-room-sources-detail"[^]*<span class="vdesc-n">Konfiguration:<\/span> Nicht konfiguriert/,
-  "an empty room source must state its configuration state in the tongue too");
+assert.ok(html.includes("Wetter-Einrichtung"),
+  "the unconfigured weather source must still explain its setup");
+assert.match(html, /id="dynamic-room-sources-detail"[^]*<span class="vdesc-n">Status:<\/span> Nicht eingerichtet — MQTT-Quelle über den Stift hinzufügen/,
+  "an empty room source needs one actionable status line, not a generic MQTT manual");
 assert.doesNotMatch(html, /Wetter-Konfiguration/,
   "unconfigured weather must show setup guidance instead of configured-source guidance");
 
@@ -417,15 +421,50 @@ S.status.weather_forecast = { configured: true, fetching: true };
 html = sandbox.__renderDynamic();
 assert.match(html, /id="dynamic-weather-detail"[^]*<span class="vdesc-n">Status:<\/span> Aktualisierung läuft — Der ESP32 ruft gerade neue Prognosedaten ab\./,
   "a configured weather fetch must keep the tongue and explain the in-progress state");
-assert.match(html, /id="dynamic-room-sources-detail"[^]*<span class="vdesc-n">Status:<\/span> Nicht verfügbar — Messwert verworfen\./,
+assert.match(html, /id="dynamic-room-sources-detail"[^]*<span class="vdesc-n">Status:<\/span> Fehler — MQTT-Nachricht verworfen: bad payload/,
   "a configured source error must be explained in its tongue");
-// The name is cosmetic and may be empty. The row header still has to identify SOMETHING, and it must
-// be the same word the tongue's source line uses — one fallback, not two.
+// The name is cosmetic and may be empty. The row header still has to identify SOMETHING even though
+// implementation-level source prose no longer belongs in the live status tongue.
 assert.match(html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "",
   /<span>MQTT<\/span>/,
-  "a configured source saved without a name must fall back to the tongue's own source word");
+  "a configured source saved without a name must retain one stable row identity");
 assert.doesNotMatch(html, /data-act="env3"|dynamic-env3-status/,
   "ENV III configuration must live exclusively in Board Hardware");
+
+// The room-source tongue has one dominant status vocabulary. These are the reachable transport,
+// arrival and freshness states around the healthy/unusable cases above; none may fall back to the
+// former generic setup paragraph or claim a stale packet is current.
+S.status.mqtt = { configured: false };
+S.status.reference_temperature = { configured: true, name: "Example rm", has_value: false };
+html = sandbox.__renderDynamic();
+assert.match(html, /id="dynamic-room-sources-detail"[^]*<span class="vdesc-n">Status:<\/span> Nicht verfügbar — MQTT-Broker deaktiviert/);
+assert.match(html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "", /\berr\b/,
+  "a saved MQTT source cannot be available while the broker is disabled");
+
+S.status.mqtt = { configured: true };
+S.status.reference_temperature = { configured: true, name: "Example rm", has_value: false };
+html = sandbox.__renderDynamic();
+assert.match(html, /Status:<\/span> Wartet — Noch keinen MQTT-Messwert empfangen/);
+
+S.status.reference_temperature = {
+  configured: true, name: "Example rm", has_value: true, temperature_c: 24,
+  has_setpoint: true, setpoint_c: 22, age_s: 601, max_age_s: 600,
+  fresh: false, freshness_reason: "stale", control_eligible: false, reason: "stale",
+};
+html = sandbox.__renderDynamic();
+assert.match(html, /Status:<\/span> Veraltet — Messwert ist älter als zulässig/);
+assert.match(html, /Letzter Messwert:<\/span> vor 601 s · zulässig: höchstens 600 s/,
+  "only a stale reading needs its configured age limit next to the actual age");
+
+S.status.reference_temperature = {
+  configured: true, name: "Example rm", has_value: true, temperature_c: 24,
+  has_setpoint: true, setpoint_c: 22, age_s: null, fresh: false,
+  freshness_reason: "retained_without_timestamp", control_eligible: false,
+  reason: "retained_without_timestamp",
+};
+html = sandbox.__renderDynamic();
+assert.match(html, /Status:<\/span> Nicht verwendbar — Retained-Wert ohne vertrauenswürdige Messzeit/,
+  "a retained value without source time must fail closed with its specific reason");
 
 S.status.weather_forecast = {
   configured: true, has_value: true, outdoor_mean_2h_c: -3.2,
@@ -484,10 +523,13 @@ assert.match(html, /Raumthermostat ausgeschaltet/,
 const blockedRoomButton = html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "";
 assert.match(blockedRoomButton, /class="[^"]*\bwarn\b/,
   "the source that is blocking the diagnosis must not be the one row rendered as OK");
-assert.match(blockedRoomButton, /aria-label="Raumtemperaturquelle: Example rm · Raumthermostat ausgeschaltet"/,
+assert.match(blockedRoomButton, /aria-label="Raumtemperaturquelle: Example rm · Nicht verwendbar — Raumthermostat ausgeschaltet"/,
   "a current-but-unusable source must name the block in its accessible name, not merely go orange");
-assert.match(html, /<span class="vdesc-n">Verwertbar:<\/span> Raumthermostat ausgeschaltet/,
-  "the source tongue must give the same reason as the state row");
+assert.match(html, /<span class="vdesc-n">Status:<\/span> Nicht verwendbar — Raumthermostat ausgeschaltet/,
+  "the source tongue must give one amber-compatible verdict with the same reason as the state row");
+const blockedRoomTongue = html.match(/id="dynamic-room-sources-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
+assert.doesNotMatch(blockedRoomTongue, /<span class="vdesc-n">Verwertbar:<\/span>|Aktuell —/,
+  "freshness must not appear as a competing positive status on an unusable source");
 
 // Protocol and Firmware use the same info-tongue contract while keeping their independent controls.
 S.status = {
