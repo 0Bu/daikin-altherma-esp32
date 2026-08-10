@@ -333,14 +333,45 @@ struct DhwLossBucket {
     uint16_t circulation_known_s = 0;
     uint16_t circulation_on_s = 0;
     int16_t max_loss_tenths_k_h = CHECKUP_ABSENT;
+    // WHAT THE PLANT REFUSED, not only what it granted. Everything above counts hours that COMPLETED;
+    // with none of them the check reported `0 min of 6 h` and nothing else, which is the same reading
+    // a board that booted a minute ago gives. The three fields below are the difference between
+    // "not yet" and "not here": how many candidate hours were discarded, WHY, and how far the best
+    // one got before it was. Without them a plant that structurally cannot grant a quiet hour is
+    // indistinguishable from one that simply has not yet — and the check would say `collecting`
+    // forever, which reads as "wait a little longer" when the truth is "never on this plant".
+    uint16_t best_aborted_s = 0;
+    uint8_t aborts = 0;
+    uint8_t abort_reasons = 0;   // DHW_ABORT_* bits, OR-folded — a mask, never a ranking it cannot afford
     uint8_t windows = 0;
     uint8_t high_windows = 0;
     uint8_t high_with_pump = 0;
     uint8_t high_pump_off = 0;
 };
 
+// EXACTLY at the stated budget (24 x 16). The next field costs a decision about the budget rather
+// than an edit — which is what the assert is for.
 constexpr size_t DHW_LOSS_BYTES = sizeof(DhwLossBucket) * CHECKUP_BUCKETS;
 static_assert(DHW_LOSS_BYTES <= 384, "DHW loss ring exceeded its static-memory budget");
+
+// Why a candidate hour was discarded. A MASK on the bucket: several causes inside one hour are all
+// true, and folding them to "the last one" would name whichever fired nearest the commit.
+constexpr uint8_t DHW_ABORT_CHARGE  = 1u << 0;  // tank charge witness (3-way valve on DHW, or BSH)
+constexpr uint8_t DHW_ABORT_PUMP    = 1u << 1;  // internal circulation pump stirred the hydronics
+constexpr uint8_t DHW_ABORT_DRAW    = 1u << 2;  // R5T fell like a draw, not like a standing loss
+constexpr uint8_t DHW_ABORT_READING = 1u << 3;  // R5T outside the plausible band
+constexpr uint8_t DHW_ABORT_BLIND   = 1u << 4;  // too much of the hour went unobserved
+
+inline const char* dhw_abort_reason_name(uint8_t bit) {
+    switch (bit) {
+        case DHW_ABORT_CHARGE:  return "charge";
+        case DHW_ABORT_PUMP:    return "pump";
+        case DHW_ABORT_DRAW:    return "draw";
+        case DHW_ABORT_READING: return "reading";
+        case DHW_ABORT_BLIND:   return "blind";
+        default:                return "";
+    }
+}
 
 struct DhwLossRing {
     DhwLossBucket buf[CHECKUP_COMPLETED_BUCKETS] = {};
@@ -381,6 +412,11 @@ struct DhwLossState {
     uint32_t segment_circulation_on_s = 0;
     uint32_t circulation_off_run_s = 0;
     uint32_t settle_remaining_s = 0;
+    // How long the charge witness has stood UNBROKEN. A charge earns the 45-minute settle only past
+    // DHW_LOSS_CHARGE_MIN_S; see the constant. Deliberately NOT cleared by reset_segment(), which is
+    // about the candidate hour — this is about the witness, and the two ended together only by
+    // accident of the old code.
+    uint32_t charge_run_s = 0;
     // Seconds inside the candidate segment during which the plant was NOT OBSERVED — a page that
     // timed out this sweep, or a gap past CHECKUP_MAX_GAP_S. Tracked rather than fatal; see
     // dhw_loss_step's blindness rule.
@@ -398,6 +434,38 @@ struct DhwLossState {
 constexpr uint32_t DHW_LOSS_WINDOW_S = 3600;             // R5T resolves only 0.1 K
 constexpr uint32_t DHW_LOSS_SETTLE_S = 45 * 60;          // issue #349 method after a tank charge
 constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
+// HOW LONG THE CHARGE WITNESS MUST STAND before it costs the 45-minute settle.
+//
+// The settle exists because a tank that was just heated redistributes for a while, so the loss
+// measured across that stretch is not a standing loss. That is a claim about HEAT PUT INTO THE TANK
+// — and a witness that stood for one poll cycle put none in. Without this bound the two were the
+// same event: one sample of "3-way valve on DHW" cost the same 105 minutes (45 settle + a fresh
+// 60-minute window) as a 40-minute charge. Measured against this header over an otherwise perfect
+// 24 h with a standing tank, ONE ~1 s valve blip every 90 minutes took the day from 23 completed
+// windows to ZERO, and the card then reported `0 min of 6 h` indefinitely with every input present
+// and correct.
+//
+// The number is not a new guess: DHW_LOSS_BLIND_RUN_MAX_S already asserts, as its own load-bearing
+// justification, that a tank charge cannot start, run and finish inside 120 seconds. This is that
+// same claim used in the other direction, so the two cannot disagree about what a charge is.
+//
+// A SHORT witness is still a DISTURBANCE and still discards the candidate hour — the hydronics moved
+// and the tank is no longer standing. What it no longer does is assert that heat went in. The
+// asymmetry is deliberate and is the safe direction: the worst case of being wrong here is a
+// candidate hour that starts 45 minutes earlier than the old rule allowed, on a tank that received
+// at most ~120 s of charge — and the window measures a DROP (`drop_tenths` floors at 0), so a tank
+// still warming from it reports no loss at all rather than a false one.
+//
+// An unmeasured gap counts as proven: a witness seen across an interval nobody watched could have
+// been running for all of it, and that is the one direction in which guessing short would admit a
+// real charge's tail as tank loss.
+constexpr uint32_t DHW_LOSS_CHARGE_MIN_S = 120;
+// HOW MANY DISCARDED HOURS make "this plant does not grant one" a statement rather than a guess.
+// Six — the same number of clean hours the check needs before it may say the tank is fine. To claim
+// the plant is healthy it wants a full day AND six completed hours; to claim it cannot be judged
+// here it wants a full day AND six DISCARDED ones. Symmetric on purpose: both are conclusions about
+// the whole window, and neither may be reached from a single event.
+constexpr uint32_t DHW_LOSS_BLOCKED_MIN_ABORTS = 6;
 // KNOWN BLIND BAND — read this before tuning either constant.
 //
 // The anchor is re-established every <= DHW_LOSS_DRAW_WINDOW_S and a drop of this many tenths from it
@@ -483,6 +551,7 @@ struct DhwLossCarry {
     uint32_t segment_circulation_known_s = 0;
     uint32_t segment_circulation_on_s = 0;
     uint32_t settle_remaining_s = 0;
+    uint32_t charge_run_s = 0;
     uint32_t segment_blind_s = 0;
     uint32_t blind_run_s = 0;
     int16_t segment_start_tenths = 0;
@@ -502,6 +571,9 @@ inline DhwLossCarry dhw_loss_checkpoint(const DhwLossState& st, int64_t now_us) 
     c.segment_circulation_known_s = st.segment_circulation_known_s;
     c.segment_circulation_on_s = st.segment_circulation_on_s;
     c.settle_remaining_s = st.settle_remaining_s;
+    // A charge in progress at the reboot keeps its accumulated run: restarting the clock would let a
+    // 40-minute charge that straddles an OTA look like a fresh blip and skip its settle entirely.
+    c.charge_run_s = st.charge_run_s;
     c.segment_blind_s = st.segment_blind_s;
     c.blind_run_s = st.blind_run_s;
     c.segment_start_tenths = static_cast<int16_t>(st.segment_start_tenths);
@@ -534,6 +606,7 @@ inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_
     st = DhwLossState{};
     st.last_us = now_us;
     st.settle_remaining_s = c.settle_remaining_s;
+    st.charge_run_s = c.charge_run_s;
     if (!(c.flags & DHW_LOSS_CARRY_SEGMENT)) return;
 
     st.segment_start_us = now_us;
@@ -556,6 +629,23 @@ inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_
         st.draw_anchor_tenths = c.draw_anchor_tenths;
     }
     if (!dhw_loss_blind_ok(st, DHW_LOSS_REBOOT_BLIND_S)) st.reset_segment();
+}
+
+// Discard the candidate hour and RECORD that it happened. Only a LIVE candidate is an abort: the
+// settle branch calls reset_segment() on every one of its cycles, and counting those would report
+// 2250 discarded hours for one tank charge. The best-reached figure is folded here rather than at
+// the commit for the same reason it is worth keeping at all — the interesting candidate is the one
+// that was killed, not the one still running.
+inline void dhw_loss_abort(DhwLossState& st, DhwLossBucket& b, uint8_t reason, int64_t now_us) {
+    if (st.segment_start_us >= 0) {
+        const uint32_t elapsed = dhw_loss_age_s(now_us, st.segment_start_us, st.segment_carried_s);
+        const uint32_t observed = elapsed - std::min(elapsed, st.segment_blind_s);
+        if (observed > b.best_aborted_s)
+            b.best_aborted_s = static_cast<uint16_t>(std::min<uint32_t>(observed, UINT16_MAX));
+        b.aborts = checkup_add_u8(b.aborts, 1);
+        b.abort_reasons = static_cast<uint8_t>(b.abort_reasons | reason);
+    }
+    st.reset_segment();
 }
 
 struct DhwLossProgress {
@@ -603,19 +693,35 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     // tank loss as soon as the timed-out row recovered.
     const bool heating_tank = (s.valve_known && s.valve_dhw) || (s.bsh_known && s.bsh_on);
     if (heating_tank) {
-        st.settle_remaining_s = DHW_LOSS_SETTLE_S;
-        st.reset_segment();
+        // An interval nobody measured counts as proven charge time — see DHW_LOSS_CHARGE_MIN_S.
+        const uint32_t seen = continuous ? dt : DHW_LOSS_CHARGE_MIN_S;
+        st.charge_run_s = std::min<uint32_t>(UINT32_MAX - seen, st.charge_run_s) + seen;
+        if (st.charge_run_s >= DHW_LOSS_CHARGE_MIN_S) st.settle_remaining_s = DHW_LOSS_SETTLE_S;
+        // The candidate ends either way: brief or not, the hydronics moved and the tank is no
+        // longer standing. Only the 45-minute settle is withheld from a witness too short to have
+        // put heat in.
+        dhw_loss_abort(st, b, DHW_ABORT_CHARGE, now_us);
         return;
     }
+    // AN UNREADABLE ROW IS NOT PROOF THE CHARGE ENDED — the same "unknown is not off" rule the
+    // witness itself follows, and the direction that matters most here. Both witnesses live on page
+    // 0x60; one timed-out sweep inside a real 40-minute charge would otherwise restart the
+    // two-minute clock, and a charge that finished within two minutes of that timeout would arm no
+    // settle at all and admit its own tail as standing tank loss — the false-leak direction this
+    // check must never fail in. At the reference installation's measured timeout rate (47 in 8.2 h)
+    // that is not a corner case. Staying armed across a blind stretch only ever spends MORE settle.
+    if (s.valve_known && s.bsh_known) st.charge_run_s = 0;
     if (!continuous) {
         // Past CHECKUP_MAX_GAP_S the firmware was not watching — a wedged read, a burst of timed-out
         // pages, a reboot. That is BLIND time of a known length, not a plant state, so it is
         // budgeted exactly like an unreadable row rather than discarding the hour outright.
-        if (!dhw_loss_blind_ok(st, gap_s)) st.reset_segment();
+        if (!dhw_loss_blind_ok(st, gap_s)) dhw_loss_abort(st, b, DHW_ABORT_BLIND, now_us);
         return;
     }
     if (st.settle_remaining_s) {
         st.settle_remaining_s = dt >= st.settle_remaining_s ? 0 : st.settle_remaining_s - dt;
+        // Not an abort: the charge that armed this already booked one, and there is no candidate
+        // left to discard. Counting these would report one aborted hour per second of settling.
         st.reset_segment();
         return;
     }
@@ -624,10 +730,12 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     // two charge witnesses already returned above; what is left is the internal pump (space heating
     // stirs the hydronics R5T sits in) and an R5T outside the plausible band. `known` is required on
     // each: an unread row is judged one branch further down, never here.
-    const bool disqualified = (s.pump_known && s.pump_on) ||
-                              (s.r5t_ok && (s.r5t_tenths < 0 || s.r5t_tenths > 900));
-    if (disqualified) {
-        st.reset_segment();
+    if (s.pump_known && s.pump_on) {
+        dhw_loss_abort(st, b, DHW_ABORT_PUMP, now_us);
+        return;
+    }
+    if (s.r5t_ok && (s.r5t_tenths < 0 || s.r5t_tenths > 900)) {
+        dhw_loss_abort(st, b, DHW_ABORT_READING, now_us);
         return;
     }
 
@@ -635,7 +743,7 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     // leaves every row on it absent from this sample (hp_poll replaces the cache with the rows that
     // answered), and the tank did not change state because a UART read timed out.
     if (!states_known || !s.r5t_ok) {
-        if (!dhw_loss_blind_ok(st, dt)) st.reset_segment();
+        if (!dhw_loss_blind_ok(st, dt)) dhw_loss_abort(st, b, DHW_ABORT_BLIND, now_us);
         return;
     }
 
@@ -645,7 +753,7 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
         // then re-arm the anchor at a temperature that was actually measured.
         if (st.draw_anchor_us >= 0 &&
             st.draw_anchor_tenths - s.r5t_tenths >= DHW_LOSS_DRAW_DROP_TENTHS)
-            st.reset_segment();
+            dhw_loss_abort(st, b, DHW_ABORT_DRAW, now_us);
         st.draw_anchor_us = now_us;
         st.draw_anchor_carried_s = 0;
         st.draw_anchor_tenths = s.r5t_tenths;
@@ -661,7 +769,7 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     } else if (st.draw_anchor_tenths - s.r5t_tenths >= DHW_LOSS_DRAW_DROP_TENTHS) {
         // A draw can mimic a spectacular cooling rate. Discard everything since the anchor, then
         // start a new candidate segment at the post-draw temperature.
-        st.reset_segment();
+        dhw_loss_abort(st, b, DHW_ABORT_DRAW, now_us);
         st.draw_anchor_us = now_us;
         st.draw_anchor_carried_s = 0;
         st.draw_anchor_tenths = s.r5t_tenths;
@@ -966,6 +1074,9 @@ struct DhwLossWindow {
     uint32_t high_windows = 0;
     uint32_t high_with_pump = 0;
     uint32_t high_pump_off = 0;
+    uint32_t aborts = 0;
+    uint32_t best_aborted_s = 0;   // the longest DISCARDED candidate, never a completed one
+    uint8_t  abort_reasons = 0;
     int max_loss_tenths_k_h = CHECKUP_ABSENT;
 };
 
@@ -979,6 +1090,9 @@ inline DhwLossWindow dhw_loss_aggregate(const DhwLossRing& r) {
         w.high_windows += b.high_windows;
         w.high_with_pump += b.high_with_pump;
         w.high_pump_off += b.high_pump_off;
+        w.aborts += b.aborts;
+        w.abort_reasons = static_cast<uint8_t>(w.abort_reasons | b.abort_reasons);
+        if (b.best_aborted_s > w.best_aborted_s) w.best_aborted_s = b.best_aborted_s;
         if (b.max_loss_tenths_k_h != CHECKUP_ABSENT &&
             (w.max_loss_tenths_k_h == CHECKUP_ABSENT ||
              b.max_loss_tenths_k_h > w.max_loss_tenths_k_h))
@@ -1187,6 +1301,17 @@ struct CheckupReport {
     // candidate behind "0 min" made a successful OTA handoff look exactly like a reset.
     uint32_t          dhw_candidate_s = 0;
     uint32_t          dhw_settle_remaining_s = 0;
+    // The window's own account of what it discarded, and whether that has become a verdict. On the
+    // report rather than in CheckupCheckResult's a..g because those seven are full AND because they
+    // would cost the figure on all eight checks — dhw_candidate_s set that precedent. `dhw_blocked`
+    // is stated rather than inferred from `aborts > 0` beside an Unavailable verdict: a consumer
+    // reconstructing it would be a second copy of the rule, and the two Unavailable causes need
+    // OPPOSITE advice (a profile that cannot supply the rows is nothing the owner can act on; a
+    // plant that never stands still is).
+    uint32_t          dhw_aborts = 0;
+    uint32_t          dhw_best_aborted_s = 0;
+    uint8_t           dhw_abort_reasons = 0;
+    bool              dhw_blocked = false;
     bool              full_span = false;
     uint8_t           available = 0; // checks supported by the active profile
     uint8_t           assessable = 0;// supported checks with a bounded judgement (not raw observations)
@@ -1232,7 +1357,20 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
     // A high clean window is useful immediately; a reassuring absence waits for a complete 24 h
     // lifecycle and at least six clean hours.  The Shelly strengthens attribution but is optional:
     // missing/stale external evidence never erases an X10A-established high tank loss.
+    r.dhw_aborts = dhw.aborts;
+    r.dhw_abort_reasons = dhw.abort_reasons;
+    r.dhw_best_aborted_s = dhw.best_aborted_s;
+    // WHAT THE PLANT WILL NEVER GRANT is a different answer from WHAT IT HAS NOT GRANTED YET, and
+    // only this check can tell them apart. A full lifecycle with not one completed hour and at least
+    // DHW_LOSS_BLOCKED_MIN_ABORTS discarded ones is a plant whose own duty cycle is shorter than the
+    // 105 minutes the method needs (45 settle + a 60-minute window). Reported as Unavailable — the
+    // verdict that already means "this check cannot adjudicate here": it says nothing either way,
+    // does not outrank Ok, and stops one permanently-unreachable check from holding the whole card
+    // at `collecting` for the rest of the installation's life. `aborts` is what separates it from a
+    // dead bus, where nothing was measured and `collecting` is still the honest answer.
     const bool dhw_supported = cov.r5t && cov.valve && cov.pump && cov.bsh;
+    const bool dhw_blocked = dhw_supported && w.full_span && dhw.windows == 0 &&
+                             dhw.aborts >= DHW_LOSS_BLOCKED_MIN_ABORTS;
     if (!dhw_supported) {
         set(CheckupCheck::DhwLoss, CheckupVerdict::Unavailable, 0, DHW_LOSS_REQUIRED_S);
     } else if (dhw.high_windows > 0) {
@@ -1248,6 +1386,14 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
             dhw.max_loss_tenths_k_h == CHECKUP_ABSENT ? -1 : dhw.max_loss_tenths_k_h,
             static_cast<int>(dhw.windows), static_cast<int>(dhw.high_windows),
             static_cast<int>(dhw.high_with_pump), static_cast<int>(dhw.high_pump_off),
+            static_cast<int>(dhw.circulation_on_s),
+            static_cast<int>(dhw.circulation_known_s));
+    } else if (dhw_blocked) {
+        r.dhw_blocked = true;
+        set(CheckupCheck::DhwLoss, CheckupVerdict::Unavailable,
+            dhw.observed_s, DHW_LOSS_REQUIRED_S,
+            dhw.max_loss_tenths_k_h == CHECKUP_ABSENT ? -1 : dhw.max_loss_tenths_k_h,
+            static_cast<int>(dhw.windows), 0, 0, 0,
             static_cast<int>(dhw.circulation_on_s),
             static_cast<int>(dhw.circulation_known_s));
     } else if (!w.full_span || dhw.observed_s < DHW_LOSS_REQUIRED_S) {

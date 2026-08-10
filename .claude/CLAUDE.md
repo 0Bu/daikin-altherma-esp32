@@ -953,7 +953,9 @@ checkup.cpp     the 24-hour PLANT CHECKUP behind /status.health and the dashboar
                 so the checkup and the held-over marking cannot disagree). 24 one-hour buckets, not
                 in NVS for history.cpp's reason — and, since logic/checkup_persist.hpp, "not in NVS"
                 no longer means "gone at every reboot" here either. The rings sit in .noinit DRAM
-                (1224 B beside history's 29020), so any reset that KEPT POWER carries the window
+                (measured 1282 B — the 896 B generic ring plus the 386 B DHW one, whose bucket now
+                sits EXACTLY on its stated 384-byte budget — beside history's 29020), so any reset
+                that KEPT POWER carries the window
                 across at zero cost in RAM, flash and partitions. This is where a reboot hurts MOST
                 of anything on this board: the window is 24 h and the requirements are hours, so
                 losing it loses the VERDICT rather than a few samples — measured, the DHW check had
@@ -1506,12 +1508,17 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 outdoor page AND the hydronic one, and a locator would pick one unit and miss the
                 other's fault. The compressor witness is ou_is_rps_witness(), called not restated.
                 FIVE verdicts, and the two that are not judgements are the design: Unavailable (this
-                profile cannot supply the inputs — feature_gate.hpp's DISABLE-NEVER-DEGRADE, and it
+                check cannot adjudicate here — feature_gate.hpp's DISABLE-NEVER-DEGRADE, and it
                 really bites, since only 27 of 44 profiles carry the compressor witness) and
                 Collecting (the inputs exist, the 24 h window does not hold enough of them yet).
                 Collecting outranks Ok in the aggregation and Unavailable does not, which is the
                 whole honesty property: a board that has been up ten minutes has not established
                 that the plant is fine, while a check the model cannot run says nothing either way.
+                Unavailable has a SECOND cause since the DHW window learned to report what it
+                DISCARDS, and the two need OPPOSITE advice, so `dhw_loss.blocked` states which it is
+                rather than leaving a consumer to infer it from `aborts > 0`: a profile without the
+                rows is nothing an owner can act on, a plant that never stands still is. That second
+                cause is a state Collecting cannot express — see the dhw_loss paragraph below.
                 TWO of #208's six checks are deliberately NOT built, each because the bus cannot
                 support the claim: an absolute minimum-flow threshold (per
                 model over a 3-18 kW catalog, and the unit raises 7H itself, so the flow minimum is
@@ -1555,6 +1562,40 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 DHW, BSH on, internal pump running, an implausible R5T) still ends the segment, and
                 a draw hidden inside a blind run is still caught, because the anchor standing when
                 vision was lost is what the first sighted sample is judged against.
+                WHAT THE HOUR COST was the half none of that fixed, and it is two separate defects
+                wearing one symptom — `0 min of 6 h`, forever, on a plant whose every input is
+                present and correct. FIRST, the settle was owed to HEAT PUT INTO THE TANK and was
+                charged for a WITNESS instead: one sample of "3-way valve on DHW" armed the full 45
+                minutes, so a blip and a 40-minute charge cost the identical 105 minutes (settle plus
+                a fresh 60-minute window). Measured against this header over an otherwise perfect
+                24 h with a standing tank, ONE ~1 s blip every 90 minutes took the day from 23
+                completed windows to ZERO. DHW_LOSS_CHARGE_MIN_S (120 s) is the bound, and it is not
+                a new guess: DHW_LOSS_BLIND_RUN_MAX_S already asserts, as its own justification, that
+                no tank charge starts, runs and finishes inside 120 s — this is that claim in the
+                other direction, so the two cannot disagree about what a charge is. A short witness
+                STILL discards the candidate (the hydronics moved); what it no longer does is assert
+                that heat went in. TWO rules keep the bound from failing toward a leak that is not
+                there: an unmeasured gap counts as PROVEN charge time, and an UNREADABLE row is not
+                proof the charge ended (both witnesses ride page 0x60, so one silent page inside a
+                40-minute charge would restart the clock, and a charge ending soon after would arm
+                no settle and have its tail measured as standing loss — at 47 timeouts in 8.2 h, not
+                a corner case). Staying armed across a blind stretch only ever spends MORE settle.
+                SECOND, the check could
+                not say any of this: it kept no record of what it discarded, so a plant whose duty
+                cycle is shorter than 105 minutes reported exactly what a board that booted a minute
+                ago reports, and `collecting` reads as "wait a little longer" when the truth is
+                "never here". The ring now carries `aborts`, an `abort_reasons` MASK (charge / pump /
+                draw / reading / blind — a mask, not a ranking it cannot afford at 2 bytes) and
+                `best_aborted_s`, all decaying with the same 24 h; a full lifecycle with no completed
+                window and >= DHW_LOSS_BLOCKED_MIN_ABORTS (6, the same number of hours OK requires —
+                symmetric on purpose) discarded ones becomes `blocked`. The settle's own per-cycle
+                reset is NOT an abort: the charge that armed it already booked one, and counting them
+                would report 2700 discarded hours per tank charge. What separates blocked from a DEAD
+                BUS is `aborts` itself — a bus that measured nothing discarded nothing, and
+                `collecting` stays right there. A finding always outranks blocked: a high window is
+                evidence, and evidence is never withheld because the plant is also busy. The bucket
+                is now EXACTLY at its stated 384-byte budget (24 x 16), so the next field is a
+                decision about the budget rather than an edit.
                 availability.hpp = the ADJUDICATED per-row answer to "is this decoded number a
                 MEASUREMENT, or merely something the firmware could decode?" (#209). Every other gate
                 answers something narrower: convert() handles the wire format's own 0x8000 no-data
@@ -2822,7 +2863,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   fault first, each `unavailable` | `collecting` | `ok` | `info` | `warn` plus its
                   own named numbers: fault{active},
                   dhw_loss{max_k_h,windows,high_windows,high_with_pump,high_pump_off,
-                  circulation_on_s,circulation_known_s}, cycling{starts,mean_run_s},
+                  circulation_on_s,circulation_known_s,candidate_s,settle_remaining_s,
+                  aborts,abort_reasons[],best_aborted_s,blocked}, cycling{starts,mean_run_s},
                   defrost{count,share_pct,paired_count,defrost_s,run_s}, pressure{min_bar},
                   flow{min_l_min},
                   heater{buh_min,bsh_min,buh_s,bsh_s}, retries{seen}. Named per check rather than a generic pair,

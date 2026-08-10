@@ -170,6 +170,21 @@ const I18N = {
     "check.detail.dhw_candidate": (n, r, c, w) => `${n} of ${r} completed in clean one-hour windows; current clean window: ${c} of ${w}.`,
     "check.detail.dhw_settling": (n, r, s) => `${n} of ${r} completed in clean one-hour windows; tank charging or BSH was detected, with ${s} settling time remaining.`,
     "check.detail.dhw_waiting": (n, r) => `${n} of ${r} completed in clean one-hour windows; no complete clean one-hour window yet.`,
+    // What the window DISCARDED. Appended to whichever sentence above applies, because "0 min" and
+    // "0 min after nine attempts were thrown away by tank charging" are different findings, and only
+    // the second one tells the reader where to look.
+    "check.detail.dhw_aborted": (n, reasons, best) => ` ${n} candidate ${n === 1 ? "window" : "windows"} discarded (${reasons}); longest reached ${best} of 60 min.`,
+    // The verdict that says this is not a matter of waiting longer. TWO sentences, because the same
+    // verdict is reachable from two causes that need opposite action: a plant whose own duty cycle
+    // is shorter than the method needs, and an X10A link that never stayed readable long enough.
+    // Blaming the duty cycle for a flapping bus sends the reader to the wrong place entirely.
+    "check.detail.dhw_blocked": (n, reasons, best) => `Not reachable on this plant: over a full 24 hours not one clean one-hour window completed, and ${n} candidate ${n === 1 ? "window was" : "windows were"} discarded (${reasons}); the longest reached ${best} of 60 min. The method needs 105 undisturbed minutes after each tank charge (45 min settling plus a 60-minute window), which this plant's own duty cycle does not leave.`,
+    "check.detail.dhw_blocked_link": (n, best) => `Not assessable: over a full 24 hours not one clean one-hour window completed, and all ${n} candidate ${n === 1 ? "window was" : "windows were"} discarded because the X10A link stopped answering mid-window; the longest reached ${best} of 60 min. This is the link, not the plant — check the X10A wiring and the RX/TX pins.`,
+    "check.detail.dhw_reason.charge": "tank charging",
+    "check.detail.dhw_reason.pump": "internal pump",
+    "check.detail.dhw_reason.draw": "draw-like drop",
+    "check.detail.dhw_reason.reading": "implausible R5T",
+    "check.detail.dhw_reason.blind": "X10A not answering",
     "check.detail.collecting_unknown": "Not enough usable evidence for an assessment yet.",
     "check.detail.observation": "Measured value only; there is no universal OK/WARNING limit.",
     "check.detail.experimental": "Experimental observation; a stable counter is not proof that no limiting occurred.",
@@ -687,6 +702,21 @@ const I18N = {
     "check.detail.dhw_candidate": (n, r, c, w) => `${n} von ${r} als vollständige bereinigte Stundenfenster erfasst; laufendes bereinigtes Fenster: ${c} von ${w}.`,
     "check.detail.dhw_settling": (n, r, s) => `${n} von ${r} als vollständige bereinigte Stundenfenster erfasst; Speicherladung oder BSH erkannt, noch ${s} Beruhigungszeit.`,
     "check.detail.dhw_waiting": (n, r) => `${n} von ${r} als vollständige bereinigte Stundenfenster erfasst; noch kein vollständiges bereinigtes Stundenfenster.`,
+    // Was das Fenster VERWORFEN hat. Wird an den jeweils zutreffenden Satz oben angehängt: „0 min“
+    // und „0 min, nachdem neun Ansätze durch Speicherladungen verworfen wurden“ sind verschiedene
+    // Befunde, und nur der zweite sagt dem Leser, wo er hinschauen muss.
+    "check.detail.dhw_aborted": (n, reasons, best) => ` ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen (${reasons}); längster erreichte ${best} von 60 min.`,
+    // Das Urteil, das sagt: hier hilft kein längeres Warten. ZWEI Sätze, weil dasselbe Urteil aus
+    // zwei Ursachen folgt, die entgegengesetztes Handeln verlangen: ein Anlagentakt, der kürzer ist
+    // als das Verfahren braucht, und eine X10A-Verbindung, die nie lange genug lesbar blieb. Einem
+    // flackernden Bus den Anlagentakt vorzuwerfen schickt den Leser komplett an die falsche Stelle.
+    "check.detail.dhw_blocked": (n, reasons, best) => `Auf dieser Anlage nicht erreichbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen (${reasons}); der längste erreichte ${best} von 60 min. Das Verfahren braucht nach jeder Speicherladung 105 ungestörte Minuten (45 min Beruhigung plus 60-Minuten-Fenster) — so viel lässt der Takt dieser Anlage nicht.`,
+    "check.detail.dhw_blocked_link": (n, best) => `Nicht bewertbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, alle ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen, weil die X10A-Verbindung mitten im Fenster aufhörte zu antworten; der längste erreichte ${best} von 60 min. Das liegt an der Verbindung, nicht an der Anlage — prüfe die X10A-Verkabelung und die RX/TX-Pins.`,
+    "check.detail.dhw_reason.charge": "Speicherladung",
+    "check.detail.dhw_reason.pump": "interne Pumpe",
+    "check.detail.dhw_reason.draw": "zapfungsähnlicher Abfall",
+    "check.detail.dhw_reason.blind": "X10A antwortet nicht",
+    "check.detail.dhw_reason.reading": "R5T unplausibel",
     "check.detail.collecting_unknown": "Noch nicht genug verwertbare Evidenz für eine Bewertung.",
     "check.detail.observation": "Nur Messwert; dafür gibt es keinen allgemeinen Grenzwert für OK oder WARNUNG.",
     "check.detail.experimental": "Experimentelle Beobachtung; ein stabiler Zähler beweist nicht, dass keine Begrenzung stattfand.",

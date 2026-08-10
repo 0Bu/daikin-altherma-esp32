@@ -43,6 +43,7 @@ for (const key of [
   "min_bar", "min_l_min", "buh_min", "bsh_min", "buh_s", "bsh_s", "active", "seen",
   "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
   "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
+  "aborts", "best_aborted_s", "blocked", "abort_reasons",
 ]) {
   assert.match(normalizedStatusSource, new RegExp(`"${key}"`),
                `missing /status.health key ${key}`);
@@ -204,6 +205,58 @@ assert.match(ui.detail(dhwCandidate),
 const dhwSettling = { ...dhwCandidate, candidate_s: 0, settle_remaining_s: 1200 };
 assert.match(ui.detail(dhwSettling),
   /PRÜFT — 0 min von 6 h als vollständige bereinigte Stundenfenster erfasst; Speicherladung oder BSH erkannt, noch 20 min Beruhigungszeit/);
+
+// WHAT THE WINDOW DISCARDED rides every collecting sentence. "0 min" alone reads exactly like a
+// board that booted a minute ago; "0 min, and nine candidates were thrown away by tank charging"
+// is the half that says where to look — and whether waiting will ever help.
+const dhwAborted = { ...dhwSettling, aborts: 9, best_aborted_s: 2400,
+                     abort_reasons: ["charge", "pump"] };
+assert.match(ui.detail(dhwAborted),
+  /noch 20 min Beruhigungszeit\. 9 Kandidaten wurden verworfen \(Speicherladung, interne Pumpe\); längster erreichte 40 min von 60 min\./);
+ui.setLang("en");
+assert.match(ui.detail(dhwAborted),
+  /9 candidate windows discarded \(tank charging, internal pump\); longest reached 40 min of 60 min\./);
+assert.match(ui.detail({ ...dhwAborted, aborts: 1, abort_reasons: ["pump"] }),
+             /1 candidate window discarded \(internal pump\)/);
+// Older firmware sends none of these keys: the sentence must simply not appear.
+assert.doesNotMatch(ui.detail(dhwSettling), /discarded/);
+// A slug this build does not know is dropped rather than rendered as a raw key that would read
+// like a cause. The firmware sends names, so the browser never decodes a bitmask.
+assert.match(ui.detail({ ...dhwAborted, abort_reasons: ["charge", "from_the_future"] }),
+             /discarded \(tank charging\)/);
+
+// THE VERDICT THAT SAYS WAITING WILL NOT HELP. Unavailable like a profile that cannot supply the
+// rows — it says nothing either way — but the two need opposite advice, so `blocked` gets its own
+// sentence instead of the generic "the active profile provides no assessable data".
+const dhwBlocked = { id: "dhw_loss", verdict: "unavailable", observed_s: 0, required_s: 21600,
+                     windows: 0, max_k_h: null, blocked: true, aborts: 14, best_aborted_s: 3000,
+                     abort_reasons: ["charge"] };
+assert.match(ui.detail(dhwBlocked),
+  /NOT AVAILABLE — Not reachable on this plant: over a full 24 hours not one clean one-hour window completed, and 14 candidate windows were discarded \(tank charging\); the longest reached 50 min of 60 min\./);
+assert.match(ui.detail(dhwBlocked), /105 undisturbed minutes after each tank charge/);
+ui.setLang("de");
+assert.match(ui.detail(dhwBlocked),
+  /NICHT VERFÜGBAR — Auf dieser Anlage nicht erreichbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, 14 Kandidaten wurden verworfen \(Speicherladung\)/);
+assert.match(ui.detail(dhwBlocked), /105 ungestörte Minuten/);
+// The SAME verdict is reachable from a flapping X10A link — a candidate opens, the bus goes quiet
+// mid-window, repeatedly — and that needs the opposite action from a plant that never stands still.
+// Blaming the duty cycle there sends the reader to the heat pump for a wiring fault.
+const dhwBlockedByLink = { ...dhwBlocked, abort_reasons: ["blind"] };
+assert.match(ui.detail(dhwBlockedByLink),
+             /weil die X10A-Verbindung mitten im Fenster aufhörte zu antworten/);
+assert.match(ui.detail(dhwBlockedByLink), /prüfe die X10A-Verkabelung und die RX\/TX-Pins/);
+assert.doesNotMatch(ui.detail(dhwBlockedByLink), /Takt dieser Anlage/);
+ui.setLang("en");
+assert.match(ui.detail(dhwBlockedByLink), /This is the link, not the plant/);
+// A mix names the plant: the bus was only one of the things that ended a candidate.
+assert.match(ui.detail({ ...dhwBlocked, abort_reasons: ["charge", "blind"] }),
+             /this plant's own duty cycle does not leave/);
+ui.setLang("de");
+
+// The OTHER unavailable — a profile without the rows — keeps the generic sentence.
+assert.match(ui.detail({ id: "dhw_loss", verdict: "unavailable", observed_s: 0, required_s: 21600 }),
+             /Das aktive Profil liefert für diese Prüfung keine auswertbaren Daten/);
+ui.setLang("de");
 
 ui.setLang("en");
 assert.equal(

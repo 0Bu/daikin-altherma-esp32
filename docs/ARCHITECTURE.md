@@ -673,11 +673,19 @@ host-testable core is unusually large and valuable, because the risky parts are 
      `observed_s` and `required_s`; the report also carries `available`, `assessable` and `evaluated`.
      The DHW row additionally carries `candidate_s` and `settle_remaining_s`: the first is usable
      progress inside the current all-or-nothing clean hour, not yet credited to `observed_s`; the
-     second explains why no candidate is running after a tank charge or BSH pulse.
+     second explains why no candidate is running after a tank charge or BSH pulse. It also carries
+     what the window **discarded** — `aborts`, `abort_reasons[]` and `best_aborted_s` — because
+     `0 min of 6 h` reads identically on a board that booted a minute ago and on a plant that will
+     never grant a clean hour, and only the discarded candidates separate them.
      `available` counts supported/reportable rows, including pure observations. `assessable` is the
      narrower denominator of checks with a bounded judgement, and `evaluated` counts those that have
-     enough evidence. `Unavailable` means the profile lacks the required row, whereas `Collecting`
-     means it supports the check but has not established enough evidence.
+     enough evidence. `Unavailable` means the check cannot adjudicate here, whereas `Collecting`
+     means it supports the check but has not established enough evidence. `Unavailable` has TWO
+     causes and the DHW row's `blocked` flag distinguishes them, because they need opposite advice:
+     the profile lacks the required row (nothing an owner can act on), or a full lifecycle produced
+     no completed window and at least six discarded ones — a plant whose own duty cycle is shorter
+     than the 105 minutes the method needs. Reported as `Unavailable` rather than left `Collecting`
+     so it says nothing either way instead of holding the whole card at "checking" permanently.
   4. **The evidence class limits the claim.** The unit's current fault class is direct `device`
      evidence. Water pressure is `manufacturer` evidence: representative official manuals for
      [Altherma 3 M 04–08](https://www.daikin.ie/content/dam/document-library/user%20reference%20guide/heat/Air%20to%20water%20heat%20pump%20low%20temperature/EBLA04-08EV3.EBLA04-08E3V3.EDLA04-08EV3.EDLA04-08E3V3_User%20reference%20guide_4PEN685231-1A_English.pdf),
@@ -711,7 +719,14 @@ host-testable core is unusually large and valuable, because the risky parts are 
 
   **DHW heat loss adds one independent witness without overstating causality.** A candidate window
   requires the 3-way valve outside DHW, the internal water pump and BSH off, plausible R5T, and 45
-  minutes of settling after tank charging — each judged on a row the sweep could actually READ. A row
+  minutes of settling after tank charging. The settle is owed to HEAT PUT INTO THE TANK, so it is
+  charged only for a witness that stood at least two minutes: a one-cycle valve blip used to cost
+  the identical 105 minutes (45 settling plus a fresh 60-minute window) as a 40-minute charge, and
+  measured over an otherwise perfect 24 h with a standing tank, one such blip every 90 minutes took
+  the day from 23 completed windows to zero. A short witness still discards the candidate — the
+  hydronics moved — it just no longer asserts that heat went in. The bound is not a new guess: the
+  blind-run budget already asserts that no tank charge starts, runs and finishes inside 120 s. Each
+  input is judged on a row the sweep could actually READ. A row
   that did not answer this cycle is *blind time*, not a disqualifying state: since every input rides
   the X10A sweep, where one silent page removes all of its rows from that sample, treating an unread
   second as ineligible discarded the whole accumulated hour. Replayed over the reference

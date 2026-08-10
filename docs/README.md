@@ -327,7 +327,12 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        gate; absence-of-pattern checks require full_span plus
                                    #        DHW loss also reports candidate_s (the current clean
                                    #        hour, continued across intentional reboot) and
-                                   #        settle_remaining_s (charge/BSH settling, not evidence).
+                                   #        settle_remaining_s (charge/BSH settling, not evidence),
+                                   #        plus what it DISCARDED: aborts, abort_reasons[] (charge,
+                                   #        pump, draw, reading, blind) and best_aborted_s. blocked
+                                   #        is the verdict that a full day yielded no clean hour and
+                                   #        at least six discarded ones — this plant cannot be
+                                   #        assessed, as opposed to not yet.
                                    #        >=90% signal-specific evidence, while direct state and
                                    #        observation-only flow publish their shorter stated gate.
                                    #        Event states are read once per completed poll sweep, so a
