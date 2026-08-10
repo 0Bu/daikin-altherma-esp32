@@ -2,6 +2,7 @@
 
 #include "config.hpp"
 #include "diag_log.hpp"
+#include "http_client_diag.hpp"
 #include "logic/open_meteo.hpp"
 #include "logic/weather_forecast.hpp"
 #include "sntp_time.hpp"
@@ -54,18 +55,24 @@ std::string open_meteo_url(const Config& cfg) {
 
 bool download_json(const Config& weather, std::string& out, std::string& error) {
     const std::string url = open_meteo_url(weather);
+    const HttpClientProbe before = http_client_probe();
     esp_http_client_config_t cfg = {};
     cfg.url = url.c_str();
     cfg.timeout_ms = kHttpTimeoutMs;
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
     cfg.keep_alive_enable = false;
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (!client) { error = "out_of_memory"; return false; }
+    if (!client) {
+        http_client_log_init_failure("weather", before);
+        error = "out_of_memory";
+        return false;
+    }
     esp_http_client_set_header(client, "Accept", "application/json");
 
     bool ok = false;
     const esp_err_t opened = esp_http_client_open(client, 0);
     if (opened != ESP_OK) {
+        http_client_log_open_failure("weather", client, opened, before);
         error = "connect_failed";
     } else if (esp_http_client_fetch_headers(client) < 0) {
         error = "response_failed";

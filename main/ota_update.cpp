@@ -21,6 +21,7 @@
 #include "logic/version_cmp.hpp"
 #include "config.hpp"
 #include "diag_log.hpp"
+#include "http_client_diag.hpp"
 #include "wifi.hpp"
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
@@ -119,6 +120,7 @@ bool fetch_manifest_version(const std::string& url, char* out, size_t outlen, co
     // fail on a relative path and reporting an unreachable server.
     if (url.empty()) { err = "No update URL configured"; return false; }
 
+    const HttpClientProbe before = http_client_probe();
     esp_http_client_config_t cfg = {};
     cfg.url               = url.c_str();
     cfg.timeout_ms        = kHttpTimeoutMs;
@@ -126,11 +128,16 @@ bool fetch_manifest_version(const std::string& url, char* out, size_t outlen, co
     cfg.keep_alive_enable = false;
 
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
-    if (!c) { err = "Out of memory"; return false; }
+    if (!c) {
+        http_client_log_init_failure("ota", before);
+        err = "Out of memory";
+        return false;
+    }
 
     bool ok = false;
     esp_err_t e = esp_http_client_open(c, 0);
     if (e != ESP_OK) {
+        http_client_log_open_failure("ota", c, e, before);
         err = "Can't reach the update server";
     } else if (esp_http_client_fetch_headers(c) < 0) {
         err = "No response from the update server";

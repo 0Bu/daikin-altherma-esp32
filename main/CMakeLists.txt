@@ -17,6 +17,7 @@ idf_component_register(
         "state_dwell.cpp"
         "http_server.cpp"
         "http_common.cpp"
+        "http_client_diag.cpp"
         "http_status.cpp"
         "http_config.cpp"
         "http_ota.cpp"
