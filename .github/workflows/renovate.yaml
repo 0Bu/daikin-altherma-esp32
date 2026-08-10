@@ -55,7 +55,7 @@ jobs:
       # To get signing back, the token has to change: an App identity
       # (actions/create-github-app-token -> `x-access-token:`, after which the `auto` default signs
       # by itself) or a `gitPrivateKey`. Re-adding the ruleset rule alone just re-blocks every PR.
-      - uses: renovatebot/github-action@316d7cd859606d6039a2182b7d69199e9b036835 # v46.2.1
+      - uses: renovatebot/github-action@e09d604f8f803bb527bd8321ed5be06c460b8682 # v46.2.2
         with:
           token: ${{ secrets.RENOVATE_TOKEN }}
         env:
