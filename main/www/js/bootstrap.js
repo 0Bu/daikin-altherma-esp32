@@ -896,6 +896,7 @@ async function boot() {
   labelSchematicHits();    // name the clickable schematic parts from the INSPECT table
   wire();
   initNavigation();        // restore dashboard / Settings / exact popup from the address + history
+  otaHistoryCacheRestore();// keep already-fetched 5-minute rings over the coarse post-OTA snapshot
   resumeOta();             // adopt a download already running (reload mid-update / second tab)
 
   pollStart();             // the live data: /status + /values on a timer (there is no push)

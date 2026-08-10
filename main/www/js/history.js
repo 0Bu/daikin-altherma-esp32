@@ -154,12 +154,106 @@ function histHeld(h, i) {
   return false;
 }
 
+// Preserve a series that THIS TAB fetched before an OTA over the coarse outline returned by the
+// rebooted device. The history partition intentionally stores only one exact sample every 30 min;
+// replacing the browser's already-loaded 5-minute series with that response turned a continuous
+// curve into the regular gaps visible after an update.
+//
+// Both sides need a wall-clock anchor. `b0` is monotonic-since-boot and cannot align two firmware
+// runs; guessing with it would be worse than showing the coarse response. The grids can differ by a
+// few seconds because the five-minute raster is boot-aligned, so positions use the same nearest-slot
+// rule as ensureDerived(). An offset of half a bucket or more is ambiguous and refuses the merge.
+// Where the ranges overlap, RAM wins INCLUDING a null: this tab observed that bucket itself, so an
+// older partition sample must not overwrite even its explicit absence. The partition still supplies
+// older buckets and the new firmware's post-reboot tail.
+function histPreferRam(ram, device) {
+  if (!ram?.otaRam || !device || ram.source !== device.source || ram.dt !== device.dt ||
+      ram.label !== device.label || ram.unit !== device.unit || !Array.isArray(ram.v) ||
+      !Array.isArray(device.v) || !Number.isFinite(ram.t0) || !(ram.dt > 0)) return device;
+
+  // The restored firmware cannot place a series until its first bucket has closed AND SNTP has
+  // synced. An early empty/unanchored response therefore says nothing that can supersede the
+  // transferred series. Keep it, but adopt the fresh fetch time so retries stay at the normal
+  // one-minute cadence; as soon as the device has an anchor, the real merge below takes over.
+  if (!device.v.length || !Number.isFinite(device.t0))
+    return { ...ram, at: device.at, gen: device.gen };
+
+  const dt = ram.dt;
+  const offset = (ram.t0 - device.t0) / dt;
+  if (Math.abs(offset - Math.round(offset)) >= 0.5) return device;
+  const ramEnd = ram.t0 + (ram.v.length - 1) * dt;
+  const deviceEnd = device.t0 + (device.v.length - 1) * dt;
+  const end = Math.max(ramEnd, deviceEnd);
+  const cap = Math.max(1, Math.floor(24 * 60 * 60 / dt));
+  const naturalStart = Math.min(ram.t0, device.t0);
+  const start = Math.max(naturalStart, end - (cap - 1) * dt);
+  const n = Math.round((end - start) / dt) + 1;
+  const v = [], held = [];
+
+  const slot = (h, t) => {
+    const exact = (t - h.t0) / dt;
+    const i = Math.round(exact);
+    return Math.abs(exact - i) < 0.5 && i >= 0 && i < h.v.length ? i : -1;
+  };
+  for (let i = 0; i < n; i++) {
+    const t = start + i * dt;
+    const ri = slot(ram, t);
+    const di = slot(device, t);
+    const useRam = ri >= 0;
+    v.push(useRam ? ram.v[ri] : di >= 0 ? device.v[di] : null);
+    const isHeld = useRam ? histHeld(ram, ri) : di >= 0 && histHeld(device, di);
+    if (isHeld) {
+      const last = held[held.length - 1];
+      if (last && last[0] + last[1] === i) last[1]++; else held.push([i, 1]);
+    }
+  }
+  return { ...device, t0: start, b0: null, held, v, otaRam: true };
+}
+
+// A bounded, validated handoff through sessionStorage is the bridge across the mandatory page
+// reload after OTA. Only raw, wall-clock-anchored device series are eligible: derived curves are
+// rebuilt from those inputs, and an unsynchronised series has no honest cross-boot position.
+function histOtaSnapshot() {
+  const out = [];
+  for (const [key, h] of S.hist) {
+    if (!h || h.err || !["x10a", "modbus", "env3"].includes(h.source) ||
+        typeof h.label !== "string" || typeof h.unit !== "string" ||
+        !Number.isFinite(h.t0) || !(h.dt > 0) || !Array.isArray(h.v) || !h.v.length) continue;
+    out.push([key, { at: h.at, gen: h.gen, source: h.source, dt: h.dt, unit: h.unit,
+                     label: h.label, t0: h.t0, held: h.held, v: h.v }]);
+  }
+  return out;
+}
+
+function histOtaRestore(entries, savedAt) {
+  if (!Array.isArray(entries)) return 0;
+  let restored = 0;
+  for (const item of entries) {
+    if (!Array.isArray(item) || item.length !== 2) continue;
+    const [key, h] = item;
+    if (typeof key !== "string" || !h || !["x10a", "modbus", "env3"].includes(h.source) ||
+        typeof h.label !== "string" || typeof h.unit !== "string" || !Number.isFinite(h.t0) ||
+        !(h.dt > 0) || !Array.isArray(h.v) || !h.v.length || h.v.length > 288 ||
+        h.v.some((x) => x !== null && !Number.isFinite(x))) continue;
+    const prefix = h.source === "modbus" ? "modbus:" : h.source === "env3" ? "env3:" : "";
+    if (!key.startsWith(prefix) || (h.source === "x10a" && key.includes(":")) || S.hist.has(key)) continue;
+    const held = Array.isArray(h.held) ? h.held.filter((r) => Array.isArray(r) && r.length === 2 &&
+      Number.isInteger(r[0]) && Number.isInteger(r[1]) && r[0] >= 0 && r[1] > 0 &&
+      r[0] + r[1] <= h.v.length) : [];
+    S.hist.set(key, { at: Number.isFinite(h.at) ? h.at : savedAt, gen: Number.isFinite(h.gen) ? h.gen : 1,
+                      source: h.source, dt: h.dt, unit: h.unit, label: h.label, t0: h.t0,
+                      b0: null, held, v: h.v.slice(), otaRam: true });
+    restored++;
+  }
+  return restored;
+}
+
 // Fetch a row's series at most once a minute. The buffer moves one sample per `dt` (300 s), so a
 // per-poll refetch would send ~300 identical responses per new data point — and each response is a
 // ~1 KB contiguous string on the single httpd task (CLAUDE.md → Memory constraints).
 const histCacheKey = (id, source) => source === "modbus" ? `modbus:${id}`
   : source === "env3" ? `env3:${id}` : id;
-async function ensureHist(id, source = "x10a") {
+async function ensureHist(id, source = "x10a", paint = true, signal = null) {
   const key = histCacheKey(id, source);
   const offered = source === "modbus" ? hasModbusHist(id)
     : source === "env3" ? hasEnv3Hist(id) : hasHist(id);
@@ -167,11 +261,13 @@ async function ensureHist(id, source = "x10a") {
   const c = S.hist.get(key);
   if (c && Date.now() - c.at < 60000) return;
   if (source === "x10a" && DERIVED[id]) { await ensureDerived(id); return; }
+  const previous = S.hist.get(key);
   S.histBusy.add(key);
   try {
     const suffix = source === "modbus" ? "&source=modbus"
       : source === "env3" ? "&source=env3" : "";
-    const r = await fetch("/history?row=" + encodeURIComponent(id) + suffix);
+    const r = await fetch("/history?row=" + encodeURIComponent(id) + suffix,
+                          signal ? { signal } : undefined);
     const j = await r.json();
     // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
     // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
@@ -179,19 +275,26 @@ async function ensureHist(id, source = "x10a") {
     // `gen` counts fetches. It is what makes an index-anchored pin (no wall clock on the device)
     // honest: such a pin is only valid for the exact series it was made on, and a refetch may have
     // rolled the ring — so it is dropped rather than re-pointed at a different sample.
-    const gen = ((S.hist.get(key) || {}).gen || 0) + 1;
+    const gen = ((previous || {}).gen || 0) + 1;
     // A few legacy X10A rows carry their unit only in the catalog label. Normalise that at the
     // visual boundary too, otherwise the live row can say "22.8 L/min" while its own trend and
     // crosshair still say just "22.8". The API remains byte-for-byte compatible.
-    S.hist.set(key, { at: Date.now(), gen, source, dt: +j.dt || 300, unit: displayUnit(j),
-                        t0: typeof j.t0 === "number" ? j.t0 : null,
-                        b0: Number.isInteger(j.b0) ? j.b0 : null,
-                        held: Array.isArray(j.held) ? j.held : [],
-                        v: Array.isArray(j.v) ? j.v : [] });
+    const device = { at: Date.now(), gen, source, dt: +j.dt || 300, unit: displayUnit(j),
+                     label: typeof j.label === "string" ? j.label : "",
+                     t0: typeof j.t0 === "number" ? j.t0 : null,
+                     b0: Number.isInteger(j.b0) ? j.b0 : null,
+                     held: Array.isArray(j.held) ? j.held : [],
+                     v: Array.isArray(j.v) ? j.v : [] };
+    S.hist.set(key, histPreferRam(previous, device));
   } catch (e) {
-    S.hist.set(key, { at: Date.now(), source, err: true, v: [] });
+    // A transient request failure immediately after reboot must not erase the one good copy this tab
+    // carried across the OTA. Throttle the retry like any other fetch while keeping the measured RAM
+    // interval visible; an ordinary session without a handoff retains the established error state.
+    S.hist.set(key, previous?.otaRam ? { ...previous, at: Date.now() }
+                                    : { at: Date.now(), source, err: true, v: [] });
   } finally {
-    S.histBusy.delete(key); renderApp();
+    S.histBusy.delete(key);
+    if (paint) renderApp();
   }
 }
 
@@ -203,6 +306,39 @@ async function ensureHistPair(id) {
     hasModbusHist(id) ? ensureHist(id, "modbus") : null,
     hasEnv3Hist(id) ? ensureHist(id, "env3") : null,
   ]);
+}
+
+// Before the old image gives control to OTA, copy every offered RAW ring out of device RAM into the
+// tab-scoped handoff. Limiting the transfer to panels the user happened to open would preserve the
+// screenshot above but leave the same defect waiting behind every unopened inspector. Requests are
+// sequential because the ESP32 has one httpd worker, silent because rebuilding the whole dashboard
+// after each of ~46 small responses would dominate the transfer, and bounded so one stuck request
+// cannot prevent the update itself. An unsynchronised clock is skipped: those rings have no honest
+// cross-boot anchor and histOtaSnapshot() would refuse them anyway.
+async function captureHistoriesForOta() {
+  const h = histSpec();
+  if (!h || S.status?.ntp?.synced !== true) return 0;
+  const wanted = [], seen = new Set();
+  const add = (rows, source) => {
+    for (const r of Array.isArray(rows) ? rows : []) {
+      if (!r || typeof r.id !== "string") continue;
+      const key = histCacheKey(r.id, source);
+      if (seen.has(key)) continue;
+      seen.add(key); wanted.push([r.id, source]);
+    }
+  };
+  add(h.rows, "x10a"); add(h.modbus_rows, "modbus"); add(h.env3_rows, "env3");
+
+  const deadline = Date.now() + 10000;
+  for (const [id, source] of wanted) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const ctl = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), Math.min(1500, remaining)) : null;
+    try { await ensureHist(id, source, false, ctl?.signal || null); }
+    finally { if (timer) clearTimeout(timer); }
+  }
+  return histOtaSnapshot().length;
 }
 
 // A derived series: fetch every input (each through ensureHist above, so each is cached and

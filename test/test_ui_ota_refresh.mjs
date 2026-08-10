@@ -6,6 +6,17 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
+const otaHistorySource = readAppFragments(["history.js", "settings.js", "bootstrap.js"]);
+assert.match(otaHistorySource, /histories:\s*histOtaSnapshot\(\)/,
+  "the accepted OTA must save the browser's already-loaded history rings");
+assert.match(otaHistorySource,
+  /otaHistoryCacheRestore\(\);[^]*?resumeOta\(\);[^]*?pollStart\(\);/,
+  "the post-OTA page must restore RAM histories before the idle OTA response clears the handoff");
+const updateFlow = otaHistorySource.slice(otaHistorySource.indexOf("async function checkFirmwareUpdate"),
+  otaHistorySource.indexOf("function otaWatch"));
+assert.ok(updateFlow.indexOf("await captureHistoriesForOta()") < updateFlow.indexOf('post("/ota/update"'),
+  "all offered RAM rings must be captured before the old firmware starts the OTA");
+
 class Element {
   constructor(id = "") {
     this.id = id;
@@ -65,6 +76,8 @@ class Element {
     status: cachedStatus,
     values: [{ label: "Operation Mode", value: "Heating" }],
     modbus: [{ label: "Leaving water temperature", value: "31.0" }],
+    histories: [["env3:temperature", { source: "env3", dt: 300, unit: "°C",
+      label: "Temperature", t0: 1234, held: [], v: [247] }]],
   })]]);
   const sessionStorage = {
     getItem: (key) => storage.get(key) ?? null,
@@ -78,6 +91,7 @@ class Element {
   };
   let languageHydrations = 0;
   let dashboardStatusPaints = 0;
+  let restoredHistories = null;
   const context = {
     S,
     LANG: "de",
@@ -109,6 +123,8 @@ class Element {
     // one explanation note does not fail as a missing global.
     descNoteHtml: (lead, text) => `<div class="vdesc-p"><span class="vdesc-n">${lead}</span> ${text}</div>`,
     hasHist: () => false,
+    histOtaSnapshot: () => [],
+    histOtaRestore: (entries) => { restoredHistories = entries; return entries.length; },
     setLangFromStatus: () => { languageHydrations += 1; },
     renderOtaDashboardStatus: () => { dashboardStatusPaints += 1; },
     j: async () => ({ state: "updating", progress: 78, current: "1.4.72-dev.333", channel: "dev" }),
@@ -118,12 +134,15 @@ class Element {
   const source = readAppFragments(["dashboard.js", "settings.js"]);
   const sandbox = vm.createContext(context);
   vm.runInContext(
-    `${source}\nthis.__api = { resumeOta, renderSettings, otaCacheRestore };`,
+    `${source}\nthis.__api = { resumeOta, renderSettings, otaCacheRestore, otaHistoryCacheRestore };`,
     sandbox,
     { filename: "main/www/app.sources" },
   );
   context.renderApp = () => sandbox.__api.renderSettings();
 
+  assert.equal(sandbox.__api.otaHistoryCacheRestore(), 1);
+  assert.equal(restoredHistories[0][0], "env3:temperature",
+    "the tab-scoped five-minute series is handed to history.js before the OTA state is consumed");
   sandbox.__api.resumeOta();
   await new Promise((resolve) => setImmediate(resolve));
 

@@ -1065,6 +1065,14 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    six buckets, because the cursor only moves forward and a HomeHub that powers up late would
    otherwise lose its twelve rings for the whole boot. The block's write-side padding is trimmed
    before splicing, or a ring holding one reading would claim a 24-hour span it never recorded.
+   For an OTA started from the web UI, the initiating tab also reads every offered, wall-clock-
+   anchored five-minute ring before starting the download and carries those responses through the
+   mandatory page reload in bounded `sessionStorage`. The post-update renderer merges the coarse
+   partition response underneath that tab copy: the pre-update RAM sample wins every overlapping
+   bucket, while the partition may extend the old edge and the new firmware extends the live edge.
+   This is a display handoff, not a third device persistence medium: it is limited to the initiating
+   tab, expires after 15 minutes, and is skipped without a synced clock because monotonic bucket ids
+   cannot align two boots honestly.
    **`BinaryEvent` rows are OR-folded rather than decimated** — those rows exist because defrosts and
    BUH pulses are shorter than a bucket, so keeping one bucket in six would erase them from a
    restored day; any ON in the group makes the coarse slot ON, which widens what the slot means

@@ -71,10 +71,16 @@ const S = {
       { id: "valve_dhw", label: "3-way valve" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
     ],
-  } },
+    env3_rows: [{ id: "temperature", label: "Temperature" }],
+  }, ntp: { synced: true } },
   hist: new Map(), histBusy: new Set(), histPin: new Map(), clickHold: false, scrub: null,
 };
 let fetched = "";
+let fetchedUrls = [];
+const defaultHistoryResponse = { dt: 300, unit: "°C", label: "Domestic Hot Water temperature",
+  b0: 102, v: [457], held: [] };
+let historyResponse = defaultHistoryResponse;
+let historyFetchError = false;
 const labels = {
   "hist.loading": "Verlauf wird geladen…", "hist.err": "Verlauf nicht verfügbar.",
   "hist.none": "Noch keine Messwerte aufgezeichnet.", "hist.title": "Letzte 24 Stunden",
@@ -152,15 +158,65 @@ const context = {
   },
   fetch: async (url) => {
     fetched = url;
-    return { json: async () => ({ dt: 300, unit: "°C", b0: 102, v: [457], held: [] }) };
+    fetchedUrls.push(url);
+    if (historyFetchError) throw new Error("temporary reboot window");
+    return { json: async () => historyResponse };
   },
   setTimeout, clearTimeout, Date, Map, Set, console,
 };
 vm.createContext(context);
 vm.runInContext(readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, histCacheKey, historyView, histHtml, scrubText," +
-  " scrubMove, ensureHist, ensureHistPair, ensureDerived };", context, { filename: "main/www/js/history.js" });
+  " scrubMove, ensureHist, ensureHistPair, ensureDerived, histPreferRam, histOtaSnapshot," +
+  " histOtaRestore, captureHistoriesForOta };", context, { filename: "main/www/js/history.js" });
 const h = context.__api;
+
+// An OTA reload used to discard the browser's already-fetched, continuous five-minute series. The
+// rebooted device then supplied only the history partition's 30-minute outline, producing the
+// regular gaps from the reported screenshot. Merge the two on wall time and make the RAM interval
+// authoritative; the partition may extend the old edge and the rebooted device may extend the new.
+{
+  const ram = { at: 1, gen: 1, source: "env3", dt: 300, unit: "°C", label: "Temperature",
+    t0: 1000, held: [[1, 1]], v: [10, null, 12, 13], otaRam: true };
+  const partition = { at: 2, gen: 2, source: "env3", dt: 300, unit: "°C", label: "Temperature",
+    t0: 400, held: [], v: [1, null, 3, null, 30, null, 40] };
+  const merged = h.histPreferRam(ram, partition);
+  assert.deepEqual(Array.from(merged.v), [1, null, 10, null, 12, 13, 40],
+    "RAM wins every overlapping OTA bucket, including an explicit gap; partition supplies both tails");
+  assert.deepEqual(Array.from(merged.held, (r) => Array.from(r)), [[3, 1]],
+    "the reason for a RAM-side gap moves with its wall-clock bucket");
+  assert.equal(merged.b0, null, "monotonic bucket ids from two firmware boots must not be combined");
+  assert.equal(h.histPreferRam({ ...ram, label: "Old sensor" }, partition), partition,
+    "a changed physical history identity refuses the browser handoff");
+  const early = h.histPreferRam(ram, { ...partition, at: 3, gen: 3, t0: null, v: [] });
+  assert.deepEqual(Array.from(early.v), [10, null, 12, 13],
+    "an early post-reboot response without a committed/anchored bucket cannot erase the RAM handoff");
+  assert.equal(early.at, 3, "the retained RAM series still adopts the fresh fetch time for throttling");
+
+  S.hist.set("env3:temperature", ram);
+  S.hist.set("dt", { ...ram, source: undefined });       // derived: rebuilt, never transferred
+  const handoff = h.histOtaSnapshot();
+  assert.equal(handoff.length, 1, "only raw wall-clock-anchored device rings cross an OTA reload");
+  S.hist.clear();
+  assert.equal(h.histOtaRestore(handoff, 1234), 1);
+  assert.equal(S.hist.get("env3:temperature").otaRam, true,
+    "a restored browser ring is marked for RAM-first merging with the fresh device response");
+
+  historyResponse = { ...partition, b0: 2 };
+  await h.ensureHist("temperature", "env3");
+  assert.deepEqual(Array.from(S.hist.get("env3:temperature").v), [1, null, 10, null, 12, 13, 40],
+    "the production fetch path puts its post-OTA partition response underneath the restored RAM ring");
+
+  const beforeFailure = S.hist.get("env3:temperature");
+  beforeFailure.at = 0;
+  historyFetchError = true;
+  await h.ensureHist("temperature", "env3");
+  assert.deepEqual(Array.from(S.hist.get("env3:temperature").v), [1, null, 10, null, 12, 13, 40],
+    "a transient history request failure after reboot cannot erase the transferred RAM series");
+  historyFetchError = false;
+  historyResponse = defaultHistoryResponse;
+  S.hist.clear();
+}
 
 const x10a = { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
                 held: [], v: [452, null, 454] };
@@ -492,5 +548,20 @@ S.hist.delete("modbus:dhw_tank");
 await h.ensureHist("dhw_tank", "modbus");
 assert.equal(fetched, "/history?row=dhw_tank&source=modbus");
 assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), [457]);
+
+// The initiating tab captures ALL offered raw sources, not just the inspector that happened to be
+// open when Update was tapped. Source namespaces must survive the pre-OTA fetch as real wire URLs.
+S.status.history = {
+  rows: [{ id: "dhw_tank", label: "DHW tank temp. (R5T)" }],
+  modbus_rows: [{ id: "dhw_tank", label: "Domestic Hot Water temperature" }],
+  env3_rows: [{ id: "temperature", label: "Temperature" }],
+};
+S.hist.clear(); fetchedUrls = [];
+await h.captureHistoriesForOta();
+assert.deepEqual(fetchedUrls, [
+  "/history?row=dhw_tank",
+  "/history?row=dhw_tank&source=modbus",
+  "/history?row=temperature&source=env3",
+], "the pre-OTA RAM capture walks each independent source sequentially");
 
 console.log("UI history sources: X10A and Modbus rings align, gap, render and fetch independently");
