@@ -2022,6 +2022,9 @@ static void mqtt_task(void*) {
             ota_quiesce_cap_logged = false;
         }
 
+        // Static literals only: the catch path must say WHICH allocation-rich phase failed without
+        // allocating another string on the heap that just refused one.
+        const char* publish_stage = "gate";
         try {
             const HpStats hp = hp_stats();
             const MqttPublishGateDecision gate = mqtt_publish_gate_step(
@@ -2045,7 +2048,9 @@ static void mqtt_task(void*) {
             // decoding. The only outbound exception is a user-requested retained tombstone for a
             // just-disabled weather/HomeHub source. Ordinary publication remains below
             // gate.publish_cycle, so no discovery/state/heartbeat/value payload can escape.
+            publish_stage = "config";
             const Config ref_config = config();
+            publish_stage = "subscriptions";
             service_reference_subscription(ref_config);
             service_reference_probe_subscription(ref_config);
             service_circulation_subscription(ref_config);
@@ -2056,6 +2061,7 @@ static void mqtt_task(void*) {
             // tying it to hp_poll would leave /status.history.rows empty exactly in that case.
             history_record_circulation();
             service_requested_topic_cleanup(ref_config);
+            publish_stage = "heating_curve";
             evaluate_heating_curve(ref_config, hp);
 
             if (gate.publish_offline) {
@@ -2074,6 +2080,7 @@ static void mqtt_task(void*) {
             }
 
             if (gate.publish_cycle) {
+                publish_stage = "announce";
                 if (s_announce.exchange(false)) {              // consume: just (re)connected
                     s_announced_profile.clear();               // force a fresh discovery below
                     s_last_x10a_json.clear();                  // force full per-topic state re-seeds
@@ -2134,6 +2141,7 @@ static void mqtt_task(void*) {
                     publish_crash();                            // crash report if notable, else stale-record probe
                     s_heartbeat_announced = true;
                 }
+                publish_stage = "x10a";
                 const std::string prof = ref_config.profile;
                 if (prof != "auto" && prof != s_announced_profile) {
                     publish_x10a_discovery();                  // discovery for the (new) profile
@@ -2144,6 +2152,7 @@ static void mqtt_task(void*) {
                 }
                 // prof == "auto" (detection pending): wait — don't publish transient generic sensors.
 
+                publish_stage = "modbus";
                 const bool modbus_enabled = mb_status().enabled;
                 if (modbus_enabled) {
                     // State publication is independent of Home Assistant discovery. This also
@@ -2162,8 +2171,10 @@ static void mqtt_task(void*) {
                 // Weather remains an independent firmware input. MQTT archives it while its saved
                 // location exists; deleting the location removes the retained predecessor without
                 // publishing a synthetic disabled document. No HA entities are created.
+                publish_stage = "weather";
                 publish_weather_state(ref_config.weather_enabled);
 
+                publish_stage = "env3";
                 const bool env3_enabled = ref_config.env3_enabled && env3_board_supported(ref_config);
                 if (env3_enabled) {
                     s_env3_disabled_cleaned = false;
@@ -2188,6 +2199,7 @@ static void mqtt_task(void*) {
                 // HA may have been offline for the connect-time tombstones. Repeat the retired-topic
                 // cleanup periodically so it converges after HA returns; no retained config is ever
                 // recreated, and the independent /modbus + /weather data streams are untouched.
+                publish_stage = "retire";
                 ha_retire_elapsed_s += delay_s;
                 if (ha_retire_elapsed_s >= HA_RETIRE_INTERVAL_S) {
                     retract_modbus_discovery();
@@ -2197,6 +2209,7 @@ static void mqtt_task(void*) {
 
                 // Fixed HEARTBEAT_INTERVAL_S cadence for both technical heartbeat and the separate
                 // heating-curve domain snapshot; neither needs every-cycle publish-on-change.
+                publish_stage = "heartbeat";
                 heartbeat_elapsed_s += delay_s;
                 if (heartbeat_elapsed_s >= HEARTBEAT_INTERVAL_S) {
                     publish_heartbeat();
@@ -2229,10 +2242,10 @@ static void mqtt_task(void*) {
             // when the line describing it never reaches the ring — which is the whole complaint in
             // #380: the ring was the only evidence, and a chatty boot overwrites it.
             s_mqtt_skipped.fetch_add(1, std::memory_order_relaxed);
-            diag_printf("mqtt: publish skipped (%s)\n", e.what());
+            diag_printf("mqtt: publish skipped at %s (%s)\n", publish_stage, e.what());
         } catch (...) {
             s_mqtt_skipped.fetch_add(1, std::memory_order_relaxed);
-            diag_printf("mqtt: publish skipped (oom?)\n");
+            diag_printf("mqtt: publish skipped at %s (oom?)\n", publish_stage);
         }
         vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
     }
