@@ -746,6 +746,10 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // invalidate a settled fingerprint (which would force a spurious re-detect next poll).
     cJSON* profItem     = cJSON_GetObjectItem(j, "profile");
     bool   profile_sent = cJSON_IsString(profItem);
+    cJSON* rxItem       = cJSON_GetObjectItem(j, "rx");
+    cJSON* txItem       = cJSON_GetObjectItem(j, "tx");
+    const bool x10a_sent = set_hp_updates_x10a(
+        profile_sent, cJSON_IsNumber(rxItem), cJSON_IsNumber(txItem));
     const int old_rx = c.rx_pin;
     const int old_tx = c.tx_pin;
     // "auto" (the UI's only value) requests a fresh detection; a concrete id pins the model for this
@@ -783,15 +787,18 @@ static esp_err_t set_hp(httpd_req_t* req) {
                   config_reserved_pins(c).plus(net_eth_reserved_pins())))
         return send_err(req, "400 Bad Request", reason.c_str());
     // A selected preset adds the PCB fact the generic ESP32-S3 validator cannot know: only pads
-    // physically routed to this board's headers may carry X10A. Custom intentionally stays generic.
-    // Apply the same live reservations as /status.pins_avail so a raw/stale request cannot persist
-    // an ENV III, local-peripheral or Ethernet collision that the dropdown has already withheld.
-    if (const BoardPreset* board = board_selected_preset(c)) {
-        const ReservedPins used = config_reserved_pins(c).plus(net_eth_reserved_pins());
-        if (!board_preset_x10a_pin_offerable(board, c.rx_pin, hw_octal_spi(), used))
-            return send_err(req, "400 Bad Request", "rx_pin is not available on selected board");
-        if (!board_preset_x10a_pin_offerable(board, c.tx_pin, hw_octal_spi(), used))
-            return send_err(req, "400 Bad Request", "tx_pin is not available on selected board");
+    // physically routed to this board's headers may carry X10A. Apply it only when THIS PATCH makes
+    // an X10A statement. /set_hp also owns the independent HomeHub fields; rejecting an empty-host
+    // disable because untouched legacy pins do not belong to a later-selected board makes HomeHub
+    // impossible to turn off. A raw/stale X10A request still cannot persist such a pair.
+    if (x10a_sent) {
+        if (const BoardPreset* board = board_selected_preset(c)) {
+            const ReservedPins used = config_reserved_pins(c).plus(net_eth_reserved_pins());
+            if (!board_preset_x10a_pin_offerable(board, c.rx_pin, hw_octal_spi(), used))
+                return send_err(req, "400 Bad Request", "rx_pin is not available on selected board");
+            if (!board_preset_x10a_pin_offerable(board, c.tx_pin, hw_octal_spi(), used))
+                return send_err(req, "400 Bad Request", "tx_pin is not available on selected board");
+        }
     }
     // This route OWNS the pin cache, unlike the service routes whose link writes are only
     // best-effort maintenance. Require all three cache keys; on failure RAM stays untouched, so

@@ -445,6 +445,15 @@ inline bool set_hp_resets_checkup(bool profile_present, int old_rx, int old_tx,
     return profile_present || old_rx != new_rx || old_tx != new_tx;
 }
 
+// /set_hp is shared by two independent sources: X10A wiring/detection and HomeHub Modbus. A
+// HomeHub-only patch must not be rejected because an older build left a chip-safe X10A pair that is
+// foreign to the board preset selected later. Those untouched pins are already live and the
+// HomeHub request neither persists a different pair nor asks detection to use it. Conversely, any
+// explicit profile/RX/TX field is an X10A statement and must pass the board-specific pin gate.
+inline bool set_hp_updates_x10a(bool profile_present, bool rx_present, bool tx_present) {
+    return profile_present || rx_present || tx_present;
+}
+
 // HomeHub history belongs to one physical Modbus target. Actuation consent and other /set_hp fields
 // do not change that identity; host, port or unit id do. The recorder preserves the common 24-hour
 // raster but turns the elapsed part into gaps so values from two gateways are never spliced.
