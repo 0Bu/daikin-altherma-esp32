@@ -86,7 +86,7 @@
              "—"; a live HomeHub may supply structurally paired readings in petrol instead. The card
              itself holds the status block that says why. -->
         <section id="hpLive">
-          <figure class="card schem-card" id="schem"
+          <figure class="schem-card" id="schem"
                   aria-label="Live system schematic: outdoor unit, refrigerant circuit, plate heat exchanger, water circuit with backup heater and 3-way valve, domestic hot water tank and space circuit">
             <!-- EVERY value pill and component below is a hit target (class sc-hit + data-insp):
                  tapping one fills the inspector panel under the drawing with what it is, what is
@@ -94,7 +94,8 @@
                  groups carry role=button + tabindex so keyboard and screen readers reach them, which
                  is also why the <svg> is a labelled group and no longer aria-hidden — a hidden
                  subtree must not contain focusable elements. -->
-            <div class="schem-scroll">
+            <div class="card schem-face">
+              <div class="schem-scroll">
               <svg viewBox="0 0 790 451" role="group"
                    aria-label="Live system schematic — tap a value or component for an explanation">
                 <!-- The DIAGRAM proper hangs 48 px above where its own coordinates put it, and
@@ -678,15 +679,16 @@
                   <text class="sc-val" x="334" y="369" text-anchor="middle"><tspan data-i18n="schem.r3t">R3T</tspan> <tspan id="svR3t">—</tspan> °C</text>
                 </g>
                 </g>
-              </svg>
+                </svg>
+              </div>
             </div>
-            <!-- Inspector: filled by renderInspect() when a schematic hit target is tapped. Sits in
-                 the same card, directly under the drawing, so the explanation and the thing it
-                 explains are visible together. With nothing selected it collapses to nothing — the
-                 "tap something" affordance lives in the drawing's own aria-label (and in the hit
-                 targets' hover/press feedback), not as a line of copy under every idle dashboard.
-                 Its live half (reading, state sentence, row values) re-renders every poll while it
-                 is open. -->
+            <!-- Inspector: filled by renderInspect() when a schematic hit target is tapped. It is
+                 a separate inset tongue attached below the white drawing card, matching the value
+                 and Settings explainers instead of taking space inside the picture. With nothing
+                 selected it collapses to nothing — the "tap something" affordance lives in the
+                 drawing's own aria-label (and in the hit targets' hover/press feedback), not as a
+                 line of copy under every idle dashboard. Its live half (reading, state sentence,
+                 row values) re-renders every poll while it is open. -->
             <div class="inspect" id="inspect">
               <div class="inspect-card" id="inspCard" hidden>
                 <!-- Title and headline reading are ONE wrapping pair (style.css .inspect-head): the
