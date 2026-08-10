@@ -49,11 +49,11 @@
 // lifecycle anchor: first/latest_sample_us are monotonic and restart at zero, so the previous boot's
 // observed span is carried as a DURATION (CheckupRing::carried_span_us) instead.
 //
-// The in-flight CheckupState/DhwLossState are deliberately NOT restored. They hold the previous
-// sample's timestamp and the edge witnesses either side of it, and a reboot is precisely the
-// discontinuity both step functions already know how to handle: no elapsed seconds are booked across
-// it and no transition is read across it. Restoring them would book a compressor start that may
-// never have happened — the one thing CHECKUP_MAX_GAP_S exists to refuse.
+// The in-flight CheckupState is deliberately NOT restored. It holds edge witnesses either side of
+// the reboot, and carrying those would book a compressor start that may never have happened.  The
+// DHW filter is different: it is a measured one-hour LEVEL interval, not an edge.  Intentional
+// esp_restart() therefore checkpoints it as relative ages, books the reboot as explicit blind time,
+// and carries any fully measured DHW window that is still waiting in the open hourly bucket.
 //
 // ── Why a layout fingerprint, not just a CRC ────────────────────────────────────────────────────
 // A bucket is a pile of anonymous counters. Nothing in `buh_s` says which row it was read from, so a
@@ -206,6 +206,69 @@ inline uint32_t checkup_model_fingerprint(const char* profile_id) {
     }
     crc = config_crc32_update(crc, &nul, 1);
     return config_crc32_final(crc);
+}
+
+// ── Intentional-reboot DHW handoff ──────────────────────────────────────────────────────────────
+// Separate from the completed-ring seal on purpose.  The normal seal must remain valid through an
+// unexpected panic while the open buckets change.  This handoff is written once by the shutdown
+// handler immediately before esp_restart(), then consumed once by the next boot.
+inline constexpr uint32_t CHECKUP_DHW_HANDOFF_MAGIC   = 0x57484443u; // "CDHW" little-endian
+inline constexpr uint16_t CHECKUP_DHW_HANDOFF_VERSION = 1;
+
+struct DhwLossHandoffPayload {
+    DhwLossCarry  candidate;
+    DhwLossBucket pending;   // completed clean windows not yet at the generic hour's commit seam
+};
+
+inline uint32_t checkup_dhw_handoff_layout_fingerprint() {
+    uint32_t crc = CONFIG_CRC32_INIT;
+    crc = checkup_fp_u32(crc, checkup_layout_fingerprint());
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(DhwLossCarry)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(DhwLossBucket)));
+    crc = checkup_fp_u32(crc, DHW_LOSS_REBOOT_BLIND_S);
+    crc = checkup_fp_u32(crc, DHW_LOSS_CARRY_SEGMENT);
+    crc = checkup_fp_u32(crc, DHW_LOSS_CARRY_DRAW);
+    return config_crc32_final(crc);
+}
+
+// Field-wise rather than over raw structs: padding bytes are not evidence and must not decide
+// whether a valid handoff survives a compiler update.
+inline uint32_t checkup_dhw_handoff_crc(uint32_t model_fp,
+                                        const DhwLossHandoffPayload& p) {
+    uint32_t crc = CONFIG_CRC32_INIT;
+    crc = checkup_fp_u32(crc, model_fp);
+    const DhwLossCarry& c = p.candidate;
+    crc = checkup_fp_u32(crc, c.segment_elapsed_s);
+    crc = checkup_fp_u32(crc, c.draw_anchor_age_s);
+    crc = checkup_fp_u32(crc, c.segment_circulation_known_s);
+    crc = checkup_fp_u32(crc, c.segment_circulation_on_s);
+    crc = checkup_fp_u32(crc, c.settle_remaining_s);
+    crc = checkup_fp_u32(crc, c.segment_blind_s);
+    crc = checkup_fp_u32(crc, c.blind_run_s);
+    crc = checkup_fp_u32(crc, static_cast<uint16_t>(c.segment_start_tenths));
+    crc = checkup_fp_u32(crc, static_cast<uint16_t>(c.draw_anchor_tenths));
+    crc = checkup_fp_u32(crc, c.flags);
+
+    const DhwLossBucket& b = p.pending;
+    crc = checkup_fp_u32(crc, b.observed_s);
+    crc = checkup_fp_u32(crc, b.circulation_known_s);
+    crc = checkup_fp_u32(crc, b.circulation_on_s);
+    crc = checkup_fp_u32(crc, static_cast<uint16_t>(b.max_loss_tenths_k_h));
+    crc = checkup_fp_u32(crc, b.windows);
+    crc = checkup_fp_u32(crc, b.high_windows);
+    crc = checkup_fp_u32(crc, b.high_with_pump);
+    crc = checkup_fp_u32(crc, b.high_pump_off);
+    return config_crc32_final(crc);
+}
+
+inline bool checkup_dhw_handoff_valid(uint32_t magic, uint16_t version,
+                                      uint32_t layout_fp, uint32_t model_fp,
+                                      uint32_t expected_model_fp, uint32_t stored_crc,
+                                      const DhwLossHandoffPayload& payload) {
+    return magic == CHECKUP_DHW_HANDOFF_MAGIC && version == CHECKUP_DHW_HANDOFF_VERSION &&
+           layout_fp == checkup_dhw_handoff_layout_fingerprint() &&
+           model_fp == expected_model_fp &&
+           stored_crc == checkup_dhw_handoff_crc(model_fp, payload);
 }
 
 } // namespace daik::logic

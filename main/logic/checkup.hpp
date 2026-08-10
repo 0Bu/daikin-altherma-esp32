@@ -370,6 +370,11 @@ struct DhwLossState {
     int64_t last_us = -1;
     int64_t segment_start_us = -1;
     int64_t draw_anchor_us = -1;
+    // A reboot restarts esp_timer at zero, so an adopted candidate cannot express its earlier
+    // start as an absolute timestamp in this boot.  The already-observed age rides separately and
+    // the new boot's monotonic delta is added to it.  Zero during an ordinary uninterrupted boot.
+    uint32_t segment_carried_s = 0;
+    uint32_t draw_anchor_carried_s = 0;
     int segment_start_tenths = 0;
     int draw_anchor_tenths = 0;
     uint32_t segment_circulation_known_s = 0;
@@ -384,6 +389,7 @@ struct DhwLossState {
 
     void reset_segment() {
         segment_start_us = draw_anchor_us = -1;
+        segment_carried_s = draw_anchor_carried_s = 0;
         segment_circulation_known_s = segment_circulation_on_s = 0;
         segment_blind_s = 0;
     }
@@ -460,6 +466,58 @@ constexpr uint32_t DHW_LOSS_CIRC_KNOWN_PCT = 90;
 constexpr uint32_t DHW_LOSS_CIRC_MIN_ON_S = 5 * 60;
 constexpr uint32_t DHW_LOSS_CIRC_OFF_SETTLE_S = 2 * 3600;
 constexpr uint32_t DHW_LOSS_REQUIRED_S = 6 * 3600;       // plus a complete 24 h lifecycle for clear
+// The device cannot measure its own downtime.  Intentional esp_restart() on this board is a few
+// seconds, so use the same bounded, explicit blind allowance as the persisted state-age table.  It
+// advances wall-clock age but never observed evidence.
+constexpr uint32_t DHW_LOSS_REBOOT_BLIND_S = 5;
+
+constexpr uint8_t DHW_LOSS_CARRY_SEGMENT = 1u << 0;
+constexpr uint8_t DHW_LOSS_CARRY_DRAW     = 1u << 1;
+
+// Wire-neutral checkpoint of the in-flight filter.  Absolute esp_timer timestamps cannot cross a
+// reboot; ages can.  The storage seal lives in checkup_persist.hpp, while these translations stay
+// beside the state machine they must agree with and are host-tested without ESP-IDF.
+struct DhwLossCarry {
+    uint32_t segment_elapsed_s = 0;
+    uint32_t draw_anchor_age_s = 0;
+    uint32_t segment_circulation_known_s = 0;
+    uint32_t segment_circulation_on_s = 0;
+    uint32_t settle_remaining_s = 0;
+    uint32_t segment_blind_s = 0;
+    uint32_t blind_run_s = 0;
+    int16_t segment_start_tenths = 0;
+    int16_t draw_anchor_tenths = 0;
+    uint8_t flags = 0;
+};
+
+inline uint32_t dhw_loss_age_s(int64_t now_us, int64_t anchor_us, uint32_t carried_s = 0) {
+    if (anchor_us < 0 || now_us < anchor_us) return carried_s;
+    const uint64_t live = static_cast<uint64_t>(now_us - anchor_us) / 1000000u;
+    const uint64_t total = static_cast<uint64_t>(carried_s) + live;
+    return total > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(total);
+}
+
+inline DhwLossCarry dhw_loss_checkpoint(const DhwLossState& st, int64_t now_us) {
+    DhwLossCarry c;
+    c.segment_circulation_known_s = st.segment_circulation_known_s;
+    c.segment_circulation_on_s = st.segment_circulation_on_s;
+    c.settle_remaining_s = st.settle_remaining_s;
+    c.segment_blind_s = st.segment_blind_s;
+    c.blind_run_s = st.blind_run_s;
+    c.segment_start_tenths = static_cast<int16_t>(st.segment_start_tenths);
+    c.draw_anchor_tenths = static_cast<int16_t>(st.draw_anchor_tenths);
+    if (st.segment_start_us >= 0) {
+        c.flags |= DHW_LOSS_CARRY_SEGMENT;
+        c.segment_elapsed_s = dhw_loss_age_s(now_us, st.segment_start_us,
+                                             st.segment_carried_s);
+    }
+    if (st.draw_anchor_us >= 0) {
+        c.flags |= DHW_LOSS_CARRY_DRAW;
+        c.draw_anchor_age_s = dhw_loss_age_s(now_us, st.draw_anchor_us,
+                                             st.draw_anchor_carried_s);
+    }
+    return c;
+}
 
 // Book `blind` unobserved seconds against the candidate segment. Returns false when the segment can
 // no longer be assembled out of what was actually seen, and the caller ends it.
@@ -470,6 +528,49 @@ inline bool dhw_loss_blind_ok(DhwLossState& st, uint32_t blind) {
     st.segment_blind_s = std::min<uint32_t>(UINT32_MAX - blind, st.segment_blind_s) + blind;
     return st.blind_run_s <= DHW_LOSS_BLIND_RUN_MAX_S &&
            st.segment_blind_s <= DHW_LOSS_WINDOW_S * DHW_LOSS_BLIND_MAX_PCT / 100;
+}
+
+inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_us) {
+    st = DhwLossState{};
+    st.last_us = now_us;
+    st.settle_remaining_s = c.settle_remaining_s;
+    if (!(c.flags & DHW_LOSS_CARRY_SEGMENT)) return;
+
+    st.segment_start_us = now_us;
+    st.segment_carried_s = std::min<uint32_t>(UINT32_MAX - DHW_LOSS_REBOOT_BLIND_S,
+                                              c.segment_elapsed_s) +
+                           DHW_LOSS_REBOOT_BLIND_S;
+    st.segment_start_tenths = c.segment_start_tenths;
+    st.segment_circulation_known_s = c.segment_circulation_known_s;
+    st.segment_circulation_on_s = c.segment_circulation_on_s;
+    st.segment_blind_s = c.segment_blind_s;
+    st.blind_run_s = c.blind_run_s;
+    // Attribution as "pump continuously off" cannot cross an interval nobody observed.
+    st.circulation_off_run_s = 0;
+
+    if (c.flags & DHW_LOSS_CARRY_DRAW) {
+        st.draw_anchor_us = now_us;
+        st.draw_anchor_carried_s = std::min<uint32_t>(UINT32_MAX - DHW_LOSS_REBOOT_BLIND_S,
+                                                       c.draw_anchor_age_s) +
+                                    DHW_LOSS_REBOOT_BLIND_S;
+        st.draw_anchor_tenths = c.draw_anchor_tenths;
+    }
+    if (!dhw_loss_blind_ok(st, DHW_LOSS_REBOOT_BLIND_S)) st.reset_segment();
+}
+
+struct DhwLossProgress {
+    uint32_t candidate_observed_s = 0;
+    uint32_t settle_remaining_s = 0;
+};
+
+inline DhwLossProgress dhw_loss_progress(const DhwLossState& st, int64_t now_us) {
+    DhwLossProgress p;
+    p.settle_remaining_s = st.settle_remaining_s;
+    if (st.segment_start_us < 0) return p;
+    const uint32_t elapsed = dhw_loss_age_s(now_us, st.segment_start_us,
+                                            st.segment_carried_s);
+    p.candidate_observed_s = elapsed - std::min(elapsed, st.segment_blind_s);
+    return p;
 }
 
 inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSample& s,
@@ -546,24 +647,29 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
             st.draw_anchor_tenths - s.r5t_tenths >= DHW_LOSS_DRAW_DROP_TENTHS)
             st.reset_segment();
         st.draw_anchor_us = now_us;
+        st.draw_anchor_carried_s = 0;
         st.draw_anchor_tenths = s.r5t_tenths;
         st.blind_run_s = 0;
     }
 
     if (st.draw_anchor_us < 0 || now_us < st.draw_anchor_us ||
-        now_us - st.draw_anchor_us > static_cast<int64_t>(DHW_LOSS_DRAW_WINDOW_S) * 1000000) {
+        dhw_loss_age_s(now_us, st.draw_anchor_us, st.draw_anchor_carried_s) >
+            DHW_LOSS_DRAW_WINDOW_S) {
         st.draw_anchor_us = now_us;
+        st.draw_anchor_carried_s = 0;
         st.draw_anchor_tenths = s.r5t_tenths;
     } else if (st.draw_anchor_tenths - s.r5t_tenths >= DHW_LOSS_DRAW_DROP_TENTHS) {
         // A draw can mimic a spectacular cooling rate. Discard everything since the anchor, then
         // start a new candidate segment at the post-draw temperature.
         st.reset_segment();
         st.draw_anchor_us = now_us;
+        st.draw_anchor_carried_s = 0;
         st.draw_anchor_tenths = s.r5t_tenths;
     }
 
     if (st.segment_start_us < 0) {
         st.segment_start_us = now_us;
+        st.segment_carried_s = 0;
         st.segment_start_tenths = s.r5t_tenths;
         return;
     }
@@ -575,7 +681,8 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
                 std::min<uint32_t>(UINT32_MAX - dt, st.segment_circulation_on_s) + dt;
     }
 
-    const uint32_t elapsed_s = static_cast<uint32_t>((now_us - st.segment_start_us) / 1000000);
+    const uint32_t elapsed_s = dhw_loss_age_s(now_us, st.segment_start_us,
+                                              st.segment_carried_s);
     if (elapsed_s < DHW_LOSS_WINDOW_S) return;
     const int drop_tenths = std::max(0, st.segment_start_tenths - s.r5t_tenths);
     // The RATE is per wall-clock hour: both endpoints are measured and the tank cooled for the whole
@@ -611,6 +718,7 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     // Adjacent, non-overlapping one-hour windows preserve the sensor resolution and keep every
     // completed statistic inside exactly one hourly retention bucket.
     st.segment_start_us = now_us;
+    st.segment_carried_s = 0;
     st.segment_start_tenths = s.r5t_tenths;
     st.segment_circulation_known_s = st.segment_circulation_on_s = 0;
     // The blind budget is PER WINDOW like the two circulation counters beside it. Carrying it over
@@ -1074,6 +1182,11 @@ inline const char* checkup_result_evidence_name(CheckupCheck c, const CheckupChe
 
 struct CheckupReport {
     uint32_t          covered_s = 0;
+    // Progress inside the not-yet-creditable DHW hour.  Kept separate from observed_s: an hour is
+    // evidence only when all its exclusion gates survive to the end, but hiding a 59-minute
+    // candidate behind "0 min" made a successful OTA handoff look exactly like a reset.
+    uint32_t          dhw_candidate_s = 0;
+    uint32_t          dhw_settle_remaining_s = 0;
     bool              full_span = false;
     uint8_t           available = 0; // checks supported by the active profile
     uint8_t           assessable = 0;// supported checks with a bounded judgement (not raw observations)

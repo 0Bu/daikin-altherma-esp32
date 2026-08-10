@@ -988,9 +988,22 @@ function checkupDetailHtml(c) {
   const value = checkupMetricValue(c);
   let detail;
   if (statusKey === "collecting") {
-    detail = c.required_s > 0
-      ? t("check.detail.collecting", checkupDuration(c.observed_s), checkupDuration(c.required_s))
-      : t("check.detail.collecting_unknown");
+    if (c.id === "dhw_loss" && c.required_s > 0) {
+      const done = checkupDuration(c.observed_s), required = checkupDuration(c.required_s);
+      if (Number(c.settle_remaining_s) > 0) {
+        detail = t("check.detail.dhw_settling", done, required,
+                   checkupDuration(c.settle_remaining_s));
+      } else if (Number(c.candidate_s) > 0) {
+        detail = t("check.detail.dhw_candidate", done, required,
+                   checkupDuration(c.candidate_s), checkupDuration(3600));
+      } else {
+        detail = t("check.detail.dhw_waiting", done, required);
+      }
+    } else {
+      detail = c.required_s > 0
+        ? t("check.detail.collecting", checkupDuration(c.observed_s), checkupDuration(c.required_s))
+        : t("check.detail.collecting_unknown");
+    }
   } else {
     detail = t(checkupDetailKey(c, statusKey));
   }

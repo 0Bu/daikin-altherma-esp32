@@ -671,6 +671,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
      signal. Direct current state and observation-only flow use their stated shorter eligibility
      targets instead of pretending to be 24-hour absence claims. Each result therefore carries
      `observed_s` and `required_s`; the report also carries `available`, `assessable` and `evaluated`.
+     The DHW row additionally carries `candidate_s` and `settle_remaining_s`: the first is usable
+     progress inside the current all-or-nothing clean hour, not yet credited to `observed_s`; the
+     second explains why no candidate is running after a tank charge or BSH pulse.
      `available` counts supported/reportable rows, including pure observations. `assessable` is the
      narrower denominator of checks with a bounded judgement, and `evaluated` counts those that have
      enough evidence. `Unavailable` means the profile lacks the required row, whereas `Collecting`
@@ -1184,7 +1187,11 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    `logic/checkup.hpp`; storage is 23 completed one-hour buckets plus the pending hour in static
    `.noinit` RAM, never 24 completed buckets plus an accidental 25th open hour. `.noinit` rather than
    `.data` since `logic/checkup_persist.hpp`: a reset that keeps power carries the window across, and
-   the flash image lost the initialiser it used to carry for it. See *The host-tested logic core* for why a
+   the flash image lost the initialiser it used to carry for it. Intentional `esp_restart()` also
+   writes a separately sealed, one-shot DHW handoff under the same mutex: relative candidate ages,
+   the settling guard and completed DHW windows still in the open generic hour. The next boot books
+   five blind seconds and consumes that handoff once; a panic never replays an older checkpoint.
+   See *The host-tested logic core* for why a
    row is addressed by (page, offset, **converter**) here and by (page, offset, unit) in the trends.
 5. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
    the cache; they never touch the UART. X10A, HomeHub and ENV III trends are not published to MQTT — they exist for

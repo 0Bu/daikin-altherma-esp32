@@ -325,6 +325,9 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        covered_s is coarse card context only. Each check's
                                    #        observed_s is its own valid evidence and required_s its
                                    #        gate; absence-of-pattern checks require full_span plus
+                                   #        DHW loss also reports candidate_s (the current clean
+                                   #        hour, continued across intentional reboot) and
+                                   #        settle_remaining_s (charge/BSH settling, not evidence).
                                    #        >=90% signal-specific evidence, while direct state and
                                    #        observation-only flow publish their shorter stated gate.
                                    #        Event states are read once per completed poll sweep, so a

@@ -293,7 +293,8 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   sub-second telescoping evidence clocks, gap/bucket/window boundaries, real monotonic `full_span`,
   raw pressure minimum plus independently confirmed low-pressure fact, flow run-up, BUH/BSH observed
   seconds, raw/paired defrost edge counts, exact retry-counter deltas, clean one-hour R5T loss windows,
-  draw/charge/settling exclusion, circulation-power attribution and the evidence-bounded aggregate. Pure observations,
+  draw/charge/settling exclusion, circulation-power attribution, intentional-reboot checkpoint/adoption
+  of the in-flight DHW candidate (with blind downtime), and the evidence-bounded aggregate. Pure observations,
   count-only/zero-denominator defrost and stable experimental counters are reportable but cannot
   support aggregate `ok`; catalog-wide uniqueness pins every locator to the intended row.
 
