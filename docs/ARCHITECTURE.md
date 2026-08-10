@@ -27,6 +27,13 @@ main.cpp            → boot: NVS init, safe-mode guard, WiFi (STA or setup AP),
 safe_mode.cpp/.hpp  → boot-loop safe mode (logic/boot_guard.hpp): crash-only boot counter in NVS
                        (boot_fails) → past a threshold, come up minimally (WiFi + web UI + OTA, no
                        poll/MQTT) to recover a bad config in-browser. See "Boot-loop safe mode" below
+heap_guard.cpp/.hpp → THE HEAP WATCHDOG's device glue (logic/heap_watchdog.hpp) — the escalation the
+                      other OOM guards lack: answering 503 to everything forever is a HANG, worse
+                      than a crash. A contiguous INTERNAL block under the critical floor for an
+                      unbroken hold becomes a deliberate esp_restart, capped by an NVS breadcrumb;
+                      arming and recovery ask DIFFERENT thresholds, or a heap hovering at the line
+                      resets the clock forever. The ladder ENDS IN SAFE MODE (see "Boot-loop safe
+                      mode" below). Also the ONE largest-block sampler every reporting site uses
 wifi.cpp/.hpp       → STA bring-up (all-channel scan → strongest AP by RSSI) + endless reconnect
                        (first-boot budget → setup portal; once online NO reason code ever reboots it)
                        + reason-aware one-shot credential rollback (new creds fail to get a lease →
@@ -37,6 +44,12 @@ wifi.cpp/.hpp       → STA bring-up (all-channel scan → strongest AP by RSSI)
                        logic/link_watch.hpp: 2 proven-silent periods, or 10 blind ones, re-associate)
                        + DHCP hostname + mDNS; wifi_info() also reports the AP's
                        BSSID + PHY standard + this STA's MAC
+net.cpp/.hpp        → the OPTIONAL WIRED TRANSPORT: a W5500 on SPI, in practice an AtomS3 Lite on a
+                      PoE base. A second TRANSPORT, not a second source — MQTT/syslog/SNTP/OTA/HTTP
+                      run over it unchanged, so nothing above branches on which one carries the
+                      device. Runtime-DETECTED (VERSIONR), never a board variant: a board without one
+                      frees the SPI bus again and is byte-for-byte what it was. mDNS moved here from
+                      wifi.cpp. See "Network transport (WiFi, or the optional wire)" below
 sntp_time.cpp/.hpp  → SNTP client (esp_netif_sntp, config().ntp_server — NVS "ntp_server" override of
                        CONFIG_DAIKIN_NTP_SERVER default "pool.ntp.org", runtime-editable via
                        POST /set_ntp exactly like syslog_host/POST /set_syslog). Started right after
@@ -59,6 +72,13 @@ hp_poll.cpp/.hpp    → poll engine task: builds the active register set from th
                        polls each interval, fills the thread-safe value cache, drives errors. It
                        PUBLISHES nothing to the browser — that was the /events broadcaster, and
                        removing it took the /status builder off this task with it (#241)
+env3.cpp/.hpp       → OPTIONAL local climate sensor (the M5Stack ENV III: SHT30 + QMP6988 on one I2C
+                      bus) — a THIRD reading source with its own task, cadence and freshness window,
+                      sharing nothing with X10A or the HomeHub. Disabled, or a non-M5Stack board, and
+                      there is no task and no bus at all. A save is HARDWARE-PROVEN rather than
+                      merely validated (logic/env3.hpp) and applies by REBOOT — the I2C driver owns
+                      the bus for the task's life. Deliberately NOT in /values or the checkup: those
+                      describe the heat pump, and an accessory on the board is not a plant reading
 weather_forecast.cpp/.hpp
                     → optional direct Open-Meteo client. A configured latitude/longitude starts one
                       task that waits for WiFi + synchronized time and requests six hourly DWD ICON
@@ -70,6 +90,28 @@ weather_forecast.cpp/.hpp
                       publisher task mirrors an atomic retained evidence snapshot (without precise
                       coordinates) to <base>/weather/openmeteo/forecast. No heat-pump control is
                       written and no weather HA entities are created.
+history.cpp/.hpp    → the 24-hour trend rings: one fixed-cadence buffer per logic/history.hpp TREND,
+                      fed by four producers (the poll task's X10A rows + the board's own heap, the
+                      Modbus task, the ENV III task, the MQTT circulation witness) and served behind
+                      GET /history as THREE independent INSTRUMENTS (x10a / modbus / env3), never
+                      merged — they have separate liveness. Storage + mutex; the mechanics are the
+                      host-tested logic/history.hpp. In .noinit DRAM rather than heap, so a reset
+                      that KEPT POWER keeps the readings, and a coarse snapshot in the optional
+                      `history` partition covers the OTA case .noinit cannot — both sealed by a
+                      catalog fingerprint, since a ring is addressed by INDEX
+checkup.cpp/.hpp    → the 24-hour PLANT CHECKUP behind /status.health: counted EVENTS and window
+                      MINIMA (compressor starts + mean run length, defrost share, pressure and flow
+                      minima, backup-heater minutes, fault class, retry counters). Storage + mutex
+                      only; every rule is the host-tested logic/checkup.hpp. NOT a view over the
+                      trend rings — TrendRing::fold keeps the LAST reading of a 5-minute bucket, so
+                      the short cycling this exists to find leaves no trace in that raster
+state_dwell.cpp/.hpp → HOW LONG EACH SWITCHED ROW HAS READ WHAT IT READS — the value list's other
+                      half, since "OFF" describes a plant that finished a charge four seconds ago and
+                      one that has not charged since Tuesday equally well. Bit flags + the fault
+                      class only, 48 scalar slots (a 24-hour ring would cost 576 B per row). Storage
+                      + mutex; the rules are logic/state_dwell.hpp. THREE facts on /values, not one
+                      number: dwell_s, dwell_min (the transition was never witnessed, so the age is a
+                      lower bound) and dwell_blind_s (how much of the run the bus did not answer for)
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
                        format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
@@ -188,6 +230,13 @@ syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_ho
                       drive a getaddrinfo+ICMP storm. The errno is captured inside syslog_sendto
                       BEFORE close() (which may clobber it, and it now decides the throttle). Failures
                       log the TRANSITION (paused/recovered), not every dropped line
+diag_crash.cpp/.hpp → one-shot boot capture of the reset reason + the core-dump SUMMARY (crashed
+                      task/PC/backtrace/app-elf-sha) into a cached CrashInfo (logic/crashinfo.hpp),
+                      read by /status.last_crash and the MQTT crash topic — the summary is NEVER
+                      re-parsed on a request path. An ORPHAN dump (its app-elf-sha does not match the
+                      RUNNING build, since the coredump partition survives an OTA) is erased at
+                      capture, so `coredump` means "a dump for THIS firmware is downloadable" rather
+                      than a download espcoredump rejects on a SHA mismatch
 status_led.cpp/.hpp → onboard status-indicator task with TWO back-ends behind one host-tested
                       pattern table (logic/led_pattern.hpp): a level-driven GPIO LED and an
                       addressable WS2812 (RMT, espressif/led_strip). Pin + driver + polarity are
