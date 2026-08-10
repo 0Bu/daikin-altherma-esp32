@@ -17,6 +17,7 @@
 #include "diag_log.hpp"
 #include "heap_guard.hpp"
 #include "history.hpp"
+#include "state_dwell.hpp"
 #include "hp_poll.hpp"
 #include "hp_modbus.hpp"
 #include "logic/binary_semantics.hpp"
@@ -718,6 +719,13 @@ void http_append_status_json(std::string& j, bool redact) {
     // both correct behaviour, and only the device can tell which one happened.
     j += ",\"persist\":";
     j += jstr(history_persist_state());
+    // The same question for the per-row STATE AGES (logic/state_dwell.hpp), which ride the same
+    // .noinit medium under the same rules and therefore reset for the same reasons. It sits here
+    // rather than in a block of its own for the reason this whole builder is written the way it is:
+    // every byte added to /status is paid for on the httpd task's stack (CLAUDE.md → Memory
+    // constraints), and one more key in an existing object is the cheapest honest place to say it.
+    j += ",\"dwell_persist\":";
+    j += jstr(dwell_persist_state());
     j += ",\"rows\":[";
     bool first_trend = true;
     for (size_t t = 0; t < logic::TREND_COUNT; t++) {
@@ -1102,6 +1110,39 @@ static void append_values_array(std::string& j) {
         // (a script, the MCP surface) gets the answer without reimplementing the rule, and so the
         // marker travels with the row rather than being recomputed from a snapshot taken elsewhere.
         if (v[i].held) j += ",\"held\":true";
+        // HOW LONG THIS STATE HAS STOOD (logic/state_dwell.hpp). Emitted only for the switched rows
+        // the table tracks, so the ~65 measurement rows cost no bytes — the same rule `binary`,
+        // `held` and `concept` already follow. "OFF" answers what a flag is; for a flag that is most
+        // of the question, and for a temperature "time since the last change" is the poll period.
+        //
+        // THREE fields rather than one, because the number alone is not the claim:
+        //   dwell_s        seconds the current state has stood, as far as this board could tell
+        //   dwell_min      the true age is at LEAST that — the transition itself was never seen
+        //                  (a run this board joined in progress, or one resumed after a long gap)
+        //   dwell_blind_s  of those seconds, how many the bus did not answer for
+        // A consumer that prints dwell_s and ignores the other two states something stronger than
+        // the device knows, which is why they are separate keys and not a rendered string.
+        //
+        // GATED ON THE ROW STATING A VALUE AT ALL, which is not the same question as `known` below.
+        // The slot survives a row the sweep could not read — that is the point of it, it books the
+        // seconds as blind — but this row is then published with `"value":null`, and an age beside a
+        // value that is not there describes nothing. The browser renders such a row as "—", so the
+        // pair reads "— for 3 h 20 min": an age for a reading the device just refused to state,
+        // which is ou_stale.hpp's inspector defect (a blanked pill restated one line below itself)
+        // arriving in a new place. No value, no age — and the firmware decides that, so a consumer
+        // that is not the browser cannot reach a different answer.
+        if (logic::dwell_tracked(v[i].conv) && !v[i].value.empty()) {
+            const logic::DwellReading dw = dwell_reading(v[i].reg, v[i].off, v[i].conv);
+            // `known` false is a first-class answer and is emitted as ABSENCE: a silent bus, a page
+            // that stopped answering, a row seen too long ago to vouch for. An omitted key says "no
+            // reading"; a zero would say "it changed just now".
+            if (dw.known) {
+                j += ",\"dwell_s\":";
+                j += std::to_string(dw.since_s);
+                if (!dw.exact) j += ",\"dwell_min\":true";
+                if (dw.blind_s) { j += ",\"dwell_blind_s\":"; j += std::to_string(dw.blind_s); }
+            }
+        }
         // The row's CONCEPT — the structural id logic/homehub_map.hpp pairs the two independent
         // sources on (logic/history.hpp's trend vocabulary, resolved through the same
         // trend_row_matches() the rings use). It is what lets the browser put a Modbus reading beside

@@ -741,6 +741,17 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vdesc-p:first-child { margin-top: 0; }
 .vdesc-n { color: var(--fg); font-weight: 600; }
 
+/* HOW LONG THE ROW HAS READ WHAT IT READS — the panel's opening line, and the only LIVE sentence in
+   it (everything below is the same copy on every device at every hour). It takes --fg rather than
+   the body's --muted for exactly that reason: it is a reading, like the value in the row header the
+   user just tapped, not commentary about one.
+   The blind-time caveat beside it stays --muted and is deliberately NOT --warn: a bus that missed a
+   few sweeps is ordinary (47 timeouts in 8.2 h on the reference installation), and colouring it as
+   a fault would teach a reader to treat the normal state of their plant as a problem. It qualifies
+   the number; it does not accuse it. */
+.vdesc-since { color: var(--fg); font-weight: 600; }
+.vdesc-since-gap { color: var(--muted); font-weight: 400; }
+
 /* One current Daikin code and its meaning. The 63-entry lookup stays internal; the explainer shows
    the fact the user asked about instead of turning a single row into a service-manual index. */
 .fault-code-current {

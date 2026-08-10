@@ -35,6 +35,14 @@
 #        and the MQTT bridge start anyway and take the heap the minimal boot exists to leave free
 #    12. that latch deleted outright, which ends the restart ladder back in the unreachable
 #        degraded state #407 was filed about
+#    13. the per-row state ages left unfed on the paths that read NOTHING, so a silent bus freezes
+#        every duration at the instant it went quiet and goes on presenting them as current — seed
+#        1's shape a third time, and the reason the feature has three call sites rather than one
+#    14. the lower-bound marker dropped from /values, so a run the board merely FOUND already
+#        standing is published as one it watched arrive
+#    15. the state age computed by flooring the INTERVAL instead of quantising the absolute instants,
+#        which discards the sub-second remainder of every poll cycle — 23% slow forever, and the one
+#        defect here that is wrong in a way no gate could see from the outside
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -265,6 +273,51 @@ assert seed != s, "seed 12 did not apply — the latch call moved"
 open(p, "w").write(seed)
 PY2
 expect_red "the end-of-ladder safe-mode latch deleted" run_contract
+restore
+
+# 13. The state ages left unfed where the cycle reads NOTHING. This is seed 1's failure a third
+#     time and the reason the feature has three call sites: the two that matter are the ones a
+#     refactor deletes, because they look like no-ops — they pass no data. Unfed, the table simply
+#     stops moving, and a board whose X10A died keeps presenting the pre-outage durations as live.
+python3 - "$TMP/main/hp_poll.cpp" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("                dwell_record(nullptr, 0);\n", "", 1)
+assert seed != s, "seed 13 did not apply — the unresolved-profile call site moved"
+open(p, "w").write(seed)
+PY2
+expect_red "the state ages frozen on a board whose X10A never answers" run_contract
+restore
+
+# 14. The lower-bound marker dropped on the way out. Both runs carry a TRUE number and the only
+#     thing separating "I watched this arrive" from "it was already like this when I started
+#     looking" is this one key — so losing it is invisible in every value, payload and chart.
+python3 - "$TMP/main/http_status.cpp" <<'PY2'
+import sys, re
+p = sys.argv[1]
+s = open(p).read()
+seed = re.sub(r'\n\s*if \(!dw\.exact\) j \+= ",\\"dwell_min\\":true";', "", s, count=1)
+assert seed != s, "seed 14 did not apply — the lower-bound marker moved"
+open(p, "w").write(seed)
+PY2
+expect_red "an unwitnessed state age published as a witnessed one" run_contract
+restore
+
+# 15. The dwell computed off a FLOORED INTERVAL rather than absolute instants. The poll loop sleeps
+#     a whole second after a serial sweep, so the cadence is ~1.2-1.3 s and the remainder is lost on
+#     every cycle, permanently. checkup_step() already carries the rule; this seed proves the
+#     assertion notices when the dwell stops following it.
+python3 - "$TMP/main/state_dwell.cpp" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("dt_s = static_cast<uint32_t>(now_us / 1000000 - s_last_us / 1000000);",
+                 "dt_s = static_cast<uint32_t>((now_us - s_last_us) / 1000000);", 1)
+assert seed != s, "seed 15 did not apply — the elapsed derivation moved"
+open(p, "w").write(seed)
+PY2
+expect_red "the state age flooring each interval instead of telescoping the remainder" run_contract
 restore
 
 if [ "$fail" -ne 0 ]; then

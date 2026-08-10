@@ -221,8 +221,19 @@ const I18N = {
     "hist.pin_hint": "tap to pin",
     "hist.duration_min": (m) => `${m} min`, "hist.duration_h": (h) => `${h} h`,
     "hist.duration_hm": (h, m) => `${h} h ${m} min`,
+    // Sub-minute tier, used by the per-row state age alone: a trend raster is five minutes wide, but
+    // a flag that switched twenty seconds ago is exactly the case someone is looking at.
+    "hist.duration_sec": (s) => `${s} s`,
     "hist.state_phase_run": (state, when, d) => `${state}\n${when} · approx. ${d}`,
     "hist.state_active": "Active", "hist.state_off": "Off",
+    // HOW LONG A SWITCHED ROW HAS READ WHAT IT READS. `val.since_min` is not a softer wording of
+    // `val.since` — it is a WEAKER CLAIM, and the two must never be interchangeable: the board saw
+    // the state arrive in the first, and only found it already standing in the second. `val.since_gap`
+    // names the part of the run the bus did not answer for, during which a flag could have pulsed and
+    // returned unseen.
+    "val.since": (state, d) => `${state} for ${d}`,
+    "val.since_min": (state, d) => `${state} for at least ${d}`,
+    "val.since_gap": (d) => `${d} of it not observed`,
     "hist.modbus_plateau": (when, d) => `register unchanged ${when} · approx. ${d} · measurement age unknown`,
     "hist.boost_total": (d) => `Boost active · ${d}`,
     "hist.boost_none": "No Boost in the recorded period.",
@@ -721,8 +732,12 @@ const I18N = {
     "hist.pin_hint": "antippen zum Anheften",
     "hist.duration_min": (m) => `${m} min`, "hist.duration_h": (h) => `${h} h`,
     "hist.duration_hm": (h, m) => `${h} h ${m} min`,
+    "hist.duration_sec": (s) => `${s} s`,
     "hist.state_phase_run": (state, when, d) => `${state}\n${when} · ca. ${d}`,
     "hist.state_active": "Aktiv", "hist.state_off": "Aus",
+    "val.since": (state, d) => `${state} seit ${d}`,
+    "val.since_min": (state, d) => `${state} seit mindestens ${d}`,
+    "val.since_gap": (d) => `davon ${d} nicht beobachtet`,
     "hist.modbus_plateau": (when, d) => `Register unverändert ${when} · ca. ${d} · Messalter unbekannt`,
     "hist.boost_total": (d) => `Boost aktiv · ${d}`,
     "hist.boost_none": "Kein Boost im aufgezeichneten Zeitraum.",

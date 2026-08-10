@@ -38,6 +38,7 @@
 #include "recovery_button.hpp"
 #include "heap_guard.hpp"
 #include "safe_mode.hpp"
+#include "state_dwell.hpp"
 #include "sntp_time.hpp"
 #include "status_led.hpp"
 #include "wifi.hpp"
@@ -131,6 +132,7 @@ static void boot_sequence() {
     // and before HTTP can ask for a snapshot — rather than racing two lazy creators on first boot.
     daik::history_start();
     daik::checkup_start();   // same rule: judge .noinit before a producer task exists
+    daik::dwell_start();     // and the per-row state ages, judged on the same terms
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (!daik::safe_mode_active()) {
         daik::env3_start();              // optional outdoor climate sensor (no-op unless configured)

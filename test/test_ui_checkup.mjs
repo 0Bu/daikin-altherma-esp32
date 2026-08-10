@@ -63,12 +63,17 @@ assert.ok(pollSource.indexOf("checkup_reset();") < pollSource.indexOf("config_se
           "automatic detection must request reset before publishing the resolved profile");
 assert.ok(pollSource.indexOf("history_reset();") < pollSource.indexOf("config_set_model("),
           "automatic detection must reset trend identity before publishing the resolved profile");
+// THREE X10A-backed observations now share one identity: the checkup's 24-hour window, the trend
+// rings and the per-row state ages (logic/state_dwell.hpp). All three are addressed by coordinates
+// whose MEANING depends on the resolved unit, so a link or profile change must retire all of them
+// together — one left behind would go on describing the previous physical identity under the new
+// one's name.
 assert.match(configSource,
-             /set_hp_resets_checkup\([^;]+;\s*[\s\S]*?if \(reset_checkup\) \{\s*checkup_reset\(\);\s*history_reset\(\);/m,
-             "/set_hp must route the pure identity predicate into both X10A reset requests");
+             /set_hp_resets_checkup\([^;]+;\s*[\s\S]*?if \(reset_checkup\) \{\s*checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);/m,
+             "/set_hp must route the pure identity predicate into all three X10A reset requests");
 assert.match(configSource,
-             /static esp_err_t do_detect[\s\S]*?checkup_reset\(\);\s*history_reset\(\);\s*hp_poll_reconfigure\(\);/m,
-             "explicit /detect must reset both X10A observations before reconfiguring the poll task");
+             /static esp_err_t do_detect[\s\S]*?checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);\s*hp_poll_reconfigure\(\);/m,
+             "explicit /detect must reset all three X10A observations before reconfiguring the poll task");
 assert.match(configSource,
              /homehub_history_identity_changed\([\s\S]*?if \(reset_mb_history\) history_modbus_reset\(\);/m,
              "/set_hp must reset HomeHub history only when host, port or unit identity changes");
