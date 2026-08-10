@@ -61,7 +61,21 @@ function api({ lang = "en", x10a = true, values = [] } = {}) {
   // assertion the whole file exists for: both cases carry a true number, and only the wording
   // separates "I watched this happen" from "it was already like this when I started looking".
   assert.match(a.dwellNoteHtml(ROW({ dwell_s: 12000, dwell_min: true }), "OFF"),
-    /OFF for at least 3 h 20 min/, "an unwitnessed run must be stated as a lower bound");
+    /OFF ≥ 3 h 20 min/, "an unwitnessed run must be stated as a lower bound");
+
+  // A BOUND FLOORS. Rounding to nearest is right for a measured span and wrong for a bound: 1710 s
+  // rounds to 29 min, and "≥ 29 min" asserts 1740 s — thirty seconds the board never observed.
+  // Every value in the upper half of a minute does that, so this is the common case, not an edge.
+  assert.match(a.dwellNoteHtml(ROW({ dwell_s: 1710, dwell_min: true }), "OFF"), /OFF ≥ 28 min/,
+    "a lower bound must floor — rounding it up asserts time nobody watched");
+  assert.doesNotMatch(a.dwellNoteHtml(ROW({ dwell_s: 1710, dwell_min: true }), "OFF"), /29 min/);
+  assert.match(a.dwellNoteHtml(ROW({ dwell_s: 1739, dwell_min: true }), "OFF"), /OFF ≥ 28 min/);
+  assert.match(a.dwellNoteHtml(ROW({ dwell_s: 1740, dwell_min: true }), "OFF"), /OFF ≥ 29 min/,
+    "…but a bound that really has reached the minute prints it");
+  // A MEASURED run keeps rounding to nearest — the bound rule must not leak into the exact case,
+  // where the closest true statement is the nearest minute.
+  assert.match(a.dwellNoteHtml(ROW({ dwell_s: 1710 }), "OFF"), /OFF for 29 min/,
+    "a witnessed run is a measurement and still rounds to nearest");
 
   // The device saying nothing renders as nothing. "0 s" would read as "it just changed" — a live
   // reading manufactured for a row the firmware explicitly declined to describe.
@@ -88,7 +102,11 @@ function api({ lang = "en", x10a = true, values = [] } = {}) {
   const de = api({ lang: "de" });
   assert.match(de.dwellNoteHtml(ROW({ dwell_s: 12000 }), "OFF"), /OFF seit 3 h 20 min/);
   assert.match(de.dwellNoteHtml(ROW({ dwell_s: 12000, dwell_min: true }), "OFF"),
-    /OFF seit mindestens 3 h 20 min/, "the weaker claim must survive translation");
+    /OFF ≥ 3 h 20 min/, "the weaker claim must survive translation");
+  // The relation symbol is language-neutral, so both dictionaries carry the identical form — but it
+  // must still be PRESENT in both, or a missing key would fall back to English and read the same by
+  // accident, hiding the omission from every check.
+  assert.match(de.dwellNoteHtml(ROW({ dwell_s: 1710, dwell_min: true }), "OFF"), /OFF ≥ 28 min/);
   assert.match(de.dwellNoteHtml(ROW({ dwell_s: 12000, dwell_blind_s: 600 }), "OFF"),
     /davon 10 min nicht beobachtet/);
   // Sub-minute resolution exists only here: a flag that switched twenty seconds ago is the case a

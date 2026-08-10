@@ -541,8 +541,15 @@ function stateRuns(series, wanted, classify) {
   }
   return out;
 }
-function histDuration(seconds) {
-  const min = Math.max(0, Math.round(seconds / 60));
+// `bound` renders a LOWER BOUND rather than a measurement, and the difference is not cosmetic.
+// Rounding to nearest is right for a phase duration off the chart — that is a measured span and the
+// nearest minute is the closest true statement about it. It is WRONG for a bound: a run measured at
+// 1710 s rounds to 29 min, and "at least 29 min" asserts 1740 s, i.e. thirty seconds the board never
+// observed. Every value in the upper half of a minute does that. A bound floors, so the printed
+// number is the tightest whole unit that is still TRUE.
+function histDuration(seconds, bound = false) {
+  const exact = Math.max(0, seconds / 60);
+  const min = bound ? Math.floor(exact) : Math.round(exact);
   const h = Math.floor(min / 60), m = min % 60;
   return h && m ? t("hist.duration_hm", h, m)
        : h ? t("hist.duration_h", h) : t("hist.duration_min", m);
@@ -552,9 +559,9 @@ function histDuration(seconds) {
 // raster is five minutes — but a state age does: a flag that switched twenty seconds ago is the
 // case a reader is most likely to be looking at, and "0 min" is the one answer that makes a live
 // number look broken.
-function dwellDuration(seconds) {
-  const s = Math.max(0, Math.round(seconds));
-  return s < 60 ? t("hist.duration_sec", s) : histDuration(s);
+function dwellDuration(seconds, bound = false) {
+  const s = Math.max(0, bound ? Math.floor(seconds) : Math.round(seconds));
+  return s < 60 ? t("hist.duration_sec", s) : histDuration(s, bound);
 }
 
 // HOW LONG THIS ROW HAS READ WHAT IT READS — the first line of a switched row's explainer.
@@ -586,7 +593,7 @@ function dwellNoteHtml(v, stateText) {
   // prints "— for 3 h 20 min", an age for a reading the row above just refused.
   if (!v || v.dwell_s == null || v.value == null || !stateText || stateText === "—") return "";
   const shown = v.dwell_min
-    ? t("val.since_min", stateText, dwellDuration(v.dwell_s))
+    ? t("val.since_min", stateText, dwellDuration(v.dwell_s, true))
     : t("val.since", stateText, dwellDuration(v.dwell_s));
   const blind = Number(v.dwell_blind_s) || 0;
   return descParaHtml(`<span class="vdesc-since">${esc(shown)}</span>` +

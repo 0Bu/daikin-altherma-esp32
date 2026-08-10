@@ -1007,7 +1007,8 @@ state_dwell.cpp HOW LONG EACH SWITCHED ROW HAS READ WHAT IT READS — the value 
                 the reboot window was watched. /status.history.dwell_persist names the outcome.
                 THE HONESTY is the whole feature, and it is three separate facts on /values rather
                 than one number: `dwell_s` is what the board could tell, `dwell_min` says the
-                transition was never WITNESSED so the true age is at least that, and `dwell_blind_s`
+                transition was never WITNESSED so the true age is at least that (rendered `>=` and
+                FLOORED, since rounding a bound up asserts seconds nobody watched), and `dwell_blind_s`
                 says how much of the run the bus did not answer for. WITNESSED is strict — the
                 previous state seen in the IMMEDIATELY PRECEDING cycle — since a change found after
                 even a short gap happened somewhere inside it, and an exact "for 0 s" about an

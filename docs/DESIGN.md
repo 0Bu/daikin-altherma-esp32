@@ -968,7 +968,9 @@ Body, ordered:
      is the poll period — a number that would read 1–3 s on ~50 rows and bury the ~34 where it means
      something. **The device states the claim and the browser only renders it**, and there are three
      of them because the number alone is not one: a run whose transition was never witnessed reads
-     *"for at least"* — a weaker claim, never the same sentence — and a run the bus did not answer
+     *"OFF ≥ 3 h 20 min"* — a weaker claim in a compact relation symbol that reads identically in both
+     languages, never the same sentence as a measured run, and **floored**, since rounding a bound to
+     the nearest minute would assert seconds nobody watched — and a run the bus did not answer
      for throughout names the unobserved part beside it, in `--muted` and never `--warn`, since a few
      missed sweeps is the ordinary state of this bus and colouring it as a fault teaches a reader to
      distrust a healthy plant. Where the device says nothing — a silent bus, a row unread past its
