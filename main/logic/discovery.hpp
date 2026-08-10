@@ -163,7 +163,8 @@ inline std::string env3_discovery_topic(const std::string& prefix, const std::st
 
 // Availability has two independent causes and therefore uses HA's availability list in `all`
 // mode: the ESP32 must be online AND this particular key must exist in the ENV III payload. The
-// driver publishes `{}` on read failure/staleness, so HA marks only these three entities unavailable
+// driver OMITS the reading keys on read failure/staleness — the two I2C counters beside them stay,
+// since they describe the link rather than the air — so HA marks only these three entities unavailable
 // while the rest of the device remains online. Defaults `online`/`offline` match both templates.
 inline std::string env3_discovery_config(const std::string& node, const std::string& board_id,
                                          const std::string& state_topic,

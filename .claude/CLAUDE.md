@@ -773,7 +773,22 @@ env3.cpp        OPTIONAL local climate sensor — the M5Stack ENV III Grove unit
                 discovery config carries a TWO-entry availability list with mode "all" — the device
                 LWT and a template on the state topic itself — so a stale or failed sensor marks only
                 these three entities unavailable while the rest of the device stays online, and an
-                error publishes {} rather than carrying the last plausible outdoor value forward.
+                error OMITS the three readings rather than carrying the last plausible outdoor value
+                forward. What the document keeps in BOTH shapes is the pair of I2C bus-health
+                counters, `samples` and `errors`: they describe the LINK rather than the air, so
+                they are facts about the sensor whether or not it produced a reading — and they are
+                most informative exactly when it did not. Carried only on the healthy document, the
+                error count would go dark at the instant it became the answer, leaving a consumer
+                unable to tell a failing SHT30 from a disabled accessory, a rebooted board or a lost
+                broker; this installation's sensor hangs on a long I2C run to an outdoor enclosure,
+                where a marginal cable is a rising error rate long before it is a gap in the
+                readings. Two COUNTERS and never a pre-divided rate — a store holding numerator and
+                denominator can compute any window's ratio, a firmware that divides has thrown the
+                numerator away. They earn no HA entity: the three readings are the sensor as a user
+                sees it, and link health is a metrics-stream question. The error shape stays
+                `{"samples":N,"errors":M}` rather than `{}`, which changes nothing for HA — the
+                availability template asks whether each READING key `is number`, so the three
+                entities still go unavailable and no retained value survives.
                 It republishes when the SAMPLE COUNTER advanced even if the rounded text is identical,
                 so a time-series subscriber sees the sensor's real 10s cadence instead of a gap that
                 reads like a dropout. The QMP6988's own temperature is decoded and DISCARDED — one
@@ -1154,8 +1169,31 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A p
                 since it is an event payload, not a metrics stream) of
                 heap(free/min-free/largest-block)/uptime/reset_reason/wifi(rssi+reconnects+MAC+BSSID,
                 mac always present, bssid null offline)/mqtt(pub count+fails+reconnects)/X10A bus
-                (rx_received/rx_fails/bus_ou_held_over) stats, 21 diagnostic HA entities streamed
-                independently of profile detection. TWO are RETIRED (RETIRED_HEARTBEAT_SENSORS), under
+                (rx_received/rx_fails/bus_ou_held_over) stats, 22 diagnostic HA entities streamed
+                independently of profile detection. TWO fields are about a reboot the rest of the
+                payload cannot attribute and one memory budget it never reported at all.
+                `heap_restarts` is how many consecutive heap-watchdog restarts preceded this boot
+                (heap_guard.hpp): that restart is an esp_restart(), so reset_reason reads the same
+                "sw" a /set_* save produces and reset_fault stays 0 — without this a board cycling
+                its ladder every few minutes is a sawtooth in uptime_s and nothing else, the
+                "reboot nobody can attribute" #215 reconstructed from syslog by hand. It IS an HA
+                entity ("Heap Watchdog Restarts") because the OWNER acts on it, and `measurement`
+                rather than `total_increasing` because it is a per-boot CONSTANT that returns to 0
+                on the next healthy boot — typed monotonic, HA's statistics would read every
+                recovery as a counter reset. The four `*_stack_min_free_bytes` (httpd/poll/mqtt/
+                modbus, main/stack_watch.hpp) are payload-only and null until sampled; they are the
+                stack budget, which until now was visible only in a core dump, i.e. only after the
+                board had died. The UNIT IS BYTES and is spelled out in each name, because ESP-IDF's
+                uxTaskGetStackHighWaterMark deviates from vanilla FreeRTOS by answering in bytes
+                rather than words. `modbus_stack_min_free_words` shipped with the wrong unit until
+                the arithmetic was checked (a 6144-byte task reporting 2660 cannot be reporting
+                words) and was RENAMED to `_bytes` with the three new siblings — the #230 LABEL-UNIT
+                rule reaching a board metric: the name is the VictoriaMetrics series suffix, so a
+                wrong unit word publishes a headroom four times too large in the one figure that
+                exists to warn about running out. It is payload-only, so there is no HA entity to
+                retract; the VM series FORKS, which no firmware action can carry across a rename,
+                and that is the accepted cost of the correction. `/status.modbus
+                .task_stack_min_free_bytes` moved with it. TWO entities are RETIRED (RETIRED_HEARTBEAT_SENSORS), under
                 the rule that already retired the crash topic's "Last Reset Reason": an entity
                 repeating what another entity on the same device says is not a second reading, it is a
                 second thing to rule out. "Device Time" published the SNTP wall clock as a
@@ -1399,6 +1437,35 @@ task_config.hpp THE task PRIORITY table (TASK_PRIO_*). Relative priority is a pr
                 wired-link watch was added to the table and to neither prose copy of "twelve"). STACK SIZES deliberately stay at their call sites: each is justified by that
                 task's own measured deepest frame, and a shared table of them would invite exactly
                 the copy-the-neighbour sizing the memory section warns about
+stack_watch.cpp THE ONE stack-headroom sampler — the second memory budget, made REPORTABLE. The heap
+                has /status.sys, two trend rings and a watchdog that restarts the board; the stack
+                had a core dump's task table and nothing else, i.e. evidence that exists only once
+                the device has already died. Three overflows shipped that way (v1.0.12 httpd, #241
+                hp_poll, #318 httpd through OTA) and #318's 1200 bytes of frame growth accumulated
+                across releases with no single change announcing it — an idle board looks identical
+                at every stack size. Four slots (StackWatch::Httpd/Poll/Mqtt/Modbus), each task
+                recording its OWN FreeRTOS high-water mark from its own loop, published on the MQTT
+                heartbeat as *_stack_min_free_bytes (payload-only, no HA entity: the value is a
+                TREND a maintainer reads across versions, and four permanently-flat entities are
+                four more things a device owner must rule out). The mark is RETROSPECTIVE — FreeRTOS
+                keeps the lowest free stack ever — which is what lets every caller sample at the top
+                of its loop, the one point no branch can skip, rather than having to coincide with
+                the deepest frame. It MUST be called from the task that owns the slot
+                (uxTaskGetStackHighWaterMark answers for the CALLING task), so a central sampler
+                would file all four under one name. The MINIMUM is still tracked here rather than
+                left to FreeRTOS for exactly one task: the HomeHub stack retires and is recreated
+                when the address is cleared and re-saved, and a fresh task starts with a fresh mark,
+                so without it one slot would mean "since the last reconfigure" while three meant
+                "since boot". ZERO IS THE NEVER-SAMPLED SENTINEL and every reporting site renders it
+                as null — a board with no HomeHub has no such task, and "0 words free" is a reading.
+                The ambiguity with a real zero is accepted: a task that consumed its last word has
+                already taken the board down. Lock-free and allocation-free by construction (a
+                relaxed load/compare/store into .bss, single writer per slot) — it reports on a
+                board that may be out of memory, so it must never need any. The HTTPD slot samples
+                per REQUEST and so stays null on a board nobody has browsed this boot, which is the
+                right answer and not a gap: the deep frame exists only while a request is served, so
+                an idle httpd task would report its select loop's headroom — a large, uninteresting
+                number reading as enormous margin on the one path that has never been exercised
 logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, registers, value_def,
                 config_model, net_link,
                 config_store, discovery, ha_device, detect, history, json, mqtt_base, mqtt_group, mqtt_uri, homehub_map, heartbeat, crashinfo,
@@ -2682,10 +2749,14 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
                   plus
                   modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,
-                  values,task_stack_min_free_words,plant_gate_known,plant_gate_active
+                  values,task_stack_min_free_bytes,plant_gate_known,plant_gate_active
                   [,error,error_code,error_detail,error_register]}
                   — the HomeHub link diagnostics. READ-ONLY: there is no actuator object and no
-                  actuation flag — the link is read-only. The PLANT GATE pair is input register 53,
+                  actuation flag — the link is read-only. task_stack_min_free_bytes comes from the
+                  one sampler all four watched stacks report through (main/stack_watch.hpp), not
+                  from ModbusStatus, so this surface and the MQTT heartbeat cannot answer the same
+                  question with two numbers; it is NULL rather than 0 when the task has never run,
+                  which on a board with no HomeHub is always. The PLANT GATE pair is input register 53,
                   the one HomeHub fact the shadow controller consumes — `known` false means the
                   register did not answer and must never read as an inactive plant. `host` is the configured persistent
                   target (redacted like the other reporter-identifying values); empty means disabled.
@@ -2693,13 +2764,22 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   remains false for wire compatibility. The plant-gate pair also reaches MQTT through
                   the `<base>/heating_curve` document's diagnosis.gates block — as EVIDENCE for the
                   diagnosis, never as a writable entity: there is no actuator here to mirror,
-                  sys{free_heap,min_free_heap,max_alloc,heap_restarts,reset_reason,safe_mode,safe_mode_cause} — heap
+                  sys{free_heap,min_free_heap,max_alloc,heap_restarts,mqtt_skipped,mqtt_quiesced,
+                  poll_skipped,reset_reason,safe_mode,safe_mode_cause,
+                  stack_min_free_bytes{httpd,poll,mqtt,modbus}} — heap
                   headroom (free / since-boot low-water / largest-contiguous INTERNAL, via
                   heap_guard.hpp's one sampler) + how many consecutive heap-watchdog restarts preceded
                   this boot (0 on an ordinary one; the restart is an esp_restart, so reset_reason
                   reads the same "sw" a config save produces and without this field a board
                   restarting itself every five minutes is indistinguishable from one somebody kept
-                  saving settings on) + why the device last booted, ALWAYS present (unlike last_crash, and unlike the MQTT heartbeat needs no
+                  saving settings on) + the SECOND memory budget, per watched task in BYTES and null
+                  until that task has been sampled (main/stack_watch.hpp). Those four are here as
+                  well as on the heartbeat for the reason this whole block exists: every ordinary
+                  MQTT publish sits behind the X10A publish gate, and safe mode never starts the
+                  publish task at all, so a board with a silent bus or a latched safe mode — exactly
+                  the boards whose stack headroom someone wants — would report them nowhere. That is
+                  the shape that once folded the board's own heap trends inside the heat pump's poll
+                  cycle. + why the device last booted, ALWAYS present (unlike last_crash, and unlike the MQTT heartbeat needs no
                   broker); reset_reason via logic/reset_reason.hpp, safe_mode = the latched boot-loop
                   recovery flag (safe_mode.cpp; true once too many crash boots accumulated -> poll +
                   MQTT skipped),
@@ -3205,10 +3285,19 @@ firmware no longer has). Two rules follow:
   every intermediate `std::string` at once, all live in the same frame; `+=` holds one at a time and
   takes a bare literal with no wrapper (so it also drops the allocations). http_status.cpp's board /
   presets blocks are the worked example.
-- **Read the task table in any core dump you open** (`USED/FREE` per task). It is the only place this
-  is visible: nothing on `/status` reports stack headroom, and a task can sit one frame from death
-  while every heap number looks perfect. Anything under ~1 KB free wants raising —
-  `cfg.stack_size` in http_server.cpp, `xTaskCreate` for the rest.
+- **Read the task table in any core dump you open** (`USED/FREE` per task). It is the only place the
+  EXACT figure is visible, and a task can sit one frame from death while every heap number looks
+  perfect. Anything under ~1 KB free wants raising — `cfg.stack_size` in http_server.cpp,
+  `xTaskCreate` for the rest.
+- **…but the trend no longer waits for a crash** (`main/stack_watch.hpp`). Four tasks — httpd,
+  hp_poll, mqtt_pub and the HomeHub link — record their own FreeRTOS high-water mark from their own
+  loop, and the MQTT heartbeat carries all four as `*_stack_min_free_bytes`. That is the half a core
+  dump structurally cannot supply: a dump exists only once the board has died, so the 1200 bytes of
+  frame growth measured across #318 accumulated over releases with nothing to see it. A falling
+  line in the store is now that warning. It does NOT replace the dump — the sampler reports WORDS
+  FREE per task and says nothing about which frame took them — and `0` means NEVER SAMPLED, rendered
+  as JSON null at every reporting site (a board with no HomeHub has no such task, and "0 words free"
+  would read as one word from death).
 `CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y` (sdkconfig.defaults) now makes the *first* write past a
 limit panic at the offending instruction. IDF's default canary is only compared at a context switch
 and a sparsely-writing frame can skip over it — which is exactly what happened here (TLS[1], the
@@ -3238,8 +3327,10 @@ never off an idle heap reading (an idle board looks fine at every one of these s
 crash arrived through OTA — the one path where a too-small stack takes down a fleet rather than a
 desk. So the rule to carry forward is the general
 one, not the numbers: **anything that grows /status grows every stack that builds it**, and a
-change that hands a task a large new builder raises that task's stack in the same commit. Nothing on
-`/status` reports stack headroom — the task table in a core dump is the only place it is visible.
+change that hands a task a large new builder raises that task's stack in the same commit. The task
+table in a core dump is still the only place the exact per-frame figure is visible; what the MQTT
+heartbeat's `httpd_stack_min_free_bytes` adds is the SLOPE between crashes, which is the signal this
+paragraph's own re-measurement had to be performed by hand to find (`main/stack_watch.hpp`).
 
 **Re-measured 2026-08-07 on `main` (f686dff), and the headline margin was the wrong number.** The
 builder's fixed frame is now **0x2e00 = 11776** bytes (dev.295 9776 → dev.296 10576 → f686dff 11616

@@ -227,6 +227,12 @@ recovery_button.cpp/.hpp → physical factory-reset button (btn_gpio/btn_active_
                       merely bracketed the flash write would be invisible. A FAILED erase does NOT
                       reboot (coming back up on the config it just claimed to delete is worse than
                       staying up and logging why). Started even in safe mode
+stack_watch.cpp     → the SECOND memory budget, made reportable. Four tasks (httpd, hp_poll,
+                     mqtt_pub, the HomeHub link) record their own FreeRTOS stack high-water mark
+                     from their own loop; the MQTT heartbeat publishes all four as
+                     `*_stack_min_free_bytes`, null until sampled. The heap has `/status.sys`, two
+                     trend rings and a watchdog — the stack had a core dump's task table, which
+                     exists only once the board has died
 www/                → web UI sources: index.html + style.css + app.sources + js/*.js. The manifest
                      orders the classic-script fragments; inline_assets.cmake splices them into ONE
                      self-contained page at build time and serves it gzipped. setup.html is the
@@ -796,7 +802,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   outside 1–65535 — caught at parse time because the probe's `htons()` would truncate `:65537` to
   `:1` and call a wrong port reachable).
 - `logic/heartbeat.hpp` — the board/link diagnostics JSON (a flat object, each field prefixed by its
-  block name: `wifi_rssi`, `wifi_mac`, `bus_rx_received`, …) + its 21 diagnostic HA discovery configs
+  block name: `wifi_rssi`, `wifi_mac`, `bus_rx_received`, …) + its 22 diagnostic HA discovery configs
   and the two RETIRED ones whose retained configs must still be deleted, with uptime formatting
   pinned to known-good samples. Carries
   `bus_ou_held_over` — **source** freshness, which is a different fact from `bus_connected`: the link
@@ -1707,6 +1713,35 @@ The Home Assistant bridge:
     7 days — 5 of them panics — unattributable in the store, reconstructible only from syslog (#215).
     Neither is a new HA entity; the existing "Reset Reason" text sensor already answers a human, and a
     numeric twin beside it is the duplicate that got the crash topic's "Last Reset Reason" retired.
+    Beside them **`heap_restarts`** — how many consecutive heap-watchdog restarts preceded this boot
+    (`heap_guard_restarts()`, also on `/status.sys`). It is here because nothing else in the payload
+    can attribute that reboot: `heap_guard.cpp` restarts with `esp_restart()`, so `reset_reason`
+    reads the same `sw` a `/set_*` save produces and `reset_fault` stays `0`, and a board cycling
+    its restart ladder every few minutes shows up as a sawtooth in `uptime_s` and nothing else.
+    Unlike the two fields above it **is** an HA entity ("Heap Watchdog Restarts"): the owner of the
+    board acts on it, and it duplicates nothing — "Reset Reason" says `sw` for both cases, which is
+    exactly the ambiguity this resolves. `measurement`, not `total_increasing`: the value is the
+    count this *boot* inherited and returns to `0` on the next healthy boot, so a monotonic state
+    class would make HA read every recovery as a counter reset.
+  - **`*_stack_min_free_bytes`**: the **second memory budget** — `httpd_`, `poll_`, `mqtt_` and
+    `modbus_`, in **bytes** — the unit ESP-IDF's `uxTaskGetStackHighWaterMark` answers in, so the
+    number compares directly against a core dump's task table and against the size passed to
+    `xTaskCreate`. Vanilla FreeRTOS returns *words* here and ESP-IDF deliberately does not, which is
+    why the unit is spelled out in the field name: it becomes a VictoriaMetrics series suffix, where
+    a wrong unit word publishes a quantity four times too large in the one metric whose whole
+    purpose is warning about running out. Everything
+    above reports the heap; the stack had a core dump's task table and nothing else, i.e. evidence
+    that exists only once the board has already died. Three overflows shipped that way (v1.0.12 on
+    httpd, #241 on `hp_poll`, #318 on httpd through OTA) and #318's 1200 bytes of frame growth
+    accumulated across releases with no single change announcing it — an idle board looks identical
+    at every stack size. Each task records its own mark from its own loop (`main/stack_watch.hpp`);
+    the mark is retrospective, so the top of a loop is enough and no branch can skip it.
+    **`0` means never sampled and is published as `null`** — a task that has not run is not a task
+    with no stack left, and the Modbus slot stays unsampled forever on a board with no HomeHub,
+    where `0` would read as one word from death (a metrics consumer drops a null field and records
+    no sample, which is the honest outcome). **Payload-only — deliberately no HA entity:** the value
+    is a trend a maintainer reads across firmware versions, and four permanently-flat diagnostic
+    entities are four more things a device owner has to rule out.
   - **`wifi_*`**: `wifi_connected`, `wifi_rssi`, `wifi_reconnects` (cumulative RE-connects
     since boot, `wifi_reconnect_count()` in `wifi.cpp`, excludes the first-ever connect), `wifi_mac`
     (this STA's own MAC, always present) and `wifi_bssid` (the associated AP's MAC, null while offline)
@@ -1738,14 +1773,18 @@ The Home Assistant bridge:
     request sent). There is no `bus_tx_writes`/`bus_tx_fails` companion: the X10A bridge is read-only,
     so both were hardcoded `0` and could never vary. They were dropped in #215 — a metric that cannot
     change is a dashboard line that always reads zero. Neither was ever an HA entity.
-  - **`modbus_*`**: link state, read counters and HomeHub-task stack high-water evidence. There are
-    no write counters — the link issues no Modbus write at all.
+  - **`modbus_*`**: link state and read counters. There are
+    no write counters — the link issues no Modbus write at all. (The HomeHub task's stack high-water
+    evidence moved to the shared `modbus_stack_min_free_bytes` above when all four watched stacks
+    were given one sampler; `/status.modbus.task_stack_min_free_bytes` reads from the same place, so
+    the two surfaces cannot answer one question with two numbers.)
     **Payload-only — deliberately no HA entity.**
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the source value topics, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than
-  only on change. 21 diagnostic HA entities (WiFi signal/reconnects/MAC/BSSID, heap
-  free/min-free/largest-block, uptime, last reset reason, X10A bus status/held-over/CRC/timeout/rx
+  only on change. 22 diagnostic HA entities (WiFi signal/reconnects/MAC/BSSID, heap
+  free/min-free/largest-block, heap-watchdog restarts, uptime, last reset reason, X10A bus
+  status/held-over/CRC/timeout/rx
   errors/rx received, MQTT
   publish count/fails/reconnects, and the three #380 loss counters —
   `mqtt_skipped`/`mqtt_quiesced`/`poll_skipped`, `total_increasing` so HA's long-term statistics read

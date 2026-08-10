@@ -104,6 +104,32 @@ never read at all). They are worth an automation: `mqtt_skipped` rising outside 
 means the board is losing data to something other than its own installer. Because a reboot ends every
 such episode, `total_increasing` is what lets HA's long-term statistics read the reset as a reset.
 
+Two more fields say why the board rebooted and how close its tasks are to their limits — the
+questions the rest of the payload structurally cannot answer.
+
+`heap_restarts` is how many consecutive heap-watchdog restarts preceded this boot. The watchdog
+restarts with `esp_restart()`, so `reset_reason` reads the same `sw` a settings save produces and
+`reset_fault` stays `0`: without this field a board cycling its restart ladder every few minutes is
+a sawtooth in `uptime_s` and nothing else. It is the one heartbeat diagnostic here that is also a
+Home Assistant entity — **Heap Watchdog Restarts** — because the owner of the board acts on it, and
+it duplicates nothing (the *Reset Reason* sensor says `sw` for both cases, which is the ambiguity
+this resolves). Its state class is `measurement`, not `total_increasing`: the value is the count
+this *boot* inherited and returns to `0` on the next healthy boot, so a monotonic class would make
+HA read every recovery as a counter reset. Anything above `0` is worth an automation.
+
+`httpd_stack_min_free_bytes`, `poll_stack_min_free_bytes`, `mqtt_stack_min_free_bytes` and
+`modbus_stack_min_free_bytes` are the **second memory budget**: the worst stack headroom each task
+has had since boot, in **bytes** (ESP-IDF's `uxTaskGetStackHighWaterMark` answers in bytes, unlike
+vanilla FreeRTOS, which is why the unit is in the field name). Every heap figure above is already reported
+and charted; the stack was visible only in a core dump's task table, which exists only once the
+board has already died — and this firmware has shipped three stack overflows. Watch these as a
+trend across firmware versions rather than as an absolute: a steadily falling line means a growing
+call frame, which is what nothing could see before. **`null` means never sampled, not zero
+headroom** — `modbus_` stays null on a board with no HomeHub, and `httpd_` stays null until the
+board serves its first HTTP request, since the deep frame only exists while one is being served.
+They are payload-only, with no HA entity: four permanently-flat diagnostics are four more things to
+rule out, and the audience for a headroom trend is whoever is upgrading the firmware.
+
 Room-source and heating-curve evidence lives separately on `<base>/heating_curve` (not retained),
 published on the same 10-second reporting cadence. Its schema-versioned JSON is grouped by meaning:
 `room` contains the firmware-accepted live input, and `diagnosis` contains the derived, durable
@@ -339,9 +365,16 @@ Two properties are worth knowing before you build automations on them:
   *and* a template over the state topic itself. A stale or failed sensor therefore marks **only
   these three** entities unavailable while the rest of the device stays online — an I2C fault on an
   accessory must not make the heat pump look offline.
-- An error publishes `{}` rather than carrying the last plausible reading forward. The reading is
-  outdoor climate; a value that quietly stops updating while still looking current is exactly what
-  the rest of this firmware refuses to do (see *Values the firmware refuses to publish*).
+- An error **omits the three readings** rather than carrying the last plausible one forward. The
+  reading is outdoor climate; a value that quietly stops updating while still looking current is
+  exactly what the rest of this firmware refuses to do (see *Values the firmware refuses to
+  publish*). What the document keeps in either shape is `samples` and `errors`, the sensor's own
+  I2C counters: they describe the **link**, not the air, so they are facts about the sensor whether
+  or not it produced a reading — and they are most informative exactly when it did not. Carried
+  only on the healthy document, the error count would go dark at the instant it became the answer,
+  leaving you unable to tell a failing SHT30 from a disabled accessory, a rebooted board or a lost
+  broker. They earn no HA entity (link health is a metrics-stream question, and the availability
+  template above keys on the READING keys, so the three entities still go unavailable).
 
 They republish whenever the sample counter advances, even if the rounded text is identical, so a
 time-series consumer sees the sensor's real 10 s cadence instead of a gap that reads like a dropout.

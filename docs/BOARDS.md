@@ -131,10 +131,14 @@ dialog. Selecting **No sensor** disables the input. The dashboard then shows a
 separate **Outdoor climate** card. These readings do **not** replace or relabel Daikin's own R1T
 air-inlet value and are not yet consumed by a control algorithm. Every new fresh sample is also
 published as retained numeric JSON on `<base>/env3`, for example
-`{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75}`. A stale or unavailable
-sensor publishes `{}`. Home Assistant discovery creates separate measurement entities for ENV III
-temperature, humidity and air pressure. They require both an online device and the corresponding
-JSON key, so `{}` makes them unavailable without hiding unrelated heat-pump entities. Selecting
+`{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75,"samples":4211,"errors":7}`.
+A stale or unavailable sensor **omits the three readings** and publishes the two counters alone
+(`{"samples":4211,"errors":8}`): `samples`/`errors` describe the I2C link rather than the air, so
+they are facts about the sensor whether or not it produced a reading — and they matter most when it
+did not, which is why they ride both shapes. Home Assistant discovery creates separate measurement
+entities for ENV III temperature, humidity and air pressure. They require both an online device and
+the corresponding READING key, so a counters-only document makes them unavailable without hiding
+unrelated heat-pump entities. Selecting
 **No sensor** retracts the state topic and all three retained discovery configurations.
 
 | Board / wiring | ENV III SDA | ENV III SCL | X10A consequence |

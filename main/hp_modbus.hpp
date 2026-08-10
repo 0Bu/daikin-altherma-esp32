@@ -53,7 +53,6 @@ struct ModbusStatus {
     bool        plant_gate_active = false;
     bool        heating_mode_known  = false;
     bool        heating_mode_active = false;
-    uint32_t    task_stack_min_free_words = 0;  // FreeRTOS high-water mark; 0 until task runs
 };
 
 // Start the stack. Creates the status mutex always (so /status can report `enabled:false` before any
