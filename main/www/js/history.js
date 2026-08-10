@@ -728,12 +728,26 @@ function dwellNoteHtml(v, stateText) {
   // to be withheld by whichever side decided the reading is not stateable — otherwise the panel
   // prints "— for 3 h 20 min", an age for a reading the row above just refused.
   if (!v || v.dwell_s == null || v.value == null || !stateText || stateText === "—") return "";
-  const shown = v.dwell_min
-    ? t("val.since_min", stateText, dwellDuration(v.dwell_s, true))
-    : t("val.since", stateText, dwellDuration(v.dwell_s));
+  // The STATE WORD is the subject and carries the panel's emphasis token; everything after it — the
+  // age and the condition on it — is plain body text. That split is the sentence's own structure:
+  // "OFF" is what the row reads, the rest is when and how well that was seen, and it has to stay
+  // one uninterrupted qualifier so the eye cannot take the number and skip what bounds it.
+  //
+  // `.vdesc-n` rather than a new class or a bare <b>: it is already the panel's lead-in-in-stronger-
+  // ink token (the "Normal:" note uses it), so this needs no CSS at all and cannot drift from it.
+  //
+  // The state is composed OUTSIDE t(), which is why the keys carry only the predicate ("seit ${d}",
+  // "≥ ${d}"). Markup inside a translated string is the thing descNoteHtml avoids, and it would
+  // force every future language to keep the subject first; here the caller owns the subject and the
+  // dictionary owns the sentence about it.
+  const tail = v.dwell_min
+    ? t("val.since_min", dwellDuration(v.dwell_s, true))
+    : t("val.since", dwellDuration(v.dwell_s));
   const blind = Number(v.dwell_blind_s) || 0;
-  return descParaHtml(`<span class="vdesc-since">${esc(shown)}</span>` +
-    (blind > 0 ? `<span class="vdesc-since-gap"> · ${esc(t("val.since_gap", dwellDuration(blind)))}</span>` : ""));
+  // The separator stays a middle dot rather than a comma or a dash — it joins two clauses without
+  // implying either subordination or a range, and a dash beside a "≥" would read as one.
+  return descParaHtml(`<span class="vdesc-n">${esc(stateText)}</span> ` + esc(tail) +
+    (blind > 0 ? esc(" · " + t("val.since_gap", dwellDuration(blind))) : ""));
 }
 function stateRunWhen(view, from, count) {
   if (view.t0 != null) {

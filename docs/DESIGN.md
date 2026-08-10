@@ -962,7 +962,13 @@ Body, ordered:
      register name in both languages.
      **A switched row's panel opens with HOW LONG IT HAS READ THAT** — the one live sentence in a
      panel whose explainer is otherwise the same copy on every device at every hour, which is why it
-     goes first and takes `--fg` rather than the body's `--muted`. "OFF" answers what a flag *is*,
+     goes first. Only the **state word** carries emphasis — the panel's existing `.vdesc-n` lead-in
+     token, the one the "Normal:" note uses — because it is the sentence's subject; the age and its
+     unobserved-time caveat after it are one uninterrupted qualifier in plain body text, so the eye
+     cannot take the number and skip what bounds it. The state word is composed *outside* `t()`,
+     which is why the keys carry only the predicate: markup inside a translated string is what
+     `descNoteHtml` avoids, and it would force every future language to keep the subject first.
+     "OFF" answers what a flag *is*,
      and for a flag that is half the question: `Powerful DHW Operation: OFF` describes a plant that
      finished a charge four seconds ago and one that has not charged since Tuesday equally well.
      Scoped to the bit flags and the fault class (`logic/state_dwell.hpp` decides which, structurally
@@ -1519,9 +1525,10 @@ enabled/available values are hidden.
   light, 1.23:1 in dark — so it would be an edge that is drawn and cannot be seen), and an inset
   top shadow (`--shadow-tongue`, per-scheme like `--shadow-card`) is the shadow the row casts onto
   it. Bold `--fg` "Normal:" lead-in on `--muted` body. A **switched** row's panel opens with its
-  STATE AGE above that (§5.3 item 6): `--fg` and semibold, because it is the panel's only live
-  reading rather than commentary about one, with the unobserved-time caveat beside it in plain
-  `--muted`. It opens with the `grid-template-rows: 0fr→1fr`
+  STATE AGE above that (§5.3 item 6): the state word in the same `.vdesc-n` token as the "Normal:"
+  lead-in, and everything after it — the age and its unobserved-time caveat alike — in plain body
+  text, so the qualifier reads as one statement rather than a number with a footnote. It opens with
+  the `grid-template-rows: 0fr→1fr`
   height transition (§5.3 item 6) **plus** a `translateY(-7px)→0` slide on the same `.22s` timing, so
   height and content land together; both honour `prefers-reduced-motion` — which has to be said
   explicitly, since the global reduced-motion rule kills `animation` only, not `transition`.

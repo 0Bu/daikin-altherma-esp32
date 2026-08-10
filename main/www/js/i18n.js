@@ -231,8 +231,8 @@ const I18N = {
     // the state arrive in the first, and only found it already standing in the second. `val.since_gap`
     // names the part of the run the bus did not answer for, during which a flag could have pulsed and
     // returned unseen.
-    "val.since": (state, d) => `${state} for ${d}`,
-    "val.since_min": (state, d) => `${state} \u2265 ${d}`,
+    "val.since": (d) => `for ${d}`,
+    "val.since_min": (d) => `\u2265 ${d}`,
     "val.since_gap": (d) => `${d} of it not observed`,
     "hist.modbus_plateau": (when, d) => `register unchanged ${when} · approx. ${d} · measurement age unknown`,
     "hist.boost_total": (d) => `Boost active · ${d}`,
@@ -735,8 +735,8 @@ const I18N = {
     "hist.duration_sec": (s) => `${s} s`,
     "hist.state_phase_run": (state, when, d) => `${state}\n${when} · ca. ${d}`,
     "hist.state_active": "Aktiv", "hist.state_off": "Aus",
-    "val.since": (state, d) => `${state} seit ${d}`,
-    "val.since_min": (state, d) => `${state} \u2265 ${d}`,
+    "val.since": (d) => `seit ${d}`,
+    "val.since_min": (d) => `\u2265 ${d}`,
     "val.since_gap": (d) => `davon ${d} nicht beobachtet`,
     "hist.modbus_plateau": (when, d) => `Register unverändert ${when} · ca. ${d} · Messalter unbekannt`,
     "hist.boost_total": (d) => `Boost aktiv · ${d}`,
