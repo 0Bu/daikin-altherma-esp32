@@ -27,8 +27,15 @@ assert.match(index,
   /<figure class="schem-card" id="schem"[\s\S]*?<div class="card schem-face">[\s\S]*?<\/svg>[\s\S]*?<\/div>\s*<\/div>\s*<!-- Inspector:[\s\S]*?<div class="inspect"/,
   "the inspector must be a sibling tongue below the white schematic face, not part of the picture card");
 assert.match(style,
-  /\.inspect \{ margin: 0 10px; \}[\s\S]*?\.inspect-card \{[^}]*border-top: 0;[^}]*border-radius: 0 0 var\(--r-tile\) var\(--r-tile\);[^}]*box-shadow: var\(--shadow-tongue\);/,
-  "the schematic inspector must use the shared inset, bottom-rounded tongue treatment");
+  /\.vdesc, \.inspect \{[^}]*grid-template-rows: 0fr;[^}]*transition: grid-template-rows \.22s ease;[^}]*\}[\s\S]*?\.vitem\.open \.vdesc, \.inspect\.open \{ grid-template-rows: 1fr; \}/,
+  "the schematic inspector must use the exact same clipped height transition as every other tongue");
+assert.match(style,
+  /\.vdesc-body, \.inspect-card \{[^}]*margin: 0 10px 12px;[^}]*border-top: 0;[^}]*border-radius: 0 0 var\(--r-tile\) var\(--r-tile\);[^}]*box-shadow: var\(--shadow-tongue\);[^}]*transform: translateY\(-7px\);[^}]*transition: transform \.22s ease;[^}]*\}[\s\S]*?\.vitem\.open \.vdesc-body, \.inspect\.open \.inspect-card \{ transform: none; \}/,
+  "the schematic inspector and row explainers must share one surface and pull-out movement");
+assert.doesNotMatch(style, /inspect-tongue-in/,
+  "the inspector must not retain an independent one-shot animation");
+assert.match(index, /<div class="inspect-inner">\s*<div class="inspect-card" id="inspCard" aria-hidden="true" inert>/,
+  "the collapsed inspector must stay mounted in the shared clip but remain non-interactive");
 
 function classList() {
   const names = new Set();
@@ -51,7 +58,7 @@ function element() {
   };
 }
 
-const ids = ["gEnv3", "svEnv3Temp", "inspCard", "inspTitle", "inspSrc", "inspNow",
+const ids = ["gEnv3", "svEnv3Temp", "inspect", "inspCard", "inspTitle", "inspSrc", "inspNow",
              "inspBody", "inspHist", "inspRows"];
 const elements = Object.fromEntries(ids.map((id) => [id, element()]));
 const nativeTitle = element();
@@ -110,6 +117,10 @@ assert.equal(nativeTitle.textContent, elements.gEnv3.attrs["aria-label"],
   "hover and assistive text must name the same current reading and state");
 
 assert.equal(elements.inspCard.hidden, false);
+assert.equal(elements.inspect.classList.contains("open"), true,
+  "rendering a selection must open the shared accordion instead of unhiding the card");
+assert.equal(elements.inspCard.attrs["aria-hidden"], undefined);
+assert.equal(elements.inspCard.attrs.inert, undefined);
 assert.equal(elements.inspTitle.textContent, "Außenklima");
 assert.equal(elements.inspSrc.textContent, "ENV III");
 assert.equal(elements.inspNow.textContent, "21,5 °C");
@@ -139,5 +150,9 @@ assert.equal(elements.gEnv3.style.display, "none");
 assert.equal(elements.gEnv3.attrs.tabindex, "-1");
 assert.equal(elements.gEnv3.attrs["aria-hidden"], "true");
 assert.equal(S.insp, null, "disabling ENV III must close an inspector whose trigger disappeared");
+sandbox.__api.render();
+assert.equal(elements.inspect.classList.contains("open"), false);
+assert.equal(elements.inspCard.attrs["aria-hidden"], "true");
+assert.equal(elements.inspCard.attrs.inert, "");
 
 console.log("ENV III pill: compact header reading, combined inspector and stale-state contract verified");

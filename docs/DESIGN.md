@@ -618,7 +618,11 @@ Body, ordered:
    shared, and `E004` is what decides whose it is.
 3. **Inspector** — the inset tongue attached directly below the drawing card, so the explanation and
    the thing it explains are on screen together without covering or extending the white picture.
-   It uses the same tinted, bottom-rounded, top-shadowed treatment as the other explainer tongues.
+   It uses the same tinted, bottom-rounded, top-shadowed treatment **and the same clipped 220 ms
+   pull-out transition** as the other explainer tongues: the track grows from `0fr` to `1fr` while
+   the body moves down 7 px from under the drawing. It stays mounted but inert while collapsed;
+   toggling `hidden` would paint the complete infobox immediately instead of revealing it with the
+   shared motion.
    Idle it shows **nothing** and collapses — the picture's
    clickability is carried by the hit targets themselves (hover/press feedback, `role="button"`,
    the SVG's own `aria-label`), and a standing line of instructional copy under an otherwise quiet

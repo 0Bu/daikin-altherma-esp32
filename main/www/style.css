@@ -341,21 +341,28 @@ svg .sc-hit:hover .sc-mode, svg .sc-hit.sel .sc-mode { fill: var(--brand-strong)
 svg .sc-hit:focus { outline: none; }
 svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 4px; }
 
+/* ── Shared explanation tongue ───────────────────────────────────────────────────────────────
+   The schematic inspector and every value/Settings explainer use ONE opening mechanism: a clipped
+   grid track grows from 0fr to 1fr while the tinted body travels the last 7 px down from beneath
+   its owner. In particular, the inspector remains mounted while closed; unhiding a card would
+   paint its complete background immediately and only animate an independent decoration on top.
+   Both transitions deliberately share the same 220 ms timing, so geometry, surface and content
+   arrive together everywhere. */
+.vdesc, .inspect { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s ease; }
+.vitem.open .vdesc, .inspect.open { grid-template-rows: 1fr; }
+.vdesc-inner, .inspect-inner { overflow: hidden; }
+.vdesc-body, .inspect-card {
+  margin: 0 10px 12px; padding: 13px 14px 12px;
+  background: var(--brand-tint); border: 1px solid var(--line); border-top: 0;
+  border-radius: 0 0 var(--r-tile) var(--r-tile); box-shadow: var(--shadow-tongue);
+  font-size: 13.5px; color: var(--muted); line-height: 1.55;
+  transform: translateY(-7px); transition: transform .22s ease;
+}
+.vitem.open .vdesc-body, .inspect.open .inspect-card { transform: none; }
+
 /* ── Inspector tongue (attached below the schematic card) ────────────────────────────────────
    Reuses the value-row explainer copy (DESCRIPTIONS) so "what is this / what's normal" has ONE
    source; the live half (reading, state sentence, member rows) is rebuilt from the poll cache. */
-/* Empty until something is tapped: the container carries margin only, so an unselected inspector
-   collapses to nothing rather than reserving a slot for a placeholder line. */
-.inspect { margin: 0 10px; }
-.inspect-card {
-  background: var(--brand-tint); border: 1px solid var(--line); border-top: 0;
-  border-radius: 0 0 var(--r-tile) var(--r-tile); box-shadow: var(--shadow-tongue);
-  padding: 12px 14px; animation: inspect-tongue-in .22s ease both;
-}
-@keyframes inspect-tongue-in {
-  from { opacity: 0; transform: translateY(-7px); }
-  to { opacity: 1; transform: none; }
-}
 /* NAME ABOVE, READING BELOW — as soon as the two stop fitting on one line. The pair is a WRAPPING
    flex line, and the title's `flex-basis: auto` is what makes the break content-aware rather than a
    width guess: an item's hypothetical size is its own max-content width, so the line breaks exactly
@@ -690,10 +697,6 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vrow-end { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; }
 .vrow-chev { flex: none; color: var(--muted); transition: transform .2s ease; align-self: center; }
 .vitem.open .vrow-chev { transform: rotate(90deg); }
-/* the collapsible: grid 0fr→1fr animates height cleanly without a fixed max-height guess */
-.vdesc { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s ease; }
-.vitem.open .vdesc { grid-template-rows: 1fr; }
-.vdesc-inner { overflow: hidden; }
 /* The explainer is pushed out from UNDER the row that opened it, not wedged between two rows: a
    faint --brand-tint info block (DESIGN.md §2) sitting FLUSH against the row, held in from the row
    edges and rounded at the BOTTOM corners only — so it reads as continuing behind the row rather
@@ -707,14 +710,6 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    the height grows, which is what makes it read as pulled out rather than grown in place — same
    .22s as the height transition above, so both land together (and the 220 ms quoted in
    DESIGN.md §5.3 item 5 stays true). The row keeps no radius of its own. */
-.vdesc-body {
-  margin: 0 10px 12px; padding: 13px 14px 12px;
-  background: var(--brand-tint); border: 1px solid var(--line); border-top: 0;
-  border-radius: 0 0 var(--r-tile) var(--r-tile); box-shadow: var(--shadow-tongue);
-  font-size: 13.5px; color: var(--muted); line-height: 1.55;
-  transform: translateY(-7px); transition: transform .22s ease;
-}
-.vitem.open .vdesc-body { transform: none; }
 /* An OPEN row keeps a divider under it — the same full-width --line the next .vitem draws when
    nothing is expanded — so the panel appears BETWEEN two list lines instead of replacing one. The
    line is the LIST's, not the panel's: it therefore runs the full row width while the panel stays
@@ -957,9 +952,11 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    of a mild day. It stays --muted so the axis doesn't cry fault over a healthy unit; only a real
    dropout (.vhist-gap) earns the attention colour. */
 .vhist-idle { color: var(--muted); }
-/* The global reduced-motion rule (line ~127) kills `animation` only — a transition needs saying
-   here, and .vdesc-body's slide is one (DESIGN.md §9). */
-@media (prefers-reduced-motion: reduce) { .vdesc, .vdesc-body, .vrow-chev { transition: none; } }
+/* The global reduced-motion rule (line ~127) kills `animation` only — these shared tongue and
+   chevron movements are transitions, so they need their own explicit opt-out (DESIGN.md §9). */
+@media (prefers-reduced-motion: reduce) {
+  .vdesc, .inspect, .vdesc-body, .inspect-card, .vrow-chev { transition: none; }
+}
 
 /* ── Forms ──────────────────────────────────────────────────────────────── */
 .field { display: block; margin-bottom: 14px; }
