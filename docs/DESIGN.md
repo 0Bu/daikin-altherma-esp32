@@ -1406,23 +1406,31 @@ vocabulary exactly:
    gates no sampling and its absence is not a fault; only a RUNNING recorder that is not being fed
    turns amber, because only then is the sensor the thing to go and look at.
 
-   Every row has a pull-out explanation tongue. Live room and weather values are not repeated as an
-   unexplained green summary line: while the card is enabled, the tongue names status, quantity,
-   time/freshness and provenance in separate labelled paragraphs, matching the value explanations
-   elsewhere in the UI. The compact right side **names** the single room-temperature source — the
+   Every row has a pull-out explanation tongue. The room-source tongue is deliberately a compact
+   **live verdict**, not a second copy of its editor. One status line combines transport, freshness
+   and diagnostic usability with that exact precedence. Thus a fresh MQTT packet from a thermostat
+   reporting itself switched off reads **"Nicht verwendbar — Raumthermostat ausgeschaltet"**, never
+   "Aktuell" beside an amber row. If a value exists, only actual temperature, target and **Letzter
+   Messwert** follow. The last-reading age tells whether the thermostat is still reporting; only a
+   stale state adds the configured maximum beside it, while a broker-replayed retained value is
+   marked briefly as such. One final purpose paragraph says concisely what the source actually
+   causes in user terms: comparing room and target temperature helps reveal a heating curve that is
+   too high or too low over time, but never controls the heat pump. Configuration state, source name/topic/path
+   prose and the generic subscription/delete manual do not belong in this status tongue: the row
+   already names the source, and its pencil opens the editor where those mechanics are relevant.
+   An empty row needs just one actionable verdict: not set up, add a source with the pencil.
+
+   The compact right side **names** the single room-temperature source — the
    saved Bezeichnung, falling back to "MQTT" for a mapping saved without one — exactly as the
    Anlagendiagnose row above it names the configured pump, and the weather row names its configured
    provider. It read "Konfiguriert" through v1.0.0-dev.347: a word that restated what the presence
    of any value already said, in the one place on the row that could have identified WHICH
-   thermostat is being read. Whether a mapping is saved at all is still a fact about the row, so it
-   did not vanish — it leads the tongue as its own labelled paragraph, and the unconfigured row
-   states it there too. That makes this a §5.6 Connections row in shape, so it takes that rule
+   thermostat is being read. That makes this a §5.6 Connections row in shape, so it takes that rule
    whole, **including the second half**: the face carries the condition in colour, and the
-   accessible name spells that condition out in words (§9) — the freshness word, or the block's own
-   reason where the reading is current but cannot produce a verdict, since "Aktuell" in the
-   accessible name of an amber row is the two-rows-disagreeing failure above, folded into one row.
+   accessible name spells out the same combined verdict in words (§9).
    The room-source modal remains
-   test-before-persist; Delete removes the saved mapping and captured value. Retained data
+   test-before-persist and states that fact briefly at the Save action; Delete removes the saved
+   mapping and captured value. Retained data
    without trusted source time fails closed, and `/status` plus the grouped numeric
    `<base>/heating_curve` topic retain the full canonical and diagnosis evidence. No UI path sends a
    setpoint or HomeHub write.

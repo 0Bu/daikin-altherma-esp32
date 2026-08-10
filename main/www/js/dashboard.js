@@ -448,71 +448,79 @@ const ROOM_BLOCK_LINES = {
   disabled:                   "dyn.room_off",
   non_heating_mode:           "dyn.room_not_heating",
   stale:                      "dyn.room_stale",
-  retained_without_timestamp: "dyn.room_stale",
+  retained_without_timestamp: "dyn.room_retained_no_time",
   clock_unsynced:             "dyn.state_clock",
   no_value:                   "dyn.room_no_value",
-  invalid_payload:            "dyn.room_invalid",
-  temperature_out_of_range:   "dyn.room_invalid",
-  setpoint_out_of_range:      "dyn.room_invalid",
+  invalid_payload:            "dyn.room_invalid_payload",
+  future_timestamp:           "dyn.room_future_time",
+  backward_timestamp:         "dyn.room_backward_time",
+  arrival_clock_invalid:      "dyn.room_invalid_time",
+  temperature_out_of_range:   "dyn.room_invalid_temperature",
+  setpoint_out_of_range:      "dyn.room_invalid_setpoint",
   missing_setpoint:           "dyn.room_no_setpoint",
   missing_setpoint_mapping:   "dyn.room_no_setpoint",
   missing_source_time:        "dyn.room_no_time",
-  missing_enabled_state:      "dyn.room_no_flag",
-  missing_hvac_mode:          "dyn.room_no_flag",
+  missing_enabled_state:      "dyn.room_no_enabled",
+  missing_hvac_mode:          "dyn.room_no_hvac_mode",
 };
 
-// What the row header calls the configured source. ONE fallback for a mapping saved without a name
-// (the name is cosmetic and may be empty), shared by the row value and the tongue's source line, so
-// the two can never call the same source by two different words.
+// What the row header calls the configured source. The name is cosmetic and may be empty, so one
+// stable fallback keeps the compact row identifiable.
 function roomSourceName(r) { return r.name || "MQTT"; }
 
-// The source's own condition, as ONE rule. It is read twice — by the tongue, which prints it with
-// its explanation, and by the row's accessible name, which is now the only place a screen-reader
-// user meets it (the face carries the source's NAME and states the condition in colour). A second
-// copy of this ladder is the drift this project keeps paying for, so there is one.
+// The source's own condition, as ONE rule. Freshness is only one input to this verdict: a fresh
+// packet from a thermostat that reports itself switched off is NOT a healthy source for this card.
+// The returned class, visible status and accessible status all come from this same result so an
+// amber row can never explain itself as merely "Current" again.
 function roomSourceStatus(r, mqtt) {
-  if (!mqtt.configured) return { key: "unavailable", detail: t("ref.broker_off") };
-  if (r.error) return { key: "unavailable", detail: t("ref.detail.error", r.error) };
-  if (r.has_value && r.fresh) return { key: "fresh", detail: t("ref.detail.fresh") };
-  if (r.has_value) return { key: "stale",
-    detail: r.freshness_reason === "retained_without_timestamp" ? t("ref.time_untrusted")
-      : r.freshness_reason === "clock_unsynced" ? t("ref.clock_unsynced")
-      : t("ref.detail.stale") };
-  return { key: "waiting", detail: t("ref.detail.waiting") };
+  if (!r.configured)
+    return { key: "not_configured", detail: t("ref.detail.setup"), cls: "dim" };
+  if (!mqtt.configured)
+    return { key: "unavailable", detail: t("ref.broker_off"), cls: "err" };
+  if (r.error)
+    return { key: "error", detail: t("ref.detail.error", r.error), cls: "err" };
+  if (!r.has_value)
+    return { key: "waiting", detail: t("ref.detail.waiting"), cls: "warn" };
+  if (!r.fresh) {
+    const freshnessDetail = ({
+      retained_without_timestamp: t("ref.time_untrusted"),
+      clock_unsynced: t("ref.clock_unsynced"),
+      future_timestamp: t("dyn.room_future_time"),
+      backward_timestamp: t("dyn.room_backward_time"),
+      arrival_clock_invalid: t("dyn.room_invalid_time"),
+    })[r.freshness_reason];
+    if (freshnessDetail)
+      return { key: "unusable", detail: freshnessDetail, cls: "warn" };
+    return { key: "stale",
+      detail: t("ref.detail.stale"), cls: "warn" };
+  }
+  if (!r.control_eligible)
+    return { key: "unusable", detail: t(ROOM_BLOCK_LINES[r.reason] || "dyn.room_invalid_payload"),
+      cls: "warn" };
+  return { key: "usable", detail: "", cls: "ok" };
 }
 
-// What the row's accessible name says INSTEAD of the colour. A reading that is current but cannot
-// produce a verdict is the case the colour renders warn while "Aktuell" would read fine, so the
-// block reason wins over the freshness word — the same precedence the tongue's Verwertbar note has.
-function roomSourceAriaState(r, mqtt) {
-  if (r.has_value && r.fresh && !r.control_eligible && ROOM_BLOCK_LINES[r.reason])
-    return t(ROOM_BLOCK_LINES[r.reason]);
-  return t(`ref.status.${roomSourceStatus(r, mqtt).key}`);
+function roomSourceStatusText(status) {
+  const state = t(`ref.status.${status.key}`);
+  return status.detail ? `${state} — ${status.detail}` : state;
 }
 
-function roomSourceDetailHtml(r, mqtt, temperature, setpoint, age) {
-  const { key: statusKey, detail } = roomSourceStatus(r, mqtt);
-
-  const retained = r.has_value && r.retained ? ` · ${t("ref.retained")}` : "";
-  // The CONFIGURATION state leads the tongue, because the row header no longer states it: it names
-  // the source instead (the circulation row's rule — a name is what a reader recognises, while
-  // "Configured" only said that a form had been filled in). Whether a mapping is saved at all is
-  // still a fact about this row, so it is stated here rather than dropped.
-  let html = descNoteHtml(t("ref.detail.configuration_label"), t("dyn.configured"));
-  html += descNoteHtml(t("ref.detail.status_label"),
-    `${t(`ref.status.${statusKey}`)} — ${detail}${retained}`);
-  // A source that is CURRENT but not usable for a verdict is the case that used to render as a
-  // plain green "Configured" while the state row above it reported the diagnosis blocked. Say so
-  // here, in the same tongue that already explains the reading.
-  if (r.has_value && r.fresh && !r.control_eligible && ROOM_BLOCK_LINES[r.reason])
-    html += descNoteHtml(t("ref.detail.eligibility_label"), t(ROOM_BLOCK_LINES[r.reason]));
+function roomSourceDetailHtml(r, status, temperature, setpoint, age) {
+  // This tongue is a live status, not a second copy of the editor. The source name is already the
+  // row value; topic/path mechanics belong in the modal. Start with the one overall verdict, then
+  // show only the readings that help a user understand it.
+  let html = descNoteHtml(t("ref.detail.status_label"), roomSourceStatusText(status));
   if (r.has_value) {
     html += descNoteHtml(t("ref.detail.temperature_label"), t("ref.detail.temperature", temperature));
     if (r.has_setpoint)
       html += descNoteHtml(t("ref.detail.setpoint_label"), t("ref.detail.setpoint", setpoint));
-    html += descNoteHtml(t("ref.detail.age_label"), t("ref.detail.age", age));
+    const last = status.key === "stale" && Number.isFinite(r.max_age_s)
+      ? t("ref.detail.last_measurement_stale", age, r.max_age_s)
+      : t("ref.detail.last_measurement", age);
+    html += descNoteHtml(t("ref.detail.last_measurement_label"),
+      last + (r.retained ? ` · ${t("ref.retained")}` : ""));
   }
-  return html + descNoteHtml(t("ref.detail.source_label"), t("ref.detail.source", roomSourceName(r)));
+  return html + `<div class="vdesc-p">${esc(t("ref.detail.purpose"))}</div>`;
 }
 
 // state + reason -> one plain-language line, its severity class and its explanation. Keyed on the
@@ -667,24 +675,17 @@ function dynamicControlCardHtml() {
   // ALWAYS rendered. Through v1.0.0-dev.331 this returned "" unless an explicit switch had selected
   // SHADOW — while that switch answered 409 until the very sources whose only editors live on this
   // card were configured. The feature could not be reached from the UI at all.
-  let sourceCls = "dim";
+  const sourceStatus = roomSourceStatus(r, mqtt);
+  const sourceCls = sourceStatus.cls;
   let temperature = "", setpoint = "", age = "";
-  if (r.configured) {
-    if (!mqtt.configured) sourceCls = "err";
-    else if (r.error) sourceCls = "err";
-    else if (r.has_value) {
-      temperature = Number(r.temperature_c).toLocaleString(
-        LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 2 });
-      if (r.has_setpoint) setpoint = Number(r.setpoint_c).toLocaleString(
-        LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 2 });
-      const seconds = Number.isFinite(r.age_s) ? r.age_s : r.received_ago_s;
-      age = Number.isFinite(seconds) ? (seconds < 2 ? t("ref.now") : t("ref.ago", seconds))
-        : t("ref.age_unknown");
-      // Green means "this can produce a verdict", not merely "a number arrived recently". A fresh
-      // reading from a thermostat that reports itself switched off is exactly what blocks the
-      // diagnosis, so it must not be the one row on the card that looks fine.
-      sourceCls = !r.fresh ? "warn" : r.control_eligible ? "ok" : "warn";
-    } else sourceCls = "warn";
+  if (r.has_value) {
+    temperature = Number(r.temperature_c).toLocaleString(
+      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 2 });
+    if (r.has_setpoint) setpoint = Number(r.setpoint_c).toLocaleString(
+      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 2 });
+    const seconds = Number.isFinite(r.age_s) ? r.age_s : r.received_ago_s;
+    age = Number.isFinite(seconds) ? (seconds < 2 ? t("ref.now") : t("ref.ago", seconds))
+      : t("ref.age_unknown");
   }
   // The STATE, not an imaginary operating mode. What a reader needs is why no sample exists yet;
   // through the summer the honest answer ("the plant is not heating") must NOT be styled as a fault,
@@ -697,18 +698,14 @@ function dynamicControlCardHtml() {
   let rows = dynamicInfoRow("state", t("dyn.state"), t(st.key), st.cls,
     `<div class="vdesc-p">${esc(t("dyn.card_help"))}</div>` +
     `<div class="vdesc-p">${esc(t(st.help))}</div>`);
-  // The row header IDENTIFIES the source, exactly as the circulation row does: which thermostat is
-  // being read is what a reader recognises and can check against their own installation, while
-  // "Configured" repeated a fact the presence of a value already carries. The configuration state
-  // itself moves into the tongue, where the unconfigured case says so too.
+  // The row header IDENTIFIES the source, exactly as the circulation row does. "Configured" merely
+  // repeated that a form had been saved; the unconfigured row already says so on its face and its
+  // tongue gives the only useful follow-up: where to add one.
   const sourceValue = r.configured ? roomSourceName(r) : t("dyn.not_configured");
-  const sourceBody = (r.configured
-    ? roomSourceDetailHtml(r, mqtt, temperature, setpoint, age)
-    : descNoteHtml(t("ref.detail.configuration_label"), t("dyn.not_configured"))) +
-    `<div class="vdesc-p">${esc(t("ref.hint"))}</div>`;
+  const sourceBody = roomSourceDetailHtml(r, sourceStatus, temperature, setpoint, age);
   rows += dynamicInfoRow("room-sources", t("dyn.room_source"), sourceValue, sourceCls,
     sourceBody, "ref-temp", t("ref.title"),
-    r.configured ? roomSourceAriaState(r, mqtt) : "");
+    r.configured ? roomSourceStatusText(sourceStatus) : "");
   let weatherCls = "dim";
   let outdoor = "", solar = "";
   if (w.configured && w.has_value) {
