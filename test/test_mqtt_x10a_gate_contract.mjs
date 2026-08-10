@@ -22,15 +22,16 @@ const initialStart = task.indexOf("start_current_client()");
 const gateStep = task.indexOf("mqtt_publish_gate_step(");
 const promote = task.indexOf("if (gate.promote_publisher");
 const refSubscription = task.indexOf("service_reference_subscription(ref_config)");
-const refProbe = task.indexOf("service_reference_probe_subscription(ref_config)");
 const refFrames = task.indexOf("service_reference_frames(ref_config)");
 const offline = task.indexOf("if (gate.publish_offline)");
 const resume = task.indexOf("if (gate.resumed");
 const publishCycle = task.indexOf("if (gate.publish_cycle)");
 assert.ok(initialStart >= 0 && gateStep > initialStart && promote > gateStep,
   "the no-LWT client must start before X10A decides publisher promotion");
-assert.ok(refSubscription > promote && refProbe > refSubscription && refFrames > refProbe,
-  "eligible saved-source/Test servicing and frame decoding must run outside the publish gate");
+assert.ok(refSubscription > promote && refFrames > refSubscription,
+  "saved room-source subscription and runtime frame decoding must run outside the publish gate");
+assert.doesNotMatch(task, /service_reference_probe|mqtt_reference_test/,
+  "removing the room pre-save test must not leave a second inbound state machine");
 assert.ok(offline > refFrames && resume > offline && publishCycle > resume,
   "offline/resume transitions and every ordinary publication must follow inbound servicing");
 assert.doesNotMatch(task.slice(promote, refSubscription), /SubscriberOnly[\s\S]*continue\s*;/,

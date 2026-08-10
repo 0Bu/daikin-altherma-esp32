@@ -4,8 +4,8 @@
 // per value on (re)connect (logic/discovery.hpp), republishes retained heat-pump state when its
 // value set changes, and publishes each fresh ENV III sample on its own retained topic with three
 // discovery entities (temperature, humidity, pressure). Read-only: no command subscriptions —
-// the one optional inbound subscription captures a configured reference-temperature number and
-// never actuates the heat pump. No-op if mqtt_uri is empty.
+// optional exact inbound subscriptions assemble one configured room sample and never actuate the
+// heat pump. No-op if mqtt_uri is empty.
 #include <cstdint>
 #include <string>
 #include "logic/heating_curve_diagnosis.hpp"
@@ -51,30 +51,9 @@ ReferenceTemperatureStatus reference_temperature_status();
 // the MQTT status mutex; HTTP/status readers receive a copy. No actuator object crosses this API.
 logic::HeatingCurveSnapshot heating_curve_status();
 
-// A candidate mapping is tested on the existing authenticated MQTT connection without publishing
-// it to Config/NVS. The call waits for one value that passes the same JSON/timestamp/freshness
-// checks as the live source. `proof` is non-zero only after that value arrived; POST /set_ref_temp
-// presents it back so an untested mapping cannot be persisted through either the UI or a raw POST.
-struct ReferenceTemperatureTestConfig {
-    std::string topic, temperature_path, setpoint_path, timestamp_path, enabled_path, hvac_mode_path;
-    uint32_t max_age_s = 0;
-};
-struct ReferenceTemperatureTestResult {
-    bool passed=false, retained=false;
-    bool control_eligible=false, has_enabled=false, enabled=false, has_hvac_mode=false;
-    double temperature_c=0.0, setpoint_c=0.0, room_error_k=0.0;
-    uint32_t proof=0;
-    ReferenceRoomReason reason=ReferenceRoomReason::InvalidPayload;
-    std::string hvac_mode, error;
-};
-ReferenceTemperatureTestResult mqtt_reference_test(const ReferenceTemperatureTestConfig& candidate,
-                                                    uint32_t timeout_ms);
-bool mqtt_reference_test_proof_valid(uint32_t proof,
-                                     const ReferenceTemperatureTestConfig& candidate);
-
 // Wake the existing MQTT task after POST /set_ref_temp. Topic changes are applied live; the
-// firmware does not create a second MQTT client and does not reboot. This also retires the consumed
-// transient test proof.
+// firmware does not create a second MQTT client and does not reboot. The new binding starts without
+// a value and becomes usable only after its runtime decoder accepts a fresh payload.
 void mqtt_reference_reconfigure();
 
 // Independent read-only power witness for the potable-water circulation pump.  It shares the

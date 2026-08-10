@@ -20,6 +20,8 @@ inline constexpr double   REF_ROOM_TEMPERATURE_MIN_C = 5.0;
 inline constexpr double   REF_ROOM_TEMPERATURE_MAX_C = 35.0;
 inline constexpr double   REF_ROOM_SETPOINT_MIN_C    = 5.0;
 inline constexpr double   REF_ROOM_SETPOINT_MAX_C    = 35.0;
+inline constexpr uint16_t REF_ROOM_SETPOINT_MIN_TENTHS = 50;
+inline constexpr uint16_t REF_ROOM_SETPOINT_MAX_TENTHS = 350;
 inline constexpr const char* REF_ROOM_SOURCE_ID = "living_room";
 
 // Exact topics only. Wildcards would let one small ESP32 subscription receive an unbounded set of
@@ -58,7 +60,10 @@ inline bool reference_json_path_valid(std::string_view path, const char** why = 
 
 inline bool reference_temperature_config_valid(std::string_view name, std::string_view topic,
                                                std::string_view temperature_path,
+                                               std::string_view setpoint_topic,
                                                std::string_view setpoint_path,
+                                               uint16_t fixed_setpoint_tenths,
+                                               std::string_view timestamp_topic,
                                                std::string_view timestamp_path,
                                                std::string_view enabled_path,
                                                std::string_view hvac_mode_path,
@@ -68,16 +73,54 @@ inline bool reference_temperature_config_valid(std::string_view name, std::strin
     if (name.size() > REF_TEMP_NAME_MAX) return fail("Sensor name is too long");
     if (!reference_topic_valid(topic, why)) return false;
     if (topic.empty()) return true;                         // disabling needs no leftover fields
-    if (!reference_json_path_valid(temperature_path, why)) return false;
-    // A pre-v13 persisted mapping has no target path. Keep it readable as observation-only after OTA;
-    // POST /set_ref_temp separately requires a target for every newly saved enabled profile.
-    if (!setpoint_path.empty() && !reference_json_path_valid(setpoint_path, why)) return false;
-    if (!timestamp_path.empty() && !reference_json_path_valid(timestamp_path, why)) return false;
-    if (!enabled_path.empty() && !reference_json_path_valid(enabled_path, why)) return false;
-    if (!hvac_mode_path.empty() && !reference_json_path_valid(hvac_mode_path, why)) return false;
+    // A mapping is user intent, not proof that the publisher is currently awake or that its next
+    // payload contains this key. Empty, malformed and as-yet-unverified paths are therefore
+    // persistable; the bounded live decoder reports a missing/non-numeric field when a frame
+    // eventually arrives. Length stays bounded because these strings live in the Config blob.
+    if (temperature_path.size() > REF_TEMP_PATH_MAX) return fail("JSON path is too long");
+    if (!setpoint_topic.empty() && !reference_topic_valid(setpoint_topic, why)) return false;
+    if (!timestamp_topic.empty() && !reference_topic_valid(timestamp_topic, why)) return false;
+    const bool fixed_setpoint = fixed_setpoint_tenths != 0;
+    const bool mapped_setpoint = !setpoint_topic.empty() || !setpoint_path.empty();
+    if (fixed_setpoint && mapped_setpoint)
+        return fail("Target temperature must be either a fixed value or an MQTT mapping");
+    if (fixed_setpoint && (fixed_setpoint_tenths < REF_ROOM_SETPOINT_MIN_TENTHS ||
+                           fixed_setpoint_tenths > REF_ROOM_SETPOINT_MAX_TENTHS))
+        return fail("Fixed target temperature must be between 5 and 35 degrees C");
+    // A pre-v13 persisted mapping has no target. Keep it readable as observation-only after OTA;
+    // POST /set_ref_temp separately requires either a complete mapping or a fixed target.
+    if (mapped_setpoint) {
+        if (setpoint_topic.empty()) return fail("Target-temperature MQTT topic is required");
+        if (setpoint_path.size() > REF_TEMP_PATH_MAX) return fail("JSON path is too long");
+    }
+    const bool mapped_timestamp = !timestamp_topic.empty() || !timestamp_path.empty();
+    if (mapped_timestamp) {
+        if (timestamp_topic.empty()) return fail("Timestamp MQTT topic is required");
+        if (timestamp_path.size() > REF_TEMP_PATH_MAX) return fail("JSON path is too long");
+    }
+    if (enabled_path.size() > REF_TEMP_PATH_MAX || hvac_mode_path.size() > REF_TEMP_PATH_MAX)
+        return fail("JSON path is too long");
     if (max_age_s < REF_TEMP_MAX_AGE_MIN_S || max_age_s > REF_TEMP_MAX_AGE_MAX_S)
         return fail("Maximum age must be between 10 and 3600 seconds");
     return true;
+}
+
+// Compatibility overload for persisted v7-v16 mappings and older API/domain tests: every JSON
+// path lived in the temperature topic and the target was always MQTT-backed. New saves use the
+// explicit-topic overload above.
+inline bool reference_temperature_config_valid(std::string_view name, std::string_view topic,
+                                               std::string_view temperature_path,
+                                               std::string_view setpoint_path,
+                                               std::string_view timestamp_path,
+                                               std::string_view enabled_path,
+                                               std::string_view hvac_mode_path,
+                                               uint32_t max_age_s,
+                                               const char** why = nullptr) {
+    return reference_temperature_config_valid(
+        name, topic, temperature_path,
+        setpoint_path.empty() ? std::string_view{} : topic, setpoint_path, 0,
+        timestamp_path.empty() ? std::string_view{} : topic, timestamp_path,
+        enabled_path, hvac_mode_path, max_age_s, why);
 }
 
 inline bool reference_leap_year(int year) {
@@ -297,11 +340,6 @@ inline ReferenceRoomSample reference_room_sample(const ReferenceRoomRaw& raw,
     if (!raw.configured) return reject(ReferenceRoomReason::NotConfigured);
     if (!raw.has_temperature) return reject(ReferenceRoomReason::NoValue);
     if (!raw.payload_valid) return reject(raw.payload_reason);
-    if (!raw.has_source_time) {
-        return reject(freshness.reason && std::string_view(freshness.reason) == "retained_without_timestamp"
-                      ? ReferenceRoomReason::RetainedWithoutTimestamp
-                      : ReferenceRoomReason::MissingSourceTime);
-    }
     if (!freshness.fresh) return reject(reference_room_freshness_reason(freshness.reason));
     if (raw.temperature_c < REF_ROOM_TEMPERATURE_MIN_C ||
         raw.temperature_c > REF_ROOM_TEMPERATURE_MAX_C)

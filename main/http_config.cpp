@@ -1,10 +1,10 @@
-// POST config routes: /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp,
+// POST config routes: /set_wifi, /set_mqtt, /set_ref_temp,
 // /test_circulation, /set_circulation, /set_weather,
 // /set_syslog, /set_ntp, /set_hp,
 // /set_board, /set_env3, /set_ota, /set_lang, /discover_homehub, /detect. Parse JSON, validate, then apply:
-// WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping is first tested without
-// persistence, then its proof-gated save applies live; /set_hp persists the RX/TX pin cache (no
-// reboot) but keeps the model session-only;
+// WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping persists immediately and
+// applies live, while its subscriber reports missing/wrong paths only after a payload arrives;
+// /set_hp persists the RX/TX pin cache (no reboot) but keeps the model session-only;
 // /set_ota and /set_lang persist their UI settings and apply them live; /detect re-runs detection in
 // RAM.
 #include "http_handlers.hpp"
@@ -484,13 +484,12 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
 }
 
 struct RefTempRequest {
-    std::string name, topic, path, setpoint_path, time_path, enabled_path, hvac_mode_path;
+    std::string name, topic, path, setpoint_topic, setpoint_path, time_topic, time_path,
+                enabled_path, hvac_mode_path;
+    uint16_t fixed_setpoint_tenths = 0;
     uint32_t max_age_s = REF_TEMP_MAX_AGE_DEFAULT_S;
-    uint32_t test_proof = 0;
 };
 
-// Parse Test and Save through one contract. Otherwise the most important guarantee in this dialog
-// could drift: the candidate that earned the proof would not necessarily be the mapping persisted.
 static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out) {
     char body[1536];
     if (http_read_body(req, body, sizeof(body)) < 0) return "bad body";
@@ -499,101 +498,90 @@ static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out)
     out.name      = js(j, "name");
     out.topic     = js(j, "topic");
     out.path      = js(j, "temperature_path");
+    const bool has_setpoint_topic = cJSON_HasObjectItem(j, "setpoint_topic");
     out.setpoint_path = js(j, "setpoint_path");
+    out.setpoint_topic = js(j, "setpoint_topic");
+    const bool has_time_topic = cJSON_HasObjectItem(j, "timestamp_topic");
     out.time_path = js(j, "timestamp_path");
+    out.time_topic = js(j, "timestamp_topic");
     out.enabled_path = js(j, "enabled_path");
     out.hvac_mode_path = js(j, "hvac_mode_path");
+    cJSON* fixed_item = cJSON_GetObjectItem(j, "fixed_setpoint_c");
+    const bool has_fixed_item = fixed_item != nullptr;
+    bool fixed_type_valid = !fixed_item || (cJSON_IsNumber(fixed_item) &&
+                            std::isfinite(fixed_item->valuedouble) &&
+                            fixed_item->valuedouble >= 0.0 && fixed_item->valuedouble <= 35.0);
+    if (fixed_type_valid && fixed_item) {
+        const double tenths = fixed_item->valuedouble * 10.0;
+        fixed_type_valid = std::fabs(tenths - std::round(tenths)) <= 0.000001;
+        if (fixed_type_valid) out.fixed_setpoint_tenths = static_cast<uint16_t>(std::round(tenths));
+    }
     cJSON* age_item = cJSON_GetObjectItem(j, "max_age_s");
     const bool age_type_valid = !age_item || (cJSON_IsNumber(age_item) &&
                                 age_item->valuedouble == static_cast<double>(age_item->valueint));
     out.max_age_s = age_item && cJSON_IsNumber(age_item)
                   ? static_cast<uint32_t>(age_item->valueint)
                   : REF_TEMP_MAX_AGE_DEFAULT_S;
-    cJSON* proof_item = cJSON_GetObjectItem(j, "test_proof");
-    const bool proof_type_valid = !proof_item || (cJSON_IsNumber(proof_item) &&
-                                   proof_item->valuedouble >= 0 &&
-                                   proof_item->valuedouble <= 2147483647.0 &&
-                                   proof_item->valuedouble == std::floor(proof_item->valuedouble));
-    if (proof_type_valid && proof_item)
-        out.test_proof = static_cast<uint32_t>(proof_item->valuedouble);
     cJSON_Delete(j);
 
+    if (!fixed_type_valid) return "Fixed target temperature must use at most one decimal place";
     if (!age_type_valid) return "Maximum age must be a whole number";
-    if (!proof_type_valid) return "Test proof must be a whole number";
     if (out.topic.empty()) {                             // empty topic is the explicit Off state
         out.path.clear();
+        out.setpoint_topic.clear();
         out.setpoint_path.clear();
+        out.fixed_setpoint_tenths = 0;
+        out.time_topic.clear();
         out.time_path.clear();
         out.enabled_path.clear();
         out.hvac_mode_path.clear();
     }
-    if (!out.topic.empty() && out.setpoint_path.empty()) return "Setpoint JSON path is required";
-    if (!out.topic.empty() && out.time_path.empty()) return "Timestamp JSON path is required";
+    // v16 and older API clients only send the one topic. Preserve that request contract while new
+    // clients can state each exact value source independently.
+    if (!out.topic.empty() && !has_setpoint_topic && !has_fixed_item && !out.setpoint_path.empty())
+        out.setpoint_topic = out.topic;
+    if (!out.topic.empty() && !has_time_topic && !out.time_path.empty())
+        out.time_topic = out.topic;
+    if (!out.topic.empty() && out.fixed_setpoint_tenths == 0 && out.setpoint_topic.empty())
+        return "Target temperature needs an MQTT mapping or a fixed value";
     const char* why = nullptr;
-    if (!reference_temperature_config_valid(out.name, out.topic, out.path, out.setpoint_path,
-                                            out.time_path, out.enabled_path, out.hvac_mode_path,
+    if (!reference_temperature_config_valid(out.name, out.topic, out.path,
+                                            out.setpoint_topic, out.setpoint_path,
+                                            out.fixed_setpoint_tenths,
+                                            out.time_topic, out.time_path,
+                                            out.enabled_path, out.hvac_mode_path,
                                             out.max_age_s, &why))
         return why ? why : "invalid reference temperature config";
     return nullptr;
 }
 
-static ReferenceTemperatureTestConfig ref_temp_test_config(const RefTempRequest& in) {
-    return {in.topic, in.path, in.setpoint_path, in.time_path,
-            in.enabled_path, in.hvac_mode_path, in.max_age_s};
-}
-
-// Test on the already-authenticated live MQTT connection. Nothing in Config or NVS changes here;
-// a successful response hands the browser a one-mapping proof that /set_ref_temp checks again.
-static esp_err_t test_ref_temp(httpd_req_t* req) {
-    RefTempRequest in;
-    if (const char* error = parse_ref_temp_request(req, in))
-        return send_err(req, "400 Bad Request", error);
-    if (in.topic.empty()) return send_err(req, "400 Bad Request", "MQTT topic is required for a test");
-
-    const ReferenceTemperatureTestResult result = mqtt_reference_test(
-        ref_temp_test_config(in), 12000);
-    if (!result.passed)
-        return send_err(req, "422 Unprocessable Entity",
-                        result.error.empty() ? "No fresh MQTT value received" : result.error.c_str());
-
-    char response[384];
-    std::snprintf(response, sizeof(response),
-                  "{\"ok\":true,\"test_proof\":%lu,\"temperature_c\":%.6g,"
-                  "\"setpoint_c\":%.6g,\"control_eligible\":%s,\"room_error_k\":%s,"
-                  "\"reason\":\"%s\",\"reason_code\":%u,\"retained\":%s}",
-                  static_cast<unsigned long>(result.proof), result.temperature_c, result.setpoint_c,
-                  result.control_eligible ? "true" : "false",
-                  result.control_eligible ? std::to_string(result.room_error_k).c_str() : "null",
-                  reference_room_reason_name(result.reason), static_cast<unsigned>(result.reason),
-                  result.retained ? "true" : "false");
-    return http_send_json(req, response);
-}
-
-// Decision-ready, read-only room source. The mapping + freshness policy apply live on the existing
-// MQTT connection and feed only the write-free SHADOW controller. A non-empty mapping cannot reach
-// Config/NVS until this exact topic/path/age tuple produced a fresh value.
+// Decision-ready, read-only room source. Saving records user intent and applies its exact topics on
+// the existing MQTT connection immediately. Payload/path/freshness errors remain runtime evidence:
+// they are visible in /status and keep the write-free SHADOW diagnosis fail-closed.
 static esp_err_t set_ref_temp(httpd_req_t* req) {
     RefTempRequest in;
     if (const char* error = parse_ref_temp_request(req, in))
         return send_err(req, "400 Bad Request", error);
 
-    const ReferenceTemperatureTestConfig tested = ref_temp_test_config(in);
-    if (!in.topic.empty() && !mqtt_reference_test_proof_valid(in.test_proof, tested))
-        return send_err(req, "409 Conflict", "Test this MQTT mapping successfully before saving");
-
     Config c = config();
     if (c.ref_temp_name == in.name && c.ref_temp_topic == in.topic && c.ref_temp_path == in.path &&
+        c.ref_temp_setpoint_topic == in.setpoint_topic &&
         c.ref_temp_setpoint_path == in.setpoint_path && c.ref_temp_time_path == in.time_path &&
+        c.ref_temp_fixed_setpoint_tenths == in.fixed_setpoint_tenths &&
+        c.ref_temp_time_topic == in.time_topic &&
         c.ref_temp_enabled_path == in.enabled_path &&
         c.ref_temp_hvac_mode_path == in.hvac_mode_path &&
         c.ref_temp_max_age_s == in.max_age_s) {
-        mqtt_reference_reconfigure();                 // consume the proof + retry the saved mapping
+        mqtt_reference_reconfigure();                 // retry the saved mapping and clear old evidence
         return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
     }
     c.ref_temp_name = in.name;
     c.ref_temp_topic = in.topic;
     c.ref_temp_path = in.path;
+    c.ref_temp_setpoint_topic = in.setpoint_topic;
     c.ref_temp_setpoint_path = in.setpoint_path;
+    c.ref_temp_fixed_setpoint_tenths = in.fixed_setpoint_tenths;
+    c.ref_temp_time_topic = in.time_topic;
     c.ref_temp_time_path = in.time_path;
     c.ref_temp_enabled_path = in.enabled_path;
     c.ref_temp_hvac_mode_path = in.hvac_mode_path;
@@ -1123,7 +1111,6 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     // re-detect are trusted-LAN only, so a nearby radio client cannot reconfigure the device.
     http_register_on(s, surface, "/set_wifi", HTTP_POST, set_wifi);
     http_register_on(s, surface, "/set_mqtt", HTTP_POST, set_mqtt);
-    http_register_on(s, surface, "/test_ref_temp", HTTP_POST, test_ref_temp);
     http_register_on(s, surface, "/set_ref_temp", HTTP_POST, set_ref_temp);
     http_register_on(s, surface, "/test_circulation", HTTP_POST, test_circulation);
     http_register_on(s, surface, "/set_circulation", HTTP_POST, set_circulation);

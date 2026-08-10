@@ -107,6 +107,15 @@ void config_load() {
             c.ref_temp_name = b.ref_temp_name; c.ref_temp_topic = b.ref_temp_topic;
             c.ref_temp_path = b.ref_temp_path; c.ref_temp_time_path = b.ref_temp_time_path;
             c.ref_temp_setpoint_path = b.ref_temp_setpoint_path;
+            c.ref_temp_setpoint_topic = b.has_ref_multi_source
+                ? b.ref_temp_setpoint_topic
+                : (b.ref_temp_setpoint_path.empty() ? "" : b.ref_temp_topic);
+            c.ref_temp_time_topic = b.has_ref_multi_source
+                ? b.ref_temp_time_topic
+                : (b.ref_temp_time_path.empty() ? "" : b.ref_temp_topic);
+            if (b.has_ref_multi_source && b.ref_temp_fixed_setpoint_tenths <= UINT16_MAX)
+                c.ref_temp_fixed_setpoint_tenths =
+                    static_cast<uint16_t>(b.ref_temp_fixed_setpoint_tenths);
             c.ref_temp_enabled_path = b.ref_temp_enabled_path;
             c.ref_temp_hvac_mode_path = b.ref_temp_hvac_mode_path;
             c.ref_temp_max_age_s = b.ref_temp_max_age_s;
@@ -351,6 +360,9 @@ bool config_save(const Config& requested, bool require_link) {
     b.mqtt_base = c.mqtt_base;
     b.ref_temp_name = c.ref_temp_name; b.ref_temp_topic = c.ref_temp_topic;
     b.ref_temp_path = c.ref_temp_path; b.ref_temp_time_path = c.ref_temp_time_path;
+    b.ref_temp_setpoint_topic = c.ref_temp_setpoint_topic;
+    b.ref_temp_time_topic = c.ref_temp_time_topic;
+    b.ref_temp_fixed_setpoint_tenths = c.ref_temp_fixed_setpoint_tenths;
     b.ref_temp_setpoint_path = c.ref_temp_setpoint_path;
     b.ref_temp_enabled_path = c.ref_temp_enabled_path;
     b.ref_temp_hvac_mode_path = c.ref_temp_hvac_mode_path;

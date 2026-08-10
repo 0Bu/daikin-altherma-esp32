@@ -233,7 +233,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings, **v14 (retired dynamic-LWT mode byte, now written zero and ignored)** v15 the external circulation-power witness (topic/paths/thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against) and v16 this installation's MQTT base topic (empty = the compile-time default, so the upgrade is a no-op). Preset id and board pins are one atomic statement. A non-empty `mb_host` polls; empty disables the stack. Older blobs remain readable; the v9 actuation-consent bit and v14 mode byte are discarded because what they gated no longer exists. Heating-curve diagnosis derives arming from the timestamped room mapping; forecast is optional. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings, **v14 (retired dynamic-LWT mode byte, now written zero and ignored)** v15 the external circulation-power witness (topic/paths/thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against), v16 this installation's MQTT base topic (empty = the compile-time default, so the upgrade is a no-op), and v17 independent room-value topics plus an optional fixed target. Preset id and board pins are one atomic statement. A non-empty `mb_host` polls; empty disables the stack. Older blobs remain readable; the v9 actuation-consent bit and v14 mode byte are discarded because what they gated no longer exists. Heating-curve diagnosis derives arming from the room mapping; forecast is optional. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `board_set` | **Legacy migration input only.** Pre-v12 builds stored this bit without a concrete preset id. On upgrade, `true` plus an exact historical field match is migrated to the same board the old UI displayed; untouched defaults (`false`) remain unidentified. New saves store `board_user_set` and the stable preset id atomically in `cfg`. |
@@ -468,17 +468,18 @@ POST /set_mqtt                     # { broker, user?, pass?, clear_creds?, base?
                                    #   ABSENT means keep, "" means the compile-time default. Checked
                                    #   before the broker pre-flight; each refusal carries a machine
                                    #   code (mqtt_base_wildcard, mqtt_base_not_sluggable, …).
-POST /test_ref_temp                # { name, topic, temperature_path, setpoint_path, timestamp_path,
-                                   #   enabled_path?, hvac_mode_path?, max_age_s }
-                                   #   → temporarily subscribe on the existing authenticated MQTT
-                                   #   connection and wait up to 12 s for a value accepted by the live
-                                   #   JSON/timestamp/plausibility decoder. Changes neither Config nor NVS.
-                                   #   Success returns current + target, typed optional gates and a proof;
-                                   #   missing/stale source time or out-of-range temperatures are rejected.
-POST /set_ref_temp                 # the exact mapping above + test_proof → persist + apply live. A
-                                   #   non-empty topic requires a proof issued for that same topic/path/
-                                   #   gate/age tuple; an empty topic is the explicit Disable operation and
-                                   #   needs no readable value or proof.
+POST /set_ref_temp                 # { name, topic, temperature_path,
+                                   #   setpoint_topic, setpoint_path, fixed_setpoint_c,
+                                   #   timestamp_topic?, timestamp_path?, enabled_path?,
+                                   #   hvac_mode_path?, max_age_s } → persist + subscribe immediately.
+                                   #   fixed_setpoint_c (5.0–35.0, 0.1 steps) replaces the target
+                                   #   topic/path. Empty, malformed or not-yet-readable JSON paths are
+                                   #   accepted as operator intent: the next MQTT frame records the decoder
+                                   #   error in /status.reference_temperature.error and /diag; the analysis
+                                   #   stays fail-closed until a readable, fresh aggregate exists. With no
+                                   #   timestamp mapping, live non-retained MQTT arrival time is used;
+                                   #   retained data without trusted source time remains rejected. An empty
+                                   #   topic is the explicit Disable operation.
 POST /test_circulation             # { name, topic, power_path, timestamp_path, max_age_s,
                                    #   on_threshold_w, off_threshold_w, confirm_s } → temporarily
                                    #   subscribe and require one fresh active-power value; returns watts,
@@ -488,7 +489,7 @@ POST /set_circulation              # the exact mapping above + test_proof → pe
                                    #   Defaults: apower, aenergy.minute_ts, 3.0/1.0 W, 120 s age,
                                    #   60 s confirmation; every field is configurable in Settings.
                                    #   (There is no POST /set_dynamic_lwt. The heating-curve diagnosis
-                                   #   arms itself from the timestamped MQTT room source above. The
+                                   #   arms itself from the eligible MQTT room source above. The
                                    #   forecast below is optional comparison evidence, so location
                                    #   disclosure is not a prerequisite. It records raw room error,
                                    #   not a requested LWT offset; no actuator exists.)

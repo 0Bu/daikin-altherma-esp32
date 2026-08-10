@@ -247,17 +247,16 @@ assert.match(mqttHa, /else if \(!s_env3_disabled_cleaned\)[\s\S]*retract_env3_di
   "disabling ENV III must retract all retained HA discovery configs as well as state");
 
 // The room-source row remains a user-configured exact MQTT mapping. Save performs the non-persistent
-// live test itself and only then presents its proof to persistence; Delete posts the explicit empty
-// mapping that clears the source and captured value.
-assert.match(html, /id="refTempModal"[\s\S]*id="rtTopic"[\s\S]*id="rtPath"[\s\S]*id="rtSetpointPath"[\s\S]*id="rtTimePath"[\s\S]*id="rtMaxAge"/,
+// Save persists intent immediately; Delete posts the explicit empty mapping that clears the source
+// and captured value. Payload/path diagnostics belong to the durable subscriber.
+assert.match(html, /id="refTempModal"[\s\S]*id="rtTemperatureSource"[\s\S]*id="rtTarget"[\s\S]*id="rtTimestampSource"[\s\S]*id="rtMaxAge"/,
   "the room-temperature source modal must expose current, target, source-time and freshness mappings");
 assert.doesNotMatch(html, /id="rtEnabledPath"|id="rtHvacModePath"|ref\.enabled_path|ref\.hvac_mode_path/,
   "advanced eligibility mappings must not appear as optional fields in the room-source dialog");
 for (const [input, help, key] of [
-  ["rtTopic", "rtTopicHelp", "ref.topic_help"],
-  ["rtPath", "rtPathHelp", "ref.path_help"],
-  ["rtSetpointPath", "rtSetpointPathHelp", "ref.setpoint_path_help"],
-  ["rtTimePath", "rtTimePathHelp", "ref.time_path_help"],
+  ["rtTemperatureSource", "rtTemperatureSourceHelp", "ref.temperature_source_help"],
+  ["rtTarget", "rtTargetHelp", "ref.target_help"],
+  ["rtTimestampSource", "rtTimestampSourceHelp", "ref.timestamp_source_help"],
   ["rtMaxAge", "rtMaxAgeHelp", "ref.max_age_help"],
 ]) {
   assert.match(html, new RegExp(`id="${input}"[^>]*aria-describedby="${help}"[\\s\\S]*id="${help}"[^>]*data-i18n="${key.replace(".", "\\.")}"`),
@@ -270,7 +269,7 @@ assert.match(html, /id="rtDeleteBtn"[^>]*data-i18n="ref\.delete"[\s\S]*id="rtBtn
 assert.doesNotMatch(html, /id="rtTestBtn"|id="rtTestResult"/,
   "the room-source dialog must not retain a separate Test action or stale proof result");
 assert.match(html, /data-i18n="ref\.save_help"/,
-  "the live-test-before-save fact belongs briefly beside Save, not in every status tongue");
+  "the immediate-save/runtime-validation contract belongs briefly beside Save");
 assert.doesNotMatch(app, /One MQTT source is supported|Es wird eine MQTT-Quelle unterstützt/,
   "the room-source status must not carry the former generic subscription and delete manual");
 assert.doesNotMatch(app, /shelly1pmminig4-fixture00003\/status\/switch:0/,
@@ -279,25 +278,31 @@ assert.doesNotMatch(app, /\$\("rtEnabledPath"\)|\$\("rtHvacModePath"\)/,
   "the browser bundle must not retain DOM access to the removed optional fields");
 assert.match(app, /const sameMapping = !!saved\.configured[\s\S]*enabled_path: sameMapping \? \(saved\.enabled_path \|\| ""\) : ""[\s\S]*hvac_mode_path: sameMapping \? \(saved\.hvac_mode_path \|\| ""\) : ""/,
   "editing an unchanged source must preserve existing advanced gates without exposing them in the UI");
-assert.match(app, /refTempForm[^]*post\("\/test_ref_temp", input\)[^]*testResult\.test_proof[^]*post\("\/set_ref_temp", \{ \.\.\.input, test_proof: testResult\.test_proof \}\)/,
-  "Save must obtain a live proof and persist exactly that tested mapping in one user action");
-assert.match(app, /\$\("rtDeleteBtn"\)\.onclick[^]*post\("\/set_ref_temp", \{[^]*name: "", topic: "", temperature_path: "", setpoint_path: "", timestamp_path: ""/,
+assert.match(app, /refTempForm[^]*post\("\/set_ref_temp", input\)/,
+  "Save must persist the mapping directly without waiting for a publisher");
+assert.doesNotMatch(app, /\/test_ref_temp|mqtt_reference_test/,
+  "the room-source UI must not retain the timed pre-save probe");
+assert.match(app, /\$\("rtDeleteBtn"\)\.onclick[^]*post\("\/set_ref_temp", \{[^]*name: "", topic: "", temperature_path: "", setpoint_topic: "", setpoint_path: ""[^]*timestamp_topic: "", timestamp_path: ""/,
   "Delete must clear the saved mapping without testing the form's current field contents");
+assert.match(app, /lastIndexOf\("\$"\)/,
+  "topic$path parsing must preserve leading $ system topics by splitting at the last delimiter");
+assert.match(app, /validRefTopic\(topic\) && path\.length <= 128/,
+  "room-source paths must remain persistable until a real MQTT frame validates them");
 assert.match(app, /"ref\.delete": "Delete"[^]*"ref\.delete": "Löschen"/,
   "Delete must remain explicit in both supported languages");
-assert.match(httpConfig, /mqtt_reference_test_proof_valid\(in\.test_proof, tested\)[\s\S]*Test this MQTT mapping successfully before saving/,
-  "a raw POST must not bypass the test-before-persist contract");
-assert.match(httpConfig, /static esp_err_t test_ref_temp[\s\S]*mqtt_reference_test\([\s\S]*12000/,
-  "the test endpoint must wait for the live MQTT task without writing the mapping");
-assert.match(mqttHa, /service_reference_probe_frame[\s\S]*reference_timestamp_moved_backward\([\s\S]*service_reference_frames[\s\S]*reference_timestamp_moved_backward\(/,
-  "the transient test and saved source must share the backward-timestamp rejection");
+assert.doesNotMatch(httpConfig, /test_ref_temp|mqtt_reference_test/,
+  "the room-source API must persist without a probe or proof gate");
+assert.match(mqttHa, /set_reference_error[\s\S]*reference temperature payload rejected[\s\S]*decode_reference_frame/,
+  "the durable subscriber must expose and log payload/path failures at runtime");
+assert.doesNotMatch(mqttHa, /service_reference_probe|s_ref_probe|mqtt_reference_test/,
+  "the MQTT task must not retain a separate room-source probe state machine");
 assert.match(app, /r\.retained[\s\S]*ref\.retained/,
   "the captured-value UI must identify retained MQTT messages");
 assert.match(app, /retained_without_timestamp: t\("ref\.time_untrusted"\)/,
   "retained values without source time must be shown as untrusted, never fresh");
 
 // The circulation witness is a second read-only exact MQTT mapping. It consumes actual active power,
-// not Shelly relay intent, and shares the same live-test-before-persist safety boundary.
+// not Shelly relay intent, and retains its separate live-test-before-persist safety boundary.
 assert.match(html, /id="circulationModal"[\s\S]*id="circTopic"[\s\S]*id="circPowerPath"[\s\S]*id="circTimePath"[\s\S]*id="circOn"[\s\S]*id="circOff"[\s\S]*id="circMaxAge"[\s\S]*id="circConfirm"/,
   "circulation settings must expose the exact topic, JSON paths, freshness, hysteresis and confirmation");
 assert.match(html, /id="svR2t"[\s\S]*id="svValve2"[\s\S]*id="svFlowSwitch"[\s\S]*id="svR3t"/,

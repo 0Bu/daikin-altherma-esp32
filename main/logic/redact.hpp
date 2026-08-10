@@ -43,11 +43,12 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The eighteen /status values http_status.cpp passes through redact_identifier (via its jstr_r
+// The twenty /status values http_status.cpp passes through redact_identifier (via its jstr_r
 // wrapper). Listed here rather than only at the call sites so the set is reviewable in one place:
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  mqtt.base
 //   net.ip  net.eth.ip  net.eth.mac
 //   reference_temperature.name  reference_temperature.topic
+//   reference_temperature.setpoint_topic  reference_temperature.timestamp_topic
 //   circulation_source.name  circulation_source.topic
 //   weather_forecast.latitude  weather_forecast.longitude
 //   syslog.host  ntp.server  modbus.host
@@ -70,7 +71,7 @@ inline constexpr const char* REDACTED = "<redacted>";
 // it was not until this comment and that constant had drifted two fields apart in silence. What is
 // still only a review point is the direction no count can see: a NEW identifying field that nobody
 // wrapped at all. It never reaches the redactor, so it never reaches this number either.
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 18;
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 20;
 
 // Field-level substitution for the /status builder. Returns by value because every caller feeds it
 // straight into json_quote(), which copies anyway.
