@@ -36,6 +36,7 @@ scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data
 tools/absence/selftest.sh          # can the source-absence matrix still go red?
 scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
 scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
+scripts/run-claude-md-budget.sh    # is .claude/CLAUDE.md still inside its byte budget?
 ```
 
 `run-mock-tests.sh --coverage` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
@@ -223,6 +224,15 @@ hand-written host-test fixture `altherma3_r_erga`, which detection can never ass
 looked at every table would have called it clean. It does **not** require an id to be right on every
 profile: the catalog genuinely disagrees across models, and the docs should state a majority id and
 name the alternatives beside it. `tools/docs/selftest.sh` re-seeds the defects it was built for.
+
+`run-claude-md-budget.sh` keeps [`.claude/CLAUDE.md`](.claude/CLAUDE.md) inside a byte budget. That
+file is loaded into every Claude Code session, so every byte in it is paid on every turn, and it
+grows by accretion — each merged PR is tempted to leave its whole story there (it reached 329 KB
+before the 2026-08 reduction). The file's own header states the editorial rule the gate enforces:
+a new finding lands there as the *rule* plus a pointer, while the measurement and the defect story
+go to `docs/` (ARCHITECTURE.md for the chassis, PLANT.md for plant features, this file for the
+gates). When it fires, move narrative out — never trim a rule, and never raise the budget to clear
+the red. `tools/claudemd/selftest.sh` proves it fails closed.
 
 Three more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
 need them locally — run them if you touch

@@ -120,6 +120,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 77 | **Optional wired transport (W5500 / PoE)** — a second network transport detected at boot from one SPI identity register, with the boot fork (wire → radio → portal), the route priority, the pulled-cable reboot and the probe's refusal to drive a configured pad as host-tested rules | ✅ 🧪 | [`logic/net_link.hpp`](../main/logic/net_link.hpp), [`net.cpp`](../main/net.cpp), [`test_transport_contract.mjs`](../test/test_transport_contract.mjs) |
 | 78 | **Transport-independent HTTP trust surface** — the restricted provisioning route set follows the OPEN setup AP's existence rather than the WiFi mode, so a wired board is not locked out of its own API and a live AP cannot be widened by a cable | ✅ 🧪 | [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_server.cpp`](../main/http_server.cpp) |
 | 80 | **Per-row state age** — how long each switched row has read what it reads, published as three separate facts (the seconds, whether the transition was *witnessed*, and how much of the run the bus did not answer for) so a consumer cannot state a stronger claim than the board made | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
+| 81 | **CLAUDE.md byte-budget gate** — the always-loaded agent instructions are held under a byte budget in CI, forcing new findings into `docs/` as narrative and into `.claude/CLAUDE.md` only as rules | ✅ | [`run-claude-md-budget.sh`](../scripts/run-claude-md-budget.sh), [`selftest.sh`](../tools/claudemd/selftest.sh) |
 
 ---
 
@@ -689,6 +690,11 @@ Four properties of that core are worth naming because they are not obvious from 
   16384. The trade — less exact backtraces in the one file whose core dumps mattered — and the
   reproduce command are stated where the pin lives and in [`.claude/CLAUDE.md`](../.claude/CLAUDE.md)
   under "Memory constraints".
+- **✅ CLAUDE.md byte-budget gate.** `.claude/CLAUDE.md` is loaded into every Claude Code session, so
+  every byte there is paid on every turn — and it grows by accretion (329 KB before the 2026-08
+  reduction). [`run-claude-md-budget.sh`](../scripts/run-claude-md-budget.sh) holds it under 64 KiB
+  as a CI `gates` step; the fix when it fires is moving narrative to `docs/`, never trimming a rule.
+  [`tools/claudemd/selftest.sh`](../tools/claudemd/selftest.sh) proves it fails closed.
 - **🔭 No generic static-analyser gate — measured, not assumed.** Recorded here so it is not
   re-litigated: clang-tidy over the pure headers reports thousands of findings on a blanket config
   (over half of them this project's own `CHECK` macro) and, curated to bug-finding checks, roughly
