@@ -145,8 +145,10 @@ main { flex: 1; }
 
 /* ── Live system section: the interactive schematic ─────────────────────── */
 /* The dashboard opens on this card, and the drawing carries its own status — there is no band
-   above it and no chip row beside it (DESIGN.md §5.3 item 1). */
-.schem-card { margin: 0 0 12px; padding: 14px 12px 8px; }
+   above it and no chip row beside it (DESIGN.md §5.3 item 1). The figure is only the semantic
+   wrapper: the white face ends with the picture, leaving the inspector free to emerge below it. */
+.schem-card { margin: 0 0 12px; }
+.schem-face { position: relative; z-index: 1; padding: 14px 12px 8px; }
 .schem-scroll { overflow-x: auto; }
 .schem-scroll svg { display: block; min-width: 640px; width: 100%; height: auto; }
 svg .sc-box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
@@ -339,15 +341,20 @@ svg .sc-hit:hover .sc-mode, svg .sc-hit.sel .sc-mode { fill: var(--brand-strong)
 svg .sc-hit:focus { outline: none; }
 svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 4px; }
 
-/* ── Inspector panel (under the schematic, same card) ────────────────────────────────────────
+/* ── Inspector tongue (attached below the schematic card) ────────────────────────────────────
    Reuses the value-row explainer copy (DESCRIPTIONS) so "what is this / what's normal" has ONE
    source; the live half (reading, state sentence, member rows) is rebuilt from the poll cache. */
 /* Empty until something is tapped: the container carries margin only, so an unselected inspector
    collapses to nothing rather than reserving a slot for a placeholder line. */
-.inspect { margin: 4px 6px 6px; }
+.inspect { margin: 0 10px; }
 .inspect-card {
-  background: var(--brand-tint); border: 1px solid var(--line); border-radius: var(--r-tile);
-  padding: 12px 14px;
+  background: var(--brand-tint); border: 1px solid var(--line); border-top: 0;
+  border-radius: 0 0 var(--r-tile) var(--r-tile); box-shadow: var(--shadow-tongue);
+  padding: 12px 14px; animation: inspect-tongue-in .22s ease both;
+}
+@keyframes inspect-tongue-in {
+  from { opacity: 0; transform: translateY(-7px); }
+  to { opacity: 1; transform: none; }
 }
 /* NAME ABOVE, READING BELOW — as soon as the two stop fitting on one line. The pair is a WRAPPING
    flex line, and the title's `flex-basis: auto` is what makes the break content-aware rather than a

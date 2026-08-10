@@ -23,6 +23,12 @@ assert.match(style, /svg \.sc-env3\.fresh \.sc-env3-box\s*\{[^}]*stroke:\s*var\(
   "a fresh outdoor-climate pill must have a visible measurement state");
 assert.match(index, /id="inspBody"[\s\S]*id="inspHist"[\s\S]*id="inspRows"/,
   "the inspector DOM must place the ENV III chart after its custom value body");
+assert.match(index,
+  /<figure class="schem-card" id="schem"[\s\S]*?<div class="card schem-face">[\s\S]*?<\/svg>[\s\S]*?<\/div>\s*<\/div>\s*<!-- Inspector:[\s\S]*?<div class="inspect"/,
+  "the inspector must be a sibling tongue below the white schematic face, not part of the picture card");
+assert.match(style,
+  /\.inspect \{ margin: 0 10px; \}[\s\S]*?\.inspect-card \{[^}]*border-top: 0;[^}]*border-radius: 0 0 var\(--r-tile\) var\(--r-tile\);[^}]*box-shadow: var\(--shadow-tongue\);/,
+  "the schematic inspector must use the shared inset, bottom-rounded tongue treatment");
 
 function classList() {
   const names = new Set();

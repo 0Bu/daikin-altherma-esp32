@@ -616,8 +616,10 @@ Body, ordered:
    with no dead strip between; `G011` re-derives each cap from the real CSS and fails the build on an
    overhang. It says nothing about two *pipes* meeting at a junction — that place is genuinely
    shared, and `E004` is what decides whose it is.
-3. **Inspector** — the panel directly under the drawing, in the same card, so the explanation and the
-   thing it explains are on screen together. Idle it shows **nothing** and collapses — the picture's
+3. **Inspector** — the inset tongue attached directly below the drawing card, so the explanation and
+   the thing it explains are on screen together without covering or extending the white picture.
+   It uses the same tinted, bottom-rounded, top-shadowed treatment as the other explainer tongues.
+   Idle it shows **nothing** and collapses — the picture's
    clickability is carried by the hit targets themselves (hover/press feedback, `role="button"`,
    the SVG's own `aria-label`), and a standing line of instructional copy under an otherwise quiet
    dashboard is exactly the decorative copy §1.4 rules out. Selected it shows:
