@@ -14,6 +14,7 @@ idf_component_register(
         "env3.cpp"
         "history.cpp"
         "checkup.cpp"
+        "state_dwell.cpp"
         "http_server.cpp"
         "http_common.cpp"
         "http_status.cpp"

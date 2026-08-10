@@ -75,12 +75,13 @@ assert.match(history, /if \(board_trend\(d\)\) continue;/,
 const mainCpp = read("main/main.cpp");
 const startAt   = mainCpp.indexOf("checkup_start()");
 const histAt    = mainCpp.indexOf("history_start()");
+const dwellAt   = mainCpp.indexOf("dwell_start()");
 const pollAt    = mainCpp.indexOf("hp_poll_start(");
-assert.ok(startAt > 0 && histAt > 0 && pollAt > 0,
-  "main.cpp must start the trends, the checkup and the poll task");
-assert.ok(startAt < pollAt && histAt < pollAt,
-  "history_start() and checkup_start() must run BEFORE the poll task: both adopt or wipe .noinit " +
-  "rings without a lock, which is only sound while no producer exists");
+assert.ok(startAt > 0 && histAt > 0 && dwellAt > 0 && pollAt > 0,
+  "main.cpp must start the trends, the checkup, the state ages and the poll task");
+assert.ok(startAt < pollAt && histAt < pollAt && dwellAt < pollAt,
+  "history_start(), checkup_start() and dwell_start() must run BEFORE the poll task: all three " +
+  "adopt or wipe .noinit state without a lock, which is only sound while no producer exists");
 
 // ── 1c. Every .noinit region must be UNINITIALISED storage ─────────────────────────────────────
 // `__NOINIT_ATTR` places an object in a NOLOAD section; it does NOT stop C++ from initialising it.
@@ -97,7 +98,7 @@ assert.ok(startAt < pollAt && histAt < pollAt,
 //
 // Asserted over source text because it is a property of a DECLARATION that no host test can reach:
 // the failure is created by the compiler, downstream of anything `logic/` can see.
-for (const f of ["main/history.cpp", "main/checkup.cpp"]) {
+for (const f of ["main/history.cpp", "main/checkup.cpp", "main/state_dwell.cpp"]) {
   const src = read(f);
   const decls = [...src.matchAll(/__NOINIT_ATTR\s+(\w+)\s+(\w+)\s*;/g)];
   assert.ok(decls.length > 0, `${f} must still declare its .noinit region`);
@@ -183,8 +184,66 @@ assert.match(status,
   /if \(mb_status\(\)\.connected\) \{[\s\S]*?if \(live\) \{\s*\n\s*j \+= ",\\"modbus\\":";/,
   "/values must emit the HomeHub array only while that link is live, and omit the key otherwise");
 
+// ── 7. A SILENT BUS must age the state ages out, not freeze them ────────────────────────────────
+// The per-row state ages (logic/state_dwell.hpp) claim how long a flag has read what it reads, so
+// they are only true while somebody is watching. Every path through the poll cycle that produces no
+// readable rows must still call dwell_record(): that is what books blind seconds and eventually
+// stops the row claiming anything at all. Miss one and the table simply stops moving — every
+// duration frozen at the instant the bus went quiet and still presented as current, which is the
+// exact failure the feature exists to prevent, arriving through a missing call rather than a wrong
+// rule. THREE paths reach it, and the two failure paths are the ones a refactor drops.
+assert.match(poll, /if \(!hp_uart_init\([\s\S]{0,600}?dwell_record\(nullptr, 0\);/,
+  "a cycle that could not bring up the UART must book blind time, not skip the table");
+assert.match(poll, /if \(config\(\)\.profile == "auto"\)[\s\S]{0,1400}?dwell_record\(nullptr, 0\);/,
+  "a board whose X10A never resolves a profile must age its restored state ages out, or a reboot " +
+  "would present the frozen pre-reboot durations as current");
+assert.match(poll, /checkup_record\(fresh\.data\(\)[\s\S]{0,700}?dwell_record\(fresh\.data\(\), fresh\.size\(\)\);/,
+  "the normal cycle must fold the state ages beside the checkup, from the same row set");
+// The reduction has to read `fresh` — the rows that ANSWERED this cycle — and not the committed
+// cache, which no longer knows which rows were missing. A row absent from `fresh` IS the evidence.
+const commitAt = poll.search(/s_cache\s*=\s*std::move\(fresh\)/);
+assert.ok(commitAt > 0, "poll_once must still commit the cache by moving `fresh`");
+assert.ok(poll.indexOf("dwell_record(fresh.data(), fresh.size());") < commitAt,
+  "dwell_record must see `fresh` before the commit moves it away, or absent rows read as unchanged");
+
+// ── 8. `known == false` renders as an ABSENT key, never as a zero ───────────────────────────────
+// Section 6's rule one field down. A dwell of 0 is a real reading ("it changed just now"); a row the
+// device declines to describe must therefore omit the key entirely, or a silent bus reads as a plant
+// whose every flag just switched.
+assert.match(status, /if \(dw\.known\) \{\s*\n\s*j \+= ",\\"dwell_s\\":";/,
+  "/values must emit a state age only when the device has one to state");
+// And only for a row that STATES A VALUE. The slot outlives a row the sweep could not read — that is
+// what booking blind seconds means — but such a row is published as `"value":null`, and an age
+// beside a value that is not there describes nothing: rendered, the pair reads "— for 3 h 20 min".
+assert.match(status, /logic::dwell_tracked\(v\[i\]\.conv\) && !v\[i\]\.value\.empty\(\)/,
+  "/values must withhold the state age for a row it is publishing as null");
+
+// ── 9. Whole seconds come from ABSOLUTE timestamps, never from a floored interval ───────────────
+// The poll loop sleeps a whole second AFTER a serial sweep, so the real cadence is ~1.2-1.3 s.
+// Flooring each interval and restarting the clock from `now` discards that fraction every cycle and
+// it never returns — measured, 23% slow forever, so a three-hour state publishes as "2 h 19 min".
+// checkup_step() already states this rule; the dwell shipped the defect it warns about, so assert
+// the SHAPE rather than trusting that the next edit remembers.
+const dwellSrc = read("main/state_dwell.cpp");
+// The lock is created BEFORE any producer exists, like history_start()/checkup_start(). Created
+// lazily in the 1 Hz record path instead, the httpd task's dwell_reading() reads the raw handle
+// while another core writes it — the unsynchronized read of the very pointer that synchronizes
+// everything else in the file, which checkup.cpp carries a note about having removed.
+assert.match(dwellSrc, /void dwell_start\(\)[\s\S]{0,900}?s_mtx = xSemaphoreCreateMutex\(\);/,
+  "dwell_start() must create the table's mutex, before any producer task exists");
+assert.doesNotMatch(dwellSrc, /void dwell_record\([\s\S]{0,400}?xSemaphoreCreateMutex/,
+  "the 1 Hz record path must not create the mutex — that is the race checkup.cpp removed");
+assert.match(dwellSrc, /now_us \/ 1000000 - s_last_us \/ 1000000/,
+  "the state ages must quantise absolute instants so the sub-second remainder telescopes");
+assert.doesNotMatch(dwellSrc, /\(now_us - s_last_us\) \/ 1000000/,
+  "flooring the INTERVAL loses the remainder on every cycle — the defect this rule exists for");
+assert.match(status, /if \(!dw\.exact\) j \+= ",\\"dwell_min\\":true";/,
+  "an unwitnessed run must carry its lower-bound marker, or the browser states a stronger claim " +
+  "than the device made");
+
 console.log("source absence: board trends own their producer, absent sources state absence, " +
-            "armed-but-inactive is named, redaction invents nothing");
+            "armed-but-inactive is named, state ages expire rather than freeze, " +
+            "redaction invents nothing");
 
 // #407 — the END of the restart ladder. The boot that inherited the full count must come up MINIMAL,
 // and that decision has to be made in heap_guard_begin(), which main.cpp runs BEFORE its

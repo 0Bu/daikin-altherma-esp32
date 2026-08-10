@@ -21,6 +21,7 @@
 #include "logic/binary_semantics.hpp"
 #include "logic/fault_state.hpp"
 #include "logic/raw_capture.hpp"
+#include "logic/state_dwell.hpp"
 #include "logic/captive.hpp"
 #include "logic/boot_guard.hpp"
 #include "logic/heap_watchdog.hpp"
@@ -9761,6 +9762,246 @@ static void test_feature_gate() {
     CHECK(!uc5_supported(ghost_cov));
 }
 
+// ── logic/state_dwell.hpp ───────────────────────────────────────────────────────────────────────
+// How long a switched row has read what it reads. The interesting half is every case where the
+// answer is NOTHING: this number is a claim about a stretch of time, and the board can only make it
+// for the seconds it was actually watching.
+static void test_state_dwell() {
+    using namespace logic;
+
+    // ── the state code ──────────────────────────────────────────────────────────────────────────
+    // 0 is "no usable state" and must be produced for everything that is not a state, including the
+    // shapes that LOOK like one. A binary row is the numeric 1/0 boundary (#210); anything else is a
+    // contract break upstream and answering "state 0" for it would invent one.
+    CHECK(dwell_code(304, "0") == 1);
+    CHECK(dwell_code(304, "1") == 2);
+    CHECK(dwell_code(304, "ON") == DWELL_CODE_NONE);      // pre-#210 text must not decode
+    CHECK(dwell_code(304, "") == DWELL_CODE_NONE);
+    CHECK(dwell_code(304, nullptr) == DWELL_CODE_NONE);
+    CHECK(dwell_code(304, "10") == DWELL_CODE_NONE);      // not a flag value
+    CHECK(dwell_code(203, "Normal") != DWELL_CODE_NONE);
+    CHECK(dwell_code(203, "Error") != dwell_code(203, "Normal"));
+    // conv 203's "?" is an undecodable class. It must never read as a state, because the state it
+    // would be confused with is "no fault" — the one direction a fault reading must not fail in.
+    CHECK(dwell_code(203, "?") == DWELL_CODE_NONE);
+    CHECK(dwell_code(105, "42.0") == DWELL_CODE_NONE);    // a temperature is not a state
+
+    // The selector composes conv_is_binary rather than restating its range, so a converter added to
+    // that family is tracked here without anyone remembering to say so twice.
+    CHECK(dwell_tracked(300) && dwell_tracked(307) && dwell_tracked(203));
+    CHECK(!dwell_tracked(204));    // the same event as its 203 companion, spelled differently
+    CHECK(!dwell_tracked(105) && !dwell_tracked(151) && !dwell_tracked(211));
+
+    DwellSlot slots[DWELL_MAX_SLOTS] = {};
+    const DwellObservation off_row[] = {{0x62, 2, 304, 1}};
+    const DwellObservation on_row[]  = {{0x62, 2, 304, 2}};
+
+    // ── a run this board joined in progress is a LOWER BOUND ────────────────────────────────────
+    // Ten cycles of OFF establish "OFF for at least 10 s" and nothing more: the row was already OFF
+    // when the poll task started, and stating a bare "OFF for 10 s" would be a true number carrying
+    // a stronger claim than the evidence supports.
+    dwell_step(slots, DWELL_MAX_SLOTS, off_row, 1, 1);
+    for (int i = 0; i < 9; i++) dwell_step(slots, DWELL_MAX_SLOTS, off_row, 1, 1);
+    DwellReading r = dwell_lookup(slots, DWELL_MAX_SLOTS, 0x62, 2, 304);
+    CHECK(r.known && !r.exact);
+    CHECK(r.since_s == 9 && r.blind_s == 0);
+
+    // A WITNESSED transition restarts the run and upgrades it: this board saw the state arrive, so
+    // the anchor is its own observation rather than the moment it happened to start looking.
+    dwell_step(slots, DWELL_MAX_SLOTS, on_row, 1, 1);
+    r = dwell_lookup(slots, DWELL_MAX_SLOTS, 0x62, 2, 304);
+    CHECK(r.known && r.exact && r.since_s == 0 && r.blind_s == 0);
+    for (int i = 0; i < 5; i++) dwell_step(slots, DWELL_MAX_SLOTS, on_row, 1, 1);
+    r = dwell_lookup(slots, DWELL_MAX_SLOTS, 0x62, 2, 304);
+    CHECK(r.exact && r.since_s == 5);
+
+    // ── a change found AFTER a gap is not a witnessed change ────────────────────────────────────
+    // The transition happened somewhere inside the gap, so calling it exact would publish a precise
+    // "for 0 s" about an instant nobody observed. The gap need not be long enough to have gone
+    // stale for that to be wrong, which is why the rule tests the gap and not the stale flag.
+    {
+        DwellSlot g[DWELL_MAX_SLOTS] = {};
+        dwell_step(g, DWELL_MAX_SLOTS, off_row, 1, 1);
+        dwell_step(g, DWELL_MAX_SLOTS, off_row, 1, 1);
+        CHECK(!dwell_lookup(g, DWELL_MAX_SLOTS, 0x62, 2, 304).exact);   // joined in progress
+        dwell_step(g, DWELL_MAX_SLOTS, on_row, 1, 1);                   // seen change, no gap
+        CHECK(dwell_lookup(g, DWELL_MAX_SLOTS, 0x62, 2, 304).exact);
+        // Now lose the row for 30 s — well inside DWELL_MAX_GAP_S — and find it changed.
+        for (int i = 0; i < 30; i++) dwell_step(g, DWELL_MAX_SLOTS, nullptr, 0, 1);
+        CHECK(dwell_lookup(g, DWELL_MAX_SLOTS, 0x62, 2, 304).known);    // short gap: still speaking
+        dwell_step(g, DWELL_MAX_SLOTS, off_row, 1, 1);
+        const DwellReading after_gap = dwell_lookup(g, DWELL_MAX_SLOTS, 0x62, 2, 304);
+        CHECK(after_gap.known && after_gap.since_s == 0);
+        CHECK(!after_gap.exact);   // the change is located only to within the 30 s nobody watched
+    }
+
+    // ── blind time is not unchanged time ────────────────────────────────────────────────────────
+    // A page that does not answer removes its rows from the cache outright, and 47 such timeouts in
+    // 8.2 h is what the reference installation actually produces. The wall clock does not stop, so
+    // the run grows — but the OBSERVATION stopped, and `blind_s` is what stops the pair from being
+    // reported as an unbroken watched run. This is #413/#414 one row at a time.
+    for (int i = 0; i < 4; i++) dwell_step(slots, DWELL_MAX_SLOTS, nullptr, 0, 1);
+    r = dwell_lookup(slots, DWELL_MAX_SLOTS, 0x62, 2, 304);
+    CHECK(r.known && r.exact && r.since_s == 9 && r.blind_s == 4);
+
+    // Seeing it again clears the CURRENT gap but keeps the accumulated blind seconds: the caveat
+    // belongs to the run, not to the last cycle.
+    dwell_step(slots, DWELL_MAX_SLOTS, on_row, 1, 1);
+    r = dwell_lookup(slots, DWELL_MAX_SLOTS, 0x62, 2, 304);
+    CHECK(r.since_s == 10 && r.blind_s == 4 && r.exact);
+
+    // ── the gap bound applies to the CLOCK, not only to the missing rows ────────────────────────
+    // checkup_step() gates its whole computation on the elapsed time and discards the previous state
+    // past the bound. Enforcing that only in the unseen loop would leave a row PRESENT at both ends
+    // of a stall — the poll task starved through an OTA install, a cycle dropped by the bad_alloc
+    // guard — booking the entire stall as time somebody watched, which is the one distinction this
+    // whole feature exists to draw.
+    {
+        DwellSlot c[DWELL_MAX_SLOTS] = {};
+        dwell_step(c, DWELL_MAX_SLOTS, on_row, 1, 1);
+        dwell_step(c, DWELL_MAX_SLOTS, on_row, 1, 1);
+        dwell_step(c, DWELL_MAX_SLOTS, on_row, 1, 1);
+        const DwellReading watched = dwell_lookup(c, DWELL_MAX_SLOTS, 0x62, 2, 304);
+        CHECK(watched.known && watched.since_s == 2);
+        // One call, the row present, a stall longer than the bound in between.
+        dwell_step(c, DWELL_MAX_SLOTS, on_row, 1, DWELL_MAX_GAP_S + 1);
+        const DwellReading after = dwell_lookup(c, DWELL_MAX_SLOTS, 0x62, 2, 304);
+        CHECK(after.known);            // it IS being read again, so it has something to say
+        CHECK(after.since_s == 0);     // but not that the stall was a watched run
+        CHECK(!after.exact);           // and the state may have moved and returned inside it
+        // A stall INSIDE the bound is still a continuous observation — the rule must not fire on the
+        // ordinary case of a slow sweep or one skipped cycle.
+        DwellSlot ok[DWELL_MAX_SLOTS] = {};
+        dwell_step(ok, DWELL_MAX_SLOTS, on_row, 1, 1);
+        dwell_step(ok, DWELL_MAX_SLOTS, on_row, 1, DWELL_MAX_GAP_S);
+        const DwellReading fine = dwell_lookup(ok, DWELL_MAX_SLOTS, 0x62, 2, 304);
+        CHECK(fine.known && fine.since_s == DWELL_MAX_GAP_S);
+    }
+
+    // ── past the gap bound the slot says NOTHING ────────────────────────────────────────────────
+    // A flag can go ON and back OFF inside a long gap, so a run that spans one cannot be vouched
+    // for. The answer is the absence rule this project applies everywhere else: report nothing,
+    // never a duration the board cannot stand behind.
+    for (uint32_t i = 0; i <= DWELL_MAX_GAP_S; i++)
+        dwell_step(slots, DWELL_MAX_SLOTS, nullptr, 0, 1);
+    CHECK(!dwell_lookup(slots, DWELL_MAX_SLOTS, 0x62, 2, 304).known);
+
+    // Coming back starts a FRESH run that is again only a lower bound — a stale slot cannot vouch
+    // for when the state it now sees actually arrived, even when the state is the one it last saw.
+    dwell_step(slots, DWELL_MAX_SLOTS, on_row, 1, 1);
+    r = dwell_lookup(slots, DWELL_MAX_SLOTS, 0x62, 2, 304);
+    CHECK(r.known && !r.exact && r.since_s == 0 && r.blind_s == 0);
+
+    // ── a row that never answered occupies nothing ──────────────────────────────────────────────
+    // The difference between "unchanged since boot" and "never seen" is the whole point: a silent
+    // X10A bus must not produce a table of rows all claiming a long steady run.
+    DwellSlot fresh[DWELL_MAX_SLOTS] = {};
+    for (int i = 0; i < 50; i++) dwell_step(fresh, DWELL_MAX_SLOTS, nullptr, 0, 1);
+    for (const DwellSlot& s : fresh) CHECK(!(s.flags & DWELL_F_USED));
+    CHECK(!dwell_lookup(fresh, DWELL_MAX_SLOTS, 0x62, 2, 304).known);
+
+    // An observation carrying no usable state is treated exactly like a row that did not answer —
+    // it must not open a slot, and it must not extend one.
+    const DwellObservation junk[] = {{0x62, 8, 303, DWELL_CODE_NONE}};
+    dwell_step(fresh, DWELL_MAX_SLOTS, junk, 1, 1);
+    CHECK(!dwell_lookup(fresh, DWELL_MAX_SLOTS, 0x62, 8, 303).known);
+
+    // The converter is part of the key, and it is load-bearing rather than defensive: six flags
+    // share the single byte 0x60/12 and differ only in which bit they mask, so a (reg, off) key
+    // would make the diverter valve and the circulation pump one row.
+    DwellSlot shared[DWELL_MAX_SLOTS] = {};
+    const DwellObservation byte_60_12[] = {{0x60, 12, 306, 2}, {0x60, 12, 307, 1}};
+    dwell_step(shared, DWELL_MAX_SLOTS, byte_60_12, 2, 1);
+    dwell_step(shared, DWELL_MAX_SLOTS, byte_60_12, 2, 30);
+    CHECK(dwell_lookup(shared, DWELL_MAX_SLOTS, 0x60, 12, 306).known);
+    CHECK(dwell_lookup(shared, DWELL_MAX_SLOTS, 0x60, 12, 307).known);
+    CHECK(dwell_find(shared, DWELL_MAX_SLOTS, 0x60, 12, 306) !=
+          dwell_find(shared, DWELL_MAX_SLOTS, 0x60, 12, 307));
+    CHECK(!dwell_lookup(shared, DWELL_MAX_SLOTS, 0x60, 12, 305).known);   // a bit nobody reported
+
+    // Saturation, because a wrap would turn a long run into a fresh one — a state change that never
+    // happened, arriving through arithmetic instead of through the bus.
+    CHECK(dwell_add_u32(UINT32_MAX - 1, 5) == UINT32_MAX);
+    CHECK(dwell_add_u16(static_cast<uint16_t>(UINT16_MAX - 1), 5) == UINT16_MAX);
+
+    // ── the restore ─────────────────────────────────────────────────────────────────────────────
+    const uint32_t fp = dwell_catalog_fingerprint();
+    const uint32_t crc = 0x12345678u;
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC,
+                                DWELL_PERSIST_VERSION, fp, fp, crc, crc) == DwellRestore::Accept);
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::POWERON), DWELL_PERSIST_MAGIC,
+                                DWELL_PERSIST_VERSION, fp, fp, crc, crc) == DwellRestore::PowerCycle);
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::BROWNOUT), DWELL_PERSIST_MAGIC,
+                                DWELL_PERSIST_VERSION, fp, fp, crc, crc) == DwellRestore::PowerCycle);
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), 0, DWELL_PERSIST_VERSION,
+                                fp, fp, crc, crc) == DwellRestore::NoRecord);
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC,
+                                DWELL_PERSIST_VERSION + 1, fp, fp, crc, crc)
+          == DwellRestore::WrongVersion);
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC,
+                                DWELL_PERSIST_VERSION, fp ^ 1u, fp, crc, crc)
+          == DwellRestore::WrongCatalog);
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC,
+                                DWELL_PERSIST_VERSION, fp, fp, crc, crc ^ 1u) == DwellRestore::BadCrc);
+    // A PANIC is the boot whose preceding state matters most, so it must adopt. SAFE MODE refuses
+    // outright and is not about the bytes: it never starts the poll task, so nothing would age these
+    // slots and an adopted table would go on reporting "OFF for 3 h" for as long as the latch holds.
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::PANIC), DWELL_PERSIST_MAGIC,
+                                DWELL_PERSIST_VERSION, fp, fp, crc, crc) == DwellRestore::Accept);
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC,
+                                DWELL_PERSIST_VERSION, fp, fp, crc, crc, true) == DwellRestore::SafeMode);
+
+    // Adoption books the unwatched reboot window as blind rather than pretending it was observed.
+    // A stale slot stays stale: it was already saying nothing, and a reboot is not evidence.
+    DwellSlot carried[DWELL_MAX_SLOTS] = {};
+    dwell_step(carried, DWELL_MAX_SLOTS, on_row, 1, 1);
+    dwell_step(carried, DWELL_MAX_SLOTS, off_row, 1, 60);
+    const DwellReading before = dwell_lookup(carried, DWELL_MAX_SLOTS, 0x62, 2, 304);
+    dwell_adopt(carried, DWELL_MAX_SLOTS);
+    const DwellReading after = dwell_lookup(carried, DWELL_MAX_SLOTS, 0x62, 2, 304);
+    CHECK(after.known && after.exact);
+    CHECK(after.since_s == before.since_s + DWELL_REBOOT_BLIND_S);
+    CHECK(after.blind_s == before.blind_s + DWELL_REBOOT_BLIND_S);
+
+    // A slot already mid-gap when the board went down has been unread for its own gap PLUS the
+    // reboot. Restarting the counter would hand it a fresh DWELL_MAX_GAP_S on the other side — a run
+    // vouched for across nearly twice the bound the rule states.
+    DwellSlot midgap[DWELL_MAX_SLOTS] = {};
+    dwell_step(midgap, DWELL_MAX_SLOTS, on_row, 1, 1);
+    for (uint32_t i = 0; i < DWELL_MAX_GAP_S - 1; i++)
+        dwell_step(midgap, DWELL_MAX_SLOTS, nullptr, 0, 1);
+    CHECK(dwell_lookup(midgap, DWELL_MAX_SLOTS, 0x62, 2, 304).known);   // one second of bound left
+    dwell_adopt(midgap, DWELL_MAX_SLOTS);
+    CHECK(!dwell_lookup(midgap, DWELL_MAX_SLOTS, 0x62, 2, 304).known);  // the reboot spent it
+
+    // ── the real catalog ────────────────────────────────────────────────────────────────────────
+    // The table is fixed-size, so the question is whether any shipped profile can overflow it — a
+    // silent drop of the last rows, with no error anywhere. Resolve the VIEW, not the base table:
+    // def/overlay.hpp's page-0x10 drop-control flags are tracked rows too, so counting the generated
+    // rows alone would answer correctly for the wrong reason today and wrongly the moment the
+    // generator emits them.
+    size_t worst = 0;
+    for (const auto& p : def::profiles) {
+        const auto v = def::resolved(p);
+        size_t tracked = 0;
+        for (size_t i = 0; i < v.count(); i++) {
+            const ValueDef& row = v[i];
+            if (!dwell_tracked(row.conv)) continue;
+            tracked++;
+            // A tracked row is a STATE, never a measurement: it must carry no physical unit, or the
+            // value list would offer "42.0 °C unchanged for 3 h" as if a thermistor were a switch.
+            CHECK(row.type == -1);
+        }
+        if (tracked > worst) worst = tracked;
+    }
+    CHECK(worst > 0);
+    CHECK(worst <= DWELL_MAX_SLOTS);
+    // Headroom is stated rather than assumed: the day a generator run takes the worst case past the
+    // table this fails here instead of on a device, where the symptom is one row quietly having no
+    // dwell among a hundred that do.
+    CHECK(worst + 8 <= DWELL_MAX_SLOTS);
+}
+
 // ── logic/checkup_persist.hpp ───────────────────────────────────────────────────────────────────
 // The checkup's window is the part of this firmware that tolerates a reboot WORST: the window is
 // 24 h and the requirements are hours long, so losing it loses the verdict rather than a few
@@ -10918,6 +11159,7 @@ int main() {
     test_tie_break_reach();
     test_entity_identity();
     test_feature_gate();
+    test_state_dwell();
     test_checkup_persist();
     test_history_persist();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }

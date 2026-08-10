@@ -9,6 +9,7 @@
 // RAM.
 #include "http_handlers.hpp"
 #include "checkup.hpp"
+#include "state_dwell.hpp"
 #include "config.hpp"
 #include "env3.hpp"
 #include "heap_guard.hpp"
@@ -800,6 +801,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     if (modbus_was_enabled && !config_modbus_enabled(c)) mqtt_request_modbus_cleanup();
     if (reset_checkup) {
         checkup_reset();
+        dwell_reset();
         history_reset();
         hp_poll_reconfigure();
     }
@@ -1099,6 +1101,7 @@ static esp_err_t do_detect(httpd_req_t* req) {
     c.fp_valid = false;
     config_set_runtime(c);
     checkup_reset();
+    dwell_reset();
     history_reset();
     hp_poll_reconfigure();
     // The HomeHub stack is told separately, because it IS separate: this starts or stops its task

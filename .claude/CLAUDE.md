@@ -983,6 +983,46 @@ checkup.cpp     the 24-hour PLANT CHECKUP behind /status.health and the dashboar
                 wrong: TrendRing::fold keeps the LAST reading of each 5-minute bucket, so a
                 compressor cycle shorter than five minutes leaves no trace in it — the short cycling
                 the checkup exists to find is exactly what that raster cannot see
+state_dwell.cpp HOW LONG EACH SWITCHED ROW HAS READ WHAT IT READS — the value list's other half.
+                "OFF" answers what a flag IS; for a flag that is half the question, since
+                `Powerful DHW Operation: OFF` describes a plant that finished a charge four seconds
+                ago and one that has not charged since Tuesday equally well. Storage + mutex only;
+                every rule is the host-tested logic/state_dwell.hpp. Fed by the poll task beside
+                history_record and checkup_record, from `fresh` — the rows that ANSWERED this cycle —
+                because a row's ABSENCE is precisely the evidence the rule needs. TRACKS the bit
+                flags (conv 300-307) plus the fault CLASS (conv 203) and nothing else: for a
+                thermistor at 0.1 K resolution "time since the last change" is the poll period, a
+                number that would read 1-3 s on ~50 rows and bury the ~34 where it means something.
+                Conv 204 is deliberately out — it is the SAME EVENT as its 203 companion spelled
+                differently, and a second age beside it is the "second thing to rule out" rule that
+                already retired `device_time`. 48 slots x 16 B = 768 B, against history's ~26.5 KB
+                and the checkup's 1224: the same question answered with a 24-hour ring would cost
+                576 B PER ROW, which is why this is a scalar and why the ring budget
+                (TREND_COUNT x 576 == 17856, exactly at its ceiling) could not have absorbed it.
+                In .noinit like both of them, under the same seal, and it carries the #417 trap in
+                its own comment — the __NOINIT_ATTR object MUST be a union with a user-provided
+                empty constructor, or the members with NSDMIs are silently re-initialised while the
+                bare header scalars survive, which reports as `bad_crc` and reads as broken DRAM.
+                Adoption books DWELL_REBOOT_BLIND_S against every live run rather than pretending
+                the reboot window was watched. /status.history.dwell_persist names the outcome.
+                THE HONESTY is the whole feature, and it is three separate facts on /values rather
+                than one number: `dwell_s` is what the board could tell, `dwell_min` says the
+                transition was never WITNESSED so the true age is at least that, and `dwell_blind_s`
+                says how much of the run the bus did not answer for. WITNESSED is strict — the
+                previous state seen in the IMMEDIATELY PRECEDING cycle — since a change found after
+                even a short gap happened somewhere inside it, and an exact "for 0 s" about an
+                unobserved instant is the precision this exists to refuse. Whole seconds quantise
+                ABSOLUTE instants rather than flooring each interval (checkup_step's rule, and this
+                file shipped the defect that comment warns about: the ~1.2-1.3 s real cadence made a
+                floored interval run 23% slow forever), and the gap bound applies to the CLOCK rather
+                than only to the rows that went missing — a row present at both ends of a stall was
+                unwatched in between just the same. A row published as "value":null carries NO
+                age — the slot survives and books the seconds blind, but an age beside a value that
+                is not there renders as the literal "— for 3 h 20 min" (47 timeouts in 8.2 h on the
+                reference installation, and a flag can pulse and return unseen inside one). Past
+                DWELL_MAX_GAP_S (120 s, CHECKUP_MAX_GAP_S's number rather than a third idea of how
+                long the bus may be quiet) a slot reports NOTHING at all — the absence rule, so a
+                silent bus expires its ages instead of freezing them and presenting them as current
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp).
                 cfg.max_uri_handlers is sized EXACTLY to the trusted-LAN route count — raise it in
                 the SAME commit that adds a route: an overflow is silent and lands on the WRONG
@@ -1371,7 +1411,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 binary_semantics, circulation_source, env3, heating_curve_diagnosis,
                 heating_curve_mqtt, hp_query_log, http_cache, modbus_snapshot, mqtt_publish_gate,
                 open_meteo, reference_temperature, weather_forecast, weather_mqtt,
-                history_persist).
+                history_persist, state_dwell).
                 The list is the DIRECTORY, not a curated subset: a header missing from it reads as
                 "there is no pure rule for that", which is the one thing this inventory must never
                 say about a rule that exists — ten of them had accumulated unlisted. It drifts in the
@@ -2668,11 +2708,17 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   reason/summary from the boot-time cache, `coredump` re-read from flash per request
                   so a cleared dump can't strand the banner; drives the crash banner, whose title keys
                   on `fault` — an orphan dump alone is NOT "restarted after a crash"),
-                  history{dt,persist,rows[{id,label}],modbus_rows[{id,label}],env3_rows[{id,label}]}
+                  history{dt,persist,dwell_persist,rows[{id,label}],modbus_rows[{id,label}],
+                  env3_rows[{id,label}]}
                   — `persist` is how THIS boot's rings came to be: "accept" (adopted from .noinit
                   DRAM across a reset that kept power) or the named reason they started empty
                   ("power_cycle", "wrong_catalog" after an update moved the trend set, "bad_crc",
-                  "wrong_version", "no_record"). Reported because a chart that emptied itself
+                  "wrong_version", "no_record"). `dwell_persist` answers the same question in the
+                  same vocabulary for the per-row STATE AGES (state_dwell.cpp), which ride the same
+                  .noinit medium under the same rules and therefore reset for the same reasons; it
+                  rides this block rather than one of its own because every byte added to /status is
+                  paid for on the httpd task's stack. Reported because a chart — or a set of
+                  durations — that emptied itself
                   otherwise reads as a defect, and only the device knows which of those happened —
                   plus which
                   X10A/board rows,
@@ -2734,6 +2780,17 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus "binary":true 
                   browser still derives it, but a non-browser consumer gets it without
                   reimplementing the rule, and the marker travels WITH the row rather than being
                   recomputed from a snapshot taken elsewhere.
+                  A SWITCHED row (conv 300-307 or the conv-203 fault class) also carries HOW LONG IT
+                  HAS READ WHAT IT READS (state_dwell.cpp): `dwell_s` seconds, plus `dwell_min":true`
+                  when the transition itself was never witnessed — so the true age is at LEAST that —
+                  plus `dwell_blind_s` when part of the run went unread. THREE keys rather than one
+                  number, because the number alone is not the claim: a consumer that prints `dwell_s`
+                  and ignores the other two states something stronger than the device knows, which is
+                  the #35-#39 shape drawn as a duration. All three are omitted where they do not
+                  apply, so the ~65 measurement rows cost nothing — and an ABSENT `dwell_s` is a
+                  first-class answer meaning the device declines to describe that run at all (silent
+                  bus, a row unread past DWELL_MAX_GAP_S). A zero would say "it changed just now",
+                  which is why absence is a missing key and never a 0.
                   X10A rows also carry `concept` where logic/homehub_map.hpp pairs them with a
                   HomeHub register — the browser matches on that string and does NO matching of its
                   own, since a label match here is the substitution lwt_select/ou_stale exist to

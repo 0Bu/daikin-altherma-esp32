@@ -679,6 +679,65 @@ host-testable core is unusually large and valuable, because the risky parts are 
   The card also deliberately omits claims the available inputs cannot support: 3-way-valve leakage
   inferred from DHW cooling, even after independent circulation-pump correlation,
   a universal minimum-flow threshold, a flat daily-start alarm, and any overall “healthy” verdict.
+- `logic/state_dwell.hpp` — **how long each switched row has read what it reads**, and how much of
+  that the board actually watched. The value list answers *what is it now*; for a bit flag that is
+  half the question, since `Powerful DHW Operation: OFF` describes a plant that finished a charge
+  four seconds ago and one that has not charged since Tuesday equally well. Tracked rows are the bit
+  flags (converters 300–307) plus the fault class (203), selected structurally by converter — never
+  by label — and addressed by **(page, offset, converter)** for `checkup.hpp`'s reason two bullets
+  up: six flags share the byte `0x60/12`.
+
+  It is a **scalar, not a ring**, and that is the whole sizing argument. Nine of these rows already
+  have the better answer — a 24-hour categorical timeline whose tooltip names phase start, end and
+  sampled duration — and it cannot be extended to the rest: a ring costs 576 B, the trend budget is
+  exactly full (`TREND_COUNT × 576 == 17856`, its own ceiling), the remaining rows are not on the
+  schematic and so are excluded by `history.hpp`'s selection rule, and each would need a hand-written
+  bilingual legend. The whole table is 48 × 16 B = **768 B** in `.noinit`, adopted across a
+  power-preserving reset under the same seal, verdict vocabulary and union-storage rule as the trends
+  and the checkup.
+
+  Three properties carry the honesty, and all three are published separately on `/values` rather than
+  folded into one number — a consumer that prints the number and drops the rest states something
+  stronger than the device knows:
+
+  1. **A run joined in progress is a lower bound.** A board up ten minutes whose row read OFF
+     throughout has established "OFF for *at least* ten minutes". `dwell_min` says so, and the UI
+     renders a different sentence for it. *Witnessed* is the strict condition — the previous state
+     seen in the **immediately preceding** cycle — because a change discovered after even a short
+     gap happened somewhere inside it, and publishing an exact "for 0 s" about an instant nobody
+     observed is the precision this feature exists to refuse.
+  2. **Blind time is not unchanged time.** `poll_once` replaces the whole cache each cycle, so a page
+     that did not answer removes its rows outright — 47 timeouts in 8.2 h on the reference
+     installation. A flag can pulse and return inside such a gap, so the seconds are booked as
+     `dwell_blind_s` and travel with the run. Past `DWELL_MAX_GAP_S` (120 s, `CHECKUP_MAX_GAP_S`'s
+     number rather than a third opinion about how long the bus may be quiet) the slot reports
+     **nothing at all**, so a silent bus expires its ages instead of freezing them.
+  3. **A reboot is not a change.** Adoption books `DWELL_REBOOT_BLIND_S` against every live run
+     rather than pretending the downtime was watched; the device cannot time its own outage, and a
+     fabricated duration is what `logic/timestamp.hpp` already refuses for an unsynced clock. It
+     *accumulates* into any gap already in flight rather than restarting it, or a slot that was
+     mid-gap when the board went down would be vouched for across nearly twice the bound above.
+  4. **No value, no age.** A row the sweep could not read is published as `"value":null` — the slot
+     survives and books the seconds as blind, but the age is withheld, because an age beside a value
+     that is not there describes nothing and renders as the literal "— for 3 h 20 min". Both sides
+     refuse it: the firmware for the row it published as null, the browser for the rows it blanks on
+     its own account (a dead bus, a held-over page).
+
+  Whole seconds are derived by quantising **absolute** monotonic instants, never by flooring each
+  interval — `checkup_step()`'s rule, and this file shipped the defect that comment warns about. The
+  poll loop sleeps a whole second *after* a serial sweep, so the real cadence is ~1.2–1.3 s; flooring
+  each interval discards that fraction every cycle and never recovers it (measured: 23% slow forever,
+  so a three-hour state would publish as "2 h 19 min"). Quantising the instants telescopes the
+  remainder into the next cycle and bounds the whole run's error under one second. That rule travels
+  with its **other half**: `checkup_step()` gates the whole computation on the elapsed time and
+  discards the previous state past `CHECKUP_MAX_GAP_S`, and taking only the quantisation would leave
+  the bound enforced solely for rows that went *missing*. A row present at both ends of a stall — the
+  poll task starved through an OTA install, a cycle dropped by `poll_task`'s `bad_alloc` guard — was
+  equally unwatched in between, so the bound applies to the **clock**, not only to the rows.
+
+  It publishes **no Home Assistant entities**: HA carries `last_changed` per entity for free, and
+  thirty-four seconds-since-change sensors would be thirty-four permanently-writing recorder rows —
+  the rule that already retired the heartbeat's `device_time`.
 - `logic/redact.hpp` — what a diagnostic snapshot must **not** carry when it leaves the device, for
   `GET /status?redact=1` and `GET /diag?redact=1`. A bug report is filed as a *public* GitHub issue
   carrying the device's own status, readings and log ([`REPORTING.md`](REPORTING.md)), which is only

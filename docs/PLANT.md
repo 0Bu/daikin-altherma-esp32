@@ -5,7 +5,7 @@ What the firmware **measures, records and infers about the heat-pump installatio
 web server, diagnostics, the build). A feature belongs here when its subject is the plant, the
 building or the weather around them; there when its subject is the board.
 
-Three of the four below are **analysis**, not control, and one is an optional accessory. None of them
+Four of the five below are **analysis**, not control, and one is an optional accessory. None of them
 writes to the heat pump: this firmware has no actuator, no Modbus write path and no MQTT command
 subscription, and that is a property of the code rather than a guard around a dormant capability
 (see [`FEATURES.md`](FEATURES.md) #61 and #68, and [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md)).
@@ -16,6 +16,7 @@ subscription, and that is a property of the code rather than a guard around a do
 | [Open-Meteo forecast on the device](#open-meteo-forecast-on-the-device) | ✅ 🧪 | [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`logic/open_meteo.hpp`](../main/logic/open_meteo.hpp) |
 | [Optional ENV III climate input](#optional-env-iii-climate-input) | ✅ 🧪 | [`env3.cpp`](../main/env3.cpp), [`logic/env3.hpp`](../main/logic/env3.hpp) |
 | [Heating-curve diagnosis](#heating-curve-diagnosis) | ✅ 🧪 | [`logic/heating_curve_diagnosis.hpp`](../main/logic/heating_curve_diagnosis.hpp) |
+| [How long a switched row has read that](#how-long-a-switched-row-has-read-that) | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
 
 ---
 
@@ -257,3 +258,38 @@ configuration on a row whose own copy says the value changes nothing about what 
 
 *Platform-level features are in [`FEATURES.md`](FEATURES.md); keep both current with the
 [`feature-docs`](../.claude/skills/feature-docs/SKILL.md) skill.*
+
+---
+
+## How long a switched row has read that
+
+The value list states what a flag **is**; for a flag that is half the question. `Powerful DHW
+Operation: OFF` describes a plant that finished a charge four seconds ago and one that has not
+charged since Tuesday equally well, and until now nothing on the device could tell them apart —
+nine switched rows have a [24-hour timeline](FEATURES.md) whose tooltip names phase and duration,
+and the other twenty-one had no answer anywhere.
+
+Every bit flag and the fault class now carry the age of their current state, shown as the first line
+of the row's explainer. It is an **observation**, not a statistic: nothing is inferred from it, no
+verdict is raised on it and no threshold is attached to it. What the plant does with a long-standing
+flag is the reader's judgement — the device only says how long it has stood, and how much of that it
+actually saw.
+
+**What it refuses to claim** is the whole design, because a duration is a statement about a stretch
+of time and every way of overstating one looks identical on screen:
+
+- A run the board only found **already standing** is a lower bound — *"OFF for at least 3 h"*. Only a
+  transition it witnessed licenses the plain form, and *witnessed* means seen in the immediately
+  preceding cycle: a change discovered after even a short gap happened somewhere inside that gap.
+- A run the bus did not answer for throughout says so beside itself. A flag can pulse and return
+  inside a gap, and the X10A sweep really does miss pages (47 timeouts in 8.2 h on the reference
+  installation).
+- Past two minutes unread a row reports **nothing at all**, so a silent bus lets its ages expire
+  rather than freezing them and presenting them as current.
+- A reboot is not a change: the ages ride `.noinit` across a reset that kept power, with the
+  unwatched reboot window booked as unobserved rather than as a duration nobody measured.
+- A row the bus could not read this cycle shows **no age at all**, because it is showing no reading
+  either — an age under a "—" describes nothing.
+
+The mechanism, the storage and the persistence rules are the platform half and live in
+[`FEATURES.md`](FEATURES.md) #80.

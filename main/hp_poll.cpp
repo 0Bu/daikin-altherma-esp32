@@ -2,6 +2,7 @@
 // profile's registers, decodes the values, and publishes them to a thread-safe cache.
 #include "hp_poll.hpp"
 #include "checkup.hpp"
+#include "state_dwell.hpp"
 #include "config.hpp"
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
@@ -127,6 +128,7 @@ static void poll_once() {
             s_stats.last_error.swap(err);                  // noexcept — see the commit below
         }
         checkup_record(nullptr, 0, false, false, checkup_coverage);
+        dwell_record(nullptr, 0);          // a cycle went by unread: blind, not unchanged
         return;
     }
 
@@ -316,6 +318,13 @@ static void poll_once() {
     // can never disagree about whether the unit was running.
     checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage);
 
+    // And how long each switched row has read what it reads (logic/state_dwell.hpp). Here for
+    // the reasons above and one of its own: a row that did not answer is simply ABSENT from
+    // `fresh`, which is exactly the evidence the dwell needs to book blind seconds rather than
+    // extend a run it did not watch. Reading it anywhere else would see a cache that has already
+    // forgotten which rows were missing this cycle.
+    dwell_record(fresh.data(), fresh.size());
+
     // One commit, one lock site, and deliberately non-allocating: the vector move-assign steals
     // fresh's buffer and last_error is swapped (noexcept) rather than assigned, so the critical
     // section cannot throw. Lock backs that up — keep both, the invariant is what makes this correct
@@ -398,13 +407,14 @@ static bool poll_detect() {                                    // returns true i
     // same-cycle poll: both rolling observations consume the reset before accepting the newly
     // resolved unit, so neither can splice the prior physical identity into its first sample.
     //
-    // The history takes the DETECT-path entry rather than history_reset(): detection resolves on
-    // every boot, so on a board whose rings survived in .noinit this fired seconds after they were
-    // adopted and threw the whole X10A day away again. history_reset_on_detect() lets that first
-    // detection defer to the per-row identity check, which can actually tell a re-detect of the same
-    // unit from a different one; every later call resets exactly as before. The checkup has no such
-    // problem — it is not persisted, so a reboot starts it over regardless.
+    // All THREE take the DETECT-path entry rather than their plain reset, and for one reason:
+    // detection resolves on every boot, so on a board whose state survived in .noinit the plain
+    // reset fired seconds after it was adopted and threw the whole thing away again. The
+    // *_on_detect() variants let that first detection defer to an identity check, which can actually
+    // tell a re-detect of the same unit from a different one; every later call resets exactly as
+    // before. The history checks per-row identity, the checkup and the state ages the profile id.
     checkup_reset_on_detect(d.best.empty() ? "generic" : d.best.c_str());
+    dwell_reset_on_detect(d.best.empty() ? "generic" : d.best.c_str());
     history_reset_on_detect();
     config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
                      d.eeprom);
@@ -450,6 +460,9 @@ static void poll_task(void*) {
                 // Deliberately here rather than beside history_record_board() above — a resolved
                 // profile must be fed by poll_once() alone, or two samples would share one instant.
                 checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{});
+                // Same argument one feature over: a board whose X10A stops answering across a
+                // reboot would otherwise present the FROZEN pre-reboot state ages as current.
+                dwell_record(nullptr, 0);
                 // Silent-bus detect backoff: sweep at the poll floor at first, then stretch toward the
                 // ceiling the longer the bus stays quiet (logic/detect_backoff.hpp). Applied by SKIPPING
                 // sweep ticks — the top-of-loop esp_task_wdt_reset() above still fires every second, so

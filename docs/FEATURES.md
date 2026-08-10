@@ -118,6 +118,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 76 | **Central task-priority table** — relative priority is a property of the system, so it is declared in one place instead of as twelve bare literals the ordering had to be reconstructed from | ✅ | [`task_config.hpp`](../main/task_config.hpp) |
 | 77 | **Optional wired transport (W5500 / PoE)** — a second network transport detected at boot from one SPI identity register, with the boot fork (wire → radio → portal), the route priority, the pulled-cable reboot and the probe's refusal to drive a configured pad as host-tested rules | ✅ 🧪 | [`logic/net_link.hpp`](../main/logic/net_link.hpp), [`net.cpp`](../main/net.cpp), [`test_transport_contract.mjs`](../test/test_transport_contract.mjs) |
 | 78 | **Transport-independent HTTP trust surface** — the restricted provisioning route set follows the OPEN setup AP's existence rather than the WiFi mode, so a wired board is not locked out of its own API and a live AP cannot be widened by a cable | ✅ 🧪 | [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_server.cpp`](../main/http_server.cpp) |
+| 80 | **Per-row state age** — how long each switched row has read what it reads, published as three separate facts (the seconds, whether the transition was *witnessed*, and how much of the run the bus did not answer for) so a consumer cannot state a stronger claim than the board made | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
 
 ---
 
@@ -601,7 +602,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | HTTP | `http_body`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `redact` |
 | OTA & boot | `health_gate`, `version_cmp`, `ota_manifest`, `ota_channel`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |
 | Network policy | `wifi_rollback`, `link_watch`, `syslog_policy`, `timestamp` |
-| On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |
+| On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `state_dwell`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |
 | Local I/O | `led_pattern`, `button` |
 
 Four properties of that core are worth naming because they are not obvious from the list:

@@ -957,7 +957,25 @@ Body, ordered:
      drift into two slightly different expanders, and Model-card keys are prefixed (`model:`) so they
      can never collide with a catalog label in the open-state set. Each entry carries an English `what`/`normal` plus a German `de` copy; the browser language
      (§1) picks which is shown (English fallback). The value label above the box stays the English
-     register name in both languages. The open state lives in app state
+     register name in both languages.
+     **A switched row's panel opens with HOW LONG IT HAS READ THAT** — the one live sentence in a
+     panel whose explainer is otherwise the same copy on every device at every hour, which is why it
+     goes first and takes `--fg` rather than the body's `--muted`. "OFF" answers what a flag *is*,
+     and for a flag that is half the question: `Powerful DHW Operation: OFF` describes a plant that
+     finished a charge four seconds ago and one that has not charged since Tuesday equally well.
+     Scoped to the bit flags and the fault class (`logic/state_dwell.hpp` decides which, structurally
+     by converter) and deliberately not offered on measurements, where "time since the last change"
+     is the poll period — a number that would read 1–3 s on ~50 rows and bury the ~34 where it means
+     something. **The device states the claim and the browser only renders it**, and there are three
+     of them because the number alone is not one: a run whose transition was never witnessed reads
+     *"for at least"* — a weaker claim, never the same sentence — and a run the bus did not answer
+     for throughout names the unobserved part beside it, in `--muted` and never `--warn`, since a few
+     missed sweeps is the ordinary state of this bus and colouring it as a fault teaches a reader to
+     distrust a healthy plant. Where the device says nothing — a silent bus, a row unread past its
+     gap bound — the line is **absent**, not zero: "0 s" reads as *just changed*. A **blanked** row
+     (the rule above) states no age either, for the reason the inspector had to learn once already:
+     an age under a "—" restates the very reading the row above just refused.
+     The open state lives in app state
      (`S.descOpen`), not the DOM, so the per-poll rebuild of `#valueGroups` re-emits an expanded row
      open instead of collapsing it every second; the click toggles the live element so the slide
      animates, and updates the set for the next rebuild.
@@ -1489,7 +1507,10 @@ enabled/available values are hidden.
   no top border of its own (a `--line` hairline is invisible against `--brand-tint` — 1.15:1 in
   light, 1.23:1 in dark — so it would be an edge that is drawn and cannot be seen), and an inset
   top shadow (`--shadow-tongue`, per-scheme like `--shadow-card`) is the shadow the row casts onto
-  it. Bold `--fg` "Normal:" lead-in on `--muted` body. It opens with the `grid-template-rows: 0fr→1fr`
+  it. Bold `--fg` "Normal:" lead-in on `--muted` body. A **switched** row's panel opens with its
+  STATE AGE above that (§5.3 item 6): `--fg` and semibold, because it is the panel's only live
+  reading rather than commentary about one, with the unobserved-time caveat beside it in plain
+  `--muted`. It opens with the `grid-template-rows: 0fr→1fr`
   height transition (§5.3 item 6) **plus** a `translateY(-7px)→0` slide on the same `.22s` timing, so
   height and content land together; both honour `prefers-reduced-motion` — which has to be said
   explicitly, since the global reduced-motion rule kills `animation` only, not `transition`.

@@ -547,6 +547,51 @@ function histDuration(seconds) {
   return h && m ? t("hist.duration_hm", h, m)
        : h ? t("hist.duration_h", h) : t("hist.duration_min", m);
 }
+
+// The same formatter with a SECONDS tier under a minute. The trend charts never need one — their
+// raster is five minutes — but a state age does: a flag that switched twenty seconds ago is the
+// case a reader is most likely to be looking at, and "0 min" is the one answer that makes a live
+// number look broken.
+function dwellDuration(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  return s < 60 ? t("hist.duration_sec", s) : histDuration(s);
+}
+
+// HOW LONG THIS ROW HAS READ WHAT IT READS — the first line of a switched row's explainer.
+//
+// The device decides both the number and what may be claimed about it (logic/state_dwell.hpp); this
+// only renders. Three fields arrive and all three matter:
+//   dwell_s        seconds the current state has stood, as far as the board could tell
+//   dwell_min      the transition was never witnessed, so the true age is at LEAST that. Rendered
+//                  as "at least", never dropped: a run this board joined in progress is a weaker
+//                  claim than one it watched arrive, and printing them identically is the #35-#39
+//                  shape — a true number carrying more authority than its evidence.
+//   dwell_blind_s  how much of the run the bus did not answer for. A flag can pulse and return
+//                  inside a gap, so a run spanning one is not a run that was watched.
+// An ABSENT dwell_s is the device saying it has nothing to claim (silent bus, a row seen too long
+// ago), and absence renders as nothing at all — never as "0 s", which would read as "just changed".
+//
+// The blind caveat is shown whenever there is ANY, and it took two wrong justifications to get here.
+// The first claimed sub-minute blind time is "the reboot allowance or one missed sweep" — false,
+// since blind_s accumulates over the whole run and a long one reaches a minute a second at a time.
+// The second claimed dwellDuration would render it as "0 min" — also false: that formatter has a
+// seconds tier precisely so small numbers read correctly, so the suppression was silently dropping
+// up to 59 s of unobserved time out of a sentence otherwise presented as exact. Two failed defences
+// of one threshold is the answer: there is no defensible number, so there is no threshold. A run
+// carrying five unobserved seconds says so.
+function dwellNoteHtml(v, stateText) {
+  // No value, no age. The firmware already withholds the age for a row it could not read, but the
+  // browser blanks a row for reasons of its OWN too (a dead bus, a held-over page), and an age has
+  // to be withheld by whichever side decided the reading is not stateable — otherwise the panel
+  // prints "— for 3 h 20 min", an age for a reading the row above just refused.
+  if (!v || v.dwell_s == null || v.value == null || !stateText || stateText === "—") return "";
+  const shown = v.dwell_min
+    ? t("val.since_min", stateText, dwellDuration(v.dwell_s))
+    : t("val.since", stateText, dwellDuration(v.dwell_s));
+  const blind = Number(v.dwell_blind_s) || 0;
+  return descParaHtml(`<span class="vdesc-since">${esc(shown)}</span>` +
+    (blind > 0 ? `<span class="vdesc-since-gap"> · ${esc(t("val.since_gap", dwellDuration(blind)))}</span>` : ""));
+}
 function stateRunWhen(view, from, count) {
   if (view.t0 != null) {
     const clock = (i) => new Date((view.t0 + i * view.dt) * 1000)
@@ -1300,14 +1345,21 @@ function vDescRow(v) {
   // as a second opinion with a difference against the X10A number — that difference is measured
   // against a reading this row has just refused to state.
   const cmp = fb ? null : mb;
-  if (!d && !hid && !cmp) {
+  // The state age describes THIS row's own X10A reading, so it is withheld exactly when that reading
+  // is: a blanked row states no value, and a row a HomeHub is standing in for is showing the other
+  // instrument — putting "OFF for 3 h" under either would restate a number the row above just
+  // refused, which is the failure ou_stale.hpp's inspector rule already had to fix once.
+  const dwell = notCurrent ? "" : dwellNoteHtml(v, displayValue(src));
+  if (!d && !hid && !cmp && !dwell) {
     return `<div class="vrow"><span class="vrow-label">${esc(shownLabel)}</span>` +
       `<span class="vrow-val ${cls}">${val}</span></div>`;
   }
-  // Body = the explainer, then the second source's reading, then the trend. Any part may be absent,
-  // which is why the builder takes finished markup rather than a description.
+  // Body = how long it has read this, then the explainer, then the second source's reading, then the
+  // trend. Any part may be absent, which is why the builder takes finished markup rather than a
+  // description. The age goes FIRST because it is the only LIVE fact in the panel — the explainer
+  // below it is the same sentence on every device and at every hour.
   return descAccordion(key, shownLabel, val, cls,
-                       (d ? descBodyHtml(d, src.value) : "") + mbNoteHtml(v, cmp) +
+                       dwell + (d ? descBodyHtml(d, src.value) : "") + mbNoteHtml(v, cmp) +
                        histHtml(hid, displayUnit(v), shownLabel), hid);
 }
 
