@@ -690,24 +690,31 @@
                  line of copy under every idle dashboard. Its live half (reading, state sentence,
                  row values) re-renders every poll while it is open. -->
             <div class="inspect" id="inspect">
-              <div class="inspect-card" id="inspCard" hidden>
-                <!-- Title and headline reading are ONE wrapping pair (style.css .inspect-head): the
-                     value drops to its own line under the title as soon as the two stop fitting side
-                     by side. The mono source line is deliberately OUTSIDE that pair — it is a long
-                     verbatim register name, so it takes the card's full width and never shares a
-                     line with the reading. -->
-                <div class="inspect-head">
-                  <div class="inspect-title" id="inspTitle"></div>
-                  <div class="inspect-now num" id="inspNow"></div>
-                  <button class="inspect-x" type="button" id="inspClose" aria-label="Close">✕</button>
+              <!-- The clip is the same 0fr -> 1fr accordion structure as every value/Settings
+                   tongue. Keeping the card mounted is intentional: `hidden` would reveal the
+                   whole box immediately and leave only its contents to animate. `inert` keeps the
+                   collapsed close button and trend controls out of the keyboard/accessibility
+                   tree until renderInspect() opens the tongue. -->
+              <div class="inspect-inner">
+                <div class="inspect-card" id="inspCard" aria-hidden="true" inert>
+                  <!-- Title and headline reading are ONE wrapping pair (style.css .inspect-head): the
+                       value drops to its own line under the title as soon as the two stop fitting side
+                       by side. The mono source line is deliberately OUTSIDE that pair — it is a long
+                       verbatim register name, so it takes the card's full width and never shares a
+                       line with the reading. -->
+                  <div class="inspect-head">
+                    <div class="inspect-title" id="inspTitle"></div>
+                    <div class="inspect-now num" id="inspNow"></div>
+                    <button class="inspect-x" type="button" id="inspClose" aria-label="Close">✕</button>
+                  </div>
+                  <div class="inspect-src mono" id="inspSrc"></div>
+                  <div class="inspect-body" id="inspBody"></div>
+                  <!-- The headline row's 24-hour trend, when the firmware keeps one for it. Same
+                       sparkline the value list draws (app.js histHtml): description first, then the
+                       graphical evidence, then every additional X10A/Modbus value in one list. -->
+                  <div class="inspect-hist" id="inspHist" hidden></div>
+                  <div class="inspect-rows" id="inspRows"></div>
                 </div>
-                <div class="inspect-src mono" id="inspSrc"></div>
-                <div class="inspect-body" id="inspBody"></div>
-                <!-- The headline row's 24-hour trend, when the firmware keeps one for it. Same
-                     sparkline the value list draws (app.js histHtml): description first, then the
-                     graphical evidence, then every additional X10A/Modbus value in one list. -->
-                <div class="inspect-hist" id="inspHist" hidden></div>
-                <div class="inspect-rows" id="inspRows"></div>
               </div>
             </div>
           </figure>

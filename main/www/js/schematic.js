@@ -512,8 +512,11 @@ function renderEnv3Pill() {
     group.setAttribute("aria-hidden", "true");
     if (S.insp === "env3") {
       S.insp = null;
-      S.inspSig = "";
-      S.inspHistSig = "";
+      // Null is an invalidation sentinel, not the closed inspector's real empty signature. Using
+      // "" for both let renderInspect() take its unchanged-DOM early return and leave the tongue
+      // visibly open after its ENV III trigger disappeared.
+      S.inspSig = null;
+      S.inspHistSig = null;
     }
     return;
   }
@@ -1600,7 +1603,19 @@ function renderInspect() {
   const sig = inspectSig(e);
   if (sig === S.inspSig) return;
   S.inspSig = sig;
-  $("inspCard").hidden = !e;
+  // Use the same live-class accordion as the value/Settings tongues. The body stays mounted inside
+  // its 0fr clip so the browser has a real closed geometry to transition FROM; toggling `hidden`
+  // here painted the full infobox immediately and could never reproduce their pull-out motion.
+  const inspect = $("inspect");
+  const card = $("inspCard");
+  inspect.classList.toggle("open", !!e);
+  if (e) {
+    card.removeAttribute("aria-hidden");
+    card.removeAttribute("inert");
+  } else {
+    card.setAttribute("aria-hidden", "true");
+    card.setAttribute("inert", "");
+  }
   document.querySelectorAll("#schem .sc-hit").forEach((el) => el.classList.toggle("sel", el.dataset.insp === S.insp));
   if (!e) return;
   if (e.env3) {
