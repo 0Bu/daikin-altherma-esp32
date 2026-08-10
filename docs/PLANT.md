@@ -69,6 +69,41 @@ never observed evidence, then continues the candidate. `/status.health.checks[dh
 `candidate_s` or `settle_remaining_s`, so a carried 59-minute candidate no longer looks like zero
 progress merely because only complete one-hour windows count toward the six-hour verdict gate.
 
+**A check that cannot complete here says so, instead of collecting forever.** Only completed clean
+hours count, and each tank charge costs 105 undisturbed minutes (45 settling plus a 60-minute
+window), so a plant whose own duty cycle is shorter than that produces `0 min of 6 h` for the life
+of the installation — the same reading a board that booted a minute ago gives. Two changes separate
+them. The window now records what it **discarded**: how many candidate hours (`aborts`), why
+(`abort_reasons[]` — charge, pump, draw, reading, blind) and how far the best one got
+(`best_aborted_s`), all decaying with the same 24-hour ring. And a full lifecycle with no completed
+window and at least six discarded ones becomes `blocked`: reported as `Unavailable`, the verdict
+that already means "this check cannot adjudicate here" — it says nothing either way, does not
+outrank `Ok`, and stops one permanently unreachable check from holding the whole card at
+`collecting`. What separates it from a dead bus is `aborts`: a bus that measured nothing discarded
+nothing — a candidate cannot even open without readable rows — so `collecting` stays the honest
+answer there. A finding always outranks it: a high window is evidence, and evidence is never
+withheld because the plant is also busy.
+
+The verdict has **two causes and needs two sentences**, because they call for opposite action. A
+plant whose duty cycle is shorter than 105 minutes is one; an X10A link that keeps going quiet
+*mid-window* is the other — a flapping bus opens a candidate, loses it to the blind budget, and can
+reach the same bar. When `blind` is the only reason recorded, the card names the link and points at
+the wiring and the RX/TX pins instead of blaming the heat pump's cycling for what is a connection
+fault.
+
+The **settling** guard is charged only for a charge witness that stood at least two minutes. It is
+owed to heat entering the tank, and a one-cycle valve blip put none in; before this bound a blip
+cost the identical 105 minutes as a 40-minute charge, and one blip every 90 minutes took a
+measured, otherwise perfect 24 h from 23 completed windows to zero. A short witness still discards
+the candidate hour — the hydronics moved, so the tank was not standing — it just no longer asserts
+that heat went in. Two rules keep the bound from failing in the direction that reports a leak where
+there is none. A witness seen across an interval nobody watched counts as **proven** rather than
+short. And an **unreadable** row is not proof the charge ended: both witnesses ride page 0x60, so
+one silent page inside a real 40-minute charge would otherwise restart the two-minute clock, and a
+charge finishing soon after that timeout would arm no settle at all and have its own tail measured
+as standing loss. At the reference installation's timeout rate that is not a corner case. Staying
+armed across a blind stretch only ever spends more settling time, never less.
+
 Two refusals exist because persistence can make evidence **outlive its source**, which is the one
 thing the window must never do. Safe mode never adopts: it does not run the poll loop, so nothing
 would age the window and a frozen pre-reboot day would read as a live assessment for as long as the

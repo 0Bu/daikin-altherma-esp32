@@ -1561,9 +1561,9 @@ const MODEL_DESCRIPTIONS = {
     de: { what: "Die geräteeigene Störungsklasse, keine Projekt-Heuristik. Ein Fehler ergibt WARNUNG; eine Warnung oder Vorsicht ergibt HINWEIS; eine Meldung, die im 24-Stunden-Fenster auftrat und wieder verschwand, ebenfalls HINWEIS. Für OK müssen alle Klassenzeilen lesbar und frei sein.",
           normal: "Eine verschwundene Meldung bleibt bis zu 24 Stunden vermerkt; dieses Fenster liegt allein im Arbeitsspeicher des Boards. Neustart oder Änderung der X10A-Identität beginnen ein neues Fenster. Ein noch anstehender Code steht unter „Betrieb“." } },
   health_dhw_loss: {
-    what: "Maximum R5T drop in clean one-hour windows: tank charging, internal-pump operation, BSH, the 45-minute settling period and draw-like drops are excluded. Actual MQTT plug power attributes high loss to the DHW circulation pump.",
+    what: "Maximum R5T drop in clean one-hour windows: tank charging, internal pump, BSH, the 45-minute settle after a charge over 2 min, and draw-like drops are excluded. MQTT plug power attributes high loss to the DHW circulation pump.",
     normal: "At least 0.8 K/h gives a NOTE as a project heuristic. R5T is one point in a stratified tank: even high loss with the external pump off does not by itself prove a leaking valve, check valve or insulation defect. OK needs a full 24-hour lifecycle and six clean hours.",
-    de: { what: "Größter R5T-Abfall in bereinigten Stundenfenstern: Speicherladung, interne Pumpe, BSH, 45 Minuten Beruhigung und zapfungsähnliche Sprünge sind ausgeschlossen. Die MQTT-Plug-Leistung ordnet hohen Verlust der Warmwasser-Zirkulationspumpe zu.",
+    de: { what: "Größter R5T-Abfall in bereinigten Stundenfenstern: Speicherladung, interne Pumpe, BSH, 45 min Beruhigung ab 2 min Ladung und zapfungsähnliche Sprünge sind ausgeschlossen. Die MQTT-Plug-Leistung ordnet hohen Verlust der Zirkulationspumpe zu.",
           normal: "Ab 0,8 K/h erscheint HINWEIS als Projekt-Heuristik. R5T misst nur einen Punkt im geschichteten Speicher: Hoher Verlust bei Pumpe AUS beweist weder undichtes Ventil noch Rückschlagventil- oder Dämmungsfehler. OK erfordert volle 24 Stunden und sechs bereinigte Stunden." } },
   health_cycling: {
     what: "Counts compressor OFF-to-ON transitions and divides observed runtime by starts. Runs at the window edges may be incomplete.",

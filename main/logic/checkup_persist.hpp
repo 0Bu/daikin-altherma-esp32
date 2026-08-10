@@ -177,6 +177,11 @@ inline uint32_t checkup_layout_fingerprint() {
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(DHW_LOSS_HIGH_TENTHS_K_H));
     crc = checkup_fp_u32(crc, DHW_LOSS_BLIND_RUN_MAX_S);
     crc = checkup_fp_u32(crc, DHW_LOSS_BLIND_MAX_PCT);
+    // Both decide what a stored counter MEANS, so both belong here: the charge minimum changes which
+    // events armed a settle (and therefore which hours ever became candidates), and the blocked
+    // threshold changes what an `aborts` tally concludes.
+    crc = checkup_fp_u32(crc, DHW_LOSS_CHARGE_MIN_S);
+    crc = checkup_fp_u32(crc, DHW_LOSS_BLOCKED_MIN_ABORTS);
     crc = checkup_fp_u32(crc, DHW_LOSS_CIRC_KNOWN_PCT);
     crc = checkup_fp_u32(crc, DHW_LOSS_CIRC_MIN_ON_S);
     crc = checkup_fp_u32(crc, DHW_LOSS_CIRC_OFF_SETTLE_S);
@@ -243,6 +248,7 @@ inline uint32_t checkup_dhw_handoff_crc(uint32_t model_fp,
     crc = checkup_fp_u32(crc, c.segment_circulation_known_s);
     crc = checkup_fp_u32(crc, c.segment_circulation_on_s);
     crc = checkup_fp_u32(crc, c.settle_remaining_s);
+    crc = checkup_fp_u32(crc, c.charge_run_s);
     crc = checkup_fp_u32(crc, c.segment_blind_s);
     crc = checkup_fp_u32(crc, c.blind_run_s);
     crc = checkup_fp_u32(crc, static_cast<uint16_t>(c.segment_start_tenths));
@@ -258,6 +264,9 @@ inline uint32_t checkup_dhw_handoff_crc(uint32_t model_fp,
     crc = checkup_fp_u32(crc, b.high_windows);
     crc = checkup_fp_u32(crc, b.high_with_pump);
     crc = checkup_fp_u32(crc, b.high_pump_off);
+    crc = checkup_fp_u32(crc, b.best_aborted_s);
+    crc = checkup_fp_u32(crc, b.aborts);
+    crc = checkup_fp_u32(crc, b.abort_reasons);
     return config_crc32_final(crc);
 }
 

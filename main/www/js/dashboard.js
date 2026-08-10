@@ -980,10 +980,36 @@ function checkupDetailKey(c, statusKey) {
   return `check.detail.${statusKey}`;
 }
 
+// The reasons the firmware sent, as words. It sends SLUGS and never a bitmask, so this translates
+// rather than decodes — an unknown slug from a newer firmware is dropped instead of rendering a
+// placeholder that looks like a cause.
+function checkupDhwReasons(c) {
+  const list = Array.isArray(c.abort_reasons) ? c.abort_reasons : [];
+  return list.map((r) => t(`check.detail.dhw_reason.${r}`))
+             .filter((s) => s && !s.startsWith("check.detail."))
+             .join(", ");
+}
+
 function checkupDetailHtml(c) {
   const statusKey = checkupStatusKey(c);
   const value = checkupMetricValue(c);
   let detail;
+  // "This check cannot be completed HERE" is an unavailable verdict like a profile that lacks the
+  // rows, and needs the opposite advice — so it gets its own sentence rather than the generic one.
+  if (statusKey === "unavailable" && c.id === "dhw_loss" && c.blocked) {
+    const reasons = Array.isArray(c.abort_reasons) ? c.abort_reasons : [];
+    // Same verdict, two causes, opposite actions. When the ONLY thing that ever ended a candidate
+    // was the bus going quiet, this is the X10A link and not the plant's duty cycle — a flapping
+    // bus can reach the blocked bar, and blaming the heat pump for it sends the reader nowhere.
+    const linkOnly = reasons.length === 1 && reasons[0] === "blind";
+    const sentence = linkOnly
+      ? t("check.detail.dhw_blocked_link", Number(c.aborts) || 0,
+          checkupDuration(c.best_aborted_s))
+      : t("check.detail.dhw_blocked", Number(c.aborts) || 0, checkupDhwReasons(c),
+          checkupDuration(c.best_aborted_s));
+    return descNoteHtml(t("check.detail.assessment_label"),
+                        `${checkupStatusText(c)} — ${sentence}`);
+  }
   if (statusKey === "collecting") {
     if (c.id === "dhw_loss" && c.required_s > 0) {
       const done = checkupDuration(c.observed_s), required = checkupDuration(c.required_s);
@@ -996,6 +1022,11 @@ function checkupDetailHtml(c) {
       } else {
         detail = t("check.detail.dhw_waiting", done, required);
       }
+      // Appended to all three: what was thrown away is the same fact whatever is happening now, and
+      // it is the half that says whether waiting will ever help.
+      if (Number(c.aborts) > 0)
+        detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c),
+                    checkupDuration(c.best_aborted_s));
     } else {
       detail = c.required_s > 0
         ? t("check.detail.collecting", checkupDuration(c.observed_s), checkupDuration(c.required_s))

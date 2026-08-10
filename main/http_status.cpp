@@ -878,6 +878,29 @@ void http_append_status_json(std::string& j, bool redact) {
                     j += std::to_string(hr.dhw_candidate_s);
                     j += ",\"settle_remaining_s\":";
                     j += std::to_string(hr.dhw_settle_remaining_s);
+                    j += ",\"aborts\":";
+                    j += std::to_string(hr.dhw_aborts);
+                    j += ",\"best_aborted_s\":";
+                    j += std::to_string(hr.dhw_best_aborted_s);
+                    j += ",\"blocked\":";
+                    j += hr.dhw_blocked ? "true" : "false";
+                    // NAMES, not the raw mask: the browser would otherwise carry a copy of the bit
+                    // meanings, which is a second definition of the rule free to drift from
+                    // checkup.hpp's. Appended one literal at a time (the stack budget this builder
+                    // is measured against — CLAUDE.md → Memory constraints).
+                    j += ",\"abort_reasons\":[";
+                    {
+                        bool first = true;
+                        for (uint8_t bit : {logic::DHW_ABORT_CHARGE, logic::DHW_ABORT_PUMP,
+                                            logic::DHW_ABORT_DRAW, logic::DHW_ABORT_READING,
+                                            logic::DHW_ABORT_BLIND}) {
+                            if (!(hr.dhw_abort_reasons & bit)) continue;
+                            if (!first) j += ",";
+                            first = false;
+                            j += jstr(logic::dhw_abort_reason_name(bit));
+                        }
+                    }
+                    j += "]";
                     break;
                 case logic::CheckupCheck::Cycling:  num("starts", ck.a);   num("mean_run_s", ck.b); break;
                 case logic::CheckupCheck::Defrost: {

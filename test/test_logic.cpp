@@ -8149,6 +8149,288 @@ static void test_checkup() {
     }
 
     {
+        // A CHARGE WITNESS TOO SHORT TO HAVE PUT HEAT IN COSTS NO SETTLING TIME.
+        //
+        // The settle exists because a freshly heated tank redistributes; that is a claim about heat
+        // entering the tank, and one poll cycle of "3-way valve on DHW" put none in. It used to arm
+        // the full 45 minutes anyway, so a blip and a 40-minute charge cost the identical 105
+        // minutes (settle + a fresh hour) — and a plant that blips more often than that reported
+        // `0 min of 6 h` forever with every input present and correct.
+        auto quiet = [](int tenths) {
+            CheckupSample s;
+            s.valve_known = s.pump_known = s.bsh_known = true;
+            s.r5t_ok = true;
+            s.r5t_tenths = tenths;
+            return s;
+        };
+
+        // Continuous samples, so the "unmeasured gap counts as proven" branch is not what arms it.
+        DhwLossState st;
+        DhwLossBucket b;
+        int64_t us = 0;
+        // Two quiet samples: the first only establishes continuity, the second opens the candidate.
+        for (int sec = 0; sec <= 10; sec++)
+            dhw_loss_step(st, b, quiet(500), static_cast<int64_t>(sec) * 1000000);
+        CHECK(st.segment_start_us >= 0);
+        for (int sec = 11; sec <= 40; sec++) {                      // 30 s of charge witness
+            us = static_cast<int64_t>(sec) * 1000000;
+            CheckupSample s = quiet(500);
+            s.valve_dhw = true;
+            dhw_loss_step(st, b, s, us);
+        }
+        CHECK(st.charge_run_s == 30);
+        CHECK(st.settle_remaining_s == 0);                          // under the two-minute bound
+        // …but the candidate still ended: the hydronics moved, so the tank was not standing.
+        CHECK(st.segment_start_us < 0);
+        CHECK(b.aborts == 1 && b.abort_reasons == DHW_ABORT_CHARGE);
+
+        // Past the bound the same witness is a charge again and earns the full settle.
+        for (int sec = 41; sec <= static_cast<int>(DHW_LOSS_CHARGE_MIN_S) + 15; sec++) {
+            us = static_cast<int64_t>(sec) * 1000000;
+            CheckupSample s = quiet(500);
+            s.valve_dhw = true;
+            dhw_loss_step(st, b, s, us);
+        }
+        CHECK(st.settle_remaining_s == DHW_LOSS_SETTLE_S);
+        // One charge is ONE discarded candidate, not one per second of it.
+        CHECK(b.aborts == 1);
+        // Dropping the witness releases the accumulated run, so two short blips never add up.
+        dhw_loss_step(st, b, quiet(500), us + 1000000);
+        CHECK(st.charge_run_s == 0);
+
+        // A TIMED-OUT SWEEP INSIDE A CHARGE DOES NOT RESTART THE CLOCK. Both witnesses ride page
+        // 0x60, so one silent page makes `heating_tank` false without the charge having stopped.
+        // Clearing the run there would mean a charge ending soon after a timeout armed NO settle and
+        // its own tail was measured as standing tank loss — a leak reported where there is none,
+        // which is the one direction this check must never fail in.
+        DhwLossState blind_st;
+        DhwLossBucket blind_b;
+        for (int sec = 0; sec <= 10; sec++)
+            dhw_loss_step(blind_st, blind_b, quiet(500), static_cast<int64_t>(sec) * 1000000);
+        for (int sec = 11; sec <= 110; sec++) {                     // 100 s of real charge
+            CheckupSample s = quiet(500);
+            s.valve_dhw = true;
+            dhw_loss_step(blind_st, blind_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(blind_st.charge_run_s == 100 && blind_st.settle_remaining_s == 0);
+        {                                                           // page 0x60 misses one sweep
+            CheckupSample s = quiet(500);
+            s.valve_known = s.bsh_known = false;
+            dhw_loss_step(blind_st, blind_b, s, 111LL * 1000000);
+        }
+        CHECK(blind_st.charge_run_s == 100);                        // NOT restarted
+        for (int sec = 112; sec <= 140; sec++) {                    // the charge continues
+            CheckupSample s = quiet(500);
+            s.valve_dhw = true;
+            dhw_loss_step(blind_st, blind_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(blind_st.settle_remaining_s == DHW_LOSS_SETTLE_S);
+        // A READABLE not-charging sweep does clear it, so two separate blips never add up.
+        dhw_loss_step(blind_st, blind_b, quiet(500), 141LL * 1000000);
+        CHECK(blind_st.charge_run_s == 0);
+
+        // BSH is the second witness and is bounded identically.
+        DhwLossState bsh_st;
+        DhwLossBucket bsh_b;
+        for (int sec = 0; sec <= 10; sec++)
+            dhw_loss_step(bsh_st, bsh_b, quiet(500), static_cast<int64_t>(sec) * 1000000);
+        for (int sec = 11; sec <= 40; sec++) {
+            CheckupSample s = quiet(500);
+            s.bsh_on = true;
+            dhw_loss_step(bsh_st, bsh_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(bsh_st.settle_remaining_s == 0 && bsh_b.abort_reasons == DHW_ABORT_CHARGE);
+
+        // AN UNMEASURED GAP COUNTS AS PROVEN CHARGE TIME. A witness seen across an interval nobody
+        // watched could have run for all of it, and guessing SHORT there would admit a real
+        // charge's tail as tank loss — the one direction that must stay impossible.
+        DhwLossState gap_st;
+        DhwLossBucket gap_b;
+        CheckupSample charging = quiet(500);
+        charging.valve_dhw = true;
+        dhw_loss_step(gap_st, gap_b, charging, 0);                  // first sample of a boot
+        CHECK(gap_st.settle_remaining_s == DHW_LOSS_SETTLE_S);
+
+        // A charge STRADDLING an intentional reboot keeps its accumulated run: restarting the clock
+        // would let a 40-minute charge that spans an OTA look like a fresh blip and skip its settle.
+        DhwLossState span_st;
+        DhwLossBucket span_b;
+        dhw_loss_step(span_st, span_b, quiet(500), 0);
+        for (int sec = 1; sec <= 90; sec++) {
+            CheckupSample s = quiet(500);
+            s.valve_dhw = true;
+            dhw_loss_step(span_st, span_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(span_st.settle_remaining_s == 0 && span_st.charge_run_s == 90);
+        DhwLossState resumed;
+        dhw_loss_adopt(resumed, dhw_loss_checkpoint(span_st, 90LL * 1000000), 0);
+        CHECK(resumed.charge_run_s == 90);
+        for (int sec = 1; sec <= 40; sec++) {
+            CheckupSample s = quiet(500);
+            s.valve_dhw = true;
+            dhw_loss_step(resumed, span_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(resumed.settle_remaining_s == DHW_LOSS_SETTLE_S);
+
+        // THE MEASURED DEFECT, END TO END. One ~1 s valve blip every 90 minutes over 24 h on an
+        // otherwise perfect standing tank: zero completed windows before this bound existed.
+        auto blips_every = [&quiet](uint32_t period_s) {
+            DhwLossState s_st;
+            DhwLossBucket s_b;
+            for (uint64_t ms = 0; ms < 24ull * 3600 * 1000; ms += 1200) {
+                const uint32_t sec = static_cast<uint32_t>(ms / 1000);
+                CheckupSample s = quiet(558 - static_cast<int>(sec / 1200));  // 0.3 K/h
+                s.valve_dhw = (sec % period_s) < 2;
+                dhw_loss_step(s_st, s_b, s, static_cast<int64_t>(ms) * 1000);
+            }
+            return s_b;
+        };
+        CHECK(blips_every(90 * 60).windows > 0);
+        // The blip still discards the candidate hour, so a plant blipping faster than the window
+        // itself still yields nothing — the fix is proportionality, not permissiveness.
+        CHECK(blips_every(45 * 60).windows == 0);
+        CHECK(blips_every(45 * 60).aborts > 0);
+    }
+
+    {
+        // WHAT THE WINDOW DISCARDED, and the verdict that follows from it. Each disqualifier books
+        // its own reason so the card can name where to look; the settle's per-cycle reset does not,
+        // because the charge that armed it already booked one and there is no candidate left.
+        auto standing = []() {
+            CheckupSample s;
+            s.valve_known = s.pump_known = s.bsh_known = true;
+            s.r5t_ok = true;
+            s.r5t_tenths = 500;
+            return s;
+        };
+        auto aborted_by = [&standing](void (*disturb)(CheckupSample&)) {
+            DhwLossState st;
+            DhwLossBucket b;
+            for (int sec = 0; sec <= 600; sec++)                 // 10 min of clean candidate
+                dhw_loss_step(st, b, standing(), static_cast<int64_t>(sec) * 1000000);
+            CheckupSample s = standing();
+            disturb(s);
+            dhw_loss_step(st, b, s, 601LL * 1000000);
+            return b;
+        };
+        const DhwLossBucket by_pump = aborted_by([](CheckupSample& s) { s.pump_on = true; });
+        CHECK(by_pump.aborts == 1 && by_pump.abort_reasons == DHW_ABORT_PUMP);
+        // How far the best one got is what separates "close, but interrupted" from "never starts".
+        CHECK(by_pump.best_aborted_s == 600);
+        const DhwLossBucket by_reading = aborted_by([](CheckupSample& s) { s.r5t_tenths = 950; });
+        CHECK(by_reading.abort_reasons == DHW_ABORT_READING);
+        const DhwLossBucket by_draw = aborted_by([](CheckupSample& s) { s.r5t_tenths = 495; });
+        CHECK(by_draw.abort_reasons == DHW_ABORT_DRAW);
+        const DhwLossBucket by_blind = aborted_by([](CheckupSample& s) { s.r5t_ok = false; });
+        CHECK(by_blind.aborts == 0);        // one unread sweep is inside the blind budget
+        {
+            // …but exhausting that budget is an abort, and it says so.
+            DhwLossState st;
+            DhwLossBucket b;
+            for (int sec = 0; sec <= 600; sec++)
+                dhw_loss_step(st, b, standing(), static_cast<int64_t>(sec) * 1000000);
+            for (int sec = 601; sec <= 601 + 2 * static_cast<int>(DHW_LOSS_BLIND_RUN_MAX_S); sec++) {
+                CheckupSample s = standing();
+                s.r5t_ok = false;
+                dhw_loss_step(st, b, s, static_cast<int64_t>(sec) * 1000000);
+            }
+            CHECK(b.aborts == 1 && b.abort_reasons == DHW_ABORT_BLIND);
+        }
+        {
+            // The settle's own resets are not aborts: one charge, one discarded candidate.
+            DhwLossState st;
+            DhwLossBucket b;
+            for (int sec = 0; sec <= 600; sec++)
+                dhw_loss_step(st, b, standing(), static_cast<int64_t>(sec) * 1000000);
+            for (int sec = 601; sec <= 900; sec++) {
+                CheckupSample s = standing();
+                s.valve_dhw = true;
+                dhw_loss_step(st, b, s, static_cast<int64_t>(sec) * 1000000);
+            }
+            for (int sec = 901; sec <= 1500; sec++)                 // settling, 10 min of it
+                dhw_loss_step(st, b, standing(), static_cast<int64_t>(sec) * 1000000);
+            CHECK(b.aborts == 1);
+        }
+
+        // THE VERDICT. A full lifecycle with no completed window and six discarded ones is a plant
+        // that will not grant the method its 105 minutes — a different answer from "not yet", and
+        // reported as Unavailable so it says nothing either way instead of holding the whole card
+        // at `collecting` for the life of the installation.
+        CheckupCoverage cov;
+        cov.r5t = cov.valve = cov.pump = cov.bsh = true;
+        CheckupWindow w;
+        w.full_span = true;
+        DhwLossWindow dhw;
+        dhw.aborts = DHW_LOSS_BLOCKED_MIN_ABORTS;
+        dhw.abort_reasons = DHW_ABORT_CHARGE | DHW_ABORT_PUMP;
+        dhw.best_aborted_s = 2400;
+        {
+            const CheckupReport r = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
+            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Unavailable);
+            CHECK(r.dhw_blocked);
+            CHECK(r.dhw_aborts == DHW_LOSS_BLOCKED_MIN_ABORTS);
+            CHECK(r.dhw_best_aborted_s == 2400);
+            CHECK(r.dhw_abort_reasons == (DHW_ABORT_CHARGE | DHW_ABORT_PUMP));
+            // Unavailable says nothing either way: it must not be counted as an assessable check
+            // and must not drag the card's overall verdict.
+            CHECK(r.overall != CheckupVerdict::Collecting);
+        }
+        // One abort short of the bar is still "not yet".
+        dhw.aborts = DHW_LOSS_BLOCKED_MIN_ABORTS - 1;
+        {
+            const CheckupReport r = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
+            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Collecting);
+            CHECK(!r.dhw_blocked);
+        }
+        // A DEAD BUS measured nothing and discarded nothing — `collecting` stays the honest answer
+        // there, which is exactly what `aborts` separates.
+        dhw.aborts = 0;
+        CHECK(checkup_evaluate(w, cov, FaultClass::Normal, dhw)[CheckupCheck::DhwLoss].verdict ==
+              CheckupVerdict::Collecting);
+        // An incomplete lifecycle is never blocked, however many candidates it lost.
+        dhw.aborts = 50;
+        w.full_span = false;
+        CHECK(checkup_evaluate(w, cov, FaultClass::Normal, dhw)[CheckupCheck::DhwLoss].verdict ==
+              CheckupVerdict::Collecting);
+        // A FINDING always outranks it: a high window is evidence, and evidence is never withheld
+        // because the plant is also busy.
+        w.full_span = true;
+        dhw.high_windows = 1;
+        dhw.max_loss_tenths_k_h = 12;
+        {
+            const CheckupReport r = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
+            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Info);
+            CHECK(!r.dhw_blocked);
+            // The account of what was discarded is still reported — it explains a thin sample.
+            CHECK(r.dhw_aborts == 50);
+        }
+        // A profile that cannot supply the rows is the OTHER Unavailable and must not claim this
+        // one: the two need opposite advice, so `dhw_blocked` distinguishes them.
+        cov.valve = false;
+        CHECK(!checkup_evaluate(w, cov, FaultClass::Normal, dhw).dhw_blocked);
+    }
+
+    {
+        // The handoff CRC covers the charge run, so a charge straddling a reboot cannot be silently
+        // dropped or forged by a stale record.
+        DhwLossHandoffPayload p;
+        p.candidate.charge_run_s = 90;
+        const uint32_t crc = checkup_dhw_handoff_crc(7, p);
+        p.candidate.charge_run_s = 91;
+        CHECK(checkup_dhw_handoff_crc(7, p) != crc);
+        // …and the ring's new counters ride the same seal.
+        p.candidate.charge_run_s = 90;
+        p.pending.aborts = 1;
+        CHECK(checkup_dhw_handoff_crc(7, p) != crc);
+        p.pending.aborts = 0;
+        p.pending.abort_reasons = DHW_ABORT_PUMP;
+        CHECK(checkup_dhw_handoff_crc(7, p) != crc);
+        p.pending.abort_reasons = 0;
+        p.pending.best_aborted_s = 60;
+        CHECK(checkup_dhw_handoff_crc(7, p) != crc);
+    }
+
+    {
         // A PAGE THAT DID NOT ANSWER IS MISSING EVIDENCE, NOT A PLANT STATE. Every input this check
         // needs rides the X10A sweep, where one timed-out read removes all of that page's rows from
         // the cycle (hp_poll replaces the cache with the rows that answered) — valve/pump/BSH on
