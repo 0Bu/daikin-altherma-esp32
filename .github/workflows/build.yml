@@ -54,8 +54,8 @@ name: build
 #     that prose still compiles
 #   • ccache across runs (restored everywhere, saved from main) — the compile is ~3 of the build
 #     job's ~5 minutes and starts cold every time, since `idf.py set-target` wipes the build dir.
-#     Keyed on the TOOLCHAIN + sdkconfig, never on this file's hash: editing the workflow (a
-#     comment included) must not throw away a cache nothing in it invalidated
+#     Keyed on the TOOLCHAIN + sdkconfig + dependency lock, never on this file's hash: editing the
+#     workflow (a comment included) must not throw away a cache nothing in it invalidated
 #   • NO per-PR preview installer. Publishing one per PR commit meant a gh-pages push per commit,
 #     and every gh-pages push starts GitHub's own three-job "pages build and deployment" run on
 #     top of this one. The DEV CHANNEL covers the same need — flash what is on main from a
@@ -246,6 +246,14 @@ jobs:
       - name: Test the publish-version gate
         run: ./scripts/run-publish-version-tests.sh
 
+      # Two cheap build-contract selftests. The first proves the post-Kconfig comparison catches a
+      # missing, changed or malformed default before the firmware compile. The second pins the
+      # parser that turns ESP-IDF's json2 size data into the artifact/job-summary budget table.
+      - name: Test the ESP-IDF build contracts
+        run: |
+          python3 scripts/check-sdkconfig-defaults.py --self-test
+          python3 scripts/report-firmware-size.py --self-test
+
       # .claude/CLAUDE.md is loaded into every Claude Code session, so every byte in it is paid on
       # every turn — and it grows by accretion (it reached 329 KB before the 2026-08 reduction).
       # The budget forces new findings into docs/ as narrative and into CLAUDE.md only as rules;
@@ -277,7 +285,7 @@ jobs:
           # bytes exactly like a change under main/ does. It was missing until it caused the failure
           # this pattern exists to prevent — a minifier edit merging with no compile behind it, and
           # the changed UI bytes never reaching the dev feed.
-          relevant='^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|docs/index\.html$|\.github/workflows/build\.yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version)\.sh$|scripts/check-web-installer-plan\.py$|tools/(version|web_asset)/)'
+          relevant='^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|dependencies\.lock$|partitions\.csv$|version\.txt$|docs/index\.html$|\.github/workflows/build\.yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version)\.sh$|scripts/(check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan)\.py$|tools/(version|web_asset)/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
@@ -407,7 +415,7 @@ jobs:
       # started from zero — measured, that is ~3 minutes of this job's ~5 (the other ~2 are the
       # espressif/idf image pull, which no cache here can shorten). ccache is content-addressed,
       # so a hit is byte-identical output: the version string this run stamps changes exactly the
-      # one generated app-descriptor object, not the other ~1100.
+      # one generated app-descriptor object, not the rest of the graph.
       #
       # Written into the WORKSPACE (.ccache, gitignored) because the build runs inside the ESP-IDF
       # container and the workspace is the only path that survives it. ci-build-all.sh turns
@@ -424,9 +432,10 @@ jobs:
       # the build job's ~5 minutes) for it, and this file is edited often.
       #
       # What actually invalidates the objects is the TOOLCHAIN (esp_idf_version, which decides the
-      # compiler) and the BUILD CONFIG (sdkconfig.defaults), so key on exactly those two. The pin is
-      # read through scripts/idf-version.sh — the same reader scripts/idf-docker.sh uses — so the
-      # cache key and the image the build runs in cannot key on different versions.
+      # compiler), the BUILD CONFIG (sdkconfig.defaults) and the resolved managed-component graph
+      # (dependencies.lock), so key on exactly those. The pin is read through
+      # scripts/idf-version.sh — the same reader scripts/idf-docker.sh uses — so the cache key and
+      # the image the build runs in cannot key on different versions.
       #
       # Narrowing the key is safe in the direction that matters: ccache is content-addressed, so a
       # stale object is never *served* for a changed input (the hash simply misses). The old wide
@@ -437,9 +446,9 @@ jobs:
         run: |
           set -euo pipefail
           idf="$(./scripts/idf-version.sh)"
-          h="$( { printf 'idf=%s\n' "$idf"; cat sdkconfig.defaults; } | sha256sum | cut -c1-16 )"
+          h="$( { printf 'idf=%s\n' "$idf"; cat sdkconfig.defaults dependencies.lock; } | sha256sum | cut -c1-16 )"
           echo "hash=$h" >> "$GITHUB_OUTPUT"
-          echo "ccache key: target esp32s3 / IDF $idf / sdkconfig.defaults -> $h"
+          echo "ccache key: target esp32s3 / IDF $idf / defaults + dependency lock -> $h"
 
       - name: Restore ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -463,6 +472,13 @@ jobs:
           # ci-build-all.sh reads the version back out of the built image and fails if the two ever
           # drift apart again.
           command: ./scripts/ci-build-all.sh "${{ steps.stamp.outputs.disp }}"
+
+      - name: Publish firmware size summary
+        if: always()
+        run: |
+          if [ -f dist/daikin-altherma-esp32-size.md ]; then
+            cat dist/daikin-altherma-esp32-size.md >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Shred OTA signing key
         if: always()
@@ -503,6 +519,8 @@ jobs:
             dist/*.bin
             dist/*.elf
             dist/*.elf.sha256
+            dist/*-size.json
+            dist/*-size.md
             dist/manifest.json
 
       # A PR PUBLISHES NOTHING. It used to assemble and push a preview installer to gh-pages
@@ -544,11 +562,13 @@ jobs:
           name: v${{ steps.stamp.outputs.disp }}
           generate_release_notes: true
           # Attach the .elf (+ checksum) alongside the bins so a user's core dump can be decoded
-          # against the exact released firmware (scripts/decode-coredump.sh).
+          # against the exact released firmware, plus the size evidence from that same link.
           files: |
             dist/*.bin
             dist/*.elf
             dist/*.elf.sha256
+            dist/*-size.json
+            dist/*-size.md
 
       # The gh-pages BRANCH is the single publisher — the repo's Pages source must be set to
       # "Deploy from a branch: gh-pages / (root)" (docs/README.md). The Actions-deployment path

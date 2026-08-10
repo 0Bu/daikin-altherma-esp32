@@ -1,8 +1,9 @@
 # daikin-altherma-esp32
 
-ESP-IDF 6.x firmware for the ESP32-S3 chip (CI pins **v6.0.2**; `main/idf_component.yml` keeps a
-`>=5.5` floor on purpose — the managed components still resolve on 5.x). Reads a **Daikin Altherma**
-heat pump over its **X10A** service port and bridges every value to **Home Assistant over MQTT**
+ESP-IDF 6.x firmware for the ESP32-S3 chip (CI pins **v6.0.2**; `main/idf_component.yml` requires
+`>=6.0` because the managed W5500 2.x component uses the ESP-IDF 6 `esp_eth` API). Reads a
+**Daikin Altherma** heat pump over its **X10A** service port and bridges every value to
+**Home Assistant over MQTT**
 (auto-discovery). WiFi (captive portal), MQTT, syslog and the RX/TX pins are configured at runtime
 from a **web UI**; the unit **model** and its register set are **auto-detected** from the bus every
 boot — there is no manual picker. Firmware is installed from a **browser** (Web Serial) and updated
@@ -97,8 +98,9 @@ Rules an agent needs before touching any of that:
   `gates` job, never a job each (Actions bills per job, rounded up to a whole minute). The ~5-min
   firmware build is SKIPPED via a per-job `if:` — never a workflow-level `paths-ignore:`, since a
   skipped job still reports its required check — when the diff touches nothing the image or the
-  published site is made of. ccache is keyed on the toolchain + `sdkconfig.defaults` (via
-  `scripts/idf-version.sh`, the one shell reader of the `esp_idf_version:` pin) and deliberately NOT
+  published site is made of. ccache is keyed on the toolchain + `sdkconfig.defaults` +
+  `dependencies.lock` (via `scripts/idf-version.sh`, the one shell reader of the
+  `esp_idf_version:` pin) and deliberately NOT
   on a hash of `build.yml`, so editing the workflow does not discard a cache nothing invalidated. A
   PR publishes NOTHING (per-PR gh-pages previews are retired). A new always-on job, an ungated build
   or a per-commit publish is a real monthly cost, not a rounding error.
@@ -118,8 +120,8 @@ since Docker on macOS has no USB passthrough. The `flash-esp32` skill wraps both
 When waiting on CI, block on `gh run watch <run-id> --exit-status` — never sleep-poll.
 
 ```bash
-# Build (first run: set-target; afterwards plain `build` stays incremental). CI builds esp32s3.
-scripts/idf-docker.sh idf.py set-target esp32s3 build
+# The esp32s3 target is pinned in sdkconfig.defaults, including on the first build.
+scripts/idf-docker.sh idf.py build
 
 # Optional compile-time defaults (all also settable at runtime in the web UI)
 scripts/idf-docker.sh idf.py menuconfig                 # -> Daikin Altherma Configuration

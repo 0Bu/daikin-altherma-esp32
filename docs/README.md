@@ -139,7 +139,7 @@ brew install esptool                                              # host flasher
 git clone https://github.com/0Bu/daikin-altherma-esp32.git && cd daikin-altherma-esp32
 
 # Build via the CI-pinned ESP-IDF image (first run pulls it — 2-4 min):
-./scripts/idf-docker.sh idf.py set-target esp32s3 build
+./scripts/idf-docker.sh idf.py build
 
 # Optional compile-time defaults (WiFi, MQTT, model, pins) — all also settable at runtime:
 ./scripts/idf-docker.sh idf.py menuconfig                         # → Daikin Altherma Configuration

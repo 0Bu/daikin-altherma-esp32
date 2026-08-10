@@ -70,6 +70,11 @@ idf_component_register(
         espcoredump
 )
 
+# C++17 is the language contract shared with the host logic suite. ESP-IDF 6 currently defaults
+# applications to a newer dialect; inheriting that default would let device-only code start using
+# constructs the C++17 host compiler cannot parse, with no project file recording the change.
+target_compile_options(${COMPONENT_LIB} PRIVATE -std=gnu++17)
+
 # THE WARNING CONTRACT for main/. Three places in this component are written the way they are
 # BECAUSE a class of warning is fatal here — and until now nothing in this repo made that true:
 #

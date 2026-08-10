@@ -285,10 +285,14 @@ There is no local ESP-IDF install. Builds go through the Docker image pinned to 
 (read at runtime from `.github/workflows/build.yml`):
 
 ```bash
-scripts/idf-docker.sh idf.py set-target esp32s3 build
+scripts/idf-docker.sh idf.py build
 ```
 
-Only `esp32s3` is supported. **You do not need to build to open a PR** — CI builds every PR and
+The `esp32s3` target is part of `sdkconfig.defaults`, so a first build needs no preceding
+`set-target`. Managed-component ranges live in `main/idf_component.yml`, while their complete
+resolved graph is committed in `dependencies.lock`. To update it intentionally, edit the manifest,
+run `scripts/idf-docker.sh idf.py update-dependencies`, and review both files. Do not hand-edit the
+lock. **You do not need to build to open a PR** — CI builds every PR and
 attaches the artifacts. Say in the PR what you did and didn't verify.
 
 > **Flashing needs a signed image.** This config uses the Secure Boot v2 *signature scheme* without
