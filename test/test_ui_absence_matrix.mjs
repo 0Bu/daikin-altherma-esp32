@@ -143,7 +143,7 @@ const HEALTHY = () => ({
     crc_err: 0, timeout_err: 0 },
   profile: { id: "altherma3_r_erga" },
   modbus: { enabled: true, connected: true, discovering: false, host: "203.0.113.30", port: 502,
-    unit_id: 1, rx: 100, fails: 0, values: 20, task_stack_min_free_words: 900,
+    unit_id: 1, rx: 100, fails: 0, values: 20, task_stack_min_free_bytes: 900,
     plant_gate_known: true, plant_gate_active: true, heating_mode_known: true,
     heating_mode_active: true },
   history: { dt: 300,
@@ -222,7 +222,10 @@ const REMOVE = {
   },
   homehub(s) {
     s.modbus = { enabled: false, connected: false, discovering: false, host: "", port: 502,
-      unit_id: 1, rx: 0, fails: 0, values: 0, task_stack_min_free_words: 0,
+      // null, not 0: with no HomeHub there is no task, so its stack was never sampled — the
+      // firmware cannot emit a number here, and a fixture that says 0 describes a payload no
+      // device produces (main/stack_watch.hpp).
+      unit_id: 1, rx: 0, fails: 0, values: 0, task_stack_min_free_bytes: null,
       plant_gate_known: false, plant_gate_active: false, heating_mode_known: false,
       heating_mode_active: false };
     s.history.modbus_rows = [];

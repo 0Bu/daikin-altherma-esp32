@@ -56,7 +56,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 11 | Core dump to flash + offline symbolication, with a proven **orphan dump** erased so no undecodable download is ever offered | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT and cleared when the boot is unremarkable | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
-| 13 | 21-entity device **heartbeat** diagnostics stream, published independently of profile detection | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
+| 13 | 22-entity device **heartbeat** diagnostics stream, published independently of profile detection | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** (a router reboot never strands the bridge) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** — recovers a ghost association no event reports | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`logic/link_watch.hpp`](../main/logic/link_watch.hpp) |
 | 16 | Captive-portal provisioning (AP-only, typed SSID, UDP:53 catch-all, 302 probe redirect + RFC 8910 option 114) | ✅ 🧪 | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp), [`logic/captive.hpp`](../main/logic/captive.hpp) |
@@ -110,6 +110,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
 | 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 71 | **Pinned stack contract on the `/status` builder** — `-Os` on that one translation unit, because ~9 KB of its 11.8 KB frame was a `-Og` slot-allocation artefact, not live data | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp) |
+| 81 | **Stack-headroom telemetry** — the second memory budget, made reportable: four tasks record their own FreeRTOS high-water mark and the heartbeat carries all four, so a growing call frame is a falling line rather than a core dump nobody has yet | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp) |
 | 72 | **Reboot-surviving 24-hour trends** — `.noinit` DRAM for any reset that kept power, plus a coarse snapshot in the optional `history` partition across an OTA; both gated on a derived trend-catalog fingerprint, the stored one spliced by absolute wall-clock bucket. The initiating web-UI tab carries the pre-OTA five-minute RAM rings across its reload and renders them ahead of overlapping coarse samples | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`history.js`](../main/www/js/history.js), [`partitions.csv`](../partitions.csv) |
 | 79 | **Reboot-surviving plant checkup** — the 24-hour window rides the same `.noinit` DRAM, sealed with a layout fingerprint over every row locator and counting threshold; the model is re-checked at detection and safe mode never adopts | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`checkup.cpp`](../main/checkup.cpp) |
 | 73 | **Heap watchdog** — the escalation every other OOM guard here deliberately lacks: sustained exhaustion of the largest *internal* contiguous block becomes a deliberate restart with a persisted, capped breadcrumb, because a wedge that never recovers is worse than a crash | ✅ 🧪 | [`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp), [`heap_guard.cpp`](../main/heap_guard.cpp) |
@@ -484,7 +485,7 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   as a failure answered `500` forever, and a fault reset carries no dump often enough (a stack
   overflow overruns it) that those boards saw exactly the banner no action could clear. Every other
   error still blocks, because then a dump may genuinely still be downloadable.
-- **✅ 🧪 21-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): a
+- **✅ 🧪 22-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): a
   **flat** JSON of heap (free / min-free / largest-free-block, the true OOM limit), uptime, reset
   reason, WiFi RSSI + reconnects + MAC/BSSID, MQTT counters and X10A bus stats — published
   independently of profile detection, so board health is visible while the model is still `auto`.
@@ -493,11 +494,22 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   `mqtt_skipped` / `mqtt_quiesced` / `poll_skipped` count the 1 s cycles that produced **nothing** —
   an OOM guard catch, a deliberate OTA hold-off, and a sweep that never reached the bus (#380). They
   are the counters that made a silent loss visible: 337 dropped publishes in 30 days had existed only
-  as lines in a `/diag` ring the next chatty boot overwrites.
+  as lines in a `/diag` ring the next chatty boot overwrites. `heap_restarts` — the 22nd entity —
+  attributes the one reboot nothing else can: the heap watchdog restarts with `esp_restart()`, so
+  every other field reports the same `sw` a settings save produces.
+- **✅ Stack-headroom telemetry** ([`stack_watch.hpp`](../main/stack_watch.hpp)): four tasks (httpd,
+  poll, MQTT, HomeHub) record their own FreeRTOS high-water mark from their own loop and the
+  heartbeat publishes all four as `*_stack_min_free_bytes`. The heap has `/status.sys`, two trend
+  rings and a watchdog; the stack had a core dump's task table, which exists only once the board has
+  died — and this firmware has shipped three stack overflows. `null` means never sampled, never zero
+  headroom. Payload-only: the audience for a headroom trend is whoever upgrades the firmware.
 - **✅ 🧪 Always-on system health**: `/status.sys` carries heap headroom, the since-boot low-water
-  mark, the largest contiguous block, the three #380 cycle-loss counters, the reset-reason slug and
-  the safe-mode flag. Unlike
-  `last_crash` it is present on **every** boot, and unlike the heartbeat it needs **no broker**.
+  mark, the largest contiguous block, the heap-watchdog restart count, per-task stack headroom
+  (`stack_min_free_bytes`), the three #380 cycle-loss counters, the reset-reason slug and the
+  safe-mode flag. Unlike
+  `last_crash` it is present on **every** boot, and unlike the heartbeat it needs **no broker** —
+  which is why the stack figures are here too: every MQTT publish is X10A-gated, so a board with a
+  silent bus, or one in safe mode, would otherwise report them nowhere.
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the firmware that
   produced any dump, and the syslog boot line puts the same hash in the **log stream**.
 - **✅ 🧪 Getting the evidence off the board — and what must not come with it.** *Settings → Report a
@@ -809,7 +821,7 @@ a **connectivity-proving health gate** rather than a naive uptime timer. It ship
 embedded and gzipped into the app image** (polled, after a WebSocket push proved it could die
 silently), an **ICMP watchdog** that recovers WiFi ghost-associations no event reports, and a
 **field-debuggable crash story** — flash core dumps, offline symbolication against an sha-matched
-ELF, a retained MQTT crash topic and a 21-entity heartbeat. The risky parts — decode, CRC, config,
+ELF, a retained MQTT crash topic and a 22-entity heartbeat. The risky parts — decode, CRC, config,
 discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified on the host**
 and gated in CI, and a second family of audits asks the question tests cannot: whether a
 well-formed value is *physically true*, whether the drawing that shows it is *right*, and whether a

@@ -25,6 +25,7 @@ idf_component_register(
         "captive_dns.cpp"
         "safe_mode.cpp"
         "heap_guard.cpp"
+        "stack_watch.cpp"
         "mqtt_ha.cpp"
         "ota_update.cpp"
         "diag_log.cpp"

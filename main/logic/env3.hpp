@@ -50,25 +50,45 @@ inline bool env3_sample_plausible(float temperature_c, float humidity_pct, float
     return env3_sample_implausibility(temperature_c, humidity_pct, pressure_hpa) == nullptr;
 }
 
-// MQTT carries only a complete, current ENV III observation. `{}` deliberately invalidates a
-// retained reading when either freshness or sensor plausibility is lost. Build with sequential
-// appends: this runs on mqtt_pub, whose stack must not absorb a chain of temporary std::strings.
+// MQTT carries only a complete, current ENV III OBSERVATION: when freshness or sensor plausibility
+// is lost the three readings are omitted, which is what invalidates a retained value (the HA
+// availability template in logic/discovery.hpp asks whether each key `is number`).
+//
+// The two BUS-HEALTH counters ride BOTH shapes, and that asymmetry is the whole point of publishing
+// them. `samples` and `errors` describe the I2C link rather than the air, so they are facts about
+// this sensor whether or not it produced a reading — and they are most informative exactly when it
+// did NOT. Carrying them only on the healthy document would mean a sensor going dark stops
+// reporting its own error count at the instant that count becomes the answer, leaving a consumer
+// with a gap in the readings and no way to tell a failing SHT30 from a disabled accessory, a
+// rebooted board or a broker it lost. This installation's sensor hangs on a long I2C run to an
+// outdoor enclosure, where a marginal cable is a rising error rate long before it is a gap.
+//
+// A COUNTER, deliberately, not a rate or a flag: `errors` alone says nothing (some CRC retries are
+// normal), `errors` against `samples` over a window is the reading — and a store that has both can
+// compute any ratio, where a firmware that pre-divides them has thrown the numerator away.
+//
+// Build with sequential appends: this runs on mqtt_pub, whose stack must not absorb a chain of
+// temporary std::strings.
 inline std::string build_env3_mqtt_json(bool fresh, float temperature_c, float humidity_pct,
-                                        float pressure_hpa) {
-    if (!fresh || !env3_sample_plausible(temperature_c, humidity_pct, pressure_hpa)) return "{}";
-
-    char temperature[24], humidity[24], pressure[24];
-    std::snprintf(temperature, sizeof(temperature), "%.2f", static_cast<double>(temperature_c));
-    std::snprintf(humidity, sizeof(humidity), "%.2f", static_cast<double>(humidity_pct));
-    std::snprintf(pressure, sizeof(pressure), "%.2f", static_cast<double>(pressure_hpa));
-
+                                        float pressure_hpa, uint32_t samples, uint32_t errors) {
     std::string j = "{";
-    j += "\"temperature_c\":";
-    j += temperature;
-    j += ",\"humidity_pct\":";
-    j += humidity;
-    j += ",\"pressure_hpa\":";
-    j += pressure;
+    if (fresh && env3_sample_plausible(temperature_c, humidity_pct, pressure_hpa)) {
+        char temperature[24], humidity[24], pressure[24];
+        std::snprintf(temperature, sizeof(temperature), "%.2f", static_cast<double>(temperature_c));
+        std::snprintf(humidity, sizeof(humidity), "%.2f", static_cast<double>(humidity_pct));
+        std::snprintf(pressure, sizeof(pressure), "%.2f", static_cast<double>(pressure_hpa));
+        j += "\"temperature_c\":";
+        j += temperature;
+        j += ",\"humidity_pct\":";
+        j += humidity;
+        j += ",\"pressure_hpa\":";
+        j += pressure;
+        j += ",";
+    }
+    j += "\"samples\":";
+    j += std::to_string(samples);
+    j += ",\"errors\":";
+    j += std::to_string(errors);
     j += "}";
     return j;
 }

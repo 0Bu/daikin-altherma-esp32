@@ -2089,12 +2089,24 @@ static void test_heartbeat() {
     f.mqtt_skipped    = 337;
     f.mqtt_quiesced   = 42;
     f.poll_skipped    = 32;
+    // The heap watchdog's own ladder position, and the OTHER memory budget. The two stack figures
+    // are the real ones off this project's crashes, and they are BYTES: 1872 is the httpd headroom
+    // measured on
+    // `main` behind the deepest call chain (mcp_post -> http_append_status_json) before -Os, and
+    // 520 is what hp_poll had left in the #241 core dump's task table. mqtt is left UNSAMPLED so
+    // the same payload pins the null rendering beside two real numbers.
+    f.heap_restarts   = 2;
+    f.httpd_stack_min_free_bytes = 1872;
+    f.poll_stack_min_free_bytes  = 520;
     const std::string j = build_heartbeat_json(f);
     // FLAT payload: the former wifi/mqtt/bus sub-objects are gone, each field carried under its block
     // name as a prefix (wifi_connected, mqtt_count, bus_rx_received, …). MAC/BSSID ride the wifi_ set.
     CHECK(j == "{\"version\":\"1.2.3\",\"platform\":\"esp32s3\","
                "\"uptime_s\":680731,\"uptime\":\"007+21:05:31.860\","
                "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
+               "\"heap_restarts\":2,"
+               "\"httpd_stack_min_free_bytes\":1872,\"poll_stack_min_free_bytes\":520,"
+               "\"mqtt_stack_min_free_bytes\":null,"
                "\"reset_reason\":\"panic\",\"reset_reason_code\":4,\"reset_fault\":1,"
                "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_reconnects\":3,"
                "\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\",\"wifi_bssid\":\"00:11:22:33:44:55\","
@@ -2106,7 +2118,7 @@ static void test_heartbeat() {
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
                "\"bus_tx_reads\":763734,"
                "\"modbus_enabled\":0,\"modbus_connected\":0,\"modbus_rx\":0,\"modbus_fails\":0,"
-               "\"modbus_stack_min_free_words\":0}");
+               "\"modbus_stack_min_free_bytes\":null}");
 
     // ── #215: the reset reason has to survive a NUMERIC-ONLY consumer ──
     // Telegraf's json parser keeps numeric fields and drops everything else, so the `reset_reason`
@@ -2153,6 +2165,82 @@ static void test_heartbeat() {
         }
         CHECK(found);
     }
+    // ── The heap watchdog's ladder position has to be ATTRIBUTABLE ──
+    // heap_guard.cpp restarts the board with esp_restart(), so the reset reason is the same "sw" a
+    // /set_* save produces and reset_fault stays 0 — every other field in this payload agrees that
+    // nothing went wrong. Without this count a board cycling its restart ladder every few minutes
+    // is indistinguishable in a metrics store from one somebody keeps saving settings on, which is
+    // the "reboot nobody can attribute" #215 spent a week reconstructing from syslog.
+    CHECK(j.find("\"heap_restarts\":2,") != std::string::npos);
+    CHECK(j.find("\"heap_restarts\":\"") == std::string::npos);   // quoted, a metrics store drops it
+    {
+        bool found = false;
+        for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++) {
+            if (std::string(HEARTBEAT_SENSORS[i].json_path) != "heap_restarts") continue;
+            found = true;
+            // MEASUREMENT, never total_increasing: the value is the count this BOOT inherited and
+            // heap_guard_begin() clears the breadcrumb, so it returns to 0 on the next healthy boot.
+            // Typed monotonic, HA's long-term statistics would read every recovery as a counter
+            // reset and report the ladder as a fresh total instead of as the fault it was.
+            CHECK(std::string(HEARTBEAT_SENSORS[i].state_class) == "measurement");
+        }
+        CHECK(found);   // an ENTITY, unlike the stack marks below — the OWNER acts on this one
+    }
+
+    // ── The STACK is the second memory budget, and it fails silently ──
+    // Three overflows shipped (v1.0.12 httpd, #241 hp_poll, #318 httpd through OTA) and every one
+    // was diagnosed from a core dump's task table AFTER the board died. Nothing reported headroom
+    // while it was alive, so #318's 1200 bytes of frame growth accumulated across releases with no
+    // single change announcing it. These four fields are that missing reporting path.
+    CHECK(j.find("\"httpd_stack_min_free_bytes\":1872,") != std::string::npos);
+    CHECK(j.find("\"poll_stack_min_free_bytes\":520,")   != std::string::npos);
+    // NEVER SAMPLED IS NULL, NOT ZERO — the load-bearing half. A task that has not run is not a task
+    // with no stack left, and the Modbus slot stays unsampled forever on the majority of boards
+    // (no HomeHub, no task). Rendered as 0 those boards would publish "0 words free" — a plausible
+    // number for a stack that does not exist, drawing a flat line at the bottom of the chart this
+    // exists to make readable. A null field is DROPPED by a metrics consumer, which is the honest
+    // outcome: no sample rather than a false one.
+    CHECK(j.find("\"mqtt_stack_min_free_bytes\":null,")     != std::string::npos);
+    CHECK(j.find("\"modbus_stack_min_free_bytes\":null}")   != std::string::npos);
+    CHECK(j.find("\"mqtt_stack_min_free_bytes\":0,")        == std::string::npos);
+    CHECK(j.find("\"modbus_stack_min_free_bytes\":0}")      == std::string::npos);
+    // A sampled slot is a bare NUMBER, not a string, and the first sample wins even when it is
+    // lower than everything after it (append_stack_bytes is the one rendering rule for all four).
+    {
+        HeartbeatFields sf;
+        sf.httpd_stack_min_free_bytes  = 1;      // one word: real, and the closest to the boundary
+        sf.modbus_stack_min_free_bytes = 731;
+        const std::string sj = build_heartbeat_json(sf);
+        CHECK(sj.find("\"httpd_stack_min_free_bytes\":1,")       != std::string::npos);
+        CHECK(sj.find("\"modbus_stack_min_free_bytes\":731}")    != std::string::npos);
+        CHECK(sj.find("\"httpd_stack_min_free_bytes\":\"")       == std::string::npos);
+        // Unsampled tasks in the SAME payload still read null, so one running task cannot make the
+        // other three look like they were measured.
+        CHECK(sj.find("\"poll_stack_min_free_bytes\":null,")     != std::string::npos);
+        CHECK(sj.find("\"mqtt_stack_min_free_bytes\":null,")     != std::string::npos);
+    }
+    // THE UNIT IS PART OF THE IDENTIFIER, and it is BYTES. ESP-IDF's uxTaskGetStackHighWaterMark
+    // answers in bytes where vanilla FreeRTOS answers in words, and this field name becomes the
+    // VictoriaMetrics series suffix — so spelling it `_words` would publish a headroom four times
+    // larger than the truth in the one metric that exists to warn about running out (the #230
+    // LABEL-UNIT rule, applied to a board metric rather than a catalog row). It shipped that way
+    // on `modbus_stack_min_free_words` until the arithmetic was checked: a 6144-byte task cannot
+    // have 2660 words free. Pin the spelling in BOTH directions so neither can drift back.
+    CHECK(j.find("_stack_min_free_words") == std::string::npos);
+    for (const char* f : {"httpd", "poll", "mqtt", "modbus"}) {
+        const std::string key = std::string("\"") + f + "_stack_min_free_bytes\":";
+        CHECK(j.find(key) != std::string::npos);
+    }
+    // PAYLOAD-ONLY, deliberately: no HA entity for any of the four. The value is a TREND a
+    // maintainer reads across firmware versions, not a fact a device owner acts on, and four
+    // permanently-flat diagnostic entities are four more things to rule out — the test that retired
+    // "WiFi Quality" and "Device Time".
+    for (const char* path : {"httpd_stack_min_free_bytes", "poll_stack_min_free_bytes",
+                             "mqtt_stack_min_free_bytes", "modbus_stack_min_free_bytes"}) {
+        for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
+            CHECK(std::string(HEARTBEAT_SENSORS[i].json_path) != path);
+    }
+
     // The two always-zero bus counters are gone: the X10A protocol has no write command, so they
     // could never be anything but 0. Neither was ever an HA entity, so nothing is orphaned.
     CHECK(j.find("bus_tx_writes") == std::string::npos);
@@ -2241,7 +2329,7 @@ static void test_heartbeat() {
     CHECK(empty_curve.find("true") == std::string::npos);
     CHECK(empty_curve.find("false") == std::string::npos);
     HeartbeatFields mf; mf.modbus_enabled = true; mf.modbus_connected = true;
-    mf.modbus_rx = 12; mf.modbus_fails = 3; mf.modbus_stack_min_free_words = 731;
+    mf.modbus_rx = 12; mf.modbus_fails = 3; mf.modbus_stack_min_free_bytes = 731;
     const std::string mj = build_heartbeat_json(mf);
     CHECK(mj.find("\"modbus_enabled\":1,") != std::string::npos);
     CHECK(mj.find("\"modbus_connected\":1,") != std::string::npos);
@@ -2249,7 +2337,7 @@ static void test_heartbeat() {
     CHECK(mj.find("\"modbus_fails\":3,") != std::string::npos);
     // Last field of the payload now that the actuator block is gone (#294) — hence the closing
     // brace rather than a comma, which is itself the assertion that nothing follows it.
-    CHECK(mj.find("\"modbus_stack_min_free_words\":731}") != std::string::npos);
+    CHECK(mj.find("\"modbus_stack_min_free_bytes\":731}") != std::string::npos);
 
     // SOURCE freshness is its own field, and it is independent of bus health (#209 defect 5): the
     // link is up, the device is publishing, and the outdoor unit is simply not measuring. A consumer
@@ -2293,8 +2381,11 @@ static void test_heartbeat() {
     const std::string hb = heartbeat_topic(base);
     const std::string av = availability_topic(base);
     // -2: device_time, wifi_quality (RETIRED_HEARTBEAT_SENSORS); +3 in #380: mqtt_skipped,
-    // mqtt_quiesced, poll_skipped — the cycles that produced nothing.
-    CHECK(HEARTBEAT_SENSOR_COUNT == 21);
+    // mqtt_quiesced, poll_skipped — the cycles that produced nothing; +1: heap_restarts, the only
+    // field that can attribute the heap watchdog's "sw" reset. The four stack watermarks landed in
+    // the same change and deliberately added NOTHING here — they are payload-only, so this pin
+    // rising by one rather than five is itself the assertion that the split held.
+    CHECK(HEARTBEAT_SENSOR_COUNT == 22);
     const HeartbeatSensor& rssi = HEARTBEAT_SENSORS[0];
     CHECK(std::string(rssi.object_id) == "wifi_signal");
     std::string dt = heartbeat_discovery_topic("homeassistant", node, rssi);
@@ -5276,11 +5367,39 @@ static void test_env3() {
           "pressure_out_of_range");
     CHECK(std::string(env3_sample_implausibility(std::nanf(""), 50.0f, 1000.0f)) ==
           "temperature_not_finite");
-    CHECK(build_env3_mqtt_json(true, 20.25f, 45.5f, 1008.75f) ==
-          "{\"temperature_c\":20.25,\"humidity_pct\":45.50,\"pressure_hpa\":1008.75}");
-    CHECK(build_env3_mqtt_json(false, 20.25f, 45.5f, 1008.75f) == "{}");
-    CHECK(build_env3_mqtt_json(true, 20.25f, 45.5f, 1200.0f) == "{}");
-    CHECK(build_env3_mqtt_json(true, std::nanf(""), 45.5f, 1008.75f) == "{}");
+    // The document carries the OBSERVATION plus the two I2C bus-health counters.
+    CHECK(build_env3_mqtt_json(true, 20.25f, 45.5f, 1008.75f, 4211, 7) ==
+          "{\"temperature_c\":20.25,\"humidity_pct\":45.50,\"pressure_hpa\":1008.75,"
+          "\"samples\":4211,\"errors\":7}");
+    // THE READINGS are what absence removes — never the counters. A stale or implausible sample
+    // omits temperature_c/humidity_pct/pressure_hpa, which is exactly what the HA availability
+    // template keys on (`value_json.get('temperature_c') is number`, logic/discovery.hpp), so the
+    // three entities still go unavailable and no retained value survives.
+    //
+    // But `samples`/`errors` describe the LINK, not the air, and they are most informative in
+    // precisely this shape: this installation's sensor hangs on a long I2C run to an outdoor
+    // enclosure, where a marginal cable is a rising error rate long before it is a gap in the
+    // readings. Carried only on the healthy document, the error count would go dark at the instant
+    // it became the answer, leaving a consumer unable to tell a failing SHT30 from a disabled
+    // accessory, a rebooted board or a broker it lost.
+    CHECK(build_env3_mqtt_json(false, 20.25f, 45.5f, 1008.75f, 4211, 7) ==
+          "{\"samples\":4211,\"errors\":7}");
+    CHECK(build_env3_mqtt_json(true, 20.25f, 45.5f, 1200.0f, 0, 3) ==
+          "{\"samples\":0,\"errors\":3}");
+    CHECK(build_env3_mqtt_json(true, std::nanf(""), 45.5f, 1008.75f, 0, 3) ==
+          "{\"samples\":0,\"errors\":3}");
+    // A sensor that never answered at all still reports its zeroes: 0 samples / 0 errors is a TRUE
+    // statement about a link that has produced nothing, unlike the stack marks above where 0 would
+    // be a false reading of a task that does not exist.
+    CHECK(build_env3_mqtt_json(false, 0.0f, 0.0f, 0.0f, 0, 0) ==
+          "{\"samples\":0,\"errors\":0}");
+    // Numbers, not strings — the same metrics-consumer rule the heartbeat's 1/0 flags follow.
+    CHECK(build_env3_mqtt_json(false, 0.0f, 0.0f, 0.0f, 9, 2).find("\"errors\":\"") ==
+          std::string::npos);
+    // Both COUNTERS, never a pre-divided rate: a store holding numerator and denominator can
+    // compute any window's ratio, where a firmware that divides has thrown the numerator away.
+    CHECK(build_env3_mqtt_json(true, 20.0f, 50.0f, 1000.0f, 100, 1).find("error_rate") ==
+          std::string::npos);
     CHECK(env3_probe_may_try_swapped(Env3ProbeResult::Sht30Unavailable));
     CHECK(env3_probe_may_try_swapped(Env3ProbeResult::Qmp6988Unavailable));
     CHECK(!env3_probe_may_try_swapped(Env3ProbeResult::Ok));

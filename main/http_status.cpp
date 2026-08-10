@@ -16,6 +16,7 @@
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "heap_guard.hpp"
+#include "stack_watch.hpp"
 #include "history.hpp"
 #include "state_dwell.hpp"
 #include "hp_poll.hpp"
@@ -35,6 +36,7 @@
 #include "logic/weather_forecast.hpp"
 #include "weather_forecast.hpp"
 #include "logic/redact.hpp"
+#include "logic/heartbeat.hpp"   // append_stack_bytes — ONE never-sampled rendering rule
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
 #include "mqtt_ha.hpp"
@@ -682,7 +684,15 @@ void http_append_status_json(std::string& j, bool redact) {
     j += ",\"rx\":";                   j += std::to_string(mb.rx_ok);
     j += ",\"fails\":";                j += std::to_string(mb.rx_fail);
     j += ",\"values\":";               j += std::to_string(mb.values);
-    j += ",\"task_stack_min_free_words\":"; j += std::to_string(mb.task_stack_min_free_words);
+    // The Modbus task's stack headroom, from the one sampler all four watched stacks report
+    // through (stack_watch.hpp) rather than from ModbusStatus, so this surface and the MQTT
+    // heartbeat cannot answer the same question with two numbers. Null, not 0, when the task has
+    // never run: a board with no HomeHub has no such stack, and "0 words free" is a reading.
+    j += ",\"task_stack_min_free_bytes\":";
+    {
+        const uint32_t words = stack_watch_min_free_bytes(StackWatch::Modbus);
+        if (words == 0) j += "null"; else j += std::to_string(words);
+    }
     // The PLANT GATE (input register 53) is the one HomeHub fact the shadow controller consumes, so
     // it is reported here beside the link it comes from. `known` false means the register did not
     // answer or answered a sentinel — never read that as an inactive plant.
@@ -926,7 +936,28 @@ void http_append_status_json(std::string& j, bool redact) {
          // crash loop points at the configuration (the RX/TX pins first), a heap give-up does
          // not, and telling that reader to check their pins sends them to fix something that
          // is already correct. null whenever safe_mode is false.
-         ",\"safe_mode_cause\":" + (safe_mode_cause() ? jstr(safe_mode_cause()) : "null") + "},";
+         ",\"safe_mode_cause\":" + (safe_mode_cause() ? jstr(safe_mode_cause()) : "null");
+    // THE OTHER MEMORY BUDGET, on the surface that needs no broker. The MQTT heartbeat carries the
+    // same four figures, but every ordinary publish — the heartbeat included — sits behind the
+    // X10A publish gate (logic/mqtt_publish_gate.hpp): a board whose bus never answers publishes
+    // nothing at all, and safe mode never starts the publish task in the first place. Those are
+    // exactly the boards whose stack headroom someone wants, so a metric reachable only over MQTT
+    // would be absent precisely where it is the evidence — the shape that once folded the board's
+    // own heap trends inside the heat pump's poll cycle. Grouped under one key so the unit is
+    // stated once; null per task until that task has been sampled (main/stack_watch.hpp).
+    //
+    // Appended with successive += rather than extended onto the chain above: this builder is the
+    // one whose frame overflowed the httpd stack twice, and a chain materialises every intermediate
+    // std::string in one frame (CLAUDE.md -> Memory constraints). Four integers, one at a time.
+    j += ",\"stack_min_free_bytes\":{\"httpd\":";
+    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Httpd));
+    j += ",\"poll\":";
+    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Poll));
+    j += ",\"mqtt\":";
+    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Mqtt));
+    j += ",\"modbus\":";
+    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Modbus));
+    j += "}},";
 
     // NTP: its own top-level block (not folded into sys), mirroring syslog{} — it is a runtime-
     // configurable network service like syslog/MQTT (POST /set_ntp -> NVS "ntp_server"), not a static

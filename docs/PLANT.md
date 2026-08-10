@@ -177,7 +177,9 @@ atomic proposed snapshot, so choosing a board and attaching its sensor cannot ha
 Published as a retained flat JSON document plus three HA sensors whose discovery config carries a
 two-entry availability list — the device LWT and a template on the state topic itself — so a stale or
 failed sensor marks only those three entities unavailable while the rest of the device stays online,
-and an error publishes `{}` rather than carrying the last plausible value forward.
+and an error omits the three readings rather than carrying the last plausible value forward. The
+`samples`/`errors` I2C counters ride both shapes: they describe the link rather than the air, so a
+sensor going dark keeps reporting why instead of falling silent about it.
 
 **Where it deliberately does not appear:** `/values` and the plant checkup. Those describe the heat
 pump, and an accessory measuring the board's surroundings is not a plant reading. Its one firmware

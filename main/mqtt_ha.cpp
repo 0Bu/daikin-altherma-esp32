@@ -15,7 +15,8 @@
 //     JSON to <base>/modbus, and — only while Open-Meteo is configured — an atomic
 //     forecast/provenance snapshot to <base>/weather/openmeteo/forecast when changed, plus each fresh
 //     ENV III sample on <base>/env3.
-//     A disconnected HomeHub or unavailable/stale ENV III publishes `{}` rather than carrying an old
+//     A disconnected HomeHub publishes `{}`, and an unavailable/stale ENV III omits its three
+//     readings (keeping only its samples/errors I2C counters), rather than carrying an old
 //     reading forward. Message topics sit directly under
 //     <base> — one board per base topic; the node
 //     id identifies the DEVICE only in each discovery config's uniq_id/dev.ids + the
@@ -53,6 +54,7 @@
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "heap_guard.hpp"
+#include "stack_watch.hpp"
 #include "env3.hpp"
 #include "hp_poll.hpp"
 #include "hp_modbus.hpp"
@@ -730,7 +732,13 @@ static void publish_weather_state(bool config_enabled) {
 static void publish_env3_state() {
     const Env3Status env = env3_status();
     const std::string js = build_env3_mqtt_json(env.fresh, env.temperature_c,
-                                                env.humidity_pct, env.pressure_hpa);
+                                                env.humidity_pct, env.pressure_hpa,
+                                                env.samples, env.errors);
+    // The sample COUNTER is now part of the document, so a new reading already changes `js` and the
+    // second term would carry this on its own. The explicit check stays: it is what states the rule
+    // — the sensor's real 10 s cadence must reach a time-series subscriber even when the rounded
+    // text repeats — and leaving it implicit in a payload field would make a future decision to
+    // drop that field silently reintroduce the gap that reads like a dropout.
     const bool new_sample = env.fresh && env.samples != s_last_env3_samples;
     if (new_sample || js != s_last_env3_json) {
         mqtt_publish(s_env3, js.c_str(), static_cast<int>(js.size()), 0, 1);
@@ -894,6 +902,16 @@ static void publish_heartbeat() {
     f.free_heap       = esp_get_free_heap_size();
     f.min_free_heap   = esp_get_minimum_free_heap_size();
     f.max_alloc       = heap_largest_internal_block();
+    // What the heap watchdog already DID about that headroom. Its restart is an esp_restart(), so
+    // reset_reason below reads "sw" and reset_fault 0 — the same shape a settings save produces —
+    // and this count is the only field that tells the two apart.
+    f.heap_restarts   = heap_guard_restarts();
+    // The stack budget (stack_watch.hpp). Read here rather than sampled here: each task records its
+    // OWN mark from its own loop, because uxTaskGetStackHighWaterMark answers for the CALLING task
+    // and asking from this one would file all four under mqtt_pub's name.
+    f.httpd_stack_min_free_bytes = stack_watch_min_free_bytes(StackWatch::Httpd);
+    f.poll_stack_min_free_bytes  = stack_watch_min_free_bytes(StackWatch::Poll);
+    f.mqtt_stack_min_free_bytes  = stack_watch_min_free_bytes(StackWatch::Mqtt);
     // One cached boot reason (diag_crash.cpp), three renderings: the slug a human reads, the raw
     // code a metrics store can keep, and the fault flag an alert fires on. Bound once so all three
     // are demonstrably the same reading rather than three lookups that only look identical.
@@ -946,7 +964,7 @@ static void publish_heartbeat() {
     f.modbus_connected = mbs.connected;
     f.modbus_rx        = mbs.rx_ok;
     f.modbus_fails     = mbs.rx_fail;
-    f.modbus_stack_min_free_words = mbs.task_stack_min_free_words;
+    f.modbus_stack_min_free_bytes = stack_watch_min_free_bytes(StackWatch::Modbus);
     const std::string js = build_heartbeat_json(f);
     mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
 }
@@ -1958,6 +1976,13 @@ static void mqtt_task(void*) {
         // regardless of connection state, so this must NOT be gated on s_connected or an actual
         // publish, or a long MQTT disconnect (no publishes) would false-trip the timeout.
         esp_task_wdt_reset();
+        // This task's stack headroom, recorded beside the watchdog reset and for the same reason:
+        // it is the one statement of the cycle that no branch reaches past. That matters more here
+        // than in the other loops — the OTA hold-off below `continue`s out of the cycle entirely,
+        // so an end-of-loop sample would stop recording during precisely the episode (a TLS session
+        // competing for the heap) worth watching. The mark is retrospective, so the top of the loop
+        // still reports the deepest frame the task has ever built.
+        stack_watch_sample(StackWatch::Mqtt);
         const int delay_s = POLL_INTERVAL_S;
 
         // STAND ASIDE while an OTA download owns the heap (#380). Placed above the try, before the

@@ -23,6 +23,34 @@ struct HeartbeatFields {
     uint32_t    free_heap     = 0;   // esp_get_free_heap_size()
     uint32_t    min_free_heap = 0;   // esp_get_minimum_free_heap_size() — worst-case low-water mark
     uint32_t    max_alloc     = 0;   // heap_caps_get_largest_free_block() — the binding OOM limit
+    // HOW MANY CONSECUTIVE HEAP-WATCHDOG RESTARTS preceded this boot (heap_guard_restarts(); 0 on an
+    // ordinary one). Already on /status.sys, and it belongs here for the reason reset_reason_code
+    // does: without it a self-restarting board is INDISTINGUISHABLE in a metrics store from a
+    // healthy one somebody keeps saving settings on. The restart heap_guard.cpp makes is an
+    // esp_restart(), so it reports the same "sw" reset reason a /set_* save produces and
+    // `reset_fault` stays 0 — every other field in this payload agrees that nothing went wrong. A
+    // board cycling through its restart ladder every five minutes would show as a sawtooth in
+    // uptime_s and nothing else, which is the same "reboot nobody can attribute" that #215 spent a
+    // week reconstructing from syslog.
+    //
+    // NOT `total_increasing`: this is a per-boot CONSTANT, not a counter. It reports the count the
+    // boot inherited and heap_guard_begin() clears the breadcrumb, so it reads 2 for the whole life
+    // of the third boot in a ladder and 0 for the whole life of the next healthy one.
+    uint8_t     heap_restarts = 0;
+    // THE OTHER MEMORY BUDGET (stack_watch.hpp). Words free at the worst point since boot, per
+    // watched task; 0 = never sampled and is rendered as JSON null, never as a number — a task that
+    // has not run is not a task with no stack left, and the Modbus slot stays 0 forever on the
+    // majority of boards that have no HomeHub.
+    //
+    // Payload-only, no HA entity, like the modbus_* block below and for the same reason: this is a
+    // developer/fleet diagnostic whose value is the TREND across firmware versions, and four more
+    // diagnostic entities in HA would be four more things a reader has to rule out. The trend is
+    // what nothing could see before — every one of the three shipped overflows was read off a core
+    // dump's task table AFTER the board died, and #318's 1200 bytes of frame growth accumulated
+    // across releases with no single change announcing it.
+    uint32_t    httpd_stack_min_free_bytes  = 0;
+    uint32_t    poll_stack_min_free_bytes   = 0;
+    uint32_t    mqtt_stack_min_free_bytes   = 0;
     std::string reset_reason;         // reset_reason_name() slug — why the device last booted
     // The SAME answer as a NUMBER. The slug above is the readable one and stays, but a metrics
     // consumer never sees it: Telegraf's json parser takes numeric fields only, so `reset_reason` is
@@ -122,8 +150,21 @@ struct HeartbeatFields {
     bool        modbus_connected = false;
     uint32_t    modbus_rx        = 0;   // successful HomeHub register reads since boot
     uint32_t    modbus_fails     = 0;   // failed reads since boot
-    uint32_t    modbus_stack_min_free_words = 0;
+    // The fourth watched stack — same source and same 0-means-never-sampled rule as the three
+    // above (stack_watch.hpp). It USED to be published as a bare 0 on every board without a
+    // HomeHub, i.e. as "0 words of stack free" on the majority of the fleet: a plausible-looking
+    // number for a task that does not exist. It is null now, like its three new siblings.
+    uint32_t    modbus_stack_min_free_bytes = 0;
 };
+
+// Words free -> JSON, with the shared never-sampled rule in ONE place rather than at four call
+// sites. Absence is a first-class answer here: a metrics consumer drops a null field and records no
+// sample, which is exactly right, where a 0 would draw a line at the bottom of the chart and read
+// as a board one word from death.
+inline void append_stack_bytes(std::string& j, uint32_t words) {
+    if (words == 0) j += "null";
+    else            j += std::to_string(words);
+}
 
 // Heartbeat topic: <base>/heartbeat — separate from the source value topics so a Telegraf/HA consumer
 // can subscribe to device health independently of heat-pump values.
@@ -169,6 +210,13 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += "\"free_heap\":"; j += std::to_string(f.free_heap); j += ",";
     j += "\"min_free_heap\":"; j += std::to_string(f.min_free_heap); j += ",";
     j += "\"max_alloc\":"; j += std::to_string(f.max_alloc); j += ",";
+    // Beside the heap it reports on: the count of consecutive heap-watchdog restarts this boot
+    // inherited, which is the only field here that can attribute a "sw" reset to the watchdog.
+    j += "\"heap_restarts\":"; j += std::to_string(static_cast<unsigned>(f.heap_restarts)); j += ",";
+    // The stack budget, per watched task — null where the task has never run (see the fields).
+    j += "\"httpd_stack_min_free_bytes\":"; append_stack_bytes(j, f.httpd_stack_min_free_bytes); j += ",";
+    j += "\"poll_stack_min_free_bytes\":";  append_stack_bytes(j, f.poll_stack_min_free_bytes);  j += ",";
+    j += "\"mqtt_stack_min_free_bytes\":";  append_stack_bytes(j, f.mqtt_stack_min_free_bytes);  j += ",";
     j += "\"reset_reason\":\""; json_append_escaped(j, f.reset_reason); j += "\",";
     // Numeric twin of the slug above — see HeartbeatFields. A string never reaches a metrics store.
     j += "\"reset_reason_code\":"; j += std::to_string(f.reset_reason_code); j += ",";
@@ -232,7 +280,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"modbus_connected\":"; j += f.modbus_connected ? "1" : "0";
     j += ",\"modbus_rx\":"; j += std::to_string(f.modbus_rx);
     j += ",\"modbus_fails\":"; j += std::to_string(f.modbus_fails);
-    j += ",\"modbus_stack_min_free_words\":"; j += std::to_string(f.modbus_stack_min_free_words);
+    j += ",\"modbus_stack_min_free_bytes\":"; append_stack_bytes(j, f.modbus_stack_min_free_bytes);
     j += "}";
     return j;
 }
@@ -265,6 +313,17 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     // (max_alloc — the binding OOM limit on this firmware) is graphable/alertable in HA.
     {"sensor",        "min_free_heap",    "Min Free Heap",       "min_free_heap",    "B",   "",                 "measurement"},
     {"sensor",        "max_alloc",        "Largest Free Block",  "max_alloc",        "B",   "",                 "measurement"},
+    // An ENTITY, unlike the four stack watermarks beside it in the payload, and the difference is
+    // who acts on it: a stack low-water mark is a trend a maintainer reads across releases, this is
+    // a fact the OWNER of the board needs to know today — "your device restarted itself because it
+    // ran out of memory" — and it is the one thing that separates a heap give-up from the "sw"
+    // reset a settings save produces. It does not duplicate "Reset Reason": that entity says `sw`
+    // for both, which is exactly the ambiguity this resolves.
+    //
+    // `measurement`, NOT `total_increasing`: the value is the count this BOOT inherited and it
+    // returns to 0 on the next healthy boot, so a monotonic state class would make HA's long-term
+    // statistics read every recovery as a counter reset and every ladder as an unrelated new total.
+    {"sensor",        "heap_restarts",    "Heap Watchdog Restarts", "heap_restarts", "",    "",                 "measurement"},
     {"sensor",        "uptime",           "Uptime",              "uptime_s",         "s",   "duration",         "measurement"},
     {"sensor",        "reset_reason",     "Reset Reason",        "reset_reason",     "",    "",                 ""},
     {"binary_sensor", "bus_status",       "X10A Bus",            "bus_connected",    "",    "connectivity",     ""},

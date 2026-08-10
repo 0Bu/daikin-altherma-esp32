@@ -12,6 +12,7 @@
 #include "heap_guard.hpp"
 #include "hp_detect.hpp"
 #include "history.hpp"
+#include "stack_watch.hpp"
 #include "logic/availability.hpp"
 #include "logic/conv_override.hpp"
 #include "logic/convert.hpp"
@@ -434,6 +435,12 @@ static void poll_task(void*) {
     esp_task_wdt_add(NULL);                                    // this task owns the link — watch it
     for (;;) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
+        // This task's own stack headroom — the budget that killed it in #241 and that nothing
+        // reported while the board was alive. The mark is RETROSPECTIVE (FreeRTOS keeps the lowest
+        // free stack ever), so the top of the loop records the deepest frame of the PREVIOUS cycle
+        // and no branch below can skip it. Outside the try: it allocates nothing and must still be
+        // recorded for the cycle that threw, which is the one that went deepest.
+        stack_watch_sample(StackWatch::Poll);
         try {
             // The BOARD's own memory trends, before any decision about the bus. They describe the
             // ESP32, not the heat pump, so they must not depend on a profile being resolved: folding
@@ -522,10 +529,13 @@ void hp_poll_start() {
     //     0x3fcc84cc   hp_poll      5/5      7664/520          <- died on the stack watchpoint
     //     0x3fcbf3b4     httpd      5/5     1456/10820
     //
-    // Nothing on /status reports stack headroom, so the task table's USED/FREE column in the next
-    // core dump is the only place to check this (CLAUDE.md -> Memory constraints). If a future change
-    // gives this task a large builder or a deep call chain again, raise it in the SAME commit — and
-    // note that a builder shared by two tasks is only ever as safe as its smallest stack.
+    // The task table's USED/FREE column in the next core dump is where the exact figure lives
+    // (CLAUDE.md -> Memory constraints), but this task no longer waits for one to be readable: it
+    // records its own high-water mark every cycle and the MQTT heartbeat publishes it as
+    // poll_stack_min_free_bytes (main/stack_watch.hpp), so a shrinking margin is a falling line
+    // months before it is a panic. If a future change gives this task a large builder or a deep
+    // call chain again, raise it in the SAME commit — and note that a builder shared by two tasks
+    // is only ever as safe as its smallest stack.
     if (xTaskCreate(poll_task, "hp_poll", 8192, nullptr, TASK_PRIO_POLL, nullptr) != pdPASS)
         diag_printf("hp_poll: poll task alloc failed — X10A polling disabled this boot\n");
 }

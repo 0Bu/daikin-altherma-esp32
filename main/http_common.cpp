@@ -7,17 +7,31 @@
 // large output (e.g. /diag) instead of one big std::string. (See docs/ARCHITECTURE.md → Memory constraints.)
 #include "http_handlers.hpp"
 #include "diag_log.hpp"   // diag_printf — a route that failed to register must not do so silently
+#include "stack_watch.hpp"
 #include "logic/http_body.hpp"
 #include "esp_err.h"
 #include <new>          // std::bad_alloc
 
 namespace daik {
 
+// Record the httpd task's stack headroom on EVERY exit from handle_all — the normal return, the
+// 503 and the 500 — because the request that came closest to the limit is exactly the one that
+// threw. A destructor rather than three call sites: it also covers a future early return, and this
+// task carries the deepest call chain in the firmware (mcp_post -> http_append_status_json), which
+// overflowed twice (v1.0.12, #318) and was diagnosed both times from a core dump. Costs one
+// FreeRTOS read per request; the number leaves the board on the MQTT heartbeat (stack_watch.hpp).
+namespace {
+struct SampleHttpdStackOnExit {
+    ~SampleHttpdStackOnExit() { stack_watch_sample(StackWatch::Httpd); }
+};
+}  // namespace
+
 // The single OOM/exception guard every HTTP handler runs under. http_register() stashes the real
 // handler in user_ctx and installs this trampoline as the route handler; we call the real handler
 // inside try/catch so an out-of-memory throw (std::string / cJSON / TLS) turns into a 503 rather
 // than crashing the device (which would also drop the poll cycle + MQTT availability).
 static esp_err_t handle_all(httpd_req_t* req) {
+    SampleHttpdStackOnExit sampler;
     auto fn = reinterpret_cast<esp_err_t (*)(httpd_req_t*)>(req->user_ctx);
     if (!fn) return httpd_resp_send_500(req);
     try {

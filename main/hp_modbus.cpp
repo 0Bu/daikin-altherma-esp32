@@ -17,6 +17,7 @@
 #include "def/homehub.hpp"
 #include "diag_log.hpp"
 #include "history.hpp"
+#include "stack_watch.hpp"
 #include "logic/detect_backoff.hpp"   // the SAME backoff the X10A sweep uses on a silent bus
 #include "logic/homehub_map.hpp"      // the concept a register pairs on
 #include "logic/modbus_snapshot.hpp"  // a cache is live only for the TCP session that committed it
@@ -789,6 +790,11 @@ static void mb_task(void*) {
     esp_task_wdt_add(NULL);
     for (;;) {
         esp_task_wdt_reset();
+        // Moved here from the end of the loop when the four watched stacks were given one sampler
+        // (stack_watch.hpp): behaviourally identical, since the FreeRTOS mark is retrospective, and
+        // it now sits where the other three sit — above the `break` that retires this task, so the
+        // last cycle before a HomeHub is disabled is recorded like every other.
+        stack_watch_sample(StackWatch::Modbus);
         try {
             // Clearing the saved address disables the stack. No boot- or loop-triggered browse may
             // turn an empty field back into an active HomeHub configuration.
@@ -801,13 +807,6 @@ static void mb_task(void*) {
             diag_printf("modbus: cycle skipped (%s)\n", e.what());
         } catch (...) {
             diag_printf("modbus: cycle skipped (oom?)\n");
-        }
-        {
-            const uint32_t free_words = static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
-            Lock lk(s_mtx);
-            if (s_status.task_stack_min_free_words == 0 ||
-                free_words < s_status.task_stack_min_free_words)
-                s_status.task_stack_min_free_words = free_words;
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
     }

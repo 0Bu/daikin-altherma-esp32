@@ -1285,9 +1285,16 @@ vocabulary exactly:
    24-hour trend (§5.3 item 3's chart, same accordion as a value row). The original objection stands
    against the *number* — "148 KiB" is a diagnosis nobody can make — and is answered by the *curve*:
    a leak is a slope, and fragmentation is the two lines separating while the total holds. That is
-   the one memory question this firmware has, no other surface answers it (the heartbeat gives Home
+   the one memory question this CARD answers, no other surface answers it (the heartbeat gives Home
    Assistant the same series, but only if a broker is configured), and it is a question the user is
-   already on this screen for whenever an OTA has just failed. Not `min_free_heap`: the 24-hour
+   already on this screen for whenever an OTA has just failed.
+   It is **not** the only memory question the firmware has — per-task stack headroom is a second one
+   (`main/stack_watch.hpp`, on `/status.sys.stack_min_free_bytes` and the heartbeat) — and it gets
+   no row here for the reason this paragraph already gives: only a *curve* earned the two that came
+   back, and a stack high-water mark has none to draw. It falls monotonically within a boot and then
+   flattens, so a 24-hour chart of it is a staircase that can only descend, and there is no trend
+   ring behind it (the ring budget is at its stated ceiling). A row would be exactly the spot number
+   the original objection threw out. Not `min_free_heap`: the 24-hour
    minimum is on the chart, and a since-boot scalar beside it would be a second, coarser answer to
    the same question.
    The third is **Uptime** (`uptime_s`), a plain row directly above them, and it comes back for a

@@ -295,7 +295,9 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
                                    #   modbus:{enabled,connected,discovering,host,port,unit_id,rx,
-                                   #           fails,values,task_stack_min_free_words,
+                                   #           fails,values,task_stack_min_free_bytes, # null until
+                                   #           the task runs — never 0, which would read as
+                                   #           "no stack left" on every board with no HomeHub
                                    #           plant_gate_known,plant_gate_active,
                                    #           error?,error_code?,error_detail?,error_register?},
                                    #        # link diagnostics; read-only, no write API
@@ -355,8 +357,14 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        share_pct is null for a positive sub-percent ratio; raw
                                    #        defrost_s/run_s preserve and adjudicate it. NOT GET /diag,
                                    #        which is the log ring.
-                                   #   sys:{free_heap,min_free_heap,max_alloc,mqtt_skipped,mqtt_quiesced,
-                                   #        poll_skipped,reset_reason,safe_mode},
+                                   #   sys:{free_heap,min_free_heap,max_alloc,heap_restarts,
+                                   #        mqtt_skipped,mqtt_quiesced,poll_skipped,reset_reason,
+                                   #        safe_mode,safe_mode_cause,
+                                   #        stack_min_free_bytes:{httpd,poll,mqtt,modbus}},
+                                   #        # per-task stack headroom; null per task until sampled.
+                                   #        # Here as well as on the MQTT heartbeat because every
+                                   #        # publish is X10A-gated, so a board with a silent bus
+                                   #        # would report it nowhere.
                                    #   last_crash: null | {reason,reason_code,fault,coredump,
                                    #        task,pc,backtrace[],corrupted,elf_sha256},
                                    #   detect:{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,
@@ -593,11 +601,14 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   An enabled HomeHub publishes its live, flat register map independently on `<base>/modbus`, but no
   HA discovery config references that topic. An enabled ENV III likewise publishes each fresh 10 s
   sample independently on retained `<base>/env3` as
-  `{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75}`. An unavailable or stale
-  sensor publishes `{}` so consumers cannot mistake the last retained value for a current reading;
+  `{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75,"samples":4211,"errors":7}`.
+  An unavailable or stale sensor omits the three readings so consumers cannot mistake the last
+  retained value for a current one, keeping only the `samples`/`errors` I2C counters — those
+  describe the link rather than the air and are most informative precisely when no reading arrived;
   selecting **No sensor** retracts the retained topic and its three HA discovery configurations.
-  Home Assistant receives ENV III temperature, humidity and air pressure as measurement sensors;
-  `{}` marks those entities unavailable while the device and unrelated entities stay online.
+  Home Assistant receives ENV III temperature, humidity and air pressure as measurement sensors; a
+  document without the reading keys marks those entities unavailable while the device and unrelated
+  entities stay online.
   On upgrade, retained tombstones remove all 27 formerly
   announced `_modbus` entities; the data stream itself remains intact. A disconnected link publishes
   `{}` and disabling the source retracts its data topic. A bounded migration probe deletes the former
