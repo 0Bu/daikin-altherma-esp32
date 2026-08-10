@@ -171,6 +171,13 @@ struct ConfigBlob {
     // `has_mqtt_base` need consult no Kconfig fallback the way `has_board` must.
     std::string mqtt_base;
     bool        has_mqtt_base = false;   // FALSE when the decoded blob predates v16
+    // ── v17: independent room-value topics + optional fixed target ─────────────────────────────
+    // Temperature keeps the v7 topic/path fields. These two topics decouple target and source time;
+    // zero fixed_setpoint_tenths selects the MQTT target mapping. Older blobs migrate both topics
+    // to ref_temp_topic, preserving their single-document contract exactly.
+    std::string ref_temp_setpoint_topic, ref_temp_time_topic;
+    uint32_t    ref_temp_fixed_setpoint_tenths = 0;
+    bool        has_ref_multi_source = false;
 };
 
 inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
@@ -183,8 +190,9 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // + selected flag, v13 appends room setpoint/enabled/HVAC mappings, and v14 appends one byte that
 // carried the OFF/SHADOW dynamic-LWT mode and is now retired — written zero, ignored on read, since
 // the diagnosis arms itself from its configured sources; v15 appends the independent circulation-
-// pump MQTT power mapping, and v16 appends this installation's MQTT base topic (empty = the
+// pump MQTT power mapping, v16 appends this installation's MQTT base topic (empty = the
 // compile-time default, so the upgrade is a no-op for every existing device). Current firmware
+// and v17 appends independent target/timestamp topics plus the optional fixed target.
 // derives HomeHub enabled solely from whether mb_host is empty;
 // v5-v8 actuation bits decode OFF and every pre-v14 controller mode migrates OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
@@ -192,7 +200,7 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced the
 // field — the fallback path is the legacy per-key layout, which a device written by a blob-era build
 // has never populated.
-inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 16;
+inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 17;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
@@ -213,7 +221,7 @@ inline constexpr uint16_t CONFIG_BLOB_MAX_STR = 512;
 // Every std::string in ConfigBlob, in declaration order. A new string field belongs in this list AND
 // in test_config_blob_strings_fit()'s own field list, which is what proves the invariant this exists
 // for (fit() ⟹ the blob round-trips). Stated precisely because the test cannot discover a member
-// nobody added to it: C++ gives it no way to enumerate the struct, so the `== 21` pin catches a field
+// nobody added to it: C++ gives it no way to enumerate the struct, so the `== 23` pin catches a field
 // dropped from the TEST, not one added to the STRUCT and forgotten in both places.
 inline bool config_blob_strings_fit(const ConfigBlob& c) {
     for (const std::string* s : {
@@ -223,7 +231,7 @@ inline bool config_blob_strings_fit(const ConfigBlob& c) {
              &c.ref_temp_name, &c.ref_temp_topic, &c.ref_temp_path, &c.ref_temp_setpoint_path,
              &c.ref_temp_time_path, &c.ref_temp_enabled_path, &c.ref_temp_hvac_mode_path,
              &c.circulation_name, &c.circulation_topic, &c.circulation_power_path,
-             &c.circulation_time_path })
+             &c.circulation_time_path, &c.ref_temp_setpoint_topic, &c.ref_temp_time_topic })
         if (s->size() > CONFIG_BLOB_MAX_STR) return false;
     return true;
 }
@@ -306,6 +314,10 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     // v16 block: the installation's MQTT base topic. Written even when empty — empty IS the value
     // meaning "compile-time default", and the length prefix makes it one exact two-byte body.
     detail::blob_put_str(v, c.mqtt_base);
+    // v17 block: append-only so every previous version remains byte-exact.
+    detail::blob_put_str(v, c.ref_temp_setpoint_topic);
+    detail::blob_put_str(v, c.ref_temp_time_topic);
+    detail::blob_put_u32(v, c.ref_temp_fixed_setpoint_tenths);
     detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
     return v;
 }
@@ -439,12 +451,18 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         if (!get_str(c.mqtt_base)) return false;
         c.has_mqtt_base = true;
     }
+    if (version >= 17) {
+        if (!get_str(c.ref_temp_setpoint_topic) || !get_str(c.ref_temp_time_topic) ||
+            !get_u32(c.ref_temp_fixed_setpoint_tenths)) return false;
+        c.has_ref_multi_source = true;
+    }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block
     // v7 after the reference-source strings, v8/v9 after timestamp/max-age, and v10 after the
     // Open-Meteo location, v11 after ENV III, v12 after the explicit board identity, v13 after the
     // three room-control mapping strings, v14 after its one retired byte, v15 after the
-    // circulation-pump source mapping and thresholds, and v16 after the MQTT base topic.
+    // circulation-pump source mapping and thresholds, v16 after the MQTT base topic, and v17 after
+    // the independent room target/time topics and fixed-target value.
     // v6 and v9 change a flag's meaning without changing the HomeHub block's size, as does v14's
     // retirement of the mode byte — the LENGTH is the contract here, not what a byte still means.
     // Accepting a prefix would let a truncated v2 decode as a valid v1 with silently-default pins.

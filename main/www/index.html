@@ -825,31 +825,26 @@
         <input class="input" name="name" id="rtName" maxlength="48" placeholder="Living room" autocomplete="off">
       </label>
       <label class="field">
-        <span class="field-label plain" data-i18n="ref.topic">MQTT topic</span>
-        <input class="input mono" name="topic" id="rtTopic" maxlength="192" placeholder="sensor/living-room/status" autocomplete="off" aria-describedby="rtTopicHelp">
-        <span class="field-help" id="rtTopicHelp" data-i18n="ref.topic_help">The exact MQTT topic where the thermostat publishes its JSON status.</span>
+        <span class="field-label plain" data-i18n="ref.temperature_source">Temperature source</span>
+        <input class="input mono" id="rtTemperatureSource" maxlength="321" placeholder="shellyhtg3-…/status/temperature:0$tC" autocomplete="off" aria-describedby="rtTemperatureSourceHelp">
+        <span class="field-help" id="rtTemperatureSourceHelp" data-i18n="ref.temperature_source_help">Exact MQTT topic and optional JSON path after $. Missing or wrong paths are reported when a payload arrives.</span>
       </label>
       <label class="field">
-        <span class="field-label plain" data-i18n="ref.path">Temperature JSON path</span>
-        <input class="input mono" name="temperature_path" id="rtPath" maxlength="128" placeholder="thermostat.current_temperature_c" autocomplete="off" aria-describedby="rtPathHelp">
-        <span class="field-help" id="rtPathHelp" data-i18n="ref.path_help">Current room temperature in °C.</span>
+        <span class="field-label plain" data-i18n="ref.target">Target temperature</span>
+        <input class="input mono" id="rtTarget" maxlength="321" placeholder="20 or thermostat/status$target_temperature_c" autocomplete="off" aria-describedby="rtTargetHelp">
+        <span class="field-help" id="rtTargetHelp" data-i18n="ref.target_help">A fixed value in °C, or an exact MQTT topic with an optional JSON path after $.</span>
       </label>
       <label class="field">
-        <span class="field-label plain" data-i18n="ref.setpoint_path">Target-temperature JSON path</span>
-        <input class="input mono" name="setpoint_path" id="rtSetpointPath" maxlength="128" placeholder="thermostat.target_temperature_c" autocomplete="off" aria-describedby="rtSetpointPathHelp">
-        <span class="field-help" id="rtSetpointPathHelp" data-i18n="ref.setpoint_path_help">Desired room temperature in °C.</span>
-      </label>
-      <label class="field">
-        <span class="field-label plain" data-i18n="ref.time_path">Timestamp JSON path</span>
-        <input class="input mono" name="timestamp_path" id="rtTimePath" maxlength="128" placeholder="thermostat.read_at" autocomplete="off" aria-describedby="rtTimePathHelp">
-        <span class="field-help" id="rtTimePathHelp" data-i18n="ref.time_path_help">Measurement time as RFC3339 or Unix seconds.</span>
+        <span class="field-label plain" data-i18n="ref.timestamp_source">Timestamp source · optional</span>
+        <input class="input mono" id="rtTimestampSource" maxlength="321" placeholder="Optional: topic$unixtime" autocomplete="off" aria-describedby="rtTimestampSourceHelp">
+        <span class="field-help" id="rtTimestampSourceHelp" data-i18n="ref.timestamp_source_help">Optional RFC3339/Unix source time as topic$path. Empty uses live MQTT arrival time; retained values then fail closed.</span>
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.max_age">Maximum age · seconds</span>
         <input class="input" type="number" name="max_age_s" id="rtMaxAge" min="10" max="3600" step="1" value="600" inputmode="numeric" aria-describedby="rtMaxAgeHelp">
         <span class="field-help" id="rtMaxAgeHelp" data-i18n="ref.max_age_help">Maximum permitted age of the source reading, from 10 to 3600 seconds.</span>
       </label>
-      <p class="hint" data-i18n="ref.save_help">Save accepts the source only after a current MQTT reading has been checked.</p>
+      <p class="hint" data-i18n="ref.save_help">Save subscribes immediately. The source remains unavailable until a readable, fresh MQTT value arrives.</p>
       <p class="hint err" id="rtError" hidden></p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="rtCancel" data-i18n="btn.cancel">Cancel</button>

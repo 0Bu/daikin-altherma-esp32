@@ -118,15 +118,6 @@ const fetch = async (url, options = {}) => {
       code: "env3_sht30_not_found",
       error: "ENV III temperature/humidity sensor not found on the selected pins",
     }, 422);
-  if (url === "/test_ref_temp") {
-    if (fetchState.mode === "ref_test_reject")
-      return response(false, { error: "No fresh value received before the test timed out" }, 422);
-    return response(true, {
-      ok: true, test_proof: 71, temperature_c: 21.5, setpoint_c: 22.0,
-      control_eligible: true, room_error_k: 0.5, reason: "eligible", reason_code: 0,
-      retained: false,
-    });
-  }
   if (url === "/test_circulation") {
     if (fetchState.mode === "circ_test_reject")
       return response(false, { error: "No fresh pump-power value received before timeout" }, 422);
@@ -237,8 +228,9 @@ ui.S.status = {
   wifi: { ssid: "DemoNet" },
   mqtt: { broker: "203.0.113.27:1883", has_creds: false, base: "daikin-altherma-esp32", base_custom: false },
   reference_temperature: {
-    configured: true, name: "Living room", topic: "sensor/living-room/status",
-    temperature_path: "temperature.tC", setpoint_path: "target.tC",
+    configured: true, name: "Living room", topic: "sensor/living-room/temperature",
+    temperature_path: "temperature.tC", setpoint_topic: "", setpoint_path: "",
+    fixed_setpoint_c: 20, timestamp_topic: "sensor/living-room/sys",
     timestamp_path: "read_at", enabled_path: "enabled", hvac_mode_path: "hvac_mode",
     max_age_s: 600,
   },
@@ -449,10 +441,9 @@ const settle = async () => {
 };
 const configureValid = (item) => {
   if (item.modal === "refTempModal") {
-    document.getElementById("rtTopic").value = "sensor/living-room/status";
-    document.getElementById("rtPath").value = "temperature.tC";
-    document.getElementById("rtSetpointPath").value = "target.tC";
-    document.getElementById("rtTimePath").value = "read_at";
+    document.getElementById("rtTemperatureSource").value = "sensor/living-room/temperature$temperature.tC";
+    document.getElementById("rtTarget").value = "20";
+    document.getElementById("rtTimestampSource").value = "sensor/living-room/sys$read_at";
     document.getElementById("rtMaxAge").value = "600";
   } else if (item.modal === "circulationModal") {
     document.getElementById("circTopic").value = "shellyplugsg3-fixture00001/status/switch:0";
@@ -479,14 +470,16 @@ for (const item of cases.filter((entry) => entry.form)) {
     `${item.name}: accepted Save must release background scrolling`);
   assert.ok(fetchState.calls.some((call) => call.url === item.url), `${item.name}: Save must call ${item.url}`);
   if (item.modal === "refTempModal") {
-    assert.deepEqual(fetchState.calls.map((call) => call.url), ["/test_ref_temp", "/set_ref_temp"],
-      "one room-source Save must run live test before persistence");
-    assert.equal(fetchState.calls[1]?.body?.test_proof, 71,
-      "room-source persistence must present the proof returned by that live test");
+    assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"],
+      "one room-source Save must persist immediately without a live probe");
     assert.equal(fetchState.calls[0]?.body?.enabled_path, "enabled",
       "editing the visible fields of an unchanged source must preserve its existing enabled gate");
     assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "hvac_mode",
       "editing the visible fields of an unchanged source must preserve its existing HVAC gate");
+    assert.equal(fetchState.calls[0]?.body?.fixed_setpoint_c, 20,
+      "a numeric target must be sent as a fixed temperature, not an MQTT mapping");
+    assert.equal(fetchState.calls[0]?.body?.timestamp_topic, "sensor/living-room/sys",
+      "the timestamp mapping must retain its independent MQTT topic");
   } else if (item.modal === "circulationModal") {
     assert.deepEqual(fetchState.calls.map((call) => call.url), ["/test_circulation", "/set_circulation"],
       "one circulation-source Save must run live test before persistence");
@@ -509,26 +502,72 @@ for (const item of cases.filter((entry) => entry.form)) {
   assert.equal(ui.S.busy, false, `${item.name}: rejected Save must release busy state`);
 }
 
-// Room source Save owns validation + live test + persistence. A failed live read never reaches the
-// write endpoint, and the separate destructive action clears the mapping without testing whatever
-// draft happens to be in the form.
+// A Shelly H&T has a temperature topic but no target and need not publish a source timestamp.
+// The fixed target plus live MQTT arrival-time contract must therefore survive immediate persistence
+// with both timestamp fields deliberately empty.
+fetchState.mode = "ok";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(cases.find((item) => item.modal === "refTempModal"));
+document.getElementById("rtName").value = "Shelly H&T";
+document.getElementById("rtTemperatureSource").value =
+  "shellyhtg3-fixture00002/status/temperature:0$tC";
+document.getElementById("rtTarget").value = "20";
+document.getElementById("rtTimestampSource").value = "";
+document.getElementById("rtMaxAge").value = "600";
+await document.getElementById("refTempForm").fire("submit");
+await settle();
+assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"],
+  "a timestamp-less Shelly source must persist without waiting for its next report");
+assert.equal(fetchState.calls[0]?.body?.timestamp_topic, "");
+assert.equal(fetchState.calls[0]?.body?.timestamp_path, "");
+assert.equal(fetchState.calls[0]?.body?.fixed_setpoint_c, 20);
+
+// Missing and malformed paths are saved as operator intent. The durable subscriber reports their
+// failure only after a real MQTT frame arrives. Delete remains a separate destructive action.
 const roomSource = cases.find((item) => item.modal === "refTempModal");
-fetchState.mode = "ref_test_reject";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(roomSource);
+document.getElementById("rtName").value = "Example sensor1";
+document.getElementById("rtTemperatureSource").value = "shellyhtg3-fixture00002/status/temperature:0";
+document.getElementById("rtTarget").value = "22";
+document.getElementById("rtTimestampSource").value = "";
+document.getElementById("rtMaxAge").value = "600";
+await document.getElementById("refTempForm").fire("submit");
+await settle();
+assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"]);
+assert.equal(fetchState.calls[0]?.body?.temperature_path, "",
+  "a topic without a JSON path must still be persisted");
+assert.equal(document.getElementById("refTempModal").hidden, true,
+  "saving an unverified path must not wait for a live MQTT value");
+
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(roomSource);
+document.getElementById("rtTemperatureSource").value = "sensor/living-room$temperature..tC";
+document.getElementById("rtTarget").value = "22";
+await document.getElementById("refTempForm").fire("submit");
+await settle();
+assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"]);
+assert.equal(fetchState.calls[0]?.body?.temperature_path, "temperature..tC",
+  "even a malformed path must reach persistence and runtime diagnostics");
+
+fetchState.mode = "ok";
 fetchState.calls.length = 0;
 ui.S.busy = false;
 open(roomSource);
 configureValid(roomSource);
+document.getElementById("rtTarget").value = "thermostat/living-room/status$target.temperature_c";
 await document.getElementById("refTempForm").fire("submit");
 await settle();
-assert.deepEqual(fetchState.calls.map((call) => call.url), ["/test_ref_temp"],
-  "a failed live test must not attempt to persist the room source");
-assert.equal(document.getElementById("refTempModal").hidden, false,
-  "a failed live test must keep the mapping editable");
-assert.equal(document.getElementById("rtError").hidden, false,
-  "a failed live test must explain its failure inline");
-assert.equal(ui.S.busy, false, "a failed live test must release Save");
+assert.equal(fetchState.calls[0]?.body?.setpoint_topic, "thermostat/living-room/status",
+  "an MQTT target must keep its independent exact topic");
+assert.equal(fetchState.calls[0]?.body?.setpoint_path, "target.temperature_c",
+  "an MQTT target must split the dotted JSON path after the final $ delimiter");
+assert.equal(fetchState.calls[0]?.body?.fixed_setpoint_c, 0,
+  "an MQTT target must not also send a fixed temperature");
 
-fetchState.mode = "ok";
 fetchState.calls.length = 0;
 ui.S.busy = false;
 open(roomSource);
@@ -540,15 +579,16 @@ await settle();
 assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"],
   "Delete must not run the live-test endpoint");
 assert.deepEqual(fetchState.calls[0]?.body, {
-  name: "", topic: "", temperature_path: "", timestamp_path: "", max_age_s: 600, test_proof: 0,
-  setpoint_path: "", enabled_path: "", hvac_mode_path: "",
+  name: "", topic: "", temperature_path: "", setpoint_topic: "", setpoint_path: "",
+  fixed_setpoint_c: 0, timestamp_topic: "", timestamp_path: "", max_age_s: 600,
+  enabled_path: "", hvac_mode_path: "",
 }, "Delete must submit the explicit empty mapping rather than the draft fields");
 assert.equal(document.getElementById("refTempModal").hidden, true,
   "accepted Delete must close the dialog");
 assert.equal(document.body.classList.contains("modal-open"), false,
   "accepted Delete must release background scrolling");
 open(roomSource);
-for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath"])
+for (const id of ["rtName", "rtTemperatureSource", "rtTarget", "rtTimestampSource"])
   assert.equal(document.getElementById(id).value, "",
     `accepted Delete must leave ${id} empty when the dialog is reopened`);
 assert.equal(document.getElementById("rtMaxAge").value, "600",
@@ -560,8 +600,9 @@ fetchState.mode = "reject";
 fetchState.calls.length = 0;
 ui.S.busy = false;
 ui.S.status.reference_temperature = {
-  configured: true, name: "Living room", topic: "sensor/living-room/status",
-  temperature_path: "temperature.tC", setpoint_path: "target.tC",
+  configured: true, name: "Living room", topic: "sensor/living-room/temperature",
+  temperature_path: "temperature.tC", setpoint_topic: "", setpoint_path: "",
+  fixed_setpoint_c: 20, timestamp_topic: "sensor/living-room/sys",
   timestamp_path: "read_at", enabled_path: "enabled", hvac_mode_path: "hvac_mode",
   max_age_s: 600,
 };
@@ -578,15 +619,15 @@ assert.equal(ui.S.busy, false, "rejected Delete must release global busy state")
 
 ui.S.status.reference_temperature = {
   configured: false, name: "stale name", topic: "stale/topic",
-  temperature_path: "stale.current", setpoint_path: "stale.target",
-  timestamp_path: "stale.time", enabled_path: "stale.enabled",
+  temperature_path: "stale.current", setpoint_topic: "stale/target", setpoint_path: "stale.target",
+  timestamp_topic: "stale/time", timestamp_path: "stale.time", enabled_path: "stale.enabled",
   hvac_mode_path: "stale.hvac", max_age_s: 900,
 };
 fetchState.mode = "ok";
 open(roomSource);
 assert.equal(document.getElementById("rtDeleteBtn").disabled, true,
   "an unconfigured source must not offer a destructive no-op");
-for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath"])
+for (const id of ["rtName", "rtTemperatureSource", "rtTarget", "rtTimestampSource"])
   assert.equal(document.getElementById(id).value, "",
     `an unconfigured source must ignore stale ${id} status data`);
 assert.equal(document.getElementById("rtMaxAge").value, "600",
@@ -725,7 +766,7 @@ assert.equal(ui.S.busy, false, "a failed ENV III probe must release the shared S
 const invalid = [
   { modal: "wifiModal", form: "wifiForm", set() { document.getElementById("wfSSID").value = ""; } },
   { modal: "mqttModal", form: "mqttForm", set() { document.getElementById("mqBroker").value = "bad uri"; } },
-  { modal: "refTempModal", form: "refTempForm", set() { document.getElementById("rtTopic").value = "bad/#"; } },
+  { modal: "refTempModal", form: "refTempForm", set() { document.getElementById("rtTemperatureSource").value = "bad/#$value"; } },
   { modal: "weatherModal", form: "weatherForm", set() { document.getElementById("wxLatitude").value = "51.0"; document.getElementById("wxLongitude").value = ""; } },
   { modal: "syslogModal", form: "syslogForm", set() { document.getElementById("slHost").value = "host:not-a-port"; } },
   { modal: "homehubModal", form: "homehubForm", set() { document.getElementById("hhPort").value = "70000"; } },

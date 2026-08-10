@@ -149,16 +149,17 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
 http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
-http_config.cpp     → POST /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather,
+http_config.cpp     → POST /set_wifi, /set_mqtt, /set_ref_temp, /set_weather,
                       /test_circulation, /set_circulation,
                       /set_syslog,
                       /set_ntp, /set_hp, /discover_homehub, /set_board, /set_env3, /set_ota, /set_lang,
-                      /detect — all SIXTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
+                      /detect — all FIFTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
                       exactly to (and which must be LOWERED in the same commit that retires a route,
                       as retiring /set_dynamic_lwt did: a count left above the real one is a comment
-                      that has stopped describing the code depending on it). /test_ref_temp proves that an exact MQTT mapping yields an accepted
-                      value without saving it; /set_ref_temp requires that proof and applies live.
-                      /test_circulation and /set_circulation use the same proof boundary for a
+                      that has stopped describing the code depending on it). /set_ref_temp persists
+                      and subscribes immediately; payload/path/freshness failures are runtime status
+                      and diagnostic evidence, never a reason to refuse the operator's mapping.
+                      /test_circulation and /set_circulation retain their proof boundary for a
                       read-only active-power mapping; neither route can switch the configured plug.
                       /set_weather validates the DWD path component, persists it and only wakes the
                       weather task; no DNS/TLS request runs on the httpd worker.
@@ -1595,16 +1596,17 @@ Three layers keep the WiFi station link up:
 The Home Assistant bridge:
 
 - **Read-only** — no command topics. This bridge mirrors telemetry and never actuates the heat
-  pump or Shelly plug. Two optional exact-topic subscriptions capture and qualify a
-  reference-temperature input and the circulation pump's active-power witness,
+  pump or Shelly plug. A logical reference-temperature input may assemble temperature, target and
+  source time from three independent exact MQTT topics (or use a fixed target); another optional
+  exact-topic subscription captures the circulation pump's active-power witness,
   but no averaging or control path reads it. A configured payload timestamp (RFC3339 or Unix
   seconds) supplies age across retained delivery and restarts; without one, only a non-retained live
-  delivery may age from monotonic MQTT arrival. Editing that mapping is test-before-persist:
-  `POST /test_ref_temp` temporarily subscribes on the already-authenticated MQTT client and returns
-  a mapping-bound proof only after the normal JSON, timestamp and freshness checks accept a real
-  value; `POST /set_ref_temp` refuses a non-empty mapping without that proof. The transient test
-  never changes Config/NVS, and an empty topic remains the explicit disable operation that needs no
-  reading. The circulation mapping likewise requires `POST /test_circulation` proof before
+  delivery may age from monotonic MQTT arrival. `POST /set_ref_temp` records the mapping immediately,
+  including an empty or unverified JSON path, and subscribes on the existing authenticated client.
+  The next real MQTT frame either builds a complete fresh aggregate or records its decoder error in
+  `/status.reference_temperature.error` and the rate-limited diagnostic log; analysis remains
+  fail-closed meanwhile. An empty topic remains the explicit disable operation. The circulation
+  mapping independently requires `POST /test_circulation` proof before
   `POST /set_circulation`; its threshold state is derived from mapped watts, never relay `output`.
   Neither link can write: X10A has no write command by protocol, and no source file can
   build or issue a Modbus frame for the HomeHub (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
@@ -1624,10 +1626,9 @@ The Home Assistant bridge:
   profile), so the freed `entity_id` is reclaimed by the new entity and its recorder history and
   long-term statistics carry over. The device contains X10A values plus board/link diagnostics;
   HomeHub register values remain MQTT-only.
-- **Own publish task + esp-mqtt client.** The event handler flips status flags and copies a saved or
-  temporarily tested reference/circulation payload into one bounded queue; the same task-side decoder serves
-  both paths, so a successful pre-save test cannot disagree with live capture. JSON parsing, string
-  work, transient test subscription changes and all publishing happen in the task, so the mqtt
+- **Own publish task + esp-mqtt client.** The event handler flips status flags and copies saved room
+  or saved/temporarily-tested circulation payloads into one bounded queue. JSON parsing, string work,
+  room-source runtime diagnostics, circulation test subscription changes and all publishing happen in the task, so the mqtt
   event loop is never blocked by either.
 - **X10A-gated installation ownership, not MQTT input.** MQTT configuration is not authority to
   speak for the installation. Before the first valid X10A reply, the client connects without the

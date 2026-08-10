@@ -98,6 +98,8 @@ reading your report needs to know.
 | `mqtt.broker` | may contain a username and password if you typed them into the URL |
 | `reference_temperature.name` | a name you typed, usually naming a room or a person |
 | `reference_temperature.topic` | a path through your own broker — normally carries a room or device name |
+| `reference_temperature.setpoint_topic` | a second broker path when the target temperature is published separately |
+| `reference_temperature.timestamp_topic` | a second broker path when the source timestamp is published separately |
 | `circulation_source.name` | a name you typed for the circulation-pump meter |
 | `circulation_source.topic` | a path through your own broker — normally embeds the smart plug's device id |
 | `weather_forecast.latitude` | where your house is, to six decimals |

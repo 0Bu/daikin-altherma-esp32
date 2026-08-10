@@ -1380,8 +1380,8 @@ vocabulary exactly:
    Deleting the room source is the whole disarm: the subscription stops and runtime values clear.
    Deleting the forecast only stops Open-Meteo traffic; sampling remains armed and the state is
    "recording without forecast" when a heating window is otherwise valid. The
-   room-source row opens the exact MQTT topic, current and target temperature paths, source timestamp
-   and maximum age; the weather row opens its location modal. **The measured-outdoor row opens
+   room-source row opens the exact MQTT topic/path mappings, fixed or mapped target, optional source
+   timestamp and maximum age; the weather row opens its location modal. **The measured-outdoor row opens
    nothing.** A row's value is an editor exactly when THIS CARD owns that source — the room mapping
    and the forecast location are configured here and nowhere else. ENV III is not: its one editor is
    the Board Hardware modal on the ESP32 card, which saves it in a single atomic `POST /set_board`
@@ -1428,10 +1428,11 @@ vocabulary exactly:
    thermostat is being read. That makes this a §5.6 Connections row in shape, so it takes that rule
    whole, **including the second half**: the face carries the condition in colour, and the
    accessible name spells out the same combined verdict in words (§9).
-   The room-source modal remains
-   test-before-persist and states that fact briefly at the Save action; Delete removes the saved
-   mapping and captured value. Retained data
-   without trusted source time fails closed, and `/status` plus the grouped numeric
+   The room-source modal saves and subscribes immediately; its Save hint explains that a readable,
+   fresh MQTT frame is still required before the source becomes usable. Delete removes the saved
+   mapping and captured value. A blank timestamp mapping uses live non-retained MQTT arrival time;
+   retained data without trusted source time fails closed,
+   and `/status` plus the grouped numeric
    `<base>/heating_curve` topic retain the full canonical and diagnosis evidence. No UI path sends a
    setpoint or HomeHub write.
 

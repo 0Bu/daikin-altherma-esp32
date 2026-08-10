@@ -71,8 +71,10 @@ const validMqtt = (h) => {
 };
 
 // ── Heating-curve diagnosis · required room-temperature source ────────────
-// One diagnosis-ready, read-only profile: exact current/target/source-time mappings and a
-// freshness limit. Calibration is fixed at 0 K; no roles or weights. The backend still accepts the
+// One diagnosis-ready, read-only profile: exact current/target mappings, optional source time and a
+// freshness limit. Each mapped value can use its own exact topic; the visible `topic$path` form keeps that
+// boundary explicit without tripling every input into two controls. Calibration is fixed at 0 K;
+// no roles or weights. The backend still accepts the
 // older optional eligibility-gate mappings. They are deliberately not editable here; preserving
 // them for an otherwise unchanged source avoids silently weakening an installed configuration.
 // It is presented as the required input under the always-visible diagnosis card. A new
@@ -81,16 +83,20 @@ function fillRefTemp() {
   const r = S.status?.reference_temperature || {};
   const configured = !!r.configured;
   $("rtName").value = configured ? (r.name || "") : "";
-  $("rtTopic").value = configured ? (r.topic || "") : "";
-  $("rtPath").value = configured ? (r.temperature_path || "") : "";
-  $("rtSetpointPath").value = configured ? (r.setpoint_path || "") : "";
-  $("rtTimePath").value = configured ? (r.timestamp_path || "") : "";
+  $("rtTemperatureSource").value = configured
+    ? formatRefSource(r.topic, r.temperature_path) : "";
+  $("rtTarget").value = configured
+    ? (Number.isFinite(r.fixed_setpoint_c)
+      ? String(r.fixed_setpoint_c)
+      : formatRefSource(r.setpoint_topic || r.topic, r.setpoint_path)) : "";
+  $("rtTimestampSource").value = configured
+    ? formatRefSource(r.timestamp_topic || r.topic, r.timestamp_path) : "";
   $("rtMaxAge").value = configured && Number.isInteger(r.max_age_s) ? r.max_age_s : 600;
   $("rtDeleteBtn").disabled = !configured;
 }
 function openRefTemp() {
   fillRefTemp();
-  for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath", "rtMaxAge"])
+  for (const id of ["rtName", "rtTemperatureSource", "rtTarget", "rtTimestampSource", "rtMaxAge"])
     $(id).classList.remove("invalid");
   $("rtError").hidden = true;
   openPopup("refTempModal");
@@ -98,30 +104,59 @@ function openRefTemp() {
 function closeRefTemp() { closePopup("refTempModal"); }
 const validRefTopic = (v) => !v || (v.length <= 192 && v[0] !== "/" && !v.endsWith("/") &&
                                       !/[+#\x00-\x1f\x7f]/.test(v));
+// Circulation keeps its proof-gated dotted-key validation. Room-source parsing below deliberately
+// does not call this helper: its path is runtime-validated by the durable MQTT subscriber.
 const validRefPath = (v) => v.length <= 128 && v.split(".").every((key) =>
   key.length > 0 && key.length <= 64 && !/[\s\x00-\x1f\x7f]/.test(key));
+const formatRefSource = (topic, path) => topic ? (path ? `${topic}$${path}` : topic) : "";
+// Split at the LAST dollar: MQTT reserves dollar-prefixed topics such as $SYS/..., and those must
+// remain configurable. Path content is deliberately not validated before save: the next real MQTT
+// frame is the source of truth and exposes an unreadable/non-numeric path through runtime status.
+const parseRefSource = (value) => {
+  const text = String(value || "").trim();
+  const split = text.lastIndexOf("$");
+  if (!text) return null;
+  const hasDelimiter = split > 0;
+  const topic = (hasDelimiter ? text.slice(0, split) : text).trim();
+  const path = hasDelimiter ? text.slice(split + 1).trim() : "";
+  return validRefTopic(topic) && path.length <= 128 ? { topic, path } : null;
+};
+const parseRefFixedTarget = (value) => {
+  const text = String(value || "").trim();
+  if (!/^\d+(?:[.,]\d)?$/.test(text)) return null;
+  const number = Number(text.replace(",", "."));
+  return Number.isFinite(number) ? number : null;
+};
 
 function refTempFormPayload() {
-  const topic = $("rtTopic").value.trim();
-  const temperaturePath = $("rtPath").value.trim();
-  const setpointPath = $("rtSetpointPath").value.trim();
-  const timestampPath = $("rtTimePath").value.trim();
+  const temperature = parseRefSource($("rtTemperatureSource").value) || { topic: "", path: "" };
+  const timestamp = parseRefSource($("rtTimestampSource").value) || { topic: "", path: "" };
+  const fixedSetpoint = parseRefFixedTarget($("rtTarget").value);
+  const setpoint = fixedSetpoint === null
+    ? (parseRefSource($("rtTarget").value) || { topic: "", path: "" })
+    : { topic: "", path: "" };
   const saved = S.status?.reference_temperature || {};
-  const sameMapping = !!saved.configured && topic === (saved.topic || "") &&
-    temperaturePath === (saved.temperature_path || "") &&
-    setpointPath === (saved.setpoint_path || "") &&
-    timestampPath === (saved.timestamp_path || "");
+  const sameMapping = !!saved.configured && temperature.topic === (saved.topic || "") &&
+    temperature.path === (saved.temperature_path || "") &&
+    setpoint.topic === (saved.setpoint_topic || "") &&
+    setpoint.path === (saved.setpoint_path || "") &&
+    (fixedSetpoint ?? 0) === (saved.fixed_setpoint_c ?? 0) &&
+    timestamp.topic === (saved.timestamp_topic || "") &&
+    timestamp.path === (saved.timestamp_path || "");
   return {
     name: $("rtName").value.trim(),
-    topic,
-    temperature_path: temperaturePath,
-    setpoint_path: setpointPath,
-    timestamp_path: timestampPath,
+    topic: temperature.topic,
+    temperature_path: temperature.path,
+    setpoint_topic: setpoint.topic,
+    setpoint_path: setpoint.path,
+    fixed_setpoint_c: fixedSetpoint ?? 0,
+    timestamp_topic: timestamp.topic,
+    timestamp_path: timestamp.path,
     // Existing API clients may still manage these advanced gates. Keep them only while the visible
     // source mapping is unchanged; a new/repointed source starts without invisible assumptions.
     enabled_path: sameMapping ? (saved.enabled_path || "") : "",
     hvac_mode_path: sameMapping ? (saved.hvac_mode_path || "") : "",
-    max_age_s: topic ? Number($("rtMaxAge").value) : 600,
+    max_age_s: temperature.topic ? Number($("rtMaxAge").value) : 600,
   };
 }
 

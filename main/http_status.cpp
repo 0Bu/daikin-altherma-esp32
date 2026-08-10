@@ -435,7 +435,9 @@ void http_append_status_json(std::string& j, bool redact) {
     room_raw.payload_valid = rt.error.empty();
     room_raw.temperature_c = rt.temperature_c;
     room_raw.has_source_time = rt.has_source_time;
-    room_raw.setpoint_mapped = !c.ref_temp_setpoint_path.empty();
+    room_raw.setpoint_mapped = c.ref_temp_fixed_setpoint_tenths != 0 ||
+                               !c.ref_temp_setpoint_topic.empty() ||
+                               !c.ref_temp_setpoint_path.empty();
     room_raw.has_setpoint = rt.has_setpoint;
     room_raw.setpoint_c = rt.setpoint_c;
     room_raw.enabled_mapped = !c.ref_temp_enabled_path.empty();
@@ -458,7 +460,17 @@ void http_append_status_json(std::string& j, bool redact) {
     j += ",\"name\":";          j += jstr_r(c.ref_temp_name, redact);
     j += ",\"topic\":";         j += jstr_r(c.ref_temp_topic, redact);
     j += ",\"temperature_path\":"; j += jstr(c.ref_temp_path);
+    j += ",\"setpoint_topic\":"; j += jstr_r(c.ref_temp_setpoint_topic, redact);
     j += ",\"setpoint_path\":"; j += jstr(c.ref_temp_setpoint_path);
+    j += ",\"fixed_setpoint_c\":";
+    if (c.ref_temp_fixed_setpoint_tenths == 0) j += "null";
+    else {
+        char fixed_setpoint[16];
+        std::snprintf(fixed_setpoint, sizeof(fixed_setpoint), "%.1f",
+                      static_cast<double>(c.ref_temp_fixed_setpoint_tenths) / 10.0);
+        j += fixed_setpoint;
+    }
+    j += ",\"timestamp_topic\":"; j += jstr_r(c.ref_temp_time_topic, redact);
     j += ",\"timestamp_path\":"; j += jstr(c.ref_temp_time_path);
     j += ",\"enabled_path\":"; j += jstr(c.ref_temp_enabled_path);
     j += ",\"hvac_mode_path\":"; j += jstr(c.ref_temp_hvac_mode_path);

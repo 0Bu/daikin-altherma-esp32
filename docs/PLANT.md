@@ -272,8 +272,8 @@ reading rather than inheriting it. The sampling *method* is unchanged, so archiv
 comparable.
 
 **Arming is derived, not switched.** It follows from the timestamped MQTT room mapping alone
-([`FEATURES.md`](FEATURES.md) #62 — the source is test-before-persist, since a typo here does not fail
-loudly but produces a plausible-looking deviation). The forecast above is *optional* comparison
+([`FEATURES.md`](FEATURES.md) #62 — a typo is accepted as configuration but fails closed and is
+reported when the next MQTT frame reaches the decoder). The forecast above is *optional* comparison
 evidence, distinguishing a Recording state from a Degraded one, so clearing a location stops forecast
 traffic without stopping local samples. Deleting the room source disarms and clears sample memory: a
 reading taken under a consent since withdrawn must not outlive it.

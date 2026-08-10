@@ -42,14 +42,19 @@ struct Config {
     // fact: two boards sharing it share their retained topics, their metrics series and their Home
     // Assistant device — silently, since every individual value stays plausible (#215).
     std::string mqtt_base;
-    // One exact MQTT source for the living-room sample. An empty topic disables capture;
-    // dot-separated paths select current/target, source timestamp and optional heating eligibility.
+    // One logical living-room sample assembled from exact MQTT value mappings. Temperature, target
+    // and source time may live on different topics; a target may instead be a fixed value in 0.1 C.
+    // An empty temperature topic disables capture. Optional legacy eligibility paths remain bound
+    // to the temperature topic.
     // Without a timestamp path only a live non-retained MQTT arrival may be fresh; retained values
     // require source time so a reconnect cannot reset their age (logic/reference_temperature.hpp).
     std::string ref_temp_name;
     std::string ref_temp_topic;
     std::string ref_temp_path;
+    std::string ref_temp_setpoint_topic;
     std::string ref_temp_setpoint_path;
+    uint16_t    ref_temp_fixed_setpoint_tenths = 0; // 0 = MQTT mapping / absent legacy mapping
+    std::string ref_temp_time_topic;
     std::string ref_temp_time_path;
     std::string ref_temp_enabled_path;
     std::string ref_temp_hvac_mode_path;
@@ -192,7 +197,8 @@ struct Config {
 // card from anyone who has not set one up yet, which is how they would find out they need one.
 inline bool heating_curve_diagnosis_armed(const Config& c) {
     return !c.mqtt_uri.empty() && !c.ref_temp_topic.empty() && !c.ref_temp_path.empty() &&
-           !c.ref_temp_setpoint_path.empty() && !c.ref_temp_time_path.empty();
+           (c.ref_temp_fixed_setpoint_tenths != 0 ||
+            !c.ref_temp_setpoint_path.empty());
 }
 
 // ── Field-owned patches (config.cpp applies these to the live config under its mutex) ────────────

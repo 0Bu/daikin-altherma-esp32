@@ -351,11 +351,15 @@ function wireRestOfApp() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("refTempModal").hidden) closeRefTemp();
   });
-  for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath", "rtMaxAge"])
+  for (const id of ["rtName", "rtTemperatureSource", "rtTarget", "rtTimestampSource", "rtMaxAge"])
     $(id).addEventListener("input", () => {
       $(id).classList.remove("invalid"); $("rtError").hidden = true;
     });
   const refTempInput = () => {
+    const temperature = parseRefSource($("rtTemperatureSource").value);
+    const targetFixed = parseRefFixedTarget($("rtTarget").value);
+    const targetSource = targetFixed === null ? parseRefSource($("rtTarget").value) : null;
+    const timestamp = parseRefSource($("rtTimestampSource").value);
     const input = refTempFormPayload();
     const bad = (id, msg) => {
       $(id).classList.add("invalid");
@@ -364,30 +368,30 @@ function wireRestOfApp() {
       toast(msg, "err");
       return null;
     };
-    if (!input.topic || !validRefTopic(input.topic)) return bad("rtTopic", t("ref.err_topic"));
-    if (input.topic && !validRefPath(input.temperature_path))
-      return bad("rtPath", t("ref.err_path"));
-    if (input.topic && !validRefPath(input.setpoint_path))
-      return bad("rtSetpointPath", t("ref.err_setpoint_path"));
-    if (input.topic && !validRefPath(input.timestamp_path))
-      return bad("rtTimePath", t("ref.err_time_path"));
+    if (!temperature) return bad("rtTemperatureSource", t("ref.err_temperature_source"));
+    if (targetFixed === null && !targetSource)
+      return bad("rtTarget", t("ref.err_target"));
+    if (targetFixed !== null && (targetFixed < 5 || targetFixed > 35))
+      return bad("rtTarget", t("ref.err_target"));
+    if ($("rtTimestampSource").value.trim() && !timestamp)
+      return bad("rtTimestampSource", t("ref.err_timestamp_source"));
     if (input.topic && (!Number.isInteger(input.max_age_s) || input.max_age_s < 10 || input.max_age_s > 3600))
       return bad("rtMaxAge", t("ref.err_max_age"));
     return input;
   };
   const showRefTempRequestError = (msg) => {
     const field = /maximum age/i.test(msg) ? "rtMaxAge" :
-      /setpoint|target/i.test(msg) ? "rtSetpointPath" : /timestamp/i.test(msg) ? "rtTimePath" :
-      /JSON path|path is/i.test(msg) ? "rtPath" :
-      /name/i.test(msg) ? "rtName" : /topic|mapping/i.test(msg) ? "rtTopic" : null;
+      /setpoint|target/i.test(msg) ? "rtTarget" : /timestamp/i.test(msg) ? "rtTimestampSource" :
+      /JSON path|path is/i.test(msg) ? "rtTemperatureSource" :
+      /name/i.test(msg) ? "rtName" : /topic|mapping/i.test(msg) ? "rtTemperatureSource" : null;
     if (field) $(field).classList.add("invalid");
     $("rtError").textContent = msg;
     $("rtError").hidden = false;
     toast(msg, "err");
   };
-  // Save owns the complete contract: validate locally, obtain a mapping-bound proof from one fresh
-  // live MQTT value, then persist exactly that tested mapping. The second action is disabled while
-  // either flow is in flight, so Delete and Save cannot race each other from this dialog.
+  // Save records the mapping immediately. MQTT payload/path/freshness validation belongs to the
+  // durable subscriber, where low-frequency and on-change sensors can answer on their own cadence.
+  // Delete and Save remain mutually exclusive while the one request is in flight.
   const setRefTempActionBusy = (button, on, label) => {
     setBusy(button, on, label);
     if (on) {
@@ -404,26 +408,11 @@ function wireRestOfApp() {
     if (!input) return;
     if (S.busy) { toast(t("toast.applying"), "info"); return; }
     S.busy = true;
-    setRefTempActionBusy("rtBtn", true, "btn.verifying");
+    setRefTempActionBusy("rtBtn", true, "btn.saving");
     const idle = () => { S.busy = false; setRefTempActionBusy("rtBtn", false); };
-    let testResponse;
-    try { testResponse = await post("/test_ref_temp", input); }
-    catch {
-      idle(); showRefTempRequestError(t("toast.unreachable")); return;
-    }
-    if (!testResponse.ok) {
-      const msg = await errorOf(testResponse, t("ref.test_failed"));
-      idle(); showRefTempRequestError(msg); return;
-    }
-    const testResult = await testResponse.json().catch(() => ({}));
-    if (!Number.isInteger(testResult.test_proof) || testResult.test_proof <= 0 ||
-        !Number.isFinite(testResult.temperature_c) || !Number.isFinite(testResult.setpoint_c)) {
-      idle(); showRefTempRequestError(t("ref.test_failed")); return;
-    }
-
     let r;
     try {
-      r = await post("/set_ref_temp", { ...input, test_proof: testResult.test_proof });
+      r = await post("/set_ref_temp", input);
     } catch {
       idle(); showRefTempRequestError(t("toast.unreachable")); return;
     }
@@ -449,9 +438,10 @@ function wireRestOfApp() {
     let r;
     try {
       r = await post("/set_ref_temp", {
-        name: "", topic: "", temperature_path: "", setpoint_path: "", timestamp_path: "",
+        name: "", topic: "", temperature_path: "", setpoint_topic: "", setpoint_path: "",
+        fixed_setpoint_c: 0, timestamp_topic: "", timestamp_path: "",
         enabled_path: "", hvac_mode_path: "",
-        max_age_s: 600, test_proof: 0,
+        max_age_s: 600,
       });
     } catch {
       idle(); showRefTempRequestError(t("toast.unreachable")); return;

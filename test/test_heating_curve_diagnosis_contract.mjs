@@ -68,12 +68,18 @@ assert.doesNotMatch(evaluator, /mb_request|LwtOffsetIntent|\.offer\s*\(/,
   "runtime diagnosis may observe the plant but never offer an intent");
 
 const subscriptionStart = mqtt.indexOf("static void service_reference_subscription(");
-const subscriptionEnd = mqtt.indexOf("static void service_reference_probe_subscription(", subscriptionStart);
+const subscriptionEnd = mqtt.indexOf("static void service_circulation_probe_frame(", subscriptionStart);
 const subscription = mqtt.slice(subscriptionStart, subscriptionEnd);
 assert.match(subscription, /capture_enabled = configured;/,
   "saving the exact room topic is the subscription consent boundary");
-assert.match(subscription, /if \(!capture_enabled\)[\s\S]*esp_mqtt_client_unsubscribe/,
-  "deleting the room topic must actively unsubscribe");
+assert.match(subscription, /if \(!capture_enabled\)[\s\S]*unsubscribe_reference_topic_if_unused/,
+  "deleting the room mapping must retire every saved value-topic subscription");
+const unsubscribeStart = mqtt.indexOf("static void unsubscribe_reference_topic_if_unused(");
+const unsubscribeEnd = mqtt.indexOf("static void service_reference_subscription(", unsubscribeStart);
+assert.match(mqtt.slice(unsubscribeStart, unsubscribeEnd), /esp_mqtt_client_unsubscribe/,
+  "the shared topic-retirement helper must actively unsubscribe once no source owns it");
+assert.match(subscription, /const ReferenceTopicSet desired = reference_topics\(c\)[\s\S]*for \(const std::string& topic : desired\)[\s\S]*esp_mqtt_client_subscribe/,
+  "the saved logical room source must subscribe all distinct temperature, target and timestamp topics");
 
 const taskStart = mqtt.indexOf("static void mqtt_task(void*)");
 const taskEnd = mqtt.indexOf("static bool build_client(", taskStart);
