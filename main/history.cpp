@@ -501,14 +501,16 @@ HistorySource source_of_slot(size_t slot, size_t& idx) {
 }
 
 // Coarse-encode one ring into `out`, under the lock. Returns the count written.
-size_t coarse_of_ring_locked(HistorySource src, size_t idx, HistorySample* out) {
+size_t coarse_of_ring_locked(HistorySource src, size_t idx, HistorySample* out,
+                             size_t newest_skip) {
     const logic::TrendRing* r = ring_at(src, idx);
     if (!r) return 0;
     HistorySample full[HISTORY_SAMPLES];
     const size_t n = r->snapshot(full, HISTORY_SAMPLES);
     if (!n) return 0;
     return logic::history_coarse_encode(full, n, logic::HISTORY_COARSE_STRIDE, out,
-                                        logic::HISTORY_COARSE_SAMPLES, ring_is_event(src, idx));
+                                        logic::HISTORY_COARSE_SAMPLES, ring_is_event(src, idx),
+                                        newest_skip);
 }
 
 } // namespace
@@ -1057,12 +1059,13 @@ namespace {
 // the decoder can position the whole block from a single anchor without also storing a per-ring
 // count. A ring with less than a full day pads its OLD end with the absence sentinel, which is what
 // that time genuinely was.
-void coarse_block_locked(size_t slot, HistorySample* block) {
+void coarse_block_locked(size_t slot, HistorySample* block, const size_t newest_skip[3]) {
     for (size_t i = 0; i < logic::HISTORY_COARSE_SAMPLES; i++) block[i] = HISTORY_NO_READING;
     size_t idx = 0;
     const HistorySource src = source_of_slot(slot, idx);
     HistorySample coarse[logic::HISTORY_COARSE_SAMPLES];
-    const size_t m = coarse_of_ring_locked(src, idx, coarse);
+    const size_t m = coarse_of_ring_locked(src, idx, coarse,
+                                            newest_skip[static_cast<size_t>(src)]);
     for (size_t i = 0; i < m; i++)
         block[logic::HISTORY_COARSE_SAMPLES - m + i] = coarse[i];
 }
@@ -1071,6 +1074,7 @@ FlashHeader s_flash_header{};
 bool        s_flash_header_read = false;
 bool        s_flash_header_valid = false;
 size_t      s_flash_restore_slot = 0;
+size_t      s_flash_restored_rings = 0;
 
 // Returns false on a read error rather than folding it into the CRC value: a failed read that
 // happened to produce the stored checksum would admit an unverified record, and "the flash could not
@@ -1154,15 +1158,19 @@ void history_service_flash_restore() {
             // Drop the write-side padding before splicing, or the restored window is 24 hours wide
             // regardless of how little is actually in it — see history_coarse_lead_skip.
             const size_t skip = logic::history_coarse_lead_skip(block, logic::HISTORY_COARSE_SAMPLES);
-            if (skip < logic::HISTORY_COARSE_SAMPLES)
-                history_splice_snapshot(src, idx, block + skip,
-                                        logic::HISTORY_COARSE_SAMPLES - skip,
-                                        logic::HISTORY_COARSE_STRIDE, anchor);
+            if (skip < logic::HISTORY_COARSE_SAMPLES) {
+                if (history_splice_snapshot(src, idx, block + skip,
+                                            logic::HISTORY_COARSE_SAMPLES - skip,
+                                            logic::HISTORY_COARSE_STRIDE, anchor))
+                    s_flash_restored_rings++;
+            }
         }
     }
     if (++s_flash_restore_slot >= kTotalRings) {
         s_flash_restore_done = true;
-        diag_printf("history: stored snapshot spliced back in\n");
+        diag_printf("history: stored snapshot restore complete (%u/%u rings extended)\n",
+                    static_cast<unsigned>(s_flash_restored_rings),
+                    static_cast<unsigned>(kTotalRings));
     }
 }
 
@@ -1181,6 +1189,11 @@ void history_flash_save() {
         return;
     }
 
+    // Read the existing record before replacing it. Its anchor phase is part of the payload's
+    // meaning: the restored coarse points occupy one slot in every six of the live raster, and a
+    // second OTA must select that SAME phase or it will re-encode only their deliberate gaps.
+    flash_header_load();
+
     FlashHeader h{};
     h.magic      = logic::HISTORY_PERSIST_MAGIC;
     h.version    = logic::HISTORY_PERSIST_VERSION;
@@ -1190,9 +1203,19 @@ void history_flash_save() {
     h.rings[0]   = static_cast<uint16_t>(TREND_COUNT);
     h.rings[1]   = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
     h.rings[2]   = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
-    h.anchor[0]  = source_anchor_bucket_locked(HistorySource::X10a);
-    h.anchor[1]  = source_anchor_bucket_locked(HistorySource::Modbus);
-    h.anchor[2]  = source_anchor_bucket_locked(HistorySource::Env3);
+    const int64_t live_anchor[3] = {
+        source_anchor_bucket_locked(HistorySource::X10a),
+        source_anchor_bucket_locked(HistorySource::Modbus),
+        source_anchor_bucket_locked(HistorySource::Env3),
+    };
+    size_t newest_skip[3] = {};
+    for (size_t i = 0; i < 3; i++) {
+        const int64_t previous = s_flash_header_valid ? s_flash_header.anchor[i] : INT64_MIN;
+        h.anchor[i] = logic::history_coarse_aligned_anchor(
+            live_anchor[i], previous, logic::HISTORY_COARSE_STRIDE);
+        if (live_anchor[i] != INT64_MIN && h.anchor[i] != INT64_MIN)
+            newest_skip[i] = static_cast<size_t>(live_anchor[i] - h.anchor[i]);
+    }
 
     // Nothing anchorable means nothing writable: without a synced clock at THIS moment there is no
     // absolute position for any of it, and a record that cannot be placed is worse than none.
@@ -1209,7 +1232,7 @@ void history_flash_save() {
     uint32_t crc = CONFIG_CRC32_INIT;
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&h) + 16, sizeof(FlashHeader) - 16);
     for (size_t slot = 0; slot < kTotalRings; slot++) {
-        coarse_block_locked(slot, block);
+        coarse_block_locked(slot, block, newest_skip);
         crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(block), kCoarseBytes);
     }
     h.crc = config_crc32_final(crc);
@@ -1217,7 +1240,7 @@ void history_flash_save() {
     esp_err_t e = esp_partition_erase_range(s_flash_part, 0, s_flash_part->size);
     if (e == ESP_OK) e = esp_partition_write(s_flash_part, 0, &h, sizeof(FlashHeader));
     for (size_t slot = 0; slot < kTotalRings && e == ESP_OK; slot++) {
-        coarse_block_locked(slot, block);
+        coarse_block_locked(slot, block, newest_skip);
         e = esp_partition_write(s_flash_part, sizeof(FlashHeader) + slot * kCoarseBytes,
                                 block, kCoarseBytes);
     }

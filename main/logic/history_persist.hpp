@@ -264,12 +264,14 @@ inline HistorySample history_coarse_event_fold(const HistorySample* v, size_t fr
 }
 
 inline size_t history_coarse_encode(const HistorySample* full, size_t n, uint32_t stride,
-                                    HistorySample* out, size_t max, bool event = false) {
-    if (!full || !out || !n || !max || !stride) return 0;
-    const size_t avail = 1 + (n - 1) / stride;
+                                    HistorySample* out, size_t max, bool event = false,
+                                    size_t newest_skip = 0) {
+    if (!full || !out || !n || !max || !stride || newest_skip >= n) return 0;
+    const size_t newest = n - 1 - newest_skip;
+    const size_t avail = 1 + newest / stride;
     const size_t m = avail < max ? avail : max;
     for (size_t j = 0; j < m; j++) {
-        const size_t idx = n - 1 - (m - 1 - j) * stride;
+        const size_t idx = newest - (m - 1 - j) * stride;
         if (!event) { out[j] = full[idx]; continue; }
         // The group is the `stride` buckets ENDING at the kept instant, clamped at the old end so
         // the first group cannot read before the array.
@@ -277,6 +279,30 @@ inline size_t history_coarse_encode(const HistorySample* full, size_t n, uint32_
         out[j] = history_coarse_event_fold(full, from, idx);
     }
     return m;
+}
+
+// Keep a coarse snapshot on the SAME absolute grid across consecutive OTA boots. A restored
+// snapshot is sparse in the live five-minute ring: one real point followed by `stride-1` deliberate
+// gaps. Re-encoding that ring from its NEWEST sample silently selects a different phase whenever
+// the new boot closed its buckets at a different wall-clock offset; in the worst case all 48 old
+// points are gaps and the next reboot overwrites a valid day with an empty one.
+//
+// `previous_anchor` is any bucket on the stored grid (normally its newest). The result is the newest
+// bucket no later than `live_newest` on that same grid. A missing old anchor starts a new grid at the
+// current newest sample. The selected point may therefore lag the live ring by at most stride-1
+// buckets, but it remains a sample ACTUALLY taken at the instant the header states — never a nearby
+// value shifted onto a timestamp where it was not measured.
+inline constexpr int64_t history_coarse_aligned_anchor(int64_t live_newest,
+                                                       int64_t previous_anchor,
+                                                       uint32_t stride) {
+    if (live_newest == INT64_MIN || previous_anchor == INT64_MIN || stride == 0)
+        return live_newest;
+    const int64_t d = static_cast<int64_t>(stride);
+    // Reduce each operand before subtracting: a corrupt-but-CRC-valid extreme anchor must not turn
+    // this defensive placement helper into signed-overflow UB.
+    int64_t phase = (live_newest % d - previous_anchor % d) % d;
+    if (phase < 0) phase += d;
+    return live_newest - phase;
 }
 
 // ── Dropping the write-side padding ─────────────────────────────────────────────────────────────

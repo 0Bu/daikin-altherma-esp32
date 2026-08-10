@@ -29,6 +29,7 @@
 #include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_tls_errors.h"
 #include "freertos/FreeRTOS.h"
 #include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/semphr.h"
@@ -66,22 +67,22 @@ using Lock = SemGuard;
 // both reachable from the network and a double-tap in the UI must not spawn two TLS sessions.
 bool s_busy = false;
 
-// "A download is in flight" — the ONE piece of OTA state read from outside on a per-second cadence
+// "An OTA network operation is in flight" — the ONE piece of OTA state read from outside on a
+// per-second cadence
 // (ota_download_active(), see the header for why this is not s_status.state). Deliberately NOT under
 // s_mtx: the reader is the MQTT publish task standing aside for exactly the heap event this marks,
 // and making it take the lock the OTA task holds — or copy strings to read it — would spend the
 // resource it is trying to save. A stale read costs one published cycle either way, so relaxed
 // ordering is enough and no reader can ever block on the writer.
-std::atomic<bool> s_downloading{false};
+std::atomic<bool> s_network_active{false};
 
-// Scope guard for the flag. The download window has SEVEN exits — begin failure, an unreadable
-// descriptor, two refused-version gates, a failed transfer, a truncated one, and success into
-// esp_restart() — and a flag cleared by hand at each is a flag that a later exit path forgets. A
-// missed clear latches the publisher off for OTA_QUIESCE_MAX_CYCLES on every cycle for the rest of
-// the boot (logic/ota_quiesce.hpp caps the damage; it should never have to).
-struct DownloadFlag {
-    DownloadFlag()  { s_downloading.store(true,  std::memory_order_relaxed); }
-    ~DownloadFlag() { s_downloading.store(false, std::memory_order_relaxed); }
+// Scope guard for that flag. It deliberately covers the manifest TLS handshake too: live evidence
+// proved that the small response is irrelevant to the binding allocation — TLS setup itself failed
+// while the MQTT publisher still competed for the largest contiguous block. The guard lives around
+// the whole task operation so every manifest/download exit and exception clears it in one place.
+struct OtaNetworkFlag {
+    OtaNetworkFlag()  { s_network_active.store(true,  std::memory_order_relaxed); }
+    ~OtaNetworkFlag() { s_network_active.store(false, std::memory_order_relaxed); }
 };
 
 // A TLS handshake alone wants ~6 KB of stack, and fetch_manifest_version() puts another
@@ -93,6 +94,10 @@ constexpr UBaseType_t kTaskPrio = TASK_PRIO_OTA;   // see main/task_config.hpp f
 constexpr int  kHttpTimeoutMs = 15000;
 constexpr int  kOtaBufSize    = 2048;   // download chunk; deliberately small (contiguous heap)
 constexpr size_t kManifestMax = 1024;   // the real manifest is ~200 B; anything larger is not ours
+// MQTT publishes once a second. Hold the operation flag for a little longer than one cadence before
+// opening TLS so a publisher which woke just before the OTA task has time to finish and stand aside.
+constexpr TickType_t kNetworkQuiesceLead = pdMS_TO_TICKS(1100);
+constexpr TickType_t kAllocatorRetryDelay = pdMS_TO_TICKS(250);
 
 void set_state(const char* state, const char* message = "") {
     Lock lk(s_mtx);
@@ -114,7 +119,9 @@ OtaChannel channel_now() { return config().ota_channel; }
 // Fetch the manifest for `url` and extract its "version" into `out`.
 // `err` receives a short, USER-FACING reason on failure — the UI shows it verbatim, so it must say
 // what to do about it, not just what failed.
-bool fetch_manifest_version(const std::string& url, char* out, size_t outlen, const char*& err) {
+bool fetch_manifest_version_once(const std::string& url, char* out, size_t outlen,
+                                 const char*& err, bool& retryable_allocator_failure) {
+    retryable_allocator_failure = false;
     // An empty URL means this build has no feed configured for the selected channel (an empty
     // firmware base URL — see logic/ota_channel.hpp). Say that, rather than letting the client
     // fail on a relative path and reporting an unreachable server.
@@ -131,13 +138,20 @@ bool fetch_manifest_version(const std::string& url, char* out, size_t outlen, co
     if (!c) {
         http_client_log_init_failure("ota", before);
         err = "Out of memory";
+        retryable_allocator_failure = true;
         return false;
     }
 
     bool ok = false;
     esp_err_t e = esp_http_client_open(c, 0);
     if (e != ESP_OK) {
-        http_client_log_open_failure("ota", c, e, before);
+        const HttpClientOpenFailure failure =
+            http_client_log_open_failure("ota", c, e, before);
+        // Retry only the allocator-shaped failures seen on the live board. DNS, TCP, certificate
+        // and HTTP errors are real reachability failures; retrying those here would merely delay the
+        // same answer and blur the diagnostic that distinguishes them.
+        retryable_allocator_failure =
+            e == ESP_ERR_NO_MEM || failure.tls_error == ESP_ERR_MBEDTLS_SSL_SETUP_FAILED;
         err = "Can't reach the update server";
     } else if (esp_http_client_fetch_headers(c) < 0) {
         err = "No response from the update server";
@@ -162,6 +176,17 @@ bool fetch_manifest_version(const std::string& url, char* out, size_t outlen, co
     esp_http_client_close(c);
     esp_http_client_cleanup(c);
     return ok;
+}
+
+bool fetch_manifest_version(const std::string& url, char* out, size_t outlen, const char*& err) {
+    for (unsigned attempt = 0; attempt < 2; ++attempt) {
+        bool retryable = false;
+        if (fetch_manifest_version_once(url, out, outlen, err, retryable)) return true;
+        if (!retryable || attempt != 0) return false;
+        diag_printf("ota: manifest TLS allocation failed, retrying once after quiesce\n");
+        vTaskDelay(kAllocatorRetryDelay);
+    }
+    return false;
 }
 
 void run_check() {
@@ -274,12 +299,6 @@ void run_update(bool allow_downgrade) {
 
     esp_https_ota_config_t ota = {};
     ota.http_config            = &http;
-
-    // From here to the end of the function the TLS session and the download buffer are on the heap.
-    // Armed BEFORE begin(), because begin() is where the handshake allocates — a publisher woken by
-    // the tick in between would meet the pressure with no warning. Cleared on every exit below by
-    // the destructor, and left set on the success path (esp_restart() ends the boot anyway).
-    DownloadFlag downloading;
 
     esp_https_ota_handle_t h = nullptr;
     esp_err_t e = esp_https_ota_begin(&ota, &h);
@@ -406,15 +425,19 @@ void ota_task(void* arg) {
     const char mode      = arg ? *static_cast<const char*>(arg) : 0;
     const bool update    = mode != 0;
     const bool downgrade = mode == kUpdateDowngradeMode;
-    try {
-        if (update) run_update(downgrade);
-        else        run_check();
-    } catch (const std::exception& ex) {
-        diag_printf("ota: aborted (%s)\n", ex.what());
-        set_state("error", "Out of memory — retry in a moment");
-    } catch (...) {
-        diag_printf("ota: aborted (unknown exception)\n");
-        set_state("error", "Update failed");
+    {
+        OtaNetworkFlag active;
+        vTaskDelay(kNetworkQuiesceLead);
+        try {
+            if (update) run_update(downgrade);
+            else        run_check();
+        } catch (const std::exception& ex) {
+            diag_printf("ota: aborted (%s)\n", ex.what());
+            set_state("error", "Out of memory — retry in a moment");
+        } catch (...) {
+            diag_printf("ota: aborted (unknown exception)\n");
+            set_state("error", "Update failed");
+        }
     }
     { Lock lk(s_mtx); s_busy = false; }
     vTaskDelete(nullptr);
@@ -447,7 +470,7 @@ const char* ota_img_suffix() {
     return "";   // esp32s3 is the only target, no suffix needed
 }
 
-bool ota_download_active() { return s_downloading.load(std::memory_order_relaxed); }
+bool ota_download_active() { return s_network_active.load(std::memory_order_relaxed); }
 
 void ota_check_async(int64_t /*browser_epoch_ms*/) {
     // browser_epoch_ms stays plumbed (the route parses ?ms=) but gates nothing: TLS certificate
