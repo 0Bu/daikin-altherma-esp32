@@ -278,7 +278,8 @@ actually saw.
 **What it refuses to claim** is the whole design, because a duration is a statement about a stretch
 of time and every way of overstating one looks identical on screen:
 
-- A run the board only found **already standing** is a lower bound — *"OFF for at least 3 h"*. Only a
+- A run the board only found **already standing** is a lower bound — *"OFF ≥ 3 h"*, floored, because
+  rounding a bound up asserts time nobody watched. Only a
   transition it witnessed licenses the plain form, and *witnessed* means seen in the immediately
   preceding cycle: a change discovered after even a short gap happened somewhere inside that gap.
 - A run the bus did not answer for throughout says so beside itself. A flag can pulse and return

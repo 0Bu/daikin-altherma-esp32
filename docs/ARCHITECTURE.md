@@ -701,7 +701,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   stronger than the device knows:
 
   1. **A run joined in progress is a lower bound.** A board up ten minutes whose row read OFF
-     throughout has established "OFF for *at least* ten minutes". `dwell_min` says so, and the UI
+     throughout has established "OFF ≥ ten minutes". `dwell_min` says so, the UI renders it with the
+     relation symbol and **floors** it — rounding a bound to the nearest minute asserts up to 59
+     seconds the board never observed — and the UI
      renders a different sentence for it. *Witnessed* is the strict condition — the previous state
      seen in the **immediately preceding** cycle — because a change discovered after even a short
      gap happened somewhere inside it, and publishing an exact "for 0 s" about an instant nobody
