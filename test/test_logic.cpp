@@ -930,6 +930,10 @@ static void test_config_model() {
     CHECK(!set_hp_resets_checkup(false, 44, 43, 44, 43));        // HomeHub-only update
     CHECK(set_hp_resets_checkup(true, 44, 43, 44, 43));          // explicit profile/re-detect
     CHECK(set_hp_resets_checkup(false, 44, 43, 18, 17));         // physically different X10A link
+    CHECK(!set_hp_updates_x10a(false, false, false));             // HomeHub host update/clear only
+    CHECK(set_hp_updates_x10a(true, false, false));               // explicit profile statement
+    CHECK(set_hp_updates_x10a(false, true, false));               // RX-only raw patch
+    CHECK(set_hp_updates_x10a(false, false, true));               // TX-only raw patch
     CHECK(!homehub_history_identity_changed("hub.local", 502, 1, "hub.local", 502, 1));
     CHECK(homehub_history_identity_changed("hub-a.local", 502, 1, "hub-b.local", 502, 1));
     CHECK(homehub_history_identity_changed("hub.local", 502, 1, "hub.local", 1502, 1));

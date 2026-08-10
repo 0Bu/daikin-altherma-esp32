@@ -214,6 +214,9 @@ assert.match(httpStatus,
 assert.match(httpConfig,
   /board_selected_preset\(c\)[\s\S]*board_preset_x10a_pin_offerable\(board, c\.rx_pin[\s\S]*board_preset_x10a_pin_offerable\(board, c\.tx_pin/,
   "the X10A request path must reject board-foreign RX/TX pins instead of relying on UI filtering");
+assert.match(httpConfig,
+  /const bool x10a_sent = set_hp_updates_x10a\([\s\S]*if \(x10a_sent\) \{[\s\S]*board_selected_preset\(c\)/,
+  "a HomeHub-only /set_hp patch must bypass board-specific validation of untouched legacy X10A pins");
 assert.match(app,
   /function boardLinkPickerValues\([\s\S]*const boardRestricted = [^;]*preset_id[\s\S]*!boardRestricted/,
   "the picker must not resurrect a stale board-foreign pin for a concrete board");
