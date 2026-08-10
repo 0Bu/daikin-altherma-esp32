@@ -246,6 +246,15 @@ jobs:
       - name: Test the publish-version gate
         run: ./scripts/run-publish-version-tests.sh
 
+      # .claude/CLAUDE.md is loaded into every Claude Code session, so every byte in it is paid on
+      # every turn — and it grows by accretion (it reached 329 KB before the 2026-08 reduction).
+      # The budget forces new findings into docs/ as narrative and into CLAUDE.md only as rules;
+      # when it fires, MOVE TEXT OUT, never trim a rule and never raise the number to clear red.
+      - name: Check the CLAUDE.md byte budget
+        run: ./scripts/run-claude-md-budget.sh
+      - name: Verify the CLAUDE.md budget gate still has teeth
+        run: ./tools/claudemd/selftest.sh
+
       # Does this change reach anything the FIRMWARE BUILD or the PUBLISHED SITE is made of? If
       # not, the ~5-minute build job below is skipped entirely — on a pull request as much as on a
       # push. Docs, skills and the review tooling cannot change a byte of the image, and CI proving
