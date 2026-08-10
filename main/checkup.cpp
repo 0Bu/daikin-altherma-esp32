@@ -25,8 +25,19 @@ namespace {
 
 // The two rings and their seal, in .noinit DRAM — see logic/checkup_persist.hpp. Not initialised at
 // startup, which is the entire mechanism: whatever the previous boot left is what checkup_start()
-// gets to judge. The in-flight states stay ORDINARY statics below and are deliberately never
-// restored; a reboot is the discontinuity both step functions already handle.
+// gets to judge. Edge state stays an ordinary static and is never restored.  The DHW level-window
+// state is also reconstructed into an ordinary static, but only from the separately sealed one-shot
+// handoff an intentional esp_restart writes below.
+struct PersistedDhwHandoff {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    uint32_t layout_fp;
+    uint32_t model_fp;
+    uint32_t crc;
+    logic::DhwLossHandoffPayload payload;
+};
+
 struct PersistedCheckup {
     uint32_t magic;
     uint16_t version;
@@ -37,6 +48,10 @@ struct PersistedCheckup {
     uint32_t crc;
     logic::CheckupRing  ring;
     logic::DhwLossRing  dhw;
+    // One-shot checkpoint written by esp_restart's shutdown handler.  It has its own seal because
+    // the completed ring must remain adoptable after an unexpected panic while this open state is
+    // changing.  checkup_start consumes it before any producer exists.
+    PersistedDhwHandoff dhw_handoff;
 };
 
 // UNINITIALISED STORAGE, and the UNION is what makes it that — history.cpp's PersistStore carries
@@ -80,6 +95,7 @@ daik::FaultClass      s_fault_now = daik::FaultClass::Unknown;
 SemaphoreHandle_t     s_mtx = nullptr;
 std::atomic<bool>     s_reset_requested{false};
 std::atomic<bool>     s_dhw_reset_requested{false};
+bool                  s_reboot_saved_this_boot = false;
 
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
 // This used to be a private copy here; nine of them had drifted into two different shapes.
@@ -171,6 +187,7 @@ void persist_seal() {
 void persist_wipe() {
     P().ring.reset();
     P().dhw.reset();
+    P().dhw_handoff.magic = 0;
     persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
 }                       // reset is consumed asynchronously, after checkup_reset_on_detect set it
 
@@ -189,8 +206,45 @@ bool apply_dhw_reset_locked() {
     if (!s_dhw_reset_requested.exchange(false)) return false;
     P().dhw.reset();
     s_dhw_state = logic::DhwLossState{};
+    P().dhw_handoff.magic = 0;
     persist_seal();
     return true;
+}
+
+// Intentional reboot handoff.  Unlike the completed-ring seal this runs exactly once, after the OTA
+// image is installed and immediately before esp_restart.  A bounded lock is load-bearing: failure
+// to checkpoint may lose one candidate, while waiting forever would strand a device that has
+// already switched its boot partition.
+void checkup_reboot_save() {
+    if (s_reboot_saved_this_boot) return;
+    s_reboot_saved_this_boot = true;
+    if (!s_mtx || xSemaphoreTake(s_mtx, pdMS_TO_TICKS(200)) != pdTRUE) {
+        P().dhw_handoff.magic = 0;
+        diag_printf("checkup: DHW reboot handoff skipped (checkup busy)\n");
+        return;
+    }
+
+    // A configuration reset queued just before the reboot belongs to the new identity.  Consume it
+    // here rather than handing the old source's candidate to the next boot.
+    apply_reset_locked();
+    apply_dhw_reset_locked();
+
+    PersistedDhwHandoff& h = P().dhw_handoff;
+    h.magic     = logic::CHECKUP_DHW_HANDOFF_MAGIC;
+    h.version   = logic::CHECKUP_DHW_HANDOFF_VERSION;
+    h.reserved  = 0;
+    h.layout_fp = logic::checkup_dhw_handoff_layout_fingerprint();
+    h.model_fp  = s_model_fp;
+    h.payload.candidate = logic::dhw_loss_checkpoint(s_dhw_state, esp_timer_get_time());
+    h.payload.pending   = P().dhw.pending;
+    h.crc = logic::checkup_dhw_handoff_crc(h.model_fp, h.payload);
+
+    const logic::DhwLossProgress p = logic::dhw_loss_progress(s_dhw_state,
+                                                               esp_timer_get_time());
+    xSemaphoreGive(s_mtx);
+    diag_printf("checkup: DHW reboot handoff saved (%u min candidate, %u completed window(s))\n",
+                static_cast<unsigned>(p.candidate_observed_s / 60),
+                static_cast<unsigned>(h.payload.pending.windows));
 }
 
 } // namespace
@@ -220,12 +274,30 @@ void checkup_start() {
         // the monotonic anchors restart, and the lifecycle the previous boot observed is carried
         // across as a duration — see CheckupRing::carried_span_us.
         P().ring.pending      = logic::CheckupBucket{};
-        P().dhw.pending  = logic::DhwLossBucket{};
         P().ring.first_sample_us  = -1;
         P().ring.latest_sample_us = -1;
         P().ring.carried_span_us  = P().span_us;
         s_model_fp = P().model_fp;
         s_adopt_detect_grace = true;
+        const bool dhw_kept = logic::checkup_dhw_handoff_valid(
+            P().dhw_handoff.magic, P().dhw_handoff.version, P().dhw_handoff.layout_fp,
+            P().dhw_handoff.model_fp, s_model_fp, P().dhw_handoff.crc,
+            P().dhw_handoff.payload);
+        if (dhw_kept) {
+            P().dhw.pending = P().dhw_handoff.payload.pending;
+            logic::dhw_loss_adopt(s_dhw_state, P().dhw_handoff.payload.candidate,
+                                  esp_timer_get_time());
+            const logic::DhwLossProgress progress = logic::dhw_loss_progress(
+                s_dhw_state, esp_timer_get_time());
+            diag_printf("checkup: DHW candidate kept (%u min, %u completed window(s))\n",
+                        static_cast<unsigned>(progress.candidate_observed_s / 60),
+                        static_cast<unsigned>(P().dhw.pending.windows));
+        } else {
+            P().dhw.pending = logic::DhwLossBucket{};
+            s_dhw_state = logic::DhwLossState{};
+        }
+        // One shot: a later panic in THIS boot must not replay the same handoff a second time.
+        P().dhw_handoff.magic = 0;
         // Reported in h AND min. Whole hours alone round the first successful restore of a board's
         // life down to "0 h observed" — the seal lands at the hourly commit, so the carried span is
         // 0.999 h — which reads as "kept nothing" at exactly the moment this first works, and sends
@@ -246,6 +318,10 @@ void checkup_start() {
         diag_printf("checkup: window starts empty (%s)\n",
                     logic::checkup_restore_slug(s_persist_verdict));
     }
+    const esp_err_t shutdown_err = esp_register_shutdown_handler(checkup_reboot_save);
+    if (shutdown_err != ESP_OK)
+        diag_printf("checkup: DHW shutdown handler not registered (%s)\n",
+                    esp_err_to_name(shutdown_err));
 }
 
 const char* checkup_persist_state() { return logic::checkup_restore_slug(s_persist_verdict); }
@@ -401,10 +477,17 @@ logic::CheckupReport checkup_report() {
     // Only the record path consumes a reset, because it can also discard the in-flight sample.
     // Until then expose an empty report, never stale identity A and never consume the guard early.
     if (s_reset_requested.load()) return logic::CheckupReport{};
-    return logic::checkup_evaluate(
+    logic::CheckupReport report = logic::checkup_evaluate(
         logic::checkup_aggregate(P().ring), s_cov, s_fault_now,
         s_dhw_reset_requested.load() ? logic::DhwLossWindow{}
                                      : logic::dhw_loss_aggregate(P().dhw));
+    if (!s_dhw_reset_requested.load()) {
+        const logic::DhwLossProgress p = logic::dhw_loss_progress(s_dhw_state,
+                                                                  esp_timer_get_time());
+        report.dhw_candidate_s = p.candidate_observed_s;
+        report.dhw_settle_remaining_s = p.settle_remaining_s;
+    }
+    return report;
 }
 
 } // namespace daik

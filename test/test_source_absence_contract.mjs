@@ -15,6 +15,7 @@ import fs from "node:fs";
 
 const read = (p) => fs.readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
 const history = read("main/history.cpp");
+const checkup = read("main/checkup.cpp");
 const poll = read("main/hp_poll.cpp");
 const status = read("main/http_status.cpp");
 const redact = read("main/logic/redact.hpp");
@@ -82,6 +83,19 @@ assert.ok(startAt > 0 && histAt > 0 && dwellAt > 0 && pollAt > 0,
 assert.ok(startAt < pollAt && histAt < pollAt && dwellAt < pollAt,
   "history_start(), checkup_start() and dwell_start() must run BEFORE the poll task: all three " +
   "adopt or wipe .noinit state without a lock, which is only sound while no producer exists");
+
+// The DHW loss filter needs one whole clean hour.  Its candidate and any completed-but-still-open
+// window are checkpointed exactly at intentional esp_restart(), rather than being reset by every
+// dev-channel OTA shorter than an hour.  The handler is bounded so a busy observer can cost one
+// candidate but can never strand an already-installed OTA image.
+assert.match(checkup,
+  /void checkup_reboot_save\(\)[\s\S]*?xSemaphoreTake\(s_mtx, pdMS_TO_TICKS\(200\)\)[\s\S]*?dhw_loss_checkpoint\(s_dhw_state,[\s\S]*?h\.payload\.pending\s*=\s*P\(\)\.dhw\.pending/,
+  "intentional reboot must checkpoint both the in-flight DHW candidate and completed pending windows under a bounded lock");
+assert.match(checkup,
+  /checkup_dhw_handoff_valid\([\s\S]*?P\(\)\.dhw\.pending\s*=\s*P\(\)\.dhw_handoff\.payload\.pending;[\s\S]*?dhw_loss_adopt\(/,
+  "boot must restore the separately sealed DHW handoff before producers start");
+assert.match(checkup, /esp_register_shutdown_handler\(checkup_reboot_save\)/,
+  "checkup_start must register the intentional-reboot DHW handoff");
 
 // ── 1c. Every .noinit region must be UNINITIALISED storage ─────────────────────────────────────
 // `__NOINIT_ATTR` places an object in a NOLOAD section; it does NOT stop C++ from initialising it.

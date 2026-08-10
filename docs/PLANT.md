@@ -61,8 +61,13 @@ record whenever a firmware update changes what a stored counter means — a buck
 anonymous counters, so a valid checksum over silently re-meaning bytes is exactly what a checksum
 cannot catch. And the **model** is checked at detection rather than at boot, because that is when
 the answer exists: the window is kept only if the resolved profile is the one it was recorded under.
-The in-flight edge state is deliberately not restored — a reboot is a discontinuity, and restoring
-it would book a compressor start that may never have happened.
+The in-flight **edge** state is deliberately not restored — a reboot is a discontinuity, and
+restoring it would book a compressor start that may never have happened. The DHW-loss candidate is
+not an edge: an intentional `esp_restart()` checkpoints its relative ages and any completed clean
+window still waiting in the open bucket. The next boot adds five seconds of explicit blind time,
+never observed evidence, then continues the candidate. `/status.health.checks[dhw_loss]` exposes
+`candidate_s` or `settle_remaining_s`, so a carried 59-minute candidate no longer looks like zero
+progress merely because only complete one-hour windows count toward the six-hour verdict gate.
 
 Two refusals exist because persistence can make evidence **outlive its source**, which is the one
 thing the window must never do. Safe mode never adopts: it does not run the poll loop, so nothing

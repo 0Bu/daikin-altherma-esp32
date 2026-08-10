@@ -42,7 +42,7 @@ for (const key of [
   "starts", "mean_run_s", "count", "paired_count", "share_pct", "defrost_s", "run_s",
   "min_bar", "min_l_min", "buh_min", "bsh_min", "buh_s", "bsh_s", "active", "seen",
   "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
-  "circulation_on_s", "circulation_known_s",
+  "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
 ]) {
   assert.match(normalizedStatusSource, new RegExp(`"${key}"`),
                `missing /status.health key ${key}`);
@@ -188,6 +188,22 @@ assert.match(ui.detail(cyclingCollecting), /label="Value:">2 starts<\/detail>/);
 assert.match(ui.detail(cyclingCollecting), /label="Assessment:">CHECKING — 1 h of 2 h captured/);
 assert.match(ui.detail(pressureCollecting), /label="Value:">1\.7 bar<\/detail>/);
 assert.match(ui.detail(pressureCollecting), /label="Assessment:">CHECKING — 2 min of 1 h captured/);
+
+// DHW has an all-or-nothing one-hour eligibility window.  Expose the in-flight progress separately
+// so a successful OTA handoff cannot look identical to a reset merely because observed_s still
+// counts completed windows only.
+const dhwCandidate = {
+  id: "dhw_loss", verdict: "collecting", observed_s: 0, required_s: 21600,
+  candidate_s: 3300, settle_remaining_s: 0, windows: 0, max_k_h: null,
+};
+assert.match(ui.detail(dhwCandidate),
+  /CHECKING — 0 min of 6 h completed in clean one-hour windows; current clean window: 55 min of 1 h/);
+ui.setLang("de");
+assert.match(ui.detail(dhwCandidate),
+  /PRÜFT — 0 min von 6 h als vollständige bereinigte Stundenfenster erfasst; laufendes bereinigtes Fenster: 55 min von 1 h/);
+const dhwSettling = { ...dhwCandidate, candidate_s: 0, settle_remaining_s: 1200 };
+assert.match(ui.detail(dhwSettling),
+  /PRÜFT — 0 min von 6 h als vollständige bereinigte Stundenfenster erfasst; Speicherladung oder BSH erkannt, noch 20 min Beruhigungszeit/);
 
 ui.setLang("en");
 assert.equal(

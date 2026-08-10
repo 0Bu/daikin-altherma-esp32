@@ -874,6 +874,10 @@ void http_append_status_json(std::string& j, bool redact) {
                     num("high_pump_off", ck.e);
                     num("circulation_on_s", ck.f);
                     num("circulation_known_s", ck.g);
+                    j += ",\"candidate_s\":";
+                    j += std::to_string(hr.dhw_candidate_s);
+                    j += ",\"settle_remaining_s\":";
+                    j += std::to_string(hr.dhw_settle_remaining_s);
                     break;
                 case logic::CheckupCheck::Cycling:  num("starts", ck.a);   num("mean_run_s", ck.b); break;
                 case logic::CheckupCheck::Defrost: {

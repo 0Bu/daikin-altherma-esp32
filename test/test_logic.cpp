@@ -8086,6 +8086,66 @@ static void test_checkup() {
         dhw_loss_step(settle_st, settle_b, s, 10'000'000);
         CHECK(settle_st.settle_remaining_s == DHW_LOSS_SETTLE_S - 10);
         CHECK(settle_st.segment_start_us < 0 && settle_b.windows == 0);
+
+        // An intentional reboot checkpoints relative ages, not the old boot's esp_timer values.
+        // The candidate keeps every OBSERVED second, while the fixed reboot seam is booked as blind
+        // and therefore cannot buy evidence.  Another clean half-hour completes the original hour.
+        DhwLossState ota_st;
+        DhwLossBucket ota_b;
+        s.valve_known = s.pump_known = s.bsh_known = true;
+        s.valve_dhw = s.pump_on = s.bsh_on = false;
+        s.r5t_ok = true;
+        s.circulation_configured = s.circulation_known = true;
+        s.circulation_on = false;
+        for (int sec = 0; sec <= 1800; sec += 10) {
+            s.r5t_tenths = 500 - sec / 720;
+            dhw_loss_step(ota_st, ota_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(dhw_loss_progress(ota_st, 1800LL * 1000000).candidate_observed_s == 1790);
+        const DhwLossCarry carry = dhw_loss_checkpoint(ota_st, 1800LL * 1000000);
+        DhwLossState adopted;
+        dhw_loss_adopt(adopted, carry, 0);
+        CHECK(adopted.segment_blind_s == DHW_LOSS_REBOOT_BLIND_S);
+        CHECK(dhw_loss_progress(adopted, 0).candidate_observed_s == 1790);
+        for (int sec = 10; sec <= 1810; sec += 10) {
+            s.r5t_tenths = 498 - sec / 720;
+            dhw_loss_step(adopted, ota_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(ota_b.windows == 1);
+        CHECK(ota_b.observed_s == 3600);
+
+        // Repeated dev-channel OTAs shorter than one hour used to make this check collect forever.
+        // Four 15-minute boots now finish one clean hour; each handoff preserves the pending bucket
+        // just as checkup.cpp's shutdown payload does.
+        DhwLossState short_boot;
+        DhwLossBucket short_pending;
+        unsigned observed_total = 0;
+        for (int boot = 0; boot < 4; boot++) {
+            for (int sec = 10; sec <= 910; sec += 10) {
+                observed_total += 10;
+                s.r5t_tenths = 500 - static_cast<int>(observed_total / 720);
+                dhw_loss_step(short_boot, short_pending, s,
+                              static_cast<int64_t>(sec) * 1000000);
+            }
+            if (boot < 3) {
+                const DhwLossCarry handoff = dhw_loss_checkpoint(short_boot, 910LL * 1000000);
+                DhwLossState next;
+                dhw_loss_adopt(next, handoff, 0);
+                short_boot = next;
+            }
+        }
+        CHECK(short_pending.windows == 1);
+        CHECK(short_pending.observed_s >=
+              DHW_LOSS_WINDOW_S - 3 * DHW_LOSS_REBOOT_BLIND_S);
+        CHECK(short_pending.observed_s <= DHW_LOSS_WINDOW_S);
+
+        // Settling is a safety gate, not observed evidence.  It survives unchanged: downtime is
+        // unknown and therefore cannot be used to spend the remaining 45-minute guard.
+        const DhwLossCarry settle_carry = dhw_loss_checkpoint(settle_st, 10'000'000);
+        DhwLossState settle_adopted;
+        dhw_loss_adopt(settle_adopted, settle_carry, 0);
+        CHECK(settle_adopted.settle_remaining_s == DHW_LOSS_SETTLE_S - 10);
+        CHECK(dhw_loss_progress(settle_adopted, 0).candidate_observed_s == 0);
     }
 
     {
@@ -10203,6 +10263,32 @@ static void test_checkup_persist() {
     CHECK(checkup_model_fingerprint("generic") != checkup_model_fingerprint(nullptr));
     // A prefix must not collide with the longer id it is a prefix of — the NUL is fed deliberately.
     CHECK(checkup_model_fingerprint("altherma_gshp") != checkup_model_fingerprint("altherma_gshp2"));
+
+    // The intentional-reboot handoff is separately sealed from the completed ring.  A finished DHW
+    // window can live in the generic hour's pending bucket, and must survive even though the main
+    // seal deliberately excludes every open bucket.
+    DhwLossHandoffPayload dhw_handoff;
+    dhw_handoff.candidate.flags = DHW_LOSS_CARRY_SEGMENT | DHW_LOSS_CARRY_DRAW;
+    dhw_handoff.candidate.segment_elapsed_s = 3590;
+    dhw_handoff.candidate.draw_anchor_age_s = 120;
+    dhw_handoff.candidate.segment_start_tenths = 500;
+    dhw_handoff.candidate.draw_anchor_tenths = 498;
+    dhw_handoff.pending.observed_s = 3599;
+    dhw_handoff.pending.windows = 1;
+    dhw_handoff.pending.max_loss_tenths_k_h = 7;
+    const uint32_t model_fp = checkup_model_fingerprint("altherma3_r_erga");
+    const uint32_t handoff_fp = checkup_dhw_handoff_layout_fingerprint();
+    const uint32_t handoff_crc = checkup_dhw_handoff_crc(model_fp, dhw_handoff);
+    CHECK(checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC,
+                                    CHECKUP_DHW_HANDOFF_VERSION, handoff_fp,
+                                    model_fp, model_fp, handoff_crc, dhw_handoff));
+    CHECK(!checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC,
+                                     CHECKUP_DHW_HANDOFF_VERSION, handoff_fp,
+                                     model_fp, model_fp ^ 1u, handoff_crc, dhw_handoff));
+    dhw_handoff.pending.windows++;
+    CHECK(!checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC,
+                                     CHECKUP_DHW_HANDOFF_VERSION, handoff_fp,
+                                     model_fp, model_fp, handoff_crc, dhw_handoff));
 
     // ── the carried lifecycle ────────────────────────────────────────────────────────────────────
     // first/latest_sample_us are MONOTONIC and restart at zero, so a restore cannot adopt them: the
