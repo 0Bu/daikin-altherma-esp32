@@ -112,6 +112,9 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 71 | **Pinned stack contract on the `/status` builder** — `-Os` on that one translation unit, because ~9 KB of its 11.8 KB frame was a `-Og` slot-allocation artefact, not live data | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp) |
 | 81 | **Stack-headroom telemetry** — the second memory budget, made reportable: four tasks record their own FreeRTOS high-water mark and the heartbeat carries all four, so a growing call frame is a falling line rather than a core dump nobody has yet | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp) |
 | 72 | **Reboot-surviving 24-hour trends** — `.noinit` DRAM for resets that kept power, plus a coarse snapshot in the optional `history` partition across consecutive OTAs; re-encoding stays on the stored absolute 30-minute grid so a shifted boot phase cannot overwrite old samples with sparse-ring gaps. Both media are catalog-fingerprinted and the browser tab also carries its pre-OTA rings across reload | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`history.js`](../main/www/js/history.js), [`partitions.csv`](../partitions.csv) |
+| 82 | **Reproducible ESP-IDF build inputs** — exact transitive component lock, explicit ESP-IDF/CMake/C++ floors and wall-clock-free app metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
+| 83 | **Kconfig and target contract gate** — `esp32s3` is a project default and every declared default is compared with generated `sdkconfig` before compilation | ✅ 🧪 | [`check-sdkconfig-defaults.py`](../scripts/check-sdkconfig-defaults.py), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
+| 84 | **Firmware-size evidence** — the hard app ceiling is joined by retained ESP-IDF json2 data and an Actions summary for Flash, DIRAM, IRAM and `.bss` | ✅ 🧪 | [`report-firmware-size.py`](../scripts/report-firmware-size.py), [`build.yml`](../.github/workflows/build.yml) |
 | 79 | **Reboot-surviving plant checkup** — the 24-hour window rides the same `.noinit` DRAM, sealed with a layout fingerprint over every row locator and counting threshold; the model is re-checked at detection and safe mode never adopts | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`checkup.cpp`](../main/checkup.cpp) |
 | 73 | **Heap watchdog** — the escalation every other OOM guard here deliberately lacks: sustained exhaustion of the largest *internal* contiguous block becomes a deliberate restart with a persisted, capped breadcrumb, because a wedge that never recovers is worse than a crash | ✅ 🧪 | [`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp), [`heap_guard.cpp`](../main/heap_guard.cpp) |
 | 74 | **Presenter-parity gate** — the browser's copies of the leaving-water / post-BUH / COP-scope / held-over-page rules are diffed against the C++ headers over the whole catalog, so "host-tested" stops meaning "the copy that does not ship is tested" | ✅ 🧪 | [`presenter_golden_dump.cpp`](../test/presenter_golden_dump.cpp), [`presenter_parity.mjs`](../tools/presenter/presenter_parity.mjs), [`selftest.sh`](../tools/presenter/selftest.sh) |
@@ -671,12 +674,30 @@ Four properties of that core are worth naming because they are not obvious from 
 
 ## 9. Build system & release engineering
 
-- **✅ Deterministic toolchain.** There is no local ESP-IDF install:
+- **✅ Deterministic and reproducible toolchain.** There is no local ESP-IDF install:
   [`idf-docker.sh`](../scripts/idf-docker.sh) runs every build in the `espressif/idf` image, its
   version **read at runtime from CI's workflow** — one source of truth, so local builds cannot drift
   from CI. [`idf-version.sh`](../scripts/idf-version.sh) is the only shell extraction of that pin,
   shared by the local image selection and CI's ccache key, and exits non-zero rather than printing an
-  empty version: a second copy of the grep would fail silently in the worst direction.
+  empty version: a second copy of the grep would fail silently in the worst direction. The project
+  records its real floors too: ESP-IDF 6.0 (W5500 2.x needs that `esp_eth` API), CMake 3.22 and
+  GNU++17 for `main`, matching the host logic suite instead of inheriting ESP-IDF's changing app
+  dialect. `CONFIG_APP_REPRODUCIBLE_BUILD=y` removes wall-clock metadata from the application image.
+- **✅ Locked managed-component graph.** [`dependencies.lock`](../dependencies.lock) commits the
+  exact direct and transitive versions plus registry content hashes resolved by ESP-IDF 6.0.2.
+  Dependency changes therefore occur as reviewable diffs: change a range in
+  [`idf_component.yml`](../main/idf_component.yml), run `idf.py update-dependencies` through the
+  Docker wrapper, and review both. The ccache key includes the lock as well as IDF and Kconfig.
+- **✅ Build-input contracts.** `CONFIG_IDF_TARGET="esp32s3"` makes a clean `idf.py build` select the
+  only supported target without mutable local setup. After configuration,
+  [`check-sdkconfig-defaults.py`](../scripts/check-sdkconfig-defaults.py) compares every declared
+  assignment with generated `sdkconfig`; an unknown, renamed, promptless or overridden symbol can
+  no longer read like a guarantee while being ignored. Top-level `COMPONENTS main` limits CMake's
+  graph to the firmware root and the transitive components it actually requires.
+- **✅ Size evidence, not only a red ceiling.** The staged app still fails above the 1,952 KiB
+  policy limit, including the signature sector when present. Each build now also archives ESP-IDF's
+  json2 region/section report and publishes a Markdown job summary with the current app, Flash,
+  DIRAM, IRAM and `.bss` usage, so growth is visible before it reaches the ceiling.
 - **✅ A pinned warning contract on `main/`.** Three constructs in that component are written the way
   they are *because* a warning class is fatal there, and nothing in the repo made that true — they
   held only while ESP-IDF's own defaults happened to make them so, and IDF's `-Werror` handling is
@@ -718,7 +739,8 @@ Four properties of that core are worth naming because they are not obvious from 
   fails in seconds rather than minutes. They are **steps of one job, never a job each** — Actions
   bills every job rounded up to a whole minute, while a step boundary names the failure just as
   precisely. (The list is deliberately not counted here: read the job.)
-- **✅ Crash-decodable forever.** CI archives the unstripped `.elf` (+ sha256) per version/PR.
+- **✅ Crash-decodable and size-auditable.** CI archives the unstripped `.elf` (+ sha256) and the
+  json2/Markdown size reports per version/PR.
 - **✅ One Pages publisher.** The installer is served from the **`gh-pages` branch**. The branch model
   is what lets the release root and the `dev/` channel be published independently — an atomic
   whole-site Actions deployment cannot — so the `deploy-pages` path is deliberately absent rather
@@ -743,11 +765,12 @@ Four properties of that core are worth naming because they are not obvious from 
   **skipped** (not failed) when the diff touches nothing the image or the site is made of, which is
   why the gate is a per-job `if:` and never a workflow-level `paths-ignore:` (a filtered workflow
   leaves a required check pending forever); ccache is carried across runs, keyed on the toolchain +
-  `sdkconfig.defaults` rather than a hash of the workflow file; a PR publishes nothing; and every job
-  carries a timeout.
+  `sdkconfig.defaults` + `dependencies.lock` rather than a hash of the workflow file; a PR publishes
+  nothing; and every job carries a timeout.
 - **Managed components** ([`idf_component.yml`](../main/idf_component.yml)): `mdns`, `cjson`, `mqtt`,
   `led_strip` and `w5500` are pulled as managed components (`cjson`/`mqtt`/`w5500` were all extracted
-  from IDF core in v6.0).
+  from IDF core in v6.0); their exact graph, including transitive `wiznet_common`, is committed in
+  [`dependencies.lock`](../dependencies.lock).
 
 ---
 

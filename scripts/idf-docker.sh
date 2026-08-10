@@ -8,7 +8,7 @@
 # on the HOST with `esptool` (Docker Desktop on macOS has no USB passthrough).
 #
 # Usage:
-#   scripts/idf-docker.sh idf.py set-target esp32s3 build
+#   scripts/idf-docker.sh idf.py build                 # target comes from sdkconfig.defaults
 #   scripts/idf-docker.sh idf.py menuconfig            # interactive (-it auto)
 set -euo pipefail
 

@@ -8,6 +8,8 @@
 #                                              NVS unless the user explicitly chooses Erase
 #   daikin-altherma-esp32<suffix>.elf          unstripped ELF — decodes a core dump from THIS build
 #   daikin-altherma-esp32<suffix>.elf.sha256   integrity checksum of the ELF
+#   daikin-altherma-esp32<suffix>-size.json    ESP-IDF's machine-readable section/region report
+#   daikin-altherma-esp32<suffix>-size.md      human-readable app/flash/RAM budget summary
 #   manifest.json                              esp-web-tools builds[] + OTA version field
 #
 # Calls idf.py / esptool / espsecure.py DIRECTLY — it assumes an ESP-IDF environment is already
@@ -26,7 +28,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # ccache, when the toolchain image has it. `idf.py set-target` below wipes the build directory, so
-# every build compiles ~1100 objects from scratch — in CI that was ~3 minutes of a ~5 minute job,
+# every build compiles the whole graph from scratch — in CI that was ~3 minutes of a ~5 minute job,
 # repeated per PR push. ESP-IDF wires ccache in itself once IDF_CCACHE_ENABLE is set; the cache
 # lives in the WORKSPACE (gitignored) because CI runs this inside the ESP-IDF container and only
 # the mounted workspace survives it (.github/workflows/build.yml restores/saves that directory).
@@ -51,6 +53,11 @@ TARGETS=(esp32s3)
 DIST=dist; rm -rf "$DIST"; mkdir -p "$DIST"
 SIGN_KEY="${OTA_SIGNING_KEY_FILE:-ota_signing_key.pem}"
 APP_SIZE_LIMIT=$((0x1e8000))   # slot (0x1f0000) minus 32 KB headroom
+[ -f dependencies.lock ] || {
+    echo "dependencies.lock is missing; resolve it with idf.py update-dependencies" >&2
+    exit 1
+}
+LOCK_HASH="$(sha256sum dependencies.lock | cut -d ' ' -f1)"
 
 suffix()     { echo ""; }
 chipfamily() { echo "ESP32-S3"; }
@@ -59,7 +66,17 @@ builds_json=""
 for t in "${TARGETS[@]}"; do
     echo "=== building $t ($VERSION) ==="
     rm -f sdkconfig
-    idf.py set-target "$t" build
+    idf.py set-target "$t"
+    [ "$(sha256sum dependencies.lock | cut -d ' ' -f1)" = "$LOCK_HASH" ] || {
+        echo "dependencies.lock changed during configuration" >&2
+        echo "run idf.py update-dependencies intentionally and commit the resolved lock" >&2
+        exit 1
+    }
+    # Kconfig silently ignores an unknown, renamed or promptless default. Compare every declared
+    # assignment with the generated file before compiling so a line that only LOOKS like a build
+    # guarantee fails the same build it was meant to control.
+    python3 scripts/check-sdkconfig-defaults.py sdkconfig.defaults sdkconfig
+    idf.py build
     sfx="$(suffix "$t")"
     app="build/daikin-altherma-esp32.bin"
 
@@ -98,6 +115,19 @@ for t in "${TARGETS[@]}"; do
 
     # Size-check the image that actually gets flashed — signing appends a 4 KB signature sector.
     sz="$(stat -f%z "$app" 2>/dev/null || stat -c%s "$app")"
+
+    # Keep the hard app-slot ceiling, but also retain the whole ELF memory picture. json2 contains
+    # the per-region and per-section data needed to compare builds; the Markdown view makes the
+    # current Flash/DIRAM/IRAM headroom visible in the Actions summary instead of only on failure.
+    size_json="$DIST/daikin-altherma-esp32${sfx}-size.json"
+    size_md="$DIST/daikin-altherma-esp32${sfx}-size.md"
+    idf.py size --format json2 --output-file "$size_json"
+    python3 scripts/report-firmware-size.py \
+        --idf-size "$size_json" \
+        --app "$app" \
+        --policy-limit "$APP_SIZE_LIMIT" \
+        --target "$t" > "$size_md"
+    cat "$size_md"
     [ "$sz" -le "$APP_SIZE_LIMIT" ] || { echo "app image for $t too big: $sz > $APP_SIZE_LIMIT" >&2; exit 1; }
 
     # Canonical full-flash image. Besides remaining useful for an intentional factory-reset flash,

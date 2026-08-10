@@ -14,7 +14,7 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
 1. **Confirm the port.** The target chip is always `esp32s3` (both documented boards — XIAO ESP32-S3 and M5Stack AtomS3 Lite — are esp32s3 with native USB-Serial/JTAG). Detect the port: `ls /dev/cu.usbmodem*`.
 2. **Build** via the CI-pinned image:
    ```bash
-   scripts/idf-docker.sh sh -c 'if [ -f sdkconfig ]; then idf.py build; else idf.py set-target esp32s3 build; fi'
+   scripts/idf-docker.sh idf.py build
    ```
 3. **Sign the app — REQUIRED, do not skip.** This build config uses the Secure Boot v2 signature
    scheme (`CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`), so an **unsigned** image

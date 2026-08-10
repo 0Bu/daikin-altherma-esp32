@@ -5,7 +5,6 @@ sdkconfig.old
 
 # IDF Component Manager
 managed_components/
-dependencies.lock
 
 # Flash artifacts
 *.bin

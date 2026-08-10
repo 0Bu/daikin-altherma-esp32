@@ -141,13 +141,22 @@ Their answer is the test result. Nothing else in this section substitutes for it
 ## 3. espressif/esp-idf — the toolchain
 
 `scripts/idf-docker.sh` reads the version straight from `build.yml`, so the bumped PR builds against
-the new image with no extra setup:
+the new image. The workflow pin and the component graph are two halves of one toolchain update:
+regenerate the committed lock with that new image before compiling, and review every version/hash
+change rather than accepting an implicit resolver rewrite:
 
 ```bash
 rm -rf build sdkconfig
-scripts/idf-docker.sh idf.py set-target esp32s3 build
+scripts/idf-docker.sh idf.py update-dependencies
+git diff -- dependencies.lock main/idf_component.yml
+scripts/idf-docker.sh idf.py build
 scripts/run-mock-tests.sh && scripts/run-domain-audit.sh
 ```
+
+Commit the regenerated `dependencies.lock` onto the Renovate branch. `ci-build-all.sh` deliberately
+fails if configuration rewrites the lock, so an IDF pin cannot merge with a graph resolved by the
+old toolchain. If the new IDF falls outside `main/idf_component.yml`'s declared floor/range, update
+that manifest in the same commit and re-resolve once more.
 
 That is a compile check. It says nothing about the behaviour the renovate.json note warns about
 (mbedTLS, component moves, `esp-mqtt` / `esp_https_ota` TLS). On a **major** bump Renovate attaches a
