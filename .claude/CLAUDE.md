@@ -257,10 +257,11 @@ weather_forecast.cpp  Open-Meteo client. THE SAVED LOCATION IS THE WHOLE GATE: s
 history.cpp     24-hour trend rings: STATIC, in .noinit DRAM (never heap — the binding limit is the
                 largest CONTIGUOUS block; never NVS — ~100k writes/yr beside the WiFi creds).
                 THREE instruments (x10a/modbus/env3), never merged — separate liveness. Survives
-                power-kept resets in place; a COARSE 30-min snapshot in the optional `history`
-                partition covers OTA and reuses its absolute grid phase when a restored sparse
-                ring is saved again, so consecutive OTAs cannot re-encode the deliberate gaps;
-                POWER LOSS stays unrecovered ON PURPOSE. Every restore path
+                power-kept resets in place; upper-flash `history` APPENDS one dense source record
+                per completed 5-min bucket across reboot/OTA/power loss on the official 8 MB layout.
+                Commit word LAST; torn record ignored, previous records stay valid; 4 KiB sectors
+                rotate over the whole partition. There is no old-table/coarse fallback: install the
+                table once by USB/Web Serial. Browser storage is not a history source. Every restore path
                 is sealed by a CATALOG FINGERPRINT (rings are addressed by INDEX — reordering
                 trends would hand one row's day to another, #35–#39 via update); the seal EXCLUDES
                 the open bucket. NO_READING vs HELD_OVER distinguished; POST /detect discards
@@ -408,12 +409,16 @@ www/            web UI sources -> ONE gzipped page. WRITE THE COMMENTS: sources 
 |-----------|---------|
 | `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT (broker, credentials AND this installation's base topic, v16); syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; the v15 external circulation-power witness (name/topic/paths/max_age/on+off thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against); and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v16 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter, and `heap_rst` the heap watchdog's consecutive-restart breadcrumb (i32, cleared on any ordinary boot, capped so a restart LOOP is bounded). |
 
-**Flash partitions beyond NVS.** `history` (0x1e000, 8 KB) holds the COARSE 24-hour trend snapshot
-written from an `esp_restart` shutdown handler. Deliberately NOT in `nvs` (24 KB shared with the
-WiFi credentials cannot hold it, and it would put that partition under write traffic). OPTIONAL AT
-RUNTIME and has to be — `esp_https_ota` never writes the partition table, so every OTA-updated
-device lacks it; a missing lookup is an ABSENT FEATURE, never an error. Keep the `nvs` offset/size
-stable as always.
+**Flash partitions beyond NVS.** The official 8 MB table keeps every deployed address through
+`ota_1` unchanged, then assigns the whole upper 4 MiB to `history` at 0x400000. Its circular journal
+uses 256-byte slots today (31/12/3 dense int16 values per X10A/HomeHub/ENV III record), sixteen per
+4 KiB erase sector. A completed source bucket appends once; a final CRC-protected commit word is
+written last. A non-erased torn mid-sector slot skips to the next sector instead of erasing valid
+predecessors. Slot size grows by powers of two with the catalog and the build asserts at least 72 h
+with all three sources active; unused depth is wear reserve, not eagerly erased retention. The
+former 8 KB partition at 0x1e000 is removed and its gap stays unused. Because `esp_https_ota` never
+writes the partition table, an old-layout board needs one USB/Web-Serial re-flash. Deliberately NOT
+in `nvs` (24 KB shared with credentials must not take this traffic); keep NVS/OTA offsets stable.
 
 **The link is persisted; the model is not.** RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by detection (defaults as fallback, so a stale cache

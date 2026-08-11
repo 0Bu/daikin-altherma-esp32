@@ -5,13 +5,11 @@ CONFIG_IDF_TARGET="esp32s3"
 CONFIG_APP_REPRODUCIBLE_BUILD=y
 
 # Target is esp32s3.
-# No BLE is used, so any WiFi-capable ESP32-S3
-# with >=4 MB flash is a valid target.
+# No BLE is used. The official hardware contract is a WiFi-capable ESP32-S3 with >=8 MB flash.
 
-# Flash. 4 MB is the smallest supported part, so it sizes the partition table
-# (partitions.csv); a larger chip just leaves the top unused, so ONE image + table serves
-# every board.
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# Flash. 8 MB is the official baseline and sizes partitions.csv. The upper half starts with the
+# full-resolution 24-hour history partition; a physical 4 MB device is therefore unsupported.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 

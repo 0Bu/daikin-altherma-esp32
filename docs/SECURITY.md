@@ -225,11 +225,12 @@ always re-flashable over USB. The containment is therefore *prevention*, not rec
   part's rounded 4 KB erase interval with the NVS partition. Selecting **Erase** still deliberately
   erases the whole chip. The separately published `-merged.bin` remains a manual factory-reset
   image; writing it at offset 0 writes its `0xff` gap through NVS.
-- The `history@0x1e000` trend snapshot (8 KB, `partitions.csv`) sits outside every published part for
-  the same reason, so a day of plant readings survives a non-Erase install exactly as the settings
-  do. It is user data and is treated as such: the recovery-button factory reset erases it alongside
-  NVS (`history_flash_forget()`), and a record written by a different trend catalog is refused
-  rather than decoded, so a stale snapshot cannot be attributed to the wrong sensors.
+- The sole `history@0x400000` partition (4 MiB append journal) sits outside
+  every published data part, so plant readings survive a non-Erase install exactly as the settings
+  do. The former 8 KB partition at 0x1e000 is no longer part of the table. The journal is
+  user data: the recovery-button factory reset erases it alongside NVS (`history_flash_forget()`),
+  and a record written by a different trend catalog is refused rather
+  than decoded, so stale bytes cannot be attributed to the wrong sensors.
 
 ### The health gate (mode 1)
 

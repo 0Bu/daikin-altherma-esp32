@@ -1,34 +1,33 @@
 # Name,    Type, SubType, Offset,   Size,     Flags
-# Dual-OTA layout sized to fill 4 MB flash exactly — 4 MB is the minimum the firmware targets
-# (esp32s3 with >=4 MB flash), so it sizes the table. Each OTA slot is 0x1f0000 (~2.03 MB), leaving
-# healthy headroom for the app image (code + a 4 KB signature, rounded up to a 64 KB Secure-Boot
-# boundary). A larger flash (e.g. an 8 MB S3) just leaves the top unused.
+# Official 8 MB ESP32-S3 layout. The existing addresses through ota_1 stay byte-for-byte stable so
+# WiFi/NVS, coredumps and both installed OTA images survive the migration from the former 4 MB
+# table. Each OTA slot is 0x1f0000 (~2.03 MB), leaving healthy headroom for the app image (code + a
+# 4 KB signature, rounded up to a 64 KB Secure-Boot boundary).
 #
 # esp_https_ota writes the INACTIVE slot, so OTA updates never touch nvs (0x9000) → WiFi,
 # MQTT and the heat-pump model/pin config survive upgrades. otadata tracks the active slot;
 # a blank otadata (after a full erase) boots ota_0. Keep nvs offset/size stable across
 # versions or old config is stranded.
 #
-# `history` fills the 8 KB that was already unused between coredump (ends 0x1e000) and ota_0, which has
-# to start on a 64 KB boundary. It holds a COARSE 24-hour snapshot of the trend rings, written once
-# per intentional reboot so a history survives an OTA (main/history.cpp). Placed here rather than in
-# nvs because nvs is 24 KB, holds the WiFi credentials, and this does not fit in it either way.
+# The former 8 KB `history` partition at 0x1e000 is intentionally gone; that gap remains unused so
+# ota_0 and every deployed address stay unchanged. The one canonical `history` partition begins
+# exactly where the old 4 MB table ended and reserves the ENTIRE upper 4 MiB for trends. It is a
+# circular append-only journal: one dense source record per completed five-minute bucket, currently
+# one 256-byte slot holding 31 X10A/board, 12 HomeHub or 3 ENV III int16 values. Sixteen slots share
+# one 4 KiB erase sector; the writer traverses all 1024 sectors before reusing one. CRC covers the
+# header and values, and a separate commit word is programmed last so a power cut cannot invalidate
+# its predecessors. Slot geometry grows by powers of two with the catalog and compilation requires
+# at least 72 hours with every source active. Space older than the visible window remains wear
+# reserve and is erased only when the physical ring wraps, not merely because data aged out.
 #
-# It was called `hist` until nothing required the abbreviation: the label field is 16 bytes, so the
-# full word always fit, and every neighbour here is short only because it is short. RENAMING IT IS
-# SAFE ONLY BECAUSE OF THE RULE BELOW — a board still carrying the old table simply stops finding a
-# partition by this name, which the firmware already treats as an absent feature rather than an
-# error, and a re-flash restores it. Do not rename it again once boards are flashed with it and
-# expect the snapshot to follow.
-#
-# IT IS OPTIONAL AT RUNTIME, and it has to be: esp_https_ota writes the inactive APP slot and never
-# the partition table at 0x8000, so a device updated over the air keeps the table it was flashed
-# with and has no such partition. The firmware treats a missing lookup as an absent feature, and the
-# only way a deployed board gains it is a re-flash over USB / the web installer.
+# This clean break deliberately has no fallback for the former table: esp_https_ota writes only the
+# inactive APP slot and never the table at 0x8000, so an OTA-only board with the old layout finds no
+# usable partition at 0x400000. A one-time USB/web-installer re-flash installs this 8 MB table without
+# moving NVS, coredump or either OTA image. Physical 4 MB boards are no longer an official target.
 nvs,       data, nvs,     0x9000,   0x6000,
 otadata,   data, ota,     0xf000,   0x2000,
 phy_init,  data, phy,     0x11000,  0x1000,
 coredump,  data, coredump, 0x12000,  0xc000,
-history,   data, undefined, 0x1e000, 0x2000,
 ota_0,     app,  ota_0,   0x20000,  0x1f0000,
 ota_1,     app,  ota_1,   0x210000, 0x1f0000,
+history,   data, undefined, 0x400000, 0x400000,

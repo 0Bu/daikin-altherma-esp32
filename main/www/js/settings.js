@@ -731,7 +731,6 @@ function otaCacheStore() {
     status: S.status,
     values: Array.isArray(S._values) ? S._values : [],
     modbus: Array.isArray(S._modbus) ? S._modbus : [],
-    histories: histOtaSnapshot(),
   };
   try {
     const storage = otaCacheStorage();
@@ -741,21 +740,6 @@ function otaCacheStore() {
   } catch { return false; }                    // quota or serialization failure keeps safe fallback
 }
 
-// Transfer the already-loaded 5-minute browser rings before resumeOta() consumes/clears the render
-// cache. This also runs on the normal post-reboot page, where /ota/status is idle and the status-frame
-// restore correctly does not apply. history.js later merges a fresh coarse response UNDER these
-// samples, so restoring the Map here cannot make stale data win outside its own measured interval.
-function otaHistoryCacheRestore() {
-  const storage = otaCacheStorage();
-  if (!storage) return 0;
-  let cached;
-  try { cached = JSON.parse(storage.getItem(OTA_RENDER_CACHE_KEY) || "null"); }
-  catch { otaCacheClear(); return 0; }
-  const age = Date.now() - cached?.saved_at_ms;
-  if (!cached || !Number.isFinite(cached.saved_at_ms) || age < -60000 ||
-      age > OTA_RENDER_CACHE_MAX_AGE_MS) return 0;
-  return histOtaRestore(cached.histories, cached.saved_at_ms);
-}
 function otaCacheRestore(otaStatus) {
   // The normal poll may beat the compact resume request on a healthy board. Never replace a frame
   // freshly obtained in this page with an older persisted one merely because the two requests raced.
@@ -865,9 +849,6 @@ async function checkFirmwareUpdate() {
     }
 
     otaInline(t("ota.starting"), { ring: true });
-    // Read every wall-clock-anchored five-minute ring while the old image still owns its intact RAM.
-    // Best effort and bounded inside history.js; the OTA proceeds even when a row cannot be copied.
-    await captureHistoriesForOta();
     // fetch resolves for ANY answered status, so a 503 from the shared OOM guard arrives as a
     // perfectly successful promise. Left unchecked it would fall through into the poll below and
     // surface 5 minutes later as "Update timed out" — the wrong diagnosis for a retryable refusal.

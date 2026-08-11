@@ -105,6 +105,26 @@ class WebInstallerPlanTests(unittest.TestCase):
         self.manifest.write_text("{", encoding="utf-8")
         self.assert_rejected("cannot read")
 
+    def test_official_layout_is_8_mb_and_preserves_deployed_offsets(self) -> None:
+        rows: dict[str, tuple[int, int]] = {}
+        for raw in (ROOT / "partitions.csv").read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = [field.strip() for field in line.split(",")]
+            rows[fields[0]] = (int(fields[3], 0), int(fields[4], 0))
+
+        self.assertEqual(rows["nvs"], (0x9000, 0x6000))
+        self.assertNotIn("history_full", rows)
+        self.assertEqual(rows["ota_0"], (0x20000, 0x1F0000))
+        self.assertEqual(rows["ota_1"], (0x210000, 0x1F0000))
+        self.assertEqual(rows["history"], (0x400000, 0x400000))
+        self.assertEqual(max(offset + size for offset, size in rows.values()), 0x800000)
+
+        sdkconfig = (ROOT / "sdkconfig.defaults").read_text(encoding="utf-8")
+        self.assertIn("CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y", sdkconfig)
+        self.assertNotIn("CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y", sdkconfig)
+
 
 if __name__ == "__main__":
     unittest.main()

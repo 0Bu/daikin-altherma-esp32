@@ -110,9 +110,9 @@ history.cpp/.hpp    → the 24-hour trend rings: one fixed-cadence buffer per lo
                       GET /history as THREE independent INSTRUMENTS (x10a / modbus / env3), never
                       merged — they have separate liveness. Storage + mutex; the mechanics are the
                       host-tested logic/history.hpp. In .noinit DRAM rather than heap, so a reset
-                      that KEPT POWER keeps the readings, and a coarse snapshot in the optional
-                      `history` partition covers the OTA case .noinit cannot — both sealed by a
-                      catalog fingerprint, since a ring is addressed by INDEX
+                      that KEPT POWER keeps the readings, and the five-minute append journal in
+                      upper-flash `history` covers OTA and power loss — both sealed by a catalog
+                      fingerprint, since a ring is addressed by INDEX
 checkup.cpp/.hpp    → the 24-hour PLANT CHECKUP behind /status.health: counted EVENTS and window
                       MINIMA (compressor starts + mean run length, defrost share, pressure and flow
                       minima, backup-heater minutes, fault class, retry counters). Storage + mutex
@@ -1112,7 +1112,7 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
   hint. Detection is fully automatic (see the Auto-detection section) — the web UI shows the
   detected model read-only, so this is metadata only; there is no manual model dropdown.
 - Flash cost is bounded by embedding **only the value tables** (a few hundred rows × families),
-  not the whole source tree; labels are English-only. If size ever pressures the 4 MB layout,
+  not the whole source tree; labels are English-only. If size ever pressures the OTA slots,
   profiles can move to a data partition — the indirection through `def/registry.hpp` makes that a
   non-breaking change.
 
@@ -1166,43 +1166,34 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
      power was never lost, so the downtime is bounded to about a second. The one seam is the bucket
      that was open when the device went down — it is dropped, so the restored series can be up to
      one `HISTORY_DT_S` adrift on the axis. It cannot survive an OTA: the new image's sections move.
-   * **The optional `history` partition.** A coarse (30-minute) snapshot written once per intentional
-     reboot from an `esp_restart` shutdown handler — one 8 KB erase and ~4.4 KB of writes, a few
-     hundred writes a year against a 100k-cycle part. This is what carries a history across an OTA.
-     It is absent on every board updated over the air, because a partition table is not delivered by
-     OTA (see *NVS namespaces* in `.claude/CLAUDE.md`).
+   * **The upper-4-MiB `history` partition.** Each source appends one dense record when it closes a
+     five-minute bucket: currently 31 X10A/board, 12 HomeHub or 3 ENV III `int16` values in one
+     256-byte slot. Sixteen slots share a 4 KiB erase sector and all 1024 sectors rotate before one
+     is reused. The body is CRC-protected and a separate commit word is programmed last; a power cut
+     can invalidate only the open write, never its predecessors. A torn mid-sector slot is skipped
+     because erasing it would also erase older committed slots. Slot width grows by powers of two
+     with the largest source catalog, and a compile-time guard requires at least 72 hours with all
+     three sources active. Today 16,384 slots make one physical rotation about 57 days with X10A
+     alone or 19 days with all three sources active — roughly 6.4 or 19.3 erases per sector/year.
+     Older physical records are wear reserve rather than being erased at the
+     72-hour display boundary. The former 8 KB partition is removed entirely. Because OTA does not
+     deliver the partition table, an old-layout board needs one USB/Web-Serial re-flash to install
+     the official 8 MB table without moving NVS, coredump or either OTA slot.
 
-   **Losing power stays unrecovered, on purpose.** The only medium that could survive it is one that
-   is not on this board, and moving the plant history off the device is a different feature with a
-   different owner — the broker already stores every published value (`docs/HOME_ASSISTANT.md`).
-   Nothing here pretends otherwise: `/status.history.persist` reports `power_cycle` and the rings
-   start empty, exactly as they always did.
+   **A sudden power loss loses at most the open bucket and a just-closed record still waiting for
+   the next poll tick.** Normal persistence runs continuously; the `esp_restart` shutdown handler is
+   only a bounded final drain for the OTA/reconfiguration race. `/status.history.persist`
+   independently reports what happened to RAM.
 
-   The coarse path is **spliced in behind** the live samples at the absolute wall-clock bucket
-   each sample was taken in, never appended — appending would slide a day-old curve onto today. It
-   is skipped entirely while the clock is unsynced *or* before the live side has committed its first
-   bucket: a splice needs an absolute anchor on **both** sides, and there is no honest default for a
-   missing one. A source that has not reported yet is **waited for** rather than skipped, bounded at
-   six buckets, because the cursor only moves forward and a HomeHub that powers up late would
-   otherwise lose its twelve rings for the whole boot. The block's write-side padding is trimmed
-   before splicing, or a ring holding one reading would claim a 24-hour span it never recorded.
-   For an OTA started from the web UI, the initiating tab also reads every offered, wall-clock-
-   anchored five-minute ring before starting the download and carries those responses through the
-   mandatory page reload in bounded `sessionStorage`. The post-update renderer merges the coarse
-   partition response underneath that tab copy: the pre-update RAM sample wins every overlapping
-   bucket, while the partition may extend the old edge and the new firmware extends the live edge.
-   This is a display handoff, not a third device persistence medium: it is limited to the initiating
-   tab, expires after 15 minutes, and is skipped without a synced clock because monotonic bucket ids
-   cannot align two boots honestly.
-   **`BinaryEvent` rows are OR-folded rather than decimated** — those rows exist because defrosts and
-   BUH pulses are shorter than a bucket, so keeping one bucket in six would erase them from a
-   restored day; any ON in the group makes the coarse slot ON, which widens what the slot means
-   without inventing anything. A consecutive OTA also keeps the previous snapshot's **absolute
-   30-minute grid phase** when it re-encodes the sparse restored ring. Without that alignment, a
-   new boot whose newest five-minute bucket has a different phase selects the five deliberate gaps
-   between each restored coarse point and overwrites an intact day with an almost-empty record. The
-   aligned anchor may trail the newest live bucket by at most five buckets, but every retained point
-   stays at the instant it was actually sampled. Both paths are gated on a **catalog fingerprint** over every trend id, kind, locator
+   The flash path is **spliced in behind** the live samples at the absolute wall-clock bucket each
+   sample was taken in, never appended — appending would slide a day-old curve onto today. It waits
+   only for SNTP and can seed an empty live ring immediately; elapsed buckets after the stored anchor
+   become explicit gaps. The boot scan indexes only the final 24-hour source windows; restore reads
+   each indexed record once per four-ring batch, so no second 26 KB matrix or one unbounded
+   flash/UART stall is introduced. Leading window padding is trimmed first.
+   Measurement history is no longer copied through browser `sessionStorage`; that storage keeps only
+   the transient status/value render frame while an OTA is in flight. There is no sparse/coarse
+   fallback record. Both paths are gated on a **catalog fingerprint** over every trend id, kind, locator
    and the ring geometry, because a ring is addressed by its index — insert or reorder a trend and
    slot 12 stops meaning what it meant when the bytes were written, which would hand the expansion
    valve's day to the DHW tank. The seal deliberately excludes the open bucket's `pending`: covering
@@ -1219,9 +1210,7 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    boot observed that bucket itself, and a retained payload from a previous life of the same five
    minutes must not overwrite the observation; and the verdict is a **named enum**, never a bool —
    `wrong_catalog` after an OTA is expected and uninteresting, `bad_crc` on a board that was never
-   power-cycled is a memory fault worth knowing about. The coarse form is **pure decimation**,
-   never a fold of each group to its last reading — that would look like more data while drawing a
-   reading from 25 minutes earlier at the group's own instant.
+   power-cycled is a memory fault worth knowing about.
    The independent HomeHub task feeds twelve additional rings through `history_record_modbus()` — eight
    measurement concepts plus BSH, 3-way-valve, Quiet and Smart-Grid state timelines explicitly named in
    `logic/homehub_map.hpp`. Both recorders use the same monotonic 5-minute bucket id, returned as `b0`
@@ -1998,11 +1987,13 @@ The Home Assistant bridge:
 
 Structure:
 
-- **Target:** esp32s3 only (`scripts/ci-build-all.sh`). No BLE is used, so the target is just "WiFi ESP32-S3s with ≥4 MB flash". Uses native USB-Serial/JTAG console.
-- **Dual-OTA `partitions.csv`** sized to fill 4 MB; app at `0x20000`; `nvs` at `0x9000` untouched
+- **Target:** esp32s3 only (`scripts/ci-build-all.sh`). No BLE is used; the official baseline is a WiFi ESP32-S3 with ≥8 MB flash. Uses native USB-Serial/JTAG console.
+- **8 MB dual-OTA `partitions.csv`:** app at `0x20000`; `nvs` at `0x9000` untouched
   by OTA so WiFi + model config survive upgrades. The Web Serial manifest likewise publishes
   sparse `flash_args` parts around NVS; its build-time sector-overlap check makes the no-Erase path
-  preserve the same configuration.
+  preserve the same configuration. Existing addresses through `ota_1` still end at `0x400000`;
+  `history` uses the remaining 4 MiB through `0x7fffff`. Its append journal rotates 256-byte records
+  through every 4 KiB sector; checked slot growth preserves at least 72 hours with all sources active.
 - **Browser serial-permission release:** the installer uses `Serial.getPorts()` to show its
   **Release serial port** action only while this Pages origin already has a granted port. A single
   closed port is forgotten directly; multiple grants use the native chooser to disambiguate. An

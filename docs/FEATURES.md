@@ -111,7 +111,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 71 | **Pinned stack contract on the `/status` builder** — `-Os` on that one translation unit, because ~9 KB of its 11.8 KB frame was a `-Og` slot-allocation artefact, not live data | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp) |
 | 81 | **Stack-headroom telemetry** — the second memory budget, made reportable: four tasks record their own FreeRTOS high-water mark and the heartbeat carries all four, so a growing call frame is a falling line rather than a core dump nobody has yet | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp) |
-| 72 | **Reboot-surviving 24-hour trends** — `.noinit` DRAM for resets that kept power, plus a coarse snapshot in the optional `history` partition across consecutive OTAs; re-encoding stays on the stored absolute 30-minute grid so a shifted boot phase cannot overwrite old samples with sparse-ring gaps. Both media are catalog-fingerprinted and the browser tab also carries its pre-OTA rings across reload | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`history.js`](../main/www/js/history.js), [`partitions.csv`](../partitions.csv) |
+| 72 | **Power-loss-surviving 24-hour trends** — `.noinit` DRAM for resets that kept power, plus an upper-flash append journal with one dense X10A/HomeHub/ENV III record per completed five-minute bucket. CRC covers body and values, the commit word is written last, torn slots preserve their predecessors, and 4 KiB sectors rotate through the whole 4 MiB partition. Slot width follows catalog growth and the build requires at least 72 hours with all three sources active. The former 8 KB partition is removed; an old-layout board needs the official 8 MB table installed once by USB/Web Serial. Browser storage is not a measurement source | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
 | 82 | **Reproducible ESP-IDF build inputs** — exact transitive component lock, explicit ESP-IDF/CMake/C++ floors and wall-clock-free app metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 83 | **Kconfig and target contract gate** — `esp32s3` is a project default and every declared default is compared with generated `sdkconfig` before compilation | ✅ 🧪 | [`check-sdkconfig-defaults.py`](../scripts/check-sdkconfig-defaults.py), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 84 | **Firmware-size evidence** — the hard app ceiling is joined by retained ESP-IDF json2 data and an Actions summary for Flash, DIRAM, IRAM and `.bss` | ✅ 🧪 | [`report-firmware-size.py`](../scripts/report-firmware-size.py), [`build.yml`](../.github/workflows/build.yml) |
@@ -419,9 +419,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   `coredump` never advertises a download the decoder would reject.
 - **✅ 🧪 The 24-hour plant checkup survives a reboot** ([`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp)).
   The same `.noinit` mechanism one feature down, for the measurement that tolerates a reboot worst:
-  the window is 24 h and the requirements are hours, so losing it loses the *verdict*. `.noinit` only
-  — the `history` partition is absent on every over-the-air-updated board, so a second tenant would buy
-  nothing there. The seal excludes the open hour, the lifecycle is carried as a duration (the
+  the window is 24 h and the requirements are hours, so losing it loses the *verdict*. `.noinit`
+  only: the flash journal is separately fingerprinted for trend rings, not a
+  general persistence store. The seal excludes the open hour, the lifecycle is carried as a duration (the
   monotonic anchors restart), and a **layout fingerprint** over the geometry, every row locator and
   every counting threshold invalidates the record when an update changes what a stored counter means.
   Two refusals stop the window outliving its source: safe mode never adopts, since nothing there would
@@ -430,20 +430,16 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   Still not in NVS — that would be ~100k writes a year in the partition holding the WiFi credentials —
   but the rings now live in `.noinit` DRAM, so every reset that kept power keeps them at no RAM cost
   and a ~26.5 KB *smaller* flash image (`.data` no longer carries an initialiser for them). An OTA
-  moves the image's sections, so a coarse 30-minute snapshot goes to the optional 8 KB `history`
-  partition from a shutdown handler. A power loss takes both and stays unrecovered on purpose — only
-  a medium off this board could survive it, and that is a different feature with a different owner.
-  Before a web-UI-initiated OTA starts, that tab reads every offered wall-clock-anchored ring and
-  carries it across the mandatory reload in bounded `sessionStorage`. Its five-minute samples win
-  over the partition wherever the two overlap; the partition and the new live ring still extend the
-  edges. This is deliberately a tab-scoped display handoff rather than another device persistence
-  promise, and it is unavailable without a synced clock.
-  The coarse path is spliced in **behind** the live samples by
-  absolute wall-clock bucket, and is skipped entirely without an anchor on both sides; a source that
-  has not reported yet is waited for rather than skipped, and the block's write-side padding is
-  trimmed first so a restored ring reports the span it actually covers instead of a full day of empty
-  slots. **`BinaryEvent` rows are OR-folded rather than decimated** — defrosts and BUH pulses are
-  shorter than one bucket, so keeping one bucket in six would erase them from a restored day. Both paths are
+  moves the image's sections, so the official 8 MB layout appends one dense source record per
+  completed bucket to the upper-4-MiB `history` partition. Records use 256-byte slots today; sixteen
+  share one 4 KiB sector, and the whole partition rotates before reuse. CRC plus a last-written
+  commit word makes a torn final record fail closed without touching its predecessors. A sudden
+  power loss can lose only the open bucket or the just-closed record awaiting the next poll tick;
+  the shutdown handler performs a bounded final drain. After reboot the flash path waits
+  only for SNTP, can seed an empty live ring and restores four rings per poll tick; browser
+  `sessionStorage` is no longer a history medium. There is no coarse fallback for the former 8 KB
+  partition; an old-layout board reports the missing official partition until it is re-flashed.
+  Both paths are
   gated on a fingerprint derived from the trend catalog itself, because a ring is addressed by its
   index and a reordered table would hand one sensor's day to another. `/status.history.persist` names
   the outcome, so a chart that emptied itself has a stated cause.
@@ -826,7 +822,7 @@ Every ESP-IDF component this firmware links, and what it powers (from
 | `esp_timer` | uptime, poll/serial timing |
 | `mdns` (managed) | `<hostname>.local` discovery + the explicit HomeHub browse |
 | `espcoredump` | core dump to flash + `esp_core_dump_get_summary` |
-| `esp_partition` | the optional `history` snapshot partition, the `GET /coredump` stream, the OTA running-slot lookup |
+| `esp_partition` | the upper-flash `history` journal, the `GET /coredump` stream, the OTA running-slot lookup |
 | `cjson` (managed) | POST body parsing (`http_config.cpp`) |
 
 **Compile-time defaults** live in [`main/Kconfig.projbuild`](../main/Kconfig.projbuild). Only some

@@ -17,7 +17,7 @@ climate input and heating-curve diagnosis — are in [**PLANT.md**](PLANT.md).
 
 - **Targets:** esp32s3 only. The **M5Stack AtomS3 Lite** is the board the wiring guide is written
   for; the **Seeed XIAO ESP32-S3** is the board the compile-time pin defaults are written for.
-  **≥ 4 MB flash** (dual-OTA layout: two ~2 MB app slots). No PSRAM required.
+  **≥ 8 MB flash** (dual-OTA layout plus full-resolution persistent 24-hour history). No PSRAM required.
 - **Network:** WiFi, or — optionally and detected at boot — a **W5500 Ethernet controller on SPI**,
   in practice an M5Stack ATOMIC PoE Base under the AtomS3 Lite, so one cable carries power and the
   LAN. A board without a controller behaves exactly as before; a wired one starts no radio and opens
@@ -728,8 +728,12 @@ up and reloads itself onto the new UI. Both the check and the download run on th
   works). CI signs each image with the offline `OTA_SIGNING_KEY`. Details:
   [SECURITY.md](SECURITY.md).
 
-Partition layout (`partitions.csv`) is dual-OTA sized to fill 4 MB (a larger flash just leaves
-the top unused); app at `0x20000`.
+Partition layout (`partitions.csv`) officially targets 8 MB. The deployed NVS/coredump/dual-OTA
+addresses stay unchanged through `0x3fffff`; `history` occupies the whole upper 4 MiB from
+`0x400000` and appends one CRC/commit-protected dense source record per completed five-minute
+bucket. Its 4 KiB sectors rotate over the entire partition, and the checked geometry retains at
+least 72 hours with X10A, HomeHub and ENV III all active while leaving room for catalog growth.
+The former 8 KB partition is removed. App starts at `0x20000`.
 
 ---
 
