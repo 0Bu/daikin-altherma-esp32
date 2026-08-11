@@ -35,6 +35,7 @@
 #include <atomic>
 #include <cstdio>
 #include <exception>
+#include <utility>
 #include <vector>
 
 namespace daik {
@@ -249,7 +250,7 @@ static void poll_once() {
             // (0 bar impossible) from the water one (0 bar = a drained system, and real). The BASE
             // table is the right argument here — see the profile_refrigerant note above.
             if (hp_format(def, payload, paylen, rtype, val, prof.values, prof.count, sat_in))
-                cv.value = val;
+                cv.value = std::move(val);
             fresh.push_back(std::move(cv));
         }
     }
@@ -276,7 +277,7 @@ static void poll_once() {
     // make the trend ring and the MQTT bridge blank different rows. One function, one answer.
     bool rps_known = false, rps_running = false;
     for (const auto& cv : fresh) {
-        if (!logic::ou_is_rps_witness(cv.label.c_str(), cv.reg)) continue;
+        if (!logic::ou_is_rps_witness(cv.label, cv.reg)) continue;
         int rps_tenths = 0;
         if (logic::history_parse_tenths(cv.value.c_str(), rps_tenths)) {
             rps_known   = true;                        // absent/unreadable stays UNKNOWN, not stopped
@@ -422,7 +423,7 @@ static bool poll_detect() {                                    // returns true i
     return true;
 }
 
-// The cycle body allocates freely — poll_once builds up to ~116 CachedValues (3 std::strings each)
+// The cycle body allocates freely — poll_once builds up to ~116 CachedValues (one owned string each)
 // every second, hp_detect_run grows more — so the whole body is guarded like mqtt_task's: an OOM in a
 // fragmented moment (concurrent MQTT TLS reconnect, /set_mqtt's probe client) must skip the cycle and
 // keep the last good cache, not throw through this FreeRTOS task into std::terminate() and reboot.

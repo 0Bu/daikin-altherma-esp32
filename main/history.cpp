@@ -458,6 +458,7 @@ size_t   s_flash_next_slot = 0;
 uint64_t s_flash_next_sequence = 1;
 int64_t  s_flash_last_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN};
 int64_t  s_flash_newest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN};
+int64_t  s_flash_oldest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN};
 uint16_t s_flash_restore_slots[kJournalSources][HISTORY_SAMPLES] = {};
 uint16_t s_flash_restore_slot_count[kJournalSources] = {};
 size_t   s_flash_restore_ring = 0;
@@ -634,8 +635,8 @@ void history_record(const CachedValue* v, size_t n) {
     uint8_t     offs[kMaxRows];
     int16_t     convs[kMaxRows];
     for (size_t i = 0; i < rows; i++) {
-        labels[i] = v[i].label.c_str();
-        units[i]  = v[i].unit.c_str();
+        labels[i] = v[i].label;
+        units[i]  = v[i].unit;
         regs[i]   = v[i].reg;
         offs[i]   = v[i].off;
         convs[i]  = static_cast<int16_t>(v[i].conv);
@@ -753,7 +754,7 @@ void history_record(const CachedValue* v, size_t n) {
         // and ring; pending is already NO_READING and the bucket commit will preserve the gap.
         if (idx < 0) continue;
         if (copy_field(tr.label, sizeof(tr.label), labels[idx])) s_persist_dirty = true;
-        if (copy_field(tr.unit, sizeof(tr.unit), v[idx].unit.c_str())) s_persist_dirty = true;
+        if (copy_field(tr.unit, sizeof(tr.unit), v[idx].unit)) s_persist_dirty = true;
 
         int tenths = 0;
         const bool has = value_tenths(v[idx].value, tenths);
@@ -1091,6 +1092,7 @@ bool flash_journal_scan() {
     for (size_t src = 0; src < kJournalSources; src++) {
         s_flash_last_bucket[src] = INT64_MIN;
         s_flash_newest_bucket[src] = INT64_MIN;
+        s_flash_oldest_bucket[src] = INT64_MIN;
         s_flash_restore_slot_count[src] = 0;
     }
 
@@ -1164,6 +1166,9 @@ bool flash_journal_scan() {
                                s_flash_restore_slot_count[src] < HISTORY_SAMPLES) {
                         s_flash_restore_slots[src][s_flash_restore_slot_count[src]++] =
                             static_cast<uint16_t>(slot);
+                        if (s_flash_oldest_bucket[src] == INT64_MIN ||
+                            r.header.bucket < s_flash_oldest_bucket[src])
+                            s_flash_oldest_bucket[src] = r.header.bucket;
                     }
                 }
             }
@@ -1349,13 +1354,13 @@ void history_service_flash_restore() {
     }
 
     if (newest != INT64_MIN) {
+        const size_t start = logic::history_flash_restore_start(
+            s_flash_oldest_bucket[src_i], newest, HISTORY_SAMPLES);
         for (size_t b = 0; b < batch; b++) {
-            const size_t skip = logic::history_flash_lead_skip(s_flash_restore_blocks[b],
-                                                               HISTORY_SAMPLES);
-            if (skip < HISTORY_SAMPLES &&
+            if (start < HISTORY_SAMPLES &&
                 history_splice_snapshot(src, first_idx + b,
-                                        s_flash_restore_blocks[b] + skip,
-                                        HISTORY_SAMPLES - skip, 1, newest))
+                                        s_flash_restore_blocks[b] + start,
+                                        HISTORY_SAMPLES - start, 1, newest))
                 s_flash_restored_rings++;
         }
     }

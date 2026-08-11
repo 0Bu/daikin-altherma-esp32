@@ -48,7 +48,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 2 | Refuse-to-flash-unsigned guard | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
 | 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ 🧪 | [`partitions.csv`](../partitions.csv), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** (not an uptime timer) | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
-| 5 | OTA manifest check + signed download + **two-point downgrade gate**, with manifest-TLS heap quiescing and allocator-only retry | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
+| 5 | OTA manifest check + signed download + **two-point downgrade gate**, with bounded OTA/weather-TLS heap quiescing and allocator-only retry | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
 | 6 | Live UI by **polling** `/status` + `/values` — no push transport, on purpose | ✅ | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp) |
 | 7 | Minified, deterministic-gzip web UI **embedded in the app image**, under a 150 KiB delivery budget | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs) |
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline | ✅ | [`http_common.cpp`](../main/http_common.cpp) |
@@ -435,8 +435,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   share one 4 KiB sector, and the whole partition rotates before reuse. CRC plus a last-written
   commit word makes a torn final record fail closed without touching its predecessors. A sudden
   power loss can lose only the open bucket or the just-closed record awaiting the next poll tick;
-  the shutdown handler performs a bounded final drain. After reboot the flash path waits
-  only for SNTP, can seed an empty live ring and restores four rings per poll tick; browser
+  the shutdown handler performs a bounded final drain. Reboot restore waits only for SNTP, processes
+  four rings per poll tick and derives spans from journal buckets, so all-null rows keep their raster.
+  Browser
   `sessionStorage` is no longer a history medium. There is no coarse fallback for the former 8 KB
   partition; an old-layout board reports the missing official partition until it is re-flashed.
   Both paths are
@@ -501,7 +502,7 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   The reset reason rides as a slug **and** as numbers, because a metrics pipeline keeps numeric
   fields and drops strings. `bus_ou_held_over` reports **source** freshness rather than link health.
   `mqtt_skipped` / `mqtt_quiesced` / `poll_skipped` count the 1 s cycles that produced **nothing** —
-  an OOM guard catch, a deliberate OTA hold-off, and a sweep that never reached the bus (#380). They
+  an OOM guard catch, a deliberate OTA/weather TLS hold-off, and a sweep that never reached the bus (#380). They
   are the counters that made a silent loss visible: 337 dropped publishes in 30 days had existed only
   as lines in a `/diag` ring the next chatty boot overwrites. `heap_restarts` — the 22nd entity —
   attributes the one reboot nothing else can: the heap watchdog restarts with `esp_restart()`, so

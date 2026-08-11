@@ -1190,7 +1190,9 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    only for SNTP and can seed an empty live ring immediately; elapsed buckets after the stored anchor
    become explicit gaps. The boot scan indexes only the final 24-hour source windows; restore reads
    each indexed record once per four-ring batch, so no second 26 KB matrix or one unbounded
-   flash/UART stall is introduced. Leading window padding is trimmed first.
+   flash/UART stall is introduced. The oldest and newest indexed record buckets define the restored
+   span; sample values do not. That distinction preserves an all-`NO_READING` register's raster
+   instead of mistaking its recorded absences for unwritten leading scratch.
    Measurement history is no longer copied through browser `sessionStorage`; that storage keeps only
    the transient status/value render frame while an OTA is in flight. There is no sparse/coarse
    fallback record. Both paths are gated on a **catalog fingerprint** over every trend id, kind, locator
@@ -1897,7 +1899,7 @@ The Home Assistant bridge:
     days on the wired board, 125 of them in the last 24 hours, every one immediately before an OTA
     reboot. **`mqtt_skipped`** is a cycle that threw (`std::bad_alloc`, caught by the task guard) and
     lost the reading; **`mqtt_quiesced`** is a cycle the publisher stood aside for **on purpose**
-    because an OTA download owned the heap (`logic/ota_quiesce.hpp`, see OTA below). Two counters
+    because an OTA or weather TLS operation owned the heap (`logic/ota_quiesce.hpp`, see OTA below). Two counters
     rather than one "cycles lost", so the fix is legible in the store: the intended shape is
     `quiesced` stepping once per install while `skipped` stops rising at all, which a combined
     counter could not tell apart from no change whatsoever.
@@ -2115,11 +2117,13 @@ Structure:
   Switching *back* (dev → the last release) is a downgrade by version, which the gate below refuses
   unless the request explicitly carries `?downgrade=1`; the web UI sends it only after the user
   picks a channel and confirms. Without that the release channel would be a one-way door.
-- **Heap-bounded manifest TLS.** The lock-free flag read by the MQTT publisher covers the complete
-  OTA network operation, beginning before the manifest handshake rather than only at
-  `esp_https_ota_begin()`. The OTA task holds it for 1.1 seconds before opening TLS so the
-  once-per-second publisher can finish its current cycle and stand aside; the same bounded
-  `logic/ota_quiesce.hpp` budget prevents a stalled operation from silencing MQTT indefinitely.
+- **Heap-bounded TLS.** Lock-free flags read by the MQTT publisher cover the complete OTA and
+  Open-Meteo network operations, beginning before either handshake. Each producer holds its flag for
+  1.1 seconds before opening TLS so the once-per-second publisher can finish its current cycle and
+  stand aside; the same bounded `logic/ota_quiesce.hpp` budget prevents a stalled operation from
+  silencing MQTT indefinitely. The poll cache compounds this by owning only its formatted value:
+  immutable labels and units are borrowed from firmware-lifetime catalog tables, shrinking the one
+  contiguous allocation every sweep requires and eliminating two per-row string allocations.
   `http_client_diag.cpp` returns the TLS evidence it logs, so an init OOM or
   `ESP_ERR_MBEDTLS_SSL_SETUP_FAILED` is cleaned up and retried exactly once. DNS, TCP, certificate,
   HTTP and payload failures remain single-attempt failures with their original diagnostic class.
@@ -2135,20 +2139,22 @@ Structure:
   The web installer carves prepared sparse parts from the merged
   image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
   as the OTA feed (esp-web-tools and the device load the same file).
-- **The publisher stands aside during the download** (`logic/ota_quiesce.hpp`, #380). An install is a
-  known, bounded, self-inflicted memory event: the TLS session plus the download buffer claim the
+- **The publisher stands aside during known TLS operations** (`logic/ota_quiesce.hpp`, #380). An
+  OTA install or weather fetch is a known, bounded, self-inflicted memory event: the TLS session plus
+  the operation buffer claim the
   largest contiguous block on a heap whose binding limit *is* that block. The MQTT publish task used
   to meet it by throwing `std::bad_alloc` on its next cycle — guard catches it, cycle skipped, reading
   gone, once per second until the install finished (125 in one day, with `min_free_heap` bottoming out
-  at **812 B**). It now checks `ota_download_active()` above the first allocation of the cycle and
+  at **812 B**). It now checks `ota_download_active() || weather_fetch_active()` above the first
+  allocation of the cycle and
   skips deliberately: the same missing second, spending none of the block the download needs, and
-  counted as `mqtt_quiesced` instead of vanishing into a log ring. The flag is a lock-free
-  `std::atomic<bool>` armed by an RAII guard across `esp_https_ota_begin`…`finish`/`abort` — **not**
+  counted as `mqtt_quiesced` instead of vanishing into a log ring. Lock-free
+  `std::atomic<bool>` flags are armed by RAII guards across each network interval — **not**
   `ota_status().state`, which copies three `std::string`s out under the mutex the OTA task holds, so
   asking "is the heap under pressure?" would itself allocate, once a second, on the task the pressure
-  is aimed at. The download window has seven exits, which is why the flag is cleared by a destructor
+  is aimed at. The OTA window has seven exits, which is why its flag is cleared by a destructor
   rather than by hand at each. The hold-off is **bounded** (`OTA_QUIESCE_MAX_CYCLES`, 300 cycles ≈ 5
-  min at the 1 s cadence): a download stalled behind a dead connection must not silence the bridge for
+  min at the 1 s cadence): a TLS operation stalled behind a dead connection must not silence the bridge for
   the rest of the boot, so past the cap the publisher resumes and takes its chances with the OOM guard
   — the behaviour that shipped before, i.e. the worst case of this fix is the status quo. The
   watchdog is fed above the check, and esp-mqtt runs keepalive on its own task, so a quiesced minute

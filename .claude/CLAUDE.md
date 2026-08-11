@@ -237,7 +237,9 @@ hp_poll.cpp     poll engine task: X10A ONLY, wdt-subscribed (reset per cycle + p
                 Skips rows row_publishable() refuses; MARKS held-over outdoor rows (marked, not
                 dropped — history needs HELD_OVER vs NO_READING); dumps raw 0x10/0x20 while the
                 compressor RUNS (logic/raw_capture.hpp); carries the cross-page saturation witness
-                to the NEXT cycle (it EXPIRES unconditionally each cycle). It publishes to no
+                to the NEXT cycle (it EXPIRES unconditionally each cycle). CachedValue owns only
+                the formatted value; label/unit borrow firmware-lifetime catalog strings so the
+                full snapshot remains one TLS-safe contiguous allocation. It publishes to no
                 client — the browser polls (#241; no WebSocket, see "no /events")
 env3.cpp        OPTIONAL M5Stack ENV III (SHT30+QMP6988, one I2C bus) — THIRD source, own task.
                 Gate is literal: disabled or non-M5Stack vendor -> no task, no bus, no pullups
@@ -253,7 +255,9 @@ weather_forecast.cpp  Open-Meteo client. THE SAVED LOCATION IS THE WHOLE GATE: s
                 — TLS+HTTP+JSON on one frame; both catch halves on the loop). Everything else is
                 refusal: bounded response, units re-verified, backward provider timestamp rejected,
                 issued_at stays null (never backfilled), a location edit invalidates the stored
-                value. The MQTT evidence doc carries NO coordinates (host-test pinned)
+                value. A lock-free flag plus 1.1 s lead lets MQTT release its snapshot before TLS;
+                the bounded OTA quiesce budget is shared. The MQTT evidence doc carries NO
+                coordinates (host-test pinned)
 history.cpp     24-hour trend rings: STATIC, in .noinit DRAM (never heap — the binding limit is the
                 largest CONTIGUOUS block; never NVS — ~100k writes/yr beside the WiFi creds).
                 THREE instruments (x10a/modbus/env3), never merged — separate liveness. Survives
@@ -264,7 +268,9 @@ history.cpp     24-hour trend rings: STATIC, in .noinit DRAM (never heap — the
                 table once by USB/Web Serial. Browser storage is not a history source. Every restore path
                 is sealed by a CATALOG FINGERPRINT (rings are addressed by INDEX — reordering
                 trends would hand one row's day to another, #35–#39 via update); the seal EXCLUDES
-                the open bucket. NO_READING vs HELD_OVER distinguished; POST /detect discards
+                the open bucket. Journal BUCKETS define the restored span, not the first numeric
+                value, so an all-NO_READING row keeps its raster. NO_READING vs HELD_OVER
+                distinguished; POST /detect discards
                 rings (a different profile is a different sensor). /status.history.persist names
                 how this boot's rings came to be
 checkup.cpp     24-hour PLANT CHECKUP (/status.health): counted EVENTS + window minima — NOT a
@@ -316,7 +322,8 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge. Load-bearing rules: a field's JSON TYP
                 behavioural fields — testing topic A cannot license saving topic B), the
                 heating-curve sampler (gate order HomeHub -> plant -> heating-mode -> room -> X10A;
                 consent = the SAVED room mapping, deleting it disarms and clears), and the
-                circulation witness (#361, same consent shape)
+                circulation witness (#361, same consent shape). Before allocating a publish
+                snapshot it applies one bounded hold-off to OTA OR weather TLS activity
 ota_update.cpp  pull-based signed OTA. Channel read FRESH on every check (release = gh-pages root,
                 dev = <base>/dev/; dev builds are semver PRE-releases so ordering does the work).
                 TWO-POINT downgrade gate: manifest version AND the image's own esp_app_desc_t,

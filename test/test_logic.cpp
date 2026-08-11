@@ -2003,7 +2003,7 @@ static void test_mqtt_uri() {
     CHECK(parse_mqtt_uri("[fe80::1]", host, port, tls) && host == "[fe80::1]" && port == 1883 && !tls);
 }
 
-// #380 — the publish task stands aside while an OTA download owns the heap, BOUNDED so a download
+// #380 — the publish task stands aside while a known TLS operation owns the heap, BOUNDED so one
 // that never finishes cannot silence the bridge for the rest of the boot.
 static void test_ota_quiesce() {
     OtaQuiesceState st;
@@ -10824,24 +10824,16 @@ static void test_history_persist() {
     CHECK(history_t0(1'786'459'116, restored_age_s, 1, HISTORY_DT_S) == 1'786'458'900);
     CHECK(history_anchor_commit_us(123, 456, 789, 0) == 123);
 
-    // --- dropping the write-side padding ----------------------------------------------------------
-    // The stored block is right-aligned and pads its OLD end with NO_READING. Those slots must not
-    // reach the splice, or a ring holding one real reading claims a 24-hour span it never recorded.
-    HistorySample pad[HISTORY_SAMPLES];
-    for (size_t i = 0; i < HISTORY_SAMPLES; i++) pad[i] = HISTORY_NO_READING;
-    CHECK(history_flash_lead_skip(pad, HISTORY_SAMPLES) == HISTORY_SAMPLES);
-    pad[HISTORY_SAMPLES - 1] = 231;
-    CHECK(history_flash_lead_skip(pad, HISTORY_SAMPLES) == HISTORY_SAMPLES - 1);
-    // An INTERIOR gap is a real observation and survives; only the leading run goes.
-    pad[HISTORY_SAMPLES - 3] = 200;
-    CHECK(history_flash_lead_skip(pad, HISTORY_SAMPLES) == HISTORY_SAMPLES - 3);
-    // HELD_OVER is a recorded state ("outdoor unit resting"), never padding — it stops the skip.
-    HistorySample held[4] = { HISTORY_NO_READING, HISTORY_HELD_OVER, HISTORY_NO_READING, 55 };
-    CHECK(history_flash_lead_skip(held, 4) == 1);
-    // Nothing to skip, and the null guard.
-    HistorySample dense[3] = { 1, 2, 3 };
-    CHECK(history_flash_lead_skip(dense, 3) == 0);
-    CHECK(history_flash_lead_skip(nullptr, 3) == 3);
+    // --- locating the journal-backed span --------------------------------------------------------
+    // The record buckets, not their values, define the restored span. This is load-bearing for a
+    // register that was unavailable for every sample: its all-NO_READING raster must still survive.
+    CHECK(history_flash_restore_start(1000, 1000) == HISTORY_SAMPLES - 1);
+    CHECK(history_flash_restore_start(998, 1000) == HISTORY_SAMPLES - 3);
+    CHECK(history_flash_restore_start(1000 - (HISTORY_SAMPLES - 1), 1000) == 0);
+    CHECK(history_flash_restore_start(500, 1000) == 0);  // older data clamps to this window
+    CHECK(history_flash_restore_start(INT64_MIN, 1000) == HISTORY_SAMPLES);
+    CHECK(history_flash_restore_start(1001, 1000) == HISTORY_SAMPLES);
+    CHECK(history_flash_restore_start(1000, 1000, 0) == 0);
 
     // --- the splice -----------------------------------------------------------------------------
     // The restored samples go BEHIND what this boot recorded, each at the absolute bucket it was

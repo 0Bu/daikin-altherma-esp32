@@ -72,7 +72,7 @@
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
-#include "logic/ota_quiesce.hpp"   // stand aside while an OTA network op owns the heap (#380)
+#include "logic/ota_quiesce.hpp"   // stand aside while an OTA/weather TLS op owns the heap (#380)
 #include "logic/reference_temperature.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/weather_mqtt.hpp"
@@ -401,7 +401,7 @@ static std::vector<GroupedValue> current_x10a_values() {
         if (cache[i].value.empty()) continue;
         if (cache[i].held) continue;
         const char* group = group_for_page(cache[i].reg);
-        out.push_back({group, object_id(cache[i].label.c_str()), cache[i].value,
+        out.push_back({group, object_id(cache[i].label), cache[i].value,
                        published_kind(cache[i].conv)});
         // A textual error class also publishes its permanently-numeric companions, so a metrics
         // consumer that cannot store "U4" still sees the fault go active (#209 defect 4). Derived
@@ -1895,9 +1895,9 @@ static void mqtt_task(void*) {
     int ha_retire_elapsed_s = HA_RETIRE_INTERVAL_S;
     MqttPublishGateState publish_gate = MqttPublishGateState::SubscriberOnly;
     bool publisher_promotion_failed = false;
-    OtaQuiesceState ota_quiesce;                       // hold-off budget for the current operation
-    bool ota_quiesce_logged     = false;               // one diag line per operation, not per cycle
-    bool ota_quiesce_cap_logged = false;               // and one if that budget ever runs out
+    OtaQuiesceState network_quiesce;                   // current TLS operation's hold-off budget
+    bool network_quiesce_logged     = false;           // one diag line per operation, not per cycle
+    bool network_quiesce_cap_logged = false;           // and one if that budget ever runs out
 
     // Broker reachability and inbound observation do not depend on X10A. This first client carries
     // no installation LWT, and the gate below still encloses EVERY explicit publish. It can therefore
@@ -1921,42 +1921,45 @@ static void mqtt_task(void*) {
         stack_watch_sample(StackWatch::Mqtt);
         const int delay_s = POLL_INTERVAL_S;
 
-        // STAND ASIDE while an OTA network operation owns the heap (#380). Placed above the try,
-        // before the first allocation of the cycle: everything below this point builds std::strings,
-        // and on the
-        // heap an esp_https_ota session leaves behind, the largest of them is what throws. Skipping
+        // STAND ASIDE while an OTA or weather HTTPS operation owns the heap (#380). Placed above
+        // the try, before the first allocation of the cycle: everything below this point builds
+        // std::strings, and on the heap a TLS session leaves behind, the largest of them is what
+        // throws. Skipping
         // the cycle on purpose costs the same second of data the bad_alloc cost, spends none of the
         // block the download needs, and — unlike the throw — says so in a counter.
         //
         // The watchdog is fed ABOVE this, so a long download cannot false-trip it. The broker
         // connection is unaffected: esp-mqtt runs keepalive on its own task, so a publisher that
         // publishes nothing for a minute stays connected and HA sees a gap, not an `offline`.
-        // Bounded by logic/ota_quiesce.hpp — a download that never finishes must not silence the
+        // Bounded by logic/ota_quiesce.hpp — an operation that never finishes must not silence the
         // bridge for the rest of the boot.
         const bool ota_busy = ota_download_active();
-        if (ota_quiesce_step(ota_quiesce, ota_busy)) {
+        const bool weather_busy = weather_fetch_active();
+        const bool network_busy = ota_busy || weather_busy;
+        if (ota_quiesce_step(network_quiesce, network_busy)) {
             s_mqtt_quiesced.fetch_add(1, std::memory_order_relaxed);
-            if (!ota_quiesce_logged) {                 // once per operation; the ring is small
-                diag_printf("mqtt: holding off publishes during the OTA network operation\n");
-                ota_quiesce_logged = true;
+            if (!network_quiesce_logged) {             // once per operation; the ring is small
+                diag_printf("mqtt: holding off publishes during the %s TLS operation\n",
+                            ota_busy ? "OTA" : "weather");
+                network_quiesce_logged = true;
             }
             vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
             continue;
         }
-        // Not holding off this cycle — either no download is running, or the budget above ran out
+        // Not holding off this cycle — either no TLS operation is running, or the budget ran out
         // while one still is. Those two are worth telling apart in the log: the second means the
         // publisher is back to competing with a TLS session for the heap, so a `publish skipped` can
         // legitimately reappear and it is not a regression of this fix. Once per episode, then
-        // rearmed when the download ends.
-        if (ota_quiesce_exhausted(ota_quiesce, ota_busy)) {
-            if (!ota_quiesce_cap_logged) {
-                diag_printf("mqtt: OTA hold-off budget spent after %u cycles, publishing again\n",
+        // rearmed when the operation ends.
+        if (ota_quiesce_exhausted(network_quiesce, network_busy)) {
+            if (!network_quiesce_cap_logged) {
+                diag_printf("mqtt: TLS hold-off budget spent after %u cycles, publishing again\n",
                             static_cast<unsigned>(OTA_QUIESCE_MAX_CYCLES));
-                ota_quiesce_cap_logged = true;
+                network_quiesce_cap_logged = true;
             }
         } else {
-            ota_quiesce_logged     = false;            // rearm both lines for the next download
-            ota_quiesce_cap_logged = false;
+            network_quiesce_logged     = false;        // rearm both lines for the next operation
+            network_quiesce_cap_logged = false;
         }
 
         // Static literals only: the catch path must say WHICH allocation-rich phase failed without

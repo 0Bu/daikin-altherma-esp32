@@ -17,6 +17,9 @@ const read = (p) => fs.readFileSync(new URL(`../${p}`, import.meta.url), "utf8")
 const history = read("main/history.cpp");
 const checkup = read("main/checkup.cpp");
 const poll = read("main/hp_poll.cpp");
+const pollHeader = read("main/hp_poll.hpp");
+const mqtt = read("main/mqtt_ha.cpp");
+const weather = read("main/weather_forecast.cpp");
 const status = read("main/http_status.cpp");
 const redact = read("main/logic/redact.hpp");
 const diagnosis = read("main/logic/heating_curve_diagnosis.hpp");
@@ -255,9 +258,39 @@ assert.match(status, /if \(!dw\.exact\) j \+= ",\\"dwell_min\\":true";/,
   "an unwitnessed run must carry its lower-bound marker, or the browser states a stronger claim " +
   "than the device made");
 
+// ── 10. A journal record is evidence even when its value is absent ─────────────────────────────
+// Fully absent Modbus rows used to lose their complete post-reboot raster because restore searched
+// for the first numeric value. The record buckets are the authority for the span; NO_READING is a
+// recorded sample, not padding.
+assert.match(history,
+  /history_flash_restore_start\(\s*s_flash_oldest_bucket\[src_i\], newest, HISTORY_SAMPLES\)/,
+  "flash restore must derive the span from journal buckets so an all-null row survives");
+assert.doesNotMatch(history, /history_flash_lead_skip/,
+  "flash restore must not infer whether a bucket exists from the sample value");
+
+// ── 11. TLS pressure must not require another oversized telemetry allocation ──────────────────
+// Labels and units originate in static generated tables. Owning a string copy of each in every
+// snapshot made one X10A vector larger than the biggest block left by weather TLS on the reference
+// board. The formatted value remains owned; the immutable metadata is borrowed.
+assert.match(pollHeader,
+  /struct CachedValue\s*\{[\s\S]*?const char\* label[\s\S]*?std::string value[\s\S]*?const char\* unit/,
+  "CachedValue must borrow static label/unit metadata so a full snapshot fits beside TLS");
+assert.doesNotMatch(pollHeader, /std::string\s+(?:label|unit)\s*;/,
+  "CachedValue must not restore per-row owning strings for static metadata");
+
+// Weather raises its lock-free activity signal, then leaves one complete MQTT cadence before
+// starting HTTPS. Otherwise the publisher can already own the large vector when TLS begins, and an
+// activity check in the next cycle is too late.
+assert.match(weather,
+  /NetworkActivity activity;[\s\S]{0,180}?vTaskDelay\(pdMS_TO_TICKS\(kNetworkQuiesceLeadMs\)\);[\s\S]{0,180}?fetch_forecast\(/,
+  "weather must advertise the heap-sensitive interval before its pre-TLS grace and fetch");
+assert.match(mqtt,
+  /ota_download_active\(\)[\s\S]{0,160}?weather_fetch_active\(\)[\s\S]{0,160}?ota_busy \|\| weather_busy[\s\S]{0,160}?ota_quiesce_step\(network_quiesce, network_busy\)/,
+  "MQTT must apply the bounded TLS hold-off to both OTA and weather network activity");
+
 console.log("source absence: board trends own their producer, absent sources state absence, " +
             "armed-but-inactive is named, state ages expire rather than freeze, " +
-            "redaction invents nothing");
+            "redaction invents nothing, TLS pressure is coordinated");
 
 // #407 — the END of the restart ladder. The boot that inherited the full count must come up MINIMAL,
 // and that decision has to be made in heap_guard_begin(), which main.cpp runs BEFORE its
