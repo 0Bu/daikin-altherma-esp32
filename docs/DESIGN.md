@@ -403,7 +403,11 @@ Body, ordered:
    trailing catalog value legends such as `ON/OFF` and `On:…_Off:…` from visible reading names:
    `Space heating Operation ON/OFF` therefore reads `Space heating Operation` beside its **ON/OFF**
    value. The exact catalog label remains the identity used by `/values`, MQTT, history,
-   selectors and description matching.
+   selectors and description matching. Five labels occur on more than one X10A page; those rows
+   additionally carry the sparse `x10a_group` marker from the MQTT page namespace. The visual
+   boundary prefixes only those names (for example `Outdoor State Error Code` and
+   `Hydronic Error Code`) and scopes their accordion keys the same way. Both measurements remain
+   visible, while no duplicate label and no shared open/closed state remains.
    The system-wide **BOOST pill is permanent for the same reason**. Its face always says only BOOST:
    mode 2 (Recommended on) changes border/fill/text from light grey to petrol; every other or unknown
    mode stays light grey. The inspector and accessible name retain the exact manufacturer state. Its

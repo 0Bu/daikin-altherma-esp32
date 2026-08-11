@@ -52,6 +52,24 @@ function api({ lang = "en", x10a = true, values = [] } = {}) {
   return context.__api;
 }
 
+// Two independent X10A fault channels previously rendered under the same visible label and shared
+// one descOpen key. The sparse group marker removes both collisions while retaining both readings.
+{
+  const a = api();
+  const outdoor = a.vDescRow({ label: "Error type", value: "Normal", unit: "", reg: 0x10,
+                               x10a_group: "outdoor_state" });
+  const hydronic = a.vDescRow({ label: "Error type", value: "Normal", unit: "", reg: 0x60,
+                                x10a_group: "hydronic" });
+  assert.match(outdoor, />Outdoor State Error type</,
+    "the outdoor fault row has a unique visible name");
+  assert.match(hydronic, />Hydronic Error type</,
+    "the hydronic fault row has a unique visible name");
+  assert.match(outdoor, /data-desc="outdoor_state:Error type"/,
+    "the outdoor accordion has a structurally unique key");
+  assert.match(hydronic, /data-desc="hydronic:Error type"/,
+    "the hydronic accordion has a structurally unique key");
+}
+
 // ── The claim the device made is the claim that is printed ──────────────────────────────────────
 {
   const a = api();

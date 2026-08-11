@@ -2729,8 +2729,12 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   window is the stale-fingerprint-as-live-reading case DESIGN.md rules out.
                   RX/TX are auto-detected: read-only on the card while the bus answers, a pins_avail
                   dropdown (re-runs detection) when it doesn't.
-GET  /values      decoded readings [{label,value,unit,reg}], plus "binary":true / "held":true where
-                  they apply (emitted only when true — the many live rows cost no bytes). `reg` is the
+GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structural metadata where
+                  it applies: "binary":true, "held":true and `x10a_group` only for a catalog label
+                  reused on more than one register page. The last field reuses MQTT's audited page
+                  namespace (for example `outdoor_state` versus `hydronic`), so the dashboard can
+                  keep both independent fault channels without displaying two indistinguishable
+                  "Error Code" rows or giving their accordions one shared key. `reg` is the
                   X10A register PAGE the row came from, and it is what lets the BROWSER apply
                   logic/ou_stale.hpp's page rule (0x20/0x21 stop being refreshed while the compressor
                   rests) to any row it shows — structurally, instead of by a label list that would be

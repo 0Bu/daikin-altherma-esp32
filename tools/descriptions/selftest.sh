@@ -169,7 +169,7 @@ reset
 python3 - "$WORK/main/www/js/history.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-s = s.replace('  return cleaned || raw;', '  return raw;', 1)
+s = s.replace('  const shown = cleaned || raw;', '  const shown = raw;', 1)
 open(p, 'w').write(s)
 PY
 run_case "raw ON/OFF label suffix is caught" 1 "D006"
