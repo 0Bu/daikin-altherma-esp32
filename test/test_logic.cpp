@@ -7131,6 +7131,11 @@ static void test_history() {
         CHECK(r.snapshot(out, 8) == 6);
         CHECK(out[2] == 300);
         CHECK(out[3] == HISTORY_NO_READING && out[4] == HISTORY_NO_READING && out[5] == HISTORY_NO_READING);
+        HistorySample picked = 0;
+        CHECK(r.sample_from_newest(0, picked) && picked == HISTORY_NO_READING);
+        CHECK(r.sample_from_newest(3, picked) && picked == 300);
+        CHECK(r.sample_from_newest(5, picked) && picked == 260);
+        CHECK(!r.sample_from_newest(6, picked));
     }
     {
         // BSH is an event state: once ON was observed, an OFF later in the same five-minute bucket
@@ -10739,6 +10744,63 @@ static void test_history_persist() {
     CHECK(history_fp_str(CONFIG_CRC32_INIT, nullptr) == history_fp_str(CONFIG_CRC32_INIT, ""));
     CHECK(history_fp_u32(CONFIG_CRC32_INIT, 1) != history_fp_u32(CONFIG_CRC32_INIT, 256));
 
+    // --- the official 8 MB append journal -------------------------------------------------------
+    CHECK(HISTORY_FLASH_TOTAL_RINGS == 46);
+    CHECK(HISTORY_FLASH_PARTITION_BYTES == 4u * 1024u * 1024u);
+    CHECK(HISTORY_FLASH_ERASE_BYTES == 4096);
+    CHECK(HISTORY_JOURNAL_HEADER_BYTES == 64);
+    CHECK(HISTORY_JOURNAL_MAX_SOURCE_RINGS == 31);
+    CHECK(history_journal_slot_bytes(256) == 256);
+    CHECK(history_journal_slot_bytes(257) == 512);
+    CHECK(history_journal_slot_bytes(513) == 1024);
+    CHECK(HISTORY_JOURNAL_SLOT_BYTES == 256);
+    CHECK(HISTORY_JOURNAL_SLOTS_PER_SECTOR == 16);
+    CHECK(HISTORY_JOURNAL_SLOT_COUNT == 16384);
+    CHECK(history_journal_source_rings(HistoryJournalSource::X10a) == 31);
+    CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 12);
+    CHECK(history_journal_source_rings(HistoryJournalSource::Env3) == 3);
+    CHECK(history_journal_slot_offset(17) == 17 * 256);
+    CHECK(history_journal_sector_first_slot(17) == 16);
+    CHECK(history_journal_next_sector_slot(15) == 16);
+    CHECK(history_journal_next_sector_slot(HISTORY_JOURNAL_SLOT_COUNT - 1) == 0);
+    CHECK(history_journal_write_slot(5, true) == 5);        // ordinary erased append
+    CHECK(history_journal_write_slot(5, false) == 16);      // torn slot preserves earlier sector
+    CHECK(history_journal_write_slot(16, false) == 16);     // sector start is erased in place
+    CHECK(history_journal_write_slot(HISTORY_JOURNAL_SLOT_COUNT - 1, false) == 0);
+    CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
+    CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
+    CHECK(HISTORY_JOURNAL_SLOT_COUNT >=
+          HISTORY_FLASH_FUTURE_SAMPLES * HISTORY_JOURNAL_SOURCE_COUNT);
+    CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
+
+    HistoryJournalHeader jh{};
+    jh.magic = HISTORY_JOURNAL_MAGIC;
+    jh.version = HISTORY_JOURNAL_VERSION;
+    jh.source = static_cast<uint8_t>(HistoryJournalSource::X10a);
+    jh.catalog_fp = fp;
+    jh.commit = HISTORY_JOURNAL_ERASED;
+    jh.value_count = static_cast<uint16_t>(TREND_COUNT);
+    jh.slot_bytes = static_cast<uint16_t>(HISTORY_JOURNAL_SLOT_BYTES);
+    jh.sequence = 42;
+    jh.bucket = 123456;
+    jh.dt_s = HISTORY_DT_S;
+    jh.rings[0] = static_cast<uint16_t>(TREND_COUNT);
+    jh.rings[1] = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+    jh.rings[2] = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+    HistorySample journal_values[TREND_COUNT];
+    for (size_t i = 0; i < TREND_COUNT; i++) journal_values[i] = static_cast<HistorySample>(i * 10);
+    jh.crc = history_journal_crc(jh, journal_values, TREND_COUNT);
+    CHECK(!history_journal_header_matches(jh, fp));        // body alone is never committed
+    jh.commit = HISTORY_JOURNAL_COMMITTED;
+    CHECK(history_journal_header_matches(jh, fp));
+    CHECK(jh.crc == history_journal_crc(jh, journal_values, TREND_COUNT));
+    journal_values[7]++;
+    CHECK(jh.crc != history_journal_crc(jh, journal_values, TREND_COUNT));
+    journal_values[7]--;
+    CHECK(!history_journal_header_matches(jh, fp ^ 1u));   // catalog changes fail closed
+    jh.value_count--;
+    CHECK(!history_journal_header_matches(jh, fp));        // a short dense vector cannot shift ids
+
     // --- absolute buckets -----------------------------------------------------------------------
     CHECK(history_bucket_from_unix(0) == 0);
     CHECK(history_bucket_from_unix(299) == 0);
@@ -10752,120 +10814,34 @@ static void test_history_persist() {
     CHECK(history_bucket_from_unix(-301) == -2);
     CHECK(history_bucket_from_unix(5, 0) == 0);           // degenerate dt: 0, never a divide by zero
 
-    // --- decimation is ANCHORED ON THE NEWEST ---------------------------------------------------
-    // The last coarse sample must be the last real one: a reader looks at the newest point first, so
-    // it is the one that must never be the one dropped by the grid.
-    HistorySample full[HISTORY_SAMPLES];
-    for (size_t i = 0; i < HISTORY_SAMPLES; i++) full[i] = static_cast<HistorySample>(i);
-    HistorySample coarse[HISTORY_COARSE_SAMPLES];
-    size_t m = history_coarse_encode(full, HISTORY_SAMPLES, HISTORY_COARSE_STRIDE,
-                                     coarse, HISTORY_COARSE_SAMPLES);
-    CHECK(m == HISTORY_COARSE_SAMPLES);
-    CHECK(coarse[m - 1] == static_cast<HistorySample>(HISTORY_SAMPLES - 1));
-    CHECK(coarse[m - 2] == static_cast<HistorySample>(HISTORY_SAMPLES - 1 - HISTORY_COARSE_STRIDE));
-    CHECK(coarse[0] == static_cast<HistorySample>(HISTORY_SAMPLES - 1 -
-                                                  (m - 1) * HISTORY_COARSE_STRIDE));
-    // A partly-filled ring yields fewer coarse samples, still ending on the newest.
-    m = history_coarse_encode(full, 10, 6, coarse, HISTORY_COARSE_SAMPLES);
-    CHECK(m == 2);
-    CHECK(coarse[1] == 9);
-    CHECK(coarse[0] == 3);
-    // A tight output buffer truncates the OLD end, never the new one.
-    m = history_coarse_encode(full, HISTORY_SAMPLES, HISTORY_COARSE_STRIDE, coarse, 3);
-    CHECK(m == 3);
-    CHECK(coarse[2] == static_cast<HistorySample>(HISTORY_SAMPLES - 1));
-    CHECK(history_coarse_encode(nullptr, 10, 6, coarse, 4) == 0);
-    CHECK(history_coarse_encode(full, 0, 6, coarse, 4) == 0);
-    CHECK(history_coarse_encode(full, 10, 0, coarse, 4) == 0);
-    CHECK(history_coarse_encode(full, 10, 6, coarse, 0) == 0);
-    CHECK(history_coarse_encode(full, 10, 6, nullptr, 4) == 0);
-
-    // A second OTA must keep the first snapshot's absolute 30-minute phase. The first restore is
-    // sparse in the new boot's five-minute ring; re-encoding from the new boot's newest bucket
-    // selects only the gaps when the two phases differ, which is the live .397 -> .398 -> .399
-    // history-loss witness. Aligning to the previous anchor preserves the actual old samples and
-    // merely leaves the newest coarse point up to five buckets behind.
-    HistorySample shifted[20];
-    for (auto& s : shifted) s = HISTORY_NO_READING;
-    shifted[4] = 104; shifted[10] = 110; shifted[16] = 116; // old grid, one point per six
-    shifted[19] = 119;                                      // new boot's different phase
-    HistorySample shifted_coarse[HISTORY_COARSE_SAMPLES];
-    size_t shifted_n = history_coarse_encode(shifted, 20, 6, shifted_coarse,
-                                              HISTORY_COARSE_SAMPLES);
-    CHECK(shifted_n == 4);
-    CHECK(history_is_absent(shifted_coarse[0]));
-    CHECK(history_is_absent(shifted_coarse[1]));
-    CHECK(history_is_absent(shifted_coarse[2]));
-    CHECK(shifted_coarse[3] == 119);                        // old day was erased before this fix
-    const int64_t aligned = history_coarse_aligned_anchor(1019, 1016, 6);
-    CHECK(aligned == 1016);
-    const size_t aligned_skip = static_cast<size_t>(1019 - aligned);
-    shifted_n = history_coarse_encode(shifted, 20, 6, shifted_coarse,
-                                      HISTORY_COARSE_SAMPLES, false, aligned_skip);
-    CHECK(shifted_n == 3);
-    CHECK(shifted_coarse[0] == 104);
-    CHECK(shifted_coarse[1] == 110);
-    CHECK(shifted_coarse[2] == 116);
-    CHECK(history_coarse_aligned_anchor(1019, INT64_MIN, 6) == 1019);
-    CHECK(history_coarse_aligned_anchor(INT64_MIN, 1016, 6) == INT64_MIN);
-    CHECK(history_coarse_aligned_anchor(1019, 1016, 0) == 1019);
-    CHECK(history_coarse_aligned_anchor(-1, -4, 6) == -4); // modulo floors on the negative side
-    CHECK(history_coarse_aligned_anchor(INT64_MAX, INT64_MIN + 1, 6) == INT64_MAX - 2);
-
-    // --- event rows are OR-folded, not decimated --------------------------------------------------
-    // A defrost or a BUH step is shorter than one 5-minute bucket, which is why these rows are
-    // event-folded going in. Decimating them going out would drop five buckets in six and a restored
-    // day would show no defrost at all — an artefact that reads like a finding.
-    HistorySample ev[HISTORY_SAMPLES];
-    for (size_t i = 0; i < HISTORY_SAMPLES; i++) ev[i] = 0;          // measured OFF throughout
-    ev[HISTORY_SAMPLES - 4] = 10;                                     // one ON, in a bucket that
-    HistorySample evc[HISTORY_COARSE_SAMPLES];                        // pure decimation would drop
-    size_t em = history_coarse_encode(ev, HISTORY_SAMPLES, HISTORY_COARSE_STRIDE,
-                                      evc, HISTORY_COARSE_SAMPLES, /*event=*/false);
-    CHECK(em == HISTORY_COARSE_SAMPLES);
-    CHECK(evc[em - 1] == 0);                                          // decimated: the pulse is gone
-    em = history_coarse_encode(ev, HISTORY_SAMPLES, HISTORY_COARSE_STRIDE,
-                               evc, HISTORY_COARSE_SAMPLES, /*event=*/true);
-    CHECK(em == HISTORY_COARSE_SAMPLES);
-    CHECK(evc[em - 1] == 10);                                         // OR-folded: it survives
-    CHECK(evc[em - 2] == 0);                                          // and does not smear backwards
-    // The fold itself: ON wins over anything, a measured OFF beats an absence, HELD_OVER beats
-    // NO_READING, and an all-absent group stays absent.
-    HistorySample g1[3] = { HISTORY_NO_READING, 10, 0 };
-    CHECK(history_coarse_event_fold(g1, 0, 2) == 10);
-    HistorySample g2[3] = { HISTORY_NO_READING, 0, HISTORY_NO_READING };
-    CHECK(history_coarse_event_fold(g2, 0, 2) == 0);
-    HistorySample g3[2] = { HISTORY_NO_READING, HISTORY_HELD_OVER };
-    CHECK(history_coarse_event_fold(g3, 0, 1) == HISTORY_HELD_OVER);
-    HistorySample g4[2] = { HISTORY_NO_READING, HISTORY_NO_READING };
-    CHECK(history_coarse_event_fold(g4, 0, 1) == HISTORY_NO_READING);
-    // A HELD_OVER anywhere must not outrank a real ON.
-    HistorySample g5[3] = { HISTORY_HELD_OVER, 10, HISTORY_HELD_OVER };
-    CHECK(history_coarse_event_fold(g5, 0, 2) == 10);
-    // The oldest group clamps at the array start rather than reading before it.
-    HistorySample shortv[4] = { 10, 0, 0, 0 };
-    em = history_coarse_encode(shortv, 4, 6, evc, HISTORY_COARSE_SAMPLES, /*event=*/true);
-    CHECK(em == 1);
-    CHECK(evc[0] == 10);
+    // Live-device regression: 26 s after a reboot at unix 1786459116, the current five-minute wall
+    // bucket began 216 s ago — before esp_timer's zero. The monotonic commit MUST stay negative;
+    // clamping it to zero moved a flash-restored t0 from 1786458900 to the reboot instant 1786459090.
+    const int64_t wall_bucket = history_bucket_from_unix(1'786'459'116);
+    const int64_t commit_us = history_anchor_commit_us(26'000'000, 1'786'459'116, wall_bucket);
+    CHECK(commit_us == -190'000'000);
+    const uint32_t restored_age_s = static_cast<uint32_t>((26'000'000 - commit_us) / 1'000'000);
+    CHECK(history_t0(1'786'459'116, restored_age_s, 1, HISTORY_DT_S) == 1'786'458'900);
+    CHECK(history_anchor_commit_us(123, 456, 789, 0) == 123);
 
     // --- dropping the write-side padding ----------------------------------------------------------
     // The stored block is right-aligned and pads its OLD end with NO_READING. Those slots must not
     // reach the splice, or a ring holding one real reading claims a 24-hour span it never recorded.
-    HistorySample pad[HISTORY_COARSE_SAMPLES];
-    for (size_t i = 0; i < HISTORY_COARSE_SAMPLES; i++) pad[i] = HISTORY_NO_READING;
-    CHECK(history_coarse_lead_skip(pad, HISTORY_COARSE_SAMPLES) == HISTORY_COARSE_SAMPLES);
-    pad[HISTORY_COARSE_SAMPLES - 1] = 231;
-    CHECK(history_coarse_lead_skip(pad, HISTORY_COARSE_SAMPLES) == HISTORY_COARSE_SAMPLES - 1);
+    HistorySample pad[HISTORY_SAMPLES];
+    for (size_t i = 0; i < HISTORY_SAMPLES; i++) pad[i] = HISTORY_NO_READING;
+    CHECK(history_flash_lead_skip(pad, HISTORY_SAMPLES) == HISTORY_SAMPLES);
+    pad[HISTORY_SAMPLES - 1] = 231;
+    CHECK(history_flash_lead_skip(pad, HISTORY_SAMPLES) == HISTORY_SAMPLES - 1);
     // An INTERIOR gap is a real observation and survives; only the leading run goes.
-    pad[HISTORY_COARSE_SAMPLES - 3] = 200;
-    CHECK(history_coarse_lead_skip(pad, HISTORY_COARSE_SAMPLES) == HISTORY_COARSE_SAMPLES - 3);
+    pad[HISTORY_SAMPLES - 3] = 200;
+    CHECK(history_flash_lead_skip(pad, HISTORY_SAMPLES) == HISTORY_SAMPLES - 3);
     // HELD_OVER is a recorded state ("outdoor unit resting"), never padding — it stops the skip.
     HistorySample held[4] = { HISTORY_NO_READING, HISTORY_HELD_OVER, HISTORY_NO_READING, 55 };
-    CHECK(history_coarse_lead_skip(held, 4) == 1);
+    CHECK(history_flash_lead_skip(held, 4) == 1);
     // Nothing to skip, and the null guard.
     HistorySample dense[3] = { 1, 2, 3 };
-    CHECK(history_coarse_lead_skip(dense, 3) == 0);
-    CHECK(history_coarse_lead_skip(nullptr, 3) == 3);
+    CHECK(history_flash_lead_skip(dense, 3) == 0);
+    CHECK(history_flash_lead_skip(nullptr, 3) == 3);
 
     // --- the splice -----------------------------------------------------------------------------
     // The restored samples go BEHIND what this boot recorded, each at the absolute bucket it was

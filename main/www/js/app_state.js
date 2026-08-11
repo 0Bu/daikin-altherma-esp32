@@ -21,8 +21,8 @@ const S = {
   // state for the same reason descOpen is — #valueGroups is rebuilt on every poll, and re-fetching
   // (or re-deriving) the sparkline 1×/s would both hammer the device and restart the panel's slide.
   // A missing entry means "not fetched yet", which is what makes the panel show its loading line.
-  // During OTA, eligible wall-clock-anchored entries make one tab-scoped handoff across the required
-  // reload; history.js keeps these RAM samples authoritative over the coarse partition response.
+  // Reboot/OTA continuity comes from the device's full-resolution flash journal; browser state is
+  // never a second authority for measurements.
   hist: new Map(),
   histBusy: new Set(),
   // A PINNED trend readout per concept: id -> {t} (the pinned sample's unix instant) or {i, gen} when

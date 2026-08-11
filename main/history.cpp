@@ -15,7 +15,7 @@
 #include "esp_attr.h"           // __NOINIT_ATTR — the whole of step 1 rests on this one attribute
 // esp_heap_caps.h is deliberately absent: the largest-free-block sample now goes through
 // heap_guard.hpp's ONE internal-DRAM sampler, so no site here spells out a capability mask.
-#include "esp_partition.h"      // the optional `history` snapshot partition
+#include "esp_partition.h"      // the persistent upper-flash `history` journal
 #include "esp_system.h"         // esp_get_free_heap_size — the free_heap trend
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -124,10 +124,14 @@ bool              s_env3_have_bucket = false;
 // series' t0 (logic/history_t0): without it t0 was derived from `now` and drifted by up to a full
 // bucket between commits, which mislabelled every timestamp and let a PINNED readout round onto
 // the neighbouring sample. Monotonic because the commit may predate the first SNTP sync — its
-// wall-clock instant is then unknowable, but its age never is. -1 = nothing committed yet.
-int64_t           s_last_commit_us = -1;
-int64_t           s_mb_last_commit_us = -1;
-int64_t           s_env3_last_commit_us = -1;
+// wall-clock instant is then unknowable, but its age never is. INT64_MIN is the sentinel because a
+// flash-restored wall bucket may legitimately predate this
+// boot's monotonic zero. A negative commit timestamp is how history_newest_age_s preserves that
+// pre-boot age instead of sliding the curve to the reboot instant.
+constexpr int64_t kNoCommitUs = INT64_MIN;
+int64_t           s_last_commit_us = kNoCommitUs;
+int64_t           s_mb_last_commit_us = kNoCommitUs;
+int64_t           s_env3_last_commit_us = kNoCommitUs;
 int64_t           s_last_commit_bucket = -1;
 int64_t           s_mb_last_commit_bucket = -1;
 int64_t           s_env3_last_commit_bucket = -1;
@@ -166,6 +170,7 @@ logic::HistoryRestore s_persist_verdict = logic::HistoryRestore::NoRecord;
 // Armed only when this boot ADOPTED its rings, spent by the first detection — see
 // history_reset_on_detect() for why detection alone is not evidence that the unit changed.
 bool s_adopt_detect_grace = false;
+bool s_detect_seen = false;
 
 // WHAT THE SEAL COVERS — and the one field it deliberately does not.
 //
@@ -375,10 +380,10 @@ inline void fold_circulation_locked(const CirculationPumpSample& circulation) {
 }
 
 // Which instrument a ring belongs to. The three are never merged — they keep separate liveness and
-// separate rasters, the same reason /values keeps two arrays — but the snapshot machinery has to be
-// able to name one ring across all of them. The VALUES are part of the flash record's layout (they
-// index FlashHeader::anchor), so they are pinned rather than incidental. File-local: no caller
-// outside this translation unit addresses a ring this way.
+// separate rasters, the same reason /values keeps two arrays — but the persistence machinery has to
+// be able to name one ring across all of them. The VALUES are part of the flash record layout, so
+// they are pinned rather than incidental. File-local: no caller outside this translation unit
+// addresses a ring this way.
 enum class HistorySource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2 };
 
 // ── One ring, addressed across all three sources ────────────────────────────────────────────────
@@ -403,43 +408,11 @@ int64_t source_last_commit_us(HistorySource src) {
     return -1;
 }
 
-// Which HomeHub ring is an EVENT timeline rather than a sampled state. Stated once because two
-// places need the identical rule and they must not drift: the recorder folds it with
-// fold_binary_event, and the snapshot encoder OR-folds it across the coarse group. A row that was
-// event-folded going in and decimated going out would lose exactly the pulses the first fold exists
-// to catch.
+// Which HomeHub ring is an EVENT timeline rather than a sampled state.
 bool homehub_event_ring(size_t idx) {
     return idx < HOMEHUB_HISTORY_COUNT &&
            logic::trend_cstr_eq(logic::HOMEHUB_HISTORIES[idx].trend_id, "bsh_state");
 }
-
-// The same question across all three sources, for the snapshot encoder.
-bool ring_is_event(HistorySource src, size_t idx) {
-    switch (src) {
-        case HistorySource::X10a:
-            return idx < TREND_COUNT && logic::TRENDS[idx].kind == logic::TrendKind::BinaryEvent;
-        case HistorySource::Modbus: return homehub_event_ring(idx);
-        case HistorySource::Env3:   return false;   // three measurements, no event rows
-    }
-    return false;
-}
-
-// Named for the one diag line that has to say WHICH source's stored rings were given up on.
-const char* source_slug(HistorySource src) {
-    switch (src) {
-        case HistorySource::X10a:   return "x10a";
-        case HistorySource::Modbus: return "homehub";
-        case HistorySource::Env3:   return "env3";
-    }
-    return "unknown";
-}
-
-// How long the restore cursor will wait for a source to close its first bucket before writing that
-// source's stored rings off. Six buckets: long enough for a HomeHub that powers up with the house
-// rather than with this board, short enough that the sources behind it in the slot order are not
-// held hostage by one that is simply not there this boot.
-constexpr int64_t RESTORE_WAIT_LIMIT_US =
-    static_cast<int64_t>(logic::HISTORY_DT_S) * 6 * 1000000LL;
 
 // The ABSOLUTE (wall-clock) bucket of a source's newest committed sample, or INT64_MIN when there is
 // none or the clock has never synced. This is the anchor everything that outlives the boot hangs on:
@@ -449,7 +422,7 @@ constexpr int64_t RESTORE_WAIT_LIMIT_US =
 int64_t source_anchor_bucket_locked(HistorySource src) {
     if (!time_synced()) return INT64_MIN;
     const int64_t commit_us = source_last_commit_us(src);
-    if (commit_us < 0) return INT64_MIN;
+    if (commit_us == kNoCommitUs) return INT64_MIN;
     int64_t unix_s = -1; int32_t ms = 0;
     time_now(unix_s, ms);
     if (unix_s < 0) return INT64_MIN;
@@ -458,38 +431,45 @@ int64_t source_anchor_bucket_locked(HistorySource src) {
     return logic::history_bucket_from_unix(unix_s - age_s);
 }
 
-// ── The `history` partition ────────────────────────────────────────────────────────────────────────
-// A COARSE snapshot of every ring, written once per intentional reboot. It exists for the one case
-// the .noinit region structurally cannot cover: an OTA moves the new image's sections, so the bytes
-// are not where the new build looks for them.
-//
-// OPTIONAL BY CONSTRUCTION, and this is the load-bearing part rather than defensive coding: a
-// partition table is NOT delivered by esp_https_ota (it writes the app slot alone and never touches
-// the table at 0x8000), so every device updated over the air keeps the table it was flashed with and
-// simply has no such partition. A null lookup therefore means "this board cannot do step 2", exactly
-// the absent-feature shape feature_gate.hpp states — never an error, never a retry.
-struct FlashHeader {
-    uint32_t magic;        //  0
-    uint16_t version;      //  4
-    uint16_t stride;       //  6
-    uint32_t catalog_fp;   //  8
-    uint32_t crc;          // 12 — covers everything from `samples` onward, header and payload alike
-    uint16_t samples;      // 16 — coarse samples per ring
-    uint16_t rings[3];     // 18 — X10A / HomeHub / ENV III ring counts, pinning the payload layout
-    int64_t  anchor[3];    // 24 — absolute newest bucket per source; INT64_MIN = that source has none
-    uint8_t  pad[16];      // 48
+// ── The history flash journal ───────────────────────────────────────────────────────────────────
+// One dense source vector per completed five-minute bucket, appended into 256-byte slots. Sixteen
+// slots share a 4 KiB erase sector and the whole 4 MiB partition is traversed before any sector is
+// reused. The commit word is programmed last, so a power cut can invalidate only the record being
+// written; the preceding slot remains the head.
+struct FlashJournalRecord {
+    logic::HistoryJournalHeader header;
+    HistorySample values[logic::HISTORY_JOURNAL_MAX_SOURCE_RINGS];
 };
-static_assert(sizeof(FlashHeader) == 64, "the flash record header is a wire format — keep it 64 B");
+static_assert(sizeof(FlashJournalRecord) <= logic::HISTORY_JOURNAL_SLOT_BYTES,
+              "one journal record must fit its physical slot");
 
 const esp_partition_t* s_flash_part = nullptr;
-bool s_flash_saved_this_boot = false;      // the shutdown handler must not run twice
-bool s_flash_forgotten = false;            // a factory reset must not be re-written on the way out
+SemaphoreHandle_t s_flash_mtx = nullptr;       // serialises poll service, shutdown and factory erase
+bool s_flash_shutdown_started = false;         // the shutdown handler must not flush twice
+bool s_flash_forgotten = false;                // a factory reset must not write on the way out
 bool s_flash_restore_done = false;
+bool s_flash_scan_ok = false;
 
-constexpr size_t kCoarseBytes = logic::HISTORY_COARSE_SAMPLES * sizeof(HistorySample);
-constexpr size_t kTotalRings  = TREND_COUNT + HOMEHUB_HISTORY_COUNT + ENV3_HISTORY_COUNT;
-static_assert(sizeof(FlashHeader) + kTotalRings * kCoarseBytes <= 0x2000,
-              "the coarse record must fit the 8 KB gap between coredump and ota_0");
+constexpr size_t kTotalRings = logic::HISTORY_FLASH_TOTAL_RINGS;
+constexpr size_t kJournalSources = logic::HISTORY_JOURNAL_SOURCE_COUNT;
+constexpr size_t kRestoreRingsPerTick = 4;
+
+size_t   s_flash_next_slot = 0;
+uint64_t s_flash_next_sequence = 1;
+int64_t  s_flash_last_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN};
+int64_t  s_flash_newest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN};
+uint16_t s_flash_restore_slots[kJournalSources][HISTORY_SAMPLES] = {};
+uint16_t s_flash_restore_slot_count[kJournalSources] = {};
+size_t   s_flash_restore_ring = 0;
+size_t   s_flash_restored_rings = 0;
+size_t   s_flash_service_source = 0;
+
+// Static scratch avoids adding a 4 KiB scan buffer or four 576-byte restore blocks to the poll
+// task's measured 8 KiB stack. All access is serialised on the poll task or s_flash_mtx.
+alignas(8) uint8_t s_flash_sector[logic::HISTORY_FLASH_ERASE_BYTES];
+HistorySample s_flash_restore_blocks[kRestoreRingsPerTick][HISTORY_SAMPLES];
+static HistorySample s_splice_live[HISTORY_SAMPLES];
+static HistorySample s_splice_out[HISTORY_SAMPLES];
 
 HistorySource source_of_slot(size_t slot, size_t& idx) {
     if (slot < TREND_COUNT) { idx = slot; return HistorySource::X10a; }
@@ -500,23 +480,11 @@ HistorySource source_of_slot(size_t slot, size_t& idx) {
     return HistorySource::Env3;
 }
 
-// Coarse-encode one ring into `out`, under the lock. Returns the count written.
-size_t coarse_of_ring_locked(HistorySource src, size_t idx, HistorySample* out,
-                             size_t newest_skip) {
-    const logic::TrendRing* r = ring_at(src, idx);
-    if (!r) return 0;
-    HistorySample full[HISTORY_SAMPLES];
-    const size_t n = r->snapshot(full, HISTORY_SAMPLES);
-    if (!n) return 0;
-    return logic::history_coarse_encode(full, n, logic::HISTORY_COARSE_STRIDE, out,
-                                        logic::HISTORY_COARSE_SAMPLES, ring_is_event(src, idx),
-                                        newest_skip);
-}
-
 } // namespace
 
 // Declared here rather than in the header: only history_start() calls it, and only once.
 static void history_flash_start();
+static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks);
 
 void history_start() {
     if (s_mtx) return;                              // app_main is the sole caller; defensive idempotence
@@ -580,6 +548,7 @@ void history_reset() {
 // ONE boot, ONE detection: every later call resets exactly as before, so a genuine re-detect, a link
 // rewire or a /set_hp model change is unaffected.
 void history_reset_on_detect() {
+    s_detect_seen = true;
     if (s_adopt_detect_grace) { s_adopt_detect_grace = false; return; }
     history_reset();
 }
@@ -628,6 +597,7 @@ void history_record_board() {
     // deadlock the task that owns the X10A UART. It rides this tick because this is the one producer
     // that runs unconditionally, on every cycle, whether or not the bus ever answers.
     history_service_flash_restore();
+    history_flash_service_journal(/*max_records=*/3, /*wait_ticks=*/0);
 }
 
 void history_record_circulation() {
@@ -923,7 +893,7 @@ static size_t copy_under_lock(const char* src, char* out, size_t max) {
 int32_t history_newest_age_s() {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    if (!lk.acquired() || s_last_commit_us < 0) return -1;
+    if (!lk.acquired() || s_last_commit_us == kNoCommitUs) return -1;
     const int64_t age_us = esp_timer_get_time() - s_last_commit_us;
     return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
 }
@@ -931,7 +901,7 @@ int32_t history_newest_age_s() {
 int32_t history_modbus_newest_age_s() {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    if (!lk.acquired() || s_mb_reset_requested.load() || s_mb_last_commit_us < 0) return -1;
+    if (!lk.acquired() || s_mb_reset_requested.load() || s_mb_last_commit_us == kNoCommitUs) return -1;
     const int64_t age_us = esp_timer_get_time() - s_mb_last_commit_us;
     return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
 }
@@ -939,7 +909,7 @@ int32_t history_modbus_newest_age_s() {
 int32_t history_env3_newest_age_s() {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    if (!lk.acquired() || s_env3_last_commit_us < 0) return -1;
+    if (!lk.acquired() || s_env3_last_commit_us == kNoCommitUs) return -1;
     const int64_t age_us = esp_timer_get_time() - s_env3_last_commit_us;
     return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
 }
@@ -968,15 +938,10 @@ int64_t history_env3_oldest_bucket(size_t sample_count) {
 }
 
 // ── Splicing an older snapshot in behind the live samples ───────────────────────────────────────
-// The stored record arrives LATE — it needs a synced clock and a live side that has committed at
-// least one bucket — which is exactly why it is spliced by absolute bucket rather than appended.
+// The stored record needs a synced clock, then its absolute bucket can seed an otherwise-empty live
+// side immediately. That is what makes the device flash record — not a browser cache — sufficient
+// during the first five minutes after an OTA.
 //
-// Two scratch buffers in .bss rather than on the poll task's stack: 1152 bytes is a seventh of that
-// task's 8 KB, and this runs on the same task that owns the X10A UART and already spends ~3 KB per
-// cycle in history_record(). Safe because every caller holds the history mutex.
-static logic::HistorySample s_splice_live[HISTORY_SAMPLES];
-static logic::HistorySample s_splice_out[HISTORY_SAMPLES];
-
 namespace {
 
 // Replace a ring's committed contents, keeping the bucket currently being folded. `pending` is not
@@ -989,20 +954,54 @@ void ring_replace_locked(logic::TrendRing& r, const HistorySample* v, size_t n) 
     r.pending = pending;
 }
 
+// Give a source that has not closed a bucket in this boot an honest present-day endpoint. The
+// splice below fills every elapsed bucket after the stored anchor with explicit gaps, so a longer
+// restart never slides old readings forward. The boot's monotonic raster then continues from its
+// current open bucket exactly like a normal first observation.
+bool seed_source_timeline_locked(HistorySource src, int64_t stored_anchor, int64_t& live_anchor) {
+    int64_t unix_s = -1; int32_t ms = 0;
+    time_now(unix_s, ms);
+    if (unix_s < 0) return false;
+    live_anchor = logic::history_bucket_from_unix(unix_s);
+    if (stored_anchor > live_anchor) return false;       // stored clock was ahead — never slide it back
+
+    const int64_t now_us = esp_timer_get_time();
+    const uint32_t bucket = logic::history_bucket(now_us);
+    // This can be negative when the absolute bucket began before this boot. That is intentional:
+    // zero-clamping made /history report the reboot instant as t0 and moved the retained curve
+    // forward on every OTA/power-cycle restore.
+    const int64_t commit_us = logic::history_anchor_commit_us(now_us, unix_s, live_anchor);
+    const int64_t mono_commit_bucket = bucket ? static_cast<int64_t>(bucket) - 1 : -1;
+
+    switch (src) {
+        case HistorySource::X10a:
+            if (!s_have_bucket) { s_have_bucket = true; s_bucket = bucket; }
+            s_last_commit_us = commit_us; s_last_commit_bucket = mono_commit_bucket;
+            // If SNTP won the race against first detection, let the latter validate/fill labels
+            // instead of immediately wiping the just-restored samples.
+            if (!s_detect_seen) s_adopt_detect_grace = true;
+            break;
+        case HistorySource::Modbus:
+            if (!s_mb_have_bucket) { s_mb_have_bucket = true; s_mb_bucket = bucket; }
+            s_mb_last_commit_us = commit_us; s_mb_last_commit_bucket = mono_commit_bucket;
+            break;
+        case HistorySource::Env3:
+            if (!s_env3_have_bucket) { s_env3_have_bucket = true; s_env3_bucket = bucket; }
+            s_env3_last_commit_us = commit_us; s_env3_last_commit_bucket = mono_commit_bucket;
+            break;
+    }
+    return true;
+}
+
 bool splice_locked(HistorySource src, size_t idx, const HistorySample* v, size_t n, uint32_t stride,
                    int64_t newest_bucket) {
     logic::TrendRing* r = ring_at(src, idx);
     if (!r || !v || !n || newest_bucket == INT64_MIN) return false;
 
-    // A source with NOTHING COMMITTED YET is refused rather than seeded from the snapshot, and the
-    // reason is the metadata rather than the samples: s_*_last_commit_us would still say "nothing
-    // committed", so the route would report no t0 and the browser would draw a series it cannot
-    // place in time. Waiting for the first commit costs at most one bucket and keeps every
-    // downstream number consistent — an absolute anchor is exactly what a late splice already has.
-    const int64_t live_anchor = source_anchor_bucket_locked(src);
-    if (live_anchor == INT64_MIN) return false;
+    int64_t live_anchor = source_anchor_bucket_locked(src);
+    if (live_anchor == INT64_MIN && !seed_source_timeline_locked(src, newest_bucket, live_anchor))
+        return false;
     const size_t live_n = r->snapshot(s_splice_live, HISTORY_SAMPLES);
-    if (!live_n) return false;
 
     logic::HistorySnapshotView view;
     view.v = v; view.n = n; view.stride = stride; view.newest_bucket = newest_bucket;
@@ -1052,219 +1051,399 @@ size_t history_unit(size_t t, char* out, size_t max) {
     return copy_under_lock(P().ring[t].unit, out, max);
 }
 
-// ── The `history` partition: write on the way out, splice back on the way in ───────────────────────
+// ── History flash journal: scan, restore, append ─────────────────────────────────────────────────
 namespace {
 
-// Fill one 48-slot block RIGHT-ALIGNED: the newest coarse sample always lands in the last slot, so
-// the decoder can position the whole block from a single anchor without also storing a per-ring
-// count. A ring with less than a full day pads its OLD end with the absence sentinel, which is what
-// that time genuinely was.
-void coarse_block_locked(size_t slot, HistorySample* block, const size_t newest_skip[3]) {
-    for (size_t i = 0; i < logic::HISTORY_COARSE_SAMPLES; i++) block[i] = HISTORY_NO_READING;
-    size_t idx = 0;
-    const HistorySource src = source_of_slot(slot, idx);
-    HistorySample coarse[logic::HISTORY_COARSE_SAMPLES];
-    const size_t m = coarse_of_ring_locked(src, idx, coarse,
-                                            newest_skip[static_cast<size_t>(src)]);
-    for (size_t i = 0; i < m; i++)
-        block[logic::HISTORY_COARSE_SAMPLES - m + i] = coarse[i];
+static_assert(static_cast<uint8_t>(HistorySource::X10a) ==
+                  static_cast<uint8_t>(logic::HistoryJournalSource::X10a) &&
+              static_cast<uint8_t>(HistorySource::Modbus) ==
+                  static_cast<uint8_t>(logic::HistoryJournalSource::Modbus) &&
+              static_cast<uint8_t>(HistorySource::Env3) ==
+                  static_cast<uint8_t>(logic::HistoryJournalSource::Env3),
+              "RAM and flash source ids are one wire contract");
+
+logic::HistoryJournalSource journal_source(HistorySource src) {
+    return static_cast<logic::HistoryJournalSource>(static_cast<uint8_t>(src));
 }
 
-FlashHeader s_flash_header{};
-bool        s_flash_header_read = false;
-bool        s_flash_header_valid = false;
-size_t      s_flash_restore_slot = 0;
-size_t      s_flash_restored_rings = 0;
+bool flash_record_valid(const FlashJournalRecord& r) {
+    const auto& h = r.header;
+    return logic::history_journal_header_matches(h, P().catalog_fp) &&
+           h.crc == logic::history_journal_crc(h, r.values, h.value_count);
+}
 
-// Returns false on a read error rather than folding it into the CRC value: a failed read that
-// happened to produce the stored checksum would admit an unverified record, and "the flash could not
-// be read" is a different finding from "the flash disagrees".
-bool flash_payload_crc(uint32_t crc, uint32_t& out) {
-    HistorySample block[logic::HISTORY_COARSE_SAMPLES];
-    for (size_t slot = 0; slot < kTotalRings; slot++) {
-        if (esp_partition_read(s_flash_part, sizeof(FlashHeader) + slot * kCoarseBytes,
-                               block, kCoarseBytes) != ESP_OK) return false;
-        crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(block), kCoarseBytes);
+esp_err_t flash_read_record(size_t slot, FlashJournalRecord& out) {
+    if (!s_flash_part || slot >= logic::HISTORY_JOURNAL_SLOT_COUNT) return ESP_ERR_INVALID_ARG;
+    return esp_partition_read(s_flash_part, logic::history_journal_slot_offset(slot),
+                              &out, sizeof(out));
+}
+
+// Pass 1 finds the newest committed record and each source's latest bucket. Pass 2 walks backwards
+// from that physical head and remembers only slots inside the source's last 24-hour window. The
+// index is 1.7 KiB; retaining a second 26 KiB matrix beside the live rings would defeat the static
+// memory budget this feature was designed around.
+bool flash_journal_scan() {
+    uint64_t highest_sequence = 0;
+    uint64_t newest_sequence[kJournalSources] = {};
+    size_t head_slot = 0;
+    size_t valid_records = 0;
+    size_t bad_records = 0;
+    for (size_t src = 0; src < kJournalSources; src++) {
+        s_flash_last_bucket[src] = INT64_MIN;
+        s_flash_newest_bucket[src] = INT64_MIN;
+        s_flash_restore_slot_count[src] = 0;
     }
-    out = config_crc32_final(crc);
+
+    for (size_t sector = 0; sector < logic::HISTORY_FLASH_PARTITION_BYTES;
+         sector += logic::HISTORY_FLASH_ERASE_BYTES) {
+        const esp_err_t e = esp_partition_read(s_flash_part, sector, s_flash_sector,
+                                               sizeof(s_flash_sector));
+        if (e != ESP_OK) {
+            diag_printf("history: journal scan failed at 0x%x (%s)\n",
+                        static_cast<unsigned>(sector), esp_err_to_name(e));
+            return false;
+        }
+        for (size_t local = 0; local < logic::HISTORY_JOURNAL_SLOTS_PER_SECTOR; local++) {
+            const size_t slot = sector / logic::HISTORY_JOURNAL_SLOT_BYTES + local;
+            const uint8_t* raw = s_flash_sector + local * logic::HISTORY_JOURNAL_SLOT_BYTES;
+            FlashJournalRecord r;
+            std::memcpy(&r, raw, sizeof(r));
+            if (!flash_record_valid(r)) {
+                if (r.header.magic == logic::HISTORY_JOURNAL_MAGIC &&
+                    r.header.commit == logic::HISTORY_JOURNAL_COMMITTED &&
+                    r.header.catalog_fp == P().catalog_fp)
+                    bad_records++;
+                continue;
+            }
+            valid_records++;
+            const size_t src = r.header.source;
+            if (r.header.sequence > highest_sequence) {
+                highest_sequence = r.header.sequence;
+                head_slot = slot;
+            }
+            if (r.header.sequence > newest_sequence[src]) {
+                newest_sequence[src] = r.header.sequence;
+                s_flash_newest_bucket[src] = r.header.bucket;
+                s_flash_last_bucket[src] = r.header.bucket;
+            }
+        }
+    }
+
+    s_flash_next_sequence = highest_sequence ? highest_sequence + 1 : 1;
+    s_flash_next_slot = highest_sequence
+        ? (head_slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT : 0;
+
+    bool done[kJournalSources];
+    size_t remaining = 0;
+    for (size_t src = 0; src < kJournalSources; src++) {
+        done[src] = newest_sequence[src] == 0;
+        if (!done[src]) remaining++;
+    }
+    if (highest_sequence) {
+        size_t slot = head_slot;
+        size_t seen_valid = 0;
+        for (size_t visited = 0; visited < logic::HISTORY_JOURNAL_SLOT_COUNT && remaining;
+             visited++) {
+            FlashJournalRecord r;
+            const esp_err_t e = flash_read_record(slot, r);
+            if (e != ESP_OK) {
+                diag_printf("history: journal index failed at slot %u (%s)\n",
+                            static_cast<unsigned>(slot), esp_err_to_name(e));
+                return false;
+            }
+            if (flash_record_valid(r)) {
+                seen_valid++;
+                const size_t src = r.header.source;
+                if (!done[src]) {
+                    const int64_t oldest = s_flash_newest_bucket[src] -
+                                           static_cast<int64_t>(HISTORY_SAMPLES - 1);
+                    if (r.header.bucket < oldest) {
+                        done[src] = true;
+                        remaining--;
+                    } else if (r.header.bucket <= s_flash_newest_bucket[src] &&
+                               s_flash_restore_slot_count[src] < HISTORY_SAMPLES) {
+                        s_flash_restore_slots[src][s_flash_restore_slot_count[src]++] =
+                            static_cast<uint16_t>(slot);
+                    }
+                }
+            }
+            if (seen_valid >= valid_records) break;   // young journal: do not read 16k erased slots
+            slot = slot ? slot - 1 : logic::HISTORY_JOURNAL_SLOT_COUNT - 1;
+        }
+    }
+
+    if (!highest_sequence) s_flash_restore_done = true;
+    diag_printf("history: journal ready (%u valid, %u torn/invalid, next slot %u, %u-byte records)\n",
+                static_cast<unsigned>(valid_records), static_cast<unsigned>(bad_records),
+                static_cast<unsigned>(s_flash_next_slot),
+                static_cast<unsigned>(logic::HISTORY_JOURNAL_SLOT_BYTES));
     return true;
 }
 
-// Read and validate the stored record ONCE per boot. Needs no clock — the anchors inside it are
-// absolute, so the record can be judged long before SNTP has anything to say.
-void flash_header_load() {
-    if (s_flash_header_read || !s_flash_part) return;
-    s_flash_header_read = true;
-    if (esp_partition_read(s_flash_part, 0, &s_flash_header, sizeof(FlashHeader)) != ESP_OK) return;
-    const FlashHeader& h = s_flash_header;
-    // The catalog fingerprint does the same job here as in RAM: an OTA that moved TRENDS must not
-    // let slot 12 be decoded as whatever slot 12 means now. This is the case that actually happens,
-    // since surviving an OTA is the entire reason this partition exists.
-    if (h.magic != logic::HISTORY_PERSIST_MAGIC || h.version != logic::HISTORY_PERSIST_VERSION ||
-        h.stride != logic::HISTORY_COARSE_STRIDE || h.samples != logic::HISTORY_COARSE_SAMPLES ||
-        h.rings[0] != TREND_COUNT || h.rings[1] != HOMEHUB_HISTORY_COUNT ||
-        h.rings[2] != ENV3_HISTORY_COUNT || h.catalog_fp != P().catalog_fp) {
-        diag_printf("history: stored snapshot ignored (not this build's trend catalog)\n");
-        return;
+esp_err_t flash_region_erased(size_t offset, size_t bytes, bool& erased) {
+    if (bytes > sizeof(s_flash_sector)) return ESP_ERR_INVALID_SIZE;
+    const esp_err_t e = esp_partition_read(s_flash_part, offset, s_flash_sector, bytes);
+    if (e != ESP_OK) return e;
+    erased = true;
+    for (size_t i = 0; i < bytes; i++) {
+        if (s_flash_sector[i] != 0xff) { erased = false; break; }
     }
-    uint32_t crc = CONFIG_CRC32_INIT;
-    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&h) + 16, sizeof(FlashHeader) - 16);
-    uint32_t payload_crc = 0;
-    if (!flash_payload_crc(crc, payload_crc) || payload_crc != h.crc) {
-        diag_printf("history: stored snapshot ignored (checksum)\n");
-        return;
+    return ESP_OK;
+}
+
+esp_err_t flash_prepare_next_slot(size_t& slot) {
+    slot = s_flash_next_slot;
+    bool erased = false;
+    if (slot % logic::HISTORY_JOURNAL_SLOTS_PER_SECTOR == 0) {
+        const size_t sector_offset = logic::history_journal_slot_offset(slot);
+        esp_err_t e = flash_region_erased(sector_offset, logic::HISTORY_FLASH_ERASE_BYTES, erased);
+        if (e != ESP_OK) return e;
+        if (!erased)
+            return esp_partition_erase_range(s_flash_part, sector_offset,
+                                             logic::HISTORY_FLASH_ERASE_BYTES);
+        return ESP_OK;
     }
-    s_flash_header_valid = true;
+
+    esp_err_t e = flash_region_erased(logic::history_journal_slot_offset(slot),
+                                      logic::HISTORY_JOURNAL_SLOT_BYTES, erased);
+    if (e != ESP_OK) return e;
+    if (erased) return ESP_OK;
+
+    // A non-erased slot after the head is a torn program. Never erase its sector: it also contains
+    // the last committed records. Sacrifice the remaining slots and continue at the next sector.
+    slot = logic::history_journal_write_slot(slot, erased);
+    s_flash_next_slot = slot;
+    const size_t sector_offset = logic::history_journal_slot_offset(slot);
+    e = flash_region_erased(sector_offset, logic::HISTORY_FLASH_ERASE_BYTES, erased);
+    if (e != ESP_OK) return e;
+    return erased ? ESP_OK : esp_partition_erase_range(s_flash_part, sector_offset,
+                                                        logic::HISTORY_FLASH_ERASE_BYTES);
+}
+
+bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickType_t wait_ticks) {
+    std::memset(&out, 0xff, sizeof(out));
+    Lock lk(s_mtx, wait_ticks);
+    if (!lk.acquired()) return false;
+
+    const size_t src_i = static_cast<size_t>(src);
+    const size_t value_count = logic::history_journal_source_rings(journal_source(src));
+    const int64_t anchor = source_anchor_bucket_locked(src);
+    if (anchor == INT64_MIN || !value_count) return false;
+
+    size_t max_count = 0;
+    for (size_t i = 0; i < value_count; i++) {
+        const logic::TrendRing* r = ring_at(src, i);
+        if (r && r->count > max_count) max_count = r->count;
+    }
+    if (!max_count) return false;
+
+    const int64_t oldest = anchor - static_cast<int64_t>(max_count - 1);
+    int64_t target = s_flash_last_bucket[src_i] == INT64_MIN
+        ? oldest : s_flash_last_bucket[src_i] + 1;
+    if (target < oldest) target = oldest;       // backlog older than the live 24-hour ring is gone
+    if (target > anchor) return false;
+    const size_t age = static_cast<size_t>(anchor - target);
+
+    auto& h = out.header;
+    h.magic = logic::HISTORY_JOURNAL_MAGIC;
+    h.version = logic::HISTORY_JOURNAL_VERSION;
+    h.source = static_cast<uint8_t>(journal_source(src));
+    h.flags = 0;
+    h.catalog_fp = P().catalog_fp;
+    h.crc = 0;
+    h.commit = logic::HISTORY_JOURNAL_ERASED;
+    h.value_count = static_cast<uint16_t>(value_count);
+    h.slot_bytes = static_cast<uint16_t>(logic::HISTORY_JOURNAL_SLOT_BYTES);
+    h.sequence = s_flash_next_sequence;
+    h.bucket = target;
+    h.dt_s = logic::HISTORY_DT_S;
+    h.rings[0] = static_cast<uint16_t>(TREND_COUNT);
+    h.rings[1] = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+    h.rings[2] = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+    h.reserved = 0xffff;
+    for (size_t i = 0; i < value_count; i++) {
+        HistorySample sample = HISTORY_NO_READING;
+        const logic::TrendRing* r = ring_at(src, i);
+        if (r) (void)r->sample_from_newest(age, sample);
+        out.values[i] = sample;
+    }
+    h.crc = logic::history_journal_crc(h, out.values, value_count);
+    return true;
+}
+
+esp_err_t flash_append_record(FlashJournalRecord& r) {
+    size_t slot = 0;
+    esp_err_t e = flash_prepare_next_slot(slot);
+    if (e != ESP_OK) return e;
+    const size_t offset = logic::history_journal_slot_offset(slot);
+    const size_t body_bytes = sizeof(r.header) +
+                              static_cast<size_t>(r.header.value_count) * sizeof(HistorySample);
+    e = esp_partition_write(s_flash_part, offset, &r, body_bytes);
+    if (e == ESP_OK) {
+        const uint32_t commit = logic::HISTORY_JOURNAL_COMMITTED;
+        e = esp_partition_write(s_flash_part,
+                                offset + offsetof(logic::HistoryJournalHeader, commit),
+                                &commit, sizeof(commit));
+    }
+    FlashJournalRecord verify;
+    const esp_err_t read_e = flash_read_record(slot, verify);
+    const bool committed = read_e == ESP_OK && flash_record_valid(verify) &&
+                           verify.header.sequence == r.header.sequence &&
+                           verify.header.bucket == r.header.bucket;
+    // A low-level program call may report an error after the chip accepted the bytes. The readback
+    // is the authority: treating a valid committed record as failed would retry the same sequence in
+    // another slot and make head selection ambiguous on the next boot.
+    if (!committed) return e != ESP_OK ? e : (read_e != ESP_OK ? read_e : ESP_ERR_INVALID_RESPONSE);
+
+    const size_t src = r.header.source;
+    s_flash_last_bucket[src] = r.header.bucket;
+    s_flash_newest_bucket[src] = r.header.bucket;
+    s_flash_next_slot = (slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT;
+    s_flash_next_sequence++;
+    return ESP_OK;
 }
 
 } // namespace
 
-// ONE ring per call, driven off the poll task's own top-of-cycle tick. Bounded on purpose: a burst
-// of 46 flash reads plus 46 splices under the history mutex would be a multi-millisecond stall on
-// the task that owns the X10A UART, to recover a chart nobody is looking at yet. At one per second
-// the whole set is back within a minute, and every splice is positioned by absolute bucket, so
-// arriving late costs nothing at all.
+// Restore at most four rings per poll tick. Each batch reads a source's indexed records once and
+// transposes four values into ring-shaped blocks; the largest burst is ~74 KiB of flash reads, but
+// only 2.3 KiB of static scratch and no heap allocation.
 void history_service_flash_restore() {
-    if (s_flash_restore_done || !s_flash_part || s_flash_forgotten) return;
-    flash_header_load();
-    if (!s_flash_header_valid) { s_flash_restore_done = true; return; }
-    // TWO conditions, and the second is the one that is easy to miss. A splice needs an absolute
-    // anchor on BOTH sides: the stored record carries its own, but the live side's comes from the
-    // newest COMMITTED sample, and nothing is committed until the first bucket closes. Starting
-    // earlier would walk the whole cursor while every splice failed for want of a live anchor, and
-    // the cursor only goes forward — the snapshot would be silently skipped for the whole boot.
-    if (!time_synced()) return;
-    if (esp_timer_get_time() < static_cast<int64_t>(logic::HISTORY_DT_S) * 1100000LL) return;
+    if (s_flash_restore_done || s_flash_forgotten || !s_flash_scan_ok || !time_synced()) return;
+    if (s_flash_restore_ring >= kTotalRings) { s_flash_restore_done = true; return; }
 
-    size_t idx = 0;
-    const HistorySource src = source_of_slot(s_flash_restore_slot, idx);
-    const int64_t anchor = s_flash_header.anchor[static_cast<size_t>(src)];
+    size_t first_idx = 0;
+    const HistorySource src = source_of_slot(s_flash_restore_ring, first_idx);
+    if ((src == HistorySource::X10a && s_reset_requested.load()) ||
+        (src == HistorySource::Modbus && s_mb_reset_requested.load())) return;
+    const size_t source_rings = logic::history_journal_source_rings(journal_source(src));
+    size_t batch = source_rings - first_idx;
+    if (batch > kRestoreRingsPerTick) batch = kRestoreRingsPerTick;
+    for (size_t b = 0; b < batch; b++)
+        for (size_t i = 0; i < HISTORY_SAMPLES; i++)
+            s_flash_restore_blocks[b][i] = HISTORY_NO_READING;
 
-    // WAIT for a source that has not closed its first bucket yet rather than spending the slot on
-    // it. The uptime gate above only proves that SOME source has committed — the poll task runs
-    // unconditionally, a HomeHub on a switch that powers up late does not. Since the cursor only
-    // moves forward, spending the slot here would drop that source's twelve rings for the entire
-    // boot even though a perfectly good record for them is sitting in flash. Bounded, so a source
-    // that never returns cannot stall the rest of the set behind it; every splice is positioned
-    // absolutely, so waiting costs nothing but the wait.
-    if (anchor != INT64_MIN && source_last_commit_us(src) < 0) {
-        if (esp_timer_get_time() < RESTORE_WAIT_LIMIT_US) return;
-        diag_printf("history: stored %s rings dropped (source never reported this boot)\n",
-                    source_slug(src));
-    } else if (anchor != INT64_MIN) {
-        HistorySample block[logic::HISTORY_COARSE_SAMPLES];
-        if (esp_partition_read(s_flash_part, sizeof(FlashHeader) + s_flash_restore_slot * kCoarseBytes,
-                               block, kCoarseBytes) == ESP_OK) {
-            // Drop the write-side padding before splicing, or the restored window is 24 hours wide
-            // regardless of how little is actually in it — see history_coarse_lead_skip.
-            const size_t skip = logic::history_coarse_lead_skip(block, logic::HISTORY_COARSE_SAMPLES);
-            if (skip < logic::HISTORY_COARSE_SAMPLES) {
-                if (history_splice_snapshot(src, idx, block + skip,
-                                            logic::HISTORY_COARSE_SAMPLES - skip,
-                                            logic::HISTORY_COARSE_STRIDE, anchor))
-                    s_flash_restored_rings++;
-            }
+    const size_t src_i = static_cast<size_t>(src);
+    const int64_t newest = s_flash_newest_bucket[src_i];
+    bool read_failed = false;
+    if (newest != INT64_MIN) {
+        Lock flash_lk(s_flash_mtx, 0);
+        if (!flash_lk.acquired()) return;
+        const int64_t oldest = newest - static_cast<int64_t>(HISTORY_SAMPLES - 1);
+        // Index is newest-first; replay oldest-first so a newer duplicate bucket wins defensively.
+        for (size_t k = s_flash_restore_slot_count[src_i]; k > 0; k--) {
+            FlashJournalRecord r;
+            const esp_err_t e = flash_read_record(s_flash_restore_slots[src_i][k - 1], r);
+            if (e != ESP_OK) { read_failed = true; break; }
+            if (!flash_record_valid(r) || r.header.bucket < oldest || r.header.bucket > newest)
+                continue;
+            const size_t pos = static_cast<size_t>(r.header.bucket - oldest);
+            for (size_t b = 0; b < batch; b++)
+                s_flash_restore_blocks[b][pos] = r.values[first_idx + b];
         }
     }
-    if (++s_flash_restore_slot >= kTotalRings) {
+    if (read_failed) {
         s_flash_restore_done = true;
-        diag_printf("history: stored snapshot restore complete (%u/%u rings extended)\n",
+        diag_printf("history: journal restore stopped (flash read failed)\n");
+        return;
+    }
+
+    if (newest != INT64_MIN) {
+        for (size_t b = 0; b < batch; b++) {
+            const size_t skip = logic::history_flash_lead_skip(s_flash_restore_blocks[b],
+                                                               HISTORY_SAMPLES);
+            if (skip < HISTORY_SAMPLES &&
+                history_splice_snapshot(src, first_idx + b,
+                                        s_flash_restore_blocks[b] + skip,
+                                        HISTORY_SAMPLES - skip, 1, newest))
+                s_flash_restored_rings++;
+        }
+    }
+    s_flash_restore_ring += batch;
+    if (s_flash_restore_ring >= kTotalRings) {
+        s_flash_restore_done = true;
+        diag_printf("history: journal restore complete (%u/%u rings extended, 5-min raster)\n",
                     static_cast<unsigned>(s_flash_restored_rings),
                     static_cast<unsigned>(kTotalRings));
     }
 }
 
-// Runs from esp_register_shutdown_handler, i.e. on whichever task called esp_restart() — the httpd
-// task for a /set_* save, the OTA task for an install. Costs one 8 KB erase plus ~4.4 KB of writes,
-// about 100 ms added to a reboot, and it is the only flash write this feature ever makes: once per
-// intentional restart is a few hundred writes a year against a 100k-cycle part.
-void history_flash_save() {
-    if (!s_flash_part || s_flash_saved_this_boot || s_flash_forgotten) return;
-    s_flash_saved_this_boot = true;
-    // A BOUNDED take, unlike every other lock in this file. A shutdown handler that blocks forever
-    // does not merely skip a snapshot, it stops the device rebooting at all — which for the OTA path
-    // means a board that has already written its new image and will not start it.
-    if (!s_mtx || xSemaphoreTake(s_mtx, pdMS_TO_TICKS(200)) != pdTRUE) {
-        diag_printf("history: reboot snapshot skipped (history busy)\n");
-        return;
-    }
+static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks) {
+    if (!s_flash_part || !s_flash_mtx || !s_flash_scan_ok || s_flash_forgotten ||
+        !s_flash_restore_done || !time_synced()) return 0;
+    Lock flash_lk(s_flash_mtx, wait_ticks);
+    if (!flash_lk.acquired()) return 0;
 
-    // Read the existing record before replacing it. Its anchor phase is part of the payload's
-    // meaning: the restored coarse points occupy one slot in every six of the live raster, and a
-    // second OTA must select that SAME phase or it will re-encode only their deliberate gaps.
-    flash_header_load();
-
-    FlashHeader h{};
-    h.magic      = logic::HISTORY_PERSIST_MAGIC;
-    h.version    = logic::HISTORY_PERSIST_VERSION;
-    h.stride     = static_cast<uint16_t>(logic::HISTORY_COARSE_STRIDE);
-    h.catalog_fp = P().catalog_fp;
-    h.samples    = static_cast<uint16_t>(logic::HISTORY_COARSE_SAMPLES);
-    h.rings[0]   = static_cast<uint16_t>(TREND_COUNT);
-    h.rings[1]   = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
-    h.rings[2]   = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
-    const int64_t live_anchor[3] = {
-        source_anchor_bucket_locked(HistorySource::X10a),
-        source_anchor_bucket_locked(HistorySource::Modbus),
-        source_anchor_bucket_locked(HistorySource::Env3),
-    };
-    size_t newest_skip[3] = {};
-    for (size_t i = 0; i < 3; i++) {
-        const int64_t previous = s_flash_header_valid ? s_flash_header.anchor[i] : INT64_MIN;
-        h.anchor[i] = logic::history_coarse_aligned_anchor(
-            live_anchor[i], previous, logic::HISTORY_COARSE_STRIDE);
-        if (live_anchor[i] != INT64_MIN && h.anchor[i] != INT64_MIN)
-            newest_skip[i] = static_cast<size_t>(live_anchor[i] - h.anchor[i]);
+    size_t written = 0;
+    while (written < max_records) {
+        bool appended = false;
+        for (size_t try_src = 0; try_src < kJournalSources; try_src++) {
+            const size_t src_i = (s_flash_service_source + try_src) % kJournalSources;
+            FlashJournalRecord r;
+            if (!flash_build_next_record(static_cast<HistorySource>(src_i), r, wait_ticks)) continue;
+            const esp_err_t e = flash_append_record(r);
+            if (e != ESP_OK) {
+                diag_printf("history: journal append failed at slot %u (%s)\n",
+                            static_cast<unsigned>(s_flash_next_slot), esp_err_to_name(e));
+                return written;
+            }
+            written++;
+            appended = true;
+            s_flash_service_source = (src_i + 1) % kJournalSources;
+            break;
+        }
+        if (!appended) break;
     }
-
-    // Nothing anchorable means nothing writable: without a synced clock at THIS moment there is no
-    // absolute position for any of it, and a record that cannot be placed is worse than none.
-    if (h.anchor[0] == INT64_MIN && h.anchor[1] == INT64_MIN && h.anchor[2] == INT64_MIN) {
-        xSemaphoreGive(s_mtx);
-        diag_printf("history: reboot snapshot skipped (no synced clock to anchor it)\n");
-        return;
-    }
-
-    // Two passes over the rings rather than one 4.4 KB buffer: the buffer would be either a heap
-    // allocation on the way to a reboot, or 4.4 KB of permanent .bss for something used once a boot.
-    // Encoding twice is a few hundred microseconds and the rings cannot move — the lock is held.
-    HistorySample block[logic::HISTORY_COARSE_SAMPLES];
-    uint32_t crc = CONFIG_CRC32_INIT;
-    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&h) + 16, sizeof(FlashHeader) - 16);
-    for (size_t slot = 0; slot < kTotalRings; slot++) {
-        coarse_block_locked(slot, block, newest_skip);
-        crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(block), kCoarseBytes);
-    }
-    h.crc = config_crc32_final(crc);
-
-    esp_err_t e = esp_partition_erase_range(s_flash_part, 0, s_flash_part->size);
-    if (e == ESP_OK) e = esp_partition_write(s_flash_part, 0, &h, sizeof(FlashHeader));
-    for (size_t slot = 0; slot < kTotalRings && e == ESP_OK; slot++) {
-        coarse_block_locked(slot, block, newest_skip);
-        e = esp_partition_write(s_flash_part, sizeof(FlashHeader) + slot * kCoarseBytes,
-                                block, kCoarseBytes);
-    }
-    xSemaphoreGive(s_mtx);
-    if (e != ESP_OK) diag_printf("history: reboot snapshot failed (%s)\n", esp_err_to_name(e));
+    return written;
 }
 
-// The factory reset deletes the user's configuration; the plant history it recorded is theirs too,
-// so it goes with it. The flag is what stops the shutdown handler writing the whole thing back out
-// milliseconds later on the reboot that same reset triggers.
+// A normal five-minute close is already durable within the next poll tick. The shutdown handler is
+// only a bounded final drain for the race where OTA/reconfiguration requests esp_restart between the
+// close and that tick; it never rewrites a 26 KiB snapshot.
+void history_flash_save() {
+    if (!s_flash_part || s_flash_shutdown_started || s_flash_forgotten) return;
+    s_flash_shutdown_started = true;
+    const size_t written = history_flash_service_journal(/*max_records=*/12,
+                                                         pdMS_TO_TICKS(200));
+    if (written)
+        diag_printf("history: journal flushed %u record(s) before reboot\n",
+                    static_cast<unsigned>(written));
+}
+
+// The factory reset deletes the user's configuration; the plant history it recorded is theirs too.
+// Erasing all 4 MiB costs one cycle per sector and is deliberately reserved for this explicit action.
 void history_flash_forget() {
     s_flash_forgotten = true;
-    if (!s_flash_part) return;
+    if (!s_flash_part || !s_flash_mtx) return;
+    Lock flash_lk(s_flash_mtx);
+    if (!flash_lk.acquired()) return;
     const esp_err_t e = esp_partition_erase_range(s_flash_part, 0, s_flash_part->size);
-    if (e != ESP_OK) diag_printf("history: snapshot erase failed (%s)\n", esp_err_to_name(e));
+    if (e != ESP_OK) diag_printf("history: journal erase failed (%s)\n", esp_err_to_name(e));
 }
 
 static void history_flash_start() {
-    s_flash_part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "history");
+    s_flash_part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "history");
+    if (s_flash_part && (s_flash_part->address != logic::HISTORY_FLASH_PARTITION_OFFSET ||
+                         s_flash_part->size != logic::HISTORY_FLASH_PARTITION_BYTES)) {
+        diag_printf("history: wrong partition geometry at 0x%x (%u bytes) — ignored\n",
+                    static_cast<unsigned>(s_flash_part->address),
+                    static_cast<unsigned>(s_flash_part->size));
+        s_flash_part = nullptr;
+    }
     if (!s_flash_part) {
-        // ABSENT, not broken. A device updated over the air keeps the partition table it was
-        // flashed with — esp_https_ota writes the app slot alone — so this is the normal state for
-        // every board that has not been re-flashed over USB since the table changed.
-        diag_printf("history: no `history` partition — reboot snapshot unavailable on this board\n");
+        diag_printf("history: official 4 MiB partition unavailable — install the 8 MB table\n");
+        return;
+    }
+    s_flash_mtx = xSemaphoreCreateMutex();
+    if (!s_flash_mtx) {
+        diag_printf("history: journal mutex alloc failed — flash persistence disabled\n");
+        s_flash_part = nullptr;
+        return;
+    }
+    s_flash_scan_ok = flash_journal_scan();
+    if (!s_flash_scan_ok) {
+        diag_printf("history: journal disabled this boot (scan incomplete)\n");
         return;
     }
     const esp_err_t e = esp_register_shutdown_handler(history_flash_save);

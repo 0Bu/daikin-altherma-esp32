@@ -5,10 +5,11 @@
 // 3-way-valve, Quiet and Smart-Grid state timelines.
 //
 // The buffers are STATIC storage, never heap: on this board the binding limit is the largest
-// CONTIGUOUS free block, not free heap, and a static array does not compete for it. Their non-zero
-// pending sentinel places the rings in .data. Thirty-one X10A/board/state rings cost 17856 bytes and
-// twelve HomeHub rings another 6912 bytes and three ENV III rings 1728 bytes — see
-// logic/history.hpp's HISTORY_BYTES_PER_TREND and the ceiling asserts beside the arrays.
+// CONTIGUOUS free block, not free heap, and a static array does not compete for it. They occupy one
+// `.noinit` region so the LIVE arrays themselves survive a power-kept reset; there is no shadow
+// copy. Thirty-one X10A/board/state rings cost 17856 bytes, twelve HomeHub rings another 6912 bytes
+// and three ENV III rings 1728 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND and the
+// ceiling asserts beside the arrays.
 //
 // NOT in NVS, and that has not changed: a 576-byte blob rewritten every 5 minutes is ~100k writes a
 // year in the partition that holds the WiFi credentials, to save a history that is only ever
@@ -20,17 +21,17 @@
 //                    power keeps the readings. Costs no flash write and no extra RAM. The one seam
 //                    is the bucket that was open when the device went down: it is dropped, so the
 //                    restored series can be up to one HISTORY_DT_S adrift on the axis.
-//   hist partition — a coarse (30-minute) snapshot written once per intentional reboot, which is
-//                    what carries the history across an OTA. OPTIONAL: a partition table is not
-//                    delivered by OTA, so boards updated over the air simply do not have it.
+//   history        — one compact append-only record per source and completed five-minute bucket.
+//                    The 4 MiB ring journal carries the history across OTA, reboot and power loss
+//                    once the official 8 MB table has been installed.
 //
-// LOSING POWER is still unrecovered, on purpose: only a medium off this board could survive it, and
-// that is a different feature with a different owner. /status.history.persist then reports
-// "power_cycle" and the rings start empty, exactly as they always did.
+// A sudden power loss can discard only the bucket still being folded and, in the narrowest race,
+// the just-closed record not yet serviced by the poll task. /status.history.persist independently
+// reports what happened to the RAM copy.
 //
-// The coarse path is SPLICED IN BEHIND the live samples by absolute wall-clock bucket, never
-// appended, and is skipped entirely while the clock is unsynced — an unanchored curve has no
-// honest position on the axis. A later X10A/HomeHub identity change removes the old readings but
+// The flash path is SPLICED IN BEHIND the live samples by absolute wall-clock bucket, never appended,
+// and is skipped while the clock is unsynced — an unanchored curve has no honest position on the
+// axis. It can seed an empty live ring immediately after SNTP. A later X10A/HomeHub identity change removes the old readings but
 // preserves the boot-aligned raster as explicit gaps, so every chart shows the same elapsed window
 // without splicing devices. The UI draws the span actually retained ("Aufzeichnung · 11 h" until the
 // first full day).
@@ -135,18 +136,18 @@ size_t history_label(size_t t, char* out, size_t max);
 // like a bug — logic/history_persist.hpp's HistoryRestore vocabulary.
 const char* history_persist_state();
 
-// Write the coarse snapshot to the optional `history` partition. Registered as an esp_restart shutdown
-// handler by history_start(), so the ordinary caller is the reboot itself.
+// Bounded final drain of completed journal buckets. Registered as an esp_restart shutdown handler
+// by history_start(); normal persistence happens after every bucket and an old-table board has no
+// compatible fallback.
 void history_flash_save();
 
-// Drop the stored snapshot AND suppress the shutdown-handler write that the same reboot would
+// Drop the stored journal AND suppress the shutdown-handler write that the same reboot would
 // otherwise perform. The factory reset's counterpart for the plant history: the configuration being
 // erased is the user's, and so is the day of readings recorded beside it.
 void history_flash_forget();
 
-// Splice at most ONE stored ring back per call, driven off the poll task's unconditional top-of-cycle
-// tick. Bounded deliberately: 46 flash reads and splices in one go would stall the task that owns
-// the X10A UART, and every splice is positioned absolutely, so arriving a minute late costs nothing.
+// Splice a bounded burst of stored rings per poll tick. Records are indexed at boot and transposed
+// four rings at a time after SNTP, keeping the flash-read burst bounded on the X10A owner.
 void history_service_flash_restore();
 
 // The row's OWN unit ("°C", "bar", "A", … — whatever `unit_for_datatype` gave the cached value), or

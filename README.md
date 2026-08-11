@@ -7,7 +7,7 @@ embedded web UI. ESP32-S3 only.
 ## Requirements
 
 - A Daikin Altherma with an **X10A** header.
-- A displayless ESP32-S3 board with ≥4 MB flash. The supported reference boards are the
+- A displayless ESP32-S3 board with ≥8 MB flash. The supported reference boards are the
   M5Stack AtomS3 Lite and Seeed XIAO ESP32-S3; boards with an integrated display are currently
   unsupported ([docs/BOARDS.md](docs/BOARDS.md)).
 - A JST-EH 2.5 mm 5-pin connector to reach the X10A header.

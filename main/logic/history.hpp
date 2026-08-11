@@ -547,6 +547,16 @@ struct TrendRing {
         for (size_t i = 0; i < n; i++) out[i] = buf[(oldest + i) % HISTORY_SAMPLES];
         return n;
     }
+
+    // Read one committed bucket without copying the whole ring. `age=0` is newest. The flash
+    // journal uses this under the history mutex to assemble one source record in O(rings), rather
+    // than copying 288 samples per ring every five minutes merely to select one column.
+    bool sample_from_newest(size_t age, HistorySample& out) const {
+        if (age >= count) return false;
+        const size_t newest = (static_cast<size_t>(head) + HISTORY_SAMPLES - 1) % HISTORY_SAMPLES;
+        out = buf[(newest + HISTORY_SAMPLES - age) % HISTORY_SAMPLES];
+        return true;
+    }
 };
 
 } // namespace daik::logic

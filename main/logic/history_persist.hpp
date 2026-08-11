@@ -17,14 +17,10 @@
 //                    the live arrays simply stop being initialised at startup. Cannot survive a
 //                    power cycle, and cannot survive an OTA either — the new image's section layout
 //                    moves, so the bytes are not where the new build looks. Fails closed both times.
-//   hist partition — a COARSE snapshot written once per intentional reboot from a shutdown handler.
-//                    Covers the OTA case .noinit structurally cannot.
-//
-// LOSING POWER is therefore still unrecovered, and deliberately so: the only medium that could
-// survive it is one that is not on this board, and taking the history off the device is a different
-// feature with a different owner (the broker already stores every published value — see
-// docs/HOME_ASSISTANT.md). Nothing here pretends otherwise; /status.history.persist reports
-// "power_cycle" and the rings start empty, exactly as they always did.
+//   history        — an append-only flash journal: one compact record per source and completed
+//                    five-minute bucket. Covers OTA, ordinary reboot and sudden power loss; only the
+//                    bucket which was still open can be lost. It exists only in the official 8 MB
+//                    table; there is no coarse/old-table fallback.
 //
 // ── Why the RAM path needs no clock and the flash one does ─────────────────────────────────────
 // A restored sample is meaningless without knowing WHEN it was taken, and the ring runs on the
@@ -37,11 +33,11 @@
 // open when the device died is lost — which is what a gap means, so nothing is claimed that was not
 // measured. The seam is at most one HISTORY_DT_S wide and is documented rather than hidden.
 //
-// For the flash path the downtime is UNBOUNDED (a board can sit powered off between an OTA that
-// failed and a re-flash a week later), so that snapshot carries the absolute wall-clock bucket of
-// its newest sample and is SPLICED behind whatever the current boot has already recorded — see
-// history_splice below. A snapshot whose anchor is missing is not restored at all: there is no
-// defensible place to put it, and putting it at "now" would slide a week-old curve onto today.
+// For the flash path the downtime is UNBOUNDED (a board can sit powered off for a week), so every
+// record carries its absolute wall-clock bucket and the last 24 hours are SPLICED behind whatever
+// the current boot has already recorded — see history_splice below. A record whose anchor is missing
+// is never written: there is no defensible place to put it, and putting it at "now" would slide a
+// week-old curve onto today.
 //
 // ── Why a catalog fingerprint, not just a CRC ───────────────────────────────────────────────────
 // A ring is addressed by its INDEX in TRENDS. Insert a trend, reorder two, change a locator or the
@@ -68,22 +64,155 @@ namespace daik::logic {
 inline constexpr uint32_t HISTORY_PERSIST_MAGIC   = 0x54534948u;   // "HIST" little-endian
 inline constexpr uint16_t HISTORY_PERSIST_VERSION = 1;
 
-// ── The coarse form ─────────────────────────────────────────────────────────────────────────────
-// A full ring set is ~28 KB and the flash partition this firmware can offer is 8 KB, so the stored
-// record keeps every STRIDE-th sample.
+// ── Flash-journal geometry ──────────────────────────────────────────────────────────────────────
+// The official 8 MB table gives the entire upper 4 MiB to history. Flash can clear bits with a
+// program operation but can set them again only by erasing a whole 4 KiB sector, so the durable
+// shape is a circular APPEND log rather than an in-place snapshot. Each source closes its own
+// raster independently and therefore gets its own record: a disabled HomeHub/ENV III can never hold
+// X10A persistence hostage.
 //
-// For a MEASUREMENT the decimation is PURE — it takes the sample that actually sits in that bucket
-// and drops the rest. It deliberately does NOT fold a group down to "the last reading in it", which
-// would look like more data and would be a lie about WHEN: a reading from 25 minutes earlier would
-// be drawn at the group's own instant. What the restored curve therefore shows is exact samples 30
-// minutes apart with honest gaps between them, and the UI already renders gaps.
-//
-// BinaryEvent rows are the documented exception, and history_coarse_encode's `event` mode below
-// carries the reasoning: for them pure decimation is the lie instead.
-inline constexpr uint32_t HISTORY_COARSE_STRIDE  = 6;                        // 5 min -> 30 min
-inline constexpr size_t   HISTORY_COARSE_SAMPLES = HISTORY_SAMPLES / HISTORY_COARSE_STRIDE;  // 48
-static_assert(HISTORY_SAMPLES % HISTORY_COARSE_STRIDE == 0,
-              "the coarse raster must divide the ring exactly, or a restored sample lands off-grid");
+// One record is page-aligned and large enough for the largest source's dense int16 vector. At the
+// current 31/12/3 rings this is 256 bytes: sixteen records share one erased sector. If the catalog
+// grows past 96 rings in one source the expression moves the format to 512 bytes automatically; the
+// checked 72-hour capacity below then fails before a catalog can silently outgrow the reservation.
+inline constexpr uint32_t HISTORY_FLASH_PARTITION_OFFSET = 0x400000u;
+inline constexpr size_t   HISTORY_FLASH_PARTITION_BYTES = 4u * 1024u * 1024u;
+inline constexpr size_t   HISTORY_FLASH_ERASE_BYTES = 4096;
+inline constexpr size_t   HISTORY_FLASH_PAGE_BYTES = 256;
+inline constexpr size_t   HISTORY_JOURNAL_HEADER_BYTES = 64;
+inline constexpr size_t   HISTORY_FLASH_TOTAL_RINGS =
+    TREND_COUNT + HOMEHUB_HISTORY_COUNT + ENV3_HISTORY_COUNT;
+inline constexpr size_t HISTORY_JOURNAL_SOURCE_COUNT = 3;
+
+enum class HistoryJournalSource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2 };
+
+inline constexpr size_t history_journal_source_rings(HistoryJournalSource src) {
+    switch (src) {
+        case HistoryJournalSource::X10a:   return TREND_COUNT;
+        case HistoryJournalSource::Modbus: return HOMEHUB_HISTORY_COUNT;
+        case HistoryJournalSource::Env3:   return ENV3_HISTORY_COUNT;
+    }
+    return 0;
+}
+
+inline constexpr size_t history_journal_max_source_rings() {
+    size_t n = TREND_COUNT;
+    if (HOMEHUB_HISTORY_COUNT > n) n = HOMEHUB_HISTORY_COUNT;
+    if (ENV3_HISTORY_COUNT > n) n = ENV3_HISTORY_COUNT;
+    return n;
+}
+
+inline constexpr size_t history_journal_slot_bytes(size_t body_bytes) {
+    size_t slot = HISTORY_FLASH_PAGE_BYTES;
+    while (slot < body_bytes && slot < HISTORY_FLASH_ERASE_BYTES) slot *= 2;
+    return slot;
+}
+
+inline constexpr size_t HISTORY_JOURNAL_MAX_SOURCE_RINGS = history_journal_max_source_rings();
+inline constexpr size_t HISTORY_JOURNAL_SLOT_BYTES = history_journal_slot_bytes(
+    HISTORY_JOURNAL_HEADER_BYTES + HISTORY_JOURNAL_MAX_SOURCE_RINGS * sizeof(HistorySample));
+inline constexpr size_t HISTORY_JOURNAL_SLOTS_PER_SECTOR =
+    HISTORY_FLASH_ERASE_BYTES / HISTORY_JOURNAL_SLOT_BYTES;
+inline constexpr size_t HISTORY_JOURNAL_SLOT_COUNT =
+    HISTORY_FLASH_PARTITION_BYTES / HISTORY_JOURNAL_SLOT_BYTES;
+
+inline constexpr uint32_t HISTORY_JOURNAL_MAGIC = 0x4c4e4a48u;       // "HJNL" little-endian
+inline constexpr uint16_t HISTORY_JOURNAL_VERSION = 1;
+inline constexpr uint32_t HISTORY_JOURNAL_ERASED = 0xffffffffu;
+inline constexpr uint32_t HISTORY_JOURNAL_COMMITTED = 0x54494d43u;   // "CMIT" little-endian
+
+// Wire format. `commit` remains erased while the body is programmed and is changed to CMIT in one
+// final 1->0 write. A torn body or torn commit is therefore never mistaken for a valid record.
+struct HistoryJournalHeader {
+    uint32_t magic;          //  0
+    uint16_t version;        //  4
+    uint8_t  source;         //  6 — HistoryJournalSource
+    uint8_t  flags;          //  7 — zero in v1
+    uint32_t catalog_fp;     //  8
+    uint32_t crc;            // 12 — normalised header + `value_count` samples
+    uint32_t commit;         // 16 — written LAST
+    uint16_t value_count;    // 20
+    uint16_t slot_bytes;     // 22
+    uint64_t sequence;       // 24 — global append order, starts at one
+    int64_t  bucket;         // 32 — absolute bucket of these values
+    uint32_t dt_s;           // 40
+    uint16_t rings[3];       // 44 — all source widths pin dense-vector addressing
+    uint16_t reserved;       // 50
+    uint8_t  pad[12];        // 52
+};
+static_assert(sizeof(HistoryJournalHeader) == HISTORY_JOURNAL_HEADER_BYTES,
+              "history journal header is a 64-byte wire format");
+static_assert(offsetof(HistoryJournalHeader, commit) == 16,
+              "commit offset is part of the power-loss protocol");
+
+inline bool history_journal_header_matches(const HistoryJournalHeader& h, uint32_t catalog_fp) {
+    if (h.magic != HISTORY_JOURNAL_MAGIC || h.version != HISTORY_JOURNAL_VERSION ||
+        h.commit != HISTORY_JOURNAL_COMMITTED || h.flags != 0 || h.catalog_fp != catalog_fp ||
+        h.slot_bytes != HISTORY_JOURNAL_SLOT_BYTES || h.dt_s != HISTORY_DT_S ||
+        h.sequence == 0 || h.bucket == INT64_MIN || h.source >= HISTORY_JOURNAL_SOURCE_COUNT ||
+        h.rings[0] != TREND_COUNT || h.rings[1] != HOMEHUB_HISTORY_COUNT ||
+        h.rings[2] != ENV3_HISTORY_COUNT)
+        return false;
+    return h.value_count == history_journal_source_rings(
+        static_cast<HistoryJournalSource>(h.source));
+}
+
+// CRC normalises the two fields changed after the body was assembled. This makes the exact same
+// helper usable before the commit write and after reading the committed header back.
+inline uint32_t history_journal_crc(HistoryJournalHeader h, const HistorySample* values,
+                                    size_t count) {
+    h.crc = 0;
+    h.commit = HISTORY_JOURNAL_ERASED;
+    uint32_t crc = config_crc32_update(CONFIG_CRC32_INIT,
+                                       reinterpret_cast<const uint8_t*>(&h), sizeof(h));
+    if (values && count)
+        crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(values),
+                                  count * sizeof(HistorySample));
+    return config_crc32_final(crc);
+}
+
+inline constexpr size_t history_journal_slot_offset(size_t slot) {
+    return slot * HISTORY_JOURNAL_SLOT_BYTES;
+}
+
+inline constexpr size_t history_journal_sector_first_slot(size_t slot) {
+    return (slot / HISTORY_JOURNAL_SLOTS_PER_SECTOR) * HISTORY_JOURNAL_SLOTS_PER_SECTOR;
+}
+
+inline constexpr size_t history_journal_next_sector_slot(size_t slot) {
+    return (history_journal_sector_first_slot(slot) + HISTORY_JOURNAL_SLOTS_PER_SECTOR) %
+           HISTORY_JOURNAL_SLOT_COUNT;
+}
+
+// A torn program in the middle of a sector cannot be retried in place and its sector cannot be
+// erased because older committed slots precede it. An erased candidate is usable; a non-erased
+// sector-first candidate is reusable after erasing that sector; only a non-erased MID-sector slot
+// skips forward. Kept pure so the power-loss branch is host-tested rather than device-only.
+inline constexpr size_t history_journal_write_slot(size_t next_slot, bool candidate_erased) {
+    return candidate_erased || next_slot % HISTORY_JOURNAL_SLOTS_PER_SECTOR == 0
+        ? next_slot : history_journal_next_sector_slot(next_slot);
+}
+
+// A capacity guard for the CURRENT dense catalog. The journal retains at least 72 hours even if all
+// three sources are active and close every bucket. The remaining slots are wear reserve: records are
+// ignored by age, never erased merely because they passed 72 hours.
+inline constexpr size_t HISTORY_FLASH_FUTURE_HOURS = 72;
+inline constexpr size_t HISTORY_FLASH_FUTURE_SAMPLES =
+    HISTORY_FLASH_FUTURE_HOURS * 60u * 60u / HISTORY_DT_S;
+static_assert(HISTORY_FLASH_FUTURE_SAMPLES == 864,
+              "72 hours at the five-minute raster must contain 864 samples per ring");
+static_assert(HISTORY_JOURNAL_SLOT_BYTES <= HISTORY_FLASH_ERASE_BYTES &&
+              HISTORY_FLASH_ERASE_BYTES % HISTORY_JOURNAL_SLOT_BYTES == 0,
+              "journal slots must divide one independently erasable sector");
+static_assert(HISTORY_JOURNAL_HEADER_BYTES +
+                  HISTORY_JOURNAL_MAX_SOURCE_RINGS * sizeof(HistorySample) <=
+              HISTORY_JOURNAL_SLOT_BYTES,
+              "the largest dense source vector must fit one journal slot");
+static_assert(HISTORY_JOURNAL_SLOT_COUNT <= UINT16_MAX,
+              "restore indexes store physical slot numbers as uint16_t");
+static_assert(HISTORY_JOURNAL_SLOT_COUNT >=
+                  HISTORY_FLASH_FUTURE_SAMPLES * HISTORY_JOURNAL_SOURCE_COUNT,
+              "the history partition must retain 72 h with every source active");
 
 // ── Which resets leave DRAM intact ──────────────────────────────────────────────────────────────
 // An ALLOW list, and everything unrecognised is refused. The direction matters: a wrongly-refused
@@ -226,88 +355,22 @@ inline constexpr int64_t history_bucket_from_unix(int64_t unix_s, uint32_t dt = 
     return unix_s >= 0 ? unix_s / d : -(((-unix_s) + d - 1) / d);
 }
 
-// ── Decimation ──────────────────────────────────────────────────────────────────────────────────
-// Take every `stride`-th sample from a full oldest-first snapshot, ANCHORED ON THE NEWEST so the
-// last coarse sample is the last real one. Anchoring on the oldest instead would let the newest
-// sample fall between grid points, i.e. the one sample a reader looks at first would be the one most
-// likely to be dropped.
-//
-// ── Why EVENT rows are folded and measurements are not ─────────────────────────────────────────
-// Dropping five of every six buckets is honest for a MEASUREMENT: the kept sample was really taken
-// at the instant it is drawn at, and folding a group down to "the last reading in it" would be a lie
-// about WHEN — a temperature from 25 minutes earlier drawn at the group's own instant.
-//
-// For a BinaryEvent row that argument does not hold, and pure decimation is the lie instead. Those
-// rows exist BECAUSE the events are shorter than one bucket (history.hpp: `fold_binary_event` keeps
-// a 5-minute bucket ON if the state was ON at any moment in it) — a defrost lasts minutes, a BUH
-// step can be a single cycle. Decimating them keeps one bucket in six, so most defrosts and backup
-// heater pulses would simply not be in a restored day, and "nothing ran last night" would read as a
-// finding when it is an artefact. So an event row is OR-FOLDED over the group instead: any ON in the
-// `stride` buckets ENDING at the kept instant makes the coarse slot ON.
-//
-// That invents nothing. It widens what the slot MEANS from "ON in these five minutes" to "ON in the
-// thirty minutes ending here" — the same statement the row already makes, at the width the record
-// can afford. What is lost is the position WITHIN those thirty minutes, which for a boolean is a far
-// smaller loss than the event disappearing.
-inline HistorySample history_coarse_event_fold(const HistorySample* v, size_t from, size_t to) {
-    constexpr HistorySample on = 10;   // the public binary 1 in the common tenths wire format
-    HistorySample known = HISTORY_NO_READING;
-    bool saw_held = false;
-    for (size_t i = from; i <= to; i++) {
-        const HistorySample s = v[i];
-        if (s == on) return on;                            // ON wins outright, like fold_binary_event
-        if (s == HISTORY_HELD_OVER) { saw_held = true; continue; }
-        if (!history_is_absent(s)) known = s;              // a measured OFF beats an absence
-    }
-    if (!history_is_absent(known)) return known;
-    return saw_held ? HISTORY_HELD_OVER : HISTORY_NO_READING;
-}
-
-inline size_t history_coarse_encode(const HistorySample* full, size_t n, uint32_t stride,
-                                    HistorySample* out, size_t max, bool event = false,
-                                    size_t newest_skip = 0) {
-    if (!full || !out || !n || !max || !stride || newest_skip >= n) return 0;
-    const size_t newest = n - 1 - newest_skip;
-    const size_t avail = 1 + newest / stride;
-    const size_t m = avail < max ? avail : max;
-    for (size_t j = 0; j < m; j++) {
-        const size_t idx = newest - (m - 1 - j) * stride;
-        if (!event) { out[j] = full[idx]; continue; }
-        // The group is the `stride` buckets ENDING at the kept instant, clamped at the old end so
-        // the first group cannot read before the array.
-        const size_t from = idx + 1 >= stride ? idx + 1 - stride : 0;
-        out[j] = history_coarse_event_fold(full, from, idx);
-    }
-    return m;
-}
-
-// Keep a coarse snapshot on the SAME absolute grid across consecutive OTA boots. A restored
-// snapshot is sparse in the live five-minute ring: one real point followed by `stride-1` deliberate
-// gaps. Re-encoding that ring from its NEWEST sample silently selects a different phase whenever
-// the new boot closed its buckets at a different wall-clock offset; in the worst case all 48 old
-// points are gaps and the next reboot overwrites a valid day with an empty one.
-//
-// `previous_anchor` is any bucket on the stored grid (normally its newest). The result is the newest
-// bucket no later than `live_newest` on that same grid. A missing old anchor starts a new grid at the
-// current newest sample. The selected point may therefore lag the live ring by at most stride-1
-// buckets, but it remains a sample ACTUALLY taken at the instant the header states — never a nearby
-// value shifted onto a timestamp where it was not measured.
-inline constexpr int64_t history_coarse_aligned_anchor(int64_t live_newest,
-                                                       int64_t previous_anchor,
-                                                       uint32_t stride) {
-    if (live_newest == INT64_MIN || previous_anchor == INT64_MIN || stride == 0)
-        return live_newest;
-    const int64_t d = static_cast<int64_t>(stride);
-    // Reduce each operand before subtracting: a corrupt-but-CRC-valid extreme anchor must not turn
-    // this defensive placement helper into signed-overflow UB.
-    int64_t phase = (live_newest % d - previous_anchor % d) % d;
-    if (phase < 0) phase += d;
-    return live_newest - phase;
+// Represent an absolute wall-clock bucket on this boot's monotonic axis. The result is allowed to
+// be NEGATIVE: immediately after a reboot, the wall bucket may have started before esp_timer's new
+// zero. Clamping it to zero slides every restored curve forward to the boot instant — exactly the
+// lie the absolute flash anchor exists to prevent. Callers therefore use a distinct INT64_MIN
+// sentinel for "no commit" and accept ordinary negative timestamps as pre-boot commits.
+inline constexpr int64_t history_anchor_commit_us(int64_t now_us, int64_t unix_s,
+                                                  int64_t newest_bucket,
+                                                  uint32_t dt = HISTORY_DT_S) {
+    if (dt == 0) return now_us;
+    const int64_t bucket_s = newest_bucket * static_cast<int64_t>(dt);
+    return now_us - (unix_s - bucket_s) * 1000000LL;
 }
 
 // ── Dropping the write-side padding ─────────────────────────────────────────────────────────────
 // A stored block is written RIGHT-ALIGNED and padded at its OLD end with HISTORY_NO_READING, so a
-// board that has recorded ten minutes ships the same 48 slots as one that has recorded a day. Those
+// board that has recorded ten minutes ships the same 288 slots as one that has recorded a day. Those
 // pad slots must not reach the splice: history_splice derives the restored window from the OLDEST
 // entry it is handed, so the padding would drag every ring back a full 24 hours. The samples would
 // still be right — the SPAN would not, and the UI reads the span off the array length (history.js:
@@ -317,7 +380,7 @@ inline constexpr int64_t history_coarse_aligned_anchor(int64_t live_newest,
 // Only the LEADING run goes, and only the NO_READING sentinel. An interior gap is a real
 // observation and is kept; HELD_OVER is a real observation too ("outdoor unit resting") and is never
 // padding. A leading gap carries no information in any case — it just means the series starts later.
-inline size_t history_coarse_lead_skip(const HistorySample* v, size_t n) {
+inline size_t history_flash_lead_skip(const HistorySample* v, size_t n) {
     if (!v) return n;
     size_t k = 0;
     while (k < n && v[k] == HISTORY_NO_READING) k++;
