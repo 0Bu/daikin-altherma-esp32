@@ -67,7 +67,7 @@ const CLOSE = '\n];';
 const MODEL_OPEN = 'const MODEL_DESCRIPTIONS = {';
 const MODEL_CLOSE = '\n};';
 const DISPLAY_UNIT_DECL = 'const LABEL_UNIT_SUFFIX = ';
-const DISPLAY_LABEL_OPEN = 'function displayReadingLabel(label) {';
+const DISPLAY_LABEL_OPEN = 'function displayReadingLabel(label, row = null) {';
 const DISPLAY_LABEL_CLOSE = '\n}';
 
 // Slice a table literal out by exact markers and evaluate it. `braces` is the literal's own

@@ -1581,7 +1581,7 @@ function renderInspectHist(e, row) {
   const mb = pairedId ? mbByConcept(pairedId) : null;
   const chartName = DERIVED[id] && e && e.aria ? tx(e.aria) : null;
   el.innerHTML = !id ? ""
-    : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label), trendSource)
+    : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label, row), trendSource)
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
                : histHtml(id, DERIVED[id]?.unit || "", e.aria ? tx(e.aria) : inspTitleText(e, null), trendSource);
 }
@@ -1664,7 +1664,7 @@ function renderInspect() {
   // never carries a fact by itself. Everywhere else the badge already appears beside a gateway
   // reading; this was the one place it did not.
   const srcName = fb ? displayHomeHubLabel(fb)
-                     : displayReadingLabel(row ? row.label : (e.sample || ""));
+                     : displayReadingLabel(row ? row.label : (e.sample || ""), row);
   $("inspSrc").innerHTML = esc(srcName) +
     (fb ? ` <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>` : "");
   $("inspSrc").hidden = !(row || fb || e.sample);
@@ -1711,7 +1711,7 @@ function renderInspect() {
     // a label and a value; a second reading needs both, not a second number in the first one's slot.
     .map((m) => {
       const row = m.x10a
-        ? `<div class="inspect-row"><span>${esc(displayReadingLabel(m.x10a.label))}</span>` +
+        ? `<div class="inspect-row"><span>${esc(displayReadingLabel(m.x10a.label, m.x10a))}</span>` +
           `<span>${esc(inspVal(m.x10a, d))}</span></div>`
         : "";
       if (!m.mb) return row;

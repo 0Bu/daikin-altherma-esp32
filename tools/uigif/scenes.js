@@ -5,7 +5,8 @@
 // operating point per scene, not a recording.
 
 const DEMO = (() => {
-  const R = (label, value, unit, reg) => ({ label, value: value == null ? null : String(value), unit, reg });
+  const R = (label, value, unit, reg, extra = {}) =>
+    ({ label, value: value == null ? null : String(value), unit, reg, ...extra });
   // HomeHub telemetry has its own array and addresses registers by their EKRHH data-model offset.
   // The DHW scene below reports mode 2 (Recommended on), which is what evcc's boost writes; every
   // other scene reports mode 0 so the permanent pill proves both its active and inactive colours.
@@ -122,9 +123,14 @@ const DEMO = (() => {
 
   // Rows that never change between scenes (identity + the always-live hydronic bits).
   const base = (o) => [
+    // These are two independent controller fault channels, not duplicate rows. /values adds the
+    // sparse MQTT page scope because the raw catalog names collide; keep the demo wire-identical so
+    // the real renderer visibly distinguishes both pairs and gives their accordions separate keys.
+    R("Error type", "Normal", "", 0x10, { x10a_group: "outdoor_state" }),
+    R("Error Code", "  ", "", 0x10, { x10a_group: "outdoor_state" }),
     R("I/U operation mode", o.mode, "", 0x60),
-    R("Error Code", "  ", "", 0x60),
-    R("Error type", "Normal", "", 0x60),
+    R("Error Code", "  ", "", 0x60, { x10a_group: "hydronic" }),
+    R("Error type", "Normal", "", 0x60, { x10a_group: "hydronic" }),
     R("Operation Mode", o.ouMode, "", 0x10),
 
     // Outdoor unit — pages 0x20 / 0x21 / 0x30 (frozen while the compressor rests)

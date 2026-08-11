@@ -1398,14 +1398,23 @@ function displayUnit(v) {
 // or unit, so carrying either in the row name is redundant and inconsistent. Clean it only at the
 // visual boundary: matching descriptions, history identities, selectors and every API/MQTT payload
 // continue to use the exact catalog label.
-function displayReadingLabel(label) {
+function displayReadingLabel(label, row = null) {
   const raw = String(label ?? "").trim();
   const cleaned = raw
     .replace(LABEL_UNIT_SUFFIX, "")
     .replace(/\s*\([^)]*On\s*:[^)]*Off\s*:[^)]*\)\s*$/i, "")
     .replace(/[\s.]+ON\/OFF\s*$/i, "")
     .trim();
-  return cleaned || raw;
+  const shown = cleaned || raw;
+  // /values marks the five catalog labels that occur on more than one X10A page with the SAME
+  // structural group used by MQTT/HA. Those rows are separate measurements, not duplicates — an
+  // outdoor error and a hydronic error can occur independently — so dropping one would hide plant
+  // state. Qualifying only that audited set removes duplicate visible names without renaming every
+  // technical reading. Mechanical title-casing deliberately matches group_display_name() in
+  // logic/mqtt_group.hpp ("outdoor_state" -> "Outdoor State") and needs no second page-name table.
+  const scope = String(row?.x10a_group ?? "").trim().replace(/(^|_)([a-z])/g,
+    (_match, separator, letter) => `${separator ? " " : ""}${letter.toUpperCase()}`);
+  return scope ? `${scope} ${shown}` : shown;
 }
 
 // HomeHub API labels remain the manufacturer's stable English register names. The German UI names
@@ -1445,7 +1454,7 @@ const HOMEHUB_LABEL_DE = Object.freeze({
   58: "Allgemeine Leistungsgrenze",
 });
 function displayHomeHubLabel(row) {
-  const fallback = displayReadingLabel(row && row.label);
+  const fallback = displayReadingLabel(row && row.label, row);
   if (LANG !== "de" || !row || row.off == null) return fallback;
   return HOMEHUB_LABEL_DE[row.off] || fallback;
 }
@@ -1470,12 +1479,16 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId) {
 }
 
 // One value row. If a description matches the label, render the accordion; otherwise a plain,
-// unchanged row. Catalog labels are unique within a render; a derived row supplies its own key and
-// visual label while keeping its canonical label for description matching.
+// unchanged row. Most catalog labels are unique within a render; the reused set carries its X10A
+// group from the server below. A derived row supplies its own key and visual label while keeping its
+// canonical label for description matching.
 function vDescRow(v) {
   const label = v.label || "";
-  const shownLabel = v.displayLabel || displayReadingLabel(label);
-  const key = v.key || label;
+  const shownLabel = v.displayLabel || displayReadingLabel(label, v);
+  // Ambiguous rows used to share one label-based key, so expanding either Error Code opened both
+  // panels on the next render. The server supplies x10a_group only for that audited collision set;
+  // prefixing those keys preserves every existing key while making the colliding rows independent.
+  const key = v.key || (v.x10a_group ? `${v.x10a_group}:${label}` : label);
   let cls = v.state || v.class || "";
   const d = descFor(label, v);
   const hid = histIdFor(label);          // this profile's spelling -> the concept the device buffers

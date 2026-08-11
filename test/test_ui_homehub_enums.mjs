@@ -118,6 +118,25 @@ assert.equal(en.displayReadingLabel("Outdoor Air Temp (R1T)"), "Outdoor Air Temp
 assert.equal(en.displayReadingLabel("High Pressure (sat. °C)"), "High Pressure (sat. °C)",
   "a semantic saturation-temperature qualifier stays in the label");
 
+// The catalog deliberately carries a few same-named readings on different X10A pages. They are
+// independent values (notably outdoor-controller and hydronic-controller fault channels), so the
+// sparse structural marker from /values must make every visible label unique without renaming an
+// ordinary row or trusting prose to identify its source.
+const scopedLabels = [
+  [{ label: "Error type", reg: 0x10, x10a_group: "outdoor_state" }, "Outdoor State Error type"],
+  [{ label: "Error type", reg: 0x60, x10a_group: "hydronic" }, "Hydronic Error type"],
+  [{ label: "Error Code", reg: 0x10, x10a_group: "outdoor_state" }, "Outdoor State Error Code"],
+  [{ label: "Error Code", reg: 0x60, x10a_group: "hydronic" }, "Hydronic Error Code"],
+  [{ label: "Mixed water temp.", reg: 0x65, x10a_group: "mixing" }, "Mixing Mixed water temp."],
+];
+for (const [row, shown] of scopedLabels) {
+  assert.equal(en.displayReadingLabel(row.label, row), shown, `${shown}: structural page scope shown`);
+  assert.equal(de.displayReadingLabel(row.label, row), shown,
+    `${shown}: stable technical X10A label remains language-independent`);
+}
+assert.equal(en.displayReadingLabel("Error Code", { label: "Error Code", reg: 0x10 }), "Error Code",
+  "a row is never qualified merely by guessing from its label or register");
+
 const operationModes = [
   ["Stop", "Stop", "Stopp"],
   ["Heating", "Heating", "Heizen"],

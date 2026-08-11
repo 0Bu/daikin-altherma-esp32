@@ -26,6 +26,7 @@
 #include "logic/history.hpp"
 #include "logic/http_cache.hpp"
 #include "logic/convert.hpp"   // conv_is_binary — /values marks a bit-flag row from its converter id
+#include "logic/discovery.hpp" // ambiguous X10A labels need their existing MQTT page scope in the UI
 #include "logic/mqtt_base.hpp"  // mqtt_base_effective — report the base actually published under
 #include "logic/mqtt_group.hpp" // is_json_number — keep numeric HomeHub values numeric in /values
 #include "logic/crashinfo.hpp"
@@ -1160,6 +1161,18 @@ static void append_values_array(std::string& j) {
         j += jstr(v[i].unit);
         j += ",\"reg\":";
         j += std::to_string(v[i].reg);
+        // Five catalog labels occur on more than one register page. They are not duplicate
+        // measurements: for example, both the outdoor controller and the hydronic controller carry
+        // their own Error Code. Sending only one would hide a real fault; sending both under the
+        // same visible name made the dashboard look duplicated and also gave both accordions the
+        // same browser key. Reuse discovery.hpp's mechanically audited ambiguity ledger and the
+        // MQTT payload's existing page namespace, rather than maintaining another label list here.
+        // The marker is sparse (only ambiguous rows carry it), so ordinary /values frames do not
+        // pay a group-name payload cost for every reading.
+        if (label_slug_is_ambiguous(object_id(v[i].label.c_str()))) {
+            j += ",\"x10a_group\":";
+            j += jstr(group_for_page(v[i].reg));
+        }
         // Keep the value itself at the firmware-wide numeric 0/1 boundary. The structural marker
         // is intentionally emitted only for binary rows: it lets the browser render ON/OFF without
         // treating every numeric zero/one as a switch, while adding no payload bytes to the many
