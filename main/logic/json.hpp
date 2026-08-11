@@ -21,6 +21,7 @@
 // JSON.parse never reaches those DOM nodes at all. Do not read a fix on either layer as covering
 // the other.
 #include <string>
+#include <string_view>
 
 namespace daik {
 
@@ -28,7 +29,7 @@ namespace daik {
 // full RFC 8259 set. Everything from 0x20 up other than '"' and '\' passes through verbatim —
 // including 0x7F (DEL), which the RFC does NOT require escaping, and raw UTF-8, whose bytes are
 // legal unescaped and must survive intact for an SSID like "Café".
-inline void json_append_escaped(std::string& out, const std::string& s) {
+inline void json_append_escaped(std::string& out, std::string_view s) {
     static const char hex[] = "0123456789abcdef";
     for (const char c : s) {
         // MUST be unsigned: `char` is signed on both xtensa and the host, so a UTF-8 lead byte
@@ -55,7 +56,7 @@ inline void json_append_escaped(std::string& out, const std::string& s) {
 }
 
 // `s` as a complete, quoted JSON string — the whole-value form of the above.
-inline std::string json_quote(const std::string& s) {
+inline std::string json_quote(std::string_view s) {
     std::string o;
     o.reserve(s.size() + 2);                     // exact for the common escape-free case
     o += '"';

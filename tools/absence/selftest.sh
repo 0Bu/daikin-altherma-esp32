@@ -43,6 +43,13 @@
 #    15. the state age computed by flooring the INTERVAL instead of quantising the absolute instants,
 #        which discards the sub-second remainder of every poll cycle — 23% slow forever, and the one
 #        defect here that is wrong in a way no gate could see from the outside
+#    16. flash restore deriving a series span from its first numeric value, so an all-absent but
+#        recorded Modbus row disappears after a cold reboot
+#    17. immutable cache metadata copied into two owning strings per row again, restoring the
+#        contiguous-allocation failure beside TLS
+#    18. weather advertising its network interval only after the pre-TLS grace, too late for MQTT
+#        to release an already-running snapshot
+#    19. MQTT quiescing for OTA but not for the weather TLS interval that caused the live failure
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -318,6 +325,62 @@ assert seed != s, "seed 15 did not apply — the elapsed derivation moved"
 open(p, "w").write(seed)
 PY2
 expect_red "the state age flooring each interval instead of telescoping the remainder" run_contract
+restore
+
+# 16. Put the value-dependent restore decision back. An all-NO_READING row then contributes no
+#     span even though the journal contains the same bucket records as every numeric row.
+python3 - "$TMP/main/history.cpp" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("history_flash_restore_start(\n            s_flash_oldest_bucket[src_i], newest, HISTORY_SAMPLES)",
+                 "history_flash_lead_skip(s_flash_restore_blocks[0], HISTORY_SAMPLES)", 1)
+assert seed != s, "seed 16 did not apply — the restore-span decision moved"
+open(p, "w").write(seed)
+PY2
+expect_red "an all-absent journal row losing its recorded raster" run_contract
+restore
+
+# 17. Own the static label and unit again. This recreates two per-row string objects and their
+#     allocations in every poll and publish snapshot.
+python3 - "$TMP/main/hp_poll.hpp" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace('const char* label = "";', 'std::string label;', 1)
+seed = seed.replace('const char* unit = "";', 'std::string unit;', 1)
+assert seed != s, "seed 17 did not apply — the CachedValue metadata fields moved"
+open(p, "w").write(seed)
+PY2
+expect_red "static cache metadata copied into owning strings" run_contract
+restore
+
+# 18. Raise the weather activity signal after the grace instead of before it. MQTT can then begin a
+#     large snapshot during the delay and still own it when the handshake starts.
+python3 - "$TMP/main/weather_forecast.cpp" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = "                NetworkActivity activity;\n                vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));"
+new = "                vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));\n                NetworkActivity activity;"
+seed = s.replace(old, new, 1)
+assert seed != s, "seed 18 did not apply — the weather grace moved"
+open(p, "w").write(seed)
+PY2
+expect_red "weather advertising TLS activity after its grace" run_contract
+restore
+
+# 19. Quiesce only for OTA again, leaving the independently signalled weather fetch to race MQTT.
+python3 - "$TMP/main/mqtt_ha.cpp" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("const bool network_busy = ota_busy || weather_busy;",
+                 "const bool network_busy = ota_busy;", 1)
+assert seed != s, "seed 19 did not apply — the combined network gate moved"
+open(p, "w").write(seed)
+PY2
+expect_red "weather TLS omitted from the MQTT hold-off" run_contract
 restore
 
 if [ "$fail" -ne 0 ]; then

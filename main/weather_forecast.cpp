@@ -16,6 +16,7 @@
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -29,6 +30,9 @@ namespace {
 
 constexpr size_t kPayloadMax = 8 * 1024;
 constexpr int kHttpTimeoutMs = 20000;
+// Longer than the MQTT publisher's one-second cadence. Set the active flag first, then give an
+// already-running publish time to release its snapshot before the TLS allocator starts.
+constexpr int kNetworkQuiesceLeadMs = 1100;
 constexpr int kTaskStack = 12288;
 constexpr UBaseType_t kTaskPrio = TASK_PRIO_WEATHER;   // see main/task_config.hpp
 constexpr const char* kProvider = "open-meteo";
@@ -37,6 +41,14 @@ constexpr const char* kModel = "icon_seamless";
 WeatherForecastStatus s_status;
 SemaphoreHandle_t s_mtx = xSemaphoreCreateMutex();
 TaskHandle_t s_task = nullptr;
+std::atomic<bool> s_network_active{false};
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "weather network activity must remain allocation- and lock-free");
+
+struct NetworkActivity {
+    NetworkActivity() { s_network_active.store(true, std::memory_order_release); }
+    ~NetworkActivity() { s_network_active.store(false, std::memory_order_release); }
+};
 
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
 // This used to be a private copy here; nine of them had drifted into two different shapes.
@@ -251,7 +263,12 @@ void weather_task(void*) {
             }
             WeatherForecastSample sample;
             std::string error;
-            const bool ok = fetch_forecast(cfg, sample, error);
+            bool ok = false;
+            {
+                NetworkActivity activity;
+                vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));
+                ok = fetch_forecast(cfg, sample, error);
+            }
             bool updated = false;
             if (ok) {
                 Lock lk(s_mtx);
@@ -346,6 +363,10 @@ void weather_forecast_reconfigure() {
 WeatherForecastStatus weather_forecast_status() {
     Lock lk(s_mtx);
     return s_status;
+}
+
+bool weather_fetch_active() {
+    return s_network_active.load(std::memory_order_acquire);
 }
 
 }  // namespace daik

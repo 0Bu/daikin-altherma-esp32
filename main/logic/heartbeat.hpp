@@ -107,7 +107,8 @@ struct HeartbeatFields {
     // mqtt_skipped  — the cycle THREW (std::bad_alloc; the task guard caught it) and the reading is
     //                 gone. The wired board logged 337 of these in 30 days, 125 in the last of them,
     //                 every one immediately before an OTA reboot.
-    // mqtt_quiesced — the cycle stood aside DELIBERATELY because an OTA download owned the heap
+    // mqtt_quiesced — the cycle stood aside DELIBERATELY because an OTA/weather TLS operation
+    //                 owned the heap
     //                 (logic/ota_quiesce.hpp). Same missing second, stated reason.
     //
     // Kept as two counters rather than one "cycles lost" precisely so the fix is legible in the
@@ -250,7 +251,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"mqtt_count\":"; j += std::to_string(f.mqtt_count);
     j += ",\"mqtt_fails\":"; j += std::to_string(f.mqtt_fails);
     j += ",\"mqtt_reconnects\":"; j += std::to_string(f.mqtt_reconnects);
-    // Cycles that produced nothing — an OOM skip and a deliberate OTA hold-off (#380).
+    // Cycles that produced nothing — an OOM skip and a deliberate OTA/weather TLS hold-off (#380).
     j += ",\"mqtt_skipped\":"; j += std::to_string(f.mqtt_skipped);
     j += ",\"mqtt_quiesced\":"; j += std::to_string(f.mqtt_quiesced);
     // poll_* — the X10A sweep that never ran, so nothing below was even attempted.
@@ -344,7 +345,7 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     // `total_increasing` so HA's long-term statistics read a reboot as a counter reset rather than a
     // cliff — and a reboot is exactly what ends every episode these count.
     {"sensor",        "mqtt_skipped",     "MQTT Cycles Skipped", "mqtt_skipped",     "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_quiesced",    "MQTT Cycles Held (OTA)", "mqtt_quiesced", "",    "",                 "total_increasing"},
+    {"sensor",        "mqtt_quiesced",    "MQTT Cycles Held (TLS)", "mqtt_quiesced", "",    "",                 "total_increasing"},
     {"sensor",        "poll_skipped",     "X10A Cycles Skipped", "poll_skipped",     "",    "",                 "total_increasing"},
 };
 inline constexpr int HEARTBEAT_SENSOR_COUNT =

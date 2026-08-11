@@ -79,7 +79,7 @@ namespace daik {
 // Quote a string for JSON via the shared RFC 8259 encoder (logic/json.hpp) — the same one the MQTT
 // payloads use. Not a local escaper: /scan echoes SSIDs, i.e. arbitrary bytes chosen by any AP in
 // radio range, and a control char in one used to emit unparseable JSON.
-static std::string jstr(const std::string& s) { return json_quote(s); }
+static std::string jstr(std::string_view s) { return json_quote(s); }
 
 // The same, for the reporter-identifying values `GET /status?redact=1` withholds. Applied where
 // the value is WRITTEN, never as a pass over the finished JSON: this builder runs on the httpd task
@@ -958,7 +958,8 @@ void http_append_status_json(std::string& j, bool redact) {
     // Beside them, what that headroom already COST while the board DID survive (#380): cycles the two
     // 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches — a reading
     // dropped, or (poll) never read at all; mqtt_quiesced is the publisher standing aside on purpose
-    // while an OTA download owns the heap (logic/ota_quiesce.hpp), the same gap with a stated cause.
+    // while an OTA/weather TLS operation owns the heap (logic/ota_quiesce.hpp), the same gap with a
+    // stated cause.
     // The three of them complete the sequence the two figures above start: min_free_heap says how
     // close the board came, these say what it lost getting there, and heap_restarts says when it did
     // not get there at all. Three atomic loads and three plain integers.
@@ -1169,7 +1170,7 @@ static void append_values_array(std::string& j) {
         // MQTT payload's existing page namespace, rather than maintaining another label list here.
         // The marker is sparse (only ambiguous rows carry it), so ordinary /values frames do not
         // pay a group-name payload cost for every reading.
-        if (label_slug_is_ambiguous(object_id(v[i].label.c_str()))) {
+        if (label_slug_is_ambiguous(object_id(v[i].label))) {
             j += ",\"x10a_group\":";
             j += jstr(group_for_page(v[i].reg));
         }
@@ -1236,7 +1237,7 @@ static void append_values_array(std::string& j) {
         // `conv` is part of the key because the STATE pairings need it: six flags share the single
         // byte 0x60/12 and differ only in which bit their converter masks, so without it the diverter
         // and the circulation pump are one row.
-        if (const char* cid = logic::x10a_concept_for(v[i].reg, v[i].off, v[i].unit.c_str(), v[i].conv))
+        if (const char* cid = logic::x10a_concept_for(v[i].reg, v[i].off, v[i].unit, v[i].conv))
             { j += ",\"concept\":"; j += jstr(cid); }
         j += "}";
     }

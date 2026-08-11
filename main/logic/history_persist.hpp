@@ -368,23 +368,24 @@ inline constexpr int64_t history_anchor_commit_us(int64_t now_us, int64_t unix_s
     return now_us - (unix_s - bucket_s) * 1000000LL;
 }
 
-// ── Dropping the write-side padding ─────────────────────────────────────────────────────────────
-// A stored block is written RIGHT-ALIGNED and padded at its OLD end with HISTORY_NO_READING, so a
-// board that has recorded ten minutes ships the same 288 slots as one that has recorded a day. Those
-// pad slots must not reach the splice: history_splice derives the restored window from the OLDEST
-// entry it is handed, so the padding would drag every ring back a full 24 hours. The samples would
-// still be right — the SPAN would not, and the UI reads the span off the array length (history.js:
-// `full = n * dt >= 23.5 h`), so a chart holding one real reading would title itself "Last 24
-// hours". A fabricated span is the same class of mistake as a fabricated value.
-//
-// Only the LEADING run goes, and only the NO_READING sentinel. An interior gap is a real
-// observation and is kept; HELD_OVER is a real observation too ("outdoor unit resting") and is never
-// padding. A leading gap carries no information in any case — it just means the series starts later.
-inline size_t history_flash_lead_skip(const HistorySample* v, size_t n) {
-    if (!v) return n;
-    size_t k = 0;
-    while (k < n && v[k] == HISTORY_NO_READING) k++;
-    return k;
+// ── Locating the journal-backed span ────────────────────────────────────────────────────────────
+// Restore scratch always represents a complete 24-hour window and is initialised to NO_READING.
+// That sentinel is also a REAL journal sample: an unavailable register must retain the same
+// five-minute raster as the other values. Therefore the values themselves cannot distinguish
+// unwritten leading scratch from recorded gaps. The oldest and newest journal record buckets can.
+inline size_t history_flash_restore_start(int64_t oldest_record_bucket,
+                                          int64_t newest_record_bucket,
+                                          size_t width = HISTORY_SAMPLES) {
+    if (width == 0) return 0;
+    if (oldest_record_bucket == INT64_MIN ||
+        newest_record_bucket == INT64_MIN ||
+        oldest_record_bucket > newest_record_bucket)
+        return width;
+
+    const uint64_t span = static_cast<uint64_t>(newest_record_bucket) -
+                          static_cast<uint64_t>(oldest_record_bucket);
+    if (span >= width) return 0;
+    return width - 1U - static_cast<size_t>(span);
 }
 
 // ── The splice ──────────────────────────────────────────────────────────────────────────────────

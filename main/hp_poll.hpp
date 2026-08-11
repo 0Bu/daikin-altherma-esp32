@@ -13,9 +13,11 @@ void hp_poll_start();
 
 // One cached reading.
 struct CachedValue {
-    std::string label;
+    // Borrowed from generated catalog/override tables or string literals. These pointers remain
+    // valid for the firmware lifetime; only the formatted value is owned by each snapshot row.
+    const char* label = "";
     std::string value;   // formatted; empty = not available this cycle
-    std::string unit;
+    const char* unit = "";
     uint8_t     reg = 0; // X10A register page it came from (MQTT groups values by page)
     uint8_t     off = 0; // byte offset within that page's reply. With `reg` and `unit` it is the
                          // row's IDENTITY — how logic/history.hpp addresses a trended row, since

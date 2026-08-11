@@ -16,5 +16,8 @@ struct WeatherForecastStatus {
 void weather_forecast_start();
 void weather_forecast_reconfigure();
 WeatherForecastStatus weather_forecast_status();
+// Lock-free signal for the allocation-rich HTTPS interval. The MQTT publisher reads this before
+// constructing its snapshots so it can leave the largest contiguous heap block to TLS.
+bool weather_fetch_active();
 
 }  // namespace daik
