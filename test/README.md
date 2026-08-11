@@ -28,6 +28,11 @@ logic regression or an untested production path fails in seconds instead of afte
 build. `tools/coverage/selftest.sh` separately proves that an empty report and coverage below the
 floor fail closed.
 
+`node --test test/serial_port_release.test.mjs` rides the same command and exercises the Pages
+installer's serial-permission lifecycle: no control or chooser without an existing grant, direct
+release of one closed port, chooser disambiguation for multiple grants, refusal while a flash still
+owns the port, and visibility refresh after connection, focus and release changes.
+
 `node test/test_ui_bundle.mjs` first validates `main/www/app.sources`: every entry is local, unique
 and present, and their exact ordered concatenation parses as one classic script. All semantic UI
 tests and audits use the same reader, so they cannot silently exercise a different source order than

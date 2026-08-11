@@ -2003,6 +2003,11 @@ Structure:
   by OTA so WiFi + model config survive upgrades. The Web Serial manifest likewise publishes
   sparse `flash_args` parts around NVS; its build-time sector-overlap check makes the no-Erase path
   preserve the same configuration.
+- **Browser serial-permission release:** the installer uses `Serial.getPorts()` to show its
+  **Release serial port** action only while this Pages origin already has a granted port. A single
+  closed port is forgotten directly; multiple grants use the native chooser to disambiguate. An
+  open installer port is never interrupted, and connect/disconnect plus page focus refresh the
+  control instead of preserving stale permission state.
 - **Core Dump to Flash (Crash Archiving)**:
   - Enabled via `CONFIG_ESP_COREDUMP_ENABLE` and `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` in `sdkconfig.defaults`. The format is ELF — the only one IDF v6 emits, so no `CONFIG_*` selects it.
   - A dedicated `coredump` partition of size `0xc000` (48 KB) is placed at offset `0x12000` (in the unused gap between `phy_init` and `ota_0`), leaving the start offsets of `nvs`, `otadata`, `phy_init`, `ota_0`, and `ota_1` completely untouched for backward compatibility and OTA safety.

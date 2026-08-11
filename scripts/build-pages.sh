@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Assemble the GitHub Pages site (the browser installer) into _site/ from the built dist/:
 #   _site/index.html      the installer page (docs/index.html)
+#   _site/*.mjs           local installer behavior modules
 #   _site/manifest.json   esp-web-tools + OTA manifest
 #   _site/*.bin           sparse installer parts + signed app (OTA) + manual merged image
 #
@@ -34,7 +35,7 @@ esac
 [ -d dist ] || { echo "build-pages: run scripts/ci-build-all.sh first (no dist/)" >&2; exit 1; }
 rm -rf "$OUT"; mkdir -p "$OUT"
 
-cp docs/index.html "$OUT/index.html"
+cp docs/index.html docs/serial-port-release.mjs "$OUT/"
 cp dist/*.bin "$OUT/"
 cp dist/manifest.json "$OUT/manifest.json"
 

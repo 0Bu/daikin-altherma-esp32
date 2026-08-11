@@ -85,3 +85,7 @@ fi
 # rather than as a step of its own because this is where a C++ compiler is already guaranteed, and
 # because a rule change and its parity failure belong in the same command.
 "$(dirname "$0")/check-presenter-parity.sh"
+
+# Browser-side Web Serial permission lifecycle. The module is published next to the installer,
+# but its decisions are DOM-light and deterministic enough to exercise without a browser or board.
+node --test test/serial_port_release.test.mjs
