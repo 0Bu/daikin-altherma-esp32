@@ -124,6 +124,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 78 | **Transport-independent HTTP trust surface** — the restricted provisioning route set follows the OPEN setup AP's existence rather than the WiFi mode, so a wired board is not locked out of its own API and a live AP cannot be widened by a cable | ✅ 🧪 | [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_server.cpp`](../main/http_server.cpp) |
 | 80 | **Per-row state age** — how long each switched row has read what it reads, published as three separate facts (the seconds, whether the transition was *witnessed*, and how much of the run the bus did not answer for) so a consumer cannot state a stronger claim than the board made | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
 | 81 | **CLAUDE.md byte-budget gate** — the always-loaded agent instructions are held under a byte budget in CI, forcing new findings into `docs/` as narrative and into `.claude/CLAUDE.md` only as rules | ✅ | [`run-claude-md-budget.sh`](../scripts/run-claude-md-budget.sh), [`selftest.sh`](../tools/claudemd/selftest.sh) |
+| 85 | **Browser serial-permission release** — the Pages installer exposes a granted, closed port's `forget()` action without opening a chooser when nothing can be revoked or interrupting an active flash | ✅ 🧪 | [`serial-port-release.mjs`](serial-port-release.mjs), [`serial_port_release.test.mjs`](../test/serial_port_release.test.mjs) |
 
 ---
 
@@ -182,6 +183,10 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   every part to its real erase sectors and fails the build on an NVS overlap; its own tests feed it
   *bad* plans, since running it on the real manifest only ever proved a good plan passes. Selecting
   **Erase** remains the explicit factory-reset path.
+- **✅ 🧪 Explicit serial-permission release**: the installer shows **Release serial port** only
+  when `Serial.getPorts()` reports an existing grant for this site. One closed port is forgotten
+  directly, multiple grants use the browser chooser, and an open flash port is refused. Visibility
+  is refreshed after connect/disconnect, page focus and a successful release.
 - **Rollback armed until proven healthy** (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`): a fresh OTA
   image starts `PENDING_VERIFY` and the bootloader reverts if it reboots before being marked valid.
 - **✅ 🧪 Health gate, not a timer** ([`logic/health_gate.hpp`](../main/logic/health_gate.hpp)): an

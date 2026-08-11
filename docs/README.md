@@ -108,6 +108,11 @@ The Web Serial installer writes separate manifest parts around `nvs@0x9000`. Dec
 **Erase** option therefore preserves WiFi, MQTT, board and X10A configuration during an update;
 choosing **Erase** deliberately performs a factory reset first.
 
+If Chrome or Edge still marks a port **paired** after the installer dialog is closed, use
+**Release serial port** below the install action. It appears only when this site already has a
+granted port, refuses to interrupt an active flash, and removes the site's permission with the
+browser's `SerialPort.forget()` API.
+
 > **Deployment note:** the currently published `1.0.13` release manifest predates the sparse-part
 > plan and still flashes one merged image at offset 0. Do not use that release installer when the
 > existing configuration must survive. The development feed is already sparse; remove this warning
