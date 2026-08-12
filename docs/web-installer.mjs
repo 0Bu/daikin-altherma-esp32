@@ -3,6 +3,7 @@ const CDC_PRODUCT_IDS = new Set([0x0002, 0x0003, 0x1001, 0x1002, 0x1003]);
 const MAX_MONITOR_CHARS = 100000;
 const DEVICE_PROBE_TIMEOUT_MS = 10000;
 const TRANSPORT_CLEANUP_TIMEOUT_MS = 2000;
+const ANSI_CONTROL_SEQUENCE = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function errorWithName(name, message) {
@@ -13,6 +14,35 @@ function errorWithName(name, message) {
 
 function errorMessage(error) {
   return error && typeof error.message === "string" ? error.message : String(error);
+}
+
+export function stripSerialAnsi(text) {
+  return String(text || "").replace(ANSI_CONTROL_SEQUENCE, "");
+}
+
+export function serialLogLevel(line) {
+  const plain = stripSerialAnsi(line).trimStart();
+  if (/^E\s+\(/.test(plain)) return "error";
+  if (/^W\s+\(/.test(plain)) return "warning";
+  return "info";
+}
+
+export function splitSerialChunk(pending, text, flush = false) {
+  const combined = `${pending || ""}${text || ""}`;
+  // A CR/LF pair may be split across two Web Serial reads. Hold a trailing CR until the next chunk
+  // so it remains one line ending instead of becoming an empty line followed by LF.
+  const holdTrailingCr = !flush && combined.endsWith("\r");
+  const source = holdTrailingCr ? combined.slice(0, -1) : combined;
+  const parts = source.replace(/\r\n?/g, "\n").split("\n");
+  let nextPending = parts.pop() || "";
+  if (holdTrailingCr) nextPending += "\r";
+
+  const lines = parts.map((line) => ({ text: line, terminated: true }));
+  if (flush && nextPending) {
+    lines.push({ text: nextPending, terminated: false });
+    nextPending = "";
+  }
+  return { lines, pending: nextPending };
 }
 
 async function withTimeout(operation, milliseconds, timeoutError) {
@@ -280,6 +310,7 @@ export function attachWebInstaller({
   let manifest = null;
   let monitorReader = null;
   let monitorLoop = null;
+  let monitorPendingLine = "";
   let busy = false;
   const serialSupported = Boolean(
     serial && typeof serial.requestPort === "function" && globalThis.isSecureContext
@@ -291,11 +322,28 @@ export function attachWebInstaller({
     pageStatus.textContent = message || "";
   };
 
-  const appendMonitor = (text) => {
-    if (!text) return;
-    monitorOutput.textContent += text;
-    if (monitorOutput.textContent.length > MAX_MONITOR_CHARS) {
-      monitorOutput.textContent = monitorOutput.textContent.slice(-MAX_MONITOR_CHARS);
+  const appendRenderedMonitorLine = ({ text, terminated }) => {
+    const line = monitorOutput.ownerDocument.createElement("span");
+    const level = serialLogLevel(text);
+    line.className = `installer-monitor-line installer-monitor-line-${level}`;
+    line.textContent = `${stripSerialAnsi(text)}${terminated ? "\n" : ""}`;
+    monitorOutput.append(line);
+  };
+
+  const appendMonitor = (text, { flush = false } = {}) => {
+    if (!text && !flush) return;
+    const parsed = splitSerialChunk(monitorPendingLine, text, flush);
+    monitorPendingLine = parsed.pending;
+    parsed.lines.forEach(appendRenderedMonitorLine);
+
+    if (monitorOutput.textContent.length + monitorPendingLine.length > MAX_MONITOR_CHARS) {
+      // Trim in batches so a busy UART does not force a full DOM rebuild on every following chunk.
+      const keep = Math.floor(MAX_MONITOR_CHARS * 0.8);
+      const retained = `${monitorOutput.textContent}${stripSerialAnsi(monitorPendingLine)}`.slice(-keep);
+      monitorOutput.replaceChildren();
+      const reparsed = splitSerialChunk("", retained);
+      monitorPendingLine = reparsed.pending;
+      reparsed.lines.forEach(appendRenderedMonitorLine);
     }
     monitorOutput.scrollTop = monitorOutput.scrollHeight;
   };
@@ -377,7 +425,7 @@ export function attachWebInstaller({
             if (done) break;
             appendMonitor(decoder.decode(value, { stream: true }));
           }
-          appendMonitor(decoder.decode());
+          appendMonitor(decoder.decode(), { flush: true });
         } catch (error) {
           if (monitorReader === reader) appendStatusLine(`Serial monitor stopped: ${errorMessage(error)}`);
         } finally {

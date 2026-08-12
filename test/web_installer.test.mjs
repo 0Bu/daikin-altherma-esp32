@@ -11,7 +11,10 @@ import {
   probeDevice,
   resetConnectedDevice,
   resetToUserFirmware,
-  selectManifestBuild
+  serialLogLevel,
+  selectManifestBuild,
+  splitSerialChunk,
+  stripSerialAnsi
 } from "../docs/web-installer.mjs";
 
 const manifest = {
@@ -67,6 +70,39 @@ test("firmware parts resolve relative to the manifest and preserve offsets", asy
   assert.equal(seen[0].options.cache, "no-store");
   assert.equal(parts[0].address, 0x20000);
   assert.deepEqual(Array.from(parts[0].data), [1, 2, 3]);
+});
+
+test("serial log parsing preserves line endings across chunks and classifies IDF levels", () => {
+  const first = splitSerialChunk("", "\x1b[0;33mW (7700) uart: pin busy\r");
+  assert.deepEqual(first.lines, []);
+  assert.equal(first.pending, "\x1b[0;33mW (7700) uart: pin busy\r");
+
+  const second = splitSerialChunk(
+    first.pending,
+    "\nE (8340) uart: failed\nI (9000) diag: continuing"
+  );
+  assert.deepEqual(second.lines, [
+    { text: "\x1b[0;33mW (7700) uart: pin busy", terminated: true },
+    { text: "E (8340) uart: failed", terminated: true }
+  ]);
+  assert.equal(second.pending, "I (9000) diag: continuing");
+  assert.equal(serialLogLevel(second.lines[0].text), "warning");
+  assert.equal(serialLogLevel(second.lines[1].text), "error");
+  assert.equal(serialLogLevel(second.pending), "info");
+  assert.equal(stripSerialAnsi(second.lines[0].text), "W (7700) uart: pin busy");
+
+  assert.deepEqual(splitSerialChunk(second.pending, "", true), {
+    lines: [{ text: "I (9000) diag: continuing", terminated: false }],
+    pending: ""
+  });
+});
+
+test("diag console strips caller line endings without changing ring or syslog bytes", () => {
+  const source = fs.readFileSync(new URL("../main/diag_log.cpp", import.meta.url), "utf8");
+  assert.match(source, /syslog_send\(line, total\);/);
+  assert.match(source, /while \(console_total > 0[\s\S]*?line\[console_total - 1\] == '\\n'[\s\S]*?line\[console_total - 1\] == '\\r'/);
+  assert.match(source, /ESP_LOGI\("diag", "%\.\*s", console_total, line\);/);
+  assert.doesNotMatch(source, /ESP_LOGI\("diag", "%\.\*s", total, line\);/);
 });
 
 function fakeEsptool(chipFamily = "ESP32-S3") {
@@ -252,6 +288,8 @@ test("the published page keeps the monitor toggle in the connection tile and pin
   assert.match(html, /\.installer-device-monitor-value\s*\{[^}]*gap:14px;/s);
   assert.match(html, /\.installer-monitor-output\s*\{[^}]*overflow-x:auto;[^}]*white-space:pre;[^}]*overflow-wrap:normal;/s);
   assert.doesNotMatch(html, /\.installer-monitor-output\s*\{[^}]*white-space:pre-wrap;/s);
+  assert.match(html, /\.installer-monitor-line-warning\s*\{[^}]*color:#F2A444;/s);
+  assert.match(html, /\.installer-monitor-line-error\s*\{[^}]*color:#FF6B6B;/s);
   assert.match(html, /esptool-js@0\.6\.1\/\+esm/);
   assert.doesNotMatch(html, /esp-web-install-button/);
 });
