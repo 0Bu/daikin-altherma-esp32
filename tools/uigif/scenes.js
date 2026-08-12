@@ -119,7 +119,8 @@ const DEMO = (() => {
   // "ON"/"OFF" text here silently produced a plausible-looking but WRONG recording: `vOn` returned
   // false for every flag, so the 3-way valve pointed at the heating circuit during a hot-water
   // charge and no water-side flow animated at all.
-  const B = (label, on, reg) => ({ label, value: on ? "1" : "0", unit: "", reg, binary: true });
+  const B = (label, on, reg, extra = {}) =>
+    ({ label, value: on ? "1" : "0", unit: "", reg, binary: true, ...extra });
 
   // Rows that never change between scenes (identity + the always-live hydronic bits).
   const base = (o) => [
@@ -158,21 +159,23 @@ const DEMO = (() => {
     R("Water pressure", o.wp, "bar", 0x62),
     R("Refrigerant pressure sensor", o.rp, "bar", 0x62),
     R("Water pump signal (0:max-100:stop)", o.pumpSig, "", 0x62),
-    B("Water pump operation", o.pumpOn, 0x60),
-    B("3way valve(On:DHW_Off:Space)", o.valveDhw, 0x60),
-    B("2way valve(On:Heat_Off:Cool)", o.valve2On, 0x60),
-    B("Water flow switch", Number(o.flow) > 1, 0x60),
+    B("Water pump operation", o.pumpOn, 0x60, { concept: "pump_running" }),
+    B("3way valve(On:DHW_Off:Space)", o.valveDhw, 0x60,
+      { concept: "valve_dhw", binary_semantic: "valve_dhw" }),
+    B("2way valve(On:Heat_Off:Cool)", o.valve2On, 0x60,
+      { concept: "valve_heat", binary_semantic: "valve_heat" }),
+    B("Water flow switch", Number(o.flow) > 1, 0x60, { concept: "water_flow_switch" }),
     B("Thermostat ON/OFF", o.thermo, 0x60),
-    B("Space heating Operation ON/OFF", o.spaceOn, 0x62),
-    B("BUH Step1", false, 0x60),
-    B("BUH Step2", false, 0x60),
+    B("Space heating Operation ON/OFF", o.spaceOn, 0x62, { concept: "space_op" }),
+    B("BUH Step1", false, 0x60, { concept: "buh_step1" }),
+    B("BUH Step2", false, 0x60, { concept: "buh_step2" }),
     // The DHW tank's immersion heater. One scene switches it on to exercise the permanent orange
     // pill; the other scenes keep the same row explicitly OFF so the light-grey state is visible.
     // COP is deliberately blocked while it runs because its separate electrical heat has no power
     // measurement that can be paired with the PHE boundaries.
-    B("BSH", !!o.bshOn, 0x60),
-    B("Defrost Operation", o.defrost, 0x10),
-    B("Silent Mode", o.quiet, 0x60),
+    B("BSH", !!o.bshOn, 0x60, { concept: "bsh_state" }),
+    B("Defrost Operation", o.defrost, 0x10, { concept: "defrost_state" }),
+    B("Silent Mode", o.quiet, 0x60, { concept: "quiet_state" }),
     R("Current measured by CT sensor of L1", o.ct, "A", 0x63),
     R("Current measured by CT sensor of L2", "0.0", "A", 0x63),
     R("Current measured by CT sensor of L3", "0.0", "A", 0x63),
@@ -293,6 +296,8 @@ const DEMO = (() => {
             bssid: "02:00:00:00:00:02", mac: "02:00:00:00:00:01", std: "Wi-Fi 5", rolled_back: false },
     mqtt: { configured: true, connected: true, tls: false, has_creds: true,
             broker: "mqtt://203.0.113.26:1883", error: "" },
+    circulation_source: { configured: true, name: "DHW circulation pump", has_value: true,
+                          fresh: true, state: "off", age_s: 3, power_w: 0 },
     syslog: { configured: false, resolved: false, reachable: false, host: "", port: 514, error: "" },
     ota: { channel: "release" },
     ntp: { server: "pool.ntp.org", synced: true, time: "2026-01-18T07:42:11Z" },

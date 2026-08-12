@@ -61,7 +61,8 @@ std::string open_meteo_url(const Config& cfg) {
     return "https://api.open-meteo.com/v1/forecast?latitude=" +
            weather_coordinate_format_e6(cfg.weather_latitude_e6) + "&longitude=" +
            weather_coordinate_format_e6(cfg.weather_longitude_e6) +
-           "&hourly=temperature_2m,shortwave_radiation&models=icon_seamless"
+           "&hourly=temperature_2m,relative_humidity_2m,surface_pressure,shortwave_radiation"
+           "&models=icon_seamless"
            "&forecast_hours=6&timeformat=unixtime&timezone=GMT&temperature_unit=celsius";
 }
 
@@ -166,21 +167,27 @@ bool parse_forecast(const std::string& payload, int64_t fetched_unix_s,
         // Fail closed if the provider ever changes units despite the explicit query parameters.
         if (!json_unit(units, "time", "unixtime") ||
             !json_unit(units, "temperature_2m", "°C") ||
+            !json_unit(units, "relative_humidity_2m", "%") ||
+            !json_unit(units, "surface_pressure", "hPa") ||
             !json_unit(units, "shortwave_radiation", "W/m²")) {
             error = "unit_mismatch";
             break;
         }
         std::vector<int64_t> times;
         std::vector<double> temperature;
+        std::vector<double> humidity;
+        std::vector<double> pressure;
         std::vector<double> shortwave;
         if (!json_time_array(hourly, times) ||
             !json_number_array(hourly, "temperature_2m", temperature) ||
+            !json_number_array(hourly, "relative_humidity_2m", humidity) ||
+            !json_number_array(hourly, "surface_pressure", pressure) ||
             !json_number_array(hourly, "shortwave_radiation", shortwave)) {
             error = "payload_shape_invalid";
             break;
         }
         const WeatherValidation validation = open_meteo_derive_forecast(
-            times, temperature, shortwave, fetched_unix_s, sample);
+            times, temperature, humidity, pressure, shortwave, fetched_unix_s, sample);
         if (!validation.valid) { error = validation.reason; break; }
         ok = true;
     } while (false);
@@ -203,6 +210,7 @@ void set_disabled() {
     s_status.configured = false;
     s_status.fetching = false;
     s_status.available = false;
+    s_status.hourly_count = 0;
     s_status.latitude.clear();
     s_status.longitude.clear();
     s_status.state = "disabled";
@@ -231,6 +239,7 @@ void weather_task(void*) {
                 if (s_status.latitude != latitude || s_status.longitude != longitude) {
                     s_status.has_value = false;
                     s_status.available = false;
+                    s_status.hourly_count = 0;
                 }
                 s_status.configured = true;
                 s_status.latitude = latitude;
@@ -290,6 +299,11 @@ void weather_task(void*) {
                     s_status.decision_unix_s = sample.decision_unix_s;
                     s_status.outdoor_mean_2h_c = sample.outdoor_mean_2h_c;
                     s_status.solar_energy_2h_wh_m2 = sample.solar_energy_2h_wh_m2;
+                    s_status.hourly_count = sample.hourly_count;
+                    s_status.hourly_unix_s = sample.hourly_unix_s;
+                    s_status.hourly_temperature_c = sample.hourly_temperature_c;
+                    s_status.hourly_humidity_pct = sample.hourly_humidity_pct;
+                    s_status.hourly_pressure_hpa = sample.hourly_pressure_hpa;
                     s_status.successes++;
                     updated = true;
                 }

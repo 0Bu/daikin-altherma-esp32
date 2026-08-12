@@ -332,6 +332,12 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(standby2wv.value, "0",
     "the standby recording reproduces the reported Heating-selected / 2WV-output-OFF split");
   assert.equal(standby2wv.binary, true, "the demo crosses the real binary presentation boundary");
+  assert.equal(standby2wv.concept, "valve_heat",
+    "the demo crosses the same structural history boundary as the real /values response");
+  for (const concept of ["defrost_state", "quiet_state", "bsh_state", "buh_step1", "buh_step2",
+                         "valve_dhw", "valve_heat", "water_flow_switch"])
+    assert.ok(demoContext.__standbyValues.some((r) => r.concept === concept),
+      `the demo keeps ${concept}'s current state attached to its categorical history`);
 }
 
 // Quiet is the outdoor-unit state with an exact second source. X10A leads disagreements; HomeHub

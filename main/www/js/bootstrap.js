@@ -139,7 +139,7 @@ function wireTrendScrub(gv) {
   gv.addEventListener("keydown", (e) => {
     const plot = e.target.closest("[data-hist]");
     if (!plot) return;
-    const n = +plot.dataset.n;
+    const n = scrubCount(plot);
     const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
     if (!step && !["Home", "End", "Escape", "Enter", " "].includes(e.key)) return;
     e.preventDefault();                       // arrows would otherwise scroll the page

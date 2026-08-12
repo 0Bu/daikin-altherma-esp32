@@ -690,6 +690,12 @@ Body, ordered:
    feature — long-term analysis belongs to Home Assistant/Grafana, which hold the real series across
    reboots and years. So: no card, no dashboard-level charting, no range picker. One sparkline, in the
    panel of the row it belongs to, for a day at a 5-minute raster.
+   **Every numeric trend uses one visual grammar:** a light filled area with a darker line exactly on
+   its upper edge. Two-source comparisons, ENV III's three local-scale measurements and the three
+   forecast continuations keep that same construction with reduced opacity, so overlaps stay visible
+   instead of becoming an opaque new chart type. Gaps still split both area and line; a lone sample
+   remains a dot because it has no measured interval to fill. Categorical component histories remain
+   labelled state tracks rather than being misrepresented as numeric areas.
    **In the inspector it is the same chart, for the reading the pill RESOLVED.** For an unpaired
    same-stack fallback, the exact X10A row still decides it: while the high side reads the
    refrigerant sensor instead of the frozen HP transducer, the headline, mono source line and chart
