@@ -865,7 +865,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    already hides part of the plot. Twenty pixels keep the idle layout compact; syncGraphTipSpace()
    temporarily grows the strip to the bubble's real height for multi-line/state readouts. */
 .vhist-graph { --vhist-tip-base: 20px; position: relative;
-  padding-top: max(var(--vhist-tip-base), var(--vhist-tip-space, 0px)); }
+  padding-top: max(var(--vhist-tip-base), var(--vhist-tip-space, 0px));
+  /* The bubble lives in this reserved strip. iOS must be able to start the same horizontal scrub
+     there as on the plot while a vertical gesture remains ordinary page scrolling. */
+  touch-action: pan-y; }
 .vhist-plot { position: relative; height: 72px; }
 /* pan-y hands VERTICAL gestures back to the page (the user must still be able to scroll past the
    chart) while horizontal movement becomes a scrub. Claiming both axes would trap page scrolling
@@ -910,7 +913,11 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    rule as the live one that is scrubbed. */
 .vhist-tip { position: absolute; top: 0; --tip-p: 0; white-space: pre-line;
   left: calc(var(--tip-p) * 1%); transform: translateX(calc(var(--tip-p) * -1%));
-  pointer-events: none; font-size: 12px; color: var(--fg); background: var(--card);
+  pointer-events: none; font-size: 12px; color: var(--fg);
+  /* Transparency belongs only to the surface, never to the text. The small blur preserves contrast
+     in both themes while the chart/card remains visibly present behind the readout. */
+  background: color-mix(in srgb, var(--card) 76%, transparent);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
   width: max-content; max-width: 100%; line-height: 1.35;
   border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
   box-shadow: 0 1px 3px rgba(0,0,0,.10); }

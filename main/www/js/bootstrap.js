@@ -37,8 +37,9 @@ function wire() {
   // explainer accordion.
   $("valueGroups").addEventListener("click", (e) => {
     // A scrub that ended on the plot must not fall through to the accordion header and collapse the
-    // very panel the user was reading.
-    if (e.target.closest("[data-hist]")) return;
+    // very panel the user was reading. On touch screens the gesture may start on the tooltip strip
+    // above the plot, so the whole graph is part of this guard rather than only [data-hist].
+    if (e.target.closest(".vhist-graph")) return;
     const desc = e.target.closest("[data-desc]");
     if (desc) toggleDesc(desc);
   });
@@ -86,16 +87,26 @@ function wire() {
 }
 
 // Pointer + keyboard scrubbing for every trend plot inside `gv`.
+// A phone user naturally starts a drag on the visible tooltip as well as on the coloured plot below
+// it. The tooltip itself has pointer-events:none, so that start targets .vhist-graph. Resolve both
+// surfaces to the one plot they control; this also keeps iOS useful when pointer capture is refused
+// and later events continue to target the graph rather than [data-hist].
+function trendPlotFromTarget(target) {
+  if (!target || typeof target.closest !== "function") return null;
+  return target.closest("[data-hist]") ||
+    target.closest(".vhist-graph")?.querySelector("[data-hist]") || null;
+}
+
 function wireTrendScrub(gv) {
   gv.addEventListener("pointermove", (e) => {
-    const plot = e.target.closest("[data-hist]");
+    const plot = trendPlotFromTarget(e.target);
     if (!plot) return;
     if (S.scrub && S.scrub !== plot.dataset.hist) return;
     if (S.scrub) scrubArm(plot);              // a live drag keeps re-arming the watchdog
     scrubMove(plot, scrubIndex(plot, e.clientX));
   });
   gv.addEventListener("pointerdown", (e) => {
-    const plot = e.target.closest("[data-hist]");
+    const plot = trendPlotFromTarget(e.target);
     if (!plot) return;
     S.scrub = plot.dataset.hist;
     scrubArm(plot);
@@ -105,7 +116,7 @@ function wireTrendScrub(gv) {
   // The authoritative end of a captured drag: fires on pointerup, on pointercancel AND when the
   // element is removed from the DOM — the one exit the explicit handlers below cannot see.
   gv.addEventListener("lostpointercapture", (e) => {
-    const plot = e.target.closest("[data-hist]");
+    const plot = trendPlotFromTarget(e.target);
     if (plot) scrubEnd(plot);
   });
   // A mouse leaving clears the readout; a touch ends on pointerup/cancel. pointerout covers the
@@ -115,14 +126,14 @@ function wireTrendScrub(gv) {
   // INSIDE the same graph and must not immediately collapse the tooltip into a hover/flicker loop.
   gv.addEventListener("pointerout", (e) => {
     const graph = e.target.closest(".vhist-graph");
-    const plot = e.target.closest("[data-hist]") || graph?.querySelector("[data-hist]");
+    const plot = trendPlotFromTarget(e.target);
     if (!plot || S.scrub) return;
     if (e.relatedTarget && plot.parentElement.contains(e.relatedTarget)) return;
     scrubEnd(plot);
   });
   for (const ev of ["pointerup", "pointercancel"]) {
     gv.addEventListener(ev, (e) => {
-      const plot = e.target.closest("[data-hist]");
+      const plot = trendPlotFromTarget(e.target);
       if (!plot) return;
       // A release ON the plot PINS the sample under it (pointercancel does not — a gesture the
       // browser took away is not a choice the user made). The transient crosshair is torn down
@@ -140,7 +151,7 @@ function wireTrendScrub(gv) {
   // readout. Without this the trend would be mouse/touch-only — the one control on the dashboard
   // that a keyboard couldn't reach.
   gv.addEventListener("keydown", (e) => {
-    const plot = e.target.closest("[data-hist]");
+    const plot = trendPlotFromTarget(e.target);
     if (!plot) return;
     const n = scrubCount(plot);
     const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
@@ -157,7 +168,7 @@ function wireTrendScrub(gv) {
     scrubMove(plot, +plot.dataset.cur);
   });
   gv.addEventListener("focusout", (e) => {
-    const plot = e.target.closest("[data-hist]");
+    const plot = trendPlotFromTarget(e.target);
     if (plot) { delete plot.dataset.cur; scrubEnd(plot); }
   });
 }
@@ -174,7 +185,7 @@ function wireRestOfApp() {
   $("settingsCards").addEventListener("click", (e) => {
     // A scrub that ended on a memory row's chart must not fall through to the accordion header and
     // collapse the panel the user was reading — the same guard #valueGroups carries.
-    if (e.target.closest("[data-hist]")) return;
+    if (e.target.closest(".vhist-graph")) return;
     const desc = e.target.closest("[data-desc]");
     if (desc) return toggleDesc(desc);        // memory rows and Hardware's left action expand
     const act = e.target.closest("[data-act]");
