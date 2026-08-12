@@ -805,7 +805,8 @@ const boardLedRgbSwatches = ["led-off", "led-blue", "led-yellow", "led-green", "
 
 // Render the legend for the SAVED LED backend in the explanation tongue. The editor deliberately
 // contains controls only; its unsaved selection must not replace the meaning of the active hardware.
-// No configured LED means no legend, matching the explicit "None" selection in the editor.
+// No configured LED means no legend, matching the explicit "None" selection in the editor. The
+// points stay static: colour helps scanning, while the adjacent text carries the complete pattern.
 function boardLedLegend(b) {
   if (b.led_gpio == null || b.led_gpio < 0) return "";
   const kind = b.led_type === 1 ? "rgb" : "gpio";
@@ -1163,10 +1164,11 @@ function checkupCardHtml() {
 // entirely (bus-level detail nobody edits from here) and the IP address lives in the dashboard
 // header (renderHeaderMeta) — it is board identity, not a per-row WiFi fact.
 //
-// connLinks() derives the five rows' state ONCE and both consumers read it: the rows themselves and
-// the Settings menu entry + header dot that summarise them a level up. Re-deriving "is this link
-// healthy" for the summary is exactly how a menu ends up claiming everything is fine while the row
-// behind it is red.
+// connLinks() derives the network/service rows' state ONCE and both consumers read it: the rows
+// themselves and the header dot that summarises them a level up. Re-deriving "is this link healthy"
+// for the summary is exactly how a menu ends up claiming everything is fine while the row behind it
+// is red. X10A and ENV III live on their own Settings/dashboard surfaces, so the aggregate below
+// adds those two independent links from the same red-state facts their own renderers use.
 function modbusErrorText(mb) {
   if (!mb || !mb.error) return "";
   const code = String(mb.error_code || "");
@@ -1317,6 +1319,29 @@ function connectionsHtml() {
 // the marker would stop meaning anything. A disabled link (neutral, no class) is a choice, not a fault.
 const connDown = () => connLinks().filter((l) => l.cls === "err");
 
+// One status vocabulary for both consumers of the optional sensor link: its schematic pill and the
+// Settings alert aggregate. Keeping the transient first sample distinct here prevents either
+// surface from calling it a fault while the other still says "collecting".
+function env3ConnectionTone(env) {
+  return env?.fresh === true ? "ok" : env?.error === "collecting" ? "warn" : "err";
+}
+
+// Every broken configured link that must raise the gear's attention marker. X10A is the permanently
+// expected heat-pump link and its Protocol-card value is red whenever `connected` is false. ENV III
+// is optional: disabled/unsupported is neutral, and the short boot-time `collecting` phase is the
+// same transient warning used by its schematic pill. Once configured, an unavailable or stale whole
+// sample is a real failure and therefore joins the red network/service rows from connDown().
+function settingsConnectionsDown() {
+  const down = connDown();
+  const hp = S.status?.hp;
+  if (hp?.connected === false) down.push({ label: "X10A", cls: "err" });
+
+  const env = S.status?.env3;
+  if (env?.enabled === true && env3ConnectionTone(env) === "err")
+    down.push({ label: "ENV III", cls: "err" });
+  return down;
+}
+
 // ── Settings screen (behind the header gear) ─────────────────────────────────────────────────
 // The whole configuration on one screen, no menu level in between: Connections, ESP32 / Protocol /
 // Firmware, then the always-visible heating-curve diagnosis at the bottom, rendered together by
@@ -1373,12 +1398,12 @@ function otaSnapshotCardHtml() {
   return vcard(t("ota.snapshot_title"), settingsValueInfoRow("ota", "snapshot",
     t("ota.snapshot_label"), t("ota.snapshot_value"), "warn", t("ota.snapshot_help")));
 }
-// The gear's attention marker. The connection rows live behind it now, so a broker that stopped
-// answering would otherwise be invisible from the dashboard — the screen the user is on all day.
-// The dot is never the sole carrier of the fact: the button's accessible name spells it out, which
-// is also what a screen reader announces (DESIGN.md §9).
+// The gear's attention marker. Network/service rows live behind it, while X10A and ENV III report on
+// separate surfaces; without this aggregate, a failed configured link can be invisible from the
+// dashboard — the screen the user is on all day. The dot is never the sole carrier of the fact: the
+// button's accessible name spells it out, which is also what a screen reader announces (§9).
 function renderSettingsDot() {
-  const n = connDown().length;
+  const n = settingsConnectionsDown().length;
   $("settingsDot").hidden = n === 0;
   $("btnSettings").setAttribute("aria-label", n ? t("nav.settings_alert", n) : t("nav.settings"));
 }

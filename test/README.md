@@ -75,6 +75,11 @@ subtle text underneath it and in the accessible name, and unknown future codes f
 human-readable API prose. It also pins the user-intent boundary: an empty address is disabled, while
 a non-empty address whose task/link is down is visibly offline. Discovery does not create a boot mode.
 
+`node test/test_ui_settings_connection_alert.mjs` executes the production Settings-button alert
+aggregate. It keeps disabled optional links neutral, ignores ENV III's transient first collection,
+and requires failed or stale configured ENV III, X10A and HomeHub links to contribute independently
+to the red marker and its localised accessible connection count.
+
 `node test/test_ui_mqtt_status.mjs` executes the production MQTT Connections row together with its
 real German/English dictionary. A disconnected configured broker keeps its endpoint as the primary
 value and shows the bounded runtime cause as subtle error text underneath and in the accessible name.
@@ -132,6 +137,11 @@ reversed order before persistence, an explicit disable payload, and three live/h
 expanded Hardware infobox. The Settings renderer additionally proves that concrete Atom/XIAO X10A
 selectors contain only board-exposed, currently unreserved pins, while Custom retains its generic
 chip-safe compatibility behavior.
+
+`node test/test_ui_board_hardware_details.mjs` binds the permanent Hardware infobox to the firmware's
+eight-phase LED table for both RGB and GPIO indicators. Besides bilingual wording and saved pin/backend
+facts, it pins static, first-line-aligned colour points beside the complete slow, fast, medium, strobe
+and double-flash descriptions; the points deliberately do not animate.
 
 `node test/test_ui_checkup.mjs` executes the production plant-diagnostics card renderer without a
 browser. It pins status-only collapsed rows, values and assessments in the row explainers, the

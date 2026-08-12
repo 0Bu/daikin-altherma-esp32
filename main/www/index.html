@@ -14,9 +14,10 @@
 
   <!-- ═══ HEADER · dashboard ═══
        The gear on the right is the ONLY way off the dashboard: it opens #viewSettings, which swaps
-       this header for #hdrBack. #settingsDot marks a connection that is DOWN — the Connections rows
-       moved into Settings, so without it a broken MQTT/Syslog link would be invisible from the
-       dashboard entirely (renderSettingsDot; the button's aria-label says it in words too, §9). -->
+       this header for #hdrBack. #settingsDot marks any configured connection that is DOWN — the
+       Connections rows moved into Settings, while X10A and ENV III report on their own surfaces, so
+       without the aggregate a failed link can be invisible from the dashboard entirely
+       (renderSettingsDot; the button's aria-label says it in words too, §9). -->
   <header class="hdr hdr-dash" id="hdrDash">
     <!-- Brand mark: the supplied three-blade outdoor-fan silhouette, colour-inverted for the
          dashboard. It is a static 96 px raster embedded by the firmware and displayed at 48 px,
