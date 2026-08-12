@@ -1,6 +1,7 @@
 const ESPRESSIF_USB_VENDOR_ID = 0x303a;
 const CDC_PRODUCT_IDS = new Set([0x0002, 0x0003, 0x1001, 0x1002, 0x1003]);
 const MAX_MONITOR_CHARS = 100000;
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function errorWithName(name, message) {
   const error = new Error(message);
@@ -20,10 +21,10 @@ function terminalAdapter(onLog) {
   };
 }
 
-async function settleTransport(transport, loader, reset) {
-  if (reset && loader && loader.chip && typeof loader.after === "function") {
+async function settleTransport(transport, loader, resetMode) {
+  if (resetMode && loader && loader.chip && typeof loader.after === "function") {
     try {
-      await loader.after("hard_reset");
+      await loader.after(resetMode);
     } catch (_error) {
       // Cleanup still has to close the port if a reset signal is not supported by the adapter.
     }
@@ -34,6 +35,32 @@ async function settleTransport(transport, loader, reset) {
     } catch (_error) {
       // The device can disappear during its reset. In that case the browser already closed it.
     }
+  }
+}
+
+export async function resetToUserFirmware(port, delay = sleep) {
+  if (!port || typeof port.setSignals !== "function") {
+    throw new Error("This serial adapter cannot reset the ESP automatically.");
+  }
+
+  // Keep IO0 high while EN is pulsed low, then release EN. This is the same
+  // firmware-mode reset used by ESPConnect and avoids leaving the chip in the
+  // flasher stub after the compatibility probe.
+  await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+  await delay(100);
+  await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+  await delay(250);
+}
+
+export async function resetConnectedDevice(port, { keepOpen = false, delay = sleep } = {}) {
+  if (!port) throw new Error("No serial device is connected.");
+  const wasOpen = Boolean(port.readable || port.writable);
+
+  if (!wasOpen) await port.open({ baudRate: 115200, bufferSize: 8192 });
+  try {
+    await resetToUserFirmware(port, delay);
+  } finally {
+    if (!wasOpen && !keepOpen && (port.readable || port.writable)) await port.close();
   }
 }
 
@@ -118,7 +145,9 @@ export async function probeDevice({
     }
     return { chipFamily, build };
   } finally {
-    await settleTransport(transport, loader, true);
+    // The compatibility probe runs the flasher stub. Explicitly hand control
+    // back to the installed application before releasing the serial port.
+    await settleTransport(transport, loader, "soft_reset");
   }
 }
 
@@ -182,12 +211,12 @@ export async function flashDevice({
       }
     });
 
-    onState({ stage: "restarting", percentage: 100, message: "Restarting device" });
-    await loader.after("hard_reset");
+    onState({ stage: "restarting", percentage: 100, message: "Starting firmware" });
+    await loader.after("soft_reset");
     completed = true;
     return { chipFamily, build };
   } finally {
-    await settleTransport(transport, loader, !completed);
+    await settleTransport(transport, loader, completed ? undefined : "soft_reset");
   }
 }
 
@@ -204,6 +233,7 @@ export function attachWebInstaller({
   const element = (id) => root.querySelector(`#${id}`);
   const connectButton = element("connect-button");
   const disconnectButton = element("disconnect-button");
+  const resetButton = element("reset-button");
   const installButton = element("install-button");
   const monitorButton = element("serial-monitor-button");
   const connectionLabel = element("connection-label");
@@ -312,9 +342,6 @@ export function attachWebInstaller({
       const reader = selectedPort.readable.getReader();
       const decoder = new TextDecoder();
       monitorReader = reader;
-      monitorLive.textContent = "Live";
-      monitorLive.dataset.state = "live";
-      appendStatusLine("Serial monitor started at 115200 baud");
 
       monitorLoop = (async () => {
         try {
@@ -331,6 +358,17 @@ export function attachWebInstaller({
           if (monitorReader === reader) monitorReader = null;
         }
       })();
+
+      appendStatusLine("Resetting ESP32-S3 into normal firmware mode");
+      try {
+        await resetToUserFirmware(selectedPort);
+      } catch (error) {
+        appendStatusLine(`Automatic reset unavailable: ${errorMessage(error)} Press RESET once to see boot output.`);
+      }
+
+      monitorLive.textContent = "Live";
+      monitorLive.dataset.state = "live";
+      appendStatusLine("Serial monitor started at 115200 baud");
     } catch (error) {
       monitorLive.textContent = "Error";
       monitorLive.dataset.state = "error";
@@ -346,6 +384,7 @@ export function attachWebInstaller({
     connectionLabel.textContent = "Not connected";
     connectButton.disabled = !manifest || !serialSupported;
     disconnectButton.disabled = true;
+    resetButton.disabled = true;
     installButton.disabled = true;
     monitorButton.disabled = true;
     deviceValue.textContent = "—";
@@ -390,6 +429,7 @@ export function attachWebInstaller({
       root.dataset.connected = "true";
       connectionLabel.textContent = `${result.chipFamily} connected`;
       disconnectButton.disabled = false;
+      resetButton.disabled = false;
       installButton.disabled = !manifest;
       monitorButton.disabled = false;
       markSteps(2);
@@ -419,6 +459,7 @@ export function attachWebInstaller({
     root.dataset.finished = "false";
     installButton.disabled = true;
     disconnectButton.disabled = true;
+    resetButton.disabled = true;
     monitorButton.disabled = true;
     markSteps(3);
     setProgress("Checking device", 0);
@@ -458,12 +499,41 @@ export function attachWebInstaller({
       const connected = Boolean(selectedPort && root.dataset.connected === "true");
       installButton.disabled = !connected;
       disconnectButton.disabled = !connected;
+      resetButton.disabled = !connected;
+      monitorButton.disabled = !connected;
+    }
+  };
+
+  const resetDevice = async () => {
+    if (!selectedPort || busy) return;
+    busy = true;
+    installButton.disabled = true;
+    disconnectButton.disabled = true;
+    resetButton.disabled = true;
+    monitorButton.disabled = true;
+    appendStatusLine("Manual device reset requested");
+    setPageStatus("Resetting ESP32-S3…");
+
+    try {
+      await resetConnectedDevice(selectedPort, { keepOpen: Boolean(monitorReader) });
+      setPageStatus("ESP32-S3 reset. The firmware is starting now.", "success");
+      appendStatusLine("ESP32-S3 reset into normal firmware mode");
+    } catch (error) {
+      setPageStatus(`Reset failed: ${errorMessage(error)}`, "error");
+      appendStatusLine(`Reset failed: ${errorMessage(error)}`);
+    } finally {
+      busy = false;
+      const connected = Boolean(selectedPort && root.dataset.connected === "true");
+      installButton.disabled = !connected;
+      disconnectButton.disabled = !connected;
+      resetButton.disabled = !connected;
       monitorButton.disabled = !connected;
     }
   };
 
   connectButton.addEventListener("click", connect);
   disconnectButton.addEventListener("click", disconnect);
+  resetButton.addEventListener("click", resetDevice);
   installButton.addEventListener("click", install);
   monitorButton.addEventListener("click", async () => {
     if (root.dataset.monitor === "open") await stopMonitor();
@@ -507,5 +577,5 @@ export function attachWebInstaller({
       setPageStatus(`Firmware metadata could not be loaded: ${errorMessage(error)}`, "error");
     });
 
-  return { connect, disconnect, install, startMonitor, stopMonitor };
+  return { connect, disconnect, install, resetDevice, startMonitor, stopMonitor };
 }

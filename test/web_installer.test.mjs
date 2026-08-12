@@ -9,6 +9,8 @@ import {
   fetchFirmwareParts,
   flashDevice,
   probeDevice,
+  resetConnectedDevice,
+  resetToUserFirmware,
   selectManifestBuild
 } from "../docs/web-installer.mjs";
 
@@ -86,7 +88,7 @@ function fakeEsptool(chipFamily = "ESP32-S3") {
       calls.push("write");
       options.reportProgress(0, options.fileArray[0].data.length, options.fileArray[0].data.length);
     }
-    async after() { calls.push("reset"); }
+    async after(mode) { calls.push(`reset:${mode}`); }
   }
   return { calls, Transport, Loader };
 }
@@ -102,7 +104,7 @@ test("device probing validates the manifest and always resets and closes the por
   });
 
   assert.equal(result.chipFamily, "ESP32-S3");
-  assert.deepEqual(fake.calls, ["transport", "loader", "main", "flashId", "reset", "disconnect"]);
+  assert.deepEqual(fake.calls, ["transport", "loader", "main", "flashId", "reset:soft_reset", "disconnect"]);
 });
 
 test("flash writes the sparse manifest parts and only erases when explicitly selected", async () => {
@@ -127,13 +129,69 @@ test("flash writes the sparse manifest parts and only erases when explicitly sel
 
   assert.equal(result.chipFamily, "ESP32-S3");
   assert.equal(fake.calls.includes("erase"), false);
-  assert.deepEqual(fake.calls.slice(-3), ["write", "reset", "disconnect"]);
+  assert.deepEqual(fake.calls.slice(-3), ["write", "reset:soft_reset", "disconnect"]);
   assert.equal(states.at(-1).percentage, 100);
+  assert.equal(states.at(-1).message, "Starting firmware");
+});
+
+test("serial monitor resets into user firmware with IO0 high before reading logs", async () => {
+  const calls = [];
+  const port = {
+    async setSignals(signals) { calls.push(signals); }
+  };
+
+  await resetToUserFirmware(port, async (milliseconds) => {
+    calls.push(`wait:${milliseconds}`);
+  });
+
+  assert.deepEqual(calls, [
+    { dataTerminalReady: false, requestToSend: true },
+    "wait:100",
+    { dataTerminalReady: false, requestToSend: false },
+    "wait:250"
+  ]);
+});
+
+test("standalone reset opens a closed port, resets user firmware and releases it again", async () => {
+  const calls = [];
+  const port = {
+    readable: null,
+    writable: null,
+    async open(options) {
+      calls.push(["open", options]);
+      this.readable = {};
+      this.writable = {};
+    },
+    async setSignals(signals) { calls.push(["signals", signals]); },
+    async close() {
+      calls.push(["close"]);
+      this.readable = null;
+      this.writable = null;
+    }
+  };
+
+  await resetConnectedDevice(port, {
+    delay: async (milliseconds) => calls.push(["wait", milliseconds])
+  });
+
+  assert.deepEqual(calls, [
+    ["open", { baudRate: 115200, bufferSize: 8192 }],
+    ["signals", { dataTerminalReady: false, requestToSend: true }],
+    ["wait", 100],
+    ["signals", { dataTerminalReady: false, requestToSend: false }],
+    ["wait", 250],
+    ["close"]
+  ]);
 });
 
 test("the published page keeps the monitor toggle in the connection tile and pins its arrow right", () => {
   const html = fs.readFileSync(new URL("../docs/index.html", import.meta.url), "utf8");
   assert.equal((html.match(/id="serial-monitor-button"/g) || []).length, 1);
+  assert.equal((html.match(/id="reset-button"/g) || []).length, 1);
+  assert.match(html, /<img class="installer-logo" src="\.\/heat-pump-icon\.png" alt="" aria-hidden="true">/);
+  assert.doesNotMatch(html, /<span class="installer-logo"/);
+  assert.match(html, /class="installer-action-row installer-device-actions"[\s\S]*id="install-button"[\s\S]*id="reset-button"[\s\S]*id="disconnect-button"[\s\S]*id="release-serial-port"/);
+  assert.match(html, /\.installer-device-actions\s*\{[^}]*grid-template-columns:/s);
   assert.match(html, /\.installer-monitor-chevron\s*\{[^}]*margin-left:auto;/s);
   assert.match(html, /\.installer-device-monitor-value\s*\{[^}]*gap:14px;/s);
   assert.match(html, /esptool-js@0\.6\.1\/\+esm/);

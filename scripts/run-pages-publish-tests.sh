@@ -203,6 +203,18 @@ check "build rejects a PR number"   "$([ "$rc_build_pr" -ne 0 ] && echo yes || e
 check "build rejects a stray value" "$([ "$rc_build_extra" -ne 0 ] && echo yes || echo no)" "yes"
 check "invalid build created no site" "$([ ! -e "$T/pagebuild/_site" ] && echo yes || echo no)" "yes"
 
+# A valid Pages assembly must publish the exact same fan raster as the firmware dashboard. Keep
+# one canonical source asset under main/www; a hand-drawn installer copy is allowed to drift.
+mkdir -p "$T/pagebuild/docs" "$T/pagebuild/main/www"
+cp docs/index.html docs/serial-port-release.mjs docs/web-installer.mjs "$T/pagebuild/docs/"
+cp main/www/heat_pump_icon.png "$T/pagebuild/main/www/heat_pump_icon.png"
+echo firmware > "$T/pagebuild/dist/app.bin"
+echo '{}' > "$T/pagebuild/dist/manifest.json"
+build_pages; rc_build_valid=$?
+check "valid Pages build succeeds" "$rc_build_valid" "0"
+check "Pages icon matches firmware bytes" \
+      "$(cmp -s main/www/heat_pump_icon.png "$T/pagebuild/_site/heat-pump-icon.png" && echo yes || echo no)" "yes"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "pages publish: all $pass checks passed"

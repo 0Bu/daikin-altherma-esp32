@@ -2,6 +2,7 @@
 # Assemble the GitHub Pages site (the browser installer) into _site/ from the built dist/:
 #   _site/index.html      the installer page (docs/index.html)
 #   _site/*.mjs           local installer behavior modules
+#   _site/heat-pump-icon.png  the same canonical brand mark embedded in the firmware UI
 #   _site/manifest.json   esptool-js installer + OTA manifest
 #   _site/*.bin           sparse installer parts + signed app (OTA) + manual merged image
 #
@@ -36,6 +37,7 @@ esac
 rm -rf "$OUT"; mkdir -p "$OUT"
 
 cp docs/index.html docs/serial-port-release.mjs docs/web-installer.mjs "$OUT/"
+cp main/www/heat_pump_icon.png "$OUT/heat-pump-icon.png"
 cp dist/*.bin "$OUT/"
 cp dist/manifest.json "$OUT/manifest.json"
 
