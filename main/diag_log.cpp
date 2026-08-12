@@ -57,7 +57,15 @@ void diag_printf(const char* fmt, ...) {
     append(line, total);
     if (s_mtx) xSemaphoreGive(s_mtx);
     syslog_send(line, total);
-    ESP_LOGI("diag", "%.*s", total, line);
+    // Callers include the line ending because the ring and syslog stream need it. ESP_LOGI adds its
+    // own line ending, so forwarding that same suffix to the console produced a blank serial line
+    // after every diagnostic record. Strip only the console copy; keep ring/syslog bytes unchanged.
+    int console_total = total;
+    while (console_total > 0 &&
+           (line[console_total - 1] == '\n' || line[console_total - 1] == '\r')) {
+        --console_total;
+    }
+    ESP_LOGI("diag", "%.*s", console_total, line);
 }
 
 void diag_set_verbose(bool on) { s_verbose.store(on, std::memory_order_relaxed); }
