@@ -476,6 +476,10 @@ const STATE_HIST = Object.freeze({
     classify: (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null,
     primary: "modbus", total: "hist.boost_total", run: "hist.state_phase_run",
     compactTooltip: true,
+    compactValueLabel: (v) => {
+      const mode = v / 10;
+      return Number.isInteger(mode) && mode >= 0 && mode <= 3 ? `sg.mode${mode}` : "";
+    },
     none: "hist.boost_none", active: "hist.boost_active", inactive: "hist.boost_inactive",
     aria: "hist.boost_aria",
     // BOOST itself is mode 2, but a Boost inspector that paints modes 0, 1 and 3 as one identical
@@ -1415,6 +1419,7 @@ function scrubMove(plot, i) {
     if (h.id === ENV3_COMBINED_ID) tip.innerHTML = env3ScrubHtml(h, i);
     else tip.textContent = scrubText(h, i);
     tip.style.setProperty("--tip-p", (frac * 100).toFixed(3));
+    syncGraphTipSpace(graph);
     return;
   }
   const measuredFrac = Number.isFinite(+plot.dataset.measuredP)
@@ -1450,6 +1455,32 @@ function scrubMove(plot, i) {
   // unreadable — offsetWidth was read while the previous, edge-squeezed left was still applied, so
   // the clamp saw a 59 px bubble that "already fit" and left it wrapped over the curve.
   tip.style.setProperty("--tip-p", (frac * 100).toFixed(3));
+  syncGraphTipSpace(graph);
+}
+
+// A live or pinned readout is absolutely positioned so it can follow its sample horizontally. Its
+// HEIGHT must still participate in layout: categorical histories can contain two source blocks and
+// are much taller than the compact one-line readout. Reserve exactly the tallest visible bubble plus
+// a small breathing gap; when the bubble disappears CSS falls back to the normal compact spacing.
+// Width is deliberately not measured here — horizontal placement remains the position-only contract
+// documented beside .vhist-tip in style.css.
+const HIST_TIP_GAP_PX = 7;
+function syncGraphTipSpace(graph) {
+  if (!graph?.style || typeof graph.querySelectorAll !== "function") return;
+  const height = [...graph.querySelectorAll(".vhist-tip")]
+    .filter((tip) => !tip.hidden)
+    .reduce((max, tip) => {
+      const rectHeight = typeof tip.getBoundingClientRect === "function"
+        ? tip.getBoundingClientRect().height : 0;
+      return Math.max(max, Math.ceil(rectHeight || tip.offsetHeight || 0));
+    }, 0);
+  if (height > 0) graph.style.setProperty("--vhist-tip-space", `${height + HIST_TIP_GAP_PX}px`);
+  else graph.style.removeProperty("--vhist-tip-space");
+}
+
+function syncGraphTipSpaces() {
+  if (typeof document === "undefined") return;
+  document.querySelectorAll(".vhist-graph").forEach(syncGraphTipSpace);
 }
 
 function scrubIndex(plot, clientX) {
@@ -1489,7 +1520,9 @@ function scrubEnd(plot) {
   if (plot) {
     plot.querySelector(".vhist-cross.vhist-live").hidden = true;
     plot.querySelectorAll(".vhist-mark.vhist-live").forEach((m) => { m.hidden = true; });
-    plot.parentElement.querySelector(".vhist-tip.vhist-live").hidden = true;
+    const graph = plot.parentElement;
+    graph.querySelector(".vhist-tip.vhist-live").hidden = true;
+    syncGraphTipSpace(graph);
   }
   if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen per-poll rebuild
 }
@@ -1498,7 +1531,10 @@ function scrubEnd(plot) {
 // ESP32 card's memory rows — resume together. They are frozen by the same S.scrub and two of them
 // can hold the SAME series at once, so a resume that refreshed only one would leave another showing
 // a pin the user has since moved.
-function renderTrendHosts() { renderCards(); renderInspect(); renderSettings(); }
+function renderTrendHosts() {
+  renderCards(); renderInspect(); renderSettings();
+  syncGraphTipSpaces();
+}
 
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
 

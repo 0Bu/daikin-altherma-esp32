@@ -159,7 +159,7 @@ assert.doesNotMatch(rendered, /ENV-III-Messwerte|data-hist="env3_combined"/,
 assert.equal(renderSandbox.__env3Tooltip("de", 2),
   "jetzt\nTemperatur  21,5 °C\nLuftfeuchte  48,0 %\nLuftdruck  1.007,0 hPa",
   "one readable localized tooltip must report time and all three measurements together");
-assert.match(style, /\.vhist-env3 \.vhist-graph\s*\{[^}]*padding-top:\s*9\dpx;/,
+assert.match(style, /\.vhist-env3 \.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*9\dpx;/,
   "the combined chart must reserve enough vertical room for its four-line tooltip");
 assert.match(style, /\.vhist-env3 \.vhist-tip\s*\{[^}]*min-width:[^;}]+;[^}]*white-space:\s*pre;/,
   "the ENV III tooltip must retain readable lines instead of wrapping into a vertical strip");

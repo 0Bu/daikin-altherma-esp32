@@ -7,14 +7,18 @@ import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
+const appState = fs.readFileSync(new URL("../main/www/js/app_state.js", import.meta.url), "utf8");
 const firmwareHistory = fs.readFileSync(new URL("../main/history.cpp", import.meta.url), "utf8");
 const mqtt = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*z-index:\s*2[^}]*white-space:\s*pre;/,
-  "state tooltips must paint over the timeline and honor only their deliberate vertical breaks");
-assert.match(style, /\.vhist-graph\s*\{[^}]*padding-top:\s*20px;/,
-  "numeric and categorical plots must share the compact legend-to-graph spacing");
+  "state tooltips must honor only their deliberate vertical breaks");
+assert.match(style,
+  /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*padding-top:\s*max\(var\(--vhist-tip-base\),\s*var\(--vhist-tip-space,\s*0px\)\);/,
+  "plots must stay compact at rest and accept the measured height of a visible tooltip");
 assert.doesNotMatch(style, /\.vhist-state-graph\s*\{[^}]*padding-top:/,
   "categorical timelines must not reintroduce a larger spacing override");
+assert.match(appState, /function renderApp\(\)[\s\S]*renderCards\(\);\s*\/\/[\s\S]*syncGraphTipSpaces\(\);\s*\n\}/,
+  "a poll rebuild must restore the measured space of a retained pinned tooltip");
 assert.match(style,
   /\.vhist-state-current \{[^}]*border-left:\s*2px solid var\(--card\);/,
   "every categorical track must visibly separate its live observation from completed raster buckets");
@@ -175,7 +179,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, histCacheKey, historyView, histHtml, scrubText," +
-  " scrubMove, ensureHist, ensureHistPair, ensureDerived };", context,
+  " scrubMove, syncGraphTipSpace, ensureHist, ensureHistPair, ensureDerived };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
 
@@ -283,10 +287,10 @@ assert.match(h.histHtml("outdoor_air", "°C", "Außentemperatur"),
 S.histPin.delete("outdoor_air");
 
 // The LIVE half is the handler, not a stylesheet, so execute it rather than grep it: scrubMove must
-// place the bubble from the sample's position and must not MEASURE it. The measurement is what made
-// the defect self-reinforcing — offsetWidth was read while the squeezed `left` was still applied —
-// so the fake node counts reads of it and reports any as a failure. `left` is likewise never written
-// on the tip any more; the cross and the marker keep their own px placement inside the plot.
+// place the bubble from the sample's position and must not MEASURE ITS WIDTH. That measurement made
+// the old defect self-reinforcing — offsetWidth was read while the squeezed `left` was still applied.
+// Height is handled independently by syncGraphTipSpace below. `left` is likewise never written on
+// the tip; the cross and marker keep their own px placement inside the plot.
 {
   const styleSpy = () => {
     const props = new Map(), written = [];
@@ -315,6 +319,27 @@ S.histPin.delete("outdoor_air");
   assert.equal(offsetWidthReads, 0,
     "the bubble's placement must not depend on measuring it: the squeezed width measured as fitting");
   assert.equal(tipNode.hidden, false, "the readout is still revealed by a scrub");
+}
+
+// A two-source categorical readout can be many lines tall. It may temporarily increase the gap
+// below the legend, but it must move the plot out of the way instead of covering the selected phase.
+// Hiding the readout removes only the dynamic override, returning to the compact CSS baseline.
+{
+  const props = new Map();
+  const removed = [];
+  const styleSpy = {
+    setProperty: (key, value) => props.set(key, value),
+    removeProperty: (key) => { props.delete(key); removed.push(key); },
+  };
+  const tallTip = { hidden: false, getBoundingClientRect: () => ({ height: 118 }) };
+  const graph = { style: styleSpy, querySelectorAll: () => [tallTip] };
+  h.syncGraphTipSpace(graph);
+  assert.equal(props.get("--vhist-tip-space"), "125px",
+    "the graph reserves the full multiline tooltip height plus a small visual gap");
+  tallTip.hidden = true;
+  h.syncGraphTipSpace(graph);
+  assert.deepEqual(removed, ["--vhist-tip-space"],
+    "the larger tooltip gap disappears as soon as the readout is hidden");
 }
 
 // Smart-Grid mode is a complete categorical state timeline, not a misleading numeric 0..3 line.
@@ -347,13 +372,12 @@ assert.match(boostHtml, /vhist-state-lane-label">X10A/);
 assert.match(boostHtml, /vhist-state-lane-label mb">Modbus/);
 assert.doesNotMatch(boostHtml, /vhist-state-legend/,
   "source names belong directly on their lanes, not in a detached legend");
-for (const i of [1, 3])
-  assert.match(h.scrubText(boostView, i), /^\d{2}:\d{2}–\d{2}:\d{2} · Aus$/,
-    "non-Boost Smart-Grid modes keep the compact Boost status off");
-assert.match(h.scrubText(boostView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/,
-  "mode 2 shows the compact active Boost status");
-for (const i of [1, 2, 3])
-  assert.doesNotMatch(h.scrubText(boostView, i), /X10A|Modbus|Boost|Empfehlung|Erzwungen|Zwang|ca\.|min/);
+for (const [i, label] of [[0, "Freier Betrieb"], [1, "Zwangsabschaltung"],
+                           [2, "Empfehlung ein"], [3, "Erzwungen ein"]])
+  assert.match(h.scrubText(boostView, i), new RegExp(`^\\d{2}:\\d{2}–\\d{2}:\\d{2} · ${label}$`),
+    `the Smart-Grid tooltip must use the exact legend state ${label}`);
+for (const i of [0, 1, 2, 3])
+  assert.doesNotMatch(h.scrubText(boostView, i), /X10A|Modbus|Boost|ca\.|min/);
 
 // The schematic's BOOST inspector is a HomeHub/Modbus request, so it deliberately filters the
 // otherwise shared Smart-Grid history to that instrument. The generic value-row history above stays
@@ -366,8 +390,8 @@ assert.doesNotMatch(boostModbusHtml, /vhist-state-lane-label">X10A/);
 assert.match(boostModbusHtml, /vhist-state-lane-label mb">Modbus/);
 assert.match(boostModbusHtml, /data-source="modbus"/,
   "scrubbing and pinning must resolve the same Modbus-only view that the chart renders");
-assert.match(h.scrubText(boostModbusView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
-assert.doesNotMatch(h.scrubText(boostModbusView, 2), /X10A|Modbus|Boost|Empfehlung|ca\.|min/);
+assert.match(h.scrubText(boostModbusView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein$/);
+assert.doesNotMatch(h.scrubText(boostModbusView, 2), /X10A|Modbus|Boost|ca\.|min/);
 
 // Regression: /history ends at the newest COMPLETED bucket while /values already carries the live
 // state. The chart must not paint that old bucket through the edge labelled "jetzt". Append the
@@ -385,7 +409,7 @@ assert.match(liveBoostHtml, /vhist-state-current" style="left:87\.500%;width:12\
   "the display distinguishes the live observation from completed raster buckets");
 assert.match(liveBoostHtml, /Boost aktiv · 10 min/,
   "one live observation must not be counted as an invented five minutes of Boost runtime");
-assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Aktiv",
+assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Empfehlung ein",
   "the state shown at the right edge and its tooltip must agree");
 delete S._modbus;
 
