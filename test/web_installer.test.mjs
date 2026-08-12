@@ -107,6 +107,62 @@ test("device probing validates the manifest and always resets and closes the por
   assert.deepEqual(fake.calls, ["transport", "loader", "main", "flashId", "reset:soft_reset", "disconnect"]);
 });
 
+test("device probing times out and releases an unresponsive serial device", async () => {
+  const calls = [];
+  class Transport {
+    constructor() { calls.push("transport"); }
+    async disconnect() { calls.push("disconnect"); }
+  }
+  class Loader {
+    constructor() { calls.push("loader"); }
+    async main() {
+      calls.push("main");
+      return new Promise(() => {});
+    }
+    async after() { calls.push("reset"); }
+  }
+
+  await assert.rejects(
+    probeDevice({
+      port: { getInfo() { return { usbVendorId: 0x303a, usbProductId: 0x1001 }; } },
+      manifest,
+      TransportCtor: Transport,
+      ESPLoaderCtor: Loader,
+      timeoutMs: 10,
+      cleanupTimeoutMs: 10
+    }),
+    (error) => error.name === "DeviceProbeTimeoutError" && /did not answer in flashing mode/.test(error.message)
+  );
+
+  assert.deepEqual(calls, ["transport", "loader", "main", "disconnect"]);
+});
+
+test("a stuck transport cleanup cannot leave the compatibility page busy forever", async () => {
+  const calls = [];
+  class Transport {
+    async disconnect() {
+      calls.push("disconnect");
+      return new Promise(() => {});
+    }
+  }
+  class Loader {
+    async main() { return new Promise(() => {}); }
+  }
+
+  const startedAt = Date.now();
+  await assert.rejects(probeDevice({
+    port: { getInfo() { return {}; } },
+    manifest,
+    TransportCtor: Transport,
+    ESPLoaderCtor: Loader,
+    timeoutMs: 10,
+    cleanupTimeoutMs: 10
+  }), { name: "DeviceProbeTimeoutError" });
+
+  assert.deepEqual(calls, ["disconnect"]);
+  assert.ok(Date.now() - startedAt < 250, "probe and cleanup deadlines must release the UI promptly");
+});
+
 test("flash writes the sparse manifest parts and only erases when explicitly selected", async () => {
   const fake = fakeEsptool();
   const states = [];
@@ -194,6 +250,8 @@ test("the published page keeps the monitor toggle in the connection tile and pin
   assert.match(html, /\.installer-device-actions\s*\{[^}]*grid-template-columns:/s);
   assert.match(html, /\.installer-monitor-chevron\s*\{[^}]*margin-left:auto;/s);
   assert.match(html, /\.installer-device-monitor-value\s*\{[^}]*gap:14px;/s);
+  assert.match(html, /\.installer-monitor-output\s*\{[^}]*overflow-x:auto;[^}]*white-space:pre;[^}]*overflow-wrap:normal;/s);
+  assert.doesNotMatch(html, /\.installer-monitor-output\s*\{[^}]*white-space:pre-wrap;/s);
   assert.match(html, /esptool-js@0\.6\.1\/\+esm/);
   assert.doesNotMatch(html, /esp-web-install-button/);
 });
