@@ -86,6 +86,7 @@ fi
 # because a rule change and its parity failure belong in the same command.
 "$(dirname "$0")/check-presenter-parity.sh"
 
-# Browser-side Web Serial permission lifecycle. The module is published next to the installer,
-# but its decisions are DOM-light and deterministic enough to exercise without a browser or board.
-node --test test/serial_port_release.test.mjs
+# Browser-side Web Serial permission lifecycle and the real sparse-flash plan. Both modules are
+# published next to the installer, but their decisions are deterministic enough to gate without a
+# browser or board; a hardware flash remains the separate integration boundary.
+node --test test/serial_port_release.test.mjs test/web_installer.test.mjs

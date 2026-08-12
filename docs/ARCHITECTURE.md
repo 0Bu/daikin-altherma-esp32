@@ -2149,7 +2149,7 @@ Structure:
   [`README.md`](README.md)); a self-hosted URL with nothing served honestly reports "up to date".
   The web installer carves prepared sparse parts from the merged
   image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
-  as the OTA feed (esp-web-tools and the device load the same file).
+  as the OTA feed (the `esptool-js` installer and the device load the same file).
 - **The publisher stands aside during known TLS operations** (`logic/ota_quiesce.hpp`, #380). An
   OTA install or weather fetch is a known, bounded, self-inflicted memory event: the TLS session plus
   the operation buffer claim the
