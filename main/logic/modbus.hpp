@@ -42,6 +42,13 @@ inline constexpr int      MBAP_LEN            = 7;     // txn(2)+proto(2)+len(2)
 // size in one byte, so 2*qty must fit in 255.
 inline constexpr uint16_t MB_MAX_READ_REGS  = 125;
 
+// The largest Modbus TCP ADU: MBAP header + the 253-byte maximum PDU (§4.1). It is the size a
+// receive buffer must have, and it is stated HERE rather than at the socket because
+// mb_parse_response BINDS its output into that buffer — `MbResponse::payload` points at the reply
+// bytes rather than copying them, so the buffer's size and its LIFETIME are both part of this
+// parser's contract, not an implementation detail of whoever calls recv().
+inline constexpr int MB_ADU_MAX = MBAP_LEN + 253;
+
 // The complete function-code vocabulary this firmware can issue.
 enum class MbFunc : uint8_t {
     ReadHolding   = 0x03,
@@ -140,6 +147,12 @@ inline const char* mb_exception_reason(uint8_t code) {
     }
 }
 
+// BORROWS, never owns. `payload` points INTO the ADU buffer handed to mb_parse_response — parsing in
+// place is right for a pure parser (no copy, no allocation on a heap-tight board), but it makes the
+// buffer's LIFETIME part of the caller's contract: an MbResponse outliving its ADU buffer reads
+// freed memory, and it reads it PLAUSIBLY, because the bytes are usually still there. That is a
+// silent wrong register value, which is the one failure class this project treats as worse than a
+// crash. Keep the two together — see hp_modbus.cpp's MbRead, which is exactly that pairing.
 struct MbResponse {
     bool           ok          = false;   // Ok: a read payload is present
     bool           exception   = false;   // server returned a Modbus exception
@@ -147,7 +160,8 @@ struct MbResponse {
     uint16_t       txn         = 0;       // echoed transaction id
     uint8_t        unit        = 0;
     uint8_t        fc          = 0;       // function code (exception bit stripped)
-    const uint8_t* payload     = nullptr; // read responses: first register byte (big-endian)
+    const uint8_t* payload     = nullptr; // read responses: first register byte (big-endian) —
+                                          // INTO the caller's ADU buffer, see the note above
     int            payload_len = 0;       // read responses: byte count (2 * register count)
 };
 

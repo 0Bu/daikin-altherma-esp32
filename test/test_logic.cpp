@@ -3515,6 +3515,15 @@ static void test_modbus() {
     CHECK(mb_reg_at(r, 1, rv) && rv == 0xFB2E);     // -1234
     CHECK(mb_reg_at(r, 2, rv) && rv == 0x7FFE);     // 32766 (unavailable sentinel)
     CHECK(!mb_reg_at(r, 3, rv));                    // out-of-range index rejected
+    // The parse BORROWS: `payload` points into the caller's ADU buffer rather than copying it, which
+    // is why an MbResponse may never outlive the bytes it was parsed from. Pinned because the
+    // consequence of getting it wrong is not a crash but a PLAUSIBLE wrong register value read out of
+    // a dead frame — hp_modbus.cpp shipped exactly that until the buffer moved to the caller.
+    CHECK(r.payload >= resp && r.payload < resp + sizeof(resp));
+    CHECK(r.payload + r.payload_len <= resp + sizeof(resp));
+    // The receive buffer size is a property of the protocol, so it is stated with the parser: MBAP
+    // header plus the 253-byte maximum PDU. A buffer shorter than this cannot hold a legal reply.
+    CHECK(MB_ADU_MAX == 260);
     // Asking for a different quantity than the reply carries is a desync (QtyMismatch), not Ok.
     CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, 2, r) == MbParse::QtyMismatch);
     CHECK(!r.ok);

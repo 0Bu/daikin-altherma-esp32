@@ -473,8 +473,21 @@ static int recv_adu(int sock, uint8_t* buf, int buflen, MbFailure& failure) {
     return 6 + len;
 }
 
-static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbResponse& out,
-                    MbFailure& failure) {
+// A read and the bytes it points into, as ONE object with ONE lifetime. `MbResponse::payload` is a
+// pointer INTO the received ADU (logic/modbus.hpp parses in place), so the buffer may not belong to
+// mb_read: it did, and every caller was therefore reading a dead stack frame the moment it extracted
+// a register. It worked only because nothing was called between the read and the extraction — a
+// property of the call sites of the day, not of the code, and the kind of thing an added
+// esp_task_wdt_reset() or diag_printf() turns into a plausible WRONG register value with no error
+// anywhere. The buffer now lives in the caller's frame, beside the response that borrows it.
+struct MbRead {
+    uint8_t    adu[MB_ADU_MAX];
+    MbResponse resp;
+};
+
+static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbRead& io, MbFailure& failure) {
+    MbResponse& out = io.resp;
+    out = MbResponse{};
     failure = MbFailure{};
     if (s_sock < 0) {
         failure.type = MbFailureType::ConnectionClosed;
@@ -504,14 +517,13 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbResponse& out,
         { Lock lk(s_mtx); s_status.rx_fail++; s_status.connected = false; }
         return false;
     }
-    uint8_t adu[260];                                  // max Modbus TCP ADU = 7 + 253
-    const int got = recv_adu(s_sock, adu, sizeof(adu), failure);
+    const int got = recv_adu(s_sock, io.adu, sizeof(io.adu), failure);
     if (got < 0) {
         close_sock();
         { Lock lk(s_mtx); s_status.rx_fail++; s_status.connected = false; }
         return false;
     }
-    const MbParse p = mb_parse_response(adu, got, txn, unit, space, qty, out);
+    const MbParse p = mb_parse_response(io.adu, got, txn, unit, space, qty, out);
     if (p == MbParse::Ok) {
         Lock lk(s_mtx);
         s_status.rx_ok++;
@@ -654,14 +666,18 @@ static void mb_poll_once() {
     bool heating_mode_known = false;
     bool heating_mode_active = false;
 
+    // One buffer for the whole sweep, declared where the RESPONSES are read rather than inside
+    // mb_read: the response borrows these bytes (see MbRead), so they have to outlive the call that
+    // filled them. Hoisted out of the loop because it is 260 bytes on a 6 KB task stack — reused,
+    // not re-created per register.
+    MbRead io;
     for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++) {
         esp_task_wdt_reset();                      // each read is a bounded LAN round-trip
         const def::HomeHubReg& r = def::HOMEHUB_REGS[i];
         uint16_t pdu = 0;
         if (!mb_pdu_address(r.offset, pdu)) continue;
-        MbResponse resp;
         MbFailure failure;
-        if (!mb_read(r.space, pdu, 1, resp, failure)) {
+        if (!mb_read(r.space, pdu, 1, io, failure)) {
             failure.reg = r.offset;
             // Preserve the first exception while the link itself remains healthy. If a later
             // transport/protocol failure actually drops the link, that becomes the displayed cause:
@@ -679,7 +695,7 @@ static void mb_poll_once() {
             continue;
         }
         uint16_t raw = 0;
-        if (!mb_reg_at(resp, 0, raw)) {
+        if (!mb_reg_at(io.resp, 0, raw)) {
             first_failure = MbFailure{MbFailureType::InvalidResponse,
                                       static_cast<int>(MbParse::Malformed), r.offset};
             close_sock();
