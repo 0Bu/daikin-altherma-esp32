@@ -8,11 +8,12 @@
 // write-ordering to get right (the old multi-commit save needed both, and still left a partial state
 // on a rollback that could not complete — the F02 gap the reviewer flagged).
 //
-// Ownership: this blob is written by the httpd task ALONE (config_save), so the poll task can never
-// revert a credential change. The RX/TX/proto LINK cache is deliberately NOT in here — it stays as
-// separate self-healing keys written by both config_save and the poll task's config_save_link, and is
-// re-validated on load (link_pins_safe). Keeping the two apart is what preserves the field-ownership
-// model while making the credential/service half genuinely atomic.
+// Ownership: after boot this blob is written by the httpd task alone; the sole exception is initial
+// HomeHub discovery, which completes synchronously before httpd starts. The poll task can therefore
+// never revert a credential change. The RX/TX/proto LINK cache is deliberately NOT in here — it
+// stays as separate self-healing keys written by both config_save and the poll task's
+// config_save_link, and is re-validated on load (link_pins_safe). Keeping the two apart preserves the
+// field-ownership model while making the credential/service half genuinely atomic.
 //
 // Pure + IDF-free so the serialize/deserialize round-trip and its corruption detection are host-tested
 // (test/test_logic.cpp) rather than only exercised on a device.
@@ -105,9 +106,15 @@ struct ConfigBlob {
     // address to poll. `homehub_enabled` is retained only as a decoded/encoded v6 compatibility
     // mirror so the on-flash layout stays readable by the immediately preceding build.
     bool        homehub_enabled   = false;
-    std::string mb_host;                // "" = disabled; discovery is an explicit UI action
+    std::string mb_host;                // "" = no active HomeHub target
     int32_t     mb_port           = 502;
     int32_t     mb_unit_id        = 1;
+    // ── v18: one-shot automatic HomeHub discovery decision ─────────────────────────────────────
+    // Appended at the end of the blob. False is meaningful only in a v18+ blob: a fresh device has
+    // not searched yet. Older blobs with a HomeHub block migrate to done=true because an empty host
+    // may have been an explicit user deletion and must never silently regain LAN activity.
+    bool        mb_discovery_done = false;
+    bool        has_modbus_discovery_state = false;
     // ── v7/v8/v13: one MQTT-backed reference-temperature source ───────────────────────────────
     std::string ref_temp_name, ref_temp_topic, ref_temp_path;
     // v8 adds the source timestamp mapping and the freshness limit. Defaults migrate a v7 blob
@@ -123,8 +130,9 @@ struct ConfigBlob {
     bool        has_ref_temp = false;
     bool        has_ref_control = false;
     // ── v14: RETIRED controller-mode byte. The heating-curve diagnosis arms itself from its
-    // required MQTT room source (config_model.hpp's heating_curve_diagnosis_armed), so there is no
-    // mode to store; the optional forecast never gates sampling. The
+    // required MQTT room source plus an active HomeHub (config_model.hpp's
+    // heating_curve_diagnosis_armed), so there is no mode to store; the optional forecast never
+    // gates sampling. The
     // byte keeps its place in the layout — the exact-length rule below is what refuses a truncated
     // newer blob, and shrinking v14 would make a v13 blob decode as one — and is written as zero and
     // ignored on read, exactly as the v9 actuation-consent bit is. `has_dynamic_lwt` stays as the
@@ -154,8 +162,8 @@ struct ConfigBlob {
     int32_t     board_preset_id = 0;
     bool        board_user_set = false;
     bool        has_board_identity = false;
-    // FALSE when the decoded blob predates v5 (no HomeHub block). The current empty-host default is
-    // disabled, so an upgrade never starts LAN discovery without an explicit user action.
+    // FALSE when the decoded blob predates v5 (no HomeHub block). config_load combines this with the
+    // v18 latch: an existing v5-v17 block migrates searched, while fresh/pre-v5 state stays pending.
     bool        has_modbus = false;
     // FALSE when the decoded blob predates v2, i.e. carries no board block at all. The caller must
     // then seed the board fields from the Kconfig defaults rather than from the members above:
@@ -191,8 +199,9 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // carried the OFF/SHADOW dynamic-LWT mode and is now retired — written zero, ignored on read, since
 // the diagnosis arms itself from its configured sources; v15 appends the independent circulation-
 // pump MQTT power mapping, v16 appends this installation's MQTT base topic (empty = the
-// compile-time default, so the upgrade is a no-op for every existing device). Current firmware
-// and v17 appends independent target/timestamp topics plus the optional fixed target.
+// compile-time default, so the upgrade is a no-op for every existing device), v17 appends
+// independent target/timestamp topics plus the optional fixed target, and v18 appends
+// the one-shot HomeHub discovery decision.
 // derives HomeHub enabled solely from whether mb_host is empty;
 // v5-v8 actuation bits decode OFF and every pre-v14 controller mode migrates OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
@@ -200,7 +209,7 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced the
 // field — the fallback path is the legacy per-key layout, which a device written by a blob-era build
 // has never populated.
-inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 17;
+inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 18;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
@@ -318,6 +327,8 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_str(v, c.ref_temp_setpoint_topic);
     detail::blob_put_str(v, c.ref_temp_time_topic);
     detail::blob_put_u32(v, c.ref_temp_fixed_setpoint_tenths);
+    // v18 block: one byte is enough because the address itself remains the configured target.
+    v.push_back(c.mb_discovery_done ? 1u : 0u);
     detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
     return v;
 }
@@ -456,13 +467,19 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
             !get_u32(c.ref_temp_fixed_setpoint_tenths)) return false;
         c.has_ref_multi_source = true;
     }
+    if (version >= 18) {
+        if (p + 1 > body_end) return false;
+        c.mb_discovery_done = d[p++] != 0;
+        c.has_modbus_discovery_state = true;
+    }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block
     // v7 after the reference-source strings, v8/v9 after timestamp/max-age, and v10 after the
     // Open-Meteo location, v11 after ENV III, v12 after the explicit board identity, v13 after the
     // three room-control mapping strings, v14 after its one retired byte, v15 after the
     // circulation-pump source mapping and thresholds, v16 after the MQTT base topic, and v17 after
-    // the independent room target/time topics and fixed-target value.
+    // the independent room target/time topics and fixed-target value, and v18 after the one-shot
+    // HomeHub discovery decision.
     // v6 and v9 change a flag's meaning without changing the HomeHub block's size, as does v14's
     // retirement of the mode byte — the LENGTH is the contract here, not what a byte still means.
     // Accepting a prefix would let a truncated v2 decode as a valid v1 with silently-default pins.

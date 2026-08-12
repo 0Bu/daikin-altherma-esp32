@@ -51,6 +51,8 @@ assert.doesNotMatch(config, /dynamic_lwt_mode/,
 const armingStart = config.indexOf("inline bool heating_curve_diagnosis_armed(");
 const arming = config.slice(armingStart, config.indexOf("}", armingStart) + 1);
 assert.match(arming, /ref_temp_topic/);
+assert.match(arming, /mb_host/,
+  "explicitly deleting HomeHub must disarm diagnostics that require its plant gates");
 assert.doesNotMatch(arming, /weather_enabled|latitude|longitude/,
   "optional forecast/location disclosure must never gate local room-error sampling");
 

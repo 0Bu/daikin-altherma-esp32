@@ -77,8 +77,9 @@ struct Config {
     int32_t     weather_latitude_e6 = 0;
     int32_t     weather_longitude_e6 = 0;
     // No dynamic-LWT mode field: the heating-curve diagnosis arms itself from the required MQTT room
-    // mapping (heating_curve_diagnosis_armed); forecast is optional comparison evidence. There is
-    // nothing here to persist as an operating mode. Its retired blob byte stays zero; see config_store.hpp.
+    // mapping plus an active HomeHub (heating_curve_diagnosis_armed); forecast is optional comparison
+    // evidence. There is nothing here to persist as an operating mode. Its retired blob byte stays
+    // zero; see config_store.hpp.
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
     // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled
@@ -124,13 +125,16 @@ struct Config {
     // deliberately NO "which transport" selector — that would model an exclusivity the hardware
     // does not have, and it is what an earlier revision of this got wrong.
     //
-    // The configured HomeHub address. Empty has one unambiguous meaning: HomeHub is disabled, so no
-    // Modbus task is created and neither mDNS nor the HomeHub is queried. Discovery is an explicit
-    // user action in the edit dialog; a successful search merely fills this persistent field when
-    // the user saves. It is never armed by boot or represented as a hidden runtime mode.
+    // The configured HomeHub address. A fresh device starts with discovery_done=false and performs
+    // one bounded automatic search on its first networked boot. The result is then persistent even
+    // when no hub answered. Once discovery_done is true, an empty address has one unambiguous
+    // meaning: HomeHub was explicitly disabled (or the one-shot search found nothing), so no Modbus
+    // task is created and no later boot searches again. The edit dialog may still run a manual
+    // search and save its result.
     std::string mb_host;
     int         mb_port     = MODBUS_TCP_PORT;      // Modbus TCP port (502; the plaintext HomeHub default)
     int         mb_unit_id  = MODBUS_DEFAULT_UNIT;  // Modbus unit/slave id (1..247, default 1)
+    bool        mb_discovery_done = false;           // false only until the first networked search
     // Optional M5Stack ENV III outdoor-climate sensor. Both devices on the unit share one I2C
     // pair (SHT30 0x44 + QMP6988 0x70). Disabled by default so an OTA never starts driving pins the
     // user did not wire. Runtime pins keep the single published ESP32-S3 image board-neutral.
@@ -191,12 +195,11 @@ struct Config {
 // location to Open-Meteo. Nothing is persisted, so there is no mode to migrate or stale state to
 // disarm on boot. Deleting the room source disarms the sampler immediately.
 //
-// The HomeHub is deliberately NOT in here even though the plant gate comes from it. A missing
-// mb_host is a missing PREREQUISITE and belongs in the running state (blocked homehub_unavailable),
-// where the UI names it and points at the setting; folding it in here would silently hide the whole
-// card from anyone who has not set one up yet, which is how they would find out they need one.
+// HomeHub supplies two required plant gates. An explicit HomeHub opt-out must therefore disarm this
+// dependent diagnosis rather than keep evaluating a permanently impossible prerequisite.
 inline bool heating_curve_diagnosis_armed(const Config& c) {
-    return !c.mqtt_uri.empty() && !c.ref_temp_topic.empty() && !c.ref_temp_path.empty() &&
+    return !c.mb_host.empty() && !c.mqtt_uri.empty() && !c.ref_temp_topic.empty() &&
+           !c.ref_temp_path.empty() &&
            (c.ref_temp_fixed_setpoint_tenths != 0 ||
             !c.ref_temp_setpoint_path.empty());
 }
@@ -241,6 +244,22 @@ inline const std::string& config_modbus_host(const Config& c) {
 }
 
 inline bool config_modbus_enabled(const Config& c) { return !c.mb_host.empty(); }
+
+// Exactly one automatic decision on a fresh device. A configured host never searches, and the
+// persistent done bit makes an explicit empty save a durable opt-out rather than an invitation to
+// rediscover the HomeHub after reboot.
+inline bool config_modbus_should_search(const Config& c) {
+    return c.mb_host.empty() && !c.mb_discovery_done;
+}
+
+// Blobs through v17 had no way to distinguish their default empty address from an explicit delete.
+// Preserve the safer meaning on upgrade: any blob that already carried the HomeHub block has made
+// its decision. Only pre-HomeHub/fresh state, or a v18+ explicit pending value, may auto-search.
+inline bool config_modbus_discovery_done_on_load(bool has_modbus_block,
+                                                  bool has_discovery_state,
+                                                  bool stored_done) {
+    return has_discovery_state ? stored_done : has_modbus_block;
+}
 
 inline void apply_link(Config& c, int rx_pin, int tx_pin, Protocol proto) {
     c.rx_pin = rx_pin;

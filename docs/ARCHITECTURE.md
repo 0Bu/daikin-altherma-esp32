@@ -190,12 +190,15 @@ http_config.cpp     → POST /set_wifi, /set_mqtt, /set_ref_temp, /set_weather,
                       unchanged mapping instead requires a fresh driver sample, and moving that
                       owned bus is disable-first. /set_env3 retains the same gate for older clients.
                       /set_hp also carries the HomeHub Modbus params (mb_host/mb_port/mb_unit_id),
-                      applied live; /discover_homehub is a bounded, explicit
-                      dialog action that returns an IPv4 without saving it
+                      applied live; sending mb_host marks the one-shot discovery decision complete.
+                      /discover_homehub is a bounded manual dialog action that returns an IPv4
+                      without saving it
 hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source beside X10A, not an
                       alternative to it: its own task, cache and link state. A non-empty saved
-                      address starts polling; empty means no task, socket, discovery or requests.
-                      mDNS runs only from the dialog's explicit Search button and filters
+                      address starts polling. Fresh firmware performs one bounded search on its
+                      first boot with a LAN lease and persists even a miss; an explicitly empty
+                      address then means no task, socket, future automatic discovery or requests.
+                      Manual Search remains available in the dialog. Both searches filter
                       homehub-* from up to 64 _http._tcp responders per bounded attempt. The lwIP
                       client wraps logic/modbus.hpp framing; the response borrows a caller-owned ADU
                       so its payload cannot outlive the received bytes. logic/modbus_plan.hpp turns
@@ -937,7 +940,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   space **heating**. It does not contain the retired P gain, deadband, quantization, ±2 K envelope,
   slew limit or requested-offset vocabulary: room kelvin is not calibrated leaving-water kelvin.
   ARMING IS DERIVED, never switched or stored: `heating_curve_diagnosis_armed()`
-  (`config_model.hpp`) requires only the timestamped MQTT room mapping. Forecast is optional
+  (`config_model.hpp`) requires the timestamped MQTT room mapping and an active HomeHub. Forecast is optional
   comparison evidence; deleting it must not stop local sampling or make location disclosure a
   prerequisite. There is no mode enum, live blob field or route; v14's retired byte is written zero
   and ignored.
@@ -2565,7 +2568,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   heating_mode_known,heating_mode_active,room_source_unix_s,room_age_s,sequence,
                   evaluations,samples,holds,blocks} — versioned raw heating-curve diagnosis
                   (mqtt_ha.cpp, logic/heating_curve_diagnosis.hpp). `armed` is derived from the
-                  timestamped MQTT room mapping only; forecast is optional. State/reason are the last
+                  timestamped MQTT room mapping plus active HomeHub; forecast is optional. State/reason are the last
                   1s evaluation (`off|recording|hold|degraded|blocked` and `disabled|sample_recorded|
                   sampling_interval|room_unavailable|x10a_unavailable|homehub_unavailable|
                   plant_gate_unknown|plant_inactive|forecast_unavailable|clock_invalid|
@@ -3030,7 +3033,7 @@ POST /set_weather {latitude,longitude} -> validate + persist + notify the weathe
                   Disabling also requests the retained MQTT topic's cleanup, so a stopped forecast
                   leaves no last-known values on the broker
 (no /set_dynamic_lwt)  RETIRED in #357. There is no controller mode to POST: the heating-curve
-                  diagnosis arms itself while the timestamped MQTT room mapping is configured
+                  diagnosis arms itself while the timestamped MQTT room mapping and HomeHub are configured
                   (`heating_curve_diagnosis_armed`). Forecast/location is optional comparison evidence;
                   `/set_weather` applies its own collection/privacy boundary live. What the route bought was a
                   second statement of a fact the configuration already made — and it could not be
@@ -3061,14 +3064,17 @@ POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id}
                   -> validate + apply live (no reboot). Every key is OPTIONAL and an omitted one keeps
                   its stored value, which is what lets the pin picker POST {profile,rx,tx} without
                   flipping anyone onto Modbus — and lets the HomeHub modal POST only its three fields.
-                  `mb_host` is the complete HomeHub intent: non-empty polls exactly that address;
-                  empty suppresses tasks, searches and sockets. This SECOND stack never stops X10A.
+                  `mb_host` is the complete explicit HomeHub intent: non-empty polls exactly that
+                  address; sending empty persists the discovery latch and suppresses tasks, future
+                  automatic searches, sockets and dependent heating-curve diagnosis. This SECOND
+                  stack never stops X10A.
                   mb_port 1..65535, mb_unit_id 1..247 and mb_host's LENGTH (at most
                   CONFIG_BLOB_MAX_STR = 512 chars) are checked by validate() — the length bound is
                   not cosmetic: the atomic blob's decoder rejects the WHOLE blob on a longer string,
                   so a saved over-long address discarded the entire configuration on the next boot.
                   A refusal is 400 "mb_host is too long"; config_save refuses independently. The three
-                  HomeHub fields (host, port, unit) persist in the atomic blob and apply live: the
+                  HomeHub fields (host, port, unit, discovery-done latch) persist in the atomic blob
+                  and apply live: the
                   httpd route calls mb_reconfigure(), while the Modbus task remains the sole socket
                   owner and retires/restarts itself as needed. `actuation_enabled` is NOT accepted —
                   the Modbus link is read-only, and an accepted-but-inert field would read like a
@@ -3081,7 +3087,7 @@ POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id}
                   here — the UI language is its own setting now (POST /set_lang), no longer a /set_hp
                   field. RX/TX are auto-detected; when the bus is silent the Protocol card's pin dropdown
                   posts {profile:"auto",rx,tx} to re-run detection.
-POST /discover_homehub   {} -> run the bounded, explicit `_http._tcp` mDNS browse and return
+POST /discover_homehub   {} -> run the bounded, manual `_http._tcp` mDNS browse and return
                   {ok:true,host:"<resolved IPv4>"}. Trusted-LAN only, no configuration write and no
                   Modbus-task reconfigure: the dialog fills its ordinary address field, and only its
                   later Save persists the result. A miss returns 404 so manual entry remains available.

@@ -124,6 +124,12 @@ static void boot_sequence() {
     // in AP-only setup mode) — the client idles/retries on its own task until one shows up.
     daik::sntp_time_start();
 
+    // A genuinely fresh device gets one bounded HomeHub search once a LAN lease exists. It runs
+    // BEFORE httpd and every background config writer, so the discovered address + done latch land
+    // as one atomic config-blob update without racing a user save. A miss is persisted too; an
+    // explicit empty save therefore remains a durable opt-out on every later boot.
+    if (!daik::safe_mode_active()) daik::mb_autodiscover_initial();
+
     // --- Services ---
     // The web UI + OTA are ALWAYS started (they are the recovery surface). In safe mode all optional
     // background consumers — X10A, MQTT, Open-Meteo weather, and HomeHub — are skipped, so a bad-config
@@ -143,9 +149,10 @@ static void boot_sequence() {
         daik::mqtt_ha_start();           // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
         daik::weather_forecast_start();  // direct Open-Meteo HTTPS/JSON fetch (no-op without location)
         // The HomeHub Modbus stack — a SECOND, INDEPENDENT source (docs/MODBUS_PROTOCOL.md), not an
-        // alternative to the line above: both run, and neither notices the other failing. The
-        // A saved address is polled; an empty address creates no task/socket/traffic and never
-        // triggers discovery. mDNS runs only from the dialog's explicit Search action.
+        // alternative to the line above: both run, and neither notices the other failing. A saved
+        // address is polled; after the one-shot startup decision above, an empty address
+        // creates no task/socket/traffic and never triggers discovery again. The dialog retains a
+        // manual Search action.
         // Skipped in safe mode for the same reason the consumers above are: a boot-looping board is being
         // recovered through the web UI, and every optional consumer stays out of the way.
         daik::mb_start();

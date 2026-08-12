@@ -818,8 +818,8 @@ static void publish_crash() {
 // Evaluate the diagnosis every mqtt_task cycle, including while publication is paused or the broker
 // is down. Tying evaluation to publish_heartbeat() would leave the last verdict looking healthy
 // during exactly the X10A/MQTT failures that must block it. Arming is derived here rather than read
-// from a stored mode: heating_curve_diagnosis_armed() answers it from the same room-source
-// configuration the editor shows, so deleting that source disarms sampling on the next cycle.
+// from a stored mode: heating_curve_diagnosis_armed() answers it from the room-source and HomeHub
+// configuration the editors show, so deleting either required source disarms on the next cycle.
 static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, const HpStats& hp) {
     const ReferenceTemperatureStatus rt = reference_temperature_status();
     const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);

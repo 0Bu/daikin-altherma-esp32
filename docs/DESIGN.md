@@ -1363,7 +1363,7 @@ vocabulary exactly:
 
    Its four rows are **Status**, **Raumtemperaturquelle**, **Wetterprognose** and **Verfahren**.
    There is deliberately no fifth: no "Betriebsart" readout (there is no controller mode — saving
-   the MQTT room mapping is the arming condition) and no constant "Sicherheit & Ausgabe = Nur lesend" line — with
+   the MQTT room mapping plus active HomeHub are the arming condition) and no constant "Sicherheit & Ausgabe = Nur lesend" line — with
    the write path deleted neither could ever say anything else, and a row that cannot vary is one
    more thing a reader has to rule out (the rule that dropped `bus_tx_writes`, §5.3).
 

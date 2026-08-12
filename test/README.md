@@ -86,9 +86,9 @@ typography and downward slide as a value explainer; it is no longer constrained 
 right-hand value column. The global reduced-motion contract removes that non-essential animation.
 
 `node test/test_homehub_discovery_contract.mjs` pins the IDF-facing lifecycle that the pure C++ host
-suite cannot link: boot and the Modbus poll task never browse mDNS, an empty address creates no task,
-and only the dialog's explicit discovery endpoint runs the bounded search. The endpoint returns the
-found address to the form but cannot persist it behind the normal Save/Cancel boundary.
+suite cannot link: fresh firmware runs one persisted search before HTTP, the Modbus poll task never
+browses mDNS, and an explicitly empty address creates no task or future boot search. The dialog's
+manual endpoint returns a found address to the form but cannot persist it behind Save/Cancel.
 
 `node test/test_mqtt_x10a_gate_contract.mjs` pins the other IDF-facing ownership boundary: the X10A
 poll task starts before MQTT; `mqtt_ha_start()` builds a no-LWT client; `mqtt_task()` starts it for

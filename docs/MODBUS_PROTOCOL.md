@@ -66,7 +66,7 @@ number — the `#35–#39` failure shape this project exists to avoid.
 model (holding registers 59 and 61 are documented as not operational on Micon 20002203: a read
 returns the `32766` sentinel and a write is rejected by the hub).
 
-## Discovery — explicit mDNS search, with manual entry
+## Discovery — one automatic first search, then manual
 
 §2.5, verbatim: *"Multicast DNS (mDNS) is needed for the discovery of the Daikin HomeHub, which
 advertises on the `_http._tcp.local.` service."* Three consequences shape the implementation:
@@ -80,18 +80,24 @@ advertises on the `_http._tcp.local.` service."* Three consequences shape the im
 3. **mDNS needs a single subnet and multicast/IGMP.** A manual host is therefore mandatory as a
    fallback, not a nicety.
 
-**How it behaves:** firmware never browses for a HomeHub at boot or from the Modbus poll loop. The
-HomeHub edit dialog owns a **Search** button; only that explicit action browses `_http._tcp` up to
-three times, accepting up to 64 responders per browse, and then returns control to the dialog. The
-larger cap matters on real home LANs: a 20-result cap can exclude the HomeHub solely because mDNS
-result order is unspecified. A successful search puts the responder's IPv4 A record into the same
-editable field used for manual entry. It is not saved behind the dialog's Cancel/Save boundary.
+**How it behaves:** a genuinely fresh device browses automatically once on its first boot with a LAN
+lease, before HTTP and the background config writers start. It tries `_http._tcp` up to three times,
+accepting up to 64 responders per browse, and atomically persists both the resulting IPv4 and a
+`searched` latch. A miss is persisted too: boot never becomes a continuous multicast scan loop. If
+the device is in the captive portal without a LAN lease, or in safe mode, the decision remains
+pending for the next normal networked boot.
 
-The user may instead enter an IP, `.local` name or ordinary DNS name verbatim. Saving a non-empty
-address starts polling it; saving the field empty disables HomeHub completely. Empty therefore means
-no task, no socket, no HomeHub request and no future search — including after reboot. If several
-`homehub-*` responders answer the explicit search, the first resolved IPv4 is offered and the count
-is logged to `/diag` rather than silently guessed at.
+The HomeHub edit dialog retains a manual **Search** button with the same bounded browse. Its result
+fills the ordinary editable address field and is not saved behind the dialog's Cancel/Save boundary.
+The larger cap matters on real home LANs: a 20-result cap can exclude the HomeHub solely because mDNS
+result order is unspecified.
+
+The user may instead enter an IP, `.local` name or ordinary DNS name verbatim. Saving `mb_host` is an
+explicit decision: non-empty starts polling that address; empty disables HomeHub completely and
+persists the latch. Empty-after-searched therefore means no task, no socket, no HomeHub request, no
+HomeHub-dependent heating-curve diagnosis and no future automatic search. If several `homehub-*`
+responders answer, the first resolved IPv4 is used/offered and the count is logged to `/diag` rather
+than silently guessed at.
 
 Every active failure is exposed as complete English `error` text plus structured `error_code`,
 `error_detail` and (for reads) `error_register` fields. The UI localises the structured cause as a
@@ -334,26 +340,30 @@ Everything is runtime — no reflash, and no reboot.
 
 | Field | Meaning |
 |---|---|
-| `mb_host` | HomeHub IP or `.local`/DNS hostname; empty disables discovery, task and requests. Validated at most 512 chars — the atomic config blob rejects any longer string on read, which would discard the WHOLE saved configuration on the next boot, so an over-long address is a 400 |
+| `mb_host` | HomeHub IP or `.local`/DNS hostname; an explicitly saved empty value disables automatic discovery, task, requests and dependent diagnosis. Validated at most 512 chars — the atomic config blob rejects any longer string on read, which would discard the WHOLE saved configuration on the next boot, so an over-long address is a 400 |
+| `mb_discovery_done` | Internal v18 latch. Fresh=false triggers the one initial networked search; every result and every explicit `mb_host` save sets true. Exposed read-only as `/status.modbus.searched` |
 | `mb_port` | Modbus TCP port, default `502` (validated 1–65535) |
 | `mb_unit_id` | Modbus unit id, default `1` (validated 1–247) |
 | *(retired)* | The v9 `actuation_enabled` consent bit is no longer a config field. It is still present in the blob layout as a permanently-zero bit and is discarded on decode |
 
-The host, port and unit are persisted in the atomic CRC-checked NVS config blob
-(`main/logic/config_store.hpp`) and written by exactly one task (httpd, `POST /set_hp`). Older blobs
-still decode without losing credentials. The v9 actuation-consent bit is DISCARDED on decode: reading
-it back would resurrect consent for a capability the firmware no longer has. HomeHub polling itself
-remains derived solely from a non-empty `mb_host`.
+The host, port, unit and discovery latch are persisted in the atomic CRC-checked NVS config blob
+(`main/logic/config_store.hpp`). Normal writes belong to httpd (`POST /set_hp`); the one automatic
+write happens synchronously before httpd starts. Older blobs still decode without losing
+credentials. A pre-v18 blob that already carries the HomeHub block migrates to searched=true because
+its empty host may have been an explicit delete; only fresh/pre-HomeHub state auto-searches. The v9
+actuation-consent bit is discarded on decode. HomeHub polling remains derived solely from a
+non-empty `mb_host`.
 
 > **Why v5 and not v4.** This block and the UI-language byte were developed in parallel and both
 > claimed v4. main's language byte landed first and is already on published builds, so this took the
 > later number. A second, different "v4" would have decoded that language byte as a HomeHub setting
 > and switched a board onto a link it does not have, silently, on upgrade.
 
-**Applied live.** `POST /set_hp` accepts `mb_host`, persists it and calls `mb_reconfigure()`. A
-non-empty address starts/reconnects the task; clearing it is handled by the task at the top of its
-next cycle, so the socket keeps exactly one owner. `POST /discover_homehub` is separate: it runs the
-bounded search and returns `{ok:true,host:"<IPv4>"}` without saving or reconfiguring anything.
+**Applied live.** `POST /set_hp` accepts `mb_host`, marks discovery complete, persists both and calls
+`mb_reconfigure()`. A non-empty address starts/reconnects the task; clearing it is handled by the task
+at the top of its next cycle, so the socket keeps exactly one owner. `POST /discover_homehub` is
+separate: it runs the bounded manual search and returns `{ok:true,host:"<IPv4>"}` without saving or
+reconfiguring anything.
 
 **Web UI:** the HomeHub appears as its own row in Settings → Connections — never folded into a
 combined link state with X10A, since either can be down alone and one merged "connected" would hide
@@ -382,9 +392,9 @@ The threat model is in [`SECURITY.md`](SECURITY.md); the parts specific to this 
 * **The firmware cannot write the hub at all.** The unauthenticated
   `HA → MQTT/HTTP/MCP → raw Modbus → pump` chain does not exist, and not merely because no route is
   exposed: there is no write primitive to route to.
-* **mDNS discovery trusts LAN multicast**, so the explicit Search action offers only responders
-  whose hostname matches `homehub-*` rather than whatever answers first. A manually entered address
-  is the user's trusted-LAN choice.
+* **mDNS discovery trusts LAN multicast**, so both the one initial search and the manual Search
+  action accept only responders whose hostname matches `homehub-*` rather than whatever answers
+  first. A manually entered address is the user's trusted-LAN choice.
 
 ## Out of scope
 

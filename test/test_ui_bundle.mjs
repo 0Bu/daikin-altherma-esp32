@@ -30,8 +30,9 @@ assert.match(app, /async function refreshValues\(paint = true\)[\s\S]*if \(paint
 assert.match(app, /ok = await refreshStatus\(false\)[\s\S]*deferredPaint = ok[\s\S]*refreshValues\(!deferredPaint\)[\s\S]*if \(deferredPaint\) renderApp\(\)/,
   "a status+values poll must paint the complete frame exactly once");
 
-// HomeHub discovery is an explicit dialog action, never a boot mode. The same editable field accepts
-// a discovered or manual address, and saving it empty is the deliberate disabled state.
+// HomeHub discovery has one invisible fresh-device boot attempt, never a user-selectable mode. The
+// same editable field accepts an automatically found or manual address, and saving it empty is the
+// deliberate persistent disabled state.
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const httpConfig = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
@@ -64,11 +65,11 @@ assert.match(homehubHtml, /class="input-action"[\s\S]*id="hhHost"[\s\S]*id="hhSe
 assert.doesNotMatch(homehubHtml.slice(homehubHtml.indexOf('class="modal-actions"')), /id="hhSearch"/,
   "HomeHub Search must not return to the dialog-level Cancel/Save actions");
 assert.doesNotMatch(html, /id="hhMode"|value="auto"[\s\S]*value="manual"/,
-  "the HomeHub dialog must not reintroduce an automatic boot mode");
+  "the HomeHub dialog must not expose the internal one-shot lifecycle as a mode picker");
 assert.match(app, /post\("\/discover_homehub", \{\}\)/,
   "Search must call the dedicated request-local discovery endpoint");
 assert.match(app, /applyLive\(\{ mb_host: host, mb_port: port, mb_unit_id: unit \}/,
-  "Save must persist the field directly, including the empty disabled value");
+  "Save must persist the field directly, including the explicit empty opt-out");
 assert.doesNotMatch(app, /mb_mode|config_modbus_should_search/,
   "the browser bundle must carry no hidden Auto-mode contract");
 

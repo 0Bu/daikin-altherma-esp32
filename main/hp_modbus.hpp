@@ -8,8 +8,9 @@
 // so coupling them would let either failure mask the other. Pulled service cable: the HomeHub keeps
 // reporting. LAN down: X10A keeps polling. Neither notices the other.
 //
-// It has no STEADY-STATE cost when absent: an empty saved address creates no task and performs no
-// discovery. mDNS discovery runs only when the user presses Search in the HomeHub dialog.
+// It has no STEADY-STATE cost when absent: a fresh device performs one bounded automatic discovery
+// before HTTP starts, persists that decision, and an empty address thereafter creates no task or
+// traffic. The user may still run a manual search from the HomeHub dialog.
 //
 // The stack is READ-ONLY, and that is now a property of the code rather than of a guard: the
 // register-54 actuator built for #300 was REMOVED with the retirement of dynamic LWT actuation
@@ -58,6 +59,10 @@ struct ModbusStatus {
 // Start the stack. Creates the status mutex always (so /status can report `enabled:false` before any
 // task exists) and the task only when the config enables it. Called once from app_main.
 void mb_start();
+
+// Complete the fresh-device one-shot discovery before httpd/background config writers start. No-op
+// after any persisted result or explicit host save/delete, in safe mode, or without a LAN lease.
+void mb_autodiscover_initial();
 
 // Ask the stack to re-read its config — POST /set_hp. Starts the task if the HomeHub was just
 // enabled, stops it if just disabled, and drops a cached socket when the address changed. Safe to
