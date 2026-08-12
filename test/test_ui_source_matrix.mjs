@@ -495,8 +495,8 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(c.mbSmartGridMode(), 2, "mode 2 must reach the live schematic");
   assert.equal(c.mbForInspect("sgrequest")?.value, 2,
     "the inspector must remain traceable to the Modbus row while X10A is live");
-  assert.equal(c.INSPECT.sgrequest.trendSource({ sgSrc: "MB" }), "modbus",
-    "a HomeHub-sourced request inspector must not render the independent X10A lane");
+  assert.equal(c.INSPECT.sgrequest.trendSource, undefined,
+    "a HomeHub-sourced request must compare its X10A and Modbus history witnesses");
   assert.equal(c.sgModeText(2), "sg.mode2");
   assert.match(SOURCE, /classList\.toggle\("sg-boost-on", d\.sgMode === 2\)/,
     "only mode 2 may apply the active Boost colour");
@@ -534,8 +534,8 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
     const d = c.liveData();
     assert.equal(d.sgMode, mode, `no gateway: contacts ${+c1}${+c2} must reach the pill as ${mode}`);
     assert.equal(d.sgSrc, "X10A", "no gateway: the value is attributed to the contacts");
-    assert.equal(c.INSPECT.sgrequest.trendSource(d), "x10a",
-      "the chart must show the X10A lane the headline came from");
+    assert.equal(c.INSPECT.sgrequest.trendSource, undefined,
+      "the shared chart must fall back to the one X10A ring when no gateway exists");
     assert.match(EN(c.INSPECT.sgrequest.t(d)), /X10A/,
       "the inspector title must name the contacts, never Modbus");
     assert.match(EN(c.INSPECT.sgrequest.what(d)), /SG-Ready/,
@@ -578,8 +578,8 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   // own is not reporting — the same wrong-source complaint this card started with.
   assert.match(EN(SG_INSP(none, d).t(d)), /X10A/,
     "with no gateway and no value, the title must not name Modbus");
-  assert.equal(SG_INSP(none, d).trendSource(d), "x10a",
-    "and the empty chart must be the lane this plant could ever fill");
+  assert.equal(SG_INSP(none, d).trendSource, undefined,
+    "and the shared chart must discover whichever history witnesses this plant offers");
   const hub = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [LWT_X], modbus: [] });
   const hd = hub.liveData();
   assert.equal(hd.sgMode, null, "a live gateway that does not carry offset 56 states nothing");
