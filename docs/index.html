@@ -191,8 +191,9 @@ button:disabled { cursor:default; opacity:.55; transform:none; }
 .installer-monitor-live[data-state="error"] { color:#F08080; }
 .installer-monitor-live[data-state="error"]::before { background:#EA5A5A; }
 .installer-monitor-output {
-  min-height:150px; max-height:220px; margin:0; padding:12px 13px 14px; overflow:auto;
-  color:#C8D4DF; font:11.5px/1.58 var(--font-mono); white-space:pre-wrap; overflow-wrap:anywhere;
+  box-sizing:border-box; width:100%; min-width:0; min-height:150px; max-height:220px;
+  margin:0; padding:12px 13px 14px; overflow-x:auto; overflow-y:auto;
+  color:#C8D4DF; font:11.5px/1.58 var(--font-mono); white-space:pre; overflow-wrap:normal;
 }
 
 .installer-options { display:none; }

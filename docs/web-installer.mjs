@@ -1,6 +1,8 @@
 const ESPRESSIF_USB_VENDOR_ID = 0x303a;
 const CDC_PRODUCT_IDS = new Set([0x0002, 0x0003, 0x1001, 0x1002, 0x1003]);
 const MAX_MONITOR_CHARS = 100000;
+const DEVICE_PROBE_TIMEOUT_MS = 10000;
+const TRANSPORT_CLEANUP_TIMEOUT_MS = 2000;
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function errorWithName(name, message) {
@@ -13,6 +15,18 @@ function errorMessage(error) {
   return error && typeof error.message === "string" ? error.message : String(error);
 }
 
+async function withTimeout(operation, milliseconds, timeoutError) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(timeoutError), milliseconds);
+  });
+  try {
+    return await Promise.race([Promise.resolve(operation), timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function terminalAdapter(onLog) {
   return {
     clean() {},
@@ -21,17 +35,17 @@ function terminalAdapter(onLog) {
   };
 }
 
-async function settleTransport(transport, loader, resetMode) {
+async function settleTransport(transport, loader, resetMode, timeoutMs = TRANSPORT_CLEANUP_TIMEOUT_MS) {
   if (resetMode && loader && loader.chip && typeof loader.after === "function") {
     try {
-      await loader.after(resetMode);
+      await withTimeout(loader.after(resetMode), timeoutMs, new Error("Device reset timed out."));
     } catch (_error) {
       // Cleanup still has to close the port if a reset signal is not supported by the adapter.
     }
   }
   if (transport && typeof transport.disconnect === "function") {
     try {
-      await transport.disconnect();
+      await withTimeout(transport.disconnect(), timeoutMs, new Error("Serial cleanup timed out."));
     } catch (_error) {
       // The device can disappear during its reset. In that case the browser already closed it.
     }
@@ -123,7 +137,9 @@ export async function probeDevice({
   manifest,
   TransportCtor,
   ESPLoaderCtor,
-  onLog = () => {}
+  onLog = () => {},
+  timeoutMs = DEVICE_PROBE_TIMEOUT_MS,
+  cleanupTimeoutMs = TRANSPORT_CLEANUP_TIMEOUT_MS
 }) {
   const transport = new TransportCtor(port);
   const loader = new ESPLoaderCtor({
@@ -133,21 +149,28 @@ export async function probeDevice({
     debugLogging: false,
     enableTracing: false
   });
+  let loaderReady = false;
 
   try {
-    await loader.main();
-    if (typeof loader.flashId === "function") await loader.flashId();
-    const chipFamily = loader.chip && loader.chip.CHIP_NAME;
-    if (!chipFamily) throw errorWithName("ChipDetectionError", "The connected ESP chip could not be identified.");
-    const build = selectManifestBuild(manifest, chipFamily, port.getInfo());
-    if (!build) {
-      throw errorWithName("UnsupportedChipError", `${chipFamily} is not supported by this firmware.`);
-    }
-    return { chipFamily, build };
+    return await withTimeout((async () => {
+      await loader.main();
+      loaderReady = true;
+      if (typeof loader.flashId === "function") await loader.flashId();
+      const chipFamily = loader.chip && loader.chip.CHIP_NAME;
+      if (!chipFamily) throw errorWithName("ChipDetectionError", "The connected ESP chip could not be identified.");
+      const build = selectManifestBuild(manifest, chipFamily, port.getInfo());
+      if (!build) {
+        throw errorWithName("UnsupportedChipError", `${chipFamily} is not supported by this firmware.`);
+      }
+      return { chipFamily, build };
+    })(), timeoutMs, errorWithName(
+      "DeviceProbeTimeoutError",
+      "The serial device did not answer in flashing mode. Select an ESP32-S3 USB port; if it is an ESP32-S3, hold BOOT, tap RESET, then try again."
+    ));
   } finally {
     // The compatibility probe runs the flasher stub. Explicitly hand control
     // back to the installed application before releasing the serial port.
-    await settleTransport(transport, loader, "soft_reset");
+    await settleTransport(transport, loader, loaderReady ? "soft_reset" : undefined, cleanupTimeoutMs);
   }
 }
 
@@ -300,7 +323,11 @@ export function attachWebInstaller({
   const closePort = async () => {
     if (!selectedPort || (!selectedPort.readable && !selectedPort.writable)) return;
     try {
-      await selectedPort.close();
+      await withTimeout(
+        selectedPort.close(),
+        TRANSPORT_CLEANUP_TIMEOUT_MS,
+        new Error("Closing the serial port timed out.")
+      );
     } catch (_error) {
       // A USB reset or unplug can close the port before the page reaches cleanup.
     }
