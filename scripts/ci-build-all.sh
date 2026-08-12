@@ -10,7 +10,7 @@
 #   daikin-altherma-esp32<suffix>.elf.sha256   integrity checksum of the ELF
 #   daikin-altherma-esp32<suffix>-size.json    ESP-IDF's machine-readable section/region report
 #   daikin-altherma-esp32<suffix>-size.md      human-readable app/flash/RAM budget summary
-#   manifest.json                              esp-web-tools builds[] + OTA version field
+#   manifest.json                              browser-installer builds[] + OTA version field
 #
 # Calls idf.py / esptool / espsecure.py DIRECTLY — it assumes an ESP-IDF environment is already
 # on PATH. In CI that is provided by espressif/esp-idf-ci-action. LOCALLY, run it wrapped:
@@ -131,7 +131,7 @@ for t in "${TARGETS[@]}"; do
     [ "$sz" -le "$APP_SIZE_LIMIT" ] || { echo "app image for $t too big: $sz > $APP_SIZE_LIMIT" >&2; exit 1; }
 
     # Canonical full-flash image. Besides remaining useful for an intentional factory-reset flash,
-    # merge_bin applies any image-header transformations esp-web-tools cannot do in the browser.
+    # merge_bin applies any image-header transformations the browser flasher cannot perform.
     # The Web Serial manifest does NOT flash this whole file: merge_bin fills every gap with 0xff,
     # including nvs@0x9000, so writing it at offset 0 destroys the configuration even when the user
     # declines the separate whole-chip Erase prompt.
@@ -195,7 +195,7 @@ for t in "${TARGETS[@]}"; do
     builds_json="${builds_json:+$builds_json,}{\"chipFamily\":\"$cf\",\"parts\":[$web_parts]}"
 done
 
-# One manifest serves both the installer (builds[]) and OTA (version). esp-web-tools reads
+# One manifest serves both the installer (builds[]) and OTA (version). The browser installer reads
 # builds[]/chipFamily; the device OTA reads .version and pulls daikin-altherma-esp32<suffix>.bin.
 cat > "$DIST/manifest.json" <<EOF
 {

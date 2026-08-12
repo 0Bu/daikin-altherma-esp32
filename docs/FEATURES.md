@@ -125,6 +125,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 80 | **Per-row state age** — how long each switched row has read what it reads, published as three separate facts (the seconds, whether the transition was *witnessed*, and how much of the run the bus did not answer for) so a consumer cannot state a stronger claim than the board made | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
 | 81 | **CLAUDE.md byte-budget gate** — the always-loaded agent instructions are held under a byte budget in CI, forcing new findings into `docs/` as narrative and into `.claude/CLAUDE.md` only as rules | ✅ | [`run-claude-md-budget.sh`](../scripts/run-claude-md-budget.sh), [`selftest.sh`](../tools/claudemd/selftest.sh) |
 | 85 | **Browser serial-permission release** — the Pages installer exposes a granted, closed port's `forget()` action without opening a chooser when nothing can be revoked or interrupting an active flash | ✅ 🧪 | [`serial-port-release.mjs`](serial-port-release.mjs), [`serial_port_release.test.mjs`](../test/serial_port_release.test.mjs) |
+| 86 | **Inline Web Serial installer + monitor** — only the native port chooser leaves the branded Pages UI; ESP32-S3 probing, NVS-preserving sparse flash, cross-part progress, reset and a real 115200-baud monitor run in-page | ✅ 🧪 | [`web-installer.mjs`](web-installer.mjs), [`web_installer.test.mjs`](../test/web_installer.test.mjs) |
 
 ---
 
@@ -183,7 +184,10 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   every part to its real erase sectors and fails the build on an NVS overlap; its own tests feed it
   *bad* plans, since running it on the real manifest only ever proved a good plan passes. Selecting
   **Erase** remains the explicit factory-reset path.
-- **✅ 🧪 Explicit serial-permission release**: the installer shows **Release serial port** only
+- **✅ 🧪 Inline browser install**: the native browser chooser is the only dialog. The page probes
+  the ESP32-S3, reports weighted progress across every sparse part, resets after the write, and
+  exposes the same selected port as an on-page 115200-baud Serial Monitor when no flash owns it.
+- **✅ 🧪 Explicit serial-permission release**: the installer shows **Remove browser permission** only
   when `Serial.getPorts()` reports an existing grant for this site. One closed port is forgotten
   directly, multiple grants use the browser chooser, and an open flash port is refused. Visibility
   is refreshed after connect/disconnect, page focus and a successful release.
@@ -764,7 +768,7 @@ Four properties of that core are worth naming because they are not obvious from 
   than redundant.
 - **✅ Releases are manual; merges publish a dev channel.** A push to `main` stamps a dev version and
   republishes `dev/`; a release is an explicit workflow run that tags and republishes the root. The
-  two feeds are identical in shape, so the installer, `esp-web-tools` and the OTA client work against
+  two feeds are identical in shape, so the installer, `esptool-js` and the OTA client work against
   either without a special case.
 - **✅ Concurrent publishers survive losing the race.** That one branch has two writers and they
   overlap routinely; Actions cannot serialize them without serializing a 5-minute build to protect a

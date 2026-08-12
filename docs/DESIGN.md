@@ -1151,58 +1151,48 @@ is exactly what a user would want to see move.
   ships no localized strings.
 
 ### 5.5 Installer landing page (`docs/index.html`, GitHub Pages)
-The page a user meets **first** — before the device runs any of the firmware's own UI — so it opens
-on the same `--brand-tint` hero the captive portal does (§5.0), carrying the brand mark + the
-monospace product name, then cards on neutral `--bg`. Same container as the dashboard
-(`max-width: 720px`, `820px` + the ~1.15× type ramp at ≥600px, §9) rather than the portal's phone
-width — Web Serial is desktop-only, so this page is read on a big screen. The hero takes the
-**dashboard's** shape, not the portal's: a `--r-card` rounded, `--line`-bordered, `--shadow-card`
-card inset to the same gutter as the cards below it (§7 "Hero" — a tinted band *bordered like a
-card*), so the page is one stack of cards. The portal's full-bleed square band is right there — it
-fills a phone screen edge to edge with nothing under it — and wrong here, where it sat as a square
-block butted against the round CTA and steps cards below.
+This is the page a user meets **first**, before the device can serve its own UI. It therefore uses
+the same brand mark, tokens, card radii and controls as the captive portal and dashboard, but as an
+installer shell: product/connection top bar, four-step rail, and one main card column. At ≤780 px
+the rail becomes a compact horizontal step row; at ≤520 px device facts and installation choices
+stack. The shell never widens the viewport.
 
-- **CTA card** — the `<esp-web-install-button manifest="manifest.json">` with a `slot="activate"`
-  button styled as the app's `.btn.primary` (brand fill, white, `--shadow-cta`, `--focus-ring` on
-  `:focus-visible`), plus a `--muted` note naming the target and the exact configuration boundary:
-  a no-Erase update preserves NVS; choosing Erase deliberately resets it.
-  esp-web-tools' `--esp-tools-button-*` custom properties are **not** used and must not come back:
-  they style only the element's *own* default button, which `slot="activate"` replaces — setting
-  them beside a slotted button leaves a native grey browser button sitting on the brand page (the
-  state this page shipped in). A slotted button is styled by this page's CSS, full stop. The
-  `unsupported` / `not-allowed` slots are `--err` text.
-- **Version line** (`.ver`, between the button and the note) — names the build this page installs:
-  `--muted` "Version" + the number itself in `--font-mono`/`--fg`, since that is the one string a
-  user quotes back in a bug report. Read at load from **`manifest.json`** — deliberately the same
-  file the install button is handed, so the version shown and the image actually written cannot
-  disagree; a number typed into the page would go stale at the next release. `ci-build-all.sh`
-  stamps it `1.2.3` for a release, `1.2.3-dev.<n>` on the dev channel and `1.2.3-PR-<N>` on a
-  preview, so a non-release build states its provenance here as well as in the banner (which is
-  keyed on the **path**, so it is right before — and even without — the manifest fetch). Injected with `textContent`, never `innerHTML`. If the fetch fails
-  (no manifest, or the page opened from disk) the line **stays hidden** — showing nothing beats
-  asserting a version that could not be read.
-- **Steps card** — "After flashing" as a `.section-label`, then the three steps as `--line`-divided
-  rows with a `--brand-tint` numbered disc, matching the dashboard's value rows. Each `<li>` is the
-  flex row and its text is wrapped in a single `<span>`: without the wrapper every inline node of the
-  sentence (text, `<code>`, `<a>`) becomes its own flex item and the step lays out as a row of
-  columns. `<code>` chips are `--soft` on `--line` and wrap (`overflow-wrap: anywhere`) so a long
-  hostname never widens the card. The first step distinguishes a first install / explicit Erase
-  (join the setup AP) from a no-Erase update (the stored WiFi reconnects).
-- **Provenance banner** — the same `--warn`-accented banner of §5.3 item 0, because the identical
-  page is served from two paths (`scripts/build-pages.sh`): on `…/dev/` it says the build is the
-  latest merge to `main` rather than a cut release. The release root shows none — a release needs
-  no caveat. (A third path, `…/PR/<N>/`, had its own variant until the per-PR preview was retired.) Keyed on the **path**, not on
-  the version string: the banner has to be right before `manifest.json` has been fetched, and if
-  that fetch fails it is all the page can say. Both variants point at the device's own *Update
-  channel* setting (§5.4), since flashing a page is a one-off but the channel is what the device
-  keeps following afterwards.
+- **One native browser surface.** `Select USB device` is the only action that invokes browser UI,
+  via `navigator.serial.requestPort()`. Everything after the chooser — ESP32-S3 detection,
+  compatibility, manifest download, optional erase, sparse writes, progress, reset and errors —
+  stays visibly in this page. `docs/web-installer.mjs` uses the pinned official `esptool-js` API;
+  there is no second installer dialog or simulated progress.
+- **USB card + device facts.** The card names the exact manifest version and, after the probe,
+  shows device, connection and compatibility in three `--soft` tiles. The middle **Connection**
+  tile itself is the one Serial Monitor toggle. Its chevron is pinned to the tile's right edge —
+  never attached to the label — and rotates when open.
+- **Serial Monitor tongue.** Opening that tile slides the real 115200-baud history from underneath
+  the whole USB card. The card stays above it (`z-index`), the tongue has no top border/radius, and
+  its changing height pushes the installation card down. Closing cancels the reader, releases its
+  stream lock and closes the port; history remains in the DOM for the next open. Flashing always
+  closes the monitor first because two readers cannot own one Web Serial stream.
+- **Explicit installation boundary.** Only after a compatible probe does the installation card
+  appear. `Keep configuration` is selected/recommended and writes only manifest parts whose erase
+  sectors are already gated away from NVS. `Erase everything` is the deliberate factory-reset path.
+  The real cross-part byte progress drives the in-card bar; success appears only after the device
+  was reset and the transport closed.
+- **Version/provenance.** The displayed version and the flashed parts come from the same
+  `manifest.json`; on fetch failure installation remains disabled instead of claiming a stale
+  version. `/dev/` changes the compact channel line to `Development build · latest merge to main`;
+  the release root says `Release build`. The path decides channel provenance before the manifest
+  arrives.
+- **Permission release.** `Remove browser permission` keeps the separate `SerialPort.forget()`
+  boundary. It acts only on a closed port, never interrupts a monitor/flash stream, and disconnects
+  the page state after a successful forget.
+- **After-flashing card.** The three numbered rows preserve the first-install/Erase versus update
+  distinction, the single-dashboard model and breaker-off X10A wiring boundary. `<code>` chips wrap
+  so a long hostname never widens the card.
 - The copy states what the firmware actually does: the model is **auto-detected** and the device has
   **one dashboard** — there is no "Setup" screen, no model picker and no RX/TX step to send people to
   (§5.2, §5.3).
 - **English only — deliberately, not by omission.** The de/en browser detection of §1 stops at the
-  device UI: it is a `js/i18n.js` mechanism, and this page ships no `I18N` dictionary and no script
-  beyond the PR-banner check. The divergence from the dashboard is **not** a gap to close — do not
-  add a translation layer here to make the two consistent.
+  device UI: this page ships no `I18N` dictionary. The divergence from the dashboard is **not** a
+  gap to close — do not add a translation layer here to make the two consistent.
 
 ### 5.6 Settings — the screen behind the gear (Connections + ESP32 + heating-curve diagnosis)
 The dashboard header's **gear** (right, `.iconbtn.bordered`) is the only way off the dashboard. It

@@ -1,6 +1,6 @@
 ---
 name: renovate-review
-description: Review and merge a Renovate dependency PR. The two tracked firmware deps (esp-web-tools, espressif/esp-idf) are deliberately never auto-merged because a green build cannot prove either still works — each needs a real hardware test the user must perform. Use when a Renovate PR needs review or merging.
+description: Review and merge a Renovate dependency PR. The two tracked firmware deps (esptool-js, espressif/esp-idf) are deliberately never auto-merged because a green build cannot prove either still works — each needs a real hardware test the user must perform. Use when a Renovate PR needs review or merging.
 model: sonnet
 ---
 
@@ -12,7 +12,7 @@ proves the firmware **compiles**, which is not the question either of these bump
 [`.github/renovate.json`](../../../.github/renovate.json) says it plainly — a green build
 
 > does NOT prove the X10A decode path still matches a real heat pump, that WiFi/MQTT behaviour
-> survives an ESP-IDF bump, or that the browser installer still flashes (esp-web-tools, which the
+> survives an ESP-IDF bump, or that the browser installer still flashes (esptool-js, which the
 > build never exercises).
 
 So for these two, **"CI is green" is not a merge argument**. The evidence has to come from a board.
@@ -28,54 +28,49 @@ gh pr checks <N>
 
 | Changed | Dependency | What it needs |
 |---|---|---|
-| `docs/index.html` | `esp-web-tools` | §2 — a real Web Serial flash |
+| `docs/index.html` | `esptool-js` | §2 — a real Web Serial flash |
 | `.github/workflows/build.yml` (`esp_idf_version:`) | `espressif/esp-idf` | §3 — a real build + a running board |
 | action pins in `.github/workflows/*` | GitHub Action digests | nothing — Renovate self-merges these |
 
 The authority is `matchDepNames` in `.github/renovate.json`, not this table. If a bump is listed
 there, a human merges it; read the file if a new dep ever joins the list.
 
-## 2. esp-web-tools — the browser installer
+## 2. esptool-js — the browser installer
 
-One line changes (the CDN pin), every gate passes, and **nothing automated touches the flash path** —
-which is exactly what differs between versions. 10.3.0 replaced the DTR/RTS reset with
-`esploader.after()` and moved esptool-js to 0.6.0 (`Uint8Array` instead of binary strings). Both only
-fail on real hardware, and the reference board is native USB-Serial/JTAG, where reset behaviour is
-most fragile.
+One line changes (the CDN pin), every gate passes, and **nothing automated touches the electrical
+flash path** — which is exactly what differs between versions. The inline installer depends on
+`Transport`, `ESPLoader.main()`, sparse `writeFlash()`, `reportProgress()` and `after("hard_reset")`.
+These can all keep their TypeScript shape while changing reset or stream-lock behaviour that only
+fails on real hardware. The reference board is native USB-Serial/JTAG, where reset is most fragile.
 
 **There is no PR preview to click.** The per-PR preview installer is retired (each one cost a
-`gh-pages` push and the Pages deployment that follows it), so an esp-web-tools bump cannot be
+`gh-pages` push and the Pages deployment that follows it), so an esptool-js bump cannot be
 flashed straight from the PR. Two paths remain, and for this dependency they are the whole test:
 build and serve the installer page locally, or **merge to `main` and flash the dev channel**
 (`…/dev/`), which republishes on the merge and is what a dev-channel board would receive anyway.
 
 ### 2.1 Check the contract against the dependency's own source
 
-Release notes are a claim, not evidence — verify against the code. The npm tarball ships readable
-`src/`:
+Release notes are a claim, not evidence — verify against the code. Compare the official tags and
+the npm package's readable `lib/` output:
 
 ```bash
 for v in <old> <new>; do
-  mkdir -p "$v" && curl -sSL "https://registry.npmjs.org/esp-web-tools/-/esp-web-tools-$v.tgz" | tar xz -C "$v"
+  mkdir -p "$v" && curl -sSL "https://registry.npmjs.org/esptool-js/-/esptool-js-$v.tgz" | tar xz -C "$v"
 done
-diff -u <old>/package/src/const.ts <new>/package/src/const.ts   # the manifest contract
-diff -u <old>/package/src/flash.ts <new>/package/src/flash.ts   # build selection + transport/reset
+diff -ru <old>/package/lib <new>/package/lib
 ```
 
-- `const.ts` defines `Manifest` / `Build`. Everything our manifest emits
-  ([`scripts/ci-build-all.sh`](../../../scripts/ci-build-all.sh), bottom heredoc) must still be
-  accepted: `chipFamily: "ESP32-S3"`, `parts[].path` + `.offset`, `new_install_prompt_erase`.
-- `flash.ts` decides **which build gets selected**. This is the sharp edge: 10.3.0 added optional
-  `serialType` and picks `serialType === detected` *first*, falling back to
-  `serialType === undefined`. Our manifest sets no `serialType`, so it survives only because that
-  fallback exists. A future version that drops the fallback would silently render our manifest
-  unmatchable — "your board is not supported" — with CI still green.
+- `Transport` still has to open, read, reset and close the same Web Serial port without leaving a
+  lock behind for the on-page Serial Monitor.
+- `ESPLoader.writeFlash()` must still accept `Uint8Array` parts plus `flashSize`/`flashMode`/
+  `flashFreq: "keep"`, `compress: true`, and the three-argument progress callback.
+- `ESPLoader.after("hard_reset")` must still restore the running firmware on the native
+  USB-JTAG/Serial path.
 
-Don't reason about the selection; **run it**. Extract the real selection expression from the new
-`flash.ts` into a scratch `.mjs`, feed it the repo's real manifest, and assert a build comes back for
-the detected board, for a UART bridge, for unknown port info, and that a wrong `chipFamily` returns
-nothing. The board's identity for the CDC check: VID `0x303A`, PID `0x1001`
-("USB JTAG_serial debug unit").
+Run `node --test test/web_installer.test.mjs` against the bump. It gates our manifest selection,
+weighted sparse-part progress and no-Erase boundary. Then inspect the changed dependency source for
+the methods above; do not infer compatibility from an unchanged exported type alone.
 
 ### 2.2 Get a bootable image — pull it from CI, don't build it
 
@@ -115,9 +110,9 @@ scripts/build-pages.sh                       # assembles _site/ from dist/ + doc
 python3 -m http.server 8765 --bind 127.0.0.1 # localhost IS a secure context -> Web Serial works
 ```
 
-Confirm the page itself before involving the user: the script src is the new version, the custom
-element upgrades (`install-supported` set, not `install-unsupported`), its shadow root still exposes
-`<slot name="activate">` (the slot `docs/index.html` fills), and the console is clean.
+Confirm the page itself before involving the user: the pinned `esptool-js` module loads, manifest
+version appears, the native chooser is the only dialog, the connection/progress UI stays in-page,
+the Serial Monitor tongue opens under the USB card, and the console is clean.
 
 ### 2.4 The flash needs the user — you cannot do it
 
@@ -132,8 +127,8 @@ whole point of the test:
 
 | Phase | What a new version tends to change | Symptom |
 |---|---|---|
-| Connect | the reset sequence | *"Failed to initialize… hold the BOOT button"* |
-| Write | the esptool-js data API | write error / abort |
+| Connect | the reset sequence | *"Connection failed"* / chip never becomes suitable |
+| Write | the binary/progress API | write error / abort |
 | Reboot | the same reset path | completes but the board doesn't come back |
 
 Their answer is the test result. Nothing else in this section substitutes for it.
