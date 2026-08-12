@@ -735,14 +735,22 @@ static void test_config_model() {
     c.mb_unit_id = 1; CHECK(validate(c, why));
     c.mb_host = "";                                     // reset to default for the checks below
 
-    // The saved address is the complete HomeHub switch. Empty is disabled and can never arm an
-    // implicit boot search; a non-empty manual or discovered address is the exact polling target.
+    // Fresh is the one automatic-search state. A completed empty decision is disabled forever; a
+    // non-empty manual or discovered address is the exact polling target and never searches.
     Config m;
     CHECK(config_modbus_host(m).empty());
     CHECK(!config_modbus_enabled(m));
+    CHECK(config_modbus_should_search(m));
+    CHECK(!config_modbus_discovery_done_on_load(false, false, false));
+    CHECK(config_modbus_discovery_done_on_load(true, false, false));  // pre-v18 safety migration
+    CHECK(!config_modbus_discovery_done_on_load(true, true, false));  // v18 explicit pending
+    CHECK(config_modbus_discovery_done_on_load(false, true, true));
+    m.mb_discovery_done = true;
+    CHECK(!config_modbus_should_search(m));
     m.mb_host = "203.0.113.137";
     CHECK(config_modbus_host(m) == "203.0.113.137");
     CHECK(config_modbus_enabled(m));
+    CHECK(!config_modbus_should_search(m));
     m.mb_host = "203.0.113.131";
     CHECK(config_modbus_host(m) == "203.0.113.131");
     m.mb_host.clear();
@@ -4933,6 +4941,8 @@ static void test_redact() {
     // address, so /status withholds it as modbus.host and /diag must not put it back.
     CHECK(redact_diag_line("modbus: manual mDNS search found gateway 203.0.113.137") ==
           "modbus: manual mDNS search found gateway <redacted>");
+    CHECK(redact_diag_line("modbus: initial mDNS search found gateway 203.0.113.137") ==
+          "modbus: initial mDNS search found gateway <redacted>");
     CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using 203.0.113.137") ==
           "modbus: 2 HomeHubs discovered via mDNS — using <redacted>");
     // The count SURVIVES on the several-hubs line: that more than one gateway answered is what
@@ -5089,17 +5099,20 @@ static void test_config_store() {
         v[v.size()-4] = k & 0xFF; v[v.size()-3] = (k>>8) & 0xFF;
         v[v.size()-2] = (k>>16) & 0xFF; v[v.size()-1] = (k>>24) & 0xFF;
     };
-    // The v16 tail every serialized blob now carries: a length-prefixed base topic, EMPTY in every
-    // fixture below, so exactly its two length bytes. Named once and ADDED to each older-version
-    // suffix rather than folded into the literals, so appending v17 is one edit here instead of
-    // fifteen scattered ones — and so each literal still reads as "the blocks v<N> predates".
+    // The append-only tails every serialized blob now carries. Named once and ADDED to each
+    // older-version suffix rather than folded into the literals, so a new blob version is one edit
+    // here instead of fifteen scattered ones — and each literal still reads as the blocks v<N>
+    // predates.
     const size_t base_suffix_bytes = 2;
     const size_t ref_multi_suffix_bytes = 2 + 2 + 4;
+    const size_t discovery_suffix_bytes = 1;
+    const size_t current_suffix_bytes =
+        base_suffix_bytes + ref_multi_suffix_bytes + discovery_suffix_bytes;
     const size_t circ_suffix_bytes = 2 + circ.circulation_name.size() +
         2 + circ.circulation_topic.size() + 2 + circ.circulation_power_path.size() +
         2 + circ.circulation_time_path.size() + 16;
     std::vector<uint8_t> v14 = circ_buf;
-    v14.erase(v14.end() - 4 - (circ_suffix_bytes + base_suffix_bytes + ref_multi_suffix_bytes),
+    v14.erase(v14.end() - 4 - (circ_suffix_bytes + current_suffix_bytes),
               v14.end() - 4);
     v14[4] = 14;
     restamp(v14);
@@ -5126,7 +5139,7 @@ static void test_config_store() {
     board.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 17);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 18);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -5158,7 +5171,7 @@ static void test_config_store() {
     // path + max-age u32 (6 bytes), weather (9), ENV III (9), board identity (2), and the three
     // empty v13 room-control strings (6), v14 controller mode (1), the empty/default v15
     // circulation-source block (24), and the empty v16 base topic (2) = 91 bytes.
-    v1.erase(v1.end() - 4 - (89 + base_suffix_bytes + ref_multi_suffix_bytes), v1.end() - 4);
+    v1.erase(v1.end() - 4 - (89 + current_suffix_bytes), v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -5173,7 +5186,7 @@ static void test_config_store() {
     restamp(trunc);
     CHECK(!config_blob_deserialize(trunc.data(), trunc.size(), out));
 
-    // ── v16/v17: MQTT base topic and independent room-value mappings ────────────────────────────
+    // ── v16/v17/v18: MQTT base, room-value mappings and HomeHub discovery latch ────────────────
     // The default blob round-tripped above carries it EMPTY and still reports has_mqtt_base, because
     // empty is a VALUE here ("use the compile-time default"), not an absence — which is what makes
     // this upgrade a no-op for every deployed device: nothing to migrate, nothing to seed.
@@ -5185,6 +5198,7 @@ static void test_config_store() {
     CHECK(config_blob_deserialize(base_buf.data(), base_buf.size(), base_rt));
     CHECK(base_rt.has_mqtt_base && base_rt.mqtt_base == "daikin-bench-2" && base_rt.wifi_ssid == "net");
     CHECK(base_rt.has_ref_multi_source);
+    CHECK(base_rt.has_modbus_discovery_state && !base_rt.mb_discovery_done);
     ConfigBlob multi_source;
     multi_source.ref_temp_setpoint_topic = "thermostat/status";
     multi_source.ref_temp_time_topic = "fixtures/status/1/sys";
@@ -5196,9 +5210,24 @@ static void test_config_store() {
           multi_rt.ref_temp_setpoint_topic == multi_source.ref_temp_setpoint_topic &&
           multi_rt.ref_temp_time_topic == multi_source.ref_temp_time_topic &&
           multi_rt.ref_temp_fixed_setpoint_tenths == 205);
+    ConfigBlob discovered;
+    discovered.mb_discovery_done = true;
+    const std::vector<uint8_t> discovered_buf = config_blob_serialize(discovered);
+    ConfigBlob discovered_rt;
+    CHECK(config_blob_deserialize(discovered_buf.data(), discovered_buf.size(), discovered_rt));
+    CHECK(discovered_rt.has_modbus_discovery_state && discovered_rt.mb_discovery_done);
+    // A genuine v17 blob has the independent room mappings but no discovery decision. The load
+    // layer uses has_modbus_discovery_state=false to apply the conservative pre-v18 migration.
+    std::vector<uint8_t> v17 = base_buf;
+    v17.erase(v17.end() - 4 - discovery_suffix_bytes, v17.end() - 4);
+    v17[4] = 17;
+    restamp(v17);
+    ConfigBlob v17_rt;
+    CHECK(config_blob_deserialize(v17.data(), v17.size(), v17_rt));
+    CHECK(v17_rt.has_ref_multi_source && !v17_rt.has_modbus_discovery_state);
     // A genuine v16 blob has the base topic but not the v17 room-topic extension.
     std::vector<uint8_t> v16 = base_buf;
-    v16.erase(v16.end() - 4 - ref_multi_suffix_bytes, v16.end() - 4);
+    v16.erase(v16.end() - 4 - (ref_multi_suffix_bytes + discovery_suffix_bytes), v16.end() - 4);
     v16[4] = 16;
     restamp(v16);
     ConfigBlob v16_rt;
@@ -5209,18 +5238,19 @@ static void test_config_store() {
     // upgrade guarantee v1 and v2 got — and report the base absent rather than refusing the blob and
     // taking the user's credentials down with it.
     std::vector<uint8_t> v15 = base_buf;
-    v15.erase(v15.end() - 4 - (16 + ref_multi_suffix_bytes), v15.end() - 4);
+    v15.erase(v15.end() - 4 - (16 + ref_multi_suffix_bytes + discovery_suffix_bytes),
+              v15.end() - 4);
     v15[4] = 15;
     restamp(v15);
     ConfigBlob v15_rt;
     CHECK(config_blob_deserialize(v15.data(), v15.size(), v15_rt));
     CHECK(!v15_rt.has_mqtt_base && v15_rt.mqtt_base.empty() && v15_rt.wifi_ssid == "net");
     CHECK(v15_rt.has_circulation);              // every earlier block still decoded
-    // A blob still stamped v17 but missing its new tail is truncated, never silently accepted as v16.
-    std::vector<uint8_t> v17_short = base_buf;
-    v17_short.erase(v17_short.end() - 4 - ref_multi_suffix_bytes, v17_short.end() - 4);
-    restamp(v17_short);
-    CHECK(!config_blob_deserialize(v17_short.data(), v17_short.size(), out));
+    // A blob still stamped v18 but missing its new byte is truncated, never silently accepted as v17.
+    std::vector<uint8_t> v18_short = base_buf;
+    v18_short.erase(v18_short.end() - 4 - discovery_suffix_bytes, v18_short.end() - 4);
+    restamp(v18_short);
+    CHECK(!config_blob_deserialize(v18_short.data(), v18_short.size(), out));
 
     // ── v3: the OTA update channel ───────────────────────────────────────────────────────────────
     ConfigBlob chan; chan.wifi_ssid = "net"; chan.ota_channel = 1;   // 1 = dev
@@ -5236,7 +5266,7 @@ static void test_config_store() {
     // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
     // stored" from "explicitly release"; both mean release, only the diag line differs.
     std::vector<uint8_t> v2 = bb;
-    v2.erase(v2.end() - 4 - (76 + base_suffix_bytes + ref_multi_suffix_bytes), v2.end() - 4);
+    v2.erase(v2.end() - 4 - (76 + current_suffix_bytes), v2.end() - 4);
     v2[4] = 2;
     restamp(v2);
     ConfigBlob pre;
@@ -5260,7 +5290,7 @@ static void test_config_store() {
     // v3 blob and must still decode — the channel survives, and the absent language reads as auto
     // (has_lang == false, ui_lang == 0), so the browser keeps auto-detecting exactly as before.
     std::vector<uint8_t> v3 = lbv;
-    v3.erase(v3.end() - 4 - (75 + base_suffix_bytes + ref_multi_suffix_bytes), v3.end() - 4);
+    v3.erase(v3.end() - 4 - (75 + current_suffix_bytes), v3.end() - 4);
     v3[4] = 3;
     restamp(v3);
     ConfigBlob prel;
@@ -5277,7 +5307,7 @@ static void test_config_store() {
     mb.mb_host = "homehub-524288-abc.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 17);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 18);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
@@ -5301,7 +5331,7 @@ static void test_config_store() {
     // index would make these checks assert nothing at all.
     ConfigBlob consent_src = mb; consent_src.mb_host = "homehub-524288-abc.local";
     std::vector<uint8_t> consent = config_blob_serialize(consent_src);
-    const size_t flag_byte = consent.size() - 5 - 63 - base_suffix_bytes - ref_multi_suffix_bytes;
+    const size_t flag_byte = consent.size() - 5 - 63 - current_suffix_bytes;
     CHECK((consent[flag_byte] & 2u) != 0);               // offset pinned by the mirror bit
     CHECK((consent[flag_byte] & 1u) == 0);               // the encoder never sets the consent bit
     consent[flag_byte] |= 1u;
@@ -5317,7 +5347,7 @@ static void test_config_store() {
     // shape as an upgrade fixture: current firmware must ignore that bit and decode empty as Off.
     std::vector<uint8_t> legacy_v6_auto = mbb;
     legacy_v6_auto.erase(legacy_v6_auto.end() - 4 -
-                         (63 + base_suffix_bytes + ref_multi_suffix_bytes),
+                         (63 + current_suffix_bytes),
                          legacy_v6_auto.end() - 4);
     legacy_v6_auto[4] = 6;
     legacy_v6_auto[legacy_v6_auto.size() - 5] |= 2u;
@@ -5328,7 +5358,7 @@ static void test_config_store() {
     // A v5 empty-host blob also decodes disabled. Its historical flag was ambiguous, so it cannot
     // arm discovery in the current explicit-search contract.
     std::vector<uint8_t> v5 = mbb;
-    v5.erase(v5.end() - 4 - (63 + base_suffix_bytes + ref_multi_suffix_bytes), v5.end() - 4);
+    v5.erase(v5.end() - 4 - (63 + current_suffix_bytes), v5.end() - 4);
     v5[4] = 5;
     v5[v5.size() - 5] &= static_cast<uint8_t>(~2u);      // HomeHub flag byte immediately before CRC
     restamp(v5);
@@ -5338,7 +5368,7 @@ static void test_config_store() {
     // v8 carried the same bit as an inert placeholder. It stays inert forever now that the write
     // path is gone: the transport survives the migration and nothing decodes a consent flag.
     std::vector<uint8_t> v8 = mbb;
-    v8.erase(v8.end() - 4 - (51 + base_suffix_bytes + ref_multi_suffix_bytes), v8.end() - 4);
+    v8.erase(v8.end() - 4 - (51 + current_suffix_bytes), v8.end() - 4);
     v8[4] = 8;
     restamp(v8);
     ConfigBlob v8rt;
@@ -5348,7 +5378,7 @@ static void test_config_store() {
     // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
     // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.
     std::vector<uint8_t> v4 = mbb;
-    v4.erase(v4.end() - 4 - (74 + base_suffix_bytes + ref_multi_suffix_bytes), v4.end() - 4);
+    v4.erase(v4.end() - 4 - (74 + current_suffix_bytes), v4.end() - 4);
     v4[4] = 4;
     restamp(v4);
     ConfigBlob v4rt;
@@ -5380,7 +5410,7 @@ static void test_config_store() {
 
     // v13 already has room control but predates the controller mode; it must migrate OFF.
     std::vector<uint8_t> v13 = refb;
-    v13.erase(v13.end() - 4 - (25 + base_suffix_bytes + ref_multi_suffix_bytes), v13.end() - 4);
+    v13.erase(v13.end() - 4 - (25 + current_suffix_bytes), v13.end() - 4);
     v13[4] = 13;
     restamp(v13);
     ConfigBlob v13rt;
@@ -5394,7 +5424,7 @@ static void test_config_store() {
                                  2 + ref.ref_temp_hvac_mode_path.size();
     std::vector<uint8_t> v12 = refb;
     v12.erase(v12.end() - 4 -
-              (v13_ref_bytes + 25 + base_suffix_bytes + ref_multi_suffix_bytes), v12.end() - 4);
+              (v13_ref_bytes + 25 + current_suffix_bytes), v12.end() - 4);
     v12[4] = 12;
     restamp(v12);
     ConfigBlob v12rt;
@@ -5406,7 +5436,7 @@ static void test_config_store() {
     // in place: keep that mapping, add no imaginary timestamp path, and use the 10-minute default.
     std::vector<uint8_t> v7 = refb;
     v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 20 + v13_ref_bytes +
-                             25 + base_suffix_bytes + ref_multi_suffix_bytes),
+                             25 + current_suffix_bytes),
              v7.end() - 4);
     v7[4] = 7;
     restamp(v7);
@@ -5417,7 +5447,7 @@ static void test_config_store() {
 
     // A genuine v6 blob still carries every earlier setting and reports the new mapping absent.
     std::vector<uint8_t> v6 = mbb;
-    v6.erase(v6.end() - 4 - (63 + base_suffix_bytes + ref_multi_suffix_bytes), v6.end() - 4);
+    v6.erase(v6.end() - 4 - (63 + current_suffix_bytes), v6.end() - 4);
     v6[4] = 6;
     restamp(v6);
     ConfigBlob v6rt;
@@ -5438,7 +5468,7 @@ static void test_config_store() {
           weatherrt.weather_longitude_e6 == 13404954);
     // A genuine v10 blob keeps weather but predates ENV III and explicit board identity.
     std::vector<uint8_t> v10 = weatherb;
-    v10.erase(v10.end() - 4 - (42 + base_suffix_bytes + ref_multi_suffix_bytes), v10.end() - 4);
+    v10.erase(v10.end() - 4 - (42 + current_suffix_bytes), v10.end() - 4);
     v10[4] = 10;
     restamp(v10);
     ConfigBlob v10rt;
@@ -5456,7 +5486,7 @@ static void test_config_store() {
     // v11 already carried ENV III but no explicit board id. It remains readable so the load path can
     // migrate the old `board_set` statement instead of losing credentials or sensor wiring.
     std::vector<uint8_t> v11 = envbuf;
-    v11.erase(v11.end() - 4 - (33 + base_suffix_bytes + ref_multi_suffix_bytes), v11.end() - 4);
+    v11.erase(v11.end() - 4 - (33 + current_suffix_bytes), v11.end() - 4);
     v11[4] = 11;
     restamp(v11);
     ConfigBlob v11rt;
@@ -5466,7 +5496,7 @@ static void test_config_store() {
 
     // A v9 upgrade predates both independent outdoor sources and remains disabled by default.
     std::vector<uint8_t> v9 = weatherb;
-    v9.erase(v9.end() - 4 - (51 + base_suffix_bytes + ref_multi_suffix_bytes), v9.end() - 4);
+    v9.erase(v9.end() - 4 - (51 + current_suffix_bytes), v9.end() - 4);
     v9[4] = 9;
     restamp(v9);
     ConfigBlob v9rt;
@@ -6077,8 +6107,8 @@ static void test_heating_curve_diagnosis() {
 
     // ARMING IS DERIVED FROM THE CONFIGURATION — there is no mode byte, no /set_dynamic_lwt and so
     // no way for a stored answer to disagree with the sources a reader can see. Every input the
-    // diagnosis NEEDS is required; the HomeHub deliberately is NOT, so a device without one still
-    // shows the card and is told which prerequisite is missing rather than shown nothing.
+    // diagnosis NEEDS is required, including the HomeHub plant gates. Explicitly deleting HomeHub
+    // therefore disarms the dependent sampler instead of evaluating an impossible prerequisite.
     Config dependencies;
     CHECK(!heating_curve_diagnosis_armed(dependencies));
     dependencies.mqtt_uri = "mqtt://broker";
@@ -6086,14 +6116,16 @@ static void test_heating_curve_diagnosis() {
     dependencies.ref_temp_path = "current";
     dependencies.ref_temp_setpoint_path = "target";
     dependencies.ref_temp_time_path = "read_at";
+    dependencies.mb_host = "homehub.local";
     CHECK(heating_curve_diagnosis_armed(dependencies));   // forecast location is optional
     Config arrival_timed = dependencies;
     arrival_timed.ref_temp_time_path.clear();
     CHECK(heating_curve_diagnosis_armed(arrival_timed));  // live non-retained MQTT arrival is enough
     dependencies.weather_enabled = true;
     CHECK(heating_curve_diagnosis_armed(dependencies));
-    dependencies.mb_host = "";                 // a missing HomeHub is a runtime state, not a disarm
-    CHECK(heating_curve_diagnosis_armed(dependencies));
+    dependencies.mb_host = "";
+    CHECK(!heating_curve_diagnosis_armed(dependencies));  // explicit HomeHub opt-out disarms it
+    dependencies.mb_host = "homehub.local";
     for (std::string Config::*field : {&Config::mqtt_uri, &Config::ref_temp_topic,
                                        &Config::ref_temp_path, &Config::ref_temp_setpoint_path}) {
         Config one = dependencies;

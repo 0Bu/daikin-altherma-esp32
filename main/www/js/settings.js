@@ -327,9 +327,9 @@ function openNtp() {
 function closeNtp() { closePopup("ntpModal"); }
 
 // ── HomeHub / Modbus TCP (edit modal) ──────────────────────────────────────
-// The address is the entire persistent contract: non-empty polls it; empty disables HomeHub. mDNS
-// discovery is an explicit button action that fills this same field without saving behind the
-// dialog's Cancel/Save boundary.
+// Fresh firmware has one automatic search. In this dialog the address is the explicit persistent
+// contract: non-empty polls it; saving empty is a durable opt-out. Manual mDNS Search fills this same
+// field without saving behind the dialog's Cancel/Save boundary.
 let homehubSearchGeneration = 0;
 function fillHomehub() {
   const mb = S.status?.modbus || {};

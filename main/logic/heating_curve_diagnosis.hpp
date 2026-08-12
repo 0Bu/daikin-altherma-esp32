@@ -40,7 +40,8 @@ enum class HeatingCurveReason : uint8_t {
     // The sampler is not RUNNING at all — it lives on the MQTT publish task, which does not exist
     // when the broker is unconfigured (mqtt_ha.cpp returns before creating it) or when the board came
     // up in safe mode (main.cpp skips every optional consumer). The snapshot is then still
-    // default-constructed, i.e. Off/Disabled, while `armed` is derived from the saved room mapping at
+    // default-constructed, i.e. Off/Disabled, while `armed` is derived from the saved room mapping
+    // plus active HomeHub at
     // request time — so /status reported `armed:true` beside `reason:"disabled"`, and the UI, keying
     // on the state alone, told the reader to set up the very room source sitting configured one row
     // below. This reason exists so those two situations stop sharing a wording: Disabled means "no

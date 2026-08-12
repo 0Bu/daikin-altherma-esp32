@@ -966,9 +966,10 @@
   </div>
 
   <!-- ═══ HomeHub edit modal (opened from the Connections tile's HomeHub row) ═══
-       Discovery is ONLY the explicit Search button. It fills the same editable address field a user
-       may type manually; Save persists it, while an empty save disables HomeHub completely. Applied
-       live (POST /set_hp, no reboot). Read-only: config + diagnostics only, never pump control. -->
+       Fresh firmware searches once before HTTP starts. This manual Search button fills the same
+       editable address field a user may type manually; Save persists it, while an empty save is the
+       durable opt-out. Applied live (POST /set_hp, no reboot). Read-only: config + diagnostics only,
+       never pump control. -->
   <div class="modal" id="homehubModal" hidden>
     <div class="modal-backdrop" id="homehubBackdrop"></div>
     <form class="modal-card" id="homehubForm" role="dialog" aria-modal="true" aria-labelledby="homehubModalTitle" tabindex="-1">
@@ -992,7 +993,7 @@
         <input class="input num" name="unit" id="hhUnit" placeholder="1" inputmode="numeric" autocomplete="off">
       </label>
       <p class="hint err" id="hhError" hidden></p>
-      <p class="hint" data-i18n="homehub.hint">Search runs only when you press Search and fills the address field when a HomeHub answers. Save the result or enter an address manually. An empty address disables HomeHub completely: no search at boot and no requests. Port defaults to 502, unit id to 1. This dialog configures the data source only; it exposes no heat-pump control.</p>
+      <p class="hint" data-i18n="homehub.hint">Fresh firmware searches once automatically on its first networked start and saves the result. Search can also be run manually here. Saving an empty address permanently disables future automatic search, Modbus requests and dependent diagnosis. Port defaults to 502, unit id to 1. This dialog configures the data source only; it exposes no heat-pump control.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="hhCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="hhBtn" data-i18n="btn.save">Save</button>

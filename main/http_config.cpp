@@ -753,13 +753,16 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // a wiring-only patch (rx/tx) leaves the HomeHub untouched and the pin picker's
     // {profile:"auto",rx,tx} POST cannot switch anything on. This is a SECOND source, not an
     // alternative to X10A: enabling it starts a separate task, it does not stop the X10A poll.
-    // HomeHub configuration has one unambiguous switch: a non-empty address enables polling; an
-    // empty address disables the stack and causes no discovery or HomeHub request. Discovery is a
-    // separate, explicit /discover_homehub action which only returns an address for the dialog; it
-    // never mutates config behind the form's Save/Cancel boundary.
+    // HomeHub configuration has one unambiguous explicit decision: sending mb_host (including an
+    // empty string) completes the one-shot discovery lifecycle. Non-empty enables polling; empty is
+    // the durable opt-out, with no later boot search or HomeHub request. /discover_homehub remains a
+    // request-local manual action and never mutates config behind the form's Save/Cancel boundary.
     cJSON* hostItem = cJSON_GetObjectItem(j, "mb_host");
     const bool host_sent = cJSON_IsString(hostItem);
-    if (host_sent) c.mb_host = hostItem->valuestring;
+    if (host_sent) {
+        c.mb_host = hostItem->valuestring;
+        c.mb_discovery_done = true;
+    }
     c.mb_port           = ji(j, "mb_port", c.mb_port);
     c.mb_unit_id        = ji(j, "mb_unit_id", c.mb_unit_id);
     // `actuation_enabled` is deliberately NOT accepted: the register-54 write path is retired (#294)
@@ -807,13 +810,12 @@ static esp_err_t set_hp(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true}");
 }
 
-// Explicit HomeHub discovery for the edit dialog. This is intentionally NOT part of boot or of the
-// Modbus poll task, and it does not save anything: the user sees the found IPv4 in the normal host
-// field and decides with Save or Cancel whether it becomes configuration. A bounded miss returns
-// control to that same field for manual entry.
+// Manual HomeHub discovery for the edit dialog. Unlike the one initial boot search, this does not
+// save anything: the user sees the found IPv4 in the normal host field and decides with Save or
+// Cancel whether it becomes configuration. A bounded miss returns control for manual entry.
 static esp_err_t discover_homehub_now(httpd_req_t* req) {
-    if (!wifi_info().connected)
-        return send_err(req, "400 Bad Request", "WiFi not connected");
+    if (!net_is_up())
+        return send_err(req, "400 Bad Request", "Network not connected");
     std::string found;
     if (!mb_discover_homehub(found))
         return send_err(req, "404 Not Found", "No HomeHub found");

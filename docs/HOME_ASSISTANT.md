@@ -165,7 +165,7 @@ slug is available in `/status.reference_temperature.reason`; metric alerts shoul
 code.
 
 Heating-curve diagnosis method version `2` appears below `diagnosis` on the new topic. It is armed by
-the configured, timestamped MQTT room mapping. The Open-Meteo forecast is optional comparison
+the configured, timestamped MQTT room mapping plus an active HomeHub. The Open-Meteo forecast is optional comparison
 evidence and does not require a location to be disclosed. State codes are `0` off, `1` recording,
 `2` hold, `3` degraded and `4` blocked. Reason
 codes are `0` disabled, `1` sample recorded, `2` sampling interval, `5` room unavailable, `6` X10A

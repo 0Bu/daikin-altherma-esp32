@@ -1,6 +1,6 @@
-// Source-boundary regression test for the HomeHub discovery lifecycle. The pure config helpers prove
-// that an empty host is disabled; this pins the IDF-facing orchestration that host tests cannot link:
-// boot/poll never browse mDNS, and only the explicit HTTP action may run the bounded search.
+// Source-boundary regression test for the HomeHub discovery lifecycle. Fresh firmware performs one
+// persisted search before HTTP starts; the poll loop never browses, and an explicit empty save is a
+// durable opt-out. Manual Search remains request-local behind the dialog's Save/Cancel boundary.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
@@ -8,13 +8,15 @@ import vm from "node:vm";
 const modbus = fs.readFileSync(new URL("../main/hp_modbus.cpp", import.meta.url), "utf8");
 const http = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
+const main = fs.readFileSync(new URL("../main/main.cpp", import.meta.url), "utf8");
+const status = fs.readFileSync(new URL("../main/http_status.cpp", import.meta.url), "utf8");
 
 const taskStart = modbus.indexOf("static void mb_task(void*)");
 const taskEnd = modbus.indexOf("static void mb_task_start_if_enabled()", taskStart + 1);
 assert.ok(taskStart >= 0 && taskEnd > taskStart, "the Modbus task boundary must remain identifiable");
 const task = modbus.slice(taskStart, taskEnd);
 assert.doesNotMatch(task, /discover_homehub\s*\(|mdns_query_(?:ptr|a)\s*\(|config_modbus_should_search/,
-  "boot/poll task must never perform HomeHub discovery");
+  "the steady-state poll task must never perform HomeHub discovery");
 // Clearing the address retires the task outright. There is no restore step any more: the write path
 // was removed with dynamic LWT actuation (#294), so the stack owns nothing on the hub to put back.
 assert.match(task, /if \(config_modbus_host\(config\(\)\)\.empty\(\)\) break;/,
@@ -25,12 +27,39 @@ assert.doesNotMatch(task, /request_restore\(|mb_process_actuator\(/,
 const startStart = modbus.indexOf("static void mb_task_start_if_enabled()", taskEnd);
 const startEnd = modbus.indexOf("void mb_start()", startStart);
 assert.match(modbus.slice(startStart, startEnd), /if \(!config_modbus_enabled\(c\)\) return;/,
-  "boot must create no HomeHub task for an empty address");
+  "after the one-shot decision, an empty address must create no HomeHub task");
+
+const autoStart = modbus.indexOf("void mb_autodiscover_initial()");
+const autoEnd = modbus.indexOf("// Non-blocking connect", autoStart);
+assert.ok(autoStart >= 0 && autoEnd > autoStart, "the initial discovery boundary must exist");
+const initial = modbus.slice(autoStart, autoEnd);
+assert.match(initial, /config_modbus_should_search\(c\)/,
+  "only genuinely undecided firmware may run the automatic search");
+assert.match(initial, /if \(!net_is_up\(\)\)/,
+  "AP-only startup must defer rather than consume the one-shot decision");
+assert.match(initial, /discover_homehub_bounded\(found, "initial"\)/,
+  "the initial search must use the bounded mDNS implementation");
+assert.match(initial, /c\.mb_discovery_done = true;[\s\S]*if \(ok\) c\.mb_host = found;[\s\S]*config_save\(c\)/,
+  "found and not-found outcomes must persist the latch atomically with the address");
+const autoCall = main.indexOf("mb_autodiscover_initial()");
+const httpStart = main.indexOf("http_start()");
+assert.ok(autoCall >= 0 && httpStart > autoCall,
+  "initial discovery must finish before HTTP can race it with a user config save");
+
+const setHpStart = http.indexOf("static esp_err_t set_hp(");
+const setHpEnd = http.indexOf("static esp_err_t discover_homehub_now", setHpStart);
+const setHp = http.slice(setHpStart, setHpEnd);
+assert.match(setHp, /if \(host_sent\) \{[\s\S]*c\.mb_host = hostItem->valuestring;[\s\S]*c\.mb_discovery_done = true;/,
+  "an explicit host save, including empty delete, must permanently complete discovery");
+assert.match(status, /searched[\s\S]{0,120}c\.mb_discovery_done/,
+  "status must expose whether the one-shot decision has been persisted");
 
 const handlerStart = http.indexOf("static esp_err_t discover_homehub_now");
 const handlerEnd = http.indexOf("static esp_err_t set_syslog", handlerStart);
 assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, "the explicit discovery handler must exist");
 const handler = http.slice(handlerStart, handlerEnd);
+assert.match(handler, /if \(!net_is_up\(\)\)/,
+  "manual discovery must work over either WiFi or Ethernet and reject only when the LAN is down");
 assert.match(handler, /mb_discover_homehub\(found\)/,
   "the explicit endpoint must invoke the bounded mDNS search");
 assert.doesNotMatch(handler, /config_save|mb_reconfigure/,
@@ -76,4 +105,4 @@ assert.equal(elements.hhHost.value, "saved-homehub.local",
 assert.equal(elements.hhSearch.disabled, false,
   "an old request must not change the trigger state of the new dialog session");
 
-console.log("HomeHub discovery lifecycle: explicit UI action only; empty host is boot/poll-off");
+console.log("HomeHub discovery lifecycle: one initial persisted search; explicit empty is durable off");

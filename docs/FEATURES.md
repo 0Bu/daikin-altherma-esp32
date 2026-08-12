@@ -575,10 +575,13 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
 - **✅ 🧪 Second SOURCE: Modbus TCP to a Daikin HomeHub (EKRHH).** An optional stack **beside** the
   X10A tap, not an alternative to it: separate tasks, caches and link states, because the two fail
   for entirely unrelated reasons and coupling them would let either failure mask the other. It costs
-  nothing when absent — an empty address creates no task, socket or discovery. A lwIP socket around
+  nothing after an absent decision — an empty searched address creates no task or socket. Fresh
+  firmware performs one bounded automatic search on its first networked boot and persists even a
+  miss. A lwIP socket around
   host-tested MBAP framing with request-**bound** response parsing, a whole-reply deadline and a
-  socket dropped on any desync. **mDNS discovery is explicit** — a dialog action, filtered by
-  hostname because this firmware answers that same browse, and only Save persists the result. The
+  socket dropped on any desync. Both the initial search and the manual dialog action are filtered by
+  hostname because this firmware answers that same browse; only the initial search or dialog Save
+  persists a result. Explicitly saving empty permanently disables Modbus and dependent diagnosis. The
   link is **READ-ONLY as a property of the code**: no write entry point, function-code builder or
   value encoder exists anywhere under `main/`.
 - **✅ 🧪 Batched reads on two cadences** ([`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp)):
@@ -833,7 +836,7 @@ Every ESP-IDF component this firmware links, and what it powers (from
 | `w5500` (managed) | the W5500 MAC/PHY pair — ESP-IDF 6.0 moved the SPI Ethernet drivers out of `esp_eth` |
 | `led_strip` (managed) | WS2812 pixel driver — an addressable LED encodes colour in pulse timings |
 | `esp_timer` | uptime, poll/serial timing |
-| `mdns` (managed) | `<hostname>.local` discovery + the explicit HomeHub browse |
+| `mdns` (managed) | `<hostname>.local` discovery + initial/manual HomeHub browse |
 | `espcoredump` | core dump to flash + `esp_core_dump_get_summary` |
 | `esp_partition` | the upper-flash `history` journal, the `GET /coredump` stream, the OTA running-slot lookup |
 | `cjson` (managed) | POST body parsing (`http_config.cpp`) |

@@ -514,7 +514,7 @@ void http_append_status_json(std::string& j, bool redact) {
     // Heating-curve diagnosis v2: raw room error sampled only in confirmed HEATING operation. The
     // absolute timestamp + monotonic sequence is the durable event contract; no actuator-derived
     // P/quantized/bounded/requested-offset vocabulary remains.
-    // `armed` is the CONFIGURATION's answer (is a room mapping saved), while state/reason come from a
+    // `armed` is the CONFIGURATION's answer (are room mapping + HomeHub saved), while state/reason come from a
     // snapshot the MQTT publish task owns. Those two can disagree, and only in one direction: with no
     // broker configured, or in safe mode, that task is never created, so the snapshot stays
     // default-constructed at Off/Disabled while armed reads true. Published raw, that was a payload
@@ -679,14 +679,15 @@ void http_append_status_json(std::string& j, bool redact) {
 
     // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A link
     // reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task exists;
-    // `host` is the one persistent switch and target: empty means disabled. Explicit discovery is a
-    // request-local dialog action and never appears here as a boot/runtime mode. The link is READ-ONLY:
+    // `host` is the active target; empty after `searched:true` means persistently disabled. Manual
+    // discovery is request-local and never appears here as a runtime mode. The link is READ-ONLY:
     // there is no actuator object and no actuation flag, because the write path was removed (#294).
     // Successive += with bare literals — the httpd-stack rule the rest of this builder follows.
     const ModbusStatus mb = mb_status();
     j += "\"modbus\":{\"enabled\":";  j += mb.enabled ? "true" : "false";
     j += ",\"connected\":";            j += mb.connected ? "true" : "false";
     j += ",\"discovering\":";          j += mb.discovering ? "true" : "false";
+    j += ",\"searched\":";             j += c.mb_discovery_done ? "true" : "false";
     // The ADDRESS comes from the CONFIG, the STATE from the live link.
     // Reading the address off the link status was wrong before the first connect ever succeeded:
     // ModbusStatus is zero-initialised, so a device that had never dialled reported port 0 and unit

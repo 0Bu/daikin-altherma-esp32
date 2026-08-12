@@ -271,12 +271,13 @@ block on it. Absence is null, not 0 °C; a sample taken without the sensor clear
 reading rather than inheriting it. The sampling *method* is unchanged, so archived events stay
 comparable.
 
-**Arming is derived, not switched.** It follows from the timestamped MQTT room mapping alone
+**Arming is derived, not switched.** It follows from the timestamped MQTT room mapping plus an
+active HomeHub
 ([`FEATURES.md`](FEATURES.md) #62 — a typo is accepted as configuration but fails closed and is
 reported when the next MQTT frame reaches the decoder). The forecast above is *optional* comparison
 evidence, distinguishing a Recording state from a Degraded one, so clearing a location stops forecast
-traffic without stopping local samples. Deleting the room source disarms and clears sample memory: a
-reading taken under a consent since withdrawn must not outlive it.
+traffic without stopping local samples. Deleting either the room source or HomeHub disarms and
+clears sample memory: a reading taken under a consent since withdrawn must not outlive it.
 
 The outside contract is `/status.heating_curve` plus the schema-versioned `<base>/heating_curve`
 payload, which expose raw current and last deviation, the heating gates, the source time, an absolute

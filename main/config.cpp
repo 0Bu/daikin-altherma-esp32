@@ -167,15 +167,17 @@ void config_load() {
         // absent means "auto" (keep letting the browser decide), which the struct default already
         // says — like the channel above, and unlike the board block, there is no Kconfig fallback.
         if (b.has_lang) c.ui_lang = ui_lang_from_int(b.ui_lang);
-        // The HomeHub Modbus stack (blob v5/v6). The address is the complete current contract:
-        // non-empty polls that target, empty is disabled. Ignore v6's former enable bit so a board
-        // saved in the short-lived Auto mode (enabled + empty) becomes safely disabled instead of
-        // resuming hidden discovery on boot.
+        // The HomeHub Modbus stack (blob v5/v6 plus the v18 discovery latch). Any pre-v18 blob that
+        // already carried this block migrates to discovery_done=true: its empty host may be an
+        // explicit deletion and consent cannot be reconstructed. A fresh/pre-v5 device remains
+        // pending and gets exactly one automatic search on its first networked boot.
         if (b.has_modbus) {
             c.mb_host           = b.mb_host;
             c.mb_port           = b.mb_port;
             c.mb_unit_id        = b.mb_unit_id;
         }
+        c.mb_discovery_done = config_modbus_discovery_done_on_load(
+            b.has_modbus, b.has_modbus_discovery_state, b.mb_discovery_done);
         if (b.has_env3) {
             c.env3_enabled = b.env3_enabled;
             c.env3_sda = b.env3_sda;
@@ -310,8 +312,8 @@ void config_load() {
         }
     }
     c.proto        = parse_protocol(nvs_get_str("proto", CONFIG_DAIKIN_PROTOCOL));
-    // Old development builds persisted discovery-result keys. They are intentionally ignored:
-    // discovery is now user-triggered and only a saved mb_host may start the HomeHub task.
+    // Old development builds persisted discovery-result keys outside the atomic blob. They remain
+    // ignored: v18 owns the one-shot decision atomically beside the host it applies to.
     c.profile      = "auto";
     c.fp_pages        = 0;
     c.fp_kw_tenths    = -1;
@@ -345,12 +347,14 @@ bool config_save(const Config& requested, bool require_link) {
     // the whole new blob lands or the previous one survives — so the save is all-or-nothing across
     // both a mid-write NVS failure AND a power cut, with no per-key rollback and no write-ordering to
     // get right (the old multi-commit save needed both, and still left a partial state on a rollback
-    // that could not complete). Because this blob is written HERE (the httpd task) alone, the poll
-    // task (config_save_link) can never revert a credential change — the field-ownership guarantee is
-    // kept without the narrow per-key writes.
+    // that could not complete). Every runtime call is serialized on the httpd task; initial HomeHub
+    // discovery is the one boot call and finishes before httpd starts. The poll task
+    // (config_save_link) can therefore never revert a credential change — the field-ownership
+    // guarantee is kept without narrow per-key writes.
     // No dynamic-LWT canonicalization here any more: the diagnosis derives its arming from the MQTT
-    // room source on every evaluation (config_model.hpp's heating_curve_diagnosis_armed). Forecast
-    // is optional comparison evidence; deleting the room source disarms sampling immediately.
+    // room source and active HomeHub on every evaluation
+    // (config_model.hpp's heating_curve_diagnosis_armed). Forecast is optional comparison evidence;
+    // deleting either required source disarms sampling immediately.
     Config c = requested;
     ConfigBlob b;
     b.wifi_ssid = c.wifi_ssid;                 b.wifi_pass = c.wifi_pass;
@@ -392,11 +396,12 @@ bool config_save(const Config& requested, bool require_link) {
     b.ota_channel = ota_channel_to_int(c.ota_channel);
     // The UI language likewise: one writer (POST /set_lang, httpd), one persistent user choice.
     b.ui_lang = ui_lang_to_int(c.ui_lang);
-    // The HomeHub Modbus stack rides the same blob: one writer (POST /set_hp, httpd), like the
-    // channel, the language and the board block. See logic/config_store.hpp (blob v9).
+    // The HomeHub Modbus stack rides the same blob. POST /set_hp is its normal writer; the one-time
+    // boot discovery writes before httpd starts, so the whole-blob ownership remains serialized.
     b.mb_host           = c.mb_host;
     b.mb_port           = c.mb_port;
     b.mb_unit_id        = c.mb_unit_id;
+    b.mb_discovery_done = c.mb_discovery_done;
     // REFUSE TO WRITE A BLOB THIS BUILD COULD NOT READ BACK. The decoder rejects the whole blob if any
     // string exceeds CONFIG_BLOB_MAX_STR, and the fallback is the legacy per-key layout a blob-era
     // device never populated — so writing one does not save a slightly-wrong config, it silently

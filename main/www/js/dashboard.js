@@ -559,6 +559,9 @@ function dynamicStateRow(d, room, weather, modbus, mqtt, sys) {
     return { key: "dyn.state_cooling", cls: "", help: "dyn.state_help_cooling" };
   if (d.state === "hold")
     return { key: "dyn.state_waiting", cls: "", help: "dyn.state_help_waiting" };
+  if (d.state === "off" && modbus.searched && !modbus.host)
+    return { key: "dyn.state_homehub_disabled", cls: "dim",
+             help: "dyn.state_help_homehub_disabled" };
   if (d.state === "off")
     return { key: "dyn.state_setup_room", cls: "dim", help: "dyn.state_help_setup" };
   if (d.reason === "room_unavailable")

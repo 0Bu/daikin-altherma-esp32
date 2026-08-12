@@ -106,7 +106,7 @@ reading your report needs to know.
 | `weather_forecast.longitude` | the other half of the same |
 | `syslog.host` | an internal hostname |
 | `ntp.server` | often an internal hostname too |
-| `modbus.host` | your saved HomeHub address, whether typed manually or filled by the explicit Search button |
+| `modbus.host` | your saved HomeHub address, whether found automatically, typed manually or filled by manual Search |
 
 Four entries here are not an address on your network: the two coordinates identify a place, and the
 two source *names* are words you typed — usually a room, sometimes a person. Everything else

@@ -8,8 +8,9 @@
 // failure closes it so the next cycle reconnects — the self-healing shape hp_comm.cpp uses for the
 // UART, applied to a socket.
 //
-// The task exists only while a saved address is active. Empty configuration creates no task, socket,
-// mDNS browse or HomeHub traffic; explicit discovery runs on the HTTP request that the user starts.
+// The task exists only while a saved address is active. A fresh device performs one bounded search
+// before HTTP starts and persists even a miss; after that, empty configuration creates no task,
+// socket, mDNS browse or HomeHub traffic. The dialog can still trigger a manual search.
 #include <atomic>
 
 #include "hp_modbus.hpp"
@@ -17,6 +18,7 @@
 #include "def/homehub.hpp"
 #include "diag_log.hpp"
 #include "history.hpp"
+#include "net.hpp"
 #include "stack_watch.hpp"
 #include "logic/detect_backoff.hpp"   // the SAME backoff the X10A sweep uses on a silent bus
 #include "logic/homehub_map.hpp"      // the concept a register pairs on
@@ -279,9 +281,9 @@ static bool discover_homehub(std::string& found) {
         }
     }
     mdns_query_results_free(results);
-    // Several hubs on one LAN is unusual; the user explicitly requested discovery, so use the first
-    // one that RESOLVED and say so, rather than silently picking among them. Gated on `ok` — with nothing
-    // resolved there is no address to print, and "using " followed by nothing reads like a bug.
+    // Several hubs on one LAN is unusual. Both automatic and manual discovery deliberately use the
+    // first one that RESOLVED and say so, rather than silently picking among them. Gated on `ok` —
+    // with nothing resolved there is no address to print, and "using " followed by nothing is noise.
     if (ok && matches > 1) diag_printf("modbus: %d HomeHubs discovered via mDNS — using %s\n",
                                        matches, found.c_str());
     if (!ok && responders >= MB_DISCOVERY_MAX_RESULTS)
@@ -290,23 +292,56 @@ static bool discover_homehub(std::string& found) {
     return ok;
 }
 
-bool mb_discover_homehub(std::string& found) {
+static bool discover_homehub_bounded(std::string& found, const char* origin) {
     for (int attempt = 1; attempt <= MB_DISCOVERY_ATTEMPTS; attempt++) {
         found.clear();
         if (discover_homehub(found)) {
             // The success line contains a private LAN IP and is covered by logic/redact.hpp.
-            diag_printf("modbus: manual mDNS search found gateway %s\n", found.c_str());
+            diag_printf("modbus: %s mDNS search found gateway %s\n", origin, found.c_str());
             return true;
         }
         if (attempt < MB_DISCOVERY_ATTEMPTS) {
-            diag_printf("modbus: manual mDNS search attempt %d/%d found no HomeHub — retrying\n",
-                        attempt, MB_DISCOVERY_ATTEMPTS);
+            diag_printf("modbus: %s mDNS search attempt %d/%d found no HomeHub — retrying\n",
+                        origin, attempt, MB_DISCOVERY_ATTEMPTS);
             vTaskDelay(pdMS_TO_TICKS(MB_DISCOVERY_RETRY_MS));
         }
     }
-    diag_printf("modbus: no HomeHub found via manual mDNS search after %d attempts\n",
-                MB_DISCOVERY_ATTEMPTS);
+    diag_printf("modbus: no HomeHub found via %s mDNS search after %d attempts\n",
+                origin, MB_DISCOVERY_ATTEMPTS);
     return false;
+}
+
+bool mb_discover_homehub(std::string& found) {
+    return discover_homehub_bounded(found, "manual");
+}
+
+void mb_autodiscover_initial() {
+    Config c = config();
+    if (!config_modbus_should_search(c)) return;
+    // Do not consume the one-shot decision in the captive portal or before a LAN lease exists. The
+    // next networked boot is still the device's first meaningful opportunity to see the HomeHub.
+    if (!net_is_up()) {
+        diag_printf("modbus: initial mDNS search deferred — no LAN lease\n");
+        return;
+    }
+
+    std::string found;
+    const bool ok = discover_homehub_bounded(found, "initial");
+    // This function is called before http_start(), so config_save's whole-blob write cannot race a
+    // web save. Persist the decision even on a miss: later hubs are configured manually and boot
+    // never becomes a continuous multicast scan loop.
+    c = config();
+    if (!config_modbus_should_search(c)) return;
+    c.mb_discovery_done = true;
+    if (ok) c.mb_host = found;
+    if (!config_save(c)) {
+        diag_printf("modbus: initial discovery result could not be persisted — no HomeHub enabled\n");
+        return;
+    }
+    if (ok)
+        diag_printf("modbus: initial HomeHub address saved\n");
+    else
+        diag_printf("modbus: initial search completed without a HomeHub — future search is manual\n");
 }
 
 // Non-blocking connect with a select() timeout (the tcp_port_probe idiom from http_config.cpp), then
