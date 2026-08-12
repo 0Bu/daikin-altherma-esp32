@@ -29,7 +29,7 @@ namespace daik {
 // and therefore requires a saved host.
 struct ModbusStatus {
     bool        enabled     = false;   // task active (a configured address is being polled)
-    bool        connected   = false;   // current socket has committed at least one fresh poll cycle
+    bool        connected   = false;   // current socket has committed a full cycle and is still live
     bool        discovering = false;   // compatibility field; explicit UI search is request-local
     std::string host;                  // configured address ("" = disabled)
     int         port    = 0;
@@ -79,8 +79,10 @@ ModbusStatus mb_status();
 // logic/homehub_map.hpp pairs on.
 //
 // `live` reports whether the LINK was still up once the copy had been taken AND whether the cache
-// was committed by that same TCP session. A caller that publishes these rows must honour it: false
-// means the rows may predate a disconnect/reconnect and the snapshot must not be served. It is an
+// was committed by that same TCP session. Rows come from its latest full cycle, at most
+// logic::MB_FULL_CYCLE_TICKS - 1 poll intervals old while the link remains live. A caller that
+// publishes them must honour `live`: false means the rows may predate a disconnect/reconnect and the
+// snapshot must not be served. It is an
 // out-param rather than a separate mb_status() call because that separate call is exactly the race
 // — the cache and link state are behind two mutexes, so only the accessor can tie them into one
 // generation-checked answer.
