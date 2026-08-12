@@ -68,6 +68,7 @@
 #include "logic/weather_mqtt.hpp"
 #include "logic/open_meteo.hpp"
 #include "logic/modbus.hpp"
+#include "logic/modbus_plan.hpp"
 #include "logic/modbus_snapshot.hpp"
 #include "logic/query_flag.hpp"
 #include "logic/redact.hpp"
@@ -3591,6 +3592,168 @@ static void test_modbus() {
     CHECK(mb_ipv4_string(192, 168, 1, 137) == "203.0.113.137");
     CHECK(mb_ipv4_string(255, 0, 10, 1) == "255.0.10.1");
     CHECK(mb_ipv4_string(256, 0, 0, 1).empty());
+}
+
+// The READ PLAN (logic/modbus_plan.hpp): which requests one poll cycle issues. Two silent failure
+// modes to pin — a batch one register short (the last row of every run quietly stops refreshing) and
+// a cadence that never fires a full cycle (the whole cache frozen at the first one).
+static void test_modbus_plan() {
+    using namespace daik::logic;
+
+    // ── The cadence ─────────────────────────────────────────────────────────────────────────────
+    // Tick 0 MUST be full: a session that opened with a gate-only cycle would serve /values with 29
+    // of 31 rows absent, which reads as a broken hub rather than as a cadence.
+    CHECK(mb_cycle_is_full(0));
+    CHECK(!mb_cycle_is_full(1));
+    CHECK(!mb_cycle_is_full(MB_FULL_CYCLE_TICKS - 1));
+    CHECK(mb_cycle_is_full(MB_FULL_CYCLE_TICKS));
+    CHECK(mb_cycle_is_full(MB_FULL_CYCLE_TICKS * 97));
+    // A successful gate-only cycle has not re-read a non-gate row that failed on the preceding full
+    // cycle, so it cannot clear the one global Modbus error. Only a clean full cycle on the current
+    // session proves whole-map recovery.
+    CHECK(!mb_cycle_proves_recovery(false, true));
+    CHECK(!mb_cycle_proves_recovery(true, false));
+    CHECK(mb_cycle_proves_recovery(true, true));
+    // A full cycle really does come round — a rule that never fires is the failure this pins.
+    int full = 0;
+    for (uint32_t t = 0; t < 100; t++) if (mb_cycle_is_full(t)) full++;
+    CHECK(full == static_cast<int>(100 / MB_FULL_CYCLE_TICKS));
+    // The wrap of a uint32 tick counter is not a cadence event: at ~1 Hz it is 136 years away, but a
+    // rule that skipped a full cycle there would be unreachable by any test that did not ask.
+    CHECK(mb_cycle_is_full(0xFFFFFFFFu - (0xFFFFFFFFu % MB_FULL_CYCLE_TICKS)));
+
+    // ── Gate identity ───────────────────────────────────────────────────────────────────────────
+    // Space is half the key: offset 3 exists in BOTH spaces and is a different register in each.
+    CHECK(mb_offset_is_gate(MbFunc::ReadInput, 53));
+    CHECK(mb_offset_is_gate(MbFunc::ReadInput, 38));
+    CHECK(!mb_offset_is_gate(MbFunc::ReadHolding, 53));
+    CHECK(!mb_offset_is_gate(MbFunc::ReadInput, 52));   // DHW operation is not a gate
+
+    // ── Batching ────────────────────────────────────────────────────────────────────────────────
+    // A run, a gap, and a space change, in one fixture. Deliberately given OUT of order, because the
+    // shipped table is out of order too (holding rows sit after input rows with lower offsets).
+    {
+        const MbFunc sp[] = {MbFunc::ReadInput, MbFunc::ReadInput, MbFunc::ReadHolding,
+                             MbFunc::ReadInput, MbFunc::ReadInput, MbFunc::ReadHolding};
+        const uint16_t off[] = {41, 40, 2, 50, 42, 1};
+        uint8_t order[6] = {0};
+        CHECK(mb_plan_order(sp, off, 6, order));
+        MbBatch b[6];
+        const int nb = mb_plan_build(sp, off, 6, order, b, 6);
+        CHECK(nb == 3);
+        // Holding sorts before input (0x03 < 0x04); within a space, by offset.
+        CHECK(b[0].space == MbFunc::ReadHolding && b[0].first_offset == 1 && b[0].count == 2);
+        CHECK(b[1].space == MbFunc::ReadInput && b[1].first_offset == 40 && b[1].count == 3);
+        CHECK(b[2].space == MbFunc::ReadInput && b[2].first_offset == 50 && b[2].count == 1);
+        // Every row is covered exactly once — the property whose absence freezes rows silently.
+        int covered = 0;
+        for (int i = 0; i < nb; i++) covered += b[i].row_count;
+        CHECK(covered == 6);
+        // row_first indexes the ORDER array, so a batch decodes as a walk. Check it actually lands
+        // on the rows the batch claims: b[1] covers offsets 40,41,42 in that order.
+        CHECK(off[order[b[1].row_first + 0]] == 40);
+        CHECK(off[order[b[1].row_first + 1]] == 41);
+        CHECK(off[order[b[1].row_first + 2]] == 42);
+        // Only the batch carrying a gate offset is read on a gate cycle.
+        CHECK(!mb_batch_is_gate(b[0]) && !mb_batch_is_gate(b[1]) && !mb_batch_is_gate(b[2]));
+    }
+
+    // A duplicated (space, offset) is REFUSED, not silently deduplicated: the batch walk hands
+    // consecutive reply words to consecutive rows, so a duplicate would give one register's value to
+    // two rows and shift every row after it by one.
+    {
+        const MbFunc sp[] = {MbFunc::ReadInput, MbFunc::ReadInput};
+        const uint16_t off[] = {40, 40};
+        uint8_t order[2] = {0};
+        CHECK(!mb_plan_order(sp, off, 2, order));
+    }
+    // The same offset in the two spaces is NOT a duplicate.
+    {
+        const MbFunc sp[] = {MbFunc::ReadInput, MbFunc::ReadHolding};
+        const uint16_t off[] = {3, 3};
+        uint8_t order[2] = {0};
+        CHECK(mb_plan_order(sp, off, 2, order));
+        MbBatch b[2];
+        CHECK(mb_plan_build(sp, off, 2, order, b, 2) == 2);
+    }
+
+    // A run longer than the cap splits, and the split loses nothing.
+    {
+        constexpr int N = MB_PLAN_MAX_REGS + 3;
+        MbFunc sp[N];
+        uint16_t off[N];
+        for (int i = 0; i < N; i++) { sp[i] = MbFunc::ReadInput; off[i] = static_cast<uint16_t>(1 + i); }
+        uint8_t order[N] = {0};
+        CHECK(mb_plan_order(sp, off, N, order));
+        MbBatch b[N];
+        const int nb = mb_plan_build(sp, off, N, order, b, N);
+        CHECK(nb == 2);
+        CHECK(b[0].count == MB_PLAN_MAX_REGS);
+        CHECK(b[1].count == 3);
+        CHECK(b[1].first_offset == static_cast<uint16_t>(1 + MB_PLAN_MAX_REGS));
+        int covered = 0;
+        for (int i = 0; i < nb; i++) covered += b[i].row_count;
+        CHECK(covered == N);
+    }
+
+    // Too little room answers -1 rather than a truncated plan: a plan missing its tail drops rows
+    // with nothing anywhere to say so.
+    {
+        const MbFunc sp[] = {MbFunc::ReadInput, MbFunc::ReadInput};
+        const uint16_t off[] = {10, 20};
+        uint8_t order[2] = {0};
+        CHECK(mb_plan_order(sp, off, 2, order));
+        MbBatch b[2];
+        CHECK(mb_plan_build(sp, off, 2, order, b, 1) == -1);
+    }
+
+    // ── The SHIPPED map ─────────────────────────────────────────────────────────────────────────
+    // The measurement the change was made for, asserted rather than remembered. Every row covered
+    // exactly once, every batch inside the protocol cap, and the request count per cycle — so a
+    // future register added to def/homehub.hpp in a gap re-prices the link visibly instead of
+    // quietly restoring the per-register sweep.
+    {
+        constexpr int N = daik::def::HOMEHUB_REG_COUNT;
+        MbFunc sp[N];
+        uint16_t off[N];
+        for (int i = 0; i < N; i++) {
+            sp[i]  = daik::def::HOMEHUB_REGS[i].space;
+            off[i] = daik::def::HOMEHUB_REGS[i].offset;
+        }
+        uint8_t order[N] = {0};
+        CHECK(mb_plan_order(sp, off, N, order));
+        MbBatch b[N];
+        const int nb = mb_plan_build(sp, off, N, order, b, N);
+        CHECK(nb == 10);                       // was N requests, one per register
+        int covered = 0, gate_batches = 0, gate_regs = 0;
+        for (int i = 0; i < nb; i++) {
+            covered += b[i].row_count;
+            CHECK(b[i].count >= 1 && b[i].count <= MB_PLAN_MAX_REGS);
+            CHECK(b[i].count <= MB_MAX_READ_REGS);
+            if (mb_batch_is_gate(b[i])) { gate_batches++; gate_regs += b[i].count; }
+        }
+        CHECK(covered == N);
+        // BOTH gates must be reachable on a gate-only cycle. If a future map moved 38 or 53 so that
+        // one of them fell into a non-gate batch, the diagnosis would silently evaluate a gate that
+        // is refreshed once per full cycle instead of once per second.
+        CHECK(gate_batches == 2);
+        CHECK(gate_regs == 7);
+        // Every gate offset really is inside some gate batch — the assertion above counts batches,
+        // this one proves the coverage it is standing in for.
+        for (size_t g = 0; g < MB_GATE_OFFSET_COUNT; g++) {
+            bool found = false;
+            for (int i = 0; i < nb && !found; i++) {
+                if (!mb_batch_is_gate(b[i])) continue;
+                for (uint16_t k = 0; k < b[i].count; k++)
+                    if (b[i].first_offset + k == MB_GATE_OFFSETS[g]) { found = true; break; }
+            }
+            CHECK(found);
+        }
+        // What the cycle actually costs, stated as the arithmetic rather than as a remembered number.
+        const double per_s = (gate_batches * (MB_FULL_CYCLE_TICKS - 1) + nb)
+                             / static_cast<double>(MB_FULL_CYCLE_TICKS);
+        CHECK(per_s < N / 5.0);   // at least a five-fold reduction against one request per register
+    }
 }
 
 static void test_modbus_snapshot() {
@@ -11702,6 +11865,7 @@ int main() {
     test_mqtt_base();
     test_mqtt_uri();
     test_modbus();
+    test_modbus_plan();
     test_modbus_snapshot();
     test_homehub();
     test_homehub_map();

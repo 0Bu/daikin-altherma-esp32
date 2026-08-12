@@ -20,6 +20,7 @@
 #include "stack_watch.hpp"
 #include "logic/detect_backoff.hpp"   // the SAME backoff the X10A sweep uses on a silent bus
 #include "logic/homehub_map.hpp"      // the concept a register pairs on
+#include "logic/modbus_plan.hpp"      // WHICH requests a cycle issues — batching + the gate cadence
 #include "logic/modbus_snapshot.hpp"  // a cache is live only for the TCP session that committed it
 
 #include "esp_netif.h"
@@ -68,6 +69,18 @@ static std::string s_req_host;        // the configured host this socket is for
 static int         s_req_port = 0;
 static int         s_unit     = 0;    // Modbus unit id addressed on this socket
 static bool        s_have_req = false;// whether s_req_* describe the current socket
+// The read cadence (logic/modbus_plan.hpp). Tick 0 is a FULL cycle, so a session that has just
+// opened publishes the whole map rather than the two gate batches and 24 absent rows — which is why
+// mb_session_reset() zeroes it on every new socket rather than letting it run across sessions.
+static uint32_t    s_cycle_tick = 0;
+// Per-batch fallback to single-register reads. A Modbus EXCEPTION is a valid reply about ONE
+// register, but a batched request cannot say which of its registers it was about — so a batch that
+// excepts is re-read register by register, and stays that way for the SESSION. Sticky rather than
+// per-cycle because the usual cause is permanent for this hub configuration (a register the unit
+// does not implement); re-probing it as a batch every cycle would pay the exception forever and
+// still fall back. Cleared on reconnect: a different hub, or the same hub reconfigured, deserves the
+// cheap plan again.
+static bool        s_batch_split[def::HOMEHUB_REG_COUNT] = {false};
 
 // ── The value cache — this stack's own, deliberately NOT hp_poll's ──────────────────────────────
 // Two independent sources need two caches: sharing one would mean a dead X10A bus wipes the HomeHub
@@ -183,6 +196,12 @@ static void status_clear_error() {
 // becomes `connected` after this session has committed its first poll below. Reserving generation
 // zero makes a pre-first-poll cache impossible to mistake for current even on the first connection.
 static void status_socket_open(std::string host, int port, int unit) {
+    // A NEW SESSION STARTS A NEW READ CADENCE. Tick 0 is a full cycle, so the first poll of this
+    // socket publishes the whole map instead of the gate batches alone; and the per-batch fallback to
+    // single reads is forgotten, because the reason for it (a register this hub does not implement)
+    // is a property of the peer we may have just stopped talking to.
+    s_cycle_tick = 0;
+    for (bool& split : s_batch_split) split = false;
     Lock lk(s_mtx);
     s_status.host.swap(host);
     s_status.port        = port;
@@ -612,9 +631,54 @@ static std::string failure_message(const MbFailure& f) {
     return msg;
 }
 
+// ── The read plan, resolved at COMPILE time ─────────────────────────────────────────────────────
+// logic/modbus_plan.hpp is constexpr throughout, so the batching of def::HOMEHUB_REGS is settled by
+// the compiler and lives in flash: no RAM for a table that cannot change, and — the part that
+// matters more — its shape is asserted HERE, where it is used, rather than checked at runtime by
+// code that would have no useful answer if the check failed.
+namespace {
+struct MbPlan {
+    uint8_t          order[def::HOMEHUB_REG_COUNT] = {};
+    logic::MbBatch   batch[def::HOMEHUB_REG_COUNT] = {};
+    int              count = 0;
+    bool             ok    = false;
+};
+
+constexpr MbPlan mb_plan_make() {
+    MbPlan p;
+    MbFunc   spaces[def::HOMEHUB_REG_COUNT]  = {};
+    uint16_t offsets[def::HOMEHUB_REG_COUNT] = {};
+    for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++) {
+        spaces[i]  = def::HOMEHUB_REGS[i].space;
+        offsets[i] = def::HOMEHUB_REGS[i].offset;
+    }
+    p.ok = logic::mb_plan_order(spaces, offsets, def::HOMEHUB_REG_COUNT, p.order);
+    if (!p.ok) return p;
+    p.count = logic::mb_plan_build(spaces, offsets, def::HOMEHUB_REG_COUNT, p.order, p.batch,
+                                   def::HOMEHUB_REG_COUNT);
+    p.ok = p.count > 0;
+    return p;
+}
+constexpr MbPlan MB_PLAN = mb_plan_make();
+
+// A duplicated (space, offset) would hand one reply word to two rows and shift every row after it —
+// so the plan is not merely unusable, it would be quietly WRONG. Refuse to build.
+static_assert(MB_PLAN.ok, "HomeHub register table does not yield a usable read plan");
+// The saving, asserted rather than remembered: the map is read in far fewer requests than it has
+// registers. A future register added into a gap will move this number and should be noticed.
+static_assert(MB_PLAN.count * 3 <= def::HOMEHUB_REG_COUNT,
+              "batching no longer collapses the HomeHub map — re-check the register offsets");
+} // namespace
+
 // ── One poll cycle ───────────────────────────────────────────────────────────────────────────────
-// Reads the whole HomeHub map into this stack's own cache. Structurally the twin of hp_poll's
-// poll_once(): sized reserve up front, everything staged in locals, one non-allocating commit.
+// Reads the HomeHub map into this stack's own cache. Structurally the twin of hp_poll's poll_once():
+// sized reserve up front, everything staged in locals, one non-allocating commit.
+//
+// TWO CADENCES (logic/modbus_plan.hpp). A FULL cycle reads every batch and commits a new cache; the
+// cycles between it read only the batches carrying the diagnosis gates and commit nothing but those
+// two facts and the link state. The link used to issue one request per register per second — 31
+// MBAP round-trips a second at a hub that also serves the Onecta app, the MMI and evcc — for a map
+// whose fastest-moving member is a water temperature.
 static void mb_poll_once() {
     const Config& c = config();
     const std::string target = config_modbus_host(c);
@@ -634,7 +698,8 @@ static void mb_poll_once() {
         // instruments. Everything else in this firmware refuses exactly that (a held-over outdoor
         // reading blanks rather than being shown dimmer). The LIVE cache is therefore dropped; the
         // separate trend rings retain only timestamped past samples and receive an explicit gap for
-        // this failed cycle. Thus "a modbus row exists" still means "read this cycle" everywhere.
+        // this failed cycle. The value cache is otherwise refreshed by full cycles and remains
+        // bounded to at most MB_FULL_CYCLE_TICKS - 1 poll intervals old.
         {
             Lock lk(s_cache_mtx);
             s_cache.clear();
@@ -658,54 +723,33 @@ static void mb_poll_once() {
         cycle_generation = s_link_generation;
     }
 
+    // A FULL cycle rebuilds the cache; a gate cycle refreshes only the two facts the heating-curve
+    // diagnosis evaluates every second, and deliberately touches nothing else.
+    const bool full = logic::mb_cycle_is_full(s_cycle_tick);
+
     std::vector<CachedValue> fresh;
-    fresh.reserve(def::HOMEHUB_REG_COUNT);
+    if (full) fresh.reserve(def::HOMEHUB_REG_COUNT);
     MbFailure first_failure;
     bool plant_gate_known = false;
     bool plant_gate_active = false;
     bool heating_mode_known = false;
     bool heating_mode_active = false;
 
-    // One buffer for the whole sweep, declared where the RESPONSES are read rather than inside
-    // mb_read: the response borrows these bytes (see MbRead), so they have to outlive the call that
-    // filled them. Hoisted out of the loop because it is 260 bytes on a 6 KB task stack — reused,
-    // not re-created per register.
-    MbRead io;
-    for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++) {
-        esp_task_wdt_reset();                      // each read is a bounded LAN round-trip
-        const def::HomeHubReg& r = def::HOMEHUB_REGS[i];
-        uint16_t pdu = 0;
-        if (!mb_pdu_address(r.offset, pdu)) continue;
-        MbFailure failure;
-        if (!mb_read(r.space, pdu, 1, io, failure)) {
-            failure.reg = r.offset;
-            // Preserve the first exception while the link itself remains healthy. If a later
-            // transport/protocol failure actually drops the link, that becomes the displayed cause:
-            // otherwise a harmless unsupported register would hide the timeout that turned the row
-            // red.
-            if (first_failure.type == MbFailureType::None ||
-                (first_failure.type == MbFailureType::Exception &&
-                 failure.type != MbFailureType::Exception)) {
-                first_failure = failure;
-            }
-            // A valid Modbus exception applies to this register only, so continue and publish every
-            // row that did answer. Every other failure closed (or invalidated) the stream: trying the
-            // remaining registers would only overwrite the original cause with "not connected".
-            if (failure.type != MbFailureType::Exception) break;
-            continue;
-        }
-        uint16_t raw = 0;
-        if (!mb_reg_at(io.resp, 0, raw)) {
-            first_failure = MbFailure{MbFailureType::InvalidResponse,
-                                      static_cast<int>(MbParse::Malformed), r.offset};
-            close_sock();
-            { Lock lk(s_mtx); s_status.connected = false; }
-            break;
-        }
+    // Preserve the first failure, but never let a harmless per-register exception hide a timeout: if
+    // a later transport/protocol failure actually drops the link, that becomes the displayed cause.
+    const auto note_failure = [&](const MbFailure& f) {
+        if (first_failure.type == MbFailureType::None ||
+            (first_failure.type == MbFailureType::Exception && f.type != MbFailureType::Exception))
+            first_failure = f;
+    };
+
+    // One register word: the gates always, a cache row only on a full cycle. The gates are read from
+    // the SAME word the row is built from — they are not a second read and cannot disagree with it.
+    const auto take_row = [&](const def::HomeHubReg& r, uint16_t raw) {
         // THE SPACE-OPERATION GATE — input register 53 explicitly covers heating AND cooling. It
         // separates normal space operation from DHW/standstill, but only input register 38 below can
-        // distinguish a heating window from cooling. A sentinel/out-of-range word leaves `known` false:
-        // an unknown gate must never read as "inactive", which is an ordinary quiet plant.
+        // distinguish a heating window from cooling. A sentinel/out-of-range word leaves `known`
+        // false: an unknown gate must never read as "inactive", which is an ordinary quiet plant.
         if (r.space == MbFunc::ReadInput && r.offset == 53 && !mb_is_special(raw) && raw <= 1) {
             plant_gate_known = true;
             plant_gate_active = raw == 1;
@@ -715,6 +759,7 @@ static void mb_poll_once() {
             heating_mode_known = true;
             heating_mode_active = raw == 1;
         }
+        if (!full) return;
         CachedValue cv;
         cv.label = r.label;
         cv.unit  = r.unit;
@@ -738,6 +783,89 @@ static void mb_poll_once() {
         char buf[24];
         if (def::homehub_format(r, raw, buf, sizeof(buf))) cv.value = buf;
         fresh.push_back(std::move(cv));
+    };
+
+    // One buffer for the whole sweep, declared where the RESPONSES are read rather than inside
+    // mb_read: the response borrows these bytes (see MbRead), so they have to outlive the call that
+    // filled them. Hoisted out of the loop because it is 260 bytes on a 6 KB task stack — reused,
+    // not re-created per batch.
+    MbRead io;
+    bool link_broken = false;                      // a transport/framing failure ended the stream
+
+    // Read the rows of one batch one register at a time. The fallback path, and the whole path for a
+    // single-register batch. `break`s on anything but an exception, for the reason the batch loop
+    // does: every other failure closed or desynced the stream, so continuing would only overwrite
+    // the original cause with "not connected".
+    const auto read_singly = [&](const logic::MbBatch& b) {
+        for (uint8_t k = 0; k < b.count; k++) {
+            const def::HomeHubReg& r = def::HOMEHUB_REGS[MB_PLAN.order[b.row_first + k]];
+            uint16_t pdu = 0;
+            if (!mb_pdu_address(r.offset, pdu)) continue;
+            MbFailure failure;
+            if (!mb_read(r.space, pdu, 1, io, failure)) {
+                failure.reg = r.offset;
+                note_failure(failure);
+                if (failure.type != MbFailureType::Exception) { link_broken = true; return; }
+                continue;                          // an exception is about THIS register only
+            }
+            uint16_t raw = 0;
+            if (!mb_reg_at(io.resp, 0, raw)) {
+                first_failure = MbFailure{MbFailureType::InvalidResponse,
+                                          static_cast<int>(MbParse::Malformed), r.offset};
+                close_sock();
+                { Lock lk(s_mtx); s_status.connected = false; }
+                link_broken = true;
+                return;
+            }
+            take_row(r, raw);
+        }
+    };
+
+    for (int bi = 0; bi < MB_PLAN.count && !link_broken; bi++) {
+        const logic::MbBatch& b = MB_PLAN.batch[bi];
+        if (!full && !logic::mb_batch_is_gate(b)) continue;
+        esp_task_wdt_reset();                      // each request is a bounded LAN round-trip
+
+        if (b.count <= 1 || s_batch_split[bi]) { read_singly(b); continue; }
+
+        uint16_t pdu = 0;
+        if (!mb_pdu_address(b.first_offset, pdu)) { read_singly(b); continue; }
+        MbFailure failure;
+        if (!mb_read(b.space, pdu, b.count, io, failure)) {
+            failure.reg = b.first_offset;
+            if (failure.type != MbFailureType::Exception) {
+                note_failure(failure);
+                link_broken = true;
+                continue;
+            }
+            // An exception is a valid reply about ONE register, and a batched request cannot say
+            // which. Re-read this run singly — this cycle and, since the usual cause is a register
+            // this hub simply does not implement, every cycle of this session. The exception itself
+            // is NOT recorded here: the single reads are about to reproduce it against the register
+            // it actually belongs to, which is the one worth naming on /status.
+            s_batch_split[bi] = true;
+            diag_printf("modbus: batch %u..%u answered an exception — reading it register by register\n",
+                        static_cast<unsigned>(b.first_offset),
+                        static_cast<unsigned>(b.first_offset + b.count - 1));
+            read_singly(b);
+            continue;
+        }
+        for (uint8_t k = 0; k < b.count; k++) {
+            const def::HomeHubReg& r = def::HOMEHUB_REGS[MB_PLAN.order[b.row_first + k]];
+            uint16_t raw = 0;
+            if (!mb_reg_at(io.resp, k, raw)) {
+                // The parse already bound the reply to the requested quantity, so this is a
+                // contradiction rather than a short reply — treat it exactly as the single-read path
+                // does and drop the stream.
+                first_failure = MbFailure{MbFailureType::InvalidResponse,
+                                          static_cast<int>(MbParse::Malformed), r.offset};
+                close_sock();
+                { Lock lk(s_mtx); s_status.connected = false; }
+                link_broken = true;
+                break;
+            }
+            take_row(r, raw);
+        }
     }
 
     {
@@ -755,6 +883,37 @@ static void mb_poll_once() {
         // commit below. Resolve it while `fresh` is still available to the history recorder.
         current_session = s_sock >= 0 && s_link_generation == cycle_generation;
     }
+    const auto report_cycle_result = [&]() {
+        if (first_failure.type != MbFailureType::None) {
+            status_error(std::string(failure_code(first_failure.type)),
+                         failure_message(first_failure), first_failure.detail, first_failure.reg,
+                         /*link_down=*/!current_session);
+        } else if (logic::mb_cycle_proves_recovery(full, current_session)) {
+            // One status error represents the WHOLE map. A gate-only cycle did not re-read the
+            // non-gate rows and therefore cannot prove that their last failure recovered.
+            status_recovered();
+        }
+    };
+    // A GATE CYCLE COMMITS NOTHING BUT THE GATES. It read seven of the map's registers, so its
+    // `fresh` is not a cache and its raster position is not a sample: committing it would publish a
+    // /values array of seven rows and hand the trend rings a bucket in which 24 of the 31 rows look
+    // like a failure to read. The cache and the rings stay with the last FULL cycle, which is at most
+    // MB_FULL_CYCLE_TICKS - 1 poll intervals old — and `values`/`connected` below still report this
+    // cycle's link, so a hub that went away is visible within a second rather than within a cadence.
+    if (!full) {
+        {
+            Lock lk(s_mtx);
+            // Not `committed`: nothing was. A LIVE session keeps the count of the last full cycle,
+            // because the rows it counts are still the rows /values will serve. A session that ended
+            // reports 0 for the same reason the full path does — the cache is about to go with it.
+            if (!current_session) s_status.values = 0;
+            s_status.connected = current_session;
+        }
+        report_cycle_result();
+        s_cycle_tick++;
+        return;
+    }
+
     history_record_modbus(current_session ? fresh.data() : nullptr,
                            current_session ? fresh.size() : 0);
 
@@ -783,15 +942,8 @@ static void mb_poll_once() {
         s_status.values = current_session ? committed : 0;
         s_status.connected = current_session;
     }
-    if (first_failure.type != MbFailureType::None) {
-        status_error(std::string(failure_code(first_failure.type)),
-                     failure_message(first_failure), first_failure.detail, first_failure.reg,
-                     /*link_down=*/!current_session);
-    } else if (current_session) {
-        // The error is CURRENT state, not history. A complete clean cycle clears it and records the
-        // recovery once in /diag + Syslog.
-        status_recovered();
-    }
+    report_cycle_result();
+    s_cycle_tick++;
 }
 
 static void mb_task_start_if_enabled();
@@ -928,8 +1080,8 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
     // The link is re-read AFTER the copy, and that order is what makes the payload invariant TRUE
     // rather than merely intended. The cache and the link state sit behind two different mutexes,
     // so a caller that checks `connected` and then copies has a window: mb_read can mark the link
-    // down in between and the response still carries the previous session's rows under a guarantee
-    // that they were read this cycle.
+    // down in between and the response still carries the previous session's last full-cycle rows as
+    // though they belonged to a live session.
     //
     // Reading it afterwards closes the disconnect window without nesting the two locks. Comparing
     // generations closes the opposite RECONNECT window as well: if this copy came from session N

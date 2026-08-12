@@ -197,9 +197,12 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
                       address starts polling; empty means no task, socket, discovery or requests.
                       mDNS runs only from the dialog's explicit Search button and filters
                       homehub-* from up to 64 _http._tcp responders per bounded attempt. The lwIP
-                      client wraps logic/modbus.hpp framing. READ-ONLY: no write function code is
-                      issued anywhere, and no source file can build one (docs/MODBUS_PROTOCOL.md).
-                      The one fact it feeds the controller is the PLANT GATE (input register 53)
+                      client wraps logic/modbus.hpp framing; the response borrows a caller-owned ADU
+                      so its payload cannot outlive the received bytes. logic/modbus_plan.hpp turns
+                      31 rows into ten contiguous batches: full map every 5 s, the two diagnosis-gate
+                      batches (input 53 + 38) at 1 Hz. Gate-only success cannot clear a map-wide error;
+                      only a clean full cycle proves recovery. READ-ONLY: no write function code is
+                      issued anywhere, and no source file can build one (docs/MODBUS_PROTOCOL.md)
 def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
                       def/ profiles; decoded via logic/modbus.hpp's Temp16/Pow16/Int16/Text16 codecs
 http_ota.cpp        → /ota/check|update|status
@@ -1018,9 +1021,13 @@ host-testable core is unusually large and valuable, because the risky parts are 
   key at depth 1 (a nested `"version"` cannot shadow it), honours string escapes (so a crafted value
   cannot close its own string and inject a second key), and **refuses rather than truncates** an
   oversized value — a truncated `1.10.0` → `1.1` is a well-formed version that is ordered wrong.
-- `logic/modbus.hpp` — Modbus TCP framing (MBAP, no CRC; FC03/04/06/16 build + response/exception
-  parse) and the HomeHub `Temp16`/`Pow16`/`Int16`/`Text16` codecs + exact `homehub-*` mDNS filter.
-  Host-tested wire core used by the independent HomeHub task in `hp_modbus.cpp`.
+- `logic/modbus.hpp` — read-only Modbus TCP framing (MBAP, no CRC; FC03/04 request build plus
+  response/exception parse) and the HomeHub `Temp16`/`Pow16`/`Int16`/`Text16` codecs + exact
+  `homehub-*` mDNS filter. Host-tested wire core used by the independent HomeHub task in
+  `hp_modbus.cpp`; there is no FC06/FC16 request builder.
+- `logic/modbus_plan.hpp` — compile-time HomeHub request batching and two-cadence policy. It proves
+  every row is covered once, both diagnosis gates remain on the 1 Hz path, and a clean gate-only
+  cycle cannot falsely clear an error belonging to a row it did not sample.
 - `logic/http_body.hpp` — request-body reassembly for `http_read_body`. A POST body is a TCP stream:
   `httpd_req_recv` returns what has arrived, and the IDF's own docs note a large body "may" take
   several calls. Reading once and calling it the whole body truncated any body split across segments,
@@ -2767,9 +2774,10 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   reading current?" a per-row question no consumer could answer. `off` is the EKRHH
                   data-model offset (def/homehub.hpp), which is what the pairing keys on.
                   THE ARRAY IS EMITTED ONLY WHILE THE LINK IS LIVE AT THE MOMENT THE SNAPSHOT IS
-                  TAKEN — so if it is present, every row in it was read this cycle. That guarantee
-                  belongs in the payload because a consumer cannot tell a stale row from a fresh one
-                  by looking at it, and the browser is not the only consumer. Liveness and the cache
+                  TAKEN and carries that session's latest FULL cycle — bounded to at most four poll
+                  intervals old while the 1 Hz gate-only cycles keep link/gate state current. A
+                  consumer cannot infer that bound from a row, so it is part of this API contract.
+                  Liveness and the cache
                   sit behind two DIFFERENT mutexes, so mb_values_snapshot() reports the link state
                   AFTER copying the cache (the only place the two can be tied into one answer);
                   checking mb_status() and then copying left a window in which one response carried

@@ -228,8 +228,9 @@ hp_modbus.cpp   THE HOMEHUB MODBUS STACK — second, INDEPENDENT source (own tas
                 target; empty = NO task, socket, mDNS or stack. READ-ONLY as a property of the
                 CODE: no write builder exists anywhere under main/ and
                 test_heating_curve_diagnosis_contract.mjs keeps it so. mDNS browse ONLY from the
-                explicit POST /discover_homehub action. One fact reaches the controller: the PLANT
-                GATE (input reg 53) — known=false must NEVER read as an inactive plant
+                explicit POST /discover_homehub action. MbResponse BORROWS its caller-owned ADU.
+                logic/modbus_plan.hpp batches the map: full cycle every 5 s, gate batches (input
+                53 + 38) at 1 Hz; only a clean FULL cycle clears the map-wide current error
 hp_poll.cpp     poll engine task: X10A ONLY, wdt-subscribed (reset per cycle + per register).
                 heap_guard_sample() + history_record_board() at the top of EVERY cycle — the one
                 path no branch can skip (pinned by test_source_absence_contract.mjs). Detect

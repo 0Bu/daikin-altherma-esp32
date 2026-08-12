@@ -103,7 +103,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 58 | **Deleting a crash report** (`POST /crash/dismiss`) — a device action, not page state: erase first, mark second, so status, MQTT and every browser agree | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
 | 59 | **Pinned warning contract on `main/`** — `-Werror=return-type,format,unused-result` on that component alone, so three constructs written as if a warning were fatal actually are | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt) |
 | 60 | **Manual UI-language override** — a persistent de/en/auto picker overriding the browser guess, applied live | ✅ 🧪 | [`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp), [`www/js/i18n.js`](../main/www/js/i18n.js) |
-| 61 | **Second SOURCE: read-only Modbus TCP to a Daikin HomeHub (EKRHH)** — a stack beside X10A, not an alternative; no source file can frame a write | ✅ 🧪 | [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`logic/modbus.hpp`](../main/logic/modbus.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
+| 61 | **Second SOURCE: read-only Modbus TCP to a Daikin HomeHub (EKRHH)** — a stack beside X10A, not an alternative; no source file can frame a write; the 31-row map is batched into ten full-cycle requests while two diagnosis batches stay at 1 Hz | ✅ 🧪 | [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`logic/modbus.hpp`](../main/logic/modbus.hpp), [`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
 | 62 | **Configurable MQTT living-room source** — independent exact `topic$json-path` mappings for temperature, an optional source time and an MQTT-backed or fixed target; saving subscribes immediately even when a path is empty or wrong, then the next real MQTT frame supplies runtime decoder evidence; without source time, only live non-retained arrival is accepted | ✅ 🧪 | [`logic/reference_temperature.hpp`](../main/logic/reference_temperature.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 66 | **Complete UI interaction merge gate** — the assembled production UI is *executed* in a deterministic DOM harness, covering every modal in the production registry | ✅ 🧪 | [`test_ui_use_cases.mjs`](../test/test_ui_use_cases.mjs), [`run-ui-use-case-tests.sh`](../scripts/run-ui-use-case-tests.sh) |
 | 68 | **Source-boundary contract gate** — source-text assertions about `main/*.cpp` the host suite structurally cannot make (task, order, and which file is entitled) | ✅ | [`run-contract-tests.sh`](../scripts/run-contract-tests.sh), [`test_heating_curve_diagnosis_contract.mjs`](../test/test_heating_curve_diagnosis_contract.mjs) |
@@ -581,6 +581,16 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
   hostname because this firmware answers that same browse, and only Save persists the result. The
   link is **READ-ONLY as a property of the code**: no write entry point, function-code builder or
   value encoder exists anywhere under `main/`.
+- **✅ 🧪 Batched reads on two cadences** ([`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp)):
+  the hub is **shared** — Onecta, the MMI, evcc and any LAN collector use the same `:502` — so what
+  this firmware asks for is a question about someone else's device. The 31 EKRHH offsets fall into
+  ten contiguous runs, and only the two diagnosis gates (input 53 and 38) are time-critical, so a
+  **full** cycle is ten requests every fifth poll tick and the ticks between it read the two gate
+  batches alone: **31 → ~3.6 requests/s**. A gate cycle commits nothing but the gates — its seven
+  registers are not a cache — and a batch answered with a Modbus exception is re-read register by
+  register for the rest of the session, because an exception names one register and a batch cannot
+  say which. The plan is resolved at **compile time** into flash and `static_assert`ed where it is
+  built, so a register added into a gap re-prices the link visibly.
 - **The two sources meet in exactly one place** ([`logic/homehub_map.hpp`](../main/logic/homehub_map.hpp)):
   a register is paired to an X10A row **structurally**, reusing the trend ids and never the label —
   the catalog spells one quantity many ways and reuses tags across different quantities, so a label
