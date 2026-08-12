@@ -13,6 +13,15 @@ assert.match(style,
 assert.match(style,
   /\.vhist-tip\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--card\)\s+76%,\s*transparent\);/,
   "tooltip surfaces must be translucent without fading their text");
+assert.match(style,
+  /\.vhist-graph\s*\{[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
+  "tooltip height must not move the chart away from its legend");
+assert.match(style, /\.vhist-tip\s*\{[^}]*z-index:\s*3;[^}]*top:\s*var\(--vhist-tip-base\);/,
+  "the tooltip must start at and overlay the still-visible chart");
+assert.match(style, /\.vhist-tip-right\s*\{[^}]*translateX\(var\(--vhist-tip-gap\)\)/,
+  "the tooltip must leave a visible gap beside the selected crosshair");
+assert.match(style, /\.vhist-tip-left\s*\{[^}]*translateX\(calc\(-100% - var\(--vhist-tip-gap\)\)\)/,
+  "the tooltip must switch to the other side after the midpoint");
 assert.doesNotMatch(style, /\.vhist-tip\s*\{[^}]*\bopacity\s*:/,
   "transparency must not reduce tooltip text opacity");
 

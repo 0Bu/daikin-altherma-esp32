@@ -7,27 +7,38 @@ import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
+const historySource = fs.readFileSync(new URL("../main/www/js/history.js", import.meta.url), "utf8");
+const i18nSource = fs.readFileSync(new URL("../main/www/js/i18n.js", import.meta.url), "utf8");
 const appState = fs.readFileSync(new URL("../main/www/js/app_state.js", import.meta.url), "utf8");
 const firmwareHistory = fs.readFileSync(new URL("../main/history.cpp", import.meta.url), "utf8");
 const mqtt = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
-assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*z-index:\s*2[^}]*white-space:\s*pre;/,
-  "state tooltips must honor only their deliberate vertical breaks");
+assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*white-space:\s*pre-wrap;/,
+  "state tooltips must honor deliberate breaks but remain confined to their side of the crosshair");
 assert.match(style,
-  /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*padding-top:\s*max\(var\(--vhist-tip-base\),\s*var\(--vhist-tip-space,\s*0px\)\);/,
-  "plots must stay compact at rest and accept the measured height of a visible tooltip");
+  /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
+  "every plot must keep one fixed compact distance below its legend");
+assert.match(style, /\.vhist-tip\s*\{[^}]*z-index:\s*3;[^}]*top:\s*var\(--vhist-tip-base\);/,
+  "the translucent tooltip must start at and paint over the plot instead of moving it");
+assert.doesNotMatch(style, /--vhist-tip-space/,
+  "tooltip height must never feed back into graph layout");
 assert.doesNotMatch(style, /\.vhist-state-graph\s*\{[^}]*padding-top:/,
   "categorical timelines must not reintroduce a larger spacing override");
-assert.match(appState, /function renderApp\(\)[\s\S]*renderCards\(\);\s*\/\/[\s\S]*syncGraphTipSpaces\(\);\s*\n\}/,
-  "a poll rebuild must restore the measured space of a retained pinned tooltip");
+assert.doesNotMatch(appState, /syncGraphTipSpaces/,
+  "a status rebuild must not re-measure a tooltip and shift its plot");
+assert.doesNotMatch(historySource, /syncGraphTipSpace|HIST_TIP_GAP_PX/,
+  "scrubbing must not contain a hidden tooltip-height-to-layout coupling");
 assert.match(style,
   /\.vhist-state-current \{[^}]*border-left:\s*2px solid var\(--card\);/,
   "every categorical track must visibly separate its live observation from completed raster buckets");
-// Source outline and state fill are SEPARATE visual channels (DESIGN.md). A blanket source fill on
-// the HomeHub lane repaints every phase one colour, which is not a cosmetic loss: it erased all four
-// Smart-Grid modes into a single bar, and that bar read as a STATE, because petrol is the legend
-// swatch for "Recommended on". A plant running free for a day showed 24 h of Boost directly under a
-// Boost total of a few hours derived from the same samples. Strip comments first — the CSS explains
-// why the rule is absent, and that prose must not satisfy the check for it.
+assert.match(style, /\.vhist-state-on\.state-source-single\s*\{[^}]*opacity:\s*\.52;/,
+  "one-source evidence must retain the available state with reduced opacity");
+assert.match(style, /\.vhist-state-on\.state-source-conflict\s*\{[^}]*var\(--err\)/,
+  "disagreement must decorate the authoritative state with a warning hatch");
+assert.match(i18nSource, /"hist\.sources_differ": "sources differ"[\s\S]*"hist\.single_source": "one source only"/);
+assert.match(i18nSource, /"hist\.sources_differ": "Quellenabweichung"[\s\S]*"hist\.single_source": "nur eine Quelle"/);
+// A source fill must never repaint a consolidated state lane. That once erased all four Smart-Grid
+// modes into a petrol bar that read as 24 h of Boost. Strip comments first so explanatory prose
+// cannot accidentally satisfy the absence check.
 const cssRules = style.replace(/\/\*[\s\S]*?\*\//g, "");
 assert.doesNotMatch(cssRules, /\.vhist-state-on\.mb\b/,
   "no source colour may override a categorical state fill on the HomeHub lane");
@@ -117,6 +128,8 @@ const context = {
     if (key === "hist.state_phase_run") return `${arg}\n${arg2} · ca. ${args[2]}`;
     if (key === "hist.state_active") return "Aktiv";
     if (key === "hist.state_off") return "Aus";
+    if (key === "hist.sources_differ") return "Quellenabweichung";
+    if (key === "hist.single_source") return "nur eine Quelle";
     if (key === "hist.modbus_plateau") return `Register unverändert ${arg} · ca. ${arg2} · Messalter unbekannt`;
     if (key === "hist.boost_total") return `Boost aktiv · ${arg}`;
     if (key === "hist.boost_none") return "Kein Boost im aufgezeichneten Zeitraum.";
@@ -179,7 +192,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, histCacheKey, historyView, histHtml, scrubText," +
-  " scrubMove, syncGraphTipSpace, ensureHist, ensureHistPair, ensureDerived };", context,
+  " scrubMove, ensureHist, ensureHistPair, ensureDerived };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
 
@@ -266,31 +279,30 @@ assert.match(h.scrubText(outdoorView, 1),
   /Modbus 20\.5 °C · Register unverändert .* ca\. 15 min · Messalter unbekannt/,
   "the popup distinguishes a repeated register value from a proven fresh measurement");
 
-// THE READOUT AT THE ENDS OF THE CHART. An absolutely positioned bubble carrying only `left` is
-// shrink-to-fit against `container - left`, so at the last sample — where the live value sits and
-// where a reader looks first — the available width collapses and the text wraps to its
-// minimum-content width. Shipped, that turned "08:23 · X10A 46.3 °C · Modbus 46.3 °C" into a 59 px
-// column of SEVEN lines hanging over the curve it was reading, and the measured clamp in scrubMove
-// could not recover: it read offsetWidth while the squeezed `left` was still applied and concluded
-// the bubble already fit. Both halves of the fix are pinned here, since neither is visible in any
-// rendering this suite can perform.
+// THE READOUT BESIDE THE SELECTED INSTANT. The bubble must never cover its own crosshair: a sample
+// in the left half opens right and one in the right half opens left, with the deliberate gap bridged
+// by a leader. Side-specific max widths keep the selected line clear even on narrow screens.
 assert.match(style, /\.vhist-tip \{[^}]*width:\s*max-content;/,
   "the readout's width must not depend on its position, or the last sample wraps it to one word per line");
 assert.match(style,
-  /\.vhist-tip \{[^}]*left:\s*calc\(var\(--tip-p\) \* 1%\);\s*transform:\s*translateX\(calc\(var\(--tip-p\) \* -1%\)\);/,
-  "the readout must slide its own anchor with --tip-p, so it stays inside the card at both ends " +
-  "without a measurement or a percentage cut-off");
+  /\.vhist-tip-right \{[^}]*transform:\s*translateX\(var\(--vhist-tip-gap\)\);[^}]*max-width:/,
+  "a left-half sample must render the readout after, not on top of, its crosshair");
+assert.match(style,
+  /\.vhist-tip-left \{[^}]*transform:\s*translateX\(calc\(-100% - var\(--vhist-tip-gap\)\)\);[^}]*max-width:/,
+  "a right-half sample must render the readout before, not on top of, its crosshair");
+assert.match(style, /\.vhist-tip::before \{[^}]*width:\s*var\(--vhist-tip-gap\);/,
+  "a short leader must preserve the visual association between the displaced bubble and crosshair");
 S.histPin.set("outdoor_air", { t: 1768720000 + 3 * 300 });        // the newest sample: p = 100
 assert.match(h.histHtml("outdoor_air", "°C", "Außentemperatur"),
-  /<div class="vhist-tip vhist-pinned mono num" style="--tip-p:100\.000">/,
-  "a pinned readout carries its POSITION, so the one CSS rule places it before layout too");
+  /<div class="vhist-tip vhist-pinned vhist-tip-left mono num" style="--tip-p:100\.000">/,
+  "a pinned readout at the right edge is emitted on the left before layout too");
 S.histPin.delete("outdoor_air");
 
 // The LIVE half is the handler, not a stylesheet, so execute it rather than grep it: scrubMove must
 // place the bubble from the sample's position and must not MEASURE ITS WIDTH. That measurement made
 // the old defect self-reinforcing — offsetWidth was read while the squeezed `left` was still applied.
-// Height is handled independently by syncGraphTipSpace below. `left` is likewise never written on
-// the tip; the cross and marker keep their own px placement inside the plot.
+// Height is deliberately irrelevant to layout. `left` is likewise never written on the tip; the
+// cross and marker keep their own px placement inside the plot.
 {
   const styleSpy = () => {
     const props = new Map(), written = [];
@@ -299,8 +311,13 @@ S.histPin.delete("outdoor_air");
       set left(v) { written.push("left=" + v); }, get left() { return ""; } };
   };
   let offsetWidthReads = 0;
-  const node = (cls) => ({ className: cls, hidden: true, dataset: {}, style: styleSpy(),
-    get offsetWidth() { offsetWidthReads++; return 0; } });
+  const node = (cls) => {
+    const classes = new Set(cls.split(" "));
+    return { className: cls, hidden: true, dataset: {}, style: styleSpy(),
+      classList: { toggle: (name, on) => on ? classes.add(name) : classes.delete(name),
+        contains: (name) => classes.has(name) },
+      get offsetWidth() { offsetWidthReads++; return 0; } };
+  };
   const tipNode = node("vhist-tip vhist-live");
   const crossNode = node("vhist-cross vhist-live");
   const markNode = node("vhist-mark vhist-live");     // never spread: that reads the offsetWidth spy
@@ -314,38 +331,23 @@ S.histPin.delete("outdoor_air");
   h.scrubMove(plot, 3);                                    // the newest sample of the 4-sample ring
   assert.equal(tipNode.style.props.get("--tip-p"), "100.000",
     "the live readout is placed from the sample's position, like the pinned one");
+  assert.equal(tipNode.classList.contains("vhist-tip-left"), true,
+    "a sample in the right half must move its bubble to the left of the crosshair");
+  assert.equal(tipNode.classList.contains("vhist-tip-right"), false);
   assert.deepEqual(tipNode.style.written, ["--tip-p"],
     "scrubMove must write only --tip-p on the bubble — a px `left` reintroduces the edge squeeze");
   assert.equal(offsetWidthReads, 0,
     "the bubble's placement must not depend on measuring it: the squeezed width measured as fitting");
   assert.equal(tipNode.hidden, false, "the readout is still revealed by a scrub");
-}
-
-// A two-source categorical readout can be many lines tall. It may temporarily increase the gap
-// below the legend, but it must move the plot out of the way instead of covering the selected phase.
-// Hiding the readout removes only the dynamic override, returning to the compact CSS baseline.
-{
-  const props = new Map();
-  const removed = [];
-  const styleSpy = {
-    setProperty: (key, value) => props.set(key, value),
-    removeProperty: (key) => { props.delete(key); removed.push(key); },
-  };
-  const tallTip = { hidden: false, getBoundingClientRect: () => ({ height: 118 }) };
-  const graph = { style: styleSpy, querySelectorAll: () => [tallTip] };
-  h.syncGraphTipSpace(graph);
-  assert.equal(props.get("--vhist-tip-space"), "125px",
-    "the graph reserves the full multiline tooltip height plus a small visual gap");
-  tallTip.hidden = true;
-  h.syncGraphTipSpace(graph);
-  assert.deepEqual(removed, ["--vhist-tip-space"],
-    "the larger tooltip gap disappears as soon as the readout is hidden");
+  h.scrubMove(plot, 0);
+  assert.equal(tipNode.classList.contains("vhist-tip-right"), true,
+    "a sample in the left half must move its bubble to the right of the crosshair");
+  assert.equal(tipNode.classList.contains("vhist-tip-left"), false);
 }
 
 // Smart-Grid mode is a complete categorical state timeline, not a misleading numeric 0..3 line.
-// Every manufacturer mode and a measurement gap are visible in both source lanes. Exact phase
-// intervals live in the hover/touch/keyboard popup, not in a repeated list below the chart; only
-// mode 2 contributes to the compact Boost total.
+// The paired witnesses share one lane; exact X10A/HomeHub readings move into the tooltip. Only mode
+// 2 of the authoritative HomeHub ring contributes to the compact Boost total.
 S.hist.set("smart_grid_mode", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 10, 20, 30, null, 20, 0] });
 S.hist.set("modbus:smart_grid_mode", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
@@ -359,8 +361,8 @@ assert.doesNotMatch(boostHtml, /vhist-line/,
 assert.match(boostHtml, /Boost aktiv · 10 min/,
   "only the two mode-2 buckets contribute to the Boost total");
 for (const cls of ["sg-free", "sg-forced-off", "sg-recommended", "sg-forced-on"])
-  assert.match(boostHtml, new RegExp(`vhist-state-on mb ${cls}`),
-    `the HomeHub lane visibly distinguishes ${cls}`);
+  assert.match(boostHtml, new RegExp(`vhist-state-on ${cls}`),
+    `the consolidated lane visibly distinguishes ${cls}`);
 assert.match(boostHtml, /vhist-state-gap/);
 assert.match(boostHtml, /Freier Betrieb/);
 assert.match(boostHtml, /Zwangsabschaltung/);
@@ -368,16 +370,16 @@ assert.match(boostHtml, /Empfehlung ein/);
 assert.match(boostHtml, /Erzwungen ein/);
 assert.doesNotMatch(boostHtml, /vhist-state-runs|· Phasen/,
   "phase details belong to the chart popup, never a long list below it");
-assert.match(boostHtml, /vhist-state-lane-label">X10A/);
-assert.match(boostHtml, /vhist-state-lane-label mb">Modbus/);
-assert.doesNotMatch(boostHtml, /vhist-state-legend/,
-  "source names belong directly on their lanes, not in a detached legend");
+assert.equal((boostHtml.match(/vhist-state-track/g) || []).length, 1,
+  "paired X10A/HomeHub state histories must render one consolidated track");
+assert.match(boostHtml, /vhist-state-track combined/);
+assert.doesNotMatch(boostHtml, /vhist-state-lane-label|HomeHub · Modbus/,
+  "source names belong only in the paired tooltip, not on the consolidated chart");
 for (const [i, label] of [[0, "Freier Betrieb"], [1, "Zwangsabschaltung"],
                            [2, "Empfehlung ein"], [3, "Erzwungen ein"]])
-  assert.match(h.scrubText(boostView, i), new RegExp(`^\\d{2}:\\d{2}–\\d{2}:\\d{2} · ${label}$`),
-    `the Smart-Grid tooltip must use the exact legend state ${label}`);
-for (const i of [0, 1, 2, 3])
-  assert.doesNotMatch(h.scrubText(boostView, i), /X10A|Modbus|Boost|ca\.|min/);
+  assert.match(h.scrubText(boostView, i),
+    new RegExp(`X10A\\n${label}[\\s\\S]*Modbus\\n${label}`),
+    `the Smart-Grid tooltip must expose both witnesses for ${label}`);
 
 // The schematic's BOOST inspector is a HomeHub/Modbus request, so it deliberately filters the
 // otherwise shared Smart-Grid history to that instrument. The generic value-row history above stays
@@ -403,7 +405,7 @@ assert.equal(liveBoostView.recordedN, 7);
 assert.equal(liveBoostView.liveIndex, 7);
 assert.deepEqual(Array.from(liveBoostView.series[0].v), [0, 10, 20, 30, null, 20, 0, 20]);
 assert.match(liveBoostHtml,
-  /vhist-state-on mb sg-recommended" style="left:87\.500%;width:12\.500%/,
+  /vhist-state-on sg-recommended" style="left:87\.500%;width:12\.500%/,
   "the live Recommended-on state must own the right edge instead of extending Free running to now");
 assert.match(liveBoostHtml, /vhist-state-current" style="left:87\.500%;width:12\.500%/,
   "the display distinguishes the live observation from completed raster buckets");
@@ -447,9 +449,11 @@ assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min Rasterzeit/);
 assert.match(bshHtml, /vhist-state-on state-off/);
 assert.match(bshHtml, /vhist-state-on heater-on/);
 assert.doesNotMatch(bshHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(bshView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Aus$/);
-assert.match(h.scrubText(bshView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
-assert.doesNotMatch(h.scrubText(bshView, 1), /X10A|Modbus|Heizstab|ca\.|min/);
+assert.equal((bshHtml.match(/vhist-state-track/g) || []).length, 1);
+assert.match(bshHtml, /vhist-state-track combined/);
+assert.doesNotMatch(bshHtml, /vhist-state-lane-label/);
+assert.match(h.scrubText(bshView, 0), /X10A\nHeizstab aus[\s\S]*Modbus\nHeizstab aus/);
+assert.match(h.scrubText(bshView, 1), /X10A\nHeizstab aktiv[\s\S]*Modbus\nHeizstab aktiv/);
 
 // The Heizstab schematic inspector keeps the categorical history but narrows it to the authoritative
 // X10A BSH state. The generic value-row chart above remains dual-source for diagnostics.
@@ -463,8 +467,8 @@ assert.match(bshX10aHtml, /data-source="x10a"/);
 assert.match(h.scrubText(bshX10aView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
 assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/);
 
-// Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet keeps two
-// source-attributed lanes because X10A and HomeHub report the same exact mode independently.
+// Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet folds its paired
+// witnesses to one lane while preserving agreement, one-source fallback and conflict evidence.
 S.hist.set("defrost_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 10, 0, 10] });
 const defrostView = h.historyView("defrost_state");
@@ -480,19 +484,28 @@ assert.match(h.scrubText(defrostView, 1), /Abtauen aktiv\n.* · ca\. 5 min/);
 S.hist.set("quiet_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [10, 10, 0, 0] });
 S.hist.set("modbus:quiet_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
-  held: [], v: [10, 0, 0, 10] });
+  held: [], v: [10, null, 0, 10] });
 const quietView = h.historyView("quiet_state");
 const quietHtml = h.histHtml("quiet_state", "", "Leise-Modus");
 assert.equal(quietView.series.length, 2);
 assert.match(quietHtml, /vhist-state-track/);
 assert.doesNotMatch(quietHtml, /vhist-line/);
 assert.match(quietHtml, /Leise-Modus aktiv erfasst · 10 min Rasterzeit/);
-assert.match(quietHtml, /vhist-state-lane-label mb">Modbus/);
+assert.equal((quietHtml.match(/vhist-state-track/g) || []).length, 1);
+assert.match(quietHtml, /vhist-state-track combined/);
+assert.doesNotMatch(quietHtml, /vhist-state-lane-label/);
 assert.match(quietHtml, /vhist-state-on state-off/);
 assert.match(quietHtml, /vhist-state-on quiet-on/);
+assert.match(quietHtml, /quiet-on state-source-single/,
+  "one valid witness keeps its state visible with reduced confidence");
+assert.match(quietHtml, /state-off state-source-conflict/,
+  "different valid witnesses visibly mark the authoritative state as disputed");
+assert.match(quietHtml, />Quellenabweichung</);
+assert.match(quietHtml, />nur eine Quelle</);
 assert.doesNotMatch(quietHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(quietView, 0), /X10A\nLeise-Modus aktiv\n.* · ca\. 10 min/);
-assert.match(h.scrubText(quietView, 1), /Modbus\nLeise-Modus aus\n.* · ca\. 10 min/);
+assert.match(h.scrubText(quietView, 0), /X10A\nLeise-Modus aktiv[\s\S]*Modbus\nLeise-Modus aktiv/);
+assert.match(h.scrubText(quietView, 1), /X10A\nLeise-Modus aktiv[\s\S]*Modbus\nnicht gemessen/);
+assert.match(h.scrubText(quietView, 3), /X10A\nLeise-Modus aus[\s\S]*Modbus\nLeise-Modus aktiv/);
 
 // BUH is one component with two event-folded stage bits. The browser combines both aligned rings
 // into an off/step-1/step-2 timeline; it must not graph either raw bit as a numeric 0/1 curve.
@@ -529,8 +542,8 @@ await h.ensureDerived("pump_speed");
 assert.deepEqual(Array.from(S.hist.get("pump_speed").v), [0, 300, 1000]);
 assert.match(h.histHtml("pump_speed", "", "Drehzahl der Umwälzpumpe"), /0\.0 – 100\.0 %/);
 
-// The diverter is categorical too. Both selected branches are named, both independent sources keep
-// their own lane, and no numeric 0/1 curve is drawn.
+// The diverter is categorical too. Both selected branches are named, its agreeing witnesses share
+// one lane, and no numeric 0/1 curve is drawn.
 S.hist.set("valve_dhw", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 0, 10, 10, 0, 10] });
 S.hist.set("modbus:valve_dhw", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
@@ -542,9 +555,12 @@ assert.doesNotMatch(valveHtml, /vhist-line/);
 assert.match(valveHtml, /Warmwasser · 15 min · Raumkreis · 15 min/);
 assert.match(valveHtml, /vhist-state-on valve-space/);
 assert.match(valveHtml, /vhist-state-on valve-dhw/);
+assert.equal((valveHtml.match(/vhist-state-track/g) || []).length, 1);
+assert.match(valveHtml, /vhist-state-track combined/);
+assert.doesNotMatch(valveHtml, /vhist-state-lane-label/);
 assert.doesNotMatch(valveHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(valveView, 0), /X10A \+ Modbus\nRaumkreis\n.* · ca\. 10 min/);
-assert.match(h.scrubText(valveView, 2), /X10A \+ Modbus\nWarmwasser\n.* · ca\. 10 min/);
+assert.match(h.scrubText(valveView, 0), /X10A\nRaumkreis[\s\S]*Modbus\nRaumkreis/);
+assert.match(h.scrubText(valveView, 2), /X10A\nWarmwasser[\s\S]*Modbus\nWarmwasser/);
 
 // The legacy history id `valve_heat` stores the optional 2-way/heating-cooling OUTPUT. It is not the
 // configured/current operating mode, so the timeline must retain ON/OFF and never turn idle periods

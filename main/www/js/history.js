@@ -662,6 +662,46 @@ function stateRuns(series, wanted, classify) {
   }
   return out;
 }
+
+function categoricalLevel(cfg, value) {
+  if (value == null) return null;
+  return (cfg.levels || []).find((level) => level.match(value) === true) || null;
+}
+
+// A paired X10A/HomeHub state is one physical/logical story with two witnesses. Collapse it to one
+// visual lane without collapsing the evidence: agreement uses the ordinary state colour; one valid
+// witness uses that state translucently; disagreement uses the authoritative source's state colour
+// with a warning hatch; neither valid leaves the normal missing-data hatch. The tooltip still reads
+// both original rings, so this display-only fold never changes source data or arbitration.
+function pairedStateSamples(view, cfg) {
+  const x10a = view.series.find((s) => s.source === "x10a");
+  const modbus = view.series.find((s) => s.source === "modbus");
+  if (!x10a || !modbus) return null;
+  const primary = cfg.primary === "modbus" ? modbus : x10a;
+  return Array.from({ length: view.v.length }, (_, i) => {
+    const readings = [x10a, modbus].map((series) => ({
+      series, level: categoricalLevel(cfg, series.v[i]),
+    }));
+    const valid = readings.filter((reading) => reading.level);
+    if (!valid.length) return { level: null, evidence: "missing" };
+    if (valid.length === 1) return { level: valid[0].level, evidence: "single" };
+    const primaryReading = readings.find((reading) => reading.series === primary);
+    const level = primaryReading?.level || valid[0].level;
+    const agrees = valid.every((reading) => reading.level.cls === valid[0].level.cls);
+    return { level, evidence: agrees ? "agreement" : "conflict" };
+  });
+}
+
+function valueRuns(values, key) {
+  const out = [];
+  for (let i = 0; i < values.length; i++) {
+    const wanted = key(values[i]);
+    const from = i;
+    while (i + 1 < values.length && key(values[i + 1]) === wanted) i++;
+    out.push([from, i - from + 1, values[from]]);
+  }
+  return out;
+}
 // `bound` renders a LOWER BOUND rather than a measurement, and the difference is not cosmetic.
 // Rounding to nearest is right for a phase duration off the chart — that is a measured span and the
 // nearest minute is the closest true statement about it. It is WRONG for a bound: a run measured at
@@ -760,37 +800,65 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const recordedN = view.recordedN ?? n;
   const spanH = Math.max(1, Math.round((recordedN * view.dt) / 3600));
   const full = recordedN * view.dt >= 23.5 * 3600;
-  // Keep both lanes when both buses are available: a disagreement remains visible rather than
-  // being merged into a plausible single answer. The preferred source is part of the concept: the
-  // HomeHub owns the external SG request, while X10A leads for the physical BSH state.
+  // Totals retain the concept's authoritative source even when the two witnesses are drawn as one
+  // lane. A translucent fallback sample is useful evidence, but it must not silently contribute to
+  // a duration owned by the missing primary source.
   const primary = view.series.find((s) => s.source === cfg.primary) || view.series[0];
   const recordedPrimary = { ...primary, v: primary.v.slice(0, recordedN) };
   const active = stateRuns(recordedPrimary, true, cfg.classify);
   const total = active.reduce((sum, r) => sum + r[1] * view.dt, 0);
   const inactive = stateRuns(recordedPrimary, false, cfg.classify);
   const inactiveSeconds = inactive.reduce((sum, r) => sum + r[1] * view.dt, 0);
-  const gaps = stateRuns(recordedPrimary, null, cfg.classify).length;
   const pct = (i) => ((i / n) * 100).toFixed(3);
-  const tracks = view.series.map((s) => {
-    const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
-    const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
-      `<span class="vhist-state-on${s.source === "modbus" ? " mb" : ""}` +
-      `${level.cls ? " " + level.cls : ""}" style="left:${pct(from)}%;width:${pct(count)}%"></span>`
-    )).join("");
-    const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
-      `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
-    const current = view.liveIndex == null ? ""
-      : `<span class="vhist-state-current" style="left:${pct(view.liveIndex)}%;width:${pct(1)}%"></span>`;
-    const sourceLabel = s.source === "modbus" ? "Modbus" : s.name;
-    return `<div class="vhist-state-lane">` +
-      `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${sourceLabel}</span>` +
-      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}</div>` +
+  const paired = pairedStateSamples(view, cfg);
+  const current = view.liveIndex == null ? ""
+    : `<span class="vhist-state-current" style="left:${pct(view.liveIndex)}%;width:${pct(1)}%"></span>`;
+  let tracks;
+  if (paired) {
+    const spans = valueRuns(paired, (sample) => `${sample.level?.cls || ""}/${sample.evidence}`)
+      .map(([from, count, sample]) => sample.evidence === "missing"
+        ? `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`
+        : `<span class="vhist-state-on ${sample.level.cls}` +
+          `${sample.evidence === "single" ? " state-source-single" : ""}` +
+          `${sample.evidence === "conflict" ? " state-source-conflict" : ""}` +
+          `" style="left:${pct(from)}%;width:${pct(count)}%"></span>`
+      ).join("");
+    tracks = `<div class="vhist-state-lane vhist-state-lane-combined">` +
+      `<div class="vhist-state-track combined" aria-hidden="true">${spans}${current}</div>` +
     `</div>`;
-  }).join("");
+  } else {
+    tracks = view.series.map((s) => {
+      const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
+      const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
+        `<span class="vhist-state-on${level.cls ? " " + level.cls : ""}" ` +
+        `style="left:${pct(from)}%;width:${pct(count)}%"></span>`
+      )).join("");
+      const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
+        `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
+      const sourceLabel = s.source === "modbus" ? "Modbus" : s.name;
+      return `<div class="vhist-state-lane">` +
+        `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${sourceLabel}</span>` +
+        `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}</div>` +
+      `</div>`;
+    }).join("");
+  }
+  const evidence = paired ? new Set(paired.map((sample) => sample.evidence)) : null;
+  const gaps = paired
+    ? valueRuns(paired, (sample) => sample.evidence).filter((run) => run[2].evidence === "missing").length
+    : stateRuns(recordedPrimary, null, cfg.classify).length;
+  const evidenceLegend = !paired ? ""
+    : (evidence.has("conflict")
+      ? `<span class="vhist-level state-source-conflict"><i></i>${esc(t("hist.sources_differ"))}</span>` : "") +
+      (evidence.has("single")
+      ? `<span class="vhist-level state-source-single"><i></i>${esc(t("hist.single_source"))}</span>` : "") +
+      (evidence.has("missing")
+      ? `<span class="vhist-level state-unavailable"><i></i>${esc(t(cfg.missing || "hist.nm"))}</span>` : "");
   const levelLegend = cfg.levels
     ? `<div class="vhist-legend vhist-level-legend">${cfg.levels.map((level) =>
         `<span class="vhist-level ${level.cls}"><i></i>${esc(t(level.label))}</span>`).join("")}` +
-        (cfg.missing ? `<span class="vhist-level state-unavailable"><i></i>${esc(t(cfg.missing))}</span>` : "") +
+        (!paired && cfg.missing
+          ? `<span class="vhist-level state-unavailable"><i></i>${esc(t(cfg.missing))}</span>` : "") +
+        evidenceLegend +
       `</div>`
     : "";
 
@@ -798,9 +866,11 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
   let pinTip = "", pinCross = "";
   if (pi >= 0) {
-    const px = (scrubFrac(pi, n) * 100).toFixed(3);
+    const frac = scrubFrac(pi, n);
+    const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
-    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${px}">${esc(scrubText(view, pi))}</div>`;
+    pinTip = `<div class="vhist-tip vhist-pinned ${tipSideClass(frac)} mono num" ` +
+      `style="--tip-p:${px}">${esc(scrubText(view, pi))}</div>`;
   }
   const totalText = t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
     ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "");
@@ -808,7 +878,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
     `<div class="vhist-graph vhist-state-graph">` +
-      `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
+      `<div class="vhist-tip vhist-live vhist-tip-right mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(cfg.aria, name || id, totalText))}">` + tracks + pinCross +
         `<span class="vhist-cross vhist-live" hidden></span>` +
@@ -920,11 +990,10 @@ function histHtml(id, unit, name, source = "") {
   const u = shownUnit ? ` ${shownUnit}` : "";
   const rng = `${lo.toFixed(1)} – ${hi.toFixed(1)}${u}`;
 
-  // The scrub layer: a tooltip band ABOVE the plot (its own reserved strip, so the bubble follows
-  // the cursor Grafana-style without ever covering the curve it is reading — on a phone the finger
-  // already hides part of the plot, and a bubble under it would hide the rest), plus the crosshair
-  // and the marker dot inside the plot. All three start hidden and are moved by scrubMove() writing
-  // styles directly — never by re-rendering this HTML, which would fight the pointer.
+  // The scrub layer: a translucent tooltip OVER the plot (ApexCharts-style), plus the crosshair and
+  // marker dot inside it. The bubble follows the cursor horizontally but never changes the plot's
+  // vertical position. All three start hidden and are moved by scrubMove() writing styles directly
+  // — never by re-rendering this HTML, which would fight the pointer.
   // `data-hist` is what the delegated pointer handlers match on, and it carries the sample count so
   // the geometry the handler needs comes from the same render that drew the path.
   // A PINNED readout is emitted as part of the markup, not written onto the DOM afterwards — that is
@@ -935,15 +1004,17 @@ function histHtml(id, unit, name, source = "") {
   const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
   let pinTip = "", pinCross = "", pinMarks = "";
   if (pi >= 0) {
-    const px = (scrubFrac(pi, n) * 100).toFixed(3);
+    const frac = scrubFrac(pi, n);
+    const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
     pinMarks = view.series.map((s) => s.v[pi] == null ? ""
       : `<span class="vhist-mark vhist-pinned${s.source === "modbus" ? " mb" : ""}"` +
         ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`).join("");
-    // The bubble carries its POSITION rather than a measured offset: this runs at render time,
-    // before layout, so offsetWidth is not available the way it is during a scrub — and the sliding
-    // anchor keyed on --tip-p needs neither (style.css, .vhist-tip).
-    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${px}">${esc(scrubText(view, pi))}</div>`;
+    // Position and SIDE are derived from the sample alone, so a pinned bubble can be placed before
+    // layout: left half opens to the right, right half opens to the left. The selected crosshair is
+    // therefore never hidden behind its own readout.
+    pinTip = `<div class="vhist-tip vhist-pinned ${tipSideClass(frac)} mono num" ` +
+      `style="--tip-p:${px}">${esc(scrubText(view, pi))}</div>`;
   }
   const legend = view.series.length > 1 || view.series[0].source === "modbus"
     ? `<div class="vhist-legend">${view.series.map((s) =>
@@ -953,7 +1024,7 @@ function histHtml(id, unit, name, source = "") {
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
     `<div class="vhist-graph">` +
-      `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
+      `<div class="vhist-tip vhist-live vhist-tip-right mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${area}${line}${dots}</svg>` +
@@ -1100,7 +1171,8 @@ function env3HistHtml() {
   if (pi >= 0) {
     const forecastPin = pi >= n ? forecastScrubView(view) : null;
     const point = forecastPin?.points[pi - n];
-    const px = ((point ? forecastPin.xFrac(point.time) : scrubFrac(pi, n) * measuredEndFrac) * 100).toFixed(3);
+    const frac = point ? forecastPin.xFrac(point.time) : scrubFrac(pi, n) * measuredEndFrac;
+    const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
     pinMarks = point
       ? WEATHER_FORECAST_SERIES.map((spec) =>
@@ -1113,7 +1185,7 @@ function env3HistHtml() {
           return `<span class="vhist-mark vhist-pinned ${env3SeriesClass(s.source)}" ` +
             `style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
         }).join("");
-    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${px}">` +
+    pinTip = `<div class="vhist-tip vhist-pinned ${tipSideClass(frac)} mono num" style="--tip-p:${px}">` +
       `${env3ScrubHtml(view, pi)}</div>`;
   }
 
@@ -1121,7 +1193,7 @@ function env3HistHtml() {
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range">${esc(t("env.history_scales"))}</span></div>` + legend +
     `<div class="vhist-graph">` +
-      `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
+      `<div class="vhist-tip vhist-live vhist-tip-right mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot" data-hist="${ENV3_COMBINED_ID}" data-n="${n}" ` +
         `data-measured-p="${(measuredEndFrac * 100).toFixed(3)}" tabindex="0" role="img" ` +
         `aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", t("env.history_title"),
@@ -1305,10 +1377,10 @@ function scrubText(h, i) {
   }
   const cfg = STATE_HIST[h.id];
   if (cfg) {
-    // BOOST, BSH and BUH keep the popup deliberately terse: the complete phase interval followed
-    // by its compact status. Use the concept's authoritative source when a diagnostic chart happens
-    // to carry both lanes; source names and sampled durations stay out of this compact readout.
-    if (cfg.compactTooltip) {
+    // A deliberately source-filtered BOOST/BSH/BUH view stays terse. A paired view must name BOTH
+    // witnesses instead: the chart has folded them to one lane, so the tooltip is now the only place
+    // where agreement, fallback or disagreement can be audited without guessing.
+    if (cfg.compactTooltip && h.series.length === 1) {
       const primary = h.series.find((s) => s.source === cfg.primary) || h.series[0];
       const v = primary.v[i];
       let status = t("hist.nm");
@@ -1328,9 +1400,8 @@ function scrubText(h, i) {
     // A state chart is already a sequence of PHASES. Hovering any point therefore names the whole
     // containing phase — source, state, start/end and sampled duration — while the chart itself
     // stays compact. Source, state and timing form deliberate vertical rows; timing and duration
-    // share one row because they describe the same interval. When both instruments report the exact
-    // same phase, collapse their duplicate prose into one explicitly shared source block. A genuine
-    // disagreement still renders as two consecutive blocks, so compactness never hides evidence.
+    // share one row because they describe the same interval. Paired instruments always retain one
+    // block each, even when they agree: their names have intentionally disappeared from the chart.
     const blocks = h.series.map((s) => {
       if (h.liveIndex === i) return {
         source: s.source === "modbus" ? "Modbus" : s.name,
@@ -1343,8 +1414,6 @@ function scrubText(h, i) {
         detail: t(cfg.run, valueText(s), stateRunWhen(h, from, count), histDuration(count * h.dt)),
       };
     });
-    if (blocks.length > 1 && blocks.every((b) => b.detail === blocks[0].detail))
-      return `${blocks.map((b) => b.source).join(" + ")}\n${blocks[0].detail}`;
     return blocks.map((b) => `${b.source}\n${b.detail}`).join("\n\n");
   }
   // With two lines the readout names both instruments at the SAME instant. A gap in either remains
@@ -1385,6 +1454,20 @@ function env3ScrubHtml(h, i) {
     ).join("");
 }
 
+// Keep the selected instant visible: samples in the left half open their bubble to the right and
+// samples in the right half open it to the left. The small CSS leader bridges the deliberate gap
+// back to the crosshair. This is position-only; tooltip dimensions never feed into graph layout.
+function tipSideClass(frac) {
+  return frac > 0.5 ? "vhist-tip-left" : "vhist-tip-right";
+}
+
+function placeScrubTip(tip, frac) {
+  const left = frac > 0.5;
+  tip.classList.toggle("vhist-tip-left", left);
+  tip.classList.toggle("vhist-tip-right", !left);
+  tip.style.setProperty("--tip-p", (frac * 100).toFixed(3));
+}
+
 // Paint the crosshair for sample `i` on the existing nodes. A drag never rebuilds the plot; only
 // the ENV III bubble replaces its tiny, fully escaped set of coloured line spans.
 function scrubMove(plot, i) {
@@ -1418,8 +1501,7 @@ function scrubMove(plot, i) {
     tip.hidden = false;
     if (h.id === ENV3_COMBINED_ID) tip.innerHTML = env3ScrubHtml(h, i);
     else tip.textContent = scrubText(h, i);
-    tip.style.setProperty("--tip-p", (frac * 100).toFixed(3));
-    syncGraphTipSpace(graph);
+    placeScrubTip(tip, frac);
     return;
   }
   const measuredFrac = Number.isFinite(+plot.dataset.measuredP)
@@ -1449,38 +1531,9 @@ function scrubMove(plot, i) {
   tip.hidden = false;
   if (h.id === ENV3_COMBINED_ID) tip.innerHTML = env3ScrubHtml(h, i);
   else tip.textContent = scrubText(h, i);
-  // The bubble is placed by POSITION, never by measured width: --tip-p slides its anchor from its
-  // own left edge at 0 to its right edge at 100, so it stays inside the card at every sample and
-  // at every panel width (style.css, .vhist-tip). Measuring here is what made the right edge
-  // unreadable — offsetWidth was read while the previous, edge-squeezed left was still applied, so
-  // the clamp saw a 59 px bubble that "already fit" and left it wrapped over the curve.
-  tip.style.setProperty("--tip-p", (frac * 100).toFixed(3));
-  syncGraphTipSpace(graph);
-}
-
-// A live or pinned readout is absolutely positioned so it can follow its sample horizontally. Its
-// HEIGHT must still participate in layout: categorical histories can contain two source blocks and
-// are much taller than the compact one-line readout. Reserve exactly the tallest visible bubble plus
-// a small breathing gap; when the bubble disappears CSS falls back to the normal compact spacing.
-// Width is deliberately not measured here — horizontal placement remains the position-only contract
-// documented beside .vhist-tip in style.css.
-const HIST_TIP_GAP_PX = 7;
-function syncGraphTipSpace(graph) {
-  if (!graph?.style || typeof graph.querySelectorAll !== "function") return;
-  const height = [...graph.querySelectorAll(".vhist-tip")]
-    .filter((tip) => !tip.hidden)
-    .reduce((max, tip) => {
-      const rectHeight = typeof tip.getBoundingClientRect === "function"
-        ? tip.getBoundingClientRect().height : 0;
-      return Math.max(max, Math.ceil(rectHeight || tip.offsetHeight || 0));
-    }, 0);
-  if (height > 0) graph.style.setProperty("--vhist-tip-space", `${height + HIST_TIP_GAP_PX}px`);
-  else graph.style.removeProperty("--vhist-tip-space");
-}
-
-function syncGraphTipSpaces() {
-  if (typeof document === "undefined") return;
-  document.querySelectorAll(".vhist-graph").forEach(syncGraphTipSpace);
+  // The side changes at the midpoint, but the crosshair does not: the bubble leaves a fixed clear
+  // gap beside the chosen sample rather than hanging over the value it describes.
+  placeScrubTip(tip, frac);
 }
 
 function scrubIndex(plot, clientX) {
@@ -1520,9 +1573,7 @@ function scrubEnd(plot) {
   if (plot) {
     plot.querySelector(".vhist-cross.vhist-live").hidden = true;
     plot.querySelectorAll(".vhist-mark.vhist-live").forEach((m) => { m.hidden = true; });
-    const graph = plot.parentElement;
-    graph.querySelector(".vhist-tip.vhist-live").hidden = true;
-    syncGraphTipSpace(graph);
+    plot.parentElement.querySelector(".vhist-tip.vhist-live").hidden = true;
   }
   if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen per-poll rebuild
 }
@@ -1533,7 +1584,6 @@ function scrubEnd(plot) {
 // a pin the user has since moved.
 function renderTrendHosts() {
   renderCards(); renderInspect(); renderSettings();
-  syncGraphTipSpaces();
 }
 
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;

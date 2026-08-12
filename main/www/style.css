@@ -786,16 +786,15 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   background: color-mix(in srgb, var(--vhist-colour) 14%, transparent); }
 .vhist-source.mb { --vhist-colour: var(--src-mb); }
 .vhist-source small { color: inherit; font-size: 10.5px; }
-/* Component states are categorical timelines, not numeric curves. Every valid state owns a labelled
-   colour in the state legend, on EVERY source lane; missing samples alone are hatched. Source is the
-   OTHER visual channel — the lane's own name and its track outline — so a HomeHub phase is coloured
-   by what it says, never by who said it (DESIGN.md §"Source outline and state fill are separate
-   visual channels"). Put the source name directly on its lane instead of making the eye map a
-   detached source legend onto two otherwise identical full-width bars. */
-/* State readouts can stack source/state/interval/duration fields vertically. Their measured height
-   is reserved by syncGraphTipSpace(), so z-index only orders the bubble against the crosshair; it no
-   longer lets the bubble cover the state lanes it describes. */
-.vhist-state-graph .vhist-tip { z-index: 2; white-space: pre; }
+/* Component states are categorical timelines, not numeric curves. Paired X10A/HomeHub witnesses
+   share ONE lane: ordinary state colour means agreement, a translucent hatch means one witness,
+   and a warning hatch means disagreement. Source names and their exact readings live in the
+   tooltip; the chart remains quiet without hiding the evidence condition. A genuinely single-source
+   history keeps its source label and outline. */
+/* State readouts can stack source/state/interval/duration fields vertically. They deliberately
+   overlay the lanes like an ordinary chart tooltip; the translucent surface keeps the underlying
+   phase visible while the fixed plot position prevents the card from jumping between readouts. */
+.vhist-state-graph .vhist-tip { white-space: pre-wrap; }
 .vhist-state-plot { height: auto; display: grid; gap: 7px; padding: 4px 0; }
 .vhist-state-lane { display: grid; gap: 3px; }
 .vhist-state-lane-label { color: var(--brand-sky); font-size: 11px; font-weight: 700;
@@ -803,6 +802,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-state-lane-label.mb { color: var(--src-mb); }
 .vhist-state-track { position: relative; height: 15px; overflow: hidden; border-radius: 999px;
   background: var(--hatch); box-shadow: inset 0 0 0 1px var(--pipe); }
+.vhist-state-track.combined { box-shadow: inset 0 0 0 1px var(--pipe); }
 .vhist-state-track.x10a { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--brand-sky); }
 .vhist-state-track.modbus { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--src-mb); }
 .vhist-state-on, .vhist-state-gap { position: absolute; inset-block: 0; min-width: 2px; }
@@ -848,26 +848,38 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-state-on.sg-recommended, .vhist-level.sg-recommended i {
   background: var(--src-mb);
 }
-/* There is deliberately NO `.vhist-state-on.mb` source fill here. One used to sit after every rule
-   above and repaint the whole HomeHub lane petrol, which erased the state channel on the four
-   timelines that HAVE a Modbus lane (Smart Grid, BSH, the 3-way valve, Quiet): all four Smart-Grid
-   modes, and both sides of every binary pair, rendered as one solid bar. On Smart Grid that bar was
-   also read as a STATE, because petrol is the legend swatch for "Recommended on" — so a plant that
-   ran free all day showed 24 h of Boost, directly under a Boost total of a few hours computed from
-   the same samples. Source stays legible through the channels DESIGN.md assigns it: the lane's
-   petrol name and the track's petrol outline. */
+/* Evidence overlays come AFTER every state fill so they decorate rather than replace its meaning. */
+.vhist-state-on.state-source-single {
+  opacity: .52;
+  background-image: repeating-linear-gradient(135deg, transparent 0 4px,
+    color-mix(in srgb, var(--card) 72%, transparent) 4px 6px);
+}
+.vhist-state-on.state-source-conflict {
+  background-image: repeating-linear-gradient(135deg, transparent 0 4px,
+    color-mix(in srgb, var(--err) 72%, transparent) 4px 6px);
+  box-shadow: inset 0 0 0 1px var(--err);
+}
+.vhist-level.state-source-single i {
+  opacity: .52; background: repeating-linear-gradient(135deg, var(--pipe) 0 4px,
+    color-mix(in srgb, var(--card) 72%, transparent) 4px 6px);
+}
+.vhist-level.state-source-conflict i {
+  background: repeating-linear-gradient(135deg, var(--pipe) 0 4px,
+    color-mix(in srgb, var(--err) 72%, transparent) 4px 6px);
+  box-shadow: inset 0 0 0 1px var(--err);
+}
 
 .modal-subtitle { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
    extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
-/* The tooltip gets its OWN strip above the plot: it follows the cursor horizontally (Grafana-style)
-   but can never cover the curve it is reading — which matters most on a phone, where the finger
-   already hides part of the plot. Twenty pixels keep the idle layout compact; syncGraphTipSpace()
-   temporarily grows the strip to the bubble's real height for multi-line/state readouts. */
+/* The plot always starts at the SAME vertical position. The tooltip follows the cursor horizontally
+   and overlays the chart (ApexCharts-style); its translucent surface leaves the data underneath
+   visible. Never derive this padding from the tooltip height: a combined source readout is taller
+   than a shared-state readout, and letting either participate in layout makes the whole chart jump. */
 .vhist-graph { --vhist-tip-base: 20px; position: relative;
-  padding-top: max(var(--vhist-tip-base), var(--vhist-tip-space, 0px));
-  /* The bubble lives in this reserved strip. iOS must be able to start the same horizontal scrub
-     there as on the plot while a vertical gesture remains ordinary page scrolling. */
+  padding-top: var(--vhist-tip-base); isolation: isolate;
+  /* iOS must be able to start the same horizontal scrub on the bubble/graph as on the plot while a
+     vertical gesture remains ordinary page scrolling. */
   touch-action: pan-y; }
 .vhist-plot { position: relative; height: 72px; }
 /* pan-y hands VERTICAL gestures back to the page (the user must still be able to scroll past the
@@ -891,39 +903,31 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-cross.vhist-pinned { opacity: 1; background: var(--brand-strong); }
 .vhist-mark.vhist-pinned { background: var(--brand-strong); }
 .vhist-tip.vhist-pinned { border-color: var(--brand); color: var(--fg); font-weight: 600; }
-/* WHERE THE BUBBLE SITS, and why it is expressed this way. `--tip-p` is the sample's position as a
-   percentage NUMBER (0..100), written by scrubMove() for the live readout and inlined at render
-   time for a pinned one — one value from all four call sites, so no two can drift apart.
-   Two declarations carry the whole geometry:
-   `width: max-content` decouples the bubble's WIDTH from its position. Without it an absolutely
-   positioned box with only `left` set is shrink-to-fit against `container - left`, so at the right
-   end of the plot the available width collapses and the readout wraps to its minimum-content width
-   — measured, "08:23 · X10A 46.3 °C · Modbus 46.3 °C" became a 59 px column of SEVEN lines that
-   hung down over the curve it was reading. `transform` cannot undo that: it shifts a painted box,
-   it does not give back width the box was never laid out with. Nor could scrubMove()'s measured
-   clamp recover — it read the squeezed width and concluded the bubble already fit.
-   The ANCHOR then slides from the bubble's left edge at p=0 to its right edge at p=100, instead of
-   staying centred and being clamped at the ends. `left` is p% of the container (C) and the
-   translate is the same p% of the bubble (W), so the box sits at p/100 * (C-W) — travel exactly
-   [0, C-W] for every p and every panel width. Two properties follow by construction rather than by
-   threshold: it can never leave the card at either end, and the crosshair (p% of the same plot)
-   always falls inside the bubble it belongs to. A percentage cut-off ("anchor left below 24%")
-   promises neither once a narrow panel makes the bubble nearly as wide as the container. It also
-   needs no measurement, so a pinned readout emitted before layout is positioned by the same one
-   rule as the live one that is scrubbed. */
-.vhist-tip { position: absolute; top: 0; --tip-p: 0; white-space: pre-line;
-  left: calc(var(--tip-p) * 1%); transform: translateX(calc(var(--tip-p) * -1%));
+/* `--tip-p` is the selected sample (0..100). Keep the vertical crosshair itself unobstructed:
+   the left half opens RIGHT and the right half opens LEFT, with a small leader across the gap.
+   Each side's max-width is exactly its available half, so even a tall/mobile readout cannot spill
+   back across the selected instant. Width is never measured and height never participates in
+   layout; pinned and live bubbles therefore obey the same stable rule. */
+.vhist-tip { --tip-p: 0; --vhist-tip-gap: 10px; position: absolute; z-index: 3;
+  top: var(--vhist-tip-base); left: calc(var(--tip-p) * 1%); white-space: pre-wrap;
   pointer-events: none; font-size: 12px; color: var(--fg);
   /* Transparency belongs only to the surface, never to the text. The small blur preserves contrast
      in both themes while the chart/card remains visibly present behind the readout. */
   background: color-mix(in srgb, var(--card) 76%, transparent);
   -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
-  width: max-content; max-width: 100%; line-height: 1.35;
+  width: max-content; line-height: 1.35; overflow-wrap: anywhere;
   border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
   box-shadow: 0 1px 3px rgba(0,0,0,.10); }
-.vhist-env3 .vhist-graph { --vhist-tip-base: 52px; }
-.vhist-env3 .vhist-tip { min-width: 0; white-space: nowrap; display: grid;
-  grid-template-columns: repeat(3, max-content); column-gap: 14px;
+.vhist-tip-right { transform: translateX(var(--vhist-tip-gap));
+  max-width: calc(100% - (var(--tip-p) * 1%) - var(--vhist-tip-gap)); }
+.vhist-tip-left { transform: translateX(calc(-100% - var(--vhist-tip-gap)));
+  max-width: calc((var(--tip-p) * 1%) - var(--vhist-tip-gap)); }
+.vhist-tip::before { content: ""; position: absolute; top: 11px; width: var(--vhist-tip-gap);
+  height: 1px; background: var(--brand-strong); opacity: .72; }
+.vhist-tip-right::before { right: 100%; }
+.vhist-tip-left::before { left: 100%; }
+.vhist-env3 .vhist-tip { min-width: 0; white-space: normal; display: grid;
+  grid-template-columns: repeat(3, minmax(0, max-content)); column-gap: 14px;
   padding: 5px 8px; line-height: 1.35; border-radius: 8px;
   box-shadow: 0 4px 14px rgba(16,20,28,.12); }
 .vhist-env3 .vhist-tip-line { display: block; }
@@ -1185,9 +1189,8 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
   .vhist-head { display: grid; justify-content: stretch; gap: 2px; }
   .vhist-range { text-align: left; }
   /* The compact two-row climate tooltip is a desktop optimisation. A phone stacks the coloured
-     readings and reserves their full height so neither values nor chart are covered. */
-  .vhist-env3 .vhist-graph { --vhist-tip-base: 96px; }
-  .vhist-env3 .vhist-tip { min-width: min(220px, 100%); white-space: pre;
+     readings, but the tooltip still overlays the plot so the plot position remains fixed. */
+  .vhist-env3 .vhist-tip { min-width: 0; white-space: pre-wrap;
     display: block; padding: 7px 10px; line-height: 1.55; }
   .modal-actions { flex-direction: column-reverse; }
   .modal-actions .btn { flex: none; width: 100%; }

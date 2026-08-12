@@ -457,10 +457,6 @@ function renderApp() {
   renderSettings();
   renderLive();
   renderCards();
-  // A poll can replace a categorical plot when its live cap changes while retaining a pinned
-  // tooltip. Re-measure after all three hosts have rendered so that newly emitted pin still owns
-  // enough space above its plot instead of falling back to the compact idle gap.
-  syncGraphTipSpaces();
 }
 // Header identity line: the IP address (or the mDNS hostname while offline/unknown — whatever the
 // browser is actually reached at) and the running firmware version, under the fixed product name.
