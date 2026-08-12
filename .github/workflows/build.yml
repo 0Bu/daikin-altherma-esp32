@@ -188,6 +188,16 @@ jobs:
       - name: Verify the description audit still has teeth
         run: ./tools/descriptions/selftest.sh
 
+      # A tappable row can still explain a correct result only in installer language, omit what the
+      # finding does NOT prove, or leave the owner with no supported next step. This binds every
+      # visible plant-diagnostics row to bilingual actionable copy and to its plain-language guide.
+      # The source stamp makes evaluator/threshold/UI changes stale that guide even when no row was
+      # added. The /user-docs-review skill is the human half; this is the fail-closed mechanical one.
+      - name: Audit plain-language diagnosis help
+        run: ./scripts/run-user-docs-audit.sh
+      - name: Verify the user-docs audit still has teeth
+        run: ./tools/user_docs/selftest.sh
+
       # The dashboard schematic: the two audits above can BOTH be clean while the picture is false.
       # A pill can name a physically correct value, have copy for it, and still be drawn on the
       # wrong pipe — this drawing shipped a fan spinning around a point beside its own axle, the

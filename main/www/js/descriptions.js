@@ -894,19 +894,16 @@ function descFor(label, row = null) {
 // followed it the first child, and the paragraph break silently collapsed to nothing.
 const descParaHtml = (html) => `<div class="vdesc-p">${html}</div>`;
 
-// A labelled note under the "what is it" sentence, opened by a lead-in in stronger ink. Both notes
-// an explainer can carry take this shape — the timeless "Normal:" one below and the live held-over
-// one (HELD_OVER_NOW) the inspector appends — so one helper renders both and they cannot drift into
-// two different-looking kinds of note. A paragraph rather than a run-on sentence because the two
-// halves answer different questions ("what IS this" vs "what should it read"), and set solid they
-// read as one paragraph that changes subject mid-way.
+// A labelled note under the "what is it" sentence, opened by a lead-in in stronger ink.
+// Interpretation, normal context, the supported next step and held-over source context all take
+// this shape. A paragraph rather than a run-on sentence keeps those questions visually separate.
 // All text is our own static copy (labels come from the firmware's own def/ tables), but escape
 // anyway — cheap and keeps the one-encoder rule.
 const descNoteHtml = (lead, text) =>
   descParaHtml(`<span class="vdesc-n">${esc(lead)}</span> ${esc(text)}`);
 
-// The SECOND source, as one plain line at the END of the explainer — after the "Normal:" note, in
-// the same paragraph shape as everything else in the body, in the Modbus petrol.
+// The SECOND source, as one plain line at the END of the explainer — after the timeless explanation
+// notes, in the same paragraph shape as everything else in the body, in the Modbus petrol.
 //
 // It used to be a bordered card at the TOP, listing X10A and Modbus as two labelled rows with the
 // difference under them. That inverted the panel: the row's OWN value is already stated an inch
@@ -1004,11 +1001,16 @@ function faultCodeDetailHtml(currentValue) {
   return `<div class="fault-code-current"><code>${esc(code)}</code><span>${esc(meaning)}</span></div>`;
 }
 
-// Description body: the plain "what is it" sentence, plus an optional "Normal:" note or the current
-// fault-code meaning. `currentValue` is optional because most explainers do not need their row value.
+// Description body: the plain "what is it" sentence, then optional interpretation, normal-context
+// and next-step paragraphs. A diagnosis that names a finding without saying what a non-specialist
+// can safely do with it has not explained the result. `currentValue` is optional because most
+// explainers do not need their row value.
 function descBodyHtml(d, currentValue) {
   const b = (LANG === "de" && d.de) ? d.de : d;   // German copy when present, else the English row
   if (d.faultCode) return faultCodeDetailHtml(currentValue);
   const intro = descParaHtml(esc(b.what));
-  return intro + (b.normal ? descNoteHtml(t("normal.label"), b.normal) : "");
+  const meaning = b.meaning ? descNoteHtml(t("meaning.label"), b.meaning) : "";
+  const normal = b.normal ? descNoteHtml(t("normal.label"), b.normal) : "";
+  const action = b.action ? descNoteHtml(t("action.label"), b.action) : "";
+  return intro + meaning + normal + action;
 }

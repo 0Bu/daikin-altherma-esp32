@@ -118,11 +118,33 @@ inline constexpr CheckupLocator CHECKUP_LOC_PRESSURE = {0x62, 11, 105};  // "Wat
 inline constexpr CheckupLocator CHECKUP_LOC_FLOW     = {0x62,  9, 105};  // "Flow sensor (l/min)"
 inline constexpr CheckupLocator CHECKUP_LOC_VALVE    = {0x60, 12, 306};  // 1=DHW, 0=space
 inline constexpr CheckupLocator CHECKUP_LOC_R5T      = {0x61, 10, 105};  // DHW tank sensor, 0.1 °C
+inline constexpr CheckupLocator CHECKUP_LOC_IU_MODE  = {0x60,  2, 315};  // Heating/Cooling/DHW
 
 // Does this row carry the value a locator addresses? Three exact comparisons; no matching, no
 // heuristics, and nothing that a re-spelling or a translation could move.
 constexpr bool checkup_row_matches(const CheckupLocator& l, unsigned reg, unsigned off, int conv) {
     return reg == l.reg && off == l.off && conv == l.conv;
+}
+
+// The valve separates tank from room circuit, not HEATING from COOLING. The latter is a second,
+// independently decoded fact. Keep the formatted enum adapter pure and closed so checkup.cpp only
+// transports it; an unknown spelling is absence, never permission to call a cooling run heating.
+enum class CheckupOperatingMode : uint8_t { Unknown, Heating, Cooling, Other };
+
+constexpr bool checkup_text_equal(const char* a, const char* b) {
+    if (!a || !b) return false;
+    while (*a && *b && *a == *b) { a++; b++; }
+    return *a == '\0' && *b == '\0';
+}
+
+constexpr CheckupOperatingMode checkup_operating_mode(const char* text) {
+    if (checkup_text_equal(text, "Heating") || checkup_text_equal(text, "Heating + DHW"))
+        return CheckupOperatingMode::Heating;
+    if (checkup_text_equal(text, "Cooling") || checkup_text_equal(text, "Cooling + DHW"))
+        return CheckupOperatingMode::Cooling;
+    if (checkup_text_equal(text, "Stop") || checkup_text_equal(text, "DHW"))
+        return CheckupOperatingMode::Other;
+    return CheckupOperatingMode::Unknown;
 }
 
 // Index of the addressed row, or -1 when this profile carries none. The parallel-array shape mirrors
@@ -162,6 +184,21 @@ struct CheckupBucket {
     uint16_t covered_s       = 0; // any continuous X10A observation (card-level context only)
     uint16_t rps_observed_s  = 0; // compressor witness was readable
     uint16_t run_s           = 0; // compressor running while that witness was readable
+    // WHICH LOAD a compressor RUN served. RPS lives on 0x30; the 3-way valve and I/U mode live on
+    // 0x60, so either page can time out alone. `class_observed_s` is the paired class clock: RPS and
+    // valve must be readable together, plus I/U mode whenever the valve points at the room circuit.
+    //
+    // The two class figures below count COMPLETED RUNS, not seconds attributed sample by sample.
+    // That distinction is the whole correctness of this check. Splitting seconds by the valve while
+    // the START stays on the side the run began leaves a ratio whose numerator and denominator
+    // describe different populations, and DHW priority makes that a routine event rather than a
+    // corner case: twelve continuous 25-minute runs that each hand over to the tank after five
+    // minutes then read as a five-minute mean over twelve starts — a short-cycling verdict on a
+    // plant that never short-cycled. A run is therefore the unit, and it is classified only when its
+    // complete load identity stayed known and unchanged for the whole witnessed length.
+    uint16_t class_observed_s = 0;
+    uint16_t space_run_s     = 0; // total seconds of completed runs that served the space circuit
+    uint16_t dhw_run_s       = 0; // total seconds of completed runs that served the tank
     uint16_t dfr_observed_s  = 0; // defrost flag readable (count evidence)
     uint16_t dfr_pair_observed_s = 0; // defrost flag AND compressor witness readable (ratio evidence)
     uint16_t dfr_run_s       = 0; // compressor runtime inside that paired observation
@@ -176,6 +213,14 @@ struct CheckupBucket {
     int16_t  min_bar    = CHECKUP_ABSENT;   // tenths of bar, raw lowest valid sample seen
     int16_t  min_flow   = CHECKUP_ABSENT;   // tenths of l/min, lowest seen after pump run-up
     uint8_t  starts     = 0;   // compressor 0 -> >0 transitions (saturating)
+    // COMPLETED runs, per class — the denominators of the two heating/DHW means above, so each ratio
+    // is formed over one population. A run reaches one of these only if its valve/mode class stayed
+    // readable and unchanged; cooling is counted only to make its exclusion explicit. Everything
+    // else lands in `censored_runs`, so "no verdict" can never be read as "nothing ran".
+    uint8_t  space_runs = 0;
+    uint8_t  dhw_runs   = 0;
+    uint8_t  cooling_runs = 0; // positively identified room-circuit cooling, reported but not judged
+    uint8_t  censored_runs = 0; // completed, but mixed / class-unreadable / gapped: judged by neither
     uint8_t  defrosts   = 0;   // defrost off -> on transitions (saturating)
     uint8_t  paired_defrosts = 0; // same edge with readable compressor witnesses at both endpoints
     uint8_t  flags      = 0;
@@ -188,8 +233,15 @@ constexpr uint8_t CHECKUP_F_RETRY   = 1u << 2;   // a protection-retry counter s
 constexpr uint8_t CHECKUP_F_LOW_BAR = 1u << 3;   // <=1.0 bar persisted for the confirmation period
 
 // 23 completed buckets plus the pending one: the full rolling window's actual storage cost.
+//
+// The bound was RAISED from 896 to 1104 (36 -> 46 bytes per bucket) for the operating-class split
+// above, and that is a decision rather than an edit: .noinit is DRAM this board does not have spare,
+// and the number exists so growing it costs an argument. Heating/DHW run totals first used eight of
+// those ten bytes; the explicit cooling count plus alignment uses the remaining two. The total cost
+// is therefore the declared 240 B for the rolling day, none of it heap or flash. Anything further
+// wants the same conversation.
 constexpr size_t CHECKUP_BYTES = sizeof(CheckupBucket) * CHECKUP_BUCKETS;
-static_assert(CHECKUP_BYTES <= 896, "the static checkup ring is too large for this heap-tight board");
+static_assert(CHECKUP_BYTES <= 1104, "the static checkup ring is too large for this heap-tight board");
 
 // Saturating add for the two event counters: 255 starts in one hour is far outside anything real,
 // but a wrap to 0 would turn the worst imaginable cycling into a perfect score.
@@ -282,6 +334,20 @@ struct CheckupRing {
         age_buckets = static_cast<uint8_t>(aged > CHECKUP_BUCKETS ? CHECKUP_BUCKETS : aged);
         pending = CheckupBucket{};
     }
+
+    // Locate the bucket in which a run STARTED. Complete-run statistics belong beside their start
+    // edge: booking a 25-hour run into the bucket where it stopped lets 24 hours of pre-window time
+    // re-enter the rolling mean. `commit()` pushes every skipped hour, so distance from the current
+    // pending bucket maps directly back from `head`. Null means the start has already aged out.
+    CheckupBucket* retained_bucket(uint32_t absolute_bucket, uint32_t current_bucket) {
+        if (absolute_bucket > current_bucket) return nullptr;
+        const uint32_t distance = current_bucket - absolute_bucket;
+        if (distance == 0) return &pending;
+        if (distance > count || distance > CHECKUP_COMPLETED_BUCKETS) return nullptr;
+        const size_t index = (static_cast<size_t>(head) + CHECKUP_COMPLETED_BUCKETS - distance) %
+                             CHECKUP_COMPLETED_BUCKETS;
+        return &buf[index];
+    }
 };
 
 // ── What one poll cycle saw ─────────────────────────────────────────────────────────────────────
@@ -296,6 +362,7 @@ struct CheckupSample {
     bool bsh_known     = false, bsh_on       = false;
     bool pump_known    = false, pump_on      = false;
     bool valve_known   = false, valve_dhw    = false;
+    CheckupOperatingMode operating_mode = CheckupOperatingMode::Unknown;
     bool circulation_configured = false;
     bool circulation_known = false, circulation_on = false;
 
@@ -309,6 +376,18 @@ struct CheckupSample {
     uint8_t retry_value[CHECKUP_RETRY_COUNT] = {};       // decoded counter values, each 0..7
 };
 
+enum class CheckupRunClass : uint8_t { Unknown, SpaceHeating, Dhw, Cooling };
+
+constexpr CheckupRunClass checkup_run_class(const CheckupSample& s) {
+    if (!s.valve_known) return CheckupRunClass::Unknown;
+    if (s.valve_dhw) return CheckupRunClass::Dhw;
+    if (s.operating_mode == CheckupOperatingMode::Heating)
+        return CheckupRunClass::SpaceHeating;
+    if (s.operating_mode == CheckupOperatingMode::Cooling)
+        return CheckupRunClass::Cooling;
+    return CheckupRunClass::Unknown;
+}
+
 // What has to survive between cycles for an EDGE to be decidable at all.
 struct CheckupState {
     int64_t  last_us       = -1;      // when the previous sample was taken (monotonic)
@@ -321,7 +400,61 @@ struct CheckupState {
     uint8_t  prev_retry_value[CHECKUP_RETRY_COUNT] = {};
     uint32_t bucket        = 0;
     bool     have_bucket   = false;
+    // ── the compressor run in flight ────────────────────────────────────────────────────────────
+    // Transient on purpose, and checkup_persist.hpp deliberately does not restore CheckupState: a
+    // run straddling a reboot is therefore censored by construction, as is one already standing when
+    // the board booted (no start edge ever opened it) and one still running when the window is read
+    // (it has not completed). Those are three of the five censoring cases and none needed code.
+    bool     run_open       = false;
+    bool     run_class_pure = false;  // complete class readable and unchanged for every witnessed second
+    CheckupRunClass run_class = CheckupRunClass::Unknown;
+    uint32_t run_start_bucket = 0;    // complete-run facts age with the witnessed start edge
+    uint32_t run_s          = 0;
 };
+
+// Commit the completed run to its class, or to the censored tally when it could not be classified.
+// One place, because the gap and recovered-OFF paths must reach the same conclusion as the normal
+// stop edge. Returns true when an already sealed completed bucket changed and must be re-sealed.
+inline bool checkup_close_run(CheckupState& st, CheckupBucket& b, CheckupRing* ring = nullptr,
+                              uint32_t current_bucket = 0) {
+    if (!st.run_open) return false;
+    CheckupBucket* target = &b;
+    if (ring) {
+        target = ring->retained_bucket(st.run_start_bucket, current_bucket);
+        if (!target) {
+            // The start is outside the rolling window. Its duration cannot re-enter through the
+            // stop bucket, but the completed activity remains visible as censored evidence.
+            target = &b;
+            st.run_class_pure = false;
+        }
+    }
+    const bool reseal = ring && target != &b;
+    if (st.run_class_pure) {
+        switch (st.run_class) {
+            case CheckupRunClass::Dhw:
+                target->dhw_runs  = checkup_add_u8(target->dhw_runs, 1);
+                target->dhw_run_s = checkup_add_u16(target->dhw_run_s, st.run_s);
+                break;
+            case CheckupRunClass::SpaceHeating:
+                target->space_runs  = checkup_add_u8(target->space_runs, 1);
+                target->space_run_s = checkup_add_u16(target->space_run_s, st.run_s);
+                break;
+            case CheckupRunClass::Cooling:
+                target->cooling_runs = checkup_add_u8(target->cooling_runs, 1);
+                break;
+            case CheckupRunClass::Unknown:
+                target->censored_runs = checkup_add_u8(target->censored_runs, 1);
+                break;
+        }
+    } else {
+        target->censored_runs = checkup_add_u8(target->censored_runs, 1);
+    }
+    st.run_open = st.run_class_pure = false;
+    st.run_class = CheckupRunClass::Unknown;
+    st.run_start_bucket = 0;
+    st.run_s = 0;
+    return reseal;
+}
 
 // ── DHW tank cooling / external circulation correlation ───────────────────────────────────────
 // Kept in its own compact ring: CheckupBucket already occupies 864 of its guarded 896 bytes, and a
@@ -852,7 +985,10 @@ constexpr uint32_t CHECKUP_PRESSURE_CONFIRM_S = 60;
 // bucket while the straddling duration is conservatively discarded instead of outliving 24 hours.
 //
 // Away from a boundary the whole delta is booked into the open bucket.
-inline void checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample& s, int64_t now_us) {
+inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample& s, int64_t now_us,
+                         CheckupRing* ring = nullptr) {
+    bool reseal = false;
+    const uint32_t current_bucket = checkup_bucket(now_us);
     // ── continuity ──────────────────────────────────────────────────────────────────────────────
     // A gap longer than CHECKUP_MAX_GAP_S means the firmware was not watching. Seconds are not
     // accrued across it and — the half that matters — no transition is read across it either: the
@@ -888,6 +1024,13 @@ inline void checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             b.rps_observed_s = checkup_add_u16(b.rps_observed_s, dt);
             if (s.rps_running) b.run_s = checkup_add_u16(b.run_s, dt);
         }
+        // BOTH witnesses readable in THIS sample. The pairing is the same bias dfr_pair_observed_s
+        // exists to prevent; here it is also the clock that decides whether the class split may be
+        // believed at all.
+        const bool class_state_known = s.valve_known &&
+            (s.valve_dhw || s.operating_mode != CheckupOperatingMode::Unknown);
+        if (s.rps_known && class_state_known)
+            b.class_observed_s = checkup_add_u16(b.class_observed_s, dt);
         if (s.defrost_known) b.dfr_observed_s = checkup_add_u16(b.dfr_observed_s, dt);
         // The defrost share is a ratio of simultaneously-known states. Counting defrost time from
         // one page against compressor time observed on another would bias low whenever the defrost
@@ -966,8 +1109,42 @@ inline void checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
 
         // Edges. Both sides must be KNOWN — an unreadable cycle in the middle of a run breaks the
         // chain rather than manufacturing a stop and a start on either side of itself.
-        if (st.prev_rps_known && s.rps_known && !st.prev_rps_running && s.rps_running)
+        const bool rps_edge_known = st.prev_rps_known && s.rps_known;
+        if (rps_edge_known && !st.prev_rps_running && s.rps_running) {
+            // An older run whose stop hid inside an unreadable interval must not be overwritten by
+            // the new start. It completed, but neither its duration nor class survived the gap.
+            if (st.run_open) {
+                st.run_class_pure = false;
+                reseal |= checkup_close_run(st, b, ring, current_bucket);
+            }
             b.starts = checkup_add_u8(b.starts, 1);
+            // Open a run. Tank/space comes from the valve; a space-side run additionally needs the
+            // hydronic mode so Cooling can never be relabelled as space heating.
+            st.run_open       = true;
+            st.run_s          = 0;
+            st.run_class      = checkup_run_class(s);
+            st.run_class_pure = st.run_class != CheckupRunClass::Unknown;
+            st.run_start_bucket = current_bucket;
+        }
+        // Carry the run in flight. A class input that stops answering or changes forfeits the class
+        // but not the run: it still completes and is counted as censored. An unreadable compressor
+        // row forfeits it too — a duration nobody watched must not enter a mean.
+        if (st.run_open) {
+            if (!s.rps_known) {
+                st.run_class_pure = false;
+            } else if (s.rps_running) {
+                st.run_s += dt;
+                const CheckupRunClass current_class = checkup_run_class(s);
+                if (current_class == CheckupRunClass::Unknown || current_class != st.run_class)
+                    st.run_class_pure = false;
+            }
+        }
+        // A known OFF completes every open run. With a known ON predecessor it is the normal edge;
+        // after an unreadable sample it is still a completion, but necessarily censored.
+        if (st.run_open && s.rps_known && !s.rps_running) {
+            if (!rps_edge_known || !st.prev_rps_running) st.run_class_pure = false;
+            reseal |= checkup_close_run(st, b, ring, current_bucket);
+        }
         if (st.prev_dfr_known && s.defrost_known && !st.prev_dfr_on && s.defrost_on) {
             b.defrosts = checkup_add_u8(b.defrosts, 1);
             if (st.prev_rps_known && s.rps_known)
@@ -979,6 +1156,11 @@ inline void checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     } else {
         st.pump_run_s = 0;
         st.bar_low_run_s = 0;
+        // Past the gap bound the firmware was not watching, so a run open across it has neither a
+        // witnessed length nor a provable class. It is closed as CENSORED rather than dropped: it
+        // happened, and the count is what stops "no verdict" from reading as "nothing ran".
+        st.run_class_pure = false;
+        reseal |= checkup_close_run(st, b, ring, current_bucket);
     }
 
     // ── minima and flags — sampled, not integrated, so they need no continuity ───────────────────
@@ -1004,6 +1186,7 @@ inline void checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     st.prev_pump_on     = s.pump_on;
     st.prev_retry_known_mask = s.retry_known_mask;
     for (size_t i = 0; i < CHECKUP_RETRY_COUNT; i++) st.prev_retry_value[i] = s.retry_value[i];
+    return reseal;
 }
 
 // ── The window ──────────────────────────────────────────────────────────────────────────────────
@@ -1012,6 +1195,13 @@ struct CheckupWindow {
     uint32_t covered_s       = 0;
     uint32_t rps_observed_s  = 0;
     uint32_t run_s           = 0;
+    uint32_t class_observed_s = 0;
+    uint32_t space_run_s     = 0;
+    uint32_t dhw_run_s       = 0;
+    uint32_t space_runs      = 0;
+    uint32_t dhw_runs        = 0;
+    uint32_t cooling_runs    = 0;
+    uint32_t censored_runs   = 0;
     uint32_t dfr_observed_s  = 0;
     uint32_t dfr_pair_observed_s = 0;
     uint32_t dfr_run_s       = 0;
@@ -1039,6 +1229,13 @@ inline CheckupWindow checkup_aggregate(const CheckupRing& r) {
         w.covered_s       += b.covered_s;
         w.rps_observed_s  += b.rps_observed_s;
         w.run_s           += b.run_s;
+        w.class_observed_s += b.class_observed_s;
+        w.space_run_s     += b.space_run_s;
+        w.dhw_run_s       += b.dhw_run_s;
+        w.space_runs      += b.space_runs;
+        w.dhw_runs        += b.dhw_runs;
+        w.cooling_runs    += b.cooling_runs;
+        w.censored_runs   += b.censored_runs;
         w.dfr_observed_s  += b.dfr_observed_s;
         w.dfr_pair_observed_s += b.dfr_pair_observed_s;
         w.dfr_run_s       += b.dfr_run_s;
@@ -1119,6 +1316,7 @@ struct CheckupCoverage {
     bool pressure = false;
     bool flow     = false;
     bool valve    = false;
+    bool mode     = false;
     bool r5t      = false;
     bool fault    = false;   // any conv-203 row
     bool retries  = false;   // any exact protection-counter identity from def/overlay.hpp
@@ -1141,6 +1339,7 @@ inline void checkup_cover_row(CheckupCoverage& c, unsigned reg, unsigned off, in
     if (checkup_row_matches(CHECKUP_LOC_PRESSURE, reg, off, conv)) c.pressure = true;
     if (checkup_row_matches(CHECKUP_LOC_FLOW,     reg, off, conv)) c.flow = true;
     if (checkup_row_matches(CHECKUP_LOC_VALVE,    reg, off, conv)) c.valve = true;
+    if (checkup_row_matches(CHECKUP_LOC_IU_MODE,  reg, off, conv)) c.mode = true;
     if (checkup_row_matches(CHECKUP_LOC_R5T,      reg, off, conv)) c.r5t = true;
     if (checkup_is_fault_class(conv)) {
         c.fault = true;
@@ -1238,16 +1437,23 @@ constexpr uint32_t CHECKUP_MIN_S_FLOW     = 60;         // steady flow after run
 
 // CYCLING. Two conditions, both required, and the second is the one that knows the load. The
 // 10-minute window mean is this project's diagnostic heuristic, not a Daikin service limit:
-// expected run length varies with model, load, weather, control and emitter system, and X10A does
-// not attach an operating mode to each completed cycle. Long DHW charges can therefore mask short
-// space-heating runs. The start count guards against reading a mean off two samples, and a match is
-// Info, never a fault/limit verdict.
+// expected run length varies with model, load, weather, control and emitter system. Long DHW charges
+// and cooling runs can mask short space-heating runs in the pooled fallback. The start count guards
+// against reading a mean off two samples, and a match is Info, never a fault/limit verdict.
 //
-// A DHW charge is a LONG run, so it raises the mean rather than tripping this. That matters on the
-// reference installation, where every DHW cycle terminates on the ~100 °C discharge limit and a
-// tank charge is therefore several legitimate compressor starts.
+// A DHW charge is a LONG run, and on the reference installation every DHW cycle terminates on the
+// ~100 °C discharge limit, so one tank charge is several legitimate compressor starts. Where the
+// 3-way valve and I/U mode are readable those loads are now separated (see the Cycling branch)
+// instead of raising a pooled mean that could carry a short-cycling space circuit over this bound;
+// where they are not, the pooled mean and this masking both remain, which is the honest fallback
+// rather than a second heuristic invented for a profile with less evidence.
+//
+// The bound stays at twelve and stays a bound on the JUDGED class. Twelve space starts is a day
+// with a real duty cycle behind it; lowering it because a split leaves fewer starts on each side
+// would be trading evidence for sensitivity, which is a domain decision with its own measurement.
 constexpr uint32_t CHECKUP_CYCLING_MIN_STARTS   = 12;
 constexpr uint32_t CHECKUP_CYCLING_SHORT_RUN_S  = 600;    // 10 minutes, mean over the window
+constexpr uint32_t CHECKUP_CYCLING_CLASSIFIED_PCT = 90;   // completed runs with a usable class
 
 // DEFROST. A share of simultaneously-observed compressor runtime, not a count. 15% is an
 // intentionally broad project heuristic, not a Daikin boundary: model, humidity and coil-surface
@@ -1310,6 +1516,11 @@ struct CheckupReport {
     // plant that never stands still is).
     uint32_t          dhw_aborts = 0;
     uint32_t          dhw_best_aborted_s = 0;
+    int32_t           cycling_cooling_runs = -1;
+    // Did the CLASS SPLIT decide the cycling verdict, or did it fall back to the pooled figure? A
+    // reader cannot infer it from the fields — both are published whenever anything was witnessed —
+    // and the two answers carry different caveats, so the device states which one it used.
+    bool              cycling_split = false;
     uint8_t           dhw_abort_reasons = 0;
     bool              dhw_blocked = false;
     bool              full_span = false;
@@ -1412,26 +1623,92 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
             static_cast<int>(dhw.circulation_known_s));
     }
 
-    // ── Cycling: starts (a) and observed runtime per observed start in seconds (b) ───────────────
-    // Window edges can censor a run, and the aggregate carries no operating mode or heat demand.
-    // The ratio is therefore heuristic context, not the mean duration of completed like-for-like
-    // cycles and never a plant fault. A clear result additionally needs a full rolling lifecycle and
-    // enough RPS-specific evidence — global bus uptime is not a substitute.
+    // ── Cycling: starts (a), runtime per start (b), and the same pair per operating class (c–f) ──
+    // Window edges can censor a run, and the aggregate carries no heat demand. The ratio is
+    // therefore heuristic context, not the mean duration of completed like-for-like cycles and never
+    // a plant fault. A clear result additionally needs a full rolling lifecycle and enough evidence
+    // on the clock the verdict actually rests on — global bus uptime is not a substitute.
+    //
+    // WHICH LOAD the runs served comes from two rows: the 3-way valve separates tank from room
+    // circuit, then I/U mode separates heating from cooling on the room circuit. Pooling hides the
+    // finding this check exists for, because a tank charge is a LONG run (several legitimate starts
+    // on a unit that terminates on its ~100 °C discharge limit), so a plant that genuinely
+    // short-cycles space heating is lifted over the 10-minute mean by its own hot-water duty.
+    // Cooling answers different demand too. The heuristic therefore judges confirmed SPACE HEATING
+    // alone; DHW and cooling counts ride along as explicitly excluded observations, and the pooled
+    // pair stays on the wire as the total.
+    //
+    // The unit is a COMPLETE RUN: a run reaches a class only if its valve/mode identity stayed
+    // readable and unchanged for every witnessed second. A DHW handover, a heating/cooling change or
+    // an unread class input makes it CENSORED and counted as such, never split — its seconds and its
+    // start would otherwise describe different populations. Completed statistics are booked back
+    // to the retained START bucket, so a run that began outside the rolling day cannot re-enter it
+    // through its stop edge.
+    //
+    // A profile WITHOUT either class row keeps the pooled metric rather than losing the check:
+    // `Unavailable` is reserved for inputs that do not exist, and the compressor witness does.
+    const bool split_possible = cov.rps && cov.valve && cov.mode;
+    // CATALOG CAPABILITY IS NOT EVIDENCE. `cov.valve`/`cov.mode` say the resolved profile carries the
+    // rows, not that either ever answered — coverage is built from the profile view, so a plant
+    // whose page is silent still reports the capability. Two separate questions follow from that,
+    // conflating them shipped both halves of the same defect:
+    //
+    //   * may these fields be PRINTED?  Only once something was witnessed. Otherwise `null`, by the
+    //     rule one branch down: a rendered `0` beside sixteen real starts reads as "no space heating
+    //     ran today", which is the exact misreading the -1 encoding exists to prevent.
+    //   * may the split DECIDE?  Only where the paired clock cleared the same bar the check has
+    //     always used. A check that worked from the compressor witness alone must not begin stalling
+    //     forever because a second row it can see in the catalog is silent on the wire; where the
+    //     pair is too sparse it degrades to the pooled metric and its documented masking, exactly as
+    //     on a profile that never had the row.
+    //
+    // AND THE CLOCK IS NOT THE POPULATION — the same category error one step further in, found on
+    // hardware after the two above were fixed. `class_observed_s` counts readable seconds; the
+    // verdict is built from completed, classified RUNS. Inputs can answer all day while changing or
+    // disappearing inside each run, giving a full clock and an empty eligible set. The split used to
+    // fall through to a green Ok resting on nothing. It now needs at least twelve classified runs
+    // AND at least 90% of all completed runs classified. The count includes every positively known
+    // class, not space heating alone: a fully observed quiet heating circuit beside DHW/cooling is a
+    // real picture, while a large censored population forces the honest pooled fallback.
+    const uint32_t classified_runs = w.space_runs + w.dhw_runs + w.cooling_runs;
+    const uint32_t completed_runs  = classified_runs + w.censored_runs;
+    const bool class_population_covered = completed_runs > 0 &&
+        classified_runs * 100u >= completed_runs * CHECKUP_CYCLING_CLASSIFIED_PCT;
+    const bool class_witnessed = split_possible && w.class_observed_s > 0;
+    const bool split_judged    = split_possible && w.class_observed_s >= CHECKUP_REQUIRED_S &&
+                                 classified_runs >= CHECKUP_CYCLING_MIN_STARTS &&
+                                 class_population_covered;
+    r.cycling_split = split_judged;
+    r.cycling_cooling_runs = class_witnessed ? static_cast<int32_t>(w.cooling_runs) : -1;
+    const int cycling_mean = w.starts ? static_cast<int>(w.run_s / w.starts) : -1;
+    const int space_mean = w.space_runs ? static_cast<int>(w.space_run_s / w.space_runs) : -1;
+    const int dhw_mean   = w.dhw_runs   ? static_cast<int>(w.dhw_run_s / w.dhw_runs)     : -1;
+    const int space_runs_out    = class_witnessed ? static_cast<int>(w.space_runs)    : -1;
+    const int dhw_runs_out      = class_witnessed ? static_cast<int>(w.dhw_runs)      : -1;
+    const int censored_runs_out = class_witnessed ? static_cast<int>(w.censored_runs) : -1;
+    const int space_mean_out    = class_witnessed ? space_mean : -1;
+    const int dhw_mean_out      = class_witnessed ? dhw_mean   : -1;
+    // READINESS stays on the compressor witness — the clock this check has always waited on, and the
+    // one that cannot be starved by a second row. The DISPLAYED clock is the one the verdict used.
+    const uint32_t cycling_observed_s = split_judged ? w.class_observed_s : w.rps_observed_s;
     if (!cov.rps) {
         set(CheckupCheck::Cycling, CheckupVerdict::Unavailable, 0, CHECKUP_REQUIRED_S);
     } else if (!w.full_span || w.rps_observed_s < CHECKUP_REQUIRED_S) {
         set(CheckupCheck::Cycling, CheckupVerdict::Collecting,
             w.rps_observed_s, CHECKUP_REQUIRED_S,
-            w.rps_observed_s > 0 ? static_cast<int>(w.starts) : -1);
-    } else if (w.starts == 0) {
-        set(CheckupCheck::Cycling, CheckupVerdict::Ok,
-            w.rps_observed_s, CHECKUP_REQUIRED_S, 0);
+            w.rps_observed_s > 0 ? static_cast<int>(w.starts) : -1, -1,
+            space_runs_out, space_mean_out, dhw_runs_out, dhw_mean_out, censored_runs_out);
     } else {
-        const int mean = static_cast<int>(w.run_s / w.starts);
-        const bool notable = w.starts >= CHECKUP_CYCLING_MIN_STARTS &&
-                             static_cast<uint32_t>(mean) < CHECKUP_CYCLING_SHORT_RUN_S;
+        // Count and mean come from ONE population — completed runs of the judged class — so the
+        // numerator and denominator can never describe different events.
+        const uint32_t judged_count = split_judged ? w.space_runs : w.starts;
+        const int      judged_mean  = split_judged ? space_mean : cycling_mean;
+        const bool notable = judged_count >= CHECKUP_CYCLING_MIN_STARTS && judged_mean >= 0 &&
+                             static_cast<uint32_t>(judged_mean) < CHECKUP_CYCLING_SHORT_RUN_S;
         set(CheckupCheck::Cycling, notable ? CheckupVerdict::Info : CheckupVerdict::Ok,
-            w.rps_observed_s, CHECKUP_REQUIRED_S, static_cast<int>(w.starts), mean);
+            cycling_observed_s, CHECKUP_REQUIRED_S,
+            static_cast<int>(w.starts), cycling_mean,
+            space_runs_out, space_mean_out, dhw_runs_out, dhw_mean_out, censored_runs_out);
     }
 
     // ── Defrost: count (a) and share of paired compressor runtime in percent (b) ────────────────

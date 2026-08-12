@@ -925,8 +925,11 @@ Body, ordered:
    [ARCHITECTURE.md](ARCHITECTURE.md#the-host-tested-logic-core)). The displayed minimum is always the
    raw lowest valid sample: at or below 1.0 bar it raises `info` immediately, while only 60 continuous
    seconds raise `warn`. The confirmation changes warning strength, never the statistic. Cycling and
-   defrost can raise `info` only as heuristics: starts are not separated by
-   operating mode, and X10A has neither humidity nor evaporator-surface temperature. Flow is sampled
+   defrost can raise `info` only as heuristics. Cycling separates complete runs into space heating,
+   hot water and cooling when valve and indoor-unit mode evidence is sufficient; only confirmed
+   space-heating runs are judged, while a sparse or mixed population falls back to the explicitly
+   labelled pooled figure. X10A has no direct heat-demand signal for that fallback and neither
+   humidity nor evaporator-surface temperature for the defrost assessment. Flow is sampled
    only after 60 seconds of continuous pump operation and remains observation-only because the
    required minimum is model-specific. BUH/BSH runtime is also observation-only because weather,
    defrost support, emergency mode, settings and PV operation change legitimate use. Protection

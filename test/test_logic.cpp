@@ -7673,6 +7673,13 @@ static void test_checkup() {
     CHECK(checkup_retry_index(0x10, 12, 310) == 4);
     CHECK(checkup_retry_index(0x10, 12, 311) == -1);       // documented "Not in use"
     CHECK(checkup_retry_index(0x60, 10, 310) == -1);       // exact page identity matters
+    CHECK(checkup_operating_mode("Heating") == CheckupOperatingMode::Heating);
+    CHECK(checkup_operating_mode("Heating + DHW") == CheckupOperatingMode::Heating);
+    CHECK(checkup_operating_mode("Cooling") == CheckupOperatingMode::Cooling);
+    CHECK(checkup_operating_mode("Cooling + DHW") == CheckupOperatingMode::Cooling);
+    CHECK(checkup_operating_mode("Stop") == CheckupOperatingMode::Other);
+    CHECK(checkup_operating_mode("DHW") == CheckupOperatingMode::Other);
+    CHECK(checkup_operating_mode("?") == CheckupOperatingMode::Unknown);
 
     {
         // Capability comes from the resolved PROFILE, not from whichever rows happened to answer
@@ -7684,6 +7691,7 @@ static void test_checkup() {
         checkup_cover_row(c, 0x60, 12, 303, "BUH Step2");
         checkup_cover_row(c, 0x60, 12, 305, "BSH");
         checkup_cover_row(c, 0x60, 12, 301, "Water pump operation");
+        checkup_cover_row(c, 0x60, 2, 315, "I/U operation mode");
         checkup_cover_row(c, 0x62, 11, 105, "Water pressure");
         checkup_cover_row(c, 0x62, 9, 105, "Flow sensor (l/min)");
         checkup_cover_row(c, 0x10, 4, 203, "Error type");
@@ -7693,7 +7701,7 @@ static void test_checkup() {
             if (off < 12) checkup_cover_row(c, 0x10, off, 311, "retry");
         }
         CHECK(c.rps && c.defrost && c.buh && c.buh1 && c.buh2 && c.bsh);
-        CHECK(c.pump && c.pressure && c.flow && c.fault && c.fault_rows == 2);
+        CHECK(c.pump && c.mode && c.pressure && c.flow && c.fault && c.fault_rows == 2);
         CHECK(c.retries && c.retry_mask == 0x1f);
     }
 
@@ -7706,6 +7714,15 @@ static void test_checkup() {
     CHECK(checkup_skipped(5, 8) == 2);
     CHECK(checkup_skipped(5, 5) == 0);
     CHECK(checkup_skipped(6, 5) == 0);             // never an unsigned wrap-around
+
+    // --- the static budget ----------------------------------------------------------------------
+    // .noinit is DRAM this board does not have spare, so the ring's size is a decision and not a
+    // consequence. The static_assert stops a build that overruns the bound; this pins the FIGURE, so
+    // a field added without the conversation shows up as a failing test rather than as headroom
+    // quietly spent. Heating/DHW used 44/1056 of the split's declared 46/1104 budget; explicit
+    // cooling exclusion plus alignment consumes the remaining 48 bytes.
+    CHECK(sizeof(CheckupBucket) == 46);
+    CHECK(CHECKUP_BYTES == 1104);
 
     // --- saturation -----------------------------------------------------------------------------
     // A wrap would turn the worst imaginable cycling into a perfect score.
@@ -7740,6 +7757,238 @@ static void test_checkup() {
         CHECK(b.starts == 1);
         checkup_step(st, b, s, 4'000'000);
         CHECK(b.starts == 1);                     // still running is not another start
+
+        // No valve was readable in any of that, so the operating class established NOTHING — not a
+        // classified run and not a paired second either.
+        CHECK(b.class_observed_s == 0 && b.space_run_s == 0 && b.dhw_run_s == 0);
+        CHECK(b.space_runs == 0 && b.dhw_runs == 0);
+    }
+    {
+        // ── the operating class is a PAIRED reading, and the pairing runs both ways ─────────────
+        // The compressor witness is on page 0x30 and the 3-way valve on 0x60, so either can time out
+        // alone. The paired clock only advances when both answered in the SAME sample.
+        CheckupState st;
+        CheckupBucket b;
+        CheckupSample s;
+        s.rps_known = true; s.rps_running = true;
+        s.valve_known = false;
+        checkup_step(st, b, s, 1'000'000);
+        checkup_step(st, b, s, 2'000'000);            // witness only
+        CHECK(b.run_s == 1 && b.class_observed_s == 0);
+        s.valve_known = true; s.valve_dhw = false;
+        s.operating_mode = CheckupOperatingMode::Heating;
+        s.rps_known = false; s.rps_running = false;
+        checkup_step(st, b, s, 3'000'000);            // valve only
+        CHECK(b.class_observed_s == 0);
+        s.rps_known = true; s.rps_running = true;
+        checkup_step(st, b, s, 4'000'000);            // both
+        CHECK(b.class_observed_s == 1);
+    }
+    {
+        // ── A RUN IS THE UNIT, AND ONLY A COMPLETED ONE COUNTS ──────────────────────────────────
+        // Two clean runs on opposite sides of the valve, each witnessed start to stop.
+        CheckupState st;
+        CheckupBucket b;
+        CheckupSample s;
+        s.rps_known = true; s.valve_known = true;
+        s.operating_mode = CheckupOperatingMode::Heating;
+        s.rps_running = false; s.valve_dhw = false;
+        int64_t t = 0;
+        auto tick = [&](int secs, bool running, bool dhw) {
+            for (int i = 0; i < secs; i++) {
+                t += 1'000'000; s.rps_running = running; s.valve_dhw = dhw;
+                checkup_step(st, b, s, t);
+            }
+        };
+        tick(1, false, false);
+        tick(600, true,  false);                      // ten minutes on the space circuit
+        tick(1, false, false);                        // stop -> the run completes
+        CHECK(b.space_runs == 1 && b.space_run_s == 600);
+        tick(1200, true, true);                       // twenty minutes charging the tank
+        tick(1, false, true);
+        CHECK(b.dhw_runs == 1 && b.dhw_run_s == 1200);
+        CHECK(b.censored_runs == 0 && b.starts == 2);
+
+        // The same valve position is also used for cooling, so the I/U mode is the load-bearing
+        // second witness. A positively identified cooling run is reported but never judged as heat.
+        s.operating_mode = CheckupOperatingMode::Cooling;
+        tick(300, true, false);
+        tick(1, false, false);
+        CHECK(b.cooling_runs == 1 && b.space_runs == 1 && b.starts == 3);
+
+        // Valve position alone cannot see a heating-to-cooling change. A mode change inside the
+        // same compressor run makes the whole run mixed rather than crediting either class.
+        s.operating_mode = CheckupOperatingMode::Heating;
+        tick(60, true, false);
+        s.operating_mode = CheckupOperatingMode::Cooling;
+        tick(60, true, false);
+        tick(1, false, false);
+        CHECK(b.censored_runs == 1 && b.cooling_runs == 1 && b.space_runs == 1 && b.starts == 4);
+
+        // A run still IN FLIGHT contributes nothing: it has not completed, so it has no duration to
+        // put in a mean. This is the window-edge censoring, and it needs no code of its own.
+        s.operating_mode = CheckupOperatingMode::Heating;
+        tick(300, true, false);
+        CHECK(b.space_runs == 1 && b.space_run_s == 600);
+    }
+    {
+        // ── THE REVIEWER'S REPRODUCER (#443): a valve switch is not a compressor cycle ──────────
+        // Twelve runs, each 25 minutes long and each handing over to the tank after five — ordinary
+        // DHW priority. Splitting SECONDS by the valve while the START stays where the run began
+        // reported a five-minute mean over twelve starts, i.e. short cycling on a plant whose every
+        // run lasted 25 minutes. Classified as runs, all twelve are MIXED: judged by neither side,
+        // counted so their absence from the verdict is visible.
+        CheckupState st;
+        CheckupBucket b;
+        CheckupSample s;
+        s.rps_known = true; s.valve_known = true;
+        s.operating_mode = CheckupOperatingMode::Heating;
+        s.rps_running = false; s.valve_dhw = false;
+        int64_t t = 0;
+        auto tick = [&](int secs, bool running, bool dhw) {
+            for (int i = 0; i < secs; i++) {
+                t += 1'000'000; s.rps_running = running; s.valve_dhw = dhw;
+                checkup_step(st, b, s, t);
+            }
+        };
+        tick(1, false, false);
+        for (int run = 0; run < 12; run++) {
+            tick(300,  true,  false);                 // five minutes of space heating
+            tick(1200, true,  true);                  // hands over to the tank, compressor never stops
+            tick(60,   false, true);                  // and only then stops
+        }
+        CHECK(b.starts == 12);
+        CHECK(b.space_runs == 0 && b.space_run_s == 0);
+        CHECK(b.dhw_runs == 0 && b.dhw_run_s == 0);
+        CHECK(b.censored_runs == 12);
+
+        // The same shape the other way round — tank first, then space — must censor identically.
+        CheckupState st2;
+        CheckupBucket b2;
+        CheckupSample s2;
+        s2.rps_known = true; s2.valve_known = true;
+        s2.operating_mode = CheckupOperatingMode::Heating;
+        s2.rps_running = false; s2.valve_dhw = true;
+        int64_t t2 = 0;
+        auto tick2 = [&](int secs, bool running, bool dhw) {
+            for (int i = 0; i < secs; i++) {
+                t2 += 1'000'000; s2.rps_running = running; s2.valve_dhw = dhw;
+                checkup_step(st2, b2, s2, t2);
+            }
+        };
+        tick2(1, false, true);
+        tick2(600, true, true);
+        tick2(300, true, false);                      // hands back to the space circuit
+        tick2(1, false, false);
+        CHECK(b2.censored_runs == 1 && b2.space_runs == 0 && b2.dhw_runs == 0);
+    }
+    {
+        // A valve that stops answering for PART of a run forfeits the run's class — the side cannot
+        // be asserted to have held — while an unreadable COMPRESSOR row forfeits it because the
+        // duration stops being witnessed. Both are censored, not guessed.
+        CheckupState st;
+        CheckupBucket b;
+        CheckupSample s;
+        s.rps_known = true; s.valve_known = true;
+        s.operating_mode = CheckupOperatingMode::Heating;
+        s.rps_running = false; s.valve_dhw = false;
+        int64_t t = 0;
+        auto tick = [&](int secs, bool running, bool valve_known, bool rps_known_now) {
+            for (int i = 0; i < secs; i++) {
+                t += 1'000'000;
+                s.rps_running = running; s.valve_known = valve_known; s.rps_known = rps_known_now;
+                checkup_step(st, b, s, t);
+            }
+        };
+        tick(1, false, true, true);
+        tick(200, true, true, true);
+        tick(5,   true, false, true);                 // the valve page timed out mid-run
+        tick(200, true, true, true);
+        tick(1, false, true, true);
+        CHECK(b.censored_runs == 1 && b.space_runs == 0);
+
+        CheckupState st2; CheckupBucket b2; CheckupSample s2;
+        s2.rps_known = true; s2.valve_known = true; s2.rps_running = false; s2.valve_dhw = false;
+        s2.operating_mode = CheckupOperatingMode::Heating;
+        int64_t t2 = 0;
+        for (int i = 0; i < 1; i++) { t2 += 1'000'000; checkup_step(st2, b2, s2, t2); }
+        s2.rps_running = true;
+        for (int i = 0; i < 200; i++) { t2 += 1'000'000; checkup_step(st2, b2, s2, t2); }
+        s2.rps_known = false;                          // the compressor page timed out mid-run
+        for (int i = 0; i < 3; i++) { t2 += 1'000'000; checkup_step(st2, b2, s2, t2); }
+        s2.rps_known = true;
+        for (int i = 0; i < 200; i++) { t2 += 1'000'000; checkup_step(st2, b2, s2, t2); }
+        s2.rps_running = false;
+        t2 += 1'000'000; checkup_step(st2, b2, s2, t2);
+        CHECK(b2.censored_runs == 1 && b2.space_runs == 0);
+    }
+    {
+        // The compressor page can disappear while the stop occurs and return already OFF. The old
+        // implementation waited forever for a known ON->OFF edge, then overwrote the still-open run
+        // at the next start. Known OFF now closes it as censored exactly once.
+        CheckupState st; CheckupBucket b; CheckupSample s;
+        s.rps_known = s.valve_known = true;
+        s.operating_mode = CheckupOperatingMode::Heating;
+        checkup_step(st, b, s, 0);
+        s.rps_running = true;
+        checkup_step(st, b, s, 1'000'000);
+        s.rps_known = false;
+        checkup_step(st, b, s, 2'000'000);
+        s.rps_known = true; s.rps_running = false;
+        checkup_step(st, b, s, 3'000'000);
+        CHECK(b.censored_runs == 1 && !st.run_open);
+        checkup_step(st, b, s, 4'000'000);
+        CHECK(b.censored_runs == 1);                 // a second OFF is not another completion
+    }
+    {
+        // A POLL GAP inside a run: the firmware was not watching, so neither the length nor the side
+        // can be asserted. The run is closed as censored — it happened — rather than dropped.
+        CheckupState st;
+        CheckupBucket b;
+        CheckupSample s;
+        s.rps_known = true; s.valve_known = true;
+        s.operating_mode = CheckupOperatingMode::Heating;
+        s.rps_running = false; s.valve_dhw = false;
+        int64_t t = 0;
+        t += 1'000'000; checkup_step(st, b, s, t);
+        s.rps_running = true;
+        for (int i = 0; i < 100; i++) { t += 1'000'000; checkup_step(st, b, s, t); }
+        t += static_cast<int64_t>(CHECKUP_MAX_GAP_S + 5) * 1'000'000;
+        checkup_step(st, b, s, t);                     // the gap itself
+        CHECK(b.censored_runs == 1 && b.space_runs == 0);
+        // …and the post-gap running samples do not resurrect it: no start edge crossed the gap, so
+        // there is no open run to accrue into.
+        for (int i = 0; i < 100; i++) { t += 1'000'000; checkup_step(st, b, s, t); }
+        s.rps_running = false;
+        t += 1'000'000; checkup_step(st, b, s, t);
+        CHECK(b.censored_runs == 1 && b.space_runs == 0 && b.dhw_runs == 0);
+    }
+    {
+        // Complete-run statistics age with the START edge. A run whose start is already outside the
+        // retained 24-hour ring is censored in the current bucket; its pre-window duration may not
+        // re-enter the class mean through the stop bucket.
+        CheckupRing r;
+        for (uint32_t i = 0; i < CHECKUP_COMPLETED_BUCKETS; i++) r.commit(0);
+        CheckupState st;
+        st.run_open = st.run_class_pure = true;
+        st.run_class = CheckupRunClass::SpaceHeating;
+        st.run_start_bucket = 0;
+        st.run_s = 25u * 3600u;
+        CHECK(!checkup_close_run(st, r.pending, &r, CHECKUP_BUCKETS));
+        CHECK(r.pending.space_runs == 0 && r.pending.space_run_s == 0);
+        CHECK(r.pending.censored_runs == 1);
+
+        // A retained start is booked back into its own completed bucket and tells the caller to
+        // re-seal the persisted ring. It must not inflate the current pending hour.
+        CheckupState kept;
+        kept.run_open = kept.run_class_pure = true;
+        kept.run_class = CheckupRunClass::SpaceHeating;
+        kept.run_start_bucket = CHECKUP_BUCKETS - 1;
+        kept.run_s = 300;
+        CHECK(checkup_close_run(kept, r.pending, &r, CHECKUP_BUCKETS));
+        CHECK(r.pending.space_runs == 0);
+        const CheckupWindow retained = checkup_aggregate(r);
+        CHECK(retained.space_runs == 1 && retained.space_run_s == 300);
     }
     {
         // UNKNOWN is not stopped — the rule logic/ou_stale.hpp states, applied to an edge. A profile
@@ -8806,6 +9055,9 @@ static void test_checkup() {
         w.full_span = true;
         w.covered_s = CHECKUP_REQUIRED_S;
         w.rps_observed_s = CHECKUP_REQUIRED_S;
+        // The PAIRED compressor+valve clock the operating-class split rests on. Part of "a complete
+        // evidence window" like every other clock here; cases that mean a sparse valve row say so.
+        w.class_observed_s = CHECKUP_REQUIRED_S;
         w.dfr_observed_s = CHECKUP_REQUIRED_S;
         w.dfr_pair_observed_s = CHECKUP_REQUIRED_S;
         w.dfr_run_s = 3600; // establishes a denominator for the defrost-share heuristic
@@ -8896,6 +9148,222 @@ static void test_checkup() {
         const CheckupReport idle = checkup_evaluate(w, full, FaultClass::Normal);
         CHECK(idle[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
         CHECK(idle[CheckupCheck::Cycling].a == 0);
+    }
+    {
+        // ── the operating-class split, once the 3-way valve is readable ─────────────────────────
+        // `full` deliberately carries no valve row, so every case above is the POOLED fallback and
+        // stays exactly as it was. These are the same windows judged with the valve in hand.
+        CheckupCoverage split = full;
+        split.valve = split.mode = true;
+
+        // THE FINDING THE POOLED MEAN COULD NOT REACH, and it is the block above's own example:
+        // twelve five-minute space runs beside one two-hour tank charge. Pooled, the long charge
+        // lifts the mean to 13.8 minutes and the day reads Ok. Per completed run, the space circuit
+        // is cycling at five minutes with the tank's runtime out of both halves of the ratio.
+        CheckupWindow w = day();
+        w.starts       = 13;
+        w.run_s        = 12u * 300 + 2u * 3600;
+        w.space_runs   = 12;
+        w.space_run_s  = 12u * 300;
+        w.dhw_runs     = 1;
+        w.dhw_run_s    = 2u * 3600;
+        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
+              CheckupVerdict::Ok);                      // no valve row: pooled, and masked
+        {
+            const CheckupReport r = checkup_evaluate(w, split, FaultClass::Normal);
+            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
+            CHECK(r.overall == CheckupVerdict::Info);
+            CHECK(r.cycling_split);
+            // The pooled pair stays on the wire as the day's total — still a fact, no longer a
+            // decision.
+            CHECK(r[CheckupCheck::Cycling].a == 13);
+            CHECK(r[CheckupCheck::Cycling].b == static_cast<int>(w.run_s / w.starts));
+            CHECK(r[CheckupCheck::Cycling].c == 12 && r[CheckupCheck::Cycling].d == 300);
+            CHECK(r[CheckupCheck::Cycling].e == 1 && r[CheckupCheck::Cycling].f == 2 * 3600);
+            CHECK(r[CheckupCheck::Cycling].g == 0);      // nothing was censored in this day
+        }
+
+        // And the OTHER direction the same pooling produced: a tank charging in many short bursts is
+        // the plant doing its job, and pooled it reads as a finding. The DHW class is observation.
+        w.starts      = 32;
+        w.space_runs  = 2;
+        w.space_run_s = 2u * 3600;
+        w.dhw_runs    = 30;
+        w.dhw_run_s   = 30u * 120;
+        w.run_s       = w.space_run_s + w.dhw_run_s;
+        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
+              CheckupVerdict::Info);                    // pooled: the tank's own duty, called out
+        {
+            const CheckupReport r = checkup_evaluate(w, split, FaultClass::Normal);
+            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
+            CHECK(r[CheckupCheck::Cycling].e == 30 && r[CheckupCheck::Cycling].f == 120);
+        }
+
+        // ── THE STALL (#443 live review): catalog capability is not evidence ────────────────────
+        // A profile that CARRIES the valve row on a plant whose valve page never answers. Before
+        // this rule the paired clock stayed pinned at 0, could never reach 90% of 24 h, and a check
+        // that had always worked from the compressor witness alone read `0 min of 21 h 36 min`
+        // forever — while the card printed `space 0` beside sixteen real starts.
+        CheckupWindow silent = day();
+        silent.class_observed_s = 0;
+        silent.starts = 16;
+        silent.run_s  = 16u * 3600;
+        {
+            const CheckupReport r = checkup_evaluate(silent, split, FaultClass::Normal);
+            CHECK(r[CheckupCheck::Cycling].verdict != CheckupVerdict::Collecting);
+            CHECK(!r.cycling_split);                     // the pooled figure decided, and says so
+            CHECK(r[CheckupCheck::Cycling].observed_s == silent.rps_observed_s);
+            CHECK(r[CheckupCheck::Cycling].a == 16);
+            // NOT zero: nothing about the class was ever witnessed, and a rendered 0 reads as "no
+            // space heating ran today" beside sixteen starts that did.
+            CHECK(r[CheckupCheck::Cycling].c == -1 && r[CheckupCheck::Cycling].d == -1);
+            CHECK(r[CheckupCheck::Cycling].e == -1 && r[CheckupCheck::Cycling].g == -1);
+        }
+        // One witnessed second is enough to make the counts real observations again, while the
+        // VERDICT still falls back until the pair clears the same bar the check has always used.
+        silent.class_observed_s = 1;
+        {
+            const CheckupReport r = checkup_evaluate(silent, split, FaultClass::Normal);
+            CHECK(!r.cycling_split);
+            CHECK(r[CheckupCheck::Cycling].c == 0 && r[CheckupCheck::Cycling].g == 0);
+        }
+
+        // The verdict rests on the paired clock only once that clock cleared the bar; the READINESS
+        // gate stays on the compressor witness, so the row can never be starved into collecting.
+        w.class_observed_s = CHECKUP_REQUIRED_S - 1;
+        {
+            const CheckupReport r = checkup_evaluate(w, split, FaultClass::Normal);
+            CHECK(!r.cycling_split);
+            CHECK(r[CheckupCheck::Cycling].verdict != CheckupVerdict::Collecting);
+            CHECK(r[CheckupCheck::Cycling].observed_s == w.rps_observed_s);
+            CHECK(r[CheckupCheck::Cycling].c == 2);      // the class facts are still published
+        }
+        w.class_observed_s = CHECKUP_REQUIRED_S;
+        CHECK(checkup_evaluate(w, split, FaultClass::Normal).cycling_split);
+
+        // Without the valve row in the catalog at all, the class fields are UNESTABLISHED.
+        {
+            const CheckupReport r = checkup_evaluate(w, full, FaultClass::Normal);
+            CHECK(r[CheckupCheck::Cycling].c == -1 && r[CheckupCheck::Cycling].d == -1);
+            CHECK(r[CheckupCheck::Cycling].e == -1 && r[CheckupCheck::Cycling].f == -1);
+            CHECK(r[CheckupCheck::Cycling].g == -1);
+            CHECK(r[CheckupCheck::Cycling].observed_s == w.rps_observed_s);
+        }
+
+        // The twelve-run bound is a bound on the JUDGED population: eleven short space runs cannot
+        // borrow a busy tank's runs to clear it.
+        w.dhw_runs    = 20;
+        w.dhw_run_s   = 20u * 1200;
+        w.space_runs  = CHECKUP_CYCLING_MIN_STARTS - 1;
+        w.space_run_s = w.space_runs * 60;
+        w.starts      = w.space_runs + w.dhw_runs;
+        w.run_s       = w.space_run_s + w.dhw_run_s;
+        CHECK(checkup_evaluate(w, split, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
+              CheckupVerdict::Ok);
+        w.space_runs  = CHECKUP_CYCLING_MIN_STARTS;
+        w.space_run_s = w.space_runs * 60;
+        w.starts      = w.space_runs + w.dhw_runs;
+        w.run_s       = w.space_run_s + w.dhw_run_s;
+        CHECK(checkup_evaluate(w, split, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
+              CheckupVerdict::Info);
+
+        // Runs that happened but could not be classified are PUBLISHED, so a day with no eligible
+        // space run cannot be read as a day with no space heating.
+        w.space_runs = w.dhw_runs = 0;
+        w.space_run_s = w.dhw_run_s = 0;
+        w.censored_runs = 9;
+        w.starts = 9;
+        w.run_s  = 9u * 1500;
+        {
+            const CheckupReport r = checkup_evaluate(w, split, FaultClass::Normal);
+            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
+            CHECK(r[CheckupCheck::Cycling].c == 0 && r[CheckupCheck::Cycling].d == -1);
+            CHECK(r[CheckupCheck::Cycling].g == 9);
+            // ...and that Ok comes from the POOLED figure, not from an empty judged set. The
+            // assertion above used to pass with `split` still true, which is the defect below.
+            CHECK(!r.cycling_split);
+        }
+
+        // ── AN EMPTY JUDGED POPULATION IS NOT A CLEAN BILL (#443 second live round) ─────────────
+        // The clock and the judged population are DIFFERENT measurements, and gating the split on
+        // the clock alone was the same category error as gating it on catalog capability — the
+        // third place it hid. `class_observed_s` counts seconds in which both rows were READABLE;
+        // a valve that answers all day while moving mid-run yields a full clock and zero classified
+        // runs. The split then judged an empty set, `notable` needed >= MIN_STARTS to fire, and the
+        // day fell through to Ok: a green verdict resting on nothing, on exactly the DHW-priority
+        // pattern the censoring rule exists for.
+        //
+        // The bar is therefore on the population the verdict is built from: unless enough runs were
+        // classified AT ALL, the split has no picture of the day and the pooled figure decides —
+        // the same degradation as a too-sparse clock, one step earlier.
+        {
+            CheckupWindow d = day();                       // 12 x 1500 s, every run handed over
+            d.starts = 12;
+            d.run_s  = 12u * 1500;
+            d.censored_runs = 12;
+            const CheckupReport r = checkup_evaluate(d, split, FaultClass::Normal);
+            CHECK(!r.cycling_split);                       // no classified run -> pooled decides
+            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
+            CHECK(r[CheckupCheck::Cycling].b == 1500);     // ...and Ok now has a number behind it
+            CHECK(r[CheckupCheck::Cycling].c == 0 && r[CheckupCheck::Cycling].g == 12);
+        }
+        // The case that makes it matter rather than merely tidy: a plant that BOTH short-cycles and
+        // hands over mid-run. Judging the empty space set returned Ok and lost the finding; the
+        // pooled fallback keeps it.
+        {
+            CheckupWindow d = day();
+            d.starts = 20;
+            d.run_s  = 20u * 240;
+            d.censored_runs = 20;
+            const CheckupReport r = checkup_evaluate(d, split, FaultClass::Normal);
+            CHECK(!r.cycling_split);
+            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
+        }
+        // Twelve pure tank runs do not make twenty unclassified handovers evidence about space
+        // heating. The old "twelve on either side" gate opened the split, judged space_runs=0 and
+        // lost the pooled short-cycling finding. Classification coverage now fails closed.
+        {
+            CheckupWindow d = day();
+            d.dhw_runs = 12;
+            d.dhw_run_s = 12u * 240u;
+            d.censored_runs = 20;
+            d.starts = 32;
+            d.run_s = 32u * 240u;
+            const CheckupReport r = checkup_evaluate(d, split, FaultClass::Normal);
+            CHECK(!r.cycling_split);
+            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
+        }
+        // Cooling is a positively known third class: it proves those room-circuit runs were not
+        // heating and therefore neither pollutes the heating mean nor counts as censored evidence.
+        {
+            CheckupWindow d = day();
+            d.cooling_runs = 12;
+            d.starts = 12;
+            d.run_s = 12u * 240u;
+            const CheckupReport r = checkup_evaluate(d, split, FaultClass::Normal);
+            CHECK(r.cycling_split);
+            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
+            CHECK(r.cycling_cooling_runs == 12);
+            CHECK(r[CheckupCheck::Cycling].c == 0);       // no HEATING run was claimed
+        }
+        // And the fallback must NOT reach back for a day the split described perfectly well. A tank
+        // charging in short bursts beside two long space runs classified every run it had: the space
+        // population is small because the plant barely heated, not because classification failed.
+        // Falling back there would restore the pooled false positive this PR removed.
+        {
+            CheckupWindow d = day();
+            d.space_runs  = 2;
+            d.space_run_s = 2u * 3600;
+            d.dhw_runs    = 30;
+            d.dhw_run_s   = 30u * 120;
+            d.starts      = 32;
+            d.run_s       = d.space_run_s + d.dhw_run_s;
+            const CheckupReport r = checkup_evaluate(d, split, FaultClass::Normal);
+            CHECK(r.cycling_split);                        // 32 runs classified: a real picture
+            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
+            CHECK(checkup_evaluate(d, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
+                  CheckupVerdict::Info);                   // what the pooled figure would have said
+        }
     }
     {
         // A complete global bus window with sparse RPS evidence stays collecting. The row reports
@@ -9219,8 +9687,12 @@ static void test_checkup() {
         CheckupWindow good = day();
         good.starts = 8;
         good.run_s  = 8u * 3600;
+        // `all` carries the valve row, so the cycling verdict is the per-class one and the window
+        // has to be coherent with that: eight hour-long runs on the space circuit, none on the tank.
+        good.space_runs  = 8;
+        good.space_run_s = 8u * 3600;
         CheckupCoverage all = full;
-        all.valve = all.r5t = true;
+        all.valve = all.mode = all.r5t = true;
         DhwLossWindow clean_dhw;
         clean_dhw.observed_s = DHW_LOSS_REQUIRED_S;
         clean_dhw.circulation_known_s = DHW_LOSS_REQUIRED_S;
@@ -9308,6 +9780,13 @@ static void test_checkup() {
         { &CHECKUP_LOC_PUMP,     "water pump operation",39 },
         { &CHECKUP_LOC_PRESSURE, "water pressure",      39 },
         { &CHECKUP_LOC_FLOW,     "flow sensor",         39 },
+        // The valve and the tank sensor were the two locators this table did not pin, and both now
+        // decide verdicts: the valve gates the cycling class split and, with R5T, the whole DHW-loss
+        // check. An unpinned locator is exactly the 0x60/12 collision waiting to be re-made — the
+        // valve shares its byte with six other flags and is separated only by its converter.
+        { &CHECKUP_LOC_VALVE,    "way valve",           39 },
+        { &CHECKUP_LOC_IU_MODE,  "i/u operation mode",  39 },
+        { &CHECKUP_LOC_R5T,      "r5t",                 39 },
     };
     constexpr size_t kCheckupCount = sizeof(kCheckup) / sizeof(kCheckup[0]);
 

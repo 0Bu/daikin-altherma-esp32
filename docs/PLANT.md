@@ -22,6 +22,10 @@ subscription, and that is a property of the code rather than a guard around a do
 
 ## Rolling plant checkup (up to 24 h)
 
+> **Looking for the user guide?** [DIAGNOSTICS.md](DIAGNOSTICS.md) explains every visible result in
+> everyday language, including what `OK`, `HINWEIS`, `WARNUNG`, `PRÜFT` and `NUR MESSWERT` mean and
+> what a non-specialist can reasonably do next. This section is the technical design record.
+
 The third question the dashboard asks, after *what is it doing now* (the schematic) and *what did
 this reading do today* ([the trend rings](FEATURES.md)): **is anything worth reporting**. Counted
 events and window minima — compressor starts and mean run length, defrost count and share of
@@ -136,6 +140,52 @@ therefore **blind time**, bounded so no unobserved stretch can hide a tank charg
 from the seconds the window claims to have observed. A state the sweep *can* see still ends the
 window, and a draw hidden inside a blind stretch is still caught against the temperature anchor
 standing when vision was lost.
+
+**Cycling is judged per operating class**, because pooling the loads hid the finding the check exists
+for. A tank charge is a long run — on the reference installation every DHW cycle terminates on the
+~100 °C discharge limit, so one charge is several legitimate starts — and a combined mean therefore
+lifts a genuinely short-cycling space circuit over the ten-minute heuristic. It fails the other way
+too: a tank charging in short bursts reads as a finding when it is the plant doing its job. The
+3-way valve separates tank from room circuit; the I/U operating mode then separates heating from
+cooling on the room circuit. Only confirmed space heating is judged. DHW and positively identified
+cooling are reported but excluded.
+
+**The unit is a COMPLETE RUN, not a second**, and that distinction is the whole correctness of it.
+Splitting seconds by the valve while the start stays where the run began leaves a ratio whose
+numerator and denominator describe different populations — and DHW priority makes that routine
+rather than rare: twelve continuous 25-minute runs that each hand over to the tank after five
+minutes then read as a five-minute mean over twelve starts, a short-cycling verdict on a plant that
+never short-cycled. A run is therefore assigned to a class only if the valve and, on the room
+circuit, I/U mode stayed readable and unchanged for every witnessed second. A completed run that
+switched class, lost a class/compressor input or crossed an observation gap is **censored** and
+counted as such, so "no eligible run" can never be read as "nothing ran". A run already active at
+boot or still active when the status is read has no complete edge pair and enters no completed-run
+mean. `CheckupState` remains transient and is deliberately not restored across a reboot.
+
+Complete-run facts age with the **start edge**, not the stop. A long run that starts in a retained
+hour is booked back into that bucket when it completes, and the persisted ring is re-sealed. If its
+start has already left the rolling day, its duration cannot re-enter through a later stop bucket;
+only a censored completion remains visible in the current hour.
+
+**Catalog capability is not evidence**, and the two questions it answers are separate. Coverage is
+built from the resolved profile, so a plant whose valve/mode page never answers still reports the row.
+The class figures are therefore printed only once something was *witnessed* — otherwise null, never
+a zero that would read as "no space heating ran today" beside real starts. And the split may only
+*decide* once the paired clock cleared the same 90 % bar the check has always used; below that the
+pooled figure decides, with its documented masking, exactly as on a profile that never had the row.
+A check that worked from the compressor witness alone must not start stalling forever because a
+second row it can see in the catalog is silent on the wire. `/status` states which of the two
+carried the verdict, because a reader cannot infer it from the numbers.
+
+**And the clock is not the population** — the same error one step further in, caught on hardware
+after the two above were fixed. The paired class clock counts seconds in which the required rows were
+*readable*; the verdict is built from completed, classified *runs*. Inputs can answer all day while
+changing or disappearing inside each run, giving a full clock and no eligible population. The split
+then judged an empty set and ended on a green **Ok resting on nothing**. It now requires both twelve
+classified runs and at least 90 % of all completed runs classified. Every positively known class
+counts toward that coverage, but only heating runs enter the judged mean. A fully observed quiet
+heating circuit beside DHW or cooling is a real picture; a large censored population forces the
+pooled fallback and its explicit masking warning.
 
 **Deliberately not built**, each because the bus cannot support the claim: an absolute minimum-flow
 threshold (model-specific over a 3–18 kW catalog, and the unit raises its own error anyway — so the
