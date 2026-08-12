@@ -774,9 +774,10 @@ const INSPECT = {
     // X10A on an inspector and timeline that are currently, correctly, sourced from Modbus.
     aria: { en: "Smart-Grid request", de: "Smart-Grid-Anforderung" },
     trend: "smart_grid_mode",
-    // Each source keeps its OWN 24-hour ring, so the chart must show the lane the headline came from
-    // rather than a lane that may be empty (or, worse, the other instrument's day).
-    trendSource: (d) => (sgInspectIsX10a(d) ? "x10a" : "modbus"),
+    // The headline still follows the instrument that owns the current request, but history is a
+    // comparison of BOTH witnesses. Let the shared history renderer fetch and align both rings: it
+    // folds them into one evidence-aware lane, keeps a lone available source labelled, and leaves
+    // the exact X10A/Modbus readings to the tooltip.
     what: (d) => sgInspectIsX10a(d)
       ? {
         en: "The external Smart-Grid request as the unit's own SG-Ready input contacts report it: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started. These are the physical terminals, so a request sent to the plant over a network instead of a wired contact need not appear here.",
