@@ -110,11 +110,14 @@ function wireTrendScrub(gv) {
   });
   // A mouse leaving clears the readout; a touch ends on pointerup/cancel. pointerout covers the
   // former without also firing for every child element (pointerleave doesn't bubble to this
-  // delegate, so the related-target check does that job here).
+  // delegate, so the related-target check does that job here). A multiline tooltip can grow the
+  // graph's reserved strip and move the plot below the stationary pointer. That transition is still
+  // INSIDE the same graph and must not immediately collapse the tooltip into a hover/flicker loop.
   gv.addEventListener("pointerout", (e) => {
-    const plot = e.target.closest("[data-hist]");
+    const graph = e.target.closest(".vhist-graph");
+    const plot = e.target.closest("[data-hist]") || graph?.querySelector("[data-hist]");
     if (!plot || S.scrub) return;
-    if (e.relatedTarget && plot.contains(e.relatedTarget)) return;
+    if (e.relatedTarget && plot.parentElement.contains(e.relatedTarget)) return;
     scrubEnd(plot);
   });
   for (const ev of ["pointerup", "pointercancel"]) {

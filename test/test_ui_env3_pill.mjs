@@ -183,13 +183,13 @@ assert.match(style, /\.vhist-line\.env-forecast-temperature\s*\{[^}]*opacity:\s*
 assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-temperature\s*\{[^}]*color:\s*var\(--flow-hot\)/);
 assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-humidity\s*\{[^}]*color:\s*var\(--flow-cold\)/);
 assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-pressure\s*\{[^}]*color:\s*var\(--env-pressure\)/);
-assert.match(style, /\.vhist-env3 \.vhist-graph\s*\{[^}]*padding-top:\s*52px/,
+assert.match(style, /\.vhist-env3 \.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*52px/,
   "wide climate charts must sit close to their legend instead of reserving a five-line gap");
 assert.match(style,
   /\.vhist-env3 \.vhist-tip\s*\{[^}]*grid-template-columns:\s*repeat\(3, max-content\)/,
   "the three wide-screen readings must share one compact tooltip row");
 assert.match(style,
-  /@media \(max-width: 480px\)[\s\S]*\.vhist-env3 \.vhist-graph\s*\{[^}]*padding-top:\s*96px[\s\S]*\.vhist-env3 \.vhist-tip\s*\{[^}]*display:\s*block/,
+  /@media \(max-width: 480px\)[\s\S]*\.vhist-env3 \.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*96px[\s\S]*\.vhist-env3 \.vhist-tip\s*\{[^}]*display:\s*block/,
   "phones must stack the same tooltip rows and reserve enough height for them");
 const measuredClock = new Date(currentUnix * 1000)
   .toLocaleTimeString("de", { hour: "2-digit", minute: "2-digit" });

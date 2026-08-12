@@ -792,9 +792,9 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    by what it says, never by who said it (DESIGN.md §"Source outline and state fill are separate
    visual channels"). Put the source name directly on its lane instead of making the eye map a
    detached source legend onto two otherwise identical full-width bars. */
-/* State readouts are intentionally overlaid on the timeline. They can be taller than the reserved
-   strip because each source/state/interval/duration field is stacked vertically; keep the bubble
-   above the later-painted tracks and crosshair instead of letting the bars cut through its text. */
+/* State readouts can stack source/state/interval/duration fields vertically. Their measured height
+   is reserved by syncGraphTipSpace(), so z-index only orders the bubble against the crosshair; it no
+   longer lets the bubble cover the state lanes it describes. */
 .vhist-state-graph .vhist-tip { z-index: 2; white-space: pre; }
 .vhist-state-plot { height: auto; display: grid; gap: 7px; padding: 4px 0; }
 .vhist-state-lane { display: grid; gap: 3px; }
@@ -862,8 +862,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
 /* The tooltip gets its OWN strip above the plot: it follows the cursor horizontally (Grafana-style)
    but can never cover the curve it is reading — which matters most on a phone, where the finger
-   already hides part of the plot. */
-.vhist-graph { position: relative; padding-top: 20px; }
+   already hides part of the plot. Twenty pixels keep the idle layout compact; syncGraphTipSpace()
+   temporarily grows the strip to the bubble's real height for multi-line/state readouts. */
+.vhist-graph { --vhist-tip-base: 20px; position: relative;
+  padding-top: max(var(--vhist-tip-base), var(--vhist-tip-space, 0px)); }
 .vhist-plot { position: relative; height: 72px; }
 /* pan-y hands VERTICAL gestures back to the page (the user must still be able to scroll past the
    chart) while horizontal movement becomes a scrub. Claiming both axes would trap page scrolling
@@ -912,7 +914,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   width: max-content; max-width: 100%; line-height: 1.35;
   border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
   box-shadow: 0 1px 3px rgba(0,0,0,.10); }
-.vhist-env3 .vhist-graph { padding-top: 52px; }
+.vhist-env3 .vhist-graph { --vhist-tip-base: 52px; }
 .vhist-env3 .vhist-tip { min-width: 0; white-space: nowrap; display: grid;
   grid-template-columns: repeat(3, max-content); column-gap: 14px;
   padding: 5px 8px; line-height: 1.35; border-radius: 8px;
@@ -1177,7 +1179,7 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
   .vhist-range { text-align: left; }
   /* The compact two-row climate tooltip is a desktop optimisation. A phone stacks the coloured
      readings and reserves their full height so neither values nor chart are covered. */
-  .vhist-env3 .vhist-graph { padding-top: 96px; }
+  .vhist-env3 .vhist-graph { --vhist-tip-base: 96px; }
   .vhist-env3 .vhist-tip { min-width: min(220px, 100%); white-space: pre;
     display: block; padding: 7px 10px; line-height: 1.55; }
   .modal-actions { flex-direction: column-reverse; }
