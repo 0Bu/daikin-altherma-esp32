@@ -1,4 +1,5 @@
-// Plain-language contract for the plant-diagnostics card and docs/DIAGNOSTICS.md.
+// Plain-language contract for the plant-diagnostics card, docs/DIAGNOSTICS.md and the per-check
+// evidence ledger in docs/DIAGNOSTIC_EVIDENCE.md.
 //
 // A description-coverage audit can prove that a row is tappable and still allow an explanation
 // written only for an installer, with no supported next step. This gate asks the user-level question:
@@ -8,30 +9,37 @@
 // any change to the evaluator or the visible diagnosis contract makes the guide stale until the
 // /user-docs-review skill has reviewed the change and deliberately refreshed the stamp.
 //
-// Usage: node tools/user_docs/check_user_docs.mjs [--root DIR] [--app FILE] [--doc FILE] [--update]
+// Usage: node tools/user_docs/check_user_docs.mjs [--root DIR] [--app FILE] [--doc FILE]
+//        [--evidence FILE] [--update]
 // Exit: 0 clean/updated, 1 findings, 2 usage/parse/vacuity error.
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { readAppSource } from "../ui/read_app_source.mjs";
+import { auditEvidenceContract } from "../diagnostic_evidence/evidence_contract.mjs";
 
 let root = process.cwd();
 let appArg = "main/www/app.sources";
 let docArg = "docs/DIAGNOSTICS.md";
+let evidenceArg = "docs/DIAGNOSTIC_EVIDENCE.md";
 let update = false;
 for (let i = 2; i < process.argv.length; i++) {
   const arg = process.argv[i];
   if (arg === "--root") root = process.argv[++i];
   else if (arg === "--app") appArg = process.argv[++i];
   else if (arg === "--doc") docArg = process.argv[++i];
+  else if (arg === "--evidence") evidenceArg = process.argv[++i];
   else if (arg === "--update") update = true;
   else die(2, `unknown argument: ${arg}`);
-  if (root === undefined || appArg === undefined || docArg === undefined) die(2, "missing option value");
+  if (root === undefined || appArg === undefined || docArg === undefined || evidenceArg === undefined) {
+    die(2, "missing option value");
+  }
 }
 root = path.resolve(root);
 const app = path.resolve(root, appArg);
 const docFile = path.resolve(root, docArg);
+const evidenceFile = path.resolve(root, evidenceArg);
 
 function die(code, message) {
   console.error(`user-docs-audit: ${message}`);
@@ -133,6 +141,16 @@ for (const term of ["Verdichter", "BUH", "BSH", "X10A"]) {
   }
 }
 
+// The dedicated evidence gate owns this contract and its implementation fingerprint. Reuse its
+// structural rules here so plain-language CI also catches unsupported prose without maintaining a
+// second, subtly different definition of acceptable evidence.
+const evidence = read(evidenceFile, evidenceArg);
+for (const finding of auditEvidenceContract(evidence, rowIds, evidenceArg)) {
+  const code = finding.code === "E001" ? "U011"
+    : (finding.code === "E008" || finding.code === "E009" ? "U013" : "U012");
+  add(code, finding.subject, finding.message);
+}
+
 const fingerprint = crypto.createHash("sha256");
 for (const relative of ["main/logic/checkup.hpp", "main/checkup.cpp"]) {
   fingerprint.update(`${relative}\0`);
@@ -169,4 +187,4 @@ if (findings.length) {
   for (const finding of findings) console.error(`${finding.code} ${finding.subject}: ${finding.message}`);
   die(1, `${findings.length} finding(s)`);
 }
-console.log(`user docs audit: clean (${rowIds.length} diagnosis results, 2 UI languages, source ${expectedStamp.slice(0, 12)})`);
+console.log(`user docs audit: clean (${rowIds.length} diagnosis results + evidence sections, 2 UI languages, source ${expectedStamp.slice(0, 12)})`);

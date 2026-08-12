@@ -124,6 +124,12 @@ assert.match(app, /return vcard\(t\("dyn\.card"\), rows\);/,
   "the bottom card must render without a maturity pill");
 assert.doesNotMatch(app, /"dyn\.experimental"|section-badge\.experimental/,
   "the removed experimental pill must leave no translation or styling contract behind");
+assert.match(app,
+  /"dyn\.strategy_help": "[^"]*inner control loop[^"]*D2 clipping share[^"]*zone actually requests heat[^"]*"/,
+  "English heating-curve help must name the closed-loop masking caveat and corroborating evidence");
+assert.match(app,
+  /"dyn\.strategy_help": "[^"]*inneren Regelkreis[^"]*D2-Clipping-Anteil[^"]*Zone tatsächlich Wärme anfordert[^"]*"/,
+  "German heating-curve help must name the closed-loop masking caveat and corroborating evidence");
 const weatherModalHtml = html.match(/<div class="modal" id="weatherModal"[\s\S]*?<\/form>\s*<\/div>/)?.[0] || "";
 assert.match(weatherModalHtml, /id="wxLatitude"[\s\S]*id="wxLongitude"[\s\S]*href="https:\/\/open-meteo\.com\/"[\s\S]*data-i18n="wx\.attribution"/,
   "the direct Open-Meteo source must expose coordinate entry and attribution");

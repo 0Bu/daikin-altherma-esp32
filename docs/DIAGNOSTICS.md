@@ -1,11 +1,15 @@
 # Anlagendiagnose einfach erklärt
 
-<!-- user-docs-contract: 96345ba55bb9e8fecd14a7835ef7325d5f9f72241ff4d9a413f3068603564b81 -->
+<!-- user-docs-contract: 103d9ea4da700d26a32e16f077a0db71bf601424660db1e1520206f69e57e2a1 -->
 <!-- user-docs: health_guide -->
 
 Diese Seite richtet sich an Menschen, die ihre Wärmepumpe verstehen möchten, ohne Heizungsfachleute
 zu sein. Die Diagnose läuft automatisch auf dem ESP32. Sie **liest** Messwerte und zählt Ereignisse;
 sie verändert keine Einstellung und steuert die Wärmepumpe nicht.
+
+Zu jeder Prüfung gibt es zusätzlich eine [Beleg- und Grenzmatrix](DIAGNOSTIC_EVIDENCE.md). Dort steht
+nachprüfbar, welche Aussage aus Daikin-Unterlagen oder Primärforschung stammt, welche Schwelle nur
+eine Projekt-Heuristik ist und was die Messung ausdrücklich nicht beweisen kann.
 
 In der Weboberfläche steht die Karte **„Anlagendiagnose · 24 h“** direkt unter dem Anlagenschema.
 Tippe eine Zeile an, um Messwert, Bewertung, normale Einordnung und einen Handlungshinweis zu sehen.
@@ -53,6 +57,8 @@ Bedienungsanleitung oder Daikin-Serviceunterlagen nennen die Bedeutung. Bei eine
 verschwundenen Meldung zunächst beobachten; bei Wiederholung Zeitpunkt, Betriebsart und Code für den
 Fachbetrieb festhalten.
 
+**Belege und Grenzen:** [Gerätestörung](DIAGNOSTIC_EVIDENCE.md#1-störung-der-anlage-fault)
+
 <!-- user-docs: health_dhw_loss -->
 ### Wärmeverlust Warmwasserspeicher
 
@@ -61,6 +67,19 @@ offensichtlich durch eine Zapfung beeinflusst wurde. Dann misst sie, wie schnell
 Speicher fällt. Eine optional gemessene Zirkulationspumpe hilft zu erklären, ob sie Wärme aus dem
 Speicher transportiert hat.
 
+**Welchen Bereich kann sie beurteilen?** Ab **0,8 K/h** erscheint ein **HINWEIS**. Das ist eine
+Projekt-Heuristik aus einer Referenzanlage und kein Daikin-Grenzwert. Der Wert ist nicht einfach auf
+andere Speicher übertragbar: Speichervolumen und der Temperaturunterschied zwischen warmem Speicher
+und Aufstellraum verändern die Abkühlrate. Das Verfahren kann auffällige bereinigte Stunden nur bis
+etwa **1,85 K/h** sicher erkennen. Bei noch schnellerem kontinuierlichem Verlust kann der
+Temperaturabfall wie eine Zapfung aussehen; das Fenster wird dann verworfen.
+
+**Was bedeuten OK und NICHT VERFÜGBAR hier?** **OK** heißt nur, dass in den auswertbaren ruhigen
+Stunden kein Verlust im erkennbaren Band ab 0,8 K/h gefunden wurde. Es schließt einen schnelleren
+Dauerverlust nicht aus. **NICHT VERFÜGBAR** nach vielen verworfenen Fenstern sagt ebenfalls nicht,
+welche Ursache überwog: Ladung, Pumpenlauf, Zapfung, unlesbare Daten und ein wie Zapfung aussehender
+Dauerverlust können mit den gespeicherten Summen nicht sicher auseinandergehalten werden.
+
 **Was das Ergebnis nicht beweist:** Ein schneller Temperaturabfall beweist allein weder ein undichtes
 Ventil noch schlechte Dämmung. Der Sensor misst nur an einer Stelle im geschichteten Speicher;
 Warmwasserentnahme und natürliche Zirkulation können ähnlich aussehen.
@@ -68,6 +87,9 @@ Warmwasserentnahme und natürliche Zirkulation können ähnlich aussehen.
 **Was du tun kannst:** Bei wiederholtem **HINWEIS** zuerst Laufzeiten und Zeitplan der
 Warmwasser-Zirkulationspumpe prüfen. Beobachte, ob der Hinweis auch ohne Zapfung und bei sicher
 ausgeschalteter Zirkulationspumpe bleibt. Erst dann lohnt sich eine Prüfung durch den Fachbetrieb.
+
+**Belege und Grenzen:**
+[Wärmeverlust Warmwasserspeicher](DIAGNOSTIC_EVIDENCE.md#2-wärmeverlust-warmwasserspeicher-dhw_loss)
 
 <!-- user-docs: health_cycling -->
 ### Verdichterstarts
@@ -101,6 +123,8 @@ Heizbetrieb häufig unterbrechen. Einstellungen nicht nur wegen eines einzelnen 
 das Muster bestehen, kann der Fachbetrieb Heizkurve, Wasserdurchfluss und hydraulischen Abgleich
 gezielt prüfen.
 
+**Belege und Grenzen:** [Verdichterstarts](DIAGNOSTIC_EVIDENCE.md#3-verdichterstarts-cycling)
+
 <!-- user-docs: health_defrost -->
 ### Abtauvorgänge
 
@@ -111,9 +135,15 @@ ab; das ist grundsätzlich normal.
 beobachteten Verdichterlaufzeit dafür verwendet wurde. Ein höherer Anteil ist nur ein Hinweis, weil
 X10A weder Luftfeuchte noch die Oberflächentemperatur des Wärmetauschers liefert.
 
+**Wann erscheint ein Hinweis?** Als Projekt-Heuristik bei mindestens drei auswertbaren
+Abtauvorgängen und mehr als 15 % Abtauzeit an der gleichzeitig beobachteten Verdichterlaufzeit. Das
+ist kein Daikin-Grenzwert.
+
 **Was du tun kannst:** Wetter und Außengerät ansehen. Schnee, Laub oder Gegenstände dürfen Luftweg
 und Wasserablauf nicht blockieren. Häufiges Abtauen bei nasskaltem Wetter kann normal sein; bei
 mildem, trockenem Wetter oder sichtbarer dauerhafter Vereisung den Fachbetrieb fragen.
+
+**Belege und Grenzen:** [Abtauvorgänge](DIAGNOSTIC_EVIDENCE.md#4-abtauvorgänge-defrost)
 
 <!-- user-docs: health_pressure -->
 ### Wasserdruck, niedrigster
@@ -126,6 +156,8 @@ blind nachfüllen: Wiederholt fallender Druck kann auf Luft, ein Ausdehnungsgef�
 Wasserverlust hindeuten und gehört zum Fachbetrieb. Bei akutem Gerätefehler die Anlagenanleitung
 befolgen.
 
+**Belege und Grenzen:** [Wasserdruck](DIAGNOSTIC_EVIDENCE.md#5-wasserdruck-niedrigster-pressure)
+
 <!-- user-docs: health_flow -->
 ### Durchfluss, niedrigster
 
@@ -134,12 +166,17 @@ mindestens 60 Sekunden lief. Werte beim Pumpenstart und bei stillstehender Pumpe
 nicht verwendet.
 
 **Warum steht dort nur Messwert?** Der notwendige Durchfluss hängt von Gerätemodell und Betriebsart
-ab: Heizen, Kühlen, Warmwasser und Abtauen brauchen nicht denselben Wert.
+ab: Heizen, Kühlen, Warmwasser und Abtauen brauchen nicht denselben Wert. Angezeigt wird ein
+beobachtetes **Teillast-Minimum** der modulierenden Pumpe. Das ist nicht der Nenn- oder
+Auslegungsdurchfluss, der in einer Anleitung für einen anderen Betriebspunkt stehen kann.
 
-**Was du tun kannst:** Mit dem Mindestdurchfluss der genauen Installationsanleitung vergleichen.
-Ein einzelner niedriger Wert ohne Gerätefehler ist noch keine Diagnose. Bei wiederholter
-Unterschreitung oder einer Durchflussstörung sollte der Fachbetrieb Filter, Ventile, Pumpeneinstellung
-und Hydraulik prüfen.
+**Was du tun kannst:** Nicht direkt mit dem Nenndurchfluss vergleichen. Nur einen Mindestwert aus der
+genauen Installationsanleitung heranziehen, wenn er für dieselbe Betriebsart und Bedingung gilt. Ein
+einzelner niedriger Wert ohne Gerätefehler ist noch keine Diagnose. Bei wiederholter Unterschreitung
+dieses passenden Minimums oder einer Durchflussstörung sollte der Fachbetrieb Filter, Ventile,
+Pumpeneinstellung und Hydraulik prüfen.
+
+**Belege und Grenzen:** [Durchfluss](DIAGNOSTIC_EVIDENCE.md#6-durchfluss-niedrigster-flow)
 
 <!-- user-docs: health_heater -->
 ### Zusatzheizer
@@ -152,6 +189,8 @@ eventueller PV-Überschusssteuerung betrachten. Ein kurzer Einsatz kann gewollt 
 häufige oder lange Laufzeit ist ein Anlass, Einstellungen und Anlagenleistung prüfen zu lassen, aber
 für sich allein kein Defektnachweis.
 
+**Belege und Grenzen:** [Zusatzheizer](DIAGNOSTIC_EVIDENCE.md#7-zusatzheizer-heater)
+
 <!-- user-docs: health_retries -->
 ### Schutz-Rückregelungen
 
@@ -163,6 +202,9 @@ Herstellerbedeutung der Zähler ist nicht vollständig dokumentiert; deshalb ist
 **Was du tun kannst:** Ein einzelner Anstieg erfordert normalerweise keine Handlung. Bei wiederholten
 Anstiegen zusammen mit schlechter Leistung, ungewöhnlichen Geräuschen oder Fehlercodes Zeitpunkt und
 Betriebszustand notieren und dem Fachbetrieb zeigen.
+
+**Belege und Grenzen:**
+[Schutz-Rückregelungen](DIAGNOSTIC_EVIDENCE.md#8-schutz-rückregelungen-retries)
 
 ## Was die Diagnose nicht kann
 
@@ -210,6 +252,12 @@ protection-counter changes. `NOTE` means worth observing, not proven failure; `W
 device fault or a sustained documented boundary; `CHECKING` means more evidence is needed;
 `MEASURED ONLY` has no universal limit; and `NOT AVAILABLE` means the necessary evidence cannot be
 obtained for that check.
+
+For tank cooling, 0.8 K/h is a project heuristic for one reference installation, not a transferable
+manufacturer limit. Clean one-hour windows can expose the notable band only up to about 1.85 K/h;
+faster continuous loss may look like a draw and be discarded, so neither `OK` nor a blocked check
+excludes it. The flow row likewise reports an observed part-load minimum, not the nominal or design
+flow from a manual.
 
 For compressor cycling, complete runs are separated into space heating, hot water and cooling when
 the signals permit it. Only confirmed space-heating runs are judged by the short-run heuristic;

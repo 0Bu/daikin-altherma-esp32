@@ -186,11 +186,12 @@ const I18N = {
     // "0 min after nine attempts were thrown away by tank charging" are different findings, and only
     // the second one tells the reader where to look.
     "check.detail.dhw_aborted": (n, reasons, best) => ` ${n} candidate ${n === 1 ? "window" : "windows"} discarded (${reasons}); longest reached ${best} of 60 min.`,
-    // The verdict that says this is not a matter of waiting longer. TWO sentences, because the same
-    // verdict is reachable from two causes that need opposite action: a plant whose own duty cycle
-    // is shorter than the method needs, and an X10A link that never stayed readable long enough.
-    // Blaming the duty cycle for a flapping bus sends the reader to the wrong place entirely.
-    "check.detail.dhw_blocked": (n, reasons, best) => `Not reachable on this plant: over a full 24 hours not one clean one-hour window completed, and ${n} candidate ${n === 1 ? "window was" : "windows were"} discarded (${reasons}); the longest reached ${best} of 60 min. The method needs 105 undisturbed minutes after each tank charge (45 min settling plus a 60-minute window), which this plant's own duty cycle does not leave.`,
+    // The verdict that says this is not a matter of waiting longer. The generic path is deliberately
+    // NON-CAUSAL: the persisted window has only an abort total, an OR-ed set of reason kinds and the
+    // best duration. It cannot say which cause dominated, or pair circulation evidence with an
+    // aborted candidate. The all-blind case below is stronger because that one reason kind is the
+    // only evidence that occurred anywhere in the window.
+    "check.detail.dhw_blocked": (n, reasons, best) => `Not assessable with this method: over a full 24 hours not one clean one-hour window completed, and ${n} candidate ${n === 1 ? "window was" : "windows were"} discarded (${reasons}); the longest reached ${best} of 60 min. Tank charging needs 105 undisturbed minutes (45 min settling plus a 60-minute window); draws, pump activity, unreadable data, or continuous heat loss fast enough to look like a draw can also prevent a clean hour. The stored totals do not show which cause dominated, so fast continuous heat loss cannot be excluded.`,
     "check.detail.dhw_blocked_link": (n, best) => `Not assessable: over a full 24 hours not one clean one-hour window completed, and all ${n} candidate ${n === 1 ? "window was" : "windows were"} discarded because the X10A link stopped answering mid-window; the longest reached ${best} of 60 min. This is the link, not the plant — check the X10A wiring and the RX/TX pins.`,
     "check.detail.dhw_reason.charge": "tank charging",
     "check.detail.dhw_reason.pump": "internal pump",
@@ -425,7 +426,7 @@ const I18N = {
     "dyn.state_help_no_broker": "A room source is saved, but the diagnosis reads it over MQTT and no broker is configured. Set the broker in the Connections card; the saved room source is kept and recording starts by itself.",
     "dyn.state_help_setup_homehub": "The diagnosis needs the HomeHub to tell it when the plant is actually heating; without one it cannot tell a heating window apart from hot water or a standstill. Set the HomeHub address in the Protocol card.",
     "dyn.state_help_homehub_disabled": "This diagnosis depends on two HomeHub plant signals. With the HomeHub address explicitly empty, neither Modbus nor this dependent diagnosis runs.",
-    "dyn.strategy_help": "The sample is room target minus actual room temperature: positive means the room is below target, negative means it is above. There is no deadband, rounding, clamp or slew limit. It is an uncalibrated indicator, not a requested leaving-water offset. The reference room must represent the heated zone; a local thermostat or closed valves can mask the heating curve's effect.",
+    "dyn.strategy_help": "The sample is room target minus actual room temperature: positive means the room is below target, negative means it is above. There is no deadband, rounding, clamp or slew limit. It is an uncalibrated indicator, not a requested leaving-water offset. The reference room must represent the heated zone. Its own thermostat or closed valves form an inner control loop: they can remove heat demand and hide a curve that is too high. Read the room trend together with how often leaving-water temperature is held at its minimum (D2 clipping share) and how often the zone actually requests heat.",
     "env.title": "Outdoor sensor", "env.card": "Outdoor climate", "env.none": "No sensor",
     "env.temperature": "Temperature", "env.humidity": "Humidity", "env.pressure": "Air pressure",
     "env.sensor_state": "Sensor", "env.live": "Live", "env.collecting": "Collecting…",
@@ -738,11 +739,11 @@ const I18N = {
     // und „0 min, nachdem neun Ansätze durch Speicherladungen verworfen wurden“ sind verschiedene
     // Befunde, und nur der zweite sagt dem Leser, wo er hinschauen muss.
     "check.detail.dhw_aborted": (n, reasons, best) => ` ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen (${reasons}); längster erreichte ${best} von 60 min.`,
-    // Das Urteil, das sagt: hier hilft kein längeres Warten. ZWEI Sätze, weil dasselbe Urteil aus
-    // zwei Ursachen folgt, die entgegengesetztes Handeln verlangen: ein Anlagentakt, der kürzer ist
-    // als das Verfahren braucht, und eine X10A-Verbindung, die nie lange genug lesbar blieb. Einem
-    // flackernden Bus den Anlagentakt vorzuwerfen schickt den Leser komplett an die falsche Stelle.
-    "check.detail.dhw_blocked": (n, reasons, best) => `Auf dieser Anlage nicht erreichbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen (${reasons}); der längste erreichte ${best} von 60 min. Das Verfahren braucht nach jeder Speicherladung 105 ungestörte Minuten (45 min Beruhigung plus 60-Minuten-Fenster) — so viel lässt der Takt dieser Anlage nicht.`,
+    // Das Urteil, das sagt: hier hilft kein längeres Warten. Der allgemeine Text bleibt bewusst
+    // NICHT KAUSAL: gespeichert sind nur Gesamtzahl, die ODER-Menge vorkommender Grundtypen und die
+    // längste Dauer. Daraus folgt weder, welcher Grund überwog, noch ob die Zirkulation bei einem
+    // verworfenen Kandidaten aus war. Nur der reine Blind-Fall unten trägt eine stärkere Aussage.
+    "check.detail.dhw_blocked": (n, reasons, best) => `Mit diesem Verfahren nicht bewertbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen (${reasons}); der längste erreichte ${best} von 60 min. Eine Speicherladung braucht 105 ungestörte Minuten (45 min Beruhigung plus 60-Minuten-Fenster); auch Zapfungen, Pumpenlauf, unlesbare Daten oder ein schneller Dauerverlust, der wie eine Zapfung aussieht, können eine saubere Stunde verhindern. Die gespeicherten Summen zeigen nicht, welcher Grund überwog; schneller kontinuierlicher Wärmeverlust ist daher nicht ausgeschlossen.`,
     "check.detail.dhw_blocked_link": (n, best) => `Nicht bewertbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, alle ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen, weil die X10A-Verbindung mitten im Fenster aufhörte zu antworten; der längste erreichte ${best} von 60 min. Das liegt an der Verbindung, nicht an der Anlage — prüfe die X10A-Verkabelung und die RX/TX-Pins.`,
     "check.detail.dhw_reason.charge": "Speicherladung",
     "check.detail.dhw_reason.pump": "interne Pumpe",
@@ -970,7 +971,7 @@ const I18N = {
     "dyn.state_help_no_broker": "Eine Raumquelle ist gespeichert, aber die Diagnose liest sie \u00fcber MQTT, und es ist kein Broker konfiguriert. Broker in der Verbindungen-Karte eintragen; die gespeicherte Raumquelle bleibt erhalten und die Aufzeichnung startet von selbst.",
     "dyn.state_help_setup_homehub": "Die Diagnose braucht den HomeHub, um zu erfahren, wann die Anlage wirklich heizt; ohne ihn lässt sich ein Heizfenster nicht von Warmwasser oder Stillstand unterscheiden. Die HomeHub-Adresse steht in der Protokoll-Karte.",
     "dyn.state_help_homehub_disabled": "Diese Diagnose benötigt zwei Anlagensignale des HomeHub. Ist die HomeHub-Adresse ausdrücklich leer, laufen weder Modbus noch diese abhängige Diagnose.",
-    "dyn.strategy_help": "Erfasst wird Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu kalt, negativ bedeutet zu warm. Es gibt keine Totzone, Rundung, Begrenzung oder Schrittlimit. Das ist ein unkalibrierter Indikator und kein angeforderter Vorlauf-Offset. Der Referenzraum muss die beheizte Zone repräsentieren; ein eigener Thermostat oder geschlossene Ventile können den Einfluss der Heizkurve verdecken.",
+    "dyn.strategy_help": "Erfasst wird Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu kalt, negativ bedeutet zu warm. Es gibt keine Totzone, Rundung, Begrenzung oder Schrittlimit. Das ist ein unkalibrierter Indikator und kein angeforderter Vorlauf-Offset. Der Referenzraum muss die beheizte Zone repräsentieren. Sein eigener Thermostat oder geschlossene Ventile bilden einen inneren Regelkreis: Sie können die Wärmeanforderung beenden und eine zu hohe Heizkurve verdecken. Den Raumverlauf deshalb zusammen damit lesen, wie oft die Vorlauftemperatur an ihrer Mindestgrenze liegt (D2-Clipping-Anteil) und wie oft die Zone tatsächlich Wärme anfordert.",
     "env.title": "Außensensor", "env.card": "Außenklima", "env.none": "Kein Sensor",
     "env.temperature": "Temperatur", "env.humidity": "Luftfeuchte", "env.pressure": "Luftdruck",
     "env.sensor_state": "Sensor", "env.live": "Aktuell", "env.collecting": "Messung läuft…",

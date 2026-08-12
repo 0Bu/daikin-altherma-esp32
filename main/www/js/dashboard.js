@@ -1011,9 +1011,10 @@ function checkupDetailHtml(c) {
   // rows, and needs the opposite advice — so it gets its own sentence rather than the generic one.
   if (statusKey === "unavailable" && c.id === "dhw_loss" && c.blocked) {
     const reasons = Array.isArray(c.abort_reasons) ? c.abort_reasons : [];
-    // Same verdict, two causes, opposite actions. When the ONLY thing that ever ended a candidate
-    // was the bus going quiet, this is the X10A link and not the plant's duty cycle — a flapping
-    // bus can reach the blocked bar, and blaming the heat pump for it sends the reader nowhere.
+    // The all-blind case can name the link: no other reason kind occurred anywhere in the retained
+    // window. Every mixed/non-blind case stays non-causal. The report has an abort total and an
+    // OR-ed reason set, not per-reason counts or circulation evidence for aborted candidates, so it
+    // cannot honestly say which plant-side cause dominated.
     const linkOnly = reasons.length === 1 && reasons[0] === "blind";
     const sentence = linkOnly
       ? t("check.detail.dhw_blocked_link", Number(c.aborts) || 0,

@@ -20,6 +20,7 @@ reset() {
     cp main/logic/checkup.hpp "$WORK/main/logic/checkup.hpp"
     cp main/checkup.cpp "$WORK/main/checkup.cpp"
     cp docs/DIAGNOSTICS.md "$WORK/docs/DIAGNOSTICS.md"
+    cp docs/DIAGNOSTIC_EVIDENCE.md "$WORK/docs/DIAGNOSTIC_EVIDENCE.md"
 }
 
 patch_file() {
@@ -30,7 +31,7 @@ patch_file() {
 run_case() {
     local name="$1" want_rc="$2" needle="$3" out rc
     if [ "$seed_ok" -ne 1 ]; then echo "  MISSED: $name — defect was not seeded"; fail=$((fail + 1)); return; fi
-    out="$(node "$CHECK" --root "$WORK" --app main/www/app.sources --doc docs/DIAGNOSTICS.md 2>&1)"; rc=$?
+    out="$(node "$CHECK" --root "$WORK" --app main/www/app.sources --doc docs/DIAGNOSTICS.md --evidence docs/DIAGNOSTIC_EVIDENCE.md 2>&1)"; rc=$?
     if [ "$rc" -ne "$want_rc" ] || ! printf '%s' "$out" | grep -qF "$needle"; then
         echo "  MISSED: $name — expected exit $want_rc containing '$needle', got $rc"
         printf '%s\n' "$out" | sed -n '1,5p' | sed 's/^/            /'
@@ -118,6 +119,39 @@ if [ "$rc" -ne 0 ] || ! printf '%s' "$out" | grep -qF "updated source stamp"; th
 else
     run_case "updated stamp passes normal validation" 0 "user docs audit: clean"
 fi
+
+echo "== 8. visible diagnosis without an evidence section =="
+reset
+patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read(); old = '### 5. Wasserdruck, niedrigster (`pressure`)\n'
+if old not in s: sys.exit(1)
+open(p, 'w').write(s.replace(old, '### 5. Wasserdruck, niedrigster (`missing_pressure`)\n', 1))
+PY
+run_case "missing evidence section is caught" 1 "U011 pressure"
+
+echo "== 9. evidence section without an explicit claim boundary =="
+reset
+patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+a = s.index('### 4. Abtauvorgänge (`defrost`)'); b = s.index('### 5. Wasserdruck', a)
+block = s[a:b]
+if '**Nicht bewiesen:**' not in block: sys.exit(1)
+open(p, 'w').write(s[:a] + block.replace('**Nicht bewiesen:**', '**Offene Frage:**', 1) + s[b:])
+PY
+run_case "missing evidence claim boundary is caught" 1 "U012 defrost"
+
+echo "== 10. cited source without a resolved primary-source URL =="
+reset
+patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = '[R2-doi]: https://doi.org/10.1016/j.applthermaleng.2009.01.003\n'
+if old not in s: sys.exit(1)
+open(p, 'w').write(s.replace(old, '', 1))
+PY
+run_case "unresolved evidence URL is caught" 1 "U013 R2"
 
 echo
 if [ "$fail" -eq 0 ]; then

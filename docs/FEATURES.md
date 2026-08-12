@@ -126,6 +126,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 81 | **CLAUDE.md byte-budget gate** — the always-loaded agent instructions are held under a byte budget in CI, forcing new findings into `docs/` as narrative and into `.claude/CLAUDE.md` only as rules | ✅ | [`run-claude-md-budget.sh`](../scripts/run-claude-md-budget.sh), [`selftest.sh`](../tools/claudemd/selftest.sh) |
 | 85 | **Browser serial-permission release** — the Pages installer exposes a granted, closed port's `forget()` action without opening a chooser when nothing can be revoked or interrupting an active flash | ✅ 🧪 | [`serial-port-release.mjs`](serial-port-release.mjs), [`serial_port_release.test.mjs`](../test/serial_port_release.test.mjs) |
 | 86 | **Inline Web Serial installer + monitor** — only the native port chooser leaves the branded Pages UI; ESP32-S3 probing, NVS-preserving sparse flash, cross-part progress, reset and a real 115200-baud monitor run in-page | ✅ 🧪 | [`web-installer.mjs`](web-installer.mjs), [`web_installer.test.mjs`](../test/web_installer.test.mjs) |
+| 87 | **Diagnostic-evidence contract gate** — every visible plant diagnosis stays bound to an external basis, its implemented rule and an explicit claim limit | ✅ | [`check_diagnostic_evidence.mjs`](../tools/diagnostic_evidence/check_diagnostic_evidence.mjs), [`run-diagnostic-evidence-audit.sh`](../scripts/run-diagnostic-evidence-audit.sh) |
 
 ---
 
@@ -690,6 +691,12 @@ Four properties of that core are worth naming because they are not obvious from 
   [`selftest.sh`](../tools/domain/selftest.sh) re-introduces every defect the gate was built for, so
   a checker that has quietly stopped checking cannot pass as clean. The judgement half is the
   [`domain-review`](../.claude/skills/domain-review/SKILL.md) skill, a PR-merge gate on every merge.
+- **✅ Diagnostic claims keep their evidence.**
+  [`run-diagnostic-evidence-audit.sh`](../scripts/run-diagnostic-evidence-audit.sh) binds every visible
+  plant-diagnostic row to its primary external source, the exact implemented rule and a claim
+  boundary. Its fingerprint follows the evaluator and sampling semantics, while
+  [`selftest.sh`](../tools/diagnostic_evidence/selftest.sh) mutates each required part so a ceremonial
+  or stale evidence ledger fails CI rather than preserving an unsupported reassuring sentence.
 
 ---
 

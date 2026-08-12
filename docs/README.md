@@ -10,7 +10,9 @@ signing, OTA + rollback health gate, the polled live UI, the ESP-IDF component i
 diagnostics, WiFi resilience — see [**FEATURES.md**](FEATURES.md). The features whose subject is the
 **plant** rather than the board — the 24-hour checkup, the Open-Meteo forecast, the optional ENV III
 climate input and heating-curve diagnosis — are in [**PLANT.md**](PLANT.md). A non-technical guide
-to the visible 24-hour results and what a user can do next is in [**DIAGNOSTICS.md**](DIAGNOSTICS.md).
+to the visible 24-hour results and what a user can do next is in [**DIAGNOSTICS.md**](DIAGNOSTICS.md);
+the source, threshold and claim boundary for every check is recorded in
+[**DIAGNOSTIC_EVIDENCE.md**](DIAGNOSTIC_EVIDENCE.md).
 
 ---
 

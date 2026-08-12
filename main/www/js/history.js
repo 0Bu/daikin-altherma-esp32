@@ -1859,11 +1859,11 @@ const MODEL_DESCRIPTIONS = {
           normal: "Keine aktuelle oder gemerkte Meldung, nachdem alle unterstützten Störungszeilen lesbar waren. Eine verschwundene Meldung kann bis zu 24 Stunden sichtbar bleiben; ein aktiver Code steht unter „Betrieb“.",
           action: "Bei WARNUNG unter „Betrieb“ den genauen Code öffnen und notieren. Anleitung befolgen oder Service fragen. Einen einmaligen verschwundenen HINWEIS beobachten; bei Wiederholung Zeitpunkt und Betriebsart festhalten." } },
   health_dhw_loss: {
-    what: "Measures how quickly the hot-water tank cools during quiet one-hour periods. Tank charging, obvious hot-water draws and internal heating activity are excluded. An optional power-meter reading shows whether the circulation pump was running.",
-    normal: "Below 0.8 K/h in the assessed windows. At or above it gives NOTE as a project heuristic. One tank sensor cannot prove a leaking valve or poor insulation; OK needs a full day and six usable quiet hours.",
+    what: "Measures tank cooling in quiet one-hour windows. Charging, draw-like drops and internal heating are excluded; an optional power meter reports circulation-pump operation.",
+    normal: "NOTE starts at 0.8 K/h, a project heuristic for one reference installation. Tank volume and the tank-to-room temperature difference change the rate. Clean-hour loss is detectable only up to about 1.85 K/h; faster continuous loss can trip the draw filter. OK means none was observed in that band, not that insulation or valves are proven sound.",
     action: "For repeated NOTE, first check the hot-water circulation schedule and whether water was drawn. If the loss also persists with circulation confirmed off, give several days of readings to an installer.",
-    de: { what: "Misst, wie schnell der Warmwasserspeicher in ruhigen Stunden abkühlt. Speicherladung, erkennbare Warmwasserentnahme und interne Heizaktivität werden ausgeschlossen. Ein optionaler Strommesswert zeigt, ob die Zirkulationspumpe lief.",
-          normal: "Unter 0,8 K/h in den bewertbaren Fenstern. Ab diesem Wert erscheint HINWEIS als Projekt-Heuristik. Ein einzelner Speichersensor beweist weder undichtes Ventil noch schlechte Dämmung; OK braucht einen vollen Tag und sechs ruhige Stunden.",
+    de: { what: "Misst die Abkühlung in ruhigen Speicherstunden. Ladung, zapfungsähnliche Abfälle und interne Heizaktivität werden ausgeschlossen; ein Stromzähler kann die Zirkulationspumpe zeigen.",
+          normal: "HINWEIS ab 0,8 K/h – Heuristik der Referenzanlage. Speichervolumen und Abstand zur Raumtemperatur ändern den Wert. Bereinigte Stunden zeigen nur bis etwa 1,85 K/h; schneller Dauerverlust kann wie Zapfung ausgefiltert werden. OK heißt nur: Kein Verlust im erkennbaren Band gefunden; das beweist weder gute Dämmung noch Ventile.",
           action: "Bei wiederholtem HINWEIS zuerst Zeitplan der Warmwasser-Zirkulation und Entnahmen prüfen. Bleibt der Verlust auch bei Zirkulationspumpe OFF, mehrere Tage Messwerte dem Fachbetrieb zeigen." } },
   health_cycling: {
     what: "Counts each compressor change from OFF to ON and how long a complete run lasted. Where the signals permit, runs are separated into space heating, hot water and cooling. Mixed or unread runs are shown as unclassified.",
@@ -1888,11 +1888,11 @@ const MODEL_DESCRIPTIONS = {
           action: "Nicht blind nachfüllen. Geräteanleitung prüfen; wiederholt fallender Druck kann auf Luft, Ausdehnungsgefäß oder Wasserverlust hindeuten und gehört zum Fachbetrieb." } },
   health_flow: {
     what: "Shows the lowest water flow after the internal pump had run continuously for 60 seconds. Pump startup, stopped-pump readings and communication gaps are excluded.",
-    normal: "MEASURED ONLY: the required flow depends on the exact model and whether it is heating, cooling, making hot water or defrosting. There is no honest universal OK/WARNING limit.",
-    action: "Compare with the exact installation manual. One low value without a unit fault proves little; repeated values below the model limit or a flow error should be checked by an installer.",
+    normal: "MEASURED ONLY: this is an observed part-load minimum after pump run-up, not the nominal or design flow printed in a manual. Required flow depends on model and operating mode, so there is no universal OK/WARNING limit.",
+    action: "Do not compare this directly with nominal flow. Use the exact manual's minimum for the same mode and conditions; one low value without a unit fault proves little. Repeated values below that matching minimum or a flow error belong with an installer.",
     de: { what: "Zeigt den niedrigsten Wasserdurchfluss, nachdem die interne Pumpe 60 Sekunden durchgehend lief. Pumpenanlauf, Werte bei stehender Pumpe und Kommunikationslücken werden ausgeschlossen.",
-          normal: "NUR MESSWERT: Der nötige Durchfluss hängt von Modell und Betriebsart ab — Heizen, Kühlen, Warmwasser oder Abtauen. Deshalb gibt es keine ehrliche allgemeine Grenze für OK/WARNUNG.",
-          action: "Mit der genauen Installationsanleitung vergleichen. Ein einzelner niedriger Wert ohne Gerätestörung beweist wenig; wiederholte Unterschreitung der Modellgrenze oder Durchflussfehler vom Fachbetrieb prüfen lassen." } },
+          normal: "NUR MESSWERT: Das ist ein beobachtetes Teillast-Minimum nach dem Pumpenanlauf, nicht der Nenn- oder Auslegungsdurchfluss der Anleitung. Der nötige Wert hängt von Modell und Betriebsart ab; eine allgemeine OK/WARNUNG-Grenze gibt es nicht.",
+          action: "Nicht direkt mit dem Nenndurchfluss vergleichen. Nur den Mindestwert der Anleitung für dieselbe Betriebsart und Bedingung heranziehen. Ein Einzelwert ohne Störung beweist wenig; wiederholte Unterschreitung dieses passenden Minimums oder Durchflussfehler gehören zum Fachbetrieb." } },
   health_heater: {
     what: "Shows separately how long the electric heater for space heating (BUH) and the heater in the hot-water tank (BSH) were observed running.",
     normal: "MEASURED ONLY. Cold weather, emergency mode, defrost support, hot-water schedules or surplus-energy control can all make electric-heater runtime intentional. There is no universal OK/WARNING limit.",
