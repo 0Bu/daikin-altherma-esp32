@@ -775,15 +775,16 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   font-size: 12px; margin-bottom: 7px; }
 .vhist-t { color: var(--fg); font-weight: 600; }
 .vhist-range { color: var(--muted); }
-/* Two instruments on one scale. The legend carries names as well as colour, so an overlapping pair
-   is still identifiable and the distinction never depends on colour alone. */
+/* Every numeric legend sample repeats the plot grammar: a light area and its darker upper edge.
+   Names remain present, so an overlapping pair is still identifiable without colour alone. */
 .vhist-legend { display: flex; flex-wrap: wrap; gap: 5px 14px; margin: -1px 0 5px;
   font-size: 11.5px; color: var(--muted); }
-.vhist-source { display: inline-flex; align-items: center; gap: 5px; }
-.vhist-source i { display: inline-block; width: 16px; height: 2px; border-radius: 2px;
-  background: var(--brand-sky); }
-.vhist-source.mb { color: var(--src-mb); }
-.vhist-source.mb i { background: var(--src-mb); }
+.vhist-source { --vhist-colour: var(--brand-sky); display: inline-flex; align-items: center; gap: 5px;
+  color: var(--vhist-colour); }
+.vhist-source i { display: inline-block; width: 16px; height: 8px; border-radius: 2px;
+  box-sizing: border-box; border-top: 2px solid var(--vhist-colour);
+  background: color-mix(in srgb, var(--vhist-colour) 14%, transparent); }
+.vhist-source.mb { --vhist-colour: var(--src-mb); }
 .vhist-source small { color: inherit; font-size: 10.5px; }
 /* Component states are categorical timelines, not numeric curves. Every valid state owns a labelled
    colour in the state legend, on EVERY source lane; missing samples alone are hatched. Source is the
@@ -791,7 +792,6 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    by what it says, never by who said it (DESIGN.md §"Source outline and state fill are separate
    visual channels"). Put the source name directly on its lane instead of making the eye map a
    detached source legend onto two otherwise identical full-width bars. */
-.vhist-state-graph { padding-top: 58px; }
 /* State readouts are intentionally overlaid on the timeline. They can be taller than the reserved
    strip because each source/state/interval/duration field is stacked vertically; keep the bubble
    above the later-painted tracks and crosshair instead of letting the bars cut through its text. */
@@ -809,6 +809,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-state-on { background: var(--brand-sky); }
 .vhist-state-gap { background: repeating-linear-gradient(135deg, transparent 0 3px,
   var(--line) 3px 5px); }
+/* The final cell is a live observation, not another completed five-minute bucket. A quiet divider
+   makes that evidence boundary visible while the cell itself keeps the ordinary state colour. */
+.vhist-state-current { position: absolute; inset-block: 0; z-index: 1; pointer-events: none;
+  box-sizing: border-box; border-left: 2px solid var(--card); }
 .vhist-level-legend { margin-top: -1px; }
 .vhist-level { display: inline-flex; align-items: center; gap: 5px; }
 .vhist-level i { display: inline-block; width: 16px; height: 7px; border-radius: 4px;
@@ -859,7 +863,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 /* The tooltip gets its OWN strip above the plot: it follows the cursor horizontally (Grafana-style)
    but can never cover the curve it is reading — which matters most on a phone, where the finger
    already hides part of the plot. */
-.vhist-graph { position: relative; padding-top: 38px; }
+.vhist-graph { position: relative; padding-top: 20px; }
 .vhist-plot { position: relative; height: 72px; }
 /* pan-y hands VERTICAL gestures back to the page (the user must still be able to scroll past the
    chart) while horizontal movement becomes a scrub. Claiming both axes would trap page scrolling
@@ -908,12 +912,24 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   width: max-content; max-width: 100%; line-height: 1.35;
   border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
   box-shadow: 0 1px 3px rgba(0,0,0,.10); }
-.vhist-env3 .vhist-graph { padding-top: 96px; }
-.vhist-env3 .vhist-tip { min-width: min(220px, 100%); white-space: pre;
-  padding: 7px 10px; line-height: 1.55; border-radius: 8px;
+.vhist-env3 .vhist-graph { padding-top: 52px; }
+.vhist-env3 .vhist-tip { min-width: 0; white-space: nowrap; display: grid;
+  grid-template-columns: repeat(3, max-content); column-gap: 14px;
+  padding: 5px 8px; line-height: 1.35; border-radius: 8px;
   box-shadow: 0 4px 14px rgba(16,20,28,.12); }
-.vhist-line { fill: none; stroke: var(--brand-sky); stroke-width: 1.6px; stroke-linejoin: round; stroke-linecap: round; }
-.vhist-area { fill: var(--brand-sky); opacity: .13; stroke: none; }
+.vhist-env3 .vhist-tip-line { display: block; }
+.vhist-env3 .vhist-tip-meta { grid-column: 1 / -1; }
+.vhist-env3 .vhist-tip-line.env-temperature { color: var(--flow-hot); }
+.vhist-env3 .vhist-tip-line.env-humidity { color: var(--flow-cold); }
+.vhist-env3 .vhist-tip-line.env-pressure { color: var(--env-pressure); }
+.vhist-line { fill: none; stroke: var(--brand-sky); stroke-width: 1.6px; stroke-linejoin: round;
+  stroke-linecap: round; opacity: 1; }
+.vhist-area { fill: var(--brand-sky); opacity: .14; stroke: none; }
+/* A single curve keeps the quiet contrast in the reference chart. Overlaid curves retain the same
+   light-area/dark-edge construction, but their paint is reduced so crossings and covered regions
+   remain legible instead of accumulating into one opaque block. */
+.vhist-multi .vhist-line { opacity: .82; }
+.vhist-multi .vhist-area { opacity: .09; }
 .vhist-pt { fill: var(--brand-sky); stroke: none; }
 /* HomeHub/Modbus uses the same petrol source token as its live schematic pills. Separate classes on
    paths, lone points, cursor markers and the live endpoint keep the two sources consistent through
@@ -922,22 +938,39 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-area.mb { fill: var(--src-mb); }
 .vhist-pt.mb { fill: var(--src-mb); }
 .vhist-mark.mb { background: var(--src-mb); }
-.vhist-source.env-temperature { color: var(--flow-hot); }
-.vhist-source.env-temperature i, .vhist-mark.env-temperature, .vhist-now.env-temperature { background: var(--flow-hot); }
-.vhist-line.env-temperature { stroke: var(--flow-hot); stroke-width: 1.9px; }
+.vhist-source.env-temperature { --vhist-colour: var(--flow-hot); }
+.vhist-mark.env-temperature, .vhist-now.env-temperature { background: var(--flow-hot); }
+.vhist-line.env-temperature { stroke: var(--flow-hot); }
+.vhist-area.env-temperature { fill: var(--flow-hot); }
 .vhist-pt.env-temperature { fill: var(--flow-hot); }
-.vhist-source.env-humidity { color: var(--flow-cold); }
-.vhist-source.env-humidity i, .vhist-mark.env-humidity, .vhist-now.env-humidity { background: var(--flow-cold); }
-.vhist-line.env-humidity { stroke: var(--flow-cold); stroke-width: 1.8px; stroke-dasharray: 5 2; }
+.vhist-source.env-humidity { --vhist-colour: var(--flow-cold); }
+.vhist-mark.env-humidity, .vhist-now.env-humidity { background: var(--flow-cold); }
+.vhist-line.env-humidity { stroke: var(--flow-cold); }
+.vhist-area.env-humidity { fill: var(--flow-cold); }
 .vhist-pt.env-humidity { fill: var(--flow-cold); }
-.vhist-source.env-pressure { color: var(--env-pressure); }
-.vhist-source.env-pressure i, .vhist-mark.env-pressure, .vhist-now.env-pressure { background: var(--env-pressure); }
-.vhist-line.env-pressure { stroke: var(--env-pressure); stroke-width: 1.8px; stroke-dasharray: 1.5 2; }
+.vhist-source.env-pressure { --vhist-colour: var(--env-pressure); }
+.vhist-mark.env-pressure, .vhist-now.env-pressure { background: var(--env-pressure); }
+.vhist-line.env-pressure { stroke: var(--env-pressure); }
+.vhist-area.env-pressure { fill: var(--env-pressure); }
 .vhist-pt.env-pressure { fill: var(--env-pressure); }
+.vhist-mark.env-forecast-temperature { background: var(--flow-hot); }
+.vhist-mark.env-forecast-humidity { background: var(--flow-cold); }
+.vhist-mark.env-forecast-pressure { background: var(--env-pressure); }
+.vhist-line.env-forecast-temperature { stroke: var(--flow-hot); opacity: .68; }
+.vhist-line.env-forecast-humidity { stroke: var(--flow-cold); opacity: .68; }
+.vhist-line.env-forecast-pressure { stroke: var(--env-pressure); opacity: .68; }
+.vhist-area.env-forecast-temperature { fill: var(--flow-hot); opacity: .065; stroke: none; }
+.vhist-area.env-forecast-humidity { fill: var(--flow-cold); opacity: .065; stroke: none; }
+.vhist-area.env-forecast-pressure { fill: var(--env-pressure); opacity: .065; stroke: none; }
+/* Forecasts repeat the same area-plus-upper-line construction below the measured ENV III opacity;
+   the rest of the future stays transparent and provenance remains in the tooltip. */
+.vhist-forecast-divider { stroke: var(--muted); stroke-width: 1px;
+  stroke-dasharray: 3 3; opacity: .65; }
 /* The live end of the series. An HTML dot, not an SVG circle: the plot is scaled non-uniformly, so
    a circle inside it would render as an ellipse (app.js maps its % position onto the same scale). */
 .vhist-now { position: absolute; right: 0; width: 7px; height: 7px; border-radius: 50%;
   background: var(--brand); box-shadow: 0 0 0 2.5px var(--card); transform: translate(50%, -50%); }
+.vhist-now.timed { transform: translate(-50%, -50%); }
 .vhist-now.mb { background: var(--src-mb); }
 /* The same plot inside the schematic inspector — one chart, one vocabulary; only what it sits on
    differs. The card is --brand-tint rather than --card, and the "now" dot separates itself from the
@@ -945,6 +978,9 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .inspect-card .vhist-now { box-shadow: 0 0 0 2.5px var(--brand-tint); }
 .vhist-axis { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px;
   font-size: 11.5px; color: var(--muted); }
+.vhist-axis.vhist-axis-future { position: relative; min-height: 18px; }
+.vhist-axis-future .vhist-axis-now { position: absolute; left: calc(var(--now-p) * 1%);
+  transform: translateX(-50%); color: var(--muted); font-weight: 700; }
 /* Gaps are named in words, not drawn as a shaded band: the count belongs with the axis, and a band
    would read as a measured region. */
 .vhist-gap { color: var(--warn); }
@@ -1139,6 +1175,11 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
      Stack it below the time span instead of squeezing both into narrow multi-line columns. */
   .vhist-head { display: grid; justify-content: stretch; gap: 2px; }
   .vhist-range { text-align: left; }
+  /* The compact two-row climate tooltip is a desktop optimisation. A phone stacks the coloured
+     readings and reserves their full height so neither values nor chart are covered. */
+  .vhist-env3 .vhist-graph { padding-top: 96px; }
+  .vhist-env3 .vhist-tip { min-width: min(220px, 100%); white-space: pre;
+    display: block; padding: 7px 10px; line-height: 1.55; }
   .modal-actions { flex-direction: column-reverse; }
   .modal-actions .btn { flex: none; width: 100%; }
 }

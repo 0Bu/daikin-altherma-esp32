@@ -3,6 +3,7 @@
 // header owns the time-window and unit conversion that must remain host-testable. Open-Meteo's
 // hourly shortwave_radiation is the mean W/m² over the preceding hour, so two adjacent one-hour
 // values sum numerically to Wh/m² for the two-hour decision window.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -13,11 +14,14 @@ namespace daik {
 
 inline WeatherValidation open_meteo_derive_forecast(const std::vector<int64_t>& times,
                                                      const std::vector<double>& temperature_c,
+                                                     const std::vector<double>& humidity_pct,
+                                                     const std::vector<double>& pressure_hpa,
                                                      const std::vector<double>& shortwave_w_m2,
                                                      int64_t fetched_unix_s,
                                                      WeatherForecastSample& out) {
     auto fail = [](const char* why) { return WeatherValidation{false, why}; };
-    if (times.size() != temperature_c.size() || times.size() != shortwave_w_m2.size())
+    if (times.size() != temperature_c.size() || times.size() != humidity_pct.size() ||
+        times.size() != pressure_hpa.size() || times.size() != shortwave_w_m2.size())
         return fail("payload_shape_invalid");
 
     size_t decision = 0;
@@ -37,6 +41,14 @@ inline WeatherValidation open_meteo_derive_forecast(const std::vector<int64_t>& 
 
     out = WeatherForecastSample{1, "open-meteo", "icon_seamless", -1, fetched_unix_s,
                                 times[decision], (t1 + t2) / 2.0, r1 + r2};
+    out.hourly_count = std::min(WEATHER_HOURLY_CAP, times.size() - decision);
+    for (size_t i = 0; i < out.hourly_count; ++i) {
+        const size_t source = decision + i;
+        out.hourly_unix_s[i] = times[source];
+        out.hourly_temperature_c[i] = temperature_c[source];
+        out.hourly_humidity_pct[i] = humidity_pct[source];
+        out.hourly_pressure_hpa[i] = pressure_hpa[source];
+    }
     return weather_validate(out, fetched_unix_s);
 }
 

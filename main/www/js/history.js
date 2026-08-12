@@ -323,6 +323,43 @@ const ENV3_COMBINED_SERIES = Object.freeze([
   { id: "env3_humidity", label: "env.humidity" },
   { id: "env3_pressure", label: "env.pressure" },
 ]);
+const WEATHER_FORECAST_SERIES = Object.freeze([
+  { key: "temperature", api: "temperature_c", env: "temperature_c", measured: "env3_temperature",
+    source: "weather_forecast_temperature", cls: "env-forecast-temperature",
+    label: "env.temperature", unit: "°C" },
+  { key: "humidity", api: "humidity_pct", env: "humidity_pct", measured: "env3_humidity",
+    source: "weather_forecast_humidity", cls: "env-forecast-humidity",
+    label: "env.humidity", unit: "%" },
+  { key: "pressure", api: "pressure_hpa", env: "pressure_hpa", measured: "env3_pressure",
+    source: "weather_forecast_pressure", cls: "env-forecast-pressure",
+    label: "env.pressure", unit: "hPa" },
+]);
+
+// A forecast is FUTURE data, not another sampled sensor. Provider timestamps place each point to
+// the right of "now"; stale, incomplete or malformed responses disappear instead of being drawn as
+// plausible measurements. Device NTP time, not the browser clock, is the shared axis anchor.
+function weatherForecastView() {
+  const w = S.status?.weather_forecast;
+  const nowMs = Date.parse(S.status?.ntp?.time || "");
+  if (!w?.configured || !w.available || !w.fresh || !Array.isArray(w.hourly) ||
+      !Number.isFinite(nowMs)) return null;
+  const now = nowMs / 1000;
+  const points = [];
+  for (const raw of w.hourly) {
+    const number = (key) => typeof raw?.[key] === "number" ? raw[key] : Number.NaN;
+    const time = number("time_unix_s");
+    const temperature = number("temperature_c");
+    const humidity = number("humidity_pct");
+    const pressure = number("pressure_hpa");
+    if (!Number.isFinite(time) || !Number.isFinite(temperature) || temperature < -90 || temperature > 70 ||
+        !Number.isFinite(humidity) || humidity < 0 || humidity > 100 ||
+        !Number.isFinite(pressure) || pressure < 200 || pressure > 1200 ||
+        time < now - 60 || time > now + 24 * 3600) continue;
+    if (points.length && time <= points[points.length - 1].time) return null;
+    points.push({ time, temperature, humidity, pressure });
+  }
+  return points.length >= 2 ? { now, points } : null;
+}
 
 // One timeline carrying one or more independent instruments. `b0` is the firmware's monotonic
 // 5-minute bucket and therefore the authoritative alignment even before SNTP; wall time is the next
@@ -395,11 +432,12 @@ function historyView(id, source = "") {
     })));
   }
   const x10aName = id === "circulation_state" ? "MQTT" : "X10A";
-  return alignedHistoryView(id, [
+  const view = alignedHistoryView(id, [
     { source: "x10a", name: x10aName, h: S.hist.get(id) },
     { source: "modbus", name: "HomeHub · Modbus", h: S.hist.get(histCacheKey(id, "modbus")) },
     { source: "env3", name: "ENV III", h: S.hist.get(histCacheKey(id, "env3")) },
   ].filter((s) => !source || s.source === source));
+  return STATE_HIST[id] ? stateHistoryLiveView(view) : view;
 }
 
 // Categorical states need timelines, not numeric curves. Every valid state gets an explicit level,
@@ -536,6 +574,80 @@ const STATE_HIST = Object.freeze({
     ],
   },
 });
+
+// The rings contain COMPLETED five-minute buckets. Their right edge used to be labelled "now"
+// anyway, so a live state change could update the inspector headline immediately while the timeline
+// kept painting the preceding bucket all the way to that same edge. Smart Grid made the contradiction
+// especially obvious: "Recommended on" above a grey Free-running tail.
+//
+// Append one DISPLAY-ONLY current sample to every categorical lane. It is deliberately kept outside
+// `recordedN`: totals remain sampled raster time and never gain an invented full five minutes merely
+// because one live observation exists. The current cap uses the same structural concepts/semantics as
+// /values; an absent or disconnected source becomes a hatched current cap, never a borrowed state.
+const currentBinaryTenths = (row) => {
+  if (!row || row.value == null || row.binary !== true) return null;
+  const raw = String(row.value).trim();
+  return raw === "1" ? 10 : raw === "0" ? 0 : null;
+};
+
+function stateHistoryCurrent(id, source) {
+  if (source === "modbus") {
+    if (!Array.isArray(S._modbus)) return { present: false, value: null };
+    if (id === "smart_grid_mode") {
+      const row = S._modbus.find((r) => r && r.off === 56 && r.enum === "smart_grid_mode");
+      if (!row || row.value == null) return { present: true, value: null };
+      const raw = String(row.value).trim();
+      const mode = /^\d$/.test(raw) ? Number(raw) : -1;
+      return { present: true, value: mode >= 0 && mode <= 3 ? mode * 10 : null };
+    }
+    const row = S._modbus.find((r) => r && r.concept === id);
+    return { present: true, value: currentBinaryTenths(row) };
+  }
+
+  if (source !== "x10a") return { present: false, value: null };
+  if (id === "circulation_state") {
+    const c = S.status?.circulation_source;
+    if (!c) return { present: false, value: null };
+    const value = c.configured && c.has_value && c.fresh
+      ? c.state === "on" ? 10 : c.state === "off" ? 0 : null : null;
+    return { present: true, value };
+  }
+  if (!Array.isArray(S._values)) return { present: false, value: null };
+  if (S.status?.hp?.connected === false) return { present: true, value: null };
+  if (id === "smart_grid_mode") {
+    const contact = (semantic) => currentBinaryTenths(
+      S._values.find((r) => r && r.binary_semantic === semantic));
+    const c1 = contact("smart_grid_contact_1"), c2 = contact("smart_grid_contact_2");
+    const value = c1 == null || c2 == null ? null
+      : c1 === 10 ? (c2 === 10 ? 30 : 20) : (c2 === 10 ? 10 : 0);
+    return { present: true, value };
+  }
+  if (id === "buh_state") {
+    const step = (concept) => currentBinaryTenths(
+      S._values.find((r) => r && r.concept === concept));
+    const step1 = step("buh_step1"), step2 = step("buh_step2");
+    const value = step1 == null || step2 == null ? null : step2 === 10 ? 20 : step1;
+    return { present: true, value };
+  }
+  const row = S._values.find((r) => r && r.concept === id);
+  return { present: true, value: currentBinaryTenths(row) };
+}
+
+function stateHistoryLiveView(view) {
+  if (!view) return view;
+  const current = view.series.map((s) => stateHistoryCurrent(view.id, s.source));
+  if (!current.some((sample) => sample.present)) return view;
+  const recordedN = view.v.length;
+  const series = view.series.map((s, i) => ({
+    ...s, v: [...s.v, current[i].present ? current[i].value : null],
+  }));
+  const v = series.map((s) => s.v[recordedN]).find((value) => value != null) ?? null;
+  const liveSig = current.map((sample, i) =>
+    `${view.series[i].source}:${sample.present ? sample.value ?? "gap" : "absent"}`).join("/");
+  return { ...view, recordedN, liveIndex: recordedN, v: [...view.v, v], series,
+           gen: `${view.gen}/live:${liveSig}` };
+}
+
 function stateRuns(series, wanted, classify) {
   const out = [];
   for (let i = 0; i < series.v.length; i++) {
@@ -624,8 +736,9 @@ function stateRunWhen(view, from, count) {
       .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
     return `${clock(from)}–${clock(from + count)}`;
   }
-  const old = ((view.v.length - from) * view.dt) / 3600;
-  const recent = ((view.v.length - from - count) * view.dt) / 3600;
+  const n = view.recordedN ?? view.v.length;
+  const old = ((n - from) * view.dt) / 3600;
+  const recent = ((n - from - count) * view.dt) / 3600;
   return t("hist.boost_ago_range", old.toFixed(1), Math.max(0, recent).toFixed(1));
 }
 // The complete contiguous phase containing sample `i`. The same helper serves categorical states
@@ -640,17 +753,19 @@ function sampleRunAt(values, i, key = (v) => v) {
 }
 function stateHistHtml(id, name, view, wrap, cfg) {
   const n = view.v.length;
-  const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
-  const full = n * view.dt >= 23.5 * 3600;
+  const recordedN = view.recordedN ?? n;
+  const spanH = Math.max(1, Math.round((recordedN * view.dt) / 3600));
+  const full = recordedN * view.dt >= 23.5 * 3600;
   // Keep both lanes when both buses are available: a disagreement remains visible rather than
   // being merged into a plausible single answer. The preferred source is part of the concept: the
   // HomeHub owns the external SG request, while X10A leads for the physical BSH state.
   const primary = view.series.find((s) => s.source === cfg.primary) || view.series[0];
-  const active = stateRuns(primary, true, cfg.classify);
+  const recordedPrimary = { ...primary, v: primary.v.slice(0, recordedN) };
+  const active = stateRuns(recordedPrimary, true, cfg.classify);
   const total = active.reduce((sum, r) => sum + r[1] * view.dt, 0);
-  const inactive = stateRuns(primary, false, cfg.classify);
+  const inactive = stateRuns(recordedPrimary, false, cfg.classify);
   const inactiveSeconds = inactive.reduce((sum, r) => sum + r[1] * view.dt, 0);
-  const gaps = stateRuns(primary, null, cfg.classify).length;
+  const gaps = stateRuns(recordedPrimary, null, cfg.classify).length;
   const pct = (i) => ((i / n) * 100).toFixed(3);
   const tracks = view.series.map((s) => {
     const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
@@ -660,10 +775,12 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     )).join("");
     const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
       `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
+    const current = view.liveIndex == null ? ""
+      : `<span class="vhist-state-current" style="left:${pct(view.liveIndex)}%;width:${pct(1)}%"></span>`;
     const sourceLabel = s.source === "modbus" ? "Modbus" : s.name;
     return `<div class="vhist-state-lane">` +
       `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${sourceLabel}</span>` +
-      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}</div>` +
+      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}</div>` +
     `</div>`;
   }).join("");
   const levelLegend = cfg.levels
@@ -745,18 +862,14 @@ function histHtml(id, unit, name, source = "") {
   const full  = n * view.dt >= 23.5 * 3600;
   const { lo, hi, X, Y } = histScale(allPts, n);
 
-  // Contiguous runs only: each becomes its own line path (and its own area under it), so a gap is
-  // drawn as a gap. A run of ONE sample gets a dot — a lone reading between two gaps is still a
-  // measurement and dropping it would understate what the device saw.
-  // The area under the curve is dropped once the series is mostly absent. A filled area reads as
-  // "this quantity was at this level throughout", and for a sparse trend — the outdoor-air one on a
-  // mild day is measured for ~3 of 24 h — the isolated runs render as columns that look like bars of
-  // a different chart entirely. The line alone makes no continuity claim it cannot support.
+  // Contiguous runs only: each becomes one light area with its darker upper-edge line, so every
+  // numeric trend uses the same visual grammar while a gap remains a real gap. Multiple sources use
+  // the same geometry and are made more transparent by the wrapper class below. A run of ONE sample
+  // still gets a dot because there is no interval whose area or upper edge could honestly be drawn.
   let line = "", area = "", dots = "", gaps = 0, held = 0;
   for (const s of view.series) {
     const pts = s.v.map((x) => x == null ? null : x / 10);
     const sourceCls = s.source === "modbus" ? " mb" : "";
-    const dense = view.series.length === 1 && real.length >= pts.length * 0.6;
     let run = [];
     const flush = () => {
       if (!run.length) return;
@@ -765,7 +878,7 @@ function histHtml(id, unit, name, source = "") {
       } else {
         const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
         line += `<path class="vhist-line${sourceCls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
-        if (dense) area += `<path class="vhist-area${sourceCls}" d="${d}L${X(run[run.length - 1]).toFixed(1)} ${HIST_H}L${X(run[0]).toFixed(1)} ${HIST_H}Z"/>`;
+        area += `<path class="vhist-area${sourceCls}" d="${d}L${X(run[run.length - 1]).toFixed(1)} ${HIST_H}L${X(run[0]).toFixed(1)} ${HIST_H}Z"/>`;
       }
       run = [];
     };
@@ -850,7 +963,8 @@ function histHtml(id, unit, name, source = "") {
       // share of the day and the one that explains the shape of the chart.
       (held ? `<span class="vhist-idle">${esc(t("hist.heldnote", ((held * view.dt) / 3600).toFixed(1)))}</span>` : "") +
       (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
-      `<span>${esc(t("hist.now"))}</span></div>`
+      `<span>${esc(t("hist.now"))}</span></div>`,
+    view.series.length > 1 ? "vhist-multi" : ""
   );
 }
 
@@ -882,10 +996,33 @@ function env3HistHtml() {
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
   const full = n * view.dt >= 23.5 * 3600;
-  let curves = "", dots = "", nowDots = "";
+  const forecast = weatherForecastView();
+  const futureEnd = forecast?.points.at(-1)?.time;
+  const measuredStart = Number.isFinite(view.t0) ? view.t0 : null;
+  const measuredEnd = measuredStart == null ? null : measuredStart + (n - 1) * view.dt;
+  const timedForecast = forecast && measuredStart != null && forecast.now >= measuredStart &&
+    Number.isFinite(futureEnd) && futureEnd > forecast.now;
+  const domainEnd = timedForecast ? futureEnd : measuredEnd;
+  const domainSpan = timedForecast ? domainEnd - measuredStart : 0;
+  const timeX = (unix) => ((unix - measuredStart) / domainSpan) * HIST_W;
+  const sampleX = (i) => timedForecast ? timeX(measuredStart + i * view.dt)
+                                        : histScale(view.v, n).X(i);
+  const measuredEndFrac = timedForecast
+    ? Math.max(0, Math.min(1, timeX(measuredEnd) / HIST_W)) : 1;
+  const nowFrac = timedForecast
+    ? Math.max(0, Math.min(1, timeX(forecast.now) / HIST_W)) : 1;
+  const forecastSpecForMeasured = (source) =>
+    WEATHER_FORECAST_SERIES.find((spec) => spec.measured === source);
+  const scalePoints = (s) => {
+    const measured = s.v.map((v) => v == null ? null : v / 10);
+    const spec = timedForecast ? forecastSpecForMeasured(s.source) : null;
+    return spec ? [...measured, ...forecast.points.map((p) => p[spec.key])] : measured;
+  };
+  let areas = "", lines = "", dots = "", nowDots = "";
   for (const s of plotted) {
     const pts = s.v.map((v) => v == null ? null : v / 10);
-    const { X, Y } = histScale(pts, n);
+    const { Y } = histScale(scalePoints(s), n);
+    const X = sampleX;
     const cls = env3SeriesClass(s.source);
     let run = [];
     const flush = () => {
@@ -895,7 +1032,10 @@ function env3HistHtml() {
           `cy="${Y(pts[run[0]]).toFixed(1)}" r="1.8"/>`;
       } else {
         const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
-        curves += `<path class="vhist-line ${cls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
+        const first = run[0], last = run.at(-1);
+        areas += `<path class="vhist-area ${cls}" d="${d}L${X(last).toFixed(1)} ${HIST_H}` +
+          `L${X(first).toFixed(1)} ${HIST_H}Z"/>`;
+        lines += `<path class="vhist-line ${cls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
       }
       run = [];
     };
@@ -905,32 +1045,72 @@ function env3HistHtml() {
     flush();
     const last = s.v[n - 1];
     if (last != null) {
-      nowDots += `<span class="vhist-now ${cls}" ` +
-        `style="top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
+      nowDots += `<span class="vhist-now ${cls}${timedForecast ? " timed" : ""}" ` +
+        `style="${timedForecast ? `left:${(measuredEndFrac * 100).toFixed(3)}%;right:auto;` : ""}` +
+        `top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
     }
+  }
+
+  // Forecasts use the same three climate hues and scales as ENV III, but lower opacity. The
+  // future itself has no coloured background: only the quiet forecast areas and "now" divider
+  // identify it. Hourly point markers duplicated the tooltip's job and made the compact plot noisy.
+  let forecastAreas = "", forecastLines = "";
+  let futureH = 0;
+  if (timedForecast) {
+    for (const spec of WEATHER_FORECAST_SERIES) {
+      const measured = plotted.find((s) => s.source === spec.measured);
+      const rawCurrent = S.status?.env3?.[spec.env];
+      const current = typeof rawCurrent === "number" ? rawCurrent : Number.NaN;
+      const points = [];
+      if (S.status?.env3?.fresh && Number.isFinite(current))
+        points.push({ time: forecast.now, value: current, anchor: true });
+      for (const p of forecast.points) {
+        if (p.time > forecast.now) points.push({ time: p.time, value: p[spec.key], anchor: false });
+      }
+      if (points.length < 2) continue;
+      const past = measured ? measured.v.map((v) => v == null ? null : v / 10) : [];
+      const { Y } = histScale([...past, ...points.map((p) => p.value)], n);
+      const d = points.map((p, i) =>
+        `${i ? "L" : "M"}${timeX(p.time).toFixed(1)} ${Y(p.value).toFixed(1)}`).join("");
+      forecastAreas += `<path class="vhist-area ${spec.cls}" ` +
+        `d="${d}L${timeX(points.at(-1).time).toFixed(1)} ${HIST_H}` +
+        `L${timeX(points[0].time).toFixed(1)} ${HIST_H}Z"/>`;
+      forecastLines += `<path class="vhist-line ${spec.cls}" d="${d}" ` +
+        `vector-effect="non-scaling-stroke"/>`;
+    }
+    if (forecastAreas) futureH = Math.max(1, Math.round((futureEnd - forecast.now) / 3600));
   }
 
   let gaps = 0, inGap = false;
   for (const v of view.v) {
     if (v == null) { if (!inGap) gaps++; inGap = true; } else inGap = false;
   }
+  // Units belong to readings, not series names. They stay in every measured/forecast tooltip, so
+  // repeating them in this always-visible legend adds ink without adding meaning.
   const legend = `<div class="vhist-legend">${plotted.map((s) =>
-    `<span class="vhist-source ${env3SeriesClass(s.source)}"><i></i>${esc(s.name)}` +
-      `${s.unit ? ` <small>${esc(s.unit)}</small>` : ""}</span>`).join("")}</div>`;
+    `<span class="vhist-source ${env3SeriesClass(s.source)}"><i></i>${esc(s.name)}</span>`
+  ).join("")}</div>`;
 
   const pi = histPinIndex(ENV3_COMBINED_ID, view);
   let pinTip = "", pinCross = "", pinMarks = "";
   if (pi >= 0) {
-    const px = (scrubFrac(pi, n) * 100).toFixed(3);
+    const forecastPin = pi >= n ? forecastScrubView(view) : null;
+    const point = forecastPin?.points[pi - n];
+    const px = ((point ? forecastPin.xFrac(point.time) : scrubFrac(pi, n) * measuredEndFrac) * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
-    pinMarks = plotted.map((s) => {
-      if (s.v[pi] == null) return "";
-      const { Y } = histScale(s.v.map((v) => v == null ? null : v / 10), n);
-      return `<span class="vhist-mark vhist-pinned ${env3SeriesClass(s.source)}" ` +
-        `style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
-    }).join("");
+    pinMarks = point
+      ? WEATHER_FORECAST_SERIES.map((spec) =>
+          `<span class="vhist-mark vhist-pinned ${spec.cls}" ` +
+          `style="left:${px}%;top:${((forecastPin.Y(spec.key, point[spec.key]) / HIST_H) * 100).toFixed(2)}%"></span>`
+        ).join("")
+      : plotted.map((s) => {
+          if (s.v[pi] == null) return "";
+          const { Y } = histScale(scalePoints(s), n);
+          return `<span class="vhist-mark vhist-pinned ${env3SeriesClass(s.source)}" ` +
+            `style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
+        }).join("");
     pinTip = `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${px}">` +
-      `${esc(scrubText(view, pi))}</div>`;
+      `${env3ScrubHtml(view, pi)}</div>`;
   }
 
   return wrap(
@@ -938,19 +1118,32 @@ function env3HistHtml() {
       `<span class="vhist-range">${esc(t("env.history_scales"))}</span></div>` + legend +
     `<div class="vhist-graph">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
-      `<div class="vhist-plot" data-hist="${ENV3_COMBINED_ID}" data-n="${n}" tabindex="0" role="img" ` +
+      `<div class="vhist-plot" data-hist="${ENV3_COMBINED_ID}" data-n="${n}" ` +
+        `data-measured-p="${(measuredEndFrac * 100).toFixed(3)}" tabindex="0" role="img" ` +
         `aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", t("env.history_title"),
           pi >= 0 ? scrubText(view, pi) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">` +
-          `${curves}${dots}</svg>${nowDots}${pinCross}${pinMarks}` +
+          `${areas}${forecastAreas}${lines}${forecastLines}${dots}` +
+          (forecastAreas ? `<line class="vhist-forecast-divider" x1="${timeX(forecast.now).toFixed(1)}" y1="0" ` +
+            `x2="${timeX(forecast.now).toFixed(1)}" y2="${HIST_H}" vector-effect="non-scaling-stroke"/>` : "") +
+          `</svg>${nowDots}${pinCross}${pinMarks}` +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         plotted.map((s) => `<span class="vhist-mark vhist-live ${env3SeriesClass(s.source)}" ` +
           `data-source="${s.source}" hidden></span>`).join("") +
+        (forecastAreas ? WEATHER_FORECAST_SERIES.map((spec) =>
+          `<span class="vhist-mark vhist-live ${spec.cls}" data-source="${spec.source}" hidden></span>`
+        ).join("") : "") +
       `</div>` +
     `</div>` +
-    `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
-      (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
-      `<span>${esc(t("hist.now"))}</span></div>`
+    (forecastAreas
+      ? `<div class="vhist-axis vhist-axis-future" style="--now-p:${(nowFrac * 100).toFixed(3)}">` +
+          `<span>${esc(t("hist.ago", spanH))}</span>` +
+          `<span class="vhist-axis-now">${esc(t("hist.now"))}</span>` +
+          `<span>${esc(t("hist.in_hours", futureH))}</span></div>`
+      : `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
+          (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
+          `<span>${esc(t("hist.now"))}</span></div>`),
+    "vhist-multi"
   );
 }
 
@@ -965,6 +1158,46 @@ function env3HistHtml() {
 // sample is drawn at the right edge, which is also where "now" is.
 function scrubFrac(i, n) { return n <= 1 ? 1 : i / (n - 1); }
 
+// The outdoor-climate plot has two rasters on one time axis: five-minute measurements up to now,
+// then provider-timestamped Open-Meteo hours. One geometry helper keeps pointer, touch, keyboard and
+// pinned tooltips on the same forecast point the SVG drew.
+function forecastScrubView(h) {
+  if (!h || h.id !== ENV3_COMBINED_ID || !h.v.length || !Number.isFinite(h.t0)) return null;
+  const forecast = weatherForecastView();
+  const futureEnd = forecast?.points.at(-1)?.time;
+  if (!forecast || !Number.isFinite(futureEnd) || futureEnd <= forecast.now ||
+      forecast.now < h.t0) return null;
+  const points = forecast.points.filter((p) => p.time > forecast.now);
+  if (!points.length) return null;
+  const domainSpan = futureEnd - h.t0;
+  if (!(domainSpan > 0)) return null;
+  const measuredEnd = h.t0 + (h.v.length - 1) * h.dt;
+  const xFrac = (time) => Math.max(0, Math.min(1, (time - h.t0) / domainSpan));
+  const scales = {};
+  for (const spec of WEATHER_FORECAST_SERIES) {
+    const measured = h.series.find((s) => s.source === spec.measured);
+    const scaleValues = measured ? measured.v.map((v) => v == null ? null : v / 10) : [];
+    const rawCurrent = S.status?.env3?.[spec.env];
+    const current = typeof rawCurrent === "number" ? rawCurrent : Number.NaN;
+    if (S.status?.env3?.fresh && Number.isFinite(current)) scaleValues.push(current);
+    scaleValues.push(...points.map((p) => p[spec.key]));
+    scales[spec.key] = histScale(scaleValues, h.v.length).Y;
+  }
+  return {
+    points,
+    measuredFrac: xFrac(measuredEnd),
+    nowFrac: xFrac(forecast.now),
+    xFrac,
+    Y: (key, value) => scales[key](value),
+  };
+}
+
+function scrubCount(plot) {
+  const h = historyView(plot.dataset.hist, plot.dataset.source || "");
+  const forecast = forecastScrubView(h);
+  return (h?.v.length || 0) + (forecast?.points.length || 0);
+}
+
 // ── Pinning ─────────────────────────────────────────────────────────────────────────────────────
 // A tap PINS the readout so the value stays legible after the finger lifts; holding is no longer
 // required. Hover remains transient and simply previews over the pin without disturbing it.
@@ -976,6 +1209,11 @@ function scrubFrac(i, n) { return n <= 1 ? 1 : i / (n - 1); }
 function histPinIndex(id, h) {
   const p = S.histPin.get(id);
   if (!p || !h || !h.v.length) return -1;
+  if (p.forecast) {
+    const forecast = forecastScrubView(h);
+    const i = forecast?.points.findIndex((point) => point.time === p.t) ?? -1;
+    return i < 0 ? -1 : h.v.length + i;
+  }
   if (p.t != null) {
     if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
     const rel = p.t - h.t0, half = h.dt / 2;
@@ -989,8 +1227,11 @@ function histPinIndex(id, h) {
 function histPinToggle(id, i, source = "") {
   const h = historyView(id, source);
   if (!h || !h.v.length) return;
-  i = Math.max(0, Math.min(h.v.length - 1, i));
+  const forecast = forecastScrubView(h);
+  const total = h.v.length + (forecast?.points.length || 0);
+  i = Math.max(0, Math.min(total - 1, i));
   if (histPinIndex(id, h) === i) S.histPin.delete(id);
+  else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
   else if (h.t0 != null) S.histPin.set(id, { t: h.t0 + i * h.dt });
   else S.histPin.set(id, { i, gen: h.gen });
   // Render PAST the click guard. That guard exists to stop a POLL from replacing the DOM in the
@@ -1006,12 +1247,26 @@ function histPinToggle(id, i, source = "") {
 // (history carries t0, the unix instant of sample 0), else its age. A gap says so rather than
 // showing the neighbouring reading, which would attribute a measurement to a minute that has none.
 function scrubText(h, i) {
+  if (h.id === ENV3_COMBINED_ID && i >= h.v.length) {
+    const forecast = forecastScrubView(h);
+    const point = forecast?.points[i - h.v.length];
+    if (!point) return "";
+    const locale = LANG === "de" ? "de-DE" : "en-US";
+    const when = new Date(point.time * 1000)
+      .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
+    const value = (raw) => raw.toLocaleString(locale, {
+      minimumFractionDigits: 1, maximumFractionDigits: 1,
+    });
+    return `${when}\n${t("hist.forecast")}` + WEATHER_FORECAST_SERIES.map((spec) =>
+      `\n${t(spec.label)}  ${value(point[spec.key])} ${spec.unit}`).join("");
+  }
   const pointWhen = () => {
+    if (h.liveIndex === i) return t("hist.now");
     if (h.t0 != null) {
       return new Date((h.t0 + i * h.dt) * 1000)
         .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
     }
-    const ageH = ((h.v.length - 1 - i) * h.dt) / 3600;
+    const ageH = (((h.recordedN ?? h.v.length) - 1 - i) * h.dt) / 3600;
     return ageH < 0.05 ? t("hist.now") : t("hist.rel", ageH.toFixed(1));
   };
   const valueText = (s) => {
@@ -1051,7 +1306,6 @@ function scrubText(h, i) {
     // to carry both lanes; source names and sampled durations stay out of this compact readout.
     if (cfg.compactTooltip) {
       const primary = h.series.find((s) => s.source === cfg.primary) || h.series[0];
-      const [from, count] = sampleRunAt(primary.v, i);
       const v = primary.v[i];
       let status = t("hist.nm");
       if (v != null) {
@@ -1062,6 +1316,9 @@ function scrubText(h, i) {
           if (state != null) status = t(state ? "hist.state_active" : "hist.state_off");
         }
       }
+      if (h.liveIndex === i) return `${t("hist.now")} · ${status}`;
+      const [from, count] = sampleRunAt(
+        h.liveIndex == null ? primary.v : primary.v.slice(0, h.recordedN), i);
       return `${stateRunWhen(h, from, count)} · ${status}`;
     }
     // A state chart is already a sequence of PHASES. Hovering any point therefore names the whole
@@ -1071,7 +1328,12 @@ function scrubText(h, i) {
     // same phase, collapse their duplicate prose into one explicitly shared source block. A genuine
     // disagreement still renders as two consecutive blocks, so compactness never hides evidence.
     const blocks = h.series.map((s) => {
-      const [from, count] = sampleRunAt(s.v, i);
+      if (h.liveIndex === i) return {
+        source: s.source === "modbus" ? "Modbus" : s.name,
+        detail: `${t("hist.now")} · ${valueText(s)}`,
+      };
+      const [from, count] = sampleRunAt(
+        h.liveIndex == null ? s.v : s.v.slice(0, h.recordedN), i);
       return {
         source: s.source === "modbus" ? "Modbus" : s.name,
         detail: t(cfg.run, valueText(s), stateRunWhen(h, from, count), histDuration(count * h.dt)),
@@ -1099,13 +1361,35 @@ function scrubText(h, i) {
   return pointWhen() + " · " + val;
 }
 
-// Paint the crosshair for sample `i`. Pure DOM writes on the existing nodes — no innerHTML, so a
-// drag never rebuilds what it is holding on to.
+// The combined ENV III tooltip is the one place where three independently scaled instruments are
+// read together. Colour the complete measurement row (name AND value) with the same token as its
+// area/legend; keep time and forecast provenance neutral. `scrubText()` remains the authoritative
+// content formatter for accessibility and tests. Every line is escaped before this helper returns
+// markup, so switching the live bubble from textContent to innerHTML below does not create an HTML
+// injection path through translations, units or device data.
+function env3ScrubHtml(h, i) {
+  const lines = scrubText(h, i).split("\n");
+  const firstMeasurement = i >= h.v.length ? 2 : 1;
+  const classes = ["env-temperature", "env-humidity", "env-pressure"];
+  // Time and forecast provenance share one neutral header. On a wide card the three coloured
+  // readings then fit on one row, which lets the chart sit much closer to its legend. CSS stacks
+  // the same escaped spans again on a phone; the plain-text accessibility formatter stays intact.
+  const meta = lines.slice(0, firstMeasurement).join(" · ");
+  return `<span class="vhist-tip-line vhist-tip-meta">${esc(meta)}</span>` +
+    lines.slice(firstMeasurement).map((line, index) =>
+      `<span class="vhist-tip-line ${classes[index]}">${esc(line)}</span>`
+    ).join("");
+}
+
+// Paint the crosshair for sample `i` on the existing nodes. A drag never rebuilds the plot; only
+// the ENV III bubble replaces its tiny, fully escaped set of coloured line spans.
 function scrubMove(plot, i) {
   const h = historyView(plot.dataset.hist, plot.dataset.source || "");
   const n = +plot.dataset.n;
   if (!h || !n) return;
-  i = Math.max(0, Math.min(n - 1, i));
+  const forecast = forecastScrubView(h);
+  const total = n + (forecast?.points.length || 0);
+  i = Math.max(0, Math.min(total - 1, i));
   const graph = plot.parentElement;
   // .vhist-live, never the bare class: a PINNED crosshair carries the same visual classes and sits
   // EARLIER in the DOM, so a bare querySelector returned the pin — the hover then wrote into it and
@@ -1114,7 +1398,28 @@ function scrubMove(plot, i) {
   const cross = plot.querySelector(".vhist-cross.vhist-live");
   const marks = [...plot.querySelectorAll(".vhist-mark.vhist-live")];
   const w = plot.clientWidth;
-  const frac = scrubFrac(i, n);
+  if (i >= n && forecast) {
+    const point = forecast.points[i - n];
+    const frac = forecast.xFrac(point.time);
+    const x = frac * w;
+    cross.hidden = false;
+    cross.style.left = x.toFixed(1) + "px";
+    for (const mark of marks) {
+      const spec = WEATHER_FORECAST_SERIES.find((item) => item.source === mark.dataset.source);
+      mark.hidden = !spec;
+      if (!spec) continue;
+      mark.style.left = x.toFixed(1) + "px";
+      mark.style.top = ((forecast.Y(spec.key, point[spec.key]) / HIST_H) * 100).toFixed(2) + "%";
+    }
+    tip.hidden = false;
+    if (h.id === ENV3_COMBINED_ID) tip.innerHTML = env3ScrubHtml(h, i);
+    else tip.textContent = scrubText(h, i);
+    tip.style.setProperty("--tip-p", (frac * 100).toFixed(3));
+    return;
+  }
+  const measuredFrac = Number.isFinite(+plot.dataset.measuredP)
+    ? Math.max(0.01, Math.min(1, +plot.dataset.measuredP / 100)) : 1;
+  const frac = scrubFrac(i, n) * measuredFrac;
   const x = frac * w;
 
   cross.hidden = false;
@@ -1128,14 +1433,17 @@ function scrubMove(plot, i) {
     const s = h.series.find((q) => q.source === mark.dataset.source);
     const v = s ? s.v[i] : null;
     if (v == null) { mark.hidden = true; continue; }
-    const Y = separateScales
-      ? histScale(s.v.map((z) => z == null ? null : z / 10), n).Y : sharedY;
+    const scaleValues = s.v.map((z) => z == null ? null : z / 10);
+    const spec = forecast && WEATHER_FORECAST_SERIES.find((item) => item.measured === s.source);
+    if (spec) scaleValues.push(...weatherForecastView().points.map((point) => point[spec.key]));
+    const Y = separateScales ? histScale(scaleValues, n).Y : sharedY;
     mark.hidden = false;
     mark.style.left = x.toFixed(1) + "px";
     mark.style.top = ((Y(v / 10) / HIST_H) * 100).toFixed(2) + "%";
   }
   tip.hidden = false;
-  tip.textContent = scrubText(h, i);
+  if (h.id === ENV3_COMBINED_ID) tip.innerHTML = env3ScrubHtml(h, i);
+  else tip.textContent = scrubText(h, i);
   // The bubble is placed by POSITION, never by measured width: --tip-p slides its anchor from its
   // own left edge at 0 to its right edge at 100, so it stays inside the card at every sample and
   // at every panel width (style.css, .vhist-tip). Measuring here is what made the right edge
@@ -1147,7 +1455,20 @@ function scrubMove(plot, i) {
 function scrubIndex(plot, clientX) {
   const r = plot.getBoundingClientRect();
   const n = +plot.dataset.n;
-  return Math.round(((clientX - r.left) / (r.width || 1)) * (n - 1));
+  const h = historyView(plot.dataset.hist, plot.dataset.source || "");
+  const forecast = forecastScrubView(h);
+  const rawFrac = Math.max(0, Math.min(1, (clientX - r.left) / (r.width || 1)));
+  if (forecast && rawFrac > forecast.nowFrac) {
+    let nearest = 0, distance = Infinity;
+    forecast.points.forEach((point, i) => {
+      const d = Math.abs(forecast.xFrac(point.time) - rawFrac);
+      if (d < distance) { nearest = i; distance = d; }
+    });
+    return n + nearest;
+  }
+  const measuredFrac = Number.isFinite(+plot.dataset.measuredP)
+    ? Math.max(0.01, Math.min(1, +plot.dataset.measuredP / 100)) : 1;
+  return Math.max(0, Math.min(n - 1, Math.round((rawFrac / measuredFrac) * (n - 1))));
 }
 
 // A scrub freezes the whole value grid, so it MUST be impossible to leave one hanging: a pointerdown

@@ -6308,21 +6308,33 @@ static void test_weather_forecast_contract() {
         times.push_back(value);
     }
     const std::vector<double> temperature{6.0, 7.0, 8.0, 10.0};
+    const std::vector<double> humidity{81.0, 79.0, 76.0, 72.0};
+    const std::vector<double> pressure{1002.0, 1003.0, 1004.0, 1005.0};
     const std::vector<double> shortwave{0.0, 50.0, 100.0, 200.0};
     WeatherForecastSample derived;
     WeatherValidation dv = open_meteo_derive_forecast(
-        times, temperature, shortwave, fetched, derived);
+        times, temperature, humidity, pressure, shortwave, fetched, derived);
     CHECK(dv.valid);
     CHECK(derived.provider == "open-meteo" && derived.model == "icon_seamless");
     CHECK(derived.issued_unix_s == -1 && derived.decision_unix_s == decision);
     CHECK(std::abs(derived.outdoor_mean_2h_c - 9.0) < 0.001);
     CHECK(std::abs(derived.solar_energy_2h_wh_m2 - 300.0) < 0.001);
+    CHECK(derived.hourly_count == 3);
+    CHECK(derived.hourly_unix_s[0] == decision);
+    CHECK(std::abs(derived.hourly_temperature_c[2] - 10.0) < 0.001);
+    CHECK(std::abs(derived.hourly_humidity_pct[1] - 76.0) < 0.001);
+    CHECK(std::abs(derived.hourly_pressure_hpa[0] - 1003.0) < 0.001);
+    WeatherForecastSample invalid_hourly = derived;
+    invalid_hourly.hourly_humidity_pct[0] = 101.0;
+    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_humidity");
     std::vector<double> short_payload{0.0, 1.0};
     CHECK(std::string(open_meteo_derive_forecast(
-          times, temperature, short_payload, fetched, derived).reason) == "payload_shape_invalid");
+          times, temperature, humidity, pressure, short_payload, fetched, derived).reason) ==
+          "payload_shape_invalid");
     times[2] += 1;
     CHECK(std::string(open_meteo_derive_forecast(
-          times, temperature, shortwave, fetched, derived).reason) == "non_hourly_horizon");
+          times, temperature, humidity, pressure, shortwave, fetched, derived).reason) ==
+          "non_hourly_horizon");
 }
 
 static void test_mcp() {

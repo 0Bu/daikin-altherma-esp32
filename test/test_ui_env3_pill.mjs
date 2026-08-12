@@ -66,10 +66,20 @@ elements.gEnv3.querySelector = (selector) => selector === ":scope > title" ? nat
 elements.gEnv3.dataset = { insp: "env3" };
 
 const now = Date.now();
+const currentUnix = Date.parse("2026-08-12T10:00:00Z") / 1000;
 const S = {
   status: {
     env3: { supported: true, enabled: true, fresh: true, error: "",
             temperature_c: 21.5, humidity_pct: 48, pressure_hpa: 1007 },
+    ntp: { synced: true, time: "2026-08-12T10:00:00Z" },
+    weather_forecast: {
+      configured: true, available: true, fresh: true,
+      hourly: [
+        { time_unix_s: currentUnix + 3600, temperature_c: 22.0, humidity_pct: 46.0, pressure_hpa: 1008.0 },
+        { time_unix_s: currentUnix + 7200, temperature_c: 23.0, humidity_pct: 44.0, pressure_hpa: 1009.0 },
+        { time_unix_s: currentUnix + 10800, temperature_c: 22.5, humidity_pct: 45.0, pressure_hpa: 1008.5 },
+      ],
+    },
     history: { dt: 300, rows: [], modbus_rows: [], env3_rows: [
       { id: "env3_temperature", label: "ENV III temperature" },
       { id: "env3_humidity", label: "ENV III humidity" },
@@ -78,10 +88,13 @@ const S = {
   },
   hist: new Map([
     ["env3:env3_temperature", { at: now, gen: 1, source: "env3", dt: 300, unit: "°C", b0: 1,
+                                t0: currentUnix - 600,
                                 v: [205, 210, 215] }],
     ["env3:env3_humidity", { at: now, gen: 1, source: "env3", dt: 300, unit: "%", b0: 1,
+                             t0: currentUnix - 600,
                              v: [500, 490, 480] }],
     ["env3:env3_pressure", { at: now, gen: 1, source: "env3", dt: 300, unit: "hPa", b0: 1,
+                             t0: currentUnix - 600,
                              v: [10050, 10060, 10070] }],
   ]),
   histBusy: new Set(), histPin: new Map(), insp: "env3", inspSig: "", inspHistSig: "",
@@ -104,6 +117,7 @@ vm.runInContext(`${source}
     render: () => { LANG = "de"; renderEnv3Pill(); renderInspect(); },
     pill: () => { LANG = "de"; renderEnv3Pill(); },
     tooltip: (i) => { LANG = "de"; return scrubText(historyView(ENV3_COMBINED_ID), i); },
+    tooltipHtml: (i) => { LANG = "de"; return env3ScrubHtml(historyView(ENV3_COMBINED_ID), i); },
   };`, sandbox, { filename: "main/www/app.sources" });
 
 sandbox.__api.render();
@@ -132,9 +146,73 @@ assert.equal(elements.inspRows.innerHTML, "",
 assert.match(elements.inspHist.innerHTML,
   /data-hist="env3_combined"[\s\S]*env-temperature[\s\S]*env-humidity[\s\S]*env-pressure/,
   "the infobox must end with one shared timeline carrying all three independently scaled series");
+assert.match(elements.inspHist.innerHTML,
+  /vhist-area env-temperature[\s\S]*vhist-area env-humidity[\s\S]*vhist-area env-pressure/,
+  "ENV III measurements must retain the shared light areas");
+assert.match(elements.inspHist.innerHTML,
+  /vhist-line env-temperature[\s\S]*vhist-line env-humidity[\s\S]*vhist-line env-pressure/,
+  "each ENV III area must carry the same darker line on its upper edge");
+assert.match(elements.inspHist.innerHTML,
+  /env-forecast-temperature[\s\S]*env-forecast-humidity[\s\S]*env-forecast-pressure[\s\S]*vhist-forecast-divider/,
+  "all three Open-Meteo forecasts must share the future plot with a visible now divider");
+assert.match(elements.inspHist.innerHTML,
+  /vhist-line env-forecast-temperature[\s\S]*vhist-line env-forecast-humidity[\s\S]*vhist-line env-forecast-pressure/,
+  "forecast areas must use the same darker upper-edge line as every numeric trend");
+assert.match(elements.inspHist.innerHTML, /^<div class="vhist vhist-env3 vhist-multi">/,
+  "the overlaid ENV III and forecast series must use the transparent multi-series contract");
+assert.doesNotMatch(elements.inspHist.innerHTML,
+  /<circle class="vhist-pt env-forecast-/,
+  "forecast areas must stay quiet instead of marking every provider hour with a large point");
+assert.doesNotMatch(elements.inspHist.innerHTML,
+  /<span class="vhist-source env-forecast-/,
+  "the measured-variable legend must not repeat Open-Meteo forecast entries");
+assert.doesNotMatch(elements.inspHist.innerHTML,
+  /Open-Meteo · Prognose/,
+  "Open-Meteo provenance belongs in the forecast tooltip, not the always-visible legend");
+const legendHtml = elements.inspHist.innerHTML.match(/<div class="vhist-legend">([\s\S]*?)<\/div>/)?.[1] || "";
+assert.match(legendHtml,
+  /env-temperature[^>]*><i><\/i>Temperatur<\/span>[\s\S]*env-humidity[^>]*><i><\/i>Luftfeuchte<\/span>[\s\S]*env-pressure[^>]*><i><\/i>Luftdruck<\/span>/,
+  "the legend must retain only the three coloured measurement names");
+assert.doesNotMatch(legendHtml, /<small>|°C|%|hPa/,
+  "units belong in the tooltip, not the always-visible legend");
+assert.match(style, /\.vhist-area\.env-forecast-temperature\s*\{[^}]*opacity:\s*\.065/);
+assert.match(style, /\.vhist-multi \.vhist-area\s*\{[^}]*opacity:\s*\.09/,
+  "measured ENV III areas must use the shared multi-series transparency");
+assert.match(style, /\.vhist-line\.env-forecast-temperature\s*\{[^}]*opacity:\s*\.68/,
+  "forecast upper-edge lines must be quieter than measured upper-edge lines");
+assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-temperature\s*\{[^}]*color:\s*var\(--flow-hot\)/);
+assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-humidity\s*\{[^}]*color:\s*var\(--flow-cold\)/);
+assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-pressure\s*\{[^}]*color:\s*var\(--env-pressure\)/);
+assert.match(style, /\.vhist-env3 \.vhist-graph\s*\{[^}]*padding-top:\s*52px/,
+  "wide climate charts must sit close to their legend instead of reserving a five-line gap");
+assert.match(style,
+  /\.vhist-env3 \.vhist-tip\s*\{[^}]*grid-template-columns:\s*repeat\(3, max-content\)/,
+  "the three wide-screen readings must share one compact tooltip row");
+assert.match(style,
+  /@media \(max-width: 480px\)[\s\S]*\.vhist-env3 \.vhist-graph\s*\{[^}]*padding-top:\s*96px[\s\S]*\.vhist-env3 \.vhist-tip\s*\{[^}]*display:\s*block/,
+  "phones must stack the same tooltip rows and reserve enough height for them");
+const measuredClock = new Date(currentUnix * 1000)
+  .toLocaleTimeString("de", { hour: "2-digit", minute: "2-digit" });
 assert.equal(sandbox.__api.tooltip(2),
-  "jetzt\nTemperatur  21,5 °C\nLuftfeuchte  48,0 %\nLuftdruck  1.007,0 hPa",
+  `${measuredClock}\nTemperatur  21,5 °C\nLuftfeuchte  48,0 %\nLuftdruck  1.007,0 hPa`,
   "one readable tooltip must report the selected instant and all three measurements");
+assert.equal(sandbox.__api.tooltipHtml(2),
+  `<span class="vhist-tip-line vhist-tip-meta">${measuredClock}</span>` +
+  `<span class="vhist-tip-line env-temperature">Temperatur  21,5 °C</span>` +
+  `<span class="vhist-tip-line env-humidity">Luftfeuchte  48,0 %</span>` +
+  `<span class="vhist-tip-line env-pressure">Luftdruck  1.007,0 hPa</span>`,
+  "each measured tooltip row must colour its name and value with the matching series token");
+const forecastClock = new Date((currentUnix + 3600) * 1000)
+  .toLocaleTimeString("de", { hour: "2-digit", minute: "2-digit" });
+assert.equal(sandbox.__api.tooltip(3),
+  `${forecastClock}\nOpen-Meteo · Prognose\nTemperatur  22,0 °C\nLuftfeuchte  46,0 %\nLuftdruck  1.008,0 hPa`,
+  "the same tooltip path must expose every provider-timestamped future value");
+assert.equal(sandbox.__api.tooltipHtml(3),
+  `<span class="vhist-tip-line vhist-tip-meta">${forecastClock} · Open-Meteo · Prognose</span>` +
+  `<span class="vhist-tip-line env-temperature">Temperatur  22,0 °C</span>` +
+  `<span class="vhist-tip-line env-humidity">Luftfeuchte  46,0 %</span>` +
+  `<span class="vhist-tip-line env-pressure">Luftdruck  1.008,0 hPa</span>`,
+  "forecast provenance stays neutral while all three forecast rows keep their series colours");
 
 S.status.env3 = { ...S.status.env3, fresh: false, error: "collecting" };
 S.inspSig = "";

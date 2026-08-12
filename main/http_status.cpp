@@ -642,6 +642,23 @@ void http_append_status_json(std::string& j, bool redact) {
     j += jstr(!weather_configured ? "disabled" : (safe_mode_active() ? "waiting" : wf.state));
     j += ",\"outdoor_mean_2h_c\":"; j += weather_has_value ? weather_outdoor : "null";
     j += ",\"solar_energy_2h_wh_m2\":"; j += weather_has_value ? weather_solar : "null";
+    j += ",\"hourly\":[";
+    if (weather_has_value) {
+        const size_t count = std::min(wf.hourly_count, WEATHER_HOURLY_CAP);
+        for (size_t i = 0; i < count; ++i) {
+            if (i) j += ',';
+            char temperature[32] = {0}, humidity[32] = {0}, pressure[32] = {0};
+            std::snprintf(temperature, sizeof(temperature), "%.6g", wf.hourly_temperature_c[i]);
+            std::snprintf(humidity, sizeof(humidity), "%.6g", wf.hourly_humidity_pct[i]);
+            std::snprintf(pressure, sizeof(pressure), "%.6g", wf.hourly_pressure_hpa[i]);
+            j += "{\"time_unix_s\":"; j += std::to_string(wf.hourly_unix_s[i]);
+            j += ",\"temperature_c\":"; j += temperature;
+            j += ",\"humidity_pct\":"; j += humidity;
+            j += ",\"pressure_hpa\":"; j += pressure;
+            j += '}';
+        }
+    }
+    j += ']';
     j += ",\"issued_at\":";
     j += weather_has_value && wf.issued_unix_s >= 0 ? jstr(rfc3339_utc(wf.issued_unix_s)) : "null";
     j += ",\"fetched_at\":";

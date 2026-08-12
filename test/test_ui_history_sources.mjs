@@ -11,6 +11,13 @@ const firmwareHistory = fs.readFileSync(new URL("../main/history.cpp", import.me
 const mqtt = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*z-index:\s*2[^}]*white-space:\s*pre;/,
   "state tooltips must paint over the timeline and honor only their deliberate vertical breaks");
+assert.match(style, /\.vhist-graph\s*\{[^}]*padding-top:\s*20px;/,
+  "numeric and categorical plots must share the compact legend-to-graph spacing");
+assert.doesNotMatch(style, /\.vhist-state-graph\s*\{[^}]*padding-top:/,
+  "categorical timelines must not reintroduce a larger spacing override");
+assert.match(style,
+  /\.vhist-state-current \{[^}]*border-left:\s*2px solid var\(--card\);/,
+  "every categorical track must visibly separate its live observation from completed raster buckets");
 // Source outline and state fill are SEPARATE visual channels (DESIGN.md). A blanket source fill on
 // the HomeHub lane repaints every phase one colour, which is not a cosmetic loss: it erased all four
 // Smart-Grid modes into a single bar, and that bar read as a STATE, because petrol is the legend
@@ -60,6 +67,7 @@ const S = {
       { id: "buh_step2", label: "BUH Step2" },
       { id: "valve_dhw", label: "3way valve(On:DHW_Off:Space)" },
       { id: "valve_heat", label: "2way valve(On:Heat_Off:Cool)" },
+      { id: "water_flow_switch", label: "Water flow switch" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
       { id: "circulation_state", label: "DHW circulation pump" },
     ],
@@ -199,6 +207,35 @@ assert.match(html, /vhist-line mb/);
 assert.match(html, /45\.2 – 45\.6 °C/,
   "both sources share one vertical scale, including the Modbus-only maximum");
 
+// Every numeric chart uses the same light-area/dark-upper-edge grammar. A single series keeps the
+// reference opacity; paired instruments retain both areas and both lines under a transparent wrapper.
+S.hist.set("pump_signal", { at: 1, gen: 1, dt: 300, unit: "%", t0: null, b0: 100,
+  held: [], v: [700, 650, 600] });
+const singleAreaHtml = h.histHtml("pump_signal", "%", "Pumpensignal");
+assert.match(singleAreaHtml, /^<div class="vhist">[\s\S]*vhist-area[\s\S]*vhist-line/,
+  "a single numeric trend must draw a light area before its darker upper-edge line");
+assert.doesNotMatch(singleAreaHtml, /vhist-multi/,
+  "a single trend must keep the reference opacity");
+S.hist.set("leaving_water", { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
+  held: [], v: [400, 410, 420] });
+S.hist.set("modbus:leaving_water", { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
+  held: [], v: [401, 411, 421] });
+const pairedAreaHtml = h.histHtml("leaving_water", "°C", "Vorlauftemperatur");
+assert.match(pairedAreaHtml, /^<div class="vhist vhist-multi">/,
+  "overlaid numeric trends must opt into the reduced-opacity paint contract");
+assert.match(pairedAreaHtml,
+  /vhist-area"[\s\S]*vhist-area mb[\s\S]*vhist-line"[\s\S]*vhist-line mb/,
+  "both instruments must retain a filled area and a darker line on its upper edge");
+assert.match(style, /\.vhist-area\s*\{[^}]*opacity:\s*\.14/,
+  "the reference single-series area must remain light");
+assert.match(style, /\.vhist-multi \.vhist-area\s*\{[^}]*opacity:\s*\.09/,
+  "overlaid areas must be more transparent than a single series");
+assert.match(style, /\.vhist-multi \.vhist-line\s*\{[^}]*opacity:\s*\.82/,
+  "overlaid upper-edge lines must remain distinct without becoming opaque");
+assert.match(style,
+  /\.vhist-source i\s*\{[^}]*border-top:\s*2px solid var\(--vhist-colour\)[^}]*color-mix\(/,
+  "numeric legend samples must repeat the light-area/dark-upper-edge grammar");
+
 // A derived curve keeps the UNION of its input rasters. Before this contract, taking the shortest
 // input collapsed an 11-hour chart to 1 or 8 hours after one register appeared/reset later.
 S.hist.set("leaving_water", { at: Date.now(), gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
@@ -331,6 +368,26 @@ assert.match(boostModbusHtml, /data-source="modbus"/,
   "scrubbing and pinning must resolve the same Modbus-only view that the chart renders");
 assert.match(h.scrubText(boostModbusView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
 assert.doesNotMatch(h.scrubText(boostModbusView, 2), /X10A|Modbus|Boost|Empfehlung|ca\.|min/);
+
+// Regression: /history ends at the newest COMPLETED bucket while /values already carries the live
+// state. The chart must not paint that old bucket through the edge labelled "jetzt". Append the
+// current observation as its own cap, keep it scrub-readable, and exclude it from sampled totals.
+S._modbus = [{ off: 56, value: 2, enum: "smart_grid_mode" }];
+const liveBoostView = h.historyView("smart_grid_mode", "modbus");
+const liveBoostHtml = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung", "modbus");
+assert.equal(liveBoostView.recordedN, 7);
+assert.equal(liveBoostView.liveIndex, 7);
+assert.deepEqual(Array.from(liveBoostView.series[0].v), [0, 10, 20, 30, null, 20, 0, 20]);
+assert.match(liveBoostHtml,
+  /vhist-state-on mb sg-recommended" style="left:87\.500%;width:12\.500%/,
+  "the live Recommended-on state must own the right edge instead of extending Free running to now");
+assert.match(liveBoostHtml, /vhist-state-current" style="left:87\.500%;width:12\.500%/,
+  "the display distinguishes the live observation from completed raster buckets");
+assert.match(liveBoostHtml, /Boost aktiv · 10 min/,
+  "one live observation must not be counted as an invented five minutes of Boost runtime");
+assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Aktiv",
+  "the state shown at the right edge and its tooltip must agree");
+delete S._modbus;
 
 // The external circulation witness is a three-outcome history: confirmed running, confirmed
 // stopped, or unavailable evidence. The configured name lives in the Settings row; the chart lane
@@ -479,6 +536,62 @@ assert.match(valve2Html, /vhist-state-on valve2-on/);
 assert.doesNotMatch(valve2Html, /Kühlstellung|Heizstellung|>Kühlen<|>Heizen</);
 assert.match(h.scrubText(valve2View, 0), /2WV-Ausgang OFF\n.* · ca\. 10 min/);
 assert.match(h.scrubText(valve2View, 2), /2WV-Ausgang ON\n.* · ca\. 10 min/);
+
+// Every categorical timeline uses the same live-cap contract, including derived BUH and the MQTT
+// circulation witness. Structural concepts are mandatory; no label matching or cross-source
+// borrowing may turn an unavailable current state into a plausible one.
+S.status.hp = { connected: true };
+S.status.circulation_source = {
+  configured: true, has_value: true, fresh: true, state: "on",
+};
+S._values = [
+  { concept: "defrost_state", binary: true, value: 1 },
+  { concept: "quiet_state", binary: true, value: 1 },
+  { concept: "bsh_state", binary: true, value: 1 },
+  { concept: "buh_step1", binary: true, value: 0 },
+  { concept: "buh_step2", binary: true, value: 1 },
+  { concept: "valve_dhw", binary: true, value: 1 },
+  { concept: "valve_heat", binary: true, value: 1 },
+  { concept: "water_flow_switch", binary: true, value: 1 },
+  { binary_semantic: "smart_grid_contact_1", binary: true, value: 1 },
+  { binary_semantic: "smart_grid_contact_2", binary: true, value: 0 },
+];
+S._modbus = [
+  { concept: "quiet_state", binary: true, value: 1 },
+  { concept: "bsh_state", binary: true, value: 1 },
+  { concept: "valve_dhw", binary: true, value: 1 },
+  { off: 56, value: 2, enum: "smart_grid_mode" },
+];
+S.hist.set("water_flow_switch", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000,
+  b0: 200, held: [], v: [0, 0, 10, 0] });
+const liveStateCases = [
+  ["defrost_state", "x10a", 10],
+  ["quiet_state", "x10a", 10],
+  ["smart_grid_mode", "modbus", 20],
+  ["bsh_state", "x10a", 10],
+  ["buh_state", "x10a", 20],
+  ["valve_dhw", "x10a", 10],
+  ["circulation_state", "x10a", 10],
+  ["valve_heat", "x10a", 10],
+  ["water_flow_switch", "x10a", 10],
+];
+for (const [id, primarySource, expected] of liveStateCases) {
+  const stateView = h.historyView(id);
+  const primary = stateView.series.find((s) => s.source === primarySource);
+  assert.equal(primary.v.at(-1), expected, `${id} must append its current structural state`);
+  assert.equal(stateView.liveIndex, stateView.recordedN, `${id} must identify the live boundary`);
+  const stateHtml = h.histHtml(id, "", id);
+  assert.match(stateHtml, /vhist-state-current/, `${id} must visibly delimit the live cap`);
+  assert.match(h.scrubText(stateView, stateView.liveIndex), /jetzt/,
+    `${id} must expose the current state at the right edge tooltip`);
+}
+assert.match(h.histHtml("bsh_state", "", "Heizstab"),
+  /Heizstab aktiv erfasst · 10 min Rasterzeit/,
+  "the live BSH observation must not add a fabricated five-minute bucket to its total");
+delete S._values;
+delete S._modbus;
+delete S.status.hp;
+delete S.status.circulation_source;
 
 // Bucket alignment, not array index: Modbus starts one raster later and must leave the first slot
 // empty rather than sliding its first sample under the older X10A point.

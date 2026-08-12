@@ -769,6 +769,10 @@ const INSPECT = {
     t: (d) => sgInspectIsX10a(d)
       ? { en: "Smart-Grid request via X10A", de: "Smart-Grid-Anforderung über X10A" }
       : { en: "Smart-Grid request via Modbus", de: "Smart-Grid-Anforderung über Modbus" },
+    // The hit target and history aria name the stable concept. Source provenance remains explicit
+    // in the live title and on the chart lane; freezing a dynamic title at boot could otherwise say
+    // X10A on an inspector and timeline that are currently, correctly, sourced from Modbus.
+    aria: { en: "Smart-Grid request", de: "Smart-Grid-Anforderung" },
     trend: "smart_grid_mode",
     // Each source keeps its OWN 24-hour ring, so the chart must show the lane the headline came from
     // rather than a lane that may be empty (or, worse, the other instrument's day).
@@ -1524,7 +1528,8 @@ function inspectSig(e) {
 //
 // Written on its OWN signature, not the inspector's: the card re-renders whenever a live value
 // changes (~1×/s), and re-emitting the plot that often would tear down a crosshair mid-read and
-// restart the CSS transition. Only a new series (`gen`) or a moved pin actually changes the markup.
+// restart the CSS transition. Only a new series (`gen`), a changed categorical live cap or a moved
+// pin actually changes the markup.
 function renderInspectHist(e, row) {
   if (e && e.env3) {
     const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
@@ -1565,10 +1570,15 @@ function renderInspectHist(e, row) {
   const h = id && trendSource !== "modbus" ? S.hist.get(id) : null;
   const mh = id && trendSource !== "x10a" ? S.hist.get(histCacheKey(id, "modbus")) : null;
   const pin = id ? S.histPin.get(id) : null;
+  // Categorical histories append a display-only live sample. Include only that derived state in the
+  // chart signature, so an actual change repaints the current cap while unchanged one-second polls
+  // still leave a tooltip/crosshair DOM completely alone.
+  const liveGen = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
+    ? historyView(id, trendSource)?.gen || "" : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, h ? (h.err ? "e" : h.gen) : "", mh ? (mh.err ? "e" : mh.gen) : "",
-               pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
+               liveGen, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
   if (sig === S.inspHistSig) return;
   S.inspHistSig = sig;
   const el = $("inspHist");

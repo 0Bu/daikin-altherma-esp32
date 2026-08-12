@@ -3,6 +3,7 @@
 // location is the explicit collection/privacy boundary: the firmware requests it every 45 minutes,
 // derives two bounded comparison features and never stores the provider response or writes heat-pump
 // controls. Clearing the location sends no request. Forecast is optional for local room-error samples.
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +19,11 @@ inline constexpr uint32_t WEATHER_RETRY_INTERVAL_S = 5 * 60;
 inline constexpr int64_t WEATHER_FUTURE_TOLERANCE_S = 60;
 inline constexpr double WEATHER_OUTDOOR_MIN_C = -90.0;
 inline constexpr double WEATHER_OUTDOOR_MAX_C = 70.0;
+inline constexpr double WEATHER_HUMIDITY_MIN_PCT = 0.0;
+inline constexpr double WEATHER_HUMIDITY_MAX_PCT = 100.0;
+inline constexpr double WEATHER_PRESSURE_MIN_HPA = 200.0;
+inline constexpr double WEATHER_PRESSURE_MAX_HPA = 1200.0;
+inline constexpr size_t WEATHER_HOURLY_CAP = 6;
 // Two hours of global irradiance. The generous physical bound catches unit errors (not weather).
 inline constexpr double WEATHER_SOLAR_MAX_WH_M2 = 3000.0;
 
@@ -118,6 +124,14 @@ struct WeatherForecastSample {
     int64_t decision_unix_s = -1;
     double outdoor_mean_2h_c = 0.0;
     double solar_energy_2h_wh_m2 = 0.0;
+    // Bounded provider-timestamped points for the optional future graph. The existing two-hour
+    // comparison features above remain the decision/evidence contract; these arrays are additive
+    // presentation data and never drive heat-pump control.
+    size_t hourly_count = 0;
+    std::array<int64_t, WEATHER_HOURLY_CAP> hourly_unix_s{};
+    std::array<double, WEATHER_HOURLY_CAP> hourly_temperature_c{};
+    std::array<double, WEATHER_HOURLY_CAP> hourly_humidity_pct{};
+    std::array<double, WEATHER_HOURLY_CAP> hourly_pressure_hpa{};
 };
 
 struct WeatherValidation {
@@ -150,6 +164,25 @@ inline WeatherValidation weather_validate(const WeatherForecastSample& s,
     if (!std::isfinite(s.solar_energy_2h_wh_m2) || s.solar_energy_2h_wh_m2 < 0.0 ||
         s.solar_energy_2h_wh_m2 > WEATHER_SOLAR_MAX_WH_M2)
         return fail("invalid_solar_energy");
+    if (s.hourly_count > WEATHER_HOURLY_CAP || s.hourly_count == 1)
+        return fail("invalid_hourly_count");
+    for (size_t i = 0; i < s.hourly_count; ++i) {
+        if ((!i && s.hourly_unix_s[i] != s.decision_unix_s) ||
+            (i && s.hourly_unix_s[i] - s.hourly_unix_s[i - 1] != 3600))
+            return fail("invalid_hourly_time");
+        if (!std::isfinite(s.hourly_temperature_c[i]) ||
+            s.hourly_temperature_c[i] < WEATHER_OUTDOOR_MIN_C ||
+            s.hourly_temperature_c[i] > WEATHER_OUTDOOR_MAX_C)
+            return fail("invalid_hourly_temperature");
+        if (!std::isfinite(s.hourly_humidity_pct[i]) ||
+            s.hourly_humidity_pct[i] < WEATHER_HUMIDITY_MIN_PCT ||
+            s.hourly_humidity_pct[i] > WEATHER_HUMIDITY_MAX_PCT)
+            return fail("invalid_hourly_humidity");
+        if (!std::isfinite(s.hourly_pressure_hpa[i]) ||
+            s.hourly_pressure_hpa[i] < WEATHER_PRESSURE_MIN_HPA ||
+            s.hourly_pressure_hpa[i] > WEATHER_PRESSURE_MAX_HPA)
+            return fail("invalid_hourly_pressure");
+    }
     return {true, "ok"};
 }
 

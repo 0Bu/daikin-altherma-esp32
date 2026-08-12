@@ -159,6 +159,12 @@ for (const [block, field] of [
 }
 assert.match(status, /const bool weather_configured = c\.weather_enabled;/,
   "/status.weather_forecast.configured must come from the config");
+assert.match(weather,
+  /hourly=temperature_2m,relative_humidity_2m,surface_pressure,shortwave_radiation/,
+  "the graphical climate forecast must be additive and retain the solar evidence input");
+assert.match(status,
+  /\\"hourly\\":\[.*hourly_temperature_c.*hourly_humidity_pct.*hourly_pressure_hpa/s,
+  "/status must expose bounded timestamped climate points for the future graph");
 
 // ── 4. An ARMED diagnosis whose sampler never ran must not report itself DISABLED ───────────────
 // The sampler lives on the MQTT publish task, which safe mode never creates, while /status derives
