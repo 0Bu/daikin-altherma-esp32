@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diagnostic Evidence Review"
+  short_description: "Keep diagnostic claims traceable and current"
+  default_prompt: "Use $diagnostic-evidence-review to verify and maintain the sources, firmware rules, and claim boundaries for this diagnosis change."

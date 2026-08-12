@@ -1,6 +1,6 @@
 ---
 name: user-docs-review
-description: Keep daikin-altherma-esp32 user-facing help understandable, evidence-bounded and current. Use after changing a visible diagnosis, status, threshold, user action, UI explainer, plant-health payload or docs/DIAGNOSTICS.md, and before a PR that changes what a non-specialist sees or must do with a result.
+description: Keep daikin-altherma-esp32 user-facing help understandable, evidence-bounded and current. Use after changing a visible diagnosis, status, user action, UI explainer, plant-health payload or docs/DIAGNOSTICS.md, and before a PR that changes what a non-specialist sees or must do with a result. Use diagnostic-evidence-review alongside it when implementation rules or sources change.
 ---
 
 # User Docs Review
@@ -15,8 +15,13 @@ non-specialist cannot tell what it means, what it does not prove, or what to do 
    ticket or commit message.
 2. Trace the result through `/status.health`, `CHECKUP_ROW`, its translated value/detail strings and
    `MODEL_DESCRIPTIONS.health_*`. Verify German and English carry the same claim strength.
-3. Update the inline explainer and [`docs/DIAGNOSTICS.md`](../../../docs/DIAGNOSTICS.md) together.
-   Preserve the `<!-- user-docs: health_* -->` marker belonging to each visible row.
+3. Update the inline explainer, [`docs/DIAGNOSTICS.md`](../../../docs/DIAGNOSTICS.md) and
+   [`docs/DIAGNOSTIC_EVIDENCE.md`](../../../docs/DIAGNOSTIC_EVIDENCE.md) together. Preserve the
+   `<!-- user-docs: health_* -->` marker and the evidence heading's stable wire id belonging to each
+   visible row.
+4. Invoke `/diagnostic-evidence-review` when an external claim, evaluator, threshold, source signal
+   or evidence boundary changed. Keep this review focused on whether the resulting explanation is
+   understandable and actionable for the owner.
 
 ## Write for the owner, not the installer
 
@@ -46,6 +51,9 @@ Keep these surfaces aligned:
 - `main/www/js/i18n.js`: labels and status wording;
 - `docs/DIAGNOSTICS.md`: one marked German section with **Einfach gesagt** and
   **Was du tun kannst**, plus glossary/status updates when needed;
+- `docs/DIAGNOSTIC_EVIDENCE.md`: one section keyed by the stable diagnosis id with **Extern
+  belegt**, **Firmware-Regel**, **Nicht bewiesen**, and for a filtered/heuristic/experimental check
+  an explicit **Projektanteil** or **Experimentelle Grenze**;
 - `test/test_ui_checkup.mjs`: behavior and load-bearing wording.
 
 ## Run the gate
@@ -63,9 +71,10 @@ fingerprint. The fingerprint is a record of review, never a substitute for it:
 scripts/run-user-docs-audit.sh --update
 scripts/run-user-docs-audit.sh
 tools/user_docs/selftest.sh
+scripts/run-diagnostic-evidence-audit.sh
 scripts/run-ui-use-case-tests.sh
 ```
 
-Do not weaken length, bilingual, section, action or bounded-claim checks to clear a finding. Fix the
-missing explanation. In the handoff, name the user-visible wording that changed and distinguish
-code/CI verification from anything not checked on a physical heat pump.
+Do not weaken length, bilingual, section, action, source-coverage or bounded-claim checks to clear a
+finding. Fix the missing explanation or evidence. In the handoff, name the user-visible wording that
+changed and distinguish code/CI verification from anything not checked on a physical heat pump.

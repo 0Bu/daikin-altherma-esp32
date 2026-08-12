@@ -71,6 +71,7 @@ cannot currently stand behind shown as `—` rather than as a number.
 | [docs/FEATURES.md](docs/FEATURES.md) | Catalog of platform features (Secure Boot, OTA, diagnostics, …) |
 | [docs/PLANT.md](docs/PLANT.md) | Plant-level features: the 24 h checkup, weather forecast, ENV III input, heating-curve diagnosis |
 | [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) | Plain-language user guide to every 24 h plant-diagnostics result and the supported next step |
+| [docs/DIAGNOSTIC_EVIDENCE.md](docs/DIAGNOSTIC_EVIDENCE.md) | Sources, firmware rule, project heuristic and claim boundary for every plant diagnosis |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model + OTA signing/key lifecycle |
 | [docs/MCP.md](docs/MCP.md) | Read-only MCP server plus a local self-documenting setup page |
 | [docs/REPORTING.md](docs/REPORTING.md) | Reporting a bug: the public issue, the private device report, what gets redacted |

@@ -24,7 +24,9 @@ subscription, and that is a property of the code rather than a guard around a do
 
 > **Looking for the user guide?** [DIAGNOSTICS.md](DIAGNOSTICS.md) explains every visible result in
 > everyday language, including what `OK`, `HINWEIS`, `WARNUNG`, `PRÜFT` and `NUR MESSWERT` mean and
-> what a non-specialist can reasonably do next. This section is the technical design record.
+> what a non-specialist can reasonably do next. [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md)
+> maps every check to manufacturer documentation or primary research, the exact firmware rule and
+> the claim that the evidence cannot support. This section is the technical design record.
 
 The third question the dashboard asks, after *what is it doing now* (the schematic) and *what did
 this reading do today* ([the trend rings](FEATURES.md)): **is anything worth reporting**. Counted
@@ -78,22 +80,32 @@ hours count, and each tank charge costs 105 undisturbed minutes (45 settling plu
 window), so a plant whose own duty cycle is shorter than that produces `0 min of 6 h` for the life
 of the installation — the same reading a board that booted a minute ago gives. Two changes separate
 them. The window now records what it **discarded**: how many candidate hours (`aborts`), why
-(`abort_reasons[]` — charge, pump, draw, reading, blind) and how far the best one got
-(`best_aborted_s`), all decaying with the same 24-hour ring. And a full lifecycle with no completed
-window and at least six discarded ones becomes `blocked`: reported as `Unavailable`, the verdict
-that already means "this check cannot adjudicate here" — it says nothing either way, does not
-outrank `Ok`, and stops one permanently unreachable check from holding the whole card at
-`collecting`. What separates it from a dead bus is `aborts`: a bus that measured nothing discarded
-nothing — a candidate cannot even open without readable rows — so `collecting` stays the honest
-answer there. A finding always outranks it: a high window is evidence, and evidence is never
-withheld because the plant is also busy.
+(`abort_reasons[]` — the OR-ed set of reason kinds seen: charge, pump, draw, reading, blind) and how
+far the best one got (`best_aborted_s`), all decaying with the same 24-hour ring. It does **not**
+retain a count per reason, the reason of each individual candidate, or circulation evidence for an
+aborted candidate. A full lifecycle with no completed window and at least six discarded ones becomes
+`blocked`: reported as `Unavailable`, the verdict that already means "this check cannot adjudicate
+here" — it says nothing either way, does not outrank `Ok`, and stops one permanently unreachable
+check from holding the whole card at `collecting`. What separates it from a dead bus is `aborts`: a
+bus that measured nothing discarded nothing — a candidate cannot even open without readable rows —
+so `collecting` stays the honest answer there. A finding always outranks it: a high window is
+evidence, and evidence is never withheld because the plant is also busy.
 
-The verdict has **two causes and needs two sentences**, because they call for opposite action. A
-plant whose duty cycle is shorter than 105 minutes is one; an X10A link that keeps going quiet
-*mid-window* is the other — a flapping bus opens a candidate, loses it to the blind budget, and can
-reach the same bar. When `blind` is the only reason recorded, the card names the link and points at
-the wiring and the RX/TX pins instead of blaming the heat pump's cycling for what is a connection
-fault.
+The blocked verdict therefore has **one specific sentence and one deliberately non-causal one**.
+When `blind` is the only reason kind recorded, the card can name the X10A link and point at wiring
+and RX/TX pins: no plant-side reason occurred anywhere in the retained window. Every other mix says
+only what the stored totals establish. Charging, pump activity, draws, an implausible reading and a
+continuous loss fast enough to trip the draw filter can all prevent a clean hour; the ring cannot
+say which dominated. In particular it cannot claim "draw-dominant" or correlate circulation-off
+time with discarded candidates.
+
+The standing-loss judgement has a **bounded detection band**. `0.8 K/h` is the notable threshold —
+a project heuristic from the reference installation, not a Daikin limit and not transferable across
+tank volume or the temperature difference between tank and room. At about `1.85 K/h`, the permitted
+per-sample drop reaches the draw filter's floor: a still faster continuous loss can make every
+candidate look draw-affected and leave no completed hour. `Ok` therefore means no clean-hour loss at
+or above `0.8 K/h` was observed inside that detectable band. It does not prove the absence of a
+faster loss, and `blocked` cannot exclude one either.
 
 The **settling** guard is charged only for a charge witness that stood at least two minutes. It is
 owed to heat entering the tank, and a one-cycle valve blip put none in; before this bound a blip
@@ -189,9 +201,10 @@ pooled fallback and its explicit masking warning.
 
 **Deliberately not built**, each because the bus cannot support the claim: an absolute minimum-flow
 threshold (model-specific over a 3–18 kW catalog, and the unit raises its own error anyway — so the
-flow minimum is *reported* with no verdict attached), a flat daily start count (24 starts is one an
-hour in January and a control problem in April, so the mean run length is what knows the load), and
-any overall "healthy" verdict.
+observed part-load minimum after pump run-up is *reported* with no verdict attached; it is not the
+manual's nominal or design flow), a flat daily start count (24 starts is one an hour in January and
+a control problem in April, so the mean run length is what knows the load), and any overall
+"healthy" verdict.
 
 ---
 
@@ -320,6 +333,14 @@ it, an absent sensor moves no state, reason or counter, and a source-boundary te
 block on it. Absence is null, not 0 °C; a sample taken without the sensor clears the previous event's
 reading rather than inheriting it. The sampling *method* is unchanged, so archived events stay
 comparable.
+
+**The reference room can hide the error it is meant to reveal.** A room thermostat and its zone
+valves form a closed inner control loop: once they reduce demand or close at the setpoint, they clip
+both excess heat and the room deviation. A near-zero recorded error therefore cannot by itself prove
+that the heating curve is correct; a curve that is too high can be masked by the room controller.
+Read the event series with the D2 clipping share (how often leaving-water temperature sits at its
+minimum) and the zone-demand duty cycle (how often that zone actually requests heat). Without those
+corroborating signals, this sampler systematically under-reports that high-curve case.
 
 **Arming is derived, not switched.** It follows from the timestamped MQTT room mapping plus an
 active HomeHub

@@ -237,18 +237,26 @@ assert.match(ui.detail({ ...dhwAborted, abort_reasons: ["charge", "from_the_futu
              /discarded \(tank charging\)/);
 
 // THE VERDICT THAT SAYS WAITING WILL NOT HELP. Unavailable like a profile that cannot supply the
-// rows — it says nothing either way — but the two need opposite advice, so `blocked` gets its own
-// sentence instead of the generic "the active profile provides no assessable data".
+// rows — it says nothing either way — but `blocked` gets its own sentence instead of the generic
+// "the active profile provides no assessable data". The plant-side sentence must remain NON-CAUSAL:
+// the payload has an abort total plus an OR-ed reason set, not per-reason counts or circulation
+// evidence for aborted candidates.
 const dhwBlocked = { id: "dhw_loss", verdict: "unavailable", observed_s: 0, required_s: 21600,
                      windows: 0, max_k_h: null, blocked: true, aborts: 14, best_aborted_s: 3000,
                      abort_reasons: ["charge"] };
 assert.match(ui.detail(dhwBlocked),
-  /NOT AVAILABLE — Not reachable on this plant: over a full 24 hours not one clean one-hour window completed, and 14 candidate windows were discarded \(tank charging\); the longest reached 50 min of 60 min\./);
-assert.match(ui.detail(dhwBlocked), /105 undisturbed minutes after each tank charge/);
+  /NOT AVAILABLE — Not assessable with this method: over a full 24 hours not one clean one-hour window completed, and 14 candidate windows were discarded \(tank charging\); the longest reached 50 min of 60 min\./);
+assert.match(ui.detail(dhwBlocked), /continuous heat loss fast enough to look like a draw/);
+assert.match(ui.detail(dhwBlocked), /stored totals do not show which cause dominated/);
+assert.match(ui.detail(dhwBlocked), /fast continuous heat loss cannot be excluded/);
+assert.doesNotMatch(ui.detail(dhwBlocked), /plant's own duty cycle/);
 ui.setLang("de");
 assert.match(ui.detail(dhwBlocked),
-  /NICHT VERFÜGBAR — Auf dieser Anlage nicht erreichbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, 14 Kandidaten wurden verworfen \(Speicherladung\)/);
-assert.match(ui.detail(dhwBlocked), /105 ungestörte Minuten/);
+  /NICHT VERFÜGBAR — Mit diesem Verfahren nicht bewertbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, 14 Kandidaten wurden verworfen \(Speicherladung\)/);
+assert.match(ui.detail(dhwBlocked), /schneller Dauerverlust, der wie eine Zapfung aussieht/);
+assert.match(ui.detail(dhwBlocked), /gespeicherten Summen zeigen nicht, welcher Grund überwog/);
+assert.match(ui.detail(dhwBlocked), /schneller kontinuierlicher Wärmeverlust ist daher nicht ausgeschlossen/);
+assert.doesNotMatch(ui.detail(dhwBlocked), /Takt dieser Anlage/);
 // The SAME verdict is reachable from a flapping X10A link — a candidate opens, the bus goes quiet
 // mid-window, repeatedly — and that needs the opposite action from a plant that never stands still.
 // Blaming the duty cycle there sends the reader to the heat pump for a wiring fault.
@@ -259,9 +267,11 @@ assert.match(ui.detail(dhwBlockedByLink), /prüfe die X10A-Verkabelung und die R
 assert.doesNotMatch(ui.detail(dhwBlockedByLink), /Takt dieser Anlage/);
 ui.setLang("en");
 assert.match(ui.detail(dhwBlockedByLink), /This is the link, not the plant/);
-// A mix names the plant: the bus was only one of the things that ended a candidate.
+// A mix names what was seen but cannot rank its causes.
 assert.match(ui.detail({ ...dhwBlocked, abort_reasons: ["charge", "blind"] }),
-             /this plant's own duty cycle does not leave/);
+             /stored totals do not show which cause dominated/);
+assert.doesNotMatch(ui.detail({ ...dhwBlocked, abort_reasons: ["charge", "blind"] }),
+                    /plant's own duty cycle/);
 ui.setLang("de");
 
 // The OTHER unavailable — a profile without the rows — keeps the generic sentence.
@@ -673,6 +683,22 @@ assert.doesNotMatch(retryCopy, /with the compressor running|bei laufendem Verdic
 const pressureCopy = JSON.stringify(descriptionContext.__copy.model.health_pressure);
 assert.match(pressureCopy, /NOTE immediately and a WARNING after 60 continuous seconds/);
 assert.match(pressureCopy, /sofort HINWEIS und nach 60 durchgehenden Sekunden WARNUNG/);
+
+const dhwCopy = JSON.stringify(descriptionContext.__copy.model.health_dhw_loss);
+assert.match(dhwCopy, /0\.8 K\/h, a project heuristic for one reference installation/);
+assert.match(dhwCopy, /Tank volume and the tank-to-room temperature difference change the rate/);
+assert.match(dhwCopy, /0,8 K\/h – Heuristik der Referenzanlage/);
+assert.match(dhwCopy, /Speichervolumen und Abstand zur Raumtemperatur ändern den Wert/);
+assert.match(dhwCopy, /only up to about 1\.85 K\/h/);
+assert.match(dhwCopy, /nur bis etwa 1,85 K\/h/);
+assert.match(dhwCopy, /OK means none was observed in that band/);
+assert.match(dhwCopy, /OK heißt nur: Kein Verlust im erkennbaren Band/);
+
+const flowCopy = JSON.stringify(descriptionContext.__copy.model.health_flow);
+assert.match(flowCopy, /observed part-load minimum.*not the nominal or design flow/);
+assert.match(flowCopy, /beobachtetes Teillast-Minimum.*nicht der Nenn- oder Auslegungsdurchfluss/);
+assert.match(flowCopy, /same mode and conditions/);
+assert.match(flowCopy, /dieselbe Betriebsart und Bedingung/);
 
 // The hint box should answer the question without becoming a manual. Keep both paragraphs concise
 // while the source-level assertions above preserve the technically load-bearing caveats.
