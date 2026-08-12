@@ -27,20 +27,20 @@
 // It does NOT cover a power cycle, and nothing here pretends otherwise: /status.health.persist
 // reports "power_cycle" and the window starts empty, exactly as it always did.
 //
-// history_persist.hpp also runs a COARSE snapshot through the optional `history` flash partition for
-// the case it says .noinit "cannot" cover. That is deliberately NOT mirrored here, for a reason the
-// reference board settles rather than assumes: it reports `no `history` partition — reboot snapshot
-// unavailable on this board`, because esp_https_ota writes the app slot and never the partition
-// table, so every over-the-air-updated device lacks it and only a USB re-flash grants it. A second
-// tenant in a partition most deployed boards do not have would have bought this feature nothing on
-// the very board that motivated it.
+// The trends have since gained a real flash JOURNAL (#442): the `history` partition is part of the
+// official 8 MB table, and history_persist.hpp splices the last 24 hours back by absolute wall-clock
+// bucket across OTA, ordinary reboot and power loss. The checkup deliberately does NOT ride it, and
+// the honest consequence is stated rather than implied: this window is `.noinit` only, so an OTA
+// that moves the image layout starts it empty. Whether the checkup should get a journal of its own
+// is a real open question and a bigger one than a comment — a bucket is a pile of anonymous counters
+// whose meaning is pinned by the layout fingerprint below, so journaling it means deciding what a
+// stored counter means across firmware versions, not merely where to put the bytes.
 //
-// And the measurement is worth recording, because the sibling header states the opposite: that same
-// board kept its trend rings across a real OTA through .noinit ALONE ("rings kept across a sw
-// reset"). The new image's sections CAN move and then the bytes are not where the new build looks —
-// but they need not, and on an ordinary incremental build they did not. So .noinit is not the
-// power-cycle-only path it is described as; it is the path that fails closed when the layout moves,
-// which the seal below is what makes safe.
+// One measurement is worth keeping from before that journal existed, because it is what the seal is
+// for: this same board DID keep its rings across a real OTA through .noinit alone. The new image's
+// sections can move, and then the bytes are not where the new build looks — but they need not, and
+// on an ordinary incremental build they did not. So .noinit is not a power-cycle-only path; it is
+// the path that fails closed when the layout moves, which is what the seal below makes safe.
 //
 // ── Why the restore needs no clock ──────────────────────────────────────────────────────────────
 // history_persist.hpp's argument, and it transfers exactly: if the bytes are still there, power was
@@ -160,7 +160,8 @@ inline uint32_t checkup_layout_fingerprint() {
     crc = checkup_fp_u32(crc, CHECKUP_DT_S);
     crc = checkup_fp_u32(crc, CHECKUP_MAX_GAP_S);
     for (const CheckupLocator& l : {CHECKUP_LOC_BSH, CHECKUP_LOC_PUMP, CHECKUP_LOC_PRESSURE,
-                                    CHECKUP_LOC_FLOW, CHECKUP_LOC_VALVE, CHECKUP_LOC_R5T,
+                                    CHECKUP_LOC_FLOW, CHECKUP_LOC_VALVE, CHECKUP_LOC_IU_MODE,
+                                    CHECKUP_LOC_R5T,
                                     CHECKUP_LOC_DEFROST, CHECKUP_LOC_BUH1, CHECKUP_LOC_BUH2})
         crc = checkup_fp_loc(crc, l);
     // The retry counters are addressed by a predicate rather than a table, so the fingerprint asks

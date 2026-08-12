@@ -30,6 +30,7 @@ scripts/run-mock-tests.sh --coverage # host logic tests + 95% floor + presenter 
 scripts/run-contract-tests.sh      # do the firmware's SOURCE boundaries still hold?
 scripts/run-domain-audit.sh        # is the value catalog physically RIGHT?
 scripts/run-description-audit.sh   # can a user find out what each value IS?
+scripts/run-user-docs-audit.sh     # can a non-specialist understand and act on each diagnosis?
 scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
 scripts/run-ui-use-case-tests.sh   # do all visible UI actions actually work?
 scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data?
@@ -107,13 +108,24 @@ a retry counter as a °C reading. Since the profiles are machine-generated, the 
 the generator emits a label the copy has never seen, without anyone touching this repo's JS.
 
 It evaluates the real table in a JS engine rather than re-implementing its regexes elsewhere (a
-looser second copy of a rule is not a test of that rule), so it needs **node ≥ 18** — the only gate
-that does. Findings: `D001` a visible reading with no copy, `D002` an entry matching nothing,
+looser second copy of a rule is not a test of that rule), so it needs **node ≥ 18**, the same runtime
+as the user-docs, schematic and UI gates. Findings: `D001` a visible reading with no copy, `D002` an entry matching nothing,
 `D003/D004` a malformed entry or missing German, `D005` a stale ledger line. If a finding is correct
 as it stands, record it in [`tools/descriptions/audit_exceptions.txt`](tools/descriptions/audit_exceptions.txt)
 with a reason — except `D001`, which the ledger refuses outright: a published reading the user
 cannot look up is the defect the gate exists for, and the fix is copy, not a suppression. Touching
 the audit means also running `tools/descriptions/selftest.sh`, same argument as the domain one.
+
+`run-user-docs-audit.sh` closes the next gap: a row can have a description and still leave a normal
+owner unable to interpret or act on it. Every visible plant-diagnostics row therefore needs English
+and German copy that says what was observed, the limit of the claim and a concrete next step;
+[`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) needs the matching plain-language section. The guide's
+source stamp covers the evaluator and visible diagnosis contract, so a changed threshold, result or
+wording makes the gate fail even when no row was added. Run the
+[`user-docs-review` skill](.claude/skills/user-docs-review/SKILL.md), update the prose first, and only
+then use `scripts/run-user-docs-audit.sh --update` to record that review. The stamp is not an
+alternative to reviewing the diff. `tools/user_docs/selftest.sh` proves the gate still rejects a
+missing language/action/section, false whole-plant reassurance and an unstamped source change.
 
 `run-schematic-audit.sh` asks it one layer up again, of the **dashboard schematic** — the inline SVG
 in [`main/www/index.html`](main/www/index.html) with its CSS and its `INSPECT` / `I18N` bindings. All

@@ -38,8 +38,11 @@ assert.match(dashboardSource,
 const normalizedStatusSource = statusSource.replaceAll("\\\"", "\"");
 for (const key of [
   "health", "covered_s", "status", "checks",
+  "persist",
   "full_span", "available", "assessable", "evaluated", "evidence", "observed_s", "required_s",
   "starts", "mean_run_s", "count", "paired_count", "share_pct", "defrost_s", "run_s",
+  "space_runs", "space_mean_run_s", "dhw_runs", "dhw_mean_run_s", "cooling_runs",
+  "censored_runs", "split",
   "min_bar", "min_l_min", "buh_min", "bsh_min", "buh_s", "bsh_s", "active", "seen",
   "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
   "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
@@ -114,6 +117,14 @@ const ui = sandbox.__checkup;
 // The title keeps the bounded 24-hour scope without consuming most of a narrow card's first line.
 assert.equal(ui.text("en", "card.checkup"), "Plant diagnostics · 24 h");
 assert.equal(ui.text("de", "card.checkup"), "Anlagendiagnose · 24 h");
+assert.equal(ui.text("en", "check.guide"), "How to read this card");
+assert.equal(ui.text("de", "check.guide"), "So liest du diese Karte");
+assert.equal(ui.text("en", "action.label"), "What you can do:");
+assert.equal(ui.text("de", "action.label"), "Was du tun kannst:");
+assert.match(ui.text("en", "check.persist.power_cycle"), /no flash archive/);
+assert.match(ui.text("de", "check.persist.power_cycle"), /kein Flash-Archiv/);
+assert.match(ui.text("en", "check.persist.wrong_layout"), /changed what the stored counters mean/);
+assert.match(ui.text("de", "check.persist.wrong_layout"), /Bedeutung gespeicherter Zähler geändert/);
 for (const [key, en, de] of [
   ["ok", "OK", "OK"],
   ["info", "NOTE", "HINWEIS"],
@@ -269,6 +280,80 @@ assert.equal(
   "12 starts · <1 min/start",
   "positive runtime must not render as zero",
 );
+
+// ── the operating-class split ────────────────────────────────────────────────────────────────────
+// The class figures count COMPLETED RUNS. When the split DECIDED (`split:true`) the pooled mean is
+// the misleading half — a long tank charge inflates it — so the classes replace it on the line.
+const cyclingSplit = {
+  id: "cycling", verdict: "info", starts: 13, mean_run_s: 830, split: true,
+  space_runs: 12, space_mean_run_s: 300, dhw_runs: 1, dhw_mean_run_s: 7200,
+  cooling_runs: 0, censored_runs: 0,
+};
+assert.equal(ui.metric(cyclingSplit), "13 starts · space 12 × 5 min · hot water 1 × 2 h");
+assert.match(ui.detail(cyclingSplit), /Only confirmed space heating is assessed here/);
+assert.match(ui.detail(cyclingSplit), /I\/U operating mode must stay readable and unchanged/,
+             "the complete run-level class contract must be visible to the reader");
+ui.setLang("de");
+assert.equal(ui.metric(cyclingSplit), "13 Starts · Raum 12 × 5 min · Warmwasser 1 × 2 h");
+assert.match(ui.detail(cyclingSplit), /Bewertet wird nur bestätigte Raumheizung/);
+assert.match(ui.detail(cyclingSplit), /sicher erkannte Kühlung ist ausgeschlossen/);
+ui.setLang("en");
+
+assert.equal(
+  ui.metric({ ...cyclingSplit, cooling_runs: 4 }),
+  "13 starts · space 12 × 5 min · hot water 1 × 2 h · cooling 4 excluded",
+  "positively identified cooling must be visible but never relabelled as heating",
+);
+ui.setLang("de");
+assert.equal(
+  ui.metric({ ...cyclingSplit, cooling_runs: 4 }),
+  "13 Starts · Raum 12 × 5 min · Warmwasser 1 × 2 h · Kühlen 4 ausgeschlossen",
+);
+ui.setLang("en");
+
+// Runs that happened but could not be classified are shown, so `space 0` can never be read as "no
+// space heating ran" when in truth nothing could be judged.
+assert.equal(
+  ui.metric({ ...cyclingSplit, space_runs: 0, space_mean_run_s: null,
+              dhw_runs: 0, dhw_mean_run_s: null, censored_runs: 9 }),
+  "13 starts · space 0 · hot water 0 · 9 unclassified",
+);
+
+// THE FALLBACK (#443 live review): the valve row exists in the catalog but was too sparse to judge
+// with. The pooled mean is what decided, so it stays on the line, the class figures ride along as
+// observation, and the copy says which one carried the verdict.
+const cyclingPooled = {
+  id: "cycling", verdict: "ok", starts: 16, mean_run_s: 3600, split: false,
+  space_runs: 2, space_mean_run_s: 1800, dhw_runs: 1, dhw_mean_run_s: 900,
+  cooling_runs: 0, censored_runs: 3,
+};
+assert.equal(ui.metric(cyclingPooled),
+             "16 starts · 1 h/start · space 2 × 30 min · hot water 1 × 15 min · 3 unclassified");
+assert.match(ui.detail(cyclingPooled), /Assessed on all runs together/);
+assert.doesNotMatch(ui.detail(cyclingPooled), /Only confirmed space heating is assessed here/);
+
+// Nothing witnessed at all: the firmware sends null, and the line falls back to the pooled pair
+// unchanged. Rendering `space 0` here would claim a day of space heating nobody watched.
+assert.equal(
+  ui.metric({ id: "cycling", verdict: "ok", starts: 8, mean_run_s: 3600, split: false,
+              space_runs: null, space_mean_run_s: null,
+              dhw_runs: null, dhw_mean_run_s: null, cooling_runs: null, censored_runs: null }),
+  "8 starts · 1 h/start",
+);
+assert.doesNotMatch(
+  ui.detail({ id: "cycling", verdict: "ok", starts: 8, mean_run_s: 3600 }),
+  /Only confirmed space heating is assessed here|Assessed on all runs together/,
+  "neither sentence may appear where no class evidence was measured",
+);
+
+// Collecting, with class counts already real but no mean established yet.
+assert.equal(
+  ui.metric({ id: "cycling", verdict: "collecting", starts: 3, mean_run_s: null, split: false,
+              space_runs: 2, space_mean_run_s: null, dhw_runs: 1, dhw_mean_run_s: null,
+              censored_runs: 0, observed_s: 3600, required_s: 7200 }),
+  "3 starts · space 2 · hot water 1",
+);
+
 const lossWithPump = { id: "dhw_loss", verdict: "info", max_k_h: 1.2, windows: 6,
                        high_windows: 2, high_with_pump: 2, high_pump_off: 0 };
 assert.equal(ui.value(lossWithPump), "NOTE");
@@ -410,7 +495,7 @@ assert.doesNotMatch(card, /7 Werte|von 24 h/);
 assert.doesNotMatch(card, /Alles in Ordnung|\bgesund/i);
 
 context.S.status.health = {
-  covered_s: 7200, status: "collecting", available: 5, assessable: 3, evaluated: 1,
+  covered_s: 7200, persist: "wrong_layout", status: "collecting", available: 5, assessable: 3, evaluated: 1,
   checks: [{
     id: "pressure", verdict: "collecting", min_bar: 1.7,
     observed_s: 120, required_s: 3600,
@@ -428,6 +513,16 @@ assert.match(card, />PRÜFT · 1\/3 bewertet<\/span>/);
 assert.match(card, /<value>PRÜFT<\/value>/);
 assert.match(card, /label="Messwert:">1\.7 bar<\/detail>/);
 assert.match(card, /label="Bewertung:">PRÜFT — 2 min von 1 h erfasst/);
+assert.match(card, /label="Datenfenster:">Dieses Update hat die Bedeutung gespeicherter Zähler geändert/,
+             "the guide row must explain why collection restarted after an incompatible update");
+
+context.S.status.health.persist = "accept";
+card = ui.card();
+assert.match(card, /label="Datenfenster:">Frühere Beobachtungen wurden über den Neustart hinweg übernommen/);
+context.S.status.health.persist = "from_the_future";
+card = ui.card();
+assert.doesNotMatch(card, /from_the_future|Datenfenster:/,
+                    "an unknown persistence slug must not leak as unexplained internal vocabulary");
 
 // Regression payload matching the narrow German card that prompted the status-only design.
 // Readings, assessment copy and collection clocks are present in details but absent from every
@@ -450,8 +545,8 @@ ui.setLang("de");
 card = ui.card();
 const collapsedValues = [...card.matchAll(/<value>(.*?)<\/value>/g)].map((m) => m[1]);
 assert.deepEqual(collapsedValues,
-                 ["OK", "HINWEIS", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT"]);
-for (const value of collapsedValues) {
+                 ["Einfach erklärt", "OK", "HINWEIS", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT"]);
+for (const value of collapsedValues.slice(1)) {
   assert.doesNotMatch(value, /Aktuell|Start|Vorgang|bar|min|Speicher|gesammelt|erfasst/);
 }
 for (const reading of ["Aktuell keine", "1,2 K/h · 3 Fenster · während Zirkulationspumpenbetrieb",
@@ -559,6 +654,14 @@ for (const [name, pattern] of [
   ["German whole-plant claim", /\bAnlage (?:ist )?(?:gesund|in Ordnung)\b/i],
 ]) assert.doesNotMatch(checkupCopy, pattern, `checkup copy must not contain a ${name}`);
 
+const guideCopy = descriptionContext.__copy.model.health_guide;
+assert.match(guideCopy.de.what, /ändert keine Einstellungen und steuert die Anlage nicht/);
+assert.match(guideCopy.de.meaning, /OK heißt: genug Daten für genau diese Prüfung/);
+assert.match(guideCopy.de.action, /Beginne hier.*Öffne dann jede Diagnose/);
+assert.match(explanationSource,
+             /const action = b\.action \? descNoteHtml\(t\("action\.label"\), b\.action\) : "";/,
+             "the shared explainer must render the supported next step, not merely store it");
+
 // The concise explainer must retain the production retry comparator's important edge cases.
 const retryCopy = JSON.stringify(descriptionContext.__copy.model.health_retries);
 assert.match(retryCopy, /while stopped or at a compressor-state boundary/);
@@ -578,6 +681,9 @@ for (const id of ["fault", "dhw_loss", "cycling", "defrost", "pressure", "flow",
   for (const [lang, copy] of [["en", d], ["de", d.de]]) {
     const length = `${copy.what} ${copy.normal || ""}`.length;
     assert.ok(length <= 520, `${id} ${lang} explainer is too long (${length} characters)`);
+    assert.ok(copy.action, `${id} ${lang} needs a plain-language next step`);
+    assert.ok(copy.action.length <= 280,
+              `${id} ${lang} next step is too long (${copy.action.length} characters)`);
   }
 }
 

@@ -64,6 +64,7 @@ scripts/run-mock-tests.sh --coverage  # host logic tests + 95% coverage floor + 
 scripts/run-contract-tests.sh     # do the firmware's SOURCE boundaries still hold? (node-only)
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 scripts/run-description-audit.sh  # can the user find out what each value IS? (node-only)
+scripts/run-user-docs-audit.sh  # can a non-specialist understand and act on each diagnosis? (node-only)
 scripts/run-schematic-audit.sh    # does the DRAWING still say what it means? (node-only)
 scripts/run-ui-use-case-tests.sh  # do all visible UI actions actually work? (node-only)
 scripts/run-redaction-audit.sh    # can a bug report still leak the USER's data? (python-only)
@@ -82,6 +83,9 @@ Rules an agent needs before touching any of that:
 - Three more review skills are CONDITIONAL merge gates — `/schematic-review`, `/absence-review`,
   `/ui-use-case-review` — each keyed on a diff regex whose ONLY definition is its
   `.claude/hooks/require-*.sh` hook; read the regex there, never trust a list written elsewhere.
+- The plant-diagnostics user contract is maintained by `/user-docs-review` and
+  `scripts/run-user-docs-audit.sh`: every visible result needs bilingual meaning, limits and a safe
+  next step, while a source fingerprint makes `docs/DIAGNOSTICS.md` stale after evaluator/UI drift.
 - Adjudicated audit findings live in per-tool `audit_exceptions.txt` ledgers (domain, descriptions,
   schematic, redaction) — an ADJUDICATION cites evidence, a KNOWN-DEFECT is deleted by its fix, and
   each tool's `selftest.sh` proves the gate still catches the defects it was built for. Counting

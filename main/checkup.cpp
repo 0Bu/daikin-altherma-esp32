@@ -136,6 +136,14 @@ void flag_state(const CachedValue* v, size_t n, const logic::CheckupLocator& l,
     on    = t > 0;
 }
 
+// The converter owns the enum vocabulary; the pure helper owns what it means to this check. A row
+// that is missing, held out of the fresh snapshot or formatted as "?" remains Unknown.
+logic::CheckupOperatingMode operating_mode(const CachedValue* v, size_t n) {
+    const int i = find_row(v, n, logic::CHECKUP_LOC_IU_MODE);
+    if (i < 0) return logic::CheckupOperatingMode::Unknown;
+    return logic::checkup_operating_mode(v[i].value.c_str());
+}
+
 // A numeric row's reading in tenths.
 bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int& out) {
     const int i = find_row(v, n, l);
@@ -148,9 +156,9 @@ bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int
 // `pending` is EXCLUDED, for history.cpp's reason: it changes on every fold, i.e. once a second, so
 // a seal covering it would be stale for all but microseconds of every hour — and a panic, the case
 // this exists for most, would land in the stale window essentially always and discard a whole
-// intact day. Excluded, the sealed bytes change only at a COMMIT, so the seal written after one
-// stays valid right up to the next. The open hour is dropped on restore, which is the honest answer
-// anyway: a partial hour was never a completed bucket.
+// intact day. Excluded, sealed bytes change only at a COMMIT or when a completed run is booked back
+// into its retained START bucket; both paths re-seal immediately. The open hour is dropped on
+// restore, which is the honest answer anyway: a partial hour was never a completed bucket.
 //
 // first/latest_sample_us are excluded because they are MONOTONIC and meaningless in the next boot's
 // clock; the observed lifecycle rides as `span_us` instead.
@@ -172,8 +180,8 @@ uint32_t persist_crc() {
     return config_crc32_final(crc);
 }
 
-// Re-seal after a commit. The ONLY writer of the record's header, so the seal and the bytes it
-// covers cannot drift apart.
+// Re-seal after a commit or a completed-run write into an older retained bucket. The ONLY writer of
+// the record's header, so the seal and the bytes it covers cannot drift apart.
 void persist_seal() {
     P().magic     = logic::CHECKUP_PERSIST_MAGIC;
     P().version   = logic::CHECKUP_PERSIST_VERSION;
@@ -376,6 +384,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     flag_state(v, n, logic::CHECKUP_LOC_PUMP,    s.pump_known,    s.pump_on);
     flag_state(v, n, logic::CHECKUP_LOC_BSH,     s.bsh_known,     s.bsh_on);
     flag_state(v, n, logic::CHECKUP_LOC_VALVE,   s.valve_known,   s.valve_dhw);
+    s.operating_mode = operating_mode(v, n);
     // Either active step proves the aggregate BUH is on. Proving it is OFF needs every step carried
     // by this profile to be readable; one readable zero plus one timed-out step remains unknown.
     bool b1_known = false, b1_on = false, b2_known = false, b2_on = false;
@@ -458,11 +467,13 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         P().dhw.commit(skipped);
         persist_seal();          // the sealed bytes change ONLY here; see persist_crc()
         if (continuous_boundary) s_state.last_us = now; // dt=0, edge witnesses intentionally kept
-        logic::checkup_step(s_state, P().ring.pending, s, now);
+        const bool reseal = logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring);
+        if (reseal) persist_seal();
         if (!discard_dhw_sample)
             logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     } else {
-        logic::checkup_step(s_state, P().ring.pending, s, now);
+        const bool reseal = logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring);
+        if (reseal) persist_seal();
         if (!discard_dhw_sample)
             logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     }

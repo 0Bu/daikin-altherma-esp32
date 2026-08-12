@@ -943,6 +943,15 @@ const CHECKUP_ROW = {
 // Colour only makes the states faster to scan and never carries meaning on its own.
 const CHECKUP_TONE = { warn: "err", info: "warn", ok: "ok", collecting: "dim",
                        observation: "dim", experimental: "dim", unavailable: "dim" };
+const CHECKUP_PERSIST = new Set(["accept", "power_cycle", "no_record", "wrong_version",
+                                 "wrong_layout", "bad_crc", "model_changed", "safe_mode"]);
+
+function checkupPersistHtml(state) {
+  // Older firmware has no field, and future firmware may add a slug this UI cannot explain. In
+  // either case omit the line rather than printing an internal identifier as advice to the owner.
+  return CHECKUP_PERSIST.has(state)
+    ? descNoteHtml(t("check.persist.label"), t(`check.persist.${state}`)) : "";
+}
 
 function checkupDuration(s) {
   const seconds = Number(s);
@@ -1039,6 +1048,11 @@ function checkupDetailHtml(c) {
   } else {
     detail = t(checkupDetailKey(c, statusKey));
   }
+  // Once valve + I/U mode provide enough run-level evidence, the verdict judges confirmed SPACE
+  // HEATING alone. The card says so in every state because DHW and cooling are observations, not
+  // judged classes; mixed, unread or boundary-crossing runs remain explicitly unclassified.
+  if (c.id === "cycling" && c.space_runs != null)
+    detail += t(c.split ? "check.detail.cycling_split" : "check.detail.cycling_pooled");
   const reading = value ? descNoteHtml(t("check.detail.value_label"), value) : "";
   return reading + descNoteHtml(t("check.detail.assessment_label"),
                                 `${checkupStatusText(c)} — ${detail}`);
@@ -1096,8 +1110,25 @@ function checkupMetricValue(c) {
     case "cycling": {
       if (c.starts == null) return "";
       const starts = t("check.starts", c.starts);
-      if (collecting || c.mean_run_s == null) return starts;
-      return `${starts} · ${t("check.mean", checkupDuration(c.mean_run_s))}`;
+      // The class figures count COMPLETED runs and are published as soon as anything was witnessed —
+      // which is not the same as the split having DECIDED. When it has, the pooled mean is the
+      // misleading half (a long tank charge inflates it) and the classes replace it; when it has
+      // not, the pooled mean is what the verdict used and stays.
+      if (c.space_runs == null) {
+        if (collecting || c.mean_run_s == null) return starts;
+        return `${starts} · ${t("check.mean", checkupDuration(c.mean_run_s))}`;
+      }
+      const cls = (key, n, mean) => t(key, n ?? 0, mean == null ? "" : checkupDuration(mean));
+      const parts = [starts];
+      if (!c.split && !collecting && c.mean_run_s != null)
+        parts.push(t("check.mean", checkupDuration(c.mean_run_s)));
+      parts.push(cls("check.cycling_space", c.space_runs, c.space_mean_run_s));
+      parts.push(cls("check.cycling_dhw", c.dhw_runs, c.dhw_mean_run_s));
+      if (c.cooling_runs > 0) parts.push(t("check.cycling_cooling", c.cooling_runs));
+      // Runs that happened and could not be classified. Shown only when there are any: a reader who
+      // sees "space 0" needs to know whether nothing ran or nothing could be judged.
+      if (c.censored_runs > 0) parts.push(t("check.cycling_censored", c.censored_runs));
+      return parts.filter(Boolean).join(" · ");
     }
     case "defrost": {
       if (c.count == null) return "";
@@ -1143,6 +1174,11 @@ function checkupCardHtml() {
                            bodyPrefix: checkupDetailHtml(c) });
   }
   if (!rows) return "";
+  // The first row translates the status vocabulary and the card's limits before the reader has to
+  // infer either from a technical measurement. It is deliberately part of the same accordion card:
+  // no settings screen or external manual should be required to understand a result already here.
+  rows = modelDescRow("health_guide", t("check.guide"), t("check.guide.value"),
+                      { cls: "dim", bodyPrefix: checkupPersistHtml(h.persist) }) + rows;
   // The badge gives only the card-level verdict and judgement progress. Evidence clocks live in each
   // row's explainer, where they qualify the result without competing with the first-glance status.
   const status = checkupStatusText(h.status);

@@ -9,7 +9,8 @@ For a cross-cutting catalog of the **platform features** this firmware implement
 signing, OTA + rollback health gate, the polled live UI, the ESP-IDF component inventory,
 diagnostics, WiFi resilience — see [**FEATURES.md**](FEATURES.md). The features whose subject is the
 **plant** rather than the board — the 24-hour checkup, the Open-Meteo forecast, the optional ENV III
-climate input and heating-curve diagnosis — are in [**PLANT.md**](PLANT.md).
+climate input and heating-curve diagnosis — are in [**PLANT.md**](PLANT.md). A non-technical guide
+to the visible 24-hour results and what a user can do next is in [**DIAGNOSTICS.md**](DIAGNOSTICS.md).
 
 ---
 

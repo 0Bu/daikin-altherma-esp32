@@ -933,7 +933,23 @@ void http_append_status_json(std::string& j, bool redact) {
                     }
                     j += "]";
                     break;
-                case logic::CheckupCheck::Cycling:  num("starts", ck.a);   num("mean_run_s", ck.b); break;
+                case logic::CheckupCheck::Cycling:
+                    // The pooled pair stays first and keeps its names: it is still the day's total,
+                    // and a consumer written before the split reads exactly what it always did. The
+                    // class figures count COMPLETED RUNS — `null` until one was actually witnessed,
+                    // never 0, because a zero beside real starts reads as "no space heating ran".
+                    // `split` says which of the two decided the verdict; the reader cannot infer it.
+                    num("starts", ck.a);
+                    num("mean_run_s", ck.b);
+                    num("space_runs", ck.c);
+                    num("space_mean_run_s", ck.d);
+                    num("dhw_runs", ck.e);
+                    num("dhw_mean_run_s", ck.f);
+                    num("cooling_runs", hr.cycling_cooling_runs);
+                    num("censored_runs", ck.g);
+                    j += ",\"split\":";
+                    j += hr.cycling_split ? "true" : "false";
+                    break;
                 case logic::CheckupCheck::Defrost: {
                     num("count", ck.a);
                     num("paired_count", ck.e);
