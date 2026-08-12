@@ -159,10 +159,12 @@ assert.doesNotMatch(rendered, /ENV-III-Messwerte|data-hist="env3_combined"/,
 assert.equal(renderSandbox.__env3Tooltip("de", 2),
   "jetzt\nTemperatur  21,5 °C\nLuftfeuchte  48,0 %\nLuftdruck  1.007,0 hPa",
   "one readable localized tooltip must report time and all three measurements together");
-assert.match(style, /\.vhist-env3 \.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*9\dpx;/,
-  "the combined chart must reserve enough vertical room for its four-line tooltip");
-assert.match(style, /\.vhist-env3 \.vhist-tip\s*\{[^}]*min-width:[^;}]+;[^}]*white-space:\s*pre;/,
-  "the ENV III tooltip must retain readable lines instead of wrapping into a vertical strip");
+assert.match(style, /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
+  "the combined chart must share the fixed compact legend-to-plot distance");
+assert.doesNotMatch(style, /\.vhist-env3 \.vhist-graph\s*\{/,
+  "the taller climate tooltip must overlay rather than shift its plot");
+assert.match(style, /@media \(max-width: 480px\)[\s\S]*\.vhist-env3 \.vhist-tip\s*\{[^}]*white-space:\s*pre-wrap;/,
+  "the ENV III tooltip must retain readable lines while staying beside the selected crosshair");
 for (const text of [
   "Das M5Stack AtomS3 Lite ist ein kompaktes ESP32-S3-Board mit integrierter WS2812-RGB-Status-LED.",
   "WS2812 auf GPIO35.",
