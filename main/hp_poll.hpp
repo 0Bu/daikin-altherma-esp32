@@ -52,7 +52,7 @@ struct CachedValue {
 // Health/status counters for /status.hp.
 struct HpStats {
     bool     connected    = false;
-    int32_t  last_ok_s    = -1;   // seconds since last fully-good cycle (-1 = never)
+    int32_t  last_ok_s    = -1;   // seconds since last cycle with any valid reply (-1 = never)
     int      registers    = 0;
     int      values       = 0;
     uint32_t crc_err      = 0;

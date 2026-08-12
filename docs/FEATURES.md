@@ -402,7 +402,9 @@ other.
 - **✅ Explicit credential clearing**: empty username+password means *keep* (the modal never
   prefills), so `clear_creds` is the explicit removal signal — the only path from an authenticated
   `mqtts://` broker back to an anonymous one.
-- **✅ Availability (LWT)**: a retained `offline` last-will flipped to `online` on connect.
+- **✅ Availability (LWT)**: a retained `offline` last-will flipped to `online` on connect; after
+  activation, X10A must remain unanswered for 15 s before it marks the installation offline, while
+  shorter whole-sweep dropouts preserve availability without retaining an empty X10A document.
 - **Read-only by design.** No command subscriptions and no actuation. The optional inbound reference
   subscription captures and qualifies an input for display only; it cannot reach either pump link.
 
