@@ -317,7 +317,10 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge. Load-bearing rules: a field's JSON TYP
                 high-water mark answers bytes, and a wrong unit word in a series name is #230's
                 LABEL-UNIT rule on a board metric). Crash topic retained only when NOTABLE; probes
                 before deleting so a clean broker sees no empty publish. wdt: unconditional
-                top-of-loop reset + per-publish reset. THREE inbound things ride this task: the
+                top-of-loop reset + per-publish reset. X10A installation availability uses the
+                monotonic last-good age: a sustained 15 s loss publishes offline, while a shorter
+                all-page timeout neither flaps availability nor retains an empty state. THREE
+                inbound things ride this task: the
                 room-source test/live decode (POST /test_ref_temp issues a PROOF bound to all seven
                 behavioural fields — testing topic A cannot license saving topic B), the
                 heating-curve sampler (gate order HomeHub -> plant -> heating-mode -> room -> X10A;

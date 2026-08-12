@@ -1691,13 +1691,14 @@ The Home Assistant bridge:
   circulation-power subscriptions/tests. All ordinary discovery, state, heartbeat, crash, weather and Modbus publication
   remains blocked. The only outbound exception is explicit Settings cleanup: clearing an enabled
   Weather or HomeHub configuration queues that source's retained empty tombstone after the disabled
-  config was persisted. When `hp_stats().connected` first proves the bus, the task cleanly stops and
+  config was persisted. When `HpStats` first records a valid bus reply, the task cleanly stops and
   destroys that no-LWT session, then creates one ordinary client whose CONNECT carries the shared
-  installation LWT; the two MQTT/TLS sessions never coexist. Once activated, an X10A loss publishes
-  one retained `offline` transition and pauses every other publish while inbound subscriptions stay
-  live. Recovery on the same broker session restores `online` plus a fresh X10A/heartbeat seed,
-  while a broker reconnect follows the normal full announce path. HTTP diagnostics and the X10A
-  retry loop remain independent of the gate.
+  installation LWT; the two MQTT/TLS sessions never coexist. Once activated, an X10A loss sustained
+  for 15 seconds publishes one retained `offline` transition and pauses every other publish while
+  inbound subscriptions stay live; a shorter whole-sweep dropout keeps availability online without
+  retaining an empty X10A document. Recovery on the same broker session restores `online` plus a
+  fresh X10A/heartbeat seed, while a broker reconnect follows the normal full announce path. HTTP
+  diagnostics and the X10A retry loop remain independent of the gate.
 - **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
   entity's discovery config at a time (retained) on (re)connect, so it never needs one large
   contiguous heap block — the same memory discipline as the rest of the firmware. Layout-marker

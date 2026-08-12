@@ -5,8 +5,10 @@
 //   • X10A owns the outbound installation identity, not inbound observation: before the first valid
 //     X10A reply, connect without the shared installation LWT and service only the configured
 //     reference-temperature subscription/test. The first reply replaces that read-only session with
-//     the normal LWT-bearing publisher. After activation, a bus loss marks availability offline once
-//     and then suppresses every ordinary publish until X10A returns; subscriptions stay alive.
+//     the normal LWT-bearing publisher. After activation, a bus loss lasting 15 seconds marks
+//     availability offline once and then suppresses every ordinary publish until X10A returns;
+//     subscriptions stay alive. A shorter whole-sweep dropout neither flaps availability nor emits
+//     an empty X10A document.
 //   • On (re)connect: mark availability "online", stream retained discovery configs for the active
 //     X10A profile, diagnostics and enabled ENV III, and retract every retired HomeHub/weather
 //     discovery config. HomeHub values stay on MQTT for non-HA consumers, but are deliberately not
@@ -1968,7 +1970,7 @@ static void mqtt_task(void*) {
         try {
             const HpStats hp = hp_stats();
             const MqttPublishGateDecision gate = mqtt_publish_gate_step(
-                publish_gate, hp.connected, s_connected.load());
+                publish_gate, hp.connected, hp.last_ok_s, s_connected.load());
 
             // The first valid bus response upgrades the existing subscriber-only session to a fresh
             // client whose CONNECT packet carries the installation LWT. A clean stop means the old
@@ -2085,8 +2087,13 @@ static void mqtt_task(void*) {
                 if (prof != "auto" && prof != s_announced_profile) {
                     publish_x10a_discovery();                  // discovery for the (new) profile
                     s_announced_profile = prof;
-                    publish_x10a_state(true);                  // full retained seed
-                } else if (!s_announced_profile.empty() && prof == s_announced_profile) {
+                    // A short all-page timeout stays inside the availability grace, but poll_once()
+                    // correctly replaced its cache with an empty snapshot. Do not turn that honest
+                    // local absence into a retained `{}` for every downstream consumer. The next
+                    // answering sweep seeds state because s_last_x10a_json is still empty here.
+                    if (hp.connected) publish_x10a_state(true);
+                } else if (hp.connected && !s_announced_profile.empty() &&
+                           prof == s_announced_profile) {
                     publish_x10a_state(false);                 // republish only when it changed
                 }
                 // prof == "auto" (detection pending): wait — don't publish transient generic sensors.

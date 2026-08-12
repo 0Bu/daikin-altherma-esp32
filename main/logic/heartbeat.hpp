@@ -129,7 +129,7 @@ struct HeartbeatFields {
     int         values         = 0;
     uint32_t    crc_err        = 0;
     uint32_t    timeout_err    = 0;
-    int32_t     last_ok_s      = -1;      // seconds since last fully-good X10A cycle (-1 = never)
+    int32_t     last_ok_s      = -1;      // seconds since last cycle with any valid X10A reply
     uint32_t    rx_received    = 0;       // cumulative successful register reads (HpStats.rx_ok)
     uint32_t    rx_fails       = 0;       // cumulative failed reads (HpStats.rx_fail_total)
     // SOURCE freshness, which is a different question from publish freshness (#209 defect 5). The

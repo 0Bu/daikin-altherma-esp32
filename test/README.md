@@ -165,8 +165,9 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable
   profile resolves a real measurement and never a setpoint (issue #121, the #35–#39 failure shape).
 - `logic/mqtt_publish_gate.hpp` — an unwired board may connect/subscribe without an installation
-  LWT but cannot publish; the first X10A proof promotes it, and an active board publishes one offline
-  transition on later X10A loss before ordinary publication stays silent until recovery.
+  LWT but cannot publish; the first X10A proof promotes it, a one-cycle dropout is absorbed using the
+  monotonic last-good age, and an active board publishes one offline transition only after 15 seconds
+  of X10A loss before ordinary publication stays silent until recovery.
 - `logic/profile_view.hpp` + `def/overlay.hpp` — the generated table plus the temporary page-`0x10`
   supplement as one row sequence, and the **overlay rule** (a block applies only if the base already
   references its page). Asserted: the block is withheld when the page is absent, base rows keep their

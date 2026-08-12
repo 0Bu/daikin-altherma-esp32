@@ -11588,38 +11588,58 @@ static void test_mqtt_publish_gate() {
 
     // Broker configuration alone proves no installation ownership. The no-LWT client may be
     // connected for subscriptions, but the gate authorizes no application publication.
-    auto d = mqtt_publish_gate_step(state, false, false);
+    auto d = mqtt_publish_gate_step(state, false, -1, false);
     CHECK(d.next == MqttPublishGateState::SubscriberOnly);
     CHECK(!d.promote_publisher && !d.publish_cycle && !d.publish_offline && !d.resumed);
-    d = mqtt_publish_gate_step(state, false, true);
+    d = mqtt_publish_gate_step(state, false, -1, true);
     CHECK(d.next == MqttPublishGateState::SubscriberOnly);
     CHECK(!d.promote_publisher && !d.publish_cycle && !d.publish_offline && !d.resumed);
 
     // The first valid bus cycle authorizes exactly the replacement by an LWT-bearing client.
     // Publication still waits for that new client's MQTT_EVENT_CONNECTED.
-    d = mqtt_publish_gate_step(state, true, true);
+    d = mqtt_publish_gate_step(state, true, 0, true);
     CHECK(d.next == MqttPublishGateState::Active);
     CHECK(d.promote_publisher && !d.publish_cycle && !d.publish_offline && !d.resumed);
     state = d.next;
-    d = mqtt_publish_gate_step(state, true, true);
+    d = mqtt_publish_gate_step(state, true, 0, true);
     CHECK(d.publish_cycle && !d.promote_publisher && !d.publish_offline);
 
-    // A live installation going down gets one explicit offline marker, then complete silence.
-    d = mqtt_publish_gate_step(state, false, true);
+    // One missed whole sweep is a known property of this serial source, not an installation outage.
+    // Keep publishing auxiliary/diagnostic data during the grace; the runtime separately refuses to
+    // publish the empty current-cycle X10A cache. The boundary is elapsed source age, not MQTT ticks.
+    d = mqtt_publish_gate_step(state, false, 1, true);
+    CHECK(d.next == MqttPublishGateState::Active);
+    CHECK(d.publish_cycle && !d.publish_offline && !d.resumed);
+    d = mqtt_publish_gate_step(state, false, MQTT_X10A_OFFLINE_GRACE_S - 1, true);
+    CHECK(d.next == MqttPublishGateState::Active);
+    CHECK(d.publish_cycle && !d.publish_offline && !d.resumed);
+
+    // A sustained loss gets one explicit offline marker at the exact grace boundary, then silence.
+    d = mqtt_publish_gate_step(state, false, MQTT_X10A_OFFLINE_GRACE_S, true);
     CHECK(d.next == MqttPublishGateState::Paused);
     CHECK(d.publish_offline && !d.publish_cycle && !d.promote_publisher);
     state = d.next;
-    d = mqtt_publish_gate_step(state, false, true);
+    d = mqtt_publish_gate_step(state, false, MQTT_X10A_OFFLINE_GRACE_S + 1, true);
     CHECK(d.next == MqttPublishGateState::Paused);
     CHECK(!d.publish_offline && !d.publish_cycle && !d.resumed);
 
     // Recovery on the existing broker session asks the runtime for an online + fresh state seed;
     // a recovery while the broker is down still changes state but cannot publish prematurely.
-    d = mqtt_publish_gate_step(state, true, true);
+    d = mqtt_publish_gate_step(state, true, 0, true);
     CHECK(d.next == MqttPublishGateState::Active);
     CHECK(d.resumed && d.publish_cycle && !d.publish_offline);
-    d = mqtt_publish_gate_step(state, true, false);
+    d = mqtt_publish_gate_step(state, true, 0, false);
     CHECK(d.resumed && !d.publish_cycle && !d.publish_offline);
+
+    // The MQTT task can start just after a good sweep and observe the following transient miss.
+    // last_ok_s still proves X10A ownership during this boot, while -1 never does.
+    state = MqttPublishGateState::SubscriberOnly;
+    d = mqtt_publish_gate_step(state, false, 1, true);
+    CHECK(d.next == MqttPublishGateState::Active && d.promote_publisher);
+    CHECK(!mqtt_x10a_available(false, -1));
+    CHECK(mqtt_x10a_available(true, -1));
+    CHECK(mqtt_x10a_available(false, MQTT_X10A_OFFLINE_GRACE_S - 1));
+    CHECK(!mqtt_x10a_available(false, MQTT_X10A_OFFLINE_GRACE_S));
 }
 
 int main() {

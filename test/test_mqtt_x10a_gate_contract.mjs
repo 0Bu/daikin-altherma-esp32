@@ -36,6 +36,12 @@ assert.ok(offline > refFrames && resume > offline && publishCycle > resume,
   "offline/resume transitions and every ordinary publication must follow inbound servicing");
 assert.doesNotMatch(task.slice(promote, refSubscription), /SubscriberOnly[\s\S]*continue\s*;/,
   "subscriber-only mode must not skip inbound reference servicing");
+assert.match(task,
+  /mqtt_publish_gate_step\(\s*publish_gate, hp\.connected, hp\.last_ok_s, s_connected\.load\(\)\)/,
+  "availability gating must debounce current-cycle X10A loss with monotonic last-good age");
+assert.match(task,
+  /else if \(hp\.connected && !s_announced_profile\.empty\(\)/,
+  "an availability-grace cycle must not retain an empty X10A snapshot");
 
 const builderStart = taskEnd;
 const builderEnd = mqtt.indexOf("static bool start_current_client()", builderStart);
