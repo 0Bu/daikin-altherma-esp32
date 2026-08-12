@@ -63,12 +63,16 @@ for (const [phase, expectedPattern, suffix, rgbEnglish, rgbGerman, gpioEnglish, 
       `${phase} legend must not expose technical timing values`);
   }
 }
+assert.doesNotMatch(style, /led-(?:single-blink|double-flash)|\.led-swatch[^}]*animation/,
+  "infobox status points must stay static; the adjacent wording describes the blink pattern");
 assert.doesNotMatch(html, /id="bdLedLegend|data-i18n="board\.hint"|data-i18n="env\.pins_hint"/,
   "LED, reset and I2C explanations must not remain inside the Board Hardware editor");
 assert.match(html, /class="pin-grid board-pin-grid"[\s\S]*id="bdLedPinRow"[\s\S]*id="bdBtnPin"/,
   "LED and reset-button pin selectors must share one two-column row");
 assert.match(style, /\.pin-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/,
   "the shared board and ENV pin row must remain a real two-column grid");
+assert.match(style, /\.led-swatch\s*\{[^}]*align-self:\s*start;[^}]*margin-top:\s*calc\(\(1\.55em - 8px\) \/ 2\)/,
+  "each LED preview must center on the first text line instead of sitting above it");
 // The standard value row is 1.5em plus 9px above and below, and each of the two buttons must be
 // tappable through the whole of it. That is the property; the MECHANISM moved, because the original
 // one — the row owning the padding and each button reaching back through it with

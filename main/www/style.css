@@ -109,9 +109,9 @@ main { flex: 1; }
 .iconbtn.bordered { background: var(--card); border: 1px solid var(--line); width: 38px; height: 38px; }
 .iconbtn:hover { color: var(--brand-strong); }
 .iconbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
-/* Attention marker on the gear: a connection row is DOWN. The rows themselves live behind the gear
-   now, so this is the dashboard's only sign of it — the button's aria-label carries the same fact
-   in words, so the dot is never the sole carrier (DESIGN.md §9). */
+/* Attention marker on the gear: any configured link is DOWN. Network/service rows live behind the
+   gear, while X10A and ENV III report on separate surfaces, so this is the dashboard's common sign
+   of failure — the button's aria-label carries the same fact in words (§9). */
 .iconbtn-dot {
   position: absolute; top: -1px; right: -1px; width: 10px; height: 10px; border-radius: 50%;
   background: var(--err); border: 2px solid var(--bg);
@@ -1094,7 +1094,8 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
 .led-pattern-list { list-style: none; margin: 8px 0 0; padding: 0; }
 .led-pattern-list li { display: grid; grid-template-columns: 9px minmax(0, 1fr); gap: 7px; margin-top: 4px; }
 .led-swatch {
-  width: 8px; height: 8px; margin-top: 4px; border-radius: 50%;
+  align-self: start; width: 8px; height: 8px;
+  margin-top: calc((1.55em - 8px) / 2); border-radius: 50%;
   background: currentColor; border: 1px solid rgba(0,0,0,.18); box-shadow: 0 0 0 1px rgba(255,255,255,.25);
 }
 .led-off { color: var(--muted); background: transparent; }

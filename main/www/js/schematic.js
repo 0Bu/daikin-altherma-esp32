@@ -488,9 +488,10 @@ function updateSchematicStateA11y(d) {
 // sensor, and a live HomeHub must not make a stale ENV sample current. Keep its formatter and state
 // decision in one place so the compact header pill and the inspector always tell the same truth.
 function env3State(env) {
-  return env.fresh ? { text: t("env.live"), cls: "ok" }
-    : env.error === "collecting" ? { text: t("env.collecting"), cls: "warn" }
-    : { text: t("env.unavailable"), cls: "err" };
+  const cls = env3ConnectionTone(env);
+  return cls === "ok" ? { text: t("env.live"), cls }
+    : cls === "warn" ? { text: t("env.collecting"), cls }
+    : { text: t("env.unavailable"), cls };
 }
 
 function env3Value(env, key, digits, unit) {
