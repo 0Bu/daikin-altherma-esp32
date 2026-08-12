@@ -8,6 +8,8 @@ const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url),
 const css = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const bootstrap = readAppFragments(["bootstrap.js"]);
 const demoBuilder = fs.readFileSync(new URL("../tools/uigif/build_demo.py", import.meta.url), "utf8");
+const installer = fs.readFileSync(new URL("../docs/index.html", import.meta.url), "utf8");
+const pagesBuilder = fs.readFileSync(new URL("../scripts/build-pages.sh", import.meta.url), "utf8");
 const raster = new URL("../main/www/heat_pump_icon.png", import.meta.url);
 
 assert.ok(fs.statSync(raster).size > 0, "the source-faithful fan raster must ship with the UI");
@@ -26,5 +28,11 @@ assert.doesNotMatch(bootstrap, /syncAppFan|MutationObserver\(syncAppFan\)/,
                     "the static brand icon must not mirror telemetry state");
 assert.match(demoBuilder, /out\.parent \/ "heat-pump-icon\.png"/,
              "the recording harness must copy the underscored source asset to the hyphenated UI URL");
+assert.match(installer,
+             /<img class="installer-logo" src="\.\/heat-pump-icon\.png" alt="" aria-hidden="true">/,
+             "the browser installer must use the firmware dashboard's canonical fan mark");
+assert.match(pagesBuilder,
+             /cp main\/www\/heat_pump_icon\.png "\$OUT\/heat-pump-icon\.png"/,
+             "the Pages build must publish the exact firmware icon instead of another drawing");
 
 console.log("ui fan icon: static brand raster and live schematic fan verified");
