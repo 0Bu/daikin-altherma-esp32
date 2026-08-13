@@ -23,7 +23,7 @@ subscription, and that is a property of the code rather than a guard around a do
 ## Rolling plant checkup (up to 24 h)
 
 > **Looking for the user guide?** [DIAGNOSTICS.md](DIAGNOSTICS.md) explains every visible result in
-> everyday language, including what `OK`, `HINWEIS`, `WARNUNG`, `PRÜFT` and `NUR MESSWERT` mean and
+> everyday language, including what `OK`, `NOTE`, `WARNING`, `CHECKING`, and `MEASURED ONLY` mean and
 > what a non-specialist can reasonably do next. [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md)
 > maps every check to manufacturer documentation or primary research, the exact firmware rule and
 > the claim that the evidence cannot support. This section is the technical design record.

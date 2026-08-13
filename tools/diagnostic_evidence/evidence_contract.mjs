@@ -30,7 +30,7 @@ export function auditEvidenceContract(evidence, rowIds, evidenceArg = "docs/DIAG
     if (count > 1) add("E001", id, `evidence section is duplicated (${count})`);
   }
 
-  const sourcesAt = evidence.indexOf("\n## Quellen");
+  const sourcesAt = evidence.indexOf("\n## Sources");
   const citedSourceIds = new Set();
   // A new diagnosis is conservative by default: only the two direct device-reporting rows are
   // exempt from an explicit project/experimental boundary. Extending this allow-list is therefore
@@ -45,34 +45,34 @@ export function auditEvidenceContract(evidence, rowIds, evidenceArg = "docs/DIAG
     const end = sourcesAt > heading.index ? Math.min(nextHeading, sourcesAt) : nextHeading;
     const block = evidence.slice(heading.index, end);
     const labels = [
-      ["E002", "**Extern belegt:**"],
-      ["E003", "**Firmware-Regel:**"],
-      ["E004", "**Nicht bewiesen:**"],
+      ["E002", "**External evidence:**"],
+      ["E003", "**Firmware rule:**"],
+      ["E004", "**Not established:**"],
     ];
     for (const [code, label] of labels) {
       const count = occurrences(block, label);
       if (count !== 1) add(code, id, `evidence section needs '${label}' exactly once (found ${count})`);
     }
 
-    const externalStart = block.indexOf("**Extern belegt:**");
-    const firmwareStart = block.indexOf("**Firmware-Regel:**");
+    const externalStart = block.indexOf("**External evidence:**");
+    const firmwareStart = block.indexOf("**Firmware rule:**");
     const externalClaim = externalStart >= 0
       ? block.slice(externalStart, firmwareStart > externalStart ? firmwareStart : block.length)
       : "";
     const blockSources = [...externalClaim.matchAll(SOURCE_ID)].map((match) => match[1]);
     if (blockSources.length === 0) {
-      add("E006", id, "'Extern belegt' needs a source identifier such as [D1], [E1] or [R1]");
+      add("E006", id, "'External evidence' needs a source identifier such as [D1], [E1] or [R1]");
     }
     for (const sourceId of blockSources) citedSourceIds.add(sourceId);
 
     if (!boundaryExemptIds.has(id) &&
-        !block.includes("**Projektanteil:**") && !block.includes("**Experimentelle Grenze:**")) {
+        !block.includes("**Project boundary:**") && !block.includes("**Experimental boundary:**")) {
       add("E005", id, "project or experimental boundary must be named explicitly");
     }
   }
 
-  if (sourcesAt < 0) add("E007", evidenceArg, "evidence ledger needs a '## Quellen' source catalog");
-  if (!evidence.includes("## Pflege-Regel")) {
+  if (sourcesAt < 0) add("E007", evidenceArg, "evidence ledger needs a '## Sources' source catalog");
+  if (!evidence.includes("## Maintenance rule")) {
     add("E007", evidenceArg, "evidence ledger needs its maintenance rule");
   }
 
@@ -106,8 +106,8 @@ export function auditEvidenceContract(evidence, rowIds, evidenceArg = "docs/DIAG
       add("E009", sourceId, "source entry needs a resolved HTTPS source link");
     }
     if (sourceId.startsWith("D")) {
-      if (!/Modelle?\s/i.test(sourceBlock) || !/Dokument\s+\*\*[^*]+\*\*/i.test(sourceBlock) ||
-          !/Revision\s+\d{4}-\d{2}/i.test(sourceBlock) || !/(Abschnitt|Stelle)/i.test(sourceBlock)) {
+      if (!/models?\s/i.test(sourceBlock) || !/document\s+\*\*[^*]+\*\*/i.test(sourceBlock) ||
+          !/revision\s+\d{4}-\d{2}/i.test(sourceBlock) || !/sections? used/i.test(sourceBlock)) {
         add("E009", sourceId,
           "manufacturer source needs models, document number, revision and used section");
       }

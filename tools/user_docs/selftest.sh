@@ -55,7 +55,7 @@ block = s[a:b]
 if '          action:' not in block: sys.exit(1)
 open(p, 'w').write(s[:a] + block.replace('          action:', '          missing_action:', 1) + s[b:])
 PY
-run_case "short German action is caught" 1 "U003 health_cycling.de.action"
+run_case "short localized action is caught" 1 "U003 health_cycling.de.action"
 
 echo "== 2. visible row without a documentation section =="
 reset
@@ -74,8 +74,8 @@ import sys
 p = sys.argv[1]; s = open(p).read()
 a = s.index('<!-- user-docs: health_flow -->'); b = s.index('<!-- user-docs: health_heater -->', a)
 block = s[a:b]
-if '**Was du tun kannst:**' not in block: sys.exit(1)
-open(p, 'w').write(s[:a] + block.replace('**Was du tun kannst:**', '**Technischer Hinweis:**', 1) + s[b:])
+if '**What you can do:**' not in block: sys.exit(1)
+open(p, 'w').write(s[:a] + block.replace('**What you can do:**', '**Technical note:**', 1) + s[b:])
 PY
 run_case "missing user action in the guide is caught" 1 "U008 health_flow"
 
@@ -124,9 +124,9 @@ echo "== 8. visible diagnosis without an evidence section =="
 reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
-p = sys.argv[1]; s = open(p).read(); old = '### 5. Wasserdruck, niedrigster (`pressure`)\n'
+p = sys.argv[1]; s = open(p).read(); old = '### 5. Lowest water pressure (`pressure`)\n'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '### 5. Wasserdruck, niedrigster (`missing_pressure`)\n', 1))
+open(p, 'w').write(s.replace(old, '### 5. Lowest water pressure (`missing_pressure`)\n', 1))
 PY
 run_case "missing evidence section is caught" 1 "U011 pressure"
 
@@ -135,10 +135,10 @@ reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-a = s.index('### 4. Abtauvorgänge (`defrost`)'); b = s.index('### 5. Wasserdruck', a)
+a = s.index('### 4. Defrost events (`defrost`)'); b = s.index('### 5. Lowest water pressure', a)
 block = s[a:b]
-if '**Nicht bewiesen:**' not in block: sys.exit(1)
-open(p, 'w').write(s[:a] + block.replace('**Nicht bewiesen:**', '**Offene Frage:**', 1) + s[b:])
+if '**Not established:**' not in block: sys.exit(1)
+open(p, 'w').write(s[:a] + block.replace('**Not established:**', '**Open question:**', 1) + s[b:])
 PY
 run_case "missing evidence claim boundary is caught" 1 "U012 defrost"
 
@@ -152,6 +152,16 @@ if old not in s: sys.exit(1)
 open(p, 'w').write(s.replace(old, '', 1))
 PY
 run_case "unresolved evidence URL is caught" 1 "U013 R2"
+
+echo "== 11. German prose in any maintained Markdown guide =="
+reset
+printf '\nDieser Abschnitt erklärt die Prüfung.\n' > "$WORK/docs/UNEXPECTED_GERMAN.md"
+run_case "German documentation is caught" 1 "U014 docs/UNEXPECTED_GERMAN.md:2"
+
+echo "== 12. German prose without umlauts =="
+reset
+printf '\nDiese Dokumentation ist nicht in englischer Sprache.\n' > "$WORK/docs/ASCII_GERMAN.md"
+run_case "ASCII-only German documentation is caught" 1 "U014 docs/ASCII_GERMAN.md:2"
 
 echo
 if [ "$fail" -eq 0 ]; then

@@ -25,10 +25,10 @@ heuristic.
 3. Update [`docs/DIAGNOSTIC_EVIDENCE.md`](../../../docs/DIAGNOSTIC_EVIDENCE.md) for every affected
    diagnosis. State exactly once:
 
-   - `Extern belegt`: what the source actually establishes and its scope;
-   - `Firmware-Regel`: inputs, validity/coverage requirements, window, threshold and verdict;
-   - `Projektanteil` or `Experimentelle Grenze`: anything chosen or inferred by this project;
-   - `Nicht bewiesen`: causes or whole-system conclusions the result cannot establish.
+   - `External evidence`: what the source actually establishes and its scope;
+   - `Firmware rule`: inputs, validity/coverage requirements, window, threshold and verdict;
+   - `Project boundary` or `Experimental boundary`: anything chosen or inferred by this project;
+   - `Not established`: causes or whole-system conclusions the result cannot establish.
 4. Re-open every external source whose claim, model scope, threshold or citation changed. Prefer, in
    order: the exact official Daikin document for the named model; an official regulation; original
    peer-reviewed research. Do not use search snippets, forums, installer blogs, vendor marketing or
@@ -40,14 +40,14 @@ heuristic.
 
 ## Preserve claim strength
 
-- Call a value a `Herstellergrenze` only when the exact model-family document states that limit under
+- Call a value a `manufacturer limit` only when the exact model-family document states that limit under
   the relevant operating condition.
-- Call a decoded X10A mapping `Projektevidenz`, not a public Daikin protocol guarantee.
-- Keep a project-selected threshold a `Projekt-Heuristik`, even when research supports the general
+- Call a decoded X10A mapping `project evidence`, not a public Daikin protocol guarantee.
+- Keep a project-selected threshold a `project heuristic`, even when research supports the general
   physical relationship.
-- Keep undocumented counter semantics `experimentell`. Missing public manufacturer semantics must
+- Keep undocumented counter semantics `experimental`. Missing public manufacturer semantics must
   remain an explicit gap, never be filled by confident prose.
-- Keep missing, stale or insufficient evidence `NICHT VERFÜGBAR` or `PRÜFT`; never turn absence into
+- Keep missing, stale or insufficient evidence `NOT AVAILABLE` or `CHECKING`; never turn absence into
   an `OK` verdict.
 - Do not infer one root cause from a pattern that has several plausible causes, and do not turn one
   row's `OK` into a healthy-plant claim.

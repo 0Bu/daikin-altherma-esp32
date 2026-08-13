@@ -737,7 +737,7 @@ Body, ordered:
    name its own empty case, and the COP does.
    **A chart never gets a blanked X10A number back.** During outdoor-unit rest the X10A outdoor-air
    series is held-over for exactly those samples, so its blue curve has a gap and its scrub value says
-   "Außeneinheit ruht". The independently polled HomeHub register may draw a petrol value at that
+   "Outdoor unit idle". The independently polled HomeHub register may draw a petrol value at that
    same instant — explicitly under its own source name, never as a repaired X10A value. Its hover
    popup names how long the observed register plateau lasts and that measurement age is unknown. If
    neither source measured, no marker appears. Anything that clamps or interpolates the last known
@@ -788,7 +788,7 @@ Body, ordered:
      drawn as a gap, never interpolated across — the same refusal the blanked pills make (item 3).
    - **Idle is not a gap.** On the outdoor pages (0x20/0x21) a sample taken while the compressor
      rests is stored as *held over*, not as the number the bus keeps returning, and the readout says
-     "Außeneinheit ruht" rather than "nicht gemessen". Without that, a mild day's outdoor-air trend
+     "Outdoor unit idle" rather than "not measured". Without that, a mild day's outdoor-air trend
      is a staircase of last-run values that reads exactly like weather.
    - **A tap PINS the readout; hover only previews it.** Reading a value must not require holding a
      finger on the glass — a tap fixes the crosshair and its bubble at that sample and they stay
@@ -869,7 +869,7 @@ Body, ordered:
    patterns that can only be hints; `observation` is a measured fact with no universal judgement;
    and `experimental` marks retry-counter semantics that are not yet manufacturer-validated. The
    firmware classifies and supplies the evidence. The collapsed row shows only one of `OK`,
-   `HINWEIS`, `WARNUNG`, `PRÜFT`, `NUR MESSWERT`, `EXPERIMENTELL` or `NICHT VERFÜGBAR`.
+   `NOTE`, `WARNING`, `CHECKING`, `MEASURED ONLY`, `EXPERIMENTAL`, or `NOT AVAILABLE`.
    Its short expander carries the reading, assessment, evidence progress, basis and limits. Observation-only
    and experimental rows must never be promoted to `OK`. A threshold
    decided in `js/schematic.js` would be a second, ungated definition of the same rule.
@@ -898,7 +898,7 @@ Body, ordered:
    fractional duration telescopes instead of being floored away on every interval; continuity gaps
    still use the exact microsecond delta. Event states are sampled once per completed sweep, not at a
    guaranteed 1 Hz, so a pulse entirely between sweeps remains outside the evidence.
-   **A check the active profile cannot run says `NICHT VERFÜGBAR`.** That is `unavailable`, not a permissive zero,
+   **A check the active profile cannot run says `NOT AVAILABLE`.** That is `unavailable`, not a permissive zero,
    and does not count as evaluated. Only 27 of 44 profiles carry a compressor-speed witness; defrost
    count remains observable without it, while the compressor-runtime share stays unavailable and
    cannot count as assessed. `paired_count` separately reports transitions with compressor evidence
@@ -910,8 +910,8 @@ Body, ordered:
    as `<1 min` instead of zero.
    **DHW heat loss uses clean one-hour R5T windows and an optional independent pump witness.** Tank
    charging, internal-pump/BSH operation, 45 minutes of settling and draw-like temperature steps are
-   excluded. At least 0.8 K/h raises only `HINWEIS`; a green absence result needs a full 24-hour
-   lifecycle plus six clean hours. Settings → **Anlagendiagnose** configures the exact Shelly MQTT
+   excluded. At least 0.8 K/h raises only `NOTE`; a green absence result needs a full 24-hour
+   lifecycle plus six clean hours. Settings → **Plant diagnostics** configures the exact Shelly MQTT
    topic, `apower`/source-time JSON paths, maximum age, ON/OFF hysteresis and pulse-train-aware
    confirmation. The row
    distinguishes high loss during confirmed pump operation from high loss persisting after two hours
@@ -1412,9 +1412,9 @@ vocabulary exactly:
    Every row has a pull-out explanation tongue. The room-source tongue is deliberately a compact
    **live verdict**, not a second copy of its editor. One status line combines transport, freshness
    and diagnostic usability with that exact precedence. Thus a fresh MQTT packet from a thermostat
-   reporting itself switched off reads **"Nicht verwendbar — Raumthermostat ausgeschaltet"**, never
-   "Aktuell" beside an amber row. If a value exists, only actual temperature, target and **Letzter
-   Messwert** follow. The last-reading age tells whether the thermostat is still reporting; only a
+   reporting itself switched off reads **"Not usable — room thermostat switched off"**, never
+   "Current" beside an amber row. If a value exists, only actual temperature, target, and **Last
+   reading** follow. The last-reading age tells whether the thermostat is still reporting; only a
    stale state adds the configured maximum beside it, while a broker-replayed retained value is
    marked briefly as such. One final purpose paragraph says concisely what the source actually
    causes in user terms: comparing room and target temperature helps reveal a heating curve that is
@@ -1503,7 +1503,7 @@ the value's register/label (the generator can also stamp a `group` tag per row).
    > `test_ui_source_matrix.mjs` resolves the real `groupOf` over every catalog label and asserts
    > both the eleven and the two lists naming the same groups.
    A flag reading ON means the unit is limiting itself **right now**, so the heading carries a
-   `--warn` dot plus the words *"limiting now" / "regelt zurück"* while any is ON, and those rows'
+   `--warn` dot plus the words *"limiting now"* while any is ON, and those rows'
    values go `--warn`. The **counters are not** highlighted: they are cumulative, and marking both
    alike would merge *"is happening"* into *"has happened"* — the one distinction these rows exist
    to draw. Nothing shows when nothing is limiting. Scoped to this group, since ON is the normal
@@ -1676,7 +1676,7 @@ page under near-identical cards). Specific:
   of a thing on the left, what it currently reads on the right — and the reading is `nowrap`, because
   breaking "46.3 °C" over two lines reads as two numbers. A `nowrap` item cannot give ground, so on a
   narrow phone whatever the row is short of comes out of the **name**, and it comes out all at once:
-  "SMART-GRID-ANFORDERUNG ÜBER MODBUS" set six words deep in a 110px column beside "Freier Betrieb",
+  "SMART GRID REQUEST VIA MODBUS" set six words deep in a 110px column beside "Free operation",
   "I/U operation mode" three lines deep in 70px beside "Heizen + Warmwasser", and — worst — an
   inspector's mono source line set **one character per line, sixteen lines tall**, with the title
   printed over the reading. So the pair **wraps**: when the two stop fitting side by side, the

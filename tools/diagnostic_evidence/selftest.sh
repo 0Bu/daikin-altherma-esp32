@@ -54,9 +54,9 @@ echo "== 1. visible diagnosis without an evidence section =="
 reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
-p = sys.argv[1]; s = open(p).read(); old = '### 5. Wasserdruck, niedrigster (`pressure`)\n'
+p = sys.argv[1]; s = open(p).read(); old = '### 5. Lowest water pressure (`pressure`)\n'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '### 5. Wasserdruck, niedrigster (`missing_pressure`)\n', 1))
+open(p, 'w').write(s.replace(old, '### 5. Lowest water pressure (`missing_pressure`)\n', 1))
 PY
 run_case "missing evidence section is caught" 1 "E001 pressure"
 
@@ -64,9 +64,9 @@ echo "== 2. external basis removed =="
 reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
-p = sys.argv[1]; s = open(p).read(); old = '**Extern belegt:**'
+p = sys.argv[1]; s = open(p).read(); old = '**External evidence:**'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '**Unbelegte Behauptung:**', 1))
+open(p, 'w').write(s.replace(old, '**Unsupported claim:**', 1))
 PY
 run_case "missing external basis is caught" 1 "E002 fault"
 
@@ -74,9 +74,9 @@ echo "== 3. firmware rule removed =="
 reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
-p = sys.argv[1]; s = open(p).read(); old = '**Firmware-Regel:**'
+p = sys.argv[1]; s = open(p).read(); old = '**Firmware rule:**'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '**Unklare Regel:**', 1))
+open(p, 'w').write(s.replace(old, '**Unclear rule:**', 1))
 PY
 run_case "missing firmware rule is caught" 1 "E003 fault"
 
@@ -84,9 +84,9 @@ echo "== 4. unsupported-claim boundary removed =="
 reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
-p = sys.argv[1]; s = open(p).read(); old = '**Nicht bewiesen:**'
+p = sys.argv[1]; s = open(p).read(); old = '**Not established:**'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '**Offene Frage:**', 1))
+open(p, 'w').write(s.replace(old, '**Open question:**', 1))
 PY
 run_case "missing claim boundary is caught" 1 "E004 fault"
 
@@ -95,10 +95,10 @@ reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-a = s.index('### 4. Abtauvorgänge (`defrost`)'); b = s.index('### 5. Wasserdruck', a)
+a = s.index('### 4. Defrost events (`defrost`)'); b = s.index('### 5. Lowest water pressure', a)
 block = s[a:b]
-if '**Projektanteil:**' not in block: sys.exit(1)
-open(p, 'w').write(s[:a] + block.replace('**Projektanteil:**', '**Einordnung:**', 1) + s[b:])
+if '**Project boundary:**' not in block: sys.exit(1)
+open(p, 'w').write(s[:a] + block.replace('**Project boundary:**', '**Context:**', 1) + s[b:])
 PY
 run_case "missing project boundary is caught" 1 "E005 defrost"
 
@@ -107,7 +107,7 @@ reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-a = s.index('### 7. Zusatzheizer (`heater`)'); b = s.index('### 8. Schutz-Rückregelungen', a)
+a = s.index('### 7. Electric backup and booster heaters (`heater`)'); b = s.index('### 8. Protection-limit counter changes', a)
 block = s[a:b]
 if '[D1]' not in block: sys.exit(1)
 open(p, 'w').write(s[:a] + block.replace('[D1]', '[unlinked source]') + s[b:])
@@ -129,9 +129,9 @@ echo "== 8. manufacturer metadata weakened =="
 reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
-p = sys.argv[1]; s = open(p).read(); old = 'Revision 2019-10'
+p = sys.argv[1]; s = open(p).read(); old = 'revision 2019-10'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, 'Revision unbekannt', 1))
+open(p, 'w').write(s.replace(old, 'revision unknown', 1))
 PY
 run_case "missing manufacturer revision is caught" 1 "E009 D1"
 

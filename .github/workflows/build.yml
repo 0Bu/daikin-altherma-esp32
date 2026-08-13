@@ -190,10 +190,11 @@ jobs:
 
       # A tappable row can still explain a correct result only in installer language, omit what the
       # finding does NOT prove, or leave the owner with no supported next step. This binds every
-      # visible plant-diagnostics row to bilingual actionable copy and to its plain-language guide.
+      # visible plant-diagnostics row to localized actionable copy and to its English guide. The
+      # same gate rejects German prose in maintained repository Markdown.
       # The source stamp makes evaluator/threshold/UI changes stale that guide even when no row was
       # added. The /user-docs-review skill is the human half; this is the fail-closed mechanical one.
-      - name: Audit plain-language diagnosis help
+      - name: Audit English plain-language diagnosis help
         run: ./scripts/run-user-docs-audit.sh
       - name: Verify the user-docs audit still has teeth
         run: ./tools/user_docs/selftest.sh

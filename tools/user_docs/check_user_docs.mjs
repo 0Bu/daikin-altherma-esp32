@@ -18,6 +18,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { readAppSource } from "../ui/read_app_source.mjs";
 import { auditEvidenceContract } from "../diagnostic_evidence/evidence_contract.mjs";
+import { auditEnglishDocumentation } from "./english_docs.mjs";
 
 let root = process.cwd();
 let appArg = "main/www/app.sources";
@@ -126,15 +127,15 @@ for (let i = 0; i < ordered.length; i++) {
   const marker = ordered[i];
   const block = doc.slice(marker.index, ordered[i + 1]?.index ?? doc.length);
   if (marker[1] === "health_guide") {
-    for (const status of ["OK", "HINWEIS", "WARNUNG", "PRÜFT", "NUR MESSWERT", "EXPERIMENTELL", "NICHT VERFÜGBAR"]) {
+    for (const status of ["OK", "NOTE", "WARNING", "CHECKING", "MEASURED ONLY", "EXPERIMENTAL", "NOT AVAILABLE"]) {
       if (!block.includes(status)) add("U008", marker[1], `status '${status}' is not explained before the first diagnosis`);
     }
   } else {
-    if (!block.includes("**Einfach gesagt:**")) add("U008", marker[1], "section needs an 'Einfach gesagt' explanation");
-    if (!block.includes("**Was du tun kannst:**")) add("U008", marker[1], "section needs a concrete 'Was du tun kannst' next step");
+    if (!block.includes("**In plain language:**")) add("U008", marker[1], "section needs an 'In plain language' explanation");
+    if (!block.includes("**What you can do:**")) add("U008", marker[1], "section needs a concrete 'What you can do' next step");
   }
 }
-for (const term of ["Verdichter", "BUH", "BSH", "X10A"]) {
+for (const term of ["Compressor", "BUH", "BSH", "X10A"]) {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   if (!new RegExp(`\\|\\s*${escaped}\\s*\\|`).test(doc)) {
     add("U008", term, "technical term needs an entry in the plain-language glossary");
@@ -150,6 +151,7 @@ for (const finding of auditEvidenceContract(evidence, rowIds, evidenceArg)) {
     : (finding.code === "E008" || finding.code === "E009" ? "U013" : "U012");
   add(code, finding.subject, finding.message);
 }
+for (const finding of auditEnglishDocumentation(root)) findings.push(finding);
 
 const fingerprint = crypto.createHash("sha256");
 for (const relative of ["main/logic/checkup.hpp", "main/checkup.cpp"]) {
