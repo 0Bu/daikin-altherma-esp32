@@ -127,6 +127,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 85 | **Browser serial-permission release** — the Pages installer exposes a granted, closed port's `forget()` action without opening a chooser when nothing can be revoked or interrupting an active flash | ✅ 🧪 | [`serial-port-release.mjs`](serial-port-release.mjs), [`serial_port_release.test.mjs`](../test/serial_port_release.test.mjs) |
 | 86 | **Inline Web Serial installer + monitor** — only the native port chooser leaves the branded Pages UI; ESP32-S3 probing, NVS-preserving sparse flash, cross-part progress, reset and a real 115200-baud monitor run in-page | ✅ 🧪 | [`web-installer.mjs`](web-installer.mjs), [`web_installer.test.mjs`](../test/web_installer.test.mjs) |
 | 87 | **Diagnostic-evidence contract gate** — every visible plant diagnosis stays bound to an external basis, its implemented rule and an explicit claim limit | ✅ | [`check_diagnostic_evidence.mjs`](../tools/diagnostic_evidence/check_diagnostic_evidence.mjs), [`run-diagnostic-evidence-audit.sh`](../scripts/run-diagnostic-evidence-audit.sh) |
+| 88 | **English-only documentation contract** — maintained Markdown stays English while localized UI copy remains independently complete and equally bounded | ✅ 🧪 | [`english_docs.mjs`](../tools/user_docs/english_docs.mjs), [`run-user-docs-audit.sh`](../scripts/run-user-docs-audit.sh) |
 
 ---
 
@@ -433,6 +434,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   every counting threshold invalidates the record when an update changes what a stored counter means.
   Two refusals stop the window outliving its source: safe mode never adopts, since nothing there would
   age it, and the poll loop keeps the clock running while the bus is unidentified.
+- **✅ 🧪 English-only maintained documentation** ([`english_docs.mjs`](../tools/user_docs/english_docs.mjs)).
+  The user-docs gate scans project Markdown for high-confidence German prose while continuing to
+  require equally bounded English and German copy in the localized web UI.
 - **✅ 🧪 The 24-hour trends survive a reboot** ([`logic/history_persist.hpp`](../main/logic/history_persist.hpp)).
   Still not in NVS — that would be ~100k writes a year in the partition holding the WiFi credentials —
   but the rings now live in `.noinit` DRAM, so every reset that kept power keeps them at no RAM cost

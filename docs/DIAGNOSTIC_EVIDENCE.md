@@ -1,263 +1,257 @@
-# Belege und Grenzen der Anlagendiagnosen
+# Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: d7e9c1b55422a14f596e9e92ad11cf790b2946a336a3ba2019d5b5ea948be2bc -->
+<!-- diagnostic-evidence-contract: 20bf4c0e4bb408f4ae60dcd0fcf2d7f0cf8506b20458b1b0820a92b45a0ff930 -->
 
-Diese Seite beantwortet für jede Zeile der Karte **„Anlagendiagnose · 24 h“** vier Fragen:
+For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
-1. Welche Tatsache ist extern belegt?
-2. Was wertet die Firmware tatsächlich aus?
-3. Welche Schwelle stammt nur aus diesem Projekt?
-4. Was darf aus dem Ergebnis ausdrücklich **nicht** geschlossen werden?
+1. Which fact is supported by external evidence?
+2. What does the firmware actually evaluate?
+3. Which threshold or filter belongs only to this project?
+4. What must not be concluded from the result?
 
-Damit ist eine Herstellerangabe nicht automatisch ein Grenzwert für jedes Daikin-Modell. Die
-genaue Installationsanleitung der eigenen Innen- und Außeneinheit bleibt maßgeblich. Die hier
-verlinkten Primärquellen wurden zuletzt am **12. August 2026** geprüft.
+A manufacturer statement is not automatically a limit for every Daikin model. The installation
+manual for the exact indoor and outdoor units remains authoritative. The primary sources linked here
+were last reviewed on **12 August 2026**.
 
-## Wie belastbar ist eine Aussage?
+## How strong is each kind of claim?
 
-| Kennzeichnung | Bedeutung |
-|----------------|-----------|
-| **Gerätemeldung** | Die Wärmepumpe meldet den Zustand selbst. Die Firmware transportiert und speichert ihn, erfindet aber keine Ursache. |
-| **Herstellergrenze** | Eine konkrete Daikin-Anleitung nennt die Grenze. Sie gilt nur für die dort aufgeführten Modelle und Bedingungen. |
-| **Beobachtung** | Die Firmware zählt oder misst ein vorhandenes X10A-Signal, ohne daraus gut oder schlecht abzuleiten. |
-| **Projekt-Heuristik** | Das Projekt markiert ein Muster vorsichtig als auffällig. Die Schwelle ist kein Daikin-Servicegrenzwert. |
-| **Experimentell** | Signalname und Änderung sind beobachtbar, seine vollständige Herstellersemantik ist öffentlich nicht belegt. |
+| Label | Meaning |
+|-------|---------|
+| **Device report** | The heat pump reports the state itself. The firmware transports and retains it but does not invent a cause. |
+| **Manufacturer limit** | A specific Daikin manual states the limit. It applies only to the listed models and conditions. |
+| **Observation** | The firmware counts or measures an available X10A signal without declaring it good or bad. |
+| **Project heuristic** | The project cautiously marks a pattern as notable. The threshold is not a Daikin service limit. |
+| **Experimental** | The signal name and a change are observable, but public documentation does not establish the complete manufacturer semantics. |
 
-Die Signaladressen stammen aus der durch Protokollanalyse und Live-Mitschnitte validierten
-[X10A-Registerkarte](REGISTERS.md). Das ist belastbare Projektevidenz für die **Dekodierung**, aber
-keine offizielle Zusage von Daikin, dass X10A eine öffentliche oder über Modellgenerationen stabile
-Diagnoseschnittstelle ist.
+The signal addresses come from the [X10A register map](REGISTERS.md), which was validated through
+protocol analysis and live captures. That is strong project evidence for the **decoding**, but it is
+not an official Daikin guarantee that X10A is a public or cross-generation stable diagnostic
+interface.
 
-## Belegmatrix für alle acht Diagnosen
+## Evidence matrix for all eight diagnoses
 
-### 1. Störung der Anlage (`fault`)
+<a id="diagnosis-fault"></a>
+### 1. Unit-reported fault (`fault`)
 
-**Extern belegt:** Daikin beschreibt in der Installateur-Referenz der Altherma 3 R W, dass bei einer
-Störung ein Fehlercode mit Kurz- und Langbeschreibung in der Bedienoberfläche erscheint. Kapitel
-12.4 enthält die Fehlercode-Tabelle, darunter Kältekreis-, Elektronik- und 7H-Durchflussfehler
-([D1], Abschnitt 12.4, gedruckte Seiten 89–90).
+**External evidence:** Daikin's Altherma 3 R W installer reference states that the user interface
+shows a short and long description when a malfunction occurs. Its error-code table includes
+refrigerant-circuit, electronics, and 7H water-flow faults ([D1], section 12.4, printed pages 89–90).
 
-**Firmware-Regel:** Die Diagnose liest die von der Anlage gelieferte Fehlerklasse. Ein aktuell
-aktiver Fehler wird sofort gemeldet; eine im rollenden Fenster beobachtete, inzwischen beendete
-Warnung bleibt als vergangenes Ereignis sichtbar. Implementiert ist das in
-[`checkup_evaluate()`](../main/logic/checkup.hpp) im Zweig `Fault`; die Dekodierung der Fehlerklasse
-kommt aus [`fault_state.hpp`](../main/logic/fault_state.hpp).
+**Firmware rule:** The diagnosis reads the fault class supplied by the unit. It reports a currently
+active fault immediately and retains a warning observed in the rolling window as a past event after
+it clears. This is implemented by the `Fault` branch of
+[`checkup_evaluate()`](../main/logic/checkup.hpp); [`fault_state.hpp`](../main/logic/fault_state.hpp)
+decodes the fault class.
 
-**Nicht bewiesen:** Die Zeile stellt keine eigene Fehlerursache fest und ersetzt nicht die
-codespezifische Daikin-Serviceanleitung. Ein nicht lesbares Signal ist nicht gleichbedeutend mit
-„kein Fehler“.
+**Not established:** This row does not determine a root cause and does not replace the code-specific
+Daikin service procedure. An unreadable signal is not equivalent to “no fault”.
 
-### 2. Wärmeverlust Warmwasserspeicher (`dhw_loss`)
+<a id="diagnosis-dhw-loss"></a>
+### 2. Domestic-hot-water tank heat loss (`dhw_loss`)
 
-**Extern belegt:** Die EU definiert den Bereitschaftsverlust eines Warmwasserspeichers als die bei
-festgelegter Wasser- und Umgebungstemperatur abgegebene Wärmeleistung in Watt. Speichervolumen und
-Bereitschaftsverlust sind getrennt anzugebende technische Parameter ([E1], Artikel 2(17) und Anhang
-III Abschnitt 7). Das belegt, dass Speicherverlust real und messbar ist, aber auch von Prüfbedingung
-und Speichergröße abhängt.
+**External evidence:** The EU defines a hot-water storage tank's standing loss as the heat power in
+watts emitted at specified water and ambient temperatures. Storage volume and standing loss are
+separate declared technical parameters ([E1], Article 2(17) and Annex III, section 7). This supports
+that tank heat loss is real and measurable, while also showing that test conditions and tank size
+matter.
 
-**Firmware-Regel:** Ausgewertet werden vollständige, ruhige Ein-Stunden-Fenster des
-Speicherfühlers R5T. Laden, interne Pumpenbewegung, eine erkannte Zapfung, unplausible Werte und zu
-lange Datenlücken verwerfen das Fenster. Nach einer echten Ladung gelten 45 Minuten Beruhigungszeit.
-Ein **HINWEIS** entsteht ab `0,8 K/h`; für ein entwarnendes Ergebnis werden sechs saubere Stunden
-innerhalb eines vollständigen 24-Stunden-Lebenszyklus benötigt. Die Regeln stehen als
-`DHW_LOSS_*`-Konstanten und im `DhwLoss`-Zweig von
+**Firmware rule:** The firmware evaluates complete, quiet one-hour windows of tank sensor R5T. Tank
+charging, internal pump movement, a detected draw, implausible readings, and excessive gaps discard
+the window. A genuine charge starts a 45-minute settling period. A **NOTE** begins at `0.8 K/h`; a
+reassuring result requires six clean hours in a complete 24-hour lifecycle. The rules are the
+`DHW_LOSS_*` constants and the `DhwLoss` branch in
 [`checkup.hpp`](../main/logic/checkup.hpp).
 
-**Projektanteil:** `0,8 K/h`, die 45 Minuten Beruhigung, sechs saubere Stunden und der erkennbare
-obere Bereich von ungefähr `1,85 K/h` sind **Projekt-Heuristiken**, keine Daikin-Grenzwerte und
-keine Umsetzung der EU-Prüfmethode. Ein Temperaturabfall in K/h ist außerdem nicht unmittelbar mit
-einem Produktdatenblattwert in W vergleichbar.
+**Project boundary:** `0.8 K/h`, the 45-minute settling period, six clean hours, and the detectable
+upper range of about `1.85 K/h` are **project heuristics**, not Daikin limits or an implementation of
+the EU test method. A temperature drop in K/h is not directly comparable to a product-sheet loss in
+watts.
 
-**Nicht bewiesen:** Ein auffälliger Abfall beweist weder ein undichtes 3-Wege-Ventil noch schlechte
-Dämmung. Zapfung, Schichtung, Schwerkraftzirkulation, Rückschlagventil und externe Zirkulation können
-ähnliche Verläufe erzeugen. Auch `OK` schließt einen schnelleren Dauerverlust außerhalb des
-erkennbaren Bandes nicht aus.
+**Not established:** A notable drop proves neither a leaking three-way valve nor poor insulation.
+Draws, stratification, thermosiphoning, a check valve, and external circulation can produce similar
+traces. `OK` also does not exclude faster continuous loss outside the detectable band.
 
-### 3. Verdichterstarts (`cycling`)
+<a id="diagnosis-cycling"></a>
+### 3. Compressor cycling (`cycling`)
 
-**Extern belegt:** Ein im Auftrag des britischen Department of Energy and Climate Change erstellter
-Versuchsbericht untersuchte eine Luft- und eine Sole/Wasser-Wärmepumpe mit festen
-Verdichterdrehzahlen. Im untersuchten Aufbau verschlechterten Laufzeiten unter ungefähr sechs
-Minuten die Energieeffizienz; der Bericht betont zugleich den Einfluss von Wärmeabgabe,
-Wasservolumen, Regelung und Außentemperatur ([R1], Zusammenfassung und Abschnitte 1–2). Das belegt
-die Relevanz sehr kurzer Läufe, aber keinen universellen Daikin-Grenzwert.
+**External evidence:** A test report commissioned by the UK Department of Energy and Climate Change
+studied one air-source and one ground-source heat pump with fixed compressor speeds. Runs shorter
+than about six minutes reduced efficiency in the tested systems, while heat emission, water volume,
+control, and outside temperature also affected the result ([R1], summary and sections 1–2). This
+supports the relevance of very short runs but does not provide a universal Daikin limit.
 
-**Firmware-Regel:** Gezählt werden vollständige Verdichterläufe. Wenn 3-Wege-Ventil und Betriebsart
-durchgehend lesbar sind, werden Raumheizung, Warmwasser und Kühlen getrennt; nur bestätigte
-Raumheizung entscheidet. Ein **HINWEIS** benötigt mindestens zwölf beurteilbare Läufe mit im Mittel
-weniger als zehn Minuten sowie ausreichend vollständige 24-Stunden-Evidenz. Gemischte oder durch
-Messlücken unterbrochene Läufe werden zensiert. Die Konstanten heißen
-`CHECKUP_CYCLING_MIN_STARTS`, `CHECKUP_CYCLING_SHORT_RUN_S` und
+**Firmware rule:** The firmware counts complete compressor runs. When the three-way valve and
+operating mode remain readable throughout, it separates space heating, domestic hot water, and
+cooling; only confirmed space-heating runs decide the result. A **NOTE** requires at least twelve
+assessable runs averaging under ten minutes plus sufficient complete 24-hour evidence. Mixed runs
+and runs interrupted by measurement gaps are censored. The constants are
+`CHECKUP_CYCLING_MIN_STARTS`, `CHECKUP_CYCLING_SHORT_RUN_S`, and
 `CHECKUP_CYCLING_CLASSIFIED_PCT` in [`checkup.hpp`](../main/logic/checkup.hpp).
 
-**Projektanteil:** Zwölf Läufe und zehn Minuten sind eine bewusst vorsichtige
-**Projekt-Heuristik**. Sie sind weder aus [R1] übernommen noch eine Daikin-Vorgabe. [R1] untersuchte
-andere, nicht modulierende Geräte; er stützt nur die allgemeine Aussage, dass kurze Laufzeiten und
-Anlagenhydraulik für die Effizienz relevant sein können.
+**Project boundary:** Twelve runs and ten minutes are deliberately cautious **project heuristics**.
+They are neither copied from [R1] nor specified by Daikin. [R1] studied different, non-modulating
+units and supports only the general claim that short runs and system hydraulics can affect
+efficiency.
 
-**Nicht bewiesen:** Der Hinweis beweist weder Überdimensionierung noch einen falschen hydraulischen
-Abgleich. Ohne Gebäudelast, Wetter, Sollwerte und Wärmeabgabe ist keine eindeutige Ursache möglich.
+**Not established:** The note proves neither oversizing nor incorrect hydraulic balancing. Building
+load, weather, setpoints, and delivered heat are required to investigate a cause.
 
-### 4. Abtauvorgänge (`defrost`)
+<a id="diagnosis-defrost"></a>
+### 4. Defrost events (`defrost`)
 
-**Extern belegt:** Daikin führt Abtauung als Betriebsart und eine manuell auslösbare Funktion auf;
-bei der Inbetriebnahme muss der Mindestdurchfluss auch während Abtauung und Zusatzheizerbetrieb
-gesichert sein ([D1], Abschnitte 8.4.8, 8.4.9 und 9.3–9.4). Experimentelle Forschung zeigt, dass
-Vereisung und Abtauverhalten wesentlich von Außenlufttemperatur, relativer Feuchte und
-Wärmetauscherzustand abhängen ([R2]).
+**External evidence:** Daikin lists defrost as an operating mode and a manually activatable function;
+commissioning must maintain minimum water flow during defrost and backup-heater operation ([D1],
+sections 8.4.8, 8.4.9, and 9.3–9.4). Experimental research shows that icing and defrost behaviour
+depend strongly on outside-air temperature, relative humidity, and heat-exchanger state ([R2]).
 
-**Firmware-Regel:** Die Diagnose zählt die steigenden Flanken von `Defrost Operation`. Ein Anteil
-wird nur aus Zeiten gebildet, in denen Abtausignal und Verdichterzustand gleichzeitig lesbar waren.
-Ein **HINWEIS** erscheint bei mindestens drei so gepaarten Abtauvorgängen und **mehr als 15 %**
-Abtauzeit an der gepaarten Verdichterlaufzeit. Implementiert ist das mit
-`CHECKUP_DEFROST_MIN_COUNT` und `CHECKUP_DEFROST_SHARE_PCT` in
+**Firmware rule:** The diagnosis counts rising edges of `Defrost Operation`. It calculates a share
+only for periods in which both the defrost signal and compressor state were readable. A **NOTE**
+appears after at least three paired defrost events and when defrost exceeds **15%** of paired
+compressor runtime. `CHECKUP_DEFROST_MIN_COUNT` and `CHECKUP_DEFROST_SHARE_PCT` implement the rule in
 [`checkup.hpp`](../main/logic/checkup.hpp).
 
-**Projektanteil:** 15 % und drei Ereignisse sind eine breite **Projekt-Heuristik**, keine
-Daikin-Grenze. Die Firmware kennt weder Luftfeuchte noch Oberflächen- oder Lamellentemperatur des
-Außenwärmetauschers.
+**Project boundary:** The 15% share and three-event requirement are broad **project heuristics**, not
+Daikin limits. The firmware knows neither outdoor humidity nor the outdoor heat exchanger's surface
+or fin temperature.
 
-**Nicht bewiesen:** Häufiges Abtauen ist bei nasskaltem Wetter nicht automatisch fehlerhaft. Die
-Zeile beweist weder einen blockierten Luftweg noch Kältemittelmangel oder einen Sensordefekt.
+**Not established:** Frequent defrosting is not automatically abnormal in wet, cold weather. The row
+proves neither blocked airflow, low refrigerant charge, nor a sensor defect.
 
-### 5. Wasserdruck, niedrigster (`pressure`)
+<a id="diagnosis-pressure"></a>
+### 5. Lowest water pressure (`pressure`)
 
-**Extern belegt:** Für die in [D1] aufgeführten Altherma-3-R-W-Modelle verlangt Daikin bei der
-Fehlersuche einen Pumpeneinlassdruck **über 1 bar** und nennt als Prüfpunkte Drucksensor,
-Ausdehnungsgefäß, dessen Ventil und Vordruck ([D1], Abschnitt 12.3.4, gedruckte Seite 87). Mehrere
-weitere Altherma-Anleitungen nennen ebenfalls mindestens beziehungsweise mehr als 1 bar; der
-zulässige Füll- und Betriebsbereich bleibt trotzdem modellabhängig ([D2], Abschnitt 8.1.3).
+**External evidence:** For the Altherma 3 R W models listed in [D1], Daikin's troubleshooting
+procedure requires pump inlet pressure **above 1 bar** and names the pressure sensor, expansion
+vessel, valve, and pre-pressure as checks ([D1], section 12.3.4, printed page 87). Other Altherma
+manuals also state at least or above 1 bar, but the permitted filling and operating range remains
+model-specific ([D2], section 8.1.3).
 
-**Firmware-Regel:** Angezeigt wird der niedrigste gültige Wert im rollenden Fenster. Bei
-`<= 1,0 bar` erscheint sofort ein **HINWEIS**; erst nach 60 Sekunden ununterbrochener
-Unterschreitung wird daraus **WARNUNG**. Die Rohmessung wird durch die Bestätigung nicht verändert.
-Siehe `CHECKUP_BAR_WARN_TENTHS` und `CHECKUP_PRESSURE_CONFIRM_S` in
-[`checkup.hpp`](../main/logic/checkup.hpp).
+**Firmware rule:** The row reports the lowest valid value in the rolling window. At `<= 1.0 bar` it
+shows a **NOTE** immediately; only 60 seconds of uninterrupted low pressure promotes it to a
+**WARNING**. Confirmation does not alter the raw reading. See `CHECKUP_BAR_WARN_TENTHS` and
+`CHECKUP_PRESSURE_CONFIRM_S` in [`checkup.hpp`](../main/logic/checkup.hpp).
 
-**Projektanteil:** Die einminütige Bestätigung ist der Störimpulsfilter dieses Projekts. Sie steht
-nicht in der Daikin-Anleitung. Die Firmware verwendet 1,0 bar als konservative gemeinsame
-Diagnosegrenze, nicht als vollständigen erlaubten Bereich jedes Modells.
+**Project boundary:** The one-minute confirmation is this project's transient filter and is not in
+the Daikin manual. The firmware uses 1.0 bar as a conservative common diagnostic boundary, not as
+the complete permitted range for every model.
 
-**Nicht bewiesen:** Niedriger Druck bestimmt die Ursache nicht. Nachfüllen ohne Prüfung kann ein
-Problem mit Ausdehnungsgefäß, Luft oder Wasserverlust verdecken.
+**Not established:** Low pressure does not identify its cause. Refilling without investigation can
+hide an expansion-vessel problem, air, or water loss.
 
-### 6. Durchfluss, niedrigster (`flow`)
+<a id="diagnosis-flow"></a>
+### 6. Lowest water flow (`flow`)
 
-**Extern belegt:** Der Mindestdurchfluss ist tatsächlich modellabhängig. [D1] nennt für die dort
-aufgeführten Altherma-3-R-W-Geräte `12 l/min` und Fehler 7H bei Unterschreitung (Abschnitte 6.4.3,
-9.4.1 und 12.4). Eine Altherma 3 H HT F nennt dagegen je nach Variante `25 l/min` oder `22 l/min`
-([D2], Abschnitt 8.1.3). Damit wäre ein einziger, firmwareweiter Grenzwert sachlich falsch.
+**External evidence:** Minimum water flow is model-specific. [D1] states `12 l/min` and fault 7H for
+the listed Altherma 3 R W units (sections 6.4.3, 9.4.1, and 12.4). An Altherma 3 H HT F manual states
+`25 l/min` or `22 l/min`, depending on the variant ([D2], section 8.1.3). One firmware-wide good/bad
+limit would therefore be incorrect.
 
-**Firmware-Regel:** Die Diagnose meldet ausschließlich den niedrigsten gültigen Durchfluss,
-nachdem die interne Pumpe mindestens 60 Sekunden ununterbrochen gelaufen ist. Sie vergibt dafür
-keinen Gut-/Schlecht-Befund. Siehe `CHECKUP_FLOW_RUNUP_S` und den Zweig `Flow` in
-[`checkup.hpp`](../main/logic/checkup.hpp).
+**Firmware rule:** The diagnosis reports only the lowest valid flow after the internal pump ran
+continuously for at least 60 seconds. It does not assign a good/bad verdict. See
+`CHECKUP_FLOW_RUNUP_S` and the `Flow` branch in [`checkup.hpp`](../main/logic/checkup.hpp).
 
-**Projektanteil:** Die 60 Sekunden sind ein Messfilter gegen Anlauf, Ventilbewegung und Entlüftung;
-kein Herstellergrenzwert.
+**Project boundary:** The 60-second period filters pump start-up, valve movement, and air purging; it
+is not a manufacturer limit.
 
-**Nicht bewiesen:** Das beobachtete Teillast-Minimum ist nicht automatisch der in einer
-Inbetriebnahmeprüfung verlangte Auslegungsdurchfluss. Ein Vergleich ist nur mit der Anleitung der
-genauen Modellkombination und derselben Betriebsbedingung zulässig.
+**Not established:** The observed part-load minimum is not automatically the design flow required
+during a commissioning test. A comparison is valid only against the manual for the exact model
+combination and the same operating condition.
 
-### 7. Zusatzheizer (`heater`)
+<a id="diagnosis-heater"></a>
+### 7. Electric backup and booster heaters (`heater`)
 
-**Extern belegt:** Daikin beschreibt mehrere legitime Einsatzgründe: Der Booster Heater kann je
-nach Konfiguration bei Warmwasserbereitung, Desinfektion oder außerhalb des
-Wärmepumpen-Betriebsbereichs laufen; bei Wärmepumpenausfall können Backup und/oder Booster Heater
-die Last im Notbetrieb übernehmen ([D1], Abschnitte 8.4.6 und 8.4.9, gedruckte Seiten 66 und
-71–72). Die Dokumentation verlangt außerdem ausreichenden Durchfluss während Backup-Heater- und
-Abtaubetrieb ([D1], Abschnitt 9.3).
+**External evidence:** Daikin documents several legitimate reasons for heater operation. Depending
+on configuration, the booster heater can support domestic-hot-water preparation, disinfection, or
+operation outside the heat pump's operating range. Backup and/or booster heaters can carry load in
+emergency operation after a heat-pump failure ([D1], sections 8.4.6 and 8.4.9, printed pages 66 and
+71–72). The manual also requires sufficient water flow during backup-heater and defrost operation
+([D1], section 9.3).
 
-**Firmware-Regel:** Die aktiven Sekunden von BUH Schritt 1/2 für den Heizkreis und BSH für den
-Warmwasserspeicher werden getrennt summiert. Die Zeile bleibt **NUR MESSWERT**, weil es ohne Wetter,
-Konfiguration, Sollwerte und Betriebsgrund keine allgemeine erlaubte Laufzeit gibt. Siehe den Zweig
-`Heater` in [`checkup.hpp`](../main/logic/checkup.hpp).
+**Firmware rule:** The diagnosis separately totals active seconds for BUH steps 1/2 in the water
+circuit and BSH in the domestic-hot-water tank. The result remains **MEASURED ONLY** because weather,
+configuration, setpoints, and the operating reason are needed before runtime can be judged. See the
+`Heater` branch in [`checkup.hpp`](../main/logic/checkup.hpp).
 
-**Nicht bewiesen:** Laufzeit allein beweist weder einen Defekt noch unnötigen Stromverbrauch. Für
-eine energetische Aussage fehlen insbesondere elektrische Leistung und die vom Heizer abgegebene
-Wärme.
+**Not established:** Runtime alone proves neither a defect nor unnecessary electricity use. An
+energy conclusion additionally needs electrical power and the heat delivered by the heater.
 
-### 8. Schutz-Rückregelungen (`retries`)
+<a id="diagnosis-retries"></a>
+### 8. Protection-limit counter changes (`retries`)
 
-**Extern belegt:** Die Projekt-Registerkarte enthält fünf getrennte X10A-Zähler für
-Heißgastemperatur, Verdichter-Inverterstrom, Hochdruck, Niederdruck und Inverter-Lamellentemperatur
-([Register 0x10](REGISTERS.md#register-0x10)). Daikin dokumentiert zugehörige Fehler- und
-Schutzklassen wie Hochdruck, Verdichterüberhitzung und Inverterüberstrom in der Fehlercode-Tabelle
-([D1], Abschnitt 12.4).
+**External evidence:** The project register map contains five separate X10A counters for discharge
+temperature, compressor inverter current, high pressure, low pressure, and inverter-fin temperature
+([register 0x10](REGISTERS.md#register-0x10)). Daikin documents related fault and protection classes,
+including high pressure, compressor overheating, and inverter overcurrent, in its error-code table
+([D1], section 12.4).
 
-**Firmware-Regel:** Ein Ereignis wird nur gemeldet, wenn derselbe exakte Zähler zwischen zwei
-vergleichbaren, beobachteten Werten **ansteigt**. Ein bereits beim Start ungleich null stehender
-Zähler reicht nicht. Alle fünf Zähler und ein lesbarer Verdichterzustand werden benötigt. Siehe
-`checkup_retry_index()`, `CHECKUP_RETRY_COUNT` und den Zweig `Retries` in
-[`checkup.hpp`](../main/logic/checkup.hpp).
+**Firmware rule:** An event is reported only when the same exact counter **increases** between two
+comparable observed values. A non-zero counter present at startup is insufficient. All five counters
+and a readable compressor state are required. See `checkup_retry_index()`, `CHECKUP_RETRY_COUNT`, and
+the `Retries` branch in [`checkup.hpp`](../main/logic/checkup.hpp).
 
-**Experimentelle Grenze:** Für diese fünf internen X10A-Zähler wurde in den öffentlich verfügbaren
-Daikin-Unterlagen keine vollständige Semantik gefunden: weder Rücksetzverhalten noch garantierte
-Zählweise oder kausale Zuordnung sind veröffentlicht. Deshalb kann die Dokumentation hier bewusst
-keine Herstellergrenze nennen, und die UI kennzeichnet die Zeile als **EXPERIMENTELL**.
+**Experimental boundary:** Public Daikin documentation does not establish complete semantics for
+these five internal X10A counters, including reset behaviour, guaranteed counting rules, or causal
+assignment. The documentation therefore provides no manufacturer threshold, and the UI marks the
+row **EXPERIMENTAL**.
 
-**Nicht bewiesen:** Ein Anstieg ist kein bestimmter Fehler und ein stabiler Zähler beweist nicht,
-dass keine Schutzregelung stattfand. Für eine Ursache müssen Zeitpunkt, Betriebszustand und
-offizieller Fehlercode gemeinsam betrachtet werden.
+**Not established:** An increase is not a specific fault, and a stable counter does not prove that
+no protection limiting occurred. A cause requires the time, operating state, and official fault code
+together.
 
-## Quellen
+## Sources
 
-### Herstellerunterlagen
+### Manufacturer documentation
 
 <a id="source-d1"></a>
 
-- **[D1]** Daikin, *Daikin Altherma 3 R W – Installer reference guide*, Modelle
-  ERGA04–08DAV3(A) + EHBH/X04+08DA, Dokument **4P496758-1B**, Revision 2019-10:
-  [offizielle PDF][D1-pdf]. Verwendete Stellen: 6.4.3 Wasserinhalt/Durchfluss; 8.4.6 Tank;
-  8.4.8 Information; 8.4.9 Installateureinstellungen; 9.3–9.4 Inbetriebnahme; 12.3.4 Pumpengeräusch;
-  12.4 Fehlercodes.
+- **[D1]** Daikin, *Daikin Altherma 3 R W – Installer reference guide*, models
+  ERGA04–08DAV3(A) + EHBH/X04+08DA, document **4P496758-1B**, revision 2019-10:
+  [official PDF][D1-pdf]. Sections used: 6.4.3 water volume/flow; 8.4.6 tank; 8.4.8 information;
+  8.4.9 installer settings; 9.3–9.4 commissioning; 12.3.4 pump noise; 12.4 error codes.
 
 <a id="source-d2"></a>
 
-- **[D2]** Daikin, *Daikin Altherma 3 H HT F – Installer reference guide*, Modelle
-  EPRA14–18D + ETVH16SU18+23E, Dokument **4P644738-1D**, Revision 2023-10:
-  [offizielle PDF][D2-pdf]. Verwendete Stelle: 8.1.3 Wasserleitungen; Mindestdruck 1 bar und
-  modellabhängiger Mindestdurchfluss 25 beziehungsweise 22 l/min.
+- **[D2]** Daikin, *Daikin Altherma 3 H HT F – Installer reference guide*, models
+  EPRA14–18D + ETVH16SU18+23E, document **4P644738-1D**, revision 2023-10:
+  [official PDF][D2-pdf]. Section used: 8.1.3 water piping; minimum pressure 1 bar and
+  model-dependent minimum flow of 25 or 22 l/min.
 
-### Vorschrift und Forschung
+### Regulation and research
 
 <a id="source-e1"></a>
 
-- **[E1]** Europäische Kommission, Verordnung (EU) Nr. 814/2013 über Ökodesign-Anforderungen an
-  Warmwasserbereiter und Warmwasserspeicher: [amtlicher EUR-Lex-Text][E1-web]. Verwendete Stellen:
-  Artikel 2(17), Anhang II Abschnitt 2 und Anhang III Abschnitt 7.
+- **[E1]** European Commission, Regulation (EU) No 814/2013 on ecodesign requirements for water
+  heaters and hot-water storage tanks: [official EUR-Lex text][E1-web]. Sections used: Article 2(17),
+  Annex II section 2, and Annex III section 7.
 
 <a id="source-r1"></a>
 
-- **[R1]** Robert Green / EA Technology für DECC, *The Effects of Cycling on Heat Pump Performance*,
-  Projekt 46640, November 2012: [amtliche Veröffentlichungsseite][R1-web] und
-  [Versuchsbericht][R1-pdf]. Die Ergebnisse gelten für die untersuchten Geräte und begründen **nicht**
-  die Zehn-Minuten-Schwelle dieses Projekts.
+- **[R1]** Robert Green / EA Technology for DECC, *The Effects of Cycling on Heat Pump Performance*,
+  project 46640, November 2012: [official publication page][R1-web] and [test report][R1-pdf]. The
+  results apply to the tested units and do **not** establish this project's ten-minute threshold.
 
 <a id="source-r2"></a>
 
-- **[R2]** Y.-G. Chen und X.-M. Guo, *Dynamic defrosting characteristics of air source heat pump and
+- **[R2]** Y.-G. Chen and X.-M. Guo, *Dynamic defrosting characteristics of air source heat pump and
   effects of outdoor air parameters on defrost cycle performance*, Applied Thermal Engineering 29
   (2009), 2701–2707, DOI 10.1016/j.applthermaleng.2009.01.003:
-  [Verlagsseite und Abstract][R2-doi]. Die Studie belegt die Abhängigkeit von Außenbedingungen,
-  nicht die 15-Prozent-Heuristik dieses Projekts.
+  [publisher page and abstract][R2-doi]. The study supports dependence on outdoor conditions, not
+  this project's 15% heuristic.
 
-## Pflege-Regel
+## Maintenance rule
 
-Eine Diagnoseänderung ist dokumentarisch erst vollständig, wenn diese Seite weiterhin für jede
-betroffene Zeile Beobachtung, externe Grundlage, Projektanteil und Aussagegrenze nennt. Ein neuer
-Schwellwert darf nur **Herstellergrenze** heißen, wenn eine genaue, zur Modellfamilie passende
-Primärquelle mit Dokumentnummer, Revision und Abschnitt angegeben ist. Andernfalls bleibt er klar
-als Beobachtung, Projekt-Heuristik oder experimentell bezeichnet.
+A diagnosis change is not documentation-complete until this page still names the observation,
+external basis, project boundary, and claim limit for every affected row. A new threshold may be
+called a **manufacturer limit** only when a primary source for the matching model family is cited
+with document number, revision, and section. Otherwise it remains clearly labelled as an
+observation, project heuristic, or experimental rule.
 
-Das CI-Gate `scripts/run-diagnostic-evidence-audit.sh` bindet diese Aussagen an die aktuelle
-Diagnose-Implementierung, die sichtbaren Diagnose-IDs, die fünf Schutz-Zähler und die zugehörige
-Projektevidenz in `docs/REGISTERS.md`. Es prüft außerdem die vollständige Belegmatrix,
-Quellenverweise, HTTPS-Auflösung und bei Daikin-Unterlagen Modell, Dokumentnummer, Revision und
-verwendete Stelle. Ändert sich eine dieser Grundlagen oder diese Seite selbst, meldet es `E010`.
-Erst nach inhaltlicher Prüfung mit `/diagnostic-evidence-review` darf der Fingerabdruck erneuert
-werden:
+The CI gate `scripts/run-diagnostic-evidence-audit.sh` binds these claims to the current diagnosis
+implementation, visible diagnosis IDs, five protection counters, and the related project evidence
+in `docs/REGISTERS.md`. It also checks the complete evidence matrix, source references, HTTPS
+resolution, and each Daikin source's models, document number, revision, and used section. A change to
+any of those inputs or this page raises `E010`. Refresh the fingerprint only after a content review
+with `/diagnostic-evidence-review`:
 
 ```bash
 scripts/run-diagnostic-evidence-audit.sh --update
@@ -265,8 +259,8 @@ scripts/run-diagnostic-evidence-audit.sh
 tools/diagnostic_evidence/selftest.sh
 ```
 
-Der Fingerabdruck belegt, dass Code, Aussagen und Katalog gemeinsam geprüft wurden. Er beweist nicht
-automatisch, dass eine Quelle fachlich passt; diese Prüfung bleibt der menschliche Teil des Gates.
+The fingerprint records that code, claims, and catalog were reviewed together. It does not by itself
+prove that a source is technically applicable; that remains the human part of the gate.
 
 [D1]: #source-d1
 [D2]: #source-d2
@@ -275,7 +269,7 @@ automatisch, dass eine Quelle fachlich passt; diese Prüfung bleibt der menschli
 [R2]: #source-r2
 [D1-pdf]: https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/EHBH-D6V%2C%20EHBH-D9W%2C%20EHBX-D6V%2C%20EHBX-D9W%2C%20ERGA04-08DV%2C%20ERGA04-08DVA_4PEN496758-1B_2019_10_Installer%20reference%20guide_English.pdf
 [D2-pdf]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-high-temperature/epra14-18dw7/EPRA014-018D%28V.W%29.EPRA14-18D%28V.W%297.ETVH16UE6V%287%29_Installer%20reference%20guide_4PEN644738-1D_English.pdf
-[E1-web]: https://eur-lex.europa.eu/eli/reg/2013/814/oj/deu
+[E1-web]: https://eur-lex.europa.eu/eli/reg/2013/814/oj/eng
 [R1-web]: https://www.gov.uk/government/publications/heat-pump-performance-effects-of-cycling
 [R1-pdf]: https://assets.publishing.service.gov.uk/media/5a78e0d9e5274a2acd18a7c6/7389-effects-cycling-heat-pump-performance.pdf
 [R2-doi]: https://doi.org/10.1016/j.applthermaleng.2009.01.003

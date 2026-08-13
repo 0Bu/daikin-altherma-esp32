@@ -2,10 +2,11 @@
 # Plain-language user-documentation gate.
 #
 # Every visible plant-diagnostics result must answer, in both UI languages: what was observed, how
-# narrowly to interpret it, and what a non-specialist can safely do next. docs/DIAGNOSTICS.md must
-# carry a matching German section for every row. It reuses the dedicated evidence contract so
-# unsupported claims cannot pass here, while scripts/run-diagnostic-evidence-audit.sh owns the
-# separate source/implementation review fingerprint.
+# narrowly to interpret it, and what a non-specialist can safely do next. Maintained repository
+# documentation is English-only; localized prose stays in main/www. docs/DIAGNOSTICS.md must carry
+# a matching English section for every row. It reuses the dedicated evidence contract so unsupported
+# claims cannot pass here, while scripts/run-diagnostic-evidence-audit.sh owns the separate
+# source/implementation review fingerprint.
 #
 # Usage:
 #   scripts/run-user-docs-audit.sh           # validate; CI always uses this form
