@@ -6,8 +6,9 @@
 #                                              flash_args offset (manual factory-reset flash)
 #   daikin-altherma-esp32<suffix>-web-*.bin    sparse Web Serial parts; their erase sectors skip
 #                                              NVS unless the user explicitly chooses Erase
-#   daikin-altherma-esp32<suffix>.elf          unstripped ELF — decodes a core dump from THIS build
-#   daikin-altherma-esp32<suffix>.elf.sha256   integrity checksum of the ELF
+#   daikin-altherma-esp32<suffix>.elf.xz       unstripped ELF, xz-wrapped — decodes a core dump
+#                                              from THIS build (decode-coredump.sh unwraps it)
+#   daikin-altherma-esp32<suffix>.elf.sha256   integrity checksum of the ELF *inside* that container
 #   daikin-altherma-esp32<suffix>-size.json    ESP-IDF's machine-readable section/region report
 #   daikin-altherma-esp32<suffix>-size.md      human-readable app/flash/RAM budget summary
 #   manifest.json                              browser-installer builds[] + OTA version field
@@ -188,8 +189,46 @@ for t in "${TARGETS[@]}"; do
     # later (scripts/decode-coredump.sh). The ELF is the ONLY artifact that decodes a dump — the
     # shipped .bin can't — and it's matched to a dump by the app_elf_sha256 the dump embeds. Keep it
     # per build so any version's dumps stay decodable.
-    cp "build/daikin-altherma-esp32.elf" "$DIST/daikin-altherma-esp32${sfx}.elf"
+    #
+    # Stored xz-compressed, because the ELF is ~70% of a ~9 MB build artifact and artifact STORAGE
+    # is a metered resource the 90-day archive was overrunning (see build.yml's upload step for the
+    # arithmetic). Three things about HOW it is compressed are load-bearing:
+    #
+    #   - xz is an OUTER CONTAINER. The ELF bytes inside stay exactly what the linker emitted, so
+    #     the app_elf_sha256 esp-coredump matches a dump against still matches. That is what rules
+    #     out the cheaper-looking `objcopy --compress-debug-sections`: it rewrites the ELF itself,
+    #     so every future decode of every archived build would warn "ELF file SHA256 mismatch" —
+    #     turning the guard that catches a WRONG elf (decode-coredump.sh) into permanent noise.
+    #   - NOT gzip. The artifact zip already applies Deflate, so wrapping in a second Deflate saves
+    #     nothing; only a stronger algorithm buys anything, and DWARF is exactly what xz beats
+    #     Deflate on.
+    #   - The checksum is taken BEFORE compressing and keeps naming the plain `.elf`. It is the
+    #     identity of the ELF, not of its container, so it stays comparable to every checksum
+    #     published before this change — including the ones already attached to released versions.
+    #
+    # -T0 (all cores) gives up a little ratio — threaded xz splits the input into per-thread blocks,
+    # so matches cannot be found across a block boundary — and buys back far more CI minutes than
+    # that is worth; CI time is the other metered resource. Report both sizes: the ratio is the whole
+    # justification for the retention window build.yml picks, so it belongs in the run log rather
+    # than in anyone's estimate, this comment's included.
+    elf="$DIST/daikin-altherma-esp32${sfx}.elf"
+    cp "build/daikin-altherma-esp32.elf" "$elf"
     ( cd "$DIST" && sha256sum "daikin-altherma-esp32${sfx}.elf" > "daikin-altherma-esp32${sfx}.elf.sha256" )
+    elf_raw="$(stat -f%z "$elf" 2>/dev/null || stat -c%s "$elf")"
+    if command -v xz >/dev/null 2>&1; then
+        xz -9 -T0 -f "$elf"
+    else
+        # No xz binary. ESP-IDF always brings a Python and lzma is stdlib, so this is a real
+        # fallback — never "leave it uncompressed", which would silently double storage again and
+        # look identical in a green log.
+        python3 -c 'import lzma, shutil, sys
+with open(sys.argv[1], "rb") as f, lzma.open(sys.argv[1] + ".xz", "wb", preset=9) as g:
+    shutil.copyfileobj(f, g)' "$elf"
+        rm -f "$elf"
+    fi
+    [ -f "$elf.xz" ] || { echo "ELF compression produced no $elf.xz" >&2; exit 1; }
+    elf_comp="$(stat -f%z "$elf.xz" 2>/dev/null || stat -c%s "$elf.xz")"
+    awk -v r="$elf_raw" -v c="$elf_comp" 'BEGIN { printf "archived ELF: %.1f MB -> %.1f MB xz (%.1fx)\n", r/1e6, c/1e6, r/c }'
 
     cf="$(chipfamily "$t")"
     builds_json="${builds_json:+$builds_json,}{\"chipFamily\":\"$cf\",\"parts\":[$web_parts]}"

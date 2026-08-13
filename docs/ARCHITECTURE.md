@@ -2109,10 +2109,21 @@ Structure:
     byte, so a dump-only test would leave the retained crash record standing in Home Assistant after
     the user deleted it on the device.
   - **Decoding (maintainer side).** A raw dump is useless without the *matching-version* unstripped
-    `.elf` (the shipped `.bin` has no symbols), so CI archives `daikin-altherma-esp32.elf` + its
-    sha256 per build (artifact + Release asset, `scripts/ci-build-all.sh`). `scripts/decode-coredump.sh
-    coredump.bin [app.elf]` runs `esp-coredump info_corefile` inside the CI-pinned ESP-IDF Docker
-    image and matches the dump to the ELF by `app_elf_sha256` (warns on mismatch). VictoriaTraces is
+    `.elf` (the shipped `.bin` has no symbols), so CI archives `daikin-altherma-esp32.elf.xz` + the
+    sha256 of the ELF *inside* it per build (artifact + Release asset, `scripts/ci-build-all.sh`).
+    `scripts/decode-coredump.sh coredump.bin [app.elf[.xz]]` unwraps the container, then runs
+    `esp-coredump info_corefile` inside the CI-pinned ESP-IDF Docker image and matches the dump to
+    the ELF by `app_elf_sha256` (warns on mismatch). The xz wrapper is deliberately OUTER — the ELF
+    bytes inside are the linker's own, which is what keeps that match meaningful, and is why
+    `objcopy --compress-debug-sections` is not used despite being the simpler-looking option.
+    **How long an archived ELF lives depends on the build.** A release keeps its copy indefinitely
+    as a Release asset; a dev build's lives 3 days and an open PR build's at most 7. The PR copies
+    are deleted immediately on merge, when the successor is built from `main`, because artifact
+    storage is metered and the previous 90/7-day pair overran the allowance (the arithmetic is in
+    `build.yml` at the upload step). So a dev-channel dump older than three days may no longer be
+    decodable —
+    the device reports `app_elf_sha256`, so you can at least tell *which* build you can no longer
+    symbolize. VictoriaTraces is
     *not* the sink for this — a crash is a log/event, not a span; VictoriaLogs (via the retained MQTT
     topic + Telegraf) is.
 - **Two update channels** (`logic/ota_channel.hpp`, `POST /set_ota`, `/status.ota.channel`). A merge

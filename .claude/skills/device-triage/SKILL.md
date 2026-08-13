@@ -98,11 +98,17 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
    curl -sS --max-time 20 "http://$H/coredump" -o coredump.bin   # repo root; 404 if none
    ```
    The dump is useless without the **matching-version** unstripped `.elf` — CI archives one per
-   build (`dist/*.elf`, keyed by `app_elf_sha256` from step 2). Fetch that build's ELF into `build/`
-   (e.g. `gh run download <run-id> -n <artifact>` for the run that built this `version`), then:
+   build (`dist/*.elf.xz`, keyed by `app_elf_sha256` from step 2). Fetch that build's ELF into
+   `build/` (e.g. `gh run download <run-id> -n <artifact>` for the run that built this `version`),
+   then — the decoder unwraps the `.xz` itself, so either name works:
    ```bash
-   scripts/decode-coredump.sh coredump.bin build/daikin-altherma-esp32.elf
+   scripts/decode-coredump.sh coredump.bin build/daikin-altherma-esp32.elf.xz
    ```
+   If the download 404s, check the age/state: a dev build's artifact is kept 3 days; a PR's is
+   deleted when it merges or after at most 7 days (a release's ELF is a Release asset and never
+   expires). Past that the dump is not decodable —
+   say so plainly rather than symbolizing against a near-miss build, which `esp-coredump` would
+   warn about and which yields confidently wrong frames.
    `esp-coredump` warns on an ELF/dump `app_elf_sha256` mismatch — if it does, you grabbed the wrong
    build; refetch the one matching step 2. Summarize the crashed task + symbolized backtrace and
    point at the likely frame.

@@ -1,0 +1,75 @@
+name: cleanup merged PR artifacts
+
+# A PR artifact is the only downloadable copy of that PR's signed image and matching ELF, so it
+# remains useful while review/live testing is in progress. Once the PR is merged, main immediately
+# builds and publishes the successor on the dev channel; keeping every superseded PR build only
+# consumes metered Actions storage.
+#
+# pull_request_target is intentional. A merged PR may originate from a fork, whose pull_request
+# token is read-only. This event runs the workflow from the default branch with the requested
+# actions:write permission. It never checks out or executes PR code; the only event value used in
+# the command is GitHub's numeric PR number.
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  actions: write
+
+concurrency:
+  group: cleanup-pr-artifacts-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  delete:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Delete artifacts belonging to the merged PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || {
+            echo "Refusing non-numeric PR number: $PR_NUMBER" >&2
+            exit 2
+          }
+
+          # Fetch every page before deleting anything. Deleting while paginating shifts later pages
+          # forward and can otherwise skip artifacts. The pattern accepts both historical `-pr72-`
+          # and current `-PR-72` names, with numeric boundaries so PR 72 never matches PR 720.
+          artifact_list="$(mktemp)"
+          trap 'rm -f "$artifact_list"' EXIT
+          gh api --paginate --slurp "repos/$GH_REPO/actions/artifacts?per_page=100" |
+            jq -r --arg pr_number "$PR_NUMBER" '
+              .[].artifacts[]
+              | select(.name | test("(?i)(?:^|-)pr-?" + $pr_number + "(?:-|$)"))
+              | [.id, .name]
+              | @tsv
+            ' > "$artifact_list"
+          mapfile -t artifacts < "$artifact_list"
+
+          deleted=0
+          for artifact in "${artifacts[@]}"; do
+            artifact_id="${artifact%%$'\t'*}"
+            artifact_name="${artifact#*$'\t'}"
+            [[ "$artifact_id" =~ ^[0-9]+$ ]] || {
+              echo "Refusing non-numeric artifact id: $artifact_id" >&2
+              exit 2
+            }
+
+            gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$artifact_id"
+            printf 'Deleted artifact %s (%s)\n' "$artifact_name" "$artifact_id"
+            ((deleted += 1))
+          done
+
+          {
+            echo "### Merged PR artifact cleanup"
+            echo
+            echo "Deleted **$deleted** artifact(s) for PR **#$PR_NUMBER**."
+          } >> "$GITHUB_STEP_SUMMARY"
