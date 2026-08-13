@@ -216,6 +216,13 @@ svg .sc-rflow { fill: none; stroke-width: 3.5; stroke-linecap: round; stroke-das
 #schem { --phe-water-supply: var(--flow-hot); --phe-water-return: var(--flow-cold); }
 #schem.cooling-mode { --phe-water-supply: var(--flow-cold); --phe-water-return: var(--flow-hot); }
 #schem.water-neutral { --phe-water-supply: var(--muted); --phe-water-return: var(--muted); }
+/* The space-circuit perimeter gradient (top = supply, bottom = return) follows the SAME three-way
+   thermal swap as the water overlays: warm-in/cool-out while heating, reversed in cooling, neutral
+   grey when the flow is pump-only. The tank uses a fixed red->blue instead (a DHW charge is always a
+   heat input), which is why it does not read these. */
+#schem { --space-flow-top: var(--flow-hot); --space-flow-bot: var(--flow-cold); }
+#schem.cooling-mode { --space-flow-top: var(--flow-cold); --space-flow-bot: var(--flow-hot); }
+#schem.water-neutral { --space-flow-top: var(--muted); --space-flow-bot: var(--muted); }
 svg .sc-phe-channel { stroke-linejoin: round; opacity: .2; }
 svg .sc-phe-refrigerant-flow { stroke: url(#pheRefrigerantFlow); }
 svg .sc-phe-water-flow { stroke: url(#pheWaterFlow); }
@@ -266,21 +273,34 @@ svg .sc-buh { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
 .buh-on .sc-buh { fill: var(--brand-tint); stroke: var(--warn); }
 .buh-on .sc-bolt { fill: var(--warn); }
 /* The BSH pill is always visible and says only E-heater/Heizstab. OFF/unknown is deliberately light
-   grey; active turns the pill and the tank outline orange together, so the whole store signals the
-   heat source that is currently active. The inspector and accessible name retain the written state. */
+   grey; active turns the pill orange AND animates the tank perimeter orange (see below), so the
+   whole store signals the electric heat source. The inspector and accessible name retain the state. */
 svg .sc-tank { transition: stroke .3s; }
 svg .sc-bsh-state-box { fill: var(--hatch); stroke: var(--pipe); transition: fill .3s, stroke .3s; }
 svg .sc-bsh-state .sc-state { fill: var(--muted); transition: fill .3s; }
-.bsh-on .sc-tank { stroke: var(--warn); }
 .bsh-on .sc-bsh-state-box { fill: var(--warn); fill-opacity: .11; stroke: var(--warn); }
 .bsh-on .sc-bsh-state .sc-state { fill: var(--warn); }
-/* BSH heats the tank electrically: animate the heater wave, but never fCoil, because that overlay
-   specifically means hydronic flow and the pump may be stopped. */
-svg .sc-bsh-wave {
-  fill: none; stroke: var(--flow-hot); stroke-width: 4; stroke-linecap: round;
-  stroke-dasharray: 9 15; opacity: 0; transition: opacity .3s; pointer-events: none;
+/* The DHW tank's charging flow runs on the box PERIMETER (two half-paths), not an internal coil:
+   a fixed red->blue vertical gradient (warm in at the top, cold at the bottom, and NOT swapped in
+   cooling — a DHW charge is always a heat input) with dashes animating down both sides while the
+   tank is charging. Its own class, so G010 (an overlay must trace a drawn pipe) does not apply to
+   what is a box edge. The resting grey edge is the box's own stroke; these only show when on. */
+svg .sc-tank-flow, svg .sc-space-flow {
+  fill: none; stroke-width: 3; stroke-linecap: round;
+  stroke-dasharray: 9 15; opacity: 0; transition: opacity .4s; pointer-events: none;
 }
-.bsh-on .sc-bsh-wave { opacity: 1; animation: dashfwd 1.1s linear infinite; }
+svg .sc-tank-flow { stroke: url(#tankFlow); }
+/* The space circuit runs the same perimeter animation, but its gradient SWAPS with mode: warm
+   supply on top / cool return below while HEATING, reversed in cooling, muted grey when the flow is
+   thermally neutral (pump-only) — the same three-way rule the space pipe overlays already follow. */
+svg .sc-space-flow { stroke: url(#spaceFlow); }
+svg .sc-tank-flow.on, svg .sc-space-flow.on { opacity: 1; animation: dashfwd 1.1s linear infinite; }
+/* Active immersion heater (BSH) drives the SAME tank perimeter, but in a FIXED orange keyed on
+   .bsh-on — electric heat, distinct from the red/blue hydronic charge. The id in the selector lets it
+   win over the gradient .on, so the costly electric source stays unmistakable even if a hydronic
+   charge overlaps. The box keeps its GREY resting stroke (the solid orange outline was dropped) so
+   the moving orange dashes read clearly, exactly like the red/blue charge over the same grey edge. */
+#schem.bsh-on .sc-tank-flow { stroke: var(--warn); opacity: 1; animation: dashfwd 1.1s linear infinite; }
 svg .sc-bolt { fill: var(--muted); }
 /* Pump impeller vanes. The same-colour stroke is not decoration: it rounds the OUTLINE's corners
    (stroke-linejoin: round) so the blunt vane ends read as square-but-softened instead of sharp,
@@ -305,8 +325,12 @@ svg .sc-snow .sc-val, svg .sc-quiet .sc-val {
 #gSpaceH.on .sc-pill { stroke: var(--ok); }
 #gSpaceH.on .sc-val { fill: var(--ok); }
 .sc-selector .sc-pill { fill: var(--hatch); stroke: var(--pipe); transition: fill .3s, stroke .3s; }
+/* OPAQUE fill, not a translucent wash: both pills sit ON the space riser (x=610), so a see-through
+   fill let the dashed flow show through the pill — the opaque --hatch of the resting .sc-selector
+   already hid it, and the ON state must not regress that. --brand-tint is the same opaque tint the
+   compressor and BUH already use, so the pill still reads as a filled-blue "on". */
 .valve2-on #g2wv .sc-pill, .flow-switch-on #gFlowSwitch .sc-pill {
-  fill: var(--brand); fill-opacity: .11; stroke: var(--brand);
+  fill: var(--brand-tint); stroke: var(--brand);
 }
 .valve2-on #g2wv .sc-val, .flow-switch-on #gFlowSwitch .sc-val { fill: var(--brand-strong); }
 /* ── Clickable schematic: every value pill and component is a hit target ──────────────────────
@@ -421,6 +445,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    point, so they remain visible with "—" while idle. .no-spaceh hides an absent operation flag. */
 .no-dhw .g-dhw { display: none; }
 .no-room .g-room { display: none; }
+/* With the room reading hidden (no X10A room temp) the lower half of the emitter box is empty, so the
+   short bars read as broken. Lengthen them to fill it — a pure Y-scale from the bars' top edge, so
+   they grow downward and the 3 px stroke width (an X extent) is untouched. */
+.no-room .sc-emitter { transform: scaleY(2); transform-box: fill-box; transform-origin: top; }
 .no-spaceh #gSpaceH { display: none; }
 
 /* ── Settings screen (behind the header gear) ─────────────────────────────────

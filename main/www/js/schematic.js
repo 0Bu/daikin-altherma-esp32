@@ -543,7 +543,7 @@ function clearSchematic() {
    "cooling-mode", "water-neutral", "valve2-on", "flow-switch-on"].forEach((c) => sc.classList.remove(c));
   updateSchematicStateA11y(null);
   sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
-  $("schem").querySelectorAll(".sc-flow, .sc-rflow").forEach((el) => el.classList.remove("on", "rev"));
+  $("schem").querySelectorAll(".sc-flow, .sc-rflow, .sc-tank-flow, .sc-space-flow").forEach((el) => el.classList.remove("on", "rev"));
 }
 
 function renderLive() {
@@ -656,8 +656,8 @@ function renderLive() {
   // Each branch needs the valve to SAY so — `!toDhw` was true for an unknown valve, which is how the
   // heating branch came to animate on no evidence at all.
   const dhwPath = pumping && toDhw === true, heatPath = pumping && toDhw === false;
-  onCls("fTank", dhwPath); onCls("fCoil", dhwPath); onCls("fTankRet", dhwPath);
-  onCls("fHeat", heatPath); onCls("fHeatRet", heatPath);
+  onCls("fTank", dhwPath); onCls("fTankEdgeL", dhwPath); onCls("fTankEdgeR", dhwPath); onCls("fTankRet", dhwPath);
+  onCls("fHeat", heatPath); onCls("fHeatRet", heatPath); onCls("fSpaceEdgeL", heatPath); onCls("fSpaceEdgeR", heatPath);
   // Refrigerant direction is supportable only when both activity and the thermal task are known.
   // This is true for Modbus-only DHW, but deliberately not for a gateway-only Auto space cycle.
   const refrigerantOn = compressorOn && d.thermalMode != null;
@@ -1163,7 +1163,7 @@ const INSPECT = {
               de: `Wasser wird zum ${activeSpaceKind(d) === "cool" ? "Kühlkreis" : activeSpaceKind(d) === "heat" ? "Heizkreis" : "Raumkreis"} geführt. Der interne R1T misst ${degC(d.lwt)}; kein nachgeschalteter Fühler bestätigt die Flächentemperatur.` }
         : { en: "Current pump and flow readings do not establish circulation through the space branch.",
             de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation durch den Raumzweig." },
-    rows: [/^indoor ambient temp/i, /^rt setpoint/i, /^space heating operation/i],
+    rows: [/^indoor ambient temp/i, /^rt setpoint/i, { sel: /^space heating operation/i, cid: "space_op" }],
   },
   // This catalog row is normal space heat/cool operation, not a heating demand. "Thermostat ON/OFF"
   // remains with the indoor-unit status byte; neither bit alone proves compressor operation.
@@ -1388,11 +1388,18 @@ const inspCurRow = (e) => {
 // decides whether the body repaints — a body that renders something the signature cannot see stops
 // updating and shows a value from whenever something else last moved, looking perfectly current.
 function inspMember(sel) {
-  const r = pickRow(sel);
+  // A selector may carry an explicit Modbus concept ({sel, cid}) so its HomeHub twin can stand in even
+  // on a board with NO X10A row to source the concept from — X10A absent, HomeHub live. Without it the
+  // space-operation evidence (the only reading a HomeHub-only plant can offer here) vanished with the
+  // X10A rows, leaving the RAUMKREIS explainer empty though the gateway was answering.
+  const selector = sel && sel.cid ? sel.sel : sel;
+  const cid = sel && sel.cid ? sel.cid : null;
+  const r = pickRow(selector);
   // X10A down: the retained row is not a reading any more. The gateway stands in where it carries
   // the same quantity (mbFallbackFor — the helper whose whole job is that substitution) and the
   // member simply disappears where it does not, rather than printing a stale number under its label.
-  if (x10aDown()) return { x10a: null, mb: r ? mbFallbackFor(r.concept) : null };
+  // With no X10A row at all, the explicit concept (cid) is what still finds the gateway's twin.
+  if (x10aDown()) return { x10a: null, mb: r ? mbFallbackFor(r.concept) : (cid ? mbFallbackFor(cid) : null) };
   return { x10a: r, mb: mbTwin(r) };
 }
 

@@ -353,7 +353,7 @@ const I18N = {
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
     "insp.close": "Close",
-    "schem.leaving_water": "PHE out · pre-BUH", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
+    "schem.leaving_water": "PHE out", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
     "schem.bsh_label": "E-heater",
     "schem.space_circuit": "SPACE CIRCUIT", "schem.heating": "HEATING", "schem.cooling": "COOLING",
     "schem.pump": "PUMP", "schem.return": "PHE in", "schem.room": "Room",
@@ -904,7 +904,7 @@ const I18N = {
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
     "insp.close": "Schließen",
-    "schem.leaving_water": "PHE-Aus · vor BUH", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
+    "schem.leaving_water": "PHE-Aus", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
     "schem.bsh_label": "Heizstab",
     "schem.space_circuit": "RAUMKREIS", "schem.heating": "HEIZUNG", "schem.cooling": "KÜHLEN",
     "schem.pump": "PUMPE", "schem.return": "PHE-Ein", "schem.room": "Raum",

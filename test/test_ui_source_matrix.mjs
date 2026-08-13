@@ -109,20 +109,25 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   assert.match(index, /id="gBshState"[\s\S]*?data-i18n="schem\.bsh_label"/,
     "the heater pill keeps only its stable component name");
   assert.match(index,
-    /class="sc-bsh-state-box" x="541" y="288" width="70" height="20" rx="10"/,
+    /class="sc-bsh-state-box" x="683" y="318" width="70" height="16" rx="8"/,
     "the heater pill stays compact and centred inside the tank");
-  assert.match(index, /class="sc-box sc-tank" x="518" y="258" width="120" height="140"/,
-    "the DHW tank keeps the shared compact consumer width");
-  assert.match(index, /class="sc-box" x="660" y="258" width="120" height="140"/,
-    "the space circuit matches the DHW tank width without squeezing its contents");
+  assert.match(index, /class="sc-box sc-tank" x="660" y="290" width="120" height="108"/,
+    "the DHW tank keeps the shared compact consumer width and matches the space box height");
+  assert.match(index, /class="sc-box" x="518" y="290" width="120" height="108"/,
+    "the space circuit matches the DHW tank width; its top is lowered to give the pills above more room");
   assert.doesNotMatch(index, /id="svSgRequest"/,
     "the Boost pill has no visible active/inactive second line");
   assert.match(style, /svg \.sc-bsh-state-box \{[^}]*fill:\s*var\(--hatch\)/,
     "inactive heater pill uses the neutral light-grey fill");
   assert.match(style, /\.bsh-on \.sc-bsh-state-box \{[^}]*stroke:\s*var\(--warn\)/,
     "active heater pill turns orange as a whole pill");
-  assert.match(style, /\.bsh-on \.sc-tank \{[^}]*stroke:\s*var\(--warn\)/,
-    "active heater restores the orange outline around the whole DHW tank");
+  assert.match(style, /#schem\.bsh-on \.sc-tank-flow \{[^}]*stroke:\s*var\(--warn\)[^}]*animation:\s*dashfwd/,
+    "active heater animates the DHW tank perimeter in orange over its grey resting edge");
+  // clearSchematic() (the no-data / X10A-unreachable render path) must stop the box-perimeter flows
+  // too — a .sc-flow-only reset silently left the new sc-tank-flow / sc-space-flow overlays animating,
+  // so an unreachable plant looked like a live charging one.
+  assert.match(SOURCE, /function clearSchematic\(\)[\s\S]*?querySelectorAll\([^)]*\.sc-tank-flow[^)]*\.sc-space-flow[^)]*\)/,
+    "clearSchematic resets the box-perimeter flows (sc-tank-flow/sc-space-flow), not just sc-flow/sc-rflow");
   assert.match(style, /svg \.sc-sg-request-box \{[^}]*fill:\s*var\(--hatch\)/,
     "inactive Boost pill uses the neutral light-grey fill");
   assert.match(style, /\.sg-boost-on \.sc-sg-request-box \{[^}]*stroke:\s*var\(--src-mb\)/,
@@ -415,6 +420,22 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(c.mbTwin(LWT_X)?.value, "38.1", "both live: mbTwin must resolve off the row");
   // X10A leads: the fallback picker must NOT hand the gateway value over while X10A answers.
   assert.equal(c.mbFallbackFor("leaving_water"), null, "both live: no fallback while X10A answers");
+}
+
+// ── HomeHub-only board: no X10A rows at all, but the gateway is answering ────────────────────────
+// The space-operation evidence is the only reading a HomeHub-only plant can offer at the RAUMKREIS
+// explainer. It used to vanish with the X10A rows: inspMember sourced the Modbus twin from the X10A
+// row's `concept`, and there was no X10A row to source it from. The rows entry now carries the
+// concept explicitly ({sel, cid}) so the twin stands in on its own — X10A absent, HomeHub live.
+{
+  const M_SPACE_OP = { label: "Space heating/cooling normal operation", value: 0, unit: "",
+                       off: 53, concept: "space_op", binary: true };
+  const c = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [], modbus: [M_SPACE_OP] });
+  const members = c.inspMembers(c.INSPECT.heat, null, null);
+  const spaceRow = members.find((m) => m.mb && m.mb.concept === "space_op");
+  assert.ok(spaceRow, "X10A absent + HomeHub live: the space-operation row must still appear from Modbus");
+  assert.equal(spaceRow.x10a, null, "it stands in for the missing X10A row, not beside a present one");
+  assert.equal(members.filter((m) => m.x10a).length, 0, "no X10A rows exist, so none are invented");
 }
 
 // ── Both links live, but the outdoor unit is resting ────────────────────────────────────────────

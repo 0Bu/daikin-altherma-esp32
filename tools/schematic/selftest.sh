@@ -116,17 +116,19 @@ PY
 run_case "counter-clockwise pump is caught" 1 "G012"
 
 echo "== 2. a value pill floating ~40 px above the pipe it names =="
-# The leaving-water pill sits over the plate's water outlet BECAUSE that is where R1T is; drifted
-# up into the white space it names nothing, and the reader is left to guess which run it belongs to.
+# The high-pressure pill sits just above the refrigerant run BECAUSE that is where it is measured;
+# drifted up into the white space it names nothing, and the reader is left to guess which run it
+# belongs to. (Seeded on `hp`, not the leaving-water pill: R1T is a DELIBERATE lifted pill, tied to
+# its outlet and adjudicated as `G006 lwt`, so a lift there would be suppressed and seed nothing.)
 reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys, re
 p = sys.argv[1]; s = open(p).read()
-i = s.index('data-insp="lwt"')
+i = s.index('data-insp="hp"')
 j = s.index('</g>', i)
 blk = s[i:j]
 new = (blk.replace('y="146"', 'y="106"').replace('y="161"', 'y="121"')
-          .replace('y="140"', 'y="100"').replace('d="M418 168 V 176"', 'd="M418 128 V 176"'))
+          .replace('d="M247 168 V 177"', 'd="M247 128 V 177"'))
 if new == blk: sys.exit(1)
 open(p, 'w').write(s[:i] + new + s[j:])
 PY
@@ -193,8 +195,8 @@ reset
 patch_file "$WORK/main/www/index.html" <<'SEED'
 import sys
 p = sys.argv[1]; s = open(p).read()
-leg = '                    <path class="sc-pipe" d="M610 398 V 420"/>\n'
-after = '                  <path class="sc-flow water-flow hot" id="fTank" d="M610 180 V 258"/>\n'
+leg = '                    <path class="sc-pipe" d="M720 398 V 420 H 610"/>\n'
+after = '                  <path class="sc-flow water-flow hot" id="fTank" d="M610 180 H 720 V 290"/>\n'
 if leg not in s or after not in s: sys.exit(1)
 open(p, 'w').write(s.replace(leg, '', 1).replace(after, after + leg, 1))
 SEED
@@ -208,9 +210,9 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = '<text class="sc-lbl" x="720" y="278" text-anchor="middle"\n                        id="svSpaceCircuit" data-i18n="schem.space_circuit">'
+old = '<text class="sc-lbl" x="578" y="310" text-anchor="middle"\n                        id="svSpaceCircuit" data-i18n="schem.space_circuit">'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '<text class="sc-lbl" x="720" y="186" text-anchor="middle"\n                        id="svSpaceCircuit" data-i18n="schem.space_circuit">', 1))
+open(p, 'w').write(s.replace(old, '<text class="sc-lbl" x="578" y="186" text-anchor="middle"\n                        id="svSpaceCircuit" data-i18n="schem.space_circuit">', 1))
 PY
 run_case "label struck through by a pipe is caught" 1 "G003"
 
@@ -222,8 +224,8 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if 'M502 180 H 532' not in s: sys.exit(1)
-open(p, 'w').write(s.replace('M502 180 H 532', 'M502 186 H 532'))   # pipe, hit line AND flow overlay
+if 'M462 180 H 492' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('M462 180 H 492', 'M462 186 H 492'))   # pipe, hit line AND flow overlay
 PY
 run_case "off-grid run is caught" 1 "G008"
 
@@ -357,8 +359,8 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if 'x="664" y="218" width="112"' not in s: sys.exit(1)           # the thermostat pill
-open(p, 'w').write(s.replace('x="664" y="218" width="112"', 'x="664" y="218" width="34"', 1))
+if 'x="522" y="255" width="112"' not in s: sys.exit(1)           # the thermostat pill
+open(p, 'w').write(s.replace('x="522" y="255" width="112"', 'x="522" y="255" width="34"', 1))
 PY
 run_case "text overflowing its pill is caught" 1 "G004"
 
@@ -368,8 +370,8 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if 'd="M378 180 H 458"' not in s: sys.exit(1)
-open(p, 'w').write(s.replace('d="M378 180 H 458"', 'd="M378 180 L 458 184"', 1))
+if 'd="M378 180 H 418"' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('d="M378 180 H 418"', 'd="M378 180 L 418 184"', 1))
 PY
 run_case "a skewed pipe is caught" 1 "G005"
 
@@ -390,9 +392,9 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = '<path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 458"/>'
+old = '<path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 418"/>'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '<path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 450"/>', 1))
+open(p, 'w').write(s.replace(old, '<path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 412"/>', 1))
 PY
 run_case "a flow overlay off its pipe is caught" 1 "G010"
 
@@ -415,23 +417,23 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if 'x="660" y="258" width="120"' not in s: sys.exit(1)           # the heating box, 10 px off the edge
-open(p, 'w').write(s.replace('x="660" y="258" width="120"', 'x="660" y="258" width="180"', 1))
+if 'x="660" y="290" width="120"' not in s: sys.exit(1)           # the DHW tank box, 10 px off the edge
+open(p, 'w').write(s.replace('x="660" y="290" width="120"', 'x="660" y="290" width="180"', 1))
 PY
 run_case "drawing past the viewBox is caught" 1 "G001"
 
-# 15 — the shipped defect: a pipe's tap area reaching into the fitting it meets. The tank riser's hit
+# 15 — the shipped defect: a pipe's tap area reaching into the fitting it meets. The space riser's hit
 # line was trimmed to y=194, the 3-way valve's own bottom edge — correct if the cap were flat, but
-# `stroke-linecap: round` puts it back at y=185 and 18 % of the valve answered "DHW branch" instead.
+# `stroke-linecap: round` puts it back at y=185 and 18 % of the valve answered "space branch" instead.
 # Nothing visible changes, which is the whole point: only a pointer at the valve's rim can tell.
 reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if 'd="M610 203 V 258"' not in s: sys.exit(1)
-open(p, 'w').write(s.replace('d="M610 203 V 258"', 'd="M610 194 V 258"', 1))
+if 'd="M610 203 V 290"' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('d="M610 203 V 290"', 'd="M610 194 V 290"', 1))
 PY
-run_case "a hit line reaching into a fitting is caught" 1 "G011 wtank|valve"
+run_case "a hit line reaching into a fitting is caught" 1 "G011 wheat|valve"
 
 # 15b — the same rule against a RECTANGULAR component. G011 measures a circle and a box by different
 # geometry, so one case would leave half the rule free to rot: the supply run's hit line trimmed to
@@ -440,8 +442,8 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if 'd="M387 180 H 458"' not in s: sys.exit(1)
-open(p, 'w').write(s.replace('d="M387 180 H 458"', 'd="M378 180 H 458"', 1))
+if 'd="M387 180 H 418"' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('d="M387 180 H 418"', 'd="M378 180 H 418"', 1))
 PY
 run_case "…and it measures boxes, not just discs" 1 "G011 wsup|phe"
 
