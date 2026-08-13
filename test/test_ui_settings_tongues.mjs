@@ -32,13 +32,15 @@ const labels = {
   "dyn.outdoor_detail_status": "Status",
   "dyn.outdoor_detail_now": "Aktueller Messwert",
   "dyn.outdoor_detail_sample": "Beim letzten aufgezeichneten Ereignis",
-  "dyn.outdoor_status_live": "ENV-III-Messwert aktuell, wird mitaufgezeichnet.",
-  "dyn.outdoor_status_unavailable": "Sensor eingerichtet, aber kein aktueller Messwert erreicht die Aufzeichnung.",
-  "dyn.outdoor_status_absent": "Kein ENV-III-Sensor eingerichtet. Ereignisse werden ohne Außenwert aufgezeichnet.",
+  "dyn.outdoor_status_live": "{0}-Messwert aktuell, wird mitaufgezeichnet.",
+  "dyn.outdoor_status_unavailable": "{0} eingerichtet, aber kein aktueller Messwert erreicht die Aufzeichnung.",
+  "dyn.outdoor_status_absent": "{0} nicht eingerichtet. Ereignisse werden ohne Außenwert aufgezeichnet.",
   "dyn.outdoor_sample_none": "Ohne Außenwert aufgezeichnet",
   "dyn.outdoor_help_axis": "Aussenachse macht die Raumabweichung lesbar.",
   "dyn.outdoor_help_placement": "Was der Sensor dort misst, wo er haengt.",
   "dyn.outdoor_help_setup": "Ein M5Stack ENV III am Grove-Port kann diesen Wert liefern.",
+  "dyn.plant_outdoor": "Außenluft der Anlage",
+  "dyn.plant_outdoor_help": "HomeHub-Eingang 44 bleibt von ENV III getrennt und ändert keine Aufzeichnung.",
   "board.title": "Board-Hardware",
   "dyn.input_error": "Eingabefehler",
   "ref.title": "Raumtemperaturquelle",
@@ -169,6 +171,7 @@ vm.runInContext(`${source}\nthis.__renderDynamic = dynamicControlCardHtml; this.
 
 S.status = {
   mqtt: { configured: true },
+  modbus: { enabled: true, connected: true },
   reference_temperature: {
     configured: true, name: "Example rm", has_value: true, temperature_c: 25.1,
     has_setpoint: true, setpoint_c: 22.0, age_s: 17, fresh: true, control_eligible: true,
@@ -177,7 +180,10 @@ S.status = {
     configured: true, has_value: true, outdoor_mean_2h_c: 22.6,
     solar_energy_2h_wh_m2: 0, fresh: true,
   },
-  heating_curve: { method_version: 2, armed: true, state: "hold", reason: "plant_inactive" },
+  heating_curve: { method_version: 2, armed: true, state: "hold", reason: "plant_inactive",
+    plant_outdoor_temperature_c: 9.14, plant_outdoor_source: "homehub",
+    last_sample_room_error_k: 0.4, last_sample_plant_outdoor_temperature_c: 8.75,
+    last_sample_plant_outdoor_source: "homehub" },
   env3: {
     supported: true, enabled: true, fresh: true,
     temperature_c: 20.2, humidity_pct: 46, pressure_hpa: 1009,
@@ -220,8 +226,8 @@ assert.match(circulationTongue, /<span class="vdesc-n">Erkannter Zustand<\/span>
 let html = sandbox.__renderDynamic();
 assert.doesNotMatch(html, /section-badge|Experimentell/,
   "the enabled bottom card must not carry an experimental pill");
-assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 5,
-  "all five diagnosis rows must render an information tongue");
+assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 6,
+  "all six diagnosis rows must render an information tongue");
 // The idle-plant state is the reading a user sees for months. It must say what it means and must
 // not be styled as a fault, or the row becomes noise exactly when it is the only thing to read.
 assert.match(html, /Wartet auf Heizbetrieb/,
@@ -256,6 +262,18 @@ assert.match(html, /Gemessene Außenluft/,
   "the row must distinguish a MEASURED outdoor value from the forecast row beside it");
 assert.notEqual(html.indexOf("Gemessene Außenluft"), html.indexOf("Wetterprognose"),
   "the measured axis and the forecast must be two distinct rows");
+const plantFace = (h) =>
+  h.match(/data-desc="dynamic:plant-outdoor"[\s\S]*?<div class="vdesc">/)?.[0] || "";
+assert.match(html, /Außenluft der Anlage/,
+  "the plant axis must remain visibly separate from ENV III");
+assert.match(plantFace(html), /HomeHub/,
+  "the plant-axis face must name its source");
+assert.match(html, /Aktueller Messwert<\/span> 9,1 °C · HomeHub/,
+  "the current plant value must carry provenance inside the tongue");
+assert.match(html, /Beim letzten aufgezeichneten Ereignis<\/span> 8,8 °C · HomeHub/,
+  "the event-time plant value must carry independent provenance");
+assert.doesNotMatch(plantFace(html), /data-act=/,
+  "plant evidence is a passive row, not another HomeHub editor");
 
 // (a) sensor live, but nothing has reached the recorder: warn, and the tongue explains the gap
 // rather than letting the reader assume the sensor is broken. The face names the SENSOR in every
@@ -265,7 +283,7 @@ assert.match(outdoorFace(html), /ENV III/,
   "a set-up sensor is named on the face, exactly as the room source and Open-Meteo are");
 assert.match(outdoorFace(html), /vrow-val settings-wrap warn/,
   "a CONFIGURED sensor whose value never arrives is worth a warning");
-assert.match(html, /Sensor eingerichtet, aber kein aktueller Messwert erreicht die Aufzeichnung\./);
+assert.match(html, /ENV III eingerichtet, aber kein aktueller Messwert erreicht die Aufzeichnung\./);
 // The row must not be an editor. The ENV III has ONE editor, the Board Hardware modal, which saves
 // it atomically beside the board identity deciding whether the Grove port exists at all.
 assert.doesNotMatch(outdoorFace(html), /data-act=|dynamic-config-open/,
@@ -324,14 +342,14 @@ assert.doesNotMatch(outdoorHtml, /0,0\u00a0°C/,
 S.status.env3 = fixtureEnv3;
 S.status.heating_curve = fixtureCurve;
 
-for (const key of ["state", "room-sources", "weather", "outdoor", "strategy"]) {
+for (const key of ["state", "room-sources", "weather", "plant-outdoor", "outdoor", "strategy"]) {
   const infoButton = html.match(new RegExp(`<button class="[^"]*(?:settings-split-info|settings-whole-info-row)[^"]*"[^>]*data-desc="dynamic:${key}"[\\s\\S]*?<\\/button>`))?.[0] || "";
   assert.match(infoButton, /aria-expanded="false"/,
     `${key} label must be a closed explanation action on first render`);
   assert.doesNotMatch(infoButton, /data-act=/,
     `${key} label must never open a configuration popup`);
 }
-for (const key of ["state", "outdoor", "strategy"]) {
+for (const key of ["state", "plant-outdoor", "outdoor", "strategy"]) {
   assert.match(html, new RegExp(`<button class="vrow settings-whole-info-row settings-info-row"[^>]*data-desc="dynamic:${key}"[\\s\\S]*class="settings-info-value`),
     `${key} has no second action, so its label and value must share one full-row accordion button`);
 }
@@ -342,8 +360,8 @@ for (const key of ["state", "outdoor", "strategy"]) {
 // rows (state, axis, method) all stay passive, which is the assertion below.
 assert.equal((html.match(/class="settings-split-action dynamic-config-open/g) || []).length, 2,
   "only the two sources this card owns may be popup actions; the reported rows may not");
-assert.equal((html.match(/class="settings-info-value/g) || []).length, 3,
-  "state, outdoor axis and method values must stay passive inside their full-row accordion buttons");
+assert.equal((html.match(/class="settings-info-value/g) || []).length, 4,
+  "state, both outdoor axes and method values must stay passive inside full-row accordion buttons");
 assert.doesNotMatch(html, /settings-source-summary|Konfiguriert · 25,1 °C|Open-Meteo · 22,6 °C \/ 2 h/,
   "obsolete green summary lines must not duplicate values inside the tongues");
 const roomTongue = html.match(/<div class="vdesc-body settings-info-tongue" id="dynamic-room-sources-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
@@ -403,7 +421,7 @@ S.status.reference_temperature = {};
 S.status.weather_forecast = {};
 S.status.env3 = {};
 html = sandbox.__renderDynamic();
-assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 5,
+assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 6,
   "unconfigured sources must retain their explanation tongues");
 assert.equal((html.match(/<span>Nicht konfiguriert<\/span>/g) || []).length, 2,
   "each empty editable source must expose Not configured as its popup value");

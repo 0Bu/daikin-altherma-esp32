@@ -5,13 +5,15 @@
 #include <cstdint>
 #include <string>
 
+#include "outdoor_evidence.hpp"
+
 namespace daik {
 
-// v2 adds the optional local outdoor-air axis (`outdoor_available` plus
-// `last_sample.outdoor_temperature_c`). Purely additive, and the SAMPLING METHOD is untouched — the
-// room error is still derived exactly as in v1, so `method_version` deliberately stays 2 and archived
-// events remain comparable across this change. The schema version is what describes payload SHAPE.
-inline constexpr uint8_t HEATING_CURVE_MQTT_SCHEMA_VERSION = 2;
+// v3 adds a distinct plant-side outdoor axis and explicit provenance for both plant and ENV III
+// readings. Purely additive, and the SAMPLING METHOD is untouched — the room error is still derived
+// exactly as in v1/v2, so `method_version` deliberately stays 2 and archived events remain
+// comparable across this change. The schema version is what describes payload SHAPE.
+inline constexpr uint8_t HEATING_CURVE_MQTT_SCHEMA_VERSION = 3;
 
 struct HeatingCurveMqttFields {
     // Canonical single-room input (#288). Unavailable numbers render null; numeric validity flags
@@ -40,8 +42,15 @@ struct HeatingCurveMqttFields {
     bool        sample_eligible = false;
     bool        forecast_available = false;
     bool        outdoor_available = false;
+    logic::OutdoorSource outdoor_source = logic::OutdoorSource::None;
     bool        has_last_sample_outdoor = false;
     double      last_sample_outdoor_temperature_c = 0.0;
+    logic::OutdoorSource last_sample_outdoor_source = logic::OutdoorSource::None;
+    bool        plant_outdoor_available = false;
+    logic::OutdoorSource plant_outdoor_source = logic::OutdoorSource::None;
+    bool        has_last_sample_plant_outdoor = false;
+    double      last_sample_plant_outdoor_temperature_c = 0.0;
+    logic::OutdoorSource last_sample_plant_outdoor_source = logic::OutdoorSource::None;
     bool        plant_gate_known = false;
     bool        plant_gate_active = false;
     bool        heating_mode_known = false;
@@ -102,6 +111,21 @@ inline std::string build_heating_curve_mqtt_json(const HeatingCurveMqttFields& f
     j += ",\"sample_eligible\":"; j += f.sample_eligible ? "1" : "0";
     j += ",\"forecast_available\":"; j += f.forecast_available ? "1" : "0";
     j += ",\"outdoor_available\":"; j += f.outdoor_available ? "1" : "0";
+    j += ",\"outdoor_source\":\"";
+    j += logic::outdoor_source_name(f.outdoor_available ? f.outdoor_source
+                                                        : logic::OutdoorSource::None);
+    j += "\"";
+    j += ",\"outdoor_source_code\":";
+    j += std::to_string(static_cast<unsigned>(f.outdoor_available ? f.outdoor_source
+                                                                  : logic::OutdoorSource::None));
+    j += ",\"plant_outdoor_available\":"; j += f.plant_outdoor_available ? "1" : "0";
+    j += ",\"plant_outdoor_source\":\"";
+    j += logic::outdoor_source_name(f.plant_outdoor_available ? f.plant_outdoor_source
+                                                              : logic::OutdoorSource::None);
+    j += "\"";
+    j += ",\"plant_outdoor_source_code\":";
+    j += std::to_string(static_cast<unsigned>(f.plant_outdoor_available
+                        ? f.plant_outdoor_source : logic::OutdoorSource::None));
     j += ",\"gates\":{";
     j += "\"plant_known\":"; j += f.plant_gate_known ? "1" : "0";
     j += ",\"plant_active\":"; j += f.plant_gate_active ? "1" : "0";
@@ -126,6 +150,25 @@ inline std::string build_heating_curve_mqtt_json(const HeatingCurveMqttFields& f
     j += ",\"outdoor_temperature_c\":";
     j += f.has_last_sample_outdoor
        ? std::to_string(f.last_sample_outdoor_temperature_c) : "null";
+    j += ",\"outdoor_source\":\"";
+    j += logic::outdoor_source_name(f.has_last_sample_outdoor
+                                    ? f.last_sample_outdoor_source
+                                    : logic::OutdoorSource::None);
+    j += "\"";
+    j += ",\"outdoor_source_code\":";
+    j += std::to_string(static_cast<unsigned>(f.has_last_sample_outdoor
+                        ? f.last_sample_outdoor_source : logic::OutdoorSource::None));
+    j += ",\"plant_outdoor_temperature_c\":";
+    j += f.has_last_sample_plant_outdoor
+       ? std::to_string(f.last_sample_plant_outdoor_temperature_c) : "null";
+    j += ",\"plant_outdoor_source\":\"";
+    j += logic::outdoor_source_name(f.has_last_sample_plant_outdoor
+                                    ? f.last_sample_plant_outdoor_source
+                                    : logic::OutdoorSource::None);
+    j += "\"";
+    j += ",\"plant_outdoor_source_code\":";
+    j += std::to_string(static_cast<unsigned>(f.has_last_sample_plant_outdoor
+                        ? f.last_sample_plant_outdoor_source : logic::OutdoorSource::None));
     j += ",\"unix_s\":";
     j += f.has_last_sample ? std::to_string(f.last_sample_unix_s) : "null";
     j += ",\"sequence\":"; j += std::to_string(f.sequence);

@@ -5,12 +5,12 @@
 // WHY. The HomeHub map was read one register at a time, once per POLL_INTERVAL_S: 31 MBAP
 // round-trips a second, ~2.7 million requests a day, against a hub that also serves the Onecta app,
 // the unit's MMI, evcc and whatever else on the LAN speaks to it. Nothing about the map required
-// that. The EKRHH offsets fall into ten contiguous runs, and exactly two facts on it are
-// time-critical — the plant gate and the current mode that logic/heating_curve_diagnosis.hpp
-// evaluates every second. Everything else is a water temperature, a flow rate or a setpoint
+// that. The EKRHH offsets fall into ten contiguous runs. Two facts are time-critical gates — plant
+// operation and current mode — and input 44 is time-critical event context that #441 requires from
+// the same poll cycle. Everything else is a water temperature, a flow rate or a setpoint
 // read-back, none of which moves meaningfully inside five seconds, and all of which folds into a
 // five-MINUTE history bucket. So: batch the runs, read the whole map on a slower cadence, and keep
-// only the gates at 1 Hz.
+// only gates plus the named outdoor context at 1 Hz.
 //
 // WHY PURE. Both halves are the off-by-one a .cpp hides until it is in the field, and both fail
 // SILENTLY rather than loudly:
@@ -60,13 +60,16 @@ inline constexpr uint8_t MB_PLAN_MAX_REGS = 16;
 inline constexpr uint32_t MB_FULL_CYCLE_TICKS = 5;
 
 // The offsets that must stay current at the poll cadence: input register 53 (normal space operation)
-// and 38 (heating rather than cooling) — the two HomeHub facts the heating-curve diagnosis gates on,
-// evaluated once per second on the MQTT task. Named HERE rather than in the poll loop so the plan
-// and the diagnosis cannot drift about which registers are time-critical, and so that a third
-// time-critical fact is one entry rather than a new special case in the loop.
+// and 38 (heating rather than cooling) are diagnosis gates. Input 44 is NOT a gate; it is the
+// optional plant outdoor context attached to an eligible event. Its 40..45 batch does not overlap
+// either gate batch, so naming it separately here deliberately spends one bundled read per gate
+// cycle to make "answered this cycle" true rather than borrowing the five-second value cache.
 inline constexpr uint16_t MB_GATE_OFFSETS[] = {38, 53};
 inline constexpr size_t   MB_GATE_OFFSET_COUNT =
     sizeof(MB_GATE_OFFSETS) / sizeof(MB_GATE_OFFSETS[0]);
+inline constexpr uint16_t MB_CONTEXT_OFFSETS[] = {44};
+inline constexpr size_t   MB_CONTEXT_OFFSET_COUNT =
+    sizeof(MB_CONTEXT_OFFSETS) / sizeof(MB_CONTEXT_OFFSETS[0]);
 
 // Gates live in the INPUT space; a holding register that happens to share an offset number is a
 // different register entirely (offset 3 exists in both), so the space is half the key.
@@ -77,17 +80,23 @@ constexpr bool mb_offset_is_gate(MbFunc space, uint16_t offset) {
     return false;
 }
 
+constexpr bool mb_offset_is_fast_context(MbFunc space, uint16_t offset) {
+    if (space != MbFunc::ReadInput) return false;
+    for (size_t i = 0; i < MB_CONTEXT_OFFSET_COUNT; i++)
+        if (MB_CONTEXT_OFFSETS[i] == offset) return true;
+    return false;
+}
+
 // Tick 0 is FULL, and that is the load-bearing half: it makes the first cycle of a session publish a
-// complete cache rather than a gate pair and 29 absent rows. The caller resets the tick on every
-// reconnect for exactly that reason — a session that resumed mid-cycle would otherwise serve a
-// /values array that is missing most of the map, which reads as a broken hub rather than as a
-// cadence.
+// complete cache rather than leaving it empty after a fast-only read. The caller resets the tick on
+// every reconnect for exactly that reason — a session that resumed mid-cycle would otherwise serve
+// no value map until the cadence wrapped, which reads as a broken hub rather than as a cadence.
 constexpr bool mb_cycle_is_full(uint32_t tick) {
     return MB_FULL_CYCLE_TICKS <= 1 || (tick % MB_FULL_CYCLE_TICKS) == 0;
 }
 
-// The link exposes ONE current error for the whole register map. A clean gate-only cycle proves only
-// that its two selected batches recovered; it says nothing about a non-gate register that failed on
+// The link exposes ONE current error for the whole register map. A clean fast cycle proves only that
+// its selected batches recovered; it says nothing about a full-cycle register that failed on
 // the preceding full cycle. Clearing the global error there would make /status and Syslog oscillate
 // between failure and "recovered" every five seconds without ever re-reading the failing row.
 // Therefore only a clean, still-current FULL cycle is evidence for global recovery.
@@ -165,13 +174,15 @@ constexpr int mb_plan_build(const MbFunc* spaces, const uint16_t* offsets, int n
     return nb;
 }
 
-// Must this batch be read on a gate-only cycle? Derived from the offsets the batch covers, so a
-// batch that happens to contain a gate carries its neighbours along at no extra cost — which is why
-// the gate cycle also refreshes the 3-way valve, the compressor flag, flow, power and room
-// temperature: they share a run with the gates and would cost a second request to leave out.
-constexpr bool mb_batch_is_gate(const MbBatch& b) {
+// Must this batch be read on a fast cycle? Derived from the offsets the batch covers, so a batch
+// containing a gate or the named event context carries its neighbours along at no extra cost. This
+// is why the fast cycle also refreshes the 3-way valve, compressor flag, flow, power and room
+// temperature even though only the two gates plus input 44 are committed outside the value cache.
+constexpr bool mb_batch_is_fast(const MbBatch& b) {
     for (uint16_t k = 0; k < b.count; k++)
-        if (mb_offset_is_gate(b.space, static_cast<uint16_t>(b.first_offset + k))) return true;
+        if (mb_offset_is_gate(b.space, static_cast<uint16_t>(b.first_offset + k)) ||
+            mb_offset_is_fast_context(b.space, static_cast<uint16_t>(b.first_offset + k)))
+            return true;
     return false;
 }
 

@@ -648,7 +648,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   the third question the dashboard answers, after *what is it doing now* (the schematic) and *what did
   this one reading do today* (the trends). It reports counted events, durations and window minima —
   compressor starts and observed runtime per detected start, defrost count and (where compressor
-  state exists) share of paired runtime, water pressure and steady-flow minima, observed BUH/BSH
+  state exists) share of paired runtime, source-named outdoor min/mean context paired separately to
+  completed space-heating runs and defrost/compressor runtime, water pressure and steady-flow minima, observed BUH/BSH
   seconds, clean one-hour R5T tank-cooling windows with circulation-pump attribution, the
   unit's fault class and protection-retry counter changes — through `/status.health`. It does **not**
   issue a plant-health certificate: X10A does not establish refrigerant charge, sensor calibration,
@@ -692,6 +693,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
      signal. Direct current state and observation-only flow use their stated shorter eligibility
      targets instead of pretending to be 24-hour absence claims. Each result therefore carries
      `observed_s` and `required_s`; the report also carries `available`, `assessable` and `evaluated`.
+     Outdoor context is not another evidence clock or threshold. X10A 0x20 contributes only when it
+     answered this sweep and the non-held RPS witness positively says Running; unknown RPS is
+     absence. Two independent eight-byte aggregates keep exact tenths sums rather than
+     order-dependent rounded means. Their 384 B payload plus 48 B alignment moves the guarded
+     bucket layout from 46/1104 B to 64/1536 B and therefore changes the persistence fingerprint.
      The DHW row additionally carries `candidate_s` and `settle_remaining_s`: the first is usable
      progress inside the current all-or-nothing clean hour, not yet credited to `observed_s`; the
      second explains why no candidate is running after a tank charge or BSH pulse. It also carries
@@ -944,19 +950,19 @@ host-testable core is unusually large and valuable, because the risky parts are 
   comparison evidence; deleting it must not stop local sampling or make location disclosure a
   prerequisite. There is no mode enum, live blob field or route; v14's retired byte is written zero
   and ignored.
-  THE OUTDOOR AXIS is the second optional input, from ENV III when one is configured and its sample
-  is fresh **and** plausible — the same pair that gates the ENV III MQTT document, so a reading this
-  firmware refuses to publish cannot reach a sample instead. It is recorded **with the event**
-  (`last_sample_outdoor_temperature_c`) beside the live value, because a room error alone cannot
+  THE TWO OUTDOOR AXES are optional context: plant-side HomeHub input 44 plus ENV III when configured
+  and fresh **and** plausible. Input 44 is selected as an explicit fast Modbus context batch and is
+  accepted only from the current TCP session; ENV III uses the same pair that gates its MQTT
+  document. Each is recorded **with the event**, separately and with provenance, because a room error alone cannot
   separate a curve that is too STEEP from one shifted too HIGH: `+0.5 K` at −5 °C and at +12 °C ask
   for opposite corrections and record identically without it. Like the forecast it is CONTEXT and
   never a gate, but the bar is stricter — the forecast at least splits Recording from Degraded,
-  while nothing at all branches on this. No state, reason or counter moves with or without the
-  sensor, and `test_heating_curve_diagnosis_contract.mjs` refuses a `blocked`/`hold` on it: a gate
-  here would silently stop sampling on every board lacking the accessory, indistinguishable from the
+  while nothing at all branches on either axis. No state, reason or counter moves with or without a
+  source, and `test_heating_curve_diagnosis_contract.mjs` refuses a `blocked`/`hold` on them: a gate
+  here would silently stop sampling on a board lacking the context, indistinguishable from the
   feature being idle. Absent or non-finite records as null rather than `0` (a freezing day), a
-  sample taken without the sensor CLEARS the previous event's reading instead of inheriting it under
-  a fresh timestamp, and disarming drops it with the rest of sample memory. Adding it did not move
+  sample taken without one source CLEARS that source's previous event reading instead of inheriting
+  it under a fresh timestamp, and disarming drops both with the rest of sample memory. Adding them did not move
   `method_version`: the room error is derived exactly as before, so archived events stay comparable.
   THE GATE ORDER inside `evaluate()` is load-bearing. HomeHub connectivity and input register 53
   first prove normal space operation; input register 38 then distinguishes Heating from Cooling;
@@ -1029,7 +1035,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `homehub-*` mDNS filter. Host-tested wire core used by the independent HomeHub task in
   `hp_modbus.cpp`; there is no FC06/FC16 request builder.
 - `logic/modbus_plan.hpp` — compile-time HomeHub request batching and two-cadence policy. It proves
-  every row is covered once, both diagnosis gates remain on the 1 Hz path, and a clean gate-only
+  every row is covered once, both diagnosis gates and the named outdoor context remain on the 1 Hz path, and a clean fast-only
   cycle cannot falsely clear an error belonging to a row it did not sample.
 - `logic/http_body.hpp` — request-body reassembly for `http_read_body`. A POST body is a TCP stream:
   `httpd_req_recv` returns what has arrived, and the IDF's own docs note a large body "may" take
@@ -1971,8 +1977,8 @@ The Home Assistant bridge:
   fresh registry entry.
 - **Heating-curve topic** `<base>/heating_curve` (not retained) carries domain evidence separately
   from board/link health, built by `logic/heating_curve_mqtt.hpp` (host-tested). Top-level
-  `schema_version` is `2` (v2 added `diagnosis.outdoor_available` and
-  `diagnosis.last_sample.outdoor_temperature_c`, purely additively; `method_version` stayed `2`,
+  `schema_version` is `3` (v2 added the ENV III outdoor value; v3 adds the distinct plant outdoor
+  value and string+numeric provenance for both current/event axes, purely additively; `method_version` stayed `2`,
   since the sampling method is unchanged and payload SHAPE is what the schema version describes);
   `room` contains the accepted live room mapping, while `diagnosis` contains
   method/state/reason plus nested `gates`, `room_evidence`, `last_sample` and `counters`. Nullable
@@ -2574,7 +2580,10 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   latitude/longitude are null when unconfigured and "<redacted>" under ?redact=1,
                   heating_curve{method_version,armed,state,state_code,reason,reason_code,
                   sample_eligible,current_room_error_k,last_sample_room_error_k,
-                  last_sample_unix_s,outdoor_temperature_c,last_sample_outdoor_temperature_c,
+                  last_sample_unix_s,outdoor_temperature_c,outdoor_source,
+                  last_sample_outdoor_temperature_c,last_sample_outdoor_source,
+                  plant_outdoor_temperature_c,plant_outdoor_source,
+                  last_sample_plant_outdoor_temperature_c,last_sample_plant_outdoor_source,
                   forecast_available,plant_gate_known,plant_gate_active,
                   heating_mode_known,heating_mode_active,room_source_unix_s,room_age_s,sequence,
                   evaluations,samples,holds,blocks} — versioned raw heating-curve diagnosis
@@ -2599,22 +2608,24 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   errors are facts only while eligible/recorded; sequence + absolute timestamp form
                   the durable event contract. Room error is not an LWT offset. There is no actuator
                   result in this block and cannot be one.
-                  The OUTDOOR pair is the optional local axis from ENV III (env3.cpp), gated on the
-                  same fresh-AND-plausible pair the ENV III MQTT document uses, so a reading this
-                  firmware refuses to publish cannot reach a sample. `outdoor_temperature_c` is LIVE;
+                  The OUTDOOR fields are two independent optional axes. The legacy pair is ENV III
+                  (env3.cpp), gated on the same fresh-AND-plausible pair its MQTT document uses.
+                  The `plant_*` pair is HomeHub input 44, answered in an explicit fast batch and
+                  sealed to the current Modbus session. Both current/event values name their source.
+                  `outdoor_temperature_c` is LIVE;
                   `last_sample_outdoor_temperature_c` is the value AS IT STOOD at the recorded event,
                   which is the one an archive needs — a room error alone cannot separate a heating
                   curve that is too STEEP from one shifted too HIGH (+0.5 K at -5 C and at +12 C ask
                   for opposite corrections and record identically without it). It is CONTEXT, NEVER a
-                  gate: no branch of the evaluation reads it, an absent sensor changes no state,
-                  reason or counter, and the contract test refuses a `blocked`/`hold` on it — a gate
+                  gate: no branch of the evaluation reads either, an absent source changes no state,
+                  reason or counter, and the contract test refuses a `blocked`/`hold` on them — a gate
                   here would silently stop sampling on every board without the accessory, which
                   looks exactly like the feature merely being idle. Absent or non-finite records as
                   null, never 0 (which would read as a freezing day), a sample taken without the
-                  sensor CLEARS the previous event's reading rather than inheriting it, and
-                  disarming drops it with the rest of sample memory. Adding it did NOT move
+                  source CLEARS that source's previous event reading rather than inheriting it, and
+                  disarming drops both with the rest of sample memory. Adding them did NOT move
                   `method_version` — the room error is derived exactly as before, so archived events
-                  stay comparable; the MQTT payload's own `schema_version` went 1 -> 2 instead,
+                  stay comparable; the MQTT payload's own `schema_version` went 1 -> 2 -> 3 instead,
                   since payload SHAPE is what changed,
                   net{kind,ip,eth{supported,present,link,lease,ip,mac,speed_mbps,full_duplex,
                 pins{sclk,cs,miso,mosi}}} — WHICH TRANSPORT carries the device ("none"|"wifi"|"eth")
@@ -2725,8 +2736,10 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   own named numbers: fault{active},
                   dhw_loss{max_k_h,windows,high_windows,high_with_pump,high_pump_off,
                   circulation_on_s,circulation_known_s,candidate_s,settle_remaining_s,
-                  aborts,abort_reasons[],best_aborted_s,blocked}, cycling{starts,mean_run_s},
-                  defrost{count,share_pct,paired_count,defrost_s,run_s}, pressure{min_bar},
+                  aborts,abort_reasons[],best_aborted_s,blocked},
+                  cycling{starts,mean_run_s,...,outdoor_source,outdoor_min_c,outdoor_mean_c,outdoor_samples},
+                  defrost{count,share_pct,paired_count,defrost_s,run_s,outdoor_source,outdoor_min_c,
+                  outdoor_mean_c,outdoor_samples}, pressure{min_bar},
                   flow{min_l_min},
                   heater{buh_min,bsh_min,buh_s,bsh_s}, retries{seen}. Named per check rather than a generic pair,
                   so the browser needs no table saying what field N means for which id — that table
@@ -2789,7 +2802,7 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   data-model offset (def/homehub.hpp), which is what the pairing keys on.
                   THE ARRAY IS EMITTED ONLY WHILE THE LINK IS LIVE AT THE MOMENT THE SNAPSHOT IS
                   TAKEN and carries that session's latest FULL cycle — bounded to at most four poll
-                  intervals old while the 1 Hz gate-only cycles keep link/gate state current. A
+                  intervals old while the 1 Hz fast cycles keep link/gate/context state current. A
                   consumer cannot infer that bound from a row, so it is part of this API contract.
                   Liveness and the cache
                   sit behind two DIFFERENT mutexes, so mb_values_snapshot() reports the link state

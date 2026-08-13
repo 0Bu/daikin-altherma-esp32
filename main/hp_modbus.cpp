@@ -72,7 +72,7 @@ static int         s_req_port = 0;
 static int         s_unit     = 0;    // Modbus unit id addressed on this socket
 static bool        s_have_req = false;// whether s_req_* describe the current socket
 // The read cadence (logic/modbus_plan.hpp). Tick 0 is a FULL cycle, so a session that has just
-// opened publishes the whole map rather than the two gate batches and 24 absent rows — which is why
+// opened publishes the whole map rather than only the fast gate/context batches — which is why
 // mb_session_reset() zeroes it on every new socket rather than letting it run across sessions.
 static uint32_t    s_cycle_tick = 0;
 // Per-batch fallback to single-register reads. A Modbus EXCEPTION is a valid reply about ONE
@@ -199,7 +199,7 @@ static void status_clear_error() {
 // zero makes a pre-first-poll cache impossible to mistake for current even on the first connection.
 static void status_socket_open(std::string host, int port, int unit) {
     // A NEW SESSION STARTS A NEW READ CADENCE. Tick 0 is a full cycle, so the first poll of this
-    // socket publishes the whole map instead of the gate batches alone; and the per-batch fallback to
+    // socket publishes the whole map instead of only the fast batches; and the per-batch fallback to
     // single reads is forgotten, because the reason for it (a register this hub does not implement)
     // is a property of the peer we may have just stopped talking to.
     s_cycle_tick = 0;
@@ -710,8 +710,8 @@ static_assert(MB_PLAN.count * 3 <= def::HOMEHUB_REG_COUNT,
 // sized reserve up front, everything staged in locals, one non-allocating commit.
 //
 // TWO CADENCES (logic/modbus_plan.hpp). A FULL cycle reads every batch and commits a new cache; the
-// cycles between it read only the batches carrying the diagnosis gates and commit nothing but those
-// two facts and the link state. The link used to issue one request per register per second — 31
+// cycles between it read only the batches carrying diagnosis gates or fast outdoor context and
+// commit only those facts and the link state. The link used to issue one request per register per second — 31
 // MBAP round-trips a second at a hub that also serves the Onecta app, the MMI and evcc — for a map
 // whose fastest-moving member is a water temperature.
 static void mb_poll_once() {
@@ -758,8 +758,8 @@ static void mb_poll_once() {
         cycle_generation = s_link_generation;
     }
 
-    // A FULL cycle rebuilds the cache; a gate cycle refreshes only the two facts the heating-curve
-    // diagnosis evaluates every second, and deliberately touches nothing else.
+    // A FULL cycle rebuilds the cache; a fast cycle refreshes the two gating facts plus input 44's
+    // optional event context, and deliberately commits no partial value cache.
     const bool full = logic::mb_cycle_is_full(s_cycle_tick);
 
     std::vector<CachedValue> fresh;
@@ -769,6 +769,8 @@ static void mb_poll_once() {
     bool plant_gate_active = false;
     bool heating_mode_known = false;
     bool heating_mode_active = false;
+    bool outdoor_row_answered = false;
+    double outdoor_temperature_c = 0.0;
 
     // Preserve the first failure, but never let a harmless per-register exception hide a timeout: if
     // a later transport/protocol failure actually drops the link, that becomes the displayed cause.
@@ -778,7 +780,7 @@ static void mb_poll_once() {
             first_failure = f;
     };
 
-    // One register word: the gates always, a cache row only on a full cycle. The gates are read from
+    // One register word: gates/fast context always, a cache row only on a full cycle. Gates are read from
     // the SAME word the row is built from — they are not a second read and cannot disagree with it.
     const auto take_row = [&](const def::HomeHubReg& r, uint16_t raw) {
         // THE SPACE-OPERATION GATE — input register 53 explicitly covers heating AND cooling. It
@@ -793,6 +795,16 @@ static void mb_poll_once() {
             (raw == 1 || raw == 2)) {
             heating_mode_known = true;
             heating_mode_active = raw == 1;
+        }
+        // Input 44's 40..45 batch is explicitly selected on every fast cycle by modbus_plan.hpp.
+        // Decode the exact reply word here; the current-session half of freshness is applied after
+        // the sweep, once it is known. It remains context only — selecting the batch is not a gate.
+        if (r.space == MbFunc::ReadInput && r.offset == 44) {
+            MbValue decoded;
+            if (def::homehub_decode(r, raw, decoded)) {
+                outdoor_row_answered = true;
+                outdoor_temperature_c = decoded.value;
+            }
         }
         if (!full) return;
         CachedValue cv;
@@ -858,7 +870,7 @@ static void mb_poll_once() {
 
     for (int bi = 0; bi < MB_PLAN.count && !link_broken; bi++) {
         const logic::MbBatch& b = MB_PLAN.batch[bi];
-        if (!full && !logic::mb_batch_is_gate(b)) continue;
+        if (!full && !logic::mb_batch_is_fast(b)) continue;
         esp_task_wdt_reset();                      // each request is a bounded LAN round-trip
 
         if (b.count <= 1 || s_batch_split[bi]) { read_singly(b); continue; }
@@ -903,14 +915,6 @@ static void mb_poll_once() {
         }
     }
 
-    {
-        Lock lk(s_mtx);
-        s_status.plant_gate_known  = plant_gate_known;
-        s_status.plant_gate_active = plant_gate_active;
-        s_status.heating_mode_known  = heating_mode_known;
-        s_status.heating_mode_active = heating_mode_active;
-    }
-
     bool current_session = false;
     {
         Lock lk(s_mtx);
@@ -918,20 +922,30 @@ static void mb_poll_once() {
         // commit below. Resolve it while `fresh` is still available to the history recorder.
         current_session = s_sock >= 0 && s_link_generation == cycle_generation;
     }
+    const logic::OutdoorEvidence plant_outdoor = logic::outdoor_homehub_evidence(
+        outdoor_row_answered, current_session, outdoor_temperature_c);
+    {
+        Lock lk(s_mtx);
+        s_status.plant_gate_known  = plant_gate_known;
+        s_status.plant_gate_active = plant_gate_active;
+        s_status.heating_mode_known  = heating_mode_known;
+        s_status.heating_mode_active = heating_mode_active;
+        s_status.plant_outdoor = plant_outdoor;
+    }
     const auto report_cycle_result = [&]() {
         if (first_failure.type != MbFailureType::None) {
             status_error(std::string(failure_code(first_failure.type)),
                          failure_message(first_failure), first_failure.detail, first_failure.reg,
                          /*link_down=*/!current_session);
         } else if (logic::mb_cycle_proves_recovery(full, current_session)) {
-            // One status error represents the WHOLE map. A gate-only cycle did not re-read the
-            // non-gate rows and therefore cannot prove that their last failure recovered.
+            // One status error represents the WHOLE map. A fast cycle did not re-read the remaining
+            // rows and therefore cannot prove that their last failure recovered.
             status_recovered();
         }
     };
-    // A GATE CYCLE COMMITS NOTHING BUT THE GATES. It read seven of the map's registers, so its
+    // A FAST CYCLE COMMITS NO VALUE CACHE. It read thirteen of the map's registers, so its
     // `fresh` is not a cache and its raster position is not a sample: committing it would publish a
-    // /values array of seven rows and hand the trend rings a bucket in which 24 of the 31 rows look
+    // /values array of thirteen rows and hand the trend rings a bucket in which 18 of the 31 rows look
     // like a failure to read. The cache and the rings stay with the last FULL cycle, which is at most
     // MB_FULL_CYCLE_TICKS - 1 poll intervals old — and `values`/`connected` below still report this
     // cycle's link, so a hub that went away is visible within a second rather than within a cadence.

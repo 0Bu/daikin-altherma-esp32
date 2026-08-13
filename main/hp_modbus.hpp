@@ -23,6 +23,7 @@
 #include <string>
 #include "hp_poll.hpp"      // CachedValue — the shared row shape, so /values needs no second type
 #include "logic/modbus.hpp"
+#include "logic/outdoor_evidence.hpp"
 
 namespace daik {
 
@@ -54,6 +55,10 @@ struct ModbusStatus {
     bool        plant_gate_active = false;
     bool        heating_mode_known  = false;
     bool        heating_mode_active = false;
+    // Plant-side outdoor context from input register 44. Unlike the full value cache, this row is
+    // refreshed in an explicit one-second batch in the same cycle as input 38, and is published
+    // only when it answered in the current TCP session. It is optional evidence, never a gate.
+    logic::OutdoorEvidence plant_outdoor;
 };
 
 // Start the stack. Creates the status mutex always (so /status can report `enabled:false` before any

@@ -871,9 +871,17 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, con
     // publish can never be attached to a sample instead. Absent sensor -> absent field; sampling
     // itself is unaffected, which is why nothing here touches `armed` or any gate.
     const Env3Status env3 = env3_status();
-    in.outdoor_available = env3.fresh && env3_sample_plausible(
-        env3.temperature_c, env3.humidity_pct, env3.pressure_hpa);
-    in.outdoor_temperature_c = static_cast<double>(env3.temperature_c);
+    in.outdoor = logic::outdoor_env3_evidence(
+        env3.fresh,
+        env3_sample_plausible(env3.temperature_c, env3.humidity_pct, env3.pressure_hpa),
+        static_cast<double>(env3.temperature_c));
+    // HomeHub input 44 is decoded from an explicit fast-context batch in the SAME current cycle as
+    // the gates. Requiring both the evidence object's current-session seal and the link's current
+    // connected state prevents an old successful cycle from being attached to a later event after
+    // the socket drops.
+    in.plant_outdoor = logic::outdoor_homehub_evidence(
+        mbs.plant_outdoor.available, mbs.connected,
+        mbs.plant_outdoor.temperature_c);
     in.now_ms = static_cast<int64_t>(now_ms);
     in.now_unix_s = now_unix_s;
     in.room_has_source_time = rt.has_value && rt.has_source_time;
@@ -1025,8 +1033,16 @@ static void publish_heating_curve_telemetry() {
     f.sample_eligible = diagnosis.sample_eligible;
     f.forecast_available = diagnosis.forecast_available;
     f.outdoor_available = diagnosis.has_outdoor_temperature;
+    f.outdoor_source = diagnosis.outdoor_source;
     f.has_last_sample_outdoor = diagnosis.has_last_sample_outdoor;
     f.last_sample_outdoor_temperature_c = diagnosis.last_sample_outdoor_temperature_c;
+    f.last_sample_outdoor_source = diagnosis.last_sample_outdoor_source;
+    f.plant_outdoor_available = diagnosis.has_plant_outdoor_temperature;
+    f.plant_outdoor_source = diagnosis.plant_outdoor_source;
+    f.has_last_sample_plant_outdoor = diagnosis.has_last_sample_plant_outdoor;
+    f.last_sample_plant_outdoor_temperature_c =
+        diagnosis.last_sample_plant_outdoor_temperature_c;
+    f.last_sample_plant_outdoor_source = diagnosis.last_sample_plant_outdoor_source;
     f.plant_gate_known = diagnosis.plant_gate_known;
     f.plant_gate_active = diagnosis.plant_gate_active;
     f.heating_mode_known = diagnosis.heating_mode_known;
