@@ -551,8 +551,11 @@ Body, ordered:
    came from (CT clamps see the whole unit, the inverter current only the compressor — which is why
    an INV-based COP flatters whenever the backup heater is firing) are all in the **inspector**, one
    tap away, where a sentence fits and a caption never did. A sub-label under a pill is therefore
-   only ever the measurement's own NAME ("leaving water · pre-BUH", "return") — that is attribution,
-   without which the number above it is unowned, not commentary on it.
+   only ever the measurement's own NAME ("PHE-Aus" for the pre-BUH leaving water, "return") — that
+   is attribution, without which the number above it is unowned, not commentary on it. A name terse
+   enough to fit the pill may defer its disambiguating qualifier to the inspector: the pill reads
+   "PHE-Aus", while the inspector's full title "PHE-Wasseraustritt · vor BUH · R1T" is what separates
+   it from the post-BUH R2T.
    The one exception is the **"≈"** on the two derived pills: it is part of the reading rather than a
    note about it, and without it a bare "4.6 kW" reads as measured whenever the inspector is closed.
    Both are *derived*, never measured — thermal from flow × ΔT (≈4.186 kJ/kg·K, assuming water;
