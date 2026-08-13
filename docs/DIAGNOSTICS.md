@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 103d9ea4da700d26a32e16f077a0db71bf601424660db1e1520206f69e57e2a1 -->
+<!-- user-docs-contract: f81918ec6cd14ce516ef564d3deae6446c982bf52e5818d45665c17db57e4c71 -->
 <!-- user-docs: health_guide -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
@@ -108,6 +108,11 @@ and one two-hour hot-water run. “Cooling … excluded” means that cooling ru
 not enter the heating assessment. “... unclassified” means a mode change or measurement gap made a
 safe assignment impossible.
 
+If `X10A min … °C · mean … °C` follows the run figures, it is the heat pump's fresh outdoor-air
+context from those completed space-heating runs. It helps compare a cold-day pattern with a mild-day
+one, but it does not change the ten-minute rule or the result. No X10A suffix means no suitably
+paired current sample was established; it never means 0 °C.
+
 **When does a note appear?** The project heuristic requires at least twelve confirmed space-heating
 runs averaging under ten minutes. This is not a Daikin limit and does not by itself prove a defect.
 
@@ -127,6 +132,10 @@ this is normal in suitable conditions.
 **In plain language:** The diagnosis counts defrost events and calculates their share of compressor
 runtime for which both signals were readable. A higher share is only a note because X10A provides
 neither outdoor humidity nor the heat exchanger's surface temperature.
+
+The optional `X10A min … °C · mean … °C` suffix describes fresh outdoor readings from the same
+readable, running-compressor population. It is context only; it neither supplies humidity nor changes
+the defrost share or result.
 
 **When does a note appear?** The project heuristic requires at least three assessable defrost events
 and more than 15% defrost time within the paired compressor runtime. This is not a Daikin limit.

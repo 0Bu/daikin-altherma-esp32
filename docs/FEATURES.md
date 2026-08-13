@@ -103,7 +103,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 58 | **Deleting a crash report** (`POST /crash/dismiss`) — a device action, not page state: erase first, mark second, so status, MQTT and every browser agree | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
 | 59 | **Pinned warning contract on `main/`** — `-Werror=return-type,format,unused-result` on that component alone, so three constructs written as if a warning were fatal actually are | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt) |
 | 60 | **Manual UI-language override** — a persistent de/en/auto picker overriding the browser guess, applied live | ✅ 🧪 | [`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp), [`www/js/i18n.js`](../main/www/js/i18n.js) |
-| 61 | **Second SOURCE: read-only Modbus TCP to a Daikin HomeHub (EKRHH)** — a stack beside X10A, not an alternative; no source file can frame a write; the 31-row map is batched into ten full-cycle requests while two diagnosis batches stay at 1 Hz | ✅ 🧪 | [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`logic/modbus.hpp`](../main/logic/modbus.hpp), [`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
+| 61 | **Second SOURCE: read-only Modbus TCP to a Daikin HomeHub (EKRHH)** — a stack beside X10A, not an alternative; no source file can frame a write; the 31-row map is batched into ten full-cycle requests while two diagnosis gates and one plant-outdoor context batch stay at 1 Hz | ✅ 🧪 | [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`logic/modbus.hpp`](../main/logic/modbus.hpp), [`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
 | 62 | **Configurable MQTT living-room source** — independent exact `topic$json-path` mappings for temperature, an optional source time and an MQTT-backed or fixed target; saving subscribes immediately even when a path is empty or wrong, then the next real MQTT frame supplies runtime decoder evidence; without source time, only live non-retained arrival is accepted | ✅ 🧪 | [`logic/reference_temperature.hpp`](../main/logic/reference_temperature.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 66 | **Complete UI interaction merge gate** — the assembled production UI is *executed* in a deterministic DOM harness, covering every modal in the production registry | ✅ 🧪 | [`test_ui_use_cases.mjs`](../test/test_ui_use_cases.mjs), [`run-ui-use-case-tests.sh`](../scripts/run-ui-use-case-tests.sh) |
 | 68 | **Source-boundary contract gate** — source-text assertions about `main/*.cpp` the host suite structurally cannot make (task, order, and which file is entitled) | ✅ | [`run-contract-tests.sh`](../scripts/run-contract-tests.sh), [`test_heating_curve_diagnosis_contract.mjs`](../test/test_heating_curve_diagnosis_contract.mjs) |
@@ -115,7 +115,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 82 | **Reproducible ESP-IDF build inputs** — exact transitive component lock, explicit ESP-IDF/CMake/C++ floors and wall-clock-free app metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 83 | **Kconfig and target contract gate** — `esp32s3` is a project default and every declared default is compared with generated `sdkconfig` before compilation | ✅ 🧪 | [`check-sdkconfig-defaults.py`](../scripts/check-sdkconfig-defaults.py), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 84 | **Firmware-size evidence** — the hard app ceiling is joined by retained ESP-IDF json2 data and an Actions summary for Flash, DIRAM, IRAM and `.bss` | ✅ 🧪 | [`report-firmware-size.py`](../scripts/report-firmware-size.py), [`build.yml`](../.github/workflows/build.yml) |
-| 79 | **Reboot-surviving plant checkup** — the 24-hour window rides the same `.noinit` DRAM, sealed with a layout fingerprint over every row locator and counting threshold; the model is re-checked at detection and safe mode never adopts | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`checkup.cpp`](../main/checkup.cpp) |
+| 79 | **Reboot-surviving plant checkup** — the 24-hour window rides the same `.noinit` DRAM, sealed with a layout fingerprint over every row locator and counting threshold; Cycling and Defrost carry separately paired X10A outdoor minimum/mean context without changing a verdict | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`logic/outdoor_evidence.hpp`](../main/logic/outdoor_evidence.hpp), [`checkup.cpp`](../main/checkup.cpp) |
 | 73 | **Heap watchdog** — the escalation every other OOM guard here deliberately lacks: sustained exhaustion of the largest *internal* contiguous block becomes a deliberate restart with a persisted, capped breadcrumb, because a wedge that never recovers is worse than a crash | ✅ 🧪 | [`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp), [`heap_guard.cpp`](../main/heap_guard.cpp) |
 | 74 | **Presenter-parity gate** — the browser's copies of the leaving-water / post-BUH / COP-scope / held-over-page rules are diffed against the C++ headers over the whole catalog, so "host-tested" stops meaning "the copy that does not ship is tested" | ✅ 🧪 | [`presenter_golden_dump.cpp`](../test/presenter_golden_dump.cpp), [`presenter_parity.mjs`](../tools/presenter/presenter_parity.mjs), [`selftest.sh`](../tools/presenter/selftest.sh) |
 | 75 | **One unwind-safe mutex guard** for the whole firmware, replacing nine per-file copies that had drifted into two shapes — plus a bounded/try-lock mode for the callback contexts that must not block | ✅ | [`rtos_guard.hpp`](../main/rtos_guard.hpp) |
@@ -433,7 +433,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   monotonic anchors restart), and a **layout fingerprint** over the geometry, every row locator and
   every counting threshold invalidates the record when an update changes what a stored counter means.
   Two refusals stop the window outliving its source: safe mode never adopts, since nothing there would
-  age it, and the poll loop keeps the clock running while the bus is unidentified.
+  age it, and the poll loop keeps the clock running while the bus is unidentified. Cycling and
+  Defrost retain separate compact X10A outdoor minimum/mean statistics over their own eligible
+  populations; that context is visibly sourced and cannot alter a check's threshold or verdict.
 - **✅ 🧪 English-only maintained documentation** ([`english_docs.mjs`](../tools/user_docs/english_docs.mjs)).
   The user-docs gate scans project Markdown for high-confidence German prose while continuing to
   require equally bounded English and German copy in the localized web UI.
@@ -596,10 +598,11 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
 - **✅ 🧪 Batched reads on two cadences** ([`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp)):
   the hub is **shared** — Onecta, the MMI, evcc and any LAN collector use the same `:502` — so what
   this firmware asks for is a question about someone else's device. The 31 EKRHH offsets fall into
-  ten contiguous runs, and only the two diagnosis gates (input 53 and 38) are time-critical, so a
-  **full** cycle is ten requests every fifth poll tick and the ticks between it read the two gate
-  batches alone: **31 → ~3.6 requests/s**. A gate cycle commits nothing but the gates — its seven
-  registers are not a cache — and a batch answered with a Modbus exception is re-read register by
+  ten contiguous runs. The two diagnosis gates (input 53 and 38) and the plant-outdoor context
+  (input 44) are time-sensitive, so a **full** cycle is ten requests every fifth poll tick and the
+  ticks between it read their three batches alone: **31 → ~4.4 requests/s**. A fast cycle commits
+  only those two gates and that context — its thirteen registers are not a general cache — and a
+  batch answered with a Modbus exception is re-read register by
   register for the rest of the session, because an exception names one register and a batch cannot
   say which. The plan is resolved at **compile time** into flash and `static_assert`ed where it is
   built, so a register added into a gap re-prices the link visibly.
@@ -653,7 +656,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | HTTP | `http_body`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `redact` |
 | OTA & boot | `health_gate`, `version_cmp`, `ota_manifest`, `ota_channel`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |
 | Network policy | `wifi_rollback`, `link_watch`, `syslog_policy`, `timestamp` |
-| On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `state_dwell`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |
+| On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `outdoor_evidence`, `state_dwell`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |
 | Local I/O | `led_pattern`, `button` |
 
 Four properties of that core are worth naming because they are not obvious from the list:

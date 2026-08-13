@@ -399,6 +399,15 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     s.bar_ok  = reading(v, n, logic::CHECKUP_LOC_PRESSURE, s.bar_tenths);
     s.flow_ok = reading(v, n, logic::CHECKUP_LOC_FLOW,     s.flow_tenths);
     s.r5t_ok  = reading(v, n, logic::CHECKUP_LOC_R5T,      s.r5t_tenths);
+    // Page 0x20 can answer with the last run's outdoor value while the unit sleeps. The shared
+    // evidence helper therefore requires THIS-cycle row presence plus a positively running RPS
+    // witness. In particular, `held == false` with unknown RPS is not freshness.
+    const int outdoor_row = find_row(v, n, logic::CHECKUP_LOC_OUTDOOR);
+    int outdoor_tenths = 0;
+    if (outdoor_row >= 0 && tenths(v[static_cast<size_t>(outdoor_row)], outdoor_tenths)) {
+        s.outdoor = logic::outdoor_x10a_evidence(
+            true, rps_known, rps_running, static_cast<double>(outdoor_tenths) / 10.0);
+    }
     const CirculationPumpSample circulation = circulation_pump_sample();
     s.circulation_configured = circulation.configured;
     s.circulation_known = circulation.known;

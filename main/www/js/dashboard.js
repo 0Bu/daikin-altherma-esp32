@@ -648,7 +648,7 @@ function outdoorAxisRow(d, env) {
     cls = "warn"; value = SENSOR; statusKey = "dyn.outdoor_status_unavailable";
   }
 
-  let body = descNoteHtml(t("dyn.outdoor_detail_status"), t(statusKey));
+  let body = descNoteHtml(t("dyn.outdoor_detail_status"), t(statusKey, SENSOR));
   // The LIVE reading, which the face used to carry. It says what the axis would record NOW — worth
   // stating, and distinct from the event value below it, which is what a recorded sample actually
   // holds. Only when there IS one: "—" here would be a third way of saying what the status line
@@ -667,6 +667,46 @@ function outdoorAxisRow(d, env) {
   // NO action argument: the row is passive, and the Board Hardware modal stays the sensor's one
   // editor. Passing "board" here is what made this row a second door into it.
   return dynamicInfoRow("outdoor", t("dyn.outdoor"), value, cls, body);
+}
+
+function outdoorSourceLabel(source) {
+  return ({ homehub: "HomeHub", x10a: "X10A", env3: "ENV III" })[source] || "—";
+}
+
+// The plant's own axis. It is separate from ENV III on purpose: HomeHub input 44 belongs to the
+// heat pump and answers in the same current-cycle sweep as the sampler's plant gates; ENV III is an
+// optional accessory whose mounting position the firmware cannot know. Neither value is a gate.
+function plantOutdoorAxisRow(d, modbus) {
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const live = num(d.plant_outdoor_temperature_c);
+  const sample = num(d.last_sample_plant_outdoor_temperature_c);
+  const hasEvent = num(d.last_sample_room_error_k) !== null;
+  const liveSource = typeof d.plant_outdoor_source === "string"
+    ? d.plant_outdoor_source : null;
+  const sampleSource = typeof d.last_sample_plant_outdoor_source === "string"
+    ? d.last_sample_plant_outdoor_source : null;
+  const source = liveSource || sampleSource || (modbus.enabled ? "homehub" : null);
+  const fmt = (n) => `${n.toLocaleString(LANG === "de" ? "de-DE" : "en-US",
+    { minimumFractionDigits: 1, maximumFractionDigits: 1 })} °C`;
+
+  const evaluating = d.armed === true && d.reason !== "sampler_inactive";
+  let statusKey = "dyn.outdoor_status_absent";
+  if (live !== null) statusKey = "dyn.outdoor_status_live";
+  else if (source && evaluating) statusKey = "dyn.outdoor_status_unavailable";
+  else if (source) statusKey = "dyn.outdoor_status_idle";
+
+  let body = descNoteHtml(t("dyn.outdoor_detail_status"), t(statusKey, "HomeHub"));
+  if (live !== null)
+    body += descNoteHtml(t("dyn.outdoor_detail_now"),
+      `${fmt(live)} · ${outdoorSourceLabel(liveSource)}`);
+  if (sample !== null)
+    body += descNoteHtml(t("dyn.outdoor_detail_sample"),
+      `${fmt(sample)} · ${outdoorSourceLabel(sampleSource)}`);
+  else if (hasEvent)
+    body += descNoteHtml(t("dyn.outdoor_detail_sample"), t("dyn.outdoor_sample_none"));
+  body += `<div class="vdesc-p">${esc(t("dyn.plant_outdoor_help"))}</div>`;
+  return dynamicInfoRow("plant-outdoor", t("dyn.plant_outdoor"),
+    source ? outdoorSourceLabel(source) : t("dyn.not_configured"), live !== null ? "ok" : "dim", body);
 }
 
 function dynamicControlCardHtml() {
@@ -728,9 +768,9 @@ function dynamicControlCardHtml() {
   rows += dynamicInfoRow("weather", t("dyn.weather"), weatherValue, weatherCls,
     weatherBody, "weather", t("wx.title"));
 
-  // Beside the forecast row on purpose: both are optional outdoor evidence, and the two labels have
-  // to keep MEASURED apart from FORECAST or a reader sees two outdoor temperatures and no way to
-  // tell which is which.
+  // Plant and accessory axes stay separate and name their sources. Input 44 is the plant reading;
+  // ENV III remains a second, placement-dependent comparison and is never silently replaced.
+  rows += plantOutdoorAxisRow(d, modbus);
   rows += outdoorAxisRow(d, S.status?.env3 || {});
 
   rows += dynamicInfoRow("strategy", t("dyn.strategy"), t("dyn.shadow_strategy"), "",
@@ -1054,6 +1094,9 @@ function checkupDetailHtml(c) {
   // judged classes; mixed, unread or boundary-crossing runs remain explicitly unclassified.
   if (c.id === "cycling" && c.space_runs != null)
     detail += t(c.split ? "check.detail.cycling_split" : "check.detail.cycling_pooled");
+  if ((c.id === "cycling" || c.id === "defrost") && checkupOutdoorContext(c))
+    detail += t(c.id === "cycling" ? "check.detail.outdoor_cycling"
+                                   : "check.detail.outdoor_defrost");
   const reading = value ? descNoteHtml(t("check.detail.value_label"), value) : "";
   return reading + descNoteHtml(t("check.detail.assessment_label"),
                                 `${checkupStatusText(c)} — ${detail}`);
@@ -1077,6 +1120,23 @@ function checkupDefrostShare(c) {
 function checkupHeaterRuntime(seconds, minutes) {
   if (seconds != null) return checkupDuration(seconds);
   return minutes == null ? "" : t("check.min", minutes); // older firmware
+}
+
+function checkupOutdoorContext(c) {
+  if (typeof c.outdoor_source !== "string" ||
+      typeof c.outdoor_min_c !== "number" || !Number.isFinite(c.outdoor_min_c) ||
+      typeof c.outdoor_mean_c !== "number" || !Number.isFinite(c.outdoor_mean_c) ||
+      !(Number(c.outdoor_samples) > 0)) return "";
+  const fmt = (n) => n.toLocaleString(LANG === "de" ? "de-DE" : "en-US",
+    { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const source = outdoorSourceLabel(c.outdoor_source);
+  return c.outdoor_min_c === c.outdoor_mean_c
+    ? t("check.outdoor_one", source, fmt(c.outdoor_mean_c))
+    : t("check.outdoor_range", source, fmt(c.outdoor_min_c), fmt(c.outdoor_mean_c));
+}
+
+function checkupWithOutdoor(c, value) {
+  return [value, checkupOutdoorContext(c)].filter(Boolean).join(" · ");
 }
 
 // One row's value text. Every branch that has no number says so with a dash — a check that could not
@@ -1116,8 +1176,9 @@ function checkupMetricValue(c) {
       // misleading half (a long tank charge inflates it) and the classes replace it; when it has
       // not, the pooled mean is what the verdict used and stays.
       if (c.space_runs == null) {
-        if (collecting || c.mean_run_s == null) return starts;
-        return `${starts} · ${t("check.mean", checkupDuration(c.mean_run_s))}`;
+        if (collecting || c.mean_run_s == null) return checkupWithOutdoor(c, starts);
+        return checkupWithOutdoor(c,
+          `${starts} · ${t("check.mean", checkupDuration(c.mean_run_s))}`);
       }
       const cls = (key, n, mean) => t(key, n ?? 0, mean == null ? "" : checkupDuration(mean));
       const parts = [starts];
@@ -1129,15 +1190,15 @@ function checkupMetricValue(c) {
       // Runs that happened and could not be classified. Shown only when there are any: a reader who
       // sees "space 0" needs to know whether nothing ran or nothing could be judged.
       if (c.censored_runs > 0) parts.push(t("check.cycling_censored", c.censored_runs));
-      return parts.filter(Boolean).join(" · ");
+      return checkupWithOutdoor(c, parts.filter(Boolean).join(" · "));
     }
     case "defrost": {
       if (c.count == null) return "";
       const n = t("check.cycles", c.count);
-      if (collecting) return n;
+      if (collecting) return checkupWithOutdoor(c, n);
       const share = checkupDefrostShare(c);
       const paired = c.paired_count == null ? "" : t("check.paired_cycles", c.paired_count);
-      return [n, paired, share].filter(Boolean).join(" · ");
+      return checkupWithOutdoor(c, [n, paired, share].filter(Boolean).join(" · "));
     }
     case "pressure": {
       return c.min_bar == null ? "" : `${c.min_bar} bar`;

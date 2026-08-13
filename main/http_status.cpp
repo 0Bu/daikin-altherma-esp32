@@ -544,9 +544,27 @@ void http_append_status_json(std::string& j, bool redact) {
     j += ",\"outdoor_temperature_c\":";
     j += heating_curve.has_outdoor_temperature
        ? std::to_string(heating_curve.outdoor_temperature_c) : "null";
+    j += ",\"outdoor_source\":";
+    j += heating_curve.has_outdoor_temperature
+       ? jstr(logic::outdoor_source_name(heating_curve.outdoor_source)) : "null";
     j += ",\"last_sample_outdoor_temperature_c\":";
     j += heating_curve.has_last_sample_outdoor
        ? std::to_string(heating_curve.last_sample_outdoor_temperature_c) : "null";
+    j += ",\"last_sample_outdoor_source\":";
+    j += heating_curve.has_last_sample_outdoor
+       ? jstr(logic::outdoor_source_name(heating_curve.last_sample_outdoor_source)) : "null";
+    j += ",\"plant_outdoor_temperature_c\":";
+    j += heating_curve.has_plant_outdoor_temperature
+       ? std::to_string(heating_curve.plant_outdoor_temperature_c) : "null";
+    j += ",\"plant_outdoor_source\":";
+    j += heating_curve.has_plant_outdoor_temperature
+       ? jstr(logic::outdoor_source_name(heating_curve.plant_outdoor_source)) : "null";
+    j += ",\"last_sample_plant_outdoor_temperature_c\":";
+    j += heating_curve.has_last_sample_plant_outdoor
+       ? std::to_string(heating_curve.last_sample_plant_outdoor_temperature_c) : "null";
+    j += ",\"last_sample_plant_outdoor_source\":";
+    j += heating_curve.has_last_sample_plant_outdoor
+       ? jstr(logic::outdoor_source_name(heating_curve.last_sample_plant_outdoor_source)) : "null";
     j += ",\"forecast_available\":"; j += heating_curve.forecast_available ? "true" : "false";
     j += ",\"plant_gate_known\":"; j += heating_curve.plant_gate_known ? "true" : "false";
     j += ",\"plant_gate_active\":"; j += heating_curve.plant_gate_active ? "true" : "false";
@@ -872,6 +890,26 @@ void http_append_status_json(std::string& j, bool redact) {
             j += ".";
             j += std::to_string(v % 10);
         };
+        auto signed_tenths = [&j](const char* name, bool known, int v) {
+            j += ",\"";
+            j += name;
+            j += "\":";
+            if (!known) { j += "null"; return; }
+            if (v < 0) j += "-";
+            const unsigned magnitude = static_cast<unsigned>(v < 0 ? -v : v);
+            j += std::to_string(magnitude / 10);
+            j += ".";
+            j += std::to_string(magnitude % 10);
+        };
+        auto outdoor_context = [&j, &signed_tenths](const logic::CheckupOutdoorReport& context) {
+            const bool known = context.samples > 0;
+            j += ",\"outdoor_source\":";
+            j += known ? jstr(logic::outdoor_source_name(context.source)) : "null";
+            signed_tenths("outdoor_min_c", known, context.min_tenths);
+            signed_tenths("outdoor_mean_c", known, context.mean_tenths);
+            j += ",\"outdoor_samples\":";
+            j += known ? std::to_string(context.samples) : "null";
+        };
         // Compatibility minutes cannot represent a positive sub-minute runtime without lying as
         // zero or rounding up. Emit null for that one interval; the additive *_s fields preserve the
         // observed seconds accumulated between completed sweeps.
@@ -949,6 +987,7 @@ void http_append_status_json(std::string& j, bool redact) {
                     num("censored_runs", ck.g);
                     j += ",\"split\":";
                     j += hr.cycling_split ? "true" : "false";
+                    outdoor_context(hr.cycling_outdoor);
                     break;
                 case logic::CheckupCheck::Defrost: {
                     num("count", ck.a);
@@ -957,6 +996,7 @@ void http_append_status_json(std::string& j, bool redact) {
                     num("share_pct", ck.c > 0 && ck.b == 0 ? -1 : ck.b);
                     num("defrost_s", ck.c);
                     num("run_s", ck.d);
+                    outdoor_context(hr.defrost_outdoor);
                     break;
                 }
                 case logic::CheckupCheck::Pressure: tenths("min_bar", ck.a);                        break;

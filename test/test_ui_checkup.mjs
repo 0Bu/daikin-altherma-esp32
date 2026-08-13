@@ -43,6 +43,7 @@ for (const key of [
   "starts", "mean_run_s", "count", "paired_count", "share_pct", "defrost_s", "run_s",
   "space_runs", "space_mean_run_s", "dhw_runs", "dhw_mean_run_s", "cooling_runs",
   "censored_runs", "split",
+  "outdoor_source", "outdoor_min_c", "outdoor_mean_c", "outdoor_samples",
   "min_bar", "min_l_min", "buh_min", "bsh_min", "buh_s", "bsh_s", "active", "seen",
   "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
   "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
@@ -309,6 +310,22 @@ assert.match(ui.detail(cyclingSplit), /Bewertet wird nur bestätigte Raumheizung
 assert.match(ui.detail(cyclingSplit), /sicher erkannte Kühlung ist ausgeschlossen/);
 ui.setLang("en");
 
+const cyclingWeather = { ...cyclingSplit, outdoor_source: "x10a", outdoor_min_c: -5.0,
+                         outdoor_mean_c: -1.5, outdoor_samples: 120 };
+assert.equal(ui.metric(cyclingWeather),
+  "13 starts · space 12 × 5 min · hot water 1 × 2 h · X10A min -5.0 °C · mean -1.5 °C");
+assert.match(ui.detail(cyclingWeather), /only fresh samples from completed, consistently classified/);
+assert.match(ui.detail(cyclingWeather), /do not change the cycling threshold or verdict/);
+ui.setLang("de");
+assert.match(ui.metric(cyclingWeather), /X10A min\. -5,0 °C · Mittel -1,5 °C/);
+assert.match(ui.detail(cyclingWeather), /ändern weder Taktgrenze noch Bewertung/);
+ui.setLang("en");
+// Missing context is absent, never a plausible 0 °C. One real constant-temperature context remains
+// visible without inventing a range.
+assert.doesNotMatch(ui.metric(cyclingSplit), /X10A|0\.0 °C/);
+assert.match(ui.metric({ ...cyclingSplit, outdoor_source: "x10a", outdoor_min_c: 0,
+                         outdoor_mean_c: 0, outdoor_samples: 2 }), /X10A 0\.0 °C/);
+
 assert.equal(
   ui.metric({ ...cyclingSplit, cooling_runs: 4 }),
   "13 starts · space 12 × 5 min · hot water 1 × 2 h · cooling 4 excluded",
@@ -399,6 +416,13 @@ assert.equal(
               defrost_s: 200, run_s: 1000, evidence: "heuristic" }),
   "3 cycles · 2 paired · 20 %",
 );
+const defrostWeather = { id: "defrost", verdict: "ok", count: 3, paired_count: 2,
+  defrost_s: 200, run_s: 1000, evidence: "heuristic", outdoor_source: "x10a",
+  outdoor_min_c: -7.0, outdoor_mean_c: -2.0, outdoor_samples: 300 };
+assert.equal(ui.metric(defrostWeather),
+  "3 cycles · 2 paired · 20 % · X10A min -7.0 °C · mean -2.0 °C");
+assert.match(ui.detail(defrostWeather), /both defrost and compressor state were readable/);
+assert.match(ui.detail(defrostWeather), /do not change the defrost threshold or verdict/);
 
 context.S.status = { health: {
   covered_s: 86400, status: "unavailable", available: 1, assessable: 0, evaluated: 0,

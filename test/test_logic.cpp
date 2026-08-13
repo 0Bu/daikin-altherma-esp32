@@ -2292,8 +2292,15 @@ static void test_heartbeat() {
     cf.sample_eligible = true;
     cf.forecast_available = true;
     cf.outdoor_available = true;
+    cf.outdoor_source = logic::OutdoorSource::Env3;
     cf.has_last_sample_outdoor = true;
     cf.last_sample_outdoor_temperature_c = -4.25;
+    cf.last_sample_outdoor_source = logic::OutdoorSource::Env3;
+    cf.plant_outdoor_available = true;
+    cf.plant_outdoor_source = logic::OutdoorSource::HomeHub;
+    cf.has_last_sample_plant_outdoor = true;
+    cf.last_sample_plant_outdoor_temperature_c = -5.5;
+    cf.last_sample_plant_outdoor_source = logic::OutdoorSource::HomeHub;
     cf.plant_gate_known = true;
     cf.plant_gate_active = true;
     cf.heating_mode_known = true;
@@ -2313,7 +2320,7 @@ static void test_heartbeat() {
     cf.holds = 2;
     cf.blocks = 3;
     const std::string cj = build_heating_curve_mqtt_json(cf);
-    CHECK(cj == "{\"schema_version\":2,\"room\":{"
+    CHECK(cj == "{\"schema_version\":3,\"room\":{"
                 "\"source_id\":\"living_room\",\"calibration_k\":0,"
                 "\"temperature_valid\":1,\"setpoint_valid\":1,\"control_eligible\":1,"
                 "\"temperature_c\":20.500000,\"setpoint_c\":22.000000,\"error_k\":1.500000,"
@@ -2321,12 +2328,18 @@ static void test_heartbeat() {
                 "\"counters\":{\"messages\":42,\"errors\":2,\"rejections\":7}},"
                 "\"diagnosis\":{\"method_version\":2,\"armed\":1,\"state\":3,\"reason\":10,"
                 "\"sample_eligible\":1,\"forecast_available\":1,\"outdoor_available\":1,"
+                "\"outdoor_source\":\"env3\",\"outdoor_source_code\":3,"
+                "\"plant_outdoor_available\":1,\"plant_outdoor_source\":\"homehub\","
+                "\"plant_outdoor_source_code\":2,"
                 "\"gates\":{\"plant_known\":1,\"plant_active\":1,"
                 "\"heating_mode_known\":1,\"heating_mode_active\":1},"
                 "\"room_evidence\":{\"current_error_k\":-2.900000,"
                 "\"source_unix_s\":1770000000,\"age_s\":12},"
                 "\"last_sample\":{\"room_error_k\":-2.800000,"
-                "\"outdoor_temperature_c\":-4.250000,\"unix_s\":1770000001,"
+                "\"outdoor_temperature_c\":-4.250000,\"outdoor_source\":\"env3\","
+                "\"outdoor_source_code\":3,\"plant_outdoor_temperature_c\":-5.500000,"
+                "\"plant_outdoor_source\":\"homehub\",\"plant_outdoor_source_code\":2,"
+                "\"unix_s\":1770000001,"
                 "\"sequence\":7},\"counters\":{\"evaluations\":12,\"samples\":7,"
                 "\"holds\":2,\"blocks\":3}}}");
     CHECK(cj.find("lwt_controller_") == std::string::npos);
@@ -2338,6 +2351,9 @@ static void test_heartbeat() {
     // No sensor -> null, never 0: a metrics consumer must not read absence as a freezing day.
     CHECK(empty_curve.find("\"outdoor_available\":0") != std::string::npos);
     CHECK(empty_curve.find("\"outdoor_temperature_c\":null") != std::string::npos);
+    CHECK(empty_curve.find("\"plant_outdoor_available\":0") != std::string::npos);
+    CHECK(empty_curve.find("\"plant_outdoor_temperature_c\":null") != std::string::npos);
+    CHECK(empty_curve.find("\"plant_outdoor_source\":\"none\"") != std::string::npos);
     CHECK(empty_curve.find("\"unix_s\":null") != std::string::npos);
     CHECK(empty_curve.find("true") == std::string::npos);
     CHECK(empty_curve.find("false") == std::string::npos);
@@ -3609,14 +3625,14 @@ static void test_modbus_plan() {
     using namespace daik::logic;
 
     // ── The cadence ─────────────────────────────────────────────────────────────────────────────
-    // Tick 0 MUST be full: a session that opened with a gate-only cycle would serve /values with 29
-    // of 31 rows absent, which reads as a broken hub rather than as a cadence.
+    // Tick 0 MUST be full: a session that opened with a fast cycle would leave /values empty until
+    // the cadence wrapped, which reads as a broken hub rather than as a cadence.
     CHECK(mb_cycle_is_full(0));
     CHECK(!mb_cycle_is_full(1));
     CHECK(!mb_cycle_is_full(MB_FULL_CYCLE_TICKS - 1));
     CHECK(mb_cycle_is_full(MB_FULL_CYCLE_TICKS));
     CHECK(mb_cycle_is_full(MB_FULL_CYCLE_TICKS * 97));
-    // A successful gate-only cycle has not re-read a non-gate row that failed on the preceding full
+    // A successful fast cycle has not re-read a full-cycle row that failed on the preceding full
     // cycle, so it cannot clear the one global Modbus error. Only a clean full cycle on the current
     // session proves whole-map recovery.
     CHECK(!mb_cycle_proves_recovery(false, true));
@@ -3662,8 +3678,8 @@ static void test_modbus_plan() {
         CHECK(off[order[b[1].row_first + 0]] == 40);
         CHECK(off[order[b[1].row_first + 1]] == 41);
         CHECK(off[order[b[1].row_first + 2]] == 42);
-        // Only the batch carrying a gate offset is read on a gate cycle.
-        CHECK(!mb_batch_is_gate(b[0]) && !mb_batch_is_gate(b[1]) && !mb_batch_is_gate(b[2]));
+        // None carries either a gate or the named fast context.
+        CHECK(!mb_batch_is_fast(b[0]) && !mb_batch_is_fast(b[1]) && !mb_batch_is_fast(b[2]));
     }
 
     // A duplicated (space, offset) is REFUSED, not silently deduplicated: the batch walk hands
@@ -3733,33 +3749,45 @@ static void test_modbus_plan() {
         MbBatch b[N];
         const int nb = mb_plan_build(sp, off, N, order, b, N);
         CHECK(nb == 10);                       // was N requests, one per register
-        int covered = 0, gate_batches = 0, gate_regs = 0;
+        int covered = 0, fast_batches = 0, fast_regs = 0;
         for (int i = 0; i < nb; i++) {
             covered += b[i].row_count;
             CHECK(b[i].count >= 1 && b[i].count <= MB_PLAN_MAX_REGS);
             CHECK(b[i].count <= MB_MAX_READ_REGS);
-            if (mb_batch_is_gate(b[i])) { gate_batches++; gate_regs += b[i].count; }
+            if (mb_batch_is_fast(b[i])) { fast_batches++; fast_regs += b[i].count; }
         }
         CHECK(covered == N);
-        // BOTH gates must be reachable on a gate-only cycle. If a future map moved 38 or 53 so that
-        // one of them fell into a non-gate batch, the diagnosis would silently evaluate a gate that
+        // BOTH gates must be reachable on a fast cycle. If a future map moved 38 or 53 so that one
+        // of them fell into a full-only batch, the diagnosis would silently evaluate a gate that
         // is refreshed once per full cycle instead of once per second.
-        CHECK(gate_batches == 2);
-        CHECK(gate_regs == 7);
-        // Every gate offset really is inside some gate batch — the assertion above counts batches,
+        CHECK(fast_batches == 3);
+        CHECK(fast_regs == 13);
+        // Every gate offset really is inside some fast batch — the assertion above counts batches,
         // this one proves the coverage it is standing in for.
         for (size_t g = 0; g < MB_GATE_OFFSET_COUNT; g++) {
             bool found = false;
             for (int i = 0; i < nb && !found; i++) {
-                if (!mb_batch_is_gate(b[i])) continue;
+                if (!mb_batch_is_fast(b[i])) continue;
                 for (uint16_t k = 0; k < b[i].count; k++)
                     if (b[i].first_offset + k == MB_GATE_OFFSETS[g]) { found = true; break; }
             }
             CHECK(found);
         }
+        // Input 44 is not a gate and its 40..45 batch does not overlap either gate batch. It is
+        // explicitly selected as fast context, spending one bundled request to make 1 Hz freshness
+        // real rather than borrowing the last five-second cache cycle.
+        bool outdoor_in_fast_batch = false;
+        for (int i = 0; i < nb; i++) {
+            if (!mb_batch_is_fast(b[i]) || b[i].space != MbFunc::ReadInput) continue;
+            outdoor_in_fast_batch = b[i].first_offset <= 44 &&
+                static_cast<uint16_t>(b[i].first_offset + b[i].count) > 44;
+            if (outdoor_in_fast_batch) break;
+        }
+        CHECK(outdoor_in_fast_batch);
         // What the cycle actually costs, stated as the arithmetic rather than as a remembered number.
-        const double per_s = (gate_batches * (MB_FULL_CYCLE_TICKS - 1) + nb)
+        const double per_s = (fast_batches * (MB_FULL_CYCLE_TICKS - 1) + nb)
                              / static_cast<double>(MB_FULL_CYCLE_TICKS);
+        CHECK(approx(per_s, 4.4));
         CHECK(per_s < N / 5.0);   // at least a five-fold reduction against one request per register
     }
 }
@@ -5979,15 +6007,15 @@ static void test_heating_curve_diagnosis() {
     {
         HeatingCurveDiagnosis outdoor;
         HeatingCurveInputs oi = ready();
-        oi.outdoor_available = true;
-        oi.outdoor_temperature_c = -4.25;
+        oi.outdoor = outdoor_env3_evidence(true, true, -4.25);
         HeatingCurveSnapshot s = outdoor.evaluate(oi);
         CHECK(s.reason == HeatingCurveReason::SampleRecorded);
         CHECK(s.has_outdoor_temperature && approx(s.outdoor_temperature_c, -4.25));
         CHECK(s.has_last_sample_outdoor && approx(s.last_sample_outdoor_temperature_c, -4.25));
 
         // Live value moves between events; the recorded event keeps the temperature it was taken at.
-        oi.now_ms = 1000; oi.now_unix_s++; oi.outdoor_temperature_c = 3.5;
+        oi.now_ms = 1000; oi.now_unix_s++;
+        oi.outdoor = outdoor_env3_evidence(true, true, 3.5);
         s = outdoor.evaluate(oi);
         CHECK(s.reason == HeatingCurveReason::SamplingInterval);
         CHECK(approx(s.outdoor_temperature_c, 3.5) &&
@@ -5996,7 +6024,7 @@ static void test_heating_curve_diagnosis() {
         // Sensor lost before the NEXT event: the event still records, and the stale outdoor value
         // is CLEARED rather than carried forward under a fresh timestamp.
         oi.now_ms = HEATING_CURVE_SAMPLE_CADENCE_MS; oi.now_unix_s = 1770001800;
-        oi.outdoor_available = false; oi.room_error_k = 0.9;
+        oi.outdoor = {}; oi.room_error_k = 0.9;
         s = outdoor.evaluate(oi);
         CHECK(s.reason == HeatingCurveReason::SampleRecorded && s.sequence == 2);
         CHECK(approx(s.last_sample_room_error_k, 0.9));
@@ -6006,8 +6034,8 @@ static void test_heating_curve_diagnosis() {
         // A non-finite reading is absent, not a number: NaN must never reach a recorded event.
         HeatingCurveDiagnosis nan_case;
         HeatingCurveInputs ni = ready();
-        ni.outdoor_available = true;
-        ni.outdoor_temperature_c = std::numeric_limits<double>::quiet_NaN();
+        ni.outdoor = OutdoorEvidence{true, OutdoorSource::Env3,
+                                     std::numeric_limits<double>::quiet_NaN()};
         s = nan_case.evaluate(ni);
         CHECK(s.reason == HeatingCurveReason::SampleRecorded);
         CHECK(!s.has_outdoor_temperature && !s.has_last_sample_outdoor);
@@ -6016,7 +6044,8 @@ static void test_heating_curve_diagnosis() {
         // and counters must match the run without it — otherwise a board without ENV III would
         // sample differently from one with it.
         HeatingCurveDiagnosis with, without;
-        HeatingCurveInputs wi = ready(); wi.outdoor_available = true; wi.outdoor_temperature_c = 7.0;
+        HeatingCurveInputs wi = ready();
+        wi.outdoor = outdoor_env3_evidence(true, true, 7.0);
         const HeatingCurveSnapshot a = with.evaluate(wi);
         const HeatingCurveSnapshot b = without.evaluate(ready());
         CHECK(a.state == b.state && a.reason == b.reason && a.armed == b.armed);
@@ -6024,11 +6053,46 @@ static void test_heating_curve_diagnosis() {
               a.samples == b.samples && a.holds == b.holds && a.blocks == b.blocks);
         CHECK(approx(a.last_sample_room_error_k, b.last_sample_room_error_k));
 
+        // Plant and accessory axes remain independent and name their own provenance. Losing either
+        // on the next event clears only that source's event value; neither changes eligibility.
+        HeatingCurveDiagnosis both_sources;
+        HeatingCurveInputs bi = ready();
+        bi.outdoor = outdoor_env3_evidence(true, true, 6.5);
+        bi.plant_outdoor = outdoor_homehub_evidence(true, true, 5.75);
+        s = both_sources.evaluate(bi);
+        CHECK(s.has_last_sample_outdoor && s.last_sample_outdoor_source == OutdoorSource::Env3);
+        CHECK(s.has_last_sample_plant_outdoor &&
+              s.last_sample_plant_outdoor_source == OutdoorSource::HomeHub);
+        CHECK(approx(s.last_sample_plant_outdoor_temperature_c, 5.75));
+        bi.now_ms = HEATING_CURVE_SAMPLE_CADENCE_MS; bi.now_unix_s += 1800;
+        bi.plant_outdoor = {};
+        s = both_sources.evaluate(bi);
+        CHECK(s.reason == HeatingCurveReason::SampleRecorded && s.has_last_sample_outdoor);
+        CHECK(!s.has_last_sample_plant_outdoor &&
+              s.last_sample_plant_outdoor_source == OutdoorSource::None);
+
         // Disarming clears the event, and the outdoor value must not outlive it either.
         HeatingCurveInputs off_in;  // unarmed
         const HeatingCurveSnapshot cleared = with.evaluate(off_in);
         CHECK(!cleared.has_last_sample && !cleared.has_last_sample_outdoor &&
               cleared.last_sample_outdoor_temperature_c == 0.0);
+    }
+
+    // The shared outdoor freshness contract. X10A page 0x20 is NOT fresh merely because its row
+    // answered or `held` happened to be false: unknown/stopped RPS both refuse it. HomeHub input 44
+    // instead follows the current TCP session, and ENV III follows its own fresh+plausible pair.
+    {
+        CHECK(!outdoor_x10a_evidence(true, false, false, 4.0).available);
+        CHECK(!outdoor_x10a_evidence(true, true, false, 4.0).available);
+        const OutdoorEvidence x10a = outdoor_x10a_evidence(true, true, true, -3.5);
+        CHECK(x10a.available && x10a.source == OutdoorSource::X10a &&
+              approx(x10a.temperature_c, -3.5));
+        CHECK(!outdoor_homehub_evidence(true, false, 8.0).available);
+        CHECK(outdoor_homehub_evidence(true, true, 8.0).source == OutdoorSource::HomeHub);
+        CHECK(!outdoor_env3_evidence(true, false, 8.0).available);
+        CHECK(outdoor_env3_evidence(true, true, 8.0).source == OutdoorSource::Env3);
+        CHECK(!outdoor_homehub_evidence(true, true,
+               std::numeric_limits<double>::quiet_NaN()).available);
     }
 
     HeatingCurveDiagnosis degraded_diagnosis;
@@ -7719,10 +7783,12 @@ static void test_checkup() {
     // .noinit is DRAM this board does not have spare, so the ring's size is a decision and not a
     // consequence. The static_assert stops a build that overruns the bound; this pins the FIGURE, so
     // a field added without the conversation shows up as a failing test rather than as headroom
-    // quietly spent. Heating/DHW used 44/1056 of the split's declared 46/1104 budget; explicit
-    // cooling exclusion plus alignment consumes the remaining 48 bytes.
-    CHECK(sizeof(CheckupBucket) == 46);
-    CHECK(CHECKUP_BYTES == 1104);
+    // quietly spent. The two eight-byte contexts are deliberately separate: sharing one mean would
+    // describe Cycling with defrost-runtime weather and vice versa. The payload costs 384 bytes;
+    // 4-byte alignment adds another 48.
+    CHECK(sizeof(CheckupOutdoorStats) == 8);
+    CHECK(sizeof(CheckupBucket) == 64);
+    CHECK(CHECKUP_BYTES == 1536);
 
     // --- saturation -----------------------------------------------------------------------------
     // A wrap would turn the worst imaginable cycling into a perfect score.
@@ -7731,6 +7797,104 @@ static void test_checkup() {
     CHECK(checkup_add_u8(255, 1) == 255);
     CHECK(checkup_add_u16(65530, 3) == 65533);
     CHECK(checkup_add_u16(65535, 10) == 65535);
+
+    // --- outdoor context: compact arithmetic + paired populations -----------------------------
+    {
+        CheckupOutdoorStats stats;
+        checkup_outdoor_add(stats, outdoor_x10a_evidence(true, true, true, -5.0));
+        checkup_outdoor_add(stats, outdoor_x10a_evidence(true, true, true, 5.0));
+        CHECK(stats.samples == 2 && stats.min_tenths == -50);
+        checkup_outdoor_add(stats, outdoor_x10a_evidence(true, true, true, 400.0));
+        CHECK(stats.samples == 2 && stats.min_tenths == -50);
+        CHECK(checkup_outdoor_mean_tenths(stats) == 0);
+        // Another source cannot enter an X10A-labelled aggregate.
+        checkup_outdoor_add(stats, outdoor_homehub_evidence(true, true, -20.0));
+        CHECK(stats.samples == 2 && stats.min_tenths == -50);
+        CheckupOutdoorStats more;
+        checkup_outdoor_add(more, outdoor_x10a_evidence(true, true, true, 10.0));
+        checkup_outdoor_merge(stats, more);
+        CHECK(stats.samples == 3 && stats.min_tenths == -50 &&
+              checkup_outdoor_mean_tenths(stats) == 33);
+
+        // The persisted aggregate keeps an exact sum rather than a finite-precision running mean.
+        // Half an hour cold followed by half an hour warm must equal the reverse order; the former
+        // centi-degree mean froze at -2.66 C in this adversarial sequence.
+        CheckupOutdoorStats cold_first, warm_first;
+        for (int i = 0; i < 1800; i++) {
+            checkup_outdoor_add(cold_first, outdoor_x10a_evidence(true, true, true, -10.0));
+            checkup_outdoor_add(warm_first, outdoor_x10a_evidence(true, true, true, 10.0));
+        }
+        for (int i = 0; i < 1800; i++) {
+            checkup_outdoor_add(cold_first, outdoor_x10a_evidence(true, true, true, 10.0));
+            checkup_outdoor_add(warm_first, outdoor_x10a_evidence(true, true, true, -10.0));
+        }
+        CHECK(checkup_outdoor_mean_tenths(cold_first) == 0);
+        CHECK(checkup_outdoor_mean_tenths(warm_first) == 0);
+    }
+    {
+        CheckupState st;
+        CheckupBucket b;
+        CheckupSample s;
+        s.rps_known = true; s.rps_running = false;
+        s.valve_known = true; s.valve_dhw = false;
+        s.operating_mode = CheckupOperatingMode::Heating;
+        checkup_step(st, b, s, 0);
+        s.rps_running = true;
+        s.outdoor = outdoor_x10a_evidence(true, true, true, -5.0);
+        checkup_step(st, b, s, 1'000'000);
+        s.outdoor = outdoor_x10a_evidence(true, true, true, -3.0);
+        checkup_step(st, b, s, 2'000'000);
+        s.rps_running = false; s.outdoor = {};
+        checkup_step(st, b, s, 3'000'000);
+        CHECK(b.space_runs == 1 && b.cycling_outdoor.samples == 2);
+        CHECK(b.cycling_outdoor.min_tenths == -50 &&
+              checkup_outdoor_mean_tenths(b.cycling_outdoor) == -40);
+        CheckupRing ring;
+        ring.pending = b;
+        const CheckupReport weather_report = checkup_evaluate(
+            checkup_aggregate(ring), CheckupCoverage{}, FaultClass::Unknown);
+        CHECK(weather_report.cycling_outdoor.source == OutdoorSource::X10a);
+        CHECK(weather_report.cycling_outdoor.samples == 2 &&
+              weather_report.cycling_outdoor.min_tenths == -50 &&
+              weather_report.cycling_outdoor.mean_tenths == -40);
+
+        // Defrost context follows its simultaneously-known compressor denominator, not a generic
+        // page-0x20 sample. Unknown defrost evidence contributes nothing.
+        CheckupState ds;
+        CheckupBucket db;
+        CheckupSample d;
+        d.rps_known = true; d.rps_running = true; d.defrost_known = true;
+        d.outdoor = outdoor_x10a_evidence(true, true, true, 2.0);
+        checkup_step(ds, db, d, 0);
+        checkup_step(ds, db, d, 1'000'000);
+        CHECK(db.defrost_outdoor.samples == 1);
+        d.defrost_known = false;
+        d.outdoor = outdoor_x10a_evidence(true, true, true, -8.0);
+        checkup_step(ds, db, d, 2'000'000);
+        CHECK(db.defrost_outdoor.samples == 1 && db.defrost_outdoor.min_tenths == 20);
+
+        // A handover inside the compressor run censors both the run and its weather. Keeping the
+        // early space-heating samples would label weather from an ineligible mixed population as
+        // Cycling context merely because those samples arrived before the valve moved.
+        CheckupState ms;
+        CheckupBucket mb;
+        CheckupSample m;
+        m.rps_known = true; m.rps_running = false;
+        m.valve_known = true; m.valve_dhw = false;
+        m.operating_mode = CheckupOperatingMode::Heating;
+        checkup_step(ms, mb, m, 0);
+        m.rps_running = true;
+        m.outdoor = outdoor_x10a_evidence(true, true, true, -6.0);
+        checkup_step(ms, mb, m, 1'000'000);
+        checkup_step(ms, mb, m, 2'000'000);
+        m.valve_dhw = true;
+        m.outdoor = outdoor_x10a_evidence(true, true, true, 8.0);
+        checkup_step(ms, mb, m, 3'000'000);
+        m.rps_running = false;
+        checkup_step(ms, mb, m, 4'000'000);
+        CHECK(mb.censored_runs == 1 && mb.space_runs == 0);
+        CHECK(mb.cycling_outdoor.samples == 0);
+    }
 
     // --- the edge, which is the whole reason this is not derived from the trend rings -----------
     {
@@ -9070,6 +9234,32 @@ static void test_checkup() {
         w.min_flow = 150;
         return w;
     };
+
+    {
+        // Outdoor context is additive evidence only. Give two otherwise identical windows wildly
+        // different weather and pin every verdict/accounting field to the same result: no future
+        // refactor may quietly turn temperature into permission or a threshold input.
+        CheckupWindow without = day();
+        without.starts = 20;
+        without.run_s = 20u * 240;
+        without.defrosts = without.paired_defrosts = CHECKUP_DEFROST_MIN_COUNT;
+        without.defrost_s = 200;
+        without.dfr_run_s = 1000;
+        CheckupWindow with = without;
+        with.cycling_outdoor_min_tenths = -300;
+        with.cycling_outdoor_sum_tenths = 3'000;
+        with.cycling_outdoor_samples = 100;
+        with.defrost_outdoor_min_tenths = 450;
+        with.defrost_outdoor_sum_tenths = -2'000;
+        with.defrost_outdoor_samples = 50;
+        const CheckupReport a = checkup_evaluate(without, full, FaultClass::Normal);
+        const CheckupReport b = checkup_evaluate(with, full, FaultClass::Normal);
+        CHECK(b.cycling_outdoor.samples == 100 && b.defrost_outdoor.samples == 50);
+        CHECK(a.overall == b.overall && a.available == b.available &&
+              a.assessable == b.assessable && a.evaluated == b.evaluated);
+        for (size_t i = 0; i < CHECKUP_CHECK_COUNT; i++)
+            CHECK(a.checks[i].verdict == b.checks[i].verdict);
+    }
 
     {
         // A supported locator is capability, not evidence. Until at least one interval was actually

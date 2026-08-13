@@ -124,6 +124,11 @@ const HEALTHY = () => ({
   heating_curve: { method_version: 2, armed: true, state: "recording", state_code: 1,
     reason: "sample_recorded", reason_code: 1, sample_eligible: true, current_room_error_k: -0.5,
     last_sample_room_error_k: -0.4, last_sample_unix_s: 1780000000, forecast_available: true,
+    outdoor_temperature_c: 21.4, outdoor_source: "env3",
+    last_sample_outdoor_temperature_c: 21.2, last_sample_outdoor_source: "env3",
+    plant_outdoor_temperature_c: 9.1, plant_outdoor_source: "homehub",
+    last_sample_plant_outdoor_temperature_c: 8.9,
+    last_sample_plant_outdoor_source: "homehub",
     plant_gate_known: true, plant_gate_active: true, heating_mode_known: true,
     heating_mode_active: true, room_source_unix_s: 1780000000, room_age_s: 10, sequence: 3,
     evaluations: 900, samples: 3, holds: 1, blocks: 0 },
@@ -231,7 +236,10 @@ const REMOVE = {
     s.history.modbus_rows = [];
     s.heating_curve = { ...s.heating_curve, state: "blocked", state_code: 4,
       reason: "homehub_unavailable", reason_code: 7, sample_eligible: false,
-      plant_gate_known: false, plant_gate_active: false };
+      plant_gate_known: false, plant_gate_active: false,
+      plant_outdoor_temperature_c: null, plant_outdoor_source: null,
+      last_sample_plant_outdoor_temperature_c: null,
+      last_sample_plant_outdoor_source: null };
     return s;
   },
   env3(s) {
@@ -239,6 +247,8 @@ const REMOVE = {
       age_s: null, temperature_c: null, humidity_pct: null, pressure_hpa: null,
       error: "unsupported_board", samples: 0, presets: [] };
     s.history.env3_rows = [];
+    s.heating_curve = { ...s.heating_curve, outdoor_temperature_c: null, outdoor_source: null,
+      last_sample_outdoor_temperature_c: null, last_sample_outdoor_source: null };
     return s;
   },
   x10a(s) {
@@ -286,7 +296,12 @@ const REMOVE = {
       state: "waiting", reason: "safe_mode" };
     s.heating_curve = { ...s.heating_curve, armed: true, state: "off", state_code: 0,
       reason: "sampler_inactive", reason_code: 14, sample_eligible: false, evaluations: 0,
-      samples: 0, plant_gate_known: false, plant_gate_active: false };
+      samples: 0, plant_gate_known: false, plant_gate_active: false,
+      outdoor_temperature_c: null, outdoor_source: null,
+      last_sample_outdoor_temperature_c: null, last_sample_outdoor_source: null,
+      plant_outdoor_temperature_c: null, plant_outdoor_source: null,
+      last_sample_plant_outdoor_temperature_c: null,
+      last_sample_plant_outdoor_source: null };
     s.history = { dt: 300, rows: [], modbus_rows: [], env3_rows: [] };
     return s;
   },
@@ -486,6 +501,29 @@ for (const scenario of SCENARIOS) {
         `${scenario.name}: a healthy sensor with a stopped recorder must name the recorder`);
       checks++;
     }
+  }
+
+  // RULE 9 — the plant axis is a second, separately sourced row. HomeHub absence must not leak the
+  // last input-44 value or turn this OPTIONAL context into a warning; when present, the face and the
+  // event tongue name HomeHub rather than silently presenting it as ENV III.
+  const plantFace = rendered.dynamicControlCardHtml
+    .match(/data-desc="dynamic:plant-outdoor"[\s\S]*?<div class="vdesc">/)?.[0] || "";
+  assert.ok(plantFace, `${scenario.name}: the plant outdoor axis row must render`);
+  assert.doesNotMatch(plantFace, /data-act=/,
+    `${scenario.name}: plant outdoor evidence must not offer a configuration action`);
+  checks += 2;
+  if (scenario.remove.includes("homehub") || scenario.remove.includes("safeMode")) {
+    assert.doesNotMatch(plantFace, /vrow-val settings-wrap (?:warn|err)/,
+      `${scenario.name}: absent plant outdoor context must stay neutral and never gate sampling`);
+    assert.doesNotMatch(plantFace, /9[,.]1.*°C|8[,.]9.*°C/,
+      `${scenario.name}: a removed HomeHub must not leak an old plant outdoor value`);
+    checks += 2;
+  } else {
+    assert.match(plantFace, /HomeHub/,
+      `${scenario.name}: plant outdoor evidence must name its source`);
+    assert.match(rendered.dynamicControlCardHtml, /9,1.*°C[^]*HomeHub|9\.1.*°C[^]*HomeHub/,
+      `${scenario.name}: current plant outdoor evidence must render with provenance`);
+    checks += 2;
   }
 }
 

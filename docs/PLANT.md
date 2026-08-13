@@ -32,7 +32,8 @@ The third question the dashboard asks, after *what is it doing now* (the schemat
 this reading do today* ([the trend rings](FEATURES.md)): **is anything worth reporting**. Counted
 events and window minima — compressor starts and mean run length, defrost count and share of
 runtime, the lowest water pressure and flow, backup-heater minutes (the BUH and the DHW booster kept
-apart), the unit's own fault class, and the protection-retry counters.
+apart), the unit's own fault class, and the protection-retry counters. Cycling and defrost also
+carry source-named outdoor minimum/mean **context**; those figures never change a verdict.
 
 **Why it is not a view over the trend rings.** A ring folds each 5-minute bucket to its *last*
 reading, so a compressor cycle shorter than five minutes leaves no trace in it — and short cycling is
@@ -53,6 +54,16 @@ Storage is 23 completed one-hour buckets plus the pending hour, so the represent
 almost-25-hour "24 h"; `full_span` is computed from real first/latest monotonic timestamps. An
 explicit re-detection, or a profile or RX/TX identity change, resets the window rather than mixing an
 in-flight old-link sample into it; HomeHub-only edits do not.
+
+The two weather contexts are deliberately separate eight-byte aggregates per bucket. Cycling accepts
+only fresh X10A 0x20 samples from a run that later completes as consistently classified space
+heating; defrost accepts only samples paired with readable defrost and compressor state while the
+compressor runs. Page 0x20 answering is not enough: its value is held while the outdoor unit rests,
+so freshness additionally requires a positively running RPS witness in that same poll. Unknown RPS
+is null, not permission. Each aggregate keeps an exact tenths sum so its mean is independent of
+sample order. The explicit static cost is 64 B × 24 = **1,536 B**, 432 B more than the former bucket
+layout (384 B payload plus 48 B alignment); the layout fingerprint retires the older `.noinit`
+window on update.
 
 **A reboot no longer does.** This is the measurement that tolerates one worst: the window is 24 h and
 the requirements are hours, so losing it loses the *verdict*, not a few samples — and a device on the
@@ -324,15 +335,19 @@ thousands of failsafes when the order was the other way round.
 - A transient hold or block **preserves** the cadence and the last durable event, so recovery cannot
   fabricate a new sample.
 
-**An optional outdoor axis rides with each event.** Where the [ENV III](#optional-env-iii-climate-input)
-accessory is configured and fresh, the outdoor air temperature *at the moment of the event* is recorded
-beside the room deviation — without it the record is underdetermined, since a room error alone cannot
+**Two optional outdoor axes ride with each event.** The plant axis is HomeHub input 44, decoded from
+an explicitly fast Modbus batch in the same poll cycle as the two heating gates. The second axis is
+the [ENV III](#optional-env-iii-climate-input) accessory when configured, fresh and plausible. They
+stay separate and each event stores its source: input 44 is the plant's outside-air concept, whereas
+the firmware cannot know whether ENV III is actually mounted outdoors. Both values are captured *at
+the moment of the event* beside the room deviation — without an outdoor axis the record is
+underdetermined, since a room error alone cannot
 separate a curve that is too **steep** from one shifted too **high** (+0.5 K at −5 °C and at +12 °C call
-for opposite corrections and record identically). It is **context, never a gate**: nothing branches on
-it, an absent sensor moves no state, reason or counter, and a source-boundary test refuses a hold or
-block on it. Absence is null, not 0 °C; a sample taken without the sensor clears the previous event's
-reading rather than inheriting it. The sampling *method* is unchanged, so archived events stay
-comparable.
+for opposite corrections and record identically). Both are **context, never gates**: nothing
+branches on either, an absent source moves no state, reason or counter, and a source-boundary test
+refuses a hold or block on them. Absence is null, not 0 °C; a sample taken without one source clears
+that source's previous event value rather than inheriting it. The sampling *method* is unchanged, so
+archived events stay comparable; only the MQTT payload shape moves to schema 3.
 
 **The reference room can hide the error it is meant to reveal.** A room thermostat and its zone
 valves form a closed inner control loop: once they reduce demand or close at the setpoint, they clip
@@ -359,11 +374,12 @@ analysis evidence, not a plant command.
 
 The card in the UI always renders, stating recording, optional-forecast degradation, a summer wait,
 excluded cooling or the exact missing input — and it says out loud that room kelvin is not calibrated
-water kelvin. It also carries the optional outdoor axis as its own row, whose number comes from the
-diagnosis rather than from the sensor read a second time, so a live sensor cannot show green there
-while the state row reports that nothing is being recorded. That row NAMES the sensor (`ENV III`) and
-is **passive**, like every other reported row on the card: the readings live inside its explanation,
-and the sensor's one editor stays the Board Hardware modal on the ESP32 card, which saves it in a
+water kelvin. It also carries the plant and accessory outdoor axes as separate rows, whose numbers
+come from the diagnosis rather than from either source read a second time, so a live source cannot
+show green there while the state row reports that nothing is being recorded. The rows name
+`HomeHub` and `ENV III`, respectively, and are **passive**, like every other reported row on the
+card: the readings live inside their explanations. ENV III's one editor stays the Board Hardware
+modal on the ESP32 card, which saves it in a
 single atomic `POST /set_board` beside the board identity that decides whether the Grove port exists
 at all. A second door into that modal from a card that reports EVIDENCE offered hardware
 configuration on a row whose own copy says the value changes nothing about what gets recorded.

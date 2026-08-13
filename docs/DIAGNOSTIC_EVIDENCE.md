@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 20bf4c0e4bb408f4ae60dcd0fcf2d7f0cf8506b20458b1b0820a92b45a0ff930 -->
+<!-- diagnostic-evidence-contract: fac1ed030ae469210eb2d4dfc69cf4d17aa29410c1ceae7476bcc5264a5c1dd3 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -87,14 +87,18 @@ assessable runs averaging under ten minutes plus sufficient complete 24-hour evi
 and runs interrupted by measurement gaps are censored. The constants are
 `CHECKUP_CYCLING_MIN_STARTS`, `CHECKUP_CYCLING_SHORT_RUN_S`, and
 `CHECKUP_CYCLING_CLASSIFIED_PCT` in [`checkup.hpp`](../main/logic/checkup.hpp).
+Fresh X10A outdoor minimum/mean is attached only to completed, consistently classified
+space-heating runs. It is explanatory context and changes no threshold or verdict.
 
 **Project boundary:** Twelve runs and ten minutes are deliberately cautious **project heuristics**.
 They are neither copied from [R1] nor specified by Daikin. [R1] studied different, non-modulating
 units and supports only the general claim that short runs and system hydraulics can affect
-efficiency.
+efficiency. The X10A page-`0x20` mapping and the positive-RPS freshness pairing are project
+evidence, not a published Daikin protocol guarantee.
 
 **Not established:** The note proves neither oversizing nor incorrect hydraulic balancing. Building
-load, weather, setpoints, and delivered heat are required to investigate a cause.
+load, weather, setpoints, and delivered heat are required to investigate a cause. The optional
+minimum/mean describes only accepted samples inside eligible runs, not continuous weather coverage.
 
 <a id="diagnosis-defrost"></a>
 ### 4. Defrost events (`defrost`)
@@ -109,13 +113,18 @@ only for periods in which both the defrost signal and compressor state were read
 appears after at least three paired defrost events and when defrost exceeds **15%** of paired
 compressor runtime. `CHECKUP_DEFROST_MIN_COUNT` and `CHECKUP_DEFROST_SHARE_PCT` implement the rule in
 [`checkup.hpp`](../main/logic/checkup.hpp).
+Fresh X10A outdoor minimum/mean is collected over that same readable, running-compressor population;
+it is explanatory context and changes neither the ratio nor its verdict.
 
 **Project boundary:** The 15% share and three-event requirement are broad **project heuristics**, not
 Daikin limits. The firmware knows neither outdoor humidity nor the outdoor heat exchanger's surface
-or fin temperature.
+or fin temperature. The X10A page-`0x20` mapping and the positive-RPS freshness pairing are project
+evidence, not a published Daikin protocol guarantee.
 
 **Not established:** Frequent defrosting is not automatically abnormal in wet, cold weather. The row
-proves neither blocked airflow, low refrigerant charge, nor a sensor defect.
+proves neither blocked airflow, low refrigerant charge, nor a sensor defect. The optional
+minimum/mean describes only accepted samples inside the paired runtime, not continuous weather
+coverage.
 
 <a id="diagnosis-pressure"></a>
 ### 5. Lowest water pressure (`pressure`)

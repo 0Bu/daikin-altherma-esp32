@@ -208,18 +208,19 @@ whatever the first cycle read.
 * **Batching.** The 31 EKRHH offsets fall into **ten contiguous runs** across the two function
   spaces, so a full cycle is ten requests. The per-request cap is 16 registers, far below the
   protocol's 125: a batch is the unit of *loss* as much as of saving, and the longest run here is six.
-* **Two cadences.** A **full** cycle every fifth poll tick; the four between it read only the two
-  batches carrying the diagnosis gates — input register 53 (normal space operation) and 38 (heating
-  rather than cooling), which `heating_curve_diagnosis.hpp` evaluates every second. Those two batches
-  carry the 3-way valve, the compressor flag, flow, power and room temperature along with them,
-  because they share a run and leaving them out would cost a request rather than save one.
+* **Two cadences.** A **full** cycle every fifth poll tick; the four between it read three fast
+  batches. Two carry the diagnosis gates — input register 53 (normal space operation) and 38
+  (heating rather than cooling). The third carries input 44, optional plant outdoor context which
+  #441 requires from the same current cycle. It is explicitly **not** a gate. The extra 40–45 batch
+  is one deliberate bundled request; borrowing the five-second cache would not establish event-time
+  freshness. Neighbouring registers ride these batches because leaving them out saves no request.
 * **Five seconds, not ten.** Chosen from the *dashboard*, not from how fast the values move: the
   browser polls `/values` every two seconds, and a HomeHub reading up to ten seconds old beside a
   one-second X10A reading of the same quantity invites exactly the "which of these is current?"
   question the two-array `/values` shape exists to make answerable.
-* **A gate cycle commits nothing but the gates.** Its seven registers are not a cache and its
+* **A fast cycle commits no value cache.** Its thirteen gate/context-batch registers are not a cache and its
   position on the raster is not a sample, so `/values` and the trend rings stay with the last full
-  cycle (at most four poll intervals old) rather than publishing seven rows and 24 apparent read
+  cycle (at most four poll intervals old) rather than publishing thirteen rows and 18 apparent read
   failures. `connected` still reports *this* cycle, so a hub that goes away is visible within a
   second.
 * **An exception splits its batch.** A Modbus exception is a valid reply about **one** register, and
@@ -227,11 +228,11 @@ whatever the first cycle read.
   stays split for the session (the usual cause, a register this hub does not implement, does not go
   away). A reconnect forgets it: a different hub deserves the cheap plan again.
 * **Only a full cycle proves recovery.** `/status.modbus` carries one current error for the whole
-  map. A clean gate-only cycle did not re-read a failing non-gate row, so it cannot clear that error;
+  map. A clean fast cycle did not re-read a failing full-cycle row, so it cannot clear that error;
   otherwise `/status`, `/diag` and Syslog would oscillate between failure and recovery every five
   seconds without evidence that the row recovered.
 
-**31 → ~3.6 requests/s, ~242 000 a day.** The plan is resolved at compile time and lives in flash;
+**31 → 4.4 requests/poll-second, ~380 000 a day.** The plan is resolved at compile time and lives in flash;
 `hp_modbus.cpp` `static_assert`s that batching still collapses the map, so a future register added
 into a gap re-prices the link visibly instead of quietly restoring the per-register sweep.
 
@@ -275,8 +276,8 @@ where one exists.
 The `modbus` array is emitted **only while the link is live at the moment the snapshot is taken** —
 not merely while the stack is configured, and not merely while it was connected when the request
 arrived. Its rows belong to that live session's latest **full** cycle and are therefore bounded to at
-most four poll intervals old; the 1 Hz gate-only cycles update link and diagnosis-gate state without
-turning their seven rows into a partial cache. A consumer cannot infer that bound from a row, so the
+most four poll intervals old; the fast cycles update link, diagnosis-gate state and the sealed input-44
+event context without turning their thirteen rows into a partial cache. A consumer cannot infer that bound from a row, so the
 guarantee lives in this payload contract. Liveness and the cache sit behind two
 different mutexes, so every successful TCP connect gets a generation and every cache commit records
 the generation that produced it. `mb_values_snapshot()` reports live only when the post-copy link

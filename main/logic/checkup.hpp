@@ -73,6 +73,7 @@
 
 #include "fault_state.hpp"   // FaultClass — the fault check composes conv 203's own class table
 #include "ou_stale.hpp"      // ou_is_rps_witness — the compressor witness, called not restated
+#include "outdoor_evidence.hpp" // one provenance/freshness answer shared with heating-curve events
 
 namespace daik::logic {
 
@@ -119,6 +120,7 @@ inline constexpr CheckupLocator CHECKUP_LOC_FLOW     = {0x62,  9, 105};  // "Flo
 inline constexpr CheckupLocator CHECKUP_LOC_VALVE    = {0x60, 12, 306};  // 1=DHW, 0=space
 inline constexpr CheckupLocator CHECKUP_LOC_R5T      = {0x61, 10, 105};  // DHW tank sensor, 0.1 °C
 inline constexpr CheckupLocator CHECKUP_LOC_IU_MODE  = {0x60,  2, 315};  // Heating/Cooling/DHW
+inline constexpr CheckupLocator CHECKUP_LOC_OUTDOOR  = {0x20,  0, 105};  // R1T outdoor air, 0.1 °C
 
 // Does this row carry the value a locator addresses? Three exact comparisons; no matching, no
 // heuristics, and nothing that a re-spelling or a translation could move.
@@ -175,6 +177,18 @@ constexpr int checkup_retry_index(unsigned reg, unsigned off, int conv) {
     return -1;
 }
 
+// Compact per-hour context, in the persisted ring. Keep the exact tenths sum: a stored running mean
+// is order-dependent once finite precision rounds a small update to zero (a cold first half-hour
+// followed by a warm one can otherwise remain biased cold). Eight bytes per judged context lets
+// Cycling and Defrost each keep a paired population without conflating which operating evidence the
+// weather describes.
+struct CheckupOutdoorStats {
+    int32_t  sum_tenths = 0;
+    int16_t  min_tenths = CHECKUP_ABSENT;
+    uint16_t samples = 0;
+};
+static_assert(sizeof(CheckupOutdoorStats) == 8, "outdoor context cost changed");
+
 // ── One hour of evidence ────────────────────────────────────────────────────────────────────────
 // `covered_s` is the load-bearing field and the reason a fresh board cannot show a green verdict: it
 // counts the seconds actually OBSERVED in this hour, so an hour the firmware slept through, or a
@@ -224,6 +238,8 @@ struct CheckupBucket {
     uint8_t  defrosts   = 0;   // defrost off -> on transitions (saturating)
     uint8_t  paired_defrosts = 0; // same edge with readable compressor witnesses at both endpoints
     uint8_t  flags      = 0;
+    CheckupOutdoorStats cycling_outdoor; // samples from completed, pure space-heating runs only
+    CheckupOutdoorStats defrost_outdoor; // samples paired with known defrost + running compressor
 };
 
 // Bucket flags — facts that happened at least once in the hour and have no useful magnitude.
@@ -234,14 +250,13 @@ constexpr uint8_t CHECKUP_F_LOW_BAR = 1u << 3;   // <=1.0 bar persisted for the 
 
 // 23 completed buckets plus the pending one: the full rolling window's actual storage cost.
 //
-// The bound was RAISED from 896 to 1104 (36 -> 46 bytes per bucket) for the operating-class split
-// above, and that is a decision rather than an edit: .noinit is DRAM this board does not have spare,
-// and the number exists so growing it costs an argument. Heating/DHW run totals first used eight of
-// those ten bytes; the explicit cooling count plus alignment uses the remaining two. The total cost
-// is therefore the declared 240 B for the rolling day, none of it heap or flash. Anything further
-// wants the same conversation.
+// The bound was RAISED from 1104 to 1536 (46 -> 64 bytes per bucket) for two distinct eight-byte
+// outdoor contexts. The old #441 estimate assumed one shared context; pairing Cycling only with
+// completed space-heating runs and Defrost only with its known-state compressor denominator makes
+// that unsafe. Exact, order-independent sums cost 16 B per bucket plus 2 B alignment: 18 x 24 =
+// 432 B of .noinit DRAM. No heap or flash is used.
 constexpr size_t CHECKUP_BYTES = sizeof(CheckupBucket) * CHECKUP_BUCKETS;
-static_assert(CHECKUP_BYTES <= 1104, "the static checkup ring is too large for this heap-tight board");
+static_assert(CHECKUP_BYTES <= 1536, "the static checkup ring is too large for this heap-tight board");
 
 // Saturating add for the two event counters: 255 starts in one hour is far outside anything real,
 // but a wrap to 0 would turn the worst imaginable cycling into a perfect score.
@@ -252,6 +267,48 @@ constexpr uint8_t checkup_add_u8(uint8_t v, unsigned add) {
 constexpr uint16_t checkup_add_u16(uint16_t v, unsigned add) {
     const unsigned s = v + add;
     return s > 65535u ? uint16_t{65535} : static_cast<uint16_t>(s);
+}
+
+inline int32_t checkup_div_round_nearest(int64_t numerator, uint32_t denominator) {
+    if (!denominator) return 0;
+    const int64_t half = static_cast<int64_t>(denominator) / 2;
+    return static_cast<int32_t>(numerator >= 0
+                              ? (numerator + half) / denominator
+                              : (numerator - half) / denominator);
+}
+
+inline void checkup_outdoor_add(CheckupOutdoorStats& stats, const OutdoorEvidence& evidence) {
+    if (!outdoor_evidence_valid(evidence) || evidence.source != OutdoorSource::X10a) return;
+    const long rounded = std::lround(evidence.temperature_c * 10.0);
+    // The real outdoor domain is far narrower; this representation guard also keeps sum_tenths
+    // inside int32 even at the uint16 sample ceiling.
+    if (rounded < -3276 || rounded > 3276) return;
+    const int16_t tenths = static_cast<int16_t>(rounded);
+    if (!stats.samples) {
+        stats.min_tenths = tenths;
+        stats.sum_tenths = tenths;
+        stats.samples = 1;
+        return;
+    }
+    if (stats.samples == UINT16_MAX) return; // physically >18 h at 1 Hz inside one bucket/run
+    if (tenths < stats.min_tenths) stats.min_tenths = tenths;
+    stats.sum_tenths += tenths;
+    stats.samples = static_cast<uint16_t>(stats.samples + 1);
+}
+
+inline void checkup_outdoor_merge(CheckupOutdoorStats& into, const CheckupOutdoorStats& from) {
+    if (!from.samples) return;
+    if (!into.samples) { into = from; return; }
+    const uint32_t total = static_cast<uint32_t>(into.samples) + from.samples;
+    if (total > UINT16_MAX) return; // impossible inside one hourly bucket; preserve the valid prefix
+    into.sum_tenths += from.sum_tenths;
+    if (from.min_tenths < into.min_tenths) into.min_tenths = from.min_tenths;
+    into.samples = static_cast<uint16_t>(total);
+}
+
+inline int checkup_outdoor_mean_tenths(const CheckupOutdoorStats& stats) {
+    return stats.samples ? checkup_div_round_nearest(stats.sum_tenths, stats.samples)
+                         : CHECKUP_ABSENT;
 }
 
 // Which hour bucket a monotonic uptime falls in. Monotonic for the same reason history_bucket() is:
@@ -369,6 +426,7 @@ struct CheckupSample {
     bool bar_ok  = false;  int bar_tenths  = 0;
     bool flow_ok = false;  int flow_tenths = 0;
     bool r5t_ok  = false;  int r5t_tenths  = 0;
+    OutdoorEvidence outdoor; // fresh X10A 0x20 only; optional context, never a gate
 
     FaultClass fault = FaultClass::Unknown;             // Unknown when no conv-203 row was read
     uint8_t retry_expected_mask = 0;                    // counters supplied by the active profile
@@ -410,6 +468,7 @@ struct CheckupState {
     CheckupRunClass run_class = CheckupRunClass::Unknown;
     uint32_t run_start_bucket = 0;    // complete-run facts age with the witnessed start edge
     uint32_t run_s          = 0;
+    CheckupOutdoorStats run_outdoor; // committed only if this run completes as pure space heating
 };
 
 // Commit the completed run to its class, or to the censored tally when it could not be classified.
@@ -438,6 +497,7 @@ inline bool checkup_close_run(CheckupState& st, CheckupBucket& b, CheckupRing* r
             case CheckupRunClass::SpaceHeating:
                 target->space_runs  = checkup_add_u8(target->space_runs, 1);
                 target->space_run_s = checkup_add_u16(target->space_run_s, st.run_s);
+                checkup_outdoor_merge(target->cycling_outdoor, st.run_outdoor);
                 break;
             case CheckupRunClass::Cooling:
                 target->cooling_runs = checkup_add_u8(target->cooling_runs, 1);
@@ -453,6 +513,7 @@ inline bool checkup_close_run(CheckupState& st, CheckupBucket& b, CheckupRing* r
     st.run_class = CheckupRunClass::Unknown;
     st.run_start_bucket = 0;
     st.run_s = 0;
+    st.run_outdoor = CheckupOutdoorStats{};
     return reseal;
 }
 
@@ -1040,6 +1101,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             if (s.rps_running) {
                 b.dfr_run_s = checkup_add_u16(b.dfr_run_s, dt);
                 if (s.defrost_on) b.defrost_s = checkup_add_u16(b.defrost_s, dt);
+                checkup_outdoor_add(b.defrost_outdoor, s.outdoor);
             }
         }
         if (s.buh_known) {
@@ -1125,6 +1187,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             st.run_class      = checkup_run_class(s);
             st.run_class_pure = st.run_class != CheckupRunClass::Unknown;
             st.run_start_bucket = current_bucket;
+            st.run_outdoor = CheckupOutdoorStats{};
         }
         // Carry the run in flight. A class input that stops answering or changes forfeits the class
         // but not the run: it still completes and is counted as censored. An unreadable compressor
@@ -1137,6 +1200,8 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                 const CheckupRunClass current_class = checkup_run_class(s);
                 if (current_class == CheckupRunClass::Unknown || current_class != st.run_class)
                     st.run_class_pure = false;
+                if (st.run_class_pure && st.run_class == CheckupRunClass::SpaceHeating)
+                    checkup_outdoor_add(st.run_outdoor, s.outdoor);
             }
         }
         // A known OFF completes every open run. With a known ON predecessor it is the normal edge;
@@ -1219,6 +1284,14 @@ struct CheckupWindow {
     int      min_bar   = CHECKUP_ABSENT;
     int      min_flow  = CHECKUP_ABSENT;
     uint8_t  flags     = 0;
+    // Wider count/sum live only on the evaluating stack; the persisted per-hour representation
+    // above stays compact while a full 24 h at one sample per second remains representable.
+    int      cycling_outdoor_min_tenths = CHECKUP_ABSENT;
+    int64_t  cycling_outdoor_sum_tenths = 0;
+    uint32_t cycling_outdoor_samples = 0;
+    int      defrost_outdoor_min_tenths = CHECKUP_ABSENT;
+    int64_t  defrost_outdoor_sum_tenths = 0;
+    uint32_t defrost_outdoor_samples = 0;
 };
 
 // Sum the whole ring plus the hour still being accumulated.
@@ -1251,6 +1324,20 @@ inline CheckupWindow checkup_aggregate(const CheckupRing& r) {
         w.defrosts  += b.defrosts;
         w.paired_defrosts += b.paired_defrosts;
         w.flags     |= b.flags;
+        if (b.cycling_outdoor.samples) {
+            w.cycling_outdoor_samples += b.cycling_outdoor.samples;
+            w.cycling_outdoor_sum_tenths += b.cycling_outdoor.sum_tenths;
+            if (w.cycling_outdoor_min_tenths == CHECKUP_ABSENT ||
+                b.cycling_outdoor.min_tenths < w.cycling_outdoor_min_tenths)
+                w.cycling_outdoor_min_tenths = b.cycling_outdoor.min_tenths;
+        }
+        if (b.defrost_outdoor.samples) {
+            w.defrost_outdoor_samples += b.defrost_outdoor.samples;
+            w.defrost_outdoor_sum_tenths += b.defrost_outdoor.sum_tenths;
+            if (w.defrost_outdoor_min_tenths == CHECKUP_ABSENT ||
+                b.defrost_outdoor.min_tenths < w.defrost_outdoor_min_tenths)
+                w.defrost_outdoor_min_tenths = b.defrost_outdoor.min_tenths;
+        }
         if (b.min_bar  != CHECKUP_ABSENT && (w.min_bar  == CHECKUP_ABSENT || b.min_bar  < w.min_bar))
             w.min_bar = b.min_bar;
         if (b.min_flow != CHECKUP_ABSENT && (w.min_flow == CHECKUP_ABSENT || b.min_flow < w.min_flow))
@@ -1500,6 +1587,13 @@ inline const char* checkup_result_evidence_name(CheckupCheck c, const CheckupChe
     return checkup_evidence_name(c);
 }
 
+struct CheckupOutdoorReport {
+    OutdoorSource source = OutdoorSource::None;
+    int min_tenths = CHECKUP_ABSENT;
+    int mean_tenths = CHECKUP_ABSENT;
+    uint32_t samples = 0;
+};
+
 struct CheckupReport {
     uint32_t          covered_s = 0;
     // Progress inside the not-yet-creditable DHW hour.  Kept separate from observed_s: an hour is
@@ -1517,6 +1611,8 @@ struct CheckupReport {
     uint32_t          dhw_aborts = 0;
     uint32_t          dhw_best_aborted_s = 0;
     int32_t           cycling_cooling_runs = -1;
+    CheckupOutdoorReport cycling_outdoor;
+    CheckupOutdoorReport defrost_outdoor;
     // Did the CLASS SPLIT decide the cycling verdict, or did it fall back to the pooled figure? A
     // reader cannot infer it from the fields — both are published whenever anything was witnessed —
     // and the two answers carry different caveats, so the device states which one it used.
@@ -1546,6 +1642,20 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
     CheckupReport r;
     r.covered_s = w.covered_s;
     r.full_span = w.full_span;
+    if (w.cycling_outdoor_samples) {
+        r.cycling_outdoor.source = OutdoorSource::X10a;
+        r.cycling_outdoor.min_tenths = w.cycling_outdoor_min_tenths;
+        r.cycling_outdoor.mean_tenths = checkup_div_round_nearest(
+            w.cycling_outdoor_sum_tenths, w.cycling_outdoor_samples);
+        r.cycling_outdoor.samples = w.cycling_outdoor_samples;
+    }
+    if (w.defrost_outdoor_samples) {
+        r.defrost_outdoor.source = OutdoorSource::X10a;
+        r.defrost_outdoor.min_tenths = w.defrost_outdoor_min_tenths;
+        r.defrost_outdoor.mean_tenths = checkup_div_round_nearest(
+            w.defrost_outdoor_sum_tenths, w.defrost_outdoor_samples);
+        r.defrost_outdoor.samples = w.defrost_outdoor_samples;
+    }
 
     auto set = [&r](CheckupCheck check, CheckupVerdict v, uint32_t observed_s,
                     uint32_t required_s, int a = -1, int b = -1,

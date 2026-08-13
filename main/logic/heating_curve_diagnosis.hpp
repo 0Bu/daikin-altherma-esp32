@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstdint>
 
+#include "outdoor_evidence.hpp"
+
 namespace daik::logic {
 
 inline constexpr uint8_t HEATING_CURVE_DIAGNOSIS_METHOD_VERSION = 2;
@@ -120,8 +122,11 @@ struct HeatingCurveInputs {
     // installation without the sensor samples exactly as before, so this only widens what an event
     // carries. The caller owns freshness; an unavailable or non-finite value records as absent
     // rather than as a zero that would read like 0 C.
-    bool outdoor_available = false;
-    double outdoor_temperature_c = 0.0;
+    OutdoorEvidence outdoor;
+    // The plant's own outdoor-air reading, independently sourced from HomeHub input 44. Kept beside
+    // rather than replacing ENV III: the accessory may be mounted elsewhere, while this is the
+    // plant-side axis. Both are additive event context and neither is read by a gate below.
+    OutdoorEvidence plant_outdoor;
     int64_t now_ms = -1;
     int64_t now_unix_s = -1;
     bool room_has_source_time = false;
@@ -144,6 +149,12 @@ struct HeatingCurveSnapshot {
     // with, and a later sample without the sensor clears it rather than inheriting an older one.
     bool has_outdoor_temperature = false;
     bool has_last_sample_outdoor = false;
+    OutdoorSource outdoor_source = OutdoorSource::None;
+    OutdoorSource last_sample_outdoor_source = OutdoorSource::None;
+    bool has_plant_outdoor_temperature = false;
+    bool has_last_sample_plant_outdoor = false;
+    OutdoorSource plant_outdoor_source = OutdoorSource::None;
+    OutdoorSource last_sample_plant_outdoor_source = OutdoorSource::None;
     bool plant_gate_known = false;
     bool plant_gate_active = false;
     bool heating_mode_known = false;
@@ -153,6 +164,8 @@ struct HeatingCurveSnapshot {
     double last_sample_room_error_k = 0.0;
     double outdoor_temperature_c = 0.0;
     double last_sample_outdoor_temperature_c = 0.0;
+    double plant_outdoor_temperature_c = 0.0;
+    double last_sample_plant_outdoor_temperature_c = 0.0;
     bool room_has_source_time = false;
     int64_t room_source_unix_s = -1;
     bool room_age_known = false;
@@ -176,9 +189,15 @@ public:
         s_.forecast_available = in.forecast_available;
         // Recorded beside the forecast flag and BEFORE the arming check, like every other piece of
         // optional context: it is reported whatever the state, and no branch below reads it.
-        s_.has_outdoor_temperature =
-            in.outdoor_available && std::isfinite(in.outdoor_temperature_c);
-        s_.outdoor_temperature_c = s_.has_outdoor_temperature ? in.outdoor_temperature_c : 0.0;
+        s_.has_outdoor_temperature = outdoor_evidence_valid(in.outdoor);
+        s_.outdoor_source = s_.has_outdoor_temperature ? in.outdoor.source : OutdoorSource::None;
+        s_.outdoor_temperature_c =
+            s_.has_outdoor_temperature ? in.outdoor.temperature_c : 0.0;
+        s_.has_plant_outdoor_temperature = outdoor_evidence_valid(in.plant_outdoor);
+        s_.plant_outdoor_source = s_.has_plant_outdoor_temperature
+                                ? in.plant_outdoor.source : OutdoorSource::None;
+        s_.plant_outdoor_temperature_c = s_.has_plant_outdoor_temperature
+                                       ? in.plant_outdoor.temperature_c : 0.0;
         s_.plant_gate_known = in.plant_gate_known;
         s_.plant_gate_active = in.plant_gate_known && in.plant_gate_active;
         s_.heating_mode_known = in.heating_mode_known;
@@ -231,8 +250,13 @@ public:
         // Assigned UNCONDITIONALLY with the event: a sample taken while the sensor is missing must
         // clear the previous event's reading, never inherit it under a new timestamp.
         s_.has_last_sample_outdoor = s_.has_outdoor_temperature;
+        s_.last_sample_outdoor_source = s_.outdoor_source;
         s_.last_sample_outdoor_temperature_c =
-            s_.has_outdoor_temperature ? in.outdoor_temperature_c : 0.0;
+            s_.has_outdoor_temperature ? in.outdoor.temperature_c : 0.0;
+        s_.has_last_sample_plant_outdoor = s_.has_plant_outdoor_temperature;
+        s_.last_sample_plant_outdoor_source = s_.plant_outdoor_source;
+        s_.last_sample_plant_outdoor_temperature_c = s_.has_plant_outdoor_temperature
+                                                   ? in.plant_outdoor.temperature_c : 0.0;
         s_.last_sample_unix_s = in.now_unix_s;
         last_sample_ms_ = in.now_ms;
         s_.sequence++;
@@ -262,7 +286,11 @@ private:
         s_.has_last_sample = false;
         s_.last_sample_room_error_k = 0.0;
         s_.has_last_sample_outdoor = false;
+        s_.last_sample_outdoor_source = OutdoorSource::None;
         s_.last_sample_outdoor_temperature_c = 0.0;
+        s_.has_last_sample_plant_outdoor = false;
+        s_.last_sample_plant_outdoor_source = OutdoorSource::None;
+        s_.last_sample_plant_outdoor_temperature_c = 0.0;
         s_.last_sample_unix_s = -1;
     }
 

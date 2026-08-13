@@ -31,19 +31,22 @@ assert.match(evalBody,
   /if \(!in\.homehub_connected\)[\s\S]*if \(!in\.plant_gate_known\)[\s\S]*if \(!in\.plant_gate_active\)[\s\S]*if \(!in\.heating_mode_known\)[\s\S]*if \(!in\.heating_mode_active\)[\s\S]*if \(!in\.room_control_eligible[\s\S]*if \(!in\.x10a_connected\)/,
   "evaluation order must prove active normal space HEATING before accepting room evidence");
 
-// The optional ENV III outdoor axis is CONTEXT recorded with an event, never a condition for one.
+// The distinct plant + ENV III outdoor axes are CONTEXT recorded with an event, never a condition.
 // A gate here would silently stop sampling on every installation without the accessory — the one
 // failure mode that looks like the feature merely being idle.
-assert.doesNotMatch(evalBody, /in\.outdoor_available[^;]*\)\s*return\s+(?:blocked|hold)\(/,
-  "an absent outdoor sensor must never block or hold a sample");
 assert.doesNotMatch(evalBody, /if \([^)]*outdoor[^)]*\)\s*return/,
-  "no branch of the evaluation may depend on the outdoor axis");
+  "no branch of the evaluation may depend on either outdoor axis");
 assert.match(diagnosis, /has_last_sample_outdoor = s_\.has_outdoor_temperature;/,
   "the recorded event must take the outdoor flag as it stood at that event");
+assert.match(diagnosis,
+  /has_last_sample_plant_outdoor = s_\.has_plant_outdoor_temperature;/,
+  "the recorded event must independently take the plant outdoor flag at that event");
 const resetStart = diagnosis.indexOf("void reset_samples()");
 const resetBody = diagnosis.slice(resetStart, diagnosis.indexOf("}", resetStart));
 assert.match(resetBody, /has_last_sample_outdoor = false/,
   "disarming clears sample memory, and the outdoor value must not outlive it");
+assert.match(resetBody, /has_last_sample_plant_outdoor = false/,
+  "disarming clears the plant outdoor value with the event");
 
 const config = read("main/logic/config_model.hpp");
 assert.doesNotMatch(config, /dynamic_lwt_mode/,
@@ -64,6 +67,10 @@ assert.ok(evaluateStart >= 0 && evaluateEnd > evaluateStart,
 const evaluator = mqtt.slice(evaluateStart, evaluateEnd);
 assert.match(evaluator, /heating_mode_known = mbs\.heating_mode_known/);
 assert.match(evaluator, /heating_mode_active = mbs\.heating_mode_active/);
+assert.match(evaluator, /outdoor_env3_evidence\(/,
+  "ENV III must use the shared provenance/freshness contract");
+assert.match(evaluator, /outdoor_homehub_evidence\(/,
+  "plant outdoor context must use the same shared contract with HomeHub freshness");
 assert.match(evaluator, /now_unix_s = now_unix_s/,
   "every sample needs an absolute event timestamp, not only boot-monotonic milliseconds");
 assert.doesNotMatch(evaluator, /mb_request|LwtOffsetIntent|\.offer\s*\(/,
@@ -100,15 +107,30 @@ const heartbeat = read("main/logic/heartbeat.hpp");
 assert.doesNotMatch(heartbeat, /room_(?:source|temperature|setpoint|control|error|age|messages|rejections)|heating_curve_/,
   "room-source and heating-curve domain telemetry must stay out of the board/link heartbeat");
 const telemetry = read("main/logic/heating_curve_mqtt.hpp");
+assert.match(telemetry, /HEATING_CURVE_MQTT_SCHEMA_VERSION\s*=\s*3/);
 assert.match(telemetry, /return base \+ "\/heating_curve"/);
 assert.match(telemetry, /\\"room\\"/);
 assert.match(telemetry, /\\"diagnosis\\"/);
 assert.match(telemetry, /last_sample_unix_s/);
 assert.match(telemetry, /sequence/);
+assert.match(telemetry, /plant_outdoor_temperature_c/);
+assert.match(telemetry, /plant_outdoor_source/);
+assert.match(telemetry, /last_sample_outdoor_source/);
 assert.doesNotMatch(telemetry, /lwt_controller_|proposal_produced|last_decision_ms/,
   "retired one-cycle proposal events and actuator telemetry must not survive the diagnosis migration");
 assert.match(mqtt, /publish_heating_curve_telemetry\(\)/);
 assert.match(mqtt, /mqtt_publish\(s_heating_curve_topic/);
+
+const outdoorEvidence = read("main/logic/outdoor_evidence.hpp");
+assert.match(outdoorEvidence,
+  /outdoor_x10a_evidence[\s\S]*rps_known\s*&&\s*rps_running/,
+  "X10A page 0x20 must require a positive running witness, not held=false alone");
+assert.match(outdoorEvidence, /outdoor_homehub_evidence[\s\S]*current_session/,
+  "HomeHub input 44 must be bound to the TCP session which answered this cycle");
+const modbusPoll = read("main/hp_modbus.cpp");
+assert.match(modbusPoll,
+  /r\.offset == 44[\s\S]*homehub_decode[\s\S]*outdoor_homehub_evidence/,
+  "input 44 must be decoded from the current poll and sealed after session validation");
 
 // Walk the COMPLETE main tree recursively. The former non-recursive scan skipped main/def entirely,
 // so its claim about "every firmware source" covered only 119 of 169 C++ files.
