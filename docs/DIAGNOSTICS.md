@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: f81918ec6cd14ce516ef564d3deae6446c982bf52e5818d45665c17db57e4c71 -->
+<!-- user-docs-contract: a7ca6975f67d345fd7000b78244ec93f0268174c84be66f1f51e4edd9cac6315 -->
 <!-- user-docs: health_guide -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
@@ -32,11 +32,12 @@ update can be normal.
 
 Open **How to read this card** first. Its **Data window** line explains whether earlier diagnosis data
 was retained or discarded for this boot. An ordinary reset while power remains available normally
-retains the window. A power interruption starts it again because the 24-hour diagnosis window is
-currently held in power-retained RAM, not in a flash archive. A firmware update also discards an old
-window when the meaning or layout of the counters changed.
+retains the window directly from RAM. Completed diagnosis hours are also stored in the device's
+append-only history journal, so a power interruption or firmware update restores them once the clock
+and detected model match. Only the hour that was still open can be missing. An update still discards
+older records when the meaning or layout of their counters changed.
 
-The saved five-minute trends are separate. Each interval retains only its final measurement or an
+The saved five-minute trends remain separate. Each interval retains only its final measurement or an
 aggregated event state. Those trends cannot reliably reconstruct second-by-second compressor starts,
 the operating mode of a complete run, or an uninterrupted domestic-hot-water hour, so the firmware
 does not reuse them as diagnosis evidence.

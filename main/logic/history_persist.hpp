@@ -82,15 +82,22 @@ inline constexpr size_t   HISTORY_FLASH_PAGE_BYTES = 256;
 inline constexpr size_t   HISTORY_JOURNAL_HEADER_BYTES = 64;
 inline constexpr size_t   HISTORY_FLASH_TOTAL_RINGS =
     TREND_COUNT + HOMEHUB_HISTORY_COUNT + ENV3_HISTORY_COUNT;
-inline constexpr size_t HISTORY_JOURNAL_SOURCE_COUNT = 3;
+// The first three ids are the original v1 trend sources.  Checkup extends the SAME append stream
+// with one hourly diagnostic bucket; keeping the old ids and wire version intact means an update can
+// still restore every existing trend record instead of invalidating the journal it is fixing.
+inline constexpr size_t HISTORY_JOURNAL_SOURCE_COUNT = 4;
 
-enum class HistoryJournalSource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2 };
+enum class HistoryJournalSource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2, Checkup = 3 };
 
 inline constexpr size_t history_journal_source_rings(HistoryJournalSource src) {
     switch (src) {
         case HistoryJournalSource::X10a:   return TREND_COUNT;
         case HistoryJournalSource::Modbus: return HOMEHUB_HISTORY_COUNT;
         case HistoryJournalSource::Env3:   return ENV3_HISTORY_COUNT;
+        // The diagnostic payload is a byte-for-byte CheckupJournalPayload rather than a dense
+        // HistorySample vector.  Its word count is supplied by checkup.cpp's wire contract at the
+        // generic header matcher below, avoiding a dependency cycle between the two persist headers.
+        case HistoryJournalSource::Checkup: return 0;
     }
     return 0;
 }
@@ -145,30 +152,47 @@ static_assert(sizeof(HistoryJournalHeader) == HISTORY_JOURNAL_HEADER_BYTES,
 static_assert(offsetof(HistoryJournalHeader, commit) == 16,
               "commit offset is part of the power-loss protocol");
 
-inline bool history_journal_header_matches(const HistoryJournalHeader& h, uint32_t catalog_fp) {
+inline bool history_journal_header_matches(const HistoryJournalHeader& h, uint32_t identity_fp,
+                                           uint16_t value_count, uint32_t dt_s) {
     if (h.magic != HISTORY_JOURNAL_MAGIC || h.version != HISTORY_JOURNAL_VERSION ||
-        h.commit != HISTORY_JOURNAL_COMMITTED || h.flags != 0 || h.catalog_fp != catalog_fp ||
-        h.slot_bytes != HISTORY_JOURNAL_SLOT_BYTES || h.dt_s != HISTORY_DT_S ||
+        h.commit != HISTORY_JOURNAL_COMMITTED || h.flags != 0 || h.catalog_fp != identity_fp ||
+        h.slot_bytes != HISTORY_JOURNAL_SLOT_BYTES || h.dt_s != dt_s ||
         h.sequence == 0 || h.bucket == INT64_MIN || h.source >= HISTORY_JOURNAL_SOURCE_COUNT ||
         h.rings[0] != TREND_COUNT || h.rings[1] != HOMEHUB_HISTORY_COUNT ||
         h.rings[2] != ENV3_HISTORY_COUNT)
         return false;
-    return h.value_count == history_journal_source_rings(
-        static_cast<HistoryJournalSource>(h.source));
+    return h.value_count == value_count && value_count > 0 &&
+           static_cast<size_t>(value_count) * sizeof(HistorySample) <=
+               HISTORY_JOURNAL_SLOT_BYTES - HISTORY_JOURNAL_HEADER_BYTES;
+}
+
+// Compatibility wrapper for the three original dense trend sources.  Existing host tests and old
+// v1 records keep exactly their former contract; the fourth source must state its own payload width
+// and one-hour raster explicitly through the overload above.
+inline bool history_journal_header_matches(const HistoryJournalHeader& h, uint32_t catalog_fp) {
+    if (h.source >= static_cast<uint8_t>(HistoryJournalSource::Checkup)) return false;
+    return history_journal_header_matches(
+        h, catalog_fp,
+        static_cast<uint16_t>(history_journal_source_rings(
+            static_cast<HistoryJournalSource>(h.source))), HISTORY_DT_S);
 }
 
 // CRC normalises the two fields changed after the body was assembled. This makes the exact same
 // helper usable before the commit write and after reading the committed header back.
-inline uint32_t history_journal_crc(HistoryJournalHeader h, const HistorySample* values,
-                                    size_t count) {
+inline uint32_t history_journal_crc_bytes(HistoryJournalHeader h, const void* payload,
+                                          size_t payload_bytes) {
     h.crc = 0;
     h.commit = HISTORY_JOURNAL_ERASED;
     uint32_t crc = config_crc32_update(CONFIG_CRC32_INIT,
                                        reinterpret_cast<const uint8_t*>(&h), sizeof(h));
-    if (values && count)
-        crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(values),
-                                  count * sizeof(HistorySample));
+    if (payload && payload_bytes)
+        crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(payload), payload_bytes);
     return config_crc32_final(crc);
+}
+
+inline uint32_t history_journal_crc(HistoryJournalHeader h, const HistorySample* values,
+                                    size_t count) {
+    return history_journal_crc_bytes(h, values, count * sizeof(HistorySample));
 }
 
 inline constexpr size_t history_journal_slot_offset(size_t slot) {
@@ -193,12 +217,14 @@ inline constexpr size_t history_journal_write_slot(size_t next_slot, bool candid
         ? next_slot : history_journal_next_sector_slot(next_slot);
 }
 
-// A capacity guard for the CURRENT dense catalog. The journal retains at least 72 hours even if all
-// three sources are active and close every bucket. The remaining slots are wear reserve: records are
-// ignored by age, never erased merely because they passed 72 hours.
+// A capacity guard for the CURRENT catalog. The journal retains at least 72 hours even if all three
+// trend sources close every five-minute bucket and checkup closes every hourly bucket. The remaining
+// slots are wear reserve: records are ignored by age, never erased merely because they passed 72 h.
 inline constexpr size_t HISTORY_FLASH_FUTURE_HOURS = 72;
 inline constexpr size_t HISTORY_FLASH_FUTURE_SAMPLES =
     HISTORY_FLASH_FUTURE_HOURS * 60u * 60u / HISTORY_DT_S;
+inline constexpr size_t HISTORY_FLASH_FUTURE_RECORDS =
+    HISTORY_FLASH_FUTURE_SAMPLES * 3u + HISTORY_FLASH_FUTURE_HOURS;
 static_assert(HISTORY_FLASH_FUTURE_SAMPLES == 864,
               "72 hours at the five-minute raster must contain 864 samples per ring");
 static_assert(HISTORY_JOURNAL_SLOT_BYTES <= HISTORY_FLASH_ERASE_BYTES &&
@@ -210,8 +236,7 @@ static_assert(HISTORY_JOURNAL_HEADER_BYTES +
               "the largest dense source vector must fit one journal slot");
 static_assert(HISTORY_JOURNAL_SLOT_COUNT <= UINT16_MAX,
               "restore indexes store physical slot numbers as uint16_t");
-static_assert(HISTORY_JOURNAL_SLOT_COUNT >=
-                  HISTORY_FLASH_FUTURE_SAMPLES * HISTORY_JOURNAL_SOURCE_COUNT,
+static_assert(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS,
               "the history partition must retain 72 h with every source active");
 
 // ── Which resets leave DRAM intact ──────────────────────────────────────────────────────────────

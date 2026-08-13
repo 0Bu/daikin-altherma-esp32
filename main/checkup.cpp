@@ -96,6 +96,17 @@ SemaphoreHandle_t     s_mtx = nullptr;
 std::atomic<bool>     s_reset_requested{false};
 std::atomic<bool>     s_dhw_reset_requested{false};
 bool                  s_reboot_saved_this_boot = false;
+// End of the newest COMPLETED bucket in this boot's monotonic clock.  Unlike P().span_us this is not
+// persisted: after a cold restore the journal's absolute end times are authoritative, and after a
+// warm restore the next live commit establishes a fresh wall-clock anchor before anything new is
+// appended.
+constexpr int64_t      kNoCommitUs = INT64_MIN;
+int64_t                s_last_commit_us = kNoCommitUs;
+uint8_t                s_live_commit_count = 0; // completed in THIS monotonic clock, max 23
+
+// One-shot cold-restore scratch. Static for the poll task's measured 8 KiB stack: 23 diagnostic
+// records are roughly 2 KiB and must never become an automatic array on that task.
+CheckupFlashRecord     s_restore_live[logic::CHECKUP_COMPLETED_BUCKETS];
 
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
 // This used to be a private copy here; nine of them had drifted into two different shapes.
@@ -196,6 +207,8 @@ void persist_wipe() {
     P().ring.reset();
     P().dhw.reset();
     P().dhw_handoff.magic = 0;
+    s_last_commit_us = kNoCommitUs;
+    s_live_commit_count = 0;
     persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
 }                       // reset is consumed asynchronously, after checkup_reset_on_detect set it
 
@@ -271,6 +284,8 @@ void checkup_start() {
         s_mtx = xSemaphoreCreateMutex();
         if (!s_mtx) diag_printf("checkup: mutex alloc failed — observation disabled this boot\n");
     }
+    s_last_commit_us = kNoCommitUs;
+    s_live_commit_count = 0;
     const uint32_t want_fp = logic::checkup_layout_fingerprint();
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
     s_persist_verdict = logic::checkup_restore_verdict(reason, P().magic, P().version,
@@ -474,6 +489,14 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         const uint32_t skipped = logic::checkup_skipped(s_state.bucket, bucket);
         P().ring.commit(skipped);
         P().dhw.commit(skipped);
+        s_last_commit_us = now;
+        const uint32_t committed_now = 1u +
+            (skipped < logic::CHECKUP_COMPLETED_BUCKETS
+                ? skipped : logic::CHECKUP_COMPLETED_BUCKETS);
+        const uint32_t live_total = static_cast<uint32_t>(s_live_commit_count) + committed_now;
+        s_live_commit_count = static_cast<uint8_t>(
+            live_total < logic::CHECKUP_COMPLETED_BUCKETS
+                ? live_total : logic::CHECKUP_COMPLETED_BUCKETS);
         persist_seal();          // the sealed bytes change ONLY here; see persist_crc()
         if (continuous_boundary) s_state.last_us = now; // dt=0, edge witnesses intentionally kept
         const bool reseal = logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring);
@@ -508,6 +531,169 @@ logic::CheckupReport checkup_report() {
         report.dhw_settle_remaining_s = p.settle_remaining_s;
     }
     return report;
+}
+
+bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
+                        int64_t& bucket, logic::CheckupJournalPayload& payload) {
+    if (!s_mtx || now_unix_s < 0) return false;
+    Lock lk(s_mtx, 0);
+    if (!lk.acquired() || s_reset_requested.load() || !s_model_fp ||
+        s_last_commit_us == kNoCommitUs || !s_live_commit_count || !P().ring.count ||
+        P().ring.count != P().dhw.count)
+        return false;
+
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us < s_last_commit_us) return false;
+    const int64_t latest_end_unix_s =
+        now_unix_s - (now_us - s_last_commit_us) / 1000000;
+    const int64_t newest = logic::checkup_journal_bucket(latest_end_unix_s);
+    if (newest == INT64_MIN) return false;
+    const size_t live_count = s_live_commit_count < P().ring.count
+        ? s_live_commit_count : P().ring.count;
+    const int64_t target = logic::checkup_journal_next_live_bucket(
+        after_bucket, newest, live_count);
+    if (target == INT64_MIN) return false;
+
+    const size_t age = static_cast<size_t>(newest - target);
+    const size_t ring_i = (static_cast<size_t>(P().ring.head) +
+                           logic::CHECKUP_COMPLETED_BUCKETS - 1 - age) %
+                          logic::CHECKUP_COMPLETED_BUCKETS;
+    const size_t dhw_i = (static_cast<size_t>(P().dhw.head) +
+                          logic::CHECKUP_COMPLETED_BUCKETS - 1 - age) %
+                         logic::CHECKUP_COMPLETED_BUCKETS;
+    payload = logic::CheckupJournalPayload{};
+    payload.model_fp = s_model_fp;
+    payload.end_unix_s = latest_end_unix_s -
+        static_cast<int64_t>(age) * logic::CHECKUP_DT_S;
+    payload.checkup = P().ring.buf[ring_i];
+    payload.dhw = P().dhw.buf[dhw_i];
+    bucket = target;
+    return logic::checkup_journal_bucket(payload.end_unix_s) == target;
+}
+
+CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
+                                                int64_t now_unix_s) {
+    if (!s_mtx || now_unix_s < 0 || (!records && count))
+        return CheckupFlashRestoreResult::Ignored;
+    Lock lk(s_mtx, 0);
+    if (!lk.acquired()) return CheckupFlashRestoreResult::Deferred;
+    // Detection owns the identity and queues its reset from another point in the same poll cycle.
+    // Never restore in between those two acts. A valid RAM adoption is newer and loses no completed
+    // hour, so it wins without mixing the same evidence in twice.
+    if (!s_model_fp || s_reset_requested.load()) return CheckupFlashRestoreResult::Deferred;
+    if (s_persist_verdict == logic::CheckupRestore::Accept)
+        return CheckupFlashRestoreResult::Ignored;
+
+    const int64_t now_us = esp_timer_get_time();
+    size_t live_count = 0;
+    if (P().ring.count && P().ring.count == P().dhw.count &&
+        s_last_commit_us != kNoCommitUs && now_us >= s_last_commit_us) {
+        const int64_t latest_end = now_unix_s - (now_us - s_last_commit_us) / 1000000;
+        const size_t available = s_live_commit_count < P().ring.count
+            ? s_live_commit_count : P().ring.count;
+        const size_t oldest_i = (static_cast<size_t>(P().ring.head) +
+                                 logic::CHECKUP_COMPLETED_BUCKETS - available) %
+                                logic::CHECKUP_COMPLETED_BUCKETS;
+        for (size_t i = 0; i < available; i++) {
+            CheckupFlashRecord& rec = s_restore_live[live_count++];
+            rec.payload = logic::CheckupJournalPayload{};
+            rec.payload.model_fp = s_model_fp;
+            rec.payload.end_unix_s = latest_end -
+                static_cast<int64_t>(available - 1 - i) * logic::CHECKUP_DT_S;
+            rec.payload.checkup =
+                P().ring.buf[(oldest_i + i) % logic::CHECKUP_COMPLETED_BUCKETS];
+            rec.payload.dhw =
+                P().dhw.buf[(oldest_i + i) % logic::CHECKUP_COMPLETED_BUCKETS];
+            rec.bucket = logic::checkup_journal_bucket(rec.payload.end_unix_s);
+        }
+    }
+
+    int64_t earliest_bucket = INT64_MAX;
+    int64_t latest_bucket = INT64_MIN;
+    int64_t earliest_stored_end = INT64_MAX;
+    size_t accepted = 0;
+    auto consider = [&](const CheckupFlashRecord& rec, bool stored) {
+        if (rec.payload.reserved != 0 || rec.payload.model_fp != s_model_fp ||
+            rec.bucket != logic::checkup_journal_bucket(rec.payload.end_unix_s) ||
+            !logic::checkup_journal_in_window(rec.payload.end_unix_s, now_unix_s))
+            return;
+        if (rec.bucket < earliest_bucket) earliest_bucket = rec.bucket;
+        if (rec.bucket > latest_bucket) latest_bucket = rec.bucket;
+        if (stored) {
+            accepted++;
+            if (rec.payload.end_unix_s < earliest_stored_end)
+                earliest_stored_end = rec.payload.end_unix_s;
+        }
+    };
+    for (size_t i = 0; i < count; i++) consider(records[i], true);
+    for (size_t i = 0; i < live_count; i++) consider(s_restore_live[i], false);
+    if (!accepted) return CheckupFlashRestoreResult::Ignored;
+
+    // If this boot has not completed an hour yet, explicit empty buckets represent wall time during
+    // which the board was off. They age older evidence without inventing observed seconds.
+    if (!live_count) {
+        const int64_t before_open = logic::checkup_journal_bucket(now_unix_s) - 1;
+        if (before_open > latest_bucket) latest_bucket = before_open;
+    }
+    const int64_t capacity_start = latest_bucket -
+        static_cast<int64_t>(logic::CHECKUP_COMPLETED_BUCKETS - 1);
+    if (earliest_bucket < capacity_start) earliest_bucket = capacity_start;
+
+    const logic::CheckupBucket pending = P().ring.pending;
+    const logic::DhwLossBucket dhw_pending = P().dhw.pending;
+    const int64_t first_sample_us = P().ring.first_sample_us;
+    const int64_t latest_sample_us = P().ring.latest_sample_us;
+    const int64_t live_span_us =
+        first_sample_us >= 0 && latest_sample_us >= first_sample_us
+            ? latest_sample_us - first_sample_us : 0;
+    P().ring.reset();
+    P().dhw.reset();
+
+    auto find = [&](int64_t wanted, logic::CheckupBucket& out,
+                    logic::DhwLossBucket& dhw_out) {
+        // This boot is strictly newer than flash on a collision, although normal one-hour cadence
+        // makes such a collision impossible across a power gap.
+        for (size_t i = 0; i < live_count; i++) {
+            const auto& rec = s_restore_live[i];
+            if (rec.bucket == wanted) {
+                out = rec.payload.checkup; dhw_out = rec.payload.dhw; return true;
+            }
+        }
+        for (size_t i = count; i > 0; i--) {
+            const auto& rec = records[i - 1];             // a newer duplicate wins
+            if (rec.bucket == wanted && rec.payload.reserved == 0 &&
+                rec.payload.model_fp == s_model_fp &&
+                logic::checkup_journal_in_window(rec.payload.end_unix_s, now_unix_s) &&
+                rec.bucket == logic::checkup_journal_bucket(rec.payload.end_unix_s)) {
+                out = rec.payload.checkup; dhw_out = rec.payload.dhw; return true;
+            }
+        }
+        return false;
+    };
+    for (int64_t b = earliest_bucket; b <= latest_bucket; b++) {
+        logic::CheckupBucket cb;
+        logic::DhwLossBucket db;
+        (void)find(b, cb, db);       // absent interval stays an explicit all-zero gap
+        P().ring.push(cb);
+        P().dhw.push(db);
+    }
+    P().ring.pending = pending;
+    P().dhw.pending = dhw_pending;
+    P().ring.first_sample_us = first_sample_us;
+    P().ring.latest_sample_us = latest_sample_us;
+    P().ring.age_buckets = static_cast<uint8_t>(
+        P().ring.count < logic::CHECKUP_BUCKETS ? P().ring.count : logic::CHECKUP_BUCKETS);
+
+    const int64_t stored_start = earliest_stored_end - logic::CHECKUP_DT_S;
+    int64_t wall_span_us = now_unix_s > stored_start
+        ? (now_unix_s - stored_start) * 1000000 : 0;
+    if (wall_span_us > logic::CHECKUP_WINDOW_US) wall_span_us = logic::CHECKUP_WINDOW_US;
+    P().ring.carried_span_us = wall_span_us > live_span_us ? wall_span_us - live_span_us : 0;
+    s_persist_verdict = logic::CheckupRestore::Accept;
+    persist_seal();
+    diag_printf("checkup: restored %u hourly bucket(s) from flash after power loss\n",
+                static_cast<unsigned>(accepted));
+    return CheckupFlashRestoreResult::Restored;
 }
 
 } // namespace daik

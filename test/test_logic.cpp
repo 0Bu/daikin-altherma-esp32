@@ -11549,6 +11549,27 @@ static void test_checkup_persist() {
     open.pending.starts = 7;
     open.pending = CheckupBucket{};
     CHECK(open.pending.covered_s == 0 && open.pending.starts == 0);
+
+    // The durable source stores the EXACT hourly counters, not a reconstruction from five-minute
+    // trends. Its identity covers both their meaning and the payload wire layout; its exact end time
+    // rejects future/stale records and preserves a real rolling-day boundary after cold boot.
+    CHECK(CHECKUP_JOURNAL_PAYLOAD_BYTES >= sizeof(CheckupJournalPayload));
+    CHECK(CHECKUP_JOURNAL_PAYLOAD_BYTES % sizeof(uint16_t) == 0);
+    CHECK(CHECKUP_JOURNAL_WORDS * sizeof(uint16_t) == CHECKUP_JOURNAL_PAYLOAD_BYTES);
+    CHECK(checkup_journal_fingerprint() == checkup_journal_fingerprint());
+    CHECK(checkup_journal_fingerprint() != checkup_layout_fingerprint());
+    CHECK(checkup_journal_bucket(7'199) == 1);
+    CHECK(checkup_journal_bucket(7'200) == 2);
+    CHECK(checkup_journal_bucket(-1) == INT64_MIN);
+    CHECK(checkup_journal_in_window(100'000, 100'000));
+    CHECK(checkup_journal_in_window(100'000 - CHECKUP_WINDOW_S + 1, 100'000));
+    CHECK(!checkup_journal_in_window(100'001, 100'000));       // future is never slid to now
+    CHECK(!checkup_journal_in_window(100'000 - CHECKUP_WINDOW_S, 100'000));
+    CHECK(checkup_journal_next_live_bucket(INT64_MIN, 6, 1) == 6);
+    CHECK(checkup_journal_next_live_bucket(4, 6, 1) == 6);     // hour 5 was a power-off gap
+    CHECK(checkup_journal_next_live_bucket(4, 6, 2) == 5);
+    CHECK(checkup_journal_next_live_bucket(6, 6, 2) == INT64_MIN);
+    CHECK(checkup_journal_next_live_bucket(INT64_MIN, 6, 0) == INT64_MIN);
 }
 
 // ── logic/history_persist.hpp ───────────────────────────────────────────────────────────────────
@@ -11644,6 +11665,8 @@ static void test_history_persist() {
     CHECK(history_journal_source_rings(HistoryJournalSource::X10a) == 31);
     CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 12);
     CHECK(history_journal_source_rings(HistoryJournalSource::Env3) == 3);
+    CHECK(history_journal_source_rings(HistoryJournalSource::Checkup) == 0);
+    CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 4);
     CHECK(history_journal_slot_offset(17) == 17 * 256);
     CHECK(history_journal_sector_first_slot(17) == 16);
     CHECK(history_journal_next_sector_slot(15) == 16);
@@ -11654,8 +11677,8 @@ static void test_history_persist() {
     CHECK(history_journal_write_slot(HISTORY_JOURNAL_SLOT_COUNT - 1, false) == 0);
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_JOURNAL_SLOT_COUNT >=
-          HISTORY_FLASH_FUTURE_SAMPLES * HISTORY_JOURNAL_SOURCE_COUNT);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 2664);
+    CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
     HistoryJournalHeader jh{};
@@ -11685,6 +11708,39 @@ static void test_history_persist() {
     CHECK(!history_journal_header_matches(jh, fp ^ 1u));   // catalog changes fail closed
     jh.value_count--;
     CHECK(!history_journal_header_matches(jh, fp));        // a short dense vector cannot shift ids
+
+    // The fourth source extends v1 without changing the first three ids or invalidating their old
+    // records. Its own layout fingerprint, hourly raster and word-rounded payload width are all
+    // mandatory, and CRC covers the exact persisted CheckupBucket + DhwLossBucket bytes.
+    CheckupJournalPayload checkup_payload;
+    checkup_payload.model_fp = checkup_model_fingerprint("altherma3");
+    checkup_payload.end_unix_s = 1'700'002'800;
+    checkup_payload.checkup.rps_observed_s = 3'599;
+    checkup_payload.checkup.starts = 7;
+    checkup_payload.dhw.observed_s = 3'500;
+    uint8_t checkup_words[CHECKUP_JOURNAL_PAYLOAD_BYTES] = {};
+    std::memcpy(checkup_words, &checkup_payload, sizeof(checkup_payload));
+    HistoryJournalHeader ch = jh;
+    ch.source = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    ch.catalog_fp = checkup_journal_fingerprint();
+    ch.value_count = static_cast<uint16_t>(CHECKUP_JOURNAL_WORDS);
+    ch.dt_s = CHECKUP_DT_S;
+    ch.commit = HISTORY_JOURNAL_ERASED;
+    ch.crc = history_journal_crc_bytes(ch, checkup_words, sizeof(checkup_words));
+    ch.commit = HISTORY_JOURNAL_COMMITTED;
+    CHECK(history_journal_header_matches(ch, checkup_journal_fingerprint(),
+                                         CHECKUP_JOURNAL_WORDS, CHECKUP_DT_S));
+    CHECK(!history_journal_header_matches(ch, fp));        // never interpreted as a trend vector
+    CHECK(ch.crc == history_journal_crc_bytes(ch, checkup_words, sizeof(checkup_words)));
+    checkup_words[offsetof(CheckupJournalPayload, checkup) +
+                  offsetof(CheckupBucket, starts)] ^= 1;
+    CHECK(ch.crc != history_journal_crc_bytes(ch, checkup_words, sizeof(checkup_words)));
+    checkup_words[offsetof(CheckupJournalPayload, checkup) +
+                  offsetof(CheckupBucket, starts)] ^= 1;
+    CHECK(!history_journal_header_matches(ch, checkup_journal_fingerprint() ^ 1u,
+                                          CHECKUP_JOURNAL_WORDS, CHECKUP_DT_S));
+    CHECK(!history_journal_header_matches(ch, checkup_journal_fingerprint(),
+                                          CHECKUP_JOURNAL_WORDS, HISTORY_DT_S));
 
     // --- absolute buckets -----------------------------------------------------------------------
     CHECK(history_bucket_from_unix(0) == 0);

@@ -2,6 +2,7 @@
 // encoding) lives in logic/history.hpp and is host-tested; this file is the plumbing: static
 // storage, one mutex, and the fold from the poll cycle's values into a bucket.
 #include "history.hpp"
+#include "checkup.hpp"                // fourth journal source: exact hourly diagnostic buckets
 #include "diag_log.hpp"
 #include "heap_guard.hpp"
 #include "logic/binary_semantics.hpp"
@@ -432,22 +433,30 @@ int64_t source_anchor_bucket_locked(HistorySource src) {
 }
 
 // ── The history flash journal ───────────────────────────────────────────────────────────────────
-// One dense source vector per completed five-minute bucket, appended into 256-byte slots. Sixteen
-// slots share a 4 KiB erase sector and the whole 4 MiB partition is traversed before any sector is
-// reused. The commit word is programmed last, so a power cut can invalidate only the record being
-// written; the preceding slot remains the head.
+// One dense trend vector per completed five-minute bucket, or one exact diagnostic payload per
+// completed hour, appended into 256-byte slots. Sixteen slots share a 4 KiB erase sector and the
+// whole 4 MiB partition is traversed before any sector is reused. The commit word is programmed
+// last, so a power cut can invalidate only the record being written; the preceding slot remains the
+// head.
 struct FlashJournalRecord {
     logic::HistoryJournalHeader header;
-    HistorySample values[logic::HISTORY_JOURNAL_MAX_SOURCE_RINGS];
+    // Raw because the first three sources carry dense int16 samples while source four carries one
+    // CheckupJournalPayload. The common header's value_count remains a count of 16-bit words, so old
+    // v1 trend records stay byte-for-byte readable.
+    alignas(8) uint8_t payload[logic::HISTORY_JOURNAL_SLOT_BYTES -
+                               logic::HISTORY_JOURNAL_HEADER_BYTES];
 };
-static_assert(sizeof(FlashJournalRecord) <= logic::HISTORY_JOURNAL_SLOT_BYTES,
-              "one journal record must fit its physical slot");
+static_assert(sizeof(FlashJournalRecord) == logic::HISTORY_JOURNAL_SLOT_BYTES,
+              "one journal record is exactly one physical slot");
+static_assert(logic::CHECKUP_JOURNAL_PAYLOAD_BYTES <= sizeof(FlashJournalRecord::payload),
+              "one diagnostic hour must fit the shared journal slot");
 
 const esp_partition_t* s_flash_part = nullptr;
 SemaphoreHandle_t s_flash_mtx = nullptr;       // serialises poll service, shutdown and factory erase
 bool s_flash_shutdown_started = false;         // the shutdown handler must not flush twice
 bool s_flash_forgotten = false;                // a factory reset must not write on the way out
 bool s_flash_restore_done = false;
+bool s_flash_checkup_restore_done = false;
 bool s_flash_scan_ok = false;
 
 constexpr size_t kTotalRings = logic::HISTORY_FLASH_TOTAL_RINGS;
@@ -456,9 +465,9 @@ constexpr size_t kRestoreRingsPerTick = 4;
 
 size_t   s_flash_next_slot = 0;
 uint64_t s_flash_next_sequence = 1;
-int64_t  s_flash_last_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN};
-int64_t  s_flash_newest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN};
-int64_t  s_flash_oldest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN};
+int64_t  s_flash_last_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN, INT64_MIN};
+int64_t  s_flash_newest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN, INT64_MIN};
+int64_t  s_flash_oldest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN, INT64_MIN};
 uint16_t s_flash_restore_slots[kJournalSources][HISTORY_SAMPLES] = {};
 uint16_t s_flash_restore_slot_count[kJournalSources] = {};
 size_t   s_flash_restore_ring = 0;
@@ -1069,8 +1078,16 @@ logic::HistoryJournalSource journal_source(HistorySource src) {
 
 bool flash_record_valid(const FlashJournalRecord& r) {
     const auto& h = r.header;
-    return logic::history_journal_header_matches(h, P().catalog_fp) &&
-           h.crc == logic::history_journal_crc(h, r.values, h.value_count);
+    const bool checkup = h.source ==
+        static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
+    const bool header_ok = checkup
+        ? logic::history_journal_header_matches(
+              h, logic::checkup_journal_fingerprint(),
+              static_cast<uint16_t>(logic::CHECKUP_JOURNAL_WORDS), logic::CHECKUP_DT_S)
+        : logic::history_journal_header_matches(h, P().catalog_fp);
+    const size_t payload_bytes = static_cast<size_t>(h.value_count) * sizeof(HistorySample);
+    return header_ok && h.crc ==
+        logic::history_journal_crc_bytes(h, r.payload, payload_bytes);
 }
 
 esp_err_t flash_read_record(size_t slot, FlashJournalRecord& out) {
@@ -1157,13 +1174,16 @@ bool flash_journal_scan() {
                 seen_valid++;
                 const size_t src = r.header.source;
                 if (!done[src]) {
+                    const size_t retain = src ==
+                        static_cast<size_t>(logic::HistoryJournalSource::Checkup)
+                            ? logic::CHECKUP_COMPLETED_BUCKETS : HISTORY_SAMPLES;
                     const int64_t oldest = s_flash_newest_bucket[src] -
-                                           static_cast<int64_t>(HISTORY_SAMPLES - 1);
+                                           static_cast<int64_t>(retain - 1);
                     if (r.header.bucket < oldest) {
                         done[src] = true;
                         remaining--;
                     } else if (r.header.bucket <= s_flash_newest_bucket[src] &&
-                               s_flash_restore_slot_count[src] < HISTORY_SAMPLES) {
+                               s_flash_restore_slot_count[src] < retain) {
                         s_flash_restore_slots[src][s_flash_restore_slot_count[src]++] =
                             static_cast<uint16_t>(slot);
                         if (s_flash_oldest_bucket[src] == INT64_MIN ||
@@ -1177,6 +1197,8 @@ bool flash_journal_scan() {
         }
     }
 
+    const size_t checkup_src = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
+    s_flash_checkup_restore_done = newest_sequence[checkup_src] == 0;
     if (!highest_sequence) s_flash_restore_done = true;
     diag_printf("history: journal ready (%u valid, %u torn/invalid, next slot %u, %u-byte records)\n",
                 static_cast<unsigned>(valid_records), static_cast<unsigned>(bad_records),
@@ -1270,9 +1292,50 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
         HistorySample sample = HISTORY_NO_READING;
         const logic::TrendRing* r = ring_at(src, i);
         if (r) (void)r->sample_from_newest(age, sample);
-        out.values[i] = sample;
+        std::memcpy(out.payload + i * sizeof(sample), &sample, sizeof(sample));
     }
-    h.crc = logic::history_journal_crc(h, out.values, value_count);
+    h.crc = logic::history_journal_crc_bytes(
+        h, out.payload, value_count * sizeof(HistorySample));
+    return true;
+}
+
+bool flash_build_next_checkup_record(FlashJournalRecord& out, TickType_t wait_ticks) {
+    (void)wait_ticks; // checkup_flash_next uses the non-blocking independent owner lock
+    std::memset(&out, 0xff, sizeof(out));
+    int64_t unix_s = -1; int32_t ms = 0;
+    time_now(unix_s, ms);
+    if (unix_s < 0) return false;
+
+    const size_t src_i = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
+    int64_t bucket = INT64_MIN;
+    logic::CheckupJournalPayload payload;
+    if (!checkup_flash_next(unix_s, s_flash_last_bucket[src_i], bucket, payload)) return false;
+
+    auto& h = out.header;
+    h.magic = logic::HISTORY_JOURNAL_MAGIC;
+    h.version = logic::HISTORY_JOURNAL_VERSION;
+    h.source = static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
+    h.flags = 0;
+    h.catalog_fp = logic::checkup_journal_fingerprint();
+    h.crc = 0;
+    h.commit = logic::HISTORY_JOURNAL_ERASED;
+    h.value_count = static_cast<uint16_t>(logic::CHECKUP_JOURNAL_WORDS);
+    h.slot_bytes = static_cast<uint16_t>(logic::HISTORY_JOURNAL_SLOT_BYTES);
+    h.sequence = s_flash_next_sequence;
+    h.bucket = bucket;
+    h.dt_s = logic::CHECKUP_DT_S;
+    h.rings[0] = static_cast<uint16_t>(TREND_COUNT);
+    h.rings[1] = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+    h.rings[2] = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+    h.reserved = 0xffff;
+    std::memcpy(out.payload, &payload, sizeof(payload));
+    // The count is word-rounded. Keep the possible final padding byte deterministic and covered by
+    // CRC instead of inheriting the erased 0xff left by the slot initialisation.
+    if (logic::CHECKUP_JOURNAL_PAYLOAD_BYTES > sizeof(payload))
+        std::memset(out.payload + sizeof(payload), 0,
+                    logic::CHECKUP_JOURNAL_PAYLOAD_BYTES - sizeof(payload));
+    h.crc = logic::history_journal_crc_bytes(
+        h, out.payload, logic::CHECKUP_JOURNAL_PAYLOAD_BYTES);
     return true;
 }
 
@@ -1310,11 +1373,48 @@ esp_err_t flash_append_record(FlashJournalRecord& r) {
 
 } // namespace
 
+static void history_restore_checkup_flash() {
+    if (s_flash_checkup_restore_done || !s_flash_mtx) return;
+    const size_t src = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
+    static_assert(sizeof(CheckupFlashRecord) * logic::CHECKUP_COMPLETED_BUCKETS <=
+                      sizeof(s_flash_sector),
+                  "cold diagnostic restore reuses the 4 KiB journal scan scratch");
+    auto* records = reinterpret_cast<CheckupFlashRecord*>(s_flash_sector);
+    size_t count = 0;
+    Lock flash_lk(s_flash_mtx, 0);
+    if (!flash_lk.acquired()) return;
+    // The index is newest-first. Replay oldest-first so checkup_flash_restore can resolve a
+    // duplicate bucket by taking the later entry, matching the trend splice's rule.
+    for (size_t k = s_flash_restore_slot_count[src]; k > 0; k--) {
+        FlashJournalRecord r;
+        const esp_err_t e = flash_read_record(s_flash_restore_slots[src][k - 1], r);
+        if (e != ESP_OK) {
+            diag_printf("checkup: flash restore stopped (%s)\n", esp_err_to_name(e));
+            s_flash_checkup_restore_done = true;
+            return;
+        }
+        if (!flash_record_valid(r) || r.header.source != src ||
+            count >= logic::CHECKUP_COMPLETED_BUCKETS)
+            continue;
+        CheckupFlashRecord& out = records[count++];
+        out.bucket = r.header.bucket;
+        std::memcpy(&out.payload, r.payload, sizeof(out.payload));
+    }
+    int64_t unix_s = -1; int32_t ms = 0;
+    time_now(unix_s, ms);
+    const CheckupFlashRestoreResult result =
+        checkup_flash_restore(records, count, unix_s);
+    if (result != CheckupFlashRestoreResult::Deferred)
+        s_flash_checkup_restore_done = true;
+}
+
 // Restore at most four rings per poll tick. Each batch reads a source's indexed records once and
 // transposes four values into ring-shaped blocks; the largest burst is ~74 KiB of flash reads, but
 // only 2.3 KiB of static scratch and no heap allocation.
 void history_service_flash_restore() {
-    if (s_flash_restore_done || s_flash_forgotten || !s_flash_scan_ok || !time_synced()) return;
+    if (s_flash_forgotten || !s_flash_scan_ok || !time_synced()) return;
+    history_restore_checkup_flash();
+    if (s_flash_restore_done) return;
     if (s_flash_restore_ring >= kTotalRings) { s_flash_restore_done = true; return; }
 
     size_t first_idx = 0;
@@ -1343,8 +1443,12 @@ void history_service_flash_restore() {
             if (!flash_record_valid(r) || r.header.bucket < oldest || r.header.bucket > newest)
                 continue;
             const size_t pos = static_cast<size_t>(r.header.bucket - oldest);
-            for (size_t b = 0; b < batch; b++)
-                s_flash_restore_blocks[b][pos] = r.values[first_idx + b];
+            for (size_t b = 0; b < batch; b++) {
+                HistorySample sample = HISTORY_NO_READING;
+                std::memcpy(&sample,
+                            r.payload + (first_idx + b) * sizeof(HistorySample), sizeof(sample));
+                s_flash_restore_blocks[b][pos] = sample;
+            }
         }
     }
     if (read_failed) {
@@ -1384,8 +1488,18 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
         bool appended = false;
         for (size_t try_src = 0; try_src < kJournalSources; try_src++) {
             const size_t src_i = (s_flash_service_source + try_src) % kJournalSources;
+            // Profile detection can legitimately take minutes while X10A is unavailable. Keep the
+            // independent trend sources durable during that wait, but never append a diagnostic
+            // record ahead of its one-shot restore or it could become the apparent journal head.
+            if (src_i == static_cast<size_t>(logic::HistoryJournalSource::Checkup) &&
+                !s_flash_checkup_restore_done)
+                continue;
             FlashJournalRecord r;
-            if (!flash_build_next_record(static_cast<HistorySource>(src_i), r, wait_ticks)) continue;
+            const bool built = src_i ==
+                static_cast<size_t>(logic::HistoryJournalSource::Checkup)
+                    ? flash_build_next_checkup_record(r, wait_ticks)
+                    : flash_build_next_record(static_cast<HistorySource>(src_i), r, wait_ticks);
+            if (!built) continue;
             const esp_err_t e = flash_append_record(r);
             if (e != ESP_OK) {
                 diag_printf("history: journal append failed at slot %u (%s)\n",

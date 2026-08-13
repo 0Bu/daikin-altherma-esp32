@@ -51,7 +51,8 @@ that are not judgements carry the honesty:
   a green verdict it has no evidence for.
 
 Storage is 23 completed one-hour buckets plus the pending hour, so the represented span is never an
-almost-25-hour "24 h"; `full_span` is computed from real first/latest monotonic timestamps. An
+almost-25-hour "24 h"; `full_span` is computed from real monotonic timestamps while running and
+absolute interval ends after a cold restore. An
 explicit re-detection, or a profile or RX/TX identity change, resets the window rather than mixing an
 in-flight old-link sample into it; HomeHub-only edits do not.
 
@@ -65,14 +66,16 @@ sample order. The explicit static cost is 64 B × 24 = **1,536 B**, 432 B more t
 layout (384 B payload plus 48 B alignment); the layout fingerprint retires the older `.noinit`
 window on update.
 
-**A reboot no longer does.** This is the measurement that tolerates one worst: the window is 24 h and
+**A reboot or power interruption no longer discards the completed hours.** This is the measurement that tolerates one worst: the window is 24 h and
 the requirements are hours, so losing it loses the *verdict*, not a few samples — and a device on the
 `dev` channel that keeps up to date may never reach 24 h at all. The rings therefore live in
-`.noinit` DRAM, so any reset that kept power carries them across at no cost in RAM, flash or a
-partition. A power cut still does not, and `/status.health.persist` names which happened rather than
-letting a card that emptied itself read as a defect.
+`.noinit` DRAM, so any reset that kept power carries them across without a write. Each completed
+hour is additionally appended to the existing upper-flash `history` journal with its exact interval
+end, model identity, layout fingerprint and CRC. That path restores the rolling evidence after OTA
+section movement and power loss; only the open hour can be missing. `/status.health.persist` states
+whether earlier observations were accepted instead of letting a shortened card look unexplained.
 
-Two things guard the adoption, because ~1.2 KB of prior state is claimed in one act. A **layout
+The same checks guard both media. A **layout
 fingerprint** over the geometry, every row locator and every counting threshold invalidates the
 record whenever a firmware update changes what a stored counter means — a bucket is a pile of
 anonymous counters, so a valid checksum over silently re-meaning bytes is exactly what a checksum

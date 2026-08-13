@@ -20,24 +20,20 @@
 // following the `dev` channel, where a firmware-relevant merge publishes a build and an owner who
 // keeps up to date may never reach 24 h at all.
 //
-// ── One medium, and the honest limit ────────────────────────────────────────────────────────────
-// .noinit DRAM only. The rings are 1186 bytes and they were already static, so this costs no RAM,
-// no flash write and no new partition — the arrays simply stop being initialised at startup.
+// ── Two media, one meaning ──────────────────────────────────────────────────────────────────────
+// .noinit DRAM remains the zero-write fast path for a reset that keeps power.  The same completed
+// hourly buckets are also appended to the existing `history` flash journal once wall time is known.
+// That second path covers power loss and section movement across OTA; only the open hour can be lost.
 //
-// It does NOT cover a power cycle, and nothing here pretends otherwise: /status.health.persist
-// reports "power_cycle" and the window starts empty, exactly as it always did.
+// A diagnostic bucket is not reconstructed from the five-minute trends: those rings deliberately
+// discard the short events this check counts.  Instead the exact CheckupBucket + DhwLossBucket pair
+// rides as the fourth journal source.  Its header carries checkup_journal_fingerprint(), and every
+// payload carries the detected model fingerprint and exact interval end.  A firmware meaning change,
+// a different unit, an invalid clock anchor or a torn flash write therefore fails closed rather than
+// turning old anonymous counters into a current verdict.
 //
-// The trends have since gained a real flash JOURNAL (#442): the `history` partition is part of the
-// official 8 MB table, and history_persist.hpp splices the last 24 hours back by absolute wall-clock
-// bucket across OTA, ordinary reboot and power loss. The checkup deliberately does NOT ride it, and
-// the honest consequence is stated rather than implied: this window is `.noinit` only, so an OTA
-// that moves the image layout starts it empty. Whether the checkup should get a journal of its own
-// is a real open question and a bigger one than a comment — a bucket is a pile of anonymous counters
-// whose meaning is pinned by the layout fingerprint below, so journaling it means deciding what a
-// stored counter means across firmware versions, not merely where to put the bytes.
-//
-// One measurement is worth keeping from before that journal existed, because it is what the seal is
-// for: this same board DID keep its rings across a real OTA through .noinit alone. The new image's
+// One measurement is worth keeping from before the diagnostic journal existed, because it is what
+// the RAM seal is for: this same board DID keep its rings across a real OTA through .noinit alone. The new image's
 // sections can move, and then the bytes are not where the new build looks — but they need not, and
 // on an ordinary incremental build they did not. So .noinit is not a power-cycle-only path; it is
 // the path that fails closed when the layout moves, which is what the seal below makes safe.
@@ -212,6 +208,66 @@ inline uint32_t checkup_model_fingerprint(const char* profile_id) {
     }
     crc = config_crc32_update(crc, &nul, 1);
     return config_crc32_final(crc);
+}
+
+// ── Durable hourly journal payload ───────────────────────────────────────────────────────────────
+// history_persist.hpp owns the common 256-byte slot/header protocol; this header owns what the
+// diagnostic bytes MEAN.  `end_unix_s` is the exact end of the measured one-hour interval, not only
+// floor(unix/3600): after a cold boot it lets full_span remain an elapsed-time statement and lets a
+// record older than the rolling day be rejected even when the board was powered off for weeks.
+struct CheckupJournalPayload {
+    uint32_t model_fp = 0;
+    uint32_t reserved = 0;
+    int64_t end_unix_s = -1;
+    CheckupBucket checkup;
+    DhwLossBucket dhw;
+};
+
+inline constexpr size_t CHECKUP_JOURNAL_WORD_BYTES = sizeof(uint16_t);
+inline constexpr size_t CHECKUP_JOURNAL_WORDS =
+    (sizeof(CheckupJournalPayload) + CHECKUP_JOURNAL_WORD_BYTES - 1) /
+    CHECKUP_JOURNAL_WORD_BYTES;
+inline constexpr size_t CHECKUP_JOURNAL_PAYLOAD_BYTES =
+    CHECKUP_JOURNAL_WORDS * CHECKUP_JOURNAL_WORD_BYTES;
+
+// The common journal version cannot name a change inside this source: its first three source ids
+// must remain compatible with already-written trend records.  Fold the diagnostic wire shape into
+// this source's identity instead, beside every threshold/locator already covered above.
+inline uint32_t checkup_journal_fingerprint() {
+    uint32_t crc = CONFIG_CRC32_INIT;
+    crc = checkup_fp_u32(crc, checkup_layout_fingerprint());
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupJournalPayload)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, model_fp)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, end_unix_s)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, checkup)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, dhw)));
+    return config_crc32_final(crc);
+}
+
+inline constexpr int64_t checkup_journal_bucket(int64_t end_unix_s) {
+    return end_unix_s >= 0 ? end_unix_s / static_cast<int64_t>(CHECKUP_DT_S) : INT64_MIN;
+}
+
+// A completed interval contributes while any part of its one-hour extent can still be inside the
+// rolling day. Future records are refused rather than slid to now; a stale record after a long power
+// outage is valid flash, but no longer current diagnostic evidence.
+inline constexpr bool checkup_journal_in_window(int64_t end_unix_s, int64_t now_unix_s) {
+    return end_unix_s >= 0 && now_unix_s >= 0 && end_unix_s <= now_unix_s &&
+           end_unix_s > now_unix_s - static_cast<int64_t>(CHECKUP_WINDOW_S);
+}
+
+// Only buckets completed in THIS boot have the current monotonic-to-wall-clock anchor. After a
+// cold restore the first new completion need not be adjacent to the newest stored wall-clock bucket
+// (the board may have been off for part of an hour), so jump to the oldest genuinely live bucket
+// instead of relabelling a restored predecessor as the missing hour.
+inline constexpr int64_t checkup_journal_next_live_bucket(int64_t after_bucket,
+                                                          int64_t newest_live_bucket,
+                                                          size_t live_count) {
+    if (!live_count || newest_live_bucket == INT64_MIN || after_bucket >= newest_live_bucket)
+        return INT64_MIN;
+    const int64_t oldest_live = newest_live_bucket - static_cast<int64_t>(live_count - 1);
+    const int64_t target = after_bucket == INT64_MIN ? oldest_live : after_bucket + 1;
+    return target < oldest_live ? oldest_live : target;
 }
 
 // ── Intentional-reboot DHW handoff ──────────────────────────────────────────────────────────────
