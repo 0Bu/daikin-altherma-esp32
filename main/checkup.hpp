@@ -8,23 +8,30 @@
 // largest CONTIGUOUS free block, and a static array does not compete for it. 24 one-hour buckets
 // cost logic/checkup.hpp's CHECKUP_BYTES.
 //
-// Still not in NVS — hourly buckets there would be ~24 writes a day into the partition holding the
-// WiFi credentials, for a convenience, and that trade is refused exactly as history.hpp refuses it.
-// What "not in NVS" no longer means is "gone at every reboot": the rings live in .noinit DRAM, so
-// any reset that KEPT POWER — a /set_* save, an OTA install, a panic, the task watchdog — carries
-// them across at no cost in RAM, flash or a partition (logic/checkup_persist.hpp). LOSING POWER is
-// still unrecovered and still stated rather than hidden: /status.health.persist names why the window
-// started empty, and every check reports the coverage it actually has (logic/checkup.hpp's
-// Collecting verdict) instead of a green light bought with no evidence.
+// Still not in NVS — hourly buckets there would write into the partition holding WiFi credentials.
+// Resets that KEEP POWER use the zero-write .noinit fast path; completed hours also ride the existing
+// append-only `history` partition, so OTA layout changes and power loss retain the exact counted
+// evidence without reconstructing it from lossy five-minute trends. See logic/checkup_persist.hpp.
 //
 // An explicit X10A re-detection, profile or pin identity change still empties the window. A
 // HomeHub-only edit is a separate source and deliberately does not.
 #include "hp_poll.hpp"          // CachedValue
 #include "logic/checkup.hpp"
+#include "logic/checkup_persist.hpp"
 
 #include <cstddef>
 
 namespace daik {
+
+// Transport between the checkup owner and history.cpp's shared flash-journal owner.  The absolute
+// bucket is duplicated outside the payload because it belongs to the common journal header; the
+// payload's exact end time is what validates age/full-span after a cold boot.
+struct CheckupFlashRecord {
+    int64_t bucket = INT64_MIN;
+    logic::CheckupJournalPayload payload;
+};
+
+enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored };
 
 // Feed one poll cycle. Called from the poll task right after a sweep with that cycle's values — NOT
 // under the cache mutex (this takes its own, and holding two would invent a lock order this file has
@@ -64,5 +71,17 @@ void checkup_dhw_reset();
 // (poll task), so it copies out under the lock — the report is a plain POD, so nothing allocates
 // inside the critical section (CLAUDE.md → never allocate while holding a mutex).
 logic::CheckupReport checkup_report();
+
+// Copy the next completed hourly pair after `after_bucket` into a journal payload. `now_unix_s`
+// supplies the wall-clock anchor; no record is produced before time is synced or before one hour has
+// completed. Called under the FLASH mutex, and takes only the independent checkup mutex.
+bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
+                        int64_t& bucket, logic::CheckupJournalPayload& payload);
+
+// Splice journal records behind this boot's live pending hour. Deferred until profile detection has
+// established the model identity and consumed its reset; existing .noinit data always wins. The
+// records are oldest-first and may contain gaps or other model identities, all rejected explicitly.
+CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
+                                                int64_t now_unix_s);
 
 } // namespace daik

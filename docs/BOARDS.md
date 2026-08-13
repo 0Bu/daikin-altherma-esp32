@@ -21,7 +21,7 @@ firmware contains no display driver, display role, or remote-display MQTT path.
 | Requirement | Why |
 |---|---|
 | **ESP32-S3** target | The only target built. Not a hard chip limit — the code is target-agnostic — but nothing else is compiled or tested. |
-| **≥ 8 MB flash** | [`partitions.csv`](../partitions.csv) keeps two ~2.03 MB OTA slots below 4 MB and reserves the whole upper 4 MiB for a wear-levelled history journal. Today's dense source records use 256-byte slots; slot width grows with the catalog and compilation requires at least 72 hours with all three sources active. Physical 4 MB boards are unsupported. |
+| **≥ 8 MB flash** | [`partitions.csv`](../partitions.csv) keeps two ~2.03 MB OTA slots below 4 MB and reserves the whole upper 4 MiB for a wear-levelled history journal. Today's dense trend and hourly diagnostic records use 256-byte slots; slot width grows with the catalog and compilation requires at least 72 hours with all four sources active. Physical 4 MB boards are unsupported. |
 | **Two free GPIOs** | The X10A link (RX + TX). See [WIRING.md](WIRING.md) for the chip-safe set. |
 | **Two additional free GPIOs** *(optional)* | One I²C SDA/SCL pair when an ENV III outdoor sensor is enabled. |
 | **USB-Serial/JTAG** *(strongly preferred)* | `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` — the serial console and the browser (Web Serial) installer. A board with only an external USB-UART bridge needs the console reconfigured. |

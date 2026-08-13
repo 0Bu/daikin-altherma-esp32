@@ -116,7 +116,8 @@ history.cpp/.hpp    → the 24-hour trend rings: one fixed-cadence buffer per lo
 checkup.cpp/.hpp    → the 24-hour PLANT CHECKUP behind /status.health: counted EVENTS and window
                       MINIMA (compressor starts + mean run length, defrost share, pressure and flow
                       minima, backup-heater minutes, fault class, retry counters). Storage + mutex
-                      only; every rule is the host-tested logic/checkup.hpp. NOT a view over the
+                      only; every rule is the host-tested logic/checkup.hpp. Completed hours share
+                      history's append journal, so power loss does not reset evidence. NOT a view over the
                       trend rings — TrendRing::fold keeps the LAST reading of a 5-minute bucket, so
                       the short cycling this exists to find leaves no trace in that raster
 state_dwell.cpp/.hpp → HOW LONG EACH SWITCHED ROW HAS READ WHAT IT READS — the value list's other
@@ -780,19 +781,17 @@ host-testable core is unusually large and valuable, because the risky parts are 
   inferred from DHW cooling, even after independent circulation-pump correlation,
   a universal minimum-flow threshold, a flat daily-start alarm, and any overall “healthy” verdict.
 
-  **Persistence** (`logic/checkup_persist.hpp`): the 24-hour window rides `.noinit` DRAM (measured
-  1282 B — the 896 B generic ring plus the 386 B DHW one, whose bucket sits exactly on its stated
-  384-byte budget), and deliberately NOT history's second, flash medium: the reference board
-  reports "no `history` partition" (every OTA-updated device lacks it), so a second tenant would
-  have bought nothing on the very board that motivated it — and that same board *disproved*
-  `history_persist.hpp`'s claim that `.noinit` "cannot survive an OTA" by keeping its trend rings
-  across a real one; the sections CAN move, on an ordinary incremental build they did not, and the
-  seal is what makes the difference safe rather than lucky. The seal covers the completed buckets
+  **Persistence** (`logic/checkup_persist.hpp`): the 24-hour window rides `.noinit` DRAM for a
+  zero-write reset that keeps power. Completed `CheckupBucket` + `DhwLossBucket` pairs are also the
+  fourth source in history's 256-byte append journal, with an exact interval end, model identity,
+  layout fingerprint and CRC. This restores counted evidence after OTA section movement and power
+  loss without trying to reconstruct short events from the lossy five-minute trends; only the open
+  hour can be lost. The RAM seal covers the completed buckets
   and EXCLUDES `pending` (it changes once a second, so a seal over it would be stale whenever a
   panic actually landed) and the monotonic `first/latest_sample_us` anchors, which are meaningless
   in the next boot's clock — the observed lifecycle rides as `CheckupRing::carried_span_us`
-  instead, or the restored window would report `full_span()` false for another 24 h on evidence it
-  has. The in-flight `CheckupState`/`DhwLossState` are NOT restored: a reboot is exactly the
+  instead; a flash restore derives it from the retained interval ends. The in-flight
+  `CheckupState`/`DhwLossState` are NOT restored: a reboot is exactly the
   discontinuity both step functions handle, and restoring them would book a compressor start that
   may never have happened. The MODEL identity is checked at DETECTION rather than at boot
   (`checkup_reset_on_detect()` keeps the window only if the resolved profile matches the one it
@@ -1182,15 +1181,17 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
      power was never lost, so the downtime is bounded to about a second. The one seam is the bucket
      that was open when the device went down — it is dropped, so the restored series can be up to
      one `HISTORY_DT_S` adrift on the axis. It cannot survive an OTA: the new image's sections move.
-   * **The upper-4-MiB `history` partition.** Each source appends one dense record when it closes a
-     five-minute bucket: currently 31 X10A/board, 12 HomeHub or 3 ENV III `int16` values in one
-     256-byte slot. Sixteen slots share a 4 KiB erase sector and all 1024 sectors rotate before one
-     is reused. The body is CRC-protected and a separate commit word is programmed last; a power cut
-     can invalidate only the open write, never its predecessors. A torn mid-sector slot is skipped
-     because erasing it would also erase older committed slots. Slot width grows by powers of two
-     with the largest source catalog, and a compile-time guard requires at least 72 hours with all
-     three sources active. Today 16,384 slots make one physical rotation about 57 days with X10A
-     alone or 19 days with all three sources active — roughly 6.4 or 19.3 erases per sector/year.
+   * **The upper-4-MiB `history` partition.** Each trend source appends one dense record when it
+     closes a five-minute bucket: currently 31 X10A/board, 12 HomeHub or 3 ENV III `int16` values in
+     one 256-byte slot. The plant checkup uses the same journal for one exact hourly diagnostic
+     record; it is not reconstructed from lossy trend samples. Sixteen slots share a 4 KiB erase
+     sector and all 1024 sectors rotate before one is reused. The body is CRC-protected and a
+     separate commit word is programmed last; a power cut can invalidate only the open write, never
+     its predecessors. A torn mid-sector slot is skipped because erasing it would also erase older
+     committed slots. Slot width grows by powers of two with the largest source catalog, and a
+     compile-time guard requires at least 72 hours with all four sources active. Today 16,384 slots
+     make one physical rotation about 52.5 days with X10A plus diagnosis or 18.5 days with all trend
+     sources plus diagnosis — roughly 7.0 or 19.8 erases per sector/year.
      Older physical records are wear reserve rather than being erased at the
      72-hour display boundary. The former 8 KB partition is removed entirely. Because OTA does not
      deliver the partition table, an old-layout board needs one USB/Web-Serial re-flash to install
@@ -1272,9 +1273,9 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    so page loss becomes missing evidence rather than either “unsupported” or zero. Every rule — row
    identity, edge handling, evidence clocks and verdict/evidence class — lives in the host-tested
    `logic/checkup.hpp`; storage is 23 completed one-hour buckets plus the pending hour in static
-   `.noinit` RAM, never 24 completed buckets plus an accidental 25th open hour. `.noinit` rather than
-   `.data` since `logic/checkup_persist.hpp`: a reset that keeps power carries the window across, and
-   the flash image lost the initialiser it used to carry for it. Intentional `esp_restart()` also
+   `.noinit` RAM, never 24 completed buckets plus an accidental 25th open hour. A reset that keeps
+   power adopts that RAM in place; the completed hour pairs also append to history's flash journal
+   for OTA and power-loss recovery. Intentional `esp_restart()` additionally
    writes a separately sealed, one-shot DHW handoff under the same mutex: relative candidate ages,
    the settling guard and completed DHW windows still in the open generic hour. The next boot books
    five blind seconds and consumes that handoff once; a panic never replays an older checkpoint.
@@ -2012,7 +2013,8 @@ Structure:
   sparse `flash_args` parts around NVS; its build-time sector-overlap check makes the no-Erase path
   preserve the same configuration. Existing addresses through `ota_1` still end at `0x400000`;
   `history` uses the remaining 4 MiB through `0x7fffff`. Its append journal rotates 256-byte records
-  through every 4 KiB sector; checked slot growth preserves at least 72 hours with all sources active.
+  through every 4 KiB sector; three five-minute trend sources and the hourly plant-diagnosis source
+  share it, and checked slot growth preserves at least 72 hours with all sources active.
 - **Browser serial-permission release:** the installer uses `Serial.getPorts()` to show its
   **Release serial port** action only while this Pages origin already has a granted port. A single
   closed port is forgotten directly; multiple grants use the native chooser to disambiguate. An

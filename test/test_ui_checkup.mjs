@@ -122,8 +122,8 @@ assert.equal(ui.text("en", "check.guide"), "How to read this card");
 assert.equal(ui.text("de", "check.guide"), "So liest du diese Karte");
 assert.equal(ui.text("en", "action.label"), "What you can do:");
 assert.equal(ui.text("de", "action.label"), "Was du tun kannst:");
-assert.match(ui.text("en", "check.persist.power_cycle"), /no flash archive/);
-assert.match(ui.text("de", "check.persist.power_cycle"), /kein Flash-Archiv/);
+assert.match(ui.text("en", "check.persist.power_cycle"), /no reusable completed diagnosis hour/);
+assert.match(ui.text("de", "check.persist.power_cycle"), /keine wiederverwendbare abgeschlossene Diagnosestunde/);
 assert.match(ui.text("en", "check.persist.wrong_layout"), /changed what the stored counters mean/);
 assert.match(ui.text("de", "check.persist.wrong_layout"), /Bedeutung gespeicherter Zähler geändert/);
 for (const [key, en, de] of [
@@ -552,7 +552,7 @@ assert.match(card, /label="Datenfenster:">Dieses Update hat die Bedeutung gespei
 
 context.S.status.health.persist = "accept";
 card = ui.card();
-assert.match(card, /label="Datenfenster:">Frühere Beobachtungen wurden über den Neustart hinweg übernommen/);
+assert.match(card, /label="Datenfenster:">Frühere Beobachtungen wurden aus dem Gerät über den Neustart oder die Stromunterbrechung hinweg übernommen/);
 context.S.status.health.persist = "from_the_future";
 card = ui.card();
 assert.doesNotMatch(card, /from_the_future|Datenfenster:/,
