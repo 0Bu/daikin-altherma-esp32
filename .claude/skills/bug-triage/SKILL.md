@@ -68,8 +68,11 @@ when the backtrace in `last_crash` is genuinely not enough (step 5).
    genuinely insufficient, ask the reporter to send `/coredump` through the **private advisory form**,
    **zipped** (GitHub rejects `.bin` as an attachment outright). Never ask for it in the public issue
    and never accept it there. Then symbolize offline: `gh run download` the build matching
-   `app_elf_sha256`, and `scripts/decode-coredump.sh coredump.bin build/daikin-altherma-esp32.elf`. A
-   mismatch warning from `esp-coredump` means you fetched the wrong build.
+   `app_elf_sha256`, and `scripts/decode-coredump.sh coredump.bin build/daikin-altherma-esp32.elf.xz`
+   (CI archives the ELF xz-wrapped; the decoder unwraps it). A mismatch warning from `esp-coredump`
+   means you fetched the wrong build. A dev-build artifact older than 3 days is gone; a PR artifact
+   is gone as soon as the PR merges or after at most 7 days — report that the dump cannot be decoded
+   instead of using a nearby build.
 
 6. **Reproduce on the host — this is what replaces live access.** For a wrong-value report, take the
    hex witness out of the private report and run it through the *real* converters rather than

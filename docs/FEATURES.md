@@ -771,8 +771,10 @@ Four properties of that core are worth naming because they are not obvious from 
   fails in seconds rather than minutes. They are **steps of one job, never a job each** — Actions
   bills every job rounded up to a whole minute, while a step boundary names the failure just as
   precisely. (The list is deliberately not counted here: read the job.)
-- **✅ Crash-decodable and size-auditable.** CI archives the unstripped `.elf` (+ sha256) and the
-  json2/Markdown size reports per version/PR.
+- **✅ Crash-decodable and size-auditable.** CI archives the unstripped `.elf` (xz-wrapped, + the
+  sha256 of the ELF inside) and the json2/Markdown size reports per version/PR. A release's copy is
+  a Release asset and does not expire; a dev build's artifact lives 3 days, while an open PR's lives
+  at most 7 days and is deleted immediately on merge because artifact storage is metered.
 - **✅ One Pages publisher.** The installer is served from the **`gh-pages` branch**. The branch model
   is what lets the release root and the `dev/` channel be published independently — an atomic
   whole-site Actions deployment cannot — so the `deploy-pages` path is deliberately absent rather

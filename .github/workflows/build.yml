@@ -266,6 +266,8 @@ jobs:
         run: ./scripts/run-web-installer-plan-tests.sh
       - name: Test the publish-version gate
         run: ./scripts/run-publish-version-tests.sh
+      - name: Test the coredump artifact decoder
+        run: ./scripts/run-decode-coredump-tests.sh
 
       # Two cheap build-contract selftests. The first proves the post-Kconfig comparison catches a
       # missing, changed or malformed default before the firmware compile. The second pins the
@@ -523,12 +525,32 @@ jobs:
       # Upload the bins AND the unstripped .elf (+ checksum): the .elf is the only artifact that can
       # symbolize a core dump from this build (scripts/decode-coredump.sh), so retaining it per
       # version/PR keeps every build's crashes decodable — even while the repo is private and cuts no
-      # public Release. Artifact retention is the archive: the full 90 days for a dev/release build,
-      # but 7 for a PR build — every push to every open PR uploads ~20 MB of .elf, and the plan's
-      # artifact STORAGE is the second metered resource after minutes. This artifact is now also
-      # the ONLY way to get a PR's image (the preview installer is retired), so it stays — a
-      # maintainer downloads it, flashes it over USB, and any dump it produces is decodable for as
-      # long as the PR is plausibly live.
+      # public Release. This artifact is also the ONLY way to get a PR's image (the preview installer
+      # is retired) — a maintainer downloads it, flashes it over USB, and any dump it produces is
+      # decodable for as long as the PR is plausibly live.
+      #
+      # RETENTION IS AN ARITHMETIC PROBLEM, not a preference. The previous 90-day dev window headed
+      # far beyond the 2 GB plan allowance. Measured 2026-08-13 after xz compression: each artifact
+      # is 7.08 MB; the live workload produced 35 dev artifacts in 3 days and 151 PR artifacts in
+      # 7 days. The 3/7-day pair below therefore retains about 186 artifacts / 1.32 GB, leaving real
+      # margin for burstier weeks instead of designing to sit immediately below the quota.
+      #
+      # Measured on the first run of this change (PR-458), not predicted: the raw ELF is 17.7 MB and
+      # xz gets it to 4.7 MB (3.7x). Against the Deflate the artifact zip was already applying, that
+      # is ~1.42x, so the artifact goes 9.05 -> 7.08 MB (-22%). The next lever, if storage gets
+      # tight again, is NOT a shorter PR window: dist/*-merged.bin is a
+      # second deflated copy of the app bytes already in dist/*.bin (~1.2 MB of the remaining
+      # 2.4 MB), and for a dev or release run the images are published to gh-pages anyway — only a
+      # PR build actually needs them in the artifact.
+      #
+      # A RELEASE keeps its .elf forever as a Release ASSET (the release step below attaches it);
+      # its Actions artifact remains for 90 days. Dev images are already published to gh-pages and
+      # only need a short diagnostic tail here. A PR publishes nowhere else, so its artifact remains
+      # available for at most 7 days while it is open, to be flashed and to symbolize dumps produced
+      # during review. cleanup-pr-artifacts.yml removes every copy immediately after that PR merges:
+      # main's successor build makes the review image obsolete, and a merged PR no longer needs an
+      # ELF diagnostic window of its own.
+      #
       # Named after the STAMPED version (disp): this artifact is how a core dump finds its .elf, and
       # a dump reports the version the image embeds. That is "1.0.8-dev.7" on a merge and
       # "<base>-PR-<N>" on a PR, so every build stays self-labelling without a separate name shape.
@@ -536,10 +558,10 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: daikin-altherma-esp32-${{ steps.stamp.outputs.disp }}
-          retention-days: ${{ steps.mode.outputs.mode == 'pr' && 7 || 90 }}
+          retention-days: ${{ steps.mode.outputs.mode == 'pr' && 7 || steps.mode.outputs.mode == 'dev' && 3 || 90 }}
           path: |
             dist/*.bin
-            dist/*.elf
+            dist/*.elf.xz
             dist/*.elf.sha256
             dist/*-size.json
             dist/*-size.md
@@ -584,10 +606,13 @@ jobs:
           name: v${{ steps.stamp.outputs.disp }}
           generate_release_notes: true
           # Attach the .elf (+ checksum) alongside the bins so a user's core dump can be decoded
-          # against the exact released firmware, plus the size evidence from that same link.
+          # against the exact released firmware, plus the size evidence from that same link. This is
+          # the PERMANENT copy: a release asset is not Actions storage, so it outlives the build
+          # artifact's retention window entirely. Same xz container as the artifact — one format
+          # everywhere means decode-coredump.sh needs one unwrap path, not two.
           files: |
             dist/*.bin
-            dist/*.elf
+            dist/*.elf.xz
             dist/*.elf.sha256
             dist/*-size.json
             dist/*-size.md
