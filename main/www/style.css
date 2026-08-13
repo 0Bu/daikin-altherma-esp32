@@ -913,7 +913,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   pointer-events: none; font-size: 12px; color: var(--fg);
   /* Transparency belongs only to the surface, never to the text. The small blur preserves contrast
      in both themes while the chart/card remains visibly present behind the readout. */
-  background: color-mix(in srgb, var(--card) 76%, transparent);
+  background: color-mix(in srgb, var(--card) 60%, transparent);
   -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
   width: max-content; line-height: 1.35; overflow-wrap: anywhere;
   border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;

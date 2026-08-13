@@ -11,7 +11,7 @@ assert.match(style,
   /\.vhist-graph\s*\{[^}]*touch-action:\s*pan-y;/,
   "the tooltip strip must accept horizontal touch scrubbing while preserving vertical page scroll");
 assert.match(style,
-  /\.vhist-tip\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--card\)\s+76%,\s*transparent\);/,
+  /\.vhist-tip\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--card\)\s+60%,\s*transparent\);/,
   "tooltip surfaces must be translucent without fading their text");
 assert.match(style,
   /\.vhist-graph\s*\{[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
