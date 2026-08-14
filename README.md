@@ -2,21 +2,20 @@
 
 ESP-IDF firmware: reads a **Daikin Altherma** over the **X10A** port (UART 9600 8E1, protocol I/S)
 and publishes all values to MQTT. Runtime config + OTA via an
-embedded web UI. ESP32-S3 only.
+embedded web UI.
 
 ## Requirements
 
 - A Daikin Altherma with an **X10A** header.
-- A displayless ESP32-S3 board with ≥8 MB flash.
+- A ESP32-S3 board with ≥8 MB flash.
 - A JST-EH 2.5 mm 5-pin connector to reach the X10A header.
 - A browser with Web Serial to flash.
 
 ## Setup
 
-1. Flash: [web installer](https://0bu.github.io/daikin-altherma-esp32/).
-2. On a first install or after **Erase**, join AP `daikin-altherma-esp32-setup`
-   (captive portal / `192.168.4.1`).
-3. Configure at `http://daikin-altherma-esp32.local`.
+1. Flash: [web installer](https://0bu.github.io/daikin-altherma-esp32/)
+2. Join AP `daikin-altherma-esp32-setup`
+3. Configure at `http://daikin-altherma-esp32.local`
 
 ## Wiring X10A
 
