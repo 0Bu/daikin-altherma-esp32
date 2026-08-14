@@ -10,10 +10,11 @@
 //
 // Ownership: after boot this blob is written by the httpd task alone; the sole exception is initial
 // HomeHub discovery, which completes synchronously before httpd starts. The poll task can therefore
-// never revert a credential change. The RX/TX/proto LINK cache is deliberately NOT in here — it
-// stays as separate self-healing keys written by both config_save and the poll task's
-// config_save_link, and is re-validated on load (link_pins_safe). Keeping the two apart preserves the
-// field-ownership model while making the credential/service half genuinely atomic.
+// never revert a credential change. The RX/TX/proto LINK cache has a separate, much smaller atomic
+// blob because it has a second writer (the poll task's config_commit_detected_link). Its revision
+// compare-and-commit rejects a sweep captured before an HTTP save. Keeping two ownership domains
+// prevents stale poll snapshots from reverting services without making a three-field link
+// susceptible to a half-applied pin swap.
 //
 // Pure + IDF-free so the serialize/deserialize round-trip and its corruption detection are host-tested
 // (test/test_logic.cpp) rather than only exercised on a device.
@@ -261,6 +262,55 @@ inline void blob_put_str(std::vector<uint8_t>& v, const std::string& s) {
     v.insert(v.end(), s.begin(), s.end());
 }
 }  // namespace detail
+
+// The independently-owned X10A link cache. One NVS blob entry, rather than three committed keys:
+// changing {44,43} to {43,44} must never leave {43,43} on flash if the second write fails. Detection
+// may still self-heal a stale cache, but atomicity means an HTTP 500 cannot become accepted state on
+// the next boot. Kept separate from ConfigBlob because the poll task legitimately updates it.
+struct LinkBlob {
+    int32_t rx_pin = -1;
+    int32_t tx_pin = -1;
+    char    proto  = 'I';
+    uint32_t identity_fp = 0;
+};
+
+inline constexpr size_t LINK_BLOB_BYTES = 4 + 1 + 4 + 4 + 1 + 4 + 4;
+
+inline std::vector<uint8_t> link_blob_serialize(const LinkBlob& link) {
+    std::vector<uint8_t> v;
+    v.reserve(LINK_BLOB_BYTES);
+    v.push_back('D'); v.push_back('K'); v.push_back('L'); v.push_back('1');
+    v.push_back(1);  // wire version
+    detail::blob_put_u32(v, static_cast<uint32_t>(link.rx_pin));
+    detail::blob_put_u32(v, static_cast<uint32_t>(link.tx_pin));
+    v.push_back(static_cast<uint8_t>(link.proto));
+    detail::blob_put_u32(v, link.identity_fp);
+    detail::blob_put_u32(v, config_crc32(v.data(), v.size()));
+    return v;
+}
+
+inline bool link_blob_deserialize(const uint8_t* d, size_t n, LinkBlob& out) {
+    if (!d || n != LINK_BLOB_BYTES || d[0] != 'D' || d[1] != 'K' || d[2] != 'L' ||
+        d[3] != '1' || d[4] != 1)
+        return false;
+    const uint32_t want = static_cast<uint32_t>(d[n - 4]) |
+        (static_cast<uint32_t>(d[n - 3]) << 8) |
+        (static_cast<uint32_t>(d[n - 2]) << 16) |
+        (static_cast<uint32_t>(d[n - 1]) << 24);
+    if (config_crc32(d, n - 4) != want) return false;
+    const auto get_u32 = [&](size_t p) {
+        return static_cast<uint32_t>(d[p]) | (static_cast<uint32_t>(d[p + 1]) << 8) |
+            (static_cast<uint32_t>(d[p + 2]) << 16) |
+            (static_cast<uint32_t>(d[p + 3]) << 24);
+    };
+    LinkBlob decoded;
+    decoded.rx_pin = static_cast<int32_t>(get_u32(5));
+    decoded.tx_pin = static_cast<int32_t>(get_u32(9));
+    decoded.proto = static_cast<char>(d[13]);
+    decoded.identity_fp = get_u32(14);
+    out = decoded;
+    return true;
+}
 
 inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     std::vector<uint8_t> v;

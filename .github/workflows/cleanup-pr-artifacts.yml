@@ -1,9 +1,8 @@
 name: cleanup merged PR artifacts
 
-# A PR artifact is the only downloadable copy of that PR's signed image and matching ELF, so it
-# remains useful while review/live testing is in progress. Once the PR is merged, main immediately
-# builds and publishes the successor on the dev channel; keeping every superseded PR build only
-# consumes metered Actions storage.
+# A PR artifact contains only its non-flashable ELF/size diagnostics. It remains useful for review
+# while the PR is open; once merged, main builds a signed successor and the PR diagnostics become
+# superseded metered Actions storage.
 #
 # pull_request_target is intentional. A merged PR may originate from a fork, whose pull_request
 # token is read-only. This event runs the workflow from the default branch with the requested
@@ -23,7 +22,7 @@ concurrency:
 jobs:
   delete:
     if: github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Delete artifacts belonging to the merged PR

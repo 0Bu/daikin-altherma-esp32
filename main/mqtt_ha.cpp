@@ -78,6 +78,7 @@
 #include "logic/reference_temperature.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/weather_mqtt.hpp"
+#include "esp_mac.h"
 #include "ota_update.hpp"          // ota_download_active — the flag the quiesce above reads
 #include "sntp_time.hpp"
 #include "weather_forecast.hpp"
@@ -319,7 +320,12 @@ static void set_status(bool connected, const char* err) {
 // derived from the base topic (logic/ha_device.hpp), so replacing the ESP32 keeps the device.
 static std::string board_id() {
     uint8_t m[6] = {0};
-    esp_wifi_get_mac(WIFI_IF_STA, m);
+    // Read the interface MAC from eFuse, not the WiFi driver. An Ethernet-first board intentionally
+    // never initialises that driver; esp_wifi_get_mac() then fails and used to collapse every such
+    // board onto daikin_000000, making them disconnect one another at the broker.
+    const esp_err_t e = esp_read_mac(m, ESP_MAC_WIFI_STA);
+    if (e != ESP_OK)
+        diag_printf("mqtt: failed to read board MAC (%s)\n", esp_err_to_name(e));
     char b[20];
     std::snprintf(b, sizeof(b), "daikin_%02x%02x%02x", m[3], m[4], m[5]);
     return b;
@@ -795,7 +801,7 @@ static void publish_crash() {
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
     }
     // _live(): read `coredump` from flash, not the boot-time cache — a dump pulled + cleared via
-    // /coredump?clear=1 while the device runs turns an orphan-dump boot NOT-notable, so the cleanup
+    // POST /coredump/clear while the device runs turns an orphan-dump boot NOT-notable, so the cleanup
     // probe below removes an older retained record (a stale true would otherwise replay forever).
     const CrashInfo   ci = diag_crash_info_live();
     const std::string js = build_crash_mqtt_payload(ci);
@@ -2208,7 +2214,7 @@ static void mqtt_task(void*) {
                     publish_heartbeat();
                     if (ref_config.diagnostics_enabled) publish_heating_curve_telemetry();
                     // The crash topic is RETAINED but otherwise only published once per connect, so a
-                    // dump pulled + cleared (/coredump?clear=1) mid-session would leave HA's "Crash
+                    // dump pulled + cleared (POST /coredump/clear) mid-session would leave HA's "Crash
                     // Dump Waiting" ON until the next reconnect (and, for an orphan-dump-only boot,
                     // leave a stale crash record no longer backed by anything). Re-check on the
                     // heartbeat cadence (one 4-byte flash read, no summary parse) and republish only

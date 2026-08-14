@@ -215,8 +215,10 @@ them. This project keeps that data but makes it **runtime-selectable**:
   the top-level README). The heat-pump value labels stay English-only (a separate concept from the
   UI's own language — see Configuration model below); the poll interval is fixed at 1 s.
 - The **model** (active profile + fingerprint) is **re-detected on every boot** (never written to
-  NVS); the **link** (RX/TX pins + protocol) is a persisted cache, tried first by the sweep. Both
-  drive the poll engine (`main/hp_poll.*`). See the Configuration model below.
+  NVS); the **link** (RX/TX pins + protocol + observation-identity fingerprint) is a persisted cache,
+  tried first by the sweep. Its fields live in one CRC-protected `link` blob, so a pin swap cannot be
+  torn across a failed write or power loss. Both drive the poll engine (`main/hp_poll.*`). See the
+  Configuration model below.
 
 If the unit can't be identified at all, detection falls back to the **Generic** Altherma profile
 (the universal register core) — a value whose converter is not yet implemented reads blank rather
@@ -237,13 +239,14 @@ All runtime config lives in NVS namespace **`daik_cfg`**; compile-time defaults 
 `main/Kconfig.projbuild` (menu *Daikin Altherma Configuration*). The web UI is the primary way to
 set everything; `menuconfig` only seeds first-boot defaults.
 
-User credentials + the X10A link cache are persisted; the model is re-detected on every boot.
+User credentials + the atomic X10A link cache are persisted; the model is re-detected on every boot.
 
 | NVS key | Meaning |
 |---------|---------|
 | `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings, **v14 (retired dynamic-LWT mode byte, now written zero and ignored)**, v15 the external circulation-power witness (topic/paths/thresholds/confirm window), v16 this installation's MQTT base topic, v17 independent room-value topics plus an optional fixed target, v18 the one-shot HomeHub discovery latch, and v19 the default-off diagnostics consent plus transition generation. Fresh firmware searches once on its first networked boot; a found address or miss is saved. Explicitly saving empty permanently disables Modbus and HomeHub-dependent diagnosis. Pre-v18 blobs that already carry HomeHub state migrate as searched to preserve possible opt-outs. Heating-curve diagnosis derives arming from the v19 consent, room mapping and active HomeHub; forecast is optional. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
-| `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
+| `link` | **Atomic X10A link-cache blob** (`logic/config_store.hpp`): RX/TX pins, protocol and observation-identity fingerprint in one CRC-protected `nvs_set_blob`. The previous complete entry survives a failed write, so a pin pair cannot be torn; it is tried first by the sweep, revalidated on load and re-saved after detection proves a link. |
+| `rx_pin` / `tx_pin` / `proto` | **Legacy link migration inputs only.** They are read when `link` is absent or invalid, then superseded by the next successful config save or detection result. |
 | `board_set` | **Legacy migration input only.** Pre-v12 builds stored this bit without a concrete preset id. On upgrade, `true` plus an exact historical field match is migrated to the same board the old UI displayed; untouched defaults (`false`) remain unidentified. New saves store `board_user_set` and the stable preset id atomically in `cfg`. |
 | `boot_fails` | Boot-loop crash counter (`safe_mode.cpp`); increments on a crash-only boot, latches recovery mode past the threshold, cleared after a healthy uptime. Lives here so a factory reset wipes it too. |
 
@@ -266,17 +269,15 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) → Auto-detection.
 ## HTTP API
 
 Base: `http://<ESP32-IP>` (or `http://daikin-altherma-esp32.local`). No auth / TLS by design — trusted
-LAN only, see [SECURITY.md](SECURITY.md).
+LAN only. Browser requests are pinned to that mDNS name or a current WiFi/Ethernet IP (Host plus
+Origin/Fetch Metadata), and every POST body is `application/json`; see [SECURITY.md](SECURITY.md).
 
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
-GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the fourteen
-                                   #   reporter-identifying values (wifi.ssid/ip/bssid/mac,
-                                   #   mqtt.broker, reference_temperature.name/topic,
-                                   #   circulation_source.name/topic, syslog.host,
-                                   #   ntp.server, modbus.host plus the weather latitude/longitude
-                                   #   — network/location identifiers, plus two names the user
-                                   #   typed) read "<redacted>"
+GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporter-identifying values
+                                   #   read "<redacted>" — network/location identifiers, user-typed
+                                   #   names/topics and all seven user-typed JSON paths. The exact
+                                   #   machine-checked list is in logic/redact.hpp and REPORTING.md.
                                    #   (logic/redact.hpp). The KEY is always emitted — an omitted
                                    #   field is indistinguishable from an older build, and "which
                                    #   build produced this?" is the first question a frozen report
@@ -439,7 +440,7 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
                                    #   (a row the detected profile lacks is simply absent from
                                    #   /status.history.rows — ask that, don't guess).
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
-GET  /diag[?verbose=0|1][?clear=1][?redact=1]
+GET  /diag[?verbose=0|1][?redact=1]
                                    # plain-text in-memory diag log (raw RX frames when verbose).
                                    #   ?redact=1 scrubs the handful of lines that interpolate a
                                    #   host, an IP or an SSID (logic/redact.hpp) and switches the
@@ -452,10 +453,11 @@ GET  /scan                         # WiFi scan → {"networks":[{ssid,rssi}]} (n
                                    #   the setup portal takes a TYPED SSID and never scans. A
                                    #   diagnostic ("what does the board see, how strong?") for
                                    #   humans/scripts, like /models
-GET  /coredump[?clear=1]           # stream this firmware's core-dump image (chunked; 404 if none or
-                                   #   if raw flash only holds a proven foreign-build orphan);
-                                   #   ?clear=1 erases the coredump partition. Decode offline with
+POST /diag/clear                   # clear the in-memory diagnostic ring; destructive action is POST
+GET  /coredump                     # stream this firmware's core-dump image (chunked; 404 if none or
+                                   #   if raw flash only holds a proven foreign-build orphan). Decode offline with
                                    #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
+POST /coredump/clear               # erase only the coredump partition; keep the reset/crash record
 POST /crash/dismiss                # DELETE this boot's crash report: erase the dump AND stop
                                    #   reporting the crash, so /status.last_crash goes null, the
                                    #   retained MQTT crash topic clears and the web UI banner is gone
@@ -480,7 +482,9 @@ POST /set_mqtt                     # { broker, user?, pass?, clear_creds?, base?
 POST /set_ref_temp                 # { name, topic, temperature_path,
                                    #   setpoint_topic, setpoint_path, fixed_setpoint_c,
                                    #   timestamp_topic?, timestamp_path?, enabled_path?,
-                                   #   hvac_mode_path?, max_age_s } → persist + subscribe immediately.
+                                   #   hvac_mode_path?, max_age_s } → persist; subscribe/decode only
+                                   #   while the v19 diagnostics master is enabled. Otherwise the saved
+                                   #   mapping remains dormant; enabling rebinds it without a reboot.
                                    #   fixed_setpoint_c (5.0–35.0, 0.1 steps) replaces the target
                                    #   topic/path. Empty, malformed or not-yet-readable JSON paths are
                                    #   accepted as operator intent: the next MQTT frame records the decoder
@@ -521,8 +525,14 @@ POST /set_ntp                      # { server } → persist + reboot, no request
 POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
                                    #     mb_unit_id? } → apply live (no reboot).
                                    #   Every key optional; an omitted one keeps its stored value.
-                                   #   rx/tx PERSIST (pin cache), profile session-only; proto auto-detected.
-                                   #   The Settings Protocol card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
+                                   #   One request may update only ONE durability domain: any X10A
+                                   #   field (profile/rx/tx) mixed with any HomeHub field
+                                   #   (mb_host/mb_port/mb_unit_id) returns 400
+                                   #   "update X10A and HomeHub in separate requests" before any
+                                   #   persistence, RAM apply or task reconfiguration.
+                                   #   rx/tx PERSIST (atomic link blob), profile session-only; proto
+                                   #   auto-detected. The Settings Protocol card's pin dropdown posts
+                                   #   {profile:"auto",rx,tx} to re-detect.
                                    #   mb_host controls the SECOND, independent Modbus stack — it does
                                    #   NOT stop the X10A poll. Non-empty polls that address; empty
                                    #   disables task, discovery and requests, including after reboot.

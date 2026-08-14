@@ -7,9 +7,14 @@
 // large output (e.g. /diag) instead of one big std::string. (See docs/ARCHITECTURE.md → Memory constraints.)
 #include "http_handlers.hpp"
 #include "diag_log.hpp"   // diag_printf — a route that failed to register must not do so silently
+#include "net.hpp"
+#include "provisioning.hpp"
 #include "stack_watch.hpp"
 #include "logic/http_body.hpp"
+#include "logic/http_request.hpp"
+#include "wifi.hpp"
 #include "esp_err.h"
+#include <cstring>
 #include <new>          // std::bad_alloc
 
 namespace daik {
@@ -24,6 +29,47 @@ namespace {
 struct SampleHttpdStackOnExit {
     ~SampleHttpdStackOnExit() { stack_watch_sample(StackWatch::Httpd); }
 };
+
+bool read_header(httpd_req_t* req, const char* name, char* out, size_t cap, bool& present) {
+    const size_t len = httpd_req_get_hdr_value_len(req, name);
+    present = len != 0;
+    if (!present) {
+        if (cap) out[0] = '\0';
+        return true;
+    }
+    return len < cap && httpd_req_get_hdr_value_str(req, name, out, cap) == ESP_OK;
+}
+
+esp_err_t reject_request(httpd_req_t* req, const char* status, const char* message) {
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, message);
+}
+
+bool trusted_lan_headers_allowed(httpd_req_t* req) {
+    char host[96] = {}, origin[128] = {}, fetch_site[24] = {};
+    HttpRequestHeaders headers{};
+    if (!read_header(req, "Host", host, sizeof(host), headers.host_present) ||
+        !read_header(req, "Origin", origin, sizeof(origin), headers.origin_present) ||
+        !read_header(req, "Sec-Fetch-Site", fetch_site, sizeof(fetch_site),
+                     headers.fetch_site_present))
+        return false;
+    headers.host       = host;
+    headers.origin     = origin;
+    headers.fetch_site = fetch_site;
+
+    const WifiInfo wifi = wifi_info();
+    const EthInfo  eth  = net_eth_info();
+    return http_lan_request_allowed(headers, CONFIG_DAIKIN_HOSTNAME, wifi.ip, eth.ip);
+}
+
+bool json_post_allowed(httpd_req_t* req) {
+    if (req->method != HTTP_POST || req->content_len == 0) return true;
+    char content_type[96] = {};
+    bool present = false;
+    return read_header(req, "Content-Type", content_type, sizeof(content_type), present) && present &&
+           http_json_content_type(content_type);
+}
 }  // namespace
 
 // The single OOM/exception guard every HTTP handler runs under. http_register() stashes the real
@@ -35,6 +81,20 @@ static esp_err_t handle_all(httpd_req_t* req) {
     auto fn = reinterpret_cast<esp_err_t (*)(httpd_req_t*)>(req->user_ctx);
     if (!fn) return httpd_resp_send_500(req);
     try {
+        // The captive portal must answer arbitrary probe Host names so an OS can discover it. On
+        // the configured LAN, however, every route — static UI, read API and POST control alike —
+        // accepts only this device's mDNS/current-IP identities. This is the global DNS-rebinding
+        // boundary; MCP used to enforce a WiFi-only copy inside one handler while every other route
+        // remained reachable through a rebound hostname.
+        if (!provisioning_ap_active() && !trusted_lan_headers_allowed(req))
+            return reject_request(req, "403 Forbidden", "request origin not allowed");
+
+        // All body-bearing POST handlers parse JSON. text/plain and HTML-form bodies are deliberately
+        // refused: both are CORS-safelisted request shapes a hostile page can emit without preflight.
+        // Bodyless actions (/detect, /ota/update, /crash/dismiss and the clear endpoints) remain
+        // available to native clients without inventing an empty JSON envelope.
+        if (!json_post_allowed(req))
+            return reject_request(req, "415 Unsupported Media Type", "application/json required");
         return fn(req);
     } catch (const std::bad_alloc&) {
         httpd_resp_set_status(req, "503 Service Unavailable");

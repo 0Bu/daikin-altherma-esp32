@@ -4,7 +4,6 @@
 // snapshots as /status and /values.
 #include "http_handlers.hpp"
 #include "logic/mcp.hpp"
-#include "wifi.hpp"
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include <string>
@@ -21,17 +20,6 @@ static esp_err_t mcp_transport_error(httpd_req_t* req, const char* status, const
 }
 
 static esp_err_t mcp_post(httpd_req_t* req) {
-    // Streamable HTTP requires Origin validation against DNS rebinding. Native MCP clients omit the
-    // header; browser-originated calls must name the device's fixed mDNS host or its current IP.
-    const size_t origin_len = httpd_req_get_hdr_value_len(req, "Origin");
-    if (origin_len) {
-        char origin[96];
-        if (origin_len >= sizeof(origin) ||
-            httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK ||
-            !mcp_origin_allowed(origin, CONFIG_DAIKIN_HOSTNAME, wifi_info().ip))
-            return mcp_transport_error(req, "403 Forbidden", "Origin not allowed");
-    }
-
     // Stateless operation still honours the per-request negotiated-version header. Its absence is
     // the specification's 2025-03-26 compatibility default; a present unknown revision fails closed.
     const size_t version_len = httpd_req_get_hdr_value_len(req, "MCP-Protocol-Version");

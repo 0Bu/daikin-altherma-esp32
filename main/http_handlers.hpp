@@ -21,7 +21,8 @@ int       http_read_body(httpd_req_t* req, char* buf, size_t max);
 void http_append_status_json(std::string& out, bool redact = false);
 void http_append_values_json(std::string& out);
 
-// Register a route whose handler runs under the shared handle_all try/catch OOM guard: an uncaught
+// Register a route whose handler runs under the shared handle_all LAN-browser policy and try/catch
+// OOM guard: Host/Origin/Fetch Metadata are checked globally, body-bearing POSTs must be JSON, and an uncaught
 // std::bad_alloc (tight heap: WiFi+MQTT+TLS) becomes a 503 instead of unwinding through
 // esp_http_server's C dispatch to std::terminate -> reboot. Register EVERY route through this, not
 // httpd_register_uri_handler directly. See http_common.cpp and docs/ARCHITECTURE.md -> Memory constraints.

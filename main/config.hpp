@@ -15,29 +15,35 @@ Config config();
 void config_load();
 
 // Persist the given config to NVS. The credential/service/board/channel fields are one atomic blob;
-// the X10A link cache (RX/TX/proto) is a separate self-healing durability domain. Ordinary callers
+// the X10A link cache (RX/TX/proto/history identity) is a separate self-healing durability domain.
+// Ordinary callers
 // succeed once the blob lands even if best-effort cache maintenance fails afterwards; /set_hp passes
-// require_link=true because that route owns the link and must not apply it unless all three cache
-// keys landed. The model (profile + fingerprint) is NOT written. For the whole-struct writers only:
+// require_link=true because that route owns the link and must not apply it unless its atomic cache
+// entry landed. The model (profile + fingerprint) is NOT written. For the whole-struct writers only:
 // the /set_* handlers, serialized on the single httpd task. The poll task must NOT use this — see
-// config_save_link / config_set_model below.
+// the compare-and-commit detection helpers below.
 bool config_save(const Config& c, bool require_link = false);
 
-// Commit ONLY the X10A link (rx/tx/proto), patched into the live config under the mutex — the
-// caller's other fields are left alone, so a detection commit can never revert a concurrent
-// /set_wifi (logic/config_model.hpp documents the field-ownership rule). Returns false if the NVS
-// cache write failed; the RAM patch is applied either way (the detected link is proven-good and the
-// poll engine must keep using it this session — a lost cache just means re-detecting next boot).
-bool config_save_link(int rx_pin, int tx_pin, Protocol proto);
+// Atomically commit the link proven by one detection sweep, but only if the live config still has
+// the revision captured before that sweep. The NVS link write and RAM publication are
+// serialized with every HTTP config save, closing the detect-vs-/set_hp TOCTOU. A failed NVS cache
+// write still publishes the proven session state; `link_saved` reports that narrower durability
+// outcome. Returns false only when the expected revision is stale and nothing was changed.
+bool config_commit_detected_link(const Config& expected, int rx_pin, int tx_pin, Protocol proto,
+                                 uint32_t identity_fp, bool& link_saved,
+                                 uint32_t& committed_revision);
 
-// Commit ONLY the detected model (profile + fingerprint) to the live config. RAM-only and
-// unfailable: the model is session-only and re-derived on every boot, so it is never persisted.
-void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, int fp_iu_kw_tenths,
-                      std::string fp_eeprom);
+// Publish the model only if nothing changed after the link commit. Keeping this as a second CAS lets
+// the caller reset every identity-bound observer while the public config still says "auto"; readers
+// never see a new profile paired with old trend/checkup/dwell state.
+bool config_commit_detected_model(uint32_t expected_revision, std::string profile,
+                                  uint32_t fp_pages, int fp_kw_tenths, int fp_iu_kw_tenths,
+                                  std::string fp_eeprom);
 
 // Publish a whole config to the in-RAM singleton WITHOUT touching NVS. Used by POST /detect to reset
 // the session-only model back to the "auto" sentinel; the detection path itself commits through the
-// narrow setters above. Whole-struct like config_save, so the same rule applies: httpd task only.
+// compare-and-commit helpers above. Whole-struct like config_save, so the same rule applies: httpd
+// task only.
 void config_set_runtime(const Config& c);
 
 // ── Build/hardware facts read from Kconfig, exposed so logic/board_pins.hpp's octal_spi input comes

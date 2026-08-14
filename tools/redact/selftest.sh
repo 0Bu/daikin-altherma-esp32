@@ -13,14 +13,15 @@
 #             names rather than the /status field names alone; and a line printing the ROOM SOURCE's
 #             topic, which pins the four fields SENSITIVE was missing while /status already redacted
 #             them — the one case that is silently green if that list narrows again.
-#   /status — a field stops being wrapped, and the declared count drifts while the code is right.
+#   /status — a field stops being wrapped, the declared count drifts while the code is right, a new
+#             Config identifier is never wrapped, and the public field table drops a documented row.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-cp -R "$ROOT/main" "$ROOT/tools" "$TMP/"
+cp -R "$ROOT/main" "$ROOT/tools" "$ROOT/docs" "$TMP/"
 CHECK="$TMP/tools/redact/check_diag_coverage.py"
 fail=0
 
@@ -137,5 +138,39 @@ s = s[:i] + ('static void seeded_ref() { diag_printf("mqtt: reference source %s\
 open(p, "w").write(s)
 PY
 expect_red "a diag line printing the room source's topic with no rule"
+
+cp -R "$ROOT/main/http_config.cpp" "$TMP/main/http_config.cpp"
+
+# 7. Add a new identifying /status field through plain jstr(), without changing the wrapped count.
+#    This is the direction the old count explicitly could not see: the JSON is valid and all existing
+#    wrappers remain present, but a user-entered value was never sent through the redactor at all.
+python3 - "$TMP/main/http_status.cpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+needle = 'j += "\\\"reference_temperature\\\":{\\\"configured\\\":";'
+i = s.index(needle)
+seed = 'j += "\\\"seeded_identifier\\\":"; j += jstr(c.ref_temp_topic);\n    '
+s = s[:i] + seed + s[i:]
+open(p, "w").write(s)
+PY
+expect_red "a never-wrapped /status Config identifier"
+
+cp -R "$ROOT/main/http_status.cpp" "$TMP/main/http_status.cpp"
+
+# 8. Drop one row from the public documentation. The field list is maintained prose, but its names
+#    are compared with redact.hpp's machine-readable array so users of old firmware never receive an
+#    incomplete manual scrub checklist again.
+python3 - "$TMP/docs/REPORTING.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+needle = '| `reference_temperature.temperature_path` |'
+lines = s.splitlines(True)
+s2 = ''.join(line for line in lines if needle not in line)
+assert s2 != s, "seed 8 did not apply — REPORTING field row moved"
+open(p, "w").write(s2)
+PY
+expect_red "a missing public redaction-documentation row"
 
 exit "$fail"

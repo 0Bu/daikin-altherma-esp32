@@ -51,9 +51,10 @@ ReferenceTemperatureStatus reference_temperature_status();
 // the MQTT status mutex; HTTP/status readers receive a copy. No actuator object crosses this API.
 logic::HeatingCurveSnapshot heating_curve_status();
 
-// Wake the existing MQTT task after POST /set_ref_temp. Topic changes are applied live; the
-// firmware does not create a second MQTT client and does not reboot. The new binding starts without
-// a value and becomes usable only after its runtime decoder accepts a fresh payload.
+// Wake the existing MQTT task after POST /set_ref_temp. Topic changes are re-evaluated live without
+// a second MQTT client or reboot, but subscription/decoding remains gated by the v19 diagnostics
+// master. Once enabled, the new binding starts without a value and becomes usable only after its
+// runtime decoder accepts a fresh payload.
 void mqtt_reference_reconfigure();
 
 // Independent read-only power witness for the potable-water circulation pump.  It shares the

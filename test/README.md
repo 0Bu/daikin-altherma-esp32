@@ -212,9 +212,12 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/mcp.hpp` — the actual bounded MCP/JSON-RPC request scanner and read-only dispatcher:
   malformed vs. structurally-invalid requests, string/number/null id echo and invalid-id rejection,
   notifications, revision negotiation, `initialize` / `tools/list` / `tools/call`, empty-argument
-  enforcement, browser-Origin/DNS-rebinding policy, unknown-method/tool and invalid-params errors,
+  enforcement, unknown-method/tool and invalid-params errors,
   the exact two-tool catalog, and the `structuredContent` result envelopes. This is the same parser
   the device uses, not a test-only re-derivation of cJSON output.
+- `logic/http_request.hpp` — the global trusted-LAN browser boundary: exact mDNS/WiFi/Ethernet Host
+  authorities, independent Origin validation, Fetch-Metadata rejection, native-client omissions and
+  the `application/json` media-type gate for body-bearing POSTs.
 - `logic/mqtt_group.hpp` — register page → group name, number-vs-string JSON typing, the grouped
   state JSON (depth 1, first-seen order), and that a text value routes through the shared
   `logic/json.hpp` encoder.

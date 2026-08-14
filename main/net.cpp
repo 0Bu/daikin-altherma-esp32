@@ -111,6 +111,10 @@ bool         net_is_up()             { return wifi_link_up(); }
 static std::atomic<bool> s_present{false};   // a controller answered the identity probe
 static std::atomic<bool> s_link{false};      // the PHY reports a negotiated cable
 static std::atomic<bool> s_lease{false};     // DHCP gave us an address
+// Boot provenance, deliberately not cleared with s_lease: the fallback watcher must still be
+// created if the lease disappears after net_eth_start() selected the wire but before main.cpp gets
+// to net_eth_fallback_start().
+static std::atomic<bool> s_carried_boot{false};
 
 static esp_eth_handle_t            s_eth_handle = nullptr;
 static esp_netif_t*                s_eth_netif  = nullptr;
@@ -234,24 +238,145 @@ static constexpr int kLinkGraceMs = 4000;   // "is a cable connected?" — auto-
 static constexpr int kLinkPollMs  = 250;
 static constexpr int kLeaseTries  = 3;      // × CONFIG_DAIKIN_ETH_WAIT_S once the cable IS there
 
+static void clear_eth_lease() {
+    s_lease.store(false);
+    // The bit wakes the boot task; it must describe the CURRENT lease rather than remember that a
+    // lease existed once. IP_EVENT_ETH_LOST_IP covers DHCP/address loss while the PHY stays up,
+    // and ETHERNET_EVENT_DISCONNECTED covers a pulled cable even if LOST_IP is not emitted first.
+    if (s_events) xEventGroupClearBits(s_events, GOT_IP_BIT);
+}
+
 static void on_eth(void*, esp_event_base_t base, int32_t id, void* data) {
     if (base == ETH_EVENT && id == ETHERNET_EVENT_CONNECTED) {
         s_link.store(true);
         diag_printf("net: Ethernet link up\n");
     } else if (base == ETH_EVENT && id == ETHERNET_EVENT_DISCONNECTED) {
         s_link.store(false);
-        s_lease.store(false);
+        clear_eth_lease();
         diag_printf("net: Ethernet link down\n");
     } else if (base == IP_EVENT && id == IP_EVENT_ETH_GOT_IP) {
         auto* e = static_cast<ip_event_got_ip_t*>(data);
         ESP_LOGI(TAG, "eth ip=" IPSTR, IP2STR(&e->ip_info.ip));
         s_lease.store(true);
         if (s_events) xEventGroupSetBits(s_events, GOT_IP_BIT);
+    } else if (base == IP_EVENT && id == IP_EVENT_ETH_LOST_IP) {
+        clear_eth_lease();
+        diag_printf("net: Ethernet IP lease lost\n");
     }
 }
 
+// Every object below exists only because the positive VERSIONR probe left SPI2 installed. A failed
+// bring-up must unwind all of it before main.cpp starts WiFi, otherwise the fallback begins under
+// exactly the heap pressure that caused the wired path to fail. The guard makes every early return
+// before keep_running() share one reverse-order teardown instead of maintaining seven partial lists.
+struct EthStartResources {
+    esp_eth_phy_t* phy = nullptr;
+    esp_eth_mac_t* mac = nullptr;
+    bool eth_handler = false;
+    bool got_ip_handler = false;
+    bool lost_ip_handler = false;
+    bool start_attempted = false;
+    bool armed = true;
+
+    EthStartResources() = default;
+    EthStartResources(const EthStartResources&) = delete;
+    EthStartResources& operator=(const EthStartResources&) = delete;
+    ~EthStartResources() noexcept;
+
+    void keep_running() { armed = false; }
+};
+
+static void cleanup_error(const char* step, esp_err_t err) {
+    if (err != ESP_OK)
+        diag_printf("net: Ethernet cleanup %s failed (%s)\n", step, esp_err_to_name(err));
+}
+
+static void eth_start_cleanup(EthStartResources& owned) {
+    // esp_eth_start() changes the driver's FSM to START before PHY negotiation, event posting and
+    // timer start. Any of those can fail, so a failed start still needs a stop attempt to return the
+    // FSM to STOP before esp_eth_driver_uninstall(). ESP_ERR_INVALID_STATE is harmless here: either
+    // start never crossed that boundary, or stop already moved the FSM before a later stop step failed.
+    if (owned.start_attempted && s_eth_handle) {
+        const esp_err_t err = esp_eth_stop(s_eth_handle);
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) cleanup_error("stop", err);
+    }
+
+    // Reverse registration order. Nothing may retain on_eth before the EventGroup it references is
+    // deleted; only handlers whose registration succeeded are ours to unregister.
+    if (owned.lost_ip_handler)
+        cleanup_error("unregister lost-ip handler",
+                      esp_event_handler_unregister(IP_EVENT, IP_EVENT_ETH_LOST_IP, on_eth));
+    if (owned.got_ip_handler)
+        cleanup_error("unregister got-ip handler",
+                      esp_event_handler_unregister(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_eth));
+    if (owned.eth_handler)
+        cleanup_error("unregister Ethernet handler",
+                      esp_event_handler_unregister(ETH_EVENT, ESP_EVENT_ANY_ID, on_eth));
+
+    s_link.store(false);
+    clear_eth_lease();
+
+    // Glue owns the driver's extra reference and its default IP/ETH handlers. It must disappear
+    // before uninstall; there is no separate esp_netif_detach API in the pinned ESP-IDF 6.0.2.
+    if (s_eth_glue) {
+        cleanup_error("delete netif glue", esp_eth_del_netif_glue(s_eth_glue));
+        s_eth_glue = nullptr;
+    }
+
+    bool driver_released = s_eth_handle == nullptr;
+    if (s_eth_handle) {
+        const esp_err_t err = esp_eth_driver_uninstall(s_eth_handle);
+        cleanup_error("driver uninstall", err);
+        if (err == ESP_OK) {
+            s_eth_handle = nullptr;
+            driver_released = true;
+        }
+    }
+
+    // PHY was allocated before MAC below, so MAC then PHY is the true reverse order. The W5500 MAC
+    // owns the SPI device, RX task/buffer and polling timer; deleting it is what makes spi_bus_free
+    // legal. Never free either object while a driver that still references them survived uninstall.
+    bool mac_released = owned.mac == nullptr;
+    if (driver_released) {
+        if (owned.mac) {
+            const esp_err_t err = owned.mac->del(owned.mac);
+            cleanup_error("MAC delete", err);
+            if (err == ESP_OK) {
+                owned.mac = nullptr;
+                mac_released = true;
+            }
+        }
+        if (owned.phy) {
+            const esp_err_t err = owned.phy->del(owned.phy);
+            cleanup_error("PHY delete", err);
+            if (err == ESP_OK) owned.phy = nullptr;
+        }
+    }
+
+    if (s_eth_netif) {
+        esp_netif_destroy(s_eth_netif);
+        s_eth_netif = nullptr;
+    }
+    if (s_events) {
+        vEventGroupDelete(s_events);
+        s_events = nullptr;
+    }
+
+    // The probe installed the bus before every object above. Free it last, and only after the MAC
+    // successfully removed its SPI device; otherwise spi_bus_free would fail with a live child.
+    if (driver_released && mac_released)
+        cleanup_error("SPI bus free", spi_bus_free(eth_spi_host()));
+}
+
+EthStartResources::~EthStartResources() noexcept {
+    if (armed) eth_start_cleanup(*this);
+}
+
 bool net_eth_start() {
+    s_carried_boot.store(false);
     if (!net_eth_probe()) return false;
+
+    EthStartResources owned;
 
     s_events = xEventGroupCreate();
     if (!s_events) {
@@ -293,14 +418,16 @@ bool net_eth_start() {
     eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
     phy_cfg.reset_gpio_num   = -1;   // no reset line on the base either; the driver resets over SPI
 
-    esp_eth_mac_t* mac = esp_eth_mac_new_w5500(&w5500_cfg, &mac_cfg);
-    esp_eth_phy_t* phy = esp_eth_phy_new_w5500(&phy_cfg);
-    if (!mac || !phy) {
+    // PHY first, MAC second: the latter owns the W5500 SPI device, RX task/buffer and poll timer, so
+    // reverse-order cleanup can delete MAC (and detach that SPI device) before PHY and the bus.
+    owned.phy = esp_eth_phy_new_w5500(&phy_cfg);
+    owned.mac = esp_eth_mac_new_w5500(&w5500_cfg, &mac_cfg);
+    if (!owned.mac || !owned.phy) {
         diag_printf("net: W5500 mac/phy alloc failed — continuing on WiFi\n");
         return false;
     }
 
-    esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(mac, phy);
+    esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(owned.mac, owned.phy);
     if (esp_eth_driver_install(&eth_cfg, &s_eth_handle) != ESP_OK) {
         diag_printf("net: W5500 driver install failed — continuing on WiFi\n");
         return false;
@@ -319,12 +446,35 @@ bool net_eth_start() {
         return false;
     }
 
-    esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, on_eth, nullptr);
-    esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_eth, nullptr);
-    if (esp_eth_start(s_eth_handle) != ESP_OK) {
-        diag_printf("net: W5500 start failed — continuing on WiFi\n");
+    const esp_err_t eth_handler =
+        esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, on_eth, nullptr);
+    const esp_err_t got_ip_handler =
+        esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_eth, nullptr);
+    const esp_err_t lost_ip_handler =
+        esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_LOST_IP, on_eth, nullptr);
+    owned.eth_handler = eth_handler == ESP_OK;
+    owned.got_ip_handler = got_ip_handler == ESP_OK;
+    owned.lost_ip_handler = lost_ip_handler == ESP_OK;
+    if (eth_handler != ESP_OK || got_ip_handler != ESP_OK || lost_ip_handler != ESP_OK) {
+        // LOST_IP is part of the transport's correctness boundary, not optional diagnostics: without
+        // it a DHCP loss leaves net_kind()/OTA health latched online forever. Do not start a wired
+        // interface whose lease lifecycle cannot be observed. The guard unregisters only handlers
+        // that landed, then releases every allocation behind them.
+        diag_printf("net: Ethernet event handler registration failed (%s/%s/%s) — continuing on WiFi\n",
+                    esp_err_to_name(eth_handler), esp_err_to_name(got_ip_handler),
+                    esp_err_to_name(lost_ip_handler));
         return false;
     }
+    owned.start_attempted = true;
+    const esp_err_t start_err = esp_eth_start(s_eth_handle);
+    if (start_err != ESP_OK) {
+        diag_printf("net: W5500 start failed (%s) — continuing on WiFi\n",
+                    esp_err_to_name(start_err));
+        return false;
+    }
+    // From here, no-link/no-DHCP are availability outcomes rather than construction failures: keep
+    // the driver hot so a later cable/lease can still win the route alongside WiFi.
+    owned.keep_running();
 
     // Phase 1 — is a cable connected at all? Seconds, not tens of seconds: the PHY reports link as
     // soon as auto-negotiation completes. No link by the grace window means no cable or a dead
@@ -356,7 +506,8 @@ bool net_eth_start() {
         diag_printf("net: Ethernet cable is up but no DHCP lease after %d s — still waiting\n",
                     (i + 1) * CONFIG_DAIKIN_ETH_WAIT_S);
     }
-    if (bits & GOT_IP_BIT) {
+    if (net_eth_boot_ready((bits & GOT_IP_BIT) != 0, s_lease.load())) {
+        s_carried_boot.store(true);
         net_mdns_start();
         diag_printf("net: Ethernet carries this boot — the WiFi radio stays off\n");
         return true;
@@ -437,7 +588,7 @@ void net_eth_fallback_start() {
     // Nothing to watch unless the wire is what brought this boot up: a board that fell back to
     // WiFi already has the radio's own endless reconnect, and one with no controller has no wire
     // to lose.
-    if (!s_present.load() || !s_lease.load()) return;
+    if (!net_eth_fallback_watch_needed(s_present.load(), s_carried_boot.load())) return;
     if (xTaskCreate(eth_fallback_task, "eth_fb", 3072, nullptr, TASK_PRIO_ETH_FALLBACK, nullptr) != pdPASS)
         diag_printf("net: fallback watch task alloc failed — a pulled cable will need a manual "
                     "power cycle\n");

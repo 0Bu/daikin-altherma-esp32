@@ -21,6 +21,7 @@
 #include "logic/detect_backoff.hpp"
 #include "logic/hexdump.hpp"
 #include "logic/history.hpp"   // history_parse_tenths — the SAME parse history.cpp applies to the witness
+#include "logic/history_persist.hpp"  // source identity fingerprint for durable X10A history
 #include "logic/ou_stale.hpp"
 #include "logic/raw_capture.hpp"
 #include "http_handlers.hpp"
@@ -58,6 +59,7 @@ static std::atomic<bool>     s_detect_reset{false};
 // nothing is ordered against it and a reader one cycle behind is reading a counter that moves once
 // a second at worst. Not in s_stats: that mutex must not be taken on the path out of an OOM.
 static std::atomic<uint32_t> s_cycles_skipped{0};
+static std::atomic<uint32_t> s_target_generation{1};
 
 // Consecutive bus-answering sweeps that matched no profile. Poll-task-owned, RAM only, like the
 // backoff above. Falling back to `generic` costs ~46 rows including every derived figure, so it
@@ -88,6 +90,7 @@ static logic::RawCaptureState s_raw_capture;
 // and the rule falls open. A stale witness must never outlive the reply it came from — that would
 // be the held-over-reading substitution one page over.
 static SaturationWitness      s_sat_witness;
+static uint32_t               s_sat_witness_generation = 0;  // poll-task-owned
 
 // RAII guard around s_mtx (same idiom as config.cpp), used by every take in this file. It matters
 // most for the readers: they copy std::strings OUT of s_stats/s_cache under the lock, so they can
@@ -104,7 +107,13 @@ using Lock = SemGuard;
 }  // namespace
 
 static void poll_once() {
+    const uint32_t cycle_generation = hp_poll_generation();
     const Config& c    = config();
+    // The task-level branch is advisory: /detect can switch a concrete profile to "auto" after
+    // that decision but before this function captures its own stable config snapshot. Refuse that
+    // stale entry before profile lookup or UART work; a later switch is caught by the generation
+    // barrier at commit time.
+    if (c.profile == "auto") return;
     const auto&   prof = def::lookup(c.profile.c_str());
     // The GENERATED rows plus the page-0x10 protection words (def/overlay.hpp). Everything below
     // iterates the VIEW; `prof` survives only for the two calls that need a flat contiguous array
@@ -126,11 +135,13 @@ static void poll_once() {
         std::string err = eb;                              // built before the lock (allocates)
         {
             Lock lk(s_mtx);
-            s_stats.connected = false;
-            s_stats.last_error.swap(err);                  // noexcept — see the commit below
+            if (s_target_generation.load(std::memory_order_acquire) == cycle_generation) {
+                s_stats.connected = false;
+                s_stats.last_error.swap(err);              // noexcept — see the commit below
+            }
         }
-        checkup_record(nullptr, 0, false, false, checkup_coverage);
-        dwell_record(nullptr, 0);          // a cycle went by unread: blind, not unchanged
+        checkup_record(nullptr, 0, false, false, checkup_coverage, cycle_generation);
+        dwell_record(nullptr, 0, cycle_generation); // a cycle went by unread: blind, not unchanged
         return;
     }
 
@@ -165,7 +176,8 @@ static void poll_once() {
     // This cycle's saturation witness, captured as the witness page goes by and published to the
     // carry at the end of the sweep. The rows decoded THIS cycle are judged against the PREVIOUS
     // cycle's value (see s_sat_witness) — the witness page is read after the page it judges.
-    const SaturationWitness sat_in = s_sat_witness;
+    const SaturationWitness sat_in = s_sat_witness_generation == cycle_generation
+        ? s_sat_witness : SaturationWitness{};
     SaturationWitness       sat_out;                  // default: not captured -> next cycle fails open
     // The BASE table, like rtype above: the witness is a generated pressure row and the supplement
     // carries no conv-405 row (def/overlay.hpp's static_assert pins that).
@@ -257,8 +269,6 @@ static void poll_once() {
 
     // Publish this cycle's capture for the next one. Unconditional, so a witness page that went
     // silent expires within one cycle instead of authorizing a withholding forever.
-    s_sat_witness = sat_out;
-
     // ── SOURCE freshness: which of these readings is the outdoor unit still measuring? ────────────
     // The outdoor unit refreshes its OWN pages (0x20 sensors, 0x21 inverter) only while it RUNS;
     // stopped, it answers with the last run's numbers (logic/ou_stale.hpp, measured). The web UI has
@@ -294,7 +304,8 @@ static void poll_once() {
     // Target Evap. Temp., and it has never been captured: hp_detect.cpp dumps the same pages, but
     // only on a detect pass, which is always a unit at rest — the state where the value is not wrong.
     // Budgeted and edge-triggered so this cannot flood the 6 KB diag ring (logic/raw_capture.hpp).
-    if (logic::raw_capture_due(s_raw_capture, rps_running, esp_timer_get_time())) {
+    if (hp_poll_generation_matches(cycle_generation) &&
+        logic::raw_capture_due(s_raw_capture, rps_running, esp_timer_get_time())) {
         const struct { uint8_t reg; const uint8_t* buf; int len; } run_raw[] = {
             {0x10, raw10, raw10_len}, {0x20, raw20, raw20_len},
         };
@@ -310,7 +321,7 @@ static void poll_once() {
     // Feed the trend rings BEFORE the commit and OUTSIDE the cache mutex: history.cpp takes its own
     // lock, and holding both would create a two-mutex order this file has no other reason to have.
     // `fresh` is still ours here — after the move below it is empty.
-    history_record(fresh.data(), fresh.size());
+    history_record(fresh.data(), fresh.size(), cycle_generation);
 
     // The rolling plant diagnosis, on the same terms and for the same reason it is here rather than derived
     // later: compressor starts, defrosts and backup-heater minutes are EVENTS, and an event that
@@ -318,14 +329,15 @@ static void poll_once() {
     // precisely the short-run evidence the observation exists to preserve (logic/checkup.hpp). The compressor
     // state is handed over rather than re-derived, so the checkup and the held-over marking above
     // can never disagree about whether the unit was running.
-    checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage);
+    checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage,
+                   cycle_generation);
 
     // And how long each switched row has read what it reads (logic/state_dwell.hpp). Here for
     // the reasons above and one of its own: a row that did not answer is simply ABSENT from
     // `fresh`, which is exactly the evidence the dwell needs to book blind seconds rather than
     // extend a run it did not watch. Reading it anywhere else would see a cache that has already
     // forgotten which rows were missing this cycle.
-    dwell_record(fresh.data(), fresh.size());
+    dwell_record(fresh.data(), fresh.size(), cycle_generation);
 
     // One commit, one lock site, and deliberately non-allocating: the vector move-assign steals
     // fresh's buffer and last_error is swapped (noexcept) rather than assigned, so the critical
@@ -334,6 +346,9 @@ static void poll_once() {
     // buffers swap hands back to `err`/`fresh` are freed after the give, when no reader can see them.
     {
         Lock lk(s_mtx);
+        if (s_target_generation.load(std::memory_order_acquire) != cycle_generation) return;
+        s_sat_witness = sat_out;
+        s_sat_witness_generation = cycle_generation;
         s_cache            = std::move(fresh);
         s_stats.connected  = any_ok;
         s_stats.registers  = regs;
@@ -354,16 +369,25 @@ static void poll_once() {
 // every boot; the LINK cache (pins + protocol) is persisted, but only when it changed (a swapped
 // wire self-corrects once, then subsequent boots confirm it with no NVS write). Only commits when
 // the bus actually answered, so a not-yet-wired unit simply retries instead of being pinned to "generic".
-static bool poll_detect() {                                    // returns true iff the bus answered
+static bool poll_detect() {                         // false only when an attempted sweep found no bus
+    const uint32_t cycle_generation = hp_poll_generation();
+    const Config expected = config();
+    // Conversely, /set_hp can install a concrete profile after the task chose the auto branch but
+    // before this function captures its expected snapshot. Do not sweep (and therefore cannot
+    // commit) for that stale entry. Returning true avoids charging irrelevant detect backoff; the
+    // concrete branch below can poll the installed profile in this same task cycle.
+    if (expected.profile != "auto") return true;
     DetectResult d = hp_detect_run();
     if (!d.bus_ok) {
         std::string err = "no X10A response (detecting)";     // built before the lock: it allocates
         {
             Lock lk(s_mtx);
-            s_stats.connected  = false;
-            s_stats.last_error.swap(err);                      // noexcept — see poll_once's commit
-            s_stats.timeout_err++;
-            s_stats.rx_fail_total++;
+            if (s_target_generation.load(std::memory_order_acquire) == cycle_generation) {
+                s_stats.connected  = false;
+                s_stats.last_error.swap(err);                  // noexcept — see poll_once's commit
+                s_stats.timeout_err++;
+                s_stats.rx_fail_total++;
+            }
         }
         return false;                                          // keep "auto" — retry per backoff
     }
@@ -372,13 +396,6 @@ static bool poll_detect() {                                    // returns true i
     // be saving credentials, and a whole-struct save would carry this snapshot's stale wifi/mqtt
     // fields over a /set_wifi that landed during the sweep — silently reverting it after the user
     // already got {"ok":true}. logic/config_model.hpp holds the ownership rule.
-    const Config c          = config();
-    const bool link_changed = (c.rx_pin != d.rx) || (c.tx_pin != d.tx) || (c.proto != d.proto);
-    // Persist the link cache only on change (auto-corrected pins, e.g. a swapped wire); an unchanged
-    // link is already live in RAM, so there is nothing to patch and no NVS write to make.
-    if (link_changed && !config_save_link(d.rx, d.tx, d.proto))
-        diag_printf("detect: link cache write failed — pins %d/%d active this session, re-detect next boot\n",
-                    d.rx, d.tx);
     // Read with the best-fit representative. The ranking is deterministic and — since #230 B —
     // independent of the order the registry is written in (the last tie-break is the lowest profile
     // id), so a reordered table cannot move the entity ids and series this unit publishes. Where the
@@ -393,18 +410,68 @@ static bool poll_detect() {                                    // returns true i
     // speed and every pressure — so it is not acted on until a SECOND sweep agrees
     // (detect_commit_no_match, logic/detect.hpp). Keeping "auto" means the next cycle simply
     // re-detects; the model is RAM-only either way, so nothing is persisted by waiting.
-    if (d.best.empty()) {
-        s_no_match++;
-        if (!detect_commit_no_match(s_no_match)) {
-            diag_printf("detect: no profile matched (pass %d/%d) — re-detecting before falling back to generic\n",
-                        s_no_match, DETECT_NO_MATCH_CONFIRMATIONS);
-            return true;                               // bus answered; keep "auto" and sweep again
+    const std::string detected_profile = d.best.empty() ? "generic" : d.best;
+    const uint32_t identity_fp = logic::history_x10a_target_fingerprint(
+        detected_profile.c_str(), d.rx, d.tx, static_cast<char>(d.proto));
+    bool first_no_match = false;
+    bool generic_committed = false;
+    bool link_saved = true;
+    bool committed = false;
+    uint32_t link_revision = 0;
+    int no_match_count = 0;
+    {
+        // This is the detect/reconfigure commit barrier. The sweep itself stays unlocked, but every
+        // side effect (NVS link, RAM model, identity resets) is conditional on the captured target
+        // generation while holding the same mutex hp_poll_reconfigure uses to advance it. The
+        // config helper adds a second compare-and-commit token so a /set_hp save that landed just
+        // before its generation bump also wins deterministically.
+        Lock lk(s_mtx);
+        if (s_target_generation.load(std::memory_order_acquire) != cycle_generation) return true;
+
+        if (d.best.empty()) {
+            no_match_count = ++s_no_match;
+            if (!detect_commit_no_match(no_match_count)) {
+                // Do not cache either a generic identity or a changed link on the unconfirmed pass:
+                // one missing page is admissible and must not invalidate a valid 24 h scope.
+                first_no_match = true;
+            } else {
+                generic_committed = true;
+            }
+        } else {
+            s_no_match = 0;
         }
-        diag_printf("detect: no profile matched on %d consecutive sweeps — reading with generic\n",
-                    s_no_match);
-    } else {
-        s_no_match = 0;
+
+        if (!first_no_match) {
+            committed = config_commit_detected_link(
+                expected, d.rx, d.tx, d.proto, identity_fp, link_saved, link_revision);
+            if (committed) {
+                // All observation resets are inside the same generation barrier as the detected
+                // config commit. An HTTP reconfigure therefore happens wholly before or after this
+                // block, never between the new identity and its reset boundary.
+                checkup_reset_on_detect(detected_profile.c_str());
+                dwell_reset_on_detect(detected_profile.c_str());
+                history_reset_on_detect(identity_fp);
+                committed = config_commit_detected_model(
+                    link_revision, detected_profile, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
+                    d.eeprom);
+            }
+        }
     }
+    if (first_no_match) {
+        diag_printf("detect: no profile matched (pass %d/%d) — re-detecting before falling back to generic\n",
+                    no_match_count, DETECT_NO_MATCH_CONFIRMATIONS);
+        return true;
+    }
+    if (!committed) {
+        diag_printf("detect: discarded stale sweep after configuration changed\n");
+        return true;
+    }
+    if (!link_saved)
+        diag_printf("detect: link cache write failed — pins %d/%d active this session, re-detect next boot\n",
+                    d.rx, d.tx);
+    if (generic_committed)
+        diag_printf("detect: no profile matched on %d consecutive sweeps — reading with generic\n",
+                    no_match_count);
     // The profile/link now names a new observation identity. This is deliberately before the
     // same-cycle poll: both rolling observations consume the reset before accepting the newly
     // resolved unit, so neither can splice the prior physical identity into its first sample.
@@ -415,11 +482,6 @@ static bool poll_detect() {                                    // returns true i
     // *_on_detect() variants let that first detection defer to an identity check, which can actually
     // tell a re-detect of the same unit from a different one; every later call resets exactly as
     // before. The history checks per-row identity, the checkup and the state ages the profile id.
-    checkup_reset_on_detect(d.best.empty() ? "generic" : d.best.c_str());
-    dwell_reset_on_detect(d.best.empty() ? "generic" : d.best.c_str());
-    history_reset_on_detect();
-    config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
-                     d.eeprom);
     return true;
 }
 
@@ -467,10 +529,11 @@ static void poll_task(void*) {
                 // can still evidence. Coverage is empty because it is TRUE: no profile is resolved.
                 // Deliberately here rather than beside history_record_board() above — a resolved
                 // profile must be fed by poll_once() alone, or two samples would share one instant.
-                checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{});
+                const uint32_t generation = hp_poll_generation();
+                checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
                 // Same argument one feature over: a board whose X10A stops answering across a
                 // reboot would otherwise present the FROZEN pre-reboot state ages as current.
-                dwell_record(nullptr, 0);
+                dwell_record(nullptr, 0, generation);
                 // Silent-bus detect backoff: sweep at the poll floor at first, then stretch toward the
                 // ceiling the longer the bus stays quiet (logic/detect_backoff.hpp). Applied by SKIPPING
                 // sweep ticks — the top-of-loop esp_task_wdt_reset() above still fires every second, so
@@ -566,6 +629,14 @@ HpStats hp_stats() {
 
 uint32_t hp_skipped_cycles() { return s_cycles_skipped.load(std::memory_order_relaxed); }
 
+uint32_t hp_poll_generation() {
+    return s_target_generation.load(std::memory_order_acquire);
+}
+
+bool hp_poll_generation_matches(uint32_t generation) {
+    return generation != 0 && s_target_generation.load(std::memory_order_acquire) == generation;
+}
+
 void hp_poll_reconfigure() {
     // POST /detect and POST /set_hp (new pins) run on the httpd task and put profile back to "auto".
     // Drop any accumulated detect backoff so a just-rewired bus is swept on the NEXT poll cycle, not
@@ -573,6 +644,22 @@ void hp_poll_reconfigure() {
     // task consumes it via exchange() at the top of its auto branch. (Config itself is re-read there
     // every cycle already; this only resets the backoff timer.)
     s_detect_reset.store(true);
+    if (!s_mtx) {
+        uint32_t next = s_target_generation.fetch_add(1, std::memory_order_acq_rel) + 1;
+        if (next == 0) s_target_generation.store(1, std::memory_order_release);
+        return;
+    }
+    Lock lk(s_mtx);
+    uint32_t next = s_target_generation.load(std::memory_order_relaxed) + 1;
+    if (next == 0) next = 1;
+    s_target_generation.store(next, std::memory_order_release);
+    s_cache.clear();
+    s_stats.connected = false;
+    s_stats.registers = 0;
+    s_stats.values = 0;
+    s_stats.ou_held_over = false;
+    s_stats.last_error.clear();
+    s_last_ok_us = -1;
 }
 
 } // namespace daik

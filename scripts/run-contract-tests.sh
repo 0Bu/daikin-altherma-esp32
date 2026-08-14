@@ -33,4 +33,6 @@ for test_file in "${tests[@]}"; do
   node "$test_file"
 done
 
+./scripts/run-public-readiness-audit.sh
+
 echo "${#tests[@]} source-boundary contract test(s) passed"

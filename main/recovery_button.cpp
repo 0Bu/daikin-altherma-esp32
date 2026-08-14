@@ -2,10 +2,13 @@
 // hand-off; the press classification itself is logic/button.hpp (pure, host-tested).
 #include "recovery_button.hpp"
 #include "config.hpp"
+#include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "history.hpp"
 #include "nvs_storage.hpp"
+#include "state_dwell.hpp"
 #include "status_led.hpp"
+#include "wifi.hpp"
 #include "logic/button.hpp"
 
 #include "driver/gpio.h"
@@ -36,10 +39,15 @@ void factory_reset() {
     vTaskDelay(pdMS_TO_TICKS(WIPE_LEAD_MS));
 
     const esp_err_t e = nvs_erase_all();
-    // The day of plant readings recorded beside that config is the user's too, so it goes with it.
-    // This ALSO suppresses the shutdown handler that would otherwise write the whole snapshot back
-    // out milliseconds later, on the very reboot this reset triggers.
-    history_flash_forget();
+    // Do not destroy history after a FAILED config wipe: that leaves the device running with its old
+    // settings while silently deleting a different class of user data. Once NVS is gone, suppress
+    // producers under the history flash lock and erase the journal before the reboot handler runs.
+    // The raw coredump can contain credentials too, so a new owner must never inherit it.
+    const esp_err_t wifi_e = e == ESP_OK ? wifi_forget_persisted_config() : e;
+    const bool history_erased = e == ESP_OK && wifi_e == ESP_OK ? history_flash_forget() : false;
+    if (e == ESP_OK && wifi_e == ESP_OK && history_erased) dwell_forget();
+    const bool crash_erased = e == ESP_OK && wifi_e == ESP_OK && history_erased
+        ? diag_crash_forget() : false;
 
     // Hold the signal to its full visible duration regardless of how fast the erase ran.
     const int elapsed = static_cast<int>((esp_timer_get_time() - t0) / 1000);
@@ -52,6 +60,16 @@ void factory_reset() {
         // but /diag + syslog at least record WHY the reset did nothing.
         diag_printf("button: factory reset FAILED (%s) — config left intact, NOT rebooting\n",
                     esp_err_to_name(e));
+        status_led_signal(LedSignal::None);
+        return;
+    }
+    if (wifi_e != ESP_OK || !history_erased || !crash_erased) {
+        // NVS is already empty, but rebooting would turn a partial reset into a privacy breach: the
+        // next setup could restore old trend data or expose an old raw memory dump. Stay in this
+        // boot with producers suppressed; releasing and holding again retries the failed erase.
+        diag_printf("button: factory reset INCOMPLETE — wifi=%s history=%s coredump=%s; NOT rebooting, release and hold again to retry\n",
+                    esp_err_to_name(wifi_e), history_erased ? "erased" : "pending",
+                    crash_erased ? "erased" : "pending");
         status_led_signal(LedSignal::None);
         return;
     }

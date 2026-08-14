@@ -59,7 +59,7 @@ inline HttpSurface http_surface_for(bool setup_ap_running) {
 // Does `surface` expose a route at `path` with the given method? On the trusted LAN, everything.
 // On the open setup AP, ONLY: GET / , GET /index.html (setup.html), GET /favicon.ico (an inert
 // static asset), and POST /set_wifi (submit credentials). Every other route —
-// status/values/models/diag/coredump, the remaining /set_*
+// status/values/models/diag/coredump (including their POST clear routes), the remaining /set_*
 // config, /detect, OTA and MCP — is withheld: an unregistered GET falls through to the captive
 // catch-all (the setup page, never data), and an unregistered POST simply 404s.
 //

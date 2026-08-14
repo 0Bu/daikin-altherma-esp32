@@ -779,7 +779,7 @@ const REPO = "0Bu/daikin-altherma-esp32";
 // could not be read". Same reason the /diag truncation below announces itself.
 // Which fields the DEVICE actually scrubbed, read off the redacted response itself rather than
 // listed here. A hand-kept list is the second copy of logic/redact.hpp that this whole flow exists
-// to avoid: it shipped nine of fourteen fields for two releases, so every public issue carried a
+// to avoid: it shipped an incomplete hand-kept field list for two releases, so every public issue carried a
 // false claim about its own scrubbing (the coordinates and the HomeHub address WERE redacted and
 // the report said they were not). Walking the response cannot drift — a field the firmware starts
 // or stops redacting moves this line with it, including on a device running an older build than

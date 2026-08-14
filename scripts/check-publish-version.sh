@@ -14,9 +14,11 @@
 # it had served minutes before. CI stayed green — the feed had simply stopped being able to move any
 # device forward. This step turns exactly that into a failed run.
 #
-#   scripts/check-publish-version.sh <mode> <candidate-version> [remote]
+#   scripts/check-publish-version.sh [--source-sha <40-hex>] <mode> <candidate-version> [remote]
 #
 #     mode        release  -> checked against gh-pages manifest.json      (the release feed)
+#                 release-resume -> same, but equality is a retry only when the published
+#                                   provenance.source_sha equals --source-sha exactly
 #                 dev      -> checked against gh-pages dev/manifest.json  (the dev feed)
 #                 pr|none  -> nothing is published; the check is skipped
 #     candidate   the version this run would publish (the stamped version.txt)
@@ -28,20 +30,38 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+source_sha=""
+if [ "${1:-}" = "--source-sha" ]; then
+    [ "$#" -ge 2 ] || {
+        echo "publish gate: --source-sha requires a lowercase 40-character Git SHA" >&2
+        exit 2
+    }
+    source_sha="$2"
+    shift 2
+fi
+
 mode="${1:-}"
 candidate="${2:-}"
 remote="${3:-origin}"
-[ -n "$mode" ] && [ -n "$candidate" ] || {
-    echo "usage: check-publish-version.sh <release|dev|pr|none> <candidate-version> [remote]" >&2
+[ -n "$mode" ] && [ -n "$candidate" ] && [ "$#" -le 3 ] || {
+    echo "usage: check-publish-version.sh [--source-sha <40-hex>] <release|release-resume|dev|pr|none> <candidate-version> [remote]" >&2
     exit 2
 }
+if [ -n "$source_sha" ] && [[ ! "$source_sha" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "publish gate: --source-sha must be a lowercase 40-character Git SHA" >&2
+    exit 2
+fi
 
 case "$mode" in
-    release) manifest="manifest.json" ;;
+    release|release-resume) manifest="manifest.json" ;;
     dev)     manifest="dev/manifest.json" ;;
     pr|none) echo "publish gate: mode '$mode' publishes nothing — skipped"; exit 0 ;;
     *)       echo "publish gate: unknown mode '$mode'" >&2; exit 2 ;;
 esac
+[ "$mode" != release-resume ] || [ -n "$source_sha" ] || {
+    echo "publish gate: release-resume requires --source-sha <40-hex>" >&2
+    exit 2
+}
 
 # ASK WHETHER THE BRANCH EXISTS BEFORE FETCHING IT, because those are two different answers and only
 # one of them is safe to pass on. `git fetch` fails identically for "no such branch" and for a DNS
@@ -90,6 +110,39 @@ print(doc["version"])
     exit 2
 }
 
+# Publishing the Pages root happens before the GitHub Release/tag. If Pages succeeded and the
+# later Release API failed, a rerun sees exactly the candidate already in the root manifest. That
+# equality is a safe sideways move only when the existing manifest says it came from this exact Git
+# object. Without that binding, an exact-version retry could replace the served binary and create a
+# tag for different source while every device still sees the same version. Dev feeds and ordinary
+# release checks remain strictly forward-only.
+if [ "$mode" = release-resume ] && [ "$published" = "$candidate" ]; then
+    if [[ ! "$candidate" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+        echo "publish gate: release resume requires strict X.Y.Z SemVer (got '$candidate')" >&2
+        exit 2
+    fi
+    published_source="$(printf '%s' "$published_json" | python3 -c '
+import json, re, sys
+doc = json.load(sys.stdin)
+provenance = doc.get("provenance")
+if not isinstance(provenance, dict):
+    sys.exit("published manifest has no provenance object")
+source = provenance.get("source_sha")
+if not isinstance(source, str) or re.fullmatch(r"[0-9a-f]{40}", source) is None:
+    sys.exit("published manifest has no valid provenance.source_sha")
+print(source)
+')" || {
+        echo "publish gate: cannot prove which source produced gh-pages:$manifest" >&2
+        exit 2
+    }
+    if [ "$published_source" != "$source_sha" ]; then
+        echo "publish gate: refusing $candidate resume — published source $published_source differs from candidate $source_sha" >&2
+        exit 1
+    fi
+    echo "publish gate: release feed already serves $candidate from $source_sha — idempotent resume permitted"
+    exit 0
+fi
+
 BUILD_DIR=build_mock   # matches .gitignore (/build_mock/), like run-domain-audit.sh
 mkdir -p "$BUILD_DIR"
 CXX="${CXX:-}"
@@ -104,7 +157,9 @@ fi
 
 echo "publish gate: $mode feed currently serves $published"
 gate_args=("$published" "$candidate")
-[ "$mode" = release ] && gate_args+=(--release)   # the root feed also refuses a pre-release SHAPE
+case "$mode" in
+    release|release-resume) gate_args+=(--release) ;; # root feed refuses a pre-release SHAPE
+esac
 if "$BUILD_DIR/publish_gate" "${gate_args[@]}"; then
     exit 0
 fi

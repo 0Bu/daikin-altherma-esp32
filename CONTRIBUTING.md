@@ -250,18 +250,19 @@ go to `docs/` (ARCHITECTURE.md for the chassis, PLANT.md for plant features, thi
 gates). When it fires, move narrative out — never trim a rule, and never raise the budget to clear
 the red. `tools/claudemd/selftest.sh` proves it fails closed.
 
-Three more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
+Four more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
 need them locally — run them if you touch
 [`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh),
 [`scripts/build-pages.sh`](scripts/build-pages.sh),
 [`scripts/check-web-installer-plan.py`](scripts/check-web-installer-plan.py),
 [`scripts/check-publish-version.sh`](scripts/check-publish-version.sh) or
-[`scripts/next-version.sh`](scripts/next-version.sh):
+[`scripts/next-version.sh`](scripts/next-version.sh), or when changing the CI trust/release split:
 
 ```bash
 scripts/run-pages-publish-tests.sh         # needs only git, no toolchain
 scripts/run-web-installer-plan-tests.sh    # needs only python3
 scripts/run-publish-version-tests.sh       # git + python3 + a C++17 compiler
+scripts/run-ci-release-contract-tests.sh   # shell + python3, no credentials
 ```
 
 The first races two publishers against a throwaway bare repo, because `gh-pages` has two concurrent
@@ -289,8 +290,12 @@ resets the numbering — on 2026-07-24 that republished the dev feed as `1.0.0-d
 `1.0.14-dev.2` it had served minutes earlier, with a green build. If this gate fires, fix the floor
 (a tag, or `version.txt`) — not the gate.
 
-Every one of them is a **step of one `gates` job**, not a job each (the version gate above runs in
-`build`, where the stamped version exists; only its tests are a `gates` step). Actions bills every
+The fourth pins the workflow's trust and delivery contract: untrusted PRs expose no signing key or
+flashable artifact, a release resume must match the published manifest's exact source SHA, and the
+license/notices, Pages feed and GitHub Release stay in their fail-closed order.
+
+Every one of their test suites is a **step of one `gates` job**, not a job each (the production
+version gate runs in `trusted_build`, where the stamped version exists). Actions bills every
 job rounded up to the next whole minute, so a fleet of ~15-second jobs costs a billed minute each
 for under a minute of work; a step boundary names the failure just as precisely. For the current
 list, read the `gates` job in `.github/workflows/build.yml` rather than a count written here.
@@ -308,8 +313,8 @@ The `esp32s3` target is part of `sdkconfig.defaults`, so a first build needs no 
 `set-target`. Managed-component ranges live in `main/idf_component.yml`, while their complete
 resolved graph is committed in `dependencies.lock`. To update it intentionally, edit the manifest,
 run `scripts/idf-docker.sh idf.py update-dependencies`, and review both files. Do not hand-edit the
-lock. **You do not need to build to open a PR** — CI builds every PR and
-attaches the artifacts. Say in the PR what you did and didn't verify.
+lock. **You do not need to build to open a PR** — CI builds every PR and attaches its non-flashable
+diagnostic artifacts. Say in the PR what you did and didn't verify.
 
 > **Flashing needs a signed image.** This config uses the Secure Boot v2 *signature scheme* without
 > hardware Secure Boot, so an **unsigned** app crash-loops before `app_main` (no eFuses are burned,
@@ -413,15 +418,17 @@ holds for the maintainer too — `main` takes no direct pushes at all. Practical
   [`build.yml`](.github/workflows/build.yml) — add to it if you introduce a file the image or the
   published site is made of.
 
-Fork PRs build and run all gates, but get no signing key: they compile-check only. That is
-deliberate, not a failure.
+Fork and same-repository PRs build and run all gates as untrusted source, but get no signing key:
+they compile- and size-check only. Their seven-day Actions artifact contains the compressed ELF,
+its checksum and size reports for diagnostics, but no flashable `.bin`, merged image, Web Serial
+parts or installer manifest. That is deliberate, not a failure.
 
 **A PR publishes no installer.** Per-PR previews at `…/PR/<N>/` are retired: each one was a
 `gh-pages` push, and every `gh-pages` push starts a full GitHub Pages deployment on top of the
 build. To flash a build in a browser, use the **dev channel** (`…/dev/`), republished by every
-firmware-relevant merge. The PR's own image is still there as a build **artifact** on the run, for
-7 days. Actions minutes are a metered monthly resource on this account — the same reason the fast
-gates share one job and the firmware build is skipped when it cannot matter.
+firmware-relevant merge. The PR run retains only the non-flashable diagnostic artifact described
+above for seven days. Actions minutes are a metered monthly resource on this account — the same
+reason the fast gates share one job and the firmware build is skipped when it cannot matter.
 
 ## Releases (a merge does not cut one)
 

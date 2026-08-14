@@ -245,6 +245,7 @@ button:disabled { cursor:default; opacity:.55; transform:none; }
 code { font-family:var(--font-mono); font-size:.88em; background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:1px 6px; overflow-wrap:anywhere; }
 .installer-links { margin:15px 2px 0; color:var(--muted); font-size:13px; }
 .installer-footer { color:var(--muted); font-size:12px; text-align:center; padding:0 20px 26px; }
+.installer-footer a { color:inherit; }
 
 @media (max-width:780px) {
   body { padding:10px; }
@@ -387,7 +388,8 @@ code { font-family:var(--font-mono); font-size:.88em; background:var(--soft); bo
       </section>
     </main>
   </div>
-  <footer class="installer-footer">MIT · not affiliated with Daikin.</footer>
+  <footer class="installer-footer"><a href="./LICENSE.txt">MIT</a> ·
+    <a href="./THIRD_PARTY_NOTICES.md">third-party notices</a> · not affiliated with Daikin.</footer>
 </div>
 
 <script>

@@ -2,10 +2,11 @@
 # Print the pinned ESP-IDF version (e.g. "v6.0.2") — the ONE shell reader of that pin.
 #
 # The version lives in exactly one place, .github/workflows/build.yml (`esp_idf_version:`, kept
-# current by Renovate's custom manager in .github/renovate.json). Two shell callers need it and
+# current by Renovate's custom manager in .github/renovate.json). Three shell callers need it and
 # must never disagree about it:
 #
 #   scripts/idf-docker.sh   picks the espressif/idf image the LOCAL build runs in
+#   scripts/ci-build-all.sh records the exact pin in every published manifest
 #   .github/workflows/build.yml  derives the ccache key from it (a toolchain bump must not be
 #                                served objects the previous toolchain compiled)
 #

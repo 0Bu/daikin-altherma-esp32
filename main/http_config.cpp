@@ -4,7 +4,8 @@
 // /set_board, /set_env3, /set_ota, /set_lang, /set_diagnostics, /discover_homehub, /detect.
 // Parse JSON, validate, then apply:
 // WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping persists immediately and
-// applies live, while its subscriber reports missing/wrong paths only after a payload arrives;
+// rebinds live only while the v19 diagnostics master is enabled; when enabled, its subscriber
+// reports missing/wrong paths only after a payload arrives;
 // /set_hp persists the RX/TX pin cache (no reboot) but keeps the model session-only;
 // /set_ota and /set_lang persist their UI settings and apply them live; /detect re-runs detection in
 // RAM.
@@ -19,12 +20,13 @@
 #include "logic/config_model.hpp"
 #include "logic/board_presets.hpp"
 #include "logic/env3.hpp"
+#include "logic/history_persist.hpp"
 #include "logic/mqtt_base.hpp"  // mqtt_base_valid — the installation base topic's rules, host-tested
 #include "logic/mqtt_uri.hpp"   // parse_mqtt_uri — host/port/TLS split, host-tested
 #include "logic/reference_temperature.hpp"
 #include "logic/weather_forecast.hpp"
 #include "hp_modbus.hpp"        // mb_reconfigure — start/stop the second, independent stack
-#include "mqtt_ha.hpp"          // mqtt_reference_reconfigure — apply its exact subscription live
+#include "mqtt_ha.hpp"          // mqtt_reference_reconfigure — re-evaluate its master-gated binding
 #include "net.hpp"              // net_eth_reserved_pins — the pads a detected W5500 is clocking
 #include "weather_forecast.hpp"
 
@@ -352,10 +354,10 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     }
 
     if (!broker.empty()) {
-        // 1. WiFi connectivity check
-        if (!wifi_info().connected) {
+        // 1. Transport-neutral connectivity check (the broker is equally reachable over Ethernet)
+        if (!net_is_up()) {
             httpd_resp_set_status(req, "400 Bad Request");
-            return http_send_json(req, "{\"ok\":false,\"error\":\"WiFi not connected\"}");
+            return http_send_json(req, "{\"ok\":false,\"error\":\"Network not connected\"}");
         }
 
         // 2. Validate scheme / credentials leakage policy
@@ -556,9 +558,10 @@ static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out)
     return nullptr;
 }
 
-// Decision-ready, read-only room source. Saving records user intent and applies its exact topics on
-// the existing MQTT connection immediately. Payload/path/freshness errors remain runtime evidence:
-// they are visible in /status and keep the write-free SHADOW diagnosis fail-closed.
+// Decision-ready, read-only room source. Saving records user intent and re-evaluates its binding on
+// the existing MQTT connection immediately; actual subscription/decoding remains gated by the v19
+// diagnostics master. Payload/path/freshness errors remain runtime evidence while enabled: they are
+// visible in /status and keep the write-free SHADOW diagnosis fail-closed.
 static esp_err_t set_ref_temp(httpd_req_t* req) {
     RefTempRequest in;
     if (const char* error = parse_ref_temp_request(req, in))
@@ -789,6 +792,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     c.tx_pin    = ji(j, "tx", c.tx_pin);
     const bool reset_checkup =
         set_hp_resets_checkup(profile_sent, old_rx, old_tx, c.rx_pin, c.tx_pin);
+    if (reset_checkup) c.x10a_identity_fp = 0;  // replaced below only for a committed manual model
     // The HomeHub Modbus stack (issue #32). All optional — an omitted key keeps its stored value, so
     // a wiring-only patch (rx/tx) leaves the HomeHub untouched and the pin picker's
     // {profile:"auto",rx,tx} POST cannot switch anything on. This is a SECOND source, not an
@@ -798,7 +802,15 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // the durable opt-out, with no later boot search or HomeHub request. /discover_homehub remains a
     // request-local manual action and never mutates config behind the form's Save/Cancel boundary.
     cJSON* hostItem = cJSON_GetObjectItem(j, "mb_host");
+    cJSON* portItem = cJSON_GetObjectItem(j, "mb_port");
+    cJSON* unitItem = cJSON_GetObjectItem(j, "mb_unit_id");
     const bool host_sent = cJSON_IsString(hostItem);
+    const bool homehub_sent = host_sent || cJSON_IsNumber(portItem) || cJSON_IsNumber(unitItem);
+    if (!set_hp_update_domains_compatible(x10a_sent, homehub_sent)) {
+        cJSON_Delete(j);
+        return send_err(req, "400 Bad Request",
+                        "update X10A and HomeHub in separate requests");
+    }
     if (host_sent) {
         c.mb_host = hostItem->valuestring;
         c.mb_discovery_done = true;
@@ -831,22 +843,37 @@ static esp_err_t set_hp(httpd_req_t* req) {
                 return send_err(req, "400 Bad Request", "tx_pin is not available on selected board");
         }
     }
-    // This route OWNS the pin cache, unlike the service routes whose link writes are only
-    // best-effort maintenance. Require all three cache keys; on failure RAM stays untouched, so
-    // there is no new link to hand the poll engine and reconfigure must be skipped.
-    if (!config_save(c, /*require_link=*/true))
+    // A concrete API profile is a committed decoding contract even though the UI always requests
+    // auto-detection. Give that manual contract the same stable profile/link scope as detection;
+    // otherwise history_reset() would leave target_fp=0 forever because no detect cycle runs. A
+    // wiring-only raw patch while a concrete profile is already active follows the same rule.
+    if (reset_checkup && c.profile != "auto")
+        c.x10a_identity_fp = logic::history_x10a_target_fingerprint(
+            c.profile.c_str(), c.rx_pin, c.tx_pin, static_cast<char>(c.proto));
+    // This route owns TWO independent durability domains. An explicit X10A statement requires all
+    // the atomic link-cache entry; a HomeHub-only request succeeds with the service blob and treats the
+    // unchanged X10A cache as best-effort maintenance. Mixed requests were rejected above, so a 500
+    // can no longer hide a HomeHub blob that already landed before a link-key failure.
+    if (!config_save(c, /*require_link=*/x10a_sent))
         return send_err(req, "500 Internal Server Error", "config write failed");
     if (modbus_was_enabled && !config_modbus_enabled(c)) mqtt_request_modbus_cleanup();
     if (reset_checkup) {
+        hp_poll_reconfigure();
         checkup_reset();
         dwell_reset();
         history_reset();
-        hp_poll_reconfigure();
+        if (c.x10a_identity_fp != 0) {
+            checkup_reset_on_detect(c.profile.c_str());
+            dwell_reset_on_detect(c.profile.c_str());
+            history_reset_on_detect(c.x10a_identity_fp);
+        }
     }
-    if (reset_mb_history) history_modbus_reset();
-    // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
-    // and re-resolves its address without touching the X10A poll engine above.
-    mb_reconfigure();
+    if (reset_mb_history) {
+        history_modbus_reset();
+        // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
+        // and re-resolves its address without touching the X10A poll engine above.
+        mb_reconfigure();
+    }
     return http_send_json(req, "{\"ok\":true}");
 }
 
@@ -1137,13 +1164,10 @@ static esp_err_t do_detect(httpd_req_t* req) {
     c.profile  = "auto";
     c.fp_valid = false;
     config_set_runtime(c);
+    hp_poll_reconfigure();
     checkup_reset();
     dwell_reset();
     history_reset();
-    hp_poll_reconfigure();
-    // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
-    // and re-resolves its address without touching the X10A poll engine above.
-    mb_reconfigure();
     return http_send_json(req, "{\"ok\":true}");
 }
 

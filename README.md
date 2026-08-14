@@ -81,5 +81,8 @@ optional HomeHub link has none in the code: no source file can even frame a Modb
 contract test keeps it that way ([docs/MODBUS_PROTOCOL.md](docs/MODBUS_PROTOCOL.md)). Other clients
 on your LAN — the Onecta app, the unit's own controller, evcc — do write the hub; this firmware just
 reports what they left behind.
-Trusted LAN only; no API auth/TLS. MIT ([LICENSE](LICENSE)); protocol / value definitions derived
-from [ESPAltherma](https://github.com/raomin/ESPAltherma) (MIT). No warranty; not affiliated with Daikin.
+Trusted LAN only; no user authentication or API TLS (browser Host/Origin guards still apply). MIT
+([LICENSE](LICENSE)); protocol / value definitions derived from
+[ESPAltherma](https://github.com/raomin/ESPAltherma) (MIT). See
+[third-party notices](THIRD_PARTY_NOTICES.md) for complete attributions. No warranty; not affiliated
+with Daikin.

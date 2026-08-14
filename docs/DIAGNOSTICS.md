@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 211eb01b8125a2a704abd4dc747565f5334eff6dbffc8133e817649ee456504f -->
+<!-- user-docs-contract: 2744ccb5a9cd3d3ec3b41f31949d1c496bca9f8d40aa5cfe8695e75359beaeb0 -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -32,7 +32,9 @@ not recommend a next step because its bounded evidence may not establish the cau
 
 Most reassuring results require a complete 24-hour window and at least 90% readable coverage for the
 signals used by the check. A diagnosis-format change starts a new window, so **CHECKING** after an
-update can be normal.
+update can be normal. Changing the X10A wiring or detected profile also starts a new window; a bus
+read that was already in flight for the previous link is discarded rather than counted under the
+replacement plant identity.
 
 An ordinary reset while power remains available normally retains the diagnosis window directly from
 RAM. Completed diagnosis hours are also stored in the device's append-only history journal, so a

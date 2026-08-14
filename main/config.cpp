@@ -65,9 +65,20 @@ Config config() {
     return g_cfg;
 }
 
+static uint32_t next_revision(uint32_t current) {
+    uint32_t next = current + 1;
+    return next ? next : 1;
+}
+
+static void publish_locked(const Config& requested) {
+    Config c = requested;
+    c.runtime_revision = next_revision(g_cfg.runtime_revision);
+    g_cfg = std::move(c);
+}
+
 static void publish(const Config& c) {
     Lock lk(g_mtx);
-    g_cfg = c;
+    publish_locked(c);
 }
 
 void config_load() {
@@ -266,13 +277,22 @@ void config_load() {
         c.weather_longitude_e6 = 0;
     }
 
-    // Persisted X10A LINK cache: RX/TX pins + protocol. The wiring is physically boot-invariant, so
+    // Persisted X10A LINK cache: RX/TX pins + protocol. New builds use one CRC-protected blob so a
+    // failed/interrupted pin swap cannot leave a mixed pair. Legacy per-key values are accepted only
+    // until the first successful save/detection migrates them.
     // it is cached (fallback = compile-time Kconfig default) and tried FIRST by the detection sweep;
     // a change is re-persisted (hp_poll.cpp poll_detect). The sweep still tries the defaults too, so
     // a stale cache self-heals. The MODEL is NOT persisted — profile + fingerprint below stay the
     // sentinel/empty and are re-detected on every boot (a swapped unit is re-identified).
-    c.rx_pin       = nvs_get_i32("rx_pin", CONFIG_DAIKIN_RX_PIN);
-    c.tx_pin       = nvs_get_i32("tx_pin", CONFIG_DAIKIN_TX_PIN);
+    std::vector<uint8_t> link_raw;
+    LinkBlob link_blob;
+    const bool link_blob_loaded = nvs_get_blob("link", link_raw) &&
+                                  link_blob_deserialize(link_raw.data(), link_raw.size(), link_blob);
+    c.rx_pin = link_blob_loaded ? link_blob.rx_pin
+                                : nvs_get_i32("rx_pin", CONFIG_DAIKIN_RX_PIN);
+    c.tx_pin = link_blob_loaded ? link_blob.tx_pin
+                                : nvs_get_i32("tx_pin", CONFIG_DAIKIN_TX_PIN);
+    c.x10a_identity_fp = link_blob_loaded ? link_blob.identity_fp : 0;
     // Optional hardware fails closed on an invalid persisted mapping. Disabling it keeps the UI
     // reachable without claiming or driving a bad pad; the stored pins remain visible for repair.
     {
@@ -283,14 +303,9 @@ void config_load() {
             c.env3_enabled = false;
         }
     }
-    // Re-check the pair on the way IN. BOTH write paths commit rx_pin and tx_pin as two independent
-    // NVS writes — config_save and, since the field-owned split, config_save_link — so a save cut or
-    // failed between them leaves a pair on flash the request path would have rejected outright:
-    // correcting a swapped wire {44,43} -> {43,44} with only the rx write through leaves rx == tx ==
-    // 43. Naming the failing key on /diag (put_i32) reports that write; it does not undo the one that
-    // landed. validate() enforces the pair, but only on the request path (http_config.cpp); NVS stops
-    // being trusted the moment a partial write is possible.
-    // A guard, not a repair: the sweep already drops an rx == tx candidate and falls back to these
+    // Re-check on the way IN even though the blob is atomic: older per-key layouts, corruption, a
+    // different board's NVS image and future format mistakes are all still untrusted. A guard, not a
+    // repair: the sweep already drops an rx == tx candidate and falls back to these
     // same defaults (hp_detect.cpp), so the bus still comes up. link_pins_safe adds the checks the
     // sweep lacks — the upper GPIO bound AND the chip-reserved-pin rule (board_pins.hpp), the same
     // rule the request path enforces (validate) — so a pair that reaches flash via a curl POST to
@@ -315,7 +330,8 @@ void config_load() {
             c.env3_enabled = false;
         }
     }
-    c.proto        = parse_protocol(nvs_get_str("proto", CONFIG_DAIKIN_PROTOCOL));
+    c.proto = parse_protocol(link_blob_loaded ? std::string(1, link_blob.proto)
+                                              : nvs_get_str("proto", CONFIG_DAIKIN_PROTOCOL));
     // Old development builds persisted discovery-result keys outside the atomic blob. They remain
     // ignored: v18 owns the one-shot decision atomically beside the host it applies to.
     c.profile      = "auto";
@@ -325,20 +341,6 @@ void config_load() {
     c.fp_eeprom       = "";
     c.fp_valid        = false;
     publish(c);
-}
-
-// One NVS write, with the failure named on /diag + syslog. The callers only learn THAT the save
-// failed (they turn it into a 500); without this line nobody could tell which key died or why —
-// a full partition and a wedged flash both surface as a bare "config write failed".
-static bool put_str(const char* key, const std::string& val) {
-    esp_err_t e = nvs_set_str(key, val);
-    if (e != ESP_OK) diag_printf("config: NVS write failed key=%s err=%s\n", key, esp_err_to_name(e));
-    return e == ESP_OK;
-}
-static bool put_i32(const char* key, int32_t val) {
-    esp_err_t e = nvs_set_i32(key, val);
-    if (e != ESP_OK) diag_printf("config: NVS write failed key=%s err=%s\n", key, esp_err_to_name(e));
-    return e == ESP_OK;
 }
 
 bool config_save(const Config& requested, bool require_link) {
@@ -352,13 +354,30 @@ bool config_save(const Config& requested, bool require_link) {
     // both a mid-write NVS failure AND a power cut, with no per-key rollback and no write-ordering to
     // get right (the old multi-commit save needed both, and still left a partial state on a rollback
     // that could not complete). Every runtime call is serialized on the httpd task; initial HomeHub
-    // discovery is the one boot call and finishes before httpd starts. The poll task
-    // (config_save_link) can therefore never revert a credential change — the field-ownership
-    // guarantee is kept without narrow per-key writes.
+    // discovery is the one boot call and finishes before httpd starts. The poll task uses a
+    // revision-checked field-owned commit, so it can never revert a credential change.
     // Diagnostics consent and its generation ride atomically with every dependent source. The
     // heating-curve diagnosis still derives its remaining prerequisites from the MQTT room source
     // and active HomeHub on every evaluation; forecast remains optional comparison evidence.
+    // Serialize the NVS transaction with detection's field-owned commit. The flash write is rare
+    // and may hold readers briefly, but this is the only way RAM and the atomic link entry can keep
+    // one ordering when /set_hp races a long-running detection sweep.
+    Lock lk(g_mtx);
     Config c = requested;
+    if (!require_link && requested.runtime_revision != g_cfg.runtime_revision) {
+        // The only concurrent writer is auto-detection. An unrelated HTTP form owns service fields,
+        // not the detected X10A session, so a snapshot taken before detection must carry forward the
+        // newly proven model/link rather than silently reverting them on publication.
+        c.profile = g_cfg.profile;
+        c.proto = g_cfg.proto;
+        c.rx_pin = g_cfg.rx_pin;
+        c.tx_pin = g_cfg.tx_pin;
+        c.x10a_identity_fp = g_cfg.x10a_identity_fp;
+        c.fp_pages = g_cfg.fp_pages;
+        c.fp_kw_tenths = g_cfg.fp_kw_tenths;
+        c.fp_iu_kw_tenths = g_cfg.fp_iu_kw_tenths;
+        c.fp_eeprom = g_cfg.fp_eeprom;
+    }
     ConfigBlob b;
     b.wifi_ssid = c.wifi_ssid;                 b.wifi_pass = c.wifi_pass;
     b.wifi_ssid_backup = c.wifi_ssid_backup;   b.wifi_pass_backup = c.wifi_pass_backup;
@@ -429,25 +448,22 @@ bool config_save(const Config& requested, bool require_link) {
         return false;
     }
 
-    // The X10A LINK cache (RX/TX/proto) stays as separate self-healing keys, NOT in the blob: it has
-    // two owners (this path for a manual /set_hp override, and the poll task's config_save_link for a
-    // detected pin), and a partial write self-heals on the next detect and is re-validated on load by
-    // link_pins_safe. Written AFTER the blob so a link-key hiccup never taints the atomic credential
-    // save; the credential/service state is already durably committed by the time we get here.
-    bool link_ok = true;
-    link_ok &= put_i32("rx_pin", c.rx_pin);
-    link_ok &= put_i32("tx_pin", c.tx_pin);
-    link_ok &= put_str("proto", std::string(1, static_cast<char>(c.proto)));
+    // The link remains a separate ownership domain, but its four fields are ONE atomic entry. It is
+    // written after the service blob so a cache failure never taints an unrelated credential save.
+    const std::vector<uint8_t> link = link_blob_serialize(
+        LinkBlob{c.rx_pin, c.tx_pin, static_cast<char>(c.proto), c.x10a_identity_fp});
+    const esp_err_t link_err = nvs_set_blob("link", link.data(), link.size());
+    const bool link_ok = link_err == ESP_OK;
     if (!link_ok)
-        diag_printf("config: link-cache key write failed after the atomic blob save "
-                    "(self-heals on the next detect; re-validated on load)\n");
+        diag_printf("config: atomic link-cache write failed after service save (%s; previous link "
+                    "remains intact)\n", esp_err_to_name(link_err));
     if (!config_save_succeeded(/*blob_ok=*/true, link_ok, require_link)) {
         // /set_hp owns the link and cannot call this a save when its cache did not land. Do not
         // publish its requested pins to RAM or wake the poll task. (The atomic blob also landed, but
         // /set_hp changed none of its fields; for every other route that blob is the requested save.)
         return false;
     }
-    publish(c);
+    publish_locked(c);
     return true;
 }
 
@@ -456,37 +472,49 @@ bool config_save(const Config& requested, bool require_link) {
 // spends a whole sweep off-lock probing the bus; committing that stale snapshot back would revert
 // any /set_wifi or /set_mqtt that landed meanwhile. See logic/config_model.hpp's ownership note.
 
-bool config_save_link(int rx_pin, int tx_pin, Protocol proto) {
-    // NVS first, off-lock (flash writes are slow — readers shouldn't queue behind them), and only
-    // the three link keys: the caller's credentials are never carried along.
-    bool ok = true;
-    ok &= put_i32("rx_pin", rx_pin);
-    ok &= put_i32("tx_pin", tx_pin);
-    ok &= put_str("proto", std::string(1, static_cast<char>(proto)));
-    // Patch RAM even when the cache write failed, unlike /set_hp's require_link config_save call:
-    // this link is PROVEN — the bus just answered on it — and the poll engine reads the pins from
-    // here every cycle. Refusing the patch would leave it hammering pins known not to work. A
-    // failed write only costs the cache (detection re-runs next boot); `false` tells the caller.
-    {
-        Lock lk(g_mtx);
-        apply_link(g_cfg, rx_pin, tx_pin, proto);
+bool config_commit_detected_link(const Config& expected, int rx_pin, int tx_pin, Protocol proto,
+                                 uint32_t identity_fp, bool& link_saved,
+                                 uint32_t& committed_revision) {
+    Lock lk(g_mtx);
+    if (g_cfg.runtime_revision != expected.runtime_revision) {
+        link_saved = false;
+        committed_revision = 0;
+        return false;
     }
-    return ok;
+
+    const bool link_changed = g_cfg.rx_pin != rx_pin || g_cfg.tx_pin != tx_pin ||
+                              g_cfg.proto != proto || g_cfg.x10a_identity_fp != identity_fp;
+    link_saved = true;
+    if (link_changed) {
+        const std::vector<uint8_t> link = link_blob_serialize(
+            LinkBlob{rx_pin, tx_pin, static_cast<char>(proto), identity_fp});
+        link_saved = nvs_set_blob("link", link.data(), link.size()) == ESP_OK;
+    }
+
+    // The link is proven by this sweep, so keep using it for the current session even if its cache
+    // write failed. The history reset performed by the caller scopes every new RAM/flash record to
+    // `identity_fp`; on reboot a stale cached identity mismatches and is rejected fail-closed.
+    apply_link(g_cfg, rx_pin, tx_pin, proto, identity_fp);
+    g_cfg.runtime_revision = next_revision(g_cfg.runtime_revision);
+    committed_revision = g_cfg.runtime_revision;
+    return true;
 }
 
-// RAM-only by design: the model is re-detected every boot, so there is nothing to persist and no
-// failure to report. Allocation happens at the call site, not under the lock (apply_model swaps).
-void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, int fp_iu_kw_tenths,
-                      std::string fp_eeprom) {
+bool config_commit_detected_model(uint32_t expected_revision, std::string profile,
+                                  uint32_t fp_pages, int fp_kw_tenths, int fp_iu_kw_tenths,
+                                  std::string fp_eeprom) {
     Lock lk(g_mtx);
+    if (g_cfg.runtime_revision != expected_revision) return false;
     apply_model(g_cfg, std::move(profile), fp_pages, fp_kw_tenths, fp_iu_kw_tenths,
                 std::move(fp_eeprom));
+    g_cfg.runtime_revision = next_revision(g_cfg.runtime_revision);
+    return true;
 }
 
 // Whole-struct RAM publish (no NVS). Sole caller is POST /detect (http_config.cpp), which resets
 // profile->"auto" + clears the fingerprint: acceptable as a whole-struct write because it runs on the
 // httpd task, which OWNS the credential fields (serialized against the other /set_* handlers), so it
-// cannot revert them. The poll task must NOT use this — it uses the field-owned config_set_model.
+// cannot revert them. The poll task must NOT use this — it uses the revision-checked helpers above.
 void config_set_runtime(const Config& c) { publish(c); }
 
 // Kconfig-derived hardware facts (see config.hpp). Kept here — the one file that already owns the

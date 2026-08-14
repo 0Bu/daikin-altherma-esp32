@@ -90,18 +90,20 @@ static bool        s_batch_split[def::HOMEHUB_REG_COUNT] = {false};
 static SemaphoreHandle_t s_cache_mtx = nullptr;
 static std::vector<CachedValue> s_cache;
 static uint32_t s_cache_generation = 0;      // guarded by s_cache_mtx; session that committed s_cache
+static uint32_t s_cache_target_generation = 0; // guarded by s_cache_mtx; configured HomeHub identity
 
 // Task handle + the connect backoff. s_task is read/written under s_mtx so a /set_hp that lands while
 // the old task is retiring cannot race it into starting two tasks. Discovery is never part of this
 // loop; normal connect failures reuse the X10A sweep's host-tested policy.
 static TaskHandle_t  s_task = nullptr;
 static DetectBackoff s_backoff;
-// ATOMIC because mb_reconfigure() writes it from the HTTPD task while mb_task reads it — an int64_t
-// is two stores on a 32-bit target, so a torn read was possible. Every outcome of a torn read here
-// happened to be a SHORTER wait, so nothing broke; it is made atomic because hp_poll.cpp's
-// equivalent httpd->poll one-shot already says in so many words that it must be, and a formal race
-// left in place because today's consequence is benign is one nobody re-checks after the next edit.
+// The HTTP task never mutates s_backoff: it bumps the target generation and sends an atomic one-shot;
+// the poll task alone consumes that request and resets its own backoff. This mirrors hp_poll.cpp and
+// removes the former plain-int data race. The generation also invalidates a cycle/cache that belongs
+// to the previous HomeHub before the poll task has had time to close that socket.
 static std::atomic<int64_t> s_next_try_us{0};
+static std::atomic<bool> s_reconfigure_reset{false};
+static std::atomic<uint32_t> s_target_generation{1};
 
 enum class MbFailureType {
     None,
@@ -140,16 +142,21 @@ ModbusStatus mb_status() {
 
 // ── Status writers. Strings are built BY THE CALLER and swapped in (noexcept) so nothing allocates
 // under the lock — the rule hp_poll.cpp's commit follows for exactly the same reason. ──────────────
-static void status_target(std::string host, int port, int unit, bool discovering) {
+static bool status_target(std::string host, int port, int unit, bool discovering,
+                          uint32_t expected_target_generation = 0) {
     Lock lk(s_mtx);
+    if (expected_target_generation != 0 &&
+        s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
+        return false;
     s_status.host.swap(host);
     s_status.port        = port;
     s_status.unit_id     = unit;
     s_status.discovering = discovering;
     s_status.connected   = false;
+    return true;
 }
-static void status_error(std::string code, std::string msg, int detail = -1, int reg = 0,
-                         bool link_down = true) {
+static bool status_error(std::string code, std::string msg, int detail = -1, int reg = 0,
+                         bool link_down = true, uint32_t expected_target_generation = 0) {
     // `msg` is swapped under the mutex, so preserve the line to be logged in a fixed buffer first.
     // Logging while holding s_mtx would invert the status/diag mutex order and invite a deadlock.
     char log_line[192];
@@ -157,6 +164,9 @@ static void status_error(std::string code, std::string msg, int detail = -1, int
     bool changed = false;
     {
         Lock lk(s_mtx);
+        if (expected_target_generation != 0 &&
+            s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
+            return false;
         changed = s_status.last_error_code != code || s_status.last_error != msg ||
                   s_status.last_error_detail != detail || s_status.last_error_register != reg;
         if (link_down) s_status.connected = false;
@@ -169,12 +179,16 @@ static void status_error(std::string code, std::string msg, int detail = -1, int
     // One line per transition, not one per one-second retry. A clean poll clears the current error,
     // so the same fault is logged again if it genuinely returns after recovery.
     if (changed) diag_printf("modbus: %s\n", log_line);
+    return true;
 }
 
-static void status_recovered() {
+static bool status_recovered(uint32_t expected_target_generation = 0) {
     bool recovered = false;
     {
         Lock lk(s_mtx);
+        if (expected_target_generation != 0 &&
+            s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
+            return false;
         recovered = !s_status.last_error_code.empty() || !s_status.last_error.empty();
         s_status.last_error_code.clear();
         s_status.last_error.clear();
@@ -182,22 +196,28 @@ static void status_recovered() {
         s_status.last_error_register = 0;
     }
     if (recovered) diag_printf("modbus: communication recovered\n");
+    return true;
 }
 
 // A new user-selected target is a new attempt, so an old failure is no longer the
 // CURRENT state while that attempt is in flight. Unlike status_recovered(), this does not log a
 // recovery before any successful communication has happened.
-static void status_clear_error() {
+static bool status_clear_error(uint32_t expected_target_generation = 0) {
     Lock lk(s_mtx);
+    if (expected_target_generation != 0 &&
+        s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
+        return false;
     s_status.last_error_code.clear();
     s_status.last_error.clear();
     s_status.last_error_detail   = -1;
     s_status.last_error_register = 0;
+    return true;
 }
 // A successful TCP connect starts a new SESSION, but does not make the old cache live. The link only
 // becomes `connected` after this session has committed its first poll below. Reserving generation
 // zero makes a pre-first-poll cache impossible to mistake for current even on the first connection.
-static void status_socket_open(std::string host, int port, int unit) {
+static bool status_socket_open(std::string host, int port, int unit,
+                               uint32_t expected_target_generation) {
     // A NEW SESSION STARTS A NEW READ CADENCE. Tick 0 is a full cycle, so the first poll of this
     // socket publishes the whole map instead of only the fast batches; and the per-batch fallback to
     // single reads is forgotten, because the reason for it (a register this hub does not implement)
@@ -205,12 +225,15 @@ static void status_socket_open(std::string host, int port, int unit) {
     s_cycle_tick = 0;
     for (bool& split : s_batch_split) split = false;
     Lock lk(s_mtx);
+    if (s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
+        return false;
     s_status.host.swap(host);
     s_status.port        = port;
     s_status.unit_id     = unit;
     s_status.connected   = false;
     s_status.discovering = false;
     if (++s_link_generation == 0) ++s_link_generation;  // zero stays the "no session" sentinel
+    return true;
 }
 
 // ── Address resolution ──────────────────────────────────────────────────────────────────────────
@@ -434,36 +457,51 @@ static void mb_disconnect() {
     status_target(std::string(), 0, 0, false);
 }
 
-static bool mb_ensure_connected(const std::string& host, int port, int unit_id) {
+static bool mb_ensure_connected(const std::string& host, int port, int unit_id,
+                                uint32_t expected_target_generation) {
+    if (s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
+        return false;
     // No address, nothing to dial. There is deliberately no discovery fallback here.
     if (host.empty()) {
-        status_error(std::string("no_address"), std::string("no HomeHub address configured"));
+        status_error(std::string("no_address"), std::string("no HomeHub address configured"),
+                     -1, 0, true, expected_target_generation);
         return false;
     }
     // Reuse a healthy socket for the same target — a read failure will have close_sock()'d it, so
     // s_sock >= 0 here means the last cycle's link is still good.
-    if (s_sock >= 0 && s_have_req && host == s_req_host && port == s_req_port && unit_id == s_unit)
+    if (s_sock >= 0 && s_have_req && host == s_req_host && port == s_req_port && unit_id == s_unit &&
+        s_target_generation.load(std::memory_order_acquire) == expected_target_generation)
         return true;
     close_sock();
     // Announce the target before the blocking resolve, so /status shows what the device is
     // attempting rather than going silent for seconds.
-    status_clear_error();
-    status_target(host, port, unit_id, /*discovering=*/false);
+    if (!status_clear_error(expected_target_generation) ||
+        !status_target(host, port, unit_id, /*discovering=*/false,
+                       expected_target_generation))
+        return false;
 
     sockaddr_in addr{};
     std::string resolved = host;
     esp_task_wdt_reset();   // DNS/mDNS resolution can take a couple of seconds
     if (!resolve_host(host, port, addr)) {
         status_error(std::string("resolve_failed"),
-                     std::string("HomeHub address could not be resolved"));
+                     std::string("HomeHub address could not be resolved"), -1, 0, true,
+                     expected_target_generation);
         return false;
     }
+    if (s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
+        return false;
     int connect_err = 0;
     const int sock = connect_socket(addr, 2000, connect_err);
     esp_task_wdt_reset();
     if (sock < 0) {
         status_error(std::string(connect_error_code(connect_err)),
-                     connect_error_message(connect_err), connect_err);
+                     connect_error_message(connect_err), connect_err, 0, true,
+                     expected_target_generation);
+        return false;
+    }
+    if (s_target_generation.load(std::memory_order_acquire) != expected_target_generation) {
+        close(sock);
         return false;
     }
     s_sock     = sock;
@@ -471,7 +509,10 @@ static bool mb_ensure_connected(const std::string& host, int port, int unit_id) 
     s_req_port = port;
     s_unit     = unit_id;
     s_have_req = true;
-    status_socket_open(std::move(resolved), port, unit_id);
+    if (!status_socket_open(std::move(resolved), port, unit_id, expected_target_generation)) {
+        close_sock();
+        return false;
+    }
     return true;
 }
 
@@ -715,6 +756,8 @@ static_assert(MB_PLAN.count * 3 <= def::HOMEHUB_REG_COUNT,
 // MBAP round-trips a second at a hub that also serves the Onecta app, the MMI and evcc — for a map
 // whose fastest-moving member is a water temperature.
 static void mb_poll_once() {
+    const uint32_t cycle_target_generation =
+        s_target_generation.load(std::memory_order_acquire);
     const Config& c = config();
     const std::string target = config_modbus_host(c);
 
@@ -724,8 +767,11 @@ static void mb_poll_once() {
     // configuration. The reset keeps the boot-aligned raster and replaces old-target data with gaps.
     if (s_have_req && (target != s_req_host || c.mb_port != s_req_port || c.mb_unit_id != s_unit))
         history_modbus_reset();
+    // Capture after the task-owned target correction above. Capturing before it made the first full
+    // cycle for every new HomeHub self-reject as stale and left an avoidable full-cadence gap.
+    const uint32_t history_generation = history_modbus_generation();
 
-    if (!mb_ensure_connected(target, c.mb_port, c.mb_unit_id)) {
+    if (!mb_ensure_connected(target, c.mb_port, c.mb_unit_id, cycle_target_generation)) {
         // THE CACHE GOES WITH THE LINK. Keeping it was a real defect: /values kept serving the last
         // good readings, the browser had no way to tell they were minutes old, and it went on
         // printing them as the live second opinion — complete with a computed "difference" against a
@@ -739,9 +785,10 @@ static void mb_poll_once() {
             Lock lk(s_cache_mtx);
             s_cache.clear();
             s_cache_generation = 0;
+            s_cache_target_generation = 0;
         }
         { Lock lk(s_mtx); s_status.values = 0; }
-        history_record_modbus(nullptr, 0);            // advance its independent raster with a gap
+        history_record_modbus(nullptr, 0, history_generation); // advance this identity with a gap
         // Back off before retrying — see s_backoff. Applied by SKIPPING cycles, never by lengthening
         // the delay, so the top-of-loop watchdog reset keeps its cadence.
         s_next_try_us = esp_timer_get_time() +
@@ -920,27 +967,22 @@ static void mb_poll_once() {
         Lock lk(s_mtx);
         // The task owns the socket and generation, so this answer cannot change before the cache
         // commit below. Resolve it while `fresh` is still available to the history recorder.
-        current_session = s_sock >= 0 && s_link_generation == cycle_generation;
+        current_session = s_sock >= 0 && s_link_generation == cycle_generation &&
+                          s_target_generation.load(std::memory_order_acquire) ==
+                              cycle_target_generation;
     }
     const logic::OutdoorEvidence plant_outdoor = logic::outdoor_homehub_evidence(
         outdoor_row_answered, current_session, outdoor_temperature_c);
-    {
-        Lock lk(s_mtx);
-        s_status.plant_gate_known  = plant_gate_known;
-        s_status.plant_gate_active = plant_gate_active;
-        s_status.heating_mode_known  = heating_mode_known;
-        s_status.heating_mode_active = heating_mode_active;
-        s_status.plant_outdoor = plant_outdoor;
-    }
-    const auto report_cycle_result = [&]() {
+    const auto report_cycle_result = [&](bool final_current_session) {
         if (first_failure.type != MbFailureType::None) {
             status_error(std::string(failure_code(first_failure.type)),
                          failure_message(first_failure), first_failure.detail, first_failure.reg,
-                         /*link_down=*/!current_session);
-        } else if (logic::mb_cycle_proves_recovery(full, current_session)) {
+                         /*link_down=*/!final_current_session,
+                         cycle_target_generation);
+        } else if (logic::mb_cycle_proves_recovery(full, final_current_session)) {
             // One status error represents the WHOLE map. A fast cycle did not re-read the remaining
             // rows and therefore cannot prove that their last failure recovered.
-            status_recovered();
+            status_recovered(cycle_target_generation);
         }
     };
     // A FAST CYCLE COMMITS NO VALUE CACHE. It read thirteen of the map's registers, so its
@@ -950,28 +992,54 @@ static void mb_poll_once() {
     // MB_FULL_CYCLE_TICKS - 1 poll intervals old — and `values`/`connected` below still report this
     // cycle's link, so a hub that went away is visible within a second rather than within a cadence.
     if (!full) {
+        bool final_current_session = false;
         {
             Lock lk(s_mtx);
+            final_current_session = s_sock >= 0 && s_link_generation == cycle_generation &&
+                s_target_generation.load(std::memory_order_acquire) == cycle_target_generation;
             // Not `committed`: nothing was. A LIVE session keeps the count of the last full cycle,
             // because the rows it counts are still the rows /values will serve. A session that ended
             // reports 0 for the same reason the full path does — the cache is about to go with it.
-            if (!current_session) s_status.values = 0;
-            s_status.connected = current_session;
+            if (!final_current_session) s_status.values = 0;
+            s_status.connected = final_current_session;
+            s_status.plant_gate_known = final_current_session && plant_gate_known;
+            s_status.plant_gate_active = final_current_session && plant_gate_active;
+            s_status.heating_mode_known = final_current_session && heating_mode_known;
+            s_status.heating_mode_active = final_current_session && heating_mode_active;
+            s_status.plant_outdoor = final_current_session ? plant_outdoor
+                                                            : logic::OutdoorEvidence{};
         }
-        report_cycle_result();
+        // The writer itself rechecks target generation under s_mtx, closing the last window between
+        // this status commit and a concurrent /set_hp.
+        report_cycle_result(final_current_session);
         s_cycle_tick++;
         return;
     }
 
+    // Re-check immediately before committing the two externally visible stores. If /set_hp landed
+    // after the session check, its generation/history-identity changes make both commits refuse the
+    // old target rather than presenting A as the first sample of B.
+    if (s_target_generation.load(std::memory_order_acquire) != cycle_target_generation)
+        current_session = false;
     history_record_modbus(current_session ? fresh.data() : nullptr,
-                           current_session ? fresh.size() : 0);
+                          current_session ? fresh.size() : 0, history_generation);
 
     const int committed = static_cast<int>(fresh.size());
     {
         Lock lk(s_cache_mtx);
-        s_cache = std::move(fresh);                // move-assign: steals the buffer, cannot throw
-        s_cache_generation = cycle_generation;
+        // Re-check while owning the store. If /set_hp bumped the target before waiting for this lock,
+        // refuse the old buffer; if it bumps afterwards, mb_reconfigure waits and clears it itself.
+        if (s_target_generation.load(std::memory_order_acquire) == cycle_target_generation) {
+            s_cache = std::move(fresh);            // move-assign: steals the buffer, cannot throw
+            s_cache_generation = cycle_generation;
+            s_cache_target_generation = cycle_target_generation;
+        } else {
+            s_cache.clear();
+            s_cache_generation = 0;
+            s_cache_target_generation = 0;
+        }
     }
+    bool final_current_session = false;
     {
         Lock lk(s_mtx);
         // rx_ok/rx_fail are NOT touched here: mb_read already counts every read as it happens, and
@@ -988,10 +1056,18 @@ static void mb_poll_once() {
         // Only a poll that still owns the current open socket can publish this session as live. A
         // framing/transport failure closes it in mb_read and keeps connected=false; Modbus exception
         // replies leave the socket open and commit the rows that really answered.
-        s_status.values = current_session ? committed : 0;
-        s_status.connected = current_session;
+        final_current_session = s_sock >= 0 && s_link_generation == cycle_generation &&
+            s_target_generation.load(std::memory_order_acquire) == cycle_target_generation;
+        s_status.values = final_current_session ? committed : 0;
+        s_status.connected = final_current_session;
+        s_status.plant_gate_known = final_current_session && plant_gate_known;
+        s_status.plant_gate_active = final_current_session && plant_gate_active;
+        s_status.heating_mode_known = final_current_session && heating_mode_known;
+        s_status.heating_mode_active = final_current_session && heating_mode_active;
+        s_status.plant_outdoor = final_current_session ? plant_outdoor
+                                                        : logic::OutdoorEvidence{};
     }
-    report_cycle_result();
+    report_cycle_result(final_current_session);
     s_cycle_tick++;
 }
 
@@ -1013,6 +1089,10 @@ static void mb_task(void*) {
         // last cycle before a HomeHub is disabled is recorded like every other.
         stack_watch_sample(StackWatch::Modbus);
         try {
+            if (s_reconfigure_reset.exchange(false, std::memory_order_acq_rel)) {
+                s_backoff.silent = 0;
+                s_next_try_us.store(0, std::memory_order_release);
+            }
             // Clearing the saved address disables the stack. No boot- or loop-triggered browse may
             // turn an empty field back into an active HomeHub configuration.
             if (config_modbus_host(config()).empty()) break;
@@ -1038,6 +1118,7 @@ static void mb_task(void*) {
         Lock lk(s_cache_mtx);
         s_cache.clear();
         s_cache_generation = 0;
+        s_cache_target_generation = 0;
     }
     diag_printf("modbus: HomeHub disabled by empty configuration — stack stopped\n");
     esp_task_wdt_delete(NULL);
@@ -1091,21 +1172,35 @@ void mb_start() {
 }
 
 void mb_reconfigure() {
-    if (!s_mtx) return;
+    if (!s_mtx || !s_cache_mtx) return;
+    s_reconfigure_reset.store(true, std::memory_order_release);
+    s_next_try_us.store(0, std::memory_order_release);
     {
-        // A changed address must not keep the old socket. The task owns s_req_*, so it is not touched
-        // from here — the reset below makes the next cycle re-evaluate and reconnect on its own.
-        s_backoff.silent = 0;
-        s_next_try_us    = 0;
-    }
-    {
-        // A saved address is a new attempt. Do not show the previous target's failure under it while
-        // the task is resolving/connecting; the next clean poll or concrete failure owns this state.
+        // Generation and every target-bound status fact change under ONE lock. If an old poll owns
+        // it first, this clear runs after its commit; if this request owns it first, every guarded
+        // writer observes the new generation and refuses. There is no interval in which readers can
+        // observe generation B with target A's connected/gates/error state.
         Lock lk(s_mtx);
+        uint32_t next = s_target_generation.load(std::memory_order_relaxed) + 1;
+        if (next == 0) next = 1;  // zero remains the pre-init/no-target sentinel
+        s_target_generation.store(next, std::memory_order_release);
         s_status.last_error_code.clear();
         s_status.last_error.clear();
         s_status.last_error_detail   = -1;
         s_status.last_error_register = 0;
+        s_status.connected = false;
+        s_status.values = 0;
+        s_status.plant_gate_known = false;
+        s_status.plant_gate_active = false;
+        s_status.heating_mode_known = false;
+        s_status.heating_mode_active = false;
+        s_status.plant_outdoor = logic::OutdoorEvidence{};
+    }
+    {
+        Lock lk(s_cache_mtx);
+        s_cache.clear();
+        s_cache_generation = 0;
+        s_cache_target_generation = 0;
     }
     mb_task_start_if_enabled();
     // Clearing the address is handled BY the task (it re-reads it at the top of each cycle and
@@ -1120,11 +1215,13 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
     if (!s_cache_mtx) return 0;
     size_t n = 0;
     uint32_t cache_generation = 0;
+    uint32_t cache_target_generation = 0;
     {
         Lock lk(s_cache_mtx);
         n = s_cache.size() < max ? s_cache.size() : max;
         for (size_t i = 0; i < n; i++) out[i] = s_cache[i];
         cache_generation = s_cache_generation;
+        cache_target_generation = s_cache_target_generation;
     }
     // The link is re-read AFTER the copy, and that order is what makes the payload invariant TRUE
     // rather than merely intended. The cache and the link state sit behind two different mutexes,
@@ -1138,9 +1235,16 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
     // again, but the generations differ and the caller still omits these old rows.
     {
         Lock lk(s_mtx);
-        live = logic::modbus_cache_is_live(
-            s_status.connected, s_link_generation, cache_generation);
+        const uint32_t target_generation =
+            s_target_generation.load(std::memory_order_acquire);
+        live = logic::modbus_cache_is_live(s_status.connected, s_link_generation,
+                                           cache_generation, target_generation,
+                                           cache_target_generation);
     }
+    // Seqlock-style retry boundary: a target change overlapping the two-lock snapshot is never live.
+    if (live && cache_target_generation !=
+                    s_target_generation.load(std::memory_order_acquire))
+        live = false;
     return n;
 }
 

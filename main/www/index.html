@@ -915,7 +915,7 @@
         <input class="input" type="number" name="max_age_s" id="rtMaxAge" min="10" max="3600" step="1" value="600" inputmode="numeric" aria-describedby="rtMaxAgeHelp">
         <span class="field-help" id="rtMaxAgeHelp" data-i18n="ref.max_age_help">Maximum permitted age of the source reading, from 10 to 3600 seconds.</span>
       </label>
-      <p class="hint" data-i18n="ref.save_help">Save subscribes immediately. The source remains unavailable until a readable, fresh MQTT value arrives.</p>
+      <p class="hint" data-i18n="ref.save_help">Save stores the mapping. It subscribes while Plant diagnostics is enabled; otherwise it remains dormant. A readable, fresh MQTT value is still required.</p>
       <p class="hint err" id="rtError" hidden></p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="rtCancel" data-i18n="btn.cancel">Cancel</button>

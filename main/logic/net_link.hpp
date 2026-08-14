@@ -14,9 +14,9 @@
 //      credentials, and a device already on the LAN needs none. This is also the rule that keeps
 //      the HTTP trust surface honest — see http_surface.hpp, whose input is "is the setup AP
 //      running", not "is the radio in station mode".
-//   3. net_eth_fallback_step() — what happens when the cable is pulled from a board that came up
-//      wired. The answer is a deliberate REBOOT, and that is a decision, not a shortcut: see the
-//      function.
+//   3. net_eth_boot_ready() / net_eth_fallback_watch_needed() / net_eth_fallback_step() — keep
+//      the lease event, the boot verdict and the later cable-loss recovery as three explicit
+//      states. The recovery answer is a deliberate REBOOT, not a shortcut: see the functions.
 //   4. net_eth_probe_allowed() — whether the SPI identity probe may drive those four pads at all.
 //      The probe writes a clock and a chip-select; on a board where the user has put the X10A UART
 //      on GPIO5/6 (a documented AtomS3 Lite alternative, docs/BOARDS.md) that is a transmitter
@@ -92,6 +92,22 @@ inline bool net_wifi_start_needed(bool eth_lease, bool wifi_configured) {
 // the wire the user is actually using.
 inline bool net_portal_needed(bool eth_lease, bool wifi_up) {
     return !eth_lease && !wifi_up;
+}
+
+// A GOT_IP event is only a wake-up, not a permanent lease. The event bit is cleared on LOST_IP and
+// link-down in net.cpp, but the event-loop and boot tasks can still interleave between the wait and
+// this verdict. Requiring the current lease as well prevents a stale local EventBits_t snapshot
+// from carrying the boot after the address has already gone away.
+inline bool net_eth_boot_ready(bool got_ip_event, bool eth_lease) {
+    return got_ip_event && eth_lease;
+}
+
+// Whether to create the cable-loss watcher is a BOOT-PROVENANCE question, not a current-lease
+// question. The lease can disappear in the small interval after net_eth_start() returns true and
+// before main.cpp creates the watcher. Remembering that Ethernet carried the boot closes that race:
+// a loss in the interval still earns the normal grace-counted reboot onto configured WiFi.
+inline bool net_eth_fallback_watch_needed(bool eth_present, bool eth_carried_boot) {
+    return eth_present && eth_carried_boot;
 }
 
 // ── Losing the wire ──────────────────────────────────────────────────────────────────────────

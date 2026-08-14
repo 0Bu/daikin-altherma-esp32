@@ -43,6 +43,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 HEADER = ROOT / "main" / "logic" / "redact.hpp"
 STATUS = ROOT / "main" / "http_status.cpp"
+REPORTING = ROOT / "docs" / "REPORTING.md"
 LEDGER = Path(__file__).with_name("audit_exceptions.txt")
 
 # Identifiers whose VALUE originates with the user or identifies this specific installation. This
@@ -106,6 +107,29 @@ def declared_status_fields():
     return int(m.group(1))
 
 
+def declared_status_field_names():
+    """The authoritative public JSON paths from redact.hpp's machine-readable array."""
+    text = HEADER.read_text()
+    try:
+        block = text.split("REDACTED_STATUS_FIELD_NAMES[]", 1)[1].split("};", 1)[0]
+    except IndexError:
+        print("redaction: REDACTED_STATUS_FIELD_NAMES is gone from redact.hpp — refusing to check")
+        sys.exit(2)
+    return re.findall(r'"([a-z0-9_.]+)"', block)
+
+
+def documented_status_field_names():
+    """The public table is maintained prose, but its field column must match the code exactly."""
+    text = REPORTING.read_text()
+    start = "<!-- redacted-status-fields:start -->"
+    end = "<!-- redacted-status-fields:end -->"
+    if start not in text or end not in text:
+        print("redaction: REPORTING.md field-list markers are missing — refusing to check")
+        sys.exit(2)
+    block = text.split(start, 1)[1].split(end, 1)[0]
+    return re.findall(r"^\|\s*`([a-z0-9_.]+)`\s*\|", block, re.M)
+
+
 def status_redaction_sites():
     """Every /status value actually passed through the redactor, counted where it is WRITTEN.
 
@@ -121,6 +145,27 @@ def status_redaction_sites():
             continue
         out += [n for _ in re.finditer(r"\b(?:jstr_r|redact_or)\s*\(", line)]
     return out
+
+
+def status_unwrapped_config_sites():
+    """Config strings emitted through plain jstr(), hence invisible to the wrapper count.
+
+    The three existing exceptions identify firmware/hardware rather than the reporter. Everything
+    else beginning with a raw Config member needs an explicit redaction decision; this catches the
+    never-wrapped direction that a count of jstr_r() calls structurally cannot see.
+    """
+    lines = STATUS.read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if "void http_append_status_json" in line)
+    end = next(i for i, line in enumerate(lines[start + 1:], start + 1)
+               if "void http_append_values_json" in line)
+    public = {"c.board_user_set", "c.profile", "c.fp_valid"}
+    findings = []
+    for i in range(start, end):
+        line = lines[i]
+        m = re.search(r"\bjstr\s*\(\s*(c\.[A-Za-z_][A-Za-z0-9_]*)", line)
+        if m and m.group(1) not in public:
+            findings.append((i + 1, m.group(1)))
+    return findings
 
 
 def adjudicated():
@@ -140,16 +185,36 @@ def main():
     findings, checked = [], 0
 
     # (A) /status — the declared field count against the call sites that produce it.
-    declared, sites = declared_status_fields(), status_redaction_sites()
-    print(f"redaction: /status redacts {len(sites)} field(s), redact.hpp declares {declared}")
-    if len(sites) != declared:
+    declared, names, sites = (declared_status_fields(), declared_status_field_names(),
+                              status_redaction_sites())
+    documented = documented_status_field_names()
+    print(f"redaction: /status redacts {len(sites)} field(s), redact.hpp declares {declared} "
+          f"and names {len(names)}")
+    if len(sites) != declared or len(names) != declared:
         where = ", ".join(f"{STATUS.relative_to(ROOT)}:{n}" for n in sites)
         print("\nMISCOUNTED — redact.hpp's REDACTED_STATUS_FIELDS no longer describes the builder:\n")
-        print(f"  declared {declared}, found {len(sites)} at {where}")
+        print(f"  declared {declared}, named {len(names)}, found {len(sites)} at {where}")
         print("    fix: set REDACTED_STATUS_FIELDS in main/logic/redact.hpp to the real count AND")
-        print("         name the new field in the comment beside it. If a field was ADDED to")
+        print("         name the new field in REDACTED_STATUS_FIELD_NAMES. If a field was ADDED to")
         print("         /status without being wrapped, wrap it instead — this check counts what")
-        print("         is redacted, and cannot see a value nobody passed through redact_or().\n")
+        print("         is redacted; the plain-jstr check below covers a never-wrapped Config string.\n")
+        return 1
+
+    if documented != names:
+        print("\nDOC DRIFT — docs/REPORTING.md does not list exactly the redacted /status fields:\n")
+        print(f"  code only: {', '.join(n for n in names if n not in documented) or '(none)'}")
+        print(f"  docs only: {', '.join(n for n in documented if n not in names) or '(none)'}")
+        print("    fix: regenerate the ordered field column with run-redaction-audit.sh --list and")
+        print("         preserve the human explanation beside every field.\n")
+        return 1
+
+    unwrapped = status_unwrapped_config_sites()
+    if unwrapped:
+        print("\nUNWRAPPED — /status emits Config string(s) through plain jstr():\n")
+        for line, member in unwrapped:
+            print(f"  {STATUS.relative_to(ROOT)}:{line}  {member}")
+        print("    fix: use jstr_r(value, redact), or add a narrowly justified firmware-identity")
+        print("         exception in status_unwrapped_config_sites().\n")
         return 1
 
     for src in sorted((ROOT / "main").glob("*.cpp")):
@@ -171,6 +236,9 @@ def main():
             findings.append((f"{src.relative_to(ROOT)}:{line_no}", fmt.strip(), ident))
 
     if "--list" in sys.argv:
+        print(f"{len(names)} /status fields (docs table order):")
+        for name in names:
+            print(f"  {name}")
         print(f"{len(rules)} redaction rules in {HEADER.relative_to(ROOT)}:")
         for r in rules:
             print(f"  {r!r}")

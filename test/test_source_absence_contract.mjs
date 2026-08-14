@@ -87,6 +87,40 @@ assert.ok(startAt < pollAt && histAt < pollAt && dwellAt < pollAt,
   "history_start(), checkup_start() and dwell_start() must run BEFORE the poll task: all three " +
   "adopt or wipe .noinit state without a lock, which is only sound while no producer exists");
 
+// ── 1c. Each poll worker must re-prove the branch from ITS OWN config snapshot ───────────────────────
+// The two config() calls in poll_task() are only routing hints. There are two adversarial windows:
+// (1) it observes "auto", then /set_hp installs a concrete profile before poll_detect() starts;
+// (2) it observes a concrete profile, then /detect installs "auto" before poll_once() starts.
+// Generation/CAS checks reject changes AFTER a worker has captured its own snapshot, but cannot
+// reject either change that completed BEFORE that capture. Pin both snapshot-owned mode guards
+// ahead of the first bus/decode operation so neither stale task-level decision can touch the bus or
+// publish a result for the opposite mode.
+const pollOnceStart = poll.indexOf("static void poll_once()");
+const pollDetectStart = poll.indexOf("static bool poll_detect()");
+const pollDetectEnd = poll.indexOf("// The cycle body allocates freely", pollDetectStart);
+assert.ok(pollOnceStart >= 0 && pollDetectStart > pollOnceStart && pollDetectEnd > pollDetectStart,
+  "hp_poll.cpp must retain independently inspectable poll_once() and poll_detect() workers");
+
+const pollOnceBody = poll.slice(pollOnceStart, pollDetectStart);
+const onceSnapshotAt = pollOnceBody.indexOf("const Config& c    = config();");
+const onceModeGuardAt = pollOnceBody.indexOf('if (c.profile == "auto") return;');
+const onceDecodeAt = pollOnceBody.indexOf("def::lookup(c.profile.c_str())");
+const onceBusAt = pollOnceBody.indexOf("hp_uart_init(c.rx_pin, c.tx_pin)");
+assert.ok(onceSnapshotAt >= 0 && onceModeGuardAt > onceSnapshotAt &&
+          onceDecodeAt > onceModeGuardAt && onceBusAt > onceModeGuardAt,
+  "poll_once must fail closed on its OWN auto snapshot before profile lookup or UART work; this " +
+  "closes concrete->auto between poll_task's branch and the worker snapshot");
+
+const pollDetectBody = poll.slice(pollDetectStart, pollDetectEnd);
+const detectSnapshotAt = pollDetectBody.indexOf("const Config expected = config();");
+const detectModeGuardAt = pollDetectBody.indexOf('if (expected.profile != "auto") return true;');
+const detectSweepAt = pollDetectBody.indexOf("DetectResult d = hp_detect_run();");
+const detectCommitAt = pollDetectBody.indexOf("config_commit_detected_link(");
+assert.ok(detectSnapshotAt >= 0 && detectModeGuardAt > detectSnapshotAt &&
+          detectSweepAt > detectModeGuardAt && detectCommitAt > detectSweepAt,
+  "poll_detect must fail closed on its OWN concrete snapshot before the sweep and commit; this " +
+  "closes auto->concrete between poll_task's branch and the worker snapshot");
+
 // The DHW loss filter needs one whole clean hour.  Its candidate and any completed-but-still-open
 // window are checkpointed exactly at intentional esp_restart(), rather than being reset by every
 // dev-channel OTA shorter than an hour.  The handler is bounded so a busy observer can cost one
@@ -215,18 +249,18 @@ assert.match(status,
 // duration frozen at the instant the bus went quiet and still presented as current, which is the
 // exact failure the feature exists to prevent, arriving through a missing call rather than a wrong
 // rule. THREE paths reach it, and the two failure paths are the ones a refactor drops.
-assert.match(poll, /if \(!hp_uart_init\([\s\S]{0,600}?dwell_record\(nullptr, 0\);/,
+assert.match(poll, /if \(!hp_uart_init\([\s\S]{0,900}?dwell_record\(nullptr, 0, cycle_generation\);/,
   "a cycle that could not bring up the UART must book blind time, not skip the table");
-assert.match(poll, /if \(config\(\)\.profile == "auto"\)[\s\S]{0,1400}?dwell_record\(nullptr, 0\);/,
+assert.match(poll, /if \(config\(\)\.profile == "auto"\)[\s\S]{0,2200}?dwell_record\(nullptr, 0, generation\);/,
   "a board whose X10A never resolves a profile must age its restored state ages out, or a reboot " +
   "would present the frozen pre-reboot durations as current");
-assert.match(poll, /checkup_record\(fresh\.data\(\)[\s\S]{0,700}?dwell_record\(fresh\.data\(\), fresh\.size\(\)\);/,
+assert.match(poll, /checkup_record\(fresh\.data\(\)[\s\S]{0,900}?dwell_record\(fresh\.data\(\), fresh\.size\(\),\s*cycle_generation\);/,
   "the normal cycle must fold the state ages beside the checkup, from the same row set");
 // The reduction has to read `fresh` — the rows that ANSWERED this cycle — and not the committed
 // cache, which no longer knows which rows were missing. A row absent from `fresh` IS the evidence.
 const commitAt = poll.search(/s_cache\s*=\s*std::move\(fresh\)/);
 assert.ok(commitAt > 0, "poll_once must still commit the cache by moving `fresh`");
-assert.ok(poll.indexOf("dwell_record(fresh.data(), fresh.size());") < commitAt,
+assert.ok(poll.indexOf("dwell_record(fresh.data(), fresh.size(), cycle_generation);") < commitAt,
   "dwell_record must see `fresh` before the commit moves it away, or absent rows read as unchanged");
 
 // ── 8. `known == false` renders as an ABSENT key, never as a zero ───────────────────────────────

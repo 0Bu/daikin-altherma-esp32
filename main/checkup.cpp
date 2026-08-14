@@ -376,12 +376,19 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation) {
                                 : logic::CheckupRestore::DiagnosticsDisabled;
 }
 
-const char* checkup_persist_state() { return logic::checkup_restore_slug(s_persist_verdict); }
+const char* checkup_persist_state() {
+    if (!s_mtx) return logic::checkup_restore_slug(s_persist_verdict);
+    Lock lk(s_mtx);
+    return logic::checkup_restore_slug(s_persist_verdict);
+}
 
 void checkup_reset() {
-    // A request, not the act: the reset is consumed by the record path under the mutex, on the poll
-    // task that owns the rings. An atomic flag keeps this callable from the httpd task (and from
-    // detection) without either taking a lock held once a second by the other.
+    // Arm under the same mutex as record consumption. The HTTP path bumps the source generation
+    // first, then waits here; an old-link cycle can therefore never consume this new reset and seed
+    // the cleared window with its own sample.
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    if (!lk.acquired()) return;
     s_reset_requested.store(true);
 }
 
@@ -396,6 +403,9 @@ void checkup_reset() {
 // exactly as before, so a genuine re-detect, a link rewire or a /set_hp model change is unaffected.
 void checkup_reset_on_detect(const char* profile_id) {
     const uint32_t fp = logic::checkup_model_fingerprint(profile_id);
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    if (!lk.acquired()) return;
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) {
         s_model_fp = fp;
         s_adopt_detect_grace = false;
@@ -413,7 +423,7 @@ void checkup_reset_on_detect(const char* profile_id) {
                     profile_id ? profile_id : "?");
     }
     s_model_fp = fp;
-    checkup_reset();
+    s_reset_requested.store(true);
 }
 
 void checkup_dhw_reset() {
@@ -421,7 +431,7 @@ void checkup_dhw_reset() {
 }
 
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
-                    const logic::CheckupCoverage& coverage) {
+                    const logic::CheckupCoverage& coverage, uint32_t source_generation) {
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (!s_mtx) return;   // checkup_start() creates it; absent means its alloc failed -> no observation
     if (!v && n) return;
@@ -501,6 +511,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
+    if (!hp_poll_generation_matches(source_generation)) return;
 
     // A request can arrive while an old-link sweep is in flight. If this cycle consumes it, discard
     // the whole sample after clearing state; otherwise the tail of old poll A would seed the window

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "esp_err.h"
 // WiFi station bring-up. Connects to the STRONGEST AP for the SSID (all-channel scan + connect
 // by signal), so a multi-AP / mesh network no longer strands the bridge on the first (often weak)
 // AP it hears. Plus an endless-reconnect + gateway watchdog: first-ever connect has a bounded
@@ -18,6 +19,11 @@ bool wifi_configured();
 // (creds presumed wrong) after tearing the STA stack down — the caller should then open the setup
 // portal (provisioning_start_ap()). See docs/ARCHITECTURE.md → WiFi/LAN connectivity.
 bool wifi_start_sta();
+
+// Erase the ESP-IDF WiFi driver's legacy persistent STA/AP configuration. Runtime configuration is
+// RAM-only in this firmware; this exists for factory-reset migration from builds that used IDF's
+// default FLASH storage and therefore duplicated SSID/password outside `daik_cfg`.
+[[nodiscard]] esp_err_t wifi_forget_persisted_config();
 
 // Scan result for the web-UI/captive-portal SSID list.
 struct WifiScanEntry { char ssid[33]; int8_t rssi; };

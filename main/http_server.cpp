@@ -29,8 +29,9 @@ void http_start() {
     // diagnosis arms itself from the two sources it reads, so there is no mode to POST; 32/33 are
     // the circulation-power test/persist pair. The room source's former pre-save test route had
     // raised the total to 34; removing it returned the exact total to 33. The explicit master
-    // diagnostics consent route raises the current exact total to 34.
-    cfg.max_uri_handlers = 34;
+    // diagnostics consent route raised the total to 34; the two destructive GET query flags became
+    // explicit POST /diag/clear and POST /coredump/clear routes, raising the current exact total to 36.
+    cfg.max_uri_handlers = 36;
     cfg.lru_purge_enable = true;
     // 16 KB, not the 8 KB this ran on through v1.0.12 — MEASURED, not padded. v1.0.12 panicked and
     // the core dump's task table read `httpd 7728/460`: the task had been 7732 bytes deep at its last

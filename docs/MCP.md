@@ -17,8 +17,9 @@ The implemented subset follows the date-versioned MCP specification:
 - `tools/call` accepts only those tool names and an omitted or empty `arguments` object.
 - A valid notification (for example `notifications/initialized`) is accepted with HTTP `202` and no
   body. There is no session id and no state is retained between requests.
-- Native clients may omit `Origin`; a present browser `Origin` must name the device's configured mDNS
-  hostname or current IP (with optional `:80`), otherwise the request is rejected with HTTP `403`.
+- Native clients may omit `Origin`; the global HTTP boundary requires Host and a present browser
+  `Origin` to name the device's mDNS hostname or current WiFi/Ethernet IP (with optional `:80`) and
+  rejects cross-site Fetch Metadata with HTTP `403`. The POST body must declare `application/json`.
   A present `MCP-Protocol-Version` header must name one of the three supported revisions; when it is
   absent the Streamable-HTTP compatibility default applies.
 - Parse/Request/Method/Params errors use JSON-RPC `-32700`, `-32600`, `-32601`, and `-32602`;

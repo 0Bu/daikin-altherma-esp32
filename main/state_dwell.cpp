@@ -150,13 +150,34 @@ void dwell_start() {
     }
 }
 
-const char* dwell_persist_state() { return logic::dwell_restore_slug(s_persist_verdict); }
+const char* dwell_persist_state() {
+    if (!s_mtx) return logic::dwell_restore_slug(s_persist_verdict);
+    Lock lk(s_mtx);
+    return logic::dwell_restore_slug(s_persist_verdict);
+}
 
 void dwell_reset() {
     // Do not create/take the mutex from the httpd task. The poll task remains its sole creator, and
     // only the record path consumes this request under that mutex; lookups answer "nothing to say"
     // until then, which is the correct answer for a table that is about to be emptied.
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    if (!lk.acquired()) return;
     s_reset_requested.store(true);
+}
+
+void dwell_forget() {
+    // If mutex allocation failed there is no producer: dwell_record() returns immediately, so the
+    // region can be wiped directly. Otherwise serialize with the poll fold and seal the empty state
+    // before the factory-reset path is allowed to reboot.
+    Lock lk(s_mtx);
+    if (s_mtx && !lk.acquired()) return;
+    s_reset_requested.store(false);
+    s_last_us = -1;
+    s_model_fp = 0;
+    s_adopt_detect_grace = false;
+    s_persist_verdict = logic::DwellRestore::NoRecord;
+    persist_wipe();
 }
 
 // Detection resolves a profile on EVERY boot — the model is RAM-only by design — so "detection
@@ -168,6 +189,9 @@ void dwell_reset_on_detect(const char* profile_id) {
     // six-line CRC over the same string is a second thing that can disagree about whether the unit
     // changed, and both features answer that question for the same reason on the same event.
     const uint32_t fp = logic::checkup_model_fingerprint(profile_id);
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    if (!lk.acquired()) return;
     if (s_adopt_detect_grace) {
         s_adopt_detect_grace = false;
         if (fp == s_model_fp) return;          // same unit — the restored ages are about this plant
@@ -179,7 +203,7 @@ void dwell_reset_on_detect(const char* profile_id) {
     s_reset_requested.store(true);
 }
 
-void dwell_record(const CachedValue* v, size_t n) {
+void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation) {
     // dwell_start() creates it; absent means its alloc failed -> no state ages this boot. Saying so
     // once, there, rather than from this 1 Hz path: an unlatched line here would put ~86k copies of
     // itself through the 6 KB diag ring every day and evict the boot record, the crash records and
@@ -221,16 +245,18 @@ void dwell_record(const CachedValue* v, size_t n) {
     // absolute instants telescopes the remainder into the next cycle instead, bounding the total
     // error at under one second for the whole run rather than compounding it per cycle.
     const int64_t now_us = esp_timer_get_time();
-    uint32_t dt_s = 0;
-    if (s_last_us >= 0 && now_us >= s_last_us)
-        dt_s = static_cast<uint32_t>(now_us / 1000000 - s_last_us / 1000000);
-    s_last_us = now_us;
     // dt_s == 0 is NOT a reason to skip the fold: two calls can land in one wall second, and the
     // observations still have to be applied — a state CHANGE in that cycle must be recorded even
     // though no seconds are booked for it. Returning early here would drop it silently.
 
     Lock lk(s_mtx);
+    if (!lk.acquired()) return;
+    if (!hp_poll_generation_matches(source_generation)) return;
     if (apply_reset_locked()) return;          // discard this sample with the identity it belonged to
+    uint32_t dt_s = 0;
+    if (s_last_us >= 0 && now_us >= s_last_us)
+        dt_s = static_cast<uint32_t>(now_us / 1000000 - s_last_us / 1000000);
+    s_last_us = now_us;
     logic::dwell_step(P().slots, logic::DWELL_MAX_SLOTS, obs, obs_n, dt_s);
     persist_seal();
 }

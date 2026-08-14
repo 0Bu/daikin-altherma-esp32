@@ -86,6 +86,9 @@ void provisioning_start_ap() {
     // AP-only keeps the open radio to exactly the one job it has here.
     wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
+    // Keep the setup AP configuration out of the driver's NVS too. `daik_cfg` is the one persistent
+    // authority; the AP is reconstructed on every unprovisioned boot.
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
 
     wifi_config_t ap = {};
     strcpy(reinterpret_cast<char*>(ap.ap.ssid), "daikin-altherma-esp32-setup");

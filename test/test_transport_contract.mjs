@@ -23,6 +23,12 @@
 //   4. THE RADIO STAYS OFF. Nothing may call wifi_start_sta() unconditionally again: that would
 //      restore the ~50 KB of heap and the second netif this transport exists to avoid, silently,
 //      while every test above still passes.
+//   5. LEASE LIFECYCLE + OFF-LINK CLIENTS. GOT_IP is not a forever-latch: LOST_IP/link-down must
+//      revoke both the lease flag and wake bit, and OTA/weather/syslog/MQTT pre-flight must ask the
+//      transport-neutral boundary rather than silently withholding wired service.
+//   6. FAILURE UNWIND. The positive probe leaves an SPI bus installed. Every later allocation or
+//      start failure must reverse all resources before WiFi fallback, including a failed start that
+//      already moved the IDF driver FSM to START. Otherwise ENOMEM poisons the fallback by design.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -79,14 +85,98 @@ assert.ok(/net_eth_probe_allowed\(\s*pins\s*,\s*in_use\s*\)/.test(net) &&
 // A failed probe must hand the pads back, or a board without a base loses GPIO5-8 for X10A.
 assert.ok(/spi_bus_free\(/.test(net), "a failed probe must free the SPI bus again");
 
+const cleanupStart = net.indexOf("static void eth_start_cleanup(");
+const cleanupEnd = net.indexOf("bool net_eth_start()", cleanupStart);
+assert.ok(cleanupStart >= 0 && cleanupEnd > cleanupStart,
+  "the Ethernet construction unwind must remain a single identifiable function");
+const cleanup = net.slice(cleanupStart, cleanupEnd);
+const cleanupSteps = [
+  "esp_eth_stop(",
+  "esp_event_handler_unregister(IP_EVENT, IP_EVENT_ETH_LOST_IP",
+  "esp_event_handler_unregister(IP_EVENT, IP_EVENT_ETH_GOT_IP",
+  "esp_event_handler_unregister(ETH_EVENT, ESP_EVENT_ANY_ID",
+  "esp_eth_del_netif_glue(",
+  "esp_eth_driver_uninstall(",
+  "owned.mac->del(",
+  "owned.phy->del(",
+  "esp_netif_destroy(",
+  "vEventGroupDelete(",
+  "spi_bus_free(",
+];
+let previousCleanupStep = -1;
+for (const step of cleanupSteps) {
+  const position = cleanup.indexOf(step);
+  assert.ok(position > previousCleanupStep,
+    `Ethernet failure cleanup must contain ${step} in reverse acquisition order`);
+  previousCleanupStep = position;
+}
+assert.match(cleanup, /s_eth_glue\s*=\s*nullptr/,
+  "failure cleanup must clear the released glue handle");
+assert.match(cleanup, /s_eth_handle\s*=\s*nullptr/,
+  "failure cleanup must clear the released driver handle");
+assert.match(cleanup, /s_eth_netif\s*=\s*nullptr/,
+  "failure cleanup must clear the destroyed netif handle");
+assert.match(cleanup, /s_events\s*=\s*nullptr/,
+  "failure cleanup must clear the deleted EventGroup handle");
+
+const startBegin = net.indexOf("bool net_eth_start()");
+const startEnd = net.indexOf("EthInfo net_eth_info()", startBegin);
+const ethStart = net.slice(startBegin, startEnd);
+const guardCreate = ethStart.indexOf("EthStartResources owned;");
+const driverStart = ethStart.indexOf("esp_eth_start(s_eth_handle)");
+const guardRelease = ethStart.indexOf("owned.keep_running()");
+const firstWait = ethStart.indexOf("xEventGroupWaitBits(");
+assert.ok(guardCreate >= 0 && driverStart > guardCreate && guardRelease > driverStart &&
+          firstWait > guardRelease,
+  "the unwind guard must cover every post-probe construction step and release only after start");
+assert.match(ethStart,
+  /owned\.start_attempted\s*=\s*true[\s\S]*esp_eth_start\(s_eth_handle\)[\s\S]*if \(start_err != ESP_OK\)[\s\S]*return false;[\s\S]*owned\.keep_running\(\)/,
+  "an esp_eth_start failure must stay guard-owned so cleanup can stop its partially-started FSM");
+
+assert.ok(/id\s*==\s*IP_EVENT_ETH_LOST_IP\)\s*\{\s*clear_eth_lease\(\)/.test(net) &&
+          /esp_event_handler_register\(\s*IP_EVENT\s*,\s*IP_EVENT_ETH_LOST_IP\s*,\s*on_eth/.test(net),
+  "Ethernet LOST_IP must be handled and registered, not just GOT_IP");
+assert.ok(/id\s*==\s*ETHERNET_EVENT_DISCONNECTED\)\s*\{[\s\S]*?clear_eth_lease\(\)/.test(net),
+  "a physical Ethernet disconnect must revoke the lease even if LOST_IP is not delivered first");
+assert.ok(/clear_eth_lease\(\)[\s\S]*?s_lease\.store\(false\)[\s\S]*?xEventGroupClearBits/.test(net),
+  "losing the Ethernet address must clear both the lease flag and the GOT_IP wake bit");
+assert.ok(/net_eth_boot_ready\(\s*\(bits\s*&\s*GOT_IP_BIT\)\s*!=\s*0\s*,\s*s_lease\.load\(\)\s*\)/.test(net),
+  "the Ethernet boot verdict must combine the wake event with the current lease");
+assert.ok(/net_eth_fallback_watch_needed\(\s*s_present\.load\(\)\s*,\s*s_carried_boot\.load\(\)\s*\)/.test(net),
+  "fallback watch creation must use boot provenance, not a lease that can vanish before task start");
+
+const ota = code("main/ota_update.cpp");
+assert.ok(/const\s+NetLink\s+link\s*=\s*net_kind\(\)/.test(ota) &&
+          /health_gate_decide\([\s\S]*?link\s*,\s*provisioning_ap_active\(\)\s*\)/.test(ota),
+  "OTA health must accept an active transport or an actually running recovery portal");
+assert.ok(!/wifi_info\(\)\.connected/.test(ota),
+  "OTA health must not equate network health with WiFi association");
+assert.ok(!/health_gate_decide\([\s\S]*?wifi_configured\(\)/.test(ota),
+  "no stored SSID must not invent a portal on a wired boot that deliberately kept it off");
+
+const weather = code("main/weather_forecast.cpp");
+const syslog = code("main/syslog.cpp");
+assert.ok(/net_is_up\(\)/.test(weather) && !/wifi_info\(\)\.connected/.test(weather),
+  "Open-Meteo reachability must be transport-neutral");
+assert.ok(/net_is_up\(\)/.test(syslog) && !/wifi_info\(\)\.connected/.test(syslog),
+  "syslog reachability must be transport-neutral");
+
 // The pads a DETECTED controller owns must reach the pickers and the request path, in both
 // directions — the reservation rule board_pins.hpp states for the X10A link and the indicator.
 const status = code("main/http_status.cpp");
 const config = code("main/http_config.cpp");
+const setMqttStart = config.indexOf("static esp_err_t set_mqtt(");
+const setMqttEnd = config.indexOf("static esp_err_t set_ref_temp(", setMqttStart);
+assert.ok(setMqttStart >= 0 && setMqttEnd > setMqttStart,
+  "the source contract must be able to isolate the MQTT save handler");
+const setMqtt = config.slice(setMqttStart, setMqttEnd);
+assert.ok(/if\s*\(\s*!net_is_up\(\)\s*\)[\s\S]*?Network not connected/.test(setMqtt) &&
+          !/wifi_info\(\)\.connected/.test(setMqtt),
+  "the MQTT save pre-flight must be reachable over either transport");
 assert.ok((status.match(/net_eth_reserved_pins\(\)/g) || []).length >= 4,
   "every offered pin list must withhold the Ethernet pads");
 assert.ok((config.match(/net_eth_reserved_pins\(\)/g) || []).length >= 3,
   "the /set_hp, /set_board and ENV III request paths must all refuse an Ethernet pad");
 
-console.log("transport: trust surface keys on the setup AP, the boot fork gates radio and portal, " +
-            "the probe never drives a configured pad");
+console.log("transport: trust/boot/probe boundaries, Ethernet lease lifecycle and transport-neutral " +
+            "off-link clients are pinned");
