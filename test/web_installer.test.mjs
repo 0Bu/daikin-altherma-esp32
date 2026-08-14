@@ -283,6 +283,10 @@ test("the published page keeps the monitor toggle in the connection tile and pin
   assert.match(html, /<img class="installer-logo" src="\.\/heat-pump-icon\.png" alt="" aria-hidden="true">/);
   assert.doesNotMatch(html, /<span class="installer-logo"/);
   assert.match(html, /class="installer-action-row installer-device-actions"[\s\S]*id="install-button"[\s\S]*id="reset-button"[\s\S]*id="disconnect-button"[\s\S]*id="release-serial-port"/);
+  assert.match(html, /--installer-rail-width:214px;/);
+  assert.match(html, /\.installer-shell\s*\{[^}]*background:linear-gradient\(to right,var\(--brand-tint\) 0 var\(--installer-rail-width\),var\(--bg\) var\(--installer-rail-width\)\);/s);
+  assert.match(html, /\.installer-layout\s*\{[^}]*grid-template-columns:var\(--installer-rail-width\) minmax\(0,1fr\);/s);
+  assert.match(html, /@media \(max-width:780px\)\s*\{[\s\S]*?\.installer-shell\s*\{\s*background:var\(--bg\);\s*\}[\s\S]*?\.installer-layout\s*\{\s*grid-template-columns:1fr;\s*\}/s);
   assert.match(html, /\.installer-device-actions\s*\{[^}]*grid-template-columns:/s);
   assert.match(html, /\.installer-monitor-chevron\s*\{[^}]*margin-left:auto;/s);
   assert.match(html, /\.installer-device-monitor-value\s*\{[^}]*gap:14px;/s);

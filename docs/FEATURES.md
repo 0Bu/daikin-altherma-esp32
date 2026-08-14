@@ -48,7 +48,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 2 | Refuse-to-flash-unsigned guard | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
 | 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ 🧪 | [`partitions.csv`](../partitions.csv), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** (not an uptime timer) | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
-| 5 | OTA manifest check + signed download + **two-point downgrade gate**, with bounded OTA/weather-TLS heap quiescing and allocator-only retry | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
+| 5 | OTA manifest check + signed manual HTTPS stream + **two-point downgrade gate**, transport cleanup before validation, dual INTERNAL-heap gate and bounded MQTT/X10A/weather quiescing | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
 | 6 | Live UI by **polling** `/status` + `/values` — no push transport, on purpose | ✅ | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp) |
 | 7 | Minified, deterministic-gzip web UI **embedded in the app image**, under a 150 KiB delivery budget | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs) |
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline | ✅ | [`http_common.cpp`](../main/http_common.cpp) |
@@ -147,8 +147,9 @@ CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n   # CI signs post-build, offline key 
 
 Why the combination is unusual:
 
-- **The running app verifies the *next* OTA image's RSA signature before writing it**, so a
-  compromised update host cannot push unsigned firmware.
+- **The running app validates the *next* OTA image's RSA signature before selecting its inactive
+  slot for boot**, so a compromised update host cannot activate unsigned firmware. Download bytes
+  may be written only to that inactive slot before validation; the running slot stays untouched.
 - **No eFuses are burned.** The bootloader does not verify on boot, so this is fully reversible,
   carries **zero brick risk**, and the browser (Web Serial) / USB install path keeps working.
 - **The private key is never present at compile time** — the image is signed in a separate step
@@ -178,7 +179,7 @@ Because the app must carry a valid signature to run, an **unsigned image crash-l
 Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
 
 - **Dual-OTA layout** ([`partitions.csv`](../partitions.csv)): two app slots plus `otadata`,
-  `phy_init` and a `coredump` partition. `esp_https_ota` writes the **inactive** slot, so an update
+  `phy_init` and a `coredump` partition. The `esp_ota` stream writes the **inactive** slot, so an update
   never touches `nvs@0x9000` — WiFi, MQTT and the X10A pin cache survive upgrades.
 - **✅ NVS-preserving Web Serial updates**: the manifest publishes only the occupied `flash_args`
   ranges as separate parts, so a no-Erase install skips `nvs` instead of writing the merged image's
@@ -208,13 +209,23 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
 - **✅ 🧪 Manifest check & signed download**: both network operations run on **one on-demand task,
   one at a time** — never the httpd worker, and never twice concurrently (two TLS sessions compete
   for the largest contiguous block). The lock-free OTA heap lease begins before manifest TLS setup,
-  gives the once-per-second MQTT publisher one cycle to stand aside, and stays active through the
-  image download. An init-OOM or `ESP_ERR_MBEDTLS_SSL_SETUP_FAILED` during the manifest handshake is
+  gives the once-per-second MQTT publisher and X10A poller one cycle to stand aside, prevents a new
+  weather request and waits a bounded interval for an existing one, and stays active through image
+  validation. An init-OOM or `ESP_ERR_MBEDTLS_SSL_SETUP_FAILED` during the manifest handshake is
   retried exactly once after cleanup; DNS, TCP, certificate and HTTP failures are not relabelled or
   retried. The manifest parser
   ([`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp)) is the one place an attacker-influenced
   byte stream is parsed here: bounded, allocation-free, depth-aware, and it **refuses rather than
   truncates** an oversized value.
+- **✅ 🧪 Heap-safe signed-image validation** ([`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp)):
+  the firmware streams HTTPS through a fixed 2 KiB INTERNAL buffer into the inactive partition,
+  then destroys that buffer and the complete HTTP/TLS client **before** `esp_ota_end()` invokes the
+  unchanged RSA-3072/PSA verifier. A dual gate requires at least 24 KiB total free INTERNAL 8-bit
+  heap **and** a 12 KiB largest contiguous INTERNAL block before transfer and again before
+  validation; each wait is bounded and fails closed. Only successful validation may reach
+  `esp_ota_set_boot_partition()`. IDF maps structure, digest/signature and verifier-allocation
+  failures to the same validation result, so the UI reports “image validation failed” rather than
+  inventing a signature-specific diagnosis.
 - **✅ 🧪 Two-point downgrade gate** ([`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp)): a
   signature proves a build *authentic*, not *newer*. The gate refuses anything not strictly newer,
   checked against the manifest **and** against the image's own embedded `esp_app_desc_t` version,
@@ -841,8 +852,8 @@ Every ESP-IDF component this firmware links, and what it powers (from
 | `esp_wifi` | STA (strongest-AP scan, SAE) + SoftAP setup portal |
 | `esp_event` / `esp_netif` | event loop + network interfaces, DHCP hostname, SNTP client (`esp_netif_sntp`) |
 | `esp_http_server` | `:80` UI/API server. `CONFIG_HTTPD_WS_SUPPORT=n` — there is no push transport |
-| `esp_https_ota` / `app_update` / `esp_app_format` | OTA slot writes, rollback, app descriptor (version, ELF sha) |
-| `esp_http_client` / `esp-tls` | OTA fetch, weather-forecast fetch, TLS transport |
+| `app_update` / `esp_app_format` | low-level OTA slot writes, signed-image validation, boot selection/rollback, app descriptor (version, ELF sha) |
+| `esp_http_client` / `esp-tls` | heap-bounded OTA stream, weather-forecast fetch, TLS transport |
 | `bootloader_support` | Secure Boot v2 signature verification on the update path |
 | `mqtt` (managed) | HA MQTT-discovery bridge |
 | `esp_crt_bundle` | CA bundle for MQTTS / OTA / forecast TLS verification |

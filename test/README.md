@@ -107,6 +107,17 @@ QoS-1 retained empty tombstone for its source topic. That explicit deletion is s
 subscriber-only broker connection even without X10A, while no discovery/state/heartbeat publisher
 is reachable from the cleanup boundary. Re-enabling before broker delivery cancels the request.
 
+`node test/test_ota_heap_contract.mjs` pins the signed-OTA memory boundary that cannot be linked on
+the host: firmware bytes stream through the low-level HTTP/OTA APIs, HTTP/TLS is fully released
+before `esp_ota_end()` performs RSA validation, total-free and largest-contiguous headroom are gated
+both before transfer and immediately before validation, and boot selection remains strictly after a
+successful verifier result. It also requires the allocation-rich X10A poll to use the existing
+bounded quiesce rule, distinguishes intentional holds from OOM skips, and keeps IDF's umbrella image
+validation error generic rather than falsely claiming a bad signature. Initial feed URLs and every
+redirect stay on forced HTTPS, and an oversized response remains a size-policy refusal rather than
+masquerading as an interrupted connection. `tools/ota/selftest.mjs` removes each of those safeguards
+independently and proves the contract turns red.
+
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation
 mode. It pins the manufacturer terms, readable diagram headlines and consistent German model-card
@@ -274,6 +285,12 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   threshold (no off-by-one), and which reset reasons count as a crash.
 - `logic/health_gate.hpp` — the OTA commit/wait/give-up verdict across the base window + hard cap,
   incl. an unconfigured (setup-AP) device.
+- `logic/ota_headroom.hpp` — the signed-image verifier's two independent internal-heap floors:
+  exact-threshold success, a plausible aggregate with the live 632-byte fragmented block, sufficient
+  contiguous space with insufficient total working memory, and both dimensions below threshold.
+- `logic/ota_transport.hpp` — fail-closed OTA URL policy: initial feeds require absolute HTTPS;
+  redirects admit HTTPS or ordinary relative paths only, with HTTP/other schemes, protocol-relative
+  authorities, malformed origins, whitespace/control bytes and backslash parser ambiguities refused.
 - `logic/version_cmp.hpp` — the OTA downgrade gate: numeric (not lexical) dotted-version ordering, so
   `1.10.0 > 1.9.0`; equal and older refused; a `v` prefix and a semver pre-release suffix handled;
   pre-release identifiers compare numerically too (`-dev.12 > -dev.9`), which is what keeps the dev

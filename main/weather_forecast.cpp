@@ -6,6 +6,7 @@
 #include "logic/open_meteo.hpp"
 #include "logic/weather_forecast.hpp"
 #include "net.hpp"
+#include "ota_update.hpp"
 #include "sntp_time.hpp"
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
@@ -225,6 +226,14 @@ void set_disabled() {
 void weather_task(void*) {
     for (;;) {
         try {
+            // OTA owns the same scarce internal heap for TLS and RSA validation.  Check before the
+            // Config/string snapshot so a scheduled forecast does not start allocating after OTA
+            // requested quiescence.  The second check inside NetworkActivity below closes the race
+            // where both tasks passed their first check at the same instant.
+            if (ota_download_active()) {
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+                continue;
+            }
             const Config cfg = config();
             if (!cfg.diagnostics_enabled || !cfg.weather_enabled) {
                 set_disabled();
@@ -273,10 +282,28 @@ void weather_task(void*) {
             WeatherForecastSample sample;
             std::string error;
             bool ok = false;
+            bool ota_preempted = false;
             {
                 NetworkActivity activity;
                 vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));
-                ok = fetch_forecast(cfg, sample, error);
+                // Set our flag first, then re-read OTA's.  If OTA won the race it either observes
+                // this flag and waits, or observes it before we set it; in the latter case this
+                // re-check sees OTA and no TLS allocation starts.  There is no interval in which
+                // both clients may legitimately proceed.
+                ota_preempted = ota_download_active();
+                if (!ota_preempted) ok = fetch_forecast(cfg, sample, error);
+            }
+            if (ota_preempted) {
+                {
+                    Lock lk(s_mtx);
+                    s_status.fetching = false;
+                    s_status.available = false;
+                    s_status.state = "waiting";
+                    s_status.reason = "ota_active";
+                    s_status.error.clear();
+                }
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+                continue;
             }
             bool updated = false;
             if (ok) {

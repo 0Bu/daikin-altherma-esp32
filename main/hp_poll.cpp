@@ -23,8 +23,10 @@
 #include "logic/history.hpp"   // history_parse_tenths — the SAME parse history.cpp applies to the witness
 #include "logic/history_persist.hpp"  // source identity fingerprint for durable X10A history
 #include "logic/ou_stale.hpp"
+#include "logic/ota_quiesce.hpp"
 #include "logic/raw_capture.hpp"
 #include "http_handlers.hpp"
+#include "ota_update.hpp"
 
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
@@ -60,6 +62,8 @@ static std::atomic<bool>     s_detect_reset{false};
 // a second at worst. Not in s_stats: that mutex must not be taken on the path out of an OOM.
 static std::atomic<uint32_t> s_cycles_skipped{0};
 static std::atomic<uint32_t> s_target_generation{1};
+static std::atomic<bool>     s_poll_task_running{false};
+static std::atomic<bool>     s_ota_quiesced{false};
 
 // Consecutive bus-answering sweeps that matched no profile. Poll-task-owned, RAM only, like the
 // backoff above. Falling back to `generic` costs ~46 rows including every derived figure, so it
@@ -495,7 +499,11 @@ static bool poll_detect() {                         // false only when an attemp
 // came to run here (#241) — the dashboard now polls /status and /values on the httpd task instead
 // (docs/ARCHITECTURE.md "Push vs. poll"). What this task does is read the bus and commit the cache.
 static void poll_task(void*) {
+    s_poll_task_running.store(true, std::memory_order_release);
     esp_task_wdt_add(NULL);                                    // this task owns the link — watch it
+    OtaQuiesceState ota_quiesce;
+    bool ota_quiesce_logged = false;
+    bool ota_quiesce_cap_logged = false;
     for (;;) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
         // This task's own stack headroom — the budget that killed it in #241 and that nothing
@@ -504,6 +512,36 @@ static void poll_task(void*) {
         // and no branch below can skip it. Outside the try: it allocates nothing and must still be
         // recorded for the cycle that threw, which is the one that went deepest.
         stack_watch_sample(StackWatch::Poll);
+
+        // OTA's TLS client and Secure-Boot-v2 RSA verifier need the same scarce contiguous internal
+        // heap that poll_once() uses for its vector and owned strings.  Stand aside before the first
+        // Config/cache allocation, not after a std::bad_alloc: the latter was the live 1.0.0 failure
+        // mode and left only 632 B free at validation.  The lock-free flag rises 1.1 s before OTA
+        // allocates; a sweep already in progress finishes, then this branch acknowledges every
+        // subsequent cycle by doing no bus/cache work.  Like MQTT, the hold is bounded so a stuck
+        // flag cannot silence the heat-pump link forever.
+        const bool ota_active = ota_download_active();
+        if (ota_quiesce_step(ota_quiesce, ota_active)) {
+            s_ota_quiesced.store(true, std::memory_order_release);
+            esp_task_wdt_reset();  // explicit on the held path; keep this true if code moves above it
+            if (!ota_quiesce_logged) {
+                diag_printf("poll: holding off X10A sweeps during OTA\n");
+                ota_quiesce_logged = true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
+            continue;
+        }
+        s_ota_quiesced.store(false, std::memory_order_release);
+        if (ota_quiesce_exhausted(ota_quiesce, ota_active)) {
+            if (!ota_quiesce_cap_logged) {
+                diag_printf("poll: OTA hold-off budget spent after %u cycles, polling again\n",
+                            static_cast<unsigned>(OTA_QUIESCE_MAX_CYCLES));
+                ota_quiesce_cap_logged = true;
+            }
+        } else {
+            ota_quiesce_logged = false;
+            ota_quiesce_cap_logged = false;
+        }
         try {
             // The BOARD's own memory trends, before any decision about the bus. They describe the
             // ESP32, not the heat pump, so they must not depend on a profile being resolved: folding
@@ -628,6 +666,11 @@ HpStats hp_stats() {
 }
 
 uint32_t hp_skipped_cycles() { return s_cycles_skipped.load(std::memory_order_relaxed); }
+
+bool hp_poll_ota_quiesced() {
+    return !s_poll_task_running.load(std::memory_order_acquire) ||
+           s_ota_quiesced.load(std::memory_order_acquire);
+}
 
 uint32_t hp_poll_generation() {
     return s_target_generation.load(std::memory_order_acquire);

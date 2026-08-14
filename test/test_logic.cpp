@@ -43,7 +43,9 @@
 #include "logic/version_cmp.hpp"
 #include "logic/ota_channel.hpp"
 #include "logic/ui_lang.hpp"
+#include "logic/ota_headroom.hpp"
 #include "logic/ota_manifest.hpp"
+#include "logic/ota_transport.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/hp_query_log.hpp"
 #include "logic/http_body.hpp"
@@ -2061,6 +2063,88 @@ static void test_ota_quiesce() {
     // the 1 s publish cadence: minutes, not seconds, and not the rest of the boot.
     CHECK(OTA_QUIESCE_MAX_CYCLES >= 60);
     CHECK(OTA_QUIESCE_MAX_CYCLES <= 900);
+}
+
+// The verifier needs BOTH aggregate capacity and one sufficiently large INTERNAL block. The live
+// failure is the adversarial shape here: aggregate free heap can look plausible while fragmentation
+// leaves RSA/PSA no usable block. Pin every threshold edge independently so changing && to ||, using
+// the total for both inputs, or weakening either comparison is observable on the host.
+static void test_ota_headroom() {
+    CHECK(OTA_VERIFY_MIN_FREE_BYTES == 24u * 1024u);
+    CHECK(OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES == 12u * 1024u);
+
+    CHECK(ota_verify_headroom_ok(OTA_VERIFY_MIN_FREE_BYTES,
+                                 OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES));
+    CHECK(ota_verify_headroom_ok(OTA_VERIFY_MIN_FREE_BYTES + 1,
+                                 OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES + 1));
+
+    // Plenty in aggregate cannot compensate for the 632-byte fragmented block observed live.
+    CHECK(!ota_verify_headroom_ok(64u * 1024u, 632));
+    CHECK(!ota_verify_headroom_ok(64u * 1024u,
+                                  OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES - 1));
+    // One large block cannot compensate for too little total verifier working memory.
+    CHECK(!ota_verify_headroom_ok(OTA_VERIFY_MIN_FREE_BYTES - 1, 32u * 1024u));
+    // Neither-short case closes the vacuous path where only one side is really consulted.
+    CHECK(!ota_verify_headroom_ok(0, 0));
+}
+
+// The initial feed must be absolute HTTPS; redirects may use an ordinary relative reference but
+// can never downgrade the transport or hide a new authority behind `//`. Exercise parser-confusion
+// shapes as well as the happy path because esp_http_client, not this small policy, does full URL
+// parsing after the policy admits a value.
+static void test_ota_transport() {
+    CHECK(ota_url_is_absolute_https("https://updates.example/firmware.bin"));
+    CHECK(ota_url_is_absolute_https("HTTPS://UPDATES.EXAMPLE/firmware.bin"));
+    CHECK(ota_url_is_absolute_https("https://[2001:db8::1]/firmware.bin"));
+    CHECK(!ota_url_is_absolute_https(""));
+    CHECK(!ota_url_is_absolute_https("https://"));
+    CHECK(!ota_url_is_absolute_https("https:///firmware.bin"));
+    CHECK(!ota_url_is_absolute_https("https://?firmware.bin"));
+    CHECK(!ota_url_is_absolute_https("https://#firmware.bin"));
+    CHECK(!ota_url_is_absolute_https("http://updates.example/firmware.bin"));
+    CHECK(!ota_url_is_absolute_https(" https://updates.example/firmware.bin"));
+    CHECK(!ota_url_is_absolute_https("https://updates.example\\firmware.bin"));
+    CHECK(!ota_url_is_absolute_https(std::string("https://updates.example/") + char(0x7f)));
+    CHECK(!ota_url_is_absolute_https(std::string("https://updates.example/") + char(0x1f)));
+
+    CHECK(ota_url_is_https_or_relative("https://updates.example/next.bin"));
+    CHECK(ota_url_is_https_or_relative("/next.bin"));
+    CHECK(ota_url_is_https_or_relative("next.bin"));
+    CHECK(ota_url_is_https_or_relative("../next.bin"));
+    CHECK(ota_url_is_https_or_relative("?version=2"));
+    CHECK(ota_url_is_https_or_relative("#fragment"));
+    CHECK(ota_url_is_https_or_relative("path/value:still-a-path"));
+    CHECK(!ota_url_is_https_or_relative(""));
+    CHECK(!ota_url_is_https_or_relative("//attacker.example/next.bin"));
+    CHECK(!ota_url_is_https_or_relative("http://updates.example/next.bin"));
+    CHECK(!ota_url_is_https_or_relative("HtTp://updates.example/next.bin"));
+    CHECK(!ota_url_is_https_or_relative("https:next.bin"));
+    CHECK(!ota_url_is_https_or_relative("data:application/octet-stream,x"));
+    CHECK(!ota_url_is_https_or_relative("C:/next.bin"));
+    CHECK(!ota_url_is_https_or_relative("\\\\attacker.example\\next.bin"));
+    CHECK(!ota_url_is_https_or_relative("next file.bin"));
+
+    // ESP-IDF concatenates duplicate Location values internally. The policy must therefore reject
+    // the whole response rather than let either the first or last header decide which scheme the
+    // client eventually parses.
+    OtaRedirectLocationState redirect;
+    CHECK(!ota_redirect_location_accepted(redirect));
+    ota_redirect_location_observe(redirect, "http://attacker.example/fw.bin");
+    CHECK(!ota_redirect_location_accepted(redirect));
+    ota_redirect_location_observe(redirect, "https://updates.example/fw.bin");
+    CHECK(!ota_redirect_location_accepted(redirect));       // insecure -> secure stays ambiguous
+
+    ota_redirect_location_reset(redirect);
+    ota_redirect_location_observe(redirect, "https://updates.example/fw.bin");
+    CHECK(ota_redirect_location_accepted(redirect));
+    ota_redirect_location_observe(redirect, "http://attacker.example/fw.bin");
+    CHECK(!ota_redirect_location_accepted(redirect));       // secure -> insecure stays ambiguous
+
+    ota_redirect_location_reset(redirect);
+    ota_redirect_location_observe(redirect, "/fw.bin");
+    CHECK(ota_redirect_location_accepted(redirect));
+    ota_redirect_location_observe(redirect, "/same-origin.bin");
+    CHECK(!ota_redirect_location_accepted(redirect));       // even two secure values are ambiguous
 }
 
 static void test_heartbeat() {
@@ -12803,6 +12887,8 @@ int main() {
     test_homehub();
     test_homehub_map();
     test_ota_quiesce();
+    test_ota_headroom();
+    test_ota_transport();
     test_heartbeat();
     test_crashinfo();
     test_bootlog();

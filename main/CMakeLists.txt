@@ -51,7 +51,6 @@ idf_component_register(
         esp_netif
         esp_http_server
         esp_app_format
-        esp_https_ota
         app_update
         esp_http_client
         esp-tls

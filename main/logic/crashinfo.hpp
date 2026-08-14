@@ -129,8 +129,8 @@ inline constexpr int ESP_ERR_NOT_FOUND_MIRROR = 0x105;
 // dismissal has TWO jobs — destroy the downloadable dump, and clear the report — and they do not
 // always both apply. On a device whose INSTALLED partition table carries no `coredump` partition the
 // erase has nothing to destroy and answers ESP_ERR_NOT_FOUND. That is not an exotic corner on this
-// project: partitions.csv already states the premise for the `history` partition — esp_https_ota writes
-// the inactive APP slot and never the table at 0x8000, so a board keeps whatever table it was
+// project: partitions.csv already states the premise for the `history` partition — the OTA stream
+// writes the inactive APP slot and never the table at 0x8000, so a board keeps whatever table it was
 // flashed with and can only gain a partition by re-flashing. Treating "nothing to erase" as a
 // failure answers 500 to every dismissal there, forever, and a fault reset commonly carries no dump
 // at all (a stack overflow overruns it) — so the banner those boards see is exactly the one no

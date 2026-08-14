@@ -33,6 +33,11 @@ for test_file in "${tests[@]}"; do
   node "$test_file"
 done
 
+# Source contracts can go green by quietly losing contact with the call sites they claim to pin.
+# Re-seed each OTA heap regression in a throwaway tree and require this suite's exact checker to
+# reject it; the real tree is never modified.
+node tools/ota/selftest.mjs
+
 ./scripts/run-public-readiness-audit.sh
 
 echo "${#tests[@]} source-boundary contract test(s) passed"

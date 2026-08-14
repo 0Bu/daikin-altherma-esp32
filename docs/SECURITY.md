@@ -136,15 +136,18 @@ this also prevents reading the config off a stolen board.
 
 > **Implementation status.** All of it is implemented: flash-time signing, the **rollback health
 > gate**, and the **pull-OTA path** (`ota_check_async` / `ota_update_async` in `ota_update.cpp` —
-> manifest check, `esp_https_ota` download, signature verify on install, and the downgrade gate).
+> manifest check, heap-bounded `esp_http_client` → `esp_ota` stream, signature validation before
+> boot selection, and the downgrade gate).
 > The release and development **feeds are live**; the Pages source points at `gh-pages`.
 > Publishing does not require a public repository, but note that the resulting **Pages site is
 > public regardless** of repo visibility, so the signed images it serves are world-readable (see
 > [`README.md`](README.md)). The trust properties below are runtime behaviour, not intent.
 
 OTA updates are **signed** (Secure Boot v2 RSA-3072 signature scheme *without* hardware Secure
-Boot): the running app verifies the RSA signature of a downloaded image before installing it, so a
-compromised update host (or its GitHub Pages source) cannot push unsigned or tampered firmware.
+Boot): the running app streams the download only into the inactive slot, releases the HTTP/TLS
+client and its fixed buffer, then lets `esp_ota_end()` validate the complete image before that slot
+can be selected for boot. A compromised update host (or its GitHub Pages source) therefore cannot
+activate unsigned or tampered firmware.
 
 - **No eFuses are burned** — this is reversible, has no brick risk, and the browser installer /
   USB flash path keeps working. The bootloader does **not** verify on boot; only the running app
@@ -162,8 +165,8 @@ compromised update host (or its GitHub Pages source) cannot push unsigned or tam
 
   1. Against the **manifest's** `version`, before the download starts — cheap, and stops a pointless
      transfer. On its own this is *not* sufficient: it only checks what the host *claims*.
-  2. Against the **image's own embedded version** (`esp_app_desc_t`, read via
-     `esp_https_ota_get_img_desc()` once the transfer has begun but before anything is committed).
+  2. Against the **image's own embedded version** (`esp_app_desc_t`, copied from the fixed-size
+     image-header probe before the first `esp_ota_write()`).
      This is what defeats a host that advertises `9.9.9` in the manifest and serves a signed 1.0.0
      binary. A mismatch between the two is refused outright — CI already verifies that a published
      manifest agrees with the image it ships, so in the field a disagreement is a stale cache or an
@@ -189,6 +192,21 @@ compromised update host (or its GitHub Pages source) cannot push unsigned or tam
   The requester is a trusted-LAN client that just picked a channel in the web UI and confirmed a
   dialog spelling out that the build is older — the same trust level that can already erase the
   config or re-point the X10A pins.
+- **Heap-safe validation** *(implemented — `logic/ota_headroom.hpp`, host-tested)* — OTA raises one
+  lock-free quiesce request before any network allocation. MQTT publication and X10A polling stand
+  aside before building their allocation-rich snapshots, while an already-running Open-Meteo TLS
+  request is given one bounded timeout to unwind. The firmware then requires both **24 KiB total
+  free INTERNAL 8-bit heap** and a **12 KiB largest contiguous INTERNAL block**, first before the
+  image transfer and again after the HTTP/TLS client plus fixed 2 KiB download buffer have been
+  freed, immediately before RSA/PSA validation. Each wait is bounded to five seconds and refuses
+  the update on failure; it never weakens or skips signature checking.
+
+  The order is deliberate: IDF's signed-image verifier runs in `esp_ota_end()`. Keeping the TLS
+  allocator alive until that call made the verifier compete for the same fragmented internal heap.
+  The low-level stream retains that exact verifier while allowing transport cleanup first.
+  `ESP_ERR_OTA_VALIDATE_FAILED` covers malformed image structure, digest/signature failure **and**
+  verifier allocation failure, so the UI reports the defensible generic **“Update rejected: image
+  validation failed”**; `/diag` records the error and heap samples without guessing a narrower cause.
 - **Rollback health gate** *(implemented)* — a freshly OTA-installed image stays `PENDING_VERIFY`
   until it has run for ~90 s and then proves either an active WiFi/Ethernet link or a provisioning
   portal that is actually running (`ota_update.cpp`, `logic/health_gate.hpp`), so a
@@ -210,7 +228,7 @@ Three failure modes, and what recovers each:
 | # | How a bad image arrives | Auto-recovery |
 |---|---|---|
 | 1 | **OTA** installs an image that boots but is broken/crashes | ✅ dual-OTA + `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` + the health gate. The image boots `PENDING_VERIFY`; it must prove healthy or the bootloader reverts to the previous slot. |
-| 2 | **OTA** installs an *unsigned/tampered* image | ✅ `esp_https_ota_finish()` verifies the RSA-3072 signature before the slot is ever activated; a failure is surfaced to the UI as "Update rejected: bad signature" and the running image is untouched. |
+| 2 | **OTA** receives an *unsigned/tampered* image | ✅ after the inactive-slot stream and transport cleanup, `esp_ota_end()` validates the complete signed image before `esp_ota_set_boot_partition()` can activate it. Validation failure leaves the running slot selected and is reported generically because IDF does not distinguish signature, structure, digest and verifier-allocation failures in that error. |
 | 2b | **OTA** installs an authentically-signed but **older** image (downgrade onto a fixed bug) | ✅ the downgrade gate above — checked against the manifest *and* against the image's own embedded version, so a host that lies in the manifest is still refused. |
 | 3 | **Direct USB / Web-Serial flash** of an unsigned (or early-crashing) build | ⚠️ not auto-recoverable — see below. Prevented instead by `scripts/require-signed.sh`. |
 
