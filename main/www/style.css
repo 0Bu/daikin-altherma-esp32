@@ -815,10 +815,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-source.mb { --vhist-colour: var(--src-mb); }
 .vhist-source small { color: inherit; font-size: 10.5px; }
 /* Component states are categorical timelines, not numeric curves. Paired X10A/HomeHub witnesses
-   share ONE lane: ordinary state colour means agreement, a translucent hatch means one witness,
-   and a warning hatch means disagreement. Source names and their exact readings live in the
-   tooltip; the chart remains quiet without hiding the evidence condition. A genuinely single-source
-   history keeps its source label and outline. */
+   keep one independent, labelled lane each: ordinary state colour remains comparable across the
+   lanes, while a missing interval is hatched only for the source that did not measure it. Exact
+   readings and phase timing remain available in the shared tooltip. A genuinely single-source
+   history keeps its one source label and outline. */
 /* State readouts can stack source/state/interval/duration fields vertically. They deliberately
    overlay the lanes like an ordinary chart tooltip; the translucent surface keeps the underlying
    phase visible while the fixed plot position prevents the card from jumping between readouts. */
@@ -830,7 +830,6 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-state-lane-label.mb { color: var(--src-mb); }
 .vhist-state-track { position: relative; height: 15px; overflow: hidden; border-radius: 999px;
   background: var(--hatch); box-shadow: inset 0 0 0 1px var(--pipe); }
-.vhist-state-track.combined { box-shadow: inset 0 0 0 1px var(--pipe); }
 .vhist-state-track.x10a { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--brand-sky); }
 .vhist-state-track.modbus { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--src-mb); }
 .vhist-state-on, .vhist-state-gap { position: absolute; inset-block: 0; min-width: 2px; }
@@ -876,27 +875,6 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-state-on.sg-recommended, .vhist-level.sg-recommended i {
   background: var(--src-mb);
 }
-/* Evidence overlays come AFTER every state fill so they decorate rather than replace its meaning. */
-.vhist-state-on.state-source-single {
-  opacity: .52;
-  background-image: repeating-linear-gradient(135deg, transparent 0 4px,
-    color-mix(in srgb, var(--card) 72%, transparent) 4px 6px);
-}
-.vhist-state-on.state-source-conflict {
-  background-image: repeating-linear-gradient(135deg, transparent 0 4px,
-    color-mix(in srgb, var(--err) 72%, transparent) 4px 6px);
-  box-shadow: inset 0 0 0 1px var(--err);
-}
-.vhist-level.state-source-single i {
-  opacity: .52; background: repeating-linear-gradient(135deg, var(--pipe) 0 4px,
-    color-mix(in srgb, var(--card) 72%, transparent) 4px 6px);
-}
-.vhist-level.state-source-conflict i {
-  background: repeating-linear-gradient(135deg, var(--pipe) 0 4px,
-    color-mix(in srgb, var(--err) 72%, transparent) 4px 6px);
-  box-shadow: inset 0 0 0 1px var(--err);
-}
-
 .modal-subtitle { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
    extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
