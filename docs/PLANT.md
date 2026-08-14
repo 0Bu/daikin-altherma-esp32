@@ -24,7 +24,7 @@ subscription, and that is a property of the code rather than a guard around a do
 
 > **Looking for the user guide?** [DIAGNOSTICS.md](DIAGNOSTICS.md) explains every visible result in
 > everyday language, including what `OK`, `NOTE`, `WARNING`, `CHECKING`, and `MEASURED ONLY` mean and
-> what a non-specialist can reasonably do next. [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md)
+> the limits of each observation. [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md)
 > maps every check to manufacturer documentation or primary research, the exact firmware rule and
 > the claim that the evidence cannot support. This section is the technical design record.
 
@@ -34,6 +34,12 @@ events and window minima — compressor starts and mean run length, defrost coun
 runtime, the lowest water pressure and flow, backup-heater minutes (the BUH and the DHW booster kept
 apart), the unit's own fault class, and the protection-retry counters. Cycling and defrost also
 carry source-named outdoor minimum/mean **context**; those figures never change a verdict.
+
+**Collection is explicit opt-in.** A fresh device and every configuration migrated from before blob
+v19 keep plant diagnostics off. The Firmware card's selector starts a new evidence generation live;
+turning it off stops and clears the checkup and its dependent room, forecast, and circulation inputs.
+No accumulated window crosses a disable/enable boundary. Ordinary X10A/HomeHub telemetry, trend
+rings, ENV III, and board diagnostics are independent of this switch.
 
 **Why it is not a view over the trend rings.** A ring folds each 5-minute bucket to its *last*
 reading, so a compressor cycle shorter than five minutes leaves no trace in it — and short cycling is
@@ -233,11 +239,12 @@ that work: `POST /set_weather` only saves and wakes the task, so no DNS, TLS or 
 httpd worker. The response is bounded *before* it is read (a `Content-Length` cap, then fixed chunks
 against a running total) and never stored — nothing about a forecast survives a reboot.
 
-**Saving a location IS the consent.** Handing these coordinates and this installation's public source
-IP to a third party is the act being consented to, and the save is the only place a user states it,
-so there is no second switch in front of it. Clearing the location wakes the task, stops it, drops the
-runtime values and retracts the retained MQTT evidence document — a retained forecast nobody deletes
-goes on reading like a live input long after collection was withdrawn.
+**Saving a location is the location-specific consent.** Handing these coordinates and this
+installation's public source IP to a third party is the act being consented to. Fetching additionally
+requires the default-off plant-diagnostics master; a saved location is dormant while it is off.
+Clearing the location wakes the task, stops it, drops the runtime values and retracts the retained
+MQTT evidence document — a retained forecast nobody deletes goes on reading like a live input long
+after collection was withdrawn.
 
 **Almost everything else here is a refusal**, and that is the design:
 
@@ -360,13 +367,13 @@ Read the event series with the D2 clipping share (how often leaving-water temper
 minimum) and the zone-demand duty cycle (how often that zone actually requests heat). Without those
 corroborating signals, this sampler systematically under-reports that high-curve case.
 
-**Arming is derived, not switched.** It follows from the timestamped MQTT room mapping plus an
-active HomeHub
+**Arming is derived from the explicit master and its prerequisites.** It requires plant diagnostics,
+the timestamped MQTT room mapping and an active HomeHub
 ([`FEATURES.md`](FEATURES.md) #62 — a typo is accepted as configuration but fails closed and is
 reported when the next MQTT frame reaches the decoder). The forecast above is *optional* comparison
 evidence, distinguishing a Recording state from a Degraded one, so clearing a location stops forecast
-traffic without stopping local samples. Deleting either the room source or HomeHub disarms and
-clears sample memory: a reading taken under a consent since withdrawn must not outlive it.
+traffic without stopping local samples. Disabling diagnostics, or deleting either the room source or
+HomeHub, disarms and clears sample memory: a reading taken under an earlier consent must not outlive it.
 
 The outside contract is `/status.heating_curve` plus the schema-versioned `<base>/heating_curve`
 payload, which expose raw current and last deviation, the heating gates, the source time, an absolute
@@ -375,7 +382,7 @@ and treat a sequence or uptime reset as a reboot. Those domain fields are delibe
 `<base>/heartbeat`, which stays technical board and link health. There are no HA entities: this is
 analysis evidence, not a plant command.
 
-The card in the UI always renders, stating recording, optional-forecast degradation, a summer wait,
+The card in the UI renders only while plant diagnostics are enabled, stating recording, optional-forecast degradation, a summer wait,
 excluded cooling or the exact missing input — and it says out loud that room kelvin is not calibrated
 water kelvin. It also carries the plant and accessory outdoor axes as separate rows, whose numbers
 come from the diagnosis rather than from either source read a second time, so a live source cannot

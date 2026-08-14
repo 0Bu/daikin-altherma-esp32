@@ -164,11 +164,11 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
 http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
-http_config.cpp     → POST /set_wifi, /set_mqtt, /set_ref_temp, /set_weather,
+http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_temp, /set_weather,
                       /test_circulation, /set_circulation,
                       /set_syslog,
                       /set_ntp, /set_hp, /discover_homehub, /set_board, /set_env3, /set_ota, /set_lang,
-                      /detect — all FIFTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
+                      /detect — all SIXTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
                       exactly to (and which must be LOWERED in the same commit that retires a route,
                       as retiring /set_dynamic_lwt did: a count left above the real one is a comment
                       that has stopped describing the code depending on it). /set_ref_temp persists
@@ -178,12 +178,12 @@ http_config.cpp     → POST /set_wifi, /set_mqtt, /set_ref_temp, /set_weather,
                       read-only active-power mapping; neither route can switch the configured plug.
                       /set_weather validates the DWD path component, persists it and only wakes the
                       weather task; no DNS/TLS request runs on the httpd worker.
-                      CONSENT rides on the SAVE of each source, not on a switch in front of them:
-                      /set_ref_temp starts and stops the room subscription and /set_weather the
-                      Open-Meteo traffic, the latter requesting the retained weather topic's cleanup
-                      once the disabled location is persisted. There is no /set_dynamic_lwt — the
-                      heating-curve diagnosis arms itself from those two saves, so no stored mode can
-                      disagree with the configuration a reader can see.
+                      /set_diagnostics is the default-off device-wide consent boundary. It starts a
+                      fresh generation when toggled and stops/clears the checkup plus room, weather,
+                      and circulation collection when disabled. Each source save still owns its
+                      mapping or coordinate disclosure, but a saved source is dormant while the
+                      master is off. There is no /set_dynamic_lwt controller mode — the read-only
+                      heating-curve sampler additionally requires its room source and HomeHub.
                       /set_board atomically owns board identity/peripherals plus the integrated ENV
                       III fields. Its shared preflight proof-gates an enable before the one NVS
                       write: a short-lived bus requires one CRC-valid SHT30 sample and the QMP6988
@@ -944,8 +944,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   records the **raw** reference-room deviation at most once per 30 minutes during confirmed normal
   space **heating**. It does not contain the retired P gain, deadband, quantization, ±2 K envelope,
   slew limit or requested-offset vocabulary: room kelvin is not calibrated leaving-water kelvin.
-  ARMING IS DERIVED, never switched or stored: `heating_curve_diagnosis_armed()`
-  (`config_model.hpp`) requires the timestamped MQTT room mapping and an active HomeHub. Forecast is optional
+  ARMING IS DERIVED from the stored master consent and source configuration:
+  `heating_curve_diagnosis_armed()` (`config_model.hpp`) requires diagnostics enabled, the
+  timestamped MQTT room mapping and an active HomeHub. Forecast is optional
   comparison evidence; deleting it must not stop local sampling or make location disclosure a
   prerequisite. There is no mode enum, live blob field or route; v14's retired byte is written zero
   and ignored.
@@ -2340,9 +2341,10 @@ comments are stripped from markup; HTML indentation stays (whitespace between in
 significant, and ~1.1 KB is not worth a layout defect that renders correctly on the machine that
 made it). The UI is **two screens**:
 the dashboard (the plant — schematic, model, values, no config at all) and **Settings** behind the
-header gear (the Connections tile + four ESP32 board cards — ESP32 board health, Protokoll
-[X10A link + pins] and Firmware [version/OTA + language] — plus the permanent Anlagendiagnose card;
-flat, no sub-screens, all four built by one `esp32CardHtml()` and rebuilt together on every poll).
+header gear (the Connections tile + three ESP32 board cards — ESP32 board health, Protokoll
+[X10A link + pins] and Firmware [version/OTA/language + default-off plant-diagnostics consent] —
+plus conditional Anlagendiagnose and heating-curve source cards while enabled; flat, no sub-screens,
+all built by one `esp32CardHtml()` and rebuilt together on every poll).
 Settings drives the config endpoints in
 place:
 
@@ -2422,7 +2424,15 @@ place:
   (no UI control), the poll interval is fixed at 1 s (not sent). `/set_hp` still accepts only
   `{profile, rx, tx}` — the UI language is its own setting now (see the **Language** bullet below),
   never a `/set_hp` field.
-- **DHW circulation-pump witness** → `/test_circulation` then `/set_circulation` (Settings
+- **Plant diagnostics** → `/set_diagnostics` (Settings **Firmware** card). The persisted boolean is
+  false on a fresh device and on every pre-v19 config migration. A real toggle advances a persisted
+  generation, saves it first, and then applies live without reboot. Off wipes the rolling checkup,
+  unsubscribes/clears the room and circulation witnesses, stops forecast requests, retracts retained
+  diagnosis publications and hides both dependent Settings cards plus the dashboard checkup. Saved
+  source mappings remain so a later explicit enable can reuse them, but no old-generation evidence
+  can cross that boundary. X10A/HomeHub polling, trends, ENV III, and the technical heartbeat remain
+  independent.
+- **DHW circulation-pump witness** → `/test_circulation` then `/set_circulation` (conditional Settings
   **Anlagendiagnose** card). The fields are the exact MQTT topic, active-power and source-time JSON
   paths, maximum age, ON/OFF hysteresis and confirmation time. Save accepts only a fresh value
   and binds the proof to that exact tuple before writing blob v15; Delete posts the empty mapping.
@@ -2508,6 +2518,9 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   working. The three readings are null unless the sample is fresh — never a last-known
                   value, the same rule the held-over X10A rows follow — and `error` then carries WHY
                   ("unsupported_board"|"disabled"|"collecting"|"sensor_not_found"|"sht30_crc"|…),
+                  diagnostics{enabled} — the persisted, default-off master opt-in reported separately
+                  from board/link health. The Settings Firmware selector owns it; missing this object
+                  in an older response is treated as off by the UI,
                   since "no number" and "no number BECAUSE the CRC failed" are different findings.
                   pins_avail[]/presets[] are this bus's own I2C candidates and are NOT gated on
                   `supported`: since #339 the Board Hardware form saves board identity and ENV III in
@@ -2544,9 +2557,10 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   object archives its numeric accepted
                   view. It is the required heating-curve-diagnosis input; `room_error_k` is recorded
                   raw and is not an LWT correction. It feeds no heat-pump write.
-                  SAVING the topic is the whole consent to subscribe to it (#357 removed the second
-                  gate #341 had added): while one is stored it is subscribed and decoded, and
-                  deleting it drops the subscription and CLEARS every captured field. `reason` is the
+                  SAVING the topic records the mapping, but the device-wide diagnostics opt-in is
+                  additionally required before it is subscribed and decoded. Turning the master off
+                  drops the subscription and clears every captured field without deleting the saved
+                  mapping; deleting the mapping does both permanently. `reason` is the
                   load-bearing one for a UI — "disabled" (the thermostat reports itself off),
                   "non_heating_mode", "stale" — because a reading can be present, fresh and still
                   unusable, and the diagnosis card must say WHICH rather than call the input missing.
@@ -2557,8 +2571,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   source_at,source_unix_s,timestamp_source,age_s,fresh,freshness_reason,retained,
                   messages,errors,rejections[,error]} — the EXTERNAL CIRCULATION WITNESS (#361): an
                   independent MQTT power meter on the DHW circulation pump, decoded on the mqtt task
-                  beside the room source and following the same consent boundary (the saved topic IS
-                  the subscription; deleting it clears every captured field). `state` is the
+                  beside the room source and following the same two-part boundary (saved mapping plus
+                  diagnostics master; deleting it clears every captured field). `state` is the
                   CONFIRMED class from logic/circulation_source.hpp — on/off/unknown — never the raw
                   sample: the witness is a PULSED load, so a lone spike must not flip the state and a
                   hysteresis-band reading must not read as off. It exists because the `dhw_loss`
@@ -2573,10 +2587,10 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   configured, the task's own availability and freshness, so a consumer never has to
                   combine them itself; a FAILED refresh keeps has_value plus the last two numbers for
                   diagnosis while available/fresh go false, which is the distinction between "no data"
-                  and "data that must not be acted on". FETCHING is gated on the SAVED LOCATION and
-                  nothing else (#357 removed #341's second gate along with its
-                  "dynamic_lwt_disabled" state): saving coordinates is the consent to send them, so
-                  a stored-but-deliberately-unfetched location is no longer a state that exists.
+                  and "data that must not be acted on". FETCHING requires both the SAVED LOCATION and
+                  the device-wide diagnostics opt-in. Saving coordinates is still the specific consent
+                  to disclose them, but the stored location remains deliberately dormant while the
+                  master is off.
                   `issued_at` is ALWAYS null — the endpoint does
                   not expose the model-run instant and fetch time is not a substitute for it.
                   latitude/longitude are null when unconfigured and "<redacted>" under ?redact=1,
@@ -2590,7 +2604,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   heating_mode_known,heating_mode_active,room_source_unix_s,room_age_s,sequence,
                   evaluations,samples,holds,blocks} — versioned raw heating-curve diagnosis
                   (mqtt_ha.cpp, logic/heating_curve_diagnosis.hpp). `armed` is derived from the
-                  timestamped MQTT room mapping plus active HomeHub; forecast is optional. State/reason are the last
+                  diagnostics opt-in, timestamped MQTT room mapping and active HomeHub; forecast is optional. State/reason are the last
                   1s evaluation (`off|recording|hold|degraded|blocked` and `disabled|sample_recorded|
                   sampling_interval|room_unavailable|x10a_unavailable|homehub_unavailable|
                   plant_gate_unknown|plant_inactive|forecast_unavailable|clock_invalid|
@@ -2727,7 +2741,9 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   already rendering. Rows this profile does not carry are omitted entirely,
                   health{covered_s,persist,full_span,available,assessable,evaluated,status,
                   checks[{id,verdict,evidence,observed_s,required_s,…}]} — the 24-hour plant CHECKUP
-                  (logic/checkup.hpp, checkup.cpp), judged on the DEVICE: `status` is the worst
+                  (logic/checkup.hpp, checkup.cpp), judged on the DEVICE only while diagnostics are
+                  enabled. While off the object remains structurally present but carries no accumulated
+                  checks, and the dashboard card is hidden. `status` is the worst
                   verdict across the checks and `covered_s` how much of the day was actually
                   OBSERVED (seconds, not whole hours — the first hour after a reboot must read as the
                   small number it is rather than rounding to "0 h"). covered_s is CARD-level context;
@@ -2995,6 +3011,13 @@ POST /set_ntp     {server} -> persist + reboot. No request-path network probe (t
                   CONFIG_DAIKIN_NTP_SERVER compile-time default" (SNTP has no disabled state, unlike
                   syslog_host's empty-means-off). Unchanged settings short-circuit to
                   {ok:true,reboot:false}, same as /set_mqtt.
+POST /set_diagnostics {enabled:boolean} -> persist + apply live, no reboot. This is the one
+                  device-wide opt-in for the rolling checkup, heating-curve diagnosis, and their
+                  additional room/forecast/circulation collection. It defaults false for fresh and
+                  pre-v19 configurations. Every real transition advances a durable generation;
+                  disabling clears the old checkup and source runtime state, and enabling starts a
+                  new interval that cannot restore evidence from a prior generation. Ordinary X10A,
+                  HomeHub, history, ENV III, and technical heartbeat processing remain active.
 POST /test_ref_temp  {name,topic,temperature_path,setpoint_path,timestamp_path,enabled_path,
                   hvac_mode_path,max_age_s} -> subscribe the CANDIDATE mapping on the existing
                   authenticated MQTT client, wait up to 12 s for a frame, decode it through the very
@@ -3045,12 +3068,10 @@ POST /set_circulation   {name,topic,power_path,time_path,max_age_s,on_tenths_w,o
                   short-circuits to {ok:true,saved:false,reboot:false}; only a change to those seven
                   reconfigures the subscription, so renaming the source does not retire its evidence
 POST /set_weather {latitude,longitude} -> validate + persist + notify the weather task (no reboot,
-                  and no DNS/TLS/JSON on the request path). SAVING THE LOCATION IS THE CONSENT to
-                  hand these coordinates — and this device's public source IP — to a third party, so
-                  the task fetches while one is stored and stops when it is cleared. There is no
-                  second switch: #341 put one in front of this and #357 removed it, because the
-                  request is the act being consented to and the save is the only place a user states
-                  it. Both are
+                  and no DNS/TLS/JSON on the request path). SAVING THE LOCATION is the specific
+                  consent to hand these coordinates — and this device's public source IP — to a
+                  third party; the task additionally requires the device-wide diagnostics opt-in.
+                  A saved location remains dormant while that master is off. Both are
                   STRINGS parsed strictly (optional sign, digits, `.` or the German `,`, at most six
                   decimals — an exponent, whitespace or a `+` is rejected rather than coerced, since
                   a coordinate that silently becomes a different one is a request the user cannot
@@ -3059,14 +3080,15 @@ POST /set_weather {latitude,longitude} -> validate + persist + notify the weathe
                   Disabling also requests the retained MQTT topic's cleanup, so a stopped forecast
                   leaves no last-known values on the broker
 (no /set_dynamic_lwt)  RETIRED in #357. There is no controller mode to POST: the heating-curve
-                  diagnosis arms itself while the timestamped MQTT room mapping and HomeHub are configured
+                  diagnosis arms itself while diagnostics, the timestamped MQTT room mapping and HomeHub are configured
                   (`heating_curve_diagnosis_armed`). Forecast/location is optional comparison evidence;
                   `/set_weather` applies its own collection/privacy boundary live. What the route bought was a
                   second statement of a fact the configuration already made — and it could not be
                   reached: it answered 409 until those sources existed, while the only editors for
                   them lived inside the Settings card that was hidden until the mode was on. An
                   ACTIVE controller stays unrepresentable for the stronger reason than a rejected
-                  word: no enum, no Config field, no live blob byte and no route exist to carry one.
+                  word: no controller enum, value field or route exists. `/set_diagnostics` is only
+                  a collection opt-in and creates no actuator.
 POST /set_env3    {enabled,sda,scl} -> validate + PROVE + persist + REBOOT. A standalone
                   COMPATIBILITY endpoint since #339 folded ENV III into the Board Hardware form — no
                   shipped client posts here (the UI sends env3_* to /set_board), and both routes run

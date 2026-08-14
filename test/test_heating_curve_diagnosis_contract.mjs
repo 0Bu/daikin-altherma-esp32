@@ -54,6 +54,8 @@ assert.doesNotMatch(config, /dynamic_lwt_mode/,
 const armingStart = config.indexOf("inline bool heating_curve_diagnosis_armed(");
 const arming = config.slice(armingStart, config.indexOf("}", armingStart) + 1);
 assert.match(arming, /ref_temp_topic/);
+assert.match(arming, /diagnostics_enabled/,
+  "heating-curve diagnosis must require the explicit device-wide diagnostics opt-in");
 assert.match(arming, /mb_host/,
   "explicitly deleting HomeHub must disarm diagnostics that require its plant gates");
 assert.doesNotMatch(arming, /weather_enabled|latitude|longitude/,
@@ -79,8 +81,8 @@ assert.doesNotMatch(evaluator, /mb_request|LwtOffsetIntent|\.offer\s*\(/,
 const subscriptionStart = mqtt.indexOf("static void service_reference_subscription(");
 const subscriptionEnd = mqtt.indexOf("static void service_circulation_probe_frame(", subscriptionStart);
 const subscription = mqtt.slice(subscriptionStart, subscriptionEnd);
-assert.match(subscription, /capture_enabled = configured;/,
-  "saving the exact room topic is the subscription consent boundary");
+assert.match(subscription, /capture_enabled = c\.diagnostics_enabled && configured;/,
+  "the saved room mapping must remain dormant until master diagnostics consent is on");
 assert.match(subscription, /if \(!capture_enabled\)[\s\S]*unsubscribe_reference_topic_if_unused/,
   "deleting the room mapping must retire every saved value-topic subscription");
 const unsubscribeStart = mqtt.indexOf("static void unsubscribe_reference_topic_if_unused(");
@@ -89,6 +91,26 @@ assert.match(mqtt.slice(unsubscribeStart, unsubscribeEnd), /esp_mqtt_client_unsu
   "the shared topic-retirement helper must actively unsubscribe once no source owns it");
 assert.match(subscription, /const ReferenceTopicSet desired = reference_topics\(c\)[\s\S]*for \(const std::string& topic : desired\)[\s\S]*esp_mqtt_client_subscribe/,
   "the saved logical room source must subscribe all distinct temperature, target and timestamp topics");
+
+const circulationSubscriptionStart = mqtt.indexOf("static void service_circulation_subscription(");
+const circulationSubscriptionEnd = mqtt.indexOf("static void service_circulation_probe(", circulationSubscriptionStart);
+const circulationSubscription = mqtt.slice(circulationSubscriptionStart, circulationSubscriptionEnd);
+assert.match(circulationSubscription, /capture_enabled = c\.diagnostics_enabled && configured;/,
+  "the saved circulation mapping must remain dormant until master diagnostics consent is on");
+assert.match(mqtt, /if \(ref_config\.diagnostics_enabled\)\s*history_record_circulation/,
+  "circulation-power history must not collect while diagnostics are off");
+
+const weather = read("main/weather_forecast.cpp");
+assert.match(weather, /if \(!cfg\.diagnostics_enabled \|\| !cfg\.weather_enabled\)/,
+  "a saved forecast location must remain dormant while master diagnostics consent is off");
+
+const checkup = read("main/checkup.cpp");
+assert.match(checkup, /void checkup_record\([^)]*\)[\s\S]*if \(!s_diagnostics_enabled\.load/,
+  "the rolling 24-hour checkup must not collect while diagnostics are off");
+const httpConfig = read("main/http_config.cpp");
+assert.match(httpConfig,
+  /set_diagnostics[\s\S]*diagnostics_next_generation[\s\S]*checkup_set_diagnostics[\s\S]*history_checkup_reset[\s\S]*history_circulation_reset[\s\S]*mqtt_reference_reconfigure[\s\S]*mqtt_circulation_reconfigure[\s\S]*weather_forecast_reconfigure/,
+  "a master transition must retire every diagnostic evidence producer live");
 
 const taskStart = mqtt.indexOf("static void mqtt_task(void*)");
 const taskEnd = mqtt.indexOf("static bool build_client(", taskStart);

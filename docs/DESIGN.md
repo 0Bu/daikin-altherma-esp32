@@ -18,9 +18,9 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
    which is the heat pump — the live schematic, the detected model, every reading. The header
    **gear** opens **Settings**, which is the ESP32 and what it talks to: the Connections tile
    (WiFi/MQTT/Syslog/NTP), and the ESP32 board card split into three — ESP32 (board hardware, uptime,
-   memory), Protokoll (X10A link, RX/TX pins) and Firmware (version, OTA channel, language).
-   A **Heizkurven-Diagnose** card for the room/weather/controller project always sits
-   below Firmware — it is where its own two sources are configured.
+   memory), Protokoll (X10A link, RX/TX pins) and Firmware (version, OTA channel, language, plant
+   diagnostics). Plant diagnostics are off by default. Only after that Firmware-row opt-in do the
+   **Anlagendiagnose** and **Heizkurven-Diagnose** source cards appear below Firmware.
    Nothing sits between the gear and those cards — Settings is **flat**, no
    menu of entries to tap through, because there is little enough of it that a menu would exist only
    to hide a card behind a second tap. Settings still reports forward: a link that is **down** marks
@@ -860,7 +860,8 @@ Body, ordered:
    The **ESP32** card that used to sit above it is in Settings now (§5.6): this card is the *unit*,
    that one is the *board*.
 5. **Plant-diagnostics card** — "Anlagendiagnose · 24 h" / "Plant diagnostics · 24 h", styled exactly like the Model card, directly
-   below it and above the value groups. It answers the third question the dashboard has, after *what
+   below it and above the value groups **while the Firmware master opt-in is enabled**. It answers
+   the third question the dashboard has, after *what
    is it doing now* (the system card) and *what did this one reading do today* (a value row's trend):
    **what did the on-board inputs establish, and was anything worth following up?** It is deliberately not
    a health certificate for the plant. X10A cannot establish refrigerant charge, sensor calibration,
@@ -1213,15 +1214,16 @@ screen title. `Esc` leaves the same way, but only when no modal is open: a modal
 one key press never both closes a dialog and leaves the screen behind it. Settings is addressable as
 `#settings`; each modal extends that route with its stable human-readable name.
 
-**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on five permanent
+**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on four permanent
 cards, stacked in the same single column as everything else (§9). The Connections tile is the *same*
 card it was on the dashboard — the move changed where the configuration lives, not how it looks. The
 board card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
 different questions (the board itself, the X10A link, the running software) that one card used to
-answer at once. The permanent **Anlagendiagnose** card configures the independent read-only
-circulation-pump power source. The **Heizkurven-Diagnose** card is their permanent neighbour rather
-than another top-level screen and deliberately comes last, after Firmware and Anlagendiagnose. All
-five are built and rebuilt together by one `esp32CardHtml()`. HomeHub/Modbus is a fifth row in the
+answer at once. Firmware's default-off **Plant diagnostics** selector is the one device-wide opt-in.
+When enabled, the conditional **Anlagendiagnose** card configures the independent read-only
+circulation-pump power source and the conditional **Heizkurven-Diagnose** card comes last. When off,
+neither source card is rendered and the firmware performs none of their additional collection. All
+cards are built and rebuilt together by one `esp32CardHtml()`. HomeHub/Modbus is a fifth row in the
 Connections tile and follows the same row
 vocabulary exactly:
 
@@ -1347,17 +1349,16 @@ vocabulary exactly:
    the check runs and reports **here**, without leaving Settings (§5.4). This row was read-only
    through v1.0.13 on the reasoning that the header owned the affordance; in use that only made the
    version look inert precisely where a user is already deciding which build to run. Version,
-   update channel and language each have the same label-owned explanation tongue as Protocol.
-   There is no fourth row: the Heizkurven-Diagnose switch that used to sit here is GONE. It stated
-   a fact the configuration already made, and it could not be reached — it answered 409 until a room
-   source and a HomeHub were configured, while the only editors for those live inside the card the
-   switch revealed. **A switch whose precondition is only reachable behind itself is not a consent
-   gate, it is a locked door.** Consent rides on the SAVE of each source instead, which is the act
-   that actually hands out a broker topic or a coordinate pair.
+   update channel and language each have the same label-owned explanation tongue as Protocol. The
+   fourth row is the **Plant diagnostics** selector (`diagnostics.enabled` → `POST /set_diagnostics`).
+   It defaults to Off, applies live without a reboot, and is deliberately available before any
+   dependent source is configured. Enabling starts a fresh evidence generation. Disabling stops and
+   clears the 24-hour checkup, room subscription, forecast traffic, circulation witness, and their
+   retained diagnosis publications; normal X10A/HomeHub bridge traffic is not part of this gate.
 
 5. **Heizkurven-Diagnose card** — the bottom-most Settings home of the room-feedback project,
-   ALWAYS rendered, because this is where its required room source and optional forecast are
-   configured. The card is a DIAGNOSIS, not a control: during confirmed heating windows it records
+   rendered only while the Firmware master opt-in is enabled. This is where its required room source
+   and optional forecast are configured. The card is a DIAGNOSIS, not a control: during confirmed heating windows it records
    the raw room deviation (target minus actual; positive means too cold) every 30 minutes. That is an uncalibrated indicator,
    not a leaving-water offset; one room kelvin must never be presented as one water kelvin. Seasonal
    interpretation also needs actual LWT clipping, run time and thermostat duty. Nothing is written
@@ -1365,7 +1366,7 @@ vocabulary exactly:
 
    Its four rows are **Status**, **Raumtemperaturquelle**, **Wetterprognose** and **Verfahren**.
    There is deliberately no fifth: no "Betriebsart" readout (there is no controller mode — saving
-   the MQTT room mapping plus active HomeHub are the arming condition) and no constant "Sicherheit & Ausgabe = Nur lesend" line — with
+   the master opt-in plus MQTT room mapping and active HomeHub are the arming condition) and no constant "Sicherheit & Ausgabe = Nur lesend" line — with
    the write path deleted neither could ever say anything else, and a row that cannot vary is one
    more thing a reader has to rule out (the rule that dropped `bus_tx_writes`, §5.3).
 
@@ -1447,7 +1448,7 @@ vocabulary exactly:
 a rare escape hatch drawn at a live reading's weight, immediately under *Largest free block*, read as
 one more board fact, and each card's whole claim is that every row on it belongs to that domain.
 
-Under all five, a `--muted` monospace footer line naming the product and running version — and, after
+Under all currently rendered cards, a `--muted` monospace footer line naming the product and running version — and, after
 them, **Report a bug**, the screen's one action. It is the `.verlink` affordance the header's version
 button uses (§5.3 header): size, weight and colour all inherited, so at rest it is indistinguishable
 from the text beside it, with the brand tint + underline arriving only on hover/`:focus-visible`. It
@@ -1470,11 +1471,11 @@ marked and the mark would stop meaning anything. A **disabled** link is a choice
 raises nothing. The dot is never the only carrier: the button's `aria-label` states the count in
 words (§9).
 
-**Rebuild rule.** The permanent cards including heating-curve diagnosis are rebuilt from `/status`
-on every push. The Connections tile is one container; the three ESP32-family cards and conditional
-heating-curve card are emitted as one string by `esp32CardHtml()`. The write goes through the same
+**Rebuild rule.** The permanent and conditional cards are rebuilt from `/status` on every push. The
+Connections tile is one container; the three ESP32-family cards plus the conditional circulation
+and heating-curve cards are emitted as one string by `esp32CardHtml()`. The write goes through the same
 change-guard the rest of the app uses — and the rebuild is skipped entirely
-while an RX/TX dropdown, the update-channel select **or the language select** has focus, or the poll
+while an RX/TX dropdown, the update-channel select, the language select **or the diagnostics select** has focus, or the poll
 would collapse it mid-pick. (Any future select on these cards has to join that guard — an open
 native dropdown is destroyed by an `innerHTML` write, and the poll is ~1×/s.)
 

@@ -125,7 +125,8 @@ function renderCards() {
   // Keep the observation first in the card stream: #valueGroups immediately follows #hpLive in the
   // document, so this places plant diagnostics directly after the diagram before every other card.
   // It remains linked to X10A liveness, as it was when statusCardsHtml() owned the card.
-  const checkup = S.status?.hp?.connected ? checkupCardHtml() : "";
+  const checkup = S.status?.diagnostics?.enabled === true && S.status?.hp?.connected
+    ? checkupCardHtml() : "";
   setHtml("valueGroups", checkup + statusCardsHtml() + valueGroupsHtml(S._values || [], S.status?.hp?.connected));
 }
 
@@ -257,6 +258,19 @@ function langRow(cur) {
     `<div class="vdesc-p">${esc(t("card.language_help"))}</div>`);
 }
 
+// The one device-wide consent boundary for optional plant diagnostics. OFF is persisted/default and
+// leaves the source mappings dormant; ON starts a fresh evidence generation without rebooting.
+function diagnosticsRow(enabled) {
+  const opt = (value, label) =>
+    `<option value="${value}"${value === (enabled ? "on" : "off") ? " selected" : ""}>${esc(label)}</option>`;
+  const select = `<select class="input diagnostics-sel" id="e32Diagnostics" ` +
+    `aria-label="${esc(t("card.diagnostics"))}">` +
+    opt("off", t("diagnostics.off")) + opt("on", t("diagnostics.on")) + `</select>`;
+  return settingsInfoRow("firmware:diagnostics", "firmware-diagnostics-detail",
+    t("card.diagnostics"), select,
+    `<div class="vdesc-p">${esc(t("card.diagnostics_help"))}</div>`);
+}
+
 // The version row (Firmware card): the running version, and the SAME OTA trigger the dashboard
 // header's version is — one gesture with one meaning wherever the version is printed. Not a second
 // copy of the flow: the tap runs checkFirmwareUpdate() itself. It does NOT leave the screen. An
@@ -337,9 +351,9 @@ function circulationSettingsCardHtml() {
 }
 
 // Settings cards rendered below Connections: THREE permanent ESP32-family cards, the plant-
-// diagnostics card and then the heating-curve diagnosis card. The latter is ALWAYS rendered — it is
-// where its two sources are configured, so hiding it until they were configured left no way to
-// configure them. The ESP32 cards
+// diagnostics card and then the heating-curve diagnosis card. Those dependent cards render only
+// after the Firmware card's explicit master opt-in; their saved source mappings remain dormant while
+// it is off. The ESP32 cards
 // were split from what was
 // one, so each answers one question. ESP32 = the board itself (its onboard hardware and its own
 // health — uptime + the two memory curves). Protokoll = the X10A link (whether the bus answers, the
@@ -384,17 +398,17 @@ function esp32CardHtml() {
       pinsLocked ? hp.tx : picker.tx, "rx", t("card.rxpin_help")) +
     pinRow(t("card.txpin"), "e32Tx", pinsLocked ? hp.tx : picker.tx,
       pinsLocked ? hp.rx : picker.rx, "tx", t("card.txpin_help"));
-  // Firmware — running build, update feed and language. No heating-curve switch: that diagnosis arms
-  // itself from the two sources configured on its own card, so a switch here would have been a
-  // second statement of a fact the configuration already makes — and an unreachable one, since the
-  // editors for those sources live inside the card the switch used to reveal.
+  // Firmware — running build, update feed, language and the explicit plant-diagnostics consent.
+  // This is not a heat-pump controller mode: it only gates optional observations and their sources.
+  const diagnosticsEnabled = s.diagnostics?.enabled === true;
   const fwRows =
     firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
-    langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto");
+    langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto") +
+    diagnosticsRow(diagnosticsEnabled);
   return vcard("ESP32", esp32Rows) + vcard(t("card.proto_title"), protoRows) +
-         vcard(t("card.fw_title"), fwRows) + circulationSettingsCardHtml() +
-         dynamicControlCardHtml();
+         vcard(t("card.fw_title"), fwRows) +
+         (diagnosticsEnabled ? circulationSettingsCardHtml() + dynamicControlCardHtml() : "");
 }
 
 // The Settings home for the heating-curve diagnosis. Every main row uses the same split
@@ -715,9 +729,8 @@ function dynamicControlCardHtml() {
   const mqtt = S.status?.mqtt || {};
   const d = S.status?.heating_curve || {};
   const modbus = S.status?.modbus || {};
-  // ALWAYS rendered. Through v1.0.0-dev.331 this returned "" unless an explicit switch had selected
-  // SHADOW — while that switch answered 409 until the very sources whose only editors live on this
-  // card were configured. The feature could not be reached from the UI at all.
+  // The Firmware master opt-in owns visibility. Once enabled this card remains visible regardless of
+  // which individual source is configured, so its own editors are always reachable.
   const sourceStatus = roomSourceStatus(r, mqtt);
   const sourceCls = sourceStatus.cls;
   let temperature = "", setpoint = "", age = "";
@@ -983,15 +996,6 @@ const CHECKUP_ROW = {
 // Colour only makes the states faster to scan and never carries meaning on its own.
 const CHECKUP_TONE = { warn: "err", info: "warn", ok: "ok", collecting: "dim",
                        observation: "dim", experimental: "dim", unavailable: "dim" };
-const CHECKUP_PERSIST = new Set(["accept", "power_cycle", "no_record", "wrong_version",
-                                 "wrong_layout", "bad_crc", "model_changed", "safe_mode"]);
-
-function checkupPersistHtml(state) {
-  // Older firmware has no field, and future firmware may add a slug this UI cannot explain. In
-  // either case omit the line rather than printing an internal identifier as advice to the owner.
-  return CHECKUP_PERSIST.has(state)
-    ? descNoteHtml(t("check.persist.label"), t(`check.persist.${state}`)) : "";
-}
 
 function checkupDuration(s) {
   const seconds = Number(s);
@@ -1236,11 +1240,6 @@ function checkupCardHtml() {
                            bodyPrefix: checkupDetailHtml(c) });
   }
   if (!rows) return "";
-  // The first row translates the status vocabulary and the card's limits before the reader has to
-  // infer either from a technical measurement. It is deliberately part of the same accordion card:
-  // no settings screen or external manual should be required to understand a result already here.
-  rows = modelDescRow("health_guide", t("check.guide"), t("check.guide.value"),
-                      { cls: "dim", bodyPrefix: checkupPersistHtml(h.persist) }) + rows;
   // The badge gives only the card-level verdict and judgement progress. Evidence clocks live in each
   // row's explainer, where they qualify the result without competing with the first-glance status.
   const status = checkupStatusText(h.status);
@@ -1467,7 +1466,9 @@ function renderSettings() {
   // pointer drops its capture and kills the scrub mid-drag (renderCards has the same guard).
   if (S.scrub) return;
   const a = document.activeElement;
-  const picking = !!(a && a.classList && (a.classList.contains("pin-sel") || a.classList.contains("chan-sel") || a.classList.contains("lang-sel")));
+  const picking = !!(a && a.classList && (a.classList.contains("pin-sel") ||
+    a.classList.contains("chan-sel") || a.classList.contains("lang-sel") ||
+    a.classList.contains("diagnostics-sel")));
   if (!picking) {
     $("connTile").hidden = false;             // resumeOta hides the unavailable pre-status shell
     setHtml("connTile", connectionsHtml());

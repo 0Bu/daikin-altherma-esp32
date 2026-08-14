@@ -1,18 +1,22 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: a7ca6975f67d345fd7000b78244ec93f0268174c84be66f1f51e4edd9cac6315 -->
-<!-- user-docs: health_guide -->
+<!-- user-docs-contract: 211eb01b8125a2a704abd4dc747565f5334eff6dbffc8133e817649ee456504f -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
-The diagnosis runs automatically on the ESP32. It **reads** measurements and counts events; it does
-not change settings or control the heat pump.
+Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
+enabled in Settings under the Firmware card. Enabling starts a new evidence generation; disabling
+stops the checkup and its additional room-temperature, weather-forecast, and circulation-power
+collection and clears the accumulated diagnosis. The ordinary X10A/HomeHub bridge and technical
+device telemetry remain independent. When enabled, the diagnosis **reads** measurements and counts
+events; it does not change settings or control the heat pump.
 
 Every check also has an [evidence and limits entry](DIAGNOSTIC_EVIDENCE.md). That ledger identifies
 which claims come from Daikin documentation or primary research, which thresholds are project
 heuristics, and what the measurement cannot establish.
 
-The web UI shows the **Plant diagnostics · 24 h** card immediately below the plant schematic. Open a
-row to see the reading, assessment, normal context, and a suggested next step.
+While enabled, the web UI shows the **Plant diagnostics · 24 h** card immediately below the plant
+schematic. Open a row to see the reading, assessment, and normal context. The card deliberately does
+not recommend a next step because its bounded evidence may not establish the cause.
 
 ## What the statuses mean
 
@@ -30,12 +34,11 @@ Most reassuring results require a complete 24-hour window and at least 90% reada
 signals used by the check. A diagnosis-format change starts a new window, so **CHECKING** after an
 update can be normal.
 
-Open **How to read this card** first. Its **Data window** line explains whether earlier diagnosis data
-was retained or discarded for this boot. An ordinary reset while power remains available normally
-retains the window directly from RAM. Completed diagnosis hours are also stored in the device's
-append-only history journal, so a power interruption or firmware update restores them once the clock
-and detected model match. Only the hour that was still open can be missing. An update still discards
-older records when the meaning or layout of their counters changed.
+An ordinary reset while power remains available normally retains the diagnosis window directly from
+RAM. Completed diagnosis hours are also stored in the device's append-only history journal, so a
+power interruption or firmware update restores them once the clock and detected model match. Only
+the hour that was still open can be missing. An update still discards older records when the meaning
+or layout of their counters changed.
 
 The saved five-minute trends remain separate. Each interval retains only its final measurement or an
 aggregated event state. Those trends cannot reliably reconstruct second-by-second compressor starts,
@@ -49,11 +52,6 @@ does not reuse them as diagnosis evidence.
 
 **In plain language:** The diagnosis remembers whether the heat pump itself reported a fault,
 warning, or caution. A report that has since cleared can remain visible for up to 24 hours.
-
-**What you can do:** For a **WARNING**, open the exact code under **Operation** and write it down.
-Use the operating manual or the matching Daikin service information. For a single cleared note,
-observe first; if it returns, record the time, operating mode, and code for an installer or service
-technician.
 
 **Evidence and limits:** [Unit-reported faults](DIAGNOSTIC_EVIDENCE.md#diagnosis-fault)
 
@@ -80,10 +78,6 @@ stored totals alone.
 **What this result does not establish:** A rapid temperature drop alone proves neither a leaking
 three-way valve nor poor insulation. The sensor measures one location in a stratified tank; hot-water
 draws and natural circulation can look similar.
-
-**What you can do:** If a **NOTE** repeats, first check the schedule and runtime of the domestic-hot-
-water circulation pump. Observe whether it remains when no hot water is drawn and the circulation
-pump is certainly off. If it does, give several days of readings to an installer.
 
 **Evidence and limits:** [Domestic-hot-water tank heat loss](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 
@@ -117,11 +111,6 @@ paired current sample was established; it never means 0 °C.
 **When does a note appear?** The project heuristic requires at least twelve confirmed space-heating
 runs averaging under ten minutes. This is not a Daikin limit and does not by itself prove a defect.
 
-**What you can do:** Observe several days and note outside temperature and operating mode. Check
-whether many room thermostats or heating circuits close and whether schedules frequently interrupt
-space heating. Do not change settings because of one day. If the pattern persists, ask an installer
-to check the heat curve, water flow, and hydraulic balance.
-
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 
 <!-- user-docs: health_defrost -->
@@ -141,10 +130,6 @@ the defrost share or result.
 **When does a note appear?** The project heuristic requires at least three assessable defrost events
 and more than 15% defrost time within the paired compressor runtime. This is not a Daikin limit.
 
-**What you can do:** Consider the weather and inspect the outdoor unit. Snow, leaves, or objects must
-not block the airflow or water drain. Frequent defrosting can be normal in wet, cold weather. Ask an
-installer if it also happens in mild, dry weather or visible icing remains continuously.
-
 **Evidence and limits:** [Defrost events](DIAGNOSTIC_EVIDENCE.md#diagnosis-defrost)
 
 <!-- user-docs: health_pressure -->
@@ -152,10 +137,6 @@ installer if it also happens in mild, dry weather or visible icing remains conti
 
 **In plain language:** This is the lowest valid water pressure in the observed window. A **NOTE**
 appears at or below 1.0 bar; it becomes a **WARNING** after pressure remains that low for 60 seconds.
-
-**What you can do:** Check the permitted range in the manual for the exact unit. Do not refill
-blindly: repeatedly falling pressure can indicate air, an expansion-vessel problem, or water loss and
-should be checked by an installer. Follow the unit manual if the heat pump reports an active fault.
 
 **Evidence and limits:** [Lowest water pressure](DIAGNOSTIC_EVIDENCE.md#diagnosis-pressure)
 
@@ -169,12 +150,8 @@ pump is stopped.
 **Why is it measured only?** Required flow depends on the exact unit and operating mode. Heating,
 cooling, domestic hot water, and defrost do not necessarily require the same value. This is an
 observed **part-load minimum** from a modulating pump, not the nominal or design flow stated for a
-different operating point in a manual.
-
-**What you can do:** Do not compare it directly with nominal flow. Use a minimum from the exact
-installation manual only when it applies to the same operating mode and conditions. One low reading
-without a unit fault proves little. Repeatedly falling below that matching minimum, or a water-flow
-fault, should prompt an installer to check filters, valves, pump settings, and hydraulics.
+different operating point in a manual. A manual minimum is comparable only for the same model,
+operating mode, and conditions; one low reading without a unit fault proves little.
 
 **Evidence and limits:** [Lowest water flow](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow)
 
@@ -183,10 +160,8 @@ fault, should prompt an installer to check filters, valves, pump settings, and h
 
 **In plain language:** The diagnosis separately counts how long the electric backup heater for the
 water circuit (**BUH**) and the electric booster heater in the hot-water tank (**BSH**) were active.
-
-**What you can do:** Compare runtime with weather, hot-water schedules, defrosting, emergency mode,
-and any PV-surplus control. Short use can be intentional. Unexpectedly frequent or long runtime is a
-reason to have settings and plant output checked, but runtime alone does not prove a defect.
+Weather, hot-water schedules, defrosting, emergency mode, and PV-surplus control can all make this
+runtime intentional; runtime alone does not prove a defect.
 
 **Evidence and limits:** [Electric heaters](DIAGNOSTIC_EVIDENCE.md#diagnosis-heater)
 
@@ -195,11 +170,8 @@ reason to have settings and plant output checked, but runtime alone does not pro
 
 **In plain language:** The diagnosis observes five internal counters that may indicate protective
 limiting. Only a clearly observed increase counts. The full manufacturer semantics are not publicly
-documented, so this row is **EXPERIMENTAL**.
-
-**What you can do:** One increase normally requires no action. If increases repeat together with low
-output, unusual noises, or fault codes, record the time and operating state and show the pattern to
-an installer or service technician.
+documented, so this row is **EXPERIMENTAL**. An increase is not a fault diagnosis, and no increase
+cannot prove that the unit never limited itself.
 
 **Evidence and limits:** [Protection-limit counter changes](DIAGNOSTIC_EVIDENCE.md#diagnosis-retries)
 

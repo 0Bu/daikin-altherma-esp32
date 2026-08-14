@@ -46,7 +46,11 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 
 // Judge what the previous boot left in .noinit and adopt or wipe it. app_main calls this ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.
-void checkup_start();
+void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation);
+
+// Apply the persisted master switch live. A transition synchronously starts a fresh evidence
+// identity, so neither the next poll cycle nor a reboot can carry the previous interval across it.
+void checkup_set_diagnostics(bool enabled, uint32_t generation);
 
 // How this boot's window came to be — logic/checkup_persist.hpp's CheckupRestore vocabulary, on
 // /status.health.persist. A card that emptied itself otherwise reads as a defect.

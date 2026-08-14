@@ -798,9 +798,9 @@
 
     <!-- ═══ SETTINGS (reached from the header gear) ═══
          The device's configuration, on ONE screen — no menu level in between: Connections, the
-         three ESP32-family cards, permanent plant-diagnostics card and permanent heating-curve-
-         diagnosis card. esp32CardHtml() emits all five as one string so their live summaries update
-         together. -->
+         three ESP32-family cards and, while explicitly enabled under Firmware, the plant-diagnostics
+         and heating-curve source cards. esp32CardHtml() emits them as one string so their live
+         summaries update together. -->
     <section class="view" id="viewSettings">
       <div class="pad">
         <div class="conn-tile" id="connTile"></div>

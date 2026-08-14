@@ -1085,6 +1085,12 @@ void http_append_status_json(std::string& j, bool redact) {
          ",\"synced\":" + (ts.synced ? "true" : "false") +
          ",\"time\":" + (ts.synced ? jstr(rfc3339_utc(ts.unix_time)) : "null") + "},";
 
+    // Explicit opt-in boundary for optional plant diagnostics and their external source collection.
+    // Kept separate from system/link health: X10A, HomeHub and the technical heartbeat remain active.
+    j += "\"diagnostics\":{\"enabled\":";
+    j += c.diagnostics_enabled ? "true" : "false";
+    j += "},";
+
     // Which OTA feed this device follows (logic/ota_channel.hpp; POST /set_ota). Reported HERE and
     // not only on /ota/status because the Settings screen's ESP32 card renders the selector from
     // /status like every other setting — reading a second endpoint on every poll just to colour one

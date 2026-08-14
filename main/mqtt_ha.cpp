@@ -218,6 +218,7 @@ static uint32_t s_circulation_probe_task_generation = 0;
 static std::string s_circulation_binding_topic;
 static std::string s_circulation_binding_power_path;
 static std::string s_circulation_binding_time_path;
+static bool s_circulation_capture_enabled = false;
 static uint32_t s_circulation_runtime_max_age_s = CIRC_SOURCE_MAX_AGE_DEFAULT_S; // guarded by s_mtx
 
 // RAII guard around s_mtx (same idiom as config.cpp / hp_poll.cpp). Replaces the raw take/give pairs
@@ -818,9 +819,16 @@ static void publish_crash() {
 // Evaluate the diagnosis every mqtt_task cycle, including while publication is paused or the broker
 // is down. Tying evaluation to publish_heartbeat() would leave the last verdict looking healthy
 // during exactly the X10A/MQTT failures that must block it. Arming is derived here rather than read
-// from a stored mode: heating_curve_diagnosis_armed() answers it from the room-source and HomeHub
-// configuration the editors show, so deleting either required source disarms on the next cycle.
+// from a controller mode: heating_curve_diagnosis_armed() answers it from the explicit diagnostics
+// consent plus the room-source and HomeHub configuration the editors show, so withdrawing any
+// required prerequisite disarms on the next cycle.
 static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, const HpStats& hp) {
+    if (!cfg.diagnostics_enabled) {
+        logic::HeatingCurveInputs in;
+        in.armed = false;
+        Lock lk(s_mtx);
+        return s_heating_curve_diagnosis.evaluate(in);
+    }
     const ReferenceTemperatureStatus rt = reference_temperature_status();
     const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
     int64_t now_unix_s = -1;
@@ -980,6 +988,7 @@ static void publish_heartbeat() {
 // browsers while retaining numeric leaves for Telegraf/VictoriaMetrics.
 static void publish_heating_curve_telemetry() {
     const Config cfg = config();
+    if (!cfg.diagnostics_enabled) return;
     HeatingCurveMqttFields f;
     const ReferenceTemperatureStatus rt = reference_temperature_status();
     const uint64_t room_now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
@@ -1324,12 +1333,15 @@ static void reset_circulation_status_locked(bool configured) {
 
 static void service_circulation_subscription(const Config& c) {
     const bool configured = !c.circulation_topic.empty();
+    const bool capture_enabled = c.diagnostics_enabled && configured;
     if (c.circulation_topic != s_circulation_binding_topic ||
         c.circulation_power_path != s_circulation_binding_power_path ||
-        c.circulation_time_path != s_circulation_binding_time_path) {
+        c.circulation_time_path != s_circulation_binding_time_path ||
+        capture_enabled != s_circulation_capture_enabled) {
         s_circulation_binding_topic = c.circulation_topic;
         s_circulation_binding_power_path = c.circulation_power_path;
         s_circulation_binding_time_path = c.circulation_time_path;
+        s_circulation_capture_enabled = capture_enabled;
         Lock lk(s_mtx);
         s_circulation_runtime_max_age_s = c.circulation_max_age_s;
         reset_circulation_status_locked(configured);
@@ -1339,7 +1351,7 @@ static void service_circulation_subscription(const Config& c) {
         s_circulation_status.configured = configured;
     }
 
-    if (!configured) {
+    if (!capture_enabled) {
         s_circulation_reconfigure.exchange(false);
         if (!s_circulation_subscribed_topic.empty() && s_connected &&
             !reference_topic_owned(s_circulation_subscribed_topic))
@@ -1395,6 +1407,24 @@ static void service_circulation_subscription(const Config& c) {
 }
 
 static void service_circulation_probe_subscription(const Config& saved) {
+    if (!saved.diagnostics_enabled) {
+        bool signal = false;
+        {
+            Lock lk(s_mtx);
+            signal = s_circulation_probe.active;
+            s_circulation_probe.active = false;
+            s_circulation_probe.passed = false;
+            s_circulation_probe.error = "Plant diagnostics are disabled";
+        }
+        if (!s_circulation_probe_subscribed_topic.empty() && s_connected &&
+            !reference_topic_owned(s_circulation_probe_subscribed_topic) &&
+            s_circulation_probe_subscribed_topic != s_circulation_subscribed_topic)
+            esp_mqtt_client_unsubscribe(s_client, s_circulation_probe_subscribed_topic.c_str());
+        s_circulation_probe_subscribed_topic.clear();
+        s_circulation_probe_task_generation = 0;
+        if (signal && s_circulation_probe_sem) xSemaphoreGive(s_circulation_probe_sem);
+        return;
+    }
     if (!s_connected) return;
     if (s_circulation_probe_reconfigure.exchange(false))
         s_circulation_probe_task_generation = 0;
@@ -1504,11 +1534,10 @@ static void unsubscribe_reference_topic_if_unused(const std::string& topic,
 // Apply topic edits on the existing MQTT client. A binding change retires the old raw value: a
 // reading extracted by the previous path must never appear under the new sensor identity.
 static void service_reference_subscription(const Config& c) {
-    // Saving a room topic IS the consent to subscribe to it — there is no second switch in front of
-    // this any more. A configured source is therefore always collected, which is also what makes it
-    // observable in the editor before the forecast half of the diagnosis exists.
+    // The mapping may remain saved while diagnostics are off. Only the Firmware-card master consent
+    // opens the subscription; switching it off clears the runtime sample and unsubscribes live.
     const bool configured = !c.ref_temp_topic.empty();
-    const bool capture_enabled = configured;
+    const bool capture_enabled = c.diagnostics_enabled && configured;
     if (c.ref_temp_topic != s_ref_binding_topic || c.ref_temp_path != s_ref_binding_path ||
         c.ref_temp_setpoint_topic != s_ref_binding_setpoint_topic ||
         c.ref_temp_setpoint_path != s_ref_binding_setpoint_path ||
@@ -1668,7 +1697,8 @@ static void service_circulation_probe_frame(const ReferenceMqttFrame& frame) {
 
 static void service_circulation_frame(const ReferenceMqttFrame& frame, const Config& c) {
     service_circulation_probe_frame(frame);
-    if (c.circulation_topic.empty() || frame.topic != c.circulation_topic) return;
+    if (!c.diagnostics_enabled || c.circulation_topic.empty() ||
+        frame.topic != c.circulation_topic) return;
     {
         Lock lk(s_mtx);
         s_circulation_status.messages++;
@@ -1741,6 +1771,7 @@ static void service_reference_frames(const Config& c) {
     const ReferenceTopicSet saved_topics = reference_topics(c);
     while (xQueueReceive(s_ref_queue, &s_ref_task_frame, 0) == pdTRUE) {
         const ReferenceMqttFrame& frame = s_ref_task_frame;
+        if (!c.diagnostics_enabled) continue;
         service_circulation_frame(frame, c);
         if (c.ref_temp_topic.empty() || !reference_topic_set_contains(saved_topics, frame.topic))
             continue;
@@ -2016,7 +2047,7 @@ static void mqtt_task(void*) {
             // The circulation witness is MQTT-owned and remains meaningful while X10A auto-detect
             // is backing off on a silent bus. Record it on this task's independent one-second tick;
             // tying it to hp_poll would leave /status.history.rows empty exactly in that case.
-            history_record_circulation();
+            if (ref_config.diagnostics_enabled) history_record_circulation();
             service_requested_topic_cleanup(ref_config);
             publish_stage = "heating_curve";
             evaluate_heating_curve(ref_config, hp);
@@ -2134,7 +2165,7 @@ static void mqtt_task(void*) {
                 // location exists; deleting the location removes the retained predecessor without
                 // publishing a synthetic disabled document. No HA entities are created.
                 publish_stage = "weather";
-                publish_weather_state(ref_config.weather_enabled);
+                publish_weather_state(ref_config.diagnostics_enabled && ref_config.weather_enabled);
 
                 publish_stage = "env3";
                 const bool env3_enabled = ref_config.env3_enabled && env3_board_supported(ref_config);
@@ -2175,7 +2206,7 @@ static void mqtt_task(void*) {
                 heartbeat_elapsed_s += delay_s;
                 if (heartbeat_elapsed_s >= HEARTBEAT_INTERVAL_S) {
                     publish_heartbeat();
-                    publish_heating_curve_telemetry();
+                    if (ref_config.diagnostics_enabled) publish_heating_curve_telemetry();
                     // The crash topic is RETAINED but otherwise only published once per connect, so a
                     // dump pulled + cleared (/coredump?clear=1) mid-session would leave HA's "Crash
                     // Dump Waiting" ON until the next reconnect (and, for an orphan-dump-only boot,

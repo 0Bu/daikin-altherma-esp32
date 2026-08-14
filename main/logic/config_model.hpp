@@ -76,10 +76,13 @@ struct Config {
     bool        weather_enabled = false;
     int32_t     weather_latitude_e6 = 0;
     int32_t     weather_longitude_e6 = 0;
-    // No dynamic-LWT mode field: the heating-curve diagnosis arms itself from the required MQTT room
-    // mapping plus an active HomeHub (heating_curve_diagnosis_armed); forecast is optional comparison
-    // evidence. There is nothing here to persist as an operating mode. Its retired blob byte stays
-    // zero; see config_store.hpp.
+    // One explicit, device-wide consent boundary for optional plant diagnostics. OFF is both the
+    // first-boot and every pre-v19 migration default: ordinary X10A/HomeHub values keep running, but
+    // the 24 h checkup, heating-curve evaluation and their MQTT/weather/circulation inputs do not
+    // subscribe, fetch, record or publish. Each transition advances the generation so evidence from
+    // an earlier consent interval cannot be restored from RAM/flash into a newly enabled one.
+    bool        diagnostics_enabled = false;
+    uint32_t    diagnostics_generation = 0;
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
     // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled
@@ -189,19 +192,27 @@ struct Config {
     bool        fp_valid     = false;
 };
 
-// WHETHER THE HEATING-CURVE DIAGNOSIS RUNS — derived from the configuration, never switched. The
-// canonical MQTT room source is its only required configured data source. Forecast is an OPTIONAL
+// WHETHER THE HEATING-CURVE DIAGNOSIS RUNS. The master diagnostics consent is required first; the
+// canonical MQTT room source is its required configured data source. Forecast is an OPTIONAL
 // comparison covariate and must not block raw room-error samples or force a user to disclose a
-// location to Open-Meteo. Nothing is persisted, so there is no mode to migrate or stale state to
-// disarm on boot. Deleting the room source disarms the sampler immediately.
+// location to Open-Meteo. Deleting the room source or switching diagnostics off disarms the sampler
+// immediately. This remains a read-only diagnosis, never a heat-pump operating mode.
 //
 // HomeHub supplies two required plant gates. An explicit HomeHub opt-out must therefore disarm this
 // dependent diagnosis rather than keep evaluating a permanently impossible prerequisite.
 inline bool heating_curve_diagnosis_armed(const Config& c) {
-    return !c.mb_host.empty() && !c.mqtt_uri.empty() && !c.ref_temp_topic.empty() &&
+    return c.diagnostics_enabled && !c.mb_host.empty() && !c.mqtt_uri.empty() &&
+           !c.ref_temp_topic.empty() &&
            !c.ref_temp_path.empty() &&
            (c.ref_temp_fixed_setpoint_tenths != 0 ||
             !c.ref_temp_setpoint_path.empty());
+}
+
+// Zero is the migration/default-off generation. Once the owner makes an explicit choice, use a
+// non-zero value and never wrap back to zero; this keeps old anonymous diagnostic journal entries
+// outside every future consent interval.
+inline constexpr uint32_t diagnostics_next_generation(uint32_t current) {
+    return current == UINT32_MAX ? 1u : current + 1u;
 }
 
 // ── Field-owned patches (config.cpp applies these to the live config under its mutex) ────────────

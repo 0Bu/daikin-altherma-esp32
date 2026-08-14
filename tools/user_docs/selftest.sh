@@ -45,17 +45,16 @@ echo "== 0. clean tree =="
 reset
 run_case "current user docs pass" 0 "user docs audit: clean"
 
-echo "== 1. visible row without a supported next step =="
+echo "== 1. visible row with a recommendation =="
 reset
 patch_file "$WORK/main/www/js/history.js" <<'PY'
 import sys
-p = sys.argv[1]; s = open(p).read()
-a = s.index('  health_cycling: {'); b = s.index('  health_defrost: {', a)
-block = s[a:b]
-if '          action:' not in block: sys.exit(1)
-open(p, 'w').write(s[:a] + block.replace('          action:', '          missing_action:', 1) + s[b:])
+p = sys.argv[1]; s = open(p).read(); old = '  health_cycling: {\n'
+if s.count(old) != 1: sys.exit(1)
+new = old + '    action: "Change the heat curve based on this result.",\n'
+open(p, 'w').write(s.replace(old, new, 1))
 PY
-run_case "short localized action is caught" 1 "U003 health_cycling.de.action"
+run_case "recommendation copy is caught" 1 "U015 health_cycling.en.action"
 
 echo "== 2. visible row without a documentation section =="
 reset
@@ -67,28 +66,30 @@ open(p, 'w').write(s.replace(old, '', 1))
 PY
 run_case "missing result section is caught" 1 "U007 health_pressure"
 
-echo "== 3. section that names a metric but gives no next step =="
+echo "== 3. documentation reintroduces a recommendation =="
 reset
 patch_file "$WORK/docs/DIAGNOSTICS.md" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 a = s.index('<!-- user-docs: health_flow -->'); b = s.index('<!-- user-docs: health_heater -->', a)
 block = s[a:b]
-if '**What you can do:**' not in block: sys.exit(1)
-open(p, 'w').write(s[:a] + block.replace('**What you can do:**', '**Technical note:**', 1) + s[b:])
+old = '**Evidence and limits:**'
+if old not in block: sys.exit(1)
+new = '**What you can do:** Change the pump setting.\n\n' + old
+open(p, 'w').write(s[:a] + block.replace(old, new, 1) + s[b:])
 PY
-run_case "missing user action in the guide is caught" 1 "U008 health_flow"
+run_case "recommendation in the guide is caught" 1 "U008 health_flow"
 
 echo "== 4. whole-plant reassurance from one bounded check =="
 reset
 patch_file "$WORK/main/www/js/history.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-a = s.index('  health_guide: {'); b = s.index('  health_fault: {', a)
+a = s.index('  health_fault: {'); b = s.index('  health_dhw_loss: {', a)
 block = s[a:b]
-start = block.index('          action: "')
+start = block.index('          normal: "')
 end = block.index('" } },', start)
-block = block[:start] + '          action: "Die Anlage ist in Ordnung. Weitere Prüfung ist nicht erforderlich.' + block[end:]
+block = block[:end] + ' Die Anlage ist in Ordnung.' + block[end:]
 open(p, 'w').write(s[:a] + block + s[b:])
 PY
 run_case "false whole-plant reassurance is caught" 1 "U006 German whole-plant all-clear"

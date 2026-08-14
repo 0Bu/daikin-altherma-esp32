@@ -634,6 +634,24 @@ async function onLangPick() {
   toast(t("lang.saved"), "ok");
 }
 
+// Optional plant diagnostics are explicit opt-in and apply live. The status refresh both confirms
+// persistence and reveals/hides the dependent source cards; their saved mappings are not deleted.
+async function onDiagnosticsPick() {
+  const sel = $("e32Diagnostics");
+  const enabled = sel.value === "on";
+  sel.blur();
+  try {
+    const r = await post("/set_diagnostics", { enabled });
+    if (!r.ok) {
+      toast(await errorOf(r, t("toast.rejected")), "err");
+      await refreshStatus();
+      return;
+    }
+  } catch { toast(t("toast.unreachable"), "err"); return; }
+  await refreshStatus();
+  toast(t(enabled ? "diagnostics.saved_on" : "diagnostics.saved_off"), "ok");
+}
+
 // ── Firmware / OTA ───────────────────────────────────────────────────────
 // Tapping the version in the header meta line checks for an OTA update, and offers to install one:
 // the full /ota/check -> /ota/status -> /ota/update flow is wired below against the device-side

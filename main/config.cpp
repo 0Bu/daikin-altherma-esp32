@@ -125,6 +125,10 @@ void config_load() {
             c.weather_latitude_e6 = b.weather_latitude_e6;
             c.weather_longitude_e6 = b.weather_longitude_e6;
         }
+        if (b.has_diagnostics) {
+            c.diagnostics_enabled = b.diagnostics_enabled;
+            c.diagnostics_generation = b.diagnostics_generation;
+        }
         if (b.has_circulation && b.circulation_on_tenths_w <= UINT16_MAX &&
             b.circulation_off_tenths_w <= UINT16_MAX && b.circulation_confirm_s <= UINT16_MAX) {
             const uint16_t on_w = static_cast<uint16_t>(b.circulation_on_tenths_w);
@@ -351,10 +355,9 @@ bool config_save(const Config& requested, bool require_link) {
     // discovery is the one boot call and finishes before httpd starts. The poll task
     // (config_save_link) can therefore never revert a credential change — the field-ownership
     // guarantee is kept without narrow per-key writes.
-    // No dynamic-LWT canonicalization here any more: the diagnosis derives its arming from the MQTT
-    // room source and active HomeHub on every evaluation
-    // (config_model.hpp's heating_curve_diagnosis_armed). Forecast is optional comparison evidence;
-    // deleting either required source disarms sampling immediately.
+    // Diagnostics consent and its generation ride atomically with every dependent source. The
+    // heating-curve diagnosis still derives its remaining prerequisites from the MQTT room source
+    // and active HomeHub on every evaluation; forecast remains optional comparison evidence.
     Config c = requested;
     ConfigBlob b;
     b.wifi_ssid = c.wifi_ssid;                 b.wifi_pass = c.wifi_pass;
@@ -382,6 +385,8 @@ bool config_save(const Config& requested, bool require_link) {
     b.weather_enabled = c.weather_enabled;
     b.weather_latitude_e6 = c.weather_latitude_e6;
     b.weather_longitude_e6 = c.weather_longitude_e6;
+    b.diagnostics_enabled = c.diagnostics_enabled;
+    b.diagnostics_generation = c.diagnostics_generation;
     b.env3_enabled = c.env3_enabled; b.env3_sda = c.env3_sda; b.env3_scl = c.env3_scl;
     b.board_preset_id = static_cast<int32_t>(c.board_preset_id);
     b.board_user_set = c.board_user_set;

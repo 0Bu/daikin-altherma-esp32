@@ -5051,6 +5051,8 @@ static void test_config_store() {
     a.ntp_server = "pool.ntp.org";
     a.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     a.board_user_set = true;
+    a.diagnostics_enabled = true;
+    a.diagnostics_generation = 7;
     std::vector<uint8_t> buf = config_blob_serialize(a);
     ConfigBlob b;
     CHECK(config_blob_deserialize(buf.data(), buf.size(), b));
@@ -5076,6 +5078,7 @@ static void test_config_store() {
           b.circulation_off_tenths_w == 10 && b.circulation_confirm_s == 60);
     CHECK(b.has_ref_multi_source && b.ref_temp_setpoint_topic.empty() &&
           b.ref_temp_time_topic.empty() && b.ref_temp_fixed_setpoint_tenths == 0);
+    CHECK(b.has_diagnostics && b.diagnostics_enabled && b.diagnostics_generation == 7);
 
     // v15 is append-only: the complete Shelly mapping and exact tenths-of-watt thresholds round-trip,
     // while a genuine v14 blob remains readable and reports the source absent.
@@ -5134,8 +5137,10 @@ static void test_config_store() {
     const size_t base_suffix_bytes = 2;
     const size_t ref_multi_suffix_bytes = 2 + 2 + 4;
     const size_t discovery_suffix_bytes = 1;
+    const size_t diagnostics_suffix_bytes = 1 + 4;
     const size_t current_suffix_bytes =
-        base_suffix_bytes + ref_multi_suffix_bytes + discovery_suffix_bytes;
+        base_suffix_bytes + ref_multi_suffix_bytes + discovery_suffix_bytes +
+        diagnostics_suffix_bytes;
     const size_t circ_suffix_bytes = 2 + circ.circulation_name.size() +
         2 + circ.circulation_topic.size() + 2 + circ.circulation_power_path.size() +
         2 + circ.circulation_time_path.size() + 16;
@@ -5167,7 +5172,7 @@ static void test_config_store() {
     board.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 18);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 19);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -5227,6 +5232,8 @@ static void test_config_store() {
     CHECK(base_rt.has_mqtt_base && base_rt.mqtt_base == "daikin-bench-2" && base_rt.wifi_ssid == "net");
     CHECK(base_rt.has_ref_multi_source);
     CHECK(base_rt.has_modbus_discovery_state && !base_rt.mb_discovery_done);
+    CHECK(base_rt.has_diagnostics && !base_rt.diagnostics_enabled &&
+          base_rt.diagnostics_generation == 0);
     ConfigBlob multi_source;
     multi_source.ref_temp_setpoint_topic = "thermostat/status";
     multi_source.ref_temp_time_topic = "fixtures/status/1/sys";
@@ -5247,7 +5254,8 @@ static void test_config_store() {
     // A genuine v17 blob has the independent room mappings but no discovery decision. The load
     // layer uses has_modbus_discovery_state=false to apply the conservative pre-v18 migration.
     std::vector<uint8_t> v17 = base_buf;
-    v17.erase(v17.end() - 4 - discovery_suffix_bytes, v17.end() - 4);
+    v17.erase(v17.end() - 4 - (discovery_suffix_bytes + diagnostics_suffix_bytes),
+              v17.end() - 4);
     v17[4] = 17;
     restamp(v17);
     ConfigBlob v17_rt;
@@ -5255,7 +5263,9 @@ static void test_config_store() {
     CHECK(v17_rt.has_ref_multi_source && !v17_rt.has_modbus_discovery_state);
     // A genuine v16 blob has the base topic but not the v17 room-topic extension.
     std::vector<uint8_t> v16 = base_buf;
-    v16.erase(v16.end() - 4 - (ref_multi_suffix_bytes + discovery_suffix_bytes), v16.end() - 4);
+    v16.erase(v16.end() - 4 -
+              (ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes),
+              v16.end() - 4);
     v16[4] = 16;
     restamp(v16);
     ConfigBlob v16_rt;
@@ -5266,7 +5276,8 @@ static void test_config_store() {
     // upgrade guarantee v1 and v2 got — and report the base absent rather than refusing the blob and
     // taking the user's credentials down with it.
     std::vector<uint8_t> v15 = base_buf;
-    v15.erase(v15.end() - 4 - (16 + ref_multi_suffix_bytes + discovery_suffix_bytes),
+    v15.erase(v15.end() - 4 -
+              (16 + ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes),
               v15.end() - 4);
     v15[4] = 15;
     restamp(v15);
@@ -5274,11 +5285,20 @@ static void test_config_store() {
     CHECK(config_blob_deserialize(v15.data(), v15.size(), v15_rt));
     CHECK(!v15_rt.has_mqtt_base && v15_rt.mqtt_base.empty() && v15_rt.wifi_ssid == "net");
     CHECK(v15_rt.has_circulation);              // every earlier block still decoded
-    // A blob still stamped v18 but missing its new byte is truncated, never silently accepted as v17.
-    std::vector<uint8_t> v18_short = base_buf;
-    v18_short.erase(v18_short.end() - 4 - discovery_suffix_bytes, v18_short.end() - 4);
-    restamp(v18_short);
-    CHECK(!config_blob_deserialize(v18_short.data(), v18_short.size(), out));
+    // A genuine v18 blob has the HomeHub decision but no diagnostics consent. It migrates OFF with a
+    // zero generation; a v19 stamp missing that complete five-byte block is truncated and rejected.
+    std::vector<uint8_t> v18 = base_buf;
+    v18.erase(v18.end() - 4 - diagnostics_suffix_bytes, v18.end() - 4);
+    v18[4] = 18;
+    restamp(v18);
+    ConfigBlob v18_rt;
+    CHECK(config_blob_deserialize(v18.data(), v18.size(), v18_rt));
+    CHECK(v18_rt.has_modbus_discovery_state && !v18_rt.has_diagnostics &&
+          !v18_rt.diagnostics_enabled && v18_rt.diagnostics_generation == 0);
+    std::vector<uint8_t> v19_short = v18;
+    v19_short[4] = 19;
+    restamp(v19_short);
+    CHECK(!config_blob_deserialize(v19_short.data(), v19_short.size(), out));
 
     // ── v3: the OTA update channel ───────────────────────────────────────────────────────────────
     ConfigBlob chan; chan.wifi_ssid = "net"; chan.ota_channel = 1;   // 1 = dev
@@ -5335,7 +5355,7 @@ static void test_config_store() {
     mb.mb_host = "homehub-524288-abc.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 18);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 19);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
@@ -6169,10 +6189,9 @@ static void test_heating_curve_diagnosis() {
     in = ready(); in.now_ms = 20;
     CHECK(rearm.evaluate(in).sequence == 2 && rearm.snapshot().has_last_sample);
 
-    // ARMING IS DERIVED FROM THE CONFIGURATION — there is no mode byte, no /set_dynamic_lwt and so
-    // no way for a stored answer to disagree with the sources a reader can see. Every input the
-    // diagnosis NEEDS is required, including the HomeHub plant gates. Explicitly deleting HomeHub
-    // therefore disarms the dependent sampler instead of evaluating an impossible prerequisite.
+    // ARMING requires the explicit master diagnostics opt-in plus every visible source dependency.
+    // This remains independent of the retired controller mode: there is no /set_dynamic_lwt and no
+    // actuator. Explicitly deleting HomeHub disarms the dependent sampler too.
     Config dependencies;
     CHECK(!heating_curve_diagnosis_armed(dependencies));
     dependencies.mqtt_uri = "mqtt://broker";
@@ -6181,6 +6200,8 @@ static void test_heating_curve_diagnosis() {
     dependencies.ref_temp_setpoint_path = "target";
     dependencies.ref_temp_time_path = "read_at";
     dependencies.mb_host = "homehub.local";
+    CHECK(!heating_curve_diagnosis_armed(dependencies));   // diagnostics are opt-in
+    dependencies.diagnostics_enabled = true;
     CHECK(heating_curve_diagnosis_armed(dependencies));   // forecast location is optional
     Config arrival_timed = dependencies;
     arrival_timed.ref_temp_time_path.clear();
@@ -6199,6 +6220,9 @@ static void test_heating_curve_diagnosis() {
     Config no_weather = dependencies;
     no_weather.weather_enabled = false;
     CHECK(heating_curve_diagnosis_armed(no_weather));
+    CHECK(diagnostics_next_generation(0) == 1);
+    CHECK(diagnostics_next_generation(41) == 42);
+    CHECK(diagnostics_next_generation(UINT32_MAX) == 1);
 
     // ── The snapshot the evaluator never touched ────────────────────────────────────────────────
     // The sampler lives on the MQTT publish task, which safe mode never creates (main.cpp skips every
@@ -11466,12 +11490,24 @@ static void test_checkup_persist() {
                                   CHECKUP_PERSIST_VERSION, fp, fp, crc, crc, /*safe_mode=*/true)
           == CheckupRestore::SafeMode);
     CHECK(std::string(checkup_restore_slug(CheckupRestore::SafeMode)) == "safe_mode");
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, fp, fp, crc, crc,
+                                  /*safe_mode=*/false, /*diagnostics_enabled=*/false, 4, 4)
+          == CheckupRestore::DiagnosticsDisabled);
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, fp, fp, crc, crc,
+                                  /*safe_mode=*/false, /*diagnostics_enabled=*/true, 4, 5)
+          == CheckupRestore::DiagnosticsChanged);
 
     // Every verdict says something distinct on /diag and /status.health.persist.
     CHECK(std::string(checkup_restore_slug(CheckupRestore::Accept)) == "accept");
     CHECK(std::string(checkup_restore_slug(CheckupRestore::WrongLayout)) == "wrong_layout");
     CHECK(std::string(checkup_restore_slug(CheckupRestore::ModelChanged)) == "model_changed");
     CHECK(std::string(checkup_restore_slug(CheckupRestore::PowerCycle)) == "power_cycle");
+    CHECK(std::string(checkup_restore_slug(CheckupRestore::DiagnosticsDisabled)) ==
+          "diagnostics_disabled");
+    CHECK(std::string(checkup_restore_slug(CheckupRestore::DiagnosticsChanged)) ==
+          "diagnostics_changed");
 
     // The layout fingerprint is the half a CRC cannot do. A bucket is a pile of anonymous counters:
     // nothing in `buh_s` says which row it came from, so an update that moved a locator or a

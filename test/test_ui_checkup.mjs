@@ -26,7 +26,7 @@ const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.m
 assert.match(dashboardSource, /const GROUP_ORDER = \["Operation"/s,
              "Operation must remain the first live-value group");
 assert.match(dashboardSource,
-             /const checkup = S\.status\?\.hp\?\.connected \? checkupCardHtml\(\) : "";\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+\s*valueGroupsHtml\(/s,
+             /const checkup = S\.status\?\.diagnostics\?\.enabled === true && S\.status\?\.hp\?\.connected\s*\? checkupCardHtml\(\) : "";\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+\s*valueGroupsHtml\(/s,
              "plant diagnostics must render first in the post-diagram card stream");
 assert.match(dashboardSource,
              /return hp\.connected \? vcard\(t\("card\.model"\), model\) : "";/,
@@ -118,14 +118,11 @@ const ui = sandbox.__checkup;
 // The title keeps the bounded 24-hour scope without consuming most of a narrow card's first line.
 assert.equal(ui.text("en", "card.checkup"), "Plant diagnostics · 24 h");
 assert.equal(ui.text("de", "card.checkup"), "Anlagendiagnose · 24 h");
-assert.equal(ui.text("en", "check.guide"), "How to read this card");
-assert.equal(ui.text("de", "check.guide"), "So liest du diese Karte");
-assert.equal(ui.text("en", "action.label"), "What you can do:");
-assert.equal(ui.text("de", "action.label"), "Was du tun kannst:");
-assert.match(ui.text("en", "check.persist.power_cycle"), /no reusable completed diagnosis hour/);
-assert.match(ui.text("de", "check.persist.power_cycle"), /keine wiederverwendbare abgeschlossene Diagnosestunde/);
-assert.match(ui.text("en", "check.persist.wrong_layout"), /changed what the stored counters mean/);
-assert.match(ui.text("de", "check.persist.wrong_layout"), /Bedeutung gespeicherter Zähler geändert/);
+for (const copy of Object.values(ui.copy)) {
+  assert.ok(!("check.guide" in copy), "the removed guide row must have no translation");
+  assert.ok(!("check.guide.value" in copy), "the removed guide value must have no translation");
+  assert.ok(!("action.label" in copy), "diagnostic explainers must not advertise recommendations");
+}
 for (const [key, en, de] of [
   ["ok", "OK", "OK"],
   ["info", "NOTE", "HINWEIS"],
@@ -547,16 +544,8 @@ assert.match(card, />PRÜFT · 1\/3 bewertet<\/span>/);
 assert.match(card, /<value>PRÜFT<\/value>/);
 assert.match(card, /label="Messwert:">1\.7 bar<\/detail>/);
 assert.match(card, /label="Bewertung:">PRÜFT — 2 min von 1 h erfasst/);
-assert.match(card, /label="Datenfenster:">Dieses Update hat die Bedeutung gespeicherter Zähler geändert/,
-             "the guide row must explain why collection restarted after an incompatible update");
-
-context.S.status.health.persist = "accept";
-card = ui.card();
-assert.match(card, /label="Datenfenster:">Frühere Beobachtungen wurden aus dem Gerät über den Neustart oder die Stromunterbrechung hinweg übernommen/);
-context.S.status.health.persist = "from_the_future";
-card = ui.card();
-assert.doesNotMatch(card, /from_the_future|Datenfenster:/,
-                    "an unknown persistence slug must not leak as unexplained internal vocabulary");
+assert.doesNotMatch(card, /So liest du diese Karte|Einfach erklärt|Datenfenster:/,
+                    "the diagnostic card must not render the removed guide row");
 
 // Regression payload matching the narrow German card that prompted the status-only design.
 // Readings, assessment copy and collection clocks are present in details but absent from every
@@ -579,8 +568,8 @@ ui.setLang("de");
 card = ui.card();
 const collapsedValues = [...card.matchAll(/<value>(.*?)<\/value>/g)].map((m) => m[1]);
 assert.deepEqual(collapsedValues,
-                 ["Einfach erklärt", "OK", "HINWEIS", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT"]);
-for (const value of collapsedValues.slice(1)) {
+                 ["OK", "HINWEIS", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT"]);
+for (const value of collapsedValues) {
   assert.doesNotMatch(value, /Aktuell|Start|Vorgang|bar|min|Speicher|gesammelt|erfasst/);
 }
 for (const reading of ["Aktuell keine", "1,2 K/h · 3 Fenster · während Zirkulationspumpenbetrieb",
@@ -688,13 +677,10 @@ for (const [name, pattern] of [
   ["German whole-plant claim", /\bAnlage (?:ist )?(?:gesund|in Ordnung)\b/i],
 ]) assert.doesNotMatch(checkupCopy, pattern, `checkup copy must not contain a ${name}`);
 
-const guideCopy = descriptionContext.__copy.model.health_guide;
-assert.match(guideCopy.de.what, /ändert keine Einstellungen und steuert die Anlage nicht/);
-assert.match(guideCopy.de.meaning, /OK heißt: genug Daten für genau diese Prüfung/);
-assert.match(guideCopy.de.action, /Beginne hier.*Öffne dann jede Diagnose/);
-assert.match(explanationSource,
-             /const action = b\.action \? descNoteHtml\(t\("action\.label"\), b\.action\) : "";/,
-             "the shared explainer must render the supported next step, not merely store it");
+assert.ok(!("health_guide" in descriptionContext.__copy.model),
+          "the removed guide row must have no explainer copy");
+assert.doesNotMatch(explanationSource, /action\.label|b\.action/,
+                    "the shared explainer must not render recommendation copy");
 
 // The concise explainer must retain the production retry comparator's important edge cases.
 const retryCopy = JSON.stringify(descriptionContext.__copy.model.health_retries);
@@ -721,19 +707,17 @@ assert.match(dhwCopy, /OK heißt nur: Kein Verlust im erkennbaren Band/);
 const flowCopy = JSON.stringify(descriptionContext.__copy.model.health_flow);
 assert.match(flowCopy, /observed part-load minimum.*not the nominal or design flow/);
 assert.match(flowCopy, /beobachtetes Teillast-Minimum.*nicht der Nenn- oder Auslegungsdurchfluss/);
-assert.match(flowCopy, /same mode and conditions/);
-assert.match(flowCopy, /dieselbe Betriebsart und Bedingung/);
+assert.match(flowCopy, /same model, mode and conditions/);
+assert.match(flowCopy, /dasselbe Modell, dieselbe Betriebsart und dieselben Bedingungen/);
 
-// The hint box should answer the question without becoming a manual. Keep both paragraphs concise
-// while the source-level assertions above preserve the technically load-bearing caveats.
+// The hint box should explain the observation without becoming a manual or recommending an action.
+// Keep both paragraphs concise while the source-level assertions preserve the load-bearing caveats.
 for (const id of ["fault", "dhw_loss", "cycling", "defrost", "pressure", "flow", "heater", "retries"]) {
   const d = descriptionContext.__copy.model[`health_${id}`];
   for (const [lang, copy] of [["en", d], ["de", d.de]]) {
     const length = `${copy.what} ${copy.normal || ""}`.length;
     assert.ok(length <= 520, `${id} ${lang} explainer is too long (${length} characters)`);
-    assert.ok(copy.action, `${id} ${lang} needs a plain-language next step`);
-    assert.ok(copy.action.length <= 280,
-              `${id} ${lang} next step is too long (${copy.action.length} characters)`);
+    assert.ok(!("action" in copy), `${id} ${lang} must not recommend a next step`);
   }
 }
 

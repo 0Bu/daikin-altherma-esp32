@@ -137,7 +137,11 @@ static void boot_sequence() {
     // History has two independent producer tasks. Create their shared lock before either starts —
     // and before HTTP can ask for a snapshot — rather than racing two lazy creators on first boot.
     daik::history_start();
-    daik::checkup_start();   // same rule: judge .noinit before a producer task exists
+    daik::checkup_start(cfg.diagnostics_enabled, cfg.diagnostics_generation);
+    // The circulation-power ring is diagnosis evidence, not general X10A history. Keep retained
+    // pre-opt-in data inaccessible until an explicit enable starts and reseeds this source.
+    if (!cfg.diagnostics_enabled) daik::history_circulation_reset();
+                                 // same rule: judge .noinit before a producer task exists
     daik::dwell_start();     // and the per-row state ages, judged on the same terms
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (!daik::safe_mode_active()) {

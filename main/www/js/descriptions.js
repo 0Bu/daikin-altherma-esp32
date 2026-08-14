@@ -895,7 +895,7 @@ function descFor(label, row = null) {
 const descParaHtml = (html) => `<div class="vdesc-p">${html}</div>`;
 
 // A labelled note under the "what is it" sentence, opened by a lead-in in stronger ink.
-// Interpretation, normal context, the supported next step and held-over source context all take
+// Interpretation, normal context and held-over source context all take
 // this shape. A paragraph rather than a run-on sentence keeps those questions visually separate.
 // All text is our own static copy (labels come from the firmware's own def/ tables), but escape
 // anyway — cheap and keeps the one-encoder rule.
@@ -1001,16 +1001,13 @@ function faultCodeDetailHtml(currentValue) {
   return `<div class="fault-code-current"><code>${esc(code)}</code><span>${esc(meaning)}</span></div>`;
 }
 
-// Description body: the plain "what is it" sentence, then optional interpretation, normal-context
-// and next-step paragraphs. A diagnosis that names a finding without saying what a non-specialist
-// can safely do with it has not explained the result. `currentValue` is optional because most
-// explainers do not need their row value.
+// Description body: the plain "what is it" sentence, then optional interpretation and normal-context
+// paragraphs. `currentValue` is optional because most explainers do not need their row value.
 function descBodyHtml(d, currentValue) {
   const b = (LANG === "de" && d.de) ? d.de : d;   // German copy when present, else the English row
   if (d.faultCode) return faultCodeDetailHtml(currentValue);
   const intro = descParaHtml(esc(b.what));
   const meaning = b.meaning ? descNoteHtml(t("meaning.label"), b.meaning) : "";
   const normal = b.normal ? descNoteHtml(t("normal.label"), b.normal) : "";
-  const action = b.action ? descNoteHtml(t("action.label"), b.action) : "";
-  return intro + meaning + normal + action;
+  return intro + meaning + normal;
 }

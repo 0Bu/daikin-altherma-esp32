@@ -218,16 +218,15 @@ void set_disabled() {
     s_status.error.clear();
 }
 
-// There is no second "collection is paused while the feature is off" state any more: a saved
-// location IS the consent to fetch it, so the only two states are configured (fetching) and not
-// configured (set_disabled above). What used to sit here cleared every runtime value while keeping
-// the coordinates visible; deleting the location now does that through set_disabled.
+// A saved location is dormant while the device-wide diagnostics switch is off. set_disabled clears
+// every runtime value in either inactive state; the coordinates remain in Config and become active
+// again only after explicit consent is restored.
 
 void weather_task(void*) {
     for (;;) {
         try {
             const Config cfg = config();
-            if (!cfg.weather_enabled) {
+            if (!cfg.diagnostics_enabled || !cfg.weather_enabled) {
                 set_disabled();
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
                 continue;

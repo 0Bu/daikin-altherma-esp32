@@ -1836,77 +1836,54 @@ const MODEL_DESCRIPTIONS = {
   // reason than the Model card's: a value row states a measurement the reader can look up, while
   // "31 starts, mean 6 min" states a JUDGEMENT, while flow/heater rows deliberately state only a
   // measurement. Without the copy a reader cannot tell which is which, what the firmware actually
-  // established, or what they would do about it. So each entry answers what was counted, the limit
-  // of the claim, and what follow-up is supported.
+  // established. So each entry answers what was counted and the limit of the claim, without
+  // recommending a follow-up that the available evidence may not support.
   //
   // They also have to say what the row does NOT claim. Two of these checks are deliberately weaker
   // than they look — the flow minimum carries no verdict at all because the manufacturer's minimum
   // is per model, and a high defrost share is only a heuristic because humidity and coil temperature
   // are not on this bus — and a reader who assumes the firmware is asserting more than it is will draw
   // the wrong conclusion from a correct number.
-  health_guide: {
-    what: "The board automatically watches the last 24 hours of heat-pump operation. It only reads: it does not change settings or control the unit. Each row answers one limited question, not whether the whole installation is sound.",
-    meaning: "OK means enough data for this one check and no finding in it. NOTE means worth observing, not a proven defect. WARNING needs attention. CHECKING needs more data. MEASURED ONLY has no universal limit.",
-    action: "Start here to see why the window may have restarted. Then open any result for its reading, limits and next step. Judge a NOTE over several days and in context.",
-    de: { what: "Das Board beobachtet automatisch die letzten 24 Stunden des Wärmepumpenbetriebs. Es liest nur: Es ändert keine Einstellungen und steuert die Anlage nicht. Jede Zeile beantwortet ausschließlich eine begrenzte Frage.",
-          meaning: "OK heißt: genug Daten für genau diese Prüfung und darin kein Befund. HINWEIS heißt beobachten, nicht Defekt. WARNUNG erfordert Prüfung. PRÜFT braucht mehr Daten. NUR MESSWERT hat keine allgemeine Grenze.",
-          action: "Beginne hier, um zu sehen, warum das Zeitfenster neu begonnen haben kann. Öffne dann jede Diagnose für Messwert, Grenzen und nächsten Schritt; bewerte einen HINWEIS über mehrere Tage." } },
   health_fault: {
     what: "Reports the heat pump's own error or warning state. An active error gives WARNING; a warning/caution or a message that appeared and cleared within 24 hours gives NOTE. This is the unit speaking, not a project guess.",
     normal: "No current or remembered message after every supported fault row was readable. A cleared message can remain visible for up to 24 hours; an active code is shown under Operation.",
-    action: "For WARNING, open Operation and note the exact code. Follow the unit manual or contact service. For a cleared one-off NOTE, observe; record the time and mode if it returns.",
     de: { what: "Meldet den Fehler- oder Warnzustand der Wärmepumpe selbst. Ein aktiver Fehler ergibt WARNUNG; eine Warnung/Vorsicht oder eine in 24 Stunden erschienene und wieder verschwundene Meldung ergibt HINWEIS. Das ist keine Projekt-Vermutung.",
-          normal: "Keine aktuelle oder gemerkte Meldung, nachdem alle unterstützten Störungszeilen lesbar waren. Eine verschwundene Meldung kann bis zu 24 Stunden sichtbar bleiben; ein aktiver Code steht unter „Betrieb“.",
-          action: "Bei WARNUNG unter „Betrieb“ den genauen Code öffnen und notieren. Anleitung befolgen oder Service fragen. Einen einmaligen verschwundenen HINWEIS beobachten; bei Wiederholung Zeitpunkt und Betriebsart festhalten." } },
+          normal: "Keine aktuelle oder gemerkte Meldung, nachdem alle unterstützten Störungszeilen lesbar waren. Eine verschwundene Meldung kann bis zu 24 Stunden sichtbar bleiben; ein aktiver Code steht unter „Betrieb“." } },
   health_dhw_loss: {
     what: "Measures tank cooling in quiet one-hour windows. Charging, draw-like drops and internal heating are excluded; an optional power meter reports circulation-pump operation.",
     normal: "NOTE starts at 0.8 K/h, a project heuristic for one reference installation. Tank volume and the tank-to-room temperature difference change the rate. Clean-hour loss is detectable only up to about 1.85 K/h; faster continuous loss can trip the draw filter. OK means none was observed in that band, not that insulation or valves are proven sound.",
-    action: "For repeated NOTE, first check the hot-water circulation schedule and whether water was drawn. If the loss also persists with circulation confirmed off, give several days of readings to an installer.",
     de: { what: "Misst die Abkühlung in ruhigen Speicherstunden. Ladung, zapfungsähnliche Abfälle und interne Heizaktivität werden ausgeschlossen; ein Stromzähler kann die Zirkulationspumpe zeigen.",
-          normal: "HINWEIS ab 0,8 K/h – Heuristik der Referenzanlage. Speichervolumen und Abstand zur Raumtemperatur ändern den Wert. Bereinigte Stunden zeigen nur bis etwa 1,85 K/h; schneller Dauerverlust kann wie Zapfung ausgefiltert werden. OK heißt nur: Kein Verlust im erkennbaren Band gefunden; das beweist weder gute Dämmung noch Ventile.",
-          action: "Bei wiederholtem HINWEIS zuerst Zeitplan der Warmwasser-Zirkulation und Entnahmen prüfen. Bleibt der Verlust auch bei Zirkulationspumpe OFF, mehrere Tage Messwerte dem Fachbetrieb zeigen." } },
+          normal: "HINWEIS ab 0,8 K/h – Heuristik der Referenzanlage. Speichervolumen und Abstand zur Raumtemperatur ändern den Wert. Bereinigte Stunden zeigen nur bis etwa 1,85 K/h; schneller Dauerverlust kann wie Zapfung ausgefiltert werden. OK heißt nur: Kein Verlust im erkennbaren Band gefunden; das beweist weder gute Dämmung noch Ventile." } },
   health_cycling: {
     what: "Counts each compressor change from OFF to ON and how long a complete run lasted. Where the signals permit, runs are separated into space heating, hot water and cooling. Mixed or unread runs are shown as unclassified.",
     normal: "Confirmed heating runs average at least 10 min. With 12 or more averaging under 10 min, NOTE appears. Hot water and cooling are excluded. If too many runs are unclassified, all runs are assessed together. This is not a Daikin limit.",
-    action: "Observe several days before changing settings. Check whether many room thermostats or heating zones close or schedules interrupt heating. If it persists, ask an installer to check heat curve, water flow and hydraulic balance.",
     de: { what: "Zählt jeden Verdichterwechsel von OFF zu ON und die Dauer eines vollständigen Laufs. Wenn die Signale reichen, werden Raumheizung, Warmwasser und Kühlen getrennt. Gemischte oder ungelesene Läufe erscheinen als „ohne Zuordnung“.",
-          normal: "Bestätigte Heizläufe dauern im Mittel mindestens 10 min. Bei mindestens 12 Läufen unter 10 min erscheint HINWEIS. Warmwasser und Kühlen zählen nicht mit. Sind zu viele Läufe ungeklärt, werden alle gemeinsam bewertet. Kein Daikin-Grenzwert.",
-          action: "Vor Änderungen mehrere Tage beobachten. Prüfen, ob viele Raumthermostate/Heizkreise schließen oder Zeitpläne das Heizen unterbrechen. Bleibt das Muster, Fachbetrieb Heizkurve, Wasserdurchfluss und hydraulischen Abgleich prüfen lassen." } },
+          normal: "Bestätigte Heizläufe dauern im Mittel mindestens 10 min. Bei mindestens 12 Läufen unter 10 min erscheint HINWEIS. Warmwasser und Kühlen zählen nicht mit. Sind zu viele Läufe ungeklärt, werden alle gemeinsam bewertet. Kein Daikin-Grenzwert." } },
   health_defrost: {
     what: "Counts each defrost change from OFF to ON and the share of observed compressor time spent defrosting. Defrost removes ice from the outdoor heat exchanger and is normal in cold, damp weather.",
     normal: "Up to 15% of paired compressor time. Above it with at least three observed defrosts gives NOTE only. This is not a Daikin limit: humidity and heat-exchanger surface temperature are unavailable.",
-    action: "Relate the result to the weather. Keep the outdoor unit's air path and water drain clear. Frequent defrost in mild, dry weather or persistent visible icing is a reason to contact an installer.",
     de: { what: "Zählt jeden Wechsel der Abtauung von OFF zu ON und ihren Anteil an der beobachteten Verdichterlaufzeit. Abtauen entfernt Eis am Außengerät und ist bei kaltem, feuchtem Wetter normal.",
-          normal: "Bis 15 % der gepaarten Verdichterlaufzeit. Darüber erscheint bei mindestens drei beobachteten Abtauungen nur HINWEIS. Kein Daikin-Grenzwert: Luftfeuchte und Oberflächentemperatur des Wärmetauschers fehlen.",
-          action: "Ergebnis zum Wetter einordnen. Luftweg und Wasserablauf am Außengerät frei halten. Häufiges Abtauen bei mildem, trockenem Wetter oder dauerhafte sichtbare Vereisung mit dem Fachbetrieb klären." } },
+          normal: "Bis 15 % der gepaarten Verdichterlaufzeit. Darüber erscheint bei mindestens drei beobachteten Abtauungen nur HINWEIS. Kein Daikin-Grenzwert: Luftfeuchte und Oberflächentemperatur des Wärmetauschers fehlen." } },
   health_pressure: {
     what: "Shows the lowest valid water pressure measured in the heating circuit during the rolling window.",
     normal: "Above 1.0 bar. At or below 1.0 bar gives a NOTE immediately and a WARNING after 60 continuous seconds. The permitted range can vary by model, so compare it with the exact unit manual.",
-    action: "Do not refill blindly. Check the model manual; pressure that repeatedly falls can indicate air, expansion-vessel trouble or water loss and should be assessed by an installer.",
     de: { what: "Zeigt den niedrigsten gültigen Wasserdruck, der im Heizkreis während des rollierenden Fensters gemessen wurde.",
-          normal: "Über 1,0 bar. Bei höchstens 1,0 bar erscheint sofort HINWEIS und nach 60 durchgehenden Sekunden WARNUNG. Der erlaubte Bereich kann je Modell abweichen; mit der genauen Geräteanleitung vergleichen.",
-          action: "Nicht blind nachfüllen. Geräteanleitung prüfen; wiederholt fallender Druck kann auf Luft, Ausdehnungsgefäß oder Wasserverlust hindeuten und gehört zum Fachbetrieb." } },
+          normal: "Über 1,0 bar. Bei höchstens 1,0 bar erscheint sofort HINWEIS und nach 60 durchgehenden Sekunden WARNUNG. Der erlaubte Bereich kann je Modell abweichen; mit der genauen Geräteanleitung vergleichen." } },
   health_flow: {
     what: "Shows the lowest water flow after the internal pump had run continuously for 60 seconds. Pump startup, stopped-pump readings and communication gaps are excluded.",
-    normal: "MEASURED ONLY: this is an observed part-load minimum after pump run-up, not the nominal or design flow printed in a manual. Required flow depends on model and operating mode, so there is no universal OK/WARNING limit.",
-    action: "Do not compare this directly with nominal flow. Use the exact manual's minimum for the same mode and conditions; one low value without a unit fault proves little. Repeated values below that matching minimum or a flow error belong with an installer.",
+    normal: "MEASURED ONLY: this is an observed part-load minimum after pump run-up, not the nominal or design flow. There is no universal limit; a manual minimum applies only to the same model, mode and conditions. One low value without a unit fault proves little.",
     de: { what: "Zeigt den niedrigsten Wasserdurchfluss, nachdem die interne Pumpe 60 Sekunden durchgehend lief. Pumpenanlauf, Werte bei stehender Pumpe und Kommunikationslücken werden ausgeschlossen.",
-          normal: "NUR MESSWERT: Das ist ein beobachtetes Teillast-Minimum nach dem Pumpenanlauf, nicht der Nenn- oder Auslegungsdurchfluss der Anleitung. Der nötige Wert hängt von Modell und Betriebsart ab; eine allgemeine OK/WARNUNG-Grenze gibt es nicht.",
-          action: "Nicht direkt mit dem Nenndurchfluss vergleichen. Nur den Mindestwert der Anleitung für dieselbe Betriebsart und Bedingung heranziehen. Ein Einzelwert ohne Störung beweist wenig; wiederholte Unterschreitung dieses passenden Minimums oder Durchflussfehler gehören zum Fachbetrieb." } },
+          normal: "NUR MESSWERT: Das ist ein beobachtetes Teillast-Minimum nach Pumpenanlauf, nicht der Nenn- oder Auslegungsdurchfluss. Eine allgemeine Grenze gibt es nicht; ein Anleitungs-Minimum gilt nur für dasselbe Modell, dieselbe Betriebsart und dieselben Bedingungen. Ein Einzelwert ohne Anlagenstörung beweist wenig." } },
   health_heater: {
     what: "Shows separately how long the electric heater for space heating (BUH) and the heater in the hot-water tank (BSH) were observed running.",
     normal: "MEASURED ONLY. Cold weather, emergency mode, defrost support, hot-water schedules or surplus-energy control can all make electric-heater runtime intentional. There is no universal OK/WARNING limit.",
-    action: "Compare runtime with weather and hot-water or surplus schedules. Short use can be expected. If long use keeps appearing without an explanation, have settings and plant capacity checked.",
     de: { what: "Zeigt getrennt, wie lange der elektrische Zusatzheizer für den Heizkreis (BUH) und der Heizstab im Warmwasserspeicher (BSH) beobachtet wurden.",
-          normal: "NUR MESSWERT. Kälte, Notbetrieb, Abtauhilfe, Warmwasser-Zeitplan oder Überschusssteuerung können elektrische Laufzeit erklären. Es gibt keine allgemeine Grenze für OK/WARNUNG.",
-          action: "Laufzeit mit Wetter, Warmwasser- und Überschusszeitplan vergleichen. Kurzer Einsatz kann normal sein. Erscheint lange Laufzeit wiederholt ohne Erklärung, Einstellungen und Anlagenleistung prüfen lassen." } },
+          normal: "NUR MESSWERT. Kälte, Notbetrieb, Abtauhilfe, Warmwasser-Zeitplan oder Überschusssteuerung können elektrische Laufzeit erklären. Es gibt keine allgemeine Grenze für OK/WARNUNG." } },
   health_retries: {
     what: "Experimental watch of five internal protection counters. Only a clear increase between comparable readings counts, including one first visible while stopped or at a compressor-state boundary. Baseline, stable or decreasing values, gaps and resets do not.",
     normal: "No observed increase. An increase gives NOTE, not a fault diagnosis; no increase cannot prove that the unit never limited itself because the counters are not fully documented.",
-    action: "One increase normally needs no action. If increases repeat together with poor output, unusual noise or error codes, note the time and operating mode for an installer.",
     de: { what: "Experimentelle Beobachtung von fünf internen Schutzzählern. Nur ein klarer Anstieg zwischen vergleichbaren Messungen zählt, auch wenn er erst im Stillstand oder an einer Verdichter-Zustandsgrenze sichtbar wird. Basiswert, stabile oder abnehmende Werte, Lücken und Rücksetzungen zählen nicht.",
-          normal: "Kein beobachteter Anstieg. Ein Anstieg ergibt HINWEIS, keine Störungsdiagnose; kein Anstieg beweist wegen unvollständig dokumentierter Zähler nicht, dass die Anlage nie begrenzt hat.",
-          action: "Ein einzelner Anstieg braucht meist keine Aktion. Wiederholt er sich zusammen mit wenig Leistung, ungewöhnlichen Geräuschen oder Fehlercodes, Zeitpunkt und Betriebsart für den Fachbetrieb notieren." } },
+          normal: "Kein beobachteter Anstieg. Ein Anstieg ergibt HINWEIS, keine Störungsdiagnose; kein Anstieg beweist wegen unvollständig dokumentierter Zähler nicht, dass die Anlage nie begrenzt hat." } },
   // The two board-memory rows on the ESP32 card. The copy has one job beyond naming the number: to
   // say what the SHAPE of the curve means, because that is the whole reason these rows exist rather
   // than living on /status alone.
