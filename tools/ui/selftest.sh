@@ -87,8 +87,17 @@ set -e
 # matcher sees as no stamp at all, so a body filled in literally from the template was refused —
 # three times (PR #99, #343, #381) before anyone fixed the template rather than remembering. Fill
 # the real template's own line with a real sha and require the gate to accept it.
-tpl_line="$(grep -m1 'merge gate @' "$proj/.github/pull_request_template.md" || true)"
-[ -n "$tpl_line" ] || { echo "ui selftest: no 'merge gate @' line in the PR template" >&2; exit 1; }
+# THIS hook's own line, selected by name — not merely the first "merge gate @" in the file. The
+# template teaches one stamp per gate and their order is nobody's contract: when a later change made
+# /project-review the first of them, this check fed require-ui-use-case-review.sh a SIBLING gate's
+# line, which is absent under its key, and the suite failed for a reason that had nothing to do with
+# the defect it is here to catch.
+tpl_line="$(grep -m1 -F -- '`/ui-use-case-review`' "$proj/.github/pull_request_template.md" || true)"
+[ -n "$tpl_line" ] || { echo "ui selftest: no /ui-use-case-review line in the PR template" >&2; exit 1; }
+case "$tpl_line" in
+  *"merge gate @"*) ;;
+  *) echo "ui selftest: the /ui-use-case-review template line teaches no 'merge gate @' stamp" >&2; exit 1 ;;
+esac
 tpl_body="$(printf '%s' "$tpl_line" | sed 's/\[ \]/[x]/; s/<short-sha>/abcdef123456/')"
 
 cat > "$hook_tmp/bin/gh" <<'EOF'
@@ -107,8 +116,68 @@ printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" CLAUDE_PROJECT_DIR="
 
 rm -rf "$hook_tmp"
 
+# The end-to-end check above covers exactly ONE line, and the template teaches a stamp per merge
+# gate. Name the complete expected set explicitly: selecting only lines which already contain
+# "merge gate @" makes a regressed prose-only line disappear from both the input and the count, so
+# the selftest used to announce "all 5 readable" after one of the six gates was deliberately broken.
+# Put every expected key through the SHARED matcher, and reject missing or surprise gate entries.
+# shellcheck source=/dev/null
+. "$proj/.claude/hooks/pr-gate-lib.sh"
+expected_gate_keys=(project-review feature-docs domain-review schematic-review ui-use-case-review absence-review)
+tpl_content="$(cat "$proj/.github/pull_request_template.md")"
+tpl_lines="$(printf '%s\n' "$tpl_content" | gate_task_lines | grep -iE 'gate')"
+tpl_n=0
+for key in "${expected_gate_keys[@]}"; do
+    line="$(printf '%s\n' "$tpl_lines" | grep -F -- "\`/$key\`" || true)"
+    [ -n "$line" ] || { echo "ui selftest: the PR template is missing the /$key gate line" >&2; exit 1; }
+    [ "$(printf '%s\n' "$line" | wc -l | tr -d ' ')" -eq 1 ] || {
+        echo "ui selftest: the PR template has duplicate /$key gate lines" >&2; exit 1; }
+    case "$line" in
+      *"merge gate @"*) ;;
+      *) echo "ui selftest: the /$key template line teaches no 'merge gate @' stamp" >&2; exit 1 ;;
+    esac
+    filled="$(printf '%s' "$line" | sed 's/\[ \]/[x]/; s/<short-sha>/abcdef123456/')"
+    [ "$(gate_checkbox_status "$filled" "$key")" = "checked abcdef123456" ] || {
+        echo "ui selftest: the template's /$key line does not teach a stamp the merge gate can read" >&2
+        exit 1
+    }
+    tpl_n=$((tpl_n + 1))
+done
+[ "$tpl_n" -eq "${#expected_gate_keys[@]}" ] || {
+    echo "ui selftest: expected ${#expected_gate_keys[@]} gate lines, checked $tpl_n" >&2; exit 1; }
+extra_keys="$(printf '%s\n' "$tpl_lines" \
+    | sed -n 's/.*`\/\([a-z0-9-]\{1,\}\)`.*/\1/p' \
+    | while IFS= read -r key; do
+        found=false
+        for expected in "${expected_gate_keys[@]}"; do [ "$key" = "$expected" ] && found=true; done
+        [ "$found" = true ] || printf '%s\n' "$key"
+      done)"
+[ -z "$extra_keys" ] || { echo "ui selftest: unexpected gate key(s): $extra_keys" >&2; exit 1; }
+
+# A PR body legitimately quotes checkbox examples. Inline, blockquoted and fenced examples are not
+# checklist records and must neither shadow nor satisfy the one real gate line.
+decoy_body="$(printf '%s\n' \
+    'Prose about the gate: `- [ ] `/project-review` run clean` is the form that fails.' \
+    '> - [x] `/project-review` clean — merge gate @ deadbee' \
+    '```markdown' \
+    '- [x] `/project-review` clean — merge gate @ deadbee' \
+    '```' \
+    '' \
+    '- [x] `/project-review` clean — merge gate @ abcdef123456')"
+[ "$(gate_checkbox_status "$decoy_body" project-review)" = "checked abcdef123456" ] || {
+    echo "ui selftest: quoted/fenced checkboxes shadow or satisfy the real gate" >&2; exit 1; }
+# Two actual task-list entries are malformed and must fail closed rather than preferring a ticked
+# decoy. The honest single unticked box still reports unchecked.
+duplicate_body="$(printf '%s\n' \
+    '- [x] `/project-review` clean — merge gate @ deadbee' \
+    '- [ ] `/project-review` clean — merge gate @ <short-sha>')"
+[ "$(gate_checkbox_status "$duplicate_body" project-review)" = "ambiguous" ] || {
+    echo "ui selftest: duplicate real gate boxes do not fail closed" >&2; exit 1; }
+[ "$(gate_checkbox_status '- [ ] `/project-review` clean — merge gate @ <short-sha>' project-review)" = "unchecked" ] || {
+    echo "ui selftest: an unticked gate box no longer reports unchecked" >&2; exit 1; }
+
 echo "ui selftest: merge hook accepts current proof and blocks failing or stale proof"
-echo "ui selftest: the PR template teaches a stamp the merge gate accepts"
+echo "ui selftest: all $tpl_n PR-template stamp lines are readable by the merge gate"
 
 # Re-seed the COP-block-reason scrape going self-referential. The four reasons used to be assigned
 # as literals inside liveData(); when the cascade moved into copPlan() only `mb_scope` stayed a

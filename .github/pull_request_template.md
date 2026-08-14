@@ -39,10 +39,10 @@ alone — those are Claude Code skills in this repo's .claude/ directory and are
 
 <!-- Not runnable by outside contributors — leave unchecked, the maintainer fills these in. -->
 
-- [ ] `/project-review` run clean (doc drift, memory, tests, multi-target)
-- [ ] `/feature-docs` run if a technical feature changed — `docs/FEATURES.md` catalog synced
-- [ ] `/domain-review` run — required on EVERY merge: values verified physically right, sensible and authentic (a PR that cannot reach a value clears in seconds, but say what you checked)
-- [ ] `/schematic-review` run if the dashboard schematic changed — the drawing still tells the truth about the plant, and every reading is on the part that measures it
+- [ ] `/project-review` clean — merge gate @ <short-sha> (doc drift, memory, tests, multi-target)
+- [ ] `/feature-docs` synced — merge gate @ <short-sha> (required if a technical feature changed: `docs/FEATURES.md` matches the code)
+- [ ] `/domain-review` clean — merge gate @ <short-sha> (required on EVERY merge: values verified physically right, sensible and authentic — a PR that cannot reach a value clears in seconds, but say what you checked)
+- [ ] `/schematic-review` clean — merge gate @ <short-sha> (required if the dashboard schematic changed: the drawing still tells the truth about the plant, and every reading is on the part that measures it)
 - [ ] `/ui-use-case-review` clean — merge gate @ <short-sha> (required if UI behavior changed)
 - [ ] `/absence-review` clean — merge gate @ <short-sha> (required if an OPTIONAL SOURCE changed: the broker, the room source, the circulation witness, the HomeHub, ENV III, the weather location, the X10A bus, safe mode, or anything that reports one)
 <!-- The stamp must be a BARE sha after the `@` — the gate matches `@[[:space:]]*[0-9a-f]{7,40}`
