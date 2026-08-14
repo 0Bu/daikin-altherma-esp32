@@ -203,17 +203,34 @@ check "build rejects a PR number"   "$([ "$rc_build_pr" -ne 0 ] && echo yes || e
 check "build rejects a stray value" "$([ "$rc_build_extra" -ne 0 ] && echo yes || echo no)" "yes"
 check "invalid build created no site" "$([ ! -e "$T/pagebuild/_site" ] && echo yes || echo no)" "yes"
 
-# A valid Pages assembly must publish the exact same fan raster as the firmware dashboard. Keep
-# one canonical source asset under main/www; a hand-drawn installer copy is allowed to drift.
-mkdir -p "$T/pagebuild/docs" "$T/pagebuild/main/www"
+# A valid Pages assembly must publish the exact same fan raster as the firmware dashboard and the
+# exact redistribution notices from the repository. Keep one canonical source for each.
+mkdir -p "$T/pagebuild/docs" "$T/pagebuild/main/www" "$T/pagebuild/tools/web_asset/vendor"
 cp docs/index.html docs/serial-port-release.mjs docs/web-installer.mjs "$T/pagebuild/docs/"
 cp main/www/heat_pump_icon.png "$T/pagebuild/main/www/heat_pump_icon.png"
+cp LICENSE THIRD_PARTY_NOTICES.md "$T/pagebuild/"
+cp tools/web_asset/vendor/LICENSE "$T/pagebuild/tools/web_asset/vendor/LICENSE"
 echo firmware > "$T/pagebuild/dist/app.bin"
 echo '{}' > "$T/pagebuild/dist/manifest.json"
 build_pages; rc_build_valid=$?
 check "valid Pages build succeeds" "$rc_build_valid" "0"
 check "Pages icon matches firmware bytes" \
       "$(cmp -s main/www/heat_pump_icon.png "$T/pagebuild/_site/heat-pump-icon.png" && echo yes || echo no)" "yes"
+check "Pages LICENSE.txt matches the repository" \
+      "$(cmp -s LICENSE "$T/pagebuild/_site/LICENSE.txt" && echo yes || echo no)" "yes"
+check "Pages third-party notices match the repository" \
+      "$(cmp -s THIRD_PARTY_NOTICES.md "$T/pagebuild/_site/THIRD_PARTY_NOTICES.md" && echo yes || echo no)" "yes"
+check "Pages Apache license matches the vendor source" \
+      "$(cmp -s tools/web_asset/vendor/LICENSE "$T/pagebuild/_site/Apache-2.0.txt" && echo yes || echo no)" "yes"
+
+build_pages --dev; rc_build_dev=$?
+check "valid dev Pages build succeeds" "$rc_build_dev" "0"
+check "dev Pages LICENSE.txt matches the repository" \
+      "$(cmp -s LICENSE "$T/pagebuild/_site/dev/LICENSE.txt" && echo yes || echo no)" "yes"
+check "dev Pages third-party notices match the repository" \
+      "$(cmp -s THIRD_PARTY_NOTICES.md "$T/pagebuild/_site/dev/THIRD_PARTY_NOTICES.md" && echo yes || echo no)" "yes"
+check "dev Pages Apache license matches the vendor source" \
+      "$(cmp -s tools/web_asset/vendor/LICENSE "$T/pagebuild/_site/dev/Apache-2.0.txt" && echo yes || echo no)" "yes"
 
 echo
 if [ "$fail" -eq 0 ]; then

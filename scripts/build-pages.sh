@@ -4,6 +4,7 @@
 #   _site/*.mjs           local installer behavior modules
 #   _site/heat-pump-icon.png  the same canonical brand mark embedded in the firmware UI
 #   _site/manifest.json   esptool-js installer + OTA manifest
+#   _site/LICENSE.txt + THIRD_PARTY_NOTICES.md + Apache-2.0.txt  redistribution notices
 #   _site/*.bin           sparse installer parts + signed app (OTA) + manual merged image
 #
 # The site hosts TWO independent feeds, because a merge to main no longer cuts a release:
@@ -38,6 +39,9 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 
 cp docs/index.html docs/serial-port-release.mjs docs/web-installer.mjs "$OUT/"
 cp main/www/heat_pump_icon.png "$OUT/heat-pump-icon.png"
+cp LICENSE "$OUT/LICENSE.txt"
+cp THIRD_PARTY_NOTICES.md "$OUT/THIRD_PARTY_NOTICES.md"
+cp tools/web_asset/vendor/LICENSE "$OUT/Apache-2.0.txt"
 cp dist/*.bin "$OUT/"
 cp dist/manifest.json "$OUT/manifest.json"
 

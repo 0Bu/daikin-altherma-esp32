@@ -10,6 +10,10 @@
 
 namespace daik {
 
+// Create the write-serialization mutex before config_load or any producer task starts. Failure is
+// fail-stop: without it a factory reset could race a writer and boot with data it claimed erased.
+void nvs_storage_init();
+
 // The setters return the failing esp_err_t rather than a bare bool: config.cpp logs the key + the
 // error name to /diag + syslog, which is the only way to tell WHICH write failed and why (a full
 // partition reads very differently from a wedged flash).
@@ -38,7 +42,9 @@ bool                    nvs_get_blob(const char* key, std::vector<uint8_t>& out)
 // behind the physical recovery button (recovery_button.cpp) — the only config reset that does not
 // require reaching the device over the network. A missing namespace counts as success (nothing
 // stored = nothing to erase); anything else is reported so the caller can refuse to reboot into a
-// config it just claimed to have deleted.
+// config it just claimed to have deleted. Calling this also latches every setter off until reboot;
+// the latch is established under the same mutex as in-flight writes, so no task can recreate a key
+// in the visible confirmation delay after the erase.
 [[nodiscard]] esp_err_t nvs_erase_all();
 
 } // namespace daik

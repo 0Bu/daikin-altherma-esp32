@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build every supported target from one source tree, sign each app image with the offline OTA
-# key (if present), and stage the artifacts the web installer + OTA consume into dist/:
+# Build every supported target from one source tree. The default publishing mode REQUIRES the
+# offline OTA key and stages the artifacts the web installer + OTA consume into dist/:
 #   daikin-altherma-esp32<suffix>.bin          signed app image (OTA pulls this)
 #   daikin-altherma-esp32<suffix>-merged.bin   full-flash image, signed app embedded at its
 #                                              flash_args offset (manual factory-reset flash)
@@ -13,9 +13,9 @@
 #   daikin-altherma-esp32<suffix>-size.md      human-readable app/flash/RAM budget summary
 #   manifest.json                              browser-installer builds[] + OTA version field
 #
-# Calls idf.py / esptool / espsecure.py DIRECTLY — it assumes an ESP-IDF environment is already
+# Calls idf.py / esptool / espsecure DIRECTLY — it assumes an ESP-IDF environment is already
 # on PATH. In CI that is provided by espressif/esp-idf-ci-action. LOCALLY, run it wrapped:
-#   scripts/idf-docker.sh ./scripts/ci-build-all.sh 1.0.0
+#   scripts/idf-docker.sh ./scripts/ci-build-all.sh --source-sha "$(git rev-parse HEAD)" 1.0.0
 #
 # The version argument must be the version the build EMBEDS — ESP-IDF takes PROJECT_VER from
 # version.txt, and this script verifies the two agree before writing the manifest (see below).
@@ -23,10 +23,43 @@
 # same reason. NOT scripts/next-version.sh: that is the next RELEASE version, which is deliberately
 # ahead of the version.txt floor once tags exist, i.e. exactly the drift the check rejects.
 #
-# Usage: scripts/ci-build-all.sh [version]   (defaults to the version.txt the build embeds)
-# OTA_SIGNING_KEY_FILE (a PEM path) enables signing; absent -> unsigned (fork/PR without secret).
+# Usage: scripts/ci-build-all.sh [--compile-only] [--source-sha <40-hex>] [version]
+#        (version defaults to the version.txt the build embeds)
+#
+# Publishing mode requires OTA_SIGNING_KEY_FILE (or ota_signing_key.pem). --compile-only is the
+# untrusted-PR path: it builds and size-checks the exact source, but dist/ contains only the ELF and
+# size diagnostics. It can never stage an app/merged/Web-Serial binary or installer manifest.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+MODE=publish
+SOURCE_SHA=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --compile-only)
+            [ "$MODE" = publish ] || { echo "ci-build-all: --compile-only repeated" >&2; exit 2; }
+            MODE=compile-only; shift ;;
+        --source-sha)
+            [ -z "$SOURCE_SHA" ] || { echo "ci-build-all: --source-sha repeated" >&2; exit 2; }
+            [ "$#" -ge 2 ] || { echo "ci-build-all: --source-sha requires 40 hex characters" >&2; exit 2; }
+            SOURCE_SHA="$2"; shift 2 ;;
+        --) shift; break ;;
+        -*) echo "ci-build-all: unknown option '$1'" >&2; exit 2 ;;
+        *) break ;;
+    esac
+done
+[ "$#" -le 1 ] || {
+    echo "usage: ci-build-all.sh [--compile-only] [--source-sha <40-hex>] [version]" >&2
+    exit 2
+}
+if [ -n "$SOURCE_SHA" ] && [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "ci-build-all: --source-sha must be a lowercase 40-character Git SHA" >&2
+    exit 2
+fi
+[ "$MODE" = compile-only ] || [ -n "$SOURCE_SHA" ] || {
+    echo "ci-build-all: publishing mode requires --source-sha <40-hex>" >&2
+    exit 2
+}
 
 # ccache, when the toolchain image has it. `idf.py set-target` below wipes the build directory, so
 # every build compiles the whole graph from scratch — in CI that was ~3 minutes of a ~5 minute job,
@@ -54,16 +87,23 @@ TARGETS=(esp32s3)
 DIST=dist; rm -rf "$DIST"; mkdir -p "$DIST"
 SIGN_KEY="${OTA_SIGNING_KEY_FILE:-ota_signing_key.pem}"
 APP_SIZE_LIMIT=$((0x1e8000))   # slot (0x1f0000) minus 32 KB headroom
+[ "$MODE" = compile-only ] || [ -f "$SIGN_KEY" ] || {
+    echo "ci-build-all: refusing to create flashable artifacts without OTA_SIGNING_KEY_FILE" >&2
+    echo "ci-build-all: use --compile-only for an unsigned build that stages diagnostics only" >&2
+    exit 1
+}
 [ -f dependencies.lock ] || {
     echo "dependencies.lock is missing; resolve it with idf.py update-dependencies" >&2
     exit 1
 }
 LOCK_HASH="$(sha256sum dependencies.lock | cut -d ' ' -f1)"
+IDF_VERSION="$(scripts/idf-version.sh)"
 
 suffix()     { echo ""; }
 chipfamily() { echo "ESP32-S3"; }
 
 builds_json=""
+FINAL_APP_SHA256=""
 for t in "${TARGETS[@]}"; do
     echo "=== building $t ($VERSION) ==="
     rm -f sdkconfig
@@ -98,20 +138,20 @@ for t in "${TARGETS[@]}"; do
         exit 1
     }
 
-    # Sign the app image (RSA-3072, Secure Boot v2 scheme, no hardware Secure Boot).
+    # Sign the app image (RSA-3072, Secure Boot v2 scheme, no hardware Secure Boot). Publishing
+    # mode was fail-closed on the key before the build began. Compile-only deliberately leaves the
+    # linker output untouched and, crucially, never copies it into dist/.
     # The signed image must land back on $app itself: flash_args flashes the app BY PATH
-    # ("0x20000 daikin-altherma-esp32.bin"), so merge_bin below embeds whatever is at that path.
+    # ("0x20000 daikin-altherma-esp32.bin"), so merge-bin below embeds whatever is at that path.
     # Leave the raw linker output there and the browser installer ships an app that aborts in
     # esp_secure_boot_init_checks before app_main — a crash-loop with no bootloader rollback record.
-    if [ -f "$SIGN_KEY" ]; then
-        espsecure.py sign_data --version 2 --keyfile "$SIGN_KEY" --output "build/daikin-signed.bin" "$app"
+    if [ "$MODE" = publish ]; then
+        espsecure sign-data --version 2 --keyfile "$SIGN_KEY" --output "build/daikin-signed.bin" "$app"
         cp "build/daikin-signed.bin" "$app"
         cp "$app" "$DIST/daikin-altherma-esp32${sfx}.bin"
+        FINAL_APP_SHA256="$(sha256sum "$app" | cut -d ' ' -f1)"
     else
-        echo "WARNING: no OTA_SIGNING_KEY_FILE — shipping UNSIGNED $t (no OTA/preview on main)" >&2
-        echo "WARNING: the browser installer image is UNSIGNED too — it crash-loops before" >&2
-        echo "WARNING: app_main on this signature-checking config. Do NOT flash it to a board." >&2
-        cp "$app" "$DIST/daikin-altherma-esp32${sfx}.bin"
+        echo "compile-only: unsigned $t app remains in build/ and will not be uploaded or published"
     fi
 
     # Size-check the image that actually gets flashed — signing appends a 4 KB signature sector.
@@ -122,66 +162,68 @@ for t in "${TARGETS[@]}"; do
     # current Flash/DIRAM/IRAM headroom visible in the Actions summary instead of only on failure.
     size_json="$DIST/daikin-altherma-esp32${sfx}-size.json"
     size_md="$DIST/daikin-altherma-esp32${sfx}-size.md"
+    policy_limit="$APP_SIZE_LIMIT"
+    # Secure Boot v2 appends a 4 KB signature sector. Reserve it in an unsigned PR build so a PR
+    # cannot pass the size gate and then overflow only when the trusted main build signs it.
+    [ "$MODE" = publish ] || policy_limit=$((APP_SIZE_LIMIT - 0x1000))
     idf.py size --format json2 --output-file "$size_json"
     python3 scripts/report-firmware-size.py \
         --idf-size "$size_json" \
         --app "$app" \
-        --policy-limit "$APP_SIZE_LIMIT" \
+        --policy-limit "$policy_limit" \
         --target "$t" > "$size_md"
     cat "$size_md"
-    [ "$sz" -le "$APP_SIZE_LIMIT" ] || { echo "app image for $t too big: $sz > $APP_SIZE_LIMIT" >&2; exit 1; }
+    [ "$sz" -le "$policy_limit" ] || { echo "app image for $t too big: $sz > $policy_limit" >&2; exit 1; }
 
-    # Canonical full-flash image. Besides remaining useful for an intentional factory-reset flash,
-    # merge_bin applies any image-header transformations the browser flasher cannot perform.
-    # The Web Serial manifest does NOT flash this whole file: merge_bin fills every gap with 0xff,
-    # including nvs@0x9000, so writing it at offset 0 destroys the configuration even when the user
-    # declines the separate whole-chip Erase prompt.
-    merged="$DIST/daikin-altherma-esp32${sfx}-merged.bin"
-    ( cd build && esptool --chip "$t" merge_bin -o "../$merged" @flash_args )
+    if [ "$MODE" = publish ]; then
+        # Canonical full-flash image. Besides remaining useful for an intentional factory-reset
+        # flash, merge-bin applies image-header transformations the browser flasher cannot perform.
+        # The Web Serial manifest does NOT flash this whole file: merge-bin fills every gap with
+        # 0xff, including nvs@0x9000, so writing it at offset 0 destroys the configuration even when
+        # the user declines the separate whole-chip Erase prompt.
+        merged="$DIST/daikin-altherma-esp32${sfx}-merged.bin"
+        ( cd build && esptool --chip "$t" merge-bin -o "../$merged" @flash_args )
 
-    # Self-check: CI must never publish an installer image with an unsigned app. Verify the app
-    # region of the MERGED artifact — carved back out at the offset flash_args gave it — rather
-    # than the file we told merge_bin to read, so the path indirection itself stays covered.
-    # Both offsets are 4 KB multiples (an app partition is 64 KB-aligned; signing pads to 4 KB and
-    # appends a 4 KB signature sector), so dd can carve it out block-wise — no pipe into `head`,
-    # whose early close would SIGPIPE dd into a spurious pipefail once anything follows the app.
-    if [ -f "$SIGN_KEY" ]; then
+        # Self-check: CI must never publish an installer image with an unsigned app. Verify the app
+        # region of the MERGED artifact — carved back out at the offset flash_args gave it — rather
+        # than the file we told merge-bin to read, so the path indirection itself stays covered.
+        # Both offsets are 4 KB multiples (an app partition is 64 KB-aligned; signing pads to 4 KB
+        # and appends a 4 KB signature sector), so dd can carve it out block-wise — no pipe into
+        # `head`, whose early close would SIGPIPE dd into a spurious pipefail once anything follows.
         off="$(awk -v f="$(basename "$app")" '$2 == f { print $1 }' build/flash_args)"
         [ -n "$off" ] || { echo "no app entry for $(basename "$app") in build/flash_args" >&2; exit 1; }
         dd if="$merged" of=build/merged-app.bin bs=4096 skip=$(( off / 4096 )) count=$(( sz / 4096 )) status=none
         scripts/require-signed.sh build/merged-app.bin
-    fi
 
-    # Stage only the byte ranges named by flash_args for Web Serial. Carving them from the merged
-    # image (rather than copying the inputs) retains merge_bin's header preparation, while separate
-    # manifest parts leave NVS and every other gap untouched on a no-Erase update.
-    web_parts=""
-    web_part_count=0
-    while read -r off rel; do
-        src="build/$rel"
-        [ -f "$src" ] || { echo "flash_args part does not exist: $src" >&2; exit 1; }
-        part_size="$(stat -f%z "$src" 2>/dev/null || stat -c%s "$src")"
-        part_offset=$((off))
-        base="$(basename "$rel")"
-        if [ "$base" = "$(basename "$app")" ]; then
-            web_name="daikin-altherma-esp32${sfx}.bin"
-        else
-            web_name="daikin-altherma-esp32${sfx}-web-$base"
-        fi
-        dd if="$merged" of="$DIST/$web_name" bs=1 skip="$part_offset" count="$part_size" status=none
-        staged_size="$(stat -f%z "$DIST/$web_name" 2>/dev/null || stat -c%s "$DIST/$web_name")"
-        [ "$staged_size" -eq "$part_size" ] || {
-            echo "short Web Serial part $web_name: $staged_size != $part_size" >&2
-            exit 1
-        }
-        web_parts="${web_parts:+$web_parts,}{\"path\":\"$web_name\",\"offset\":$part_offset}"
-        web_part_count=$((web_part_count + 1))
-    done < <(awk '$1 ~ /^0x[0-9a-fA-F]+$/ { print $1, $2 }' build/flash_args)
-    [ "$web_part_count" -gt 0 ] || { echo "no flash parts found in build/flash_args" >&2; exit 1; }
+        # Stage only the byte ranges named by flash_args for Web Serial. Carving them from the
+        # merged image retains merge-bin's header preparation, while separate manifest parts leave
+        # NVS and every other gap untouched on a no-Erase update.
+        web_parts=""
+        web_part_count=0
+        while read -r off rel; do
+            src="build/$rel"
+            [ -f "$src" ] || { echo "flash_args part does not exist: $src" >&2; exit 1; }
+            part_size="$(stat -f%z "$src" 2>/dev/null || stat -c%s "$src")"
+            part_offset=$((off))
+            base="$(basename "$rel")"
+            if [ "$base" = "$(basename "$app")" ]; then
+                web_name="daikin-altherma-esp32${sfx}.bin"
+            else
+                web_name="daikin-altherma-esp32${sfx}-web-$base"
+            fi
+            dd if="$merged" of="$DIST/$web_name" bs=1 skip="$part_offset" count="$part_size" status=none
+            staged_size="$(stat -f%z "$DIST/$web_name" 2>/dev/null || stat -c%s "$DIST/$web_name")"
+            [ "$staged_size" -eq "$part_size" ] || {
+                echo "short Web Serial part $web_name: $staged_size != $part_size" >&2
+                exit 1
+            }
+            web_parts="${web_parts:+$web_parts,}{\"path\":\"$web_name\",\"offset\":$part_offset}"
+            web_part_count=$((web_part_count + 1))
+        done < <(awk '$1 ~ /^0x[0-9a-fA-F]+$/ { print $1, $2 }' build/flash_args)
+        [ "$web_part_count" -gt 0 ] || { echo "no flash parts found in build/flash_args" >&2; exit 1; }
 
-    # The app served to OTA and the app carved for Web Serial are now the exact same bytes. Re-run
-    # the signing guard on that final staged file, not only on the pre-merge input.
-    if [ -f "$SIGN_KEY" ]; then
+        # The app served to OTA and the app carved for Web Serial are now the exact same bytes.
+        # Re-run the signing guard on that final staged file, not only on the pre-merge input.
         scripts/require-signed.sh "$DIST/daikin-altherma-esp32${sfx}.bin"
     fi
 
@@ -230,9 +272,18 @@ with open(sys.argv[1], "rb") as f, lzma.open(sys.argv[1] + ".xz", "wb", preset=9
     elf_comp="$(stat -f%z "$elf.xz" 2>/dev/null || stat -c%s "$elf.xz")"
     awk -v r="$elf_raw" -v c="$elf_comp" 'BEGIN { printf "archived ELF: %.1f MB -> %.1f MB xz (%.1fx)\n", r/1e6, c/1e6, r/c }'
 
-    cf="$(chipfamily "$t")"
-    builds_json="${builds_json:+$builds_json,}{\"chipFamily\":\"$cf\",\"parts\":[$web_parts]}"
+    if [ "$MODE" = publish ]; then
+        cf="$(chipfamily "$t")"
+        builds_json="${builds_json:+$builds_json,}{\"chipFamily\":\"$cf\",\"parts\":[$web_parts]}"
+    fi
 done
+
+if [ "$MODE" = compile-only ]; then
+    scripts/check-nonflashable-artifacts.sh "$DIST"
+    echo "staged non-flashable compile diagnostics in $DIST/ for $VERSION"
+    exit 0
+fi
+[ -n "$FINAL_APP_SHA256" ] || { echo "ci-build-all: final signed app hash is missing" >&2; exit 1; }
 
 # One manifest serves both the installer (builds[]) and OTA (version). The browser installer reads
 # builds[]/chipFamily; the device OTA reads .version and pulls daikin-altherma-esp32<suffix>.bin.
@@ -240,9 +291,17 @@ cat > "$DIST/manifest.json" <<EOF
 {
   "name": "daikin-altherma-esp32",
   "version": "$VERSION",
+  "provenance": {
+    "source_sha": "$SOURCE_SHA",
+    "idf_version": "$IDF_VERSION",
+    "dependencies_lock_sha256": "$LOCK_HASH",
+    "app_sha256": "$FINAL_APP_SHA256"
+  },
   "new_install_prompt_erase": true,
   "builds": [$builds_json]
 }
 EOF
+scripts/check-manifest-provenance.py "$DIST/manifest.json" \
+    "$DIST/daikin-altherma-esp32.bin" "$SOURCE_SHA" "$IDF_VERSION" dependencies.lock
 scripts/check-web-installer-plan.py "$DIST/manifest.json" partitions.csv
 echo "staged dist/ for $VERSION"

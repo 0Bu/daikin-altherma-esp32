@@ -23,11 +23,12 @@ static esp_err_t ota_check(httpd_req_t* req) {
 // POST /ota/update[?downgrade=1] — start the download of the SELECTED channel's build.
 //
 // ?downgrade=1 is the channel switch, and the only way to install a build that is older than the
-// running one (dev -> the last release). It is a query FLAG rather than a body field on purpose:
-// the same one-place-to-get-wrong rule /diag?clear=1 and /coredump?clear=1 follow, applied through
-// the host-tested query_flag_on so ?downgrade=0 cannot mean the same thing as ?downgrade=1. The
-// permission travels with THIS request only — it is never stored, so a later automatic check can
-// never inherit it — and it relaxes nothing but the version ordering (logic/version_cmp.hpp).
+// running one (dev -> the last release). It is a query FLAG rather than a body field on purpose and
+// passes through the host-tested query_flag_on, so ?downgrade=0 cannot mean the same thing as
+// ?downgrade=1. The permission travels with THIS POST only — it is never stored, so a later
+// automatic check can never inherit it — and it relaxes nothing but the version ordering
+// (logic/version_cmp.hpp). Evidence deletion is kept out of query flags entirely: /diag/clear and
+// /coredump/clear are explicit POST routes.
 static esp_err_t ota_do(httpd_req_t* req) {
     char q[48];
     bool downgrade = false;

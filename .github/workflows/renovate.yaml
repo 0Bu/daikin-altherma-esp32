@@ -21,7 +21,7 @@ permissions:
   pull-requests: write
 jobs:
   renovate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       # COMMIT SIGNING: this bot CANNOT sign, and that is why the main ruleset no longer requires it.
@@ -55,7 +55,7 @@ jobs:
       # To get signing back, the token has to change: an App identity
       # (actions/create-github-app-token -> `x-access-token:`, after which the `auto` default signs
       # by itself) or a `gitPrivateKey`. Re-adding the ruleset rule alone just re-blocks every PR.
-      - uses: renovatebot/github-action@e09d604f8f803bb527bd8321ed5be06c460b8682 # v46.2.2
+      - uses: renovatebot/github-action@e09d604f8f803bb527bd8321ed5be06c460b8682  # v46.2.2
         with:
           token: ${{ secrets.RENOVATE_TOKEN }}
         env:

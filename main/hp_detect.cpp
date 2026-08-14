@@ -103,8 +103,9 @@ DetectResult hp_detect_run() {
         // CHECK the bring-up, exactly as poll_once does, and for two distinct reasons:
         //   * A failed REMAP leaves the driver valid on the PREVIOUS pins (hp_comm.cpp keeps it that
         //     way on purpose). Probing on anyway means an answer heard on the old pair gets recorded
-        //     as this candidate's — and poll_detect then persists that wrong pair via
-        //     config_save_link, so the next boot starts from a lie the sweep has to undo.
+        //     as this candidate's — and poll_detect would offer that wrong pair to the
+        //     generation/revision-checked detected-link commit, so a later boot could start from a
+        //     lie the sweep has to undo.
         //   * A failed first INSTALL leaves no driver at all. Probing anyway would make a local UART
         //     failure indistinguishable from a silent X10A link. Naming the real cause once is the
         //     whole point of the equivalent guard in poll_once.

@@ -9,7 +9,20 @@ and the OTA-signing / key lifecycle.
 - **The HTTP API and web UI have no authentication or TLS.** This is deliberate — the device is
   meant to sit on a trusted home LAN. Anyone who can reach `http://daikin-altherma-esp32.local` can read
   values and change the configuration. **Never expose it to the internet.** If you need access
-  control, front it with a reverse proxy or put it on an isolated VLAN.
+  control, prefer an isolated VLAN. A reverse proxy works only as a deliberately separate security
+  boundary: it must terminate authentication/TLS and CSRF protection, then send upstream requests
+  with `Host` set to the device mDNS name/current IP and without an external browser `Origin` or
+  cross-site Fetch Metadata. Passing the public proxy Host or `https://` Origin through is rejected
+  by the device policy below; merely forwarding port 80 is not supported internet exposure.
+- **A browser cannot extend that trust boundary through DNS rebinding or cross-site requests.** On
+  the configured LAN, every route accepts `Host` only for the fixed mDNS name or the current
+  WiFi/Ethernet IPv4 address. A present `Origin` must independently name one of those identities,
+  and cross-site/unknown `Sec-Fetch-Site` values are rejected. Native clients normally send neither
+  browser header and continue to work (an HTTP/1.0 probe may omit `Host` too); a Host they do send
+  must still name the device. Every body-bearing POST requires `Content-Type: application/json`, so
+  a hostile page cannot use a CORS-safelisted form or `text/plain` request to change configuration.
+  The captive portal is exempt from the Host check because OS connectivity probes deliberately use
+  unrelated Host names; its sole write, `/set_wifi`, still requires JSON.
 - **The open setup AP exposes ONLY the provisioning surface.** When no configured network is
   reachable at boot, the device falls back to an unauthenticated `WIFI_AUTH_OPEN` SoftAP
   (`daikin-altherma-esp32-setup`) so WiFi can be entered from a phone — any radio client in range can
@@ -18,9 +31,9 @@ and the OTA-signing / key lifecycle.
   `GET /scan` is withheld too: the portal takes the SSID as free text and never scans, so nothing is
   lost by not handing an unauthenticated radio client a survey of every AP in range (SSIDs + RSSI —
   a location fingerprint). The full read/config/OTA/MCP API — including `/coredump` and `/diag`, which can carry
-  WiFi/MQTT secrets — is **withheld** on the AP and registered only once the device is on the
-  configured STA network (the trusted LAN). So a nearby client can join the device to WiFi but cannot
-  read a core dump, read live state, or reconfigure it. The boundary is one host-tested policy
+  WiFi/MQTT secrets — is **withheld** on the AP and registered only on the configured WiFi/Ethernet
+  LAN surface. So a nearby client can join the device to WiFi but cannot read a core dump, read live
+  state, or reconfigure it. The boundary is one host-tested policy
   (`logic/http_surface.hpp`) applied at registration time in `http_start()`; a withheld GET falls
   through to the setup page, a withheld POST 404s.
 - **The surface is decided by whether that AP is running — not by the WiFi mode.** It used to be
@@ -52,10 +65,10 @@ and the OTA-signing / key lifecycle.
   secrets** (the WiFi/MQTT passwords and TLS session material that pass through RAM). On the trusted
   LAN this is acceptable; anywhere less trusted it is a remote credential-disclosure vector with no
   physical access needed. A dump is written only when the firmware actually crashes; erase it with
-  `GET /coredump?clear=1` once retrieved so a stale image isn't left readable — or with the crash
+  `POST /coredump/clear` once retrieved so a stale image isn't left readable — or with the crash
   banner's **Delete report** (`POST /crash/dismiss`), which erases the same image *and* stops the
-  device reporting the crash. Both are trusted-LAN only, and the delete is a `POST` for that reason:
-  it destroys evidence, so it must not be triggerable by a link a browser follows on its own.
+  device reporting the crash. All destructive actions are POSTs: they must not be triggerable by a
+  link, prefetch or crawler.
   - **The crash *summary* is deliberately not sensitive.** What the firmware surfaces automatically —
     `/status.last_crash`, the web-UI banner, and the retained `<base>/crash` MQTT topic — is
     only the reset reason, the crashed task name, and raw program-counter/backtrace **addresses**.
@@ -176,9 +189,10 @@ compromised update host (or its GitHub Pages source) cannot push unsigned or tam
   The requester is a trusted-LAN client that just picked a channel in the web UI and confirmed a
   dialog spelling out that the build is older — the same trust level that can already erase the
   config or re-point the X10A pins.
-- **Rollback health gate** *(implemented)* — a freshly-flashed image stays `PENDING_VERIFY` until it
-  has run healthily for ~90 s (`ota_update.cpp`, `logic/health_gate.hpp`), so a boots-but-crashes
-  image is reverted.
+- **Rollback health gate** *(implemented)* — a freshly OTA-installed image stays `PENDING_VERIFY`
+  until it has run for ~90 s and then proves either an active WiFi/Ethernet link or a provisioning
+  portal that is actually running (`ota_update.cpp`, `logic/health_gate.hpp`), so a
+  boots-but-crashes or boots-without-a-recovery-surface image is reverted.
 
 The ESP32-S3 supports the V2 RSA scheme at its default minimum revision.
 
@@ -239,10 +253,12 @@ always re-flashable over USB. The containment is therefore *prevention*, not rec
 image — i.e. one installed via `esp_ota_*` (a real OTA), which always leaves a valid previous slot.
 It commits the image (`esp_ota_mark_app_valid_cancel_rollback()`) only once it has proven **healthy**,
 not merely survived a timer: it must run past a base window (~90 s — survives an early crash-loop) AND
-reach connectivity (STA online, or the setup portal when no credentials are stored). An update that
-boots but can't get online — e.g. a WiFi regression that could never be re-flashed OTA — is left
-`PENDING_VERIFY` up to a hard cap (~10 min, forgiving of a briefly-offline site); the next reboot
-then rolls it back to the previous firmware. The decision is the host-tested `daik::health_gate_decide()` in `main/logic/health_gate.hpp`
+prove either an active IP link (`NetLink::Wifi` or `NetLink::Eth`) or that the provisioning portal is
+actually running in this boot. The presence or absence of stored WiFi credentials is not health
+evidence: a wired boot deliberately keeps the portal off, and losing that Ethernet lease must not be
+mistaken for a recovery surface. An update with neither link nor portal is left `PENDING_VERIFY` up to
+a hard cap (~10 min, forgiving of a briefly-offline site); the next reboot then rolls it back to the
+previous firmware. The decision is the host-tested `daik::health_gate_decide()` in `main/logic/health_gate.hpp`
 (covered by `test/test_logic.cpp`). A USB/`@flash_args` image is `UNDEFINED`, never `PENDING_VERIFY`,
 so the gate is a no-op for it and can never strand a fresh board.
 
@@ -274,8 +290,9 @@ present on the trusted LAN. The counter lives in `daik_cfg`, so a factory reset 
 
 - The private key is an **RSA-3072 PEM** kept **offline**. It is never committed (`.gitignore`
   blocks `*.pem`) and, in CI, exists only transiently: `build.yml` writes it from the
-  `OTA_SIGNING_KEY` repository secret, `ci-build-all.sh` signs each image, and a `always()` step
-  shreds it.
+  `OTA_SIGNING_KEY` repository secret, `ci-build-all.sh` signs each image, and an `always()` step
+  removes the workspace file with `rm -f ota_signing_key.pem`. This is lifecycle cleanup on the
+  ephemeral runner, not a claim of secure storage-media erasure.
 - **Fork PRs get no secret** → they build **unsigned**, as a compile check only. Nothing is
   published or offered for flashing (an unsigned image would crash-loop at boot on a signed-build
   device).

@@ -5,8 +5,8 @@
 #include "http_client_diag.hpp"
 #include "logic/open_meteo.hpp"
 #include "logic/weather_forecast.hpp"
+#include "net.hpp"
 #include "sntp_time.hpp"
-#include "wifi.hpp"
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
@@ -245,13 +245,14 @@ void weather_task(void*) {
                 s_status.longitude = longitude;
                 s_status.model = kModel;
             }
-            if (!wifi_info().connected || !time_synced()) {
+            const bool network_up = net_is_up();
+            if (!network_up || !time_synced()) {
                 {
                     Lock lk(s_mtx);
                     s_status.fetching = false;
                     s_status.available = false;
                     s_status.state = "waiting";
-                    s_status.reason = !wifi_info().connected ? "network_unavailable" : "clock_unsynced";
+                    s_status.reason = !network_up ? "network_unavailable" : "clock_unsynced";
                 }
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
                 continue;

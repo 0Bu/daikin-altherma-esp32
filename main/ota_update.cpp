@@ -22,6 +22,8 @@
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "http_client_diag.hpp"
+#include "net.hpp"
+#include "provisioning.hpp"
 #include "wifi.hpp"
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
@@ -507,9 +509,10 @@ OtaStatus ota_status() {
 }
 
 // Keep rollback armed until this OTA image has proven HEALTHY, not merely survived a timer: it must
-// have run for a base window (survives an early crash-loop -> bootloader reverts) AND reached
-// connectivity (STA online, or the setup portal if it has no credentials). A boots-but-broken update
-// — e.g. a WiFi regression that can never get online to be re-flashed — is left PENDING_VERIFY, so
+// have run for a base window (survives an early crash-loop -> bootloader reverts) AND expose a
+// recovery path — a live IP transport (WiFi or Ethernet), or a provisioning portal that is actually
+// running in this boot. Stored-credential state alone is not evidence. A boots-but-broken update
+// — e.g. a network regression that can never get online to be re-flashed — is left PENDING_VERIFY, so
 // the next reboot rolls back to the previous slot instead of sealing the break in. The decision is
 // the host-tested daik::health_gate_decide(); see logic/health_gate.hpp + docs/SECURITY.md.
 //
@@ -536,8 +539,8 @@ static void health_gate_task(void*) {
     bool skip_reported = false;
     for (int elapsed = 0;; elapsed += kHealthPollS) {
         // THE BODY SELF-GUARDS, like every other allocating task loop here (.claude/CLAUDE.md), and
-        // it is worth saying why it counts as one: wifi_info() is POD and health_gate_decide() is
-        // pure, but wifi_configured() reads config() BY VALUE — ~10 std::string copies for a bool.
+        // it is worth saying why it counts as one: net_kind() is atomic-only,
+        // provisioning_ap_active() is boot-latched and health_gate_decide() is pure.
         // The window this task runs in is the worst possible place to leave that unguarded: 90-600 s
         // into an OTA boot, i.e. exactly when the MQTT discovery burst and a TLS session put the
         // heap at its peak. An escape is std::terminate -> reboot, and a reboot while PENDING_VERIFY
@@ -546,9 +549,9 @@ static void health_gate_task(void*) {
         // Skipping a cycle is safe and is the conservative direction: no verdict is reached, elapsed
         // still advances, and the hard cap still ends the window by leaving the image PENDING_VERIFY.
         try {
-            const bool connected = wifi_info().connected;
+            const NetLink link = net_kind();
             const HealthVerdict v = health_gate_decide(elapsed, kHealthBaseWindowS, kHealthHardCapS,
-                                                       wifi_configured(), connected);
+                                                       link, provisioning_ap_active());
             if (v == HealthVerdict::Commit) {
                 // The return value decides whether this image survives the next reboot, so it is not
                 // one to discard: a failed commit leaves the image PENDING_VERIFY and the bootloader
@@ -556,8 +559,8 @@ static void health_gate_task(void*) {
                 // of what happened — on the one path where the evidence has to be right.
                 const esp_err_t e = esp_ota_mark_app_valid_cancel_rollback();
                 if (e == ESP_OK)
-                    ESP_LOGI("ota", "image marked valid (health gate passed after %ds, wifi=%d)",
-                             elapsed, connected);
+                    ESP_LOGI("ota", "image marked valid (health gate passed after %ds, link=%s)",
+                             elapsed, net_link_str(link));
                 else
                     diag_printf("ota: health gate passed but marking the image valid failed (%s) — "
                                 "the next reboot rolls back to the previous firmware\n",

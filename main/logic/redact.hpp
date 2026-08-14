@@ -9,7 +9,7 @@
 // copies of a rule the CI gate can only see in one place.
 //
 // TWO SHAPES, because the two routes leak differently:
-//   * /status leaks by FIELD — fourteen named values in a JSON object built field by field, so the
+//   * /status leaks by FIELD — named values in a JSON object built field by field, so the
 //     substitution happens where the value is written (http_status.cpp calls redact_or) and never as
 //     a post-processing pass over the finished string. That matters: http_append_status_json() runs
 //     on the httpd task whose stack overflow killed v1.0.12, and a second full-size buffer is
@@ -25,13 +25,11 @@
 // Deliberately NOT redacted, because they identify the FIRMWARE rather than the reporter:
 // version, app_elf_sha256, uptime, heap, the X10A pins, the detected model. And not wifi.rssi /
 // wifi.connected / syslog.port either — the point of the report is that those still answer.
-// The CLOSEST CALL is the reference-temperature and circulation sources' *_path selectors:
-// user-typed, up to 128 chars,
-// and sitting in the same block as the name and topic that ARE redacted. They stay because a path
-// describes the SHAPE of someone else's payload (`thermostat.current_temperature_c`) rather than
-// naming a machine, a room or a place, and a report whose room source cannot be parsed cannot be
-// diagnosed. A path spelled `zones.<room>.temp` would break that reasoning — which is why this is
-// written down as a decision rather than left as the one shape the derived count cannot see.
+// The reference-temperature and circulation sources' seven *_path selectors are user-typed too.
+// A generic path can look structural (`thermostat.current_temperature_c`), but it can just as
+// legitimately spell `zones.<room>.temp`, naming a room, person or device. Structure is not worth
+// leaking identity into a public issue, so paths follow the source names/topics through the same
+// field-level substitution.
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -43,13 +41,17 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The twenty /status values http_status.cpp passes through redact_identifier (via its jstr_r
-// wrapper). Listed here rather than only at the call sites so the set is reviewable in one place:
+// The twenty-seven /status values http_status.cpp passes through redact_identifier (via its jstr_r
+// wrapper). This array is the machine-readable source for tools/redact/check_diag_coverage.py
+// (`--list` prints it); the audit also compares docs/REPORTING.md's public table with it:
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  mqtt.base
 //   net.ip  net.eth.ip  net.eth.mac
-//   reference_temperature.name  reference_temperature.topic
-//   reference_temperature.setpoint_topic  reference_temperature.timestamp_topic
-//   circulation_source.name  circulation_source.topic
+//   reference_temperature.name  reference_temperature.topic  reference_temperature.temperature_path
+//   reference_temperature.setpoint_topic  reference_temperature.setpoint_path
+//   reference_temperature.timestamp_topic  reference_temperature.timestamp_path
+//   reference_temperature.enabled_path  reference_temperature.hvac_mode_path
+//   circulation_source.name  circulation_source.topic  circulation_source.power_path
+//   circulation_source.timestamp_path
 //   weather_forecast.latitude  weather_forecast.longitude
 //   syslog.host  ntp.server  modbus.host
 // modbus.host joined the set with the HomeHub transport (#32): it is a LAN address, whether typed
@@ -69,9 +71,24 @@ inline constexpr const char* REDACTED = "<redacted>";
 //
 // The COUNT is checked (tools/redact/check_diag_coverage.py derives it from the call sites), which
 // it was not until this comment and that constant had drifted two fields apart in silence. What is
-// still only a review point is the direction no count can see: a NEW identifying field that nobody
-// wrapped at all. It never reaches the redactor, so it never reaches this number either.
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 20;
+// The audit separately flags a Config string emitted through plain jstr(): that is the direction a
+// call-site count alone cannot see — a new identifying field that was never wrapped at all.
+inline constexpr std::string_view REDACTED_STATUS_FIELD_NAMES[] = {
+    "wifi.ssid", "wifi.ip", "wifi.bssid", "wifi.mac", "mqtt.broker", "mqtt.base",
+    "net.ip", "net.eth.ip", "net.eth.mac",
+    "reference_temperature.name", "reference_temperature.topic",
+    "reference_temperature.temperature_path", "reference_temperature.setpoint_topic",
+    "reference_temperature.setpoint_path", "reference_temperature.timestamp_topic",
+    "reference_temperature.timestamp_path", "reference_temperature.enabled_path",
+    "reference_temperature.hvac_mode_path",
+    "circulation_source.name", "circulation_source.topic", "circulation_source.power_path",
+    "circulation_source.timestamp_path",
+    "weather_forecast.latitude", "weather_forecast.longitude",
+    "syslog.host", "ntp.server", "modbus.host",
+};
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 27;
+static_assert(REDACTED_STATUS_FIELDS ==
+              sizeof(REDACTED_STATUS_FIELD_NAMES) / sizeof(REDACTED_STATUS_FIELD_NAMES[0]));
 
 // Field-level substitution for the /status builder. Returns by value because every caller feeds it
 // straight into json_quote(), which copies anyway.

@@ -1,44 +1,6 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(ls:*)",
-      "Bash(cat:*)",
-      "Bash(find:*)",
-      "Bash(grep:*)",
-      "Bash(rg:*)",
-      "Bash(jq:*)",
-      "Bash(wc:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(file:*)",
-      "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(git branch:*)",
-      "Bash(git add:*)",
-      "Bash(git fetch:*)",
-      "Bash(git checkout:*)",
-      "Bash(git push:*)",
-      "Bash(gh pr view:*)",
-      "Bash(gh pr list:*)",
-      "Bash(gh pr diff:*)",
-      "Bash(gh run view:*)",
-      "Bash(gh run list:*)",
-      "Bash(gh run watch:*)",
-      "Bash(gh run download:*)",
-      "Bash(gh pr create:*)",
-      "Bash(gh pr comment:*)",
-      "Bash(scripts/run-mock-tests.sh:*)",
-      "Bash(scripts/idf-docker.sh:*)",
-      "Bash(scripts/next-version.sh:*)",
-      "Bash(scripts/build-pages.sh:*)",
-      "Bash(cmake:*)",
-      "Bash(ctest:*)",
-      "Bash(python3:*)",
-      "Bash(esptool:*)",
-      "Bash(curl:*)"
-    ]
+    "allow": []
   },
   "hooks": {
     "PreToolUse": [
@@ -89,11 +51,11 @@
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-use-case-review.sh\"",
             "statusMessage": "Running complete UI use-case gate\u2026"
           },
-        {
-          "type": "command",
-          "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh\"",
-          "statusMessage": "Checking source-absence gate\u2026"
-        }
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh\"",
+            "statusMessage": "Checking source-absence gate\u2026"
+          }
         ]
       },
       {
@@ -123,11 +85,11 @@
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-use-case-review.sh\"",
             "statusMessage": "Running complete UI use-case gate\u2026"
           },
-        {
-          "type": "command",
-          "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh\"",
-          "statusMessage": "Checking source-absence gate\u2026"
-        }
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh\"",
+            "statusMessage": "Checking source-absence gate\u2026"
+          }
         ]
       }
     ],

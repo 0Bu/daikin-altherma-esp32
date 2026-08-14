@@ -14,6 +14,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 REPO="$PWD"
+SOURCE_A="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SOURCE_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
@@ -37,14 +39,21 @@ git init -q "$T/work"
   git branch -M main && git remote add origin "$T/origin.git" && git push -q origin main
 )
 
-# publish <root-version> <dev-version>: (re)create gh-pages on the bare origin with those manifests.
+# publish <root-version> <dev-version> [root-source]: (re)create gh-pages on the bare origin.
+# `no-provenance` deliberately models a manifest written by the pre-provenance workflow.
 publish() {
+  local root_source="${3:-$SOURCE_A}"
   rm -rf "$T/pages"; git init -q "$T/pages"
   (
     cd "$T/pages" || exit 1
     git config user.email t@t; git config user.name t; git config commit.gpgsign false
     mkdir -p dev
-    printf '{"name":"x","version":"%s"}\n' "$1" > manifest.json
+    if [ "$root_source" = no-provenance ]; then
+      printf '{"name":"x","version":"%s"}\n' "$1" > manifest.json
+    else
+      printf '{"name":"x","version":"%s","provenance":{"source_sha":"%s"}}\n' \
+        "$1" "$root_source" > manifest.json
+    fi
     [ -n "${2:-}" ] && printf '{"name":"x","version":"%s"}\n' "$2" > dev/manifest.json
     git add -A && git commit -qm pages
     git branch -M gh-pages && git remote add origin "$T/origin.git" && git push -qf origin gh-pages
@@ -55,6 +64,8 @@ run() { ( cd "$T/work" && ./scripts/check-publish-version.sh "$@" ) >"$T/out.log
 echo "== 1. no gh-pages at all: the first publish ever is not blocked =="
 run release 1.0.0; check "release passes" "$?" "0"
 run dev 1.0.0-dev.1; check "dev passes"   "$?" "0"
+run --source-sha "$SOURCE_A" release-resume 1.0.0
+check "first release-resume passes with an explicit source" "$?" "0"
 
 echo "== 2. each mode reads its OWN feed's manifest =="
 publish 1.0.13 1.0.14-dev.2
@@ -78,13 +89,37 @@ echo "== 4. republishing the SAME version is refused too =="
 run release 1.0.13;    check "equal release version refused" "$?" "1"
 run dev 1.0.14-dev.2;  check "equal dev version refused"     "$?" "1"
 
-echo "== 5. modes that publish nothing are skipped, unknown modes are not =="
+echo "== 5. a RELEASE resume may repeat exactly one stable version =="
+run release-resume 1.0.13
+check "resume without source identity is refused" "$?" "2"
+run --source-sha "$SOURCE_A" release-resume 1.0.13
+check "equal release and identical source pass" "$?" "0"
+run --source-sha "$SOURCE_B" release-resume 1.0.13
+check "equal release from different source is refused" "$?" "1"
+check "source mismatch names both identities" \
+      "$(grep -c "$SOURCE_A.*$SOURCE_B" "$T/out.log")" "1"
+run --source-sha "$SOURCE_A" release-resume 1.0.14
+check "new stable release still passes" "$?" "0"
+run --source-sha "$SOURCE_A" release-resume 1.0.13-rc.1
+check "pre-release resume is refused" "$?" "1"
+run --source-sha "$SOURCE_A" release-resume 1.0.12
+check "older release resume is refused" "$?" "1"
+
+publish 1.0.13 1.0.14-dev.2 no-provenance
+run --source-sha "$SOURCE_A" release-resume 1.0.13
+check "equal legacy manifest without provenance fails closed" "$?" "2"
+publish 1.0.13 1.0.14-dev.2 short-source
+run --source-sha "$SOURCE_A" release-resume 1.0.13
+check "equal manifest with malformed source fails closed" "$?" "2"
+publish 1.0.13 1.0.14-dev.2
+
+echo "== 6. modes that publish nothing are skipped, unknown modes are not =="
 run pr 1.0.14-PR-7;    check "pr is skipped"      "$?" "0"
 run none 1.0.14;       check "none is skipped"    "$?" "0"
 run publish 1.0.14;    check "unknown mode fails" "$?" "2"
 run release "";        check "missing version"    "$?" "2"
 
-echo "== 6. an unreadable reference fails CLOSED, it does not read as 'nothing published' =="
+echo "== 7. an unreadable reference fails CLOSED, it does not read as 'nothing published' =="
 publish 1.0.13 ""                      # dev/manifest.json absent -> first publish of that feed
 run dev 1.0.0-dev.1; check "absent dev manifest passes" "$?" "0"
 rm -rf "$T/pages"; git init -q "$T/pages"

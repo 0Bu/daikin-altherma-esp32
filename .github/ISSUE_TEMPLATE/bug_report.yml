@@ -212,7 +212,7 @@ body:
     attributes:
       value: |
         ---
-        This project is free to use and maintained in spare time. If you would like to support it,
-        the **Sponsor** button at the top of the repository is there. It supports the project as a
-        whole — there is no way to pay for a particular issue, and none is planned. Entirely
-        optional: every report is read and answered the same way.
+        This project is free to use and maintained in spare time. **No funding account is currently
+        configured**, so there is no Sponsor button at present. If project funding is enabled later,
+        it will support the project as a whole — there is no way to pay for a particular issue, and
+        none is planned. Every report is read and answered the same way.

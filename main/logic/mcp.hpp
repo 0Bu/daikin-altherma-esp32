@@ -269,21 +269,6 @@ inline bool mcp_protocol_supported(const std::string& requested) {
            requested == "2025-11-25";
 }
 
-inline bool mcp_origin_allowed(const std::string& origin, const std::string& device_hostname,
-                               const std::string& device_ip) {
-    // Native clients send no Origin. A browser-originated POST is accepted only when it names this
-    // device directly; comparing it to the Host header would preserve the DNS-rebinding hole because
-    // a rebound attack deliberately keeps its hostile Host/Origin pair unchanged.
-    if (origin.empty()) return true;
-    if (!device_hostname.empty()) {
-        const std::string mdns = "http://" + device_hostname + ".local";
-        if (origin == mdns || origin == mdns + ":80") return true;
-    }
-    if (device_ip.empty()) return false;
-    const std::string base = "http://" + device_ip;
-    return origin == base || origin == base + ":80";
-}
-
 inline McpRequest mcp_parse(const char* body, int len) {
     McpRequest out;
     if (!body || len <= 0) { out.error = -32700; return out; }

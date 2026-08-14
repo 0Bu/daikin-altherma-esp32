@@ -3,6 +3,7 @@
 #
 #   scripts/next-version.sh [patch|minor|major]   the next RELEASE version   (default: patch)
 #   scripts/next-version.sh --dev                 the next DEV build version
+#   scripts/next-version.sh --exact X.Y.Z         validate/echo a release version (resume path)
 #
 # RELEASES ARE MANUAL. A merge to main no longer cuts one: the release path is a
 # `workflow_dispatch` run of .github/workflows/build.yml with `release: true` (and the bump level
@@ -32,21 +33,67 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-base="$(tr -d '[:space:]' < "$repo_root/version.txt")"
-latest="$(git -C "$repo_root" tag -l 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')"
+# Command substitution removes the terminating newline but preserves every other byte. Internal or
+# surrounding whitespace is therefore rejected by the strict SemVer expression instead of being
+# silently deleted into a different version.
+base="$(cat "$repo_root/version.txt")"
+
+# Release tags and the floor are deliberately the stable SemVer subset. Accepting an arbitrary v*
+# tag and feeding its tail into shell arithmetic lets a typo such as v1.2.latest choose or crash a
+# production release. Leading zeroes are rejected too: there must be one canonical spelling.
+semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+is_semver() { [[ "$1" =~ $semver_re ]]; }
+is_semver "$base" || {
+    echo "next-version: version.txt must contain strict X.Y.Z SemVer (got '$base')" >&2
+    exit 1
+}
 
 dev=no
 level=patch
-for arg in "$@"; do
-    case "$arg" in
-        --dev)                dev=yes ;;
-        patch|minor|major)    level="$arg" ;;
-        *) echo "next-version: unknown argument '$arg' (expected --dev / patch / minor / major)" >&2
+level_set=no
+exact=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dev)
+            [ "$dev" = no ] || { echo "next-version: --dev specified more than once" >&2; exit 1; }
+            dev=yes; shift ;;
+        --exact)
+            [ -z "$exact" ] || { echo "next-version: --exact specified more than once" >&2; exit 1; }
+            [ "$#" -ge 2 ] || { echo "next-version: --exact requires X.Y.Z" >&2; exit 1; }
+            exact="$2"; shift 2 ;;
+        patch|minor|major)
+            [ "$level_set" = no ] || { echo "next-version: bump level specified more than once" >&2; exit 1; }
+            level="$1"; level_set=yes; shift ;;
+        *) echo "next-version: unknown argument '$1' (expected --dev / --exact X.Y.Z / patch / minor / major)" >&2
            exit 1 ;;
     esac
 done
+[ -z "$exact" ] || { [ "$dev" = no ] && [ "$level_set" = no ]; } || {
+    echo "next-version: --exact cannot be combined with --dev or a bump level" >&2
+    exit 1
+}
+if [ -n "$exact" ]; then
+    is_semver "$exact" || {
+        echo "next-version: --exact requires strict X.Y.Z SemVer (got '$exact')" >&2
+        exit 1
+    }
+    echo "$exact"
+    exit 0
+fi
 [ "$dev" = yes ] && level=patch   # a dev build always leads to the next PATCH: it must sort below
                                   # whatever the next release turns out to be, and patch is lowest
+
+latest=""
+while IFS= read -r tag; do
+    version_tag="${tag#v}"
+    is_semver "$version_tag" || {
+        echo "next-version: refusing malformed release tag '$tag' (expected vX.Y.Z)" >&2
+        exit 1
+    }
+    if [ -z "$latest" ] || [ "$(printf '%s\n%s\n' "$latest" "$version_tag" | sort -V | tail -n1)" = "$version_tag" ]; then
+        latest="$version_tag"
+    fi
+done < <(git -C "$repo_root" tag -l 'v*')
 
 # The release version: the bumped tag, floored by version.txt.
 if [[ -z "$latest" ]]; then

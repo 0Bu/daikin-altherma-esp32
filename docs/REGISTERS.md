@@ -331,7 +331,7 @@ the I/U capacity code (`0x60` offset 6).
 > | at rest | 220.1 – 243.2 °C | **17.2 – 19.0 °C** |
 >
 > **The conv in the table above is deliberately still `114`** — it records what the generated `def/`
-> tables carry, and those are machine output from an offline generator that lives outside this repo
+> tables carry, and those are machine output from maintainer-only offline tooling not distributed in this repo
 > (`.claude/CLAUDE.md`: never hand-edit one). The correction is applied by
 > `logic/conv_override.hpp`, which maps `(0x10, 6, 114) → 109` at every point a row enters the
 > pipeline, carries the evidence beside the rule, and is asserted against all 54 wire integers and
@@ -664,7 +664,9 @@ the I/U capacity code (`0x60` offset 6).
 ## 7. Porting a model
 
 1. Get the model's rows as `{reg, offset, conv, size, type, label}` (one row per value).
-2. Feed them to the offline profile generator (`gen_profiles.py`, maintained outside this repo) → an embedded `def/<family>.hpp` table.
+2. A maintainer feeds them to the non-distributed offline profile generator → an embedded
+   `def/<family>.hpp` table. Contributors can submit evidence or catalog corrections without access
+   to the proprietary generator input; the maintainer supplies the regenerated diff.
 3. Wire the profile into `def/registry.hpp` and the `/models` catalog.
 4. Ensure every `conv` used is implemented in [`logic/convert.hpp`](../main/logic/convert.hpp); add a
    `CHECK` in [`test/test_logic.cpp`](../test/test_logic.cpp) for any new converter (see the

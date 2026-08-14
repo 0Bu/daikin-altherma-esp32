@@ -34,7 +34,7 @@ namespace daik {
 // cycle went by with nothing readable, so every slot books blind seconds and eventually stops
 // claiming a run. Skipping it on a silent bus would freeze every dwell at its last value and go on
 // presenting it as current — the failure this whole feature exists to avoid.
-void dwell_record(const CachedValue* v, size_t n);
+void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation);
 
 // Judge what the previous boot left in .noinit and adopt or wipe it. app_main calls this ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.
@@ -56,6 +56,11 @@ void dwell_reset_on_detect(const char* profile_id);
 // belonged to. A HomeHub-only reconfiguration must NOT call this; it is an independent source and
 // changes nothing about which X10A flag sits at which coordinate.
 void dwell_reset();
+
+// Factory-reset privacy boundary. Unlike the deferred identity reset above, this synchronously
+// invalidates the .noinit table before esp_restart(), so a software reset cannot re-adopt the prior
+// owner's state ages after NVS has already been erased.
+void dwell_forget();
 
 // What this board can say about one row, or `known == false` when the answer is nothing. Copies a
 // plain POD out under the lock, so nothing allocates inside the critical section (CLAUDE.md →

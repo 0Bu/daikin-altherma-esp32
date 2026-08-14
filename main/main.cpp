@@ -33,6 +33,7 @@
 #include "http_server.hpp"
 #include "mqtt_ha.hpp"
 #include "net.hpp"
+#include "nvs_storage.hpp"
 #include "ota_update.hpp"
 #include "provisioning.hpp"
 #include "recovery_button.hpp"
@@ -73,6 +74,7 @@ static void boot_sequence() {
         daik::diag_printf("nvs: init failed (%s) — running WITHOUT persistence this boot\n",
                           esp_err_to_name(nvs_err));
     daik::diag_crash_capture();          // read reset reason + core-dump summary once, before services
+    daik::nvs_storage_init();            // serialize all writes with the physical factory-reset latch
     daik::config_load();
     // --- Board-local hardware (status indicator + recovery button) ---
     // AFTER config_load, not before: both the indicator's pin/driver and the button's pin are

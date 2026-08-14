@@ -8,8 +8,10 @@
 namespace daik::logic {
 
 inline bool modbus_cache_is_live(bool connected, uint32_t link_generation,
-                                 uint32_t cache_generation) {
-    return connected && link_generation != 0 && cache_generation == link_generation;
+                                 uint32_t cache_generation, uint32_t target_generation,
+                                 uint32_t cache_target_generation) {
+    return connected && link_generation != 0 && target_generation != 0 &&
+           cache_generation == link_generation && cache_target_generation == target_generation;
 }
 
 }  // namespace daik::logic

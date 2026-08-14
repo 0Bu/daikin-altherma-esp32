@@ -290,7 +290,7 @@ python3 - "$TMP/main/hp_poll.cpp" <<'PY2'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed = s.replace("                dwell_record(nullptr, 0);\n", "", 1)
+seed = s.replace("                dwell_record(nullptr, 0, generation);\n", "", 1)
 assert seed != s, "seed 13 did not apply — the unresolved-profile call site moved"
 open(p, "w").write(seed)
 PY2

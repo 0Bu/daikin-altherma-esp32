@@ -50,7 +50,7 @@ void history_start();
 // NOT under the cache mutex (this takes its own, and holding two would invert a lock order for no
 // reason). Cheap: it resolves the trended rows, folds one sample into the pending bucket per trend,
 // and only touches the ring when a bucket boundary is crossed (once per HISTORY_DT_S).
-void history_record(const CachedValue* v, size_t n);
+void history_record(const CachedValue* v, size_t n, uint32_t source_generation);
 
 // Feed the BOARD's own trends (free heap, largest contiguous block). Called from the poll task at
 // the top of EVERY cycle, before it decides whether to detect or to sweep, because these describe the
@@ -70,7 +70,11 @@ void history_record_circulation();
 // states named in logic/homehub_map.hpp are buffered; other states, setpoints and Modbus-only values do not
 // acquire a chart. An empty cycle advances the source's time raster with gaps, so an outage does not
 // make the last Modbus point slide to "now".
-void history_record_modbus(const CachedValue* v, size_t n);
+void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation);
+
+// Snapshot the current HomeHub history identity before starting a poll. A configuration change bumps
+// it from the HTTP task; a cycle that began against the previous target is then refused at commit.
+uint32_t history_modbus_generation();
 
 // Fold the independent ENV III observation into its three 24-hour rings. Called from the sensor's
 // own 10-second task, so these curves keep advancing even when X10A is disconnected. `valid=false`
@@ -90,7 +94,7 @@ void history_reset();
 // history_record()'s per-row identity check, which compares the surviving labels against the newly
 // resolved ones and is strictly better informed. Every later call resets exactly as history_reset()
 // does. See the definition for what this cost on a live board.
-void history_reset_on_detect();
+void history_reset_on_detect(uint32_t identity_fp);
 
 // Start a new HomeHub observation identity after host, port or unit-id changes. Like the X10A
 // reset, elapsed positions remain explicit gaps on the common boot-aligned 24-hour raster.
@@ -148,7 +152,7 @@ void history_flash_save();
 // Drop the stored journal AND suppress the shutdown-handler write that the same reboot would
 // otherwise perform. The factory reset's counterpart for the plant history: the configuration being
 // erased is the user's, and so is the day of readings recorded beside it.
-void history_flash_forget();
+bool history_flash_forget();
 
 // Splice a bounded burst of stored rings per poll tick. Records are indexed at boot and transposed
 // four rings at a time after SNTP, keeping the flash-read burst bounded on the X10A owner.

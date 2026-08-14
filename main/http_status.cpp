@@ -43,6 +43,7 @@
 #include "mqtt_ha.hpp"
 #include "net.hpp"
 #include "ota_update.hpp"
+#include "provisioning.hpp"
 #include "safe_mode.hpp"
 #include "sntp_time.hpp"
 #include "wifi.hpp"
@@ -51,7 +52,6 @@
 #include "esp_log.h"
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
-#include "esp_wifi.h"
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "esp_partition.h"
@@ -94,14 +94,6 @@ static std::string jstr_r(const std::string& s, bool redact) {
     return json_quote(redact_identifier(s, redact));
 }
 
-// Is a SoftAP live, i.e. are we the provisioning portal rather than the dashboard? The setup portal
-// runs AP-only (provisioning.cpp); APSTA is matched too because it is never the normal operating
-// mode (the STA path sets WIFI_MODE_STA), so any mode carrying a live SoftAP means "setup".
-static bool setup_mode() {
-    wifi_mode_t mode = WIFI_MODE_NULL;
-    return esp_wifi_get_mode(&mode) == ESP_OK && (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA);
-}
-
 // The validator identifies the exact app image, so any OTA that can change an embedded asset also
 // changes the ETag.  The caller adds the resource name because a strong validator must not claim
 // that the dashboard, favicon and heat-pump raster are byte-identical representations.
@@ -134,10 +126,12 @@ static esp_err_t static_asset_cache(httpd_req_t* req, const char* asset,
     return httpd_resp_send(req, nullptr, 0);
 }
 
-// Serve the captive setup page if the device is running in SoftAP (setup) mode, or if
-// WiFi is not yet configured. Otherwise serve the full dashboard web UI.
+// The boot path owns the provisioning decision. "No stored SSID" is not equivalent to a portal:
+// an Ethernet-first boot deliberately keeps the radio and AP off, yet still serves the trusted-LAN
+// dashboard. Key the page on the observed, boot-latched recovery surface just like http_server's
+// request policy does.
 static esp_err_t h_index(httpd_req_t* req) {
-    if (setup_mode() || !wifi_configured())
+    if (provisioning_ap_active())
         return http_send_gzip(req, "text/html", setup_html_gz_start, setup_html_gz_end);
     char etag[80] = {0};
     bool not_modified = false;
@@ -173,7 +167,8 @@ static esp_err_t h_heat_pump_icon(httpd_req_t* req) {
 // In STA mode this is the dashboard's SPA shell and must NOT redirect. logic/captive.hpp owns the
 // split; both branches are host-tested there.
 static esp_err_t h_captive(httpd_req_t* req) {
-    if (captive_reply_for(req->uri, setup_mode()) == CaptiveReply::Page) return h_index(req);
+    if (captive_reply_for(req->uri, provisioning_ap_active()) == CaptiveReply::Page)
+        return h_index(req);
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", CAPTIVE_PORTAL_URI);
     // The probe result must not be cached: a phone that once saw this network answer a probe from
@@ -460,9 +455,9 @@ void http_append_status_json(std::string& j, bool redact) {
     j += c.ref_temp_topic.empty() ? "false" : "true";
     j += ",\"name\":";          j += jstr_r(c.ref_temp_name, redact);
     j += ",\"topic\":";         j += jstr_r(c.ref_temp_topic, redact);
-    j += ",\"temperature_path\":"; j += jstr(c.ref_temp_path);
+    j += ",\"temperature_path\":"; j += jstr_r(c.ref_temp_path, redact);
     j += ",\"setpoint_topic\":"; j += jstr_r(c.ref_temp_setpoint_topic, redact);
-    j += ",\"setpoint_path\":"; j += jstr(c.ref_temp_setpoint_path);
+    j += ",\"setpoint_path\":"; j += jstr_r(c.ref_temp_setpoint_path, redact);
     j += ",\"fixed_setpoint_c\":";
     if (c.ref_temp_fixed_setpoint_tenths == 0) j += "null";
     else {
@@ -472,9 +467,9 @@ void http_append_status_json(std::string& j, bool redact) {
         j += fixed_setpoint;
     }
     j += ",\"timestamp_topic\":"; j += jstr_r(c.ref_temp_time_topic, redact);
-    j += ",\"timestamp_path\":"; j += jstr(c.ref_temp_time_path);
-    j += ",\"enabled_path\":"; j += jstr(c.ref_temp_enabled_path);
-    j += ",\"hvac_mode_path\":"; j += jstr(c.ref_temp_hvac_mode_path);
+    j += ",\"timestamp_path\":"; j += jstr_r(c.ref_temp_time_path, redact);
+    j += ",\"enabled_path\":"; j += jstr_r(c.ref_temp_enabled_path, redact);
+    j += ",\"hvac_mode_path\":"; j += jstr_r(c.ref_temp_hvac_mode_path, redact);
     j += ",\"source_id\":\""; j += REF_ROOM_SOURCE_ID; j += "\"";
     j += ",\"calibration_k\":0";
     j += ",\"temperature_min_c\":"; j += std::to_string(REF_ROOM_TEMPERATURE_MIN_C);
@@ -596,8 +591,8 @@ void http_append_status_json(std::string& j, bool redact) {
     j += c.circulation_topic.empty() ? "false" : "true";
     j += ",\"name\":"; j += jstr_r(c.circulation_name, redact);
     j += ",\"topic\":"; j += jstr_r(c.circulation_topic, redact);
-    j += ",\"power_path\":"; j += jstr(c.circulation_power_path);
-    j += ",\"timestamp_path\":"; j += jstr(c.circulation_time_path);
+    j += ",\"power_path\":"; j += jstr_r(c.circulation_power_path, redact);
+    j += ",\"timestamp_path\":"; j += jstr_r(c.circulation_time_path, redact);
     j += ",\"max_age_s\":"; j += std::to_string(c.circulation_max_age_s);
     j += ",\"on_threshold_w\":"; j += tenths_w_text(c.circulation_on_tenths_w);
     j += ",\"off_threshold_w\":"; j += tenths_w_text(c.circulation_off_tenths_w);
@@ -1111,7 +1106,7 @@ void http_append_status_json(std::string& j, bool redact) {
     // flash here: this builder answers a REQUEST, now up to once every 8 s per open dashboard, so
     // keep the path cheap (no flash PARSE).
     // `coredump` is the exception: it must reflect flash NOW, not at boot, or a dump erased via
-    // /coredump?clear=1 leaves a banner that can't be cleared and a download that 404s. Refreshing it
+    // POST /coredump/clear leaves a banner with no download unless this is refreshed. Refreshing it
     // costs one 4-byte flash read — the same read GET /coredump already does per request.
     const CrashInfo crash = diag_crash_info_live();
     j += "\"last_crash\":" + std::string(crash_is_notable(crash) ? build_crash_json(crash) : "null") + ",";
@@ -1558,10 +1553,8 @@ static esp_err_t h_diag(httpd_req_t* req) {
     char q[64];
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
         char v[4];
-        // clear is DESTRUCTIVE, so it fires only on ?clear=1 (the documented value) — not on mere
-        // key presence, which used to let ?clear=0 wipe the log. verbose routes through the same
-        // policy: verbose=1 -> on, anything else (incl. verbose=0) -> off.
-        if (httpd_query_key_value(q, "clear", v, sizeof(v)) == ESP_OK && query_flag_on(v)) diag_clear();
+        // GET is read-only. Destructive clearing is POST /diag/clear, so a link, prefetch or image
+        // request can never erase the evidence it was trying to retrieve.
         if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK) diag_set_verbose(query_flag_on(v));
         if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
     }
@@ -1593,20 +1586,12 @@ static esp_err_t h_diag(httpd_req_t* req) {
     return httpd_resp_send_chunk(req, nullptr, 0);            // terminate the chunked response
 }
 
-static esp_err_t h_coredump(httpd_req_t* req) {
-    char q[32];
-    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
-        char v[4];
-        if (httpd_query_key_value(q, "clear", v, sizeof(v)) == ESP_OK && query_flag_on(v)) {
-            esp_err_t err = esp_core_dump_image_erase();
-            if (err == ESP_OK) {
-                return http_send_json(req, "{\"ok\":true}");
-            } else {
-                return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to erase coredump");
-            }
-        }
-    }
+static esp_err_t h_diag_clear(httpd_req_t* req) {
+    diag_clear();
+    return http_send_json(req, "{\"ok\":true}");
+}
 
+static esp_err_t h_coredump(httpd_req_t* req) {
     // Match /status.last_crash exactly: a raw image proven to belong to another firmware is not a
     // downloadable report, even when its best-effort boot-time erase failed and bytes remain in the
     // partition. Without this gate the banner says "no dump" while the endpoint serves one that
@@ -1659,15 +1644,24 @@ static esp_err_t h_coredump(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// POST /coredump/clear erases only the raw image and deliberately preserves the reset/crash record.
+// That is distinct from /crash/dismiss below, which acknowledges the whole report. Both mutations
+// are POSTs so neither can be triggered by a followed link or speculative GET.
+static esp_err_t h_coredump_clear(httpd_req_t* req) {
+    const esp_err_t err = esp_core_dump_image_erase();
+    if (err == ESP_OK) return http_send_json(req, "{\"ok\":true}");
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to erase coredump");
+}
+
 // POST /crash/dismiss — acknowledge + DELETE this boot's crash report: erase the core-dump image and
 // mark the cached CrashInfo dismissed (diag_crash_dismiss()), so /status.last_crash goes null, the
 // retained MQTT crash topic clears on the next heartbeat tick, and the UI banner is gone for good
 // rather than for one page view.
 //
-// Separate from /coredump?clear=1 rather than folded into it, because they answer different
+// Separate from POST /coredump/clear rather than folded into it, because they answer different
 // questions: clearing frees the flash slot for the NEXT dump and deliberately leaves the fault reset
 // on record, while this says the crash itself has been dealt with. A fault reset carries no dump at
-// all in the common case (a stack overflow overruns the dump too), and there ?clear=1 changes
+// all in the common case (a stack overflow overruns the dump too), and there /coredump/clear changes
 // nothing the banner keys on.
 //
 // POST, unlike the GET it sits beside: this destroys the one piece of evidence a bug report needs
@@ -1712,7 +1706,9 @@ void http_register_status(httpd_handle_t s, HttpSurface surface) {
 
     http_register(s, "/models", HTTP_GET, h_models);
     http_register(s, "/diag", HTTP_GET, h_diag);
+    http_register(s, "/diag/clear", HTTP_POST, h_diag_clear);
     http_register(s, "/coredump", HTTP_GET, h_coredump);
+    http_register(s, "/coredump/clear", HTTP_POST, h_coredump_clear);
     http_register(s, "/crash/dismiss", HTTP_POST, h_crash_dismiss);
 }
 

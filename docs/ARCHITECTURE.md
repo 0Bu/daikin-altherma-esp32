@@ -130,25 +130,32 @@ state_dwell.cpp/.hpp → HOW LONG EACH SWITCHED ROW HAS READ WHAT IT READS — t
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
                        format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
-                      cache (pins/proto) persisted, model RAM-only; mutex-guarded snapshot via config().
-                      Writers commit only the fields they own (config_save_link/config_set_model for
+                      cache (pins/proto/identity) persisted, model RAM-only; mutex-guarded snapshot
+                      via config().
+                      Writers commit only the fields they own
+                      (config_commit_detected_link/config_commit_detected_model for revision-checked
                       detection, config_save for the HTTP handlers). config_save writes the
                       credential/service fields as ONE CRC-checked atomic blob (logic/config_store.hpp,
                       host-tested) — a single nvs_set_blob, so that blob is all-or-nothing across a
                       write failure AND a power cut; on failure the old blob is intact, config_save
-                      returns false and publishes nothing. The RX/TX/proto link cache stays as separate
-                      self-healing keys. A cache-write failure after a successful blob is logged but
-                      does not falsely fail an unrelated service save; /set_hp requires the cache and
-                      leaves RAM untouched on failure. config_save_link applies its RAM patch (the link
-                      is proven-good). config_load reads the blob first, falling back to the legacy
-                      per-key keys when it is absent (fresh device / pre-blob OTA) or CRC-invalid
+                      returns false and publishes nothing. The separately-owned RX/TX/proto/identity
+                      cache is also ONE CRC-checked atomic `link` blob, so a failed pin swap leaves the
+                      previous complete link intact. A link-blob failure after a successful service
+                      blob is logged but does not falsely fail an unrelated service save; /set_hp
+                      requires its link write and leaves RAM untouched on failure.
+                      config_commit_detected_link still applies a revision-current proven link to
+                      RAM if only its cache write fails, so detection need merely run again after
+                      reboot. config_load reads `cfg` and `link`
+                      first, falling back to each domain's legacy per-key values when its blob is
+                      absent (fresh device / pre-blob OTA) or invalid
 nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters return esp_err_t and
                        are [[nodiscard]] — a dropped write is silent (compare to ESP_OK, not bool)
 http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns register their own routes.
-                      Picks the trust surface from the WiFi mode (esp_wifi_get_mode): the OPEN setup
-                      AP registers ONLY the provisioning routes (GET / , /index.html, POST
+                      Picks the trust surface from the observed provisioning-AP state: the OPEN
+                      setup AP registers ONLY the provisioning routes (GET / , /index.html, POST
                       /set_wifi + captive), withholding /scan, /coredump, /diag, config/OTA/MCP from
-                      an unauthenticated radio client; the STA (trusted LAN) registers the full API.
+                      an unauthenticated radio client; with no setup AP, the configured WiFi or
+                      Ethernet LAN registers the full API.
                       Boundary = host-tested logic/http_surface.hpp (F01). `cfg.max_uri_handlers` is
                       sized EXACTLY to the trusted-LAN route count, so adding a route means raising
                       it in the same commit: overflowing is silent and hits the WRONG route (the
@@ -172,12 +179,13 @@ http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_te
                       exactly to (and which must be LOWERED in the same commit that retires a route,
                       as retiring /set_dynamic_lwt did: a count left above the real one is a comment
                       that has stopped describing the code depending on it). /set_ref_temp persists
-                      and subscribes immediately; payload/path/freshness failures are runtime status
-                      and diagnostic evidence, never a reason to refuse the operator's mapping.
+                      immediately, but subscribes/decodes only while the v19 diagnostics master is
+                      enabled; payload/path/freshness failures are runtime status and diagnostic
+                      evidence, never a reason to refuse the operator's mapping.
                       /test_circulation and /set_circulation retain their proof boundary for a
                       read-only active-power mapping; neither route can switch the configured plug.
-                      /set_weather validates the DWD path component, persists it and only wakes the
-                      weather task; no DNS/TLS request runs on the httpd worker.
+                      /set_weather strictly validates the latitude/longitude pair, persists it and
+                      only wakes the weather task; no DNS/TLS request runs on the httpd worker.
                       /set_diagnostics is the default-off device-wide consent boundary. It starts a
                       fresh generation when toggled and stops/clears the checkup plus room, weather,
                       and circulation collection when disabled. Each source save still owns its
@@ -192,6 +200,8 @@ http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_te
                       owned bus is disable-first. /set_env3 retains the same gate for older clients.
                       /set_hp also carries the HomeHub Modbus params (mb_host/mb_port/mb_unit_id),
                       applied live; sending mb_host marks the one-shot discovery decision complete.
+                      X10A and HomeHub are separate durability domains: naming fields from both in
+                      one request returns 400 before either domain is changed.
                       /discover_homehub is a bounded manual dialog action that returns an IPv4
                       without saving it
 hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source beside X10A, not an
@@ -878,11 +888,13 @@ host-testable core is unusually large and valuable, because the risky parts are 
   defensible because the board scrubs first — so this is the single implementation of that rule,
   shared by the web UI's "Report a bug" action and the manual `curl` fallback, rather than a copy in
   `www/js/app_state.js` that would drift. Two shapes, because the routes leak differently: `/status` leaks by
-  **field** (fourteen named values, substituted where each is *written* — a post-processing pass over
+  **field** (named values, substituted where each is *written* — a post-processing pass over
   the finished JSON is what the httpd stack budget has no room for), `/diag` leaks by **line**,
-  which is the non-trivial half the `CHECK`s cover. That count is **derived** from the call sites by
-  the redaction audit rather than restated here, because it had already been wrong in four places at
-  once — the header said ten, the audit tool eight, this file eight, and the builder wrapped twelve.
+  which is the non-trivial half the `CHECK`s cover. The 27-field list in `logic/redact.hpp` is
+  machine-readable; the audit compares its length with the call sites and its names with
+  `REPORTING.md`, then rejects a raw Config string written through plain `jstr()` so a never-wrapped
+  identifier cannot hide behind an unchanged wrapper count. Seven entries are user-typed JSON paths:
+  paths can contain room/person/device names just as topics do, so they are not structural exceptions.
   An UNSET identifier is left empty rather than substituted (`redact_identifier`, not the
   `redact_or` primitive): `<redacted>` over an empty value manufactures a source the
   installation does not have, and "which optional sources is this device even running" is the
@@ -1049,26 +1061,35 @@ host-testable core is unusually large and valuable, because the risky parts are 
   Content-Length and goes quiet park the single httpd task, taking the web UI and the OTA route out of
   a bad config with it.
 - `logic/http_surface.hpp` — the HTTP trust-surface boundary (F01). `http_surface_serves(surface,
-  path, is_post)` says which routes each surface exposes: on the trusted STA LAN, everything; on the
+  path, is_post)` says which routes each surface exposes: on the trusted configured LAN (WiFi or
+  Ethernet), everything; on the
   OPEN setup AP, ONLY `GET /`, `/index.html` and `POST /set_wifi` — `/scan` included in what is
   withheld, since the portal takes a typed SSID and an open radio has no reason to be handed a
-  survey of every AP in range. `http_start()` picks the
-  surface from the WiFi mode and every concern registers through `http_register_on()`, so `/coredump`,
-  `/diag` and the config/OTA/MCP routes never exist on the unauthenticated radio. Host-tested so the
-  allow-list is asserted, not re-derived per file.
-- `logic/query_flag.hpp` — `query_flag_on(value)`: a `?clear=1`-style flag fires only on exactly
-  `"1"`. `httpd_query_key_value` succeeds on key PRESENCE, so acting on that alone let `?clear=0` wipe
-  the diag log / coredump; the policy is now one host-tested predicate used by `/diag` and `/coredump`.
-- `logic/config_store.hpp` — the atomic config blob (F02): `config_blob_serialize` / `deserialize`
+  survey of every AP in range. `http_start()` picks the surface from the observed provisioning-AP
+  state and every concern registers through `http_register_on()`, so `/coredump`, `/diag` and the
+  config/OTA/MCP routes never exist on the unauthenticated radio, while an Ethernet-only board still
+  gets the trusted-LAN surface. Host-tested so the allow-list is asserted, not re-derived per file.
+- `logic/http_request.hpp` — the browser boundary on the configured LAN, applied by
+  `http_common.cpp`'s one `handle_all` trampoline before **every** registered route. `Host` must be
+  the fixed mDNS name or a current WiFi/Ethernet IPv4; a present `Origin` is checked independently
+  against the same device identities, and cross-site/unknown Fetch Metadata fails closed. Native
+  clients without browser headers remain valid. Every POST carrying a body must declare
+  `application/json`, excluding CORS-safelisted form/text requests. The captive portal skips only
+  the Host/browser check because OS probes intentionally arrive under unrelated hostnames.
+- `logic/query_flag.hpp` — `query_flag_on(value)`: a `?verbose=1`-style flag fires only on exactly
+  `"1"`. `httpd_query_key_value` succeeds on key PRESENCE, so acting on that alone formerly let
+  `?clear=0` wipe the diag log / coredump. Clearing is no longer a query flag: only the explicit
+  POST `/diag/clear` and `/coredump/clear` routes mutate evidence.
+- `logic/config_store.hpp` — the atomic config blobs (F02): `config_blob_serialize` / `deserialize`
   pack the credential + service fields (WiFi creds + rollback backup + flags, MQTT, syslog, NTP) into
   one length-checked, CRC32-protected byte blob written to a single NVS key. A single `nvs_set_blob`
   is entry-atomic, so the blob is all-or-nothing across BOTH a mid-write NVS failure AND a power cut
-  — no per-key rollback, no write-ordering. The separate self-healing link-cache writes do not undo
-  that commit: ordinary service routes succeed once their blob lands, while `/set_hp` explicitly
-  requires the cache (`config_save_succeeded`, host-tested). `deserialize` returns false (leaving its
-  out-param untouched) on any corruption, so a fresh device / a pre-blob OTA falls back to the legacy
-  per-key load. Host-tested: CRC golden vector, round-trip, and every corruption path (bad
-  CRC/magic/version, truncation, trailing garbage).
+  — no per-key rollback, no write-ordering. `link_blob_serialize` / `deserialize` give the separately
+  owned RX/TX/protocol/identity cache the same one-entry CRC boundary. Ordinary service routes succeed
+  once their `cfg` blob lands even if best-effort link maintenance fails; an X10A `/set_hp` explicitly
+  requires its `link` write (`config_save_succeeded`, host-tested). Each decoder returns false without
+  publishing a partial value, so a fresh device / pre-blob OTA falls back to that domain's legacy
+  per-key load. Host-tested: CRC golden vector, round-trips, and corruption/truncation paths.
 - `logic/mcp.hpp` — the complete IDF-free core for `/mcp` (F14): a bounded, depth-aware JSON scanner;
   JSON-RPC structure/id validation and exact id echo; `initialize`, `tools/list`, and `tools/call`
   dispatch; MCP revision negotiation; the fixed two-tool no-argument catalog; and result/error
@@ -1094,11 +1115,12 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
 - Each value is a `ValueDef{reg, offset, conv, size, type, label}` row; one model profile is an
   array of them, embedded as `const` in `main/def/<profile>.hpp`. The tables are machine-generated
   from the X10A value definitions (see [`REGISTERS.md`](REGISTERS.md)) — curated to the useful
-  monitoring values — and `def/registry.hpp` maps a **profile id** to its table. The generator is
-  **offline tooling maintained outside this repo** (there is no `tools/` directory on `main`): it
-  decodes Daikin's proprietary value catalog (encrypted `.ldd` = zlib + NRBF) into these tables
-  (`gen_profiles.py`) and the id→name table (`gen_names_generic.py`). Generated tables are never
-  hand-edited — they are regenerated, and their rows verified against [`REGISTERS.md`](REGISTERS.md).
+  monitoring values — and `def/registry.hpp` maps a **profile id** to its table. The maintainer's
+  profile generator and its proprietary Daikin catalog input are intentionally not distributed in
+  this repository; only their generated C++ output is shipped. Generated tables are never
+  hand-edited — maintainers regenerate them offline, and the checked-in rows are verified against
+  [`REGISTERS.md`](REGISTERS.md). Contributors can propose catalog corrections without possessing
+  the generator input; the maintainer performs regeneration and includes the resulting diff.
 - **One hand-written supplement exists, and it is temporary: `def/overlay.hpp`.** Every generated
   profile carries six rows for page `0x10` where [`REGISTERS.md`](REGISTERS.md) §5 documents
   twenty-six — uniformly, all 43 tables agreeing row-for-row, so it is the generator's page-`0x10`
@@ -1309,20 +1331,20 @@ feed. Config keys live in [`sdkconfig.defaults`](../sdkconfig.defaults).
 The goal is **zero manual model/protocol picking** where the bus allows it, on **every boot**. The
 **model** is never persisted: `config_load` always seeds `Config::profile` with the sentinel
 `"auto"`, so a fresh identification runs after every reset (a swapped unit is re-identified). The
-**link** (RX/TX pins + protocol) *is* persisted as a boot-invariant cache — loaded first, tried
-first, re-saved on change — with the compile-time defaults as fallback so a stale cache self-heals.
+**link** (RX/TX pins + protocol + observation identity) *is* persisted as a boot-invariant cache —
+loaded first, tried first, re-saved on change — with the compile-time defaults as fallback so a stale
+cache self-heals.
 The loaded pins are re-checked with `link_pins_safe` — the **pair** rule plus the chip-reserved-pin
 rule, the same ground the request path covers via `validate` — and dropped for those defaults if they
-fail: both write paths — `config_save` and
-`config_save_link` — commit `rx_pin` and `tx_pin` as two independent, **self-healing** NVS keys
-(the link cache is deliberately NOT in the atomic credential/service blob — it has two owners and is
-re-validated on load), so a **power cut** or a write failure between them can leave a pair on flash
-(`rx == tx`, a pin outside this chip's range, or a reserved flash/strapping/JTAG pad) that no request
-could have set. Naming the failing key on `/diag` reports that write; it does not undo the
-one that landed, which is why the check belongs on the way back in. The sweep already skips an
-`rx == tx` candidate on its own, so this is a guard rather than a repair; what it adds is the two
-checks the sweep lacks — the upper GPIO bound and the chip-reserved-pin rule — and a `/status` pin
-readout that never reports an unconfigurable link as fact.
+fail. Both write paths — HTTP's `config_save` and detection's revision-checked
+`config_commit_detected_link` — serialize the complete link into one
+CRC-protected `link` NVS blob. It remains separate from the atomic credential/service blob because it
+has two owners, not because its fields are separate: a **power cut** or failed write leaves the
+previous complete link intact instead of durably pairing one new pin with one old pin. Load still
+validates the decoded pair because a legacy per-key migration, corruption, a copied NVS image or a
+future format mistake is untrusted; the sweep already skips `rx == tx`, while this guard additionally
+covers the upper GPIO bound and chip-reserved flash/strapping/JTAG pads. A failed `link` write is named
+on `/diag`, and `/status` never reports an unconfigurable persisted link as fact.
 While `profile == "auto"`, the poll task runs one detection pass (`poll_detect()`) instead of a
 normal cycle. These passes are **not** run blindly every second: on a **silent bus** the sweep backs
 off from the 1 s poll cadence toward a 60 s ceiling (`logic/detect_backoff.hpp`, host-tested),
@@ -1417,14 +1439,15 @@ It is a **count**, not a timer, because the sweep cadence itself backs off: two 
 pieces of evidence at any cadence, where a wall-clock window would quietly become one. Waiting
 persists nothing — the model is RAM-only either way — and `POST /detect` clears the tally so a
 forced re-detect cannot inherit a confirmation it never earned. The model goes to the in-RAM config
-(`config_set_model`), while a
-changed link cache (pins/proto) is persisted (`config_save_link`). Both are **narrow, field-owned**
-setters rather than a whole-`Config` save: detection reads its snapshot before a sweep that takes
-seconds, so committing the whole struct would write that snapshot's stale credentials back over a
-`POST /set_wifi` that landed meanwhile — reverting it silently, after the user was told `{"ok":true}`.
-They patch only their own fields into the live config under its mutex (`apply_link` / `apply_model`
+(`config_commit_detected_model`), while a changed link cache (pins/proto/identity) is persisted by
+`config_commit_detected_link`. Detection captured a config revision before its seconds-long sweep;
+under the poll-generation barrier, the link helper compares that revision while holding the config
+mutex and returns a fresh revision token. The model helper accepts the session-only profile only if
+that token is still current. Thus an HTTP save or `/set_hp` generation bump wins atomically and the
+stale sweep is discarded — it cannot write old credentials or a previous link back after the user
+received `{"ok":true}`. These helpers patch only detection-owned fields (`apply_link` / `apply_model`
 in `logic/config_model.hpp`, host-tested); whole-struct `config_save` remains for the HTTP handlers,
-which own the credential fields and are serialized on the single httpd task.
+which own the credential/service fields and are serialized on the single httpd task.
 
 - **exactly one candidate** → applied; the UI shows "Detected: <family> · ~kW".
 - **several candidates** → the best-fit representative is read with. The 41 Altherma models collapse
@@ -1677,8 +1700,10 @@ The Home Assistant bridge:
   but no averaging or control path reads it. A configured payload timestamp (RFC3339 or Unix
   seconds) supplies age across retained delivery and restarts; without one, only a non-retained live
   delivery may age from monotonic MQTT arrival. `POST /set_ref_temp` records the mapping immediately,
-  including an empty or unverified JSON path, and subscribes on the existing authenticated client.
-  The next real MQTT frame either builds a complete fresh aggregate or records its decoder error in
+  including an empty or unverified JSON path, and rebinds the existing authenticated client only
+  while the device-wide v19 diagnostics master is enabled. With that master off, the mapping remains
+  saved but dormant: there is no subscription or decoding. Once enabled, the next real MQTT frame
+  either builds a complete fresh aggregate or records its decoder error in
   `/status.reference_temperature.error` and the rate-limited diagnostic log; analysis remains
   fail-closed meanwhile. An empty topic remains the explicit disable operation. The circulation
   mapping independently requires `POST /test_circulation` proof before
@@ -2027,7 +2052,7 @@ Structure:
   - Enabled via `CONFIG_ESP_COREDUMP_ENABLE` and `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` in `sdkconfig.defaults`. The format is ELF — the only one IDF v6 emits, so no `CONFIG_*` selects it.
   - A dedicated `coredump` partition of size `0xc000` (48 KB) is placed at offset `0x12000` (in the unused gap between `phy_init` and `ota_0`), leaving the start offsets of `nvs`, `otadata`, `phy_init`, `ota_0`, and `ota_1` completely untouched for backward compatibility and OTA safety.
   - Exposed via a chunked HTTP GET endpoint `/coredump` (implemented in `http_status.cpp`) that streams the binary crash dump in 512-byte blocks to prevent OOM errors on the tight ESP32 heap.
-  - Supports erasing the partition via `GET /coredump?clear=1` (invokes `esp_core_dump_image_erase()`).
+  - Supports erasing the partition via `POST /coredump/clear` (invokes `esp_core_dump_image_erase()`).
   - `POST /crash/dismiss` is the other side of that: it erases the image **and** marks the cached
     `CrashInfo` dismissed (`diag_crash_dismiss()`), i.e. the user *deleting the crash report* rather
     than freeing the flash slot. See "How a user hands a crash over" below.
@@ -2049,7 +2074,7 @@ Structure:
     SHA-256 mismatch (#215). Successful erasure also clears the partition for the next real panic. The
     `coredump` **presence flag** is the one exception: it IS re-checked from flash per request
     (`diag_crash_info_live()` — a 4-byte size-word read, not the summary reparse), because the image
-    can be erased mid-session via `/coredump?clear=1` and a cached flag would then advertise a dump
+    can be erased mid-session via `POST /coredump/clear` and a cached flag would then advertise a dump
     that flash no longer holds. A *fault* reset (panic / watchdog / brown-out / CPU lockup) or an
     orphan dump is "notable"; a clean power-on / software reboot is not — and neither is a report the
     user has **deleted** (`CrashInfo::dismissed`, below), which is the one other field written after
@@ -2076,7 +2101,7 @@ Structure:
     on a `fault` (DESIGN.md §5.6).
   - **How a user hands a crash over.** `GET /status.last_crash` is `null` on a clean boot, else the
     boot-time cached reason/summary — with `coredump` re-read live from flash on every request
-    (`diag_crash_info_live()`), so a dump cleared via `/coredump?clear=1` can't leave a stale banner or
+    (`diag_crash_info_live()`), so a dump cleared via `POST /coredump/clear` can't leave a stale banner or
     a dead download link. The running app's `app_elf_sha256` is also on `/status`. The web UI shows a
     crash **banner** (`renderCrashBanner()`) — titled on `fault`, so an orphan dump doesn't claim this
     boot crashed — with the reset reason + hex backtrace, a one-click `coredump.bin` download, and a
@@ -2197,8 +2222,10 @@ Structure:
   crash-loops and blanks the otadata rollback record. Contained by the pre-flash guard
   `scripts/require-signed.sh`. Full model,
   including the three failure modes and the health gate, in [SECURITY.md](SECURITY.md) → Boot recovery.
-- **A PR publishes nothing** — it builds, signs and size-checks the image and keeps it as a build
-  artifact. Every same-repo PR used to publish a signed preview installer at
+- **A PR publishes nothing** — untrusted PR source is compile- and size-checked without access to
+  signing material. Its Actions artifact contains only non-flashable diagnostics: the compressed
+  ELF, its checksum and the size reports. No app/merged/Web-Serial `.bin` or installer manifest is
+  produced or uploaded. Every same-repo PR used to publish a signed preview installer at
   `…/PR/<N>/` on `gh-pages` as well, with a `pr-preview-cleanup` workflow removing it on close.
   That is retired: each preview was a `gh-pages` push, every `gh-pages` push starts GitHub's own three-job
   *pages build and deployment* run, and the **dev channel** already answers the same question —
@@ -2422,10 +2449,12 @@ place:
   not the rule — `validate()` rejects a **chip-reserved** GPIO server-side (`board_pin_offerable()`
   per pin, with the octal-SPI and status-LED facts from Kconfig), so a raw `curl POST` cannot route the UART onto a
   flash/strapping/JTAG pad, and `config_load()` re-applies the same test to the persisted cache. The
-  RX/TX pins are **persisted** (a manual pick survives reboot); the model is session-only. Protocol is auto-detected
-  (no UI control), the poll interval is fixed at 1 s (not sent). `/set_hp` still accepts only
-  `{profile, rx, tx}` — the UI language is its own setting now (see the **Language** bullet below),
-  never a `/set_hp` field.
+  RX/TX pins are **persisted atomically in `link`** (a manual pick survives reboot); the model is
+  session-only. Protocol is auto-detected (no UI control), the poll interval is fixed at 1 s (not
+  sent). `/set_hp` accepts the X10A domain `{profile, rx, tx}` and the independent HomeHub domain
+  `{mb_host, mb_port, mb_unit_id}`, but not both in one request: a mixed patch returns 400
+  `"update X10A and HomeHub in separate requests"` before changing either. The UI language is its own
+  setting now (see the **Language** bullet below), never a `/set_hp` field.
 - **Plant diagnostics** → `/set_diagnostics` (Settings **Firmware** card). The persisted boolean is
   false on a fresh device and on every pre-v19 config migration. A real toggle advances a persisted
   generation, saves it first, and then applies live without reboot. Off wipes the rolling checkup,
@@ -2885,25 +2914,19 @@ GET  /models      pin hint + catalog metadata (def/models_catalog.hpp). Detectio
                   web UI never fetches it, and the RX/TX dropdown takes its GPIOs from
                   /status.pins_avail (logic/board_pins.hpp), NOT from this pin_hint. Legacy metadata
                   behind a read-only inspection endpoint for humans/scripts
-GET  /diag[?verbose=0|1][?clear=1][?redact=1]   in-memory diag log. ?redact=1 scrubs the handful of
+GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. ?redact=1 scrubs the handful of
                   lines that interpolate a host/IP/SSID (logic/redact.hpp) and switches the response
                   to CHUNKED: a replacement is longer than most values it replaces, so the redacted
                   text can GROW past the static dump buffer, and the alternatives are a second ~8 KB
                   .bss buffer or a ~6 KB contiguous heap allocation
-GET  /status?redact=1   the bug-report form of /status: every reporter-identifying value
-                  (wifi.ssid/ip/bssid/mac, mqtt.broker, mqtt.base,
-                  reference_temperature.name/topic, circulation_source.name/topic,
-                  weather_forecast.latitude/longitude, syslog.host, ntp.server, modbus.host — the
-                  last is the saved HomeHub LAN address or `.local` hostname) reads "<redacted>".
-                  Read the set off logic/redact.hpp rather than this list, which is a convenience
-                  copy. SOME entries are in it for a reason the network addresses are not: the
-                  coordinates are the reporter's HOUSE to six decimals,
-                  reference_temperature.name is a word the user typed — usually a room, sometimes a
-                  person, the circulation witness adds the same pair one source over (its topic
-                  normally embedding a smart-plug device id), and mqtt.base is one they typed that
-                  also becomes the installation's HA
-                  device id. The count is DERIVED from the call sites by the redaction audit, so this
-                  list and logic/redact.hpp's cannot silently disagree with the builder again.
+POST /diag/clear  clear the in-memory diagnostic ring. Destructive actions are POST-only, so a link,
+                  prefetch or crawler cannot erase evidence.
+GET  /status?redact=1   the bug-report form of /status: all 27 reporter-identifying values read
+                  "<redacted>". `logic/redact.hpp` owns the machine-readable ordered field list and
+                  `REPORTING.md` owns its human explanations; the redaction audit compares both with
+                  the builder. Besides network/location identifiers, names and topics, the set now
+                  includes all seven user-typed JSON paths — `zones.<room>.temp` demonstrates why a
+                  path can identify the reporter just as readily as a topic.
                   An UNSET field is left EMPTY rather than substituted (redact_identifier, not the
                   raw redact_or primitive): "<redacted>" over an empty value manufactures an
                   identifier that does not exist, and the first question triage asks of a frozen
@@ -2921,21 +2944,21 @@ GET  /status?redact=1   the bug-report form of /status: every reporter-identifyi
 GET  /scan        WiFi scan {"networks":[{ssid,rssi}]} — TRUSTED-LAN ONLY and read by NO shipped
                   client: the setup portal takes a TYPED SSID (no dropdown, no fetch), so this is a
                   humans/scripts diagnostic like /models, not part of the provisioning surface
-GET  /coredump[?clear=1]   stream the current-firmware core-dump image (chunked octet-stream; 404 if
-                  none or if the only raw image is a proven foreign-build orphan);
-                  ?clear=1 erases the coredump partition. Decode offline against the matching-version
+GET  /coredump      stream the current-firmware core-dump image (chunked octet-stream; 404 if
+                  none or if the only raw image is a proven foreign-build orphan). Decode offline against the matching-version
                   .elf: scripts/decode-coredump.sh coredump.bin (CI archives the .elf per build). The
                   UI surfaces a crash banner + one-click download when /status.last_crash is set.
+POST /coredump/clear erase only the coredump partition while preserving the reset/crash record.
 POST /crash/dismiss   ACKNOWLEDGE + DELETE this boot's crash report: erase the core-dump image and
                   mark the cached CrashInfo dismissed (diag_crash_dismiss), so crash_is_notable() is
                   false everywhere at once — /status.last_crash goes null, the retained MQTT crash
                   topic clears on the next heartbeat tick, and the web UI's banner is gone across
                   reloads and browsers. That is the point: the banner's "dismiss" was page state
-                  alone, so a reload brought the same crash back. Separate from /coredump?clear=1
+                  alone, so a reload brought the same crash back. Separate from POST /coredump/clear
                   because they answer different questions — clearing frees the flash slot for the
                   NEXT dump and deliberately leaves the fault reset on record, while this says the
                   crash has been dealt with; and a fault reset commonly carries no dump at all (a
-                  stack overflow overruns it), where ?clear=1 changes nothing the banner keys on.
+                  stack overflow overruns it), where /coredump/clear changes nothing the banner keys on.
                   ERASE FIRST, mark second: a failed erase of current-firmware evidence answers 500
                   {ok:false,error} and marks NOTHING, since a dismissal surviving it would report
                   "no crash" while the dump was still downloadable. Proven-foreign residue is the
@@ -3020,9 +3043,12 @@ POST /set_diagnostics {enabled:boolean} -> persist + apply live, no reboot. This
                   HomeHub, history, ENV III, and technical heartbeat processing remain active.
 POST /set_ref_temp   {name,topic,temperature_path,setpoint_topic,setpoint_path,fixed_setpoint_c,
                   timestamp_topic,timestamp_path,enabled_path,hvac_mode_path,max_age_s} -> validate,
-                  persist and apply live on the existing MQTT client without reboot. There is NO
+                  persist and rebind on the existing MQTT client without reboot. Subscription and
+                  decoding occur only while the v19 diagnostics master is enabled; otherwise the
+                  saved mapping remains dormant. There is NO
                   test/proof step (#433 removed POST /test_ref_temp and the test_proof gate): the
-                  mapping applies immediately. Empty topic is the explicit disabled state and clears
+                  mapping becomes the active binding immediately when that master is on. Empty topic
+                  is the explicit disabled state and clears
                   every other field; otherwise the value topic is exact (no wildcards), paths are
                   bounded dot-separated JSON selectors, max_age_s is an integer in 10..3600, and a
                   non-empty source needs a target — either a setpoint mapping or a fixed target
@@ -3031,17 +3057,19 @@ POST /set_ref_temp   {name,topic,temperature_path,setpoint_topic,setpoint_path,f
                   setpoint_path/timestamp_path resolved against it, preserving the v16 request
                   contract. A typo does not fail loudly — it surfaces as a runtime room error on
                   /status (payload/path/freshness), which is what keeps the write-free SHADOW
-                  diagnosis fail-closed. An unchanged mapping still reconfigures the subscription so
-                  the Settings action can retry it, and short-circuits {ok:true,saved:false,
+                  diagnosis fail-closed. An unchanged mapping still re-evaluates the live/dormant
+                  binding so the Settings action can retry it, and short-circuits {ok:true,saved:false,
                   reboot:false}. Deleting a source (empty topic) applies the same way — removal must
                   never depend on the thing being removed still working
-POST /test_circulation  {name,topic,power_path,time_path,max_age_s,on_tenths_w,off_tenths_w,
-                  confirm_s} -> subscribe the CANDIDATE mapping on the existing authenticated MQTT
-                  client, wait up to 12 s for a frame, decode it through the path the live witness
-                  uses, and answer {ok,test_proof,power_w,state,retained} — or 422 with the reason it
-                  did not. Writes NOTHING (a probe, not a save): an empty
-                  topic is 400, since "test nothing" is not a question
-POST /set_circulation   {name,topic,power_path,time_path,max_age_s,on_tenths_w,off_tenths_w,
+POST /test_circulation  {name,topic,power_path,timestamp_path,max_age_s,on_threshold_w,
+                  off_threshold_w,confirm_s} -> require the v19 diagnostics master (409 while off),
+                  subscribe the CANDIDATE mapping on the existing authenticated MQTT client, wait
+                  up to 12 s for a frame, decode it through the path the live witness uses, and
+                  answer {ok,test_proof,power_w,state,retained} — or 422 with the reason it did not.
+                  Writes NOTHING (a probe, not a save): an empty topic is 400, since "test nothing"
+                  is not a question
+POST /set_circulation   {name,topic,power_path,timestamp_path,max_age_s,on_threshold_w,
+                  off_threshold_w,
                   confirm_s,test_proof} -> validate, persist and apply live (no reboot). The
                   EXTERNAL CIRCULATION WITNESS: an independent power meter (in practice a smart plug
                   on the DHW circulation pump) whose confirmed on/off state is what lets the checkup
@@ -3099,6 +3127,10 @@ POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id}
                   -> validate + apply live (no reboot). Every key is OPTIONAL and an omitted one keeps
                   its stored value, which is what lets the pin picker POST {profile,rx,tx} without
                   flipping anyone onto Modbus — and lets the HomeHub modal POST only its three fields.
+                  Those are two durability domains, never one transaction: any request that names an
+                  X10A field (profile/rx/tx) AND a HomeHub field (mb_host/mb_port/mb_unit_id) returns
+                  400 "update X10A and HomeHub in separate requests" before persistence, RAM apply or
+                  task reconfiguration. Clients must send two requests when they intend to change both.
                   `mb_host` is the complete explicit HomeHub intent: non-empty polls exactly that
                   address; sending empty persists the discovery latch and suppresses tasks, future
                   automatic searches, sockets and dependent heating-curve diagnosis. This SECOND
@@ -3164,7 +3196,8 @@ POST /set_board   {preset_id,led_gpio,led_type,led_inverted,btn_gpio,btn_active_
    (every /set_*) a failed route-owned NVS write answers 500
                   {ok:false,error:"config write failed"} and does NOT reboot/apply; unrelated
                   self-healing link-cache maintenance failures are logged without rejecting a
-                  committed service blob, while /set_hp requires those keys (the failing key is on /diag)
+                  committed service blob, while an X10A /set_hp requires the atomic `link` blob (its
+                  failed write is on /diag and the previous complete link remains intact)
 POST /set_ota     {channel:"release"|"dev"} -> validate + persist, applied LIVE (no reboot, unlike
                   /set_board: nothing claims the channel at task start — ota_update.cpp reads it when
                   it fetches, so the very next check uses the new feed). An unknown name is REJECTED,

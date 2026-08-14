@@ -33,10 +33,12 @@ assert.ok(refs >= 0 && requestedCleanup > refs && ordinaryGate > requestedCleanu
 const setHpStart = http.indexOf("static esp_err_t set_hp(");
 const setHpEnd = http.indexOf("static esp_err_t discover_homehub_now", setHpStart);
 const setHp = http.slice(setHpStart, setHpEnd);
-const hpSave = setHp.indexOf("config_save(c, /*require_link=*/true)");
+const hpSave = setHp.indexOf("config_save(c, /*require_link=*/x10a_sent)");
 const hpRequest = setHp.indexOf("mqtt_request_modbus_cleanup()");
 assert.match(setHp, /modbus_was_enabled\s*=\s*config_modbus_enabled\(c\)/);
 assert.match(setHp, /modbus_was_enabled && !config_modbus_enabled\(c\)/);
+assert.match(setHp, /set_hp_update_domains_compatible\(x10a_sent, homehub_sent\)/,
+  "X10A and HomeHub writes must stay in separate durability domains");
 assert.ok(hpSave >= 0 && hpRequest > hpSave,
   "HomeHub cleanup may be requested only after the disabling config was persisted");
 

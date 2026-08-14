@@ -11,6 +11,7 @@
 #include "sdkconfig.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "net.hpp"
@@ -290,6 +291,10 @@ bool wifi_start_sta() {
     if (s_sta_netif) esp_netif_set_hostname(s_sta_netif, CONFIG_DAIKIN_HOSTNAME);
     wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
+    // `daik_cfg` is the sole persistence authority. IDF defaults to WIFI_STORAGE_FLASH, which would
+    // silently duplicate SSID/password in its own NVS namespace and let them survive our factory
+    // reset. Select RAM before the first set_config; config_load supplies them again every boot.
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, nullptr, &s_h_wifi);
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi, nullptr, &s_h_ip);
 
@@ -429,6 +434,24 @@ bool wifi_start_sta() {
     return true;
 }
 
+esp_err_t wifi_forget_persisted_config() {
+    bool temporary_init = false;
+    esp_err_t e = esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+    if (e == ESP_ERR_WIFI_NOT_INIT) {
+        wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
+        e = esp_wifi_init(&ic);
+        if (e != ESP_OK) return e;
+        temporary_init = true;
+        e = esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+    }
+    if (e == ESP_OK) e = esp_wifi_restore();
+    if (temporary_init) {
+        const esp_err_t deinit = esp_wifi_deinit();
+        if (e == ESP_OK) e = deinit;
+    }
+    return e;
+}
+
 int wifi_scan(WifiScanEntry* out, int max) {
     wifi_scan_config_t sc = {};
     if (esp_wifi_scan_start(&sc, true) != ESP_OK) return 0;
@@ -468,7 +491,9 @@ WifiInfo wifi_info() {
             info.std[sizeof(info.std) - 1] = '\0';
         }
     }
-    esp_wifi_get_mac(WIFI_IF_STA, info.mac);
+    // This identity exists even when an Ethernet-first boot never starts the WiFi driver.
+    // Reporting it directly from eFuse keeps /status transport-neutral too.
+    (void)esp_read_mac(info.mac, ESP_MAC_WIFI_STA);
     return info;
 }
 

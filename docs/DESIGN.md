@@ -1157,7 +1157,8 @@ is exactly what a user would want to see move.
   finds nothing and says so. The UI does not distinguish "no newer version" from "no feed configured";
   both are honestly "up to date" from the device's point of view.
 - The **device log** is not surfaced in the UI (an early Diagnostics screen was dropped). It remains
-  available out-of-band at `GET /diag` (verbose/clear via query); another card on Settings is where
+  available out-of-band at `GET /diag` (verbose/redact via query; clearing is `POST /diag/clear`);
+  another card on Settings is where
   it would go if it ever comes back.
 - The UI language follows the **browser** (de / en) by default, with an optional **manual override**
   on the Firmware card (Sprache → `/set_lang`, persisted in NVS as `ui_lang`; §1). The firmware itself
@@ -1435,9 +1436,10 @@ vocabulary exactly:
    thermostat is being read. That makes this a §5.6 Connections row in shape, so it takes that rule
    whole, **including the second half**: the face carries the condition in colour, and the
    accessible name spells out the same combined verdict in words (§9).
-   The room-source modal saves and subscribes immediately; its Save hint explains that a readable,
-   fresh MQTT frame is still required before the source becomes usable. Delete removes the saved
-   mapping and captured value. A blank timestamp mapping uses live non-retained MQTT arrival time;
+   The room-source modal saves immediately and subscribes only while the v19 Plant diagnostics
+   master is enabled; its Save hint names that dormant state and explains that a readable, fresh
+   MQTT frame is still required before the source becomes usable. Delete removes the saved mapping
+   and captured value. A blank timestamp mapping uses live non-retained MQTT arrival time;
    retained data without trusted source time fails closed,
    and `/status` plus the grouped numeric
    `<base>/heating_curve` topic retain the full canonical and diagnosis evidence. No UI path sends a
@@ -1718,7 +1720,11 @@ The design needs these additions to the firmware (all small, tracked as follow-u
   identity line consumes `ip` (§5.3 body). See `main/http_status.cpp`.
 - `POST /set_hp`: **every field is optional** — an omitted key keeps its current value, so the
   Settings Protokoll card posts just `{profile:"auto",rx,tx}` on a pin change. `poll_s` is **not**
-  accepted (fixed at 1 s); `proto` is auto-detected and not accepted; there is no value mask.
+  accepted (fixed at 1 s); `proto` is auto-detected and not accepted; there is no value mask. X10A
+  (`profile`/`rx`/`tx`) and HomeHub (`mb_host`/`mb_port`/`mb_unit_id`) are separate durability domains:
+  naming fields from both in one request returns 400
+  `"update X10A and HomeHub in separate requests"` before anything is persisted or applied. The two
+  UI forms already submit those domains separately.
 - `GET /status`: `uptime_s` (seconds since boot) has **two** consumers, and they read it for
   different things: the **Uptime** row on the Settings ESP32 card (§5.6 item 2) states it, while
   §5.4's OTA flow watches it go *backwards* to detect that the device rebooted under the app (an

@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 622056a065e952a6cf76cc70d04e84d9001ccca982ad1b9f5420a2df109e6a77 -->
+<!-- diagnostic-evidence-contract: 458491c7881556ea8666d07ec4a62357a159e13a39288ea79136b332a990dd98 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -12,6 +12,11 @@ For every row in the **Plant diagnostics · 24 h** card, this page answers four 
 The whole feature is an explicit opt-in under Settings › Firmware and is off by default. Turning it
 on begins a fresh evidence generation; turning it off stops and clears the diagnosis and its
 additional room, forecast, and circulation sources. None of the results below is a recommendation.
+
+X10A observations are also scoped to the configured target generation. A link, wiring, or detected
+unit change invalidates an in-flight cycle before it can enter this evidence window; the old target's
+last sample is discarded rather than becoming the first sample attributed to the new target. This is
+an identity and freshness boundary, not evidence that an unreadable replacement unit is healthy.
 
 A manufacturer statement is not automatically a limit for every Daikin model. The installation
 manual for the exact indoor and outdoor units remains authoritative. The primary sources linked here

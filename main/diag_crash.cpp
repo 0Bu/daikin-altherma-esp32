@@ -10,6 +10,7 @@
 #include "esp_system.h"
 
 #include <cstdlib>
+#include <atomic>
 #include <cstring>
 
 namespace daik {
@@ -24,9 +25,10 @@ static_assert(static_cast<uint32_t>(CrashReason::INT_WDT)    == ESP_RST_INT_WDT,
 static_assert(static_cast<uint32_t>(CrashReason::TASK_WDT)   == ESP_RST_TASK_WDT,   "reset enum drift");
 static_assert(static_cast<uint32_t>(CrashReason::BROWNOUT)   == ESP_RST_BROWNOUT,   "reset enum drift");
 
-// Filled once by diag_crash_capture(). Read-only thereafter EXCEPT for the `dismissed` byte, which
-// diag_crash_dismiss() sets once (see there for why that needs no lock).
+// Filled once by diag_crash_capture() and read-only thereafter. Dismissal is the only cross-task
+// field and therefore lives in its own atomic rather than racing a request against /status/MQTT.
 static CrashInfo s_ci;
+static std::atomic<bool> s_dismissed{false};
 // Set only on boot-time proof that the on-flash image belongs to another firmware. The erase is
 // best-effort; this latch keeps a failed erase from making the rejected image reportable again when
 // diag_crash_info_live() performs its later raw flash presence check.
@@ -45,13 +47,14 @@ bool diag_crash_coredump_present() {
 }
 
 CrashInfo diag_crash_info_live() {
-    CrashInfo c = s_ci;                            // boot-time reason + parsed summary
+    CrashInfo c = diag_crash_info();               // boot-time reason + atomic dismissal state
     c.coredump  = diag_crash_coredump_present();   // ...but the image itself may be gone by now
     return c;
 }
 
 void diag_crash_capture() {
     s_foreign_coredump = false;
+    s_dismissed.store(false);
     s_ci.reason   = static_cast<uint32_t>(esp_reset_reason());
     s_ci.coredump = diag_crash_coredump_present();
 
@@ -110,7 +113,11 @@ void diag_crash_capture() {
     }
 }
 
-const CrashInfo& diag_crash_info() { return s_ci; }
+CrashInfo diag_crash_info() {
+    CrashInfo c = s_ci;
+    c.dismissed = s_dismissed.load();
+    return c;
+}
 
 // Acknowledge + delete this boot's crash report (see diag_crash.hpp). Erase FIRST, mark second: on a
 // failed erase of CURRENT-FIRMWARE evidence nothing is marked, so the banner comes back rather than
@@ -149,8 +156,18 @@ bool diag_crash_dismiss() {
                                                : "foreign dump residue suppressed";
     if (err != ESP_OK)
         diag_printf("crash: coredump erase returned %s — %s\n", esp_err_to_name(err), how);
-    s_ci.dismissed = true;
+    s_dismissed.store(true);
     diag_printf("crash: report dismissed (reset=%s, %s)\n", crash_reason_slug(s_ci.reason), how);
+    return true;
+}
+
+bool diag_crash_forget() {
+    const esp_err_t err = esp_core_dump_image_erase();
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
+        diag_printf("crash: factory-reset coredump erase failed: %s\n", esp_err_to_name(err));
+        return false;
+    }
+    s_dismissed.store(true);
     return true;
 }
 

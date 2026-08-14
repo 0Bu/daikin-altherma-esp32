@@ -83,6 +83,11 @@ on:
         type: choice
         options: [patch, minor, major]
         default: patch
+      release_version:
+        description: "Exact X.Y.Z to resume a partial release (blank derives the next version)"
+        type: string
+        required: false
+        default: ""
 
 # Serialize main so the release version + the two feeds can't race; cancel superseded PR runs.
 # A release dispatch and a push to main share this group deliberately: they both derive a version
@@ -104,12 +109,12 @@ jobs:
   # NOTE for branch protection: the required checks are now `gates` and `build`, not the three
   # old job names.
   gates:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       firmware: ${{ steps.changes.outputs.firmware }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0   # the change detection below diffs against the base commit
 
@@ -254,10 +259,9 @@ jobs:
       # the same audit, re-records and re-stamps in one place, on a machine that can do all three.
       # The currency of the README recording is now a judgement call, not a merge condition.
 
-      # The gh-pages publish is the LAST step of the build job below, after ~5 minutes of firmware
-      # work — so when it breaks, it breaks expensively and at the worst moment. It is also the one
-      # step with a concurrency hazard: two publishers (the release root and every merge's dev
-      # channel) write one branch. Exercise it here
+      # The gh-pages publish follows the expensive firmware build, so a regression still fails late.
+      # It also has a concurrency hazard: the release root and every merge's dev channel write one
+      # branch. Exercise it here
       # against a throwaway bare repo — no network, no credentials, seconds long — so a regression
       # fails before the build, not after it.
       - name: Test the gh-pages publish (incl. concurrent publishers)
@@ -266,6 +270,8 @@ jobs:
         run: ./scripts/run-web-installer-plan-tests.sh
       - name: Test the publish-version gate
         run: ./scripts/run-publish-version-tests.sh
+      - name: Test CI trust boundaries and release contracts
+        run: ./scripts/run-ci-release-contract-tests.sh
       - name: Test the coredump artifact decoder
         run: ./scripts/run-decode-coredump-tests.sh
 
@@ -276,6 +282,7 @@ jobs:
         run: |
           python3 scripts/check-sdkconfig-defaults.py --self-test
           python3 scripts/report-firmware-size.py --self-test
+          python3 scripts/check-manifest-provenance.py --self-test
 
       # .claude/CLAUDE.md is loaded into every Claude Code session, so every byte in it is paid on
       # every turn — and it grows by accretion (it reached 329 KB before the 2026-08 reduction).
@@ -304,12 +311,10 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          # tools/web_asset/ is a BUILD INPUT, not tooling: main/CMakeLists.txt runs its minifier over
-          # the web UI and embeds the result in the image, so a change there changes the firmware
-          # bytes exactly like a change under main/ does. It was missing until it caused the failure
-          # this pattern exists to prevent — a minifier edit merging with no compile behind it, and
-          # the changed UI bytes never reaching the dev feed.
-          relevant='^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|dependencies\.lock$|partitions\.csv$|version\.txt$|docs/(index\.html|serial-port-release\.mjs)$|\.github/workflows/build\.yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version)\.sh$|scripts/(check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan)\.py$|tools/(version|web_asset)/)'
+          # tools/web_asset/ is a BUILD/PUBLICATION INPUT, not tooling: main/CMakeLists.txt runs its
+          # minifier over the web UI and embeds the result in the image, while build-pages.sh copies
+          # vendor/LICENSE into both feeds. A change there must therefore rebuild and republish.
+          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/(check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance)[.]py$|tools/(version|web_asset)/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
@@ -336,39 +341,129 @@ jobs:
             changed=yes
           else
             git diff --name-only $range > /tmp/changed-files.txt
-            if grep -qE "$relevant" /tmp/changed-files.txt; then changed=yes; else changed=no; fi
+            if grep -qE "$relevant" /tmp/changed-files.txt; then
+              changed=yes
+            else
+              changed=no
+            fi
           fi
           echo "firmware=$changed" >> "$GITHUB_OUTPUT"
           echo "build-relevant changes: $changed"
 
+  # Untrusted source boundary. Pull requests and non-main manual dispatches compile without any
+  # signing material and can retain only non-flashable diagnostics. Keep this job named `build`:
+  # it is the required PR check, and a skipped build still satisfies docs-only changes.
   build:
+    needs: [gates]
+    if: needs.gates.outputs.firmware == 'yes' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Stamp compile-only firmware version
+        id: stamp
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          if [ "$EVENT_NAME" = pull_request ]; then
+            [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "invalid PR number: $PR_NUMBER" >&2; exit 2; }
+            disp="$(./scripts/next-version.sh)-PR-${PR_NUMBER}"
+          else
+            disp="$(./scripts/next-version.sh --dev)"
+          fi
+          echo "$disp" > version.txt
+          echo "disp=$disp" >> "$GITHUB_OUTPUT"
+          echo "stamping compile-only build $disp"
+
+      - name: Derive the ccache key
+        id: cckey
+        run: |
+          set -euo pipefail
+          idf="$(./scripts/idf-version.sh)"
+          h="$( { printf 'idf=%s\n' "$idf"; cat sdkconfig.defaults dependencies.lock; } | sha256sum | cut -c1-16 )"
+          echo "hash=$h" >> "$GITHUB_OUTPUT"
+
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
+        with:
+          path: .ccache
+          key: ccache-esp32s3-${{ steps.cckey.outputs.hash }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-esp32s3-${{ steps.cckey.outputs.hash }}-
+
+      - name: Compile firmware without flashable artifacts
+        uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
+        with:
+          esp_idf_version: v6.0.2
+          target: esp32s3
+          command: ./scripts/ci-build-all.sh --compile-only --source-sha "${{ github.sha }}" "${{ steps.stamp.outputs.disp }}"
+
+      - name: Publish firmware size summary
+        if: always()
+        run: |
+          if [ -f dist/daikin-altherma-esp32-size.md ]; then
+            cat dist/daikin-altherma-esp32-size.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Hand the ccache tree back to the runner
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .ccache || true
+
+      - name: Enforce non-flashable PR artifact boundary
+        run: ./scripts/check-nonflashable-artifacts.sh dist
+
+      - name: Upload compile diagnostics
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: daikin-altherma-esp32-${{ steps.stamp.outputs.disp }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            dist/*.elf.xz
+            dist/*.elf.sha256
+            dist/*-size.json
+            dist/*-size.md
+
+  # Trusted main build. This job can read the signing key but its token remains read-only; the
+  # separate publisher below owns contents:write and never receives the private key.
+  trusted_build:
     needs: [gates]
     # Skipped — not failed — when nothing the image or the site is made of changed. A skipped job
     # still reports its check, so this stays compatible with `build` as a required check.
-    if: needs.gates.outputs.firmware == 'yes'
-    runs-on: ubuntu-latest
+    if: >-
+      needs.gates.outputs.firmware == 'yes' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
-      contents: write   # tags + releases + the gh-pages branch push (the only Pages publisher)
+      contents: read
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+      version: ${{ steps.stamp.outputs.disp }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0   # full history + tags for versioning / change detection
 
-      # What is this run FOR? Exactly one of: release (manual only), dev, or pr. Decided once, in
-      # one place, so no later step has to re-derive it from a three-way `if:` expression.
+      # This job is structurally restricted to trusted main. A manual release is the only release
+      # mode; every other admitted event publishes the dev channel.
       - name: Decide the run mode
         id: mode
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            mode=pr
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.release }}" = "true" ] \
-               && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.release }}" = "true" ]; then
             mode=release
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            mode=dev
           else
-            mode=none        # a dispatch on a branch other than main: build only, publish nothing
+            mode=dev
           fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "run mode: $mode"
@@ -385,14 +480,32 @@ jobs:
       #                                core dump from a manually flashed PR build still finds its .elf)
       - name: Stamp firmware version
         id: stamp
+        env:
+          BUMP: ${{ inputs.bump }}
+          REQUESTED_RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
+          set -euo pipefail
           git fetch --tags --force
-          latest="$(git tag -l 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')"
           case "${{ steps.mode.outputs.mode }}" in
-            release) disp="$(./scripts/next-version.sh '${{ inputs.bump }}')" ;;
-            pr)      base="$latest"; [ -z "$base" ] && base="$(./scripts/next-version.sh)"
-                     disp="${base}-PR-${{ github.event.pull_request.number }}" ;;
-            *)       disp="$(./scripts/next-version.sh --dev)" ;;
+            release)
+              if [ -n "$REQUESTED_RELEASE_VERSION" ]; then
+                disp="$(./scripts/next-version.sh --exact "$REQUESTED_RELEASE_VERSION")"
+              else
+                disp="$(./scripts/next-version.sh "$BUMP")"
+              fi
+              if git rev-parse --verify --quiet "v${disp}^{commit}" >/dev/null; then
+                tag_sha="$(git rev-parse "v${disp}^{commit}")"
+                [ "$tag_sha" = "$GITHUB_SHA" ] || {
+                  echo "refusing to attach a rebuilt artifact to v$disp at $tag_sha (run is $GITHUB_SHA)" >&2
+                  exit 1
+                }
+              fi ;;
+            dev)
+              [ -z "$REQUESTED_RELEASE_VERSION" ] || {
+                echo "release_version requires release=true" >&2
+                exit 2
+              }
+              disp="$(./scripts/next-version.sh --dev)" ;;
           esac
           echo "$disp" > version.txt
           echo "disp=$disp" >> "$GITHUB_OUTPUT"
@@ -409,31 +522,28 @@ jobs:
       # only the stamped version, so it costs seconds and fails before the ~5-minute build, before
       # the tag and before the GitHub Release.
       - name: Check the version moves its feed forward
-        run: ./scripts/check-publish-version.sh '${{ steps.mode.outputs.mode }}' '${{ steps.stamp.outputs.disp }}'
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+          VERSION: ${{ steps.stamp.outputs.disp }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          check_mode="$MODE"
+          [ "$MODE" != release ] || check_mode=release-resume
+          ./scripts/check-publish-version.sh --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"
 
-      # Materialize the offline OTA signing key from the OTA_SIGNING_KEY secret (RSA-3072 PEM).
-      # Main publish w/o secret -> hard error (never publish unsigned to OTA). Fork PR w/o secret
-      # -> warn + build unsigned (compile check only). See docs/SECURITY.md.
+      # Materialize the OTA signing key only inside this trusted-main/read-only-token job. PR code
+      # cannot enter this job, and the later contents:write publisher never receives the key.
       - name: Provision OTA signing key
-        id: signkey
-        # Skipped only for mode `none` (a dispatch on a branch that publishes nothing): that build
-        # is a compile check, so a missing secret there must not be a hard error.
-        if: steps.mode.outputs.mode != 'none'
         env:
           OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
         run: |
+          set -euo pipefail
           if [ -z "$OTA_SIGNING_KEY" ]; then
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              echo "signed=false" >> "$GITHUB_OUTPUT"
-              echo "::warning::No OTA_SIGNING_KEY (fork PR?) — building UNSIGNED (compile check only)."
-              exit 0
-            fi
             echo "::error::Refusing to publish UNSIGNED firmware — set the OTA_SIGNING_KEY secret (docs/SECURITY.md)." >&2
             exit 1
           fi
           printf '%s\n' "$OTA_SIGNING_KEY" > ota_signing_key.pem
           chmod 600 ota_signing_key.pem
-          echo "signed=true" >> "$GITHUB_OUTPUT"
 
       # ccache across runs. `idf.py set-target` wipes the build directory, so every CI compile
       # started from zero — measured, that is ~3 minutes of this job's ~5 (the other ~2 are the
@@ -446,9 +556,8 @@ jobs:
       # IDF_CCACHE_ENABLE on itself when the ccache binary is present, so a toolchain image
       # without it degrades to today's behaviour instead of failing the build.
       #
-      # Restored on every run, SAVED only from main: a PR can read the base branch's cache but its
-      # own write would be scoped to that PR's ref and thrown away when it closes — spending upload
-      # time per PR push to warm a cache nothing else can read.
+      # Restored on every run and saved only by this trusted-main job. Untrusted builds can read the
+      # base cache, but never upload their own objects into a cache later builds restore.
       # The cache key must change when the cached objects go stale — and NOT otherwise. It used to
       # be hashFiles('.github/workflows/build.yml', 'sdkconfig.defaults'), i.e. the hash of this
       # WHOLE FILE, so every edit to this workflow threw the cache away. Most edits to it change no
@@ -475,7 +584,7 @@ jobs:
           echo "ccache key: target esp32s3 / IDF $idf / defaults + dependency lock -> $h"
 
       - name: Restore ccache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
         with:
           path: .ccache
           key: ccache-esp32s3-${{ steps.cckey.outputs.hash }}-${{ github.run_id }}
@@ -483,7 +592,7 @@ jobs:
             ccache-esp32s3-${{ steps.cckey.outputs.hash }}-
 
       - name: Build firmware
-        uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5 # v1.2.0
+        uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
         with:
           esp_idf_version: v6.0.2
           target: esp32s3
@@ -495,7 +604,7 @@ jobs:
           # bins don't embed makes every device download an "update" that changes nothing, forever.
           # ci-build-all.sh reads the version back out of the built image and fails if the two ever
           # drift apart again.
-          command: ./scripts/ci-build-all.sh "${{ steps.stamp.outputs.disp }}"
+          command: ./scripts/ci-build-all.sh --source-sha "${{ github.sha }}" "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary
         if: always()
@@ -517,48 +626,19 @@ jobs:
 
       - name: Save ccache
         if: github.ref == 'refs/heads/main' && success()
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
         with:
           path: .ccache
           key: ccache-esp32s3-${{ steps.cckey.outputs.hash }}-${{ github.run_id }}
 
-      # Upload the bins AND the unstripped .elf (+ checksum): the .elf is the only artifact that can
-      # symbolize a core dump from this build (scripts/decode-coredump.sh), so retaining it per
-      # version/PR keeps every build's crashes decodable — even while the repo is private and cuts no
-      # public Release. This artifact is also the ONLY way to get a PR's image (the preview installer
-      # is retired) — a maintainer downloads it, flashes it over USB, and any dump it produces is
-      # decodable for as long as the PR is plausibly live.
-      #
-      # RETENTION IS AN ARITHMETIC PROBLEM, not a preference. The previous 90-day dev window headed
-      # far beyond the 2 GB plan allowance. Measured 2026-08-13 after xz compression: each artifact
-      # is 7.08 MB; the live workload produced 35 dev artifacts in 3 days and 151 PR artifacts in
-      # 7 days. The 3/7-day pair below therefore retains about 186 artifacts / 1.32 GB, leaving real
-      # margin for burstier weeks instead of designing to sit immediately below the quota.
-      #
-      # Measured on the first run of this change (PR-458), not predicted: the raw ELF is 17.7 MB and
-      # xz gets it to 4.7 MB (3.7x). Against the Deflate the artifact zip was already applying, that
-      # is ~1.42x, so the artifact goes 9.05 -> 7.08 MB (-22%). The next lever, if storage gets
-      # tight again, is NOT a shorter PR window: dist/*-merged.bin is a
-      # second deflated copy of the app bytes already in dist/*.bin (~1.2 MB of the remaining
-      # 2.4 MB), and for a dev or release run the images are published to gh-pages anyway — only a
-      # PR build actually needs them in the artifact.
-      #
-      # A RELEASE keeps its .elf forever as a Release ASSET (the release step below attaches it);
-      # its Actions artifact remains for 90 days. Dev images are already published to gh-pages and
-      # only need a short diagnostic tail here. A PR publishes nowhere else, so its artifact remains
-      # available for at most 7 days while it is open, to be flashed and to symbolize dumps produced
-      # during review. cleanup-pr-artifacts.yml removes every copy immediately after that PR merges:
-      # main's successor build makes the review image obsolete, and a merged PR no longer needs an
-      # ELF diagnostic window of its own.
-      #
-      # Named after the STAMPED version (disp): this artifact is how a core dump finds its .elf, and
-      # a dump reports the version the image embeds. That is "1.0.8-dev.7" on a merge and
-      # "<base>-PR-<N>" on a PR, so every build stays self-labelling without a separate name shape.
+      # This is the only cross-job handoff. It contains signed flashables, but never the private key;
+      # the publisher downloads it with actions:read and owns the only contents:write token.
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: daikin-altherma-esp32-${{ steps.stamp.outputs.disp }}
-          retention-days: ${{ steps.mode.outputs.mode == 'pr' && 7 || steps.mode.outputs.mode == 'dev' && 3 || 90 }}
+          retention-days: ${{ steps.mode.outputs.mode == 'dev' && 3 || 90 }}
+          if-no-files-found: error
           path: |
             dist/*.bin
             dist/*.elf.xz
@@ -567,68 +647,80 @@ jobs:
             dist/*-size.md
             dist/manifest.json
 
-      # A PR PUBLISHES NOTHING. It used to assemble and push a preview installer to gh-pages
-      # PR/<N>/ on every commit, with a pr-preview-cleanup workflow to remove it on close — a
-      # gh-pages push (and therefore a full Pages deployment) per PR commit, for an installer that
-      # only differs from the dev channel by the PR's own changes. The dev channel replaced it:
-      # one publish per merge, and a board flashed from it follows the feed it was set to. A PR
-      # still BUILDS — the compile, the signature and the size limit are all checked — it just
-      # keeps the result to itself, as a build artifact.
+  # Outward mutation boundary. It has contents:write but no signing secret and consumes only the
+  # signed artifact produced by trusted_build. A failed publish can be retried without exposing the
+  # key to a write-capable job.
+  publish:
+    needs: [trusted_build]
+    if: needs.trusted_build.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
 
-      # ── DEV CHANNEL: every firmware-relevant merge to main ────────────────────────────────────
-      # Publishes gh-pages dev/ only — the release root is left standing
-      # (scripts/publish-pages-branch.sh --dev). No tag, no GitHub Release: a dev build is a
-      # position on a branch, not a version anyone was asked to run. A manual dispatch WITHOUT
-      # `release` lands here too, which is how the dev feed gets re-published on demand.
-      #
-      # No change gate on the step any more: the whole JOB is now gated on the same flag
-      # (gates.firmware), so reaching this line already means the merge changed something the image
-      # or the site is made of — a docs-only merge never gets here to be filtered out.
+      - name: Download signed build handoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_NAME: daikin-altherma-esp32-${{ needs.trusted_build.outputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+          MODE: ${{ needs.trusted_build.outputs.mode }}
+          VERSION: ${{ needs.trusted_build.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh run download "$GITHUB_RUN_ID" --repo "$GH_REPO" --name "$ARTIFACT_NAME" --dir dist
+          test -f dist/manifest.json
+          test -f dist/daikin-altherma-esp32.bin
+          ./scripts/check-manifest-provenance.py dist/manifest.json \
+            dist/daikin-altherma-esp32.bin "$SOURCE_SHA" "$(./scripts/idf-version.sh)" dependencies.lock
+          ./scripts/check-web-installer-plan.py dist/manifest.json partitions.csv
+          check_mode="$MODE"
+          [ "$MODE" != release ] || check_mode=release-resume
+          ./scripts/check-publish-version.sh --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"
+
       - name: Assemble dev-channel site
-        if: steps.mode.outputs.mode == 'dev'
+        if: needs.trusted_build.outputs.mode == 'dev'
         run: ./scripts/build-pages.sh --dev
       - name: Publish dev channel to gh-pages
-        if: steps.mode.outputs.mode == 'dev'
+        if: needs.trusted_build.outputs.mode == 'dev'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: ./scripts/publish-pages-branch.sh --dev
 
-      # ── RELEASE: manual only ──────────────────────────────────────────────────────────────────
-      # Creates the v* tag + the GitHub Release, then republishes the gh-pages ROOT (the release
-      # channel). Not gated on change detection, unlike the dev publish: a release is an explicit
-      # act, and "nothing firmware-relevant changed since the last one" is the maintainer's call to
-      # make, not something to discover by having the run quietly do nothing.
-      - name: Create release
-        if: steps.mode.outputs.mode == 'release'
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+      # Publish the release feed BEFORE creating its tag/Release. If this fails, no immutable release
+      # exists. If the later API call fails, release-resume accepts the already-published same version
+      # only when its manifest names this exact github.sha; release_version can explicitly resume even
+      # after a tag was partially created.
+      - name: Assemble Pages site (release channel)
+        if: needs.trusted_build.outputs.mode == 'release'
+        run: ./scripts/build-pages.sh
+      - name: Publish site to gh-pages (root)
+        if: needs.trusted_build.outputs.mode == 'release'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/publish-pages-branch.sh
+
+      - name: Create or resume release
+        if: needs.trusted_build.outputs.mode == 'release'
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3
         with:
-          tag_name: v${{ steps.stamp.outputs.disp }}
-          name: v${{ steps.stamp.outputs.disp }}
+          tag_name: v${{ needs.trusted_build.outputs.version }}
+          name: v${{ needs.trusted_build.outputs.version }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
-          # Attach the .elf (+ checksum) alongside the bins so a user's core dump can be decoded
-          # against the exact released firmware, plus the size evidence from that same link. This is
-          # the PERMANENT copy: a release asset is not Actions storage, so it outlives the build
-          # artifact's retention window entirely. Same xz container as the artifact — one format
-          # everywhere means decode-coredump.sh needs one unwrap path, not two.
+          fail_on_unmatched_files: true
           files: |
             dist/*.bin
             dist/*.elf.xz
             dist/*.elf.sha256
             dist/*-size.json
             dist/*-size.md
-
-      # The gh-pages BRANCH is the single publisher — the repo's Pages source must be set to
-      # "Deploy from a branch: gh-pages / (root)" (docs/README.md). The Actions-deployment path
-      # (configure-pages -> upload-pages-artifact -> deploy-pages) is deliberately NOT used: it
-      # deploys one atomic whole-site artifact, which cannot host the dev/ channel subpath that
-      # build-pages.sh + publish-pages-branch.sh maintain alongside the release root. The two
-      # mechanisms are mutually exclusive — a repo's Pages source is either a branch or Actions, so
-      # running both meant one of them was always dead or failing.
-      - name: Assemble Pages site (release channel)
-        if: steps.mode.outputs.mode == 'release'
-        run: ./scripts/build-pages.sh
-      - name: Publish site to gh-pages (root)
-        if: steps.mode.outputs.mode == 'release'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./scripts/publish-pages-branch.sh
+            _site/LICENSE.txt
+            _site/THIRD_PARTY_NOTICES.md
+            _site/Apache-2.0.txt

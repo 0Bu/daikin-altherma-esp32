@@ -82,35 +82,47 @@ below and edit them out by hand before you post.
 
 ## What is removed, and what deliberately is not
 
-The device replaces these fourteen values with `<redacted>` and **keeps the field itself**.
+The device replaces these 27 values with `<redacted>` and **keeps the field itself**.
 A value you have **not set** is the exception: it stays empty rather than becoming
 `<redacted>`, because an unset field has nothing to hide and substituting one would claim you
 have a broker, a room source or a HomeHub that you do not — which is the first thing anyone
 reading your report needs to know.
 
 
+<!-- redacted-status-fields:start -->
 | Field | Why it goes |
 |---|---|
 | `wifi.ssid` | names your home network |
 | `wifi.ip` | your internal address |
 | `wifi.bssid` | your router's radio address — locatable in public databases |
 | `wifi.mac` | identifies this specific board |
-| `mqtt.broker` | may contain a username and password if you typed them into the URL |
+| `mqtt.broker` | may contain credentials if they were typed into the URL |
+| `mqtt.base` | is user-typed and becomes the installation's Home Assistant device id |
+| `net.ip` | the active transport's internal address |
+| `net.eth.ip` | the wired interface's internal address |
+| `net.eth.mac` | identifies this specific wired controller |
 | `reference_temperature.name` | a name you typed, usually naming a room or a person |
 | `reference_temperature.topic` | a path through your own broker — normally carries a room or device name |
+| `reference_temperature.temperature_path` | user-typed JSON path; may contain room, person or device names |
 | `reference_temperature.setpoint_topic` | a second broker path when the target temperature is published separately |
+| `reference_temperature.setpoint_path` | user-typed JSON path; may contain room, person or device names |
 | `reference_temperature.timestamp_topic` | a second broker path when the source timestamp is published separately |
+| `reference_temperature.timestamp_path` | user-typed JSON path; may contain room, person or device names |
+| `reference_temperature.enabled_path` | user-typed JSON path; may contain room, person or device names |
+| `reference_temperature.hvac_mode_path` | user-typed JSON path; may contain room, person or device names |
 | `circulation_source.name` | a name you typed for the circulation-pump meter |
 | `circulation_source.topic` | a path through your own broker — normally embeds the smart plug's device id |
+| `circulation_source.power_path` | user-typed JSON path; may contain room, person or device names |
+| `circulation_source.timestamp_path` | user-typed JSON path; may contain room, person or device names |
 | `weather_forecast.latitude` | where your house is, to six decimals |
 | `weather_forecast.longitude` | the other half of the same |
 | `syslog.host` | an internal hostname |
 | `ntp.server` | often an internal hostname too |
 | `modbus.host` | your saved HomeHub address, whether found automatically, typed manually or filled by manual Search |
+<!-- redacted-status-fields:end -->
 
-Four entries here are not an address on your network: the two coordinates identify a place, and the
-two source *names* are words you typed — usually a room, sometimes a person. Everything else
-identifies a machine.
+The coordinates identify a place; source names and JSON paths are words you typed and can name a
+room or person. The remaining values identify devices or paths through your own network.
 
 The `/diag` log is scrubbed line by line for the same things.
 
@@ -170,8 +182,9 @@ removed from them for you — check them for your network name and your server a
 
 ## Supporting the project
 
-This firmware is free to use and maintained in spare time. The **Sponsor** button at the top of the
-repository takes contributions towards the project as a whole.
+This firmware is free to use and maintained in spare time. **No funding account is currently
+configured**, so the repository does not currently present a Sponsor button. If project funding is
+enabled later, it will support the project as a whole.
 
 There is deliberately **no way to pay for a particular issue**, and none is planned — reports are
 worked on by what is wrong and how well it is evidenced, not by who contributed. Sponsoring is

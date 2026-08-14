@@ -85,6 +85,11 @@ HpStats  hp_stats();
 // allocation-free, because the increment happens inside the OOM catch handler.
 uint32_t hp_skipped_cycles();
 
+// Identity token for one complete X10A cycle. A config change bumps it before arming the consumer
+// resets; cache/history/checkup/dwell commits accept only the token captured before their bus read.
+uint32_t hp_poll_generation();
+bool     hp_poll_generation_matches(uint32_t generation);
+
 // Signal the poll task to re-read config (called by /set_hp after config_save).
 void hp_poll_reconfigure();
 

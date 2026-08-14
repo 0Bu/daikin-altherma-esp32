@@ -1,6 +1,6 @@
 #include "syslog.hpp"
 #include "config.hpp"
-#include "wifi.hpp"
+#include "net.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "safe_mode.hpp"
@@ -245,14 +245,14 @@ static void handle_send_failure(int err, const char* what, bool& resolved, bool&
 }
 
 // Replay the boot records ONCE, as soon as a collector is resolved. diag_crash_capture() runs at the
-// top of app_main — before WiFi, before this task exists — so its crash line could only ever reach
+// top of app_main — before networking, before this task exists — so its crash line could only ever reach
 // the in-RAM diag ring, which a chatty failure mode (an X10A timeout every ~0.3 s) overwrites within
 // a minute. Result: the single most useful line for forensics was readable nowhere. The boot line
 // goes out on every boot (build identity: without it a log stream cannot be tied to a binary); the
 // crash records only when there is a real crash to report (build_crash_log_lines returns 0 otherwise).
 //
 // Sent straight down syslog_sendto(), NOT via diag_printf(): by now the queue is typically full of
-// the boot backlog (nothing drains it until WiFi + DNS are up), and syslog_send()'s enqueue is
+// the boot backlog (nothing drains it until a network + DNS are up), and syslog_send()'s enqueue is
 // non-blocking — it would silently drop exactly the lines this exists to save. Returns false if a
 // send failed, leaving the one-shot unlatched so the next resolve retries.
 //
@@ -335,7 +335,7 @@ void syslog_init() {
           try {
             const Config& c = config();
             bool configured = !c.syslog_host.empty();
-            bool wifi_ok = wifi_info().connected;
+            const bool network_up = net_is_up();
 
             if (!configured) {
                 if (resolved || reachable) { resolved = reachable = false; set_status(false, false, ""); }
@@ -345,8 +345,12 @@ void syslog_init() {
                 continue;
             }
 
-            if (!wifi_ok) {
-                if (resolved) { resolved = false; reachable = false; set_status(false, false, "WiFi disconnected"); }
+            if (!network_up) {
+                if (resolved) {
+                    resolved = false;
+                    reachable = false;
+                    set_status(false, false, "Network disconnected");
+                }
                 vTaskDelay(pdMS_TO_TICKS(2000));
                 continue;
             }

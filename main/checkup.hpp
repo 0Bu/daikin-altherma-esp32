@@ -42,7 +42,7 @@ enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored };
 // compressor running" is how the trend ring and the MQTT bridge would come to blank different rows,
 // and here it would be how a compressor start gets counted by one rule and not the other.
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
-                    const logic::CheckupCoverage& coverage);
+                    const logic::CheckupCoverage& coverage, uint32_t source_generation);
 
 // Judge what the previous boot left in .noinit and adopt or wipe it. app_main calls this ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.

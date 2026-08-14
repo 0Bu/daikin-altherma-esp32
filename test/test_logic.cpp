@@ -48,6 +48,7 @@
 #include "logic/hp_query_log.hpp"
 #include "logic/http_body.hpp"
 #include "logic/http_cache.hpp"
+#include "logic/http_request.hpp"
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
@@ -725,7 +726,7 @@ static void test_config_model() {
     CHECK(validate(c, why));                            // default (no address at all) is valid
     c.mb_host = "";
     CHECK(validate(c, why));                            // empty host = no manual address, valid
-    c.mb_host = "homehub-524288-abc.local";
+    c.mb_host = "homehub-524288-example.local";
     CHECK(validate(c, why));                            // an explicit .local host is fine
     c.mb_port = 0;   CHECK(!validate(c, why));          // port out of range
     c.mb_port = 65536; CHECK(!validate(c, why));
@@ -943,6 +944,10 @@ static void test_config_model() {
     CHECK(set_hp_updates_x10a(true, false, false));               // explicit profile statement
     CHECK(set_hp_updates_x10a(false, true, false));               // RX-only raw patch
     CHECK(set_hp_updates_x10a(false, false, true));               // TX-only raw patch
+    CHECK(set_hp_update_domains_compatible(true, false));         // X10A owns its link-cache result
+    CHECK(set_hp_update_domains_compatible(false, true));         // HomeHub owns the blob result
+    CHECK(set_hp_update_domains_compatible(false, false));        // no-op remains harmless
+    CHECK(!set_hp_update_domains_compatible(true, true));         // no partial cross-domain save
     CHECK(!homehub_history_identity_changed("hub.local", 502, 1, "hub.local", 502, 1));
     CHECK(homehub_history_identity_changed("hub-a.local", 502, 1, "hub-b.local", 502, 1));
     CHECK(homehub_history_identity_changed("hub.local", 502, 1, "hub.local", 1502, 1));
@@ -2778,21 +2783,26 @@ static void test_heap_watchdog() {
 }
 
 static void test_health_gate() {
-    // base=90s, cap=300s. STA-configured device.
+    // base=90s, cap=300s. Health is an observed transport or an observed recovery surface.
     const int base = 90, cap = 300;
     // Not yet at the base window -> keep waiting even if already online.
-    CHECK(health_gate_decide(0,   base, cap, /*cfg=*/true, /*conn=*/true)  == HealthVerdict::Wait);
-    CHECK(health_gate_decide(85,  base, cap, true,  true)  == HealthVerdict::Wait);
-    // Past the base window AND online -> commit (seal image in, cancel rollback).
-    CHECK(health_gate_decide(90,  base, cap, true,  true)  == HealthVerdict::Commit);
-    CHECK(health_gate_decide(120, base, cap, true,  true)  == HealthVerdict::Commit);
-    // Configured but never online -> wait until the hard cap, then give up (leave rollback armed).
-    CHECK(health_gate_decide(90,  base, cap, true,  false) == HealthVerdict::Wait);
-    CHECK(health_gate_decide(295, base, cap, true,  false) == HealthVerdict::Wait);
-    CHECK(health_gate_decide(300, base, cap, true,  false) == HealthVerdict::GiveUp);
-    // No credentials = legitimate setup-AP mode: connectivity isn't expected, so it's healthy.
-    CHECK(health_gate_decide(90,  base, cap, false, false) == HealthVerdict::Commit);
-    CHECK(health_gate_decide(0,   base, cap, false, false) == HealthVerdict::Wait);   // still honour base window
+    CHECK(health_gate_decide(0,  base, cap, NetLink::Wifi, /*portal=*/false) ==
+          HealthVerdict::Wait);
+    CHECK(health_gate_decide(85, base, cap, NetLink::Wifi, false) == HealthVerdict::Wait);
+    // Past the base window AND online -> commit (seal image in, cancel rollback). The Ethernet case
+    // is load-bearing: a wired boot intentionally never starts STA even when an SSID is stored.
+    CHECK(health_gate_decide(90,  base, cap, NetLink::Wifi, false) == HealthVerdict::Commit);
+    CHECK(health_gate_decide(90,  base, cap, NetLink::Eth,  false) == HealthVerdict::Commit);
+    CHECK(health_gate_decide(120, base, cap, NetLink::Eth,  false) == HealthVerdict::Commit);
+    // No transport and no portal -> wait until the hard cap, then leave rollback armed.
+    CHECK(health_gate_decide(90,  base, cap, NetLink::None, false) == HealthVerdict::Wait);
+    CHECK(health_gate_decide(295, base, cap, NetLink::None, false) == HealthVerdict::Wait);
+    CHECK(health_gate_decide(300, base, cap, NetLink::None, false) == HealthVerdict::GiveUp);
+    // A portal that is actually running is a valid recovery surface after the base window.
+    CHECK(health_gate_decide(90, base, cap, NetLink::None, true) == HealthVerdict::Commit);
+    CHECK(health_gate_decide(0,  base, cap, NetLink::None, true) == HealthVerdict::Wait);
+    // Critical wired/no-SSID loss: lack of credentials does not invent a portal that boot kept off.
+    CHECK(health_gate_decide(90, base, cap, NetLink::None, false) != HealthVerdict::Commit);
 }
 
 static void test_board_pins() {
@@ -3352,7 +3362,7 @@ static void test_crashinfo() {
 
     // A USB re-plug (ESP32-S3 native USB resets the chip on re-enumeration) is NOT a fault, so with
     // no dump in flash it must not raise the banner. The device reports `coredump` from a LIVE flash
-    // read (diag_crash_info_live), not the boot-time cache: a dump erased via /coredump?clear=1 while
+    // read (diag_crash_info_live), not the boot-time cache: a dump erased via POST /coredump/clear while
     // the device runs used to leave this true forever, which pinned an uncleanable "crash" banner on
     // a device that never crashed and a "Download crash report" button that 404s.
     CrashInfo usb_replug;
@@ -3795,14 +3805,18 @@ static void test_modbus_plan() {
 static void test_modbus_snapshot() {
     using daik::logic::modbus_cache_is_live;
     // A disconnected link never publishes, even if the cache and last session happen to match.
-    CHECK(!modbus_cache_is_live(false, 7, 7));
+    CHECK(!modbus_cache_is_live(false, 7, 7, 3, 3));
     // The load-bearing reconnect case: /values copied session 7's cache, then session 8 connected
     // before it sampled status. A boolean-only post-check says "live"; the generation check refuses
     // the previous session's rows until session 8 has committed its own poll.
-    CHECK(!modbus_cache_is_live(true, 8, 7));
-    CHECK(modbus_cache_is_live(true, 8, 8));
+    CHECK(!modbus_cache_is_live(true, 8, 7, 3, 3));
+    CHECK(modbus_cache_is_live(true, 8, 8, 3, 3));
+    // A saved target invalidates the previous cache immediately, before the poll task gets CPU time
+    // to close its old socket and publish a replacement cycle.
+    CHECK(!modbus_cache_is_live(true, 8, 8, 4, 3));
     // Generation zero is the pre-first-commit sentinel, not a coincidentally matching session.
-    CHECK(!modbus_cache_is_live(true, 0, 0));
+    CHECK(!modbus_cache_is_live(true, 0, 0, 3, 3));
+    CHECK(!modbus_cache_is_live(true, 8, 8, 0, 0));
 }
 
 // The HomeHub Modbus register profile (def/homehub.hpp) — the DECODE MECHANICS (scaling, special
@@ -5040,6 +5054,20 @@ static void test_config_store() {
     CHECK(config_crc32(reinterpret_cast<const uint8_t*>("123456789"), 9) == 0xCBF43926u);
     CHECK(config_crc32(nullptr, 0) == 0u);
 
+    // The separately-owned X10A cache is atomic too: a swapped pin pair and protocol are one CRC'd
+    // entry, so failure cannot leave the first pin durable and return HTTP 500 before the second.
+    LinkBlob link{43, 44, 'S', 0x12345678u};
+    std::vector<uint8_t> link_bytes = link_blob_serialize(link);
+    CHECK(link_bytes.size() == LINK_BLOB_BYTES);
+    LinkBlob link_rt;
+    CHECK(link_blob_deserialize(link_bytes.data(), link_bytes.size(), link_rt));
+    CHECK(link_rt.rx_pin == 43 && link_rt.tx_pin == 44 && link_rt.proto == 'S' &&
+          link_rt.identity_fp == 0x12345678u);
+    std::vector<uint8_t> link_bad = link_bytes;
+    link_bad[9] ^= 1;
+    CHECK(!link_blob_deserialize(link_bad.data(), link_bad.size(), link_rt));
+    CHECK(!link_blob_deserialize(link_bytes.data(), link_bytes.size() - 1, link_rt));
+
     // Round-trip every field, including bytes that must survive verbatim (spaces are valid SSID/user
     // bytes — the F08 fix — and a blob must not mangle them), and the two packed flags.
     ConfigBlob a;
@@ -5352,13 +5380,13 @@ static void test_config_store() {
     // main's language byte landed first and is already on published builds, so this took the later
     // number — a second, different "v4" would decode that byte as a HomeHub setting.
     ConfigBlob mb; mb.wifi_ssid = "net";
-    mb.mb_host = "homehub-524288-abc.local";
+    mb.mb_host = "homehub-524288-example.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
     CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 19);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
-    CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
+    CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-example.local");
     CHECK(mrt.mb_port == 502 && mrt.mb_unit_id == 3 && mrt.homehub_enabled);
     CHECK(mrt.wifi_ssid == "net");                       // the earlier-version fields round-trip too
     // An EMPTY mb_host (= disabled) must survive the string encoding, and the compatibility bit must
@@ -5377,7 +5405,7 @@ static void test_config_store() {
     // Needs a NON-EMPTY host so the flag byte's bit1 (the host-derived compatibility mirror) is set,
     // which is what pins the byte offset below: with an empty host every bit there is 0 and a wrong
     // index would make these checks assert nothing at all.
-    ConfigBlob consent_src = mb; consent_src.mb_host = "homehub-524288-abc.local";
+    ConfigBlob consent_src = mb; consent_src.mb_host = "homehub-524288-example.local";
     std::vector<uint8_t> consent = config_blob_serialize(consent_src);
     const size_t flag_byte = consent.size() - 5 - 63 - current_suffix_bytes;
     CHECK((consent[flag_byte] & 2u) != 0);               // offset pinned by the mirror bit
@@ -6478,20 +6506,6 @@ static void test_mcp() {
         CHECK(mcp_protocol_supported(version));
     }
     CHECK(!mcp_protocol_supported("2024-11-05"));
-    CHECK(mcp_origin_allowed("", "daikin-altherma-esp32", "192.0.2.170"));
-    CHECK(mcp_origin_allowed("http://daikin-altherma-esp32.local",
-                             "daikin-altherma-esp32", "192.0.2.170"));
-    CHECK(mcp_origin_allowed("http://daikin-altherma-esp32.local:80",
-                             "daikin-altherma-esp32", "192.0.2.170"));
-    CHECK(mcp_origin_allowed("http://192.0.2.170",
-                             "daikin-altherma-esp32", "192.0.2.170"));
-    CHECK(mcp_origin_allowed("http://192.0.2.170:80",
-                             "daikin-altherma-esp32", "192.0.2.170"));
-    CHECK(!mcp_origin_allowed("https://daikin-altherma-esp32.local",
-                              "daikin-altherma-esp32", "192.0.2.170"));
-    CHECK(!mcp_origin_allowed("http://evil.example",
-                              "daikin-altherma-esp32", "192.0.2.170"));
-    CHECK(!mcp_origin_allowed("http://192.0.2.170", "", ""));
     r = parse("{\"jsonrpc\":\"2.0\",\"id\":\"init\",\"method\":\"initialize\","
               "\"params\":{\"protocolVersion\":\"2099-01-01\"}}");
     CHECK(!r.error && r.protocol_version == MCP_PROTOCOL_LATEST && r.id_raw == "\"init\"");
@@ -6635,6 +6649,17 @@ static void test_net_link() {
     CHECK(!net_portal_needed(/*eth*/false, /*wifi_up*/true));
     CHECK( net_portal_needed(/*eth*/false, /*wifi_up*/false));
 
+    // GOT_IP is a wake-up, not a permanent lease: a local event-bit snapshot that races LOST_IP
+    // may not carry the boot once the current lease says otherwise.
+    CHECK( net_eth_boot_ready(/*got event*/true,  /*current lease*/true));
+    CHECK(!net_eth_boot_ready(/*got event*/true,  /*current lease*/false));
+    CHECK(!net_eth_boot_ready(/*got event*/false, /*current lease*/true));
+    // Watch creation keys on boot provenance, so loss in the narrow interval between returning from
+    // net_eth_start() and starting the task cannot suppress recovery.
+    CHECK( net_eth_fallback_watch_needed(/*present*/true,  /*carried boot*/true));
+    CHECK(!net_eth_fallback_watch_needed(/*present*/true,  /*carried boot*/false));
+    CHECK(!net_eth_fallback_watch_needed(/*present*/false, /*carried boot*/true));
+
     // Losing the wire. A live lease, or a running radio, is nothing to act on.
     EthFallbackWatch w;
     CHECK(net_eth_fallback_step(w, /*lease*/true, /*wifi_running*/false, /*configured*/true) ==
@@ -6701,7 +6726,8 @@ static void test_http_surface() {
 
     // Trusted LAN exposes the full API — every route, either method.
     for (const char* p : {"/", "/index.html", "/favicon.ico", "/scan", "/status", "/values",
-                          "/diag", "/coredump", "/crash/dismiss", "/models", "/set_wifi",
+                          "/diag", "/diag/clear", "/coredump", "/coredump/clear",
+                          "/crash/dismiss", "/models", "/set_wifi",
                           "/set_mqtt", "/set_ntp", "/set_weather", "/set_hp", "/detect", "/ota/check",
                           "/ota/update", "/mcp"}) {
         CHECK(http_surface_serves(lan, p, false));
@@ -6720,7 +6746,9 @@ static void test_http_surface() {
     CHECK(!http_surface_serves(ap, "/status", false));
     CHECK(!http_surface_serves(ap, "/values", false));
     CHECK(!http_surface_serves(ap, "/diag", false));
+    CHECK(!http_surface_serves(ap, "/diag/clear", true));
     CHECK(!http_surface_serves(ap, "/coredump", false));
+    CHECK(!http_surface_serves(ap, "/coredump/clear", true));
     // …and /crash/dismiss least of all: it DESTROYS the dump and the crash record, so an
     // unauthenticated radio client could erase the evidence of a crash it never saw.
     CHECK(!http_surface_serves(ap, "/crash/dismiss", true));
@@ -6745,6 +6773,62 @@ static void test_http_surface() {
     CHECK(!http_surface_serves(ap, "/", true));
     CHECK(!http_surface_serves(ap, "/index.html", true));
     CHECK(!http_surface_serves(ap, "/favicon.ico", true));
+}
+
+static void test_http_request_policy() {
+    constexpr std::string_view hostname = "daikin-altherma-esp32";
+    constexpr std::string_view wifi_ip  = "192.0.2.20";
+    constexpr std::string_view eth_ip   = "198.51.100.30";
+
+    for (const char* authority : {"daikin-altherma-esp32.local",
+                                  "DAIKIN-ALTHERMA-ESP32.LOCAL:80",
+                                  "192.0.2.20", "192.0.2.20:80",
+                                  "198.51.100.30", "198.51.100.30:80"})
+        CHECK(http_authority_allowed(authority, hostname, wifi_ip, eth_ip));
+    for (const char* authority : {"", "evil.example", "daikin-altherma-esp32.local.evil",
+                                  "daikin-altherma-esp32.local:8080", "user@192.0.2.20",
+                                  "192.0.2.200"})
+        CHECK(!http_authority_allowed(authority, hostname, wifi_ip, eth_ip));
+
+    CHECK(http_origin_allowed("http://daikin-altherma-esp32.local", hostname, wifi_ip, eth_ip));
+    CHECK(http_origin_allowed("http://198.51.100.30:80", hostname, wifi_ip, eth_ip));
+    CHECK(!http_origin_allowed("https://daikin-altherma-esp32.local", hostname, wifi_ip, eth_ip));
+    CHECK(!http_origin_allowed("http://evil.example", hostname, wifi_ip, eth_ip));
+    CHECK(!http_origin_allowed("null", hostname, wifi_ip, eth_ip));
+
+    HttpRequestHeaders h{};
+    // A native HTTP/1.0 probe with no browser headers remains supported.
+    CHECK(http_lan_request_allowed(h, hostname, wifi_ip, eth_ip));
+    h.host_present = true;
+    h.host = "192.0.2.20";
+    CHECK(http_lan_request_allowed(h, hostname, wifi_ip, eth_ip));
+    h.host = "attacker.example";
+    CHECK(!http_lan_request_allowed(h, hostname, wifi_ip, eth_ip));
+
+    h.host = "daikin-altherma-esp32.local";
+    h.origin_present = true;
+    h.origin = "http://daikin-altherma-esp32.local";
+    h.fetch_site_present = true;
+    h.fetch_site = "same-origin";
+    CHECK(http_lan_request_allowed(h, hostname, wifi_ip, eth_ip));
+    h.fetch_site = "cross-site";
+    CHECK(!http_lan_request_allowed(h, hostname, wifi_ip, eth_ip));
+    h.fetch_site = "future-value";
+    CHECK(!http_lan_request_allowed(h, hostname, wifi_ip, eth_ip));
+    h.fetch_site = "same-origin";
+    h.origin = "http://attacker.example";
+    CHECK(!http_lan_request_allowed(h, hostname, wifi_ip, eth_ip));
+    h.host_present = false;
+    CHECK(!http_lan_request_allowed(h, hostname, wifi_ip, eth_ip));
+
+    CHECK(http_json_content_type("application/json"));
+    CHECK(http_json_content_type("Application/JSON; charset=utf-8"));
+    CHECK(http_json_content_type(" application/json ; charset=UTF-8 "));
+    CHECK(!http_json_content_type(""));
+    CHECK(!http_json_content_type("text/plain"));
+    CHECK(!http_json_content_type("application/x-www-form-urlencoded"));
+    CHECK(!http_json_content_type("application/jsonp"));
+    CHECK(!http_json_content_type("application/json;"));
 }
 
 // logic/lwt_select.hpp — the leaving-water MEASUREMENT picker that feeds ΔT / heat output / COP.
@@ -11745,6 +11829,49 @@ static void test_history_persist() {
     jh.value_count--;
     CHECK(!history_journal_header_matches(jh, fp));        // a short dense vector cannot shift ids
 
+    // HomeHub records add a configured-target identity to the catalog identity. Old/unscoped v1
+    // records fail closed, and host, port or unit changes cannot splice target A under target B.
+    const uint32_t hub_a = history_homehub_target_fingerprint("hub-a.local", 502, 1);
+    CHECK(hub_a != history_homehub_target_fingerprint("hub-b.local", 502, 1));
+    CHECK(hub_a != history_homehub_target_fingerprint("hub-a.local", 1502, 1));
+    CHECK(hub_a != history_homehub_target_fingerprint("hub-a.local", 502, 2));
+    HistoryJournalHeader mh = jh;
+    mh.source = static_cast<uint8_t>(HistoryJournalSource::Modbus);
+    mh.flags = HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
+    mh.value_count = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+    mh.commit = HISTORY_JOURNAL_ERASED;
+    history_journal_set_scope(mh, hub_a);
+    HistorySample hub_values[HOMEHUB_HISTORY_COUNT] = {};
+    mh.crc = history_journal_crc(mh, hub_values, HOMEHUB_HISTORY_COUNT);
+    mh.commit = HISTORY_JOURNAL_COMMITTED;
+    CHECK(history_journal_header_matches_scoped(mh, fp, hub_a));
+    CHECK(!history_journal_header_matches_scoped(mh, fp, hub_a ^ 1u));
+    CHECK(history_journal_header_matches_scoped_layout(
+        mh, fp, HistoryJournalSource::Modbus));  // old targets still advance the physical head
+    CHECK(!history_journal_header_matches(mh, fp));
+    mh.flags = 0;
+    CHECK(!history_journal_header_matches_scoped(mh, fp, hub_a));
+
+    const uint32_t unit_a = history_x10a_target_fingerprint("profile-a", 44, 43, 'I');
+    CHECK(unit_a != 0);
+    CHECK(unit_a != history_x10a_target_fingerprint("profile-b", 44, 43, 'I'));
+    CHECK(unit_a != history_x10a_target_fingerprint("profile-a", 43, 44, 'I'));
+    CHECK(unit_a != history_x10a_target_fingerprint("profile-a", 44, 43, 'S'));
+    // Optional detection witnesses are intentionally absent from this identity. A transiently
+    // missing page/capacity/EEPROM reply cannot change the committed profile/link scope.
+    CHECK(unit_a == history_x10a_target_fingerprint("profile-a", 44, 43, 'I'));
+    HistoryJournalHeader xh = jh;
+    xh.flags = HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
+    xh.value_count = static_cast<uint16_t>(TREND_COUNT);
+    xh.commit = HISTORY_JOURNAL_ERASED;
+    history_journal_set_scope(xh, unit_a);
+    xh.crc = history_journal_crc(xh, journal_values, TREND_COUNT);
+    xh.commit = HISTORY_JOURNAL_COMMITTED;
+    CHECK(history_journal_header_matches_x10a_scoped(xh, fp, unit_a));
+    CHECK(!history_journal_header_matches_x10a_scoped(xh, fp, unit_a ^ 1u));
+    CHECK(history_journal_header_matches_scoped_layout(
+        xh, fp, HistoryJournalSource::X10a));    // restore scope and global sequence are separate
+
     // The fourth source extends v1 without changing the first three ids or invalidating their old
     // records. Its own layout fingerprint, hourly raster and word-rounded payload width are all
     // mandatory, and CRC covers the exact persisted CheckupBucket + DhwLossBucket bytes.
@@ -12637,6 +12764,7 @@ int main() {
     test_mcp();
     test_net_link();
     test_http_surface();
+    test_http_request_policy();
     test_lwt_select();
     test_ou_stale();
     test_cop_scope();

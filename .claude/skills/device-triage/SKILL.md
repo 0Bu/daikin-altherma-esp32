@@ -7,8 +7,9 @@ model: sonnet
 # device-triage
 
 Read a running device's health over HTTP and, if it crashed, pull and symbolize the dump. This is
-the live-device counterpart to `flash-esp32`. Read-only on the device except `/coredump?clear=1`
-(never clear without asking). No auth/TLS by design — trusted LAN only.
+the live-device counterpart to `flash-esp32`. The workflow is read-only unless the user explicitly
+asks for `POST /diag/clear` or `POST /coredump/clear`; never clear either evidence source without
+asking. No auth/TLS by design — trusted LAN only.
 
 **Host:** default `daikin-altherma-esp32.local` (mDNS). If mDNS doesn't resolve, ask the user for
 the IP and use it verbatim. Put the host in `H` for the commands below: `H=daikin-altherma-esp32.local`.
@@ -85,8 +86,8 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
    curl -sS -o /dev/null -w '%{http_code}\n' "http://$H/coredump"   # 200 = real, 404 = no dump
    ```
    A `coredump:true` + `404` disagreement means the flag is stale (fixed on current main by re-reading
-   it live; older firmware caches it at boot and never invalidates on `/coredump?clear=1`). Report the
-   disagreement — don't trust either side alone.
+   it live; older firmware can cache it at boot and fail to invalidate it after the image is erased).
+   Report the disagreement — don't trust either side alone.
 
    If `coredump:true` **and** the 404 check says 200, a full dump is waiting — continue to step 5. If
    there's no dump, the reason + backtrace above is all there is.
@@ -132,8 +133,11 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
   imitated from the numbers a report happens to contain.
 - The device has no live push; the web UI polls `/status` + `/values`, and this skill takes the same one-shot HTTP snapshot,
   which is the right tool for triage. For a live watch, open the web UI.
-- `/coredump?clear=1` erases the dump partition — only after the user has the decoded backtrace and
-  explicitly asks to clear it.
+- `POST /diag/clear` clears the in-memory diagnostic ring. This triage flow does not need it; use it
+  only after the user explicitly asks to discard those logs.
+- `POST /coredump/clear` erases only the dump partition — only after the user has the decoded
+  backtrace and explicitly asks to clear it. `POST /crash/dismiss` is different: it also dismisses
+  the crash record.
 - Nothing here needs the signing key or Docker **except** step 5's symbolization.
 - **The device snapshot and the log history answer different questions.** `/status` + `/diag` say what
   is true *now*; VictoriaLogs (step 3) is the only source for *what happened* — reboots, when a

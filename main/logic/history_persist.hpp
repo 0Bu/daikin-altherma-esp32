@@ -62,7 +62,7 @@ namespace daik::logic {
 // covers the RECORD LAYOUT alone; anything about the trend catalog is the fingerprint's job, which
 // is why this number has not had to move for a trend addition and should not be bumped for one.
 inline constexpr uint32_t HISTORY_PERSIST_MAGIC   = 0x54534948u;   // "HIST" little-endian
-inline constexpr uint16_t HISTORY_PERSIST_VERSION = 1;
+inline constexpr uint16_t HISTORY_PERSIST_VERSION = 2;  // v2 binds .noinit HomeHub rings to target
 
 // ── Flash-journal geometry ──────────────────────────────────────────────────────────────────────
 // The official 8 MB table gives the entire upper 4 MiB to history. Flash can clear bits with a
@@ -127,6 +127,7 @@ inline constexpr uint32_t HISTORY_JOURNAL_MAGIC = 0x4c4e4a48u;       // "HJNL" l
 inline constexpr uint16_t HISTORY_JOURNAL_VERSION = 1;
 inline constexpr uint32_t HISTORY_JOURNAL_ERASED = 0xffffffffu;
 inline constexpr uint32_t HISTORY_JOURNAL_COMMITTED = 0x54494d43u;   // "CMIT" little-endian
+inline constexpr uint8_t  HISTORY_JOURNAL_FLAG_TARGET_SCOPED = 0x01u;
 
 // Wire format. `commit` remains erased while the body is programmed and is changed to CMIT in one
 // final 1->0 write. A torn body or torn commit is therefore never mistaken for a valid record.
@@ -170,11 +171,57 @@ inline bool history_journal_header_matches(const HistoryJournalHeader& h, uint32
 // v1 records keep exactly their former contract; the fourth source must state its own payload width
 // and one-hour raster explicitly through the overload above.
 inline bool history_journal_header_matches(const HistoryJournalHeader& h, uint32_t catalog_fp) {
-    if (h.source >= static_cast<uint8_t>(HistoryJournalSource::Checkup)) return false;
+    if (h.source >= static_cast<uint8_t>(HistoryJournalSource::Checkup) ||
+        h.source == static_cast<uint8_t>(HistoryJournalSource::Modbus))
+        return false;  // HomeHub records additionally require the configured-target fingerprint
     return history_journal_header_matches(
         h, catalog_fp,
         static_cast<uint16_t>(history_journal_source_rings(
             static_cast<HistoryJournalSource>(h.source))), HISTORY_DT_S);
+}
+
+inline void history_journal_set_scope(HistoryJournalHeader& h, uint32_t scope_fp) {
+    h.pad[0] = static_cast<uint8_t>(scope_fp);
+    h.pad[1] = static_cast<uint8_t>(scope_fp >> 8);
+    h.pad[2] = static_cast<uint8_t>(scope_fp >> 16);
+    h.pad[3] = static_cast<uint8_t>(scope_fp >> 24);
+}
+
+inline uint32_t history_journal_scope(const HistoryJournalHeader& h) {
+    return static_cast<uint32_t>(h.pad[0]) | (static_cast<uint32_t>(h.pad[1]) << 8) |
+           (static_cast<uint32_t>(h.pad[2]) << 16) |
+           (static_cast<uint32_t>(h.pad[3]) << 24);
+}
+
+// Structural/CRC-independent validity for a target-scoped source, without choosing the currently
+// configured target. Journal head discovery must see records from old targets too; otherwise it can
+// reuse their global sequence numbers. Scope equality belongs only to restore/index selection.
+inline bool history_journal_header_matches_scoped_layout(const HistoryJournalHeader& h,
+                                                         uint32_t catalog_fp,
+                                                         HistoryJournalSource source) {
+    if ((source != HistoryJournalSource::X10a && source != HistoryJournalSource::Modbus) ||
+        h.source != static_cast<uint8_t>(source) ||
+        h.flags != HISTORY_JOURNAL_FLAG_TARGET_SCOPED || history_journal_scope(h) == 0)
+        return false;
+    HistoryJournalHeader structural = h;
+    structural.flags = 0;
+    return history_journal_header_matches(
+        structural, catalog_fp,
+        static_cast<uint16_t>(history_journal_source_rings(source)), HISTORY_DT_S);
+}
+
+inline bool history_journal_header_matches_scoped(const HistoryJournalHeader& h,
+                                                  uint32_t catalog_fp, uint32_t scope_fp) {
+    return scope_fp != 0 && history_journal_scope(h) == scope_fp &&
+           history_journal_header_matches_scoped_layout(
+               h, catalog_fp, HistoryJournalSource::Modbus);
+}
+
+inline bool history_journal_header_matches_x10a_scoped(const HistoryJournalHeader& h,
+                                                       uint32_t catalog_fp, uint32_t scope_fp) {
+    return scope_fp != 0 && history_journal_scope(h) == scope_fp &&
+           history_journal_header_matches_scoped_layout(
+               h, catalog_fp, HistoryJournalSource::X10a);
 }
 
 // CRC normalises the two fields changed after the body was assembled. This makes the exact same
@@ -332,6 +379,31 @@ inline uint32_t history_fp_u32(uint32_t crc, uint32_t v) {
     const uint8_t b[4] = { static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8),
                            static_cast<uint8_t>(v >> 16), static_cast<uint8_t>(v >> 24) };
     return config_crc32_update(crc, b, 4);
+}
+
+// The physical HomeHub observation identity. Flash and .noinit history must never cross this
+// boundary: a new host, port or unit id is a different plant even when the register catalog matches.
+inline uint32_t history_homehub_target_fingerprint(const char* host, uint32_t port, uint32_t unit) {
+    uint32_t crc = CONFIG_CRC32_INIT;
+    crc = history_fp_str(crc, host);
+    crc = history_fp_u32(crc, port);
+    crc = history_fp_u32(crc, unit);
+    return config_crc32_final(crc);
+}
+
+// Scope X10A history to the committed decoding contract, not to a single sweep's optional witness.
+// Page/capacity/EEPROM reads may legitimately be absent for one boot-time sweep; including them
+// would discard a day of valid history on a transient reply loss even though the selected row
+// catalog and wiring are unchanged. A profile or physical link change still gets a distinct scope.
+inline uint32_t history_x10a_target_fingerprint(const char* profile, int32_t rx_pin, int32_t tx_pin,
+                                                char proto) {
+    uint32_t crc = CONFIG_CRC32_INIT;
+    crc = history_fp_str(crc, profile);
+    crc = history_fp_u32(crc, static_cast<uint32_t>(rx_pin));
+    crc = history_fp_u32(crc, static_cast<uint32_t>(tx_pin));
+    crc = history_fp_u32(crc, static_cast<uint8_t>(proto));
+    uint32_t out = config_crc32_final(crc);
+    return out ? out : 1u;  // zero remains the explicit "identity not detected" sentinel
 }
 
 // Every fact that decides WHICH physical quantity ring index i holds, plus the geometry that decides

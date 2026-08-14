@@ -64,24 +64,27 @@ assert.match(checkupSource, /if \(apply_reset_locked\(\)\) return;/,
              "record must discard the sample that consumes an identity reset");
 assert.match(checkupSource, /if \(s_reset_requested\.load\(\)\) return logic::CheckupReport\{\};/,
              "report must stay empty without consuming a pending identity reset");
-assert.ok(pollSource.indexOf("checkup_reset();") < pollSource.indexOf("config_set_model("),
+assert.ok(pollSource.indexOf("checkup_reset_on_detect(") < pollSource.indexOf("config_commit_detected_model("),
           "automatic detection must request reset before publishing the resolved profile");
-assert.ok(pollSource.indexOf("history_reset();") < pollSource.indexOf("config_set_model("),
+assert.ok(pollSource.indexOf("history_reset_on_detect(") < pollSource.indexOf("config_commit_detected_model("),
           "automatic detection must reset trend identity before publishing the resolved profile");
+assert.match(pollSource,
+             /Lock lk\(s_mtx\);[\s\S]*?s_target_generation\.load[\s\S]*?config_commit_detected_link\([\s\S]*?checkup_reset_on_detect\([\s\S]*?dwell_reset_on_detect\([\s\S]*?history_reset_on_detect\([\s\S]*?config_commit_detected_model\(/m,
+             "detection config and observer resets must share the reconfigure generation barrier");
 // THREE X10A-backed observations now share one identity: the checkup's 24-hour window, the trend
 // rings and the per-row state ages (logic/state_dwell.hpp). All three are addressed by coordinates
 // whose MEANING depends on the resolved unit, so a link or profile change must retire all of them
 // together — one left behind would go on describing the previous physical identity under the new
 // one's name.
 assert.match(configSource,
-             /set_hp_resets_checkup\([^;]+;\s*[\s\S]*?if \(reset_checkup\) \{\s*checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);/m,
+             /set_hp_resets_checkup\([^;]+;\s*[\s\S]*?if \(reset_checkup\) \{\s*hp_poll_reconfigure\(\);\s*checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);/m,
              "/set_hp must route the pure identity predicate into all three X10A reset requests");
 assert.match(configSource,
-             /static esp_err_t do_detect[\s\S]*?checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);\s*hp_poll_reconfigure\(\);/m,
-             "explicit /detect must reset all three X10A observations before reconfiguring the poll task");
+             /static esp_err_t do_detect[\s\S]*?hp_poll_reconfigure\(\);\s*checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);/m,
+             "explicit /detect must invalidate old cycles before arming all three X10A resets");
 assert.match(configSource,
-             /homehub_history_identity_changed\([\s\S]*?if \(reset_mb_history\) history_modbus_reset\(\);/m,
-             "/set_hp must reset HomeHub history only when host, port or unit identity changes");
+             /homehub_history_identity_changed\([\s\S]*?if \(reset_mb_history\) \{\s*history_modbus_reset\(\);[\s\S]*?mb_reconfigure\(\);\s*\}/m,
+             "/set_hp must reset HomeHub history and reconfigure only when host, port or unit identity changes");
 assert.match(modbusPollSource,
              /if \(s_have_req && \(target != s_req_host \|\| c\.mb_port != s_req_port \|\| c\.mb_unit_id != s_unit\)\)\s*history_modbus_reset\(\);/m,
              "the Modbus task must close the race where an old cycle consumes the HTTP reset");

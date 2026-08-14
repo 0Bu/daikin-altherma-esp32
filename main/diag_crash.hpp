@@ -11,7 +11,7 @@
 // core-dump image per /status poll would put a flash read and an allocation on it).
 //
 // The `coredump` flag is the ONE field that is NOT a boot-time fact: the image it describes can be
-// erased while the device runs (GET /coredump?clear=1), so a cached copy goes stale and claims a
+// erased while the device runs (POST /coredump/clear), so a cached copy goes stale and claims a
 // dump is downloadable that flash no longer holds — a crash banner that can't be cleared and a
 // download that 404s. Callers that report it (/status.last_crash, the MQTT crash topic) therefore
 // use diag_crash_info_live(), which re-reads the flag. See logic/crashinfo.hpp for the pure
@@ -21,7 +21,7 @@
 namespace daik {
 
 void             diag_crash_capture();   // call once, early in app_main (after diag_log_init)
-const CrashInfo& diag_crash_info();      // cached snapshot; read-only, safe from any task
+CrashInfo        diag_crash_info();      // cached snapshot with the atomic dismissal state
 
 // Is a downloadable dump in flash RIGHT NOW? Cheap (one 4-byte flash read), NOT the summary parse —
 // safe to call on a request path. Use this, not diag_crash_info().coredump, to decide "downloadable".
@@ -43,5 +43,10 @@ CrashInfo        diag_crash_info_live();
 // Erasing an already-empty partition is success (nothing to delete is the state being asked for), so
 // a fault reset with no dump dismisses fine.
 bool             diag_crash_dismiss();
+
+// Factory-reset privacy boundary. Unlike an ordinary dismissal, a proven-foreign dump is still
+// private RAM from the previous owner, so ANY erase failure (except no partition existing) blocks
+// reset completion. On success the cached report is dismissed too.
+bool             diag_crash_forget();
 
 } // namespace daik

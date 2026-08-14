@@ -182,10 +182,11 @@ heap_guard.cpp  THE HEAP WATCHDOG (logic/heap_watchdog.hpp): largest contiguous 
                 at the top of every cycle; NOT in safe mode, which is stated, not hidden
 config.cpp      runtime Config (logic/config_model.hpp) in NVS "daik_cfg". WRITERS COMMIT ONLY THE
                 FIELDS THEY OWN: httpd (/set_*) uses whole-struct config_save, poll detection uses
-                config_save_link/config_set_model — a whole-struct save from detection would revert
-                a /set_wifi that landed during the sweep. Credential/service fields are ONE atomic
+                revision-checked config_commit_detected_link/config_commit_detected_model — a
+                whole-struct save from detection would revert a /set_wifi that landed during the
+                sweep. Credential/service fields are ONE atomic
                 CRC-checked blob (logic/config_store.hpp, single nvs_set_blob, all-or-nothing);
-                the RX/TX/proto link cache stays separate self-healing keys (two owners,
+                the RX/TX/proto/identity link cache stays a separate self-healing atomic blob (two owners,
                 re-validated on load via link_pins_safe — flash can hold a pair the request path
                 would have rejected). config_save can FAIL and every caller checks its own
                 durability contract; a failure names the key on /diag
@@ -296,14 +297,15 @@ state_dwell.cpp HOW LONG each switched row has read what it reads (bit flags + f
                 a user-provided empty ctor or NSDMIs silently re-initialise (#417, reads as
                 bad_crc)
 http_server.cpp esp_http_server :80; routes register themselves. cfg.max_uri_handlers is sized
-                EXACTLY to the trusted-LAN route count (34) — raise/lower it in the SAME commit
+                EXACTLY to the trusted-LAN route count (36) — raise/lower it in the SAME commit
                 that adds/retires a route; an overflow is silent and the casualty is whatever
                 registers LAST (the SPA catch-all). Trust surface picked from the SETUP AP's
                 existence (logic/http_surface.hpp): the open AP gets only provisioning routes
 http_common.cpp shared helpers + THE ONE OOM guard: http_register() wraps every handler in the
                 handle_all trampoline (bad_alloc -> 503, other throw -> 500). No route is exempt
-http_status.cpp GET / /status /values /history /models /diag /scan /coredump + POST /crash/dismiss
-                + captive catch-all. http_append_status_json() runs on the httpd task ALONE (#241)
+http_status.cpp GET / /status /values /history /models /diag /scan /coredump + POST /diag/clear
+                /coredump/clear /crash/dismiss + captive catch-all. http_append_status_json() runs
+                on the httpd task ALONE (#241)
 http_config.cpp ALL SIXTEEN write routes (see HTTP API below) — the count is what
                 cfg.max_uri_handlers is sized to. Three of them write no config: the
                 /test_circulation probe, /discover_homehub, /detect
@@ -441,17 +443,20 @@ in `nvs` (24 KB shared with credentials must not take this traffic); keep NVS/OT
 **The link is persisted; the model is not.** RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by detection (defaults as fallback, so a stale cache
 self-heals). The **model** (`profile` + fingerprint `fp_*`) is re-detected every boot: RAM only
-(`config_set_model`), so a swapped unit is re-identified. `poll_detect` calls `config_save_link`
-(persist) only when pins/proto change.
+(`config_commit_detected_model`), so a swapped unit is re-identified. `poll_detect` offers the
+proven link to `config_commit_detected_link`; the helper rewrites the atomic link cache only when
+pins, protocol, or observation identity changed.
 
 **Writers commit only the fields they own.** Two tasks write the config — httpd (`/set_*`) and poll
 (detection). Detection snapshots, then probes for a whole sweep, so it must never write back a
 whole struct: that would revert a `/set_wifi` that landed mid-sweep, *after* the user got
-`{"ok":true}`. It uses the narrow setters (`config_save_link`, `config_set_model`), which patch the
-live config under the mutex (`apply_link`/`apply_model`, host-tested). Whole-struct `config_save`
-stays for the HTTP handlers (they own the credentials and are serialized on the one httpd task).
-The rule is deliberately asymmetric — it closes poll→httpd; the httpd→poll direction self-corrects
-on the next detect.
+`{"ok":true}`. Detection captures the config revision before probing, then enters the same poll-
+generation barrier used by HTTP reconfiguration. `config_commit_detected_link` compares that
+revision while holding the config mutex, persists/publishes only the detected link, and returns a
+new revision token; `config_commit_detected_model` accepts the session-only model only while that
+token is still current. A winning HTTP save or generation bump therefore discards the stale sweep
+instead of relying on a later detect to repair it. Whole-struct `config_save` stays for the HTTP
+handlers (they own the credential/service fields and are serialized on the one httpd task).
 
 **`config_save` can fail — every caller checks it.** The blob write is atomic: on error the
 previous blob is intact, `config_save` returns `false` and publishes nothing to RAM. The `/set_*`
@@ -488,11 +493,13 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-h serie
                   held[] marks resting-unit nulls; t0 OMITTED when the clock never synced (an age,
                   not a fabricated time); unknown id = 404, never a default
 GET  /models      catalog metadata; read by NO shipped client
-GET  /diag[?verbose][?clear=1][?redact=1]   in-RAM diag ring; redacted form is CHUNKED (a
+GET  /diag[?verbose=0|1][?redact=1]   in-RAM diag ring; redacted form is CHUNKED (a
                   replacement can GROW past the static buffer)
+POST /diag/clear   clear the in-RAM diagnostic ring; evidence deletion is never a GET side effect
 GET  /scan        trusted-LAN-only WiFi scan; read by no shipped client
-GET  /coredump[?clear=1]   stream the current-firmware dump (404 for none/foreign); decode with
+GET  /coredump    stream the current-firmware dump (404 for none/foreign); decode with
                   scripts/decode-coredump.sh against the matching .elf
+POST /coredump/clear   erase only the dump image and preserve the reset/crash record
 POST /crash/dismiss   erase dump + mark dismissed (device-wide, erase-first). POST because it
                   destroys the one artifact a bug report needs
 POST /set_wifi    validate -> persist + reboot; old creds stashed as one-shot rollback backup
@@ -511,11 +518,13 @@ POST /set_diagnostics {enabled} strict boolean -> the ONE device-wide consent fo
                   so enabling can never adopt evidence recorded before a disable. X10A, HomeHub,
                   history, ENV III and the heartbeat are untouched by it
 POST /set_ref_temp    the room mapping (value topic+path, an optional independent setpoint/time
-                  topic or a fixed target, max_age) -> validate -> apply LIVE on the existing MQTT
+                  topic or a fixed target, max_age) -> validate -> save and rebind on the existing MQTT
                   client, NO proof, NO reboot (#433 removed the /test_ref_temp probe + test_proof
-                  gate); unchanged short-circuits {ok:true,saved:false}. Empty topic = disable. The
-                  SAVE is the consent to subscribe; deleting unsubscribes + clears captured state;
-                  a typo stays runtime evidence on /status, keeping the SHADOW diagnosis fail-closed
+                  gate); unchanged short-circuits {ok:true,saved:false}. Empty topic = disable.
+                  Saving alone is NOT capture consent: subscription/decoding starts only while the
+                  v19 diagnostics master is enabled; otherwise the mapping stays dormant. Deleting
+                  unsubscribes + clears captured state; a typo stays runtime evidence on /status
+                  while enabled, keeping the SHADOW diagnosis fail-closed
 POST /test_circulation / POST /set_circulation   the external circulation power witness (#361):
                   /test_circulation returns a single-use test_proof, /set_circulation REQUIRES it
                   (409 otherwise) — the ONE route demanding evidence; unchanged mapping short-circuits

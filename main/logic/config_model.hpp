@@ -119,6 +119,14 @@ struct Config {
     Protocol    proto    = Protocol::I;  // last detected framing (I/S); tried first, then the other
     int         rx_pin   = 44;
     int         tx_pin   = 43;
+    // Hash of the last proven physical identity (profile/link/fingerprint), persisted beside the
+    // link solely to scope trend restoration. Zero means detection has not proven this identity.
+    uint32_t    x10a_identity_fp = 0;
+
+    // Monotonic RAM-only revision of this snapshot. It is deliberately not serialized: the poll
+    // task uses it as a compare-and-commit token so an auto-detection sweep that started before an
+    // HTTP reconfiguration cannot publish its old link/model after the new settings landed.
+    uint32_t    runtime_revision = 0;
 
     // ── The HomeHub Modbus stack — PERSISTED (issue #32) ─────────────────────────────────────────
     // A SECOND, INDEPENDENT source, not an alternative to the X10A link above. The two share no
@@ -173,11 +181,12 @@ struct Config {
     BoardPresetId board_preset_id = BoardPresetId::Custom;
 
     // ── Auto-detected MODEL (not the link). Set by hp_detect.cpp; see logic/detect.hpp. ──
-    // SESSION-ONLY: applied to the in-RAM config via config_set_model (apply_model, below) and NEVER
-    // persisted — the model is re-detected on every boot (config_load seeds profile="auto"), so a
-    // swapped unit is re-identified. The fingerprint lets /status recompute the candidate set cheaply
-    // (no re-probe). (config_set_runtime — whole-struct RAM publish — survives only for POST /detect's
-    // reset to "auto"; the poll task uses the field-owned config_set_model so it never reverts creds.)
+    // SESSION-ONLY: applied via config_commit_detected_model after the detected-link commit returns
+    // a still-current revision token, and NEVER persisted — the model is re-detected on every boot
+    // (config_load seeds profile="auto"), so a swapped unit is re-identified. The fingerprint lets
+    // /status recompute the candidate set cheaply (no re-probe). config_set_runtime — whole-struct
+    // RAM publish — survives only for POST /detect's reset to "auto"; the poll task uses the
+    // revision-checked field-owned helpers so it never reverts credentials or a new link.
     uint32_t    fp_pages     = 0;   // page mask that answered (logic/detect.hpp page_bit)
     int         fp_kw_tenths = -1;  // O/U capacity in 0.1 kW; -1 = unknown
     // I/U capacity code (reg 0x60 offset 6, same 0.1 kW units); -1 = unknown. Kept BESIDE the O/U
@@ -272,10 +281,12 @@ inline bool config_modbus_discovery_done_on_load(bool has_modbus_block,
     return has_discovery_state ? stored_done : has_modbus_block;
 }
 
-inline void apply_link(Config& c, int rx_pin, int tx_pin, Protocol proto) {
+inline void apply_link(Config& c, int rx_pin, int tx_pin, Protocol proto,
+                       uint32_t identity_fp = 0) {
     c.rx_pin = rx_pin;
     c.tx_pin = tx_pin;
     c.proto  = proto;
+    c.x10a_identity_fp = identity_fp;
 }
 
 // Apply the detected model + fingerprint. Takes its strings BY VALUE and swaps them in (both
@@ -488,6 +499,13 @@ inline bool set_hp_resets_checkup(bool profile_present, int old_rx, int old_tx,
 // explicit profile/RX/TX field is an X10A statement and must pass the board-specific pin gate.
 inline bool set_hp_updates_x10a(bool profile_present, bool rx_present, bool tx_present) {
     return profile_present || rx_present || tx_present;
+}
+
+// The X10A link cache and HomeHub identity are separate durability domains. A mixed request used to
+// commit the HomeHub blob first and then return 500 when a link-key write failed, so the rejected
+// change appeared after reboot. One request must own exactly one domain for its result to be honest.
+inline bool set_hp_update_domains_compatible(bool x10a_present, bool homehub_present) {
+    return !(x10a_present && homehub_present);
 }
 
 // HomeHub history belongs to one physical Modbus target. Actuation consent and other /set_hp fields
