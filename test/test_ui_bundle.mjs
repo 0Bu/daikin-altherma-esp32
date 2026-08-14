@@ -287,8 +287,8 @@ assert.match(html, /data-i18n="ref\.save_help"/,
   "the immediate-save/runtime-validation contract belongs briefly beside Save");
 assert.doesNotMatch(app, /One MQTT source is supported|Es wird eine MQTT-Quelle unterstützt/,
   "the room-source status must not carry the former generic subscription and delete manual");
-assert.doesNotMatch(app, /shelly1pmminig4-fixture00003\/status\/switch:0/,
-  "an untouched profile must not carry the obsolete Shelly device-temperature preset");
+assert.doesNotMatch(app, /shelly[a-z0-9-]*-[0-9a-f]{6,}\/status\//i,
+  "an untouched profile must not carry an obsolete device-specific temperature preset");
 assert.doesNotMatch(app, /\$\("rtEnabledPath"\)|\$\("rtHvacModePath"\)/,
   "the browser bundle must not retain DOM access to the removed optional fields");
 assert.match(app, /const sameMapping = !!saved\.configured[\s\S]*enabled_path: sameMapping \? \(saved\.enabled_path \|\| ""\) : ""[\s\S]*hvac_mode_path: sameMapping \? \(saved\.hvac_mode_path \|\| ""\) : ""/,
@@ -368,7 +368,7 @@ const weatherFields = {
 const weatherContext = vm.createContext({ S: {}, $: (id) => weatherFields[id], t: (key) => key, esc: String });
 vm.runInContext(`${settingsSource}\nthis.__parseWeatherCoordinatePair = parseWeatherCoordinatePair; this.__pasteWeatherCoordinates = pasteWeatherCoordinates;`,
   weatherContext, { filename: "main/www/js/settings.js" });
-const googlePair = "12.34567890123456, 23.45678901234567";
+const googlePair = "12.345678123456, 23.456789123456";
 const parsedGooglePair = weatherContext.__parseWeatherCoordinatePair(googlePair);
 assert.equal(parsedGooglePair.latitude, "12.345678");
 assert.equal(parsedGooglePair.longitude, "23.456789");

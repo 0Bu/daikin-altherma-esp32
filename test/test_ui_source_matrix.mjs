@@ -52,7 +52,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
       // to false on a plant whose gateway is perfectly well configured.
       status: { hp: { connected: x10a },
                 modbus: { enabled: mbEnabled, connected: mbConnected,
-                          host: mbEnabled ? "203.0.113.30" : "" } },
+                          host: mbEnabled ? "192.0.2.30" : "" } },
       _values: values,
       _modbus: modbus,
     },

@@ -225,8 +225,8 @@ vm.runInContext(`${source}
 const ui = context.__ui;
 
 ui.S.status = {
-  wifi: { ssid: "DemoNet" },
-  mqtt: { broker: "203.0.113.27:1883", has_creds: false, base: "daikin-altherma-esp32", base_custom: false },
+  wifi: { ssid: "ExampleNet" },
+  mqtt: { broker: "192.0.2.27:1883", has_creds: false, base: "daikin-altherma-esp32", base_custom: false },
   reference_temperature: {
     configured: true, name: "Living room", topic: "sensor/living-room/temperature",
     temperature_path: "temperature.tC", setpoint_topic: "", setpoint_path: "",
@@ -236,7 +236,7 @@ ui.S.status = {
   },
   circulation_source: {
     configured: true, name: "DHW circulation",
-    topic: "shellyplugsg3-fixture00001/status/switch:0",
+    topic: "fixture/circulation/status",
     power_path: "apower", timestamp_path: "aenergy.minute_ts",
     max_age_s: 120, on_threshold_w: 3.0, off_threshold_w: 1.0, confirm_s: 60,
   },
@@ -320,7 +320,7 @@ assert.equal(location.hash, "", "an unknown popup hash must canonicalize to the 
 loadRoute("#settings/mqtt");
 assert.equal(ui.S.stage, "settings", "a popup URL must restore its Settings parent");
 assert.equal(document.getElementById("mqttModal").hidden, false, "a popup URL must restore the exact popup");
-assert.equal(document.getElementById("mqBroker").value, "203.0.113.27:1883",
+assert.equal(document.getElementById("mqBroker").value, "192.0.2.27:1883",
   "a restored popup must use the normal status-backed form fill path");
 await document.getElementById("mqCancel").onclick();
 assert.equal(location.hash, "#settings", "closing a directly loaded popup must canonicalize to Settings");
@@ -343,7 +343,7 @@ ui.S.status = null;
 loadRoute("#settings/wifi");
 ui.S.status = loadedStatus;
 ui.hydrateRoutedPopup();
-assert.equal(document.getElementById("wfSSID").value, "DemoNet",
+assert.equal(document.getElementById("wfSSID").value, "ExampleNet",
   "an untouched reload popup must hydrate from the first status response");
 await document.getElementById("wfCancel").onclick();
 
@@ -355,7 +355,7 @@ assert.equal(document.getElementById("wifiModal").hidden, true, "browser Back mu
 assert.equal(location.hash, "#settings", "browser Back from a popup must retain Settings");
 history.forward();
 assert.equal(document.getElementById("wifiModal").hidden, false, "browser Forward must restore the popup");
-assert.equal(document.getElementById("wfSSID").value, "DemoNet",
+assert.equal(document.getElementById("wfSSID").value, "ExampleNet",
   "browser Forward must run the popup's normal fill lifecycle");
 await document.getElementById("wfCancel").onclick();
 
@@ -446,7 +446,7 @@ const configureValid = (item) => {
     document.getElementById("rtTimestampSource").value = "sensor/living-room/sys$read_at";
     document.getElementById("rtMaxAge").value = "600";
   } else if (item.modal === "circulationModal") {
-    document.getElementById("circTopic").value = "shellyplugsg3-fixture00001/status/switch:0";
+    document.getElementById("circTopic").value = "fixture/circulation/status";
     document.getElementById("circPowerPath").value = "apower";
     document.getElementById("circTimePath").value = "aenergy.minute_ts";
     document.getElementById("circMaxAge").value = "120";
@@ -502,23 +502,24 @@ for (const item of cases.filter((entry) => entry.form)) {
   assert.equal(ui.S.busy, false, `${item.name}: rejected Save must release busy state`);
 }
 
-// A Shelly H&T has a temperature topic but no target and need not publish a source timestamp.
+// This synthetic sensor fixture has a temperature topic but no target and need not publish a
+// source timestamp.
 // The fixed target plus live MQTT arrival-time contract must therefore survive immediate persistence
 // with both timestamp fields deliberately empty.
 fetchState.mode = "ok";
 fetchState.calls.length = 0;
 ui.S.busy = false;
 open(cases.find((item) => item.modal === "refTempModal"));
-document.getElementById("rtName").value = "Shelly H&T";
+document.getElementById("rtName").value = "Example temperature sensor";
 document.getElementById("rtTemperatureSource").value =
-  "shellyhtg3-fixture00002/status/temperature:0$tC";
+  "fixture/room-temperature/status$tC";
 document.getElementById("rtTarget").value = "20";
 document.getElementById("rtTimestampSource").value = "";
 document.getElementById("rtMaxAge").value = "600";
 await document.getElementById("refTempForm").fire("submit");
 await settle();
 assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"],
-  "a timestamp-less Shelly source must persist without waiting for its next report");
+  "a timestamp-less source must persist without waiting for its next report");
 assert.equal(fetchState.calls[0]?.body?.timestamp_topic, "");
 assert.equal(fetchState.calls[0]?.body?.timestamp_path, "");
 assert.equal(fetchState.calls[0]?.body?.fixed_setpoint_c, 20);
@@ -529,8 +530,8 @@ const roomSource = cases.find((item) => item.modal === "refTempModal");
 fetchState.calls.length = 0;
 ui.S.busy = false;
 open(roomSource);
-document.getElementById("rtName").value = "Example sensor1";
-document.getElementById("rtTemperatureSource").value = "shellyhtg3-fixture00002/status/temperature:0";
+document.getElementById("rtName").value = "Example sleeping sensor";
+document.getElementById("rtTemperatureSource").value = "fixture/room-temperature/status";
 document.getElementById("rtTarget").value = "22";
 document.getElementById("rtTimestampSource").value = "";
 document.getElementById("rtMaxAge").value = "600";
@@ -644,7 +645,7 @@ assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "",
 ui.S.status.reference_temperature.configured = true;
 
 // Circulation-source Save follows the same proof boundary, but its proof is actual active power.
-// Delete removes only the read-only observer mapping; there is no Shelly switch request.
+// Delete removes only the read-only observer mapping; there is no device switch request.
 const circulationSource = cases.find((item) => item.modal === "circulationModal");
 fetchState.mode = "circ_test_reject";
 fetchState.calls.length = 0;

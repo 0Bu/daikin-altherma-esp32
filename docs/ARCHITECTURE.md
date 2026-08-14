@@ -1132,8 +1132,10 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
   profiles can move to a data partition — the indirection through `def/registry.hpp` makes that a
   non-breaking change.
 
-Porting fidelity is enforced on the host: `test/test_defs.cpp` checks a sampling of profile rows
-against the source rows so a regenerate can't silently drift.
+Porting fidelity is enforced on the host: the domain audit (`tools/domain/catalog_audit.cpp`, run by
+`scripts/run-domain-audit.sh`) resolves every profile's rows and cross-checks them against
+[`REGISTERS.md`](REGISTERS.md) §5, and `test/test_logic.cpp` pins the frozen identifier set, so a
+regenerate can't silently drift.
 
 ## The poll engine (`hp_poll.cpp`)
 
@@ -2564,8 +2566,6 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   load-bearing one for a UI — "disabled" (the thermostat reports itself off),
                   "non_heating_mode", "stale" — because a reading can be present, fresh and still
                   unusable, and the diagnosis card must say WHICH rather than call the input missing.
-                  POST /test_ref_temp stays outside all of it, so a candidate can be proved before it
-                  is saved,
                   circulation_source{configured,name,topic,power_path,timestamp_path,max_age_s,
                   on_threshold_w,off_threshold_w,confirm_s,subscribed,has_value,power_w,state,
                   source_at,source_unix_s,timestamp_source,age_s,fresh,freshness_reason,retained,
@@ -3018,43 +3018,28 @@ POST /set_diagnostics {enabled:boolean} -> persist + apply live, no reboot. This
                   disabling clears the old checkup and source runtime state, and enabling starts a
                   new interval that cannot restore evidence from a prior generation. Ordinary X10A,
                   HomeHub, history, ENV III, and technical heartbeat processing remain active.
-POST /test_ref_temp  {name,topic,temperature_path,setpoint_path,timestamp_path,enabled_path,
-                  hvac_mode_path,max_age_s} -> subscribe the CANDIDATE mapping on the existing
-                  authenticated MQTT client, wait up to 12 s for a frame, decode it through the very
-                  path the live source uses, and answer {ok,test_proof,temperature_c,setpoint_c,
-                  control_eligible,room_error_k,reason,reason_code,retained} — or 422 with the reason
-                  it did not (no fresh value, invalid JSON path, timestamp moved backward, broker not
-                  connected, another test running). It WRITES NOTHING: no Config, no NVS, no change
-                  to the live subscription. An empty topic is 400 here, because "test nothing" is not
-                  a question. The whole point is the `test_proof` it returns — see the next route.
-                  Uses the SAME parser as /set_ref_temp, so the mapping that earned the proof is
-                  byte-for-byte the mapping that can then be persisted. This probe is the ONE part of
-                  the reference stack outside the saved-source subscription: the frame reaches the
-                  probe before live-source decoding, because the required order is test -> save ->
-                  arm, and a gate that blocked the test would make the first step depend on the last
-POST /set_ref_temp   {name,topic,temperature_path,setpoint_path,timestamp_path,enabled_path,
-                  hvac_mode_path,max_age_s,test_proof} -> validate, persist and
-                  apply live on the existing MQTT client without reboot. Empty topic is the explicit
-                  disabled state; otherwise the topic is exact (no wildcards), paths are bounded
-                  dot-separated JSON selectors, and max_age_s is an integer in 10..3600. An unchanged
-                  mapping still reconfigures the subscription so the Settings action can retry it.
-                  A non-empty mapping REQUIRES a valid `test_proof` from /test_ref_temp or answers
-                  409 "Test this MQTT mapping successfully before saving" — the one route here that
-                  demands evidence rather than merely well-formed input, because this mapping is the
-                  required heating-curve diagnosis input and a typo does not fail loudly: it
-                  produces a plausible-looking room error, or a permanent BLOCK that reads like a
-                  broken feature. The proof is bound to all seven BEHAVIOURAL fields (not the name,
-                  which is cosmetic and needs no retest), so testing one topic cannot license saving
-                  another, and editing a path or the max age invalidates it. It is RAM-only and
-                  single-use: a save consumes it, a newer test supersedes it, a reboot forgets it —
-                  which is right for evidence about a broker that may have changed since. Deleting a
-                  source (empty topic) needs no proof: removal must never depend on the thing being
-                  removed still working
+POST /set_ref_temp   {name,topic,temperature_path,setpoint_topic,setpoint_path,fixed_setpoint_c,
+                  timestamp_topic,timestamp_path,enabled_path,hvac_mode_path,max_age_s} -> validate,
+                  persist and apply live on the existing MQTT client without reboot. There is NO
+                  test/proof step (#433 removed POST /test_ref_temp and the test_proof gate): the
+                  mapping applies immediately. Empty topic is the explicit disabled state and clears
+                  every other field; otherwise the value topic is exact (no wildcards), paths are
+                  bounded dot-separated JSON selectors, max_age_s is an integer in 10..3600, and a
+                  non-empty source needs a target — either a setpoint mapping or a fixed target
+                  (`fixed_setpoint_c`, 0..35 °C). #433 also made the setpoint and timestamp sources
+                  INDEPENDENT topics; an old client that sends only `topic` still has its
+                  setpoint_path/timestamp_path resolved against it, preserving the v16 request
+                  contract. A typo does not fail loudly — it surfaces as a runtime room error on
+                  /status (payload/path/freshness), which is what keeps the write-free SHADOW
+                  diagnosis fail-closed. An unchanged mapping still reconfigures the subscription so
+                  the Settings action can retry it, and short-circuits {ok:true,saved:false,
+                  reboot:false}. Deleting a source (empty topic) applies the same way — removal must
+                  never depend on the thing being removed still working
 POST /test_circulation  {name,topic,power_path,time_path,max_age_s,on_tenths_w,off_tenths_w,
                   confirm_s} -> subscribe the CANDIDATE mapping on the existing authenticated MQTT
                   client, wait up to 12 s for a frame, decode it through the path the live witness
                   uses, and answer {ok,test_proof,power_w,state,retained} — or 422 with the reason it
-                  did not. Writes NOTHING (the /test_ref_temp shape, for the same reason): an empty
+                  did not. Writes NOTHING (a probe, not a save): an empty
                   topic is 400, since "test nothing" is not a question
 POST /set_circulation   {name,topic,power_path,time_path,max_age_s,on_tenths_w,off_tenths_w,
                   confirm_s,test_proof} -> validate, persist and apply live (no reboot). The
@@ -3062,8 +3047,10 @@ POST /set_circulation   {name,topic,power_path,time_path,max_age_s,on_tenths_w,o
                   on the DHW circulation pump) whose confirmed on/off state is what lets the checkup
                   tell a real 3-way-valve leak from ordinary circulation losses. Empty topic is the
                   explicit disabled state; a non-empty one REQUIRES a valid `test_proof` from
-                  /test_circulation or answers 409, exactly like the room source — a mistyped witness
-                  does not fail loudly, it silently re-attributes a tank's cooling rate. The proof
+                  /test_circulation or answers 409. Circulation is the remaining proof-gated MQTT
+                  mapping; the room source saves directly and reports mapping errors at runtime. A
+                  mistyped witness does not fail loudly, it silently re-attributes a tank's cooling
+                  rate. The proof
                   binds the seven BEHAVIOURAL fields (not the cosmetic name). An unchanged mapping
                   short-circuits to {ok:true,saved:false,reboot:false}; only a change to those seven
                   reconfigures the subscription, so renaming the source does not retire its evidence

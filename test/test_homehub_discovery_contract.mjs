@@ -98,7 +98,7 @@ assert.equal(elements.hhSearch.disabled, true, "the active search must disable i
 context.__homehub.closeHomehub();
 context.__homehub.openHomehub();
 assert.equal(elements.hhHost.value, "saved-homehub.local", "reopen reloads the persisted address");
-finishSearch({ ok: true, status: 200, json: async () => ({ host: "203.0.113.137" }) });
+finishSearch({ ok: true, status: 200, json: async () => ({ host: "192.0.2.137" }) });
 assert.equal(await abandonedSearch, false, "the abandoned request must be ignored");
 assert.equal(elements.hhHost.value, "saved-homehub.local",
   "a late discovery response must not overwrite the newly opened form");

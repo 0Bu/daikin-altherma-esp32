@@ -31,6 +31,7 @@ scripts/run-contract-tests.sh      # do the firmware's SOURCE boundaries still h
 scripts/run-domain-audit.sh        # is the value catalog physically RIGHT?
 scripts/run-description-audit.sh   # can a user find out what each value IS?
 scripts/run-user-docs-audit.sh     # are English docs clear, current, and actionable?
+scripts/run-diagnostic-evidence-audit.sh # is each diagnosis still tied to its cited source?
 scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
 scripts/run-ui-use-case-tests.sh   # do all visible UI actions actually work?
 scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data?
