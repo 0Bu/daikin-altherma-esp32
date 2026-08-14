@@ -350,9 +350,14 @@ ota_update.cpp  pull-based signed OTA. Channel read FRESH on every check (releas
                 TWO-POINT downgrade gate: manifest version AND the image's own esp_app_desc_t,
                 exact match required; ?downgrade=1 relaxes ORDER only, never signature, never
                 persisted. Both network ops on ONE on-demand task, one at a time (two TLS sessions
-                fight over the largest block). The publisher QUIESCES from before manifest TLS
-                setup through the download (logic/ota_quiesce.hpp, bounded); only init-OOM and TLS
-                setup allocation failures get one cleanup-and-retry
+                fight over the largest block). MQTT + X10A QUIESCE before allocation; an in-flight
+                weather client gets one bounded unwind window. Image transport is manual HTTPS-only
+                esp_http_client -> esp_ota with a fixed 2 KiB INTERNAL buffer. Free buffer + TLS
+                BEFORE esp_ota_end's unchanged RSA verifier; only then select boot slot. Require
+                24 KiB free INTERNAL + 12 KiB largest block before transfer AND validation, bounded
+                and fail-closed. VALIDATE_FAILED is generic (structure/digest/signature/allocator),
+                never claim a signature-specific cause. Only manifest init-OOM and TLS setup
+                allocation failures get one cleanup-and-retry
 status_led.cpp  status indicator: TWO back-ends (GPIO / WS2812) behind one host-tested pattern
                 table (logic/led_pattern.hpp). Pin+driver+polarity are RUNTIME (CI ships ONE
                 image; boards disagree). X10A-down outranks MQTT-down. Button override pre-empts
@@ -445,8 +450,9 @@ uses 256-byte slots today (31/12/3 dense int16 values per X10A/HomeHub/ENV III r
 written last. A non-erased torn mid-sector slot skips to the next sector instead of erasing valid
 predecessors. Slot size grows by powers of two with the catalog and the build asserts at least 72 h
 with all three sources active; unused depth is wear reserve, not eagerly erased retention. The
-former 8 KB partition at 0x1e000 is removed and its gap stays unused. Because `esp_https_ota` never
-writes the partition table, an old-layout board needs one USB/Web-Serial re-flash. Deliberately NOT
+former 8 KB partition at 0x1e000 is removed and its gap stays unused. Because the OTA app-stream
+writes only the inactive app slot, never the partition table, an old-layout board needs one
+USB/Web-Serial re-flash. Deliberately NOT
 in `nvs` (24 KB shared with credentials must not take this traffic); keep NVS/OTA offsets stable.
 
 **The link is persisted; the model is not.** RX/TX pins + protocol are the physical, boot-invariant

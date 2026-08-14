@@ -1,7 +1,7 @@
 #pragma once
-// Pull-based signed OTA (esp_https_ota). Flow: check -> compare the manifest version -> download
-// daikin-altherma-esp32<suffix>.bin into the inactive slot -> verify signature -> reboot, with a
-// downgrade gate that refuses anything not strictly newer.
+// Pull-based signed OTA (esp_http_client -> esp_ota). Flow: check -> compare the manifest version ->
+// stream daikin-altherma-esp32<suffix>.bin into the inactive slot -> release TLS -> verify signature
+// -> reboot, with a downgrade gate that refuses anything not strictly newer.
 //
 // Both halves are implemented. The DELIVERY half (ota_check_async / ota_update_async) runs on one
 // on-demand task, never the httpd worker; the ROLLBACK half (ota_health_gate_arm) keeps a fresh

@@ -85,6 +85,11 @@ HpStats  hp_stats();
 // allocation-free, because the increment happens inside the OOM catch handler.
 uint32_t hp_skipped_cycles();
 
+// Has the running X10A task observed OTA's lock-free quiesce request and left its allocation-rich
+// cycle? True also when no poll task exists (safe/minimal mode or task-start failure), because there
+// is then no cycle for OTA to wait on. Used only by ota_update.cpp's bounded pre-TLS barrier.
+bool hp_poll_ota_quiesced();
+
 // Identity token for one complete X10A cycle. A config change bumps it before arming the consumer
 // resets; cache/history/checkup/dwell commits accept only the token captured before their bus read.
 uint32_t hp_poll_generation();

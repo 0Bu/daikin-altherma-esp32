@@ -320,10 +320,18 @@ assert.doesNotMatch(pollHeader, /std::string\s+(?:label|unit)\s*;/,
 
 // Weather raises its lock-free activity signal, then leaves one complete MQTT cadence before
 // starting HTTPS. Otherwise the publisher can already own the large vector when TLS begins, and an
-// activity check in the next cycle is too late.
-assert.match(weather,
-  /NetworkActivity activity;[\s\S]{0,180}?vTaskDelay\(pdMS_TO_TICKS\(kNetworkQuiesceLeadMs\)\);[\s\S]{0,180}?fetch_forecast\(/,
-  "weather must advertise the heap-sensitive interval before its pre-TLS grace and fetch");
+// activity check in the next cycle is too late. OTA and weather now also close their simultaneous-
+// start race: weather raises its own flag first, waits the grace interval, re-reads OTA's flag and
+// starts HTTPS only if OTA did not win. Assert the ordered block rather than an arbitrary character
+// distance — the race explanation between those statements is deliberately allowed to be explicit.
+const weatherActivity = weather.indexOf("NetworkActivity activity;");
+const weatherLead = weather.indexOf("vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));",
+                                  weatherActivity);
+const weatherOtaRecheck = weather.indexOf("ota_preempted = ota_download_active();", weatherLead);
+const weatherFetch = weather.indexOf("if (!ota_preempted) ok = fetch_forecast(", weatherOtaRecheck);
+assert.ok(weatherActivity >= 0 && weatherLead > weatherActivity &&
+          weatherOtaRecheck > weatherLead && weatherFetch > weatherOtaRecheck,
+  "weather must advertise its heap interval, wait one cadence, re-check OTA and only then fetch");
 assert.match(mqtt,
   /ota_download_active\(\)[\s\S]{0,160}?weather_fetch_active\(\)[\s\S]{0,160}?ota_busy \|\| weather_busy[\s\S]{0,160}?ota_quiesce_step\(network_quiesce, network_busy\)/,
   "MQTT must apply the bounded TLS hold-off to both OTA and weather network activity");

@@ -237,9 +237,10 @@ captive_dns.cpp     → UDP:53 catch-all (every name → 192.168.4.1) so the set
 logic/captive.hpp   → what the "/*" catch-all answers: a 302 to the portal in setup mode (the only
                       signal iOS/Android/Windows probe agents all act on), the SPA shell in STA mode
 mqtt_ha.cpp/.hpp    → Home Assistant MQTT-Discovery bridge (streamed discovery), read-only
-ota_update.cpp      → OTA: manifest check + esp_https_ota download + the two-point downgrade
-                      gate + the rollback health gate. Both network ops run on ONE on-demand
-                      task (never the httpd worker), one at a time; status behind a mutex
+ota_update.cpp      → OTA: manifest check + fixed-buffer esp_http_client → esp_ota stream + the
+                      two-point downgrade gate + RSA validation + rollback health gate. HTTP/TLS
+                      is released before esp_ota_end; both network ops run on ONE on-demand task
+                      (never the httpd worker), one at a time; status behind a mutex
 diag_log.cpp        → in-RAM console ring served by GET /diag (static .bss buffer); each line is
                       also handed to syslog_send() for optional off-device forwarding
 syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_host is empty). The
@@ -2175,21 +2176,24 @@ Structure:
   Switching *back* (dev → the last release) is a downgrade by version, which the gate below refuses
   unless the request explicitly carries `?downgrade=1`; the web UI sends it only after the user
   picks a channel and confirms. Without that the release channel would be a one-way door.
-- **Heap-bounded TLS.** Lock-free flags read by the MQTT publisher cover the complete OTA and
-  Open-Meteo network operations, beginning before either handshake. Each producer holds its flag for
-  1.1 seconds before opening TLS so the once-per-second publisher can finish its current cycle and
-  stand aside; the same bounded `logic/ota_quiesce.hpp` budget prevents a stalled operation from
-  silencing MQTT indefinitely. The poll cache compounds this by owning only its formatted value:
+- **Heap-bounded TLS and validation.** Lock-free flags cover the complete OTA and Open-Meteo
+  network operations, beginning before either handshake. Each producer holds its flag for 1.1
+  seconds before opening TLS so the once-per-second MQTT publisher can finish its current cycle and
+  stand aside; OTA also waits for an in-flight X10A sweep to acknowledge the same request and for an
+  already-open weather client to unwind. New X10A snapshot work and new weather requests then stay
+  out until OTA ends. The shared `logic/ota_quiesce.hpp` budget prevents a stalled flag from
+  silencing MQTT or X10A indefinitely. The poll cache compounds this by owning only its formatted value:
   immutable labels and units are borrowed from firmware-lifetime catalog tables, shrinking the one
   contiguous allocation every sweep requires and eliminating two per-row string allocations.
   `http_client_diag.cpp` returns the TLS evidence it logs, so an init OOM or
   `ESP_ERR_MBEDTLS_SSL_SETUP_FAILED` is cleaned up and retried exactly once. DNS, TCP, certificate,
   HTTP and payload failures remain single-attempt failures with their original diagnostic class.
-- **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): the running app verifies
-  the signature before installing. Fully implemented (`ota_update.cpp`) — manifest check,
-  `esp_https_ota` download into the inactive slot, the **two-point downgrade gate** (manifest
+- **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): fully implemented in
+  `ota_update.cpp` — manifest check, an HTTPS-only `esp_http_client` → `esp_ota` stream into the
+  inactive slot, the **two-point downgrade gate** (manifest
   version *and* the image's own embedded `esp_app_desc_t` version, with exact artifact-version
-  equality required, so a lying or stale manifest is refused), and the **connectivity health gate**
+  equality required, so a lying or stale manifest is refused), signed-image validation and the
+  **connectivity health gate**
   (commit only after a base window AND getting
   online, else stay `PENDING_VERIFY` → a reboot rolls back). Both default feeds are live, and
   publishing runs on a private repo too (the Pages site is public either way — see
@@ -2197,7 +2201,17 @@ Structure:
   The web installer carves prepared sparse parts from the merged
   image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
   as the OTA feed (the `esptool-js` installer and the device load the same file).
-- **The publisher stands aside during known TLS operations** (`logic/ota_quiesce.hpp`, #380). An
+- **Validation gets the transport's heap back first.** The firmware downloads through a fixed
+  2 KiB INTERNAL buffer and closes/frees both that buffer and the complete HTTP/TLS client before
+  calling `esp_ota_end()`. That call remains IDF's mandatory RSA-3072/PSA verifier; only its success
+  permits the separate `esp_ota_set_boot_partition()` call. Before opening the image stream and
+  again immediately before validation, a bounded five-second gate requires both 24 KiB total free
+  INTERNAL 8-bit heap and a 12 KiB largest contiguous INTERNAL block. Refusal is retryable and
+  fail-closed. Because `ESP_ERR_OTA_VALIDATE_FAILED` intentionally combines image-structure,
+  digest/signature and verifier-allocation failures, the user-facing error is the exact generic
+  “Update rejected: image validation failed”; `/diag` records before/after heap evidence instead of
+  claiming a signature-specific root cause it cannot prove.
+- **Allocation-heavy peers stand aside during known TLS operations** (`logic/ota_quiesce.hpp`, #380). An
   OTA install or weather fetch is a known, bounded, self-inflicted memory event: the TLS session plus
   the operation buffer claim the
   largest contiguous block on a heap whose binding limit *is* that block. The MQTT publish task used
@@ -2216,7 +2230,10 @@ Structure:
   the rest of the boot, so past the cap the publisher resumes and takes its chances with the OOM guard
   — the behaviour that shipped before, i.e. the worst case of this fix is the status quo. The
   watchdog is fed above the check, and esp-mqtt runs keepalive on its own task, so a quiesced minute
-  is a gap in HA rather than an `offline`.
+  is a gap in HA rather than an `offline`. X10A applies the same check before its first Config/cache
+  allocation and acknowledges OTA after any in-flight sweep has finished. Weather raises its own
+  lock-free activity flag before its second OTA check, closing the race in both directions: either
+  the existing weather request unwinds first or the new one never opens TLS.
 - **Boot recovery / anti-brick** — an unsigned app aborts pre-`app_main`, so only the bootloader can
   recover, and only via a recorded previous OTA slot; a direct USB flash of an unsigned build both
   crash-loops and blanks the otadata rollback record. Contained by the pre-flash guard

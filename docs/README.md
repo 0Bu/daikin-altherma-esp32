@@ -711,7 +711,8 @@ Derived sensors (COP etc.) and a sample dashboard: [HOME_ASSISTANT.md](HOME_ASSI
 
 Pull-based: the device fetches `manifest.json` from `CONFIG_DAIKIN_OTA_MANIFEST_URL` (default GitHub
 Pages), compares its `version` to the running firmware, and on confirmation downloads its image
-`daikin-altherma-esp32.bin` via `esp_https_ota` into the inactive OTA slot, then reboots. Tap the
+`daikin-altherma-esp32.bin` through a fixed-buffer HTTPS stream into the inactive OTA slot, validates
+it and then reboots. Tap the
 firmware **version** to check — either the one in the header (next to the IP address) or the
 *Version* row on gear → **Firmware**, which does the same thing and stays where you are. The UI shows
 the download progress inline beside whichever version you tapped, waits for the board to come back
@@ -744,8 +745,14 @@ up and reloads itself onto the new UI. Both the check and the download run on th
 - **Rollback armed** *(implemented)*: `main.cpp` defers `esp_ota_mark_app_valid_cancel_rollback()` to
   a health gate (~90 s), so a boots-but-crashes image reverts.
 - **Signed images:** Secure Boot v2 RSA-3072 signing *without* hardware Secure Boot — the running
-  app verifies the signature before installing an OTA (no eFuses; reversible; web installer still
-  works). CI signs each image with the offline `OTA_SIGNING_KEY`. Details:
+  app frees the fixed 2 KiB download buffer and the complete HTTP/TLS client before `esp_ota_end()`
+  validates the image; only then may its inactive slot be selected for boot. OTA requires both
+  24 KiB free INTERNAL heap and a 12 KiB largest INTERNAL block before transfer and again before
+  validation. MQTT publication, X10A polling and weather TLS stand aside on a bounded quiesce path.
+  A failed IDF validation is reported generically rather than guessed to be a signature failure because
+  the same result also covers malformed images, digest errors and verifier allocation failures.
+  Signature enforcement remains mandatory (no eFuses; reversible; Web Serial still works), and CI
+  signs each image with the offline `OTA_SIGNING_KEY`. Details:
   [SECURITY.md](SECURITY.md).
 
 Partition layout (`partitions.csv`) officially targets 8 MB. The deployed NVS/coredump/dual-OTA

@@ -1,7 +1,7 @@
 // Pull-based signed OTA. See ota_update.hpp and docs/ARCHITECTURE.md → OTA.
 //
 // Both halves are now implemented: the DELIVERY half here (manifest check -> downgrade gate ->
-// esp_https_ota into the inactive slot) and the ROLLBACK half further down (the health gate that
+// esp_http_client -> esp_ota into the inactive slot) and the ROLLBACK half further down (the health gate that
 // keeps a fresh image PENDING_VERIFY until it proves healthy). They are independent safety nets and
 // neither replaces the other: the gate below refuses to *start* a bad update, the health gate
 // recovers from one that started and booted broken.
@@ -12,25 +12,32 @@
 //   • Nothing runs on the httpd worker. /set_mqtt's ~8 s pre-flight is deliberately the ONE
 //     request-path network block in this firmware (.claude/CLAUDE.md); a multi-MB TLS download
 //     would park the single httpd task for minutes and take the whole web UI down with it.
-//   • One OTA operation at a time, ever. Two concurrent esp_https_ota sessions would each open a
+//   • One OTA operation at a time, ever. Two concurrent HTTPS/esp_ota sessions would each open a
 //     TLS context on a heap whose binding limit is the largest CONTIGUOUS free block.
 #include "ota_update.hpp"
 #include "logic/health_gate.hpp"
 #include "logic/ota_channel.hpp"
+#include "logic/ota_headroom.hpp"
 #include "logic/ota_manifest.hpp"
+#include "logic/ota_transport.hpp"
 #include "logic/version_cmp.hpp"
 #include "config.hpp"
 #include "diag_log.hpp"
+#include "heap_guard.hpp"
+#include "hp_poll.hpp"
 #include "http_client_diag.hpp"
 #include "net.hpp"
 #include "provisioning.hpp"
+#include "weather_forecast.hpp"
 #include "wifi.hpp"
 #include "esp_app_desc.h"
+#include "esp_app_format.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
-#include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_system.h"
 #include "esp_tls_errors.h"
 #include "freertos/FreeRTOS.h"
 #include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
@@ -38,6 +45,7 @@
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <string>
@@ -77,14 +85,16 @@ bool s_busy = false;
 // resource it is trying to save. A stale read costs one published cycle either way, so relaxed
 // ordering is enough and no reader can ever block on the writer.
 std::atomic<bool> s_network_active{false};
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "OTA quiesce signal must remain allocation- and lock-free");
 
 // Scope guard for that flag. It deliberately covers the manifest TLS handshake too: live evidence
 // proved that the small response is irrelevant to the binding allocation — TLS setup itself failed
 // while the MQTT publisher still competed for the largest contiguous block. The guard lives around
 // the whole task operation so every manifest/download exit and exception clears it in one place.
 struct OtaNetworkFlag {
-    OtaNetworkFlag()  { s_network_active.store(true,  std::memory_order_relaxed); }
-    ~OtaNetworkFlag() { s_network_active.store(false, std::memory_order_relaxed); }
+    OtaNetworkFlag()  { s_network_active.store(true,  std::memory_order_release); }
+    ~OtaNetworkFlag() { s_network_active.store(false, std::memory_order_release); }
 };
 
 // A TLS handshake alone wants ~6 KB of stack, and fetch_manifest_version() puts another
@@ -96,10 +106,105 @@ constexpr UBaseType_t kTaskPrio = TASK_PRIO_OTA;   // see main/task_config.hpp f
 constexpr int  kHttpTimeoutMs = 15000;
 constexpr int  kOtaBufSize    = 2048;   // download chunk; deliberately small (contiguous heap)
 constexpr size_t kManifestMax = 1024;   // the real manifest is ~200 B; anything larger is not ours
+constexpr unsigned kMaxRedirects = 5;
 // MQTT publishes once a second. Hold the operation flag for a little longer than one cadence before
 // opening TLS so a publisher which woke just before the OTA task has time to finish and stand aside.
 constexpr TickType_t kNetworkQuiesceLead = pdMS_TO_TICKS(1100);
 constexpr TickType_t kAllocatorRetryDelay = pdMS_TO_TICKS(250);
+constexpr TickType_t kVerifyHeadroomRetryDelay = pdMS_TO_TICKS(250);
+constexpr unsigned   kVerifyHeadroomMaxAttempts = 20;  // 5 s: transient churn may unwind, never wait forever
+constexpr TickType_t kPollQuiesceWait      = pdMS_TO_TICKS(15000);
+constexpr TickType_t kWeatherWait          = pdMS_TO_TICKS(kHttpTimeoutMs + 5000);
+
+struct OtaHeapSample {
+    size_t free_bytes;
+    size_t largest_internal_block;
+};
+
+enum class OtaTransferFailure : uint8_t { None, Read, Write, Size };
+
+const char* ota_transfer_failure_name(OtaTransferFailure failure) {
+    switch (failure) {
+        case OtaTransferFailure::Read:  return "read";
+        case OtaTransferFailure::Write: return "write";
+        case OtaTransferFailure::Size:  return "size";
+        default:                        return "none";
+    }
+}
+
+OtaHeapSample ota_heap_sample() {
+    return {heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+            heap_largest_internal_block()};
+}
+
+// Wait a short, bounded interval for an allocation-rich task which was already in flight when the
+// lock-free OTA flag rose to unwind.  This is called twice by run_update(): before the transfer owns
+// an OTA handle, and after HTTP/TLS plus the download buffer have been freed but before esp_ota_end
+// invokes Secure-Boot-v2 validation.  Refusing on low headroom is fail-closed and retryable; lowering
+// the threshold or skipping verification is not.
+bool wait_for_ota_verify_headroom(const char* phase, OtaHeapSample& sample) {
+    for (unsigned attempt = 0; attempt < kVerifyHeadroomMaxAttempts; ++attempt) {
+        sample = ota_heap_sample();
+        if (ota_verify_headroom_ok(sample.free_bytes, sample.largest_internal_block)) {
+            diag_printf("ota: %s heap ready (free=%u B largest=%u B)\n", phase,
+                        static_cast<unsigned>(sample.free_bytes),
+                        static_cast<unsigned>(sample.largest_internal_block));
+            return true;
+        }
+        vTaskDelay(kVerifyHeadroomRetryDelay);
+    }
+
+    sample = ota_heap_sample();
+    diag_printf("ota: %s blocked by low heap (free=%u B largest=%u B; need %u/%u B)\n",
+                phase, static_cast<unsigned>(sample.free_bytes),
+                static_cast<unsigned>(sample.largest_internal_block),
+                static_cast<unsigned>(OTA_VERIFY_MIN_FREE_BYTES),
+                static_cast<unsigned>(OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES));
+    return false;
+}
+
+void close_http_client(esp_http_client_handle_t& client) {
+    if (!client) return;
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    client = nullptr;
+}
+
+esp_err_t firmware_http_event(esp_http_client_event_t* event) {
+    if (!event || event->event_id != HTTP_EVENT_ON_HEADER || !event->user_data ||
+        !event->header_key || !event->header_value) return ESP_OK;
+    const std::string_view key(event->header_key);
+    if (key.size() != 8 || !ota_ascii_prefix_ieq(key, "Location")) return ESP_OK;
+    auto* policy = static_cast<OtaRedirectLocationState*>(event->user_data);
+    ota_redirect_location_observe(*policy, event->header_value);
+    return ESP_OK;
+}
+
+// Open GET and follow the same standard redirect statuses as esp_https_ota in IDF v6.0.2.  The
+// client owns no body buffer supplied by the server, and the redirect budget is finite even if a
+// broken feed points at itself.
+esp_err_t open_firmware_stream(esp_http_client_handle_t client, OtaRedirectLocationState& policy,
+                               int& status) {
+    for (unsigned redirects = 0; redirects <= kMaxRedirects; ++redirects) {
+        ota_redirect_location_reset(policy);
+        esp_err_t e = esp_http_client_open(client, 0);
+        if (e != ESP_OK) return e;
+        if (esp_http_client_fetch_headers(client) < 0) return ESP_FAIL;
+        status = esp_http_client_get_status_code(client);
+        if (status == 200) return ESP_OK;
+        const bool redirect = status == 301 || status == 302 || status == 303 ||
+                              status == 307 || status == 308;
+        if (!redirect || redirects == kMaxRedirects) return ESP_FAIL;
+        if (!ota_redirect_location_accepted(policy)) return ESP_ERR_INVALID_ARG;
+        e = esp_http_client_set_redirection(client);
+        if (e != ESP_OK) return e;
+        // `set_redirection` consumes Location while the response still exists.  Only then discard
+        // the old response/socket so the next esp_http_client_open starts a clean TLS request.
+        esp_http_client_close(client);
+        esp_http_client_clear_response_buffer(client);
+    }
+    return ESP_FAIL;
+}
 
 void set_state(const char* state, const char* message = "") {
     Lock lk(s_mtx);
@@ -110,6 +215,34 @@ void set_state(const char* state, const char* message = "") {
 void set_progress(int pct) {
     Lock lk(s_mtx);
     s_status.progress = pct;
+}
+
+bool wait_for_weather_quiesce() {
+    if (!weather_fetch_active()) return true;
+    diag_printf("ota: waiting for the in-flight weather TLS client to release heap\n");
+    const TickType_t started = xTaskGetTickCount();
+    while (weather_fetch_active() && xTaskGetTickCount() - started < kWeatherWait)
+        vTaskDelay(kAllocatorRetryDelay);
+    if (!weather_fetch_active()) return true;
+    const OtaHeapSample sample = ota_heap_sample();
+    diag_printf("ota: weather TLS client did not quiesce (free=%u B largest=%u B)\n",
+                static_cast<unsigned>(sample.free_bytes),
+                static_cast<unsigned>(sample.largest_internal_block));
+    return false;
+}
+
+bool wait_for_poll_quiesce() {
+    if (hp_poll_ota_quiesced()) return true;
+    diag_printf("ota: waiting for the in-flight X10A poll cycle to release heap\n");
+    const TickType_t started = xTaskGetTickCount();
+    while (!hp_poll_ota_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
+        vTaskDelay(kAllocatorRetryDelay);
+    if (hp_poll_ota_quiesced()) return true;
+    const OtaHeapSample sample = ota_heap_sample();
+    diag_printf("ota: X10A poll task did not acknowledge quiesce (free=%u B largest=%u B)\n",
+                static_cast<unsigned>(sample.free_bytes),
+                static_cast<unsigned>(sample.largest_internal_block));
+    return false;
 }
 
 // The feed this device follows right now (config ota_channel, POST /set_ota). Read fresh on every
@@ -128,6 +261,7 @@ bool fetch_manifest_version_once(const std::string& url, char* out, size_t outle
     // firmware base URL — see logic/ota_channel.hpp). Say that, rather than letting the client
     // fail on a relative path and reporting an unreachable server.
     if (url.empty()) { err = "No update URL configured"; return false; }
+    if (!ota_url_is_absolute_https(url)) { err = "Update URL must use HTTPS"; return false; }
 
     const HttpClientProbe before = http_client_probe();
     esp_http_client_config_t cfg = {};
@@ -135,6 +269,11 @@ bool fetch_manifest_version_once(const std::string& url, char* out, size_t outle
     cfg.timeout_ms        = kHttpTimeoutMs;
     cfg.crt_bundle_attach = esp_crt_bundle_attach;   // public CA bundle, same as MQTTS
     cfg.keep_alive_enable = false;
+    cfg.transport_type    = HTTP_TRANSPORT_OVER_SSL;
+    // Manifest redirects are unnecessary for the fixed Pages feed. Refusing them avoids a second
+    // policy path where an HTTPS URL could point the client at plaintext before image signing ever
+    // gets a say.
+    cfg.disable_auto_redirect = true;
 
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
     if (!c) {
@@ -175,8 +314,7 @@ bool fetch_manifest_version_once(const std::string& url, char* out, size_t outle
         else if (!manifest_version(buf, got, out, outlen)) err = "Manifest has no usable version";
         else                                            ok = true;
     }
-    esp_http_client_close(c);
-    esp_http_client_cleanup(c);
+    close_http_client(c);
     return ok;
 }
 
@@ -286,27 +424,147 @@ void run_update(bool allow_downgrade) {
         set_state("error", "No update URL configured");
         return;
     }
+    if (!ota_url_is_absolute_https(url)) {
+        diag_printf("ota: refusing non-HTTPS firmware URL\n");
+        set_state("error", "Update URL must use HTTPS");
+        return;
+    }
     diag_printf("ota: downloading %s (%s -> %s, %s channel)\n", url.c_str(), running.c_str(), avail,
                 ota_channel_name(ch));
 
+    // The first gate runs while the manifest client's TLS state has already been released and
+    // before the firmware transfer claims another client, buffer and OTA handle.  In particular it
+    // lets a poll sweep which started just before s_network_active rose finish instead of racing
+    // the allocator during esp_ota_begin.
+    OtaHeapSample transfer_heap{};
+    if (!wait_for_ota_verify_headroom("transfer", transfer_heap)) {
+        set_state("error", "Not enough memory to verify the update — retry after reboot");
+        return;
+    }
+
+    OtaRedirectLocationState redirect_policy;
     esp_http_client_config_t http = {};
     http.url               = url.c_str();
     http.timeout_ms        = kHttpTimeoutMs;
     http.crt_bundle_attach = esp_crt_bundle_attach;
     http.keep_alive_enable = false;
+    http.transport_type    = HTTP_TRANSPORT_OVER_SSL;
+    // Redirects are consumed only by open_firmware_stream(), after the duplicate-aware policy has
+    // accepted exactly one Location. Pin the client itself to manual mode as well, so a future
+    // switch from open/read to esp_http_client_perform cannot silently introduce a second,
+    // unchecked path.
+    http.disable_auto_redirect = true;
+    http.event_handler     = firmware_http_event;
+    http.user_data         = &redirect_policy;
     // Small receive buffer on purpose. The image is ~1.5 MB but is written to flash chunk by chunk,
     // so nothing here needs to scale with it — and this allocation competes with the MQTTS session
     // for the largest CONTIGUOUS free block, which is the real ceiling on this device.
     http.buffer_size       = kOtaBufSize;
 
-    esp_https_ota_config_t ota = {};
-    ota.http_config            = &http;
-
-    esp_https_ota_handle_t h = nullptr;
-    esp_err_t e = esp_https_ota_begin(&ota, &h);
-    if (e != ESP_OK || !h) {
-        diag_printf("ota: begin failed (%s)\n", esp_err_to_name(e));
+    const HttpClientProbe before = http_client_probe();
+    esp_http_client_handle_t client = esp_http_client_init(&http);
+    if (!client) {
+        http_client_log_init_failure("ota", before);
         set_state("error", "Couldn't start the download");
+        return;
+    }
+
+    int status = 0;
+    esp_err_t e = open_firmware_stream(client, redirect_policy, status);
+    if (e != ESP_OK) {
+        const HttpClientOpenFailure failure =
+            http_client_log_open_failure("ota", client, e, before);
+        close_http_client(client);
+        diag_printf("ota: firmware stream failed (status=%d, err=%s, tls=0x%lx)\n", status,
+                    esp_err_to_name(e), static_cast<unsigned long>(failure.tls_error));
+        set_state("error", status == 0 ? "Can't reach the update server"
+                                        : "Update server returned an error");
+        return;
+    }
+
+    const int64_t total = esp_http_client_get_content_length(client);
+    uint8_t* buffer = static_cast<uint8_t*>(
+        heap_caps_malloc(kOtaBufSize, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+    if (!buffer) {
+        close_http_client(client);
+        const OtaHeapSample failed = ota_heap_sample();
+        diag_printf("ota: download-buffer allocation failed (free=%u B largest=%u B)\n",
+                    static_cast<unsigned>(failed.free_bytes),
+                    static_cast<unsigned>(failed.largest_internal_block));
+        set_state("error", "Not enough memory to verify the update — retry after reboot");
+        return;
+    }
+
+    const esp_partition_t* update_partition = esp_ota_get_next_update_partition(nullptr);
+    if (!update_partition || (total > 0 && static_cast<uint64_t>(total) > update_partition->size)) {
+        heap_caps_free(buffer);
+        close_http_client(client);
+        diag_printf("ota: no suitable update partition (image=%lld B)\n",
+                    static_cast<long long>(total));
+        set_state("error", "Update image does not fit this device");
+        return;
+    }
+
+    // OTA_WITH_SEQUENTIAL_WRITES defers erasing the INACTIVE APP partition until the first
+    // esp_ota_write(), so the header/version gates below still reject a mismatched artifact before
+    // altering that slot.  esp_ota_begin() may separately invalidate rollback metadata in otadata;
+    // it is therefore intentionally not described as making no flash write at all.
+    esp_ota_handle_t ota_handle = 0;
+    bool ota_open = false;
+    e = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+    if (e == ESP_OK) ota_open = true;
+    if (e != ESP_OK) {
+        heap_caps_free(buffer);
+        close_http_client(client);
+        diag_printf("ota: esp_ota_begin failed (%s)\n", esp_err_to_name(e));
+        set_state("error", e == ESP_ERR_NO_MEM
+                           ? "Not enough memory to verify the update — retry after reboot"
+                           : "Couldn't start the download");
+        return;
+    }
+
+    // Read only the fixed image header/first segment descriptor/app descriptor first.  This binds
+    // the manifest version to the bytes actually served before the inactive partition is erased or
+    // bulk data is accepted.  All three structures are public esp_app_format API in IDF v6.0.2.
+    constexpr size_t kImageProbeSize = sizeof(esp_image_header_t) +
+                                       sizeof(esp_image_segment_header_t) +
+                                       sizeof(esp_app_desc_t);
+    static_assert(kImageProbeSize <= kOtaBufSize, "OTA probe must fit the fixed download buffer");
+    size_t probe_len = 0;
+    unsigned read_timeouts = 0;
+    while (probe_len < kImageProbeSize) {
+        const int n = esp_http_client_read(client, reinterpret_cast<char*>(buffer + probe_len),
+                                           static_cast<int>(kImageProbeSize - probe_len));
+        if (n == -ESP_ERR_HTTP_EAGAIN && read_timeouts++ < 2) continue;
+        if (n <= 0) break;
+        probe_len += static_cast<size_t>(n);
+        read_timeouts = 0;
+    }
+    if (probe_len != kImageProbeSize) {
+        if (ota_open) { esp_ota_abort(ota_handle); ota_open = false; }
+        heap_caps_free(buffer);
+        close_http_client(client);
+        diag_printf("ota: incomplete image header (%u/%u B)\n",
+                    static_cast<unsigned>(probe_len), static_cast<unsigned>(kImageProbeSize));
+        set_state("error", "Update image is unreadable");
+        return;
+    }
+
+    esp_image_header_t image_header{};
+    esp_app_desc_t img{};
+    std::memcpy(&image_header, buffer, sizeof(image_header));
+    std::memcpy(&img, buffer + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t),
+                sizeof(img));
+    if (image_header.magic != ESP_IMAGE_HEADER_MAGIC ||
+        image_header.chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID ||
+        img.magic_word != ESP_APP_DESC_MAGIC_WORD) {
+        if (ota_open) { esp_ota_abort(ota_handle); ota_open = false; }
+        heap_caps_free(buffer);
+        close_http_client(client);
+        diag_printf("ota: image header rejected (magic=0x%02x chip=%u desc=0x%08lx)\n",
+                    image_header.magic, static_cast<unsigned>(image_header.chip_id),
+                    static_cast<unsigned long>(img.magic_word));
+        set_state("error", "Update image is unreadable");
         return;
     }
 
@@ -314,18 +572,10 @@ void run_update(bool allow_downgrade) {
     // claim about it. The manifest and the image are two separate attacker-controlled artifacts: a
     // hostile host can advertise "9.9.9" and serve a genuine, correctly-signed OLD binary, and the
     // signature check would happily pass it — an authentic downgrade onto a fixed vulnerability.
-    // esp_https_ota_get_img_desc reads esp_app_desc_t out of the first chunk, so this still runs
-    // BEFORE the bulk of the image is fetched and before anything is committed.
+    // The fixed probe above reads esp_app_desc_t out of the first bytes, so this still runs BEFORE
+    // the bulk of the image is fetched and before anything is written or committed.
     // (CI already refuses to publish a manifest whose version disagrees with the built image, so in
     // the field a mismatch is a stale cache or an attack — either way, not something to install.)
-    esp_app_desc_t img = {};
-    e = esp_https_ota_get_img_desc(h, &img);
-    if (e != ESP_OK) {
-        diag_printf("ota: can't read image descriptor (%s)\n", esp_err_to_name(e));
-        esp_https_ota_abort(h);
-        set_state("error", "Update image is unreadable");
-        return;
-    }
     char imgver[sizeof(img.version) + 1] = {0};
     std::memcpy(imgver, img.version, sizeof(img.version));   // version[] need not be NUL-terminated
     // ...and that the image the host actually served is the one the manifest DESCRIBED. Passing the
@@ -335,9 +585,11 @@ void run_update(bool allow_downgrade) {
     // two strings from one stamped value (ci-build-all.sh reads the built image back), so in the
     // field a mismatch is a stale cache, a broken host or an attack.
     if (!ota_artifact_versions_match(avail, imgver)) {
+        if (ota_open) { esp_ota_abort(ota_handle); ota_open = false; }
+        heap_caps_free(buffer);
+        close_http_client(client);
         diag_printf("ota: REFUSING image v%s: manifest claimed %s (artifact mismatch)\n", imgver,
                     avail);
-        esp_https_ota_abort(h);
         Lock lk(s_mtx);
         s_status.state            = "error";
         s_status.message          = "Update rejected: manifest and image versions differ";
@@ -345,9 +597,11 @@ void run_update(bool allow_downgrade) {
         return;
     }
     if (!ota_install_allowed(running, imgver, allow_downgrade)) {
+        if (ota_open) { esp_ota_abort(ota_handle); ota_open = false; }
+        heap_caps_free(buffer);
+        close_http_client(client);
         diag_printf("ota: REFUSING image v%s while running v%s (manifest claimed %s)\n", imgver,
                     running.c_str(), avail);
-        esp_https_ota_abort(h);
         Lock lk(s_mtx);
         s_status.state            = "error";
         s_status.message          = "Update rejected: not newer than the running firmware";
@@ -355,44 +609,123 @@ void run_update(bool allow_downgrade) {
         return;
     }
 
-    const int total = esp_https_ota_get_image_size(h);
-    int       last  = -1;
-    while ((e = esp_https_ota_perform(h)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
+    size_t written = 0;
+    int last = -1;
+    OtaTransferFailure transfer_failure = OtaTransferFailure::None;
+    auto write_chunk = [&](const uint8_t* data, size_t len) -> bool {
+        if ((total > 0 && written + len > static_cast<uint64_t>(total)) ||
+            written + len > update_partition->size) {
+            e = ESP_ERR_INVALID_SIZE;
+            transfer_failure = OtaTransferFailure::Size;
+            return false;
+        }
+        const esp_err_t write_e = esp_ota_write(ota_handle, data, len);
+        if (write_e != ESP_OK) {
+            e = write_e;
+            transfer_failure = OtaTransferFailure::Write;
+            return false;
+        }
+        written += len;
         if (total > 0) {
-            const int pct = static_cast<int>(
-                (static_cast<int64_t>(esp_https_ota_get_image_len_read(h)) * 100) / total);
+            const int pct = static_cast<int>((static_cast<uint64_t>(written) * 100) /
+                                             static_cast<uint64_t>(total));
             if (pct != last) { set_progress(pct); last = pct; }
         }
+        return true;
+    };
+
+    bool transfer_ok = write_chunk(buffer, probe_len);
+    read_timeouts = 0;
+    while (transfer_ok) {
+        const int n = esp_http_client_read(client, reinterpret_cast<char*>(buffer), kOtaBufSize);
+        if (n == -ESP_ERR_HTTP_EAGAIN && read_timeouts++ < 2) continue;
+        if (n < 0) {
+            e = static_cast<esp_err_t>(-n);
+            transfer_failure = OtaTransferFailure::Read;
+            transfer_ok = false;
+            break;
+        }
+        if (n == 0) break;
+        read_timeouts = 0;
+        transfer_ok = write_chunk(buffer, static_cast<size_t>(n));
     }
 
-    if (e != ESP_OK) {
-        // A truncated transfer is NOT an install: esp_https_ota_abort releases the slot so a failed
-        // download can't leave a half-written image behind for the bootloader to find.
-        diag_printf("ota: download failed (%s)\n", esp_err_to_name(e));
-        esp_https_ota_abort(h);
-        set_state("error", "Download failed — check the connection");
-        return;
-    }
-    if (!esp_https_ota_is_complete_data_received(h)) {
-        diag_printf("ota: incomplete image, aborting\n");
-        esp_https_ota_abort(h);
-        set_state("error", "Incomplete download");
+    const bool complete = esp_http_client_is_complete_data_received(client) &&
+                          (total <= 0 || written == static_cast<uint64_t>(total));
+
+    // CRITICAL ORDERING: free the fixed download buffer and the HTTP/TLS client BEFORE
+    // esp_ota_end().  IDF v6.0.2's esp_https_ota_finish() does the reverse — esp_ota_end first,
+    // cleanup second — so RSA/PSA verification had to allocate beside TLS and failed on the live
+    // board with a 632-byte low-water mark.  The raw esp_ota API preserves the exact same signed
+    // image verifier while letting the transport release its heap first.
+    heap_caps_free(buffer);
+    buffer = nullptr;
+    close_http_client(client);
+
+    if (!transfer_ok || !complete) {
+        if (ota_open) { esp_ota_abort(ota_handle); ota_open = false; }
+        const OtaHeapSample failed = ota_heap_sample();
+        diag_printf("ota: download failed (class=%s err=%s, complete=%d, bytes=%u/%lld, "
+                    "free=%u B largest=%u B)\n",
+                    ota_transfer_failure_name(transfer_failure), esp_err_to_name(e),
+                    complete ? 1 : 0, static_cast<unsigned>(written),
+                    static_cast<long long>(total), static_cast<unsigned>(failed.free_bytes),
+                    static_cast<unsigned>(failed.largest_internal_block));
+        const char* message = transfer_failure == OtaTransferFailure::Size
+                            ? "Update rejected: image size is invalid"
+                            : transfer_failure == OtaTransferFailure::Write
+                            ? "Couldn't write the update"
+                            : !complete ? "Incomplete download"
+                                        : "Download failed — check the connection";
+        set_state("error", message);
         return;
     }
 
-    // esp_https_ota_finish is where the RSA-3072 Secure Boot v2 signature is verified
-    // (CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y) and the boot partition is switched. An
-    // unsigned or tampered image is REFUSED here, before it can ever be selected for boot — this is
-    // the check that makes an untrusted manifest host survivable, so it must never be disabled.
-    e = esp_https_ota_finish(h);
+    OtaHeapSample verify_heap{};
+    if (!wait_for_ota_verify_headroom("validation", verify_heap)) {
+        if (ota_open) { esp_ota_abort(ota_handle); ota_open = false; }
+        set_state("error", "Not enough memory to verify the update — retry after reboot");
+        return;
+    }
+
+    // esp_ota_end() is the SAME IDF RSA-3072 Secure-Boot-v2 verifier selected by
+    // CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y.  It runs only after TLS cleanup and only
+    // with the headroom gate above; no unsigned/tampered image can reach the boot selector.  The
+    // handle becomes invalid regardless of result, so mark it closed before the call.
+    ota_open = false;
+    e = esp_ota_end(ota_handle);
     if (e != ESP_OK) {
+        const OtaHeapSample after = ota_heap_sample();
         if (e == ESP_ERR_OTA_VALIDATE_FAILED) {
-            diag_printf("ota: SIGNATURE VERIFICATION FAILED — image rejected, running image intact\n");
-            set_state("error", "Update rejected: bad signature");
+            // IDF deliberately collapses bad image structure, digest/signature failure AND verifier
+            // allocation failure into ESP_ERR_OTA_VALIDATE_FAILED.  Do not claim which one occurred.
+            diag_printf("ota: image validation failed (%s; before free=%u B largest=%u B; "
+                        "after free=%u B largest=%u B) — running image intact\n",
+                        esp_err_to_name(e), static_cast<unsigned>(verify_heap.free_bytes),
+                        static_cast<unsigned>(verify_heap.largest_internal_block),
+                        static_cast<unsigned>(after.free_bytes),
+                        static_cast<unsigned>(after.largest_internal_block));
+            set_state("error", "Update rejected: image validation failed");
         } else {
-            diag_printf("ota: finish failed (%s)\n", esp_err_to_name(e));
+            diag_printf("ota: esp_ota_end failed (%s; free=%u B largest=%u B)\n",
+                        esp_err_to_name(e), static_cast<unsigned>(after.free_bytes),
+                        static_cast<unsigned>(after.largest_internal_block));
             set_state("error", "Couldn't install the update");
         }
+        return;
+    }
+
+    // Selection is deliberately separate and strictly AFTER successful validation.  IDF validates
+    // once more while setting otadata; any failure still leaves the running slot selected.
+    e = esp_ota_set_boot_partition(update_partition);
+    if (e != ESP_OK) {
+        const OtaHeapSample after = ota_heap_sample();
+        diag_printf("ota: validated image but boot selection failed (%s; free=%u B largest=%u B)\n",
+                    esp_err_to_name(e), static_cast<unsigned>(after.free_bytes),
+                    static_cast<unsigned>(after.largest_internal_block));
+        set_state("error", e == ESP_ERR_OTA_VALIDATE_FAILED
+                           ? "Update rejected: image validation failed"
+                           : "Couldn't activate the update");
         return;
     }
 
@@ -431,8 +764,18 @@ void ota_task(void* arg) {
         OtaNetworkFlag active;
         vTaskDelay(kNetworkQuiesceLead);
         try {
-            if (update) run_update(downgrade);
-            else        run_check();
+            // Weather uses the same TLS allocator.  Its task raises its own lock-free activity flag
+            // before the race-closing OTA re-check; an already-open request gets one HTTP timeout
+            // plus margin to unwind, while a new one observes this OTA flag and never starts.
+            if (!wait_for_poll_quiesce()) {
+                set_state("error", "Heat-pump polling is still using memory — retry shortly");
+            } else if (!wait_for_weather_quiesce()) {
+                set_state("error", "Another network operation is still using memory — retry shortly");
+            } else if (update) {
+                run_update(downgrade);
+            } else {
+                run_check();
+            }
         } catch (const std::exception& ex) {
             diag_printf("ota: aborted (%s)\n", ex.what());
             set_state("error", "Out of memory — retry in a moment");
@@ -472,7 +815,7 @@ const char* ota_img_suffix() {
     return "";   // esp32s3 is the only target, no suffix needed
 }
 
-bool ota_download_active() { return s_network_active.load(std::memory_order_relaxed); }
+bool ota_download_active() { return s_network_active.load(std::memory_order_acquire); }
 
 void ota_check_async(int64_t /*browser_epoch_ms*/) {
     // browser_epoch_ms stays plumbed (the route parses ?ms=) but gates nothing: TLS certificate

@@ -1169,7 +1169,8 @@ This is the page a user meets **first**, before the device can serve its own UI.
 the same brand mark, tokens, card radii and controls as the captive portal and dashboard, but as an
 installer shell: product/connection top bar, four-step rail, and one main card column. At ≤780 px
 the rail becomes a compact horizontal step row; at ≤520 px device facts and installation choices
-stack. The shell never widens the viewport.
+stack. On wider screens the rail tint continues behind the footer to the shell's lower edge; the
+mobile shell returns to the plain page background. The shell never widens the viewport.
 
 - **One native browser surface.** `Select USB device` is the only action that invokes browser UI,
   via `navigator.serial.requestPort()`. Everything after the chooser — ESP32-S3 detection,
