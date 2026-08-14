@@ -36,6 +36,7 @@ const allowedHookCommands = new Set([
   'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-schematic-review.sh"',
   'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-use-case-review.sh"',
   'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh"',
+  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-gif.sh"',
   'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/report-capabilities.sh"',
   'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/clang-format-edit.sh"',
   'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/run-logic-tests.sh"',

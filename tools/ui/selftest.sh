@@ -123,7 +123,11 @@ rm -rf "$hook_tmp"
 # Put every expected key through the SHARED matcher, and reject missing or surprise gate entries.
 # shellcheck source=/dev/null
 . "$proj/.claude/hooks/pr-gate-lib.sh"
-expected_gate_keys=(project-review feature-docs domain-review schematic-review ui-use-case-review absence-review)
+# One entry per merge gate under .claude/hooks/require-*.sh. The list is explicit BOTH ways — a
+# missing key and a surprise key are each a failure — so adding a gate means adding it here in the
+# same commit, which is the point: a gate whose template line nobody checks is a gate whose stamp
+# nobody can be sure is readable.
+expected_gate_keys=(project-review feature-docs domain-review schematic-review ui-use-case-review absence-review ui-gif)
 tpl_content="$(cat "$proj/.github/pull_request_template.md")"
 tpl_lines="$(printf '%s\n' "$tpl_content" | gate_task_lines | grep -iE 'gate')"
 tpl_n=0

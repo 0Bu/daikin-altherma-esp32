@@ -56,7 +56,7 @@ SessionStart hook prints what the current environment supports.
 
 **But there IS a real local verification loop** — these run with the plain system toolchain
 (g++/clang++, node, python3), no board needed. Run them all before opening a PR; each is a CI
-`gates` step except the GIF audit. The full rationale for every gate, its exceptions ledger and its
+`gates` step. The full rationale for every gate, its exceptions ledger and its
 selftest is in [`CONTRIBUTING.md`](../CONTRIBUTING.md) → "The local loop":
 
 ```bash
@@ -81,9 +81,14 @@ Rules an agent needs before touching any of that:
   domain audit is the mechanical half; the `/domain-review` skill is the judgement half and is a
   **PR-merge gate on every merge** — unconditional, because deciding up front which files can change
   a value's meaning is the guess that let #35–#39 ship.
-- Three more review skills are CONDITIONAL merge gates — `/schematic-review`, `/absence-review`,
-  `/ui-use-case-review` — each keyed on a diff regex whose ONLY definition is its
-  `.claude/hooks/require-*.sh` hook; read the regex there, never trust a list written elsewhere.
+- Four more review skills are CONDITIONAL merge gates — `/schematic-review`, `/absence-review`,
+  `/ui-use-case-review`, `/ui-gif` — each keyed on a relevance test whose ONLY definition is its
+  `.claude/hooks/require-*.sh` hook; read it there, never trust a list written elsewhere. Three are
+  a diff regex. `/ui-gif` deliberately is NOT: the schematic shares `index.html`/`style.css`/`js/`
+  with the settings modal and the charts, so any path filter would demand a 10-minute re-record for
+  edits that cannot move a pixel. It asks the AUDIT: a STALE recording is refused outright (a ticked
+  box never outranks a mechanical mismatch — the way out is the recorder), while a clean one is
+  gated only on the two paths that mean a NEW recording (the GIF, its stamp).
 - The plant-diagnostics user contract is maintained by `/user-docs-review` and
   `scripts/run-user-docs-audit.sh`: every visible result needs bilingual meaning, limits and a safe
   next step, while a source fingerprint makes `docs/DIAGNOSTICS.md` stale after evaluator/UI drift.
@@ -91,9 +96,12 @@ Rules an agent needs before touching any of that:
   schematic, redaction) — an ADJUDICATION cites evidence, a KNOWN-DEFECT is deleted by its fix, and
   each tool's `selftest.sh` proves the gate still catches the defects it was built for. Counting
   conventions live in the selftests themselves (anchored greps, e.g. `grep -c '^run_case '`).
-- The GIF audit is deliberately NOT a CI step: its only remedy is a local re-record
-  (`scripts/record-dashboard-gif.sh`, Chrome + ffmpeg), so a CI gate would buy re-stamping instead;
-  the `/ui-gif` skill audits + re-records + re-stamps in one place.
+- The GIF audit IS a CI step, and what makes that safe is a refusal rather than a check: the remedy
+  is still a local re-record (`scripts/record-dashboard-gif.sh`, Chrome + ffmpeg), so the danger was
+  always that red gets cleared by re-stamping — `check_ui_gif.mjs` now refuses to write a stamp whose
+  `ui` moved while `gif` stayed identical (`--allow-identical-gif` says otherwise, per invocation).
+  The recording's CROP is the framing number a UI change invalidates silently: re-measure `#schem`,
+  never eyeball it. `/ui-gif` audits + re-records + re-stamps + judges the picture in one place.
 - There is deliberately **no clang-tidy/cppcheck gate and no `.clang-tidy` file** — measured, not
   assumed (CONTRIBUTING.md has the numbers); an inert config reads like a guarantee. What `main/*.cpp`
   has instead is a PINNED warning contract: `main/CMakeLists.txt` sets `-Werror=return-type`,
@@ -420,7 +428,8 @@ www/            web UI sources -> ONE gzipped page. WRITE THE COMMENTS: sources 
                 budget (UI_GZIP_MAX_BYTES, build-breaking, pinned by
                 test_ui_delivery_contract.mjs). The schematic SVG has its own audit + the
                 /schematic-review skill; any change here also ages the README's RECORDING
-                (docs/media/dashboard.gif -> /ui-gif skill)
+                (docs/media/dashboard.gif) — a CI gate AND a merge gate since #468, so a UI edit
+                that reaches a frame is re-recorded in the SAME PR (/ui-gif)
 ```
 
 ## NVS namespaces
