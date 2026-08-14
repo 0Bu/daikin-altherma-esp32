@@ -207,7 +207,7 @@ because a label is unique only within its register page while HA's `unique_id` n
 The catalog carries *"Error Code"* on the outdoor page **and** on the hydronic one: as a state key
 that is two distinct entries in two group objects, but as a bare entity id it was one id on one
 retained topic — so HA created a single entity and a unit reporting both faults showed one of them
-(#221). Hence `outdoor_state_error_code` and `hydronic_error_code` as entities, while the payload
+(legacy-221). Hence `outdoor_state_error_code` and `hydronic_error_code` as entities, while the payload
 still reads `{"outdoor_state": {"error_code": …}, "hydronic": {"error_code": …}}`.
 
 Units and `device_class` are derived from each
@@ -315,14 +315,14 @@ the rest in, so an install created by an older, MAC-identified build keeps its e
 > device disappears once its last entity is gone.) Recent Home Assistant versions also offer
 > **⋮ → Delete** on an MQTT device's page, which clears the same configs for you.
 
-> **Upgrading from a build before the entity ids carried the register group (#221):** every entity's
+> **Upgrading from a build before the entity ids carried the register group (legacy-221):** every entity's
 > `unique_id` and discovery topic gain a `<group>_` prefix. This is a **bug fix, not a rename for its
 > own sake** — five labels that the catalog places on two different register pages were being
 > announced under one id on one topic, so the second discovery config overwrote the first and one of
 > the two sensors did not exist in HA at all. On the reference installation that meant **one "Error
 > Code" entity on a unit that reports two**, with nothing to indicate which unit it came from.
 >
-> On its first connect after the upgrade the firmware **deletes every pre-#221 retained config** —
+> On its first connect after the upgrade the firmware **deletes every pre-legacy-221 retained config** —
 > both the `sensor` and the `binary_sensor` shape, under the current node id *and* under the MAC-era
 > one — in a single pass that completes **before** any replacement is published. Friendly names are
 > unchanged except for the ten entities in the table below, so the other ~154 entities reclaim their
@@ -358,7 +358,7 @@ the rest in, so an install created by an older, MAC-identified build keeps its e
 > the other four labels appear only once on that profile, so they gain a qualified name but no
 > sibling.
 >
-> The #221 entity-id migration did not alter JSON keys or metric suffixes. The later source-topic
+> The legacy-221 entity-id migration did not alter JSON keys or metric suffixes. The later source-topic
 > split intentionally moves that same grouped X10A payload from `<base>/state` to `<base>/x10a`;
 > keys inside it and therefore VictoriaMetrics series names remain unchanged.
 
@@ -483,7 +483,7 @@ fault" on a byte the firmware could not decode.
 Each is its own `binary_sensor` (`device_class: problem`), named and id'd by its group — *Outdoor
 State Error Active*, *Hydronic Error Active* — since a profile carries an error class on both the
 outdoor and the hydronic page while HA entity ids share one flat namespace. The companions were the
-first entities built this way; since #221 it is the general rule, and the catalog rows follow it too
+first entities built this way; since legacy-221 it is the general rule, and the catalog rows follow it too
 (see [Topics](#topics)).
 
 ### Values the firmware refuses to publish
@@ -495,8 +495,8 @@ nobody measured:
 - **The row was decoded with the wrong converter.** `Target Evap. Temp.` matched the catalog
   faithfully and still yielded 145–200 °C while the compressor ran, so it was withheld entirely for
   one release. It is now decoded as the `÷128` register it actually is and reads 10.4–15.6 °C running
-  / 17.2–19.0 °C at rest ([#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194) /
-  [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209)). **Upgrading:** the *Target Evap.
+  / 17.2–19.0 °C at rest (legacy-194 /
+  legacy-209). **Upgrading:** the *Target Evap.
   Temp.* entity — removed on the release that quarantined it — comes back on the next connect. Its
   history is not continuous: samples recorded before the quarantine are the old ×10 values, so a
   long-range graph shows a step from ~200 °C down to ~15 °C. The entity keeps its id on purpose
@@ -515,7 +515,7 @@ nobody measured:
   *second* outdoor unit. On an installation that does not have one, `0xA1` answers with 16 zero bytes
   and `0xA0` reports no O/U MPU id (`0xFFFF`) while asserting no output — so every row on that page
   is withheld together rather than published as four 0 °C thermistors and an expansion valve at 0
-  pulses ([#224](https://github.com/0Bu/daikin-altherma-esp32/issues/224)). The entities stay, and
+  pulses (legacy-224). The entities stay, and
   the signature is re-checked against the live reply every cycle: an installation that *does* have
   the second unit answers differently and sees all of them normally. **Upgrading:** if these entities
   showed numbers before, they go *unknown* — the numbers were never measurements. Their recorder
@@ -570,7 +570,7 @@ counter and verify that transition against the raw page bytes and its surroundin
 context. A defrost or a counter reaching `7` is useful additional coverage, but neither is a proxy
 for that direct evidence. Until a real decrease is observed, the clamp-vs-wrap handling above stays
 fail-closed. Progress and the exact close gate are tracked in
-[#180](https://github.com/0Bu/daikin-altherma-esp32/issues/180).
+legacy-180.
 
 **The metric IDs are frozen.** Now that these rows are ingested, each one is carried in
 VictoriaMetrics as `daikin_altherma_<group>_<object_id>` — so the group key (`outdoor_state`) and

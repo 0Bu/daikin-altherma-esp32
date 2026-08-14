@@ -71,7 +71,7 @@ hp_convert.cpp/.hpp → converter functions: raw bytes →
 hp_poll.cpp/.hpp    → poll engine task: builds the active register set from the profile,
                        polls each interval, fills the thread-safe value cache, drives errors. It
                        PUBLISHES nothing to the browser — that was the /events broadcaster, and
-                       removing it took the /status builder off this task with it (#241)
+                       removing it took the /status builder off this task with it (legacy-241)
 env3.cpp/.hpp       → OPTIONAL local climate sensor (the M5Stack ENV III: SHT30 + QMP6988 on one I2C
                       bus) — a THIRD reading source with its own task, cadence and freshness window,
                       sharing nothing with X10A or the HomeHub. Disabled, or a non-M5Stack board, and
@@ -458,7 +458,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   announces one HA discovery config per row, and both `http_status` and `mqtt_ha` size their snapshot
   buffer from the row **count**. Grow the cache without growing the count and the extra values are
   silently truncated out of `/values` and MQTT: an absent-value bug with no error anywhere, the
-  #35–#39 shape. Hence one view, not four merges. It carries the **overlay rule** (a supplement
+  legacy-35–39 shape. Hence one view, not four merges. It carries the **overlay rule** (a supplement
   applies only if the base already references its page), which is what keeps a hand-written block from
   doing what hand-editing a generated table would do — move detection — or adding a per-cycle bus
   round-trip that, on a model which does not answer the page, reads on `/diag` exactly like a wiring
@@ -482,7 +482,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   row's **page**, never its label alone: `(R2T)` names the leaving-water outlet on `0x61/4` *and*
   `Discharge pipe temp.(R2T)` on `0x20/4`, same offset and converter. Like `lwt_select` and
   `ou_stale` there is no firmware caller — it exists so CI gates the rule against the whole catalog.
-- `logic/availability.hpp` — the **availability ledger** (#209): is a row's decoded number a
+- `logic/availability.hpp` — the **availability ledger** (legacy-209): is a row's decoded number a
   *measurement*, or is the firmware merely able to decode something from those bytes? Everything
   else answers a narrower question — `convert()` handles the wire format's own `0x8000` no-data
   marker, `reading_plausible()` catches a number that is *impossible*, `ValueDef::no_publish` carries
@@ -491,7 +491,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   exist and three are in force. `ZeroMeansAbsent` withholds only an exact zero from an adjudicated row,
   because a global "0 °C is unavailable" rule would destroy every thermistor reading that crosses
   zero. Four rows carry it: `Target Cond. Temp.` (raw `0x0000` flat through a full compressor cycle)
-  and, since [#224](https://github.com/0Bu/daikin-altherma-esp32/issues/224), the page-`0x21`
+  and, since legacy-224, the page-`0x21`
   *Fan1/Fan2 Fin temp.* and *Compressor outlet temperature*. Those three are measured rather than
   argued: page `0x21` stops being refreshed while the outdoor unit rests, so **every** stored sample
   is a running sample — 1140 of them over 7 days, in each of which the neighbouring `INV fin temp.`
@@ -506,7 +506,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   geothermal rows that must reach the ledger and be told nothing). This is not the label *matching*
   `lwt_select.hpp` warns against — that is a pattern hunting for a quantity; this is an exact
   discriminator among spellings the catalog demonstrably carries, the same key
-  `logic/label_override.hpp` uses. The three `0x20` rows #224 also lists (outdoor coil, suction pipe,
+  `logic/label_override.hpp` uses. The three `0x20` rows legacy-224 also lists (outdoor coil, suction pipe,
   liquid line) cannot take a **flat** `ZeroMeansAbsent`: 0 °C is where those sensors live for much of
   a heating season, so an unconditional rule would withhold a real reading far more often than it
   removes a false one. `ZeroAbsentAboveSaturation` is the conditional answer — it withholds an exact
@@ -533,7 +533,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   nothing about them. The liquid line is different: 0.00 °C against a condensing 49 °C claims ~49 K
   of subcooling, which is impossible rather than unlikely — the `Target Cond. Temp.` bar reached
   against a *simultaneously measured* quantity instead of against a second installation, which is
-  what [#224](https://github.com/0Bu/daikin-altherma-esp32/issues/224) asked for and one unit could
+  what legacy-224 asked for and one unit could
   not otherwise supply.
 
   The bound (`LIQUID_LINE_SAT_CEILING`, 30 °C) is impossible rather than tight — real subcooling is
@@ -571,7 +571,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   position), so the bound is a fact about the actuator rather than about the row that happened to be
   observed; the catalog test pins that set in both directions. `Unproven` — withhold the row from every
   publish surface and retract its retained HA config — is implemented with **no live entry**: it held
-  `Target Evap. Temp.` while that row's scale was unknown, and [#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194) then showed the row was
+  `Target Evap. Temp.` while that row's scale was unknown, and legacy-194 then showed the row was
   mis-*decoded* rather than unmeasurable, so the verdict moved to `logic/conv_override.hpp`. A
   quarantine and a mis-decode are different findings; recording them as one would make the fix read
   as a suppression quietly lifted. Rules are keyed on `(page, offset, converter)` — the row's
@@ -584,7 +584,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   A **fourth** verdict is not about a row at all. `PAGE_ABSENCE_RULES` is keyed on the register
   **page** and reaches every row on it, because "the hardware behind this reply is not fitted" is a
   fact about the page rather than about any one field. Two are in force, both the **absent second
-  outdoor unit** of [#224](https://github.com/0Bu/daikin-altherma-esp32/issues/224). `0xA1` (Water-HX)
+  outdoor unit** of legacy-224. `0xA1` (Water-HX)
   answers with 16 zero bytes including its unit-family setting flags at byte 9, so the signature is
   `AllBytesZero`. `0xA0` needed a different witness, and it is the reason the rule is page-keyed at
   all: that reply is **not** all-zero — it reads `00 00 80 0c 00 00 00 00 00 00 ff ff 00 00 00 00`,
@@ -602,13 +602,13 @@ host-testable core is unusually large and valuable, because the risky parts are 
   keeps its own `AboveRangeIsAbsent` ceiling. That composition is why the page fact could not stay a
   row entry: a row already carrying a value rule cannot carry a second one, and a row a future
   generator run adds to the page would be covered by nothing.
-- `logic/conv_override.hpp` — the **converter adjudication** (#194): which converter a generated row
+- `logic/conv_override.hpp` — the **converter adjudication** (legacy-194): which converter a generated row
   is actually *encoded* with, when the id the offline generator emitted is demonstrably the wrong
   one. Sibling of the availability ledger, separate on purpose — that one asks "is this a
   measurement?" and answers by withholding, this one asks "is it decoded right?" and answers by
   asserting a **different** value. That is the stronger claim, so the bar is higher: a rule needs
   evidence that is *structural* (a property of the wire integers themselves), never a range that
-  merely looks more plausible, because fitting a scale to make a number look right is how #35–#39
+  merely looks more plausible, because fitting a scale to make a number look right is how legacy-35–39
   shipped. One entry: `Target Evap. Temp.` (`0x10/6`) conv `114` → `109` (`÷128`). All 54 distinct
   integers the row has been observed to carry satisfy `raw == floor(128 × T)` on an exact 0.1 K grid
   — p ≈ 1.6e-60 against any other scale — and the reading becomes 10.4–15.6 °C running / 17.2–19.0 °C
@@ -617,18 +617,18 @@ host-testable core is unusually large and valuable, because the risky parts are 
   because they read raw `0` on the only unit measured and `0` decodes identically under both scales.
   Applied where a row *enters* the pipeline (decode, cache, HA discovery), so the decoded value, the
   cached converter id, the published JSON type and the HA component cannot disagree about one row.
-- `logic/label_override.hpp` — the **label adjudication** ([#230](https://github.com/0Bu/daikin-altherma-esp32/issues/230) A): which
+- `logic/label_override.hpp` — the **label adjudication** (legacy-230 A): which
   *label* a generated row is published under, when the generator's is wrong. Sibling of the converter
   adjudication, composed by the same `adjudicated()`, but for the row's **identity word** rather than
   its decoded value — the label is the HA entity id and the VictoriaMetrics series suffix, so this is
-  a published claim and a change to it is a #221 migration. One entry: `0x30/1` conv 211
+  a published claim and a change to it is a legacy-221 migration. One entry: `0x30/1` conv 211
   *"Fan 1 (10 rpm)"* → *"Fan 1 (step)"* — conv 211 is a step index (`REGISTERS.md` §3.3), so the four
   profiles spelling a rate published `actuators_fan_1_10_rpm`, inviting a reader to take a `30` for
   300 rpm. Keyed on `(reg, offset, conv, from-label)`, so it corrects exactly those four and is a
   no-op the moment the generator emits *"Fan 1 (step)"*; `mqtt_ha.cpp`'s `retract_relabeled_values`
   deletes the superseded HA entity on upgrade. The oracle is the spec, never a nicer word.
 - `logic/fault_state.hpp` — the **numeric** fault flags that ride beside the **textual** Daikin
-  diagnostic code (#209 defect 4). `error_active`/`warning_active` are derived from the conv-203
+  diagnostic code (legacy-209 defect 4). `error_active`/`warning_active` are derived from the conv-203
   error class through the inverse of that converter's own `ERR_TYPE` lookup, so there is no second
   opinion about what the labels mean; an unreadable class publishes neither rather than asserting
   "no fault". Warning and Caution fold into one flag on purpose — the textual class is right beside
@@ -636,15 +636,15 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/raw_capture.hpp` — **when** the poll path may put raw page bytes on `/diag`, the missing half
   of `logic/hexdump.hpp`. Edge-triggered on stopped→running, then one per 5 min during the run, at
   most 8 per boot and never refilled: a *series* rather than a point, bounded so it cannot evict the
-  rest of the boot's evidence from the 6 KB diag ring. Built for #194, which was in the end settled
+  rest of the boot's evidence from the 6 KB diag ring. Built for legacy-194, which was in the end settled
   from the wire integers the published series already carried losslessly — the capture remains the
   general answer for the next row whose bytes are only wrong while the unit runs. Pure because it is a three-input state machine whose failure modes — a silently
   exhausted budget, or a dump that repeats every cycle — are invisible on a board until the log is
   already ruined.
 - `logic/feature_gate.hpp` — which derived features may **honestly** run on the detected model, and
-  the answer when they cannot: **disable, never degrade** (issue #69 step 0.2 / #110 Part C). It is
+  the answer when they cannot: **disable, never degrade** (issue legacy-69 step 0.2 / legacy-110 Part C). It is
   the same rule the UI already applies three times — `lwt_select` blanks ΔT/heat/COP rather than
-  substituting a setpoint (#121), `ou_stale` blanks a held-over pill rather than showing a dimmer
+  substituting a setpoint (legacy-121), `ou_stale` blanks a held-over pill rather than showing a dimmer
   register of half-valid numbers, `cop_scope` blanks the quotient rather than pairing two boundaries
   that do not match — because a reduced feature set is that already-rejected second
   vocabulary wearing a new name, and because a model fit on a feature vector does not degrade
@@ -654,9 +654,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   frequency, expansion valve or pressure row at all) — but sixteen of the 43 **detectable** profiles
   also lack page `0x30`, and with it the compressor run-state input. An id check would have let
   inference run without run-state on more than a third of the detected catalog. No firmware caller
-  yet (#69 Phase 3 has not landed); pure and host-tested so the policy is asserted rather than
+  yet (legacy-69 Phase 3 has not landed); pure and host-tested so the policy is asserted rather than
   re-litigated at the future call site.
-- `logic/checkup.hpp` — the **rolling on-board plant diagnostics** ([#208](https://github.com/0Bu/daikin-altherma-esp32/issues/208), [#349](https://github.com/0Bu/daikin-altherma-esp32/issues/349)):
+- `logic/checkup.hpp` — the **rolling on-board plant diagnostics** (legacy-208, legacy-349):
   the third question the dashboard answers, after *what is it doing now* (the schematic) and *what did
   this one reading do today* (the trends). It reports counted events, durations and window minima —
   compressor starts and observed runtime per detected start, defrost count and (where compressor
@@ -680,7 +680,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
      the extra field is load-bearing. `3way valve`, `2way valve`, `BSH`, `BUH Step1`, `BUH Step2` and
      `Water pump operation` all sit in **one** dimensionless byte (`0x60/12`) and differ only in which
      bit their converter masks, so a (page, offset, unit) locator would resolve "backup-heater
-     minutes" onto the 3-way valve's position — the #35–#39 shape with a day's statistics in front of
+     minutes" onto the 3-way valve's position — the legacy-35–39 shape with a day's statistics in front of
      it. The catalog test asserts uniqueness **and** identity (the resolved row's label) per locator
      across every shipped profile. Fault classes are matched by converter 203 so both the outdoor and
      hydronic rows participate. Retry counters are **not** matched by converter alone: converter 311
@@ -878,7 +878,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   thirty-four seconds-since-change sensors would be thirty-four permanently-writing recorder rows —
   the rule that already retired the heartbeat's `device_time`.
 - `logic/circulation_source.hpp` — the read-only MQTT power witness for the potable-water
-  circulation pump (#361): exact-topic/path validation, the ON/OFF hysteresis and the pulse-train
+  circulation pump (legacy-361): exact-topic/path validation, the ON/OFF hysteresis and the pulse-train
   confirmation tracker (`state` is the CONFIRMED class — on/off/unknown — never the raw sample: the
   witness is a pulsed load, so a lone spike must not flip the state). Its absence is a first-class
   state — the checkup's DHW-loss attribution treats the witness as OPTIONAL evidence and never
@@ -920,7 +920,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   an SSID dropdown; the portal now takes a **typed** SSID and fetches nothing, but the same bytes
   still arrive through `/status.wifi.ssid` (the associated AP names itself) and `/scan`, where one
   bad field takes down the entire response. This sits *beneath* the DOM escaping of a rendered SSID
-  (issue #52, fixed in #65) and is orthogonal to it: that fix stops hostile SSID *markup* from being
+  (issue legacy-52, fixed in legacy-65) and is orthogonal to it: that fix stops hostile SSID *markup* from being
   interpolated, while this one
   only guarantees the bytes **parse** — an SSID of `"><script>` is already valid JSON here, and a
   body that fails `JSON.parse` never reaches those DOM nodes at all. Pure, so each control char is
@@ -928,7 +928,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/mqtt_group.hpp` — register page → friendly group name, the grouped X10A JSON (depth 1,
   groups/keys in first-seen order), and the flat Modbus JSON. Each value carries its
   `PublishedKind` (from its converter), so the JSON type is a property of the **field** and cannot
-  change between states — the #209 fan-step failure, where one key alternated between a number and a
+  change between states — the legacy-209 fan-step failure, where one key alternated between a number and a
   string and the metrics consumer silently kept the stale number. A `Number` whose formatted value is
   not a number publishes `null`, never a quoted string. Text values are escaped through
   `logic/json.hpp`.
@@ -1127,7 +1127,7 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
   twenty-six — uniformly, all 43 tables agreeing row-for-row, so it is the generator's page-`0x10`
   input that is narrow, not a per-model absence. Among the missing rows are the **protection-retry
   counters** (offsets 10–12, converters 303/307/310/311), the input signal for the "silent protection
-  retries" early warning (issue #69 UC5 / #110). Converter 310 has been implemented since PR #111 but
+  retries" early warning (issue legacy-69 UC5 / legacy-110). Converter 310 has been implemented since PR legacy-111 but
   had no row to decode, so it decoded nothing in the field. The supplement supplies those rows without
   touching a generated table, and `logic/profile_view.hpp` presents *generated + supplement* as one
   row sequence to every consumer. **The overlay rule — a supplement block applies only if the base
@@ -1270,14 +1270,14 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    MQTT bridge withholds the row entirely. Before this the browser applied the rule and the firmware
    did not, so the state topic kept republishing the last run's outdoor air in a freshly-timestamped
    payload; measured against a HomeHub reference in
-   [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209), that was exact agreement at every
+   legacy-209, that was exact agreement at every
    point while the compressor ran and a mean 1.19 K (max 2.0 K) error across the 195 points while it
    rested. The heartbeat's `bus_ou_held_over` says *why* the keys went away, so a consumer reads a
    resting unit rather than a broken link.
 4b. **Raw page capture while the unit RUNS** (`logic/raw_capture.hpp`). The detect-pass dump in
    *Auto-detection* below captures pages `0x10`/`0x20` at rest, which is the state in which the rows
    under investigation are *not* wrong — the limitation that left
-   [#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194) undiagnosable. This one fires on
+   legacy-194 undiagnosable. This one fires on
    the stopped→running edge, then every `RAW_CAPTURE_PERIOD_S` (5 min) during the run, at most
    `RAW_CAPTURE_MAX` (8) times **per boot, never refilled** — a series rather than a point, because
    two candidate scales that both fit one sample may not fit a curve, and a budget because one line
@@ -1376,7 +1376,7 @@ just-wired unit is still identified promptly. A pass does:
    answer and **8 of them leave no candidate at all**, which lands the unit on `generic` (53 rows
    against ~99, with no leaving-water measurement, no compressor speed and no pressures). There is
    no page it is safe to drop, so the probe does not drop one lightly. The retry costs nothing on a
-   page that answers, and by this step the pins and framing are already proven (#214). The sweep
+   page that answers, and by this step the pins and framing are already proven (legacy-214). The sweep
    reports on the `/diag` detect line how many retries **recovered** a page, as `retries=` — so a bus
    working harder to hold its fingerprint together is visible before it changes the answer. Only
    recovered retries count: every sweep probes pages no single model carries (`0x65` answers on none
@@ -1458,7 +1458,7 @@ which own the credential/service fields and are serialized on the single httpd t
   **families** plus the O/U EEPROM digits to match the nameplate — rather than asserting a guessed
   name.
 
-  What this used to claim, and what is measurably true, differ (#230 B). The claim was that a
+  What this used to claim, and what is measurably true, differ (legacy-230 B). The claim was that a
   representative choice is free because "every candidate is register-equivalent, so the decoded VALUES
   are identical". It is not: the tie `detect_best` resolves is on the page **count** and the kW-class
   **span**, both coarser than the row tables, so tied candidates need not be register-equivalent at
@@ -1476,7 +1476,7 @@ which own the credential/service fields and are serialized on the single httpd t
   id makes the (still arbitrary) choice **stable**, and `test_tie_break_order_independence()` asserts
   it by permuting the registry and requiring the same pick. Adopting it moved **nothing**: 0 of the
   336 fingerprints re-label anything, the live reference unit included, so no installed device needed
-  a #221-style migration. It is deliberately **not** a better guess — preferring the majority spelling
+  a legacy-221-style migration. It is deliberately **not** a better guess — preferring the majority spelling
   would assert a model the bus cannot evidence, and two alternatives were measured and rejected
   (fewest-identifiers moves 13 ids on 8 fingerprints for no evidentiary gain; exact-page-mask changes
   nothing at all, an inert rule that would read like a guarantee). What remains is bounded rather than
@@ -1486,7 +1486,7 @@ which own the credential/service fields and are serialized on the single httpd t
 
   When the O/U capacity is **absent**, the candidates additionally span different kW classes — so they
   are not even close to interchangeable — and the set is narrowed by the I/U capacity code instead
-  (#225): a candidate is dropped when its kW class **contradicts** the
+  (legacy-225): a candidate is dropped when its kW class **contradicts** the
   derived capacity, never merely for stating no class — the latter would let ranking decide
   membership, and a profile with no class in its id contradicts nothing. The narrowing is applied
   only when at least one surviving candidate's class **corroborates** the fallback; an I/U code that
@@ -1494,7 +1494,7 @@ which own the credential/service fields and are serialized on the single httpd t
   candidate at once. Before this, the set ignored a fallback the *ranking* already used, so the live
   8 kW unit reported 8 candidates across 4 marketing families — including 14–16 kW models — while
   the representative had long been constrained to the 4–8 kW class. That over-broad report is not
-  inert: it put one unit into the record as two independent families (#213, corrected in #219).
+  inert: it put one unit into the record as two independent families (legacy-213, corrected in legacy-219).
   Narrowing is **not** resolving — the survivors stay genuinely indistinguishable on the bus, and
   `ambiguous` stays true. Both are on the dashboard's Model card, beneath the brand heading
   ([`DESIGN.md`](DESIGN.md) §5.3 item 4), for a concrete reason: the brand alone reads as a *failed*
@@ -1533,7 +1533,7 @@ and status every fourth). It was **removed**. The dashboard now polls `GET /valu
 `GET /status` every 8 s on one chain, backing off to 30 s when the device stops answering and
 suspending entirely while the tab is hidden.
 
-The case is empirical. Measured on the live board while investigating #238:
+The case is empirical. Measured on the live board while investigating legacy-238:
 
 | test | result |
 |---|---|
@@ -1546,13 +1546,13 @@ The case is empirical. Measured on the live board while investigating #238:
 Two defects came out of it, and neither was bad luck — both are properties of pushing from this
 firmware:
 
-* **The stream could die silently and stay dead** (#238/#239). `httpd_queue_work()` is one UDP
+* **The stream could die silently and stay dead** (legacy-238/legacy-239). `httpd_queue_work()` is one UDP
   datagram to the server's control socket, whose mailbox holds `LWIP_UDP_RECVMBOX_SIZE` (6)
   messages. An overflow is dropped **silently** — `sendto()` succeeds, IDF answers `ESP_OK` — so the
   completion callback never ran, the backpressure gate was never released, and `try_begin()` said no
   forever. The common symptom was not the crash: values kept flowing while model, health, heap and
   uptime froze on screen, with **nothing** logged.
-* **The push put the `/status` builder on the wrong task** (#241/#242). `http_append_status_json()`
+* **The push put the `/status` builder on the wrong task** (legacy-241/legacy-242). `http_append_status_json()`
   ran on the httpd task *and* on the poll task, because the broadcaster lived there. That is a
   ~3.5 KB JSON build (including `config()` **by value**, ~10 `std::string` copies) on the task that
   owns the X10A UART: `hp_poll 7664/520` — 520 bytes of 8192 left, killed by the stack watchpoint.
@@ -1722,7 +1722,7 @@ The Home Assistant bridge:
   on as the **MQTT client id** (unique per connection) and a **second `dev.ids` entry** (HA matches a
   device by any identifier and merges, so a MAC-identified install is adopted rather than
   duplicated); the configs an older build published under a superseded identity — that MAC node id,
-  and the pre-#221 un-grouped entity ids — are retracted in **one bulk pass that completes before any
+  and the pre-legacy-221 un-grouped entity ids — are retracted in **one bulk pass that completes before any
   replacement is published** (the diagnostics once per boot, the value entities once per detected
   profile), so the freed `entity_id` is reclaimed by the new entity and its recorder history and
   long-term statistics carry over. The device contains X10A values plus board/link diagnostics;
@@ -1754,7 +1754,7 @@ The Home Assistant bridge:
   node id identifies the *device* only in each discovery config's `uniq_id`/`dev.ids`
   and its `<prefix>/<component>/<node>/<group>_<object_id>/…` discovery topic (the entity id carries
   the register group because `uniq_id` and the topic are flat namespaces while a label is unique only
-  within its page — #221). Each cycle the task
+  within its page — legacy-221). Each cycle the task
   builds a single JSON object of every value, grouped one level deep by X10A register page
   (`logic/mqtt_group.hpp`, host-tested): `{ "<group>": { "<object_id>": value, … }, … }` (max
   nesting depth 1, e.g. `hydronic`, `outdoor_state`, `inverter`). Every sensor's discovery config
@@ -1816,11 +1816,11 @@ The Home Assistant bridge:
   carries a `PublishedKind` (`logic/convert.hpp` `published_kind`, keyed on the converter id):
   `Number` is emitted unquoted, `Text` quoted — in **every** state of that field. The publisher used
   to sniff the formatted string instead, and
-  [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209) measured the cost: fan step
+  legacy-209 measured the cost: fan step
   published the number `30` while the fan ran and the string `"OFF"` when it stopped, so one MQTT key
   changed JSON type during normal operation, Telegraf's numeric parser dropped the string, no zero
   ever reached VictoriaMetrics, and the last running step stayed on the chart as if the fan were
-  still turning. The converter itself is numeric since #210; the *kind* is what makes the guarantee
+  still turning. The converter itself is numeric since legacy-210; the *kind* is what makes the guarantee
   structural — a catalog-wide test walks every implemented converter over every input byte and fails
   if any one of them produces text in one state and a number in another. A `Number` handed a
   non-numeric string publishes `null`, never a quoted string: fail closed rather than flip the type.
@@ -1893,7 +1893,7 @@ The Home Assistant bridge:
     `/status.last_crash` publishes as `reason_code`, so there is one vocabulary) and **`reset_fault`**
     (`crash_reason_is_fault` as `1`/`0`). Both exist because a metrics pipeline keeps numeric fields
     and drops strings: the slug alone never became a series, which left a board restarting 55 times in
-    7 days — 5 of them panics — unattributable in the store, reconstructible only from syslog (#215).
+    7 days — 5 of them panics — unattributable in the store, reconstructible only from syslog (legacy-215).
     Neither is a new HA entity; the existing "Reset Reason" text sensor already answers a human, and a
     numeric twin beside it is the duplicate that got the crash topic's "Last Reset Reason" retired.
     Beside them **`heap_restarts`** — how many consecutive heap-watchdog restarts preceded this boot
@@ -1915,7 +1915,7 @@ The Home Assistant bridge:
     purpose is warning about running out. Everything
     above reports the heap; the stack had a core dump's task table and nothing else, i.e. evidence
     that exists only once the board has already died. Three overflows shipped that way (v1.0.12 on
-    httpd, #241 on `hp_poll`, #318 on httpd through OTA) and #318's 1200 bytes of frame growth
+    httpd, legacy-241 on `hp_poll`, legacy-318 on httpd through OTA) and legacy-318's 1200 bytes of frame growth
     accumulated across releases with no single change announcing it — an idle board looks identical
     at every stack size. Each task records its own mark from its own loop (`main/stack_watch.hpp`);
     the mark is retrospective, so the top of a loop is enough and no branch can skip it.
@@ -1940,7 +1940,7 @@ The Home Assistant bridge:
     funnels through one `mqtt_publish()` wrapper in `mqtt_ha.cpp` so these cover
     discovery+state+heartbeat+heating-curve evidence+LWT, not just one topic), `mqtt_reconnects` (cumulative, excludes the
     first-ever connect).
-    Beside them, the two counters for cycles that produced **nothing** (#380). `mqtt_fails` counts a
+    Beside them, the two counters for cycles that produced **nothing** (legacy-380). `mqtt_fails` counts a
     failed publish *call*; neither of these ever reached one, so before they existed the loss was
     invisible outside a `/diag` ring the next chatty boot overwrites — 337 dropped publishes in 30
     days on the wired board, 125 of them in the last 24 hours, every one immediately before an OTA
@@ -1961,7 +1961,7 @@ The Home Assistant bridge:
     successful/failed register reads, `HpStats.rx_ok`/`rx_fail_total`), `bus_crc_err` /
     `bus_timeout_err` (breakdown), and `bus_tx_reads` (= `rx_received + rx_fails`, every register-read
     request sent). There is no `bus_tx_writes`/`bus_tx_fails` companion: the X10A bridge is read-only,
-    so both were hardcoded `0` and could never vary. They were dropped in #215 — a metric that cannot
+    so both were hardcoded `0` and could never vary. They were dropped in legacy-215 — a metric that cannot
     change is a dashboard line that always reads zero. Neither was ever an HA entity.
   - **`modbus_*`**: link state and read counters. There are
     no write counters — the link issues no Modbus write at all. (The HomeHub task's stack high-water
@@ -1976,7 +1976,7 @@ The Home Assistant bridge:
   free/min-free/largest-block, heap-watchdog restarts, uptime, last reset reason, X10A bus
   status/held-over/CRC/timeout/rx
   errors/rx received, MQTT
-  publish count/fails/reconnects, and the three #380 loss counters —
+  publish count/fails/reconnects, and the three legacy-380 loss counters —
   `mqtt_skipped`/`mqtt_quiesced`/`poll_skipped`, `total_increasing` so HA's long-term statistics read
   the reboot that ends every such episode as a counter reset rather than a cliff; entities and not
   payload-only like `modbus_*`, because a loss nobody can put on a dashboard is exactly how this
@@ -2072,7 +2072,7 @@ Structure:
     download `espcoredump` rejects. Without
     this an orphan passes `esp_core_dump_image_check()` (it is a valid image, just of another binary),
     so `coredump` reads true and `/status` offers a download that `espcoredump` then rejects on a
-    SHA-256 mismatch (#215). Successful erasure also clears the partition for the next real panic. The
+    SHA-256 mismatch (legacy-215). Successful erasure also clears the partition for the next real panic. The
     `coredump` **presence flag** is the one exception: it IS re-checked from flash per request
     (`diag_crash_info_live()` — a 4-byte size-word read, not the summary reparse), because the image
     can be erased mid-session via `POST /coredump/clear` and a cached flag would then advertise a dump
@@ -2084,7 +2084,7 @@ Structure:
   - **Always-on system health (no fault required).** `http_append_status_json()` also carries a
     compact `sys` block — `free_heap` / `min_free_heap` (since-boot low-water, the leak indicator) /
     `max_alloc` (largest contiguous block, the true OOM ceiling), what that headroom already **cost**
-    (`mqtt_skipped` / `mqtt_quiesced` / `poll_skipped` — the #380 counters described under the
+    (`mqtt_skipped` / `mqtt_quiesced` / `poll_skipped` — the legacy-380 counters described under the
     heartbeat above; reported here as well as on the heartbeat because the heartbeat needs a broker,
     and an installation whose MQTT is misconfigured is exactly where someone is asking why values
     keep disappearing), the `reset_reason` slug (via
@@ -2211,7 +2211,7 @@ Structure:
   digest/signature and verifier-allocation failures, the user-facing error is the exact generic
   “Update rejected: image validation failed”; `/diag` records before/after heap evidence instead of
   claiming a signature-specific root cause it cannot prove.
-- **Allocation-heavy peers stand aside during known TLS operations** (`logic/ota_quiesce.hpp`, #380). An
+- **Allocation-heavy peers stand aside during known TLS operations** (`logic/ota_quiesce.hpp`, legacy-380). An
   OTA install or weather fetch is a known, bounded, self-inflicted memory event: the TLS session plus
   the operation buffer claim the
   largest contiguous block on a heap whose binding limit *is* that block. The MQTT publish task used
@@ -2273,7 +2273,7 @@ alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB �
   the counter after `BOOT_HEALTHY_S` (30 s) of continuous uptime, so a single old crash doesn't
   accumulate with a much later, unrelated one.
 - **Safe mode has a second entry route.** Besides the crash counter, `heap_guard.cpp` latches it when
-  the heap watchdog's restart ladder is exhausted (#407) — the boot inheriting the full count comes up
+  the heap watchdog's restart ladder is exhausted (legacy-407) — the boot inheriting the full count comes up
   minimal instead of staying up wedged, and `/status.sys.safe_mode_cause` reports `"heap"` rather than
   `"crash_loop"` so the recovery banner does not send that reader to check their RX/TX pins. It does
   not touch `boot_fails`: that boot is not a crash boot.
@@ -2301,7 +2301,7 @@ alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB �
   runs on the value just read — it only stops it accumulating across boots.
 - **In safe mode** `main.cpp` starts only WiFi + the HTTP web UI + the OTA health gate and **skips**
   the X10A poll engine and the MQTT bridge (the two background subsystems a bad config could crash
-  on). The full recovery surface (`/set_wifi`, `/set_mqtt`, `/set_hp`, and — once #9 lands — factory
+  on). The full recovery surface (`/set_wifi`, `/set_mqtt`, `/set_hp`, and — once legacy-9 lands — factory
   reset / import) stays available. `/status.sys.safe_mode` is `true` and the UI shows a warn-accented
   **Recovery mode** banner. The counter lives in `daik_cfg`, so a factory reset wipes it too.
 
@@ -2334,14 +2334,14 @@ definition failing).
 
 **Arming and recovering ask DIFFERENT thresholds**, and the asymmetry is load-bearing rather than
 tidy: a run opens below `HEAP_CRITICAL_BYTES` but closes only above `HEAP_RECOVERY_BYTES` (2× it).
-Answering both with one number is #399 — measured on the bench board, a heap hovering AT the
+Answering both with one number is legacy-399 — measured on the bench board, a heap hovering AT the
 threshold ended its run every second or two on ordinary ~512 B allocator churn, reset the 300 s
 clock and NEVER restarted, while `/status` and `/values` were already answering 503, i.e. while the
 device sat in the exact wedge this exists to escape. The band is deliberately modest rather than
 the 12 KB `/set_mqtt`'s pre-flight wants: it only has to reject flicker, and demanding more would
 restart a board whose recovery was real.
 
-**The ladder ends in safe mode, not in "stay up degraded"** (#407): the boot that inherits the full
+**The ladder ends in safe mode, not in "stay up degraded"** (legacy-407): the boot that inherits the full
 count latches safe mode in `heap_guard_begin` — BEFORE `main.cpp`'s gate, so the poll engine and
 the MQTT bridge are never started rather than started and then found to be eating the heap. That
 also BOUNDS the ladder by construction: safe mode creates no poll task, and `heap_guard_sample` is
@@ -2556,7 +2556,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   pin lists it must fit inside. Empty only when NO board is selected and this build
                   (or the current link position) withholds every preset — the UI then hides the row;
                   a SELECTED board is re-added even when its factory LED/button fields would now be
-                  refused (#339), since a selector missing the identity the same payload reports would
+                  refused (legacy-339), since a selector missing the identity the same payload reports would
                   read as the board having been forgotten),
                   env3{type,supported,enabled,sda,scl,connected,fresh,age_s,temperature_c,
                   humidity_pct,pressure_hpa,error,samples,errors,pins_avail[],presets[]} — the
@@ -2571,7 +2571,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   in an older response is treated as off by the UI,
                   since "no number" and "no number BECAUSE the CRC failed" are different findings.
                   pins_avail[]/presets[] are this bus's own I2C candidates and are NOT gated on
-                  `supported`: since #339 the Board Hardware form saves board identity and ENV III in
+                  `supported`: since legacy-339 the Board Hardware form saves board identity and ENV III in
                   ONE atomic POST /set_board, so selecting AtomS3 Lite and attaching its Grove sensor
                   in a single submit needs the pins offered while the PERSISTED board is still
                   Custom/Seeed. They reserve the LIVE X10A pair alone (config_link_pins) — the pending
@@ -2615,7 +2615,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   circulation_source{configured,name,topic,power_path,timestamp_path,max_age_s,
                   on_threshold_w,off_threshold_w,confirm_s,subscribed,has_value,power_w,state,
                   source_at,source_unix_s,timestamp_source,age_s,fresh,freshness_reason,retained,
-                  messages,errors,rejections[,error]} — the EXTERNAL CIRCULATION WITNESS (#361): an
+                  messages,errors,rejections[,error]} — the EXTERNAL CIRCULATION WITNESS (legacy-361): an
                   independent MQTT power meter on the DHW circulation pump, decoded on the mqtt task
                   beside the room source and following the same two-part boundary (saved mapping plus
                   diagnostics master; deleting it clears every captured field). `state` is the
@@ -2819,7 +2819,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   capacity_kw is the OUTDOOR unit's own report (page 0x00/12) and is null whenever the
                   variable-length descriptor is too short to carry offset 12; capacity_kw_iu is the
                   INDOOR unit's rated code (0x60/6, same units), which detection reads as its ranking
-                  fallback AND (since #225) as the filter that narrows candidates[] when the O/U
+                  fallback AND (since legacy-225) as the filter that narrows candidates[] when the O/U
                   figure is absent, and which is carried through the fingerprint
                   (config fp_iu_kw_tenths) so the card can show a capacity for the many units that
                   never report the O/U one. They are NOT interchangeable — a 6 kW outdoor unit under
@@ -2841,7 +2841,7 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   rests) to any row it shows — structurally, instead of by a label list that would be
                   a second, drifting copy of a rule CI gates in C++ (the catalog spells those rows
                   ~50 ways across 43 profiles). `held` is the DEVICE's own answer to the same
-                  question, now that the poll engine applies the rule too (#209 defect 5): the
+                  question, now that the poll engine applies the rule too (legacy-209 defect 5): the
                   browser still derives it, but a non-browser consumer gets it without
                   reimplementing the rule, and the marker travels WITH the row rather than being
                   recomputed from a snapshot taken elsewhere.
@@ -2851,7 +2851,7 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   plus `dwell_blind_s` when part of the run went unread. THREE keys rather than one
                   number, because the number alone is not the claim: a consumer that prints `dwell_s`
                   and ignores the other two states something stronger than the device knows, which is
-                  the #35-#39 shape drawn as a duration. All three are omitted where they do not
+                  the legacy-35–39 shape drawn as a duration. All three are omitted where they do not
                   apply, so the ~65 measurement rows cost nothing — and an ABSENT `dwell_s` is a
                   first-class answer meaning the device declines to describe that run at all (silent
                   bus, a row unread past DWELL_MAX_GAP_S). A zero would say "it changed just now",
@@ -2884,7 +2884,7 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   from the cached value — never a hardcoded "°C": the thirty-one X10A trends mix °C,
                   bar, KiB
                   and unitless rows, and the browser prints this string into the range readout and the
-                  crosshair, so a bar row labelled °C would be the #35-#39 shape. A catalog test pins
+                  crosshair, so a bar row labelled °C would be the legacy-35–39 shape. A catalog test pins
                   that each trend resolves to EXACTLY ONE row per profile, of one type code and one
                   width (which is what makes the tenths exact), across all profiles. Ids — the
                   authoritative list is logic/history.hpp's TRENDS, which is what a request takes:
@@ -2921,8 +2921,8 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   GET /status every 8 s, one chain, backing off to 30 s while the device is
                   unreachable and suspended entirely while the browser tab is hidden. The /events
                   WebSocket that used to be the only live transport was removed — a dropped IDF queue
-                  message froze one stream until reboot with nothing logged (#238) and its broadcaster
-                  ran the /status builder on the task owning the X10A UART (#241); the
+                  message froze one stream until reboot with nothing logged (legacy-238) and its broadcaster
+                  ran the /status builder on the task owning the X10A UART (legacy-241); the
                   "Push vs. poll" section above carries the measurements. Consequences worth knowing: EVERY route is
                   now under the http_register OOM guard (the raw-registered WS handler was the one
                   exception), CONFIG_HTTPD_WS_SUPPORT=n, and /status is built on ONE task
@@ -3063,13 +3063,13 @@ POST /set_ref_temp   {name,topic,temperature_path,setpoint_topic,setpoint_path,f
                   persist and rebind on the existing MQTT client without reboot. Subscription and
                   decoding occur only while the v19 diagnostics master is enabled; otherwise the
                   saved mapping remains dormant. There is NO
-                  test/proof step (#433 removed POST /test_ref_temp and the test_proof gate): the
+                  test/proof step (legacy-433 removed POST /test_ref_temp and the test_proof gate): the
                   mapping becomes the active binding immediately when that master is on. Empty topic
                   is the explicit disabled state and clears
                   every other field; otherwise the value topic is exact (no wildcards), paths are
                   bounded dot-separated JSON selectors, max_age_s is an integer in 10..3600, and a
                   non-empty source needs a target — either a setpoint mapping or a fixed target
-                  (`fixed_setpoint_c`, 0..35 °C). #433 also made the setpoint and timestamp sources
+                  (`fixed_setpoint_c`, 0..35 °C). legacy-433 also made the setpoint and timestamp sources
                   INDEPENDENT topics; an old client that sends only `topic` still has its
                   setpoint_path/timestamp_path resolved against it, preserving the v16 request
                   contract. A typo does not fail loudly — it surfaces as a runtime room error on
@@ -3111,7 +3111,7 @@ POST /set_weather {latitude,longitude} -> validate + persist + notify the weathe
                   "latitude and longitude are both required" — half a location is never a location.
                   Disabling also requests the retained MQTT topic's cleanup, so a stopped forecast
                   leaves no last-known values on the broker
-(no /set_dynamic_lwt)  RETIRED in #357. There is no controller mode to POST: the heating-curve
+(no /set_dynamic_lwt)  RETIRED in legacy-357. There is no controller mode to POST: the heating-curve
                   diagnosis arms itself while diagnostics, the timestamped MQTT room mapping and HomeHub are configured
                   (`heating_curve_diagnosis_armed`). Forecast/location is optional comparison evidence;
                   `/set_weather` applies its own collection/privacy boundary live. What the route bought was a
@@ -3122,7 +3122,7 @@ POST /set_weather {latitude,longitude} -> validate + persist + notify the weathe
                   word: no controller enum, value field or route exists. `/set_diagnostics` is only
                   a collection opt-in and creates no actuator.
 POST /set_env3    {enabled,sda,scl} -> validate + PROVE + persist + REBOOT. A standalone
-                  COMPATIBILITY endpoint since #339 folded ENV III into the Board Hardware form — no
+                  COMPATIBILITY endpoint since legacy-339 folded ENV III into the Board Hardware form — no
                   shipped client posts here (the UI sends env3_* to /set_board), and both routes run
                   the one env3_save_preflight so the two can never disagree about what counts as
                   evidence. Every key is optional
@@ -3193,7 +3193,7 @@ POST /set_board   {preset_id,led_gpio,led_type,led_inverted,btn_gpio,btn_active_
                   Reboots (unlike /set_hp's live apply): both are claimed once at task start — the
                   WS2812 opens an RMT channel, the button installs a pull — and hot-swapping a running
                   driver from another task buys nothing for a once-per-board setting. TWO facts move
-                  here, and one comparison for both is what made a save vanish (#257): the five
+                  here, and one comparison for both is what made a save vanish (legacy-257): the five
                   VALUES decide the reboot, while the SUBMIT ITSELF states that the user has said
                   what this board is (the `board_set` key / user_set above). Picking the preset your
                   device already carries moves no value but is still that statement, so it is a SAVE
@@ -3344,7 +3344,7 @@ firmware no longer has). Two rules follow:
   hp_poll, mqtt_pub and the HomeHub link — record their own FreeRTOS high-water mark from their own
   loop, and the MQTT heartbeat carries all four as `*_stack_min_free_bytes`. That is the half a core
   dump structurally cannot supply: a dump exists only once the board has died, so the 1200 bytes of
-  frame growth measured across #318 accumulated over releases with nothing to see it. A falling
+  frame growth measured across legacy-318 accumulated over releases with nothing to see it. A falling
   line in the store is now that warning. It does NOT replace the dump — the sampler reports WORDS
   FREE per task and says nothing about which frame took them — and `0` means NEVER SAMPLED, rendered
   as JSON null at every reporting site (a board with no HomeHub has no such task, and "0 words free"
@@ -3354,10 +3354,10 @@ limit panic at the offending instruction. IDF's default canary is only compared 
 and a sparsely-writing frame can skip over it — which is exactly what happened here (TLS[1], the
 neighbour it would have had to cross, was left intact).
 
-**It happened AGAIN, on the other task, and that is the lesson (#241).** `http_append_status_json()`
+**It happened AGAIN, on the other task, and that is the lesson (legacy-241).** `http_append_status_json()`
 ran on TWO tasks — the httpd task *and* `hp_poll`'s WebSocket broadcaster — so raising one stack
 fixed half the problem and left the other half to be re-discovered. v1.0.12 raised httpd 8192 ->
-12288; `hp_poll` stayed at 8192 until #229 (`health`) and #231 (`history`) grew /status from ~2.2 KB
+12288; `hp_poll` stayed at 8192 until legacy-229 (`health`) and legacy-231 (`history`) grew /status from ~2.2 KB
 to ~3.5 KB, and it died with `hp_poll 7664/520` — this time caught *at* the offending instruction by
 the watchpoint above (`exccause 0x41 DebugException`), inside a `malloc()` under `Config::Config`,
 because `config()` returns a whole `Config` **by value** (~10 `std::string` copies) on the stack of
@@ -3367,7 +3367,7 @@ check every runner, not the one that crashed.
 The SECOND runner is now gone: removing the WebSocket push left /status built on the httpd task
 alone, and `hp_poll` went back to 8192, since the builder is precisely what it could not fit.
 
-**And then it happened a THIRD time, on the surviving runner (#318).** ENV III extended the same
+**And then it happened a THIRD time, on the surviving runner (legacy-318).** ENV III extended the same
 builder, and the two signed CI ELFs show exactly what that cost: the httpd handler's FIXED FRAME
 grew from 0x2630 (9776) bytes in dev.295 to 0x2950 (10576) in dev.296, leaving 1712 bytes of a
 12288 stack for `config()`'s nested `Config`/`std::string` copy, httpd itself and interrupts. The
@@ -3385,7 +3385,7 @@ paragraph's own re-measurement had to be performed by hand to find (`main/stack_
 
 **Re-measured 2026-08-07 on `main` (f686dff), and the headline margin was the wrong number.** The
 builder's fixed frame is now **0x2e00 = 11776** bytes (dev.295 9776 → dev.296 10576 → f686dff 11616
-→ 11776 on `main` @ 7524b4c), so 1200 bytes were consumed since #318 with no single change
+→ 11776 on `main` @ 7524b4c), so 1200 bytes were consumed since legacy-318 with no single change
 announcing it — and 160 of them arrived in the two commits merged *during* this measurement. Reproduce it — this is the
 prescribed method, off the ELF, never off an idle heap reading:
 

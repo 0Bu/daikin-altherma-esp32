@@ -86,6 +86,29 @@ for (const file of ["docs/REPORTING.md", ".github/ISSUE_TEMPLATE/bug_report.yml"
   }
 }
 
+// Public documentation must not send readers to numbered work items in the private predecessor
+// repository, nor let bare `#N` prose silently auto-link to unrelated issues in this fresh public
+// tracker. Section anchors are deliberately exempt: their `#` is immediately preceded by `](` or
+// by a word character in `file.md#anchor`.
+const publicMarkdown = [
+  "README.md",
+  "CONTRIBUTING.md",
+  "test/README.md",
+  ...fs.readdirSync("docs").filter((file) => file.endsWith(".md")).map((file) => `docs/${file}`),
+];
+for (const file of publicMarkdown) {
+  const text = fs.readFileSync(file, "utf8");
+  if (/https:\/\/github\.com\/0Bu\/daikin-altherma-esp32\/(?:issues|pull)\/\d+/.test(text)) {
+    throw new Error(`${file} links to a numbered private-predecessor work item`);
+  }
+  if (/(?<!\]\()(?<!\w)#\d{1,3}\b/.test(text)) {
+    throw new Error(`${file} contains a bare predecessor #N reference that GitHub would mis-link`);
+  }
+}
+if (!fs.readFileSync("CONTRIBUTING.md", "utf8").includes("legacy-209")) {
+  throw new Error("CONTRIBUTING.md does not explain the legacy-N provenance notation");
+}
+
 const security = fs.readFileSync("docs/SECURITY.md", "utf8");
 if (/\bshreds?\b/i.test(security)) {
   throw new Error("docs/SECURITY.md overclaims secure erasure of the transient signing-key file");

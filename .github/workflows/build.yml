@@ -35,11 +35,11 @@ name: build
 #     forever. Ungating Pages while leaving releases gated would publish a manifest pinned at 1.0.0
 #     for all time — a feed that is live but frozen, where every device reports "up to date".
 #
-# NOTE: the first publish still needs a run — a repo-settings change does not trigger one. Use one
-# `workflow_dispatch` (or a firmware-relevant push); that run CREATES the gh-pages branch which the
-# Pages source must then be pointed at (Settings -> Pages -> gh-pages / (root)), see docs/README.md
-# ("Bringing the site up the first time"). Until a v* tag exists the version stays at the
-# version.txt floor (1.0.0) and only the dev feed moves.
+# NOTE: bootstrap gh-pages once as a reviewed, signed orphan commit BEFORE the first publish. The
+# GraphQL publisher deliberately refuses to invent a branch: every later commit is GitHub-signed,
+# but createCommitOnBranch can only append to an existing branch. Then point Pages at gh-pages /
+# (root) and use workflow_dispatch (or a firmware-relevant push), see docs/README.md. Until a v*
+# tag exists the version stays at the version.txt floor (1.0.0) and only the dev feed moves.
 
 # CI BUDGET — this pipeline runs on a metered minute allowance, so every job is shaped by it
 #
@@ -316,9 +316,9 @@ jobs:
       # that once per README edit was the single largest avoidable cost in this pipeline.
       #
       # The list is deliberately WIDER than "sources": scripts/build-pages.sh, the browser-installer
-      # files under docs/ and scripts/publish-pages-branch.sh produce or place the published
-      # artifacts, so a change to them must still build and republish even though the image bytes
-      # are identical.
+      # files under docs/, scripts/publish-pages-branch.sh and its GraphQL payload helper produce or
+      # place the published artifacts, so a change to them must still build and republish even
+      # though the image bytes are identical.
       #
       # A push to main additionally decides the DEV PUBLISH with this flag (see the build job): a
       # docs-only merge must not move the version and hand every dev device a byte-identical image.
@@ -331,7 +331,7 @@ jobs:
           # tools/web_asset/ is a BUILD/PUBLICATION INPUT, not tooling: main/CMakeLists.txt runs its
           # minifier over the web UI and embeds the result in the image, while build-pages.sh copies
           # vendor/LICENSE into both feeds. A change there must therefore rebuild and republish.
-          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/(check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance)[.]py$|tools/(version|web_asset)/)'
+          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance)[.]py$|tools/(version|web_asset)/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what

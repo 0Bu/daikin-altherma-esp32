@@ -8,7 +8,7 @@ building or the weather around them; there when its subject is the board.
 Four of the five below are **analysis**, not control, and one is an optional accessory. None of them
 writes to the heat pump: this firmware has no actuator, no Modbus write path and no MQTT command
 subscription, and that is a property of the code rather than a guard around a dormant capability
-(see [`FEATURES.md`](FEATURES.md) #61 and #68, and [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md)).
+(see [`FEATURES.md`](FEATURES.md) legacy-61 and legacy-68, and [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md)).
 
 | Feature | Status | Anchored in |
 |---------|:------:|-------------|
@@ -155,7 +155,7 @@ raised only by a strict increase of one exact counter between comparable samples
 absolute non-zero value. Any check concluding the *absence* of a pattern needs a complete lifecycle
 and at least 90 % valid evidence for its own signal — a stable counter does not prove absence.
 
-**DHW standing loss needed a second source before it could be a check at all** (#361). The cooling
+**DHW standing loss needed a second source before it could be a check at all** (legacy-361). The cooling
 rate alone does not separate the two causes — a healthy tank loses ~0.3 K/h without DHW circulation
 and ~1.2 K/h with it — so an external power meter on the circulation pump (`POST /set_circulation`)
 says which a given hour was. The witness is optional, and a window whose pump state is unknown buys
@@ -329,7 +329,7 @@ read-only Modbus core contains neither write function codes nor value encoders.
 It records the canonical room deviation **unchanged**, at most once per 30 minutes, and only after the
 gates below agree. There is no P gain, deadband, rounding, clamp, slew limit, requested LWT offset,
 mode switch or active controller anywhere in it — and none can be added quietly, because
-[`FEATURES.md`](FEATURES.md) #68's contract test walks every C++ source under `main/` and fails on the
+[`FEATURES.md`](FEATURES.md) legacy-68's contract test walks every C++ source under `main/` and fails on the
 vocabulary.
 
 **The gate order is load-bearing**, not incidental: HomeHub connectivity, then the plant gate
@@ -369,7 +369,7 @@ corroborating signals, this sampler systematically under-reports that high-curve
 
 **Arming is derived from the explicit master and its prerequisites.** It requires plant diagnostics,
 the timestamped MQTT room mapping and an active HomeHub
-([`FEATURES.md`](FEATURES.md) #62 — a typo is accepted as configuration but fails closed and is
+([`FEATURES.md`](FEATURES.md) legacy-62 — a typo is accepted as configuration but fails closed and is
 reported when the next MQTT frame reaches the decoder). The forecast above is *optional* comparison
 evidence, distinguishing a Recording state from a Degraded one, so clearing a location stops forecast
 traffic without stopping local samples. Disabling diagnostics, or deleting either the room source or
@@ -433,4 +433,4 @@ of time and every way of overstating one looks identical on screen:
   either — an age under a "—" describes nothing.
 
 The mechanism, the storage and the persistence rules are the platform half and live in
-[`FEATURES.md`](FEATURES.md) #80.
+[`FEATURES.md`](FEATURES.md) legacy-80.

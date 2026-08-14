@@ -6,6 +6,13 @@ wrongly, a register the catalog is missing, a board whose pins aren't in the saf
 
 By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
+The project was developed in a private predecessor repository before its public launch. References
+such as `legacy-209` identify work items from that private tracker; the discussions themselves were
+not copied because they can contain installation data. Likewise, `(#N)` suffixes in the immutable,
+signed commit history refer to predecessor pull requests, not to issue numbers in this repository.
+The current source and documentation are authoritative; open a new public issue when old context is
+needed for a present problem.
+
 ## What is most useful
 
 | | |
@@ -136,7 +143,7 @@ three gates above can be green while the picture is false, and that is not hypot
 has shipped a fan spinning around a point beside its own axle, the leaving-water pill floating 40 px
 off the run it names, the return temperature drawn on the heating-only section (claiming a branch
 R4T does not read), and "HEIZUNG" struck through by the heating riser so it rendered "HEIZUNC". Each
-one is a physically correct value attached to the wrong thing — the `#35`–`#39` shape, drawn.
+one is a physically correct value attached to the wrong thing — the `legacy-35`–`legacy-39` shape, drawn.
 
 It parses the real SVG (coordinates, transforms, path geometry, text metrics) and evaluates the real
 binding tables, so no second copy of either can drift, and reports in three layers: **structure**
@@ -206,7 +213,7 @@ moved while the GIF bytes did not, which is exactly what re-stamping an old reco
 from the outside (`--allow-identical-gif` overrides it for the one case that is real — you did
 re-record and the encoder reproduced the file byte-for-byte). Red can therefore only be cleared by a
 recording. The cost of the old arrangement was not hypothetical: with the recording's currency
-nobody's merge condition, [#462](https://github.com/0Bu/daikin-altherma-esp32/pull/462) swapped the
+nobody's merge condition, legacy-462 swapped the
 schematic's circuits and the README went stale the same day, against a stamp written hours earlier.
 If you are an outside contributor and cannot re-record, say so in the PR and leave it to the
 maintainer's `/ui-gif` skill rather than touching the stamp.

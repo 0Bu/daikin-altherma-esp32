@@ -91,16 +91,17 @@ comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 > private. Git tags and GitHub Releases are *not* public on a private repo — only accounts with
 > repo read access see those.
 
-> **Bringing the site up the first time — the order matters.** A repo-settings change does not itself
-> run a workflow, and the Pages source cannot be pointed at a branch that does not exist yet. So:
-> (1) trigger one publish — `gh workflow run build.yml` (the `workflow_dispatch` trigger exists for
-> exactly this; leave `release` unchecked to publish the dev channel, check it to cut the first
-> release) or push any firmware-relevant change — which creates the `gh-pages` branch, then
-> (2) set **Settings → Pages → Deploy from a branch → `gh-pages` / `(root)`**. Until step 2 the
-> installer URL in the top-level README 404s.
+> **Bringing the site up the first time — the order matters.** Bootstrap `gh-pages` once as a
+> reviewed **signed orphan commit**, then set **Settings → Pages → Deploy from a branch →
+> `gh-pages` / `(root)`**, and only then trigger `gh workflow run build.yml` (leave `release`
+> unchecked for the dev channel). The publisher intentionally refuses a missing branch instead of
+> silently creating an unsigned first commit. Every later update uses GitHub's
+> `createCommitOnBranch` mutation with `expectedHeadOid`; GitHub signs those commits and CI fails if
+> the returned signature is not Verified. Until the source setting exists, the installer URL in
+> the top-level README 404s.
 
 > **Required repo setting:** Pages source must be **Deploy from a branch → `gh-pages` / `(root)`**
-> (Settings → Pages). CI publishes the site by pushing the `gh-pages` branch
+> (Settings → Pages). CI publishes the site by updating the `gh-pages` branch
 > ([`scripts/publish-pages-branch.sh`](../scripts/publish-pages-branch.sh)) and nothing else — the
 > branch model is what allows the release root and the `dev/` channel to be published
 > independently, minutes or weeks apart, which the atomic whole-site Actions deployment cannot.
@@ -629,7 +630,7 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   `{ "<group>": { "<object>": value } }`, max depth 1), plus per-value discovery configs under
   `<prefix>/<component>/<node>/<group>_<object>/config` (retained) whose `value_template` reads the
   group+object out of that JSON. The entity id carries the group because a label is unique only
-  within its register page while HA's id namespace is flat (#221); the JSON key does not. `<component>` is `binary_sensor` for a bit-flag value (pump running,
+  within its register page while HA's id namespace is flat (legacy-221); the JSON key does not. `<component>` is `binary_sensor` for a bit-flag value (pump running,
   3-way valve, thermostat ON/OFF), whose state rides as the number `1`/`0` so it is usable in a
   metrics store as well as in HA, and `sensor` for everything else.
   An enabled HomeHub publishes its live, flat register map independently on `<base>/modbus`, but no

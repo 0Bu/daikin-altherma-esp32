@@ -59,7 +59,7 @@ Source: *EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E*, §2.5,
 | `32767` | unsupported by this device |
 
 `mb_is_special()` catches all three before any scaling, so a sentinel can never leak out as a large
-number — the `#35–#39` failure shape this project exists to avoid.
+number — the `legacy-35–39` failure shape this project exists to avoid.
 
 **Compatibility is not unconditional.** The Modbus register set requires Unified MMI2 firmware
 ≥ 7.8.0 on the audited ERGA-EV / EHBH / X-E family, and individual registers can be inoperative per
@@ -211,7 +211,7 @@ whatever the first cycle read.
 * **Two cadences.** A **full** cycle every fifth poll tick; the four between it read three fast
   batches. Two carry the diagnosis gates — input register 53 (normal space operation) and 38
   (heating rather than cooling). The third carries input 44, optional plant outdoor context which
-  #441 requires from the same current cycle. It is explicitly **not** a gate. The extra 40–45 batch
+  legacy-441 requires from the same current cycle. It is explicitly **not** a gate. The extra 40–45 batch
   is one deliberate bundled request; borrowing the five-second cache would not establish event-time
   freshness. Neighbouring registers ride these batches because leaving them out saves no request.
 * **Five seconds, not ten.** Chosen from the *dashboard*, not from how fast the values move: the

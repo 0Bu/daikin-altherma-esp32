@@ -111,8 +111,8 @@ The SPA **polls** `GET /values` every 2 s and `GET /status` every 8 s — one ch
 30 s on a device that stopped answering and suspended entirely while the tab is hidden (nobody is
 looking, so nobody is served). There is no push transport: the `/events` WebSocket this replaced
 failed in two ways a request cannot — silently (a dropped queue message froze one stream until
-reboot, #238) and globally (its broadcaster ran the `/status` builder on the task that owns the X10A
-UART, #241). Every browser now gets the same live UI instead of one class getting a manual reload.
+reboot, legacy-238) and globally (its broadcaster ran the `/status` builder on the task that owns the X10A
+UART, legacy-241). Every browser now gets the same live UI instead of one class getting a manual reload.
 Both cadences are the SCREEN's, not the plant's: the poll engine still reads the bus at 1 Hz. Once
 the device is on the network the app opens on the **dashboard** unless its URL addresses **Settings**
 or one of Settings' popups. That is the whole navigation tree — two screens plus addressable modal
@@ -174,7 +174,7 @@ undone by the credential rollback — sticky until the next one; drives the roll
 checkbox),
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
 `sys{free_heap,min_free_heap,max_alloc,mqtt_skipped,mqtt_quiesced,poll_skipped,reset_reason,safe_mode}`
-(heap headroom, what it already cost in dropped/held publish + poll cycles (#380), and last boot reason,
+(heap headroom, what it already cost in dropped/held publish + poll cycles (legacy-380), and last boot reason,
 always present; the UI reads `safe_mode` for the recovery banner and `free_heap`/`max_alloc` for the
 ESP32 card's two trended memory rows (§5.6) — `min_free_heap` and the reset reason stay diagnostics
 served to `/status` readers, the MQTT heartbeat's diagnostic entities and `/diag`),
@@ -513,7 +513,7 @@ Body, ordered:
    *"Space heating Operation ON/OFF"* (`0x62/2` bit 3), but the catalog's legacy name must not turn
    it into a heating demand: the state can be ON in Cooling while thermostat and compressor are OFF.
    It remains deliberately **not** *"Thermostat ON/OFF"*,
-   which it drew until #199. That row is `0x60/2` bit 3, a bit in the **indoor unit's** status byte
+   which it drew until legacy-199. That row is `0x60/2` bit 3, a bit in the **indoor unit's** status byte
    beside the I/U operation mode: Daikin's thermo-ON, which a hot-water charge raises exactly as
    readily as a call for heat. Measured on a live unit over three days it was ON 128/119/91 min per
    day and *none* of those minutes had the 3-way valve on space heating. Nothing about the value was
