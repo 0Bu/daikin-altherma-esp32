@@ -42,7 +42,7 @@ function baseModbus(patch) {
     syslog: { configured: false },
     ntp: { synced: true, server: "pool.ntp.org" },
     modbus: { enabled: true, connected: false,
-      host: "203.0.113.137", port: 502, ...patch },
+      host: "192.0.2.137", port: 502, ...patch },
   };
   return sandbox.__connLinks().find((row) => row.edit === "homehub");
 }
@@ -56,14 +56,14 @@ function baseModbus(patch) {
   });
   assert.equal(row.cls, "err", "a disconnected HomeHub remains visibly down");
   assert.equal(row.label, "HomeHub", "the connection row names the configured peer, not its protocol");
-  assert.equal(row.value, "203.0.113.137:502", "the configured IPv4 and port stay the primary value");
+  assert.equal(row.value, "192.0.2.137:502", "the configured IPv4 and port stay the primary value");
   assert.equal(row.detail, "Zeitüberschreitung bei Register 42", "the structured cause is localised");
   assert.match(row.state, /Zeitüberschreitung/, "the accessible state includes the same cause");
 
   const html = sandbox.__connRow(row);
   assert.match(html, /aria-label="HomeHub: Fehler:/, "the accessible label uses the same HomeHub name");
   assert.match(html, /class="conn-detail">Zeitüberschreitung bei Register 42<\/span>/);
-  assert.ok(html.lastIndexOf("203.0.113.137:502") < html.lastIndexOf("Zeitüberschreitung"),
+  assert.ok(html.lastIndexOf("192.0.2.137:502") < html.lastIndexOf("Zeitüberschreitung"),
     "the subtle error line is rendered under/after the endpoint");
   assert.doesNotMatch(html, /HomeHub response timed out/, "raw backend prose does not replace localisation");
 }
@@ -78,7 +78,7 @@ function baseModbus(patch) {
     error_register: 56,
   });
   assert.equal(row.cls, "ok", "a connected Modbus endpoint uses the shared healthy-link colour");
-  assert.equal(row.value, "203.0.113.137:1502", "the configured non-default port is shown");
+  assert.equal(row.value, "192.0.2.137:1502", "the configured non-default port is shown");
   assert.equal(row.detail, "Register 56: Ausnahme 2 (unzulässige Registeradresse)");
 }
 

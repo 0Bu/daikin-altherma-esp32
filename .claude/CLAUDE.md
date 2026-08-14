@@ -65,6 +65,7 @@ scripts/run-contract-tests.sh     # do the firmware's SOURCE boundaries still ho
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 scripts/run-description-audit.sh  # can the user find out what each value IS? (node-only)
 scripts/run-user-docs-audit.sh  # can a non-specialist understand and act on each diagnosis? (node-only)
+scripts/run-diagnostic-evidence-audit.sh  # is each diagnosis still tied to its cited source? (node-only)
 scripts/run-schematic-audit.sh    # does the DRAWING still say what it means? (node-only)
 scripts/run-ui-use-case-tests.sh  # do all visible UI actions actually work? (node-only)
 scripts/run-redaction-audit.sh    # can a bug report still leak the USER's data? (python-only)
@@ -304,8 +305,8 @@ http_common.cpp shared helpers + THE ONE OOM guard: http_register() wraps every 
 http_status.cpp GET / /status /values /history /models /diag /scan /coredump + POST /crash/dismiss
                 + captive catch-all. http_append_status_json() runs on the httpd task ALONE (#241)
 http_config.cpp ALL SIXTEEN write routes (see HTTP API below) — the count is what
-                cfg.max_uri_handlers is sized to. Four of them write no config: the two /test_*
-                probes, /discover_homehub, /detect
+                cfg.max_uri_handlers is sized to. Three of them write no config: the
+                /test_circulation probe, /discover_homehub, /detect
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp: stateless read-only MCP (initialize/tools/list/tools/call; reuses the exact
                 HTTP snapshot builders); GET serves an embedded static page, never SSE
@@ -327,11 +328,12 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge. Load-bearing rules: a field's JSON TYP
                 monotonic last-good age: a sustained 15 s loss publishes offline, while a shorter
                 all-page timeout neither flaps availability nor retains an empty state. THREE
                 inbound things ride this task: the
-                room-source test/live decode (POST /test_ref_temp issues a PROOF bound to all seven
-                behavioural fields — testing topic A cannot license saving topic B), the
-                heating-curve sampler (gate order HomeHub -> plant -> heating-mode -> room -> X10A;
-                consent = the SAVED room mapping, deleting it disarms and clears), and the
-                circulation witness (#361, same consent shape). Before allocating a publish
+                room-source live decode (the SAVED multi-topic room mapping is subscribed and
+                decoded only while the v19 device-wide diagnostics consent is enabled; saving records
+                the source, deleting clears it), the heating-curve sampler (gate order HomeHub ->
+                plant -> heating-mode -> room -> X10A; arming requires that master consent plus the
+                saved room mapping), and the circulation witness (#361, same master-plus-mapping
+                boundary). Before allocating a publish
                 snapshot it applies one bounded hold-off to OTA OR weather TLS activity
 ota_update.cpp  pull-based signed OTA. Channel read FRESH on every check (release = gh-pages root,
                 dev = <base>/dev/; dev builds are semver PRE-releases so ordering does the work).
@@ -423,7 +425,7 @@ www/            web UI sources -> ONE gzipped page. WRITE THE COMMENTS: sources 
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT (broker, credentials AND this installation's base topic, v16); syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; the v15 external circulation-power witness (name/topic/paths/max_age/on+off thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against); and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v16 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter, and `heap_rst` the heap watchdog's consecutive-restart breadcrumb (i32, cleared on any ordinary boot, capped so a restart LOOP is bounded). |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT (broker, credentials AND this installation's base topic, v16); syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields (v17 adds independent setpoint/time topics + an optional fixed target); optional Open-Meteo location; ENV III; the v15 external circulation-power witness (name/topic/paths/max_age/on+off thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against); and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis arms only under the v19 consent AND a timestamped MQTT room mapping; forecast is optional and has its own location-consent boundary. Blob versions v1–v19 (v18 = the one-shot HomeHub auto-discovery latch `mb_discovery_done`; v19 = the default-off `diagnostics_enabled` consent + its `diagnostics_generation`) remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter, and `heap_rst` the heap watchdog's consecutive-restart breadcrumb (i32, cleared on any ordinary boot, capped so a restart LOOP is bounded). |
 
 **Flash partitions beyond NVS.** The official 8 MB table keeps every deployed address through
 `ota_1` unchanged, then assigns the whole upper 4 MiB to `history` at 0x400000. Its circular journal
@@ -501,16 +503,22 @@ POST /set_mqtt    synchronous broker pre-flight (the ONE request-path network bl
                   short-circuit {ok:true,reboot:false} (as do /set_syslog and /set_ntp)
 POST /set_syslog  validate port -> persist + reboot; empty host disables; no network probe
 POST /set_ntp     persist + reboot; empty = reset to compile-time default (SNTP has no off state)
-POST /test_ref_temp   subscribe the CANDIDATE room mapping on the existing client, decode through
-                  the LIVE path, return a single-use test_proof (RAM-only; bound to all seven
-                  behavioural fields). Writes NOTHING; empty topic is 400
-POST /set_ref_temp    non-empty mapping REQUIRES a valid test_proof (409 otherwise) — the one
-                  route demanding evidence, because a typo'd mapping fails silently into a
-                  plausible room error. Save applies live; empty topic = disable, needs no proof
-                  (removal must never depend on the thing being removed still working). The SAVE
-                  is the consent to subscribe; deleting unsubscribes + clears captured state
-POST /test_circulation / POST /set_circulation   same probe/proof shape for the external
-                  circulation power witness (#361); unchanged mapping short-circuits
+POST /set_diagnostics {enabled} strict boolean -> the ONE device-wide consent for the optional
+                  plant diagnostics (checkup, heating-curve, and the room/forecast/circulation
+                  collection they need). Default OFF for fresh and pre-v19 blobs; applied live, no
+                  reboot; an unchanged value short-circuits {ok:true,saved:false}. Every real
+                  transition advances a durable GENERATION and resets the checkup/circulation state,
+                  so enabling can never adopt evidence recorded before a disable. X10A, HomeHub,
+                  history, ENV III and the heartbeat are untouched by it
+POST /set_ref_temp    the room mapping (value topic+path, an optional independent setpoint/time
+                  topic or a fixed target, max_age) -> validate -> apply LIVE on the existing MQTT
+                  client, NO proof, NO reboot (#433 removed the /test_ref_temp probe + test_proof
+                  gate); unchanged short-circuits {ok:true,saved:false}. Empty topic = disable. The
+                  SAVE is the consent to subscribe; deleting unsubscribes + clears captured state;
+                  a typo stays runtime evidence on /status, keeping the SHADOW diagnosis fail-closed
+POST /test_circulation / POST /set_circulation   the external circulation power witness (#361):
+                  /test_circulation returns a single-use test_proof, /set_circulation REQUIRES it
+                  (409 otherwise) — the ONE route demanding evidence; unchanged mapping short-circuits
 POST /set_weather {latitude,longitude} strings, strictly parsed; BOTH empty = disabled, exactly
                   one empty = 400. Saving IS the consent to fetch; clearing requests the retained
                   topic's cleanup. No network work on the request path

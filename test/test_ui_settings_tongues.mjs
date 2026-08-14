@@ -178,7 +178,7 @@ S.status = {
   mqtt: { configured: true },
   modbus: { enabled: true, connected: true },
   reference_temperature: {
-    configured: true, name: "Example rm", has_value: true, temperature_c: 25.1,
+    configured: true, name: "Example room", has_value: true, temperature_c: 25.1,
     has_setpoint: true, setpoint_c: 22.0, age_s: 17, fresh: true, control_eligible: true,
   },
   weather_forecast: {
@@ -194,13 +194,13 @@ S.status = {
     temperature_c: 20.2, humidity_pct: 46, pressure_hpa: 1009,
   },
   circulation_source: {
-    configured: true, name: "Example pump model", has_value: true, fresh: true,
+    configured: true, name: "Example circulation pump", has_value: true, fresh: true,
     power_w: 4.2, age_s: 17, state: "on",
   },
 };
 let circulationHtml = sandbox.__renderCirculation();
 let circulationButton = circulationHtml.match(/<button[^>]*data-act="circulation"[\s\S]*?<\/button>/)?.[0] || "";
-assert.match(circulationButton, /<span>Example pump model<\/span>/,
+assert.match(circulationButton, /<span>Example circulation pump<\/span>/,
   "the editable row header must identify the configured pump");
 // The VISIBLE face keeps the pump's name — the status must not take its place. It is scoped to the
 // span rather than the whole button on purpose: the row now states its condition in COLOUR too, and
@@ -210,7 +210,7 @@ assert.match(circulationButton, /<span>Example pump model<\/span>/,
 assert.doesNotMatch(circulationButton.match(/<span>[\s\S]*?<\/span>/)?.[0] || "",
   /Läuft|Steht|Prüft|Nicht verfügbar/,
   "the moment status belongs to the diagnostic tongue, not in place of the pump name");
-assert.match(circulationButton, /aria-label="[^"]*Example pump model · Läuft"/,
+assert.match(circulationButton, /aria-label="[^"]*Example circulation pump · Läuft"/,
   "a row whose face carries its condition in colour must say that condition in its accessible name");
 let circulationTongue = circulationHtml.match(/id="diagnostics-circulation-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
 assert.match(circulationTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> Läuft/);
@@ -218,12 +218,12 @@ assert.match(circulationTongue, /<div class="vhist vhist-state">TIMELINE/,
   "the current assessment and its categorical history must share the information tongue");
 
 S.status.circulation_source = {
-  configured: true, name: "Example pump model", has_value: false, error: "timeout",
+  configured: true, name: "Example circulation pump", has_value: false, error: "timeout",
 };
 circulationHtml = sandbox.__renderCirculation();
 circulationButton = circulationHtml.match(/<button[^>]*data-act="circulation"[\s\S]*?<\/button>/)?.[0] || "";
 circulationTongue = circulationHtml.match(/id="diagnostics-circulation-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
-assert.match(circulationButton, /Example pump model/,
+assert.match(circulationButton, /Example circulation pump/,
   "an MQTT outage must not replace the configured pump identity in the row header");
 assert.match(circulationTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> Nicht verfügbar/,
   "an unavailable source without a power sample must still expose its current status inside");
@@ -396,14 +396,14 @@ assert.match(weatherTongue, /Wetter-Konfiguration/,
 assert.doesNotMatch(weatherTongue, /Wetter-Einrichtung/,
   "configured weather must not repeat coordinate-entry guidance");
 const roomButton = html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "";
-assert.match(roomButton, /<span>Example rm<\/span>/,
+assert.match(roomButton, /<span>Example room<\/span>/,
   "the compact room-source value must name the configured source, like the circulation row");
 assert.doesNotMatch(roomButton, /<span>Konfiguriert<\/span>/,
   "the configuration state belongs in the tongue, not in place of the source name");
 // DESIGN.md §9/§5.6: a row whose face is a NAME states its condition in colour, which is allowed
 // only because the accessible name says it in words. Dropping the state word from BOTH would make
 // this the one row a screen-reader or colourblind user cannot read the status of.
-assert.match(roomButton, /aria-label="Raumtemperaturquelle: Example rm · Verwendbar"/,
+assert.match(roomButton, /aria-label="Raumtemperaturquelle: Example room · Verwendbar"/,
   "the accessible name must spell out the status the colour is carrying");
 assert.doesNotMatch(html, /1 Quelle|Raumtemperaturquellen/,
   "the single room-temperature input must not be presented as a source count or plural collection");
@@ -458,19 +458,19 @@ assert.doesNotMatch(html, /data-act="env3"|dynamic-env3-status/,
 // arrival and freshness states around the healthy/unusable cases above; none may fall back to the
 // former generic setup paragraph or claim a stale packet is current.
 S.status.mqtt = { configured: false };
-S.status.reference_temperature = { configured: true, name: "Example rm", has_value: false };
+S.status.reference_temperature = { configured: true, name: "Example room", has_value: false };
 html = sandbox.__renderDynamic();
 assert.match(html, /id="dynamic-room-sources-detail"[^]*<span class="vdesc-n">Status:<\/span> Nicht verfügbar — MQTT-Broker deaktiviert/);
 assert.match(html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "", /\berr\b/,
   "a saved MQTT source cannot be available while the broker is disabled");
 
 S.status.mqtt = { configured: true };
-S.status.reference_temperature = { configured: true, name: "Example rm", has_value: false };
+S.status.reference_temperature = { configured: true, name: "Example room", has_value: false };
 html = sandbox.__renderDynamic();
 assert.match(html, /Status:<\/span> Wartet — Noch keinen MQTT-Messwert empfangen/);
 
 S.status.reference_temperature = {
-  configured: true, name: "Example rm", has_value: true, temperature_c: 24,
+  configured: true, name: "Example room", has_value: true, temperature_c: 24,
   has_setpoint: true, setpoint_c: 22, age_s: 601, max_age_s: 600,
   fresh: false, freshness_reason: "stale", control_eligible: false, reason: "stale",
 };
@@ -480,7 +480,7 @@ assert.match(html, /Letzter Messwert:<\/span> vor 601 s · zulässig: höchstens
   "only a stale reading needs its configured age limit next to the actual age");
 
 S.status.reference_temperature = {
-  configured: true, name: "Example rm", has_value: true, temperature_c: 24,
+  configured: true, name: "Example room", has_value: true, temperature_c: 24,
   has_setpoint: true, setpoint_c: 22, age_s: null, fresh: false,
   freshness_reason: "retained_without_timestamp", control_eligible: false,
   reason: "retained_without_timestamp",
@@ -530,7 +530,7 @@ assert.doesNotMatch(html, /Standort einrichten/,
 // disagreeing about the same source. Both now state the source's own reason.
 S.status.heating_curve = { method_version: 2, armed: true, state: "blocked", reason: "room_unavailable" };
 S.status.reference_temperature = {
-  configured: true, name: "Example rm", has_value: true, temperature_c: 25.1,
+  configured: true, name: "Example room", has_value: true, temperature_c: 25.1,
   has_setpoint: true, setpoint_c: 22, age_s: 17, fresh: true,
   control_eligible: false, reason: "disabled",
 };
@@ -546,7 +546,7 @@ assert.match(html, /Raumthermostat ausgeschaltet/,
 const blockedRoomButton = html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "";
 assert.match(blockedRoomButton, /class="[^"]*\bwarn\b/,
   "the source that is blocking the diagnosis must not be the one row rendered as OK");
-assert.match(blockedRoomButton, /aria-label="Raumtemperaturquelle: Example rm · Nicht verwendbar — Raumthermostat ausgeschaltet"/,
+assert.match(blockedRoomButton, /aria-label="Raumtemperaturquelle: Example room · Nicht verwendbar — Raumthermostat ausgeschaltet"/,
   "a current-but-unusable source must name the block in its accessible name, not merely go orange");
 assert.match(html, /<span class="vdesc-n">Status:<\/span> Nicht verwendbar — Raumthermostat ausgeschaltet/,
   "the source tongue must give one amber-compatible verdict with the same reason as the state row");

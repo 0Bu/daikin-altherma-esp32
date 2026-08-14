@@ -47,9 +47,18 @@ SCALE=2                    # device pixel ratio; the crop below is in DEVICE pix
 # and a version frozen into a recording is wrong from the next release onwards, with no gate able to
 # see it (this one fingerprints sources, and nothing re-renders a GIF when version.txt moves). The
 # IP and the product name leave with it; the README says the name three lines up anyway.
-# Measured, not guessed: #schem's box is CSS 108,96 784x463 in this viewport, so the crop is that
-# card with a 12 px side margin, 8 px above and 5 px below (x 96…904, y 88…564), x SCALE.
-CROP="1616:952:192:176"    # the schematic card, nothing above or below it
+# Measured, not guessed: #schem's box is CSS 108,90 784x456.7 in this viewport, so the crop is that
+# card with a 12 px side margin, 8 px above and ~5 px below (x 96…904, y 82…552), x SCALE — the
+# device height is rounded up to an even 940 rather than 939.4.
+#
+# RE-MEASURE whenever the drawing's height moves; this is the one framing number a source change can
+# invalidate silently. #462 raised the card 6 px and shortened it by 6, and the previous
+# y 88…564 then sat 17 px under it — far enough to catch the top edge of the NEXT card in frame.
+# Nothing mechanical can see that: the stamp only proves the recording is of these sources, and a
+# GIF with a stray sliver in it renders exactly as well as one without. Get the numbers from the
+# real page rather than from this comment (a getBoundingClientRect on #schem in the demo page at
+# this VIEWPORT and SCALE) — the crop must follow the card, not the other way round.
+CROP="1616:940:192:164"    # the schematic card, nothing above or below it
 
 WIDTH=900                  # final GIF width
 WATCHDOG_TICKS=200         # 0.1 s each — a ceiling per frame, not the normal path
@@ -96,7 +105,7 @@ curl -fsS -o /dev/null "http://127.0.0.1:$PORT/demo.html" || {
     echo "record-dashboard-gif: local server did not come up on :$PORT" >&2; exit 2; }
 
 # ...and prove it is OUR server. A health check on the URL alone answers "something is listening",
-# which is a different question: $PORT is also build-ui-prototype.sh's port, so a prototype server
+# which is a different question: another local dev server may already hold $PORT, so a server
 # left running from an earlier session keeps the bind, our http.server exits "Address already in
 # use", and every frame is then filmed off SOMEONE ELSE'S page — silently, because the stale page is
 # a perfectly good dashboard. That is worse than a crash: the run finishes, the stamp is written
@@ -107,7 +116,7 @@ curl -fsS -o /dev/null "http://127.0.0.1:$PORT/demo.html" || {
 if [ "$(curl -fsS "http://127.0.0.1:$PORT/demo.html" | shasum -a 256 | cut -d' ' -f1)" \
      != "$(shasum -a 256 < "$WORK/demo.html" | cut -d' ' -f1)" ]; then
     echo "record-dashboard-gif: :$PORT is serving a DIFFERENT page than the one just built —" >&2
-    echo "  something else holds the port (build-ui-prototype.sh uses it too). Free it, or" >&2
+    echo "  something else holds the port. Free it, or" >&2
     echo "  re-run with PORT=<other>. Recording now would film that page, not this tree." >&2
     exit 2
 fi

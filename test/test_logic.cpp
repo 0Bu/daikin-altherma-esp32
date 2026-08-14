@@ -747,12 +747,12 @@ static void test_config_model() {
     CHECK(config_modbus_discovery_done_on_load(false, true, true));
     m.mb_discovery_done = true;
     CHECK(!config_modbus_should_search(m));
-    m.mb_host = "203.0.113.137";
-    CHECK(config_modbus_host(m) == "203.0.113.137");
+    m.mb_host = "192.0.2.137";
+    CHECK(config_modbus_host(m) == "192.0.2.137");
     CHECK(config_modbus_enabled(m));
     CHECK(!config_modbus_should_search(m));
-    m.mb_host = "203.0.113.131";
-    CHECK(config_modbus_host(m) == "203.0.113.131");
+    m.mb_host = "192.0.2.131";
+    CHECK(config_modbus_host(m) == "192.0.2.131");
     m.mb_host.clear();
     CHECK(config_modbus_host(m).empty());
     CHECK(!config_modbus_enabled(m));
@@ -1947,7 +1947,7 @@ static void test_mqtt_uri() {
     bool tls = false;
 
     // Bare host:port -> plaintext, explicit port.
-    CHECK(parse_mqtt_uri("192.168.1.10:1883", host, port, tls) && host == "192.168.1.10" && port == 1883 && !tls);
+    CHECK(parse_mqtt_uri("192.0.2.10:1883", host, port, tls) && host == "192.0.2.10" && port == 1883 && !tls);
     // Bare host, no port -> default plaintext 1883.
     CHECK(parse_mqtt_uri("broker.local", host, port, tls) && host == "broker.local" && port == 1883 && !tls);
     // Explicit mqtt:// scheme keeps plaintext + its port.
@@ -2081,8 +2081,8 @@ static void test_heartbeat() {
     f.wifi_connected  = true;
     f.wifi_rssi       = -76;
     f.wifi_reconnects = 3;
-    f.wifi_mac        = "A1:B2:C3:D4:E5:F6";
-    f.wifi_bssid      = "00:11:22:33:44:55";
+    f.wifi_mac        = "02:00:00:00:00:01";
+    f.wifi_bssid      = "02:00:00:00:00:02";
     f.net_link        = static_cast<uint8_t>(NetLink::Wifi);
     f.mqtt_connected  = true;
     f.mqtt_count      = 89282;
@@ -2122,7 +2122,7 @@ static void test_heartbeat() {
                "\"mqtt_stack_min_free_bytes\":null,"
                "\"reset_reason\":\"panic\",\"reset_reason_code\":4,\"reset_fault\":1,"
                "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_reconnects\":3,"
-               "\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\",\"wifi_bssid\":\"00:11:22:33:44:55\","
+               "\"wifi_mac\":\"02:00:00:00:00:01\",\"wifi_bssid\":\"02:00:00:00:00:02\","
                "\"net_link\":1,\"eth_present\":0,\"eth_link\":0,"
                "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
                "\"mqtt_skipped\":337,\"mqtt_quiesced\":42,\"poll_skipped\":32,"
@@ -2391,10 +2391,10 @@ static void test_heartbeat() {
     HeartbeatFields down;
     down.wifi_connected = false;
     down.wifi_rssi       = -50;    // stale value must not leak into the JSON
-    down.wifi_mac        = "A1:B2:C3:D4:E5:F6";   // this STA's own MAC — known even while offline
+    down.wifi_mac        = "02:00:00:00:00:01";   // this STA's own MAC — known even while offline
     const std::string dj = build_heartbeat_json(down);
     CHECK(dj.find("\"wifi_rssi\":null") != std::string::npos);
-    CHECK(dj.find("\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\"") != std::string::npos);
+    CHECK(dj.find("\"wifi_mac\":\"02:00:00:00:00:01\"") != std::string::npos);
     CHECK(dj.find("\"wifi_bssid\":null") != std::string::npos);   // no AP while offline
     // The connectivity flags are 1/0 NUMBERS in both directions — never JSON bools, which a metrics
     // consumer drops exactly like it drops a string (these three were the only heartbeat fields
@@ -3600,20 +3600,20 @@ static void test_modbus() {
     CHECK(mb_decode(MbType::Int16, 32764).ok && !mb_decode(MbType::Int16, 32764).special);
 
     // ── mDNS HomeHub hostname filter: keep real HomeHubs, drop our own advert / unrelated hosts ──
-    CHECK(is_homehub_hostname("homehub-524288-123456"));            // EKRHH guide §13.1.2 form
-    CHECK(is_homehub_hostname("homehub-524288-1.local"));
-    CHECK(is_homehub_hostname("HomeHub-524288-1"));                 // case-insensitive
+    CHECK(is_homehub_hostname("homehub-524288-example"));           // EKRHH guide §13.1.2 form
+    CHECK(is_homehub_hostname("homehub-524288-fixture.local"));
+    CHECK(is_homehub_hostname("HomeHub-524288-Test"));              // case-insensitive
     CHECK(!is_homehub_hostname("daikin-altherma-esp32"));           // THIS firmware's own advert
     CHECK(!is_homehub_hostname("homehubitat"));                     // prefix must include the dash
     CHECK(!is_homehub_hostname("home"));                            // shorter than the prefix
     CHECK(!is_homehub_hostname(""));
     CHECK(!is_homehub_hostname(nullptr));
-    const char* names[] = {"daikin-altherma-esp32.local", "some-printer", "homehub-524288-9.local"};
+    const char* names[] = {"daikin-altherma-esp32.local", "some-printer", "homehub-524288-fixture.local"};
     CHECK(mb_first_homehub(names, 3) == 2);
     const char* none[] = {"daikin-altherma-esp32", "nas"};
     CHECK(mb_first_homehub(none, 2) == -1);
     // Discovery exposes the selected A record for this session, never the serial-derived mDNS label.
-    CHECK(mb_ipv4_string(192, 168, 1, 137) == "203.0.113.137");
+    CHECK(mb_ipv4_string(192, 0, 2, 137) == "192.0.2.137");
     CHECK(mb_ipv4_string(255, 0, 10, 1) == "255.0.10.1");
     CHECK(mb_ipv4_string(256, 0, 0, 1).empty());
 }
@@ -4936,8 +4936,8 @@ static void test_redact() {
     // Field substitution keeps the KEY and replaces the VALUE. The caller writes the result into the
     // JSON where the value would have gone, so "off" must be an exact passthrough — a redaction that
     // normalised the untouched case would change /status for every ordinary request.
-    CHECK(redact_or("MyHomeNetwork", true) == REDACTED);
-    CHECK(redact_or("MyHomeNetwork", false) == "MyHomeNetwork");
+    CHECK(redact_or("ExampleNet", true) == REDACTED);
+    CHECK(redact_or("ExampleNet", false) == "ExampleNet");
     CHECK(redact_or("", true) == REDACTED);   // the PRIMITIVE substitutes whatever it is handed
 
     // The /status builder wraps its identifier fields in redact_identifier instead, which leaves an
@@ -4945,8 +4945,8 @@ static void test_redact() {
     // not have, and a bug report then cannot be read for the first thing triage needs from it: which
     // optional sources this device is even running. mqtt.broker is the sharpest case — empty IS the
     // disabled state, so every broker-less device used to report a hidden broker.
-    CHECK(redact_identifier("203.0.113.27:1883", true) == REDACTED);
-    CHECK(redact_identifier("203.0.113.27:1883", false) == "203.0.113.27:1883");
+    CHECK(redact_identifier("192.0.2.27:1883", true) == REDACTED);
+    CHECK(redact_identifier("192.0.2.27:1883", false) == "192.0.2.27:1883");
     CHECK(redact_identifier("", true).empty());     // not set -> nothing to hide, and nothing invented
     CHECK(redact_identifier("", false).empty());
 
@@ -4954,28 +4954,28 @@ static void test_redact() {
     // what fails — the leak itself is invisible (a correct-looking log line with a real hostname).
     CHECK(redact_diag_line("[   12.345] syslog: target set to logs.example.lan:514") ==
           "[   12.345] syslog: target set to <redacted>");
-    CHECK(redact_diag_line("syslog: forwarding to logs.example.lan (192.168.1.9), reachable=yes") ==
+    CHECK(redact_diag_line("syslog: forwarding to logs.example.lan (192.0.2.9), reachable=yes") ==
           "syslog: forwarding to <redacted>, reachable=yes");
     CHECK(redact_diag_line("syslog: DNS lookup failed for logs.example.lan (error 202)") ==
           "syslog: DNS lookup failed for <redacted> (error 202)");
-    CHECK(redact_diag_line("wifi: rollback restore to 'MyHomeNetwork' was not persisted — opening") ==
+    CHECK(redact_diag_line("wifi: rollback restore to 'ExampleNet' was not persisted — opening") ==
           "wifi: rollback restore to '<redacted>' was not persisted — opening");
-    CHECK(redact_diag_line("wifi: could not clear the rollback backup ('MyHomeNetwork') — a later") ==
+    CHECK(redact_diag_line("wifi: could not clear the rollback backup ('ExampleNet') — a later") ==
           "wifi: could not clear the rollback backup ('<redacted>') — a later");
     CHECK(redact_diag_line("sntp: time synced (pool.ntp.org)") == "sntp: time synced (<redacted>)");
     CHECK(redact_diag_line("sntp: init failed (pool.ntp.org): ESP_ERR_INVALID_STATE") ==
           "sntp: init failed (<redacted>): ESP_ERR_INVALID_STATE");
     // The DISCOVERED HomeHub IPv4 identifies the reporter's LAN just like a manually entered
     // address, so /status withholds it as modbus.host and /diag must not put it back.
-    CHECK(redact_diag_line("modbus: manual mDNS search found gateway 203.0.113.137") ==
+    CHECK(redact_diag_line("modbus: manual mDNS search found gateway 192.0.2.137") ==
           "modbus: manual mDNS search found gateway <redacted>");
-    CHECK(redact_diag_line("modbus: initial mDNS search found gateway 203.0.113.137") ==
+    CHECK(redact_diag_line("modbus: initial mDNS search found gateway 192.0.2.137") ==
           "modbus: initial mDNS search found gateway <redacted>");
-    CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using 203.0.113.137") ==
+    CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using 192.0.2.137") ==
           "modbus: 2 HomeHubs discovered via mDNS — using <redacted>");
     // The count SURVIVES on the several-hubs line: that more than one gateway answered is what
     // explains an unexpected pick, and it sits before the marker precisely so it can be kept.
-    CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using 203.0.113.137")
+    CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using 192.0.2.137")
               .find("modbus: 2 ") == 0);
     // The failure contains no address, matches no rule and survives whole.
     {
@@ -5080,12 +5080,12 @@ static void test_config_store() {
           b.ref_temp_time_topic.empty() && b.ref_temp_fixed_setpoint_tenths == 0);
     CHECK(b.has_diagnostics && b.diagnostics_enabled && b.diagnostics_generation == 7);
 
-    // v15 is append-only: the complete Shelly mapping and exact tenths-of-watt thresholds round-trip,
+    // v15 is append-only: the complete source mapping and exact tenths-of-watt thresholds round-trip,
     // while a genuine v14 blob remains readable and reports the source absent.
     ConfigBlob circ;
     circ.wifi_ssid = "net";
     circ.circulation_name = "DHW circulation";
-    circ.circulation_topic = "shellyplugsg3-fixture00001/status/switch:0";
+    circ.circulation_topic = "fixture/circulation/status";
     circ.circulation_power_path = "apower";
     circ.circulation_time_path = "aenergy.minute_ts";
     circ.circulation_max_age_s = 120;
@@ -5236,7 +5236,7 @@ static void test_config_store() {
           base_rt.diagnostics_generation == 0);
     ConfigBlob multi_source;
     multi_source.ref_temp_setpoint_topic = "thermostat/status";
-    multi_source.ref_temp_time_topic = "fixtures/status/1/sys";
+    multi_source.ref_temp_time_topic = "fixture/room-temperature/time";
     multi_source.ref_temp_fixed_setpoint_tenths = 205;
     const std::vector<uint8_t> multi_buf = config_blob_serialize(multi_source);
     ConfigBlob multi_rt;
@@ -5438,8 +5438,8 @@ static void test_config_store() {
     // ── v7/v8: exact MQTT mapping, source timestamp and freshness ──────────────────────────────
     ConfigBlob ref;
     ref.wifi_ssid = "net";
-    ref.ref_temp_name = "Shelly test";
-    ref.ref_temp_topic = "shelly1pmminig4-fixture00003/status/switch:0";
+    ref.ref_temp_name = "Example sensor";
+    ref.ref_temp_topic = "fixture/room-temperature/status";
     ref.ref_temp_path = "temperature.tC";
     ref.ref_temp_time_path = "thermostat.read_at";
     ref.ref_temp_setpoint_path = "thermostat.target_temperature_c";
@@ -5506,14 +5506,14 @@ static void test_config_store() {
     ConfigBlob weather;
     weather.wifi_ssid = "net";
     weather.weather_enabled = true;
-    weather.weather_latitude_e6 = 52520008;
-    weather.weather_longitude_e6 = 13404954;
+    weather.weather_latitude_e6 = 12345678;
+    weather.weather_longitude_e6 = 23456789;
     const std::vector<uint8_t> weatherb = config_blob_serialize(weather);
     ConfigBlob weatherrt;
     CHECK(config_blob_deserialize(weatherb.data(), weatherb.size(), weatherrt));
     CHECK(weatherrt.has_weather && weatherrt.weather_enabled);
-    CHECK(weatherrt.weather_latitude_e6 == 52520008 &&
-          weatherrt.weather_longitude_e6 == 13404954);
+    CHECK(weatherrt.weather_latitude_e6 == 12345678 &&
+          weatherrt.weather_longitude_e6 == 23456789);
     // A genuine v10 blob keeps weather but predates ENV III and explicit board identity.
     std::vector<uint8_t> v10 = weatherb;
     v10.erase(v10.end() - 4 - (42 + current_suffix_bytes), v10.end() - 4);
@@ -5775,16 +5775,16 @@ static void test_env3() {
 
 static void test_reference_temperature_config() {
     const char* why = nullptr;
-    CHECK(reference_temperature_config_valid("Shelly test",
-          "shelly1pmminig4-fixture00003/status/switch:0", "temperature.tC", "", "", "", "", 600, &why));
+    CHECK(reference_temperature_config_valid("Example sensor",
+          "fixture/room-temperature/status", "temperature.tC", "", "", "", "", 600, &why));
     CHECK(reference_temperature_config_valid("Meross", "meross/mts200b/id/state",
           "thermostat.current_temperature_c", "thermostat.target_temperature_c",
           "thermostat.read_at", "thermostat.enabled", "thermostat.hvac_mode", 600, &why));
     CHECK(reference_temperature_config_valid(
-          "Shelly H&T", "fixtures/status/1/temperature:0", "tC",
+          "Example temperature sensor", "fixture/room-temperature/status", "tC",
           "", "", 200, "", "", "", "", 600, &why));
     CHECK(reference_temperature_config_valid(
-          "Example sensor1", "fixtures/status/1/temperature:0", "",
+          "Example sleeping sensor", "fixture/sleeping-sensor/status", "",
           "", "", 220, "", "", "", "", 600, &why));
     CHECK(reference_temperature_config_valid(
           "Split thermostat", "room/current", "value", "room/target", "value", 0,
@@ -5901,17 +5901,17 @@ static void test_reference_temperature_config() {
 static void test_circulation_source() {
     const char* why = nullptr;
     CHECK(circulation_source_config_valid("DHW circulation",
-          "shellyplugsg3-fixture00001/status/switch:0", "apower", "aenergy.minute_ts",
+          "fixture/circulation/status", "apower", "aenergy.minute_ts",
           120, 30, 10, 60, &why));
     CHECK(circulation_source_config_valid("", "", "", "", 120, 30, 10, 60, &why));
-    CHECK(!circulation_source_config_valid("pump", "shelly/+/status", "apower",
+    CHECK(!circulation_source_config_valid("pump", "fixture/+/status", "apower",
                                            "aenergy.minute_ts", 120, 30, 10, 60, &why));
-    CHECK(!circulation_source_config_valid("pump", "shelly/status", "apower",
+    CHECK(!circulation_source_config_valid("pump", "fixture/status", "apower",
                                            "aenergy.minute_ts", 120, 10, 10, 60, &why));
     CHECK(std::string(why) == "ON threshold must be greater than OFF threshold");
-    CHECK(!circulation_source_config_valid("pump", "shelly/status", "apower",
+    CHECK(!circulation_source_config_valid("pump", "fixture/status", "apower",
                                            "aenergy.minute_ts", 9, 30, 10, 60, &why));
-    CHECK(!circulation_source_config_valid("pump", "shelly/status", "apower",
+    CHECK(!circulation_source_config_valid("pump", "fixture/status", "apower",
                                            "aenergy.minute_ts", 120, 30, 10, 0, &why));
 
     CHECK(circulation_power_class(0.0, 30, 10) == CirculationPowerState::Off);
@@ -6272,12 +6272,12 @@ static void test_weather_forecast_contract() {
     WeatherValidation valid = weather_validate(sample, fetched + 20);
     CHECK(valid.valid && std::string(valid.reason) == "ok");
 
-    WeatherLocationParse location = weather_location_parse("52.520008", "13.404954");
-    CHECK(location.valid && location.enabled && location.latitude_e6 == 52520008 &&
-          location.longitude_e6 == 13404954);
-    CHECK(weather_coordinate_format_e6(location.latitude_e6) == "52.520008");
+    WeatherLocationParse location = weather_location_parse("12.345678", "23.456789");
+    CHECK(location.valid && location.enabled && location.latitude_e6 == 12345678 &&
+          location.longitude_e6 == 23456789);
+    CHECK(weather_coordinate_format_e6(location.latitude_e6) == "12.345678");
     CHECK(weather_coordinate_format_e6(-1) == "-0.000001");
-    CHECK(weather_location_parse("52,520008", "13,404954").valid);
+    CHECK(weather_location_parse("12,345678", "23,456789").valid);
     CHECK(weather_location_parse("", "").valid && !weather_location_parse("", "").enabled);
     CHECK(!weather_location_parse("52.5", "").valid);
     CHECK(!weather_location_parse("90.000001", "13.4").valid);
@@ -6478,20 +6478,20 @@ static void test_mcp() {
         CHECK(mcp_protocol_supported(version));
     }
     CHECK(!mcp_protocol_supported("2024-11-05"));
-    CHECK(mcp_origin_allowed("", "daikin-altherma-esp32", "203.0.113.170"));
+    CHECK(mcp_origin_allowed("", "daikin-altherma-esp32", "192.0.2.170"));
     CHECK(mcp_origin_allowed("http://daikin-altherma-esp32.local",
-                             "daikin-altherma-esp32", "203.0.113.170"));
+                             "daikin-altherma-esp32", "192.0.2.170"));
     CHECK(mcp_origin_allowed("http://daikin-altherma-esp32.local:80",
-                             "daikin-altherma-esp32", "203.0.113.170"));
-    CHECK(mcp_origin_allowed("http://203.0.113.170",
-                             "daikin-altherma-esp32", "203.0.113.170"));
-    CHECK(mcp_origin_allowed("http://203.0.113.170:80",
-                             "daikin-altherma-esp32", "203.0.113.170"));
+                             "daikin-altherma-esp32", "192.0.2.170"));
+    CHECK(mcp_origin_allowed("http://192.0.2.170",
+                             "daikin-altherma-esp32", "192.0.2.170"));
+    CHECK(mcp_origin_allowed("http://192.0.2.170:80",
+                             "daikin-altherma-esp32", "192.0.2.170"));
     CHECK(!mcp_origin_allowed("https://daikin-altherma-esp32.local",
-                              "daikin-altherma-esp32", "203.0.113.170"));
+                              "daikin-altherma-esp32", "192.0.2.170"));
     CHECK(!mcp_origin_allowed("http://evil.example",
-                              "daikin-altherma-esp32", "203.0.113.170"));
-    CHECK(!mcp_origin_allowed("http://203.0.113.170", "", ""));
+                              "daikin-altherma-esp32", "192.0.2.170"));
+    CHECK(!mcp_origin_allowed("http://192.0.2.170", "", ""));
     r = parse("{\"jsonrpc\":\"2.0\",\"id\":\"init\",\"method\":\"initialize\","
               "\"params\":{\"protocolVersion\":\"2099-01-01\"}}");
     CHECK(!r.error && r.protocol_version == MCP_PROTOCOL_LATEST && r.id_raw == "\"init\"");
