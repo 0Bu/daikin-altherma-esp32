@@ -73,9 +73,9 @@ assert.match(app, /applyLive\(\{ mb_host: host, mb_port: port, mb_unit_id: unit 
 assert.doesNotMatch(app, /mb_mode|config_modbus_should_search/,
   "the browser bundle must carry no hidden Auto-mode contract");
 
-// The heating-curve diagnosis owns one opt-in bottom Settings card. Room input and direct
-// Open-Meteo forecast are editable there; board-bound ENV III lives under Board Hardware. The
-// Firmware switch owns explicit OFF/SHADOW consent.
+// One Firmware-card master opt-in owns all optional plant diagnostics. Room input and direct
+// Open-Meteo forecast are editable only in the dependent cards; board-bound ENV III remains an
+// independent sensor under Board Hardware.
 assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.state"\)[\s\S]*t\("dyn\.room_source"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)/,
   "the diagnosis Settings card must keep all planned configuration domains together");
 assert.doesNotMatch(app, /dynamicSourceRow\("env3"/,
@@ -89,15 +89,23 @@ assert.doesNotMatch(app, /t\("dyn\.mode"\)|t\("dyn\.safety"\)|t\("dyn\.read_only
 // is the expected reading, and styling it as a warning would train the user to ignore the row.
 assert.match(app, /function dynamicStateRow\([\s\S]*"dyn\.state_waiting", cls: ""/,
   "an idle plant must be a neutral state, not a warning");
-// NO ON/OFF SWITCH, and its absence is asserted rather than assumed. The switch it replaced could
-// not be reached: the editors for the two sources it demanded live inside the card it revealed, and
-// it answered 409 until those sources existed. Arming is derived from them instead.
+// Never resurrect the retired dynamic-LWT mode. The new control is a distinct master diagnostics
+// consent and therefore has its own id/handler/route and no actuator semantics.
 assert.doesNotMatch(app, /e32DynamicLwt|onDynamicLwtPick|set_dynamic_lwt/,
-  "the heating-curve diagnosis must have no switch, handler or mode route");
+  "the retired heating-curve controller mode must stay absent");
+assert.match(app, /function diagnosticsRow\(enabled\)[\s\S]*id="e32Diagnostics"[\s\S]*function onDiagnosticsPick\(\)[\s\S]*post\("\/set_diagnostics", \{ enabled \}\)/,
+  "Firmware must own the persistent master diagnostics opt-in");
+assert.doesNotMatch(app,
+  /Aus ist der Standard|unvollständig oder irreführend|Off is the default|incomplete or misleading/,
+  "the diagnostics explainer must stay focused on what the feature enables");
+assert.match(httpConfig, /static esp_err_t set_diagnostics[\s\S]*diagnostics_next_generation[\s\S]*checkup_set_diagnostics[\s\S]*mqtt_reference_reconfigure[\s\S]*weather_forecast_reconfigure/,
+  "the master route must start a fresh generation and reconfigure every dependent producer live");
 assert.doesNotMatch(app, /function dynamicControlCardHtml\(\)[\s\S]{0,600}?return "";/,
-  "the card must always render — it is where its own sources are configured");
-assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+ circulationSettingsCardHtml\(\) \+\s*dynamicControlCardHtml\(\)/,
-  "plant and heating-curve diagnostics must render after Firmware at the bottom");
+  "the card itself must not invent another visibility rule");
+assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+[\s\S]{0,160}?diagnosticsEnabled \? circulationSettingsCardHtml\(\) \+ dynamicControlCardHtml\(\) : ""/,
+  "dependent plant and heating-curve cards must render only after the Firmware opt-in");
+assert.match(app, /S\.status\?\.diagnostics\?\.enabled === true && S\.status\?\.hp\?\.connected[\s\S]{0,80}?checkupCardHtml/,
+  "the dashboard's 24-hour diagnosis must share the same master opt-in");
 // A source that is CURRENT but cannot produce a verdict must not be the one row that looks fine
 // while the state row above it reports the diagnosis blocked.
 assert.match(app, /if \(!r\.control_eligible\)[\s\S]{0,180}?key: "unusable"[\s\S]{0,120}?cls: "warn"/,

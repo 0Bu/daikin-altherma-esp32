@@ -111,6 +111,7 @@ const labels = {
   "card.firmware": "Version",
   "card.channel": "Update-Kanal",
   "card.language": "Sprache",
+  "card.diagnostics": "Anlagendiagnose",
   "card.hplink_help": "Verbindungs-Erklärung",
   "card.protocol_help": "Protokoll-Erklärung",
   "card.rxpin_help": "RX-Erklärung",
@@ -118,6 +119,7 @@ const labels = {
   "card.firmware_help": "Firmware-Erklärung",
   "card.channel_help": "Kanal-Erklärung",
   "card.language_help": "Sprach-Erklärung",
+  "card.diagnostics_help": "Diagnose-Erklärung",
   "card.hardware": "Hardware",
   "card.uptime": "Laufzeit",
   "card.freeheap": "Freier Speicher",
@@ -127,6 +129,8 @@ const labels = {
   "lang.auto": "Browser",
   "lang.de": "Deutsch",
   "lang.en": "English",
+  "diagnostics.off": "Aus",
+  "diagnostics.on": "Ein",
   "dyn.card_help": "Diagnose-Erklärung",
   "dyn.state_help_setup": "Einrichtungs-Erklärung",
   "dyn.state_setup_homehub": "HomeHub nicht eingerichtet",
@@ -170,6 +174,7 @@ vm.runInContext(`${source}\nthis.__renderDynamic = dynamicControlCardHtml; this.
   { filename: "main/www/js/dashboard.js" });
 
 S.status = {
+  diagnostics: { enabled: true },
   mqtt: { configured: true },
   modbus: { enabled: true, connected: true },
   reference_temperature: {
@@ -553,13 +558,15 @@ assert.doesNotMatch(blockedRoomTongue, /<span class="vdesc-n">Verwertbar:<\/span
 S.status = {
   version: "1.0.0-dev.317", pins_avail: [1, 2, 4, 5],
   hp: { connected: true, proto: "I", rx: 2, tx: 1, last_ok_s: 0 },
+  diagnostics: { enabled: true },
   ota: { channel: "dev" }, ui: { lang: "auto" }, heating_curve: { method_version: 2, armed: false, state: "off" },
   board: {}, env3: {}, sys: {}, mqtt: {}, reference_temperature: {}, weather_forecast: {},
 };
 S.descOpen.clear();
 html = sandbox.__renderEsp32();
 for (const key of ["protocol:link", "protocol:framing", "protocol:rx", "protocol:tx",
-                   "firmware:version", "firmware:channel", "firmware:language"]) {
+                   "firmware:version", "firmware:channel", "firmware:language",
+                   "firmware:diagnostics"]) {
   assert.match(html, new RegExp(`data-desc="${key}"`), `${key} must expose an information tongue`);
 }
 for (const key of ["link", "framing", "rx", "tx"]) {
@@ -613,10 +620,18 @@ assert.match(html, /id="e32Chan"[^]*<option value="dev" selected>Development<\/o
 assert.match(html, /id="e32Lang"[^]*<option value="auto" selected>Browser<\/option>/,
   "the language selector must survive the split explanation row");
 assert.doesNotMatch(html, /e32DynamicLwt|role="switch"/,
-  "the Firmware card must carry no heating-curve switch: arming is derived from the sources");
+  "the retired heating-curve mode switch must stay absent");
+assert.match(html, /id="e32Diagnostics"[^]*<option value="on" selected>Ein<\/option>/,
+  "the Firmware card must show the enabled master diagnostics consent");
 assert.ok(html.indexOf("card.fw_title") < 0, "translated card titles must be resolved");
 assert.ok(html.indexOf("<div class=\"section-label\">Firmware") <
           html.indexOf("<div class=\"section-label\">Heizkurven-Diagnose"),
   "the diagnosis card must follow Firmware at the bottom, configured or not");
+S.status.diagnostics.enabled = false;
+html = sandbox.__renderEsp32();
+assert.match(html, /id="e32Diagnostics"[^]*<option value="off" selected>Aus<\/option>/,
+  "off must be a visible persisted Firmware setting");
+assert.doesNotMatch(html, /<div class="section-label">(?:Anlagendiagnose|Heizkurven-Diagnose)/,
+  "dependent diagnostic cards must be absent while the master setting is off");
 
 console.log("settings source tongue use-cases: ok");

@@ -71,7 +71,9 @@
 namespace daik::logic {
 
 inline constexpr uint32_t CHECKUP_PERSIST_MAGIC   = 0x504b4843u;   // "CHKP" little-endian
-inline constexpr uint16_t CHECKUP_PERSIST_VERSION = 1;
+// v2 adds the diagnostics consent generation to the warm-restart image.  A v1
+// image must not be interpreted with the shifted v2 layout.
+inline constexpr uint16_t CHECKUP_PERSIST_VERSION = 2;
 
 // ── The verdict ─────────────────────────────────────────────────────────────────────────────────
 // Named outcomes for history_persist.hpp's reason: each is a different thing to say on /diag and a
@@ -86,6 +88,8 @@ enum class CheckupRestore : uint8_t {
     BadCrc,         // present and current, but not intact
     ModelChanged,   // adopted at boot, then detection resolved a DIFFERENT unit
     SafeMode,       // latched boot-loop recovery: nothing will age the window, so nothing adopts it
+    DiagnosticsDisabled, // explicit master switch is off: no observation or restore is allowed
+    DiagnosticsChanged,  // evidence belongs to an earlier enable/disable generation
 };
 
 inline constexpr const char* checkup_restore_slug(CheckupRestore r) {
@@ -98,6 +102,8 @@ inline constexpr const char* checkup_restore_slug(CheckupRestore r) {
         case CheckupRestore::BadCrc:       return "bad_crc";
         case CheckupRestore::ModelChanged: return "model_changed";
         case CheckupRestore::SafeMode:     return "safe_mode";
+        case CheckupRestore::DiagnosticsDisabled: return "diagnostics_disabled";
+        case CheckupRestore::DiagnosticsChanged:  return "diagnostics_changed";
     }
     return "unknown";
 }
@@ -117,13 +123,18 @@ inline constexpr CheckupRestore checkup_restore_verdict(uint32_t reset_reason, u
                                                         uint16_t version, uint32_t layout_fp,
                                                         uint32_t want_layout_fp,
                                                         uint32_t stored_crc, uint32_t actual_crc,
-                                                        bool safe_mode = false) {
+                                                        bool safe_mode = false,
+                                                        bool diagnostics_enabled = true,
+                                                        uint32_t stored_generation = 0,
+                                                        uint32_t wanted_generation = 0) {
+    if (!diagnostics_enabled)                         return CheckupRestore::DiagnosticsDisabled;
     if (safe_mode)                                  return CheckupRestore::SafeMode;
     if (!history_reset_preserves_ram(reset_reason)) return CheckupRestore::PowerCycle;
     if (magic != CHECKUP_PERSIST_MAGIC)             return CheckupRestore::NoRecord;
     if (version != CHECKUP_PERSIST_VERSION)         return CheckupRestore::WrongVersion;
     if (layout_fp != want_layout_fp)                return CheckupRestore::WrongLayout;
     if (stored_crc != actual_crc)                   return CheckupRestore::BadCrc;
+    if (stored_generation != wanted_generation)     return CheckupRestore::DiagnosticsChanged;
     return CheckupRestore::Accept;
 }
 
@@ -217,7 +228,7 @@ inline uint32_t checkup_model_fingerprint(const char* profile_id) {
 // record older than the rolling day be rejected even when the board was powered off for weeks.
 struct CheckupJournalPayload {
     uint32_t model_fp = 0;
-    uint32_t reserved = 0;
+    uint32_t diagnostics_generation = 0;
     int64_t end_unix_s = -1;
     CheckupBucket checkup;
     DhwLossBucket dhw;
@@ -238,6 +249,8 @@ inline uint32_t checkup_journal_fingerprint() {
     crc = checkup_fp_u32(crc, checkup_layout_fingerprint());
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupJournalPayload)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, model_fp)));
+    crc = checkup_fp_u32(
+        crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, diagnostics_generation)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, end_unix_s)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, checkup)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, dhw)));

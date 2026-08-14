@@ -573,6 +573,18 @@ void history_circulation_reset() {
     s_circulation_reset_requested.store(true);
 }
 
+void history_checkup_reset() {
+    if (!s_flash_mtx) return;
+    Lock lk(s_flash_mtx);
+    if (!lk.acquired()) return;
+    const size_t src = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
+    // The generation embedded in each payload is the durable identity. Resetting the cursor also
+    // permits the first completed hour of the new generation to replace a same-hour predecessor.
+    s_flash_last_bucket[src] = INT64_MIN;
+    s_flash_restore_slot_count[src] = 0;
+    s_flash_checkup_restore_done = true;
+}
+
 // The BOARD's own 24-hour trends (free heap, largest contiguous block) — their ONE producer.
 //
 // They used to be folded inside history_record(), which is reached only from poll_once(), which the

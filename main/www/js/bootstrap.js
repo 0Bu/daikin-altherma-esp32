@@ -199,6 +199,7 @@ function wireRestOfApp() {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
     else if (e.target.id === "e32Chan") onChannelPick();
     else if (e.target.id === "e32Lang") onLangPick();
+    else if (e.target.id === "e32Diagnostics") onDiagnosticsPick();
   });
   // The Connections tile (#connTile) is rebuilt every poll too — each row's pencil opens its own
   // edit modal (WiFi/MQTT/Syslog/NTP), delegated the same way.

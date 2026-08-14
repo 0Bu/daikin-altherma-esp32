@@ -241,7 +241,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings, **v14 (retired dynamic-LWT mode byte, now written zero and ignored)** v15 the external circulation-power witness (topic/paths/thresholds/confirm window), v16 this installation's MQTT base topic, v17 independent room-value topics plus an optional fixed target, and v18 the one-shot HomeHub discovery latch. Fresh firmware searches once on its first networked boot; a found address or miss is saved. Explicitly saving empty permanently disables Modbus and HomeHub-dependent diagnosis. Pre-v18 blobs that already carry HomeHub state migrate as searched to preserve possible opt-outs. Heating-curve diagnosis derives arming from the room mapping and active HomeHub; forecast is optional. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings, **v14 (retired dynamic-LWT mode byte, now written zero and ignored)**, v15 the external circulation-power witness (topic/paths/thresholds/confirm window), v16 this installation's MQTT base topic, v17 independent room-value topics plus an optional fixed target, v18 the one-shot HomeHub discovery latch, and v19 the default-off diagnostics consent plus transition generation. Fresh firmware searches once on its first networked boot; a found address or miss is saved. Explicitly saving empty permanently disables Modbus and HomeHub-dependent diagnosis. Pre-v18 blobs that already carry HomeHub state migrate as searched to preserve possible opt-outs. Heating-curve diagnosis derives arming from the v19 consent, room mapping and active HomeHub; forecast is optional. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `board_set` | **Legacy migration input only.** Pre-v12 builds stored this bit without a concrete preset id. On upgrade, `true` plus an exact historical field match is migrated to the same board the old UI displayed; untouched defaults (`false`) remain unidentified. New saves store `board_user_set` and the stable preset id atomically in `cfg`. |
@@ -489,6 +489,11 @@ POST /set_ref_temp                 # { name, topic, temperature_path,
                                    #   timestamp mapping, live non-retained MQTT arrival time is used;
                                    #   retained data without trusted source time remains rejected. An empty
                                    #   topic is the explicit Disable operation.
+POST /set_diagnostics              # { enabled: boolean } → persist the default-off master opt-in and
+                                   #   apply live without reboot. It owns the 24-hour plant checkup,
+                                   #   heating-curve diagnosis and additional room/weather/circulation
+                                   #   collection. Each transition starts a new evidence generation;
+                                   #   ordinary X10A/HomeHub and technical telemetry remain active.
 POST /test_circulation             # { name, topic, power_path, timestamp_path, max_age_s,
                                    #   on_threshold_w, off_threshold_w, confirm_s } → temporarily
                                    #   subscribe and require one fresh active-power value; returns watts,
@@ -498,13 +503,14 @@ POST /set_circulation              # the exact mapping above + test_proof → pe
                                    #   Defaults: apower, aenergy.minute_ts, 3.0/1.0 W, 120 s age,
                                    #   60 s confirmation; every field is configurable in Settings.
                                    #   (There is no POST /set_dynamic_lwt. The heating-curve diagnosis
-                                   #   arms itself from the eligible MQTT room source above. The
+                                   #   arms itself from the diagnostics opt-in plus the eligible MQTT room source above. The
                                    #   forecast below is optional comparison evidence, so location
                                    #   disclosure is not a prerequisite. It records raw room error,
                                    #   not a requested LWT offset; no actuator exists.)
 POST /set_weather                  # { latitude, longitude } as strict decimal strings → persist +
                                    #   wake the firmware weather task. Both empty disables weather
-                                   #   traffic; otherwise both are required. Open-Meteo HTTPS/JSON
+                                   #   traffic; otherwise both are required. Fetching additionally
+                                   #   requires the diagnostics master. Open-Meteo HTTPS/JSON
                                    #   work is asynchronous, never on the httpd worker.
 POST /set_syslog                   # { host, port } → validate port range, persist + reboot ("" host
                                    #   disables). DNS/reachability resolve async, shown in /status.syslog

@@ -1,7 +1,8 @@
 // POST config routes: /set_wifi, /set_mqtt, /set_ref_temp,
 // /test_circulation, /set_circulation, /set_weather,
 // /set_syslog, /set_ntp, /set_hp,
-// /set_board, /set_env3, /set_ota, /set_lang, /discover_homehub, /detect. Parse JSON, validate, then apply:
+// /set_board, /set_env3, /set_ota, /set_lang, /set_diagnostics, /discover_homehub, /detect.
+// Parse JSON, validate, then apply:
 // WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping persists immediately and
 // applies live, while its subscriber reports missing/wrong paths only after a payload arrives;
 // /set_hp persists the RX/TX pin cache (no reboot) but keeps the model session-only;
@@ -661,6 +662,8 @@ static CirculationSourceTestConfig circulation_test_config(const CirculationRequ
 }
 
 static esp_err_t test_circulation(httpd_req_t* req) {
+    if (!config().diagnostics_enabled)
+        return send_err(req, "409 Conflict", "Enable plant diagnostics before testing this source");
     CirculationRequest in;
     if (const char* error = parse_circulation_request(req, in))
         return send_err(req, "400 Bad Request", error);
@@ -677,6 +680,43 @@ static esp_err_t test_circulation(httpd_req_t* req) {
                   static_cast<unsigned long>(result.proof), result.power_w,
                   circulation_power_state_name(result.state), result.retained ? "true" : "false");
     return http_send_json(req, response);
+}
+
+// POST /set_diagnostics {enabled:boolean}. This is the one opt-in boundary for the rolling checkup,
+// heating-curve evaluation and their external source collection. It is deliberately not the retired
+// dynamic-LWT controller mode: no write path exists, and ordinary X10A/HomeHub telemetry is untouched.
+// Every transition gets a new generation before any runtime producer is woken, so RAM/flash evidence
+// from an earlier interval fails closed even across a power loss immediately after this response.
+static esp_err_t set_diagnostics(httpd_req_t* req) {
+    char body[128];
+    if (http_read_body(req, body, sizeof(body)) < 0)
+        return send_err(req, "400 Bad Request", "bad body");
+    cJSON* j = cJSON_Parse(body);
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    cJSON* item = cJSON_GetObjectItemCaseSensitive(j, "enabled");
+    if (!cJSON_IsBool(item)) {
+        cJSON_Delete(j);
+        return send_err(req, "400 Bad Request", "enabled must be boolean");
+    }
+    const bool enabled = cJSON_IsTrue(item);
+    cJSON_Delete(j);
+
+    Config c = config();
+    if (c.diagnostics_enabled == enabled)
+        return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
+    c.diagnostics_enabled = enabled;
+    c.diagnostics_generation = diagnostics_next_generation(c.diagnostics_generation);
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+
+    checkup_set_diagnostics(enabled, c.diagnostics_generation);
+    history_checkup_reset();
+    history_circulation_reset();
+    mqtt_reference_reconfigure();
+    mqtt_circulation_reconfigure();
+    weather_forecast_reconfigure();
+    diag_printf("diagnostics: %s (generation %lu)\n", enabled ? "enabled" : "disabled",
+                static_cast<unsigned long>(c.diagnostics_generation));
+    return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
 }
 
 static esp_err_t set_circulation(httpd_req_t* req) {
@@ -1125,6 +1165,7 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_env3", HTTP_POST, set_env3);
     http_register_on(s, surface, "/set_ota", HTTP_POST, set_ota);
     http_register_on(s, surface, "/set_lang", HTTP_POST, set_lang);
+    http_register_on(s, surface, "/set_diagnostics", HTTP_POST, set_diagnostics);
     http_register_on(s, surface, "/detect", HTTP_POST, do_detect);
 }
 

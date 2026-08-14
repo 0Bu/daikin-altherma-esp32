@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: f2ffb841038f49cd00d6b5524d6fa13a3c19f965b0649ee5d133522dbbb1de30 -->
+<!-- diagnostic-evidence-contract: 622056a065e952a6cf76cc70d04e84d9001ccca982ad1b9f5420a2df109e6a77 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -8,6 +8,10 @@ For every row in the **Plant diagnostics · 24 h** card, this page answers four 
 2. What does the firmware actually evaluate?
 3. Which threshold or filter belongs only to this project?
 4. What must not be concluded from the result?
+
+The whole feature is an explicit opt-in under Settings › Firmware and is off by default. Turning it
+on begins a fresh evidence generation; turning it off stops and clears the diagnosis and its
+additional room, forecast, and circulation sources. None of the results below is a recommendation.
 
 A manufacturer statement is not automatically a limit for every Daikin model. The installation
 manual for the exact indoor and outdoor units remains authoritative. The primary sources linked here

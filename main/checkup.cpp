@@ -44,6 +44,7 @@ struct PersistedCheckup {
     uint16_t reserved;
     uint32_t layout_fp;
     uint32_t model_fp;      // which unit the buckets describe (checked at detect, not here)
+    uint32_t diagnostics_generation; // consent interval; old intervals never cross a new enable
     int64_t  span_us;       // lifecycle observed up to the last commit, carried as a duration
     uint32_t crc;
     logic::CheckupRing  ring;
@@ -95,6 +96,8 @@ daik::FaultClass      s_fault_now = daik::FaultClass::Unknown;
 SemaphoreHandle_t     s_mtx = nullptr;
 std::atomic<bool>     s_reset_requested{false};
 std::atomic<bool>     s_dhw_reset_requested{false};
+std::atomic<bool>     s_diagnostics_enabled{false};
+uint32_t              s_diagnostics_generation = 0; // guarded by s_mtx after startup
 bool                  s_reboot_saved_this_boot = false;
 // End of the newest COMPLETED bucket in this boot's monotonic clock.  Unlike P().span_us this is not
 // persisted: after a cold restore the journal's absolute end times are authoritative, and after a
@@ -188,6 +191,9 @@ uint32_t persist_crc() {
                               sizeof(P().span_us));
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().model_fp),
                               sizeof(P().model_fp));
+    crc = config_crc32_update(
+        crc, reinterpret_cast<const uint8_t*>(&P().diagnostics_generation),
+        sizeof(P().diagnostics_generation));
     return config_crc32_final(crc);
 }
 
@@ -199,6 +205,7 @@ void persist_seal() {
     P().reserved  = 0;
     P().layout_fp = logic::checkup_layout_fingerprint();
     P().model_fp  = s_model_fp;
+    P().diagnostics_generation = s_diagnostics_generation;
     P().span_us   = P().ring.span_us();
     P().crc       = persist_crc();
 }
@@ -237,6 +244,7 @@ bool apply_dhw_reset_locked() {
 // to checkpoint may lose one candidate, while waiting forever would strand a device that has
 // already switched its boot partition.
 void checkup_reboot_save() {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (s_reboot_saved_this_boot) return;
     s_reboot_saved_this_boot = true;
     if (!s_mtx || xSemaphoreTake(s_mtx, pdMS_TO_TICKS(200)) != pdTRUE) {
@@ -273,7 +281,7 @@ void checkup_reboot_save() {
 // Judge what the previous boot left in .noinit. Called from app_main BEFORE any producer task
 // exists, so the whole decision is single-threaded and needs no lock — the same property
 // history_start() relies on.
-void checkup_start() {
+void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     // Create the lock HERE, not on first use. It used to be allocated lazily by the poll task inside
     // checkup_record(), which meant the httpd task's checkup_report() read the raw handle while
     // another core was writing it — an unsynchronized read of the very pointer that synchronizes
@@ -286,12 +294,16 @@ void checkup_start() {
     }
     s_last_commit_us = kNoCommitUs;
     s_live_commit_count = 0;
+    s_diagnostics_enabled.store(diagnostics_enabled, std::memory_order_release);
+    s_diagnostics_generation = diagnostics_generation;
     const uint32_t want_fp = logic::checkup_layout_fingerprint();
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
     s_persist_verdict = logic::checkup_restore_verdict(reason, P().magic, P().version,
                                                        P().layout_fp, want_fp,
                                                        P().crc, persist_crc(),
-                                                       safe_mode_active());
+                                                       safe_mode_active(), diagnostics_enabled,
+                                                       P().diagnostics_generation,
+                                                       diagnostics_generation);
     if (s_persist_verdict == logic::CheckupRestore::Accept) {
         // Adopt the completed buckets in place. The open hour is dropped (it is outside the seal),
         // the monotonic anchors restart, and the lifecycle the previous boot observed is carried
@@ -347,6 +359,23 @@ void checkup_start() {
                     esp_err_to_name(shutdown_err));
 }
 
+void checkup_set_diagnostics(bool enabled, uint32_t generation) {
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    if (!lk.acquired()) return;
+    s_diagnostics_enabled.store(enabled, std::memory_order_release);
+    s_diagnostics_generation = generation;
+    s_reset_requested.store(false);
+    s_dhw_reset_requested.store(false);
+    s_state = logic::CheckupState{};
+    s_dhw_state = logic::DhwLossState{};
+    s_cov = logic::CheckupCoverage{};
+    s_fault_now = daik::FaultClass::Unknown;
+    persist_wipe();
+    s_persist_verdict = enabled ? logic::CheckupRestore::DiagnosticsChanged
+                                : logic::CheckupRestore::DiagnosticsDisabled;
+}
+
 const char* checkup_persist_state() { return logic::checkup_restore_slug(s_persist_verdict); }
 
 void checkup_reset() {
@@ -367,6 +396,11 @@ void checkup_reset() {
 // exactly as before, so a genuine re-detect, a link rewire or a /set_hp model change is unaffected.
 void checkup_reset_on_detect(const char* profile_id) {
     const uint32_t fp = logic::checkup_model_fingerprint(profile_id);
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) {
+        s_model_fp = fp;
+        s_adopt_detect_grace = false;
+        return;
+    }
     if (s_adopt_detect_grace) {
         s_adopt_detect_grace = false;
         if (fp == s_model_fp) {
@@ -388,6 +422,7 @@ void checkup_dhw_reset() {
 
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
                     const logic::CheckupCoverage& coverage) {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (!s_mtx) return;   // checkup_start() creates it; absent means its alloc failed -> no observation
     if (!v && n) return;
 
@@ -465,6 +500,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
 
     // A request can arrive while an old-link sweep is in flight. If this cycle consumes it, discard
     // the whole sample after clearing state; otherwise the tail of old poll A would seed the window
@@ -514,6 +550,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 }
 
 logic::CheckupReport checkup_report() {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return logic::CheckupReport{};
     if (!s_mtx) return logic::CheckupReport{};
     Lock lk(s_mtx);
     if (!lk.acquired()) return logic::CheckupReport{};
@@ -535,6 +572,7 @@ logic::CheckupReport checkup_report() {
 
 bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
                         int64_t& bucket, logic::CheckupJournalPayload& payload) {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return false;
     if (!s_mtx || now_unix_s < 0) return false;
     Lock lk(s_mtx, 0);
     if (!lk.acquired() || s_reset_requested.load() || !s_model_fp ||
@@ -563,6 +601,7 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
                          logic::CHECKUP_COMPLETED_BUCKETS;
     payload = logic::CheckupJournalPayload{};
     payload.model_fp = s_model_fp;
+    payload.diagnostics_generation = s_diagnostics_generation;
     payload.end_unix_s = latest_end_unix_s -
         static_cast<int64_t>(age) * logic::CHECKUP_DT_S;
     payload.checkup = P().ring.buf[ring_i];
@@ -573,6 +612,8 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
 
 CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
                                                 int64_t now_unix_s) {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire))
+        return CheckupFlashRestoreResult::Ignored;
     if (!s_mtx || now_unix_s < 0 || (!records && count))
         return CheckupFlashRestoreResult::Ignored;
     Lock lk(s_mtx, 0);
@@ -598,6 +639,7 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
             CheckupFlashRecord& rec = s_restore_live[live_count++];
             rec.payload = logic::CheckupJournalPayload{};
             rec.payload.model_fp = s_model_fp;
+            rec.payload.diagnostics_generation = s_diagnostics_generation;
             rec.payload.end_unix_s = latest_end -
                 static_cast<int64_t>(available - 1 - i) * logic::CHECKUP_DT_S;
             rec.payload.checkup =
@@ -613,7 +655,8 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     int64_t earliest_stored_end = INT64_MAX;
     size_t accepted = 0;
     auto consider = [&](const CheckupFlashRecord& rec, bool stored) {
-        if (rec.payload.reserved != 0 || rec.payload.model_fp != s_model_fp ||
+        if (rec.payload.diagnostics_generation != s_diagnostics_generation ||
+            rec.payload.model_fp != s_model_fp ||
             rec.bucket != logic::checkup_journal_bucket(rec.payload.end_unix_s) ||
             !logic::checkup_journal_in_window(rec.payload.end_unix_s, now_unix_s))
             return;
@@ -661,7 +704,8 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
         }
         for (size_t i = count; i > 0; i--) {
             const auto& rec = records[i - 1];             // a newer duplicate wins
-            if (rec.bucket == wanted && rec.payload.reserved == 0 &&
+            if (rec.bucket == wanted &&
+                rec.payload.diagnostics_generation == s_diagnostics_generation &&
                 rec.payload.model_fp == s_model_fp &&
                 logic::checkup_journal_in_window(rec.payload.end_unix_s, now_unix_s) &&
                 rec.bucket == logic::checkup_journal_bucket(rec.payload.end_unix_s)) {

@@ -77,7 +77,7 @@ assert.match(history, /if \(board_trend\(d\)\) continue;/,
 // moving either call after hp_poll_start()/mqtt_start() would race a producer against a wipe, and
 // nothing else here could see it.
 const mainCpp = read("main/main.cpp");
-const startAt   = mainCpp.indexOf("checkup_start()");
+const startAt   = mainCpp.indexOf("checkup_start(");
 const histAt    = mainCpp.indexOf("history_start()");
 const dwellAt   = mainCpp.indexOf("dwell_start()");
 const pollAt    = mainCpp.indexOf("hp_poll_start(");

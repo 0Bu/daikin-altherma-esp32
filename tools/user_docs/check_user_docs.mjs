@@ -2,8 +2,9 @@
 // evidence ledger in docs/DIAGNOSTIC_EVIDENCE.md.
 //
 // A description-coverage audit can prove that a row is tappable and still allow an explanation
-// written only for an installer, with no supported next step. This gate asks the user-level question:
-// can a non-specialist understand what was observed, the limit of the claim and what to do next?
+// written only for an installer. This gate asks the user-level question: can a non-specialist
+// understand what was observed and the limit of the claim without being given a recommendation that
+// the diagnosis evidence cannot safely support?
 //
 // The prose itself still needs human judgement. The source fingerprint closes the maintenance gap:
 // any change to the evaluator or the visible diagnosis contract makes the guide stale until the
@@ -74,13 +75,13 @@ if (!model || typeof model !== "object" || Array.isArray(model)) die(2, "MODEL_D
 if (!rowMap || typeof rowMap !== "object" || Array.isArray(rowMap)) die(2, "CHECKUP_ROW is not an object");
 const rowIds = Object.keys(rowMap);
 if (rowIds.length === 0) die(2, "CHECKUP_ROW is empty — refusing to pass vacuously");
-const requiredKeys = ["health_guide", ...rowIds.map((id) => `health_${id}`)];
+const requiredKeys = rowIds.map((id) => `health_${id}`);
 const findings = [];
 const add = (code, subject, message) => findings.push({ code, subject, message });
 
 for (const key of requiredKeys) {
   if (!model[key]) { add("U001", key, "visible diagnosis row has no explainer"); continue; }
-  const fields = key === "health_guide" ? ["what", "meaning", "action"] : ["what", "normal", "action"];
+  const fields = ["what", "normal"];
   for (const [language, copy] of [["en", model[key]], ["de", model[key].de]]) {
     if (!copy || typeof copy !== "object") {
       add("U002", `${key}.${language}`, "language block is missing");
@@ -93,8 +94,8 @@ for (const key of requiredKeys) {
     }
     const contextLength = `${copy.what || ""} ${copy.normal || copy.meaning || ""}`.trim().length;
     if (contextLength > 520) add("U004", `${key}.${language}`, `explanation is too long (${contextLength} > 520 characters)`);
-    if (typeof copy.action === "string" && copy.action.length > 280) {
-      add("U004", `${key}.${language}.action`, `next step is too long (${copy.action.length} > 280 characters)`);
+    if (Object.prototype.hasOwnProperty.call(copy, "action")) {
+      add("U015", `${key}.${language}.action`, "diagnosis explainers must not recommend a next step");
     }
   }
 }
@@ -123,17 +124,15 @@ for (const [key, count] of markerCounts) {
 }
 
 const ordered = markers.filter((marker) => requiredKeys.includes(marker[1]));
+const preamble = doc.slice(0, ordered[0]?.index ?? doc.length);
+for (const status of ["OK", "NOTE", "WARNING", "CHECKING", "MEASURED ONLY", "EXPERIMENTAL", "NOT AVAILABLE"]) {
+  if (!preamble.includes(status)) add("U008", "status guide", `status '${status}' is not explained before the first diagnosis`);
+}
 for (let i = 0; i < ordered.length; i++) {
   const marker = ordered[i];
   const block = doc.slice(marker.index, ordered[i + 1]?.index ?? doc.length);
-  if (marker[1] === "health_guide") {
-    for (const status of ["OK", "NOTE", "WARNING", "CHECKING", "MEASURED ONLY", "EXPERIMENTAL", "NOT AVAILABLE"]) {
-      if (!block.includes(status)) add("U008", marker[1], `status '${status}' is not explained before the first diagnosis`);
-    }
-  } else {
-    if (!block.includes("**In plain language:**")) add("U008", marker[1], "section needs an 'In plain language' explanation");
-    if (!block.includes("**What you can do:**")) add("U008", marker[1], "section needs a concrete 'What you can do' next step");
-  }
+  if (!block.includes("**In plain language:**")) add("U008", marker[1], "section needs an 'In plain language' explanation");
+  if (block.includes("**What you can do:**")) add("U008", marker[1], "section must not include a potentially misleading recommendation");
 }
 for (const term of ["Compressor", "BUH", "BSH", "X10A"]) {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -162,7 +161,7 @@ for (const relative of ["main/logic/checkup.hpp", "main/checkup.cpp"]) {
 fingerprint.update(`CHECKUP_ROW\0${JSON.stringify(rowMap)}\0`);
 fingerprint.update(`HEALTH_COPY\0${boundedCopy}\0`);
 const i18nContract = source.split(/\r?\n/)
-  .filter((line) => /"(?:card\.checkup|check\.|meaning\.label|normal\.label|action\.label)"/.test(line))
+  .filter((line) => /"(?:card\.checkup|check\.|meaning\.label|normal\.label)"/.test(line))
   .join("\n");
 if (!i18nContract) die(2, "no diagnosis i18n contract found — refusing to pass vacuously");
 fingerprint.update(`I18N\0${i18nContract}\0`);

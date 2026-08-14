@@ -100,6 +100,10 @@ void history_modbus_reset();
 // independent X10A/HomeHub histories.
 void history_circulation_reset();
 
+// A diagnostics consent transition starts a new durable checkup generation. Forget the previous
+// journal cursor/restore index without touching the independent X10A/HomeHub/ENV III trend records.
+void history_checkup_reset();
+
 // Copy trend `t`'s samples OLDEST-FIRST into `out`. Returns the count written (0 .. HISTORY_SAMPLES,
 // and 0 when the profile carries no such row or nothing has been recorded yet). Non-allocating under
 // the lock — a plain copy of int16s, per CLAUDE.md's "never allocate while holding a mutex".
