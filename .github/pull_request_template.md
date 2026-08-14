@@ -45,11 +45,13 @@ alone — those are Claude Code skills in this repo's .claude/ directory and are
 - [ ] `/schematic-review` clean — merge gate @ <short-sha> (required if the dashboard schematic changed: the drawing still tells the truth about the plant, and every reading is on the part that measures it)
 - [ ] `/ui-use-case-review` clean — merge gate @ <short-sha> (required if UI behavior changed)
 - [ ] `/absence-review` clean — merge gate @ <short-sha> (required if an OPTIONAL SOURCE changed: the broker, the room source, the circulation witness, the HomeHub, ENV III, the weather location, the X10A bus, safe mode, or anything that reports one)
+- [ ] `/ui-gif` clean — merge gate @ <short-sha> (required only when `scripts/run-ui-gif-audit.sh` is red, or when this PR re-made `docs/media/dashboard.gif`: the recording is of THIS commit, and somebody looked at it. A UI edit the audit passes needs nothing here)
 <!-- The stamp must be a BARE sha after the `@` — the gate matches `@[[:space:]]*[0-9a-f]{7,40}`
      (.claude/hooks/pr-gate-lib.sh), so wrapping it in backticks parses as no stamp at all and the
      merge is refused with "ticked but carries no @ <sha> stamp". Get it with
      `git rev-parse --short=12 HEAD`. -->
 
-<!-- `/ui-gif` is deliberately NOT a gate: re-recording is local-only, so a merge could never be the
-     moment it happens. Run it when the dashboard drawing has moved on enough that the README's
-     recording misrepresents it — on its own schedule, not this PR's. -->
+<!-- `/ui-gif` needs Chrome + ffmpeg, so it is the one gate an outside contributor cannot clear. If
+     that is you: leave it unchecked and say so — the maintainer re-records. What nobody may do is
+     rewrite `tools/uigif/gif_stamp.txt` to make CI green; the stamp writer refuses that shape, and
+     it is the one move that turns this gate into a lie. -->

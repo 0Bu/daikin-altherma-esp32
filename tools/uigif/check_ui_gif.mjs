@@ -18,8 +18,9 @@
 // complete, or that a number in it is physically true. That is the /ui-gif skill's half, and the
 // domain/schematic gates'. This one answers one question — was this GIF made from these sources.
 //
-// Usage:  node tools/uigif/check_ui_gif.mjs [--write-stamp] [-v]
-// Exit:   0 = current, 1 = findings, 2 = usage / the fingerprint could not be taken (vacuity).
+// Usage:  node tools/uigif/check_ui_gif.mjs [--write-stamp [--allow-identical-gif]] [-v]
+// Exit:   0 = current, 1 = findings, 2 = usage / the fingerprint could not be taken (vacuity) /
+//         a stamp was refused because the sources moved while the recording did not.
 
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -37,8 +38,12 @@ const README = "README.md";
 const argv = process.argv.slice(2);
 const WRITE = argv.includes("--write-stamp");
 const VERBOSE = argv.includes("-v") || argv.includes("--verbose");
+// Relaxes ONE refusal below and nothing else, per invocation, never persisted: it asserts that a
+// re-record really happened and the encoder reproduced the file byte-for-byte. Same shape as the
+// OTA route's ?downgrade=1 — the escape exists, but it has to be said out loud.
+const ALLOW_IDENTICAL = argv.includes("--allow-identical-gif");
 for (const a of argv) {
-  if (!["--write-stamp", "-v", "--verbose"].includes(a)) {
+  if (!["--write-stamp", "-v", "--verbose", "--allow-identical-gif"].includes(a)) {
     console.error(`check_ui_gif: unknown argument ${a}`);
     process.exit(2);
   }
@@ -239,7 +244,36 @@ const stamp = Object.fromEntries(
   stampText.split("\n").filter((l) => l && !l.startsWith("#"))
     .map((l) => { const k = l.indexOf("="); return [l.slice(0, k).trim(), l.slice(k + 1).trim()]; }));
 
+// Which fingerprinted sources moved since the stamp. Defined once: the write-time refusal and the
+// U001 finding below must NAME the same files, or the two halves of this gate would disagree about
+// what changed.
+const changedParts = () => Object.entries(parts)
+  .filter(([k, v]) => { const was = stamp[`part.${k.replace(/\s+/g, "_")}`]; return was && was !== sha(v); })
+  .map(([k]) => k);
+
 if (WRITE) {
+  // A stamp is the ONLY evidence that this GIF is of this UI, so writing one is a CLAIM, not
+  // bookkeeping, and there is exactly one way to earn it: re-record. This refusal is what makes the
+  // gate safe to require on every merge. The objection that kept it out of CI for so long was never
+  // about the check — it was that a red gate whose remedy feels expensive gets cleared by rewriting
+  // the STAMP instead of remaking the recording, which is strictly worse than no gate at all,
+  // because the GIF then carries a stamp asserting it is current. That has a mechanical signature:
+  // the sources moved while the recording did not. Refuse it here, at the one moment both versions
+  // of the truth are in hand — after the fact nothing can tell an earned stamp from a written one.
+  if (stamp.ui && stamp.ui !== fingerprint && stamp.gif && gifSha && stamp.gif === gifSha
+      && !ALLOW_IDENTICAL) {
+    const moved = changedParts();
+    console.error(
+      `check_ui_gif: refusing to stamp — the sources moved but ${GIF} did not.\n` +
+      `  changed: ${moved.length ? moved.join(", ") : "(fingerprint differs)"}\n` +
+      `  gif:     ${gifSha.slice(0, 12)}… byte-identical to the recording already stamped\n` +
+      "  That is the signature of a re-stamp over an OLD recording, which is the one way this gate\n" +
+      "  can be made to lie: it would go green while the README goes on showing the previous UI.\n" +
+      "  Re-record instead:  scripts/record-dashboard-gif.sh\n" +
+      "  If you did re-record and the encoder reproduced the file byte-for-byte (a comment-only edit\n" +
+      "  to the recorder can do exactly that), say so: --allow-identical-gif");
+    process.exit(2);
+  }
   const now = new Date().toISOString().slice(0, 10);
   writeFileSync(P(STAMP), [
     "# Recorded by scripts/record-dashboard-gif.sh — do not hand-edit.",
@@ -250,7 +284,9 @@ if (WRITE) {
     "# gif = the sha256 of the recording itself, so a hand-edited or re-compressed GIF is caught too.",
     "#",
     "# tools/uigif/check_ui_gif.mjs fails when the UI has moved on and the recording has not. The fix",
-    "# is to RE-RECORD (that is what the stamp is for), never to edit this file.",
+    "# is to RE-RECORD (that is what the stamp is for), never to edit this file — and the writer",
+    "# refuses a stamp whose ui moved while gif stayed identical, because that is what re-stamping an",
+    "# old recording looks like from here.",
     `ui=${fingerprint}`,
     // Per-source hashes so a failure can NAME what moved — "the schematic markup changed" sends
     // you to the right file; "the fingerprint differs" sends you to re-stamp without looking.
@@ -270,9 +306,7 @@ if (!stamp.ui) {
   add("U005", `${STAMP} is missing or carries no fingerprint — nothing says which UI this GIF is of`,
       "scripts/record-dashboard-gif.sh");
 } else if (stamp.ui !== fingerprint) {
-  const changed = Object.entries(parts)
-    .filter(([k, v]) => { const was = stamp[`part.${k.replace(/\s+/g, "_")}`]; return was && was !== sha(v); })
-    .map(([k]) => k);
+  const changed = changedParts();
   add("U001",
       "the dashboard UI has changed since the GIF was recorded — the README shows an older drawing" +
       (changed.length ? `: ${changed.join(", ")}` : ""),

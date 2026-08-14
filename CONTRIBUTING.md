@@ -22,8 +22,7 @@ likely to be declined — the comment density and the "why" notes in this codeba
 
 These run on a plain system toolchain (cmake + g++/clang++ for the first, node for the rest) in
 seconds. **Run them all before opening a PR.** They are also the first steps of CI's `gates` job,
-so a failure here fails the build anyway — with one deliberate exception, `run-ui-gif-audit.sh`,
-which CI does **not** run (see below).
+so a failure here fails the build anyway.
 
 ```bash
 scripts/run-mock-tests.sh --coverage # host logic tests + 95% floor + presenter parity
@@ -197,13 +196,35 @@ identifying field nobody wrapped at all never reaches the redactor, so it never 
 
 `run-ui-gif-audit.sh` guards the README's **recording** of that drawing,
 [`docs/media/dashboard.gif`](docs/media/dashboard.gif) — the animated dashboard a new reader sees
-before anything else. **It is not a CI step and not a merge condition**, unlike everything else on
-this page, and the reason is its remedy rather than its subject: the only fix it can ask for is a
-local re-record (Chrome + ffmpeg, ~10 min), which no runner can perform. A gate whose fix is
-unavailable where it fires gets the *stamp* rewritten rather than the recording re-made — a GIF then
-carrying a stamp that asserts it is current. As an outside contributor you are welcome to run it and
-say what it reported; keeping the recording current is the maintainer's `/ui-gif` skill, on its own
-schedule. It is the one artefact here that rots *invisibly*: a recording renders
+before anything else. **It is a CI step and a merge condition**, like everything else on this page —
+but it was not always, and the argument that kept it out is worth knowing before you touch it. Its
+remedy is a local re-record (Chrome + ffmpeg, ~10 min) that no runner performs, and a gate whose fix
+is unavailable where it fires gets the *stamp* rewritten rather than the recording re-made — a GIF
+then carrying a stamp that asserts it is current, which is strictly worse than no gate at all. What
+changed is not the remedy but the escape: the stamp writer now **refuses** a stamp whose fingerprint
+moved while the GIF bytes did not, which is exactly what re-stamping an old recording looks like
+from the outside (`--allow-identical-gif` overrides it for the one case that is real — you did
+re-record and the encoder reproduced the file byte-for-byte). Red can therefore only be cleared by a
+recording. The cost of the old arrangement was not hypothetical: with the recording's currency
+nobody's merge condition, [#462](https://github.com/0Bu/daikin-altherma-esp32/pull/462) swapped the
+schematic's circuits and the README went stale the same day, against a stamp written hours earlier.
+If you are an outside contributor and cannot re-record, say so in the PR and leave it to the
+maintainer's `/ui-gif` skill rather than touching the stamp.
+
+**A UI change is not automatically a recording change**, and this gate is careful about the
+difference. The CI step is a fingerprint comparison that takes a second and passes unless the
+recording is genuinely stale, so an unrelated PR never pays for it. Editing the settings modal, the
+charts or the value list touches the same three files as the schematic and still costs you nothing
+here — what the gate reads is the `#schem` figure, the `.sc-*` rules and the six painting
+functions, not the files containing them.
+
+The maintainer's `/ui-gif` review is required when this PR **re-made** the recording, because a new
+recording is the one thing no check can judge. A **stale** one is not a review question at all: the
+merge hook refuses outright, and no ticked checkbox overrides it. A review record is evidence that
+somebody looked at a recording, and that can never outrank the mechanical fact that the recording on
+disk is not of these sources — the only way out is `scripts/record-dashboard-gif.sh`.
+
+It is the one artefact here that rots *invisibly*: a recording renders
 perfectly forever, whatever the UI has since become, so every gate above stays green while the
 README shows a drawing that no longer exists. A screenshot cannot fail a test; it can only be out of
 date, and it looks exactly as good either way. CI has no browser, so the check is a **stamp**, not a
@@ -214,6 +235,9 @@ recorder's own framing — and fails when they no longer match
 [`tools/uigif/gif_stamp.txt`](tools/uigif/gif_stamp.txt). The frame is the schematic card **alone** —
 the dashboard header above it is deliberately cropped out, because it prints the running version and
 no recording can keep that current — so a header change needs no re-record, and does not fingerprint.
+That crop is a hard-coded rectangle, which makes it the one framing number a UI change can invalidate
+in silence: when the card's height moves, **re-measure `#schem` in the demo page** and follow it. A
+crop left behind clips the drawing or catches a sliver of the next card, and no check can see it.
 It also reads the GIF itself: a single
 frame, or frames held over 200 ms, fails the thing a recording is *for*, which is showing the flow
 moving. The fix is always to re-record — never to edit the stamp:
@@ -226,7 +250,9 @@ It films the real UI (`index.html` + `style.css` + the ordered
 [`app.sources`](main/www/app.sources) fragments, spliced the way the firmware build splices them)
 with only the *device* stubbed, so what the GIF shows is what `renderLive()` drew.
 Look at the result before committing: the gate proves the recording is current, never that it is a
-good picture. `tools/uigif/selftest.sh` proves the gate still catches each way it can go stale.
+good picture — that half is the maintainer's `/ui-gif` skill, itself a merge gate.
+`tools/uigif/selftest.sh` proves the gate still catches each way the recording can go stale, and
+that the stamp still cannot be earned without one.
 
 `run-doc-entity-audit.sh` asks whether the **copy-pasteable recipes in the docs still name entities
 that exist**. [`docs/HOME_ASSISTANT.md`](docs/HOME_ASSISTANT.md) hands a reader YAML naming ids like
@@ -383,9 +409,9 @@ silence a *new* finding on code your PR touches — that is the gate working.
 
 ## Pull requests
 
-Fill in [the template](.github/pull_request_template.md). Six checkboxes on it
+Fill in [the template](.github/pull_request_template.md). Seven checkboxes on it
 (`/project-review`, `/feature-docs`, `/domain-review`, `/schematic-review`,
-`/ui-use-case-review`, `/absence-review`) are **maintainer-only** —
+`/ui-use-case-review`, `/absence-review`, `/ui-gif`) are **maintainer-only** —
 they invoke Claude Code skills in this repo's `.claude/` directory and are not something an outside
 contributor can run. Leave them unchecked; the maintainer runs them before merge. Your equivalents
 are the scripts above plus an honest note about hardware.

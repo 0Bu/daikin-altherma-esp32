@@ -249,15 +249,32 @@ jobs:
         run: ./scripts/run-doc-entity-audit.sh
       - name: Verify the doc entity-id audit still has teeth
         run: ./tools/docs/selftest.sh
-      # NOT a step here, deliberately: the README's dashboard recording (docs/media/dashboard.gif).
-      # scripts/run-ui-gif-audit.sh still exists and still works — what it can NEVER be is a per-merge
-      # gate, because its only remedy is a LOCAL re-record (Chrome + ffmpeg, ~5 min), which this
-      # runner cannot perform. A gate whose fix is unavailable where it fires does not get the
-      # recording re-made; it gets the stamp re-written to make the red go away, which is strictly
-      # worse than no gate at all — the GIF then carries a stamp asserting it is current. So the
-      # recording is maintained ON DEMAND by the /ui-gif skill (.claude/skills/ui-gif), which runs
-      # the same audit, re-records and re-stamps in one place, on a machine that can do all three.
-      # The currency of the README recording is now a judgement call, not a merge condition.
+      # The README's dashboard recording (docs/media/dashboard.gif): the one artefact here that rots
+      # INVISIBLY. A recording renders perfectly forever, whatever the UI has since become, so every
+      # other gate on this page stays green while the first thing a new reader sees is last month's
+      # drawing. CI has no browser, so this is a STAMP comparison rather than a re-render: it
+      # fingerprints the sources the recording was made from — the schematic markup, the CSS that
+      # draws and animates it, the painting code, the strings, the scenes and the recorder's own
+      # framing — and fails when the GIF no longer belongs to them. node only, seconds long.
+      #
+      # This was deliberately NOT a step here, on the argument that a gate whose remedy is
+      # unavailable where it fires does not get the recording re-made: it gets the STAMP re-written
+      # to clear the red, and the GIF then carries a stamp ASSERTING it is current, which is
+      # strictly worse than no gate at all. The remedy is still local (scripts/record-dashboard-gif.sh
+      # needs Chrome + ffmpeg); what closed is the escape. check_ui_gif.mjs now REFUSES to write a
+      # stamp whose sources moved while the GIF bytes did not — the exact signature of a re-stamp
+      # over an old recording — so red here can only be cleared by a real re-record.
+      #
+      # What the old arrangement cost is measurable rather than theoretical: with the recording's
+      # currency nobody's merge condition, the README went stale ONE merge after it was last made
+      # (#462 swapped the schematic's circuits on 2026-08-13, against a stamp written the same day),
+      # and no gate anywhere could say so. The judgement half — are the nine operating scenes still
+      # true, are the readings still honest — remains the /ui-gif skill's, now a merge gate of its
+      # own (.claude/hooks/require-ui-gif.sh).
+      - name: Audit the README's dashboard recording
+        run: ./scripts/run-ui-gif-audit.sh
+      - name: Verify the recording audit still has teeth
+        run: ./tools/uigif/selftest.sh
 
       # The gh-pages publish follows the expensive firmware build, so a regression still fails late.
       # It also has a concurrency hazard: the release root and every merge's dev channel write one

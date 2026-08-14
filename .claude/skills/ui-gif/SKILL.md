@@ -18,13 +18,24 @@ That is why the gate is a **stamp**, not a re-render: CI has no browser. And it 
 only ever prove the recording is *current* — never that it is *right*. The second half is this
 skill's.
 
-**Conditional, like `/schematic-review`** — it is for changes that reach the drawing:
+**This is a merge gate** (`.claude/hooks/require-ui-gif.sh`) and the audit is a CI `gates` step.
+Neither was true before: the audit was kept out of CI because a gate whose remedy is unavailable
+where it fires gets the *stamp* rewritten rather than the recording re-made. That escape is closed —
+`check_ui_gif.mjs` refuses to write a stamp whose `ui` moved while `gif` stayed byte-identical, which
+is precisely what re-stamping an old recording looks like. `--allow-identical-gif` overrides it for
+the one honest case (you re-recorded and the encoder reproduced the file exactly, which a
+comment-only edit to the recorder can do). **Never** hand-edit `tools/uigif/gif_stamp.txt`.
+
+**Conditional — and keyed on the audit, not on paths.** It is for changes that reach the drawing:
 `main/www/index.html`'s schematic figure, the `sc-*` half of
 `main/www/style.css`, the painting functions in `main/www/js/schematic.js` (`renderLive`, `liveData`,
 `clearSchematic`, `plantState`, `sysSet`, `vLwt`), the scene definitions in
 `tools/uigif/scenes.js`, or the recorder's framing in `scripts/record-dashboard-gif.sh`. Those are
-exactly the sources the gate fingerprints, so **the gate tells you whether it applies** — run it
-first. **You re-record and apply the fixes**, you do not just report them.
+exactly the sources the gate fingerprints — and they share their files with the settings modal, the
+charts and the value list, which is why the merge hook asks the audit rather than a path regex: an
+edit that cannot move a pixel must not cost anybody a 10-minute re-record. So **the gate tells you
+whether it applies** — run it first. **You re-record and apply the fixes**, you do not just report
+them.
 
 ## 1. Run the gate (the mechanical half)
 
@@ -41,9 +52,12 @@ scripts/run-ui-gif-audit.sh -v     # + the per-source hashes and the GIF's real 
 | `U004` | Not an animation any more: a single frame, or frames held over 200 ms. The flow, the fan and the pump have to be **seen** moving — that is what the recording is for. |
 | `U005` | No stamp — nothing says which UI this GIF is of. |
 
-**Exit 2 is not a pass.** It means the checker could no longer find what it fingerprints (a renamed
-painting function, `.sc-flow` gone from the CSS), so *nothing* was checked. Fix the extractor in
-`tools/uigif/check_ui_gif.mjs` — or the rename — and re-run `tools/uigif/selftest.sh`.
+**Exit 2 is not a pass.** In check mode it means the checker could no longer find what it
+fingerprints (a renamed painting function, `.sc-flow` gone from the CSS), so *nothing* was checked.
+Fix the extractor in `tools/uigif/check_ui_gif.mjs` — or the rename — and re-run
+`tools/uigif/selftest.sh`. It is also the exit for a **refused stamp** (`--write-stamp` with sources
+that moved over an unchanged GIF): that one is not a bug to fix, it is the gate telling you the
+recorder did not actually produce a new recording — check the recorder's output before re-running.
 
 **There is no exceptions ledger, on purpose.** The other audits have one because their findings are
 questions about intent; this one has a single answer — re-record. A "this change cannot alter a
@@ -115,8 +129,25 @@ Look at the finished GIF. Then ask:
    header above it, which prints the running version, and a version frozen into a recording is
    wrong from the next release onwards with nothing able to see it. A UI change that alters the
    card's height leaves it clipped, or leaves a sliver of the header or the next card in frame —
-   adjust `CROP` in the recorder rather than living with it. Measure, don't guess: the recorder's
-   comment carries the CSS box the current numbers came from.
+   adjust `CROP` in the recorder rather than living with it. This is the checklist item that has
+   actually fired: #462 raised `#schem` by 6 px and shortened it by 6, and the crop it left behind
+   sat 17 px under the card, catching the top edge of the next one in every frame. Nothing
+   mechanical can see that — the stamp only proves the recording is of these sources, and a GIF
+   with a stray sliver renders exactly as well as one without. **Measure, don't guess**, and don't
+   trust the recorder's comment either — it records the last measurement, not the current layout.
+   Take a fresh one: build the demo page, serve it, and read the box off the real page at the
+   recorder's own `VIEWPORT` and `SCALE`.
+
+   ```bash
+   python3 tools/uigif/build_demo.py "$PWD" /tmp/m/demo.html   # then serve /tmp/m and load it in
+   # Chrome at --window-size=1000,760 --force-device-scale-factor=2 --hide-scrollbars, and read
+   # document.querySelector("#schem").getBoundingClientRect()
+   ```
+
+   `CROP` is `width:height:x:y` in DEVICE pixels (CSS × `SCALE`), and the documented intent is the
+   card plus a 12 px side margin, 8 px above and ~5 px below. Update the recorder's comment with the
+   numbers you measured in the same commit, then re-record — `CROP` is fingerprinted, so the stamp
+   forces that anyway.
 7. **Is it still a reasonable size?** ~2 MB for 135 frames. GitHub serves it on every README
    view; if a change pushes it past a couple of megabytes, drop `WIDTH`, `DWELL_FRAMES` or
    `TRANSITION_FRAMES` before dropping the frame rate — motion is the thing being paid for.
@@ -137,6 +168,9 @@ of the firmware.
 
 `README.md` § Web UI is the copy that surrounds the recording — if a scene changes, the sentence
 describing what the dashboard states changes with it. `.claude/CLAUDE.md` and `CONTRIBUTING.md`
-list the local gates; a new check here belongs in both. If the schematic itself changed, this skill
+list the local gates; a new check here belongs in both. Since this became a merge gate, the PR
+template carries its checkbox and `.claude/hooks/require-ui-gif.sh` carries the ONLY definition of
+when it applies — and that definition is the audit itself, so widening what the gate covers means
+widening what `check_ui_gif.mjs` fingerprints, never a list in the prose that points at it. If the schematic itself changed, this skill
 is the *second* half of that work — `/schematic-review` decides whether the drawing is true, and
 this one makes sure the README stops showing the old one.

@@ -55,6 +55,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh\"",
             "statusMessage": "Checking source-absence gate\u2026"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-gif.sh\"",
+            "statusMessage": "Checking README-recording gate\u2026"
           }
         ]
       },
@@ -89,6 +94,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh\"",
             "statusMessage": "Checking source-absence gate\u2026"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-gif.sh\"",
+            "statusMessage": "Checking README-recording gate\u2026"
           }
         ]
       }
