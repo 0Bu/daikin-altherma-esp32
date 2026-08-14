@@ -14,22 +14,55 @@
 #
 # All functions are pure/reusable; the gate script sets GATE_PROJ then calls them.
 
+# gate_task_lines
+#   Filters stdin to real top-level Markdown task-list items. Inline examples, blockquotes, indented
+#   code and fenced code are prose, not the PR's maintainer checklist, and must never satisfy or
+#   shadow a gate record.
+gate_task_lines() {
+  awk '
+    function fence_token(line, token) {
+      if (match(line, /^[ ]{0,3}(```+|~~~+)/)) {
+        token = substr(line, RSTART, RLENGTH)
+        gsub(/ /, "", token)
+        return substr(token, 1, 1)
+      }
+      return ""
+    }
+    {
+      marker = fence_token($0)
+      if (marker != "") {
+        if (fence == "") fence = marker
+        else if (fence == marker) fence = ""
+        next
+      }
+      if (fence == "" && $0 ~ /^[ ]{0,3}[-*][[:space:]]+\[[ xX]\][[:space:]]+/) print
+    }
+  '
+}
+
 # gate_checkbox_status <content> <key>
-#   Prints exactly one of:  "checked <sha>" | "checked" | "unchecked" | "absent"
+#   Prints exactly one of:  "checked <sha>" | "checked" | "unchecked" | "absent" | "ambiguous"
 #   A match is a markdown task-list item ("- [ ]" / "- [x]", any bullet) whose text contains
 #   <key> (e.g. "project-review"). <sha> is the hex token (7..40) after an "@" on that line, if
 #   present. <content> is the PR body.
 gate_checkbox_status() {
-  local content="$1" key="$2" line
+  local content="$1" key="$2" line lines count
   # Match a markdown task-list item ("- [ ]" / "- [x]", any bullet) that is the REAL gate line:
   # it must mention <key> AND the word "gate" (the canonical line reads "… merge gate @ <sha>").
   # Requiring "gate" as well as the bare key stops an unrelated prose checkbox that merely names
   # the skill + a HEAD sha from satisfying the gate.
-  line="$(printf '%s\n' "$content" \
-      | grep -iE '[-*][[:space:]]+\[[ xX]\]' \
+  lines="$(printf '%s\n' "$content" \
+      | gate_task_lines \
       | grep -iF -- "$key" \
-      | grep -iE 'gate' | head -n1)"
-  [ -n "$line" ] || { printf 'absent\n'; return 0; }
+      | grep -iE 'gate')"
+  [ -n "$lines" ] || { printf 'absent\n'; return 0; }
+  # Multiple real checklist entries for one key are ambiguous. Never guess which one is the record:
+  # preferring a ticked line lets a duplicate current-SHA decoy override the actual unticked gate,
+  # while preferring the first lets stale prose shadow the real record. Fenced/inline examples were
+  # removed above; two remaining task items are a malformed PR body and fail closed.
+  count="$(printf '%s\n' "$lines" | awk 'NF { n++ } END { print n + 0 }')"
+  [ "$count" -eq 1 ] || { printf 'ambiguous\n'; return 0; }
+  line="$lines"
   if printf '%s' "$line" | grep -qE '\[[xX]\]'; then
     local sha
     sha="$(printf '%s' "$line" | grep -oiE '@[[:space:]]*[0-9a-f]{7,40}' | head -n1 \
@@ -273,6 +306,7 @@ gate_enforce() {
     echo
     case "$box_state" in
       absent)    echo "The PR body has no \`$skill\` checkbox — it has not been recorded." ;;
+      ambiguous) echo "The PR body has more than one real \`$skill\` gate checkbox — the record is ambiguous." ;;
       unchecked) echo "The \`$skill\` checkbox in the PR body is present but unticked." ;;
       checked)
         if [ -z "$box_sha" ]; then
