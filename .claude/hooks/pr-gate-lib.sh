@@ -21,7 +21,15 @@
 gate_task_lines() {
   awk '
     function fence_token(line, token) {
-      if (match(line, /^[ ]{0,3}(```+|~~~+)/)) {
+      # NOT /^[ ]{0,3}(```+|~~~+)/ -- mawk 1.3.4 panics on a bounded interval directly followed by a
+      # parenthesised alternation of + groups ("REcompile() - panic: values still on machine stack"),
+      # and a panicking filter prints NOTHING, so gate_checkbox_status saw no task lines and answered
+      # "absent" for every key. Every merge gate then refused every merge with "the PR body has no
+      # checkbox -- it has not been recorded", which reads as a reviewer who forgot rather than as a
+      # broken matcher. mawk is the default awk on Debian and Ubuntu while the GitHub runners ship
+      # gawk, so CI stayed green while the gates were dead on the machines people merge from. Each
+      # construct is fine alone; only the combination trips it, hence the spelled-out ? repetition.
+      if (match(line, /^[ ]?[ ]?[ ]?(```+|~~~+)/)) {
         token = substr(line, RSTART, RLENGTH)
         gsub(/ /, "", token)
         return substr(token, 1, 1)

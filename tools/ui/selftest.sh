@@ -154,6 +154,24 @@ extra_keys="$(printf '%s\n' "$tpl_lines" \
       done)"
 [ -z "$extra_keys" ] || { echo "ui selftest: unexpected gate key(s): $extra_keys" >&2; exit 1; }
 
+# Before any of that: the filter has to RUN. gate_task_lines is an awk program, and an awk that
+# cannot compile its regex prints nothing and exits non-zero — which arrives at gate_checkbox_status
+# as an empty candidate set, i.e. "absent", i.e. every merge gate refusing every merge with "the PR
+# body has no checkbox — it has not been recorded". That is a fail-closed direction with a message
+# that blames the reviewer. It happened: mawk 1.3.4 panicked on a bounded interval followed by an
+# alternation group, and mawk is the default awk on Debian and Ubuntu while the CI runners ship
+# gawk — so the gates were dead on the machines people merge from and green here. Assert the EXIT
+# STATUS, not just the output: an empty result is indistinguishable from "no task lines" downstream.
+set +e
+filter_out="$(printf '%s\n' '- [x] `/project-review` clean — merge gate @ abcdef123456' | gate_task_lines 2>/dev/null)"
+filter_rc=$?
+set -e
+[ "$filter_rc" -eq 0 ] || {
+    echo "ui selftest: gate_task_lines exited $filter_rc under this awk — every gate would report 'absent'" >&2
+    exit 1; }
+[ -n "$filter_out" ] || {
+    echo "ui selftest: gate_task_lines dropped a real task-list item" >&2; exit 1; }
+
 # A PR body legitimately quotes checkbox examples. Inline, blockquoted and fenced examples are not
 # checklist records and must neither shadow nor satisfy the one real gate line.
 decoy_body="$(printf '%s\n' \
