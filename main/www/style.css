@@ -445,10 +445,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    point, so they remain visible with "—" while idle. .no-spaceh hides an absent operation flag. */
 .no-dhw .g-dhw { display: none; }
 .no-room .g-room { display: none; }
-/* With the room reading hidden (no X10A room temp) the lower half of the emitter box is empty, so the
-   short bars read as broken. Lengthen them to fill it — a pure Y-scale from the bars' top edge, so
-   they grow downward and the 3 px stroke width (an X extent) is untouched. */
-.no-room .sc-emitter { transform: scaleY(2); transform-box: fill-box; transform-origin: top; }
+/* With the room reading hidden (no X10A room temp) the whole lower half of the emitter box is free.
+   Extend the bars to its bottom margin — a pure Y-scale from the bars' top edge, so they grow
+   downward and the 3 px stroke width (an X extent) is untouched. */
+.no-room .sc-emitter { transform: scaleY(2.5); transform-box: fill-box; transform-origin: top; }
 .no-spaceh #gSpaceH { display: none; }
 
 /* ── Settings screen (behind the header gear) ─────────────────────────────────

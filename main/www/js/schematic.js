@@ -542,6 +542,7 @@ function clearSchematic() {
   ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-boost-on",
    "cooling-mode", "water-neutral", "valve2-on", "flow-switch-on"].forEach((c) => sc.classList.remove(c));
   updateSchematicStateA11y(null);
+  sc.classList.add("no-room");         // no X10A room reading: let the emitter bars use the empty box
   sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
   $("schem").querySelectorAll(".sc-flow, .sc-rflow, .sc-tank-flow, .sc-space-flow").forEach((el) => el.classList.remove("on", "rev"));
 }
