@@ -115,6 +115,18 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     "the DHW tank keeps the shared compact consumer width and matches the space box height");
   assert.match(index, /class="sc-box" x="518" y="290" width="120" height="108"/,
     "the space circuit matches the DHW tank width; its top is lowered to give the pills above more room");
+  assert.match(index,
+    /class="sc-emitter" d="M538 320 v28 M558 320 v28 M578 320 v28 M598 320 v28 M618 320 v28"/,
+    "the emitter bars extend to the room-reading block");
+  assert.match(index,
+    /class="sc-val" x="578" y="368"[^>]*>[\s\S]*?id="svRoom"/,
+    "the room temperature shares the DHW temperature baseline");
+  assert.match(index,
+    /class="sc-sub" x="578" y="385"[^>]*>[\s\S]*?id="svRoomSet"/,
+    "the room setpoint shares the DHW setpoint baseline");
+  assert.match(style,
+    /\.no-room \.sc-emitter \{[^}]*transform:\s*scaleY\(2\.5\)[^}]*transform-origin:\s*top/,
+    "without a room reading the emitter bars extend to the box's bottom margin");
   assert.doesNotMatch(index, /id="svSgRequest"/,
     "the Boost pill has no visible active/inactive second line");
   assert.match(style, /svg \.sc-bsh-state-box \{[^}]*fill:\s*var\(--hatch\)/,
@@ -128,6 +140,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   // so an unreachable plant looked like a live charging one.
   assert.match(SOURCE, /function clearSchematic\(\)[\s\S]*?querySelectorAll\([^)]*\.sc-tank-flow[^)]*\.sc-space-flow[^)]*\)/,
     "clearSchematic resets the box-perimeter flows (sc-tank-flow/sc-space-flow), not just sc-flow/sc-rflow");
+  assert.match(SOURCE, /function clearSchematic\(\)[\s\S]*?classList\.add\("no-room"\)/,
+    "the total no-data path also expands the emitter bars instead of retaining the previous room layout");
   assert.match(style, /svg \.sc-sg-request-box \{[^}]*fill:\s*var\(--hatch\)/,
     "inactive Boost pill uses the neutral light-grey fill");
   assert.match(style, /\.sg-boost-on \.sc-sg-request-box \{[^}]*stroke:\s*var\(--src-mb\)/,
