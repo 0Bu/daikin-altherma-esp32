@@ -185,7 +185,7 @@ It selects the pressure→saturation-temperature curve for `conv 405/406`.
 | 5 | Auto Cool | 11–18 | Use-stored-thermostat (cool 1–4 / heat 1–4) |
 
 Indices **0 and 1 are measured**; the rest are the recovered split-air-conditioner vocabulary and are
-**unverified on a hydronic unit**. Index 0 read `Fan Only` until #216 — a mode an Altherma does not
+**unverified on a hydronic unit**. Index 0 read `Fan Only` until legacy-216 — a mode an Altherma does not
 have, and the value an idle outdoor unit reports, so it was the entry a user saw most of the day.
 Corrected against a live Altherma 3 R W (`1.0.0-dev.211`), page `0x10` captured across the
 stopped→running edge by `logic/raw_capture.hpp`:
@@ -306,23 +306,23 @@ the I/U capacity code (`0x60` offset 6).
 | 12 | 1 | 311 | s0-2 |  | Not in use |
 
 > **RESOLVED — `Target Evap. Temp.` (offset 6) is encoded `÷128`, not `×0.1`; the row is decoded
-> with conv `109`** ([#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194),
-> [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209)). With conv `114` this row read
+> with conv `109`** (legacy-194,
+> legacy-209). With conv `114` this row read
 > **240.6 °C at rest** and **145.9 → 199.6 °C while the compressor runs** — impossible for an
 > evaporating temperature, and the run-time values land *inside* `reading_plausible()`'s ±200 °C
-> envelope, so nothing masked them. #194 ruled out offset shift, endianness, width and catalog drift
+> envelope, so nothing masked them. legacy-194 ruled out offset shift, endianness, width and catalog drift
 > and stopped at two surviving scales, `×0.01` and `÷128`, calling for run-time wire bytes to decide.
 >
 > They were decidable without new capture. conv 114 publishes `raw × 0.1` at one decimal, so every
 > value this row has ever published carries its 16-bit register **exactly** (`raw = published × 10`)
-> — #194's assumption that the published figures were lossily rounded is what kept it open. Taking
+> — legacy-194's assumption that the published figures were lossily rounded is what kept it open. Taking
 > the 46 distinct run-time integers from the stored series together with the 8 distinct at-rest
 > integers from the boot-time page dumps gives 54 samples, and **all 54 satisfy
 > `raw == floor(128 × T)` for `T` on an exact 0.1 K grid**. The set `{floor(12.8k)}` has density
 > 1/12.8 among the integers, so that is p ≈ 1.6 × 10⁻⁶⁰ against any other scale. `×0.01` produces no
 > such grid (22.01, 22.14, 22.40, 23.04 …), and the physical argument that favoured it — 24.06 °C at
 > rest against "a measured 22.5–23.0 °C ambient" — compared against the X10A outdoor reading, which
-> #209 later proved is **held over** while the unit rests (`logic/ou_stale.hpp`). Against the
+> legacy-209 later proved is **held over** while the unit rests (`logic/ou_stale.hpp`). Against the
 > independent HomeHub sensor the row does not track ambient at all.
 >
 > | | conv 114 (`×0.1`) | conv 109 (`÷128`) |
@@ -353,10 +353,10 @@ the I/U capacity code (`0x60` offset 6).
 > the correction is keyed on the register, not the name.
 
 > Same page, same converter, separate verdict: `Target Cond. Temp.` (offset 8) publishes a flat
-> `0.0 °C` — one distinct value across a full #209 audit window while the
-> inverter reached 32 rps and the discharge pipe passed 100 °C, and "reads 0.0 even mid-run" in #194.
+> `0.0 °C` — one distinct value across a full legacy-209 audit window while the
+> inverter reached 32 rps and the discharge pipe passed 100 °C, and "reads 0.0 even mid-run" in legacy-194.
 > (Both audits ran against the SAME board, which detection has always resolved to
-> `altherma_ebla_edla_d_series_4_8kw_monobloc`; the "two families" reading of #209 took the hardware
+> `altherma_ebla_edla_d_series_4_8kw_monobloc`; the "two families" reading of legacy-209 took the hardware
 > identification in its scope section for the running profile.) There, `logic/ou_stale.hpp` already records it as a useless witness for that reason. Raw
 > is `0x0000`, which conv 114's `0x8000` no-data marker does not cover. The row is **not**
 > quarantined — the field can legitimately be populated — but an exact decoded zero from it is
@@ -400,7 +400,7 @@ the I/U capacity code (`0x60` offset 6).
 | 8 | 2 | 105 |  | °C | Fan2 Fin temp. |
 | 10 | 2 | 105 |  | °C | Compressor outlet temperature |
 
-> **Unpopulated on the audited unit (#224).** Offsets 6, 8 and 10 publish exactly `0.0 °C` and
+> **Unpopulated on the audited unit (legacy-224).** Offsets 6, 8 and 10 publish exactly `0.0 °C` and
 > nothing else. The measurement behind that is stronger than "it reads zero", because of *which*
 > samples it is made of: this page stops being refreshed while the outdoor unit rests
 > (`logic/ou_stale.hpp`), so every stored sample is a **running** sample — 1140 over 7 days, and in
@@ -459,7 +459,7 @@ the I/U capacity code (`0x60` offset 6).
 | 13 | 1 | 300 | 0 |  | Powerful bit (MT setting bit) |
 | 14 | 2 | 105 |  | °C | Compressor port temperature |
 
-> **Absent second-outdoor-unit signature (#224).** On the audited installation this page answers
+> **Absent second-outdoor-unit signature (legacy-224).** On the audited installation this page answers
 > `00 00 80 0c 00 00 00 00 00 00 ff ff 00 00 00 00` — and both non-zero fields are themselves
 > absence markers: the O/U MPU id at offsets 10-11 reads `0xFFFF` (no MPU answers from that bus
 > position) and the two operation words at 12-13 have never had a bit set. `logic/availability.hpp`
@@ -495,7 +495,7 @@ the I/U capacity code (`0x60` offset 6).
 | 9 | 1 | 301 | 1 |  | Hydro split setting |
 | 9 | 1 | 300 | 0 |  | Alterma LT setting |
 
-> **Absent second-outdoor-unit signature (#224).** On the audited installation this complete page
+> **Absent second-outdoor-unit signature (legacy-224).** On the audited installation this complete page
 > answered with 16 zero bytes through a real DHW compressor cycle — including all unit-family flags
 > at offset 9. `logic/availability.hpp` (`PAGE_ABSENCE_RULES`, signature `AllBytesZero`) therefore
 > withholds **every row on this page** while the complete reply through byte 9 is all zero. This is

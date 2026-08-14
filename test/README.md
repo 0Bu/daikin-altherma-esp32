@@ -184,7 +184,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/lwt_select.hpp` — the web UI's leaving-water MEASUREMENT picker (twin of `www/js/schematic.js`
   `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable
-  profile resolves a real measurement and never a setpoint (issue #121, the #35–#39 failure shape).
+  profile resolves a real measurement and never a setpoint (issue legacy-121, the legacy-35–39 failure shape).
 - `logic/mqtt_publish_gate.hpp` — an unwired board may connect/subscribe without an installation
   LWT but cannot publish; the first X10A proof promotes it, a one-cycle dropout is absorbed using the
   monotonic last-good age, and an active board publishes one offline transition only after 15 seconds
@@ -195,7 +195,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   order and indices, the resolved page mask equals the base page mask on every profile (so detection
   cannot move), the 11 rows decode end-to-end through the real converter (`0x95` → 1 discharge retry
   and 5 INV-current retries, with the drop flag ON and its neighbour OFF), and no row's `object_id`
-  collides with one the profile already has. The page-`0x10` catalog guard armed vacuous in PR #111 —
+  collides with one the profile already has. The page-`0x10` catalog guard armed vacuous in PR legacy-111 —
   size 1, conv ∈ {303,307,310,311}, never °C — is now live over the resolved view.
 - `logic/feature_gate.hpp` — *disable, never degrade*: which derived features may honestly run on the
   detected model, decided from the rows. Asserted against the whole catalog: `generic` has no
@@ -209,7 +209,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `def/registry.hpp` — profile lookup + generic fallback.
 - `logic/detect.hpp` — capacity class parsed out of a profile id, page-mask fingerprint → candidate
   narrowing + the deterministic `detect_best` pick (Altherma-only), EEPROM hex render. Deterministic
-  now means **order-independent** (#230 B): the last tie-break is the lowest profile id rather than
+  now means **order-independent** (legacy-230 B): the last tie-break is the lowest profile id rather than
   registry order, so `test_tie_break_order_independence()` permutes the signature array and requires
   the same pick — a label is an entity id and a series name, so a reordered table must not be able to
   move one. `test_tie_break_reach()` freezes the identifiers a tie-break can still decide on a

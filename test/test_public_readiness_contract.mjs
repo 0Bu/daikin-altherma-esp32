@@ -85,8 +85,29 @@ try {
       `public-readiness audit rejected ${name} for the wrong reason`);
   }
   fs.writeFileSync(seedFile, originalSeedFile);
+
+  const contributingFile = path.join(seededRoot, "CONTRIBUTING.md");
+  const originalContributing = fs.readFileSync(contributingFile, "utf8");
+  const provenanceSeeds = [
+    ["numbered predecessor URL",
+      "https://github.com/0Bu/daikin-altherma-esp32/issues/123",
+      /numbered private-predecessor work item/],
+    ["bare predecessor number", "Historical regression (see #123).", /bare predecessor #N reference/],
+  ];
+  for (const [name, seed, expected] of provenanceSeeds) {
+    fs.writeFileSync(contributingFile, `${originalContributing}\n${seed}\n`);
+    const seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
+      cwd: seededRoot,
+      env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
+      encoding: "utf8",
+    });
+    assert.notEqual(seeded.status, 0, `public-readiness audit accepted ${name}`);
+    assert.match(`${seeded.stdout}\n${seeded.stderr}`, expected,
+      `public-readiness audit rejected ${name} for the wrong reason`);
+  }
+  fs.writeFileSync(contributingFile, originalContributing);
   console.log(
-    "public readiness: Node + Git/no-rg baseline and four private-shaped fixture mutations pass",
+    "public readiness: Node + Git/no-rg baseline, four private fixtures, and two legacy-link mutations pass",
   );
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });

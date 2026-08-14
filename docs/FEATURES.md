@@ -486,11 +486,11 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   inherits the full count never starts the poll engine or the MQTT bridge, which both frees what
   those two were holding and bounds the ladder by construction (safe mode creates no poll task, and
   the sampler is only called from it). That replaced a stay-up state measured on hardware to lose
-  HTTP entirely within ~7 minutes — the recovery surface the cap existed to keep (#407);
+  HTTP entirely within ~7 minutes — the recovery surface the cap existed to keep (legacy-407);
   `/status.sys.safe_mode_cause` separates it from a crash loop, because the two need opposite advice. Arming and recovering ask **different thresholds** — a run opens under 4 KB and
   closes only above 8 KB — because answering both with one number let a heap hovering *at* the line
   reset its own countdown on ordinary allocator churn and never restart, measured on hardware while
-  `/status` and `/values` were already answering 503 (#399); the `Armed`/`Recovered` narration is
+  `/status` and `/values` were already answering 503 (legacy-399); the `Armed`/`Recovered` narration is
   throttled like the countdown line for the same 6 KB-diag-ring reason, with suppressed transitions
   counted rather than dropped silently. Two deliberate limits: **`MALLOC_CAP_INTERNAL`**, not `MALLOC_CAP_DEFAULT` —
   the latter answers from PSRAM on a board that has it, so every largest-block figure in the firmware
@@ -526,7 +526,7 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   The reset reason rides as a slug **and** as numbers, because a metrics pipeline keeps numeric
   fields and drops strings. `bus_ou_held_over` reports **source** freshness rather than link health.
   `mqtt_skipped` / `mqtt_quiesced` / `poll_skipped` count the 1 s cycles that produced **nothing** —
-  an OOM guard catch, a deliberate OTA/weather TLS hold-off, and a sweep that never reached the bus (#380). They
+  an OOM guard catch, a deliberate OTA/weather TLS hold-off, and a sweep that never reached the bus (legacy-380). They
   are the counters that made a silent loss visible: 337 dropped publishes in 30 days had existed only
   as lines in a `/diag` ring the next chatty boot overwrites. `heap_restarts` — the 22nd entity —
   attributes the one reboot nothing else can: the heap watchdog restarts with `esp_restart()`, so
@@ -539,7 +539,7 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   headroom. Payload-only: the audience for a headroom trend is whoever upgrades the firmware.
 - **✅ 🧪 Always-on system health**: `/status.sys` carries heap headroom, the since-boot low-water
   mark, the largest contiguous block, the heap-watchdog restart count, per-task stack headroom
-  (`stack_min_free_bytes`), the three #380 cycle-loss counters, the reset-reason slug and the
+  (`stack_min_free_bytes`), the three legacy-380 cycle-loss counters, the reset-reason slug and the
   safe-mode flag. Unlike
   `last_crash` it is present on **every** boot, and unlike the heartbeat it needs **no broker** —
   which is why the stack figures are here too: every MQTT publish is X10A-gated, so a board with a
