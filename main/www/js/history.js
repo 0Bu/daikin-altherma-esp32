@@ -663,45 +663,6 @@ function stateRuns(series, wanted, classify) {
   return out;
 }
 
-function categoricalLevel(cfg, value) {
-  if (value == null) return null;
-  return (cfg.levels || []).find((level) => level.match(value) === true) || null;
-}
-
-// A paired X10A/HomeHub state is one physical/logical story with two witnesses. Collapse it to one
-// visual lane without collapsing the evidence: agreement uses the ordinary state colour; one valid
-// witness uses that state translucently; disagreement uses the authoritative source's state colour
-// with a warning hatch; neither valid leaves the normal missing-data hatch. The tooltip still reads
-// both original rings, so this display-only fold never changes source data or arbitration.
-function pairedStateSamples(view, cfg) {
-  const x10a = view.series.find((s) => s.source === "x10a");
-  const modbus = view.series.find((s) => s.source === "modbus");
-  if (!x10a || !modbus) return null;
-  const primary = cfg.primary === "modbus" ? modbus : x10a;
-  return Array.from({ length: view.v.length }, (_, i) => {
-    const readings = [x10a, modbus].map((series) => ({
-      series, level: categoricalLevel(cfg, series.v[i]),
-    }));
-    const valid = readings.filter((reading) => reading.level);
-    if (!valid.length) return { level: null, evidence: "missing" };
-    if (valid.length === 1) return { level: valid[0].level, evidence: "single" };
-    const primaryReading = readings.find((reading) => reading.series === primary);
-    const level = primaryReading?.level || valid[0].level;
-    const agrees = valid.every((reading) => reading.level.cls === valid[0].level.cls);
-    return { level, evidence: agrees ? "agreement" : "conflict" };
-  });
-}
-
-function valueRuns(values, key) {
-  const out = [];
-  for (let i = 0; i < values.length; i++) {
-    const wanted = key(values[i]);
-    const from = i;
-    while (i + 1 < values.length && key(values[i + 1]) === wanted) i++;
-    out.push([from, i - from + 1, values[from]]);
-  }
-  return out;
-}
 // `bound` renders a LOWER BOUND rather than a measurement, and the difference is not cosmetic.
 // Rounding to nearest is right for a phase duration off the chart — that is a measured span and the
 // nearest minute is the closest true statement about it. It is WRONG for a bound: a run measured at
@@ -800,9 +761,8 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const recordedN = view.recordedN ?? n;
   const spanH = Math.max(1, Math.round((recordedN * view.dt) / 3600));
   const full = recordedN * view.dt >= 23.5 * 3600;
-  // Totals retain the concept's authoritative source even when the two witnesses are drawn as one
-  // lane. A translucent fallback sample is useful evidence, but it must not silently contribute to
-  // a duration owned by the missing primary source.
+  // Totals retain the concept's authoritative source. The independent lanes remain diagnostic
+  // witnesses and must not silently pool their durations into one apparently exact number.
   const primary = view.series.find((s) => s.source === cfg.primary) || view.series[0];
   const recordedPrimary = { ...primary, v: primary.v.slice(0, recordedN) };
   const active = stateRuns(recordedPrimary, true, cfg.classify);
@@ -810,55 +770,32 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const inactive = stateRuns(recordedPrimary, false, cfg.classify);
   const inactiveSeconds = inactive.reduce((sum, r) => sum + r[1] * view.dt, 0);
   const pct = (i) => ((i / n) * 100).toFixed(3);
-  const paired = pairedStateSamples(view, cfg);
   const current = view.liveIndex == null ? ""
     : `<span class="vhist-state-current" style="left:${pct(view.liveIndex)}%;width:${pct(1)}%"></span>`;
-  let tracks;
-  if (paired) {
-    const spans = valueRuns(paired, (sample) => `${sample.level?.cls || ""}/${sample.evidence}`)
-      .map(([from, count, sample]) => sample.evidence === "missing"
-        ? `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`
-        : `<span class="vhist-state-on ${sample.level.cls}` +
-          `${sample.evidence === "single" ? " state-source-single" : ""}` +
-          `${sample.evidence === "conflict" ? " state-source-conflict" : ""}` +
-          `" style="left:${pct(from)}%;width:${pct(count)}%"></span>`
-      ).join("");
-    tracks = `<div class="vhist-state-lane vhist-state-lane-combined">` +
-      `<div class="vhist-state-track combined" aria-hidden="true">${spans}${current}</div>` +
+  // historyView() orders X10A before Modbus. Render that order directly so neither source can
+  // repaint, fill in or conceal the other's status. Missing intervals stay hatched in their own
+  // lane, and disagreements are visible as different colours at the same point in time.
+  const tracks = view.series.map((s) => {
+    const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
+    const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
+      `<span class="vhist-state-on${level.cls ? " " + level.cls : ""}" ` +
+      `style="left:${pct(from)}%;width:${pct(count)}%"></span>`
+    )).join("");
+    const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
+      `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
+    const sourceLabel = s.source === "modbus" ? "Modbus" : s.name;
+    return `<div class="vhist-state-lane">` +
+      `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${sourceLabel}</span>` +
+      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}</div>` +
     `</div>`;
-  } else {
-    tracks = view.series.map((s) => {
-      const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
-      const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
-        `<span class="vhist-state-on${level.cls ? " " + level.cls : ""}" ` +
-        `style="left:${pct(from)}%;width:${pct(count)}%"></span>`
-      )).join("");
-      const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
-        `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
-      const sourceLabel = s.source === "modbus" ? "Modbus" : s.name;
-      return `<div class="vhist-state-lane">` +
-        `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${sourceLabel}</span>` +
-        `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}</div>` +
-      `</div>`;
-    }).join("");
-  }
-  const evidence = paired ? new Set(paired.map((sample) => sample.evidence)) : null;
-  const gaps = paired
-    ? valueRuns(paired, (sample) => sample.evidence).filter((run) => run[2].evidence === "missing").length
-    : stateRuns(recordedPrimary, null, cfg.classify).length;
-  const evidenceLegend = !paired ? ""
-    : (evidence.has("conflict")
-      ? `<span class="vhist-level state-source-conflict"><i></i>${esc(t("hist.sources_differ"))}</span>` : "") +
-      (evidence.has("single")
-      ? `<span class="vhist-level state-source-single"><i></i>${esc(t("hist.single_source"))}</span>` : "") +
-      (evidence.has("missing")
-      ? `<span class="vhist-level state-unavailable"><i></i>${esc(t(cfg.missing || "hist.nm"))}</span>` : "");
+  }).join("");
+  const gaps = stateRuns(recordedPrimary, null, cfg.classify).length;
+  const hasMissing = view.series.some((s) => stateRuns(s, null, cfg.classify).length > 0);
   const levelLegend = cfg.levels
     ? `<div class="vhist-legend vhist-level-legend">${cfg.levels.map((level) =>
         `<span class="vhist-level ${level.cls}"><i></i>${esc(t(level.label))}</span>`).join("")}` +
-        (!paired && cfg.missing
-          ? `<span class="vhist-level state-unavailable"><i></i>${esc(t(cfg.missing))}</span>` : "") +
-        evidenceLegend +
+        (hasMissing
+          ? `<span class="vhist-level state-unavailable"><i></i>${esc(t(cfg.missing || "hist.nm"))}</span>` : "") +
       `</div>`
     : "";
 
@@ -1377,9 +1314,9 @@ function scrubText(h, i) {
   }
   const cfg = STATE_HIST[h.id];
   if (cfg) {
-    // A deliberately source-filtered BOOST/BSH/BUH view stays terse. A paired view must name BOTH
-    // witnesses instead: the chart has folded them to one lane, so the tooltip is now the only place
-    // where agreement, fallback or disagreement can be audited without guessing.
+    // A deliberately source-filtered BOOST/BSH/BUH view stays terse. A paired view names BOTH
+    // witnesses instead, matching the two labelled lanes and keeping their exact phase details
+    // available without guessing from colours alone.
     if (cfg.compactTooltip && h.series.length === 1) {
       const primary = h.series.find((s) => s.source === cfg.primary) || h.series[0];
       const v = primary.v[i];
@@ -1401,7 +1338,7 @@ function scrubText(h, i) {
     // containing phase — source, state, start/end and sampled duration — while the chart itself
     // stays compact. Source, state and timing form deliberate vertical rows; timing and duration
     // share one row because they describe the same interval. Paired instruments always retain one
-    // block each, even when they agree: their names have intentionally disappeared from the chart.
+    // block each, even when they agree, matching their independent source-labelled lanes.
     const blocks = h.series.map((s) => {
       if (h.liveIndex === i) return {
         source: s.source === "modbus" ? "Modbus" : s.name,
