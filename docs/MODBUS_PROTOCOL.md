@@ -122,6 +122,8 @@ Read today (UC3 Daikin Altherma):
   outdoor air `44`, liquid refrigerant `45`, room `50`
 * **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100), whole-system electrical
   input `51` (`Pow16`, kW). Offset `51` is not dedicated booster-heater power.
+* **Disinfection state** (input): current disinfection operation `33` (`Int16`, binary). The
+  HomeHub map does not expose the configured weekday, start time or disinfection temperature.
 * **Setpoints and modes** (holding, read back): LWT main heating `1` / cooling `2`,
   operation mode `3`, space heating ON/OFF `4`, room thermostat heating `6` / cooling `7`, quiet mode
   `9`, DHW reheat setpoint `10`, LWT heating offset `54`, Smart-Grid mode `56`, power limits `57`/`58`
@@ -141,6 +143,7 @@ Modbus constants; the names below are applied only by the visual UI and come fro
 | input `30` | Circulation pump running | binary `0`/`1`, displayed `OFF`/`ON` |
 | input `31` | Compressor running | binary `0`/`1`, displayed `OFF`/`ON` |
 | input `32` | Booster heater running (DHW tank immersion heater) | binary `0`/`1`, displayed `OFF`/`ON` |
+| input `33` | Tank disinfection operation | binary `0`/`1`, displayed `OFF`/`ON` |
 | input `37` | 3-way valve | `0` / `1` → Space heating / DHW |
 | input `38` | Current operation mode (API label disambiguates the guide's second "Operation mode") | `1` / `2` → Heating / Cooling |
 | input `52` / `53` | DHW / space operation | binary `0`/`1`, displayed `OFF`/`ON` |
@@ -152,7 +155,7 @@ The four enums retain their raw integer in `homehub_format()`, `/values`, MCP an
 carries a separate structural `enum` id so the browser can localise a known
 state; an undocumented number remains visible as `Unknown (N)` instead of being silently coerced.
 The flat MQTT payload therefore contains, for example,
-`"smart_grid_operation_mode":2`, never `"smart_grid_operation_mode":"Recommended on"`. The seven
+`"smart_grid_operation_mode":2`, never `"smart_grid_operation_mode":"Recommended on"`. The eight
 true flags retain the same numeric `0`/`1` contract plus the structural `binary:true` marker, and
 only the visual boundary prints `OFF`/`ON`.
 
@@ -188,15 +191,15 @@ What that buys, concretely:
 | Task | `hp_poll` (8192) | `hp_modbus` (6144, only when an address is saved) |
 | Cache | `hp_values_snapshot()` | `mb_values_snapshot()` |
 | State | `/status.hp` | `/status.modbus` |
-| Rows | ~100 | 31 |
+| Rows | ~100 | 32 |
 | Fails on | cable · pin · framing | LAN · mDNS · hub |
 
 ## What one cycle asks for
 
 The hub is **shared**. The Onecta app, the unit's MMI, evcc and any metrics collector on the LAN all
 talk to the same `:502`, so how much this firmware asks for is a question about someone else's
-device, not only about ours. It used to ask for one register per request, once per second: **31 MBAP
-round-trips a second, ~2.7 million a day**, for a map whose fastest-moving member is a water
+device, not only about ours. It used to ask for one register per request, once per second: **32 MBAP
+round-trips a second, ~2.8 million a day**, for a map whose fastest-moving member is a water
 temperature.
 
 [`main/logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp) is the answer, and it is pure so that
@@ -205,7 +208,7 @@ register short stops refreshing the last row of every batch (the row still decod
 publishes; it is merely frozen), and a cadence that never fires a full cycle leaves the cache at
 whatever the first cycle read.
 
-* **Batching.** The 31 EKRHH offsets fall into **ten contiguous runs** across the two function
+* **Batching.** The 32 EKRHH offsets fall into **ten contiguous runs** across the two function
   spaces, so a full cycle is ten requests. The per-request cap is 16 registers, far below the
   protocol's 125: a batch is the unit of *loss* as much as of saving, and the longest run here is six.
 * **Two cadences.** A **full** cycle every fifth poll tick; the four between it read three fast
@@ -232,7 +235,7 @@ whatever the first cycle read.
   otherwise `/status`, `/diag` and Syslog would oscillate between failure and recovery every five
   seconds without evidence that the row recovered.
 
-**31 → 4.4 requests/poll-second, ~380 000 a day.** The plan is resolved at compile time and lives in flash;
+**32 → 4.4 requests/poll-second, ~380 000 a day.** The plan is resolved at compile time and lives in flash;
 `hp_modbus.cpp` `static_assert`s that batching still collapses the map, so a future register added
 into a gap re-prices the link visibly instead of quietly restoring the per-register sweep.
 
@@ -265,13 +268,17 @@ booster-heater run (HomeHub input `32` ↔ X10A BSH converter `305`) and 3-way-v
 purpose, each for a stated reason: the real power measurement has
 no X10A equivalent at all (X10A estimates it from CT clamps at an assumed 230 V, so pairing a
 measurement with an estimate would hide which is which); other setpoints, modes and faults are not readings.
+Disinfection input `33` is likewise deliberately unpaired: X10A `0x62/8` converter `303` is named
+**Tank preheat**, a preparatory state rather than proof that disinfection is active. Both receive
+their own event timeline, so their timing can be compared without merging their meaning.
 
 ## Where the readings go
 
 `/values` carries the two sources as **two arrays** — `values` (X10A) and `modbus` — mirroring the two
 stacks. They are not merged: the two have separate liveness, and merging would make "is this reading
 current?" a per-row question no consumer could answer. Each row on both sides carries its `concept`
-where one exists.
+where one exists; a Modbus-only timeline additionally carries `history` without acquiring a false
+X10A pairing.
 
 The `modbus` array is emitted **only while the link is live at the moment the snapshot is taken** —
 not merely while the stack is configured, and not merely while it was connected when the request

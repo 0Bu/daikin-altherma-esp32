@@ -608,10 +608,10 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
   value encoder exists anywhere under `main/`.
 - **✅ 🧪 Batched reads on two cadences** ([`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp)):
   the hub is **shared** — Onecta, the MMI, evcc and any LAN collector use the same `:502` — so what
-  this firmware asks for is a question about someone else's device. The 31 EKRHH offsets fall into
+  this firmware asks for is a question about someone else's device. The 32 EKRHH offsets fall into
   ten contiguous runs. The two diagnosis gates (input 53 and 38) and the plant-outdoor context
   (input 44) are time-sensitive, so a **full** cycle is ten requests every fifth poll tick and the
-  ticks between it read their three batches alone: **31 → ~4.4 requests/s**. A fast cycle commits
+  ticks between it read their three batches alone: **32 → ~4.4 requests/s**. A fast cycle commits
   only those two gates and that context — its thirteen registers are not a general cache — and a
   batch answered with a Modbus exception is re-read register by
   register for the rest of the session, because an exception names one register and a batch cannot

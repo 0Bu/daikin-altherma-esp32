@@ -8,11 +8,11 @@
 // stood.
 //
 // ── Why a scalar and not a ring ─────────────────────────────────────────────────────────────────
-// logic/history.hpp already answers a richer version of this for NINE rows (`defrost_state`,
+// logic/history.hpp already answers a richer version of this for several rows (`defrost_state`,
 // `bsh_state`, `valve_dhw`, …): a 24-hour categorical timeline whose tooltip names phase start, end
 // and sampled duration. It is the better answer where it exists and this header does not compete
 // with it. What it cannot be is EXTENDED to the rest: a ring costs HISTORY_BYTES_PER_TREND (576 B)
-// and the trend budget is exactly full (TREND_COUNT * 576 == 17856, the static_assert ceiling), the
+// and the trend budget is exactly full (TREND_COUNT * 576 == 18432, the static_assert ceiling), the
 // rows in question are not on the schematic and so are excluded by that file's own selection rule,
 // and each one would need a hand-written browser legend. A dwell is ~16 bytes and answers the
 // question that was actually asked.

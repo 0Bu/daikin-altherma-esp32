@@ -82,14 +82,14 @@ struct PersistedHistory {
     uint32_t mb_target_fp;  // host/port/unit identity for the .noinit HomeHub rings
 
     Trend ring[TREND_COUNT];
-    // Eight paired HomeHub measurements plus BSH, 3-way-valve, Quiet and Smart-Grid states get a
-    // second ring. Unlike X10A trends,
+    // Eight paired HomeHub measurements plus BSH, 3-way-valve, Quiet, Smart-Grid and the standalone
+    // disinfection state get a second ring. Unlike X10A trends,
     // their labels/units are fixed by def/homehub.hpp, so this side needs no per-ring string buffers.
     logic::TrendRing mb_ring[HOMEHUB_HISTORY_COUNT];
     logic::TrendRing env3_ring[ENV3_HISTORY_COUNT];
 };
-static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 6912,
-              "twelve HomeHub schematic histories should cost exactly 6912 bytes");
+static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 7488,
+              "thirteen HomeHub histories should cost exactly 7488 bytes");
 static_assert(ENV3_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 1728,
               "three ENV III histories should cost exactly 1728 bytes");
 
@@ -430,8 +430,7 @@ int64_t source_last_commit_us(HistorySource src) {
 
 // Which HomeHub ring is an EVENT timeline rather than a sampled state.
 bool homehub_event_ring(size_t idx) {
-    return idx < HOMEHUB_HISTORY_COUNT &&
-           logic::trend_cstr_eq(logic::HOMEHUB_HISTORIES[idx].trend_id, "bsh_state");
+    return idx < HOMEHUB_HISTORY_COUNT && logic::HOMEHUB_HISTORIES[idx].event;
 }
 
 // The ABSOLUTE (wall-clock) bucket of a source's newest committed sample, or INT64_MIN when there is
@@ -599,8 +598,8 @@ void history_reset() {
 // persisted to compare it against and the sweep always runs. Treating "detection resolved" as "the
 // observation identity changed" was therefore correct while the rings died at every reboot anyway —
 // and became wrong the moment .noinit started carrying them across one. Measured on the live board:
-// history_start() adopted all 46 rings ("persist":"accept"), and four seconds later this reset threw
-// the 31 X10A rings away again, leaving only HomeHub and ENV III. The feature delivered nothing on
+// history_start() adopted all rings ("persist":"accept"), and four seconds later this reset threw
+// the X10A rings away again, leaving only HomeHub and ENV III. The feature delivered nothing on
 // exactly the boards that have a heat pump attached.
 //
 // A board WITHOUT a bus never reaches this call — the profile stays "auto" — which is why the bench

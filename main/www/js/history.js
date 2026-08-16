@@ -1,15 +1,16 @@
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer. /status.history.rows names X10A rings;
-// modbus_rows names the eight paired HomeHub measurements plus BSH, 3-way-valve, Quiet and Smart-Grid
-// state timelines; env3_rows names temperature, humidity and pressure from the independent outdoor
+// modbus_rows names the paired HomeHub measurements/states plus Smart-Grid and the standalone
+// disinfection timeline; env3_rows names temperature, humidity and pressure from the independent outdoor
 // sensor.
 // The device keeps every source at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
 // would be an empty chart by design.
-// Each entry is {id, label}: the ID is the concept (logic/history.hpp's TRENDS — "dhw_tank",
-// "outdoor_air", "free_heap", …) and is what GET /history takes, while the LABEL is how this profile
+// Each entry is {id, label}: the ID is the stable history key GET /history takes. Paired sources
+// deliberately reuse logic/history.hpp's TRENDS ids ("dhw_tank", "outdoor_air", …); an honest
+// single-source timeline such as Modbus disinfection has its own id. The LABEL is how this profile
 // spells the row. Requesting by id keeps the route model-independent; matching by label is how a
-// rendered VALUE row finds its own trend. Adding a trend is a row in TRENDS — nothing here changes.
+// rendered X10A value row finds its own trend; HomeHub rows carry their explicit `history` id.
 //
 // Everything below is keyed by the ID, never by the label; the second instrument uses the explicit
 // `modbus:<id>` or `env3:<id>` namespace. A label is per-profile, so a cache keyed by it would be re-keyed by a
@@ -448,6 +449,30 @@ function historyView(id, source = "") {
 // Durations are explicitly sampled RASTER time. Event-folded BSH, BUH and defrost buckets keep an ON
 // observed during a five-minute bucket; they are not presented as second-accurate runtime.
 const STATE_HIST = Object.freeze({
+  tank_preheat_state: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "x10a", total: "hist.preheat_total", run: "hist.state_phase_run",
+    none: "hist.preheat_none", active: "hist.preheat_active", inactive: "hist.preheat_inactive",
+    aria: "hist.preheat_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.preheat_inactive" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "preheat-on", label: "hist.preheat_active" },
+    ],
+  },
+  disinfection_state: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "modbus", total: "hist.disinfection_total", run: "hist.state_phase_run",
+    none: "hist.disinfection_none", active: "hist.disinfection_active",
+    inactive: "hist.disinfection_inactive", aria: "hist.disinfection_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.disinfection_inactive" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "disinfection-on", label: "hist.disinfection_active" },
+    ],
+  },
   defrost_state: {
     classify: (v) => [0, 10].includes(v) ? v === 10 : null,
     primary: "x10a", total: "hist.defrost_total", run: "hist.state_phase_run",
@@ -604,7 +629,7 @@ function stateHistoryCurrent(id, source) {
       const mode = /^\d$/.test(raw) ? Number(raw) : -1;
       return { present: true, value: mode >= 0 && mode <= 3 ? mode * 10 : null };
     }
-    const row = S._modbus.find((r) => r && r.concept === id);
+    const row = S._modbus.find((r) => r && (r.history === id || r.concept === id));
     return { present: true, value: currentBinaryTenths(row) };
   }
 
@@ -1640,6 +1665,7 @@ const HOMEHUB_LABEL_DE = Object.freeze({
   30: "Umwälzpumpe aktiv",
   31: "Verdichter aktiv",
   32: "Heizstab aktiv",
+  33: "Speicherdesinfektion aktiv",
   37: "Position des 3-Wege-Ventils",
   38: "Aktueller Heiz- oder Kühlmodus",
   52: "Warmwasserbetrieb",
@@ -1991,7 +2017,8 @@ function modbusOnlyGroupHtml(all) {
     const val = esc(displayValue(m)) +
       (unit ? `<span class="vrow-unit">${esc(unit)}</span>` : "");
     const d = descFor(label, m);
-    const hid = m.concept && hasModbusHist(m.concept) ? m.concept : "";
+    const historyId = m.history || m.concept || "";
+    const hid = hasModbusHist(historyId) ? historyId : "";
     if (!d && !hid) {
       return `<div class="vrow"><span class="vrow-label">${esc(shown)}</span>` +
         `<span class="vrow-val src-val-mb">${val}</span></div>`;

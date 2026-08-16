@@ -81,6 +81,10 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
     // X10A's exact BSH bit. It is an ON/OFF fact only; offset 51 is whole-system electrical input and
     // must not be relabelled as this heater's own power.
     {32, MbFunc::ReadInput, MbType::Int16,  1, "",      "Booster heater run", HomeHubValueKind::Binary},
+    // EKRHH exposes the controller's actual disinfection phase directly. This is deliberately not
+    // paired with X10A "Tank preheat": preheating may precede a scheduled demand, but it does not
+    // prove that the anti-legionella/disinfection operation itself is active.
+    {33, MbFunc::ReadInput, MbType::Int16,  1, "",      "Disinfection operation", HomeHubValueKind::Binary},
     {37, MbFunc::ReadInput, MbType::Int16,  1, "",      "3-way valve", HomeHubValueKind::ThreeWayValve},
     // What the plant is DOING, which the gateway knows and the X10A-less drawing had to call
     // "unknown". Two flags rather than the single "operation mode" register (offset 38 / holding 3):

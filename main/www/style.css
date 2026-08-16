@@ -859,6 +859,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   background: var(--brand-sky);
 }
 .vhist-state-on.heater-on, .vhist-level.heater-on i,
+.vhist-state-on.preheat-on, .vhist-level.preheat-on i,
+.vhist-state-on.disinfection-on, .vhist-level.disinfection-on i,
 .vhist-state-on.step2, .vhist-level.step2 i,
 .vhist-state-on.valve-dhw, .vhist-level.valve-dhw i,
 .vhist-state-on.sg-forced-on, .vhist-level.sg-forced-on i {

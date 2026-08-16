@@ -72,7 +72,7 @@ inline constexpr uint16_t HISTORY_PERSIST_VERSION = 2;  // v2 binds .noinit Home
 // X10A persistence hostage.
 //
 // One record is page-aligned and large enough for the largest source's dense int16 vector. At the
-// current 31/12/3 rings this is 256 bytes: sixteen records share one erased sector. If the catalog
+// current 32/13/3 rings this is 256 bytes: sixteen records share one erased sector. If the catalog
 // grows past 96 rings in one source the expression moves the format to 512 bytes automatically; the
 // checked 72-hour capacity below then fails before a catalog can silently outgrow the reservation.
 inline constexpr uint32_t HISTORY_FLASH_PARTITION_OFFSET = 0x400000u;
