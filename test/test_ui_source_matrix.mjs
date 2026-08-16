@@ -277,6 +277,19 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.match(outdoorThermostat.what, /outdoor controller's own thermostat-state flag/i);
   assert.notEqual(indoorThermostat, outdoorThermostat,
     "the two identically labelled thermostat bits must keep distinct explanations");
+
+  // Ordinary /values rows carry their X10A register but only collision-ledger rows carry
+  // x10a_group. The observation-only P2 copy must therefore be located by register, otherwise the
+  // broad legacy catch-alls below it incorrectly claim a proven quiet level or solar function.
+  const lowNoiseObservation = c.descFor("Low noise control", { reg: 0x10 });
+  const solarObservation = c.descFor("Solar input", { reg: 0x60 });
+  const validatedSilentMode = c.descFor("Silent Mode", { reg: 0x60 });
+  assert.match(lowNoiseObservation.what, /level and trigger are unproven/i);
+  assert.match(solarObservation.what, /function and polarity are unproven/i);
+  assert.match(validatedSilentMode.what, /reduces outdoor-unit sound/i);
+  assert.notEqual(lowNoiseObservation, validatedSilentMode,
+    "the P2 bit must not inherit the validated Silent Mode explanation");
+
   const statusCtx = ctx({ x10a: true, mbEnabled: false, mbConnected: false, values: [
     { label: "Thermostat ON/OFF", value: "1", reg: 0x10, binary: true,
       x10a_group: "outdoor_state" },
