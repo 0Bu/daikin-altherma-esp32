@@ -2,12 +2,12 @@
 
 ESP-IDF 6.x firmware for the ESP32-S3 microcontroller (`daikin-altherma-esp32`). Communicates with Daikin Altherma heat pumps via the X10A service port and bridges data to Home Assistant via MQTT Discovery.
 
-> **Single Source of Truth:** Detailed AI knowledge is modularized under [`.ai/`](../.ai/):
-> - [`.ai/commands.md`](../.ai/commands.md) — Complete build, test, audit, flash, and debug commands
-> - [`.ai/conventions.md`](../.ai/conventions.md) — Coding conventions, memory safety, NVS rules, and review gates
-> - [`.ai/architecture.md`](../.ai/architecture.md) — Component map, memory architecture, flash layout, and HTTP API (trusted-LAN route count (36))
-> - [`.ai/domain.md`](../.ai/domain.md) — X10A protocol, converter semantics, physical correctness, and checkup logic
-> - [`AGENTS.md`](../AGENTS.md) — Universal multi-agent entry point
+> **Single Source of Truth:** Detailed AI knowledge is modularized under [`.ai/`](.ai/):
+> - [`.ai/commands.md`](.ai/commands.md) — Complete build, test, audit, flash, and debug commands
+> - [`.ai/conventions.md`](.ai/conventions.md) — Coding conventions, memory safety, NVS rules, and review gates
+> - [`.ai/architecture.md`](.ai/architecture.md) — Component map, memory architecture, flash layout, and HTTP API (trusted-LAN route count (36))
+> - [`.ai/domain.md`](.ai/domain.md) — X10A protocol, converter semantics, physical correctness, and checkup logic
+> - [`AGENTS.md`](AGENTS.md) — Universal multi-agent entry point
 
 ---
 

@@ -1,0 +1,34 @@
+---
+description: Central project rules, conventions, and architecture pointers for daikin-altherma-esp32
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Cursor Rules: `daikin-altherma-esp32`
+
+This project is an ESP-IDF firmware for the ESP32-S3 microcontroller interfacing with Daikin Altherma heat pumps over the X10A serial port.
+
+---
+
+## 1. Single Source of Truth (`.ai/`)
+
+All canonical AI documentation and guidelines are organized under [`.ai/`](../../.ai/):
+- [`.ai/commands.md`](../../.ai/commands.md) — Build, test, lint, flash, and debugging commands
+- [`.ai/conventions.md`](../../.ai/conventions.md) — Coding style, memory constraints, NVS rules, and review gates
+- [`.ai/architecture.md`](../../.ai/architecture.md) — Component map, memory layers, flash partitions, and HTTP API
+- [`.ai/domain.md`](../../.ai/domain.md) — X10A protocol, register semantics, physical correctness, and plant diagnostics
+- [`AGENTS.md`](../../AGENTS.md) — Universal agent entry point
+
+---
+
+## 2. Critical Development Invariants
+
+1. **Target:** ESP32-S3 exclusively (`esp32s3` target).
+2. **Logic Separation:** All decode, calculation, and state logic goes into `main/logic/` headers with unit test `CHECK` macros in `test/test_logic.cpp`.
+3. **No Hand-Editing `main/def/`:** Profiles and signatures in `main/def/` are machine-generated.
+4. **Memory & Concurrency Safety:**
+   - Contiguous internal DRAM (`MALLOC_CAP_INTERNAL`) is tight.
+   - Build JSON via `+=` appends, never chained `a + b + c` expressions.
+   - Wrap HTTP handlers in OOM guards (`handle_all` returning 503).
+   - Never allocate memory inside a FreeRTOS mutex critical section.
+5. **Local Verification:** Run `./scripts/run-mock-tests.sh --coverage` and `./scripts/run-contract-tests.sh` to verify changes without hardware.
