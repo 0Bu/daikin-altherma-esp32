@@ -71,6 +71,7 @@ const S = {
       { id: "defrost_state", label: "Defrost Operation" },
       { id: "quiet_state", label: "Silent Mode" },
       { id: "bsh_state", label: "BSH" },
+      { id: "tank_preheat_state", label: "Tank preheat ON/OFF" },
       { id: "buh_step1", label: "BUH Step1" },
       { id: "buh_step2", label: "BUH Step2" },
       { id: "valve_dhw", label: "3way valve(On:DHW_Off:Space)" },
@@ -86,6 +87,7 @@ const S = {
       { id: "bsh_state", label: "Booster heater run" },
       { id: "valve_dhw", label: "3-way valve" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
+      { id: "disinfection_state", label: "Disinfection operation" },
     ],
     env3_rows: [{ id: "temperature", label: "Temperature" }],
   }, ntp: { synced: true } },
@@ -143,6 +145,16 @@ const context = {
     if (key === "hist.heater_active") return "Heizstab aktiv";
     if (key === "hist.heater_inactive") return "Heizstab aus";
     if (key === "hist.heater_aria") return `${arg} — Heizstab-Verlauf. ${arg2}`;
+    if (key === "hist.preheat_total") return `Speichervorheizung aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.preheat_none") return "Keine Speichervorheizung erfasst.";
+    if (key === "hist.preheat_active") return "Speichervorheizung aktiv";
+    if (key === "hist.preheat_inactive") return "Speichervorheizung aus";
+    if (key === "hist.preheat_aria") return `${arg} — X10A-Vorheizverlauf. ${arg2}`;
+    if (key === "hist.disinfection_total") return `Desinfektion aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.disinfection_none") return "Keine Speicherdesinfektion erfasst.";
+    if (key === "hist.disinfection_active") return "Desinfektion aktiv";
+    if (key === "hist.disinfection_inactive") return "Desinfektion aus";
+    if (key === "hist.disinfection_aria") return `${arg} — HomeHub-Desinfektionsverlauf. ${arg2}`;
     if (key === "hist.buh_total") return `Zusatzheizer aktiv erfasst · ${arg} Rasterzeit`;
     if (key === "hist.buh_none") return "Kein Zusatzheizereinsatz erfasst.";
     if (key === "hist.buh_active") return "Zusatzheizer aktiv";
@@ -463,6 +475,25 @@ assert.match(bshX10aHtml, /data-source="x10a"/);
 assert.match(h.scrubText(bshX10aView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
 assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/);
 
+// Related does not mean equivalent: X10A tank preheat and HomeHub disinfection retain separate ids,
+// source lanes and state wording. Neither one may be overlaid as the other's second witness.
+S.hist.set("tank_preheat_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000,
+  b0: 200, held: [], v: [0, 10, 0, 0] });
+S.hist.set("modbus:disinfection_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000,
+  b0: 200, held: [], v: [0, 0, 10, 0] });
+assert.equal(h.hasHist("tank_preheat_state"), true);
+assert.equal(h.hasModbusHist("tank_preheat_state"), false);
+assert.equal(h.hasHist("disinfection_state"), false);
+assert.equal(h.hasModbusHist("disinfection_state"), true);
+const preheatHtml = h.histHtml("tank_preheat_state", "", "Speichervorheizung");
+const disinfectionHtml = h.histHtml("disinfection_state", "", "Speicherdesinfektion");
+assert.match(preheatHtml, /vhist-state-lane-label">X10A/);
+assert.match(preheatHtml, /vhist-state-on preheat-on/);
+assert.doesNotMatch(preheatHtml, /HomeHub · Modbus|Desinfektion aktiv/);
+assert.match(disinfectionHtml, /vhist-state-lane-label mb">Modbus/);
+assert.match(disinfectionHtml, /vhist-state-on disinfection-on/);
+assert.doesNotMatch(disinfectionHtml, />X10A<|Speichervorheizung aktiv/);
+
 // Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet keeps its paired
 // witnesses in two independent lanes so gaps and disagreements remain directly visible.
 S.hist.set("defrost_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
@@ -580,6 +611,7 @@ S._values = [
   { concept: "defrost_state", binary: true, value: 1 },
   { concept: "quiet_state", binary: true, value: 1 },
   { concept: "bsh_state", binary: true, value: 1 },
+  { concept: "tank_preheat_state", binary: true, value: 1 },
   { concept: "buh_step1", binary: true, value: 0 },
   { concept: "buh_step2", binary: true, value: 1 },
   { concept: "valve_dhw", binary: true, value: 1 },
@@ -593,6 +625,7 @@ S._modbus = [
   { concept: "bsh_state", binary: true, value: 1 },
   { concept: "valve_dhw", binary: true, value: 1 },
   { off: 56, value: 2, enum: "smart_grid_mode" },
+  { off: 33, history: "disinfection_state", binary: true, value: 1 },
 ];
 S.hist.set("water_flow_switch", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000,
   b0: 200, held: [], v: [0, 0, 10, 0] });
@@ -601,6 +634,8 @@ const liveStateCases = [
   ["quiet_state", "x10a", 10],
   ["smart_grid_mode", "modbus", 20],
   ["bsh_state", "x10a", 10],
+  ["tank_preheat_state", "x10a", 10],
+  ["disinfection_state", "modbus", 10],
   ["buh_state", "x10a", 20],
   ["valve_dhw", "x10a", 10],
   ["circulation_state", "x10a", 10],

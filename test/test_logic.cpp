@@ -3954,7 +3954,7 @@ static void test_homehub() {
         if (r.kind == HomeHubValueKind::Number) CHECK(r.offset == 23);  // actual numeric sub-code
         else statuses++;
     }
-    CHECK(dimensionless == 13 && statuses == 12 && text_rows == 1);
+    CHECK(dimensionless == 14 && statuses == 13 && text_rows == 1);
 
     const HomeHubReg* compressor = find(31);
     CHECK(compressor && compressor->kind == HomeHubValueKind::Binary &&
@@ -4015,7 +4015,7 @@ static void test_homehub() {
           std::string(buf) == "-3");
 
     // Real flags keep numeric 1/0 at the API boundary and are marked structurally for ON/OFF UI.
-    for (uint16_t off : {30, 32, 52, 53, 4, 9}) {
+    for (uint16_t off : {30, 32, 33, 52, 53, 4, 9}) {
         const HomeHubReg* flag = find(off);
         CHECK(flag && homehub_is_binary(*flag));
         CHECK(!homehub_is_text(*flag));
@@ -4053,23 +4053,28 @@ static void test_homehub_map() {
         CHECK(trend_by_id(c.concept_id) != nullptr);
         CHECK(homehub_concept_index(c.concept_id) == static_cast<int>(i));
     }
-    // The history set repeats the eight measurement plus BSH, 3-way-valve and Quiet pairings, then
-    // adds one unpaired state: Smart-Grid mode. Every entry still names a real register and a real
-    // trend, and the lookup is exact.
-    CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 1);
+    // The history set repeats the paired concepts, adds the derived Smart-Grid state, then the
+    // deliberately Modbus-only disinfection operation. Every entry names a real register; only an
+    // entry declared as an X10A timeline may share a real TRENDS id.
+    CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 2);
     for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
         const auto& h = HOMEHUB_HISTORIES[i];
         bool reg_exists = false;
         for (int k = 0; k < daik::def::HOMEHUB_REG_COUNT; k++)
             if (daik::def::HOMEHUB_REGS[k].offset == h.offset) { reg_exists = true; break; }
         CHECK(reg_exists);
-        CHECK(trend_by_id(h.trend_id) != nullptr);
+        CHECK((trend_by_id(h.trend_id) != nullptr) == h.has_x10a);
         CHECK(homehub_history_index(h.trend_id) == static_cast<int>(i));
     }
-    CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].trend_id) == "smart_grid_mode");
-    CHECK(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].offset == 56);
+    CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].trend_id) == "disinfection_state");
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].offset == 33);
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].event);
+    CHECK(!HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].has_x10a);
     CHECK(homehub_history_index("valve_dhw") >= 0);
     CHECK(homehub_history_index("quiet_state") >= 0);
+    CHECK(homehub_history_index("disinfection_state") >= 0);
+    CHECK(std::string(homehub_history_for(33)) == "disinfection_state");
+    CHECK(homehub_history_for(51) == nullptr);
     CHECK(homehub_history_index("heat_pump_power") == -1);
     CHECK(homehub_history_index(nullptr) == -1);
     // Lookup both ways.
@@ -4081,6 +4086,7 @@ static void test_homehub_map() {
     CHECK(std::string(homehub_concept_for(37)) == "valve_dhw");
     CHECK(std::string(homehub_concept_for(9)) == "quiet_state");
     CHECK(homehub_concept_for(56) == nullptr);   // historied state, but not a one-row X10A pairing
+    CHECK(homehub_concept_for(33) == nullptr);   // disinfection is HomeHub-only; preheat is not its twin
     CHECK(homehub_concept_for(51) == nullptr);   // power: X10A has no equivalent, deliberately unpaired
     CHECK(homehub_concept_for(999) == nullptr);
     CHECK(homehub_concept_index("heat_pump_power") == -1);
@@ -7353,6 +7359,9 @@ static void test_history() {
     {
         const TrendDef* bsh = trend_by_id("bsh_state");
         CHECK(bsh != nullptr && bsh->kind == TrendKind::BinaryEvent && bsh->conv == 305);
+        const TrendDef* preheat = trend_by_id("tank_preheat_state");
+        CHECK(preheat != nullptr && preheat->kind == TrendKind::BinaryEvent);
+        CHECK(preheat->reg == 0x62 && preheat->off == 8 && preheat->conv == 303);
         const TrendDef* buh1 = trend_by_id("buh_step1");
         const TrendDef* buh2 = trend_by_id("buh_step2");
         CHECK(buh1 != nullptr && buh1->kind == TrendKind::BinaryEvent && buh1->conv == 304);
@@ -7693,6 +7702,7 @@ static void test_history() {
         { "defrost_state",     39, -1, 1 },   // exact event-folded Defrost Operation flag
         { "quiet_state",       39, -1, 1 },   // exact persistent Silent Mode flag
         { "bsh_state",        39, -1, 1 },   // exact bit 305 in the shared 0x60/12 state byte
+        { "tank_preheat_state", 35, -1, 1 }, // four detected families carry no such X10A field
         { "buh_step1",        39, -1, 1 },   // exact event-folded BUH stage bits 304/303
         { "buh_step2",        39, -1, 1 },
         { "valve_dhw",        39, -1, 1 },   // exact bit 306; persistent DHW/space selector state
@@ -11855,19 +11865,19 @@ static void test_history_persist() {
     CHECK(history_fp_u32(CONFIG_CRC32_INIT, 1) != history_fp_u32(CONFIG_CRC32_INIT, 256));
 
     // --- the official 8 MB append journal -------------------------------------------------------
-    CHECK(HISTORY_FLASH_TOTAL_RINGS == 46);
+    CHECK(HISTORY_FLASH_TOTAL_RINGS == 48);
     CHECK(HISTORY_FLASH_PARTITION_BYTES == 4u * 1024u * 1024u);
     CHECK(HISTORY_FLASH_ERASE_BYTES == 4096);
     CHECK(HISTORY_JOURNAL_HEADER_BYTES == 64);
-    CHECK(HISTORY_JOURNAL_MAX_SOURCE_RINGS == 31);
+    CHECK(HISTORY_JOURNAL_MAX_SOURCE_RINGS == 32);
     CHECK(history_journal_slot_bytes(256) == 256);
     CHECK(history_journal_slot_bytes(257) == 512);
     CHECK(history_journal_slot_bytes(513) == 1024);
     CHECK(HISTORY_JOURNAL_SLOT_BYTES == 256);
     CHECK(HISTORY_JOURNAL_SLOTS_PER_SECTOR == 16);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT == 16384);
-    CHECK(history_journal_source_rings(HistoryJournalSource::X10a) == 31);
-    CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 12);
+    CHECK(history_journal_source_rings(HistoryJournalSource::X10a) == 32);
+    CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 13);
     CHECK(history_journal_source_rings(HistoryJournalSource::Env3) == 3);
     CHECK(history_journal_source_rings(HistoryJournalSource::Checkup) == 0);
     CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 4);

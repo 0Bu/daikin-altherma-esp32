@@ -76,11 +76,18 @@ inline constexpr size_t HOMEHUB_CONCEPT_COUNT =
 // history concept: both sources report the same documented 0..3 enum, and the UI draws their state
 // tracks independently so a disagreement remains visible.
 //
+// Disinfection is different again: HomeHub input 33 names the actual operation, while X10A exposes
+// only "Tank preheat". They receive separate ids and charts so correlation remains possible without
+// turning a preparatory phase into false evidence that disinfection itself ran.
+//
 // Keep this explicit rather than accepting any HomeHub number by label or kind. A state/setpoint
-// costs a 576-byte ring per source only by being named here and in TRENDS.
+// costs a 576-byte HomeHub ring by being named here; only a real X10A counterpart also appears in
+// TRENDS.
 struct HomeHubHistory {
     uint16_t    offset;
     const char* trend_id;
+    bool        event = false;      // retain any observed ON within the open five-minute bucket
+    bool        has_x10a = true;    // id must exist in TRENDS and may be overlaid as a second source
 };
 inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
     { 40, "leaving_water"   },
@@ -91,10 +98,11 @@ inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
     { 45, "refrigerant_liquid" },
     { 49, "flow"            },
     { 50, "room_temp"       },
-    { 32, "bsh_state"       },
+    { 32, "bsh_state", true },
     { 37, "valve_dhw"       },
     {  9, "quiet_state"     },
     { 56, "smart_grid_mode" },
+    { 33, "disinfection_state", true, false },
 };
 inline constexpr size_t HOMEHUB_HISTORY_COUNT =
     sizeof(HOMEHUB_HISTORIES) / sizeof(HOMEHUB_HISTORIES[0]);
@@ -113,6 +121,14 @@ inline constexpr int homehub_history_index(const char* trend_id) {
     for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++)
         if (trend_cstr_eq(HOMEHUB_HISTORIES[i].trend_id, trend_id)) return static_cast<int>(i);
     return -1;
+}
+
+// History id carried by a HomeHub value row. Unlike `homehub_concept_for`, this includes honest
+// Modbus-only timelines and therefore must never be used to pair or substitute an X10A value.
+inline const char* homehub_history_for(uint16_t offset) {
+    for (const auto& h : HOMEHUB_HISTORIES)
+        if (h.offset == offset) return h.trend_id;
+    return nullptr;
 }
 
 // ── OTHER STATES: live pairings that do not need their own history ─────────────────────────────
@@ -196,7 +212,7 @@ constexpr bool homehub_histories_are_valid() {
         bool trend = false;
         for (const auto& d : TRENDS)
             if (trend_cstr_eq(HOMEHUB_HISTORIES[i].trend_id, d.id)) { trend = true; break; }
-        if (!trend) return false;
+        if (trend != HOMEHUB_HISTORIES[i].has_x10a) return false;
         for (size_t j = i + 1; j < HOMEHUB_HISTORY_COUNT; j++)
             if (HOMEHUB_HISTORIES[i].offset == HOMEHUB_HISTORIES[j].offset ||
                 trend_cstr_eq(HOMEHUB_HISTORIES[i].trend_id, HOMEHUB_HISTORIES[j].trend_id)) return false;
@@ -228,7 +244,7 @@ constexpr bool homehub_offsets_are_distinct() {
 static_assert(detail::homehub_concepts_are_trends(),
               "a HOMEHUB_CONCEPTS entry names a trend id that logic/history.hpp does not define");
 static_assert(detail::homehub_histories_are_valid(),
-              "HomeHub histories drifted from their paired concepts or name an invalid trend");
+              "HomeHub histories drifted from their paired concepts/X10A declarations");
 static_assert(detail::homehub_state_ids_are_distinct(),
               "a HOMEHUB_STATES id collides with a trend id or another state id");
 static_assert(detail::homehub_offsets_are_distinct(),

@@ -2,8 +2,8 @@
 // WHICH MODBUS REQUESTS ONE POLL CYCLE ISSUES — the read PLAN, separated from the socket that runs
 // it (hp_modbus.cpp) and from the framing it is written in (logic/modbus.hpp).
 //
-// WHY. The HomeHub map was read one register at a time, once per POLL_INTERVAL_S: 31 MBAP
-// round-trips a second, ~2.7 million requests a day, against a hub that also serves the Onecta app,
+// WHY. The HomeHub map was read one register at a time, once per POLL_INTERVAL_S: 32 MBAP
+// round-trips a second, ~2.8 million requests a day, against a hub that also serves the Onecta app,
 // the unit's MMI, evcc and whatever else on the LAN speaks to it. Nothing about the map required
 // that. The EKRHH offsets fall into ten contiguous runs. Two facts are time-critical gates — plant
 // operation and current mode — and input 44 is time-critical event context that #441 requires from

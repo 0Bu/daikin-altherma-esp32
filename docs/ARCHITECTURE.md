@@ -213,7 +213,7 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
                       homehub-* from up to 64 _http._tcp responders per bounded attempt. The lwIP
                       client wraps logic/modbus.hpp framing; the response borrows a caller-owned ADU
                       so its payload cannot outlive the received bytes. logic/modbus_plan.hpp turns
-                      31 rows into ten contiguous batches: full map every 5 s, the two diagnosis-gate
+                      32 rows into ten contiguous batches: full map every 5 s, the two diagnosis-gate
                       batches (input 53 + 38) at 1 Hz. Gate-only success cannot clear a map-wide error;
                       only a clean full cycle proves recovery. READ-ONLY: no write function code is
                       issued anywhere, and no source file can build one (docs/MODBUS_PROTOCOL.md)
@@ -827,7 +827,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   It is a **scalar, not a ring**, and that is the whole sizing argument. Nine of these rows already
   have the better answer — a 24-hour categorical timeline whose tooltip names phase start, end and
   sampled duration — and it cannot be extended to the rest: a ring costs 576 B, the trend budget is
-  exactly full (`TREND_COUNT × 576 == 17856`, its own ceiling), the remaining rows are not on the
+  exactly full (`TREND_COUNT × 576 == 18432`, its own ceiling), the remaining rows are not on the
   schematic and so are excluded by `history.hpp`'s selection rule, and each would need a hand-written
   bilingual legend. The whole table is 48 × 16 B = **768 B** in `.noinit`, adopted across a
   power-preserving reset under the same seal, verdict vocabulary and union-storage rule as the trends
@@ -1208,7 +1208,7 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
      that was open when the device went down — it is dropped, so the restored series can be up to
      one `HISTORY_DT_S` adrift on the axis. It cannot survive an OTA: the new image's sections move.
    * **The upper-4-MiB `history` partition.** Each trend source appends one dense record when it
-     closes a five-minute bucket: currently 31 X10A/board, 12 HomeHub or 3 ENV III `int16` values in
+     closes a five-minute bucket: currently 32 X10A/board, 13 HomeHub or 3 ENV III `int16` values in
      one 256-byte slot. The plant checkup uses the same journal for one exact hourly diagnostic
      record; it is not reconstructed from lossy trend samples. Sixteen slots share a 4 KiB erase
      sector and all 1024 sectors rotate before one is reused. The body is CRC-protected and a
@@ -1256,9 +1256,9 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    minutes must not overwrite the observation; and the verdict is a **named enum**, never a bool —
    `wrong_catalog` after an OTA is expected and uninteresting, `bad_crc` on a board that was never
    power-cycled is a memory fault worth knowing about.
-   The independent HomeHub task feeds twelve additional rings through `history_record_modbus()` — eight
-   measurement concepts plus BSH, 3-way-valve, Quiet and Smart-Grid state timelines explicitly named in
-   `logic/homehub_map.hpp`. Both recorders use the same monotonic 5-minute bucket id, returned as `b0`
+   The independent HomeHub task feeds thirteen additional rings through `history_record_modbus()` — eight
+   measurement concepts plus BSH, 3-way-valve, Quiet, Smart-Grid and the standalone disinfection
+   state explicitly named in `logic/homehub_map.hpp`. Both recorders use the same monotonic 5-minute bucket id, returned as `b0`
    by `/history`, so the browser can overlay them exactly even before SNTP. An X10A absence stays a
    gap in the blue line while a HomeHub sample at that bucket remains a petrol point; the sources are
    never merged into one synthetic series.

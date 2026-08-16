@@ -794,9 +794,9 @@ void http_append_status_json(std::string& j, bool redact) {
         j += "}";
     }
     j += "],\"modbus_rows\":[";
-    // Six HomeHub measurements structurally paired to schematic readings get a second ring, plus
-    // BSH, the 3-way valve and Smart-Grid mode as categorical state timelines. Other states,
-    // setpoints and Modbus-only values remain live rows without a chart. Keep the list empty when
+    // Paired HomeHub measurements/states get a second ring; Smart Grid and disinfection add explicit
+    // state timelines without inventing a one-row X10A twin. Other states and setpoints remain live
+    // rows without a chart. Keep the list empty when
     // this installation has no HomeHub stack, so old/no-gateway devices do not offer permanently
     // empty series in the browser.
     bool first_mb_trend = true;
@@ -1351,6 +1351,10 @@ static std::string build_modbus_values_array(bool& live) {
                 { j += ",\"enum\":"; j += jstr(eid); }
         if (const char* cid = logic::homehub_concept_for(v[i].off))
             { j += ",\"concept\":"; j += jstr(cid); }
+        // History metadata is wider than source pairing: a Modbus-only timeline must be attachable
+        // to this row without pretending that it has an X10A `concept` twin.
+        if (const char* hid = logic::homehub_history_for(v[i].off))
+            { j += ",\"history\":"; j += jstr(hid); }
         j += "}";
     }
     j += "]";
@@ -1449,7 +1453,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
     const int env_t = env3_source ? env3_history_index(id) : -1;
     const bool x10a_unknown = !modbus && !env3_source && (!def_ || t >= logic::TREND_COUNT);
-    if (x10a_unknown || (modbus && (!def_ || mb_t < 0)) || (env3_source && env_t < 0)) {
+    if (x10a_unknown || (modbus && mb_t < 0) || (env3_source && env_t < 0)) {
         httpd_resp_set_status(req, "404 Not Found");
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
     }
@@ -1481,7 +1485,8 @@ static esp_err_t h_history(httpd_req_t* req) {
     }
 
     std::string j = "{\"id\":";
-    j += jstr(env3_source ? ENV3_HISTORIES[env_t].id : def_->id);
+    j += jstr(modbus ? logic::HOMEHUB_HISTORIES[mb_t].trend_id
+                     : env3_source ? ENV3_HISTORIES[env_t].id : def_->id);
     j += ",\"source\":";
     const bool mqtt_source = !modbus && !env3_source &&
                              def_->kind == logic::TrendKind::CirculationState;
