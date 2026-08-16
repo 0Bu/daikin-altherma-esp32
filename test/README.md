@@ -47,7 +47,7 @@ Escape, accepted and rejected Save paths, representative invalid input, board-ga
 and both bug-report steps. `tools/ui/selftest.sh`
 re-introduces the historical undefined ENV III close handler and proves the matrix fails on the
 actual click path. The runner-neutral policy canaries also simulate the supported
-`gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <numeric-pr> --match-head-commit
+`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <numeric-pr> --match-head-commit
 <full-40-hex-head-sha> --squash` shape and blocked app-MCP merge/auto-merge requests. The CLI path
 accepts only a current review stamp and matching expected-head lease; REST, GraphQL, and all MCP
 merge, auto-merge, or queue-activation forms are intentionally rejected. Every real local merge also
@@ -349,6 +349,6 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 2. Add a `CHECK(...)` in `test_logic.cpp` asserting against a known-good reference (for converters,
    a known-good reference output for the same raw bytes; for CRC, a real captured frame).
 3. `scripts/run-mock-tests.sh` — must pass; run it explicitly before handoff, and CI enforces it.
-   The Codex and retained Claude Stop lifecycle hooks both repeat it through the same neutral core.
+   The Codex Stop lifecycle hook repeats it through the same runner-neutral core.
 
 See the `$add-logic-test` skill (`.agents/skills/add-logic-test/`).

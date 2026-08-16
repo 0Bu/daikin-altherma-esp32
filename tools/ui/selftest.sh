@@ -6,22 +6,19 @@ tmp="$(mktemp -d)"
 hook_tmp=""
 trap 'rm -rf "$tmp"; [ -z "${hook_tmp:-}" ] || rm -rf "$hook_tmp"' EXIT
 
-# The UI review now has two supported runner surfaces. Assert the canonical skill/Codex wiring is
-# present and neutral while the Claude entry point remains as a thin compatibility adapter.
+# Assert the canonical skill and Codex wiring are present and route through the neutral gate core.
 for required in \
   ".agents/skills/ui-use-case-review/SKILL.md" \
   ".agents/skills/ui-use-case-review/agents/openai.yaml" \
   ".codex/config.toml" \
   ".codex/hooks.json" \
-  "tools/agent-hooks/require-pr-gates.sh" \
-  ".claude/skills/ui-use-case-review/SKILL.md" \
-  ".claude/hooks/require-ui-use-case-review.sh"; do
+  "tools/agent-hooks/require-pr-gates.sh"; do
   [ -f "$proj/$required" ] || { echo "ui selftest: missing agent UI-review surface $required" >&2; exit 1; }
 done
 grep -q '^name: ui-use-case-review$' "$proj/.agents/skills/ui-use-case-review/SKILL.md" \
   || { echo "ui selftest: canonical UI skill name drifted" >&2; exit 1; }
 if grep -q '^model:' "$proj/.agents/skills/ui-use-case-review/SKILL.md"; then
-  echo "ui selftest: canonical UI skill contains Claude-only model routing" >&2
+  echo "ui selftest: canonical UI skill contains runner-specific model routing" >&2
   exit 1
 fi
 node - "$proj/.codex/hooks.json" <<'NODE'
@@ -35,12 +32,8 @@ if (!wiring.includes("tools/agent-hooks/require-pr-gates.sh")) {
   console.error("ui selftest: Codex merge hooks do not route through the runner-neutral PR gate");
   process.exit(1);
 }
-if (wiring.includes(".claude/hooks/")) {
-  console.error("ui selftest: Codex hooks route through a Claude-specific implementation");
-  process.exit(1);
-}
 NODE
-echo "ui selftest: canonical .agents/.codex UI-review wiring and Claude compatibility surface exist"
+echo "ui selftest: canonical .agents/.codex UI-review wiring exists"
 
 mkdir -p "$tmp/main" "$tmp/test" "$tmp/tools"
 cp -R "$proj/main/www" "$tmp/main/www"
@@ -78,6 +71,7 @@ echo "ui selftest: iPhone dynamic-viewport regression is detected"
 # Prove the neutral local merge gate fails closed without copying a runner-specific implementation.
 hook_tmp="$(mktemp -d)"
 mkdir -p "$hook_tmp/bin" "$hook_tmp/scripts" "$hook_tmp/tools/absence"
+cp "$proj/scripts/gh-with-git-credentials.sh" "$hook_tmp/scripts/"
 git -C "$hook_tmp" init -q
 git -C "$hook_tmp" remote add origin https://github.com/0Bu/daikin-altherma-esp32.git
 
@@ -88,10 +82,10 @@ git -C "$hook_tmp" remote add origin https://github.com/0Bu/daikin-altherma-esp3
 # the real template's own line with a real sha and require the gate to accept it.
 # THIS hook's own line, selected by name — not merely the first "merge gate @" in the file. The
 # template teaches one stamp per gate and their order is nobody's contract: when a later change made
-# /project-review the first of them, this check fed require-ui-use-case-review.sh a SIBLING gate's
+# $project-review the first of them, this check fed the aggregate gate a SIBLING gate's
 # line, which is absent under its key, and the suite failed for a reason that had nothing to do with
 # the defect it is here to catch.
-tpl_line="$(grep -m1 -E -- '`[$/]ui-use-case-review`.*merge gate @' "$proj/.github/pull_request_template.md" || true)"
+tpl_line="$(grep -m1 -F -- '`$ui-use-case-review` clean — merge gate @' "$proj/.github/pull_request_template.md" || true)"
 [ -n "$tpl_line" ] || { echo "ui selftest: no canonical UI merge-gate line in the PR template" >&2; exit 1; }
 case "$tpl_line" in
   *"merge gate @"*) ;;
@@ -130,7 +124,7 @@ chmod +x "$hook_tmp/scripts/run-ui-use-case-tests.sh" "$hook_tmp/scripts/run-ui-
   "$hook_tmp/tools/absence/selftest.sh"
 
 # Local discovery is stubbed, but the production neutral gate and both merge payload shapes are
-# real. The Claude adapter must delegate to that same core rather than carrying a second policy.
+# real.
 cat > "$hook_tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 [ "${GH_HOST:-}" = github.com ] || exit 95
@@ -160,6 +154,7 @@ PY
 esac
 EOF
 chmod +x "$hook_tmp/bin/gh"
+chmod +x "$hook_tmp/scripts/gh-with-git-credentials.sh"
 
 merge_input="$(python3 - "$hook_tmp" "$ui_head" <<'PY'
 import json, sys
@@ -171,13 +166,13 @@ import json, sys
 print(json.dumps({"cwd": sys.argv[1], "tool_name": "mcp__codex_apps__github_merge_pull_request", "tool_input": {"pr_number": 123, "repository_full_name": "0Bu/daikin-altherma-esp32"}}))
 PY
 )"
-printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" AGENT_PROJECT_DIR="$hook_tmp" \
+printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
   UI_GATE_BODY_FILE="$hook_tmp/body.md" UI_GATE_FILES_FILE="$hook_tmp/files.txt" \
   "$proj/tools/agent-hooks/require-pr-gates.sh" >/dev/null \
   || { echo "ui selftest: neutral local CLI merge gate rejected current canonical UI proof" >&2; exit 1; }
 
 set +e
-mcp_out="$(printf '%s' "$mcp_merge_input" | env PATH="$hook_tmp/bin:$PATH" AGENT_PROJECT_DIR="$hook_tmp" \
+mcp_out="$(printf '%s' "$mcp_merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
   UI_GATE_BODY_FILE="$hook_tmp/body.md" UI_GATE_FILES_FILE="$hook_tmp/files.txt" \
   "$proj/tools/agent-hooks/require-pr-gates.sh" 2>&1)"; mcp_rc=$?
 set -e
@@ -185,13 +180,8 @@ set -e
   && printf '%s' "$mcp_out" | grep -qF 'MCP merge and auto-merge activation tools are unsupported' \
   || { echo "ui selftest: MCP merge bypassed the documented CLI-only path" >&2; exit 1; }
 
-env CLAUDE_PROJECT_DIR="$proj" AGENT_PR_BODY_FILE="$hook_tmp/body.md" \
-  AGENT_PR_HEAD_SHA="$ui_head" AGENT_CHANGED_FILES_FILE="$hook_tmp/files.txt" \
-  bash "$proj/.claude/hooks/require-ui-use-case-review.sh" </dev/null >/dev/null \
-  || { echo "ui selftest: Claude compatibility adapter did not delegate current UI proof" >&2; exit 1; }
-
 set +e
-printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" AGENT_PROJECT_DIR="$hook_tmp" \
+printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
   UI_GATE_BODY_FILE="$hook_tmp/body.md" UI_GATE_FILES_FILE="$hook_tmp/files.txt" \
   UI_GATE_SUITE_RC=1 "$proj/tools/agent-hooks/require-pr-gates.sh" >/dev/null 2>&1
 suite_rc=$?
@@ -201,7 +191,7 @@ set -e
 
 sed 's/abcdef123456/deadbee/g' "$hook_tmp/body.md" > "$hook_tmp/stale.md"
 set +e
-printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" AGENT_PROJECT_DIR="$hook_tmp" \
+printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
   UI_GATE_BODY_FILE="$hook_tmp/stale.md" UI_GATE_FILES_FILE="$hook_tmp/files.txt" \
   "$proj/tools/agent-hooks/require-pr-gates.sh" >/dev/null 2>&1
 stale_rc=$?
@@ -216,8 +206,8 @@ set -e
 # Put every expected key through the SHARED matcher, and reject missing or surprise gate entries.
 # shellcheck source=/dev/null
 . "$proj/tools/agent-hooks/pr-gate-lib.sh"
-# One entry per merge gate under .claude/hooks/require-*.sh. The list is explicit BOTH ways — a
-# missing key and a surprise key are each a failure — so adding a gate means adding it here in the
+# The list is explicit BOTH ways — a missing key and a surprise key are each a failure — so adding
+# a gate means adding it here in the
 # same commit, which is the point: a gate whose template line nobody checks is a gate whose stamp
 # nobody can be sure is readable.
 expected_gate_keys=(project-review feature-docs domain-review schematic-review ui-use-case-review absence-review ui-gif)
@@ -225,7 +215,7 @@ tpl_content="$(cat "$proj/.github/pull_request_template.md")"
 tpl_lines="$(printf '%s\n' "$tpl_content" | agent_gate_task_lines | grep -iE 'gate')"
 tpl_n=0
 for key in "${expected_gate_keys[@]}"; do
-    line="$(printf '%s\n' "$tpl_lines" | grep -E -- "\`[\$/]${key}\`" || true)"
+    line="$(printf '%s\n' "$tpl_lines" | grep -F -- '`$'"${key}"'`' || true)"
     [ -n "$line" ] || { echo "ui selftest: the PR template is missing the $key gate line" >&2; exit 1; }
     [ "$(printf '%s\n' "$line" | wc -l | tr -d ' ')" -eq 1 ] || {
         echo "ui selftest: the PR template has duplicate $key gate lines" >&2; exit 1; }
@@ -245,7 +235,7 @@ done
 [ "$tpl_n" -eq "${#expected_gate_keys[@]}" ] || {
     echo "ui selftest: expected ${#expected_gate_keys[@]} gate lines, checked $tpl_n" >&2; exit 1; }
 extra_keys="$(printf '%s\n' "$tpl_lines" \
-    | sed -n 's#.*`[$/]\([a-z0-9-]\{1,\}\)`.*#\1#p' \
+    | sed -n 's#.*`\$\([a-z0-9-]\{1,\}\)`.*#\1#p' \
     | while IFS= read -r key; do
         found=false
         for expected in "${expected_gate_keys[@]}"; do [ "$key" = "$expected" ] && found=true; done
@@ -262,7 +252,7 @@ extra_keys="$(printf '%s\n' "$tpl_lines" \
 # gawk — so the gates were dead on the machines people merge from and green here. Assert the EXIT
 # STATUS, not just the output: an empty result is indistinguishable from "no task lines" downstream.
 set +e
-filter_out="$(printf '%s\n' '- [x] `/project-review` clean — merge gate @ abcdef123456' | agent_gate_task_lines 2>/dev/null)"
+filter_out="$(printf '%s\n' '- [x] `$project-review` clean — merge gate @ abcdef123456' | agent_gate_task_lines 2>/dev/null)"
 filter_rc=$?
 set -e
 [ "$filter_rc" -eq 0 ] || {
@@ -275,31 +265,31 @@ set -e
 # checklist records and must neither shadow nor satisfy the one real gate line.
 decoy_file="$hook_tmp/decoy-body.md"
 printf '%s\n' \
-    'Prose about the gate: `- [ ] `/project-review` run clean` is the form that fails.' \
-    '> - [x] `/project-review` clean — merge gate @ deadbee' \
+    'Prose about the gate: `- [ ] `$project-review` run clean` is the form that fails.' \
+    '> - [x] `$project-review` clean — merge gate @ deadbee' \
     '```markdown' \
-    '- [x] `/project-review` clean — merge gate @ deadbee' \
+    '- [x] `$project-review` clean — merge gate @ deadbee' \
     '```' \
     '' \
-    '- [x] `/project-review` clean — merge gate @ abcdef123456' >"$decoy_file"
+    '- [x] `$project-review` clean — merge gate @ abcdef123456' >"$decoy_file"
 [ "$(agent_gate_checkbox_status "$decoy_file" project-review)" = "checked abcdef123456" ] || {
     echo "ui selftest: quoted/fenced checkboxes shadow or satisfy the real gate" >&2; exit 1; }
 # Two actual task-list entries are malformed and must fail closed rather than preferring a ticked
 # decoy. The honest single unticked box still reports unchecked.
 duplicate_file="$hook_tmp/duplicate-body.md"
 printf '%s\n' \
-    '- [x] `/project-review` clean — merge gate @ deadbee' \
-    '- [ ] `/project-review` clean — merge gate @ <short-sha>' >"$duplicate_file"
+    '- [x] `$project-review` clean — merge gate @ deadbee' \
+    '- [ ] `$project-review` clean — merge gate @ <short-sha>' >"$duplicate_file"
 [ "$(agent_gate_checkbox_status "$duplicate_file" project-review)" = "ambiguous" ] || {
     echo "ui selftest: duplicate real gate boxes do not fail closed" >&2; exit 1; }
 unchecked_file="$hook_tmp/unchecked-body.md"
-printf '%s\n' '- [ ] `/project-review` clean — merge gate @ <short-sha>' >"$unchecked_file"
+printf '%s\n' '- [ ] `$project-review` clean — merge gate @ <short-sha>' >"$unchecked_file"
 [ "$(agent_gate_checkbox_status "$unchecked_file" project-review)" = "unchecked" ] || {
     echo "ui selftest: an unticked gate box no longer reports unchecked" >&2; exit 1; }
 
 echo "ui selftest: merge hook accepts current proof and blocks failing or stale proof"
 echo "ui selftest: all $tpl_n PR-template stamp lines are readable by the merge gate"
-echo "ui selftest: bound CLI merge and Claude adapter accept current UI proof; MCP merge stays CLI-only"
+echo "ui selftest: bound CLI merge accepts current UI proof; MCP merge stays CLI-only"
 
 rm -rf "$hook_tmp"
 

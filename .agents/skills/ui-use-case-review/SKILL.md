@@ -77,9 +77,7 @@ unrepresented new use case, live UI assertion failure, or visual/accessibility r
 
 The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) hook
 reruns the complete suite at merge time and requires a current PR record for UI-relevant changes.
-The legacy `.claude/hooks/require-ui-use-case-review.sh` path is a Claude compatibility adapter, not
-the active policy definition. After every blocking finding is fixed, stamp the reviewed head in the
-PR body:
+After every blocking finding is fixed, stamp the reviewed head in the PR body:
 
 ```text
 - [x] `$ui-use-case-review` clean — merge gate @ <short-sha>

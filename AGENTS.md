@@ -60,9 +60,10 @@ Use the narrowest relevant skill. Important review gates are:
   PR that changes the GIF or its stamp also needs the current-head review. Re-record only locally.
 - `$flash-esp32`: use for an explicitly requested signed build-and-flash workflow.
 
-The full legacy-to-canonical mapping is `.codex/migration-manifest.json`; operating and canary notes
-are in `docs/AGENT_MIGRATION.md`. `.claude/` remains compatibility input during migration and must
-not be deleted or edited as part of ordinary feature work.
+Phase 7 of the agent migration is complete. `AGENTS.md`, `.agents/skills/`, `.codex/agents/`,
+`.codex/config.toml`, `.codex/hooks.json`, and `tools/agent-hooks/` are the canonical project
+surfaces; operating and rollback notes are in `docs/AGENT_MIGRATION.md`. Do not introduce
+runner-specific copies of project policy, skills, reviewers, or gates.
 
 ## Sources of truth
 
@@ -111,6 +112,10 @@ documentation.
 - Never read, print, copy, stage, upload, or place in model context any `*.pem`, `*.key`, private
   pairing material, credential dump, or the offline OTA signing key. `.gitignore` is not a security
   boundary.
+- For local GitHub CLI access, use `scripts/gh-with-git-credentials.sh`. It resolves the configured
+  `github.com` Git credential inside the child process and passes it to `gh` only through a transient
+  environment variable. Never read the credential store, run `git credential fill`, or print an
+  authentication token directly. CI may provide its own transient `GH_TOKEN` to the same wrapper.
 - The only permitted use of the OTA key is an explicitly authorized, unchained `espsecure.py
   sign_data`/`sign-data` invocation that passes the key by path. Do not pipe, redirect, concatenate,
   inspect, or wrap that invocation with unrelated commands.
@@ -149,9 +154,10 @@ scripts/idf-docker.sh idf.py build
   with the applicable human review skill and real-device evidence when requested.
 - New decode, formatting, validation, planning, or discovery logic belongs in an IDF-free header
   under `main/logic/` with a focused `CHECK` in `test/test_logic.cpp`.
-- Generated files under `main/def/` are machine output from the offline catalog pipeline. Do not
-  hand-edit them. Put deliberate corrections in the supported override/adjudication layer and test
-  stable identifiers and labels.
+- Generated per-model profile tables under `main/def/` are machine output from the offline catalog
+  pipeline. Do not hand-edit those generated tables; put deliberate corrections in the supported
+  override/adjudication layer and test stable identifiers and labels. `overlay.hpp` is the explicit
+  hand-written overlay, while `homehub.hpp` is the curated HomeHub definition source.
 - Do not add separate always-on CI jobs casually. Fast gates are steps of the shared `gates` job;
   GitHub Actions bills per job. Preserve required-check behavior when changing path filters.
 - When waiting for GitHub Actions, use a bounded watcher such as `gh run watch ... --exit-status`;

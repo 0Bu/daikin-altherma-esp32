@@ -58,7 +58,7 @@ passthrough).
 - First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-esp32-setup` portal.
 - A full-erase recovery: `esptool --chip esp32s3 -p <port> erase_flash` then reflash.
 - This skill does NOT merge or release — it works on the local tree only. The supported merge path
-  is `gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <number> --match-head-commit
+  is `scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <number> --match-head-commit
   <full-current-head-sha> --squash` once every applicable gate box is ticked and SHA-stamped; see
   [`docs/AGENT_MIGRATION.md`](../../../docs/AGENT_MIGRATION.md) for the full contract and derive
   which gates apply from

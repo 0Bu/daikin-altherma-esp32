@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Positive and negative mutation tests for Claude/Codex hook payloads and the consolidated PR gate.
+# Positive and negative mutation tests for canonical hook payloads and the consolidated PR gate.
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -28,8 +28,8 @@ else: print(json.loads(s)["hookSpecificOutput"]["permissionDecision"])' 2>/dev/n
 }
 
 guard_case() {
-    local name="$1" runner="$2" input="$3" expected="$4" out got rc
-    out="$(printf '%s' "$input" | python3 "$hook" pre-tool-guards --runner "$runner" 2>&1)"; rc=$?
+    local name="$1" input="$2" expected="$3" out got rc
+    out="$(printf '%s' "$input" | python3 "$hook" pre-tool-guards 2>&1)"; rc=$?
     got="$(printf '%s' "$out" | decision)"
     if [ "$rc" -eq 0 ] && [ "$got" = "$expected" ]; then
         echo "PASS  $name"; pass=$((pass + 1))
@@ -38,222 +38,368 @@ guard_case() {
     fi
 }
 
-guard_case "Claude safe documentation read" claude \
+guard_case "Canonical safe documentation read" \
     "$(payload Read file_path "$root/docs/SECURITY.md")" ""
-guard_case "Claude private PEM read denied" claude \
+guard_case "Canonical private PEM read denied" \
     "$(payload Read file_path "$root/ota_signing_key.pem")" deny
-guard_case "Claude multiline key shell access denied" claude \
+guard_case "Canonical multiline key shell access denied" \
     "$(payload Bash command $'echo safe\ncat ota_signing_key.pem')" deny
-guard_case "Claude exact espsecure signer allowed" claude \
+guard_case "Canonical exact espsecure signer allowed" \
     "$(payload Bash command 'espsecure.py sign_data --keyfile /offline/ota_signing_key.pem --output signed.bin app.bin')" ""
-guard_case "Claude exact espsecure signer environment path allowed" claude \
+guard_case "Canonical exact espsecure signer environment path allowed" \
     "$(payload Bash command 'espsecure.py sign_data --keyfile "$OTA_SIGNING_KEY_FILE" --output signed.bin app.bin')" ""
-guard_case "espsecure cannot reuse the key as payload or PEM output" claude \
+guard_case "espsecure cannot reuse the key as payload or PEM output" \
     "$(payload Bash command 'espsecure.py sign_data --version 2 --keyfile /offline/ota_signing_key.pem --output leaked.pem /offline/ota_signing_key.pem')" deny
-guard_case "Codex sensitive apply_patch target denied" codex \
+guard_case "Codex sensitive apply_patch target denied" \
     "$(payload apply_patch command $'*** Begin Patch\n*** Add File: secrets.env\n+TOKEN=x\n*** End Patch')" deny
-guard_case "Codex safe patch that documents PEM allowed" codex \
+guard_case "Codex safe patch that documents PEM allowed" \
     "$(payload apply_patch command $'*** Begin Patch\n*** Update File: docs/SECURITY.md\n@@\n-Old\n+Never read ota_signing_key.pem\n*** End Patch')" ""
-guard_case "Codex process-environment dump denied" codex \
+guard_case "Codex process-environment dump denied" \
     "$(payload exec_command command 'printenv')" deny
-guard_case "exec argv alias cannot hide environment dump" codex \
+guard_case "exec argv alias cannot hide environment dump" \
     "$(payload exec_command command 'exec -a harmless printenv')" deny
-guard_case "timeout wrapper cannot hide environment dump" codex \
+guard_case "timeout wrapper cannot hide environment dump" \
     "$(payload exec_command command 'timeout 1 printenv')" deny
-guard_case "xargs cannot invoke environment dump" codex \
+guard_case "xargs cannot invoke environment dump" \
     "$(payload exec_command command "printf 'GH_TOKEN' | xargs printenv")" deny
-guard_case "find exec cannot invoke environment dump" codex \
+guard_case "find exec cannot invoke environment dump" \
     "$(payload exec_command command "find . -maxdepth 0 -exec printenv GH_TOKEN ';'")" deny
-guard_case "wrapped terminal env dump is denied" codex \
+guard_case "wrapped terminal env dump is denied" \
     "$(payload exec_command command 'setsid env')" deny
-guard_case "dynamic printenv executable is denied" codex \
+guard_case "dynamic printenv executable is denied" \
     "$(payload exec_command command 'p=printenv; "$p"')" deny
-guard_case "Python process environment dump is denied" codex \
+guard_case "Python process environment dump is denied" \
     "$(payload exec_command command "python3 -c 'import os; print(os.environ)'")" deny
-guard_case "Node process environment dump is denied" codex \
+guard_case "Node process environment dump is denied" \
     "$(payload exec_command command "node -e 'console.log(process.env)'")" deny
-guard_case "Linux proc environment dump is denied" codex \
+guard_case "Linux proc environment dump is denied" \
     "$(payload exec_command command 'cat /proc/self/environ')" deny
-guard_case "BSD ps environment dump is denied" codex \
+guard_case "BSD ps environment dump is denied" \
     "$(payload exec_command command 'ps eww -p $$')" deny
-guard_case "Darwin ps environment flag is denied" codex \
+guard_case "Darwin ps environment flag is denied" \
     "$(payload exec_command command 'ps -E -p $$')" deny
-guard_case "combined BSD ps environment flags are denied" codex \
+guard_case "combined BSD ps environment flags are denied" \
     "$(payload exec_command command 'ps auxeww')" deny
-guard_case "ordinary process listing without environment is allowed" codex \
+guard_case "ordinary process listing without environment is allowed" \
     "$(payload exec_command command 'ps -ef')" ""
-guard_case "Codex multiline process-environment dump denied" codex \
+guard_case "Codex multiline process-environment dump denied" \
     "$(payload exec_command command $'echo safe\nprintenv')" deny
-guard_case "direct GitHub token expansion is denied" codex \
+guard_case "direct GitHub token expansion is denied" \
     "$(payload exec_command command 'printf "%s\\n" "$GH_TOKEN"')" deny
-guard_case "OTA signer path variable cannot be read" codex \
+guard_case "OTA signer path variable cannot be read" \
     "$(payload exec_command command 'cat "$OTA_SIGNING_KEY_FILE"')" deny
-guard_case "env with assignments but no command is an environment dump" codex \
+guard_case "env with assignments but no command is an environment dump" \
     "$(payload exec_command command 'env SELFTEST_VALUE=safe')" deny
-guard_case "env wrapping an ordinary command is allowed" codex \
+guard_case "env wrapping an ordinary command is allowed" \
     "$(payload exec_command command 'env LC_ALL=C ls docs')" ""
-guard_case "naked export environment dump is denied" codex \
+guard_case "naked export environment dump is denied" \
     "$(payload exec_command command 'export')" deny
-guard_case "option-only export environment dump is denied" codex \
+guard_case "option-only export environment dump is denied" \
     "$(payload exec_command command 'export -n')" deny
-guard_case "GitHub auth token output is denied" codex \
+guard_case "GitHub auth token output is denied" \
     "$(payload exec_command command 'gh auth token')" deny
-guard_case "GitHub auth status short token flag is denied" codex \
+guard_case "GitHub auth status short token flag is denied" \
     "$(payload exec_command command 'env gh auth status -t')" deny
-guard_case "dynamic GitHub executable cannot dump a token" codex \
+guard_case "credential wrapper cannot print a GitHub token" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh auth token")" deny
+guard_case "credential wrapper ordinary GitHub command is allowed" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh pr view 5 --json number")" ""
+guard_case "dynamic GitHub executable cannot dump a token" \
     "$(payload exec_command command 'g=gh; "$g" auth token')" deny
-guard_case "shell-wrapped GitHub auth token output is denied" codex \
+guard_case "shell-wrapped GitHub auth token output is denied" \
     "$(payload exec_command command 'bash -c "gh auth token"')" deny
-guard_case "backtick-wrapped GitHub auth token output is denied" codex \
+guard_case "backtick-wrapped GitHub auth token output is denied" \
     "$(payload exec_command command 'echo `gh auth token`')" deny
-guard_case "multiline GitHub auth token output is denied" codex \
+guard_case "multiline GitHub auth token output is denied" \
     "$(payload exec_command command $'echo safe\ngh auth token')" deny
-guard_case "Git credential fill output is denied" codex \
+guard_case "Git credential fill output is denied" \
     "$(payload exec_command command 'git credential fill')" deny
-guard_case "AWS secret getter output is denied" codex \
+guard_case "AWS secret getter output is denied" \
     "$(payload exec_command command 'aws configure get aws_secret_access_key')" deny
-guard_case "environment declarations are denied" codex \
+guard_case "environment declarations are denied" \
     "$(payload exec_command command 'declare -px')" deny
-guard_case "typeset environment declarations are denied" codex \
+guard_case "typeset environment declarations are denied" \
     "$(payload exec_command command 'typeset -p')" deny
-guard_case "plus-flag environment declarations are denied" codex \
+guard_case "plus-flag environment declarations are denied" \
     "$(payload exec_command command 'declare +x')" deny
-guard_case "named sensitive environment declaration is denied" codex \
+guard_case "named sensitive environment declaration is denied" \
     "$(payload exec_command command 'declare GH_TOKEN')" deny
-guard_case "readonly environment listing is denied" codex \
+guard_case "readonly environment listing is denied" \
     "$(payload exec_command command 'readonly -p')" deny
-guard_case "combined shell flags cannot hide a token dump" codex \
+guard_case "combined shell flags cannot hide a token dump" \
     "$(payload exec_command command "bash -lc 'gh auth token'")" deny
-guard_case "quoted command substitution cannot hide a token dump" codex \
+guard_case "quoted command substitution cannot hide a token dump" \
     "$(payload exec_command command 'echo "$(gh auth token)"')" deny
-guard_case "ordinary wrappers cannot hide a token dump" codex \
+guard_case "ordinary wrappers cannot hide a token dump" \
     "$(payload exec_command command 'time gh auth token')" deny
-guard_case "stdin-executed shell is denied" codex \
+guard_case "stdin-executed shell is denied" \
     "$(payload exec_command command "printf '%s' 'gh auth token' | bash")" deny
-guard_case "stdin shell flags are denied" codex \
+guard_case "stdin shell flags are denied" \
     "$(payload exec_command command "printf '%s' 'gh auth token' | bash -s")" deny
-guard_case "stdin shell wrapper is denied" codex \
+guard_case "stdin shell wrapper is denied" \
     "$(payload exec_command command "printf '%s' 'gh auth token' | env bash")" deny
-guard_case "credentials JSON shell path is denied" codex \
+guard_case "credentials JSON shell path is denied" \
     "$(payload exec_command command 'cat credentials.json')" deny
-guard_case "private SSH shell path is denied" codex \
+guard_case "private SSH shell path is denied" \
     "$(payload exec_command command 'cat ~/.ssh/id_ed25519_sk')" deny
-guard_case "private SSH Read target outside dot-ssh is denied" codex \
+guard_case "private SSH Read target outside dot-ssh is denied" \
     "$(payload Read file_path '/tmp/id_ed25519_sk')" deny
-guard_case "generic private-key Write target is denied" codex \
+guard_case "generic private-key Write target is denied" \
     "$(payload Write file_path '/tmp/private_key')" deny
-guard_case "credential YAML Read target is denied" codex \
+guard_case "credential YAML Read target is denied" \
     "$(payload Read file_path '/tmp/credentials.yml')" deny
-guard_case "quote-split private key shell path is denied" codex \
+guard_case "quote-split private key shell path is denied" \
     "$(payload exec_command command "cat ota_signing_key.p''em")" deny
-guard_case "private key glob shell path is denied" codex \
+guard_case "private key glob shell path is denied" \
     "$(payload exec_command command 'cat ota_signing_key.p?m')" deny
-guard_case "credential glob shell path is denied" codex \
+guard_case "credential glob shell path is denied" \
     "$(payload exec_command command 'cat .git-cred*')" deny
-guard_case "Git credential helper output is denied" codex \
+guard_case "Git credential helper output is denied" \
     "$(payload exec_command command 'git credential-osxkeychain get')" deny
-guard_case "Git credential executable output is denied" codex \
+guard_case "Git credential executable output is denied" \
     "$(payload exec_command command 'git-credential-osxkeychain get')" deny
-guard_case "macOS keychain stderr credential output is denied" codex \
+guard_case "macOS keychain stderr credential output is denied" \
     "$(payload exec_command command 'security find-generic-password -g -s selftest')" deny
-guard_case "qualified AWS credential getter is denied" codex \
+guard_case "qualified AWS credential getter is denied" \
     "$(payload exec_command command 'aws --profile prod configure get profile.prod.aws_secret_access_key')" deny
-guard_case "global gcloud option cannot hide token output" codex \
+guard_case "global gcloud option cannot hide token output" \
     "$(payload exec_command command 'gcloud --project demo auth print-access-token')" deny
-guard_case "global kubectl option cannot hide raw credentials" codex \
+guard_case "global kubectl option cannot hide raw credentials" \
     "$(payload exec_command command 'kubectl --context harmless config view --raw')" deny
-guard_case "kubectl raw assignment cannot expose credentials" codex \
+guard_case "kubectl raw assignment cannot expose credentials" \
     "$(payload exec_command command 'kubectl config view --raw=true')" deny
-guard_case "Docker credential helper output is denied" codex \
+guard_case "Docker credential helper output is denied" \
     "$(payload exec_command command 'docker-credential-osxkeychain get')" deny
-guard_case "macOS identity export is denied" codex \
+guard_case "macOS identity export is denied" \
     "$(payload exec_command command 'security export -t identities -f pemseq')" deny
-guard_case "private key brace expansion is denied" codex \
+guard_case "private key brace expansion is denied" \
     "$(payload exec_command command 'cat ota_signing_key.{pem,bak}')" deny
-guard_case "ANSI-C quoted private key suffix is denied" codex \
+guard_case "ANSI-C quoted private key suffix is denied" \
     "$(payload exec_command command "cat ota_signing_key.\$'pem'")" deny
-guard_case "private key brace range is denied" codex \
+guard_case "private key brace range is denied" \
     "$(payload exec_command command 'cat ota_signing_key.p{e..e}m')" deny
-guard_case "locale-quoted private key suffix is denied" codex \
+guard_case "locale-quoted private key suffix is denied" \
     "$(payload exec_command command 'cat ota_signing_key.p$"em"')" deny
-guard_case "line-continued private key suffix is denied" codex \
+guard_case "line-continued private key suffix is denied" \
     "$(payload exec_command command $'cat ota_signing_key.\\\npem')" deny
-guard_case "deep static credential braces fail closed" codex \
+guard_case "deep static credential braces fail closed" \
     "$(payload exec_command command 'cat cred{e,e}{n,n}{t,t}{i,i}{a,a}{l,l}{s,s}.json')" deny
-guard_case "combinatorial brace expansion fails closed without full expansion" codex \
+guard_case "combinatorial brace expansion fails closed without full expansion" \
     "$(payload exec_command command 'echo {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}')" deny
-guard_case "Bash extglob is conservatively denied" codex \
+guard_case "Bash extglob is conservatively denied" \
     "$(payload exec_command command "bash -O extglob -c 'cat ota_signing_key.p@(em)'")" deny
-guard_case "Malformed secret payload fails closed" codex "{" deny
-guard_case "missing tool name fails closed" codex '{}' deny
-guard_case "non-string tool name fails closed" codex \
+guard_case "Malformed secret payload fails closed" "{" deny
+guard_case "missing tool name fails closed" '{}' deny
+guard_case "non-string tool name fails closed" \
     '{"tool_name":123,"tool_input":{"cmd":"cat ota_signing_key.pem"}}' deny
-guard_case "unknown matched tool suffix fails closed" codex \
+guard_case "unknown matched tool suffix fails closed" \
     '{"tool_name":"exec_command_v2","tool_input":{"cmd":"cat ota_signing_key.pem"}}' deny
-guard_case "conflicting shell input aliases fail closed" codex \
+guard_case "conflicting shell input aliases fail closed" \
     '{"cwd":"/tmp","tool_name":"exec_command","tool_input":{"command":"echo safe","cmd":"cat ota_signing_key.pem"}}' deny
 
-guard_case "Claude Edit partitions asks" claude \
-    "$(payload Edit file_path "$root/partitions.csv")" ask
-guard_case "Codex apply_patch partitions denies" codex \
+guard_case "Canonical Edit partitions denies" \
+    "$(payload Edit file_path "$root/partitions.csv")" deny
+guard_case "Codex apply_patch partitions denies" \
     "$(payload apply_patch command $'*** Begin Patch\n*** Update File: partitions.csv\n@@\n-old\n+new\n*** End Patch')" deny
-guard_case "Codex sed -i partitions denies" codex \
+guard_case "Codex sed -i partitions denies" \
     "$(payload exec_command command "sed -i '' 's/a/b/' partitions.csv")" deny
-guard_case "Codex sed --in-place partitions denies" codex \
+guard_case "Codex sed --in-place partitions denies" \
     "$(payload exec_command command 'sed --in-place s/a/b/ partitions.csv')" deny
-guard_case "Codex sed glob partitions denies" codex \
+guard_case "Codex sed glob partitions denies" \
     "$(payload exec_command command "sed -i '' 's/a/b/' *.csv")" deny
-guard_case "Codex Python glob partitions writer denies" codex \
+guard_case "Codex Python glob partitions writer denies" \
     "$(payload exec_command command 'python3 -c '\''from pathlib import Path; [p.write_text("x") for p in Path(".").glob("*.csv")]'\''')" deny
-guard_case "Codex partitions brace expansion denies" codex \
+guard_case "Codex partitions brace expansion denies" \
     "$(payload exec_command command 'rm partitions.{csv,bak}')" deny
-guard_case "Codex split-name brace expansion denies" codex \
+guard_case "Codex split-name brace expansion denies" \
     "$(payload exec_command command 'rm partit{ions.csv,ions.bak}')" deny
-guard_case "Codex partitions brace range denies" codex \
+guard_case "Codex partitions brace range denies" \
     "$(payload exec_command command 'rm partitions.c{s..s}v')" deny
-guard_case "Codex locale-quoted partitions suffix denies" codex \
+guard_case "Codex locale-quoted partitions suffix denies" \
     "$(payload exec_command command 'rm partitions.c$"sv"')" deny
-guard_case "Codex line-continued partitions name denies" codex \
+guard_case "Codex line-continued partitions name denies" \
     "$(payload exec_command command $'rm parti\\\ntions.csv')" deny
 deep_partitions_command="sed -i '' 's/a/b/' part{it,it}{io,io}{ns,ns}{.,.}{cs,cs}{v,v}"
-guard_case "Codex deep static partitions braces deny" codex \
+guard_case "Codex deep static partitions braces deny" \
     "$(payload exec_command command "$deep_partitions_command")" deny
-guard_case "Codex partitions extglob is conservatively denied" codex \
+guard_case "Codex partitions extglob is conservatively denied" \
     "$(payload exec_command command "bash -O extglob -c 'rm partitions.c@(sv)'")" deny
-guard_case "Claude tee partitions asks" claude \
-    "$(payload Bash command 'printf x | tee partitions.csv')" ask
-guard_case "Codex redirect partitions denies" codex \
+guard_case "Canonical tee partitions denies" \
+    "$(payload Bash command 'printf x | tee partitions.csv')" deny
+guard_case "Codex redirect partitions denies" \
     "$(payload exec_command command 'printf x > partitions.csv')" deny
-guard_case "Codex cp destination partitions denies" codex \
+guard_case "Codex cp destination partitions denies" \
     "$(payload exec_command command 'cp /tmp/new.csv ./partitions.csv')" deny
-guard_case "Codex mv destination partitions denies" codex \
+guard_case "Codex mv destination partitions denies" \
     "$(payload exec_command command 'mv /tmp/new.csv partitions.csv')" deny
-guard_case "Codex unknown Python partitions writer denies" codex \
+guard_case "Codex unknown Python partitions writer denies" \
     "$(payload exec_command command 'python3 -c '\''open("partitions.csv", "w").write("changed")'\''')" deny
-guard_case "Codex computed Python partitions writer denies" codex \
+guard_case "Codex computed Python partitions writer denies" \
     "$(payload exec_command command 'python3 -c '\''open("partitions"+".csv", "w").write("changed")'\''')" deny
-guard_case "Codex command-substituted partitions redirect denies" codex \
+guard_case "Codex command-substituted partitions redirect denies" \
     "$(payload exec_command command 'printf x > "$(printf partitions).csv"')" deny
-guard_case "Codex variable-built partitions redirect denies" codex \
+guard_case "Codex variable-built partitions redirect denies" \
     "$(payload exec_command command 'p=partitions; printf x > "$p.csv"')" deny
-guard_case "Codex multiline partitions writer denies" codex \
+guard_case "Codex multiline partitions writer denies" \
     "$(payload exec_command command $'cat partitions.csv\npython3 -c '\''open("partitions.csv", "w").write("changed")'\''')" deny
-guard_case "Codex read tool redirected onto partitions denies" codex \
+guard_case "Codex read tool redirected onto partitions denies" \
     "$(payload exec_command command 'cat /tmp/new.csv > partitions.csv')" deny
-guard_case "Codex quote-split partitions redirect denies" codex \
+guard_case "Codex quote-split partitions redirect denies" \
     "$(payload exec_command command "printf x > partition''s.csv")" deny
-guard_case "Codex sed write-command partitions denies" codex \
+guard_case "Codex sed write-command partitions denies" \
     "$(payload exec_command command "sed -n 'w partitions.csv' /tmp/new.csv")" deny
-guard_case "Codex git output option partitions denies" codex \
+guard_case "Codex git output option partitions denies" \
     "$(payload exec_command command 'git show --output partitions.csv HEAD')" deny
-guard_case "Codex less output option partitions denies" codex \
+guard_case "Codex less output option partitions denies" \
     "$(payload exec_command command 'less -o partitions.csv /tmp/new.csv')" deny
-guard_case "Codex narrow partitions read allowed" codex \
+guard_case "Codex narrow partitions read allowed" \
     "$(payload exec_command command 'head -n 10 partitions.csv')" ""
-guard_case "Codex cat partitions read allowed" codex \
+guard_case "Codex cat partitions read allowed" \
     "$(payload exec_command command 'cat partitions.csv')" ""
-guard_case "Claude partitions diff allowed" claude \
+guard_case "Canonical partitions diff allowed" \
     "$(payload Bash command 'git diff -- partitions.csv')" ""
+
+# Exercise the local GitHub wrapper without touching a real credential store. The fake credential
+# helper emits a harmless token through Git's line protocol; fake gh observes it only in its
+# environment and records argv without ever printing the token.
+wrapper_bin="$tmp/wrapper-bin"
+mkdir -p "$wrapper_bin"
+cat >"$wrapper_bin/git" <<'EOF'
+#!/usr/bin/env bash
+[ "${1:-} ${2:-}" = "credential fill" ] || exit 81
+[ "$(cat)" = $'protocol=https\nhost=github.com' ] || exit 82
+[ -z "${SELFTEST_GIT_MARKER:-}" ] || printf 'called\n' >>"$SELFTEST_GIT_MARKER"
+printf '%s\n' 'protocol=https' 'host=github.com' 'username=selftest' \
+    'password=selftest-wrapper-token'
+[ "${SELFTEST_GIT_FAIL_AFTER_PASSWORD:-0}" != 1 ] || exit 42
+EOF
+cat >"$wrapper_bin/gh" <<'EOF'
+#!/usr/bin/env bash
+[ "${GH_HOST:-}" = github.com ] || exit 83
+[ "${GH_TOKEN:-}" = selftest-wrapper-token ] || exit 84
+[ "${GH_PROMPT_DISABLED:-}" = 1 ] || exit 85
+[ "${GH_PAGER:-}" = /bin/cat ] || exit 86
+[ "${GH_BROWSER:-}" = /usr/bin/false ] || exit 87
+[ "${GH_EDITOR:-}" = /usr/bin/false ] || exit 88
+[ -z "${GIT_SSH_COMMAND:-}" ] || exit 89
+[ -n "${GH_CONFIG_DIR:-}" ] && [ -d "$GH_CONFIG_DIR" ] || exit 90
+[ ! -e "$GH_CONFIG_DIR/config.yml" ] || exit 91
+[ "${GH_CONFIG_DIR:-}" != "${SELFTEST_ATTACKER_GH_CONFIG_DIR:-}" ] || exit 92
+[ -z "${GITHUB_TOKEN:-}" ] && [ -z "${GH_ENTERPRISE_TOKEN:-}" ] || exit 93
+printf '%s\n' "$*" >"$SELFTEST_GH_ARGS_FILE"
+[ -z "${SELFTEST_GH_CONFIG_FILE:-}" ] || printf '%s\n' "$GH_CONFIG_DIR" >"$SELFTEST_GH_CONFIG_FILE"
+EOF
+chmod +x "$wrapper_bin/git" "$wrapper_bin/gh"
+wrapper_args="$tmp/wrapper-args.txt"
+wrapper_marker="$tmp/wrapper-git-called"
+wrapper_config_path="$tmp/wrapper-config-path.txt"
+wrapper_hostile_config="$tmp/wrapper-hostile-config"
+mkdir -p "$wrapper_hostile_config"
+printf '%s\n' 'http_unix_socket: /tmp/untrusted.sock' >"$wrapper_hostile_config/config.yml"
+wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
+    GH_CONFIG_DIR="$wrapper_hostile_config" XDG_CONFIG_HOME="$wrapper_hostile_config" \
+    GH_ENTERPRISE_TOKEN=selftest-enterprise-token \
+    GH_PAGER=/tmp/untrusted-pager GH_BROWSER=/tmp/untrusted-browser \
+    GH_EDITOR=/tmp/untrusted-editor GIT_SSH_COMMAND=/tmp/untrusted-ssh \
+    SELFTEST_ATTACKER_GH_CONFIG_DIR="$wrapper_hostile_config" \
+    SELFTEST_GH_CONFIG_FILE="$wrapper_config_path" SELFTEST_GH_ARGS_FILE="$wrapper_args" \
+    "$root/scripts/gh-with-git-credentials.sh" \
+    pr view 5 --json number 2>&1)"; rc=$?
+wrapper_seen_config="$(cat "$wrapper_config_path" 2>/dev/null || true)"
+if [ "$rc" -eq 0 ] && [ -z "$wrapper_out" ] \
+    && [ "$(cat "$wrapper_args" 2>/dev/null)" = "pr view 5 --json number" ] \
+    && [ -n "$wrapper_seen_config" ] && [ "$wrapper_seen_config" != "$wrapper_hostile_config" ] \
+    && [ ! -e "$wrapper_seen_config" ]; then
+    echo "PASS  Git credential reaches gh only through an isolated wrapper environment"; pass=$((pass + 1))
+else
+    echo "FAIL  GitHub credential wrapper isolation failed (rc=$rc output=$wrapper_out config=$wrapper_seen_config)" >&2
+    fail=$((fail + 1))
+fi
+
+rm -f "$wrapper_args" "$wrapper_marker"
+wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
+    SELFTEST_GIT_MARKER="$wrapper_marker" SELFTEST_GH_ARGS_FILE="$wrapper_args" \
+    "$root/scripts/gh-with-git-credentials.sh" pr view 5 --json number 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && [ ! -e "$wrapper_marker" ] && [ -z "$wrapper_out" ] \
+    && [ "$(cat "$wrapper_args" 2>/dev/null)" = "pr view 5 --json number" ]; then
+    echo "PASS  pre-authenticated CI token bypasses Git credential lookup"; pass=$((pass + 1))
+else
+    echo "FAIL  pre-authenticated wrapper path touched Git credentials (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+
+rm -f "$wrapper_args"
+wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
+    SELFTEST_GIT_FAIL_AFTER_PASSWORD=1 SELFTEST_GH_ARGS_FILE="$wrapper_args" \
+    "$root/scripts/gh-with-git-credentials.sh" pr view 5 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_args" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'Git credential lookup failed'; then
+    echo "PASS  failed Git credential lookup cannot forward a partial password"; pass=$((pass + 1))
+else
+    echo "FAIL  partial failed Git credential lookup reached gh (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+
+rm -f "$wrapper_args"
+wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
+    SELFTEST_GH_ARGS_FILE="$wrapper_args" /bin/bash -x \
+    "$root/scripts/gh-with-git-credentials.sh" pr view 5 --json number 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$wrapper_args" 2>/dev/null)" = "pr view 5 --json number" ] \
+    && ! printf '%s' "$wrapper_out" | grep -qF 'selftest-wrapper-token'; then
+    echo "PASS  inherited shell tracing cannot print the resolved credential"; pass=$((pass + 1))
+else
+    echo "FAIL  shell tracing exposed or broke the GitHub credential wrapper (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+
+wrapper_block_case() {
+    local name="$1" needle="$2" out rc
+    shift 2
+    rm -f "$wrapper_marker"
+    out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
+        SELFTEST_GIT_MARKER="$wrapper_marker" SELFTEST_GH_ARGS_FILE="$wrapper_args" \
+        "$root/scripts/gh-with-git-credentials.sh" "$@" 2>&1)"; rc=$?
+    if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] \
+        && printf '%s' "$out" | grep -qF -- "$needle" \
+        && ! printf '%s' "$out" | grep -qF 'selftest-wrapper-token'; then
+        echo "PASS  $name"; pass=$((pass + 1))
+    else
+        echo "FAIL  $name (rc=$rc output=$out credential-read=$([ -e "$wrapper_marker" ] && echo yes || echo no))" >&2
+        fail=$((fail + 1))
+    fi
+}
+wrapper_block_case "credential wrapper rejects a foreign hostname before lookup" \
+    "only github.com is allowed" api --hostname ghe.example user
+wrapper_block_case "credential wrapper rejects a foreign host-qualified repo before lookup" \
+    "--repo must name github.com/OWNER/REPO" --repo ghe.example/owner/repo pr view 5
+wrapper_block_case "credential wrapper rejects aliases before lookup" \
+    "aliases and extensions are not allowed" alias list
+wrapper_block_case "credential wrapper rejects extensions before lookup" \
+    "aliases and extensions are not allowed" extension list
+wrapper_block_case "credential wrapper rejects token-output commands before lookup" \
+    "authentication commands are not allowed" auth token
+wrapper_block_case "credential wrapper rejects absolute API targets before lookup" \
+    "absolute API URLs are not allowed" api https://ghe.example/user
+wrapper_block_case "credential wrapper rejects verbose request output before lookup" \
+    "verbose request output is not allowed" api --verbose user
+wrapper_block_case "credential wrapper rejects browser execution before lookup" \
+    "browser and editor execution is not allowed" pr view 5 --web
+wrapper_block_case "credential wrapper rejects editor execution before lookup" \
+    "browser and editor execution is not allowed" issue create --editor
+wrapper_block_case "credential wrapper rejects checkout subprocesses before lookup" \
+    "Git-spawning checkout and clone commands are not allowed" pr checkout 5
+rm -f "$wrapper_marker"
+wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
+    GH_REPO=ghe.example/owner/repo SELFTEST_GIT_MARKER="$wrapper_marker" \
+    SELFTEST_GH_ARGS_FILE="$wrapper_args" "$root/scripts/gh-with-git-credentials.sh" \
+    pr view 5 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] \
+    && printf '%s' "$wrapper_out" | grep -qF -- '--repo must name github.com/OWNER/REPO'; then
+    echo "PASS  credential wrapper rejects an ambient foreign repo before lookup"; pass=$((pass + 1))
+else
+    echo "FAIL  credential wrapper accepted an ambient foreign repo (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
 
 prompt_out="$(printf '%s' '{"prompt":"Das Gerät ist offline nach einem reboot"}' \
     | python3 "$hook" prompt-context 2>&1)"
@@ -331,13 +477,13 @@ fi
 
 head_sha="abcdef1234567890abcdef1234567890abcdef12"
 cat >"$tmp/all-gates.md" <<EOF
-- [x] /project-review clean — merge gate @ $head_sha
-- [x] /domain-review clean — merge gate @ $head_sha
-- [x] /feature-docs synced — merge gate @ $head_sha
-- [x] /schematic-review clean — merge gate @ $head_sha
-- [x] /ui-use-case-review clean — merge gate @ $head_sha
-- [x] /absence-review clean — merge gate @ $head_sha
-- [x] /ui-gif clean — merge gate @ $head_sha
+- [x] \$project-review clean — merge gate @ $head_sha
+- [x] \$domain-review clean — merge gate @ $head_sha
+- [x] \$feature-docs synced — merge gate @ $head_sha
+- [x] \$schematic-review clean — merge gate @ $head_sha
+- [x] \$ui-use-case-review clean — merge gate @ $head_sha
+- [x] \$absence-review clean — merge gate @ $head_sha
+- [x] \$ui-gif clean — merge gate @ $head_sha
 EOF
 printf '%s\n' 'main/www/js/dashboard.js' >"$tmp/all-files.txt"
 
@@ -355,8 +501,8 @@ pr_case() {
 
 pr_case "CI all applicable gates pass" 0 "$tmp/all-gates.md" "$tmp/all-files.txt"
 cat >"$tmp/docs-gates.md" <<EOF
-- [x] /project-review clean — merge gate @ $head_sha
-- [x] /domain-review clean — merge gate @ $head_sha
+- [x] \$project-review clean — merge gate @ $head_sha
+- [x] \$domain-review clean — merge gate @ $head_sha
 EOF
 printf '%s\n' 'docs/README.md' >"$tmp/docs-files.txt"
 pr_case "CI docs-only skips conditional gates" 0 "$tmp/docs-gates.md" "$tmp/docs-files.txt"
@@ -383,7 +529,7 @@ pr_case "CI two SHA stamps make a canonical gate invalid" 2 \
 cat "$tmp/all-gates.md" >"$tmp/fenced-decoy.md"
 cat >>"$tmp/fenced-decoy.md" <<'EOF'
 ```markdown
-- [x] /project-review clean — merge gate @ deadbee
+- [x] $project-review clean — merge gate @ deadbee
 ```
 EOF
 pr_case "CI fenced gate example cannot shadow the real record" 0 \
@@ -392,7 +538,7 @@ cat "$tmp/all-gates.md" >"$tmp/long-fence-decoy.md"
 cat >>"$tmp/long-fence-decoy.md" <<'EOF'
 ````markdown
 ```
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 ````
 EOF
 pr_case "CI shorter same-character fence cannot expose a fake gate" 0 \
@@ -401,27 +547,27 @@ cat "$tmp/all-gates.md" >"$tmp/fence-comment-order.md"
 cat >>"$tmp/fence-comment-order.md" <<'EOF'
 ~~~ info <!--
 -->
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 ~~~
 EOF
 pr_case "CI a fence opener takes precedence over comment text in its info string" 0 \
     "$tmp/fence-comment-order.md" "$tmp/all-files.txt"
 cat "$tmp/all-gates.md" >"$tmp/nested-task-decoy.md"
-printf '%s\n' '  - [ ] /project-review clean — merge gate @ deadbee' >>"$tmp/nested-task-decoy.md"
+printf '%s\n' '  - [ ] $project-review clean — merge gate @ deadbee' >>"$tmp/nested-task-decoy.md"
 pr_case "CI nested two-space task cannot shadow a column-zero gate" 0 \
     "$tmp/nested-task-decoy.md" "$tmp/all-files.txt"
 printf '%s\n' 'prose <!-- same-line comment closes here -->' >"$tmp/comment-decoy.md"
 cat "$tmp/all-gates.md" >>"$tmp/comment-decoy.md"
 cat >>"$tmp/comment-decoy.md" <<'EOF'
 prose <!--
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 -->
 EOF
 pr_case "CI HTML-comment gate examples stay invisible without leaking state" 0 \
     "$tmp/comment-decoy.md" "$tmp/all-files.txt"
 cat >"$tmp/multi-comment-decoy.md" <<'EOF'
 <!-- first --><!-- second
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 -->
 EOF
 cat "$tmp/all-gates.md" >>"$tmp/multi-comment-decoy.md"
@@ -429,45 +575,45 @@ pr_case "CI multiple ordered HTML markers preserve the open-comment state" 0 \
     "$tmp/multi-comment-decoy.md" "$tmp/all-files.txt"
 cat >"$tmp/raw-html-decoy.md" <<'EOF'
 <pre>
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 </pre><pre>
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 </pre>
 <pre>
 </pre><!--
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 -->
 <?pi
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 ?>
 <![CDATA[
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 ]]>
 <span>
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 
 </span>
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 
 </div>
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 
 <div
-- [ ] /project-review clean — merge gate @ deadbee
+- [ ] $project-review clean — merge gate @ deadbee
 
 EOF
 cat "$tmp/all-gates.md" >>"$tmp/raw-html-decoy.md"
 pr_case "CI raw HTML code blocks cannot shadow the real gate record" 0 \
     "$tmp/raw-html-decoy.md" "$tmp/all-files.txt"
 cat "$tmp/all-gates.md" >"$tmp/duplicate-record.md"
-printf '%s\n' '- [ ] /project-review clean — merge gate @ <short-sha>' >>"$tmp/duplicate-record.md"
+printf '%s\n' '- [ ] $project-review clean — merge gate @ <short-sha>' >>"$tmp/duplicate-record.md"
 pr_case "CI duplicate real gate records fail closed" 2 \
     "$tmp/duplicate-record.md" "$tmp/all-files.txt"
 
 printf '%s\n' 'docs/media/dashboard.gif' >"$tmp/gif-files.txt"
 pr_case "CI new dashboard recording accepts current UI-GIF review" 0 \
     "$tmp/all-gates.md" "$tmp/gif-files.txt"
-grep -v '/ui-gif' "$tmp/all-gates.md" >"$tmp/no-ui-gif.md"
+grep -vF '$ui-gif' "$tmp/all-gates.md" >"$tmp/no-ui-gif.md"
 pr_case "CI new dashboard recording requires UI-GIF review" 2 \
     "$tmp/no-ui-gif.md" "$tmp/gif-files.txt"
 
@@ -567,6 +713,7 @@ fi
 # aggregate parser, relevance filters, and failure propagation.
 merge_root="$tmp/merge-root"
 mkdir -p "$merge_root/scripts" "$merge_root/tools/absence" "$tmp/bin"
+cp "$root/scripts/gh-with-git-credentials.sh" "$merge_root/scripts/"
 git -C "$merge_root" init -q
 git -C "$merge_root" remote add origin https://github.com/0Bu/daikin-altherma-esp32.git
 cat >"$tmp/bin/gh" <<'EOF'
@@ -580,12 +727,12 @@ case "${1:-} ${2:-}" in
 import json
 head = "abcdef1234567890abcdef1234567890abcdef12"
 body = "\n".join([
-    f"- [x] /project-review clean — merge gate @ {head}",
-    f"- [x] /domain-review clean — merge gate @ {head}",
-    f"- [x] /feature-docs synced — merge gate @ {head}",
-    f"- [x] /schematic-review clean — merge gate @ {head}",
-    f"- [x] /ui-use-case-review clean — merge gate @ {head}",
-    f"- [x] /absence-review clean — merge gate @ {head}",
+    f"- [x] $project-review clean — merge gate @ {head}",
+    f"- [x] $domain-review clean — merge gate @ {head}",
+    f"- [x] $feature-docs synced — merge gate @ {head}",
+    f"- [x] $schematic-review clean — merge gate @ {head}",
+    f"- [x] $ui-use-case-review clean — merge gate @ {head}",
+    f"- [x] $absence-review clean — merge gate @ {head}",
 ])
 print(json.dumps({"number": 123, "body": body, "headRefOid": head,
                   "changedFiles": int(__import__("os").environ.get("AGENT_GH_REPORTED_FILES", "1"))}))
@@ -627,10 +774,12 @@ printf 'absence\n' >>"$AGENT_SUITE_LOG"
 exit "${AGENT_ABSENCE_SUITE_RC:-0}"
 EOF
 chmod +x "$tmp/bin/gh" "$merge_root/scripts/run-ui-use-case-tests.sh" \
-    "$merge_root/scripts/run-ui-gif-audit.sh" "$merge_root/tools/absence/selftest.sh"
+    "$merge_root/scripts/run-ui-gif-audit.sh" "$merge_root/scripts/gh-with-git-credentials.sh" \
+    "$merge_root/tools/absence/selftest.sh"
 
 AGENT_TEST_PAYLOAD_CWD="$merge_root"
-merge_input="$(payload Bash command "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash")"
+export GH_TOKEN=agent-hook-selftest-token
+merge_input="$(payload Bash command "$root/scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash")"
 suite_log="$tmp/suites.log"
 out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
     AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
@@ -942,6 +1091,12 @@ raise SystemExit(0 if actual == expected else 1)' \
 parser_case "canonical CLI merge remains bound" \
     "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash" \
     'gh pr merge' '123' '0Bu/daikin-altherma-esp32' 'github.com' ''
+parser_case "credential wrapper merge remains bound" \
+    "$root/scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash" \
+    'gh pr merge' '123' '0Bu/daikin-altherma-esp32' 'github.com' ''
+parser_case "foreign same-name credential wrapper is not trusted" \
+    "/tmp/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash" \
+    'shell merge' '' '' '' 'literal merge operation is present but its executable or target is dynamic'
 parser_case "branch merge selector is rejected" \
     "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge feature/target --match-head-commit $head_sha --squash" \
     'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'merge selector must be a static numeric pull request: feature/target'

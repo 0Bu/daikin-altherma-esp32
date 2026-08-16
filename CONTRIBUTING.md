@@ -165,7 +165,7 @@ each, so `grep -c run_case` is the count) and asserts each is still caught. What
 — is the drawing still true of the plant, is a new part in the right place, is the German copy right
 — it stays quiet about; that half is the maintainer's `$schematic-review`, which is a **merge gate**
 on any PR that reaches the drawing, its contract or the tools that judge it. The runner-neutral gate
-under `tools/agent-hooks/` is the one definition; `.claude/hooks/` remains a compatibility adapter.
+under `tools/agent-hooks/` is the single definition.
 As an outside contributor you never run it; assume any change under `main/www/` needs it.
 
 `run-ui-use-case-tests.sh` exercises the production UI wiring rather than merely parsing it. Its
@@ -175,9 +175,8 @@ the two-step bug-report dialog. It also runs every existing `test_ui_*.mjs` cont
 that re-introduces the historical ENV III failure where visible Cancel and Save buttons called an
 undefined close function. CI runs the same command in the required `gates` job. For UI-relevant
 changes, the maintainer's `$ui-use-case-review` adds real narrow/desktop click-through and records a
-SHA-stamped result. The runner-neutral aggregate PR gate used by both Codex and the retained Claude
-adapters requires that current record and reruns the deterministic suite immediately before a
-command-line merge.
+SHA-stamped result. The runner-neutral aggregate PR gate requires that current record and reruns the
+deterministic suite immediately before a command-line merge.
 
 `$absence-review` is the same shape for the states above: **conditional**, required when a PR
 touches an optional source's lifecycle or a surface that reports one, with the neutral hook core as
@@ -218,7 +217,7 @@ recording. The cost of the old arrangement was not hypothetical: with the record
 nobody's merge condition, legacy-462 swapped the
 schematic's circuits and the README went stale the same day, against a stamp written hours earlier.
 If you are an outside contributor and cannot re-record, say so in the PR and leave it to the
-maintainer's `$ui-gif` skill (legacy Claude spelling `/ui-gif`) rather than touching the stamp.
+maintainer's `$ui-gif` skill rather than touching the stamp.
 
 **A UI change is not automatically a recording change**, and this gate is careful about the
 difference. The CI step is a fingerprint comparison that takes a second and passes unless the
@@ -276,35 +275,31 @@ looked at every table would have called it clean. It does **not** require an id 
 profile: the catalog genuinely disagrees across models, and the docs should state a majority id and
 name the alternatives beside it. `tools/docs/selftest.sh` re-seeds the defects it was built for.
 
-`run-agent-instructions-budget.sh` is the canonical runner-neutral agent contract. It keeps the
-always-loaded [`AGENTS.md`](AGENTS.md) below 24 KiB and the Claude compatibility instructions below
-64 KiB, validates every tracked `.claude` file exactly once against
-`.codex/migration-manifest.json`, requires every canonical/adapter target, checks skill identity and
-OpenAI metadata parity, and verifies the explicit safety invariants occur in both instruction
-files. Narrative belongs in `docs/`; do not raise a budget to clear a red gate.
-
-`scripts/run-claude-md-budget.sh` remains a compatibility wrapper with its historical environment
-variables and exit codes. New automation must call the neutral command. The mutation canaries are:
+`run-agent-instructions-budget.sh` is the canonical runner-neutral agent-integrity contract. It
+keeps the always-loaded [`AGENTS.md`](AGENTS.md) below 24 KiB, validates canonical skill identity and
+OpenAI metadata, focused-reviewer safety, hook dispatch, and the explicit project safety invariants.
+Narrative belongs in `docs/`; do not trim a rule or raise the budget to clear a red gate. The
+mutation canaries are:
 
 | Canary | Expected evidence |
 |---|---|
-| Missing instruction file or unreadable manifest input | Exit 2; never a vacuous pass |
-| Canonical instructions over 24 KiB or Claude compatibility instructions over 64 KiB | Exit 1 with the measured byte count |
-| Missing, extra or duplicate tracked `.claude` mapping; missing declared target | Non-zero mapping failure |
-| Canonical/legacy skill-set or name drift; changed `agents/openai.yaml` | Non-zero parity failure |
-| A required safety invariant absent from either instruction file | Non-zero parity failure naming the invariant |
-| Legacy wrapper over budget / missing / within budget | Fail / exit 2 / pass, proved by `tools/claudemd/selftest.sh` |
+| Missing canonical instruction or configuration input | Exit 2; never a vacuous pass |
+| `AGENTS.md` over 24 KiB | Exit 1 with the measured byte count |
+| Missing, duplicate or wrongly named canonical skill | Non-zero identity failure |
+| OpenAI metadata or focused-reviewer safety drift | Non-zero configuration failure |
+| Hook dispatch drift | Non-zero hook failure |
+| Required safety invariant absent | Non-zero failure naming the invariant |
 
-Run `tools/agent-config/selftest.sh` after changing agent instructions, the migration manifest,
-skills, subagent definitions, hook mappings, or the checker itself.
+Run `tools/agent-config/selftest.sh` after changing agent instructions, skills, subagent definitions,
+hook mappings, or the checker itself.
 
 The same `gates` job runs `tools/agent-policy/selftest.sh` and, on a pull request, invokes
 `scripts/run-agent-policy.sh` with the current PR body, head SHA and complete changed-file list from
 GitHub. Missing/partial inputs, an event SHA that is no longer the PR head, an unchecked or missing
 required review, and a stamp for an older commit all exit 2. A current `$name` record passes;
-transitional `/name` records pass the same parser. Editing the PR body does not start a workflow, so
-after the maintainer records the reviews, re-run the existing `gates` job; it fetches the live body
-rather than the old event snapshot. Any later commit invalidates every prior stamp.
+other spellings are rejected. Editing the PR body does not start a workflow, so after the maintainer
+records the reviews, re-run the existing `gates` job; it fetches the live body rather than the old
+event snapshot. Any later commit invalidates every prior stamp.
 
 This CI parser proves exact record syntax, applicability, completeness and head freshness; it cannot
 prove who last edited a PR body. An outside contributor must still leave the section alone, and a
@@ -389,7 +384,9 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
 - **Any decode, config, discovery or policy logic belongs in [`main/logic/`](main/logic/)** as an
   IDF-free header, with a `CHECK` in `test/test_logic.cpp`. Never bury it in a `.cpp` only the device
   can run — that is logic no one can verify without hardware.
-- **Never hand-edit `main/def/*` profile tables.** They are machine-generated. A profile's row set
+- **Never hand-edit generated per-model `main/def/*` profile tables.** They are machine-generated;
+  `main/def/overlay.hpp` is the hand-written overlay and `main/def/homehub.hpp` is the curated
+  HomeHub definition source. A generated profile's row set
   *is* its detection signature (`def/signatures.hpp` → maximal page overlap), so deleting a row makes
   the correct model lose a page to a feature-richer wrong one. An absent-feature row gets the
   `ValueDef::no_publish` detect-only flag instead of deletion. Verify rows against
@@ -397,8 +394,7 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
 - **Heap is the binding constraint** (the largest *contiguous* free block, not total free). HTTP
   handlers must stay under the shared OOM try/catch; every allocating task loop must self-guard; never
   allocate while holding a mutex. The rules and the reasoning are in
-  [`AGENTS.md`](AGENTS.md) → "Memory, concurrency, and HTTP safety"; `.claude/CLAUDE.md` remains the
-  Claude compatibility entry point.
+  [`AGENTS.md`](AGENTS.md) → "Memory, concurrency, and HTTP safety".
 - C/C++ formatting is [`.clang-format`](.clang-format). Match the surrounding comment density —
   explaining *why*, not *what*, is the house style.
 - **Warnings are part of the contract in `main/`.** [`main/CMakeLists.txt`](main/CMakeLists.txt) pins
@@ -448,9 +444,9 @@ silence a *new* finding on code your PR touches — that is the gate working.
 Fill in [the template](.github/pull_request_template.md). Seven checkboxes on it
 (`$project-review`, `$feature-docs`, `$domain-review`, `$schematic-review`,
 `$ui-use-case-review`, `$absence-review`, `$ui-gif`) are **maintainer-only** repository skills under
-`.agents/skills/`; legacy Claude `/name` aliases remain accepted during migration. They are not
-something an outside contributor can run. Leave them unchecked; the maintainer runs them before
-merge. Your equivalents are the scripts above plus an honest note about hardware.
+`.agents/skills/`. They are not something an outside contributor can run. Leave them unchecked; the
+maintainer runs them before merge. Your equivalents are the scripts above plus an honest note about
+hardware.
 
 `main` is kept **strictly linear**, so PRs land as **squash merges** — enforced by a branch ruleset
 on `main` (require a pull request, require linear history, and the `gates` / `build` checks green),

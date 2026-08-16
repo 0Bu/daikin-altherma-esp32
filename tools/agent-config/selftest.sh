@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mutation canaries for the runner-neutral instruction/mapping/parity contract.
+# Mutation canaries for the canonical-only agent configuration contract.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -14,32 +14,29 @@ make_fixture() {
   local dest="$1" list="$1/files.txt" relative
   rm -rf "$dest"
   mkdir -p "$dest"
-  node - "$ROOT/.codex/migration-manifest.json" > "$list" <<'NODE'
-const fs = require("node:fs");
-const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const files = new Set([
-  ".mcp.json",
-  ".codex/migration-manifest.json",
-  "tools/agent-config/safety-invariants.json",
-  manifest.canonical_instructions,
-]);
-for (const entry of manifest.entries) {
-  files.add(entry.source);
-  for (const target of entry.targets) files.add(target);
-}
-process.stdout.write([...files].sort().join("\n") + "\n");
-NODE
+  {
+    printf '%s\n' \
+      ".mcp.json" \
+      ".codex/config.toml" \
+      ".codex/hooks.json" \
+      "AGENTS.md" \
+      "scripts/gh-with-git-credentials.sh" \
+      "tools/agent-config/safety-invariants.json"
+    find "$ROOT/.codex/agents" "$ROOT/.agents/skills" -type f -print \
+      | sed "s#^$ROOT/##"
+  } | sort -u > "$list"
   while IFS= read -r relative; do
     [ -n "$relative" ] || continue
     mkdir -p "$dest/$(dirname "$relative")"
     cp "$ROOT/$relative" "$dest/$relative"
   done < "$list"
-  git -C "$ROOT" ls-files -- .claude > "$dest/tracked.txt" 2>/dev/null \
-    || fail "could not enumerate tracked .claude files"
+  rm "$list"
+  git -C "$dest" init -q
+  git -C "$dest" add .
 }
 
 run_gate() {
-  AGENT_CONFIG_ROOT="$1" AGENT_CONFIG_TRACKED_FILES_FILE="$1/tracked.txt" "$CHECK"
+  AGENT_CONFIG_ROOT="$1" "$CHECK"
 }
 
 expect_pass() {
@@ -61,8 +58,8 @@ expect_failure() {
   pass=$((pass + 1))
 }
 
-echo "== clean contract =="
-expect_pass "current mapping passes"
+echo "== clean canonical contract =="
+expect_pass "current canonical configuration passes"
 fixture="$WORK/default-budget"
 make_fixture "$fixture"
 output="$(run_gate "$fixture" 2>&1)" || fail "default budget: clean fixture failed"
@@ -71,50 +68,62 @@ printf '%s' "$output" | grep -Eq 'canonical budget [0-9]+/24576 bytes' \
 echo "  PASS  canonical default budget is 24576 bytes"
 pass=$((pass + 1))
 
-echo "== instruction budget =="
+echo "== instruction budget and cutover boundary =="
 fixture="$WORK/over-budget"
 make_fixture "$fixture"
 set +e
-output="$(AGENT_CONFIG_ROOT="$fixture" AGENT_CONFIG_TRACKED_FILES_FILE="$fixture/tracked.txt" \
-  AGENT_INSTRUCTIONS_BUDGET_BYTES=1 "$CHECK" 2>&1)"; rc=$?
+output="$(AGENT_CONFIG_ROOT="$fixture" AGENT_INSTRUCTIONS_BUDGET_BYTES=1 "$CHECK" 2>&1)"; rc=$?
 set -e
 [ "$rc" -eq 1 ] || fail "over budget: expected exit 1, got $rc"
 printf '%s' "$output" | grep -qF "over the 1-byte budget" || fail "over budget: no actionable error"
 echo "  PASS  over-budget canonical instructions"
 pass=$((pass + 1))
 
-echo "== fail-closed mapping =="
-fixture="$WORK/missing-target"
+fixture="$WORK/tracked-claude"
 make_fixture "$fixture"
-target="$(node - "$fixture/.codex/migration-manifest.json" <<'NODE'
-const fs = require("node:fs");
-const m = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-process.stdout.write(m.entries.find((entry) => entry.status !== "deprecated").targets[0]);
-NODE
-)"
-mv "$fixture/$target" "$fixture/$target.missing"
-expect_failure "missing declared target" "$fixture" "target for"
+mkdir -p "$fixture/.claude"
+printf 'reintroduced\n' > "$fixture/.claude/canary.md"
+git -C "$fixture" add .claude/canary.md
+expect_failure "tracked .claude reintroduction" "$fixture" "tracked .claude content is forbidden"
 
-fixture="$WORK/unmapped-legacy"
+fixture="$WORK/filesystem-claude"
 make_fixture "$fixture"
-printf '.claude/unmapped-canary.sh\n' >> "$fixture/tracked.txt"
-expect_failure "unmapped tracked legacy file" "$fixture" "absent from migration manifest"
+mkdir -p "$fixture/.claude"
+expect_failure "filesystem .claude reintroduction" "$fixture" "filesystem .claude content is forbidden"
 
-fixture="$WORK/duplicate-source"
+fixture="$WORK/credential-wrapper-missing"
 make_fixture "$fixture"
-node - "$fixture/.codex/migration-manifest.json" <<'NODE'
-const fs = require("node:fs");
-const file = process.argv[2];
-const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
-manifest.entries.push(structuredClone(manifest.entries[0]));
-fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n");
-NODE
-expect_failure "duplicate legacy mapping" "$fixture" "more than once"
+rm "$fixture/scripts/gh-with-git-credentials.sh"
+expect_failure "missing canonical GitHub credential wrapper" "$fixture" "credential wrapper is missing"
 
-fixture="$WORK/legacy-source-fingerprint"
+fixture="$WORK/credential-wrapper-direct-read"
 make_fixture "$fixture"
-printf '\n# legacy source drift canary\n' >> "$fixture/.claude/skills/device-triage/SKILL.md"
-expect_failure "unreviewed legacy source drift" "$fixture" "reviewed legacy source tree fingerprint drifted"
+printf '%s\n' 'head -n1 ~/.git-credentials' >> "$fixture/scripts/gh-with-git-credentials.sh"
+expect_failure "direct credential-store read in wrapper" "$fixture" "must not read a credential-store file directly"
+
+fixture="$WORK/credential-wrapper-not-executable"
+make_fixture "$fixture"
+chmod -x "$fixture/scripts/gh-with-git-credentials.sh"
+expect_failure "non-executable canonical GitHub credential wrapper" "$fixture" "credential wrapper is not executable"
+
+fixture="$WORK/credential-wrapper-xtrace"
+make_fixture "$fixture"
+sed -i.bak 's/set +x/set -x/' "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper xtrace hardening drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-host"
+make_fixture "$fixture"
+sed -i.bak 's/only github.com is allowed/any host allowed/' "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper host binding drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-config"
+make_fixture "$fixture"
+sed -i.bak 's/GH_CONFIG_DIR="$config_dir" gh/GH_CONFIG_DIR="${GH_CONFIG_DIR:-}" gh/' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper config isolation drift" "$fixture" "credential wrapper contract drifted"
 
 echo "== parsed Codex configuration =="
 fixture="$WORK/invalid-config-toml"
@@ -133,6 +142,36 @@ make_fixture "$fixture"
 subagent="$(find "$fixture/.codex/agents" -maxdepth 1 -name '*.toml' | sort | head -n1)"
 printf '%s\n' 'model = "canary"' >> "$subagent"
 expect_failure "canonical subagent model pin" "$fixture" "must not pin a model"
+
+fixture="$WORK/subagent-identity"
+make_fixture "$fixture"
+subagent="$(find "$fixture/.codex/agents" -maxdepth 1 -name '*.toml' | sort | head -n1)"
+node - "$subagent" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/^name\s*=.*$/m, 'name = "wrong_canary"'));
+NODE
+expect_failure "canonical subagent identity drift" "$fixture" "name must be"
+
+fixture="$WORK/subagent-set-missing"
+make_fixture "$fixture"
+mv "$fixture/.codex/agents/doc-drift-checker.toml" "$fixture/removed-reviewer.toml"
+expect_failure "missing canonical reviewer" "$fixture" "exactly the three mapped project reviewers"
+
+fixture="$WORK/subagent-set-extra"
+make_fixture "$fixture"
+cp "$fixture/.codex/agents/doc-drift-checker.toml" "$fixture/.codex/agents/extra-reviewer.toml"
+expect_failure "extra canonical reviewer" "$fixture" "exactly the three mapped project reviewers"
+
+fixture="$WORK/subagent-sandbox"
+make_fixture "$fixture"
+subagent="$fixture/.codex/agents/doc-drift-checker.toml"
+node - "$subagent" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace('sandbox_mode = "read-only"', 'sandbox_mode = "workspace-write"'));
+NODE
+expect_failure "canonical reviewer write access" "$fixture" "sandbox_mode must be read-only"
 
 fixture="$WORK/context7-pin"
 make_fixture "$fixture"
@@ -164,7 +203,7 @@ make_fixture "$fixture"
 printf '%s\n' '[features]' 'hooks = false' >> "$fixture/.codex/config.toml"
 expect_failure "disabled Codex hooks" "$fixture" "hooks must not be disabled"
 
-echo "== hook dispatch and compatibility adapters =="
+echo "== canonical hook dispatch =="
 fixture="$WORK/codex-guard-dispatch"
 make_fixture "$fixture"
 node - "$fixture/.codex/hooks.json" <<'NODE'
@@ -175,6 +214,17 @@ config.hooks.PreToolUse[0].matcher = "Read";
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
 NODE
 expect_failure "Codex guard dispatch drift" "$fixture" "hook matcher drifted"
+
+fixture="$WORK/codex-guard-command"
+make_fixture "$fixture"
+node - "$fixture/.codex/hooks.json" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+const config = JSON.parse(fs.readFileSync(file, "utf8"));
+config.hooks.PreToolUse[0].hooks[0].command += " --runner codex";
+fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
+NODE
+expect_failure "Codex guard command drift" "$fixture" "hook command drifted"
 
 fixture="$WORK/codex-guard-async"
 make_fixture "$fixture"
@@ -231,48 +281,17 @@ fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
 NODE
 expect_failure "Codex Stop-hook timeout drift" "$fixture" "hook timeout drifted"
 
-fixture="$WORK/claude-pr-dispatch"
+echo "== canonical skills and metadata =="
+fixture="$WORK/skill-set-missing"
 make_fixture "$fixture"
-node - "$fixture/.claude/settings.json" <<'NODE'
-const fs = require("node:fs");
-const file = process.argv[2];
-const config = JSON.parse(fs.readFileSync(file, "utf8"));
-config.hooks.PreToolUse[1].matcher = "Bash";
-fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
-NODE
-expect_failure "Claude aggregate dispatch drift" "$fixture" "hook matcher drifted"
+mv "$fixture/.agents/skills/absence-review" "$fixture/removed-skill"
+expect_failure "missing canonical skill" "$fixture" "canonical skill set must contain exactly"
 
-fixture="$WORK/claude-pr-matcher-unanchored"
+fixture="$WORK/skill-set-extra"
 make_fixture "$fixture"
-node - "$fixture/.claude/settings.json" <<'NODE'
-const fs = require("node:fs");
-const file = process.argv[2];
-const config = JSON.parse(fs.readFileSync(file, "utf8"));
-config.hooks.PreToolUse[1].matcher = config.hooks.PreToolUse[1].matcher.replace(/\$$/, "");
-fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
-NODE
-expect_failure "unanchored Claude aggregate matcher" "$fixture" "hook matcher drifted"
+mkdir -p "$fixture/.agents/skills/unreviewed-canary"
+expect_failure "extra canonical skill" "$fixture" "canonical skill set must contain exactly"
 
-fixture="$WORK/claude-guard-adapter"
-make_fixture "$fixture"
-printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$fixture/.claude/hooks/guard-secrets.sh"
-chmod +x "$fixture/.claude/hooks/guard-secrets.sh"
-expect_failure "Claude guard adapter drift" "$fixture" "thin compatibility adapter drifted"
-
-fixture="$WORK/claude-prompt-adapter"
-make_fixture "$fixture"
-printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$fixture/.claude/hooks/crash-triage-context.sh"
-chmod +x "$fixture/.claude/hooks/crash-triage-context.sh"
-expect_failure "Claude prompt lifecycle adapter drift" "$fixture" "thin compatibility adapter drifted"
-
-fixture="$WORK/claude-stop-adapter-shebang"
-make_fixture "$fixture"
-sed '1d' "$fixture/.claude/hooks/run-logic-tests.sh" > "$fixture/.claude/hooks/run-logic-tests.sh.tmp"
-mv "$fixture/.claude/hooks/run-logic-tests.sh.tmp" "$fixture/.claude/hooks/run-logic-tests.sh"
-chmod +x "$fixture/.claude/hooks/run-logic-tests.sh"
-expect_failure "Claude Stop lifecycle adapter shebang" "$fixture" "executable bash shebang"
-
-echo "== skill and safety parity =="
 fixture="$WORK/skill-name"
 make_fixture "$fixture"
 skill="$(find "$fixture/.agents/skills" -mindepth 2 -maxdepth 2 -name SKILL.md | sort | head -n1)"
@@ -303,21 +322,61 @@ fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/^description:/m, "
 NODE
 expect_failure "canonical skill invalid YAML" "$fixture" "invalid restricted YAML frontmatter"
 
-fixture="$WORK/openai-metadata"
+fixture="$WORK/skill-empty-body"
 make_fixture "$fixture"
-metadata="$(find "$fixture/.agents/skills" -path '*/agents/openai.yaml' | sort | head -n1)"
-printf '\n# parity canary\n' >> "$metadata"
-expect_failure "OpenAI metadata drift" "$fixture" "OpenAI metadata drifted"
-
-fixture="$WORK/subagent-identity"
-make_fixture "$fixture"
-subagent="$(find "$fixture/.codex/agents" -maxdepth 1 -name '*.toml' | sort | head -n1)"
-node - "$subagent" <<'NODE'
+skill="$fixture/.agents/skills/absence-review/SKILL.md"
+node - "$skill" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
-fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/^name\s*=.*$/m, 'name = "wrong_canary"'));
+const source = fs.readFileSync(file, "utf8");
+const end = source.indexOf("\n---", 4);
+fs.writeFileSync(file, source.slice(0, end + 4) + "\n");
 NODE
-expect_failure "canonical subagent identity drift" "$fixture" "name must be"
+expect_failure "canonical skill empty body" "$fixture" "empty instruction body"
+
+fixture="$WORK/openai-metadata-missing"
+make_fixture "$fixture"
+mv "$fixture/.agents/skills/diagnostic-evidence-review/agents/openai.yaml" "$fixture/removed-openai.yaml"
+expect_failure "missing OpenAI metadata" "$fixture" "exactly the three reviewed openai.yaml files"
+
+fixture="$WORK/openai-metadata-extra"
+make_fixture "$fixture"
+mkdir -p "$fixture/.agents/skills/absence-review/agents"
+cp "$fixture/.agents/skills/ui-use-case-review/agents/openai.yaml" \
+  "$fixture/.agents/skills/absence-review/agents/openai.yaml"
+expect_failure "extra OpenAI metadata" "$fixture" "exactly the three reviewed openai.yaml files"
+
+fixture="$WORK/openai-metadata-contract"
+make_fixture "$fixture"
+metadata="$fixture/.agents/skills/ui-use-case-review/agents/openai.yaml"
+node - "$metadata" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/^  short_description:.*\n/m, ""));
+NODE
+expect_failure "invalid OpenAI metadata contract" "$fixture" "interface keys must be exactly"
+
+fixture="$WORK/openai-metadata-prompt"
+make_fixture "$fixture"
+metadata="$fixture/.agents/skills/ui-use-case-review/agents/openai.yaml"
+node - "$metadata" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("$ui-use-case-review", "$wrong-canary"));
+NODE
+expect_failure "OpenAI metadata skill invocation drift" "$fixture" "default_prompt must invoke"
+
+echo "== AGENTS.md safety invariants =="
+fixture="$WORK/safety-count"
+make_fixture "$fixture"
+node - "$fixture/tools/agent-config/safety-invariants.json" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+const contract = JSON.parse(fs.readFileSync(file, "utf8"));
+contract.invariants.pop();
+fs.writeFileSync(file, JSON.stringify(contract, null, 2) + "\n");
+NODE
+expect_failure "safety invariant count drift" "$fixture" "exactly 13 invariants"
 
 fixture="$WORK/safety-invariant"
 make_fixture "$fixture"
@@ -325,10 +384,10 @@ node - "$fixture/tools/agent-config/safety-invariants.json" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 const contract = JSON.parse(fs.readFileSync(file, "utf8"));
-contract.invariants.push({ id: "selftest-missing", pattern: "SELFTEST_INVARIANT_THAT_MUST_NOT_EXIST" });
+contract.invariants[0].pattern = "SELFTEST_INVARIANT_THAT_MUST_NOT_EXIST";
 fs.writeFileSync(file, JSON.stringify(contract, null, 2) + "\n");
 NODE
-expect_failure "missing cross-runner safety invariant" "$fixture" "selftest-missing"
+expect_failure "missing AGENTS.md safety invariant" "$fixture" "is missing from AGENTS.md"
 
 echo
 echo "agent-config selftest: all $pass canaries caught"

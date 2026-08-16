@@ -26,8 +26,8 @@ on them (the `gates` job's host-logic step). Keep that discipline.
 2. **Add a `CHECK` in `test/test_logic.cpp`.** Assert against a known-good reference — for
    converters, a known-good reference output for the same raw bytes; for CRC, a real captured frame.
 3. **Run it:** `scripts/run-mock-tests.sh` (cmake + g++/clang++, no ESP-IDF). Must pass before
-   handoff; run it explicitly and rely on CI as the authoritative repeat. The retained Claude
-   compatibility path additionally repeats it from its Stop hook.
+   handoff; run it explicitly and rely on CI as the authoritative repeat. The Codex Stop lifecycle
+   hook repeats it through the same runner-neutral core.
 4. When adding a converter, copy the reference maths **verbatim**
    and cite the conv id in a comment — a subtle sign/scale/endianness change silently corrupts a
    reading.

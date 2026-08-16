@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Runner-neutral hooks for Claude Code and Codex.
+"""Canonical project hooks for Codex.
 
-Hook payloads are read from stdin.  The runner adapters select the subcommand and
-runner explicitly.  Payload-sensitive guards inspect `cwd`, `tool_name`, and
-`tool_input`; repository-scoped lifecycle, context, and formatting actions stay
-anchored to the versioned hook core's own worktree.
+Hook payloads are read from stdin. Payload-sensitive guards inspect `cwd`,
+`tool_name`, and `tool_input`; repository-scoped lifecycle, context, and
+formatting actions stay anchored to the versioned hook core's own worktree.
 """
 
 from __future__ import annotations
@@ -445,7 +444,7 @@ def shell_dumps_credentials(command: str) -> bool:
         for command_index, token in enumerate(tokens):
             executable = Path(token).name
             args = tokens[command_index + 1 :]
-            if executable == "gh" and (
+            if executable in {"gh", "gh-with-git-credentials.sh"} and (
                 any(args[index : index + 2] == ["auth", "token"] for index in range(len(args) - 1))
                 or "--show-token" in args
                 or (
@@ -867,23 +866,19 @@ def guard_secrets(payload: dict[str, Any] | None, error: str | None) -> bool:
     return True
 
 
-def guard_partitions(payload: dict[str, Any], runner: str, *, shell_only: bool = False) -> bool:
+def guard_partitions(payload: dict[str, Any], *, shell_only: bool = False) -> bool:
     if not partition_violation(payload, shell_only=shell_only):
         return False
     invariant = (
         "partitions.csv write: nvs@0x9000 offset and size must remain unchanged or an OTA can silently "
         "erase WiFi, MQTT, and X10A configuration"
     )
-    if runner == "claude":
-        emit_permission("ask", invariant + ". Confirm explicitly that the proposed change preserves that invariant.")
-    else:
-        emit_permission(
-            "deny",
-            invariant
-            + ". Codex hooks cannot safely express the required ask decision. Do not retry through another shell path; "
-            "prepare the patch for an explicitly authorized maintainer to apply manually, or use the Claude adapter "
-            "whose hook can request confirmation.",
-        )
+    emit_permission(
+        "deny",
+        invariant
+        + ". Project hooks cannot safely express the required ask decision. Do not retry through another shell path; "
+        "prepare the patch for an explicitly authorized maintainer to apply manually.",
+    )
     return True
 
 
@@ -892,7 +887,7 @@ def run_pre_tool_guards(args: argparse.Namespace) -> int:
     if guard_secrets(payload, error):
         return 0
     assert payload is not None
-    guard_partitions(payload, args.runner, shell_only=args.partition_shell_only)
+    guard_partitions(payload, shell_only=args.partition_shell_only)
     return 0
 
 
@@ -1062,7 +1057,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
     guards = subparsers.add_parser("pre-tool-guards")
-    guards.add_argument("--runner", choices=("claude", "codex"), required=True)
     guards.add_argument("--partition-shell-only", action="store_true")
     guards.set_defaults(func=run_pre_tool_guards)
     formatter = subparsers.add_parser("format")

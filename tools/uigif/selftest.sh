@@ -142,17 +142,15 @@ check "schematic css gone"     2 -  \
     perl -0pi -e 's/\.sc-flow/.zz-flow/g' main/www/style.css
 
 # 7. The merge hook must not turn a human checkbox into an override for a red mechanical audit.
-# main is not branch-protected today, so "CI also fails" is not a safety boundary: both supported
-# merge paths must themselves reject a stale recording even when the PR body carries a current-SHA
-# /ui-gif stamp. The clean direction remains conditional — an unrelated PR needs no stamp, while a
+# CI alone is not the local merge boundary: the supported CLI merge path must itself reject a stale
+# recording even when the PR body carries a current-SHA $ui-gif stamp. The clean direction remains
+# conditional — an unrelated PR needs no stamp, while a
 # PR carrying a new recording does.
 hook_d="$(seed merge-hook)"
 git -C "$hook_d" init -q
 git -C "$hook_d" remote add origin https://github.com/0Bu/daikin-altherma-esp32.git
-mkdir -p "$hook_d/.claude/hooks" "$hook_d/tools/agent-hooks" \
-    "$hook_d/tools/agent-policy" "$hook_d/bin"
-cp "$ROOT/.claude/hooks/pr-gate-lib.sh" "$hook_d/.claude/hooks/"
-cp "$ROOT/.claude/hooks/require-ui-gif.sh" "$hook_d/.claude/hooks/"
+mkdir -p "$hook_d/tools/agent-hooks" "$hook_d/tools/agent-policy" "$hook_d/bin"
+cp "$ROOT/scripts/gh-with-git-credentials.sh" "$hook_d/scripts/"
 cp "$ROOT/tools/agent-hooks/pr-gate-lib.sh" "$hook_d/tools/agent-hooks/"
 cp "$ROOT/tools/agent-hooks/require-pr-gates.sh" "$hook_d/tools/agent-hooks/"
 cp "$ROOT/tools/agent-hooks/merge_payload.py" "$hook_d/tools/agent-hooks/"
@@ -186,8 +184,8 @@ PY
   *) exit 1 ;;
 esac
 EOF
-chmod +x "$hook_d/bin/gh" "$hook_d/.claude/hooks/pr-gate-lib.sh" \
-    "$hook_d/.claude/hooks/require-ui-gif.sh" "$hook_d/tools/agent-hooks/require-pr-gates.sh"
+chmod +x "$hook_d/bin/gh" "$hook_d/scripts/gh-with-git-credentials.sh" \
+    "$hook_d/tools/agent-hooks/require-pr-gates.sh"
 
 ui_gif_head=abcdef1234567890abcdef1234567890abcdef12
 merge_input="$(python3 - "$hook_d" "$ui_gif_head" <<'PY'
@@ -207,15 +205,16 @@ print(json.dumps({"tool_name": "mcp__codex_apps__github_merge_pull_request", "to
 PY
 )"
 base_reviews="$(printf '%s\n' \
-    "- [x] /project-review clean - merge gate @ $ui_gif_head" \
-    "- [x] /domain-review clean - merge gate @ $ui_gif_head")"
+    "- [x] \`\$project-review\` clean - merge gate @ $ui_gif_head" \
+    "- [x] \`\$domain-review\` clean - merge gate @ $ui_gif_head")"
 review_stamp="$base_reviews
-- [x] /ui-gif clean - merge gate @ $ui_gif_head"
+- [x] \`\$ui-gif\` clean - merge gate @ $ui_gif_head"
 
 hook_run() {
     local input=$1; shift
-    printf '%s' "$input" | env PATH="$hook_d/bin:$PATH" CLAUDE_PROJECT_DIR="$hook_d" "$@" \
-        bash "$hook_d/.claude/hooks/require-ui-gif.sh" >/dev/null 2>&1
+    printf '%s' "$input" | env PATH="$hook_d/bin:$PATH" GH_TOKEN=uigif-hook-selftest-token \
+        AGENT_PROJECT_DIR="$hook_d" "$@" \
+        bash "$hook_d/tools/agent-hooks/require-pr-gates.sh" >/dev/null 2>&1
 }
 
 # Clean + unrelated: no UI-GIF review needed. Clean + new recording: refuse until stamped, then pass.
@@ -230,20 +229,26 @@ set -e
 hook_run "$merge_input" env UI_GIF_GATE_FILES=docs/media/dashboard.gif UI_GIF_GATE_BODY="$review_stamp" || {
     echo "uigif selftest: a current reviewed recording did not pass the merge hook" >&2; exit 1; }
 
+# MCP merge remains unsupported and cannot become an alternate path around the exact CLI binding.
+set +e
+hook_run "$mcp_merge_input" env UI_GIF_GATE_FILES=docs/README.md UI_GIF_GATE_BODY="$review_stamp"
+mcp_rc=$?
+set -e
+[ "$mcp_rc" -eq 2 ] || {
+    echo "uigif selftest: unsupported MCP merge bypassed the CLI-only gate" >&2; exit 1; }
+
 # Now make the source/GIF pair mechanically stale. The same valid human stamp must not override it,
-# through either the shell or MCP merge entry point.
+# through the supported CLI merge entry point.
 perl -0pi -e 's/(<figure\b[^>]*\bid="schem")/$1 data-selftest="stale-hook"/' "$hook_d/main/www/index.html"
 set +e
 hook_run "$merge_input" env UI_GIF_GATE_FILES=docs/README.md UI_GIF_GATE_BODY="$review_stamp"
 stale_bash_rc=$?
-hook_run "$mcp_merge_input" env UI_GIF_GATE_FILES=docs/README.md UI_GIF_GATE_BODY="$review_stamp"
-stale_mcp_rc=$?
 set -e
-[ "$stale_bash_rc" -eq 2 ] && [ "$stale_mcp_rc" -eq 2 ] || {
-    echo "uigif selftest: a current review stamp overrode a stale audit (bash=$stale_bash_rc mcp=$stale_mcp_rc)" >&2
+[ "$stale_bash_rc" -eq 2 ] || {
+    echo "uigif selftest: a current review stamp overrode a stale audit (cli=$stale_bash_rc)" >&2
     exit 1
 }
-printf '  ✓ %-28s %s\n' "stale merge with stamp" "blocked on Bash + MCP"
+printf '  ✓ %-28s %s\n' "stale merge with stamp" "blocked on CLI; MCP remains unsupported"
 
 echo
 if [ "$fails" -eq 0 ]; then echo "uigif selftest: all cases still caught"; exit 0; fi

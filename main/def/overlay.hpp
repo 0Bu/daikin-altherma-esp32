@@ -15,8 +15,8 @@
 //
 // That half cannot be fixed the normal way from this repo. The right fix is a `gen_profiles.py` run
 // (maintained outside this repo, not available here), which would repair all 43 profiles and the
-// other page-0x10 gaps at once. .claude/CLAUDE.md forbids hand-editing a generated table — correctly,
-// and the reason is specific: a hand-added row changes the profile's DETECTION signature. This file
+// other page-0x10 gaps at once. AGENTS.md forbids hand-editing a generated table — correctly, and
+// the reason is specific: a hand-added row changes the profile's DETECTION signature. This file
 // is the way to add the rows WITHOUT touching a generated table and WITHOUT that hazard; see the
 // overlay rule in logic/profile_view.hpp for why it structurally cannot move detection.
 //

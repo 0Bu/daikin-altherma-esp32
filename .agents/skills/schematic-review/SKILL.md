@@ -153,8 +153,7 @@ SHA-stamped checkbox whose stamp still matches the PR head. It is **conditional*
 `$feature-docs` and unlike `$project-review` and `$domain-review`: it fires when the PR reaches the
 drawing, its contract, or the tools that judge it — **including this file**, so changing what the
 review asks means putting the new questions to the current drawing before it lands. Its canonical
-filter is defined by the runner-neutral gate; `.claude/hooks/require-schematic-review.sh` is only a
-Claude compatibility adapter. This page deliberately does not repeat the filter.
+filter is defined by the runner-neutral gate. This page deliberately does not repeat the filter.
 
 That filter is defensible here in a way it deliberately is **not** for `$domain-review`, and the
 difference is the point: a value's meaning can change from almost anywhere — #35–#39 reached Home

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# CI-policy canaries: missing inputs and missing/stale review evidence must fail closed, while both
-# canonical $name and transitional /name records remain accepted at the current PR head.
+# CI-policy canaries: missing inputs and missing/stale review evidence must fail closed, while
+# canonical $name records remain accepted at the current PR head.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -14,10 +14,10 @@ pass=0
 fail() { echo "agent-policy selftest: $1" >&2; exit 1; }
 
 write_body() {
-  local prefix="$1" stamp="$2"
+  local stamp="$1"
   cat > "$WORK/body.md" <<EOF
-- [x] \`${prefix}project-review\` clean — merge gate @ $stamp
-- [x] \`${prefix}domain-review\` clean — merge gate @ $stamp
+- [x] \`\$project-review\` clean — merge gate @ $stamp
+- [x] \`\$domain-review\` clean — merge gate @ $stamp
 EOF
 }
 
@@ -46,15 +46,19 @@ expect_block() {
   pass=$((pass + 1))
 }
 
-echo "== accepted aliases =="
+echo "== canonical records =="
 printf 'README.md\n' > "$WORK/files.txt"
-write_body '$' "$HEAD_SHA"
+write_body "$HEAD_SHA"
 expect_pass "canonical dollar-prefixed records"
-write_body '/' "$HEAD_SHA"
-expect_pass "legacy slash-prefixed records"
+
+cat > "$WORK/body.md" <<EOF
+- [x] /project-review clean — merge gate @ $HEAD_SHA
+- [x] /domain-review clean — merge gate @ $HEAD_SHA
+EOF
+expect_block "retired slash-prefixed records" "project-review"
 
 echo "== missing or malformed CI inputs =="
-write_body '$' "$HEAD_SHA"
+write_body "$HEAD_SHA"
 set +e
 output="$(AGENT_POLICY_CI=1 "$ROOT/tools/agent-hooks/require-pr-gates.sh" --no-discovery 2>&1)"; rc=$?
 set -e
@@ -70,7 +74,7 @@ CASE_HEAD_SHA=not-a-sha expect_block "malformed head SHA" "7..40 hexadecimal"
 unset CASE_HEAD_SHA
 
 echo "== missing and stale evidence =="
-write_body '$' deadbee
+write_body deadbee
 expect_block "stale review stamps" "checked deadbee"
 
 cat > "$WORK/body.md" <<EOF
@@ -86,13 +90,13 @@ expect_block "unchecked review" "unchecked"
 
 printf 'README.md\n' > "$WORK/files.txt"
 cat > "$WORK/body.md" <<EOF
-- [x] \`/not-project-review\` clean — merge gate @ $HEAD_SHA
-- [x] \`/not-domain-review\` clean — merge gate @ $HEAD_SHA
+- [x] \`\$not-project-review\` clean — merge gate @ $HEAD_SHA
+- [x] \`\$not-domain-review\` clean — merge gate @ $HEAD_SHA
 EOF
 expect_block "gate-name substring cannot satisfy evidence" "project-review"
 
 echo "== conditional relevance =="
-write_body '$' "$HEAD_SHA"
+write_body "$HEAD_SHA"
 printf 'main/new_feature.cpp\n' > "$WORK/files.txt"
 expect_block "missing feature-docs record" "feature-docs"
 
@@ -101,7 +105,7 @@ cat >> "$WORK/body.md" <<EOF
 EOF
 expect_pass "current conditional feature record"
 
-write_body '$' "$HEAD_SHA"
+write_body "$HEAD_SHA"
 printf 'docs/DESIGN.md\n' > "$WORK/files.txt"
 set +e
 output="$(run_policy 2>&1)"; rc=$?
@@ -130,7 +134,7 @@ python3 "$EXTRACT_FILES" 1 "$WORK/rename-pages.json" > "$WORK/files.txt" \
   || fail "renamed changed-file response was rejected"
 [ "$(cat "$WORK/files.txt")" = $'docs/dashboard.old\nmain/www/js/dashboard.js' ] \
   || fail "renamed changed-file response omitted or reordered a path"
-write_body '$' "$HEAD_SHA"
+write_body "$HEAD_SHA"
 set +e
 output="$(run_policy 2>&1)"; rc=$?
 set -e

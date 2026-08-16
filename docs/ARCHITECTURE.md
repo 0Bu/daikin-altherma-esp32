@@ -158,7 +158,7 @@ http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns registe
                       an unauthenticated radio client; with no setup AP, the configured WiFi or
                       Ethernet LAN registers the full API.
                       Boundary = host-tested logic/http_surface.hpp (F01). `cfg.max_uri_handlers` is
-                      sized EXACTLY to the trusted-LAN route count, so adding a route means raising
+                      sized EXACTLY to the trusted-LAN route count of 36, so adding a route means raising
                       it in the same commit: overflowing is silent and hits the WRONG route (the
                       casualty is whatever registers last, deliberately the captive/SPA catch-all, so
                       the symptom would be deep links breaking rather than the new route 404ing).

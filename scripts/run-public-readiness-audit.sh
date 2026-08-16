@@ -15,62 +15,84 @@ if (args.some((arg) => /@latest\b/.test(arg))) {
   throw new Error("floating @latest dependency in .mcp.json");
 }
 
-const settings = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
-const grants = settings?.permissions?.allow;
-if (!Array.isArray(grants) || grants.length !== 0) {
-  throw new Error(
-    `tracked Claude settings must auto-grant no shell commands; found: ${JSON.stringify(grants)}`,
-  );
+const codexConfig = fs.readFileSync(".codex/config.toml", "utf8");
+function tomlSection(name) {
+  const lines = [];
+  let active = false;
+  for (const line of codexConfig.split(/\r?\n/)) {
+    const header = line.match(/^\s*\[([^\]]+)\]\s*$/);
+    if (header) {
+      active = header[1] === name;
+      continue;
+    }
+    if (active && line.trim() && !line.trimStart().startsWith("#")) lines.push(line.trim());
+  }
+  return lines.sort();
+}
+const agentConfig = tomlSection("agents");
+if (JSON.stringify(agentConfig) !== JSON.stringify([
+  "enabled = true",
+  "max_concurrent_threads_per_session = 3",
+])) {
+  throw new Error(`canonical multi-agent settings drifted: ${JSON.stringify(agentConfig)}`);
+}
+const context7Config = tomlSection("mcp_servers.context7");
+if (JSON.stringify(context7Config) !== JSON.stringify([
+  'args = ["-y", "@upstash/context7-mcp@4.0.2"]',
+  'command = "npx"',
+])) {
+  throw new Error(`canonical Context7 settings drifted: ${JSON.stringify(context7Config)}`);
 }
 
-// Project hooks are executable by design, but their settings-side surface is an exact local list:
+// Project hooks are executable by design, but their configuration-side surface is an exact list:
 // no inline shell, arbitrary script path, duplicate policy evaluation or newly-added hook becomes
-// trusted without changing this audit. Secret/partition guards and all PR-review gates are each
-// consolidated behind one compatibility dispatch; the runner-neutral cores own their full policy.
-// This does not authenticate hook source after project trust. It keeps the tracked settings
-// contract narrow, deterministic and reviewable.
-const claudeRoot = "${CLAUDE_PROJECT_DIR:-.}";
+// trusted without changing this audit. Secret/partition guards and all PR-review gates remain
+// consolidated behind canonical dispatches. This does not authenticate hook source after project
+// trust. It keeps the tracked configuration narrow, deterministic and reviewable.
 const expectedHookDispatches = {
   PreToolUse: [
-    ["^(?:Read|Edit|Write|Bash)$", `bash "${claudeRoot}/.claude/hooks/guard-secrets.sh"`],
-    ["^(?:Bash|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request))$", `bash "${claudeRoot}/.claude/hooks/require-project-review.sh"`],
+    ["^(?:Read|Edit|Write|Bash|apply_patch|exec_command|shell|shell_command)$", 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" pre-tool-guards', "Checking secrets and partition safety", 10],
+    ["^(?:Bash|exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request))$", 'bash "$(git rev-parse --show-toplevel)/tools/agent-hooks/require-pr-gates.sh"', "Checking current PR review evidence", 600],
   ],
-  SessionStart: [[undefined, `bash "${claudeRoot}/.claude/hooks/report-capabilities.sh"`]],
-  PostToolUse: [["^(?:Edit|Write)$", `bash "${claudeRoot}/.claude/hooks/clang-format-edit.sh"`]],
-  Stop: [[undefined, `bash "${claudeRoot}/.claude/hooks/run-logic-tests.sh"`]],
-  UserPromptSubmit: [[undefined, `bash "${claudeRoot}/.claude/hooks/crash-triage-context.sh"`]],
+  SessionStart: [["^(?:startup|resume|clear|compact)$", 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" capabilities', "Detecting repository capabilities", 15]],
+  SubagentStart: [[undefined, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" subagent-context', "Loading repository subagent boundaries", 10]],
+  UserPromptSubmit: [[undefined, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" prompt-context', "Checking whether crash-triage context applies", 10]],
+  Stop: [[undefined, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" stop-logic-tests', "Running changed host logic tests", 600]],
+  PostToolUse: [["^(?:Edit|Write|apply_patch)$", 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" format', "Formatting edited C and C++ files", 30]],
 };
-const hooks = settings?.hooks;
+const hooksFile = JSON.parse(fs.readFileSync(".codex/hooks.json", "utf8"));
+const hooks = hooksFile?.hooks;
 if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) {
-  throw new Error("tracked Claude settings must define hook dispatches");
+  throw new Error("canonical Codex hook configuration must define hook dispatches");
 }
 const actualEvents = Object.keys(hooks).sort();
 const expectedEvents = Object.keys(expectedHookDispatches).sort();
 if (JSON.stringify(actualEvents) !== JSON.stringify(expectedEvents)) {
-  throw new Error(`tracked Claude hook event set drifted: ${JSON.stringify(actualEvents)}`);
+  throw new Error(`canonical Codex hook event set drifted: ${JSON.stringify(actualEvents)}`);
 }
 for (const [event, expectedGroups] of Object.entries(expectedHookDispatches)) {
   const groups = hooks[event];
   if (!Array.isArray(groups) || groups.length !== expectedGroups.length) {
-    throw new Error(`${event} Claude hook dispatch count drifted`);
+    throw new Error(`${event} Codex hook dispatch count drifted`);
   }
   for (let index = 0; index < expectedGroups.length; index += 1) {
     const group = groups[index];
-    const [expectedMatcher, expectedCommand] = expectedGroups[index];
+    const [expectedMatcher, expectedCommand, expectedStatus, expectedTimeout] = expectedGroups[index];
     if ((group?.matcher ?? undefined) !== expectedMatcher) {
-      throw new Error(`${event}[${index}] Claude hook matcher drifted`);
+      throw new Error(`${event}[${index}] Codex hook matcher drifted`);
     }
     if (!Array.isArray(group?.hooks) || group.hooks.length !== 1) {
-      throw new Error(`${event}[${index}] must contain exactly one consolidated Claude hook`);
+      throw new Error(`${event}[${index}] must contain exactly one canonical Codex hook`);
     }
     const hook = group.hooks[0];
-    if (hook?.type !== "command" || hook?.command !== expectedCommand) {
-      throw new Error(`${event}[${index}] unapproved tracked Claude hook command`);
+    if (hook?.type !== "command" || hook?.command !== expectedCommand ||
+        hook?.statusMessage !== expectedStatus || hook?.timeout !== expectedTimeout) {
+      throw new Error(`${event}[${index}] unapproved canonical Codex hook definition`);
     }
   }
 }
 
-const routeDocs = [".claude/CLAUDE.md", ".claude/skills/device-triage/SKILL.md"];
+const routeDocs = ["docs/ARCHITECTURE.md", ".agents/skills/device-triage/SKILL.md"];
 for (const file of routeDocs) {
   const text = fs.readFileSync(file, "utf8");
   if (/\/(?:diag|coredump)\?clear(?:=1)?/.test(text)) {
@@ -80,8 +102,31 @@ for (const file of routeDocs) {
     if (!text.includes(route)) throw new Error(`${file} does not document ${route}`);
   }
 }
-if (!fs.readFileSync(".claude/CLAUDE.md", "utf8").includes("trusted-LAN route count (36)")) {
-  throw new Error(".claude/CLAUDE.md has drifted from the 36-handler trusted-LAN surface");
+if (!fs.readFileSync("docs/ARCHITECTURE.md", "utf8").includes("trusted-LAN route count of 36")) {
+  throw new Error("docs/ARCHITECTURE.md no longer documents the exact trusted-LAN route budget");
+}
+const credentialWrapperPath = "scripts/gh-with-git-credentials.sh";
+const credentialWrapperStat = fs.statSync(credentialWrapperPath);
+if (!credentialWrapperStat.isFile() || (credentialWrapperStat.mode & 0o111) === 0) {
+  throw new Error("canonical GitHub credential wrapper is missing or not executable");
+}
+const credentialWrapper = fs.readFileSync(credentialWrapperPath, "utf8");
+const credentialWrapperMarkers = [
+  "set +x",
+  "git credential fill",
+  "only github.com is allowed",
+  "aliases and extensions are not allowed",
+  "GH_PROMPT_DISABLED=1",
+  'GH_CONFIG_DIR="$config_dir"',
+  'GH_TOKEN="$token" GH_HOST=github.com GH_CONFIG_DIR="$config_dir" gh "$@"',
+];
+if (!credentialWrapperMarkers.every((marker) => credentialWrapper.includes(marker)) ||
+    credentialWrapper.includes(".git-credentials")) {
+  throw new Error("canonical GitHub credential wrapper no longer keeps credentials transient");
+}
+const httpServer = fs.readFileSync("main/http_server.cpp", "utf8");
+if (!/current exact total to 36[\s\S]{0,80}cfg\.max_uri_handlers\s*=\s*36;/.test(httpServer)) {
+  throw new Error("http_server.cpp has drifted from the documented 36-handler trusted-LAN surface");
 }
 
 const funding = fs.readFileSync(".github/FUNDING.yml", "utf8");
@@ -176,6 +221,7 @@ const fixtureFiles = execFileSync("git", ["ls-files", "-z", "--", "test", "tools
   .filter(Boolean);
 const fixtures = [];
 for (const file of fixtureFiles) {
+  if (!fs.existsSync(file)) continue; // Deletions are absent from the working tree before commit.
   const raw = fs.readFileSync(file);
   if (raw.includes(0)) continue; // Match ripgrep's default binary-file behavior.
   fixtures.push({ file, text: raw.toString("utf8") });
@@ -283,4 +329,4 @@ if git grep -nE -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' -- . >/dev/
   exit 1
 fi
 
-echo "Public-readiness audit passed: exact MCP version, zero tracked shell auto-grants, consolidated Claude hook dispatches, public contracts, synthetic fixtures, notices, no tracked private key"
+echo "Public-readiness audit passed: exact MCP version, canonical Codex configuration and hooks, public contracts, synthetic fixtures, notices, no tracked private key"

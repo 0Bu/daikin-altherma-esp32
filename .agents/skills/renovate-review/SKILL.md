@@ -173,12 +173,11 @@ to confirm WiFi associates, MQTT connects, X10A decodes real values, and the hea
 
 The gates are unchanged by this being a bot's PR. **Derive which apply** from the canonical
 [`tools/agent-hooks/require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh), never
-from a copied list. The legacy `.claude/hooks/require-*.sh` files are Claude compatibility adapters,
-not the canonical definitions. The only supported merge command is the lease-bound path documented
-in [`docs/AGENT_MIGRATION.md`](../../../docs/AGENT_MIGRATION.md):
+from a copied list. The only supported merge command is the lease-bound path documented in
+[`docs/AGENT_MIGRATION.md`](../../../docs/AGENT_MIGRATION.md):
 
 ```bash
-gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <number> --match-head-commit <full-current-head-sha> --squash
+scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <number> --match-head-commit <full-current-head-sha> --squash
 ```
 
 Run each applicable skill, then tick + SHA-stamp its box in the PR body against the PR head

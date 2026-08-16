@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import fnmatch
 import os
+from pathlib import Path
 import re
 import shlex
 import sys
@@ -16,6 +17,12 @@ ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=(.*)$", re.DOTALL)
 SHELLS = {"bash", "dash", "sh", "zsh"}
 SHELL_EXTGLOB = re.compile(r"(?<!\\)[@+?!*]\([^)]*\)")
 CANONICAL_REPOSITORY = "github.com/0Bu/daikin-altherma-esp32"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CANONICAL_CREDENTIAL_WRAPPER = (PROJECT_ROOT / "scripts/gh-with-git-credentials.sh").resolve()
+RELATIVE_CREDENTIAL_WRAPPERS = {
+    "scripts/gh-with-git-credentials.sh",
+    "./scripts/gh-with-git-credentials.sh",
+}
 MCP_BLOCKED_ACTIONS = {
     "merge_pull_request",
     "enable_auto_merge",
@@ -225,7 +232,10 @@ def canonical_repo_option(args: list[str]) -> str:
 
 def token_may_be_gh(token: str) -> bool:
     base = executable(token)
-    return base == "gh" or (
+    canonical_wrapper = token in RELATIVE_CREDENTIAL_WRAPPERS or (
+        os.path.isabs(token) and Path(token).resolve() == CANONICAL_CREDENTIAL_WRAPPER
+    )
+    return base == "gh" or canonical_wrapper or (
         any(character in base for character in "*?[") and fnmatch.fnmatchcase("gh", base)
     )
 
@@ -319,6 +329,9 @@ def parse_gh(tokens: list[str], index: int, inherited: dict[str, str]) -> dict[s
             "host": host,
             "error": error,
             "expected_head": expected_head,
+            "credential_wrapper": tokens[index]
+            if executable(tokens[index]) == "gh-with-git-credentials.sh"
+            else "",
         }
     if normalized and normalized[0] == "api":
         joined = " ".join(normalized[1:])
@@ -563,6 +576,13 @@ def main() -> int:
     tool_workdir = distinct_workdirs[0] if len(distinct_workdirs) == 1 else ""
     if tool_workdir:
         payload_cwd = os.path.abspath(os.path.join(payload_cwd or os.getcwd(), tool_workdir))
+    credential_wrapper = parsed.get("credential_wrapper", "")
+    if credential_wrapper:
+        wrapper_path = Path(credential_wrapper)
+        if not wrapper_path.is_absolute():
+            wrapper_path = Path(payload_cwd or os.getcwd()) / wrapper_path
+        if wrapper_path.resolve() != CANONICAL_CREDENTIAL_WRAPPER:
+            parsed["error"] = parsed["error"] or "merge credential wrapper is not the canonical repository script"
     fields = (
         parsed["action"],
         parsed["selector"],
