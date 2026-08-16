@@ -2875,6 +2875,11 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   first-class answer meaning the device declines to describe that run at all (silent
                   bus, a row unread past DWELL_MAX_GAP_S). A zero would say "it changed just now",
                   which is why absence is a missing key and never a 0.
+                  THE RESPONSE IS CHUNK-STREAMED in bounded ~1 KB pieces after one atomic cache
+                  snapshot. HTTP chunk boundaries carry no domain meaning; concatenating them yields
+                  the same JSON object. This keeps the body of a 129-row profile from demanding one
+                  contiguous allocation larger than the healthy target's 15-16 KB largest block,
+                  while the snapshot still guarantees that a response never mixes poll cycles.
                   X10A rows also carry `concept` where logic/homehub_map.hpp pairs them with a
                   HomeHub register — the browser matches on that string and does NO matching of its
                   own, since a label match here is the substitution lwt_select/ou_stale exist to

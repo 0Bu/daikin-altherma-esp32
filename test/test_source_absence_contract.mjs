@@ -241,6 +241,23 @@ assert.match(status,
   /if \(mb_status\(\)\.connected\) \{[\s\S]*?if \(live\) \{\s*\n\s*j \+= ",\\"modbus\\":";/,
   "/values must emit the HomeHub array only while that link is live, and omit the key otherwise");
 
+// The complete 129-row target body is larger than the contiguous block a healthy running board can
+// commonly provide. The HTTP route must therefore reuse the exact row serializer through a bounded
+// chunk sink, not rebuild the whole JSON string before its first byte is sent. The MCP tool keeps its
+// complete string because it owns a different response envelope; this assertion isolates h_values.
+const hValuesStart = status.indexOf("static esp_err_t h_values(");
+const hValuesEnd = status.indexOf("\n}\n\n// Model catalog", hValuesStart);
+assert.ok(hValuesStart >= 0 && hValuesEnd > hValuesStart,
+  "the source contract must be able to isolate the /values handler");
+const hValues = status.slice(hValuesStart, hValuesEnd);
+assert.match(status,
+  /class HttpJsonChunks[\s\S]*?kFlushBytes = 1024[\s\S]*?httpd_resp_send_chunk/,
+  "/values must keep its response chunks bounded and use HTTP chunk framing");
+assert.match(hValues, /HttpJsonChunks j\(req\)[\s\S]*?append_values_array\(j\)[\s\S]*?j\.finish\(\)/,
+  "/values must stream the shared row representation through the bounded chunk sink");
+assert.doesNotMatch(hValues, /http_append_values_json\(/,
+  "/values must not materialise the complete model-dependent response before sending it");
+
 // ── 7. A SILENT BUS must age the state ages out, not freeze them ────────────────────────────────
 // The per-row state ages (logic/state_dwell.hpp) claim how long a flag has read what it reads, so
 // they are only true while somebody is watching. Every path through the poll cycle that produces no
