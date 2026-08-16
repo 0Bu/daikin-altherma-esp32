@@ -482,10 +482,10 @@ const ROOM_BLOCK_LINES = {
 // stable fallback keeps the compact row identifiable.
 function roomSourceName(r) { return r.name || "MQTT"; }
 
-// The source's own condition, as ONE rule. Freshness is only one input to this verdict: a fresh
-// packet from a thermostat that reports itself switched off is NOT a healthy source for this card.
-// The returned class, visible status and accessible status all come from this same result so an
-// amber row can never explain itself as merely "Current" again.
+// The source's measurement condition and the diagnosis decision are related but not identical. A
+// switched-off thermostat can still supply a fresh, plausible room temperature; only its target is
+// unusable as an active heating reference. Keep that distinction in one result so the row can stay
+// amber for the blocked diagnosis without falsely calling the measurement itself unusable.
 function roomSourceStatus(r, mqtt) {
   if (!r.configured)
     return { key: "not_configured", detail: t("ref.detail.setup"), cls: "dim" };
@@ -508,10 +508,14 @@ function roomSourceStatus(r, mqtt) {
     return { key: "stale",
       detail: t("ref.detail.stale"), cls: "warn" };
   }
-  if (!r.control_eligible)
+  if (r.temperature_valid === false)
     return { key: "unusable", detail: t(ROOM_BLOCK_LINES[r.reason] || "dyn.room_invalid_payload"),
       cls: "warn" };
-  return { key: "usable", detail: "", cls: "ok" };
+  const diagnosis = !r.control_eligible
+    ? { key: "unusable", detail: t(ROOM_BLOCK_LINES[r.reason] || "dyn.room_invalid_payload") }
+    : { key: "usable", detail: "" };
+  return { key: "measurement_valid", detail: "", diagnosis,
+    cls: r.control_eligible ? "ok" : "warn" };
 }
 
 function roomSourceStatusText(status) {
@@ -519,11 +523,19 @@ function roomSourceStatusText(status) {
   return status.detail ? `${state} — ${status.detail}` : state;
 }
 
+function roomSourceAccessibleStatus(status) {
+  const measurement = roomSourceStatusText(status);
+  if (!status.diagnosis) return measurement;
+  return `${measurement} · ${t("ref.detail.diagnosis_label")} ${roomSourceStatusText(status.diagnosis)}`;
+}
+
 function roomSourceDetailHtml(r, status, temperature, setpoint, age) {
   // This tongue is a live status, not a second copy of the editor. The source name is already the
-  // row value; topic/path mechanics belong in the modal. Start with the one overall verdict, then
-  // show only the readings that help a user understand it.
+  // row value; topic/path mechanics belong in the modal. State measurement validity first, then
+  // separately say whether the heating-curve diagnosis may use it.
   let html = descNoteHtml(t("ref.detail.status_label"), roomSourceStatusText(status));
+  if (status.diagnosis)
+    html += descNoteHtml(t("ref.detail.diagnosis_label"), roomSourceStatusText(status.diagnosis));
   if (r.has_value) {
     html += descNoteHtml(t("ref.detail.temperature_label"), t("ref.detail.temperature", temperature));
     if (r.has_setpoint)
@@ -761,7 +773,7 @@ function dynamicControlCardHtml() {
   const sourceBody = roomSourceDetailHtml(r, sourceStatus, temperature, setpoint, age);
   rows += dynamicInfoRow("room-sources", t("dyn.room_source"), sourceValue, sourceCls,
     sourceBody, "ref-temp", t("ref.title"),
-    r.configured ? roomSourceStatusText(sourceStatus) : "");
+    r.configured ? roomSourceAccessibleStatus(sourceStatus) : "");
   let weatherCls = "dim";
   let outdoor = "", solar = "";
   if (w.configured && w.has_value) {
