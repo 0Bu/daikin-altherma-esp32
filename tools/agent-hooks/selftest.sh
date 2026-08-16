@@ -475,7 +475,10 @@ pr_case "CI new dashboard recording requires UI-GIF review" 2 \
 # stdin, rejects it in argv, and returns the two minimal GitHub API responses discovery requires.
 fallback_bin="$tmp/fallback-bin"
 mkdir -p "$fallback_bin"
-ln -s "$(command -v python3)" "$fallback_bin/python3"
+for tool in bash cat dirname git grep python3 rm sed; do
+    tool_path="$(command -v "$tool")" || fail "REST fallback fixture is missing $tool"
+    ln -s "$tool_path" "$fallback_bin/$tool"
+done
 cat >"$fallback_bin/curl" <<'EOF'
 #!/usr/bin/env bash
 for argument in "$@"; do
@@ -501,7 +504,7 @@ chmod +x "$fallback_bin/curl"
 curl_body="$tmp/curl-body.md"
 curl_files="$tmp/curl-files.txt"
 fake_token="selftest-token-not-a-real-credential"
-out="$(env PATH="$fallback_bin:/usr/bin:/bin" GH_TOKEN="$fake_token" \
+out="$(env PATH="$fallback_bin" GH_TOKEN="$fake_token" \
     SELFTEST_EXPECTED_TOKEN="$fake_token" AGENT_REPO_SLUG="0Bu/daikin-altherma-esp32" \
     /bin/bash -c '. "$1"; agent_gate_discover_pr 123 "$2" "$3" "$4"' \
     _ "$root/tools/agent-hooks/pr-gate-lib.sh" "$root" "$curl_body" "$curl_files" 2>&1)"; rc=$?
