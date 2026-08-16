@@ -99,7 +99,7 @@ expect_failure "missing canonical GitHub credential wrapper" "$fixture" "credent
 fixture="$WORK/credential-wrapper-direct-read"
 make_fixture "$fixture"
 printf '%s\n' 'head -n1 ~/.git-credentials' >> "$fixture/scripts/gh-with-git-credentials.sh"
-expect_failure "direct credential-store read in wrapper" "$fixture" "must not read a credential-store file directly"
+expect_failure "direct credential-store read in wrapper" "$fixture" "must bind exactly one reviewed credential-store path"
 
 fixture="$WORK/credential-wrapper-not-executable"
 make_fixture "$fixture"
@@ -120,10 +120,29 @@ expect_failure "credential wrapper host binding drift" "$fixture" "credential wr
 
 fixture="$WORK/credential-wrapper-config"
 make_fixture "$fixture"
-sed -i.bak 's/GH_CONFIG_DIR="$config_dir" "$gh_bin"/GH_CONFIG_DIR="${GH_CONFIG_DIR:-}" "$gh_bin"/' \
+sed -i.bak 's#/usr/bin/env -i "${gh_env\[@\]}"#/usr/bin/env "${gh_env[@]}"#' \
   "$fixture/scripts/gh-with-git-credentials.sh"
 rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
 expect_failure "credential wrapper config isolation drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-cwd"
+make_fixture "$fixture"
+sed -i.bak 's/cd "$config_dir" || exit 1/:/' "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper cwd isolation drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-spawner"
+make_fixture "$fixture"
+sed -i.bak 's/|"repo rename"//' "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper Git-spawner drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-helper"
+make_fixture "$fixture"
+sed -i.bak 's/credential-store --file "$credential_file" get/credential fill/' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper helper binding drift" "$fixture" "credential wrapper contract drifted"
 
 fixture="$WORK/credential-wrapper-binary"
 make_fixture "$fixture"
@@ -134,7 +153,7 @@ expect_failure "credential wrapper binary binding drift" "$fixture" "credential 
 
 fixture="$WORK/credential-wrapper-bootstrap"
 make_fixture "$fixture"
-sed -i.bak 's/unset BASH_ENV ENV LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH/unset BASH_ENV ENV/' \
+sed -i.bak 's/unset BASH_ENV ENV LD_AUDIT LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH/unset BASH_ENV ENV/' \
   "$fixture/scripts/gh-with-git-credentials.sh"
 rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
 expect_failure "credential wrapper bootstrap isolation drift" "$fixture" "credential wrapper contract drifted"

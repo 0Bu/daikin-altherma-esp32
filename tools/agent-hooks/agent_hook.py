@@ -206,6 +206,47 @@ def shell_mentions_sensitive_env(command: str) -> bool:
     return SENSITIVE_ENV_REFERENCE.search(command) is not None
 
 
+def shell_injects_credential_wrapper(command: str) -> bool:
+    normalized = normalize_ansi_c_quotes(command).replace("\n", " ; ")
+    try:
+        lexer = shlex.shlex(normalized, posix=True, punctuation_chars=";&|()!<>")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return "gh-with-git-" in normalized
+
+    wrapper_name = "gh-with-git-credentials.sh"
+
+    def may_resolve_wrapper(token: str) -> bool:
+        for expanded in expand_static_braces(token):
+            if expanded == "__AGENT_AMBIGUOUS_BRACE__":
+                return "gh-with-git-" in token
+            pieces = [expanded, *re.split(r"[\s;&|()!<>]+", expanded)]
+            for piece in pieces:
+                candidate = Path(piece).name
+                if candidate == wrapper_name:
+                    return True
+                if any(character in candidate for character in "*?[") and fnmatch.fnmatchcase(
+                    wrapper_name, candidate
+                ):
+                    return True
+        return False
+
+    if not any(may_resolve_wrapper(token) for token in tokens):
+        return False
+    if re.search(r"(?<!\\)(?:\$[({A-Za-z_]|`)", normalized):
+        return True
+    if any(re.fullmatch(r"[;&|()!<>]+", token) for token in tokens):
+        return True
+    canonical_wrapper = str((HOOK_ROOT / "scripts/gh-with-git-credentials.sh").resolve())
+    return not tokens or tokens[0] not in {
+        canonical_wrapper,
+        "scripts/gh-with-git-credentials.sh",
+        "./scripts/gh-with-git-credentials.sh",
+    }
+
+
 SHELL_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", re.DOTALL)
 
 SUDO_OPTIONS_WITH_VALUE = {
@@ -683,6 +724,11 @@ def secret_violation(payload: dict[str, Any]) -> str | None:
         command = command_from(payload)
         if not command:
             return f"cannot determine the {tool} command from the hook payload"
+        if shell_injects_credential_wrapper(command):
+            return (
+                "the credential wrapper must be invoked directly without shell wrappers, assignments, "
+                "substitutions, redirections, or chaining"
+            )
         if SHELL_EXTGLOB.search(command):
             return "shell extglob expansion is not statically bounded by the credential/partition guard"
         if shell_dumps_environment(command):

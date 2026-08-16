@@ -104,6 +104,37 @@ guard_case "credential wrapper cannot print a GitHub token" \
     "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh auth token")" deny
 guard_case "credential wrapper ordinary GitHub command is allowed" \
     "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh pr view 5 --json number")" ""
+guard_case "credential wrapper rejects Git config injection" \
+    "$(payload exec_command command "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=/tmp/selftest-helper $root/scripts/gh-with-git-credentials.sh pr view 5")" deny
+guard_case "credential wrapper rejects quoted loader injection" \
+    "$(payload exec_command command "env 'LD_PRELOAD=/tmp/selftest-preload.so' $root/scripts/gh-with-git-credentials.sh pr view 5")" deny
+guard_case "credential wrapper rejects split-string loader injection" \
+    "$(payload exec_command command "env -S'LD_PRELOAD=/tmp/selftest-preload.so $root/scripts/gh-with-git-credentials.sh pr view 5'")" deny
+guard_case "credential wrapper rejects a dynamically named loader assignment" \
+    "$(payload exec_command command "n=LD_PRELOAD; env \"\$n=/tmp/selftest-preload.so\" $root/scripts/gh-with-git-credentials.sh pr view 5")" deny
+guard_case "credential wrapper rejects a substituted loader name" \
+    "$(payload exec_command command "env \"\$(printf LD_PRELOAD)=/tmp/selftest-preload.so\" $root/scripts/gh-with-git-credentials.sh pr view 5")" deny
+guard_case "credential wrapper rejects chained execution context" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh pr view 5; echo done")" deny
+guard_case "credential wrapper rejects quote-split executable injection" \
+    "$(payload exec_command command "LD_PRELOAD=/tmp/selftest-preload.so $root/scripts/gh-with-git-credential''s.sh pr view 5")" deny
+guard_case "credential wrapper rejects globbed executable injection" \
+    "$(payload exec_command command "LD_PRELOAD=/tmp/selftest-preload.so $root/scripts/gh-with-git-credential?.sh pr view 5")" deny
+line_continued_wrapper="LD_PRELOAD=/tmp/selftest-preload.so $root/scripts/gh-with-git-credential"$'\\\n'"s.sh pr view 5"
+guard_case "credential wrapper rejects line-continued executable injection" \
+    "$(payload exec_command command "$line_continued_wrapper")" deny
+guard_case "credential wrapper rejects nested Bash loader injection" \
+    "$(payload exec_command command "bash -c 'LD_PRELOAD=/tmp/selftest-preload.so $root/scripts/gh-with-git-credentials.sh pr view 5'")" deny
+guard_case "credential wrapper rejects nested globbed loader injection" \
+    "$(payload exec_command command "bash -c 'LD_PRELOAD=/tmp/selftest-preload.so $root/scripts/g[h]-with-git-credential?.sh pr view 5'")" deny
+guard_case "credential wrapper rejects eval loader injection" \
+    "$(payload exec_command command "eval 'LD_PRELOAD=/tmp/selftest-preload.so $root/scripts/gh-with-git-credentials.sh pr view 5'")" deny
+guard_case "credential wrapper rejects dynamic-loader injection" \
+    "$(payload exec_command command "LD_AUDIT=/tmp/selftest-audit.so $root/scripts/gh-with-git-credentials.sh pr view 5")" deny
+guard_case "credential wrapper rejects proxy injection" \
+    "$(payload exec_command command "HTTPS_PROXY=http://127.0.0.1:9 $root/scripts/gh-with-git-credentials.sh pr view 5")" deny
+guard_case "credential wrapper rejects TLS-root injection" \
+    "$(payload exec_command command "SSL_CERT_FILE=/tmp/selftest-ca.pem $root/scripts/gh-with-git-credentials.sh pr view 5")" deny
 guard_case "dynamic GitHub executable cannot dump a token" \
     "$(payload exec_command command 'g=gh; "$g" auth token')" deny
 guard_case "shell-wrapped GitHub auth token output is denied" \
@@ -259,47 +290,102 @@ guard_case "Codex cat partitions read allowed" \
 guard_case "Canonical partitions diff allowed" \
     "$(payload Bash command 'git diff -- partitions.csv')" ""
 
-# Exercise the local GitHub wrapper without touching a real credential store. The fake credential
-# helper emits a harmless token through Git's line protocol; fake gh observes it only in its
-# environment and records argv without ever printing the token.
+# Exercise the local GitHub wrapper without touching a real credential store. The fake
+# credential-store command emits a harmless token through Git's line protocol; fake gh observes it
+# only in its minimal environment and records argv without ever printing the token.
 wrapper_bin="$tmp/wrapper-bin"
+wrapper_args="$tmp/wrapper-args.txt"
+wrapper_marker="$tmp/wrapper-git-called"
+wrapper_fail_toggle="$tmp/wrapper-git-fail"
+wrapper_config_path="$tmp/wrapper-config-path.txt"
+wrapper_credential_file="$tmp/wrapper-credentials"
+wrapper_hostile_config="$tmp/wrapper-hostile-config"
+wrapper_injected_marker="$tmp/wrapper-injected-helper"
+wrapper_injected_helper="$tmp/wrapper-injected-helper.sh"
 mkdir -p "$wrapper_bin"
 cat >"$wrapper_bin/git" <<'EOF'
 #!/usr/bin/env bash
-[ "${1:-} ${2:-}" = "credential fill" ] || exit 81
+[ "$#" -eq 4 ] || exit 80
+[ "${1:-}" = credential-store ] && [ "${2:-}" = --file ] \
+    && [ "${3:-}" = __WRAPPER_CREDENTIAL_FILE__ ] && [ "${4:-}" = get ] || exit 81
 [ "$(cat)" = $'protocol=https\nhost=github.com' ] || exit 82
-[ -z "${SELFTEST_GIT_MARKER:-}" ] || printf 'called\n' >>"$SELFTEST_GIT_MARKER"
+[ "${HOME:-}" = "${XDG_CONFIG_HOME:-}" ] || exit 83
+case "${HOME:-}" in /tmp/daikin-gh-config.*) ;; *) exit 84 ;; esac
+[ "$(pwd -P)" = "$(cd "$HOME" && pwd -P)" ] || exit 85
+[ "${GIT_CONFIG_NOSYSTEM:-}" = 1 ] \
+    && [ "${GIT_CONFIG_GLOBAL:-}" = /dev/null ] \
+    && [ "${GIT_CONFIG_SYSTEM:-}" = /dev/null ] \
+    && [ "${GIT_CEILING_DIRECTORIES:-}" = "$HOME" ] || exit 86
+[ "${GIT_TERMINAL_PROMPT:-}" = 0 ] || exit 87
+[ "${PATH:-}" = /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin ] || exit 88
+if [ "${GIT_CONFIG_COUNT:-}" = 1 ] && [ -x "${GIT_CONFIG_VALUE_0:-}" ]; then
+    "${GIT_CONFIG_VALUE_0}"
+fi
+for name in GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_DIR GIT_EXEC_PATH \
+    LD_AUDIT LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH \
+    HTTP_PROXY HTTPS_PROXY ALL_PROXY SSL_CERT_FILE SSL_CERT_DIR; do
+    [ -z "${!name+x}" ] || exit 89
+done
+printf 'called\n' >>__WRAPPER_MARKER__
 printf '%s\n' 'protocol=https' 'host=github.com' 'username=selftest' \
     'password=selftest-wrapper-token'
-[ "${SELFTEST_GIT_FAIL_AFTER_PASSWORD:-0}" != 1 ] || exit 42
+[ ! -e __WRAPPER_FAIL_TOGGLE__ ] || exit 42
 EOF
 cat >"$wrapper_bin/gh" <<'EOF'
 #!/usr/bin/env bash
-[ "${GH_HOST:-}" = github.com ] || exit 83
-[ "${GH_TOKEN:-}" = selftest-wrapper-token ] || exit 84
-[ "${GH_PROMPT_DISABLED:-}" = 1 ] || exit 85
-[ "${GH_PAGER:-}" = /bin/cat ] || exit 86
-[ "${GH_BROWSER:-}" = /usr/bin/false ] || exit 87
-[ "${GH_EDITOR:-}" = /usr/bin/false ] || exit 88
-[ -z "${GIT_SSH_COMMAND:-}" ] || exit 89
-[ -n "${GH_CONFIG_DIR:-}" ] && [ -d "$GH_CONFIG_DIR" ] || exit 90
-[ ! -e "$GH_CONFIG_DIR/config.yml" ] || exit 91
-[ "${GH_CONFIG_DIR:-}" != "${SELFTEST_ATTACKER_GH_CONFIG_DIR:-}" ] || exit 92
-[ -z "${GITHUB_TOKEN:-}" ] && [ -z "${GH_ENTERPRISE_TOKEN:-}" ] || exit 93
-printf '%s\n' "$*" >"$SELFTEST_GH_ARGS_FILE"
-[ -z "${SELFTEST_GH_CONFIG_FILE:-}" ] || printf '%s\n' "$GH_CONFIG_DIR" >"$SELFTEST_GH_CONFIG_FILE"
+[ "${GH_HOST:-}" = github.com ] || exit 90
+[ "${GH_TOKEN:-}" = selftest-wrapper-token ] || exit 91
+[ "${GH_PROMPT_DISABLED:-}" = 1 ] || exit 92
+[ "${GH_PAGER:-}" = /bin/cat ] && [ "${PAGER:-}" = /bin/cat ] \
+    && [ "${GIT_PAGER:-}" = /bin/cat ] || exit 93
+[ "${GH_BROWSER:-}" = /usr/bin/false ] && [ "${BROWSER:-}" = /usr/bin/false ] || exit 94
+[ "${GH_EDITOR:-}" = /usr/bin/false ] && [ "${EDITOR:-}" = /usr/bin/false ] \
+    && [ "${VISUAL:-}" = /usr/bin/false ] && [ "${GIT_EDITOR:-}" = /usr/bin/false ] || exit 95
+[ -n "${GH_CONFIG_DIR:-}" ] && [ -d "$GH_CONFIG_DIR" ] || exit 96
+[ "${HOME:-}" = "$GH_CONFIG_DIR" ] && [ "${XDG_CONFIG_HOME:-}" = "$GH_CONFIG_DIR" ] \
+    && [ "${TMPDIR:-}" = "$GH_CONFIG_DIR" ] || exit 97
+[ "$(pwd -P)" = "$(cd "$GH_CONFIG_DIR" && pwd -P)" ] || exit 102
+[ ! -e "$GH_CONFIG_DIR/config.yml" ] || exit 98
+[ "${GH_CONFIG_DIR:-}" != __WRAPPER_HOSTILE_CONFIG__ ] || exit 99
+[ "${PATH:-}" = /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin ] || exit 100
+for name in GITHUB_TOKEN GH_ENTERPRISE_TOKEN GIT_SSH_COMMAND GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 \
+    GIT_CONFIG_VALUE_0 GIT_DIR GIT_EXEC_PATH LD_AUDIT LD_PRELOAD LD_LIBRARY_PATH \
+    DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH HTTP_PROXY HTTPS_PROXY ALL_PROXY \
+    SSL_CERT_FILE SSL_CERT_DIR; do
+    [ -z "${!name+x}" ] || exit 101
+done
+printf '%s\n' "$*" >__WRAPPER_ARGS__
+printf '%s\n' "$GH_CONFIG_DIR" >__WRAPPER_CONFIG_PATH__
 EOF
-chmod +x "$wrapper_bin/git" "$wrapper_bin/gh"
+cat >"$wrapper_injected_helper" <<'EOF'
+#!/usr/bin/env bash
+printf 'called\n' >__WRAPPER_INJECTED_MARKER__
+exit 99
+EOF
+sed \
+    -e "s#__WRAPPER_CREDENTIAL_FILE__#$wrapper_credential_file#g" \
+    -e "s#__WRAPPER_MARKER__#$wrapper_marker#g" \
+    -e "s#__WRAPPER_FAIL_TOGGLE__#$wrapper_fail_toggle#g" \
+    "$wrapper_bin/git" >"$wrapper_bin/git.rendered"
+mv "$wrapper_bin/git.rendered" "$wrapper_bin/git"
+sed \
+    -e "s#__WRAPPER_HOSTILE_CONFIG__#$wrapper_hostile_config#g" \
+    -e "s#__WRAPPER_ARGS__#$wrapper_args#g" \
+    -e "s#__WRAPPER_CONFIG_PATH__#$wrapper_config_path#g" \
+    "$wrapper_bin/gh" >"$wrapper_bin/gh.rendered"
+mv "$wrapper_bin/gh.rendered" "$wrapper_bin/gh"
+sed -e "s#__WRAPPER_INJECTED_MARKER__#$wrapper_injected_marker#g" \
+    "$wrapper_injected_helper" >"$wrapper_injected_helper.rendered"
+mv "$wrapper_injected_helper.rendered" "$wrapper_injected_helper"
+chmod +x "$wrapper_bin/git" "$wrapper_bin/gh" "$wrapper_injected_helper"
+: >"$wrapper_credential_file"
 wrapper_under_test="$tmp/gh-with-git-credentials.sh"
 sed \
     -e "s#^GH_BINARY_CANDIDATES=.*#GH_BINARY_CANDIDATES='$wrapper_bin/gh'#" \
     -e "s#^GIT_BINARY_CANDIDATES=.*#GIT_BINARY_CANDIDATES='$wrapper_bin/git'#" \
+    -e "s#^    credential_file=.*#    credential_file='$wrapper_credential_file'#" \
     "$root/scripts/gh-with-git-credentials.sh" >"$wrapper_under_test"
 chmod +x "$wrapper_under_test"
-wrapper_args="$tmp/wrapper-args.txt"
-wrapper_marker="$tmp/wrapper-git-called"
-wrapper_config_path="$tmp/wrapper-config-path.txt"
-wrapper_hostile_config="$tmp/wrapper-hostile-config"
 mkdir -p "$wrapper_hostile_config"
 printf '%s\n' 'http_unix_socket: /tmp/untrusted.sock' >"$wrapper_hostile_config/config.yml"
 wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
@@ -307,16 +393,25 @@ wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin"
     GH_ENTERPRISE_TOKEN=selftest-enterprise-token \
     GH_PAGER=/tmp/untrusted-pager GH_BROWSER=/tmp/untrusted-browser \
     GH_EDITOR=/tmp/untrusted-editor GIT_SSH_COMMAND=/tmp/untrusted-ssh \
-    SELFTEST_ATTACKER_GH_CONFIG_DIR="$wrapper_hostile_config" \
-    SELFTEST_GH_CONFIG_FILE="$wrapper_config_path" SELFTEST_GH_ARGS_FILE="$wrapper_args" \
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper \
+    GIT_CONFIG_VALUE_0="$wrapper_injected_helper" GIT_DIR=/tmp/untrusted-git-dir \
+    GIT_EXEC_PATH=/tmp/untrusted-git-exec GIT_CONFIG_NOSYSTEM=0 \
+    GIT_CONFIG_GLOBAL=/tmp/untrusted-global-config \
+    GIT_CONFIG_SYSTEM=/tmp/untrusted-system-config \
+    GIT_CEILING_DIRECTORIES=/tmp/untrusted-ceiling HTTPS_PROXY=http://127.0.0.1:9 \
+    HTTP_PROXY=http://127.0.0.1:9 ALL_PROXY=socks5://127.0.0.1:9 \
+    SSL_CERT_FILE=/tmp/untrusted-ca.pem SSL_CERT_DIR=/tmp/untrusted-ca-dir \
+    LD_AUDIT=/tmp/untrusted-audit.so \
     "$wrapper_under_test" \
     pr view 5 --json number 2>&1)"; rc=$?
 wrapper_seen_config="$(cat "$wrapper_config_path" 2>/dev/null || true)"
-if [ "$rc" -eq 0 ] && [ -z "$wrapper_out" ] \
+if [ "$rc" -eq 0 ] \
     && [ "$(cat "$wrapper_args" 2>/dev/null)" = "pr view 5 --json number" ] \
     && [ -n "$wrapper_seen_config" ] && [ "$wrapper_seen_config" != "$wrapper_hostile_config" ] \
-    && [ ! -e "$wrapper_seen_config" ]; then
-    echo "PASS  Git credential reaches gh only through an isolated wrapper environment"; pass=$((pass + 1))
+    && [ ! -e "$wrapper_seen_config" ] && [ -e "$wrapper_marker" ] \
+    && [ ! -e "$wrapper_injected_marker" ] \
+    && ! printf '%s' "$wrapper_out" | grep -qF 'selftest-wrapper-token'; then
+    echo "PASS  credential-store and gh ignore hostile Git, loader, proxy, and TLS state"; pass=$((pass + 1))
 else
     echo "FAIL  GitHub credential wrapper isolation failed (rc=$rc output=$wrapper_out config=$wrapper_seen_config)" >&2
     fail=$((fail + 1))
@@ -324,7 +419,6 @@ fi
 
 rm -f "$wrapper_args" "$wrapper_marker"
 wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
-    SELFTEST_GIT_MARKER="$wrapper_marker" SELFTEST_GH_ARGS_FILE="$wrapper_args" \
     "$wrapper_under_test" pr view 5 --json number 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ] && [ ! -e "$wrapper_marker" ] && [ -z "$wrapper_out" ] \
     && [ "$(cat "$wrapper_args" 2>/dev/null)" = "pr view 5 --json number" ]; then
@@ -335,9 +429,10 @@ else
 fi
 
 rm -f "$wrapper_args"
+: >"$wrapper_fail_toggle"
 wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
-    SELFTEST_GIT_FAIL_AFTER_PASSWORD=1 SELFTEST_GH_ARGS_FILE="$wrapper_args" \
     "$wrapper_under_test" pr view 5 2>&1)"; rc=$?
+rm -f "$wrapper_fail_toggle"
 if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_args" ] \
     && printf '%s' "$wrapper_out" | grep -qF 'Git credential lookup failed'; then
     echo "PASS  failed Git credential lookup cannot forward a partial password"; pass=$((pass + 1))
@@ -348,7 +443,7 @@ fi
 
 rm -f "$wrapper_args"
 wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
-    SELFTEST_GH_ARGS_FILE="$wrapper_args" /bin/bash -x \
+    /bin/bash -x \
     "$wrapper_under_test" pr view 5 --json number 2>&1)"; rc=$?
 if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_args" ] \
     && printf '%s' "$wrapper_out" | grep -qF 'invoke this executable directly' \
@@ -373,7 +468,7 @@ printf 'bootstrap-token=%s\n' "${GH_TOKEN:-}" >"$SELFTEST_BOOTSTRAP_MARKER"
 EOF
 chmod +x "$wrapper_untrusted_bin/gh"
 rm -f "$wrapper_args" "$wrapper_bootstrap_marker"
-wrapper_out="$(env GH_TOKEN=selftest-wrapper-token SELFTEST_GH_ARGS_FILE="$wrapper_args" \
+wrapper_out="$(env GH_TOKEN=selftest-wrapper-token \
     SELFTEST_BOOTSTRAP_MARKER="$wrapper_bootstrap_marker" /bin/bash -c '
         gh() { printf "function-token=%s\\n" "${GH_TOKEN:-}"; exit 98; }
         export -f gh
@@ -391,11 +486,11 @@ fi
 wrapper_block_case() {
     local name="$1" needle="$2" out rc
     shift 2
-    rm -f "$wrapper_marker"
+    rm -f "$wrapper_marker" "$wrapper_args"
     out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
-        SELFTEST_GIT_MARKER="$wrapper_marker" SELFTEST_GH_ARGS_FILE="$wrapper_args" \
         "$wrapper_under_test" "$@" 2>&1)"; rc=$?
     if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] \
+        && [ ! -e "$wrapper_args" ] \
         && printf '%s' "$out" | grep -qF -- "$needle" \
         && ! printf '%s' "$out" | grep -qF 'selftest-wrapper-token'; then
         echo "PASS  $name"; pass=$((pass + 1))
@@ -423,11 +518,20 @@ wrapper_block_case "credential wrapper rejects browser execution before lookup" 
 wrapper_block_case "credential wrapper rejects editor execution before lookup" \
     "browser and editor execution is not allowed" issue create --editor
 wrapper_block_case "credential wrapper rejects checkout subprocesses before lookup" \
-    "Git-spawning checkout and clone commands are not allowed" pr checkout 5
+    "Git-spawning PR and repository commands are not allowed" pr checkout 5
+wrapper_block_case "credential wrapper rejects PR creation before lookup" \
+    "Git-spawning PR and repository commands are not allowed" pr create
+wrapper_block_case "credential wrapper rejects issue branch creation before lookup" \
+    "Git-spawning PR and repository commands are not allowed" issue develop 5 --checkout
+wrapper_block_case "credential wrapper rejects repository forks before lookup" \
+    "Git-spawning PR and repository commands are not allowed" repo fork 0Bu/example
+wrapper_block_case "credential wrapper rejects repository creation before lookup" \
+    "Git-spawning PR and repository commands are not allowed" repo create example
+wrapper_block_case "credential wrapper rejects repository rename before lookup" \
+    "Git-spawning PR and repository commands are not allowed" repo rename renamed
 rm -f "$wrapper_marker"
 wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
-    GH_REPO=ghe.example/owner/repo SELFTEST_GIT_MARKER="$wrapper_marker" \
-    SELFTEST_GH_ARGS_FILE="$wrapper_args" "$wrapper_under_test" \
+    GH_REPO=ghe.example/owner/repo "$wrapper_under_test" \
     pr view 5 2>&1)"; rc=$?
 if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] \
     && printf '%s' "$wrapper_out" | grep -qF -- '--repo must name github.com/OWNER/REPO'; then
@@ -760,6 +864,7 @@ cp "$root/tools/agent-hooks/merge_payload.py" "$merge_root/tools/agent-hooks/"
 cp "$root/tools/agent-hooks/run_with_timeout.py" "$merge_root/tools/agent-hooks/"
 cp "$root/tools/agent-policy/extract_changed_files.py" "$merge_root/tools/agent-policy/"
 sed -e "s#^GH_BINARY_CANDIDATES=.*#GH_BINARY_CANDIDATES='$tmp/bin/gh'#" \
+    -e 's#^extra_child_env=()#extra_child_env=("AGENT_GH_REPORTED_FILES=${AGENT_GH_REPORTED_FILES:-1}" "AGENT_GH_RETURNED_FILES=${AGENT_GH_RETURNED_FILES:-1}" "AGENT_GH_RENAME=${AGENT_GH_RENAME:-0}")#' \
     "$root/scripts/gh-with-git-credentials.sh" >"$merge_root/scripts/gh-with-git-credentials.sh"
 git -C "$merge_root" init -q
 git -C "$merge_root" remote add origin https://github.com/0Bu/daikin-altherma-esp32.git

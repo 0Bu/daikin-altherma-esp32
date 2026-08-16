@@ -78,6 +78,7 @@ cp "$proj/tools/agent-hooks/merge_payload.py" "$hook_tmp/tools/agent-hooks/"
 cp "$proj/tools/agent-hooks/run_with_timeout.py" "$hook_tmp/tools/agent-hooks/"
 cp "$proj/tools/agent-policy/extract_changed_files.py" "$hook_tmp/tools/agent-policy/"
 sed -e "s#^GH_BINARY_CANDIDATES=.*#GH_BINARY_CANDIDATES='$hook_tmp/bin/gh'#" \
+  -e 's#^extra_child_env=()#extra_child_env=("UI_GATE_BODY_FILE=${UI_GATE_BODY_FILE:-}" "UI_GATE_FILES_FILE=${UI_GATE_FILES_FILE:-}")#' \
   "$proj/scripts/gh-with-git-credentials.sh" >"$hook_tmp/scripts/gh-with-git-credentials.sh"
 git -C "$hook_tmp" init -q
 git -C "$hook_tmp" remote add origin https://github.com/0Bu/daikin-altherma-esp32.git

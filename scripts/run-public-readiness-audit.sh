@@ -116,17 +116,31 @@ const credentialWrapperMarkers = [
   "set +x",
   "GH_BINARY_CANDIDATES='/opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh'",
   "GIT_BINARY_CANDIDATES='/usr/bin/git /opt/homebrew/bin/git /usr/local/bin/git'",
-  "unset BASH_ENV ENV LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH",
-  "export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-  '"$git_bin" credential fill',
+  "unset BASH_ENV ENV LD_AUDIT LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH",
+  "SAFE_PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+  '/usr/bin/id -P "$credential_user"',
+  '/usr/bin/getent passwd "$credential_user"',
+  'credential_file="$credential_home/.git-credentials"',
+  'cd "$config_dir" || exit 1',
+  '/usr/bin/env -i HOME="$config_dir" XDG_CONFIG_HOME="$config_dir" PATH="$SAFE_PATH"',
+  "GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null",
+  'GIT_CEILING_DIRECTORIES="$config_dir" GIT_TERMINAL_PROMPT=0',
+  '"$git_bin" credential-store --file "$credential_file" get',
   "only github.com is allowed",
   "aliases and extensions are not allowed",
-  "GH_PROMPT_DISABLED=1",
-  'GH_CONFIG_DIR="$config_dir"',
-  'GH_TOKEN="$token" GH_HOST=github.com GH_CONFIG_DIR="$config_dir" "$gh_bin" "$@"',
+  '"issue develop"|"pr checkout"|"pr create"|"repo clone"|"repo create"|"repo fork"|"repo rename"|"repo sync"',
+  '"GH_PROMPT_DISABLED=1"',
+  '"GH_CONFIG_DIR=$config_dir"',
+  "extra_child_env=()",
+  'if [ "${#extra_child_env[@]}" -gt 0 ]; then',
+  '/usr/bin/env -i "${gh_env[@]}" "${extra_child_env[@]}" "$gh_bin" "$@"',
+  '/usr/bin/env -i "${gh_env[@]}" "$gh_bin" "$@"',
 ];
+const isolatedCwdMentions = credentialWrapper.match(/cd "\$config_dir" \|\| exit 1/g) ?? [];
+const credentialStoreMentions = credentialWrapper.match(/[.]git-credentials/g) ?? [];
 if (!credentialWrapperMarkers.every((marker) => credentialWrapper.includes(marker)) ||
-    credentialWrapper.includes(".git-credentials")) {
+    isolatedCwdMentions.length !== 2 ||
+    credentialStoreMentions.length !== 1) {
   throw new Error("canonical GitHub credential wrapper no longer keeps credentials transient");
 }
 const httpServer = fs.readFileSync("main/http_server.cpp", "utf8");
