@@ -118,12 +118,12 @@ const DESCRIPTIONS = [
     normal: "Treat ON as the outdoor-state bit being asserted. Correlate it with the indoor thermostat flag, operating mode and compressor frequency before assigning a demand meaning.",
     de: { what: "Das eigene Thermostat-Statusbit der Außeneinheit. Es ist vom gleich benannten Thermo-Anforderungsbit der Inneneinheit getrennt und belegt allein keinen Verdichterbetrieb.",
           normal: "ON bedeutet zunächst nur, dass dieses Außengeräte-Bit gesetzt ist. Vor einer Deutung als Anforderung mit dem Innengeräte-Thermostatbit, der Betriebsart und der Verdichterfrequenz abgleichen." } },
-  { exact: true, group: "outdoor_state", re: /^low noise control$/i,
+  { exact: true, reg: 0x10, re: /^low noise control$/i,
     what: "Outdoor low-noise bit; quiet level and trigger are unproven.",
     normal: "ON means set. Compare with Silent Mode and compressor speed.",
     de: { what: "Außengeräte-Bit; Leise-Stufe und Auslöser sind nicht belegt.",
           normal: "ON heißt gesetzt. Mit Silent Mode und Verdichterdrehzahl abgleichen." } },
-  { exact: true, group: "hydronic", re: /^solar input$/i,
+  { exact: true, reg: 0x60, re: /^solar input$/i,
     what: "Hydronic Solar input bit; function and polarity are unproven.",
     normal: "ON means set. Compare with settings and contact transitions.",
     de: { what: "Hydraulik-Bit Solar input; Funktion und Polarität sind nicht belegt.",
@@ -979,6 +979,7 @@ function descFor(label, row = null) {
   for (const d of DESCRIPTIONS) {
     if (d.source && d.source !== source) continue;
     if (d.group && d.group !== row?.x10a_group) continue;
+    if (d.reg != null && d.reg !== row?.reg) continue;
     if (d.re.test(l)) return d;
   }
   return null;
