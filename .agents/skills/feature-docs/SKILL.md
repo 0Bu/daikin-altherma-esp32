@@ -110,7 +110,8 @@ the code — by TICKING and SHA-STAMPING the PR's `$feature-docs` box with the r
 
 The gate allows the merge only while that box is checked AND its stamp still matches the PR head, so
 any later commit re-stales it and forces a fresh run. Edit the PR body with
-`gh pr edit <pr> --body-file <file>` (or the GitHub MCP update tool in web/remote). If the skill
+`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <file>`.
+If the skill
 concludes no catalog change was needed (§*When to run* → "nothing"), the docs are already in sync —
 still tick + stamp the box to record that you checked. Don't tick it if FEATURES.md is out of date —
 fix it first. The gate fails **closed**: if GitHub can't be read, the merge is blocked with guidance.

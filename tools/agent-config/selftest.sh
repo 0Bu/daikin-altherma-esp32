@@ -120,10 +120,24 @@ expect_failure "credential wrapper host binding drift" "$fixture" "credential wr
 
 fixture="$WORK/credential-wrapper-config"
 make_fixture "$fixture"
-sed -i.bak 's/GH_CONFIG_DIR="$config_dir" gh/GH_CONFIG_DIR="${GH_CONFIG_DIR:-}" gh/' \
+sed -i.bak 's/GH_CONFIG_DIR="$config_dir" "$gh_bin"/GH_CONFIG_DIR="${GH_CONFIG_DIR:-}" "$gh_bin"/' \
   "$fixture/scripts/gh-with-git-credentials.sh"
 rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
 expect_failure "credential wrapper config isolation drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-binary"
+make_fixture "$fixture"
+sed -i.bak "s#GH_BINARY_CANDIDATES='/opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh'#GH_BINARY_CANDIDATES='/tmp/gh'#" \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper binary binding drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-bootstrap"
+make_fixture "$fixture"
+sed -i.bak 's/unset BASH_ENV ENV LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH/unset BASH_ENV ENV/' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper bootstrap isolation drift" "$fixture" "credential wrapper contract drifted"
 
 echo "== parsed Codex configuration =="
 fixture="$WORK/invalid-config-toml"

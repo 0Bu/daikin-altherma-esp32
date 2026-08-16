@@ -223,13 +223,18 @@ const credentialWrapper = readText(
   "canonical GitHub credential wrapper",
 );
 for (const required of [
+  "#!/bin/bash -p",
   "set +x",
-  "git credential fill",
+  "GH_BINARY_CANDIDATES='/opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh'",
+  "GIT_BINARY_CANDIDATES='/usr/bin/git /opt/homebrew/bin/git /usr/local/bin/git'",
+  "unset BASH_ENV ENV LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH",
+  "export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+  '"$git_bin" credential fill',
   "only github.com is allowed",
   "aliases and extensions are not allowed",
   "GH_PROMPT_DISABLED=1",
   'GH_CONFIG_DIR="$config_dir"',
-  'GH_TOKEN="$token" GH_HOST=github.com GH_CONFIG_DIR="$config_dir" gh "$@"',
+  'GH_TOKEN="$token" GH_HOST=github.com GH_CONFIG_DIR="$config_dir" "$gh_bin" "$@"',
 ]) {
   if (!credentialWrapper.includes(required)) {
     die(1, `canonical GitHub credential wrapper contract drifted: missing ${required}`);

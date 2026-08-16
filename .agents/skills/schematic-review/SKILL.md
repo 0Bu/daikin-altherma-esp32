@@ -167,7 +167,8 @@ When the review passes with **no blocking findings**, tick + stamp it with the r
 - [x] `$schematic-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
 ```
 
-Edit the PR body with `gh pr edit <pr> --body-file <file>` (or the GitHub MCP update tool in
-web/remote). Any later commit re-stales the stamp, forcing a fresh review. Don't tick it if findings
+Edit the PR body with
+`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <file>`.
+Any later commit re-stales the stamp, forcing a fresh review. Don't tick it if findings
 block the merge — fix first. The gate fails **closed**: if GitHub can't be read, the merge is
 blocked with guidance.

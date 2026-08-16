@@ -196,7 +196,7 @@ try {
   const originalWrapper = fs.readFileSync(wrapperFile, "utf8");
   fs.writeFileSync(
     wrapperFile,
-    originalWrapper.replace("git credential fill", "head -n1 ~/.git-credentials"),
+    originalWrapper.replace('"$git_bin" credential fill', "head -n1 ~/.git-credentials"),
   );
   seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
     cwd: seededRoot,

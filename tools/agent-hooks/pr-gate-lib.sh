@@ -309,7 +309,7 @@ agent_gate_discover_pr() {
         || return 2
     gh_runner="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/gh-with-git-credentials.sh" \
         || return 2
-    if [ -x "$gh_runner" ] && command -v gh >/dev/null 2>&1; then
+    if [ -x "$gh_runner" ]; then
         if [ -n "$selector" ]; then
             json="$(agent_gate_run_bounded 30 env GH_HOST=github.com GH_REPO="github.com/$slug" "$gh_runner" pr view "$selector" --json number,body,headRefOid,changedFiles 2>/dev/null)" || return 2
         else

@@ -150,7 +150,8 @@ hook_d="$(seed merge-hook)"
 git -C "$hook_d" init -q
 git -C "$hook_d" remote add origin https://github.com/0Bu/daikin-altherma-esp32.git
 mkdir -p "$hook_d/tools/agent-hooks" "$hook_d/tools/agent-policy" "$hook_d/bin"
-cp "$ROOT/scripts/gh-with-git-credentials.sh" "$hook_d/scripts/"
+sed -e "s#^GH_BINARY_CANDIDATES=.*#GH_BINARY_CANDIDATES='$hook_d/bin/gh'#" \
+  "$ROOT/scripts/gh-with-git-credentials.sh" >"$hook_d/scripts/gh-with-git-credentials.sh"
 cp "$ROOT/tools/agent-hooks/pr-gate-lib.sh" "$hook_d/tools/agent-hooks/"
 cp "$ROOT/tools/agent-hooks/require-pr-gates.sh" "$hook_d/tools/agent-hooks/"
 cp "$ROOT/tools/agent-hooks/merge_payload.py" "$hook_d/tools/agent-hooks/"

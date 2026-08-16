@@ -70,8 +70,15 @@ echo "ui selftest: iPhone dynamic-viewport regression is detected"
 
 # Prove the neutral local merge gate fails closed without copying a runner-specific implementation.
 hook_tmp="$(mktemp -d)"
-mkdir -p "$hook_tmp/bin" "$hook_tmp/scripts" "$hook_tmp/tools/absence"
-cp "$proj/scripts/gh-with-git-credentials.sh" "$hook_tmp/scripts/"
+mkdir -p "$hook_tmp/bin" "$hook_tmp/scripts" "$hook_tmp/tools/absence" \
+  "$hook_tmp/tools/agent-hooks" "$hook_tmp/tools/agent-policy"
+cp "$proj/tools/agent-hooks/pr-gate-lib.sh" "$hook_tmp/tools/agent-hooks/"
+cp "$proj/tools/agent-hooks/require-pr-gates.sh" "$hook_tmp/tools/agent-hooks/"
+cp "$proj/tools/agent-hooks/merge_payload.py" "$hook_tmp/tools/agent-hooks/"
+cp "$proj/tools/agent-hooks/run_with_timeout.py" "$hook_tmp/tools/agent-hooks/"
+cp "$proj/tools/agent-policy/extract_changed_files.py" "$hook_tmp/tools/agent-policy/"
+sed -e "s#^GH_BINARY_CANDIDATES=.*#GH_BINARY_CANDIDATES='$hook_tmp/bin/gh'#" \
+  "$proj/scripts/gh-with-git-credentials.sh" >"$hook_tmp/scripts/gh-with-git-credentials.sh"
 git -C "$hook_tmp" init -q
 git -C "$hook_tmp" remote add origin https://github.com/0Bu/daikin-altherma-esp32.git
 
@@ -168,13 +175,13 @@ PY
 )"
 printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
   UI_GATE_BODY_FILE="$hook_tmp/body.md" UI_GATE_FILES_FILE="$hook_tmp/files.txt" \
-  "$proj/tools/agent-hooks/require-pr-gates.sh" >/dev/null \
+  "$hook_tmp/tools/agent-hooks/require-pr-gates.sh" >/dev/null \
   || { echo "ui selftest: neutral local CLI merge gate rejected current canonical UI proof" >&2; exit 1; }
 
 set +e
 mcp_out="$(printf '%s' "$mcp_merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
   UI_GATE_BODY_FILE="$hook_tmp/body.md" UI_GATE_FILES_FILE="$hook_tmp/files.txt" \
-  "$proj/tools/agent-hooks/require-pr-gates.sh" 2>&1)"; mcp_rc=$?
+  "$hook_tmp/tools/agent-hooks/require-pr-gates.sh" 2>&1)"; mcp_rc=$?
 set -e
 [ "$mcp_rc" -eq 2 ] \
   && printf '%s' "$mcp_out" | grep -qF 'MCP merge and auto-merge activation tools are unsupported' \
@@ -183,7 +190,7 @@ set -e
 set +e
 printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
   UI_GATE_BODY_FILE="$hook_tmp/body.md" UI_GATE_FILES_FILE="$hook_tmp/files.txt" \
-  UI_GATE_SUITE_RC=1 "$proj/tools/agent-hooks/require-pr-gates.sh" >/dev/null 2>&1
+  UI_GATE_SUITE_RC=1 "$hook_tmp/tools/agent-hooks/require-pr-gates.sh" >/dev/null 2>&1
 suite_rc=$?
 set -e
 [ "$suite_rc" -eq 2 ] \
@@ -193,7 +200,7 @@ sed 's/abcdef123456/deadbee/g' "$hook_tmp/body.md" > "$hook_tmp/stale.md"
 set +e
 printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
   UI_GATE_BODY_FILE="$hook_tmp/stale.md" UI_GATE_FILES_FILE="$hook_tmp/files.txt" \
-  "$proj/tools/agent-hooks/require-pr-gates.sh" >/dev/null 2>&1
+  "$hook_tmp/tools/agent-hooks/require-pr-gates.sh" >/dev/null 2>&1
 stale_rc=$?
 set -e
 [ "$stale_rc" -eq 2 ] \

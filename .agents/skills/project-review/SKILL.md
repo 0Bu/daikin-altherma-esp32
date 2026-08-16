@@ -42,6 +42,7 @@ blocking findings**, tick + stamp the PR's `$project-review` box with the review
 - [x] `$project-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
 ```
 
-Edit the PR body with `gh pr edit <pr> --body-file <file>` (or the GitHub MCP update tool in
-web/remote). Any later commit changes the head sha and re-stales the box, forcing a fresh review
+Edit the PR body with
+`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <file>`.
+Any later commit changes the head sha and re-stales the box, forcing a fresh review
 before the next merge. Don't tick it if findings block the merge — fix first.

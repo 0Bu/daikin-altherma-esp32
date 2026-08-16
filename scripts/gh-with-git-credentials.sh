@@ -1,29 +1,51 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
 # Run GitHub CLI with an already-provided CI token or a Git credential resolved for github.com.
 # Credential material stays in this process environment: it is never printed, written, or placed in
 # argv. Agents must use this wrapper instead of reading a credential store or invoking credential
 # helpers directly.
-set -euo pipefail
 set +x
-
-command -v gh >/dev/null 2>&1 || {
-    echo "gh-with-git-credentials: GitHub CLI is unavailable" >&2
-    exit 2
-}
+case "$-" in
+    *p*) ;;
+    *)
+        echo "gh-with-git-credentials: invoke this executable directly; an unprivileged shell bootstrap is not allowed" >&2
+        exit 2
+        ;;
+esac
+set -euo pipefail
 
 fail() {
     echo "gh-with-git-credentials: $1" >&2
     exit 2
 }
 
+# Do not let shell bootstrap files, dynamic-loader hooks, or caller PATH affect a child process that
+# receives the token. The wrapper itself is privileged before these variables are inspected.
+unset BASH_ENV ENV LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH
+export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+# Ignore shell functions and caller-controlled PATH. These are the reviewed install locations on
+# the supported macOS and Ubuntu hosts; selftests patch only their private copy of these literals.
+GH_BINARY_CANDIDATES='/opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh'
+GIT_BINARY_CANDIDATES='/usr/bin/git /opt/homebrew/bin/git /usr/local/bin/git'
+gh_bin=""
+git_bin=""
+for candidate in $GH_BINARY_CANDIDATES; do
+    if [ -f "$candidate" ] && [ -x "$candidate" ]; then gh_bin="$candidate"; break; fi
+done
+for candidate in $GIT_BINARY_CANDIDATES; do
+    if [ -f "$candidate" ] && [ -x "$candidate" ]; then git_bin="$candidate"; break; fi
+done
+[ -n "$gh_bin" ] || fail "GitHub CLI is unavailable in a reviewed install location"
+[ -n "$git_bin" ] || fail "Git is unavailable in a reviewed install location"
+
 validate_repo() {
     case "$1" in
         github.com/*/*)
-            printf '%s' "$1" | grep -Eq '^github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' \
+            printf '%s' "$1" | /usr/bin/grep -Eq '^github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' \
                 || fail "--repo must name github.com/OWNER/REPO"
             ;;
         */*)
-            printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' \
+            printf '%s' "$1" | /usr/bin/grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' \
                 || fail "--repo must name github.com/OWNER/REPO"
             ;;
         *) fail "--repo must name github.com/OWNER/REPO" ;;
@@ -102,7 +124,7 @@ else
     credential_output=""
     if ! credential_output="$({
         printf 'protocol=https\nhost=github.com\n\n'
-    } | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null)"; then
+    } | GIT_TERMINAL_PROMPT=0 "$git_bin" credential fill 2>/dev/null)"; then
         fail "Git credential lookup failed"
     fi
 
@@ -140,7 +162,7 @@ trap cleanup_config EXIT
 
 unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_CONFIG_DIR XDG_CONFIG_HOME
 set +e
-GH_TOKEN="$token" GH_HOST=github.com GH_CONFIG_DIR="$config_dir" gh "$@"
+GH_TOKEN="$token" GH_HOST=github.com GH_CONFIG_DIR="$config_dir" "$gh_bin" "$@"
 status=$?
 set -e
 unset token

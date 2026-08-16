@@ -290,6 +290,12 @@ printf '%s\n' "$*" >"$SELFTEST_GH_ARGS_FILE"
 [ -z "${SELFTEST_GH_CONFIG_FILE:-}" ] || printf '%s\n' "$GH_CONFIG_DIR" >"$SELFTEST_GH_CONFIG_FILE"
 EOF
 chmod +x "$wrapper_bin/git" "$wrapper_bin/gh"
+wrapper_under_test="$tmp/gh-with-git-credentials.sh"
+sed \
+    -e "s#^GH_BINARY_CANDIDATES=.*#GH_BINARY_CANDIDATES='$wrapper_bin/gh'#" \
+    -e "s#^GIT_BINARY_CANDIDATES=.*#GIT_BINARY_CANDIDATES='$wrapper_bin/git'#" \
+    "$root/scripts/gh-with-git-credentials.sh" >"$wrapper_under_test"
+chmod +x "$wrapper_under_test"
 wrapper_args="$tmp/wrapper-args.txt"
 wrapper_marker="$tmp/wrapper-git-called"
 wrapper_config_path="$tmp/wrapper-config-path.txt"
@@ -303,7 +309,7 @@ wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin"
     GH_EDITOR=/tmp/untrusted-editor GIT_SSH_COMMAND=/tmp/untrusted-ssh \
     SELFTEST_ATTACKER_GH_CONFIG_DIR="$wrapper_hostile_config" \
     SELFTEST_GH_CONFIG_FILE="$wrapper_config_path" SELFTEST_GH_ARGS_FILE="$wrapper_args" \
-    "$root/scripts/gh-with-git-credentials.sh" \
+    "$wrapper_under_test" \
     pr view 5 --json number 2>&1)"; rc=$?
 wrapper_seen_config="$(cat "$wrapper_config_path" 2>/dev/null || true)"
 if [ "$rc" -eq 0 ] && [ -z "$wrapper_out" ] \
@@ -319,7 +325,7 @@ fi
 rm -f "$wrapper_args" "$wrapper_marker"
 wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
     SELFTEST_GIT_MARKER="$wrapper_marker" SELFTEST_GH_ARGS_FILE="$wrapper_args" \
-    "$root/scripts/gh-with-git-credentials.sh" pr view 5 --json number 2>&1)"; rc=$?
+    "$wrapper_under_test" pr view 5 --json number 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ] && [ ! -e "$wrapper_marker" ] && [ -z "$wrapper_out" ] \
     && [ "$(cat "$wrapper_args" 2>/dev/null)" = "pr view 5 --json number" ]; then
     echo "PASS  pre-authenticated CI token bypasses Git credential lookup"; pass=$((pass + 1))
@@ -331,7 +337,7 @@ fi
 rm -f "$wrapper_args"
 wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
     SELFTEST_GIT_FAIL_AFTER_PASSWORD=1 SELFTEST_GH_ARGS_FILE="$wrapper_args" \
-    "$root/scripts/gh-with-git-credentials.sh" pr view 5 2>&1)"; rc=$?
+    "$wrapper_under_test" pr view 5 2>&1)"; rc=$?
 if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_args" ] \
     && printf '%s' "$wrapper_out" | grep -qF 'Git credential lookup failed'; then
     echo "PASS  failed Git credential lookup cannot forward a partial password"; pass=$((pass + 1))
@@ -343,12 +349,42 @@ fi
 rm -f "$wrapper_args"
 wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
     SELFTEST_GH_ARGS_FILE="$wrapper_args" /bin/bash -x \
-    "$root/scripts/gh-with-git-credentials.sh" pr view 5 --json number 2>&1)"; rc=$?
-if [ "$rc" -eq 0 ] && [ "$(cat "$wrapper_args" 2>/dev/null)" = "pr view 5 --json number" ] \
+    "$wrapper_under_test" pr view 5 --json number 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_args" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'invoke this executable directly' \
     && ! printf '%s' "$wrapper_out" | grep -qF 'selftest-wrapper-token'; then
-    echo "PASS  inherited shell tracing cannot print the resolved credential"; pass=$((pass + 1))
+    echo "PASS  shell-wrapped tracing is rejected before credential resolution"; pass=$((pass + 1))
 else
     echo "FAIL  shell tracing exposed or broke the GitHub credential wrapper (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+
+wrapper_untrusted_bin="$tmp/wrapper-untrusted-bin"
+wrapper_bootstrap="$tmp/wrapper-bootstrap.sh"
+wrapper_bootstrap_marker="$tmp/wrapper-bootstrap-called"
+mkdir -p "$wrapper_untrusted_bin"
+cat >"$wrapper_untrusted_bin/gh" <<'EOF'
+#!/bin/bash
+printf 'path-token=%s\n' "${GH_TOKEN:-}"
+exit 99
+EOF
+cat >"$wrapper_bootstrap" <<'EOF'
+printf 'bootstrap-token=%s\n' "${GH_TOKEN:-}" >"$SELFTEST_BOOTSTRAP_MARKER"
+EOF
+chmod +x "$wrapper_untrusted_bin/gh"
+rm -f "$wrapper_args" "$wrapper_bootstrap_marker"
+wrapper_out="$(env GH_TOKEN=selftest-wrapper-token SELFTEST_GH_ARGS_FILE="$wrapper_args" \
+    SELFTEST_BOOTSTRAP_MARKER="$wrapper_bootstrap_marker" /bin/bash -c '
+        gh() { printf "function-token=%s\\n" "${GH_TOKEN:-}"; exit 98; }
+        export -f gh
+        BASH_ENV="$2" PATH="$3:/bin:/usr/bin" exec "$1" pr view 5 --json number
+    ' _ "$wrapper_under_test" "$wrapper_bootstrap" "$wrapper_untrusted_bin" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && [ ! -e "$wrapper_bootstrap_marker" ] \
+    && [ "$(cat "$wrapper_args" 2>/dev/null)" = "pr view 5 --json number" ] \
+    && ! printf '%s' "$wrapper_out" | grep -qF 'selftest-wrapper-token'; then
+    echo "PASS  privileged wrapper ignores BASH_ENV, exported functions, and caller PATH"; pass=$((pass + 1))
+else
+    echo "FAIL  shell bootstrap or PATH injection reached the credential (rc=$rc output=$wrapper_out)" >&2
     fail=$((fail + 1))
 fi
 
@@ -358,7 +394,7 @@ wrapper_block_case() {
     rm -f "$wrapper_marker"
     out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
         SELFTEST_GIT_MARKER="$wrapper_marker" SELFTEST_GH_ARGS_FILE="$wrapper_args" \
-        "$root/scripts/gh-with-git-credentials.sh" "$@" 2>&1)"; rc=$?
+        "$wrapper_under_test" "$@" 2>&1)"; rc=$?
     if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] \
         && printf '%s' "$out" | grep -qF -- "$needle" \
         && ! printf '%s' "$out" | grep -qF 'selftest-wrapper-token'; then
@@ -391,7 +427,7 @@ wrapper_block_case "credential wrapper rejects checkout subprocesses before look
 rm -f "$wrapper_marker"
 wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
     GH_REPO=ghe.example/owner/repo SELFTEST_GIT_MARKER="$wrapper_marker" \
-    SELFTEST_GH_ARGS_FILE="$wrapper_args" "$root/scripts/gh-with-git-credentials.sh" \
+    SELFTEST_GH_ARGS_FILE="$wrapper_args" "$wrapper_under_test" \
     pr view 5 2>&1)"; rc=$?
 if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] \
     && printf '%s' "$wrapper_out" | grep -qF -- '--repo must name github.com/OWNER/REPO'; then
@@ -620,7 +656,11 @@ pr_case "CI new dashboard recording requires UI-GIF review" 2 \
 # Exercise the REST fallback without a gh binary. The fake curl accepts the credential only on
 # stdin, rejects it in argv, and returns the two minimal GitHub API responses discovery requires.
 fallback_bin="$tmp/fallback-bin"
-mkdir -p "$fallback_bin"
+fallback_root="$tmp/fallback-root"
+mkdir -p "$fallback_bin" "$fallback_root/tools/agent-hooks" \
+    "$fallback_root/tools/agent-policy"
+cp "$root/tools/agent-hooks/pr-gate-lib.sh" "$fallback_root/tools/agent-hooks/"
+cp "$root/tools/agent-policy/extract_changed_files.py" "$fallback_root/tools/agent-policy/"
 for tool in bash cat dirname git grep python3 rm sed; do
     tool_path="$(command -v "$tool")" || fail "REST fallback fixture is missing $tool"
     ln -s "$tool_path" "$fallback_bin/$tool"
@@ -653,7 +693,7 @@ fake_token="selftest-token-not-a-real-credential"
 out="$(env PATH="$fallback_bin" GH_TOKEN="$fake_token" \
     SELFTEST_EXPECTED_TOKEN="$fake_token" AGENT_REPO_SLUG="0Bu/daikin-altherma-esp32" \
     /bin/bash -c '. "$1"; agent_gate_discover_pr 123 "$2" "$3" "$4"' \
-    _ "$root/tools/agent-hooks/pr-gate-lib.sh" "$root" "$curl_body" "$curl_files" 2>&1)"; rc=$?
+    _ "$fallback_root/tools/agent-hooks/pr-gate-lib.sh" "$root" "$curl_body" "$curl_files" 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ] \
     && [ "$(cat "$curl_body" 2>/dev/null)" = "review evidence" ] \
     && [ "$(cat "$curl_files" 2>/dev/null)" = "docs/README.md" ] \
@@ -712,8 +752,15 @@ fi
 # discovered body/head/file set. Stub only the external PR and suite boundaries; exercise the real
 # aggregate parser, relevance filters, and failure propagation.
 merge_root="$tmp/merge-root"
-mkdir -p "$merge_root/scripts" "$merge_root/tools/absence" "$tmp/bin"
-cp "$root/scripts/gh-with-git-credentials.sh" "$merge_root/scripts/"
+mkdir -p "$merge_root/scripts" "$merge_root/tools/absence" \
+    "$merge_root/tools/agent-hooks" "$merge_root/tools/agent-policy" "$tmp/bin"
+cp "$root/tools/agent-hooks/pr-gate-lib.sh" "$merge_root/tools/agent-hooks/"
+cp "$root/tools/agent-hooks/require-pr-gates.sh" "$merge_root/tools/agent-hooks/"
+cp "$root/tools/agent-hooks/merge_payload.py" "$merge_root/tools/agent-hooks/"
+cp "$root/tools/agent-hooks/run_with_timeout.py" "$merge_root/tools/agent-hooks/"
+cp "$root/tools/agent-policy/extract_changed_files.py" "$merge_root/tools/agent-policy/"
+sed -e "s#^GH_BINARY_CANDIDATES=.*#GH_BINARY_CANDIDATES='$tmp/bin/gh'#" \
+    "$root/scripts/gh-with-git-credentials.sh" >"$merge_root/scripts/gh-with-git-credentials.sh"
 git -C "$merge_root" init -q
 git -C "$merge_root" remote add origin https://github.com/0Bu/daikin-altherma-esp32.git
 cat >"$tmp/bin/gh" <<'EOF'
@@ -775,11 +822,12 @@ exit "${AGENT_ABSENCE_SUITE_RC:-0}"
 EOF
 chmod +x "$tmp/bin/gh" "$merge_root/scripts/run-ui-use-case-tests.sh" \
     "$merge_root/scripts/run-ui-gif-audit.sh" "$merge_root/scripts/gh-with-git-credentials.sh" \
-    "$merge_root/tools/absence/selftest.sh"
+    "$merge_root/tools/absence/selftest.sh" "$merge_root/tools/agent-hooks/require-pr-gates.sh"
 
 AGENT_TEST_PAYLOAD_CWD="$merge_root"
 export GH_TOKEN=agent-hook-selftest-token
-merge_input="$(payload Bash command "$root/scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash")"
+pr_gate="$merge_root/tools/agent-hooks/require-pr-gates.sh"
+merge_input="$(payload Bash command "$merge_root/scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash")"
 suite_log="$tmp/suites.log"
 out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
     AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
