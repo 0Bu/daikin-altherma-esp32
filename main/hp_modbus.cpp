@@ -987,7 +987,7 @@ static void mb_poll_once() {
     };
     // A FAST CYCLE COMMITS NO VALUE CACHE. It read thirteen of the map's registers, so its
     // `fresh` is not a cache and its raster position is not a sample: committing it would publish a
-    // /values array of thirteen rows and hand the trend rings a bucket in which 18 of the 31 rows look
+    // /values array of thirteen rows and hand the trend rings a bucket in which 19 of the 32 rows look
     // like a failure to read. The cache and the rings stay with the last FULL cycle, which is at most
     // MB_FULL_CYCLE_TICKS - 1 poll intervals old — and `values`/`connected` below still report this
     // cycle's link, so a hub that went away is visible within a second rather than within a cadence.

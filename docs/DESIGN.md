@@ -755,10 +755,12 @@ Body, ordered:
    numeric rows, and ringing all of them would cost ~38 KB of `.bss` — about a third of the low-water
    free heap measured on the reference board — for curves nobody opened. A value row reached through
    the LIST (§6) gets a chart where a trend already exists and none where it does not.
-   HomeHub adds twelve second rings: pre- and post-BUH leaving water, return water, DHW tank, outdoor
+   HomeHub adds thirteen rings: pre- and post-BUH leaving water, return water, DHW tank, outdoor
    air, liquid refrigerant, flow and room temperature are the eight measurement concepts both sources
-   structurally pair; BSH, the 3-way valve and Quiet are exact state pairs, and the twelfth ring is the
-   explicit Smart-Grid-mode timeline. Every categorical timeline uses the same
+   structurally pair; BSH, the 3-way valve and Quiet are exact state pairs, the twelfth ring is the
+   explicit Smart-Grid-mode timeline, and the thirteenth is HomeHub input 33's Modbus-only
+   disinfection timeline. X10A Tank preheat keeps a separate X10A-only timeline because preparation
+   and active disinfection are not the same fact. Every categorical timeline uses the same
    grammar: one outlined track per available source, a separate labelled colour for every valid
    state, and hatching only for missing samples. Hover, touch pinning and keyboard navigation show a
    compact popup with source, state, phase start/end and sampled duration; those details are not
