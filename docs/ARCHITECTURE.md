@@ -123,7 +123,7 @@ checkup.cpp/.hpp    → the 24-hour PLANT CHECKUP behind /status.health: counted
 state_dwell.cpp/.hpp → HOW LONG EACH ELIGIBLE SWITCHED ROW HAS READ WHAT IT READS — the value list's other
                       half, since "OFF" describes a plant that finished a charge four seconds ago and
                       one that has not charged since Tuesday equally well. Bit flags + the fault
-                      class, except eight exact observation-only P2 tuples, in 64 scalar slots (a
+                      class, including neutral observation-only P2 flags, in 72 scalar slots (a
                       24-hour ring would cost 576 B per row). Storage + mutex; the rules are
                       logic/state_dwell.hpp. THREE facts on /values, not one
                       number: dwell_s, dwell_min (the transition was never witnessed, so the age is a
@@ -830,17 +830,17 @@ host-testable core is unusually large and valuable, because the risky parts are 
   four seconds ago and one that has not charged since Tuesday equally well. Tracked rows are the bit
   flags (converters 300–307) plus the fault class (203), selected structurally — never by label —
   and addressed by **(page, offset, converter)** for `checkup.hpp`'s reason two bullets up: six flags
-  share the byte `0x60/12`. Eight P2 overlay flags are intentionally excluded by that exact tuple:
-  they remain current MQTT/VM telemetry, but their proprietary polarity/meaning is not strong enough
-  to claim a persistent event age. The exclusion list is part of the persistence fingerprint.
+  share the byte `0x60/12`. The eight P2 overlay flags participate too: their age describes only the
+  unchanged raw neutral ON/OFF bit and does not promote their proprietary polarity or meaning from
+  observation to fact.
 
   It is a **scalar, not a ring**, and that is the whole sizing argument. Nine of these rows already
   have the better answer — a 24-hour categorical timeline whose tooltip names phase start, end and
   sampled duration — and it cannot be extended to the rest: a ring costs 576 B, the trend budget is
   exactly full (`TREND_COUNT × 576 == 18432`, its own ceiling), the remaining rows are not on the
   schematic and so are excluded by `history.hpp`'s selection rule, and each would need a hand-written
-  bilingual legend. The whole table is 64 × 16 B = **1024 B** in `.noinit`; the current worst
-  profile uses 55 slots, leaving nine spare. It is adopted across a
+  bilingual legend. The whole table is 72 × 16 B = **1152 B** in `.noinit`; the current worst
+  profile uses 63 slots, leaving nine spare. It is adopted across a
   power-preserving reset under the same seal, verdict vocabulary and union-storage rule as the trends
   and the checkup.
 
@@ -2886,9 +2886,9 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   plus `dwell_blind_s` when part of the run went unread. THREE keys rather than one
                   number, because the number alone is not the claim: a consumer that prints `dwell_s`
                   and ignores the other two states something stronger than the device knows, which is
-                  the legacy-35–39 shape drawn as a duration. Eight exact P2 overlay tuples are
-                  observation-only and excluded from dwell until their proprietary semantics are
-                  established; measurements are excluded as before. All three fields are omitted
+                  the legacy-35–39 shape drawn as a duration. Neutral P2 overlay flags carry the
+                  same raw-bit age without asserting their proprietary semantics; measurements are
+                  excluded as before. All three fields are omitted
                   where they do not apply, and an ABSENT `dwell_s` is a
                   first-class answer meaning the device declines to describe that run at all (silent
                   bus, a row unread past DWELL_MAX_GAP_S). A zero would say "it changed just now",

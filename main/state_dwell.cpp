@@ -65,7 +65,7 @@ using Lock = SemGuard;
 
 // WHAT THE SEAL COVERS. Unlike the checkup's ring there is no `pending` to exclude: every live slot
 // advances on every cycle, so a seal that skipped the changing part would cover nothing at all. It
-// is therefore rewritten after each fold, which costs a CRC32 over 1024 bytes once per second — a
+// is therefore rewritten after each fold, which costs a CRC32 over 1152 bytes once per second — a
 // few tens of microseconds on this chip, against a poll cycle that spends milliseconds on the UART.
 // A panic landing mid-fold leaves the slots and the seal disagreeing, and the next boot wipes: the
 // safe direction, and the one the verdict already has a name for.

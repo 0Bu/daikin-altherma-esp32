@@ -11585,25 +11585,47 @@ static void test_state_dwell() {
     CHECK(!dwell_tracked(204));    // the same event as its 203 companion, spelled differently
     CHECK(!dwell_tracked(105) && !dwell_tracked(151) && !dwell_tracked(211));
 
-    // P2 flags remain current telemetry but do not claim a persistent state age. Pin the complete
-    // structural exclusion list, then positive examples from every P1 page so an over-broad filter
-    // cannot make the capacity gate green by silently dropping valuable diagnostics.
-    CHECK(DWELL_OBSERVATION_ONLY_ROW_COUNT == 8);
-    for (size_t i = 0; i < DWELL_OBSERVATION_ONLY_ROW_COUNT; i++) {
-        const DwellRowKey& k = DWELL_OBSERVATION_ONLY_ROWS[i];
-        CHECK(dwell_observation_only(k.reg, k.off, k.conv));
-        CHECK(dwell_tracked(k.conv));
-        CHECK(!dwell_row_tracked(k.reg, k.off, k.conv));
+    // Evidence strength limits interpretation, not the raw ON/OFF age. Pin every P2 overlay tuple:
+    // these were the exact rows whose infoboxes lacked "OFF >= ..." while neighbouring P1 flags
+    // carried it. A neutral duration claims neither polarity nor meaning, so all eight must follow
+    // the same binary-row contract.
+    const DwellObservation p2_rows[] = {
+        {0x10, 1, 307, 2}, {0x10, 1, 301, 2}, {0x10, 1, 300, 2},
+        {0x30, 13, 307, 2}, {0x30, 13, 306, 2}, {0x30, 13, 305, 2},
+        {0x60, 11, 303, 2}, {0x60, 12, 302, 2},
+    };
+    for (const DwellObservation& row : p2_rows) {
+        CHECK(dwell_tracked(row.conv));
+        CHECK(dwell_row_tracked(row.reg, row.off, row.conv));
     }
     CHECK(dwell_row_tracked(0x10, 1, 305));  // Startup Control
     CHECK(dwell_row_tracked(0x30, 11, 307)); // 4 Way Valve
     CHECK(dwell_row_tracked(0x60, 11, 306)); // BUH thermal protector
     CHECK(dwell_row_tracked(0x62, 2, 302));  // System OFF
 
-    DwellSlot excluded[DWELL_MAX_SLOTS] = {};
-    const DwellObservation p2_row[] = {{0x10, 1, 307, 2}};
-    dwell_step(excluded, DWELL_MAX_SLOTS, p2_row, 1, 1);
-    CHECK(!dwell_lookup(excluded, DWELL_MAX_SLOTS, 0x10, 1, 307).known);
+    DwellSlot included[DWELL_MAX_SLOTS] = {};
+    dwell_step(included, DWELL_MAX_SLOTS, p2_rows,
+               sizeof(p2_rows) / sizeof(p2_rows[0]), 1);
+    for (const DwellObservation& row : p2_rows)
+        CHECK(dwell_lookup(included, DWELL_MAX_SLOTS, row.reg, row.off, row.conv).known);
+
+    // The table now crosses the old 64-bit observed mask. Exercise a row in word two twice: if the
+    // second mask word is missing, slot 64 is incorrectly booked as blind in the very cycle that
+    // observed it.
+    DwellSlot wide[DWELL_MAX_SLOTS] = {};
+    DwellObservation every[DWELL_MAX_SLOTS] = {};
+    for (size_t i = 0; i < DWELL_MAX_SLOTS; i++) {
+        every[i].reg = static_cast<uint8_t>(0x70u + i / 32u);
+        every[i].off = static_cast<uint8_t>(i % 32u);
+        every[i].conv = 304;
+        every[i].code = 2;
+    }
+    dwell_step(wide, DWELL_MAX_SLOTS, every, DWELL_MAX_SLOTS, 1);
+    dwell_step(wide, DWELL_MAX_SLOTS, every, DWELL_MAX_SLOTS, 1);
+    const DwellObservation& beyond64 = every[64];
+    const DwellReading wide_read =
+        dwell_lookup(wide, DWELL_MAX_SLOTS, beyond64.reg, beyond64.off, beyond64.conv);
+    CHECK(wide_read.known && wide_read.since_s == 1 && wide_read.blind_s == 0);
 
     DwellSlot slots[DWELL_MAX_SLOTS] = {};
     const DwellObservation off_row[] = {{0x62, 2, 304, 1}};
@@ -11740,11 +11762,7 @@ static void test_state_dwell() {
     // ── the restore ─────────────────────────────────────────────────────────────────────────────
     const uint32_t fp = dwell_catalog_fingerprint();
     const uint32_t crc = 0x12345678u;
-    DwellRowKey changed_policy[DWELL_OBSERVATION_ONLY_ROW_COUNT] = {};
-    for (size_t i = 0; i < DWELL_OBSERVATION_ONLY_ROW_COUNT; i++)
-        changed_policy[i] = DWELL_OBSERVATION_ONLY_ROWS[i];
-    changed_policy[0].conv--;
-    CHECK(dwell_catalog_fingerprint_for(changed_policy, DWELL_OBSERVATION_ONLY_ROW_COUNT) != fp);
+    CHECK(fp != 0);
     CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC,
                                 DWELL_PERSIST_VERSION, fp, fp, crc, crc) == DwellRestore::Accept);
     CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::POWERON), DWELL_PERSIST_MAGIC,
@@ -11813,7 +11831,7 @@ static void test_state_dwell() {
         if (tracked > worst) worst = tracked;
     }
     CHECK(worst > 0);
-    CHECK(worst == 55);
+    CHECK(worst == 63);
     CHECK(worst <= DWELL_MAX_SLOTS);
     // Headroom is stated rather than assumed: the day a generator run takes the worst case past the
     // table this fails here instead of on a device, where the symptom is one row quietly having no
