@@ -119,7 +119,7 @@ static void poll_once() {
     // barrier at commit time.
     if (c.profile == "auto") return;
     const auto&   prof = def::lookup(c.profile.c_str());
-    // The GENERATED rows plus the page-0x10 protection words (def/overlay.hpp). Everything below
+    // The generated rows plus every applicable hand-written overlay block (def/overlay.hpp). Everything below
     // iterates the VIEW; `prof` survives only for the two calls that need a flat contiguous array
     // (see the profile_refrigerant comment below).
     const auto    view = def::resolved(prof);
@@ -158,8 +158,8 @@ static void poll_once() {
     int       regs   = 0;
     uint8_t   seen[256] = {0};
     // The BASE table, not the view: this scans for the profile's refrigerant row to pick the conv-405
-    // saturation curve, and the supplement carries no pressure or conv-405 row — a static_assert in
-    // def/overlay.hpp pins that, so this stays correct rather than merely true today. Same reasoning
+    // saturation curve, and the overlay blocks carry no pressure or conv-405 row — static_asserts in
+    // def/overlay.hpp pin that, so this stays correct rather than merely true today. Same reasoning
     // for the table handed to hp_format() below.
     const int rtype  = profile_refrigerant(prof.values, prof.count);   // conv-405 curve selector
 
@@ -183,8 +183,8 @@ static void poll_once() {
     const SaturationWitness sat_in = s_sat_witness_generation == cycle_generation
         ? s_sat_witness : SaturationWitness{};
     SaturationWitness       sat_out;                  // default: not captured -> next cycle fails open
-    // The BASE table, like rtype above: the witness is a generated pressure row and the supplement
-    // carries no conv-405 row (def/overlay.hpp's static_assert pins that).
+    // The BASE table, like rtype above: the witness is a generated pressure row and the overlays
+    // carry no conv-405 row (def/overlay.hpp's static_asserts pin that).
     const bool has_sat_witness_row =
         profile_has_saturation_witness(prof.values, prof.count);
 
@@ -489,7 +489,7 @@ static bool poll_detect() {                         // false only when an attemp
     return true;
 }
 
-// The cycle body allocates freely — poll_once builds up to ~116 CachedValues (one owned string each)
+// The cycle body allocates freely — poll_once builds one CachedValue per resolved profile row
 // every second, hp_detect_run grows more — so the whole body is guarded like mqtt_task's: an OOM in a
 // fragmented moment (concurrent MQTT TLS reconnect, /set_mqtt's probe client) must skip the cycle and
 // keep the last good cache, not throw through this FreeRTOS task into std::terminate() and reboot.

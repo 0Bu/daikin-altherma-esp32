@@ -64,7 +64,7 @@ namespace daik::logic {
 // The bit flags (conv 300-307) plus the fault CLASS (conv 203). Both are states rather than
 // measurements, which is the whole selection rule: for a temperature "time since the last change"
 // is the poll period, because a thermistor at 0.1 K resolution moves constantly — a number that
-// would read 1-3 s on ~50 rows and bury the ~34 where it means something.
+// would read 1-3 s on many rows and bury the flags where it means something.
 //
 // Conv 204 (the raw Daikin code, "U4"/"7H") is deliberately NOT tracked even though it is textual
 // and changes rarely. It is the SAME EVENT as its 203 companion spelled differently — the class row
@@ -75,12 +75,42 @@ namespace daik::logic {
 // added to the binary family is tracked here without anyone remembering to say so twice.
 inline bool dwell_tracked(int conv) { return conv_is_binary(conv) || conv == 203; }
 
+// P2 observation rows are useful as current telemetry and long-term VictoriaMetrics series, but
+// their proprietary polarity/meaning has not been established strongly enough to spend persistent
+// per-device event-age state on them. Keep this a structural wire identity, never a label rule: a
+// label edit must not silently change which .noinit slots exist. P1 control/safety rows are tracked
+// by the ordinary converter rule above.
+struct DwellRowKey {
+    uint8_t reg;
+    uint8_t off;
+    int16_t conv;
+};
+inline constexpr DwellRowKey DWELL_OBSERVATION_ONLY_ROWS[] = {
+    {0x10, 1, 307}, {0x10, 1, 301}, {0x10, 1, 300},
+    {0x30, 13, 307}, {0x30, 13, 306}, {0x30, 13, 305},
+    {0x60, 11, 303}, {0x60, 12, 302},
+};
+inline constexpr size_t DWELL_OBSERVATION_ONLY_ROW_COUNT =
+    sizeof(DWELL_OBSERVATION_ONLY_ROWS) / sizeof(DWELL_OBSERVATION_ONLY_ROWS[0]);
+
+inline bool dwell_observation_only(uint8_t reg, uint8_t off, int conv) {
+    for (size_t i = 0; i < DWELL_OBSERVATION_ONLY_ROW_COUNT; i++) {
+        const DwellRowKey& k = DWELL_OBSERVATION_ONLY_ROWS[i];
+        if (k.reg == reg && k.off == off && k.conv == conv) return true;
+    }
+    return false;
+}
+
+inline bool dwell_row_tracked(uint8_t reg, uint8_t off, int conv) {
+    return dwell_tracked(conv) && !dwell_observation_only(reg, off, conv);
+}
+
 // Upper bound on tracked rows in one profile. Measured over the shipped catalog the worst case is
-// 32 generated rows plus def/overlay.hpp's page-0x10 drop-control flags; test_state_dwell()'s
-// catalog sweep pins the real maximum against this so a generator run that adds flags fails the
-// suite instead of silently dropping the last rows. Kept at or below 64 because dwell_step marks
-// observed slots in one uint64_t rather than allocating.
-inline constexpr size_t DWELL_MAX_SLOTS = 48;
+// 32 generated rows plus def/overlay.hpp's page-0x10 drop-control flags and P1 observability flags;
+// test_state_dwell()'s catalog sweep pins the real maximum against this so a generator run that
+// adds flags fails the suite instead of silently dropping the last rows. Kept at 64 because
+// dwell_step marks observed slots in one uint64_t rather than allocating.
+inline constexpr size_t DWELL_MAX_SLOTS = 64;
 static_assert(DWELL_MAX_SLOTS <= 64, "the observed-slot mask is a uint64_t");
 
 // How long a row may go unread before its run stops being believable. A flag can pulse and return
@@ -132,7 +162,7 @@ inline constexpr uint8_t DWELL_F_USED  = 0x01;  // this slot addresses a row
 inline constexpr uint8_t DWELL_F_EXACT = 0x02;  // the transition INTO the current state was seen
 inline constexpr uint8_t DWELL_F_STALE = 0x04;  // unread past DWELL_MAX_GAP_S — claims nothing
 
-// Field order is chosen for SIZE, not for reading order: 48 of these sit in .noinit and a slip that
+// Field order is chosen for SIZE, not for reading order: 64 of these sit in .noinit and a slip that
 // pads each one costs the whole table. 4+4+2+2+1+1+1+1 packs to exactly 16 with no hole.
 struct DwellSlot {
     uint32_t since_s = 0;   // seconds the current state has stood, as far as this board can tell
@@ -237,7 +267,7 @@ inline void dwell_step(DwellSlot* slots, size_t n, const DwellObservation* obs, 
     uint64_t seen = 0;
     for (size_t o = 0; o < obs_n; o++) {
         const DwellObservation& ob = obs[o];
-        if (ob.code == DWELL_CODE_NONE || !dwell_tracked(ob.conv)) continue;
+        if (ob.code == DWELL_CODE_NONE || !dwell_row_tracked(ob.reg, ob.off, ob.conv)) continue;
         int i = dwell_find(slots, n, ob.reg, ob.off, ob.conv);
         if (i < 0) {
             // Allocate. A full table drops the row rather than evicting a live one — the catalog
@@ -362,20 +392,32 @@ inline uint32_t dwell_fp_u32(uint32_t crc, uint32_t v) {
 // valid CRC over bytes whose meaning quietly moved. Derived rather than a hand-maintained version
 // byte, precisely so nobody can forget to bump it.
 //
-// The tracked set is addressed by a PREDICATE rather than a table, so the fingerprint asks it the
-// same question the recorder does, over the converter space it answers for.
-inline uint32_t dwell_catalog_fingerprint() {
+// The tracked converter family is addressed by a predicate; the P2 exclusions are a structural
+// table. Fingerprint both, so changing an exclusion cannot adopt old slots under new semantics.
+inline uint32_t dwell_catalog_fingerprint_for(const DwellRowKey* observation_only, size_t count) {
     uint32_t crc = CONFIG_CRC32_INIT;
     crc = dwell_fp_u32(crc, static_cast<uint32_t>(sizeof(DwellSlot)));
     crc = dwell_fp_u32(crc, static_cast<uint32_t>(DWELL_MAX_SLOTS));
     crc = dwell_fp_u32(crc, DWELL_MAX_GAP_S);
     crc = dwell_fp_u32(crc, DWELL_REBOOT_BLIND_S);
+    crc = dwell_fp_u32(crc, static_cast<uint32_t>(count));
+    for (size_t i = 0; i < count; i++) {
+        const DwellRowKey& k = observation_only[i];
+        crc = dwell_fp_u32(crc, k.reg);
+        crc = dwell_fp_u32(crc, k.off);
+        crc = dwell_fp_u32(crc, static_cast<uint32_t>(k.conv));
+    }
     for (int conv = 0; conv <= 512; conv++)
         if (dwell_tracked(conv)) crc = dwell_fp_u32(crc, static_cast<uint32_t>(conv));
     // The code mapping is part of the meaning: a build that renumbered the fault classes would read
     // the previous one's stored code as a different state and book a change that never happened.
     crc = dwell_fp_u32(crc, static_cast<uint32_t>(FAULT_CLASS_COUNT));
     return config_crc32_final(crc);
+}
+
+inline uint32_t dwell_catalog_fingerprint() {
+    return dwell_catalog_fingerprint_for(DWELL_OBSERVATION_ONLY_ROWS,
+                                         DWELL_OBSERVATION_ONLY_ROW_COUNT);
 }
 
 // Adopting a table across a reset. The slots are taken in place; what cannot be taken in place is

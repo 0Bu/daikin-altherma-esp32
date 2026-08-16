@@ -407,13 +407,15 @@ The value list states what a flag **is**; for a flag that is half the question. 
 Operation: OFF` describes a plant that finished a charge four seconds ago and one that has not
 charged since Tuesday equally well, and until now nothing on the device could tell them apart —
 nine switched rows have a [24-hour timeline](FEATURES.md) whose tooltip names phase and duration,
-and the other twenty-one had no answer anywhere.
+and other eligible flags had no answer anywhere.
 
-Every bit flag and the fault class now carry the age of their current state, shown as the first line
-of the row's explainer. It is an **observation**, not a statistic: nothing is inferred from it, no
-verdict is raised on it and no threshold is attached to it. What the plant does with a long-standing
-flag is the reader's judgement — the device only says how long it has stood, and how much of that it
-actually saw.
+Eligible bit flags and the fault class now carry the age of their current state, shown as the first
+line of the row's explainer. Eight P2 overlay flags deliberately do not: their proprietary polarity
+or meaning has not been established strongly enough to persist an event-age claim, although their
+current values still reach MQTT and VictoriaMetrics. The age is an **observation**, not a statistic:
+nothing is inferred from it, no verdict is raised on it and no threshold is attached to it. What the
+plant does with a long-standing flag is the reader's judgement — the device only says how long it
+has stood, and how much of that it actually saw.
 
 **What it refuses to claim** is the whole design, because a duration is a statement about a stretch
 of time and every way of overstating one looks identical on screen:

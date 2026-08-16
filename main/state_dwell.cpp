@@ -65,7 +65,7 @@ using Lock = SemGuard;
 
 // WHAT THE SEAL COVERS. Unlike the checkup's ring there is no `pending` to exclude: every live slot
 // advances on every cycle, so a seal that skipped the changing part would cover nothing at all. It
-// is therefore rewritten after each fold, which costs a CRC32 over 768 bytes once per second — a
+// is therefore rewritten after each fold, which costs a CRC32 over 1024 bytes once per second — a
 // few tens of microseconds on this chip, against a poll cycle that spends milliseconds on the UART.
 // A panic landing mid-fold leaves the slots and the seal disagreeing, and the next boot wipes: the
 // safe direction, and the one the verdict already has a name for.
@@ -213,8 +213,8 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation) {
 
     // Reduce the cache to the tracked rows BEFORE taking the lock. The observation array is the one
     // thing here sized by the catalog, and it is a POD on the poll task's stack: DWELL_MAX_SLOTS
-    // (48) entries of 6 bytes is 288 B of an 8 KB stack — the array is sized by the TABLE, not by
-    // the 38-row worst case it will actually hold, so quote the size the code allocates. That stack
+    // (64) entries of 6 bytes is 384 B of an 8 KB stack — the array is sized by the TABLE, not by
+    // the current worst case it will actually hold, so quote the size the code allocates. That stack
     // is the budget which fails silently on this board (AGENTS.md → Memory, concurrency, and HTTP
     // safety). A row that produced no usable state is simply
     // left out — logic/state_dwell.hpp treats absent and undecodable identically, so the caller
@@ -222,7 +222,7 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation) {
     logic::DwellObservation obs[logic::DWELL_MAX_SLOTS];
     size_t obs_n = 0;
     for (size_t i = 0; i < n && obs_n < logic::DWELL_MAX_SLOTS; i++) {
-        if (!logic::dwell_tracked(v[i].conv)) continue;
+        if (!logic::dwell_row_tracked(v[i].reg, v[i].off, v[i].conv)) continue;
         const uint8_t code = logic::dwell_code(v[i].conv, v[i].value.c_str());
         if (code == logic::DWELL_CODE_NONE) continue;
         obs[obs_n].reg  = v[i].reg;

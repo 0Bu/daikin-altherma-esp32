@@ -1362,15 +1362,13 @@ static void test_refrigerant_pressure_catalog() {
 // VALUE is wrong. The branch's own request is "Space heating Operation ON/OFF" (0x62/2 bit 3), and
 // that is what the pill draws now.
 //
-// The browser picks both rows by LABEL (www/js/schematic.js liveData). That is only sound while a label means
-// one thing, and docs/REGISTERS.md §5 documents a SECOND "Thermostat ON/OFF" — page 0x10 offset 1
-// bit 7, the outdoor unit's own — which no generated profile currently carries. def/overlay.hpp says
-// in as many words that the generator's page-0x10 input is narrower than the spec and that the
-// missing rows are expected to arrive. On the day they do, this test fails, and whoever runs the
-// generator learns that the browser's selection has to become structural (keyed on `reg`, the way
-// the ou_stale page rule already is) before the catalog can ship. Failing here is the point.
+// docs/REGISTERS.md §5 documents a SECOND "Thermostat ON/OFF" — page 0x10 offset 1 bit 7, the
+// outdoor unit's own — and the reference profile now publishes it. `/values` qualifies both reused
+// labels by their page group; the status inspector structurally selects `hydronic`, while the value
+// list exposes both. This test pins the two distinct locators so a later first-label-wins refactor
+// cannot silently attribute the outdoor flag to the indoor unit again.
 static void test_demand_flag_catalog() {
-    int thermostat = 0, space_heating = 0;
+    int indoor_thermostat = 0, outdoor_thermostat = 0, space_heating = 0;
     for (const auto& p : def::profiles) {
         const auto v = def::resolved(p);            // the rows a consumer actually sees
         for (size_t i = 0; i < v.count(); i++) {
@@ -1378,8 +1376,14 @@ static void test_demand_flag_catalog() {
             std::string lbl;
             for (const char* c = d.label; c && *c; c++) lbl += static_cast<char>(std::tolower(*c));
             if (lbl.rfind("thermostat on", 0) == 0) {           // the JS matches /thermostat on/i
-                CHECK(d.reg == 0x60); CHECK(d.offset == 2); CHECK(d.conv == 303);
-                thermostat++;
+                if (d.reg == 0x60) {
+                    CHECK(d.offset == 2); CHECK(d.conv == 303);
+                    indoor_thermostat++;
+                } else {
+                    CHECK(d.reg == 0x10); CHECK(d.offset == 1); CHECK(d.conv == 307);
+                    CHECK(std::string(p.id) == def::OBSERVABILITY_PROFILE);
+                    outdoor_thermostat++;
+                }
             }
             // Anchored, like the JS: "Space H Operation output" (0x62/8) is the OUTPUT terminal's
             // state, a different row, and must not be mistaken for the request.
@@ -1391,7 +1395,8 @@ static void test_demand_flag_catalog() {
     }
     // Traversal proof: both rows are near-universal, so a selection that silently stops finding
     // either (a renamed label, a dropped row) fails here rather than blanking a pill in the field.
-    CHECK(thermostat    >= 35);
+    CHECK(indoor_thermostat >= 35);
+    CHECK(outdoor_thermostat == 1);
     CHECK(space_heating >= 40);
 }
 
@@ -10325,13 +10330,33 @@ static void test_profile_view() {
     // these rows, and the deletion must not have to be atomic with the call-site cleanup.
     CHECK(profile_view(base_with, 2, nullptr, 0, 0x10).count() == 2);
 
+    // A second block may span several pages, but every one must already be present in the generated
+    // base. It is appended after the ordinary supplement and withheld atomically if even one page
+    // is absent; one supplement can never bootstrap a page for another.
+    ValueDef mixed_ok[] = {{0x60, 11, 306, 1, -1, "Thermal protector"},
+                           {0x10, 1, 305, 1, -1, "Startup Control"}};
+    const auto applied2 = profile_view_extend_existing_pages(applied, mixed_ok, 2);
+    CHECK(applied2.count() == 5);
+    CHECK(applied2[2].conv == 310);
+    CHECK(applied2[3].reg == 0x60 && applied2[4].reg == 0x10);
+    CHECK(applied2.extra2_count == 2);
+    ValueDef mixed_missing[] = {{0x60, 11, 306, 1, -1, "Thermal protector"},
+                                {0x62, 2, 302, 1, -1, "System OFF"}};
+    const auto skipped2 = profile_view_extend_existing_pages(applied, mixed_missing, 2);
+    CHECK(skipped2.count() == applied.count());
+    CHECK(skipped2.extra2_count == 0);
+
     // ── The real catalog ────────────────────────────────────────────────────────────────────────
     // Every profile reads page 0x10, so every profile gets the supplement. If a future generated
     // profile drops the page this CHECK fails rather than the device quietly gaining a round-trip.
     for (const auto& p : def::profiles) {
         const auto v = def::resolved(p);
-        CHECK(v.count() == p.count + def::RETRY_ROW_COUNT);
+        const bool observation_profile = std::string(p.id) == def::OBSERVABILITY_PROFILE;
+        const size_t expected = p.count + def::RETRY_ROW_COUNT +
+                                (observation_profile ? def::OBSERVABILITY_ROW_COUNT : 0);
+        CHECK(v.count() == expected);
         CHECK(v.extra_count == def::RETRY_ROW_COUNT);
+        CHECK(v.extra2_count == (observation_profile ? def::OBSERVABILITY_ROW_COUNT : 0));
     }
 
     // DETECTION IS UNMOVED — the load-bearing claim. Belt: signatures are built over def::profiles
@@ -10339,11 +10364,19 @@ static void test_profile_view() {
     // because the rule cannot set a bit that was not already set. Assert the braces, since the belt
     // is the one a refactor would remove.
     for (const auto& p : def::profiles) {
-        uint32_t base_mask = 0, view_mask = 0;
-        for (size_t i = 0; i < p.count; i++) base_mask |= daik::page_mask_bit(p.values[i].reg);
+        uint32_t base_mask = 0, view_mask = 0, base_query_mask = 0, view_query_mask = 0;
+        for (size_t i = 0; i < p.count; i++) {
+            base_mask |= daik::page_mask_bit(p.values[i].reg);
+            if (row_publishable(p.values[i]))
+                base_query_mask |= daik::page_mask_bit(p.values[i].reg);
+        }
         const auto v = def::resolved(p);
-        for (size_t i = 0; i < v.count(); i++) view_mask |= daik::page_mask_bit(v[i].reg);
+        for (size_t i = 0; i < v.count(); i++) {
+            view_mask |= daik::page_mask_bit(v[i].reg);
+            if (row_publishable(v[i])) view_query_mask |= daik::page_mask_bit(v[i].reg);
+        }
         CHECK(base_mask == view_mask);
+        CHECK(base_query_mask == view_query_mask);
     }
 
     // The supplement transcribes docs/REGISTERS.md §5 register 0x10: 11 rows over offsets 10-12,
@@ -10410,6 +10443,128 @@ static void test_profile_view() {
             for (size_t k = 0; k < p.count; k++) CHECK(row_object_id(p.values[k]) != key);
         }
     }
+
+    // ── Profile-specific diagnostic telemetry ──────────────────────────────────────────────────
+    // These rows are transcribed from docs/REGISTERS.md and freeze both their wire identity and the
+    // metric suffix they create. They are deliberately attached only to the reference monobloc and
+    // only on pages the generated profile already polls.
+    static const struct {
+        uint8_t reg;
+        uint8_t off;
+        int conv;
+        const char* label;
+        const char* group;
+        const char* metric;
+    } observation_ids[] = {
+        {0x10, 1, 307, "Thermostat ON/OFF", "outdoor_state", "thermostat_on_off"},
+        {0x10, 1, 306, "Restart standby", "outdoor_state", "restart_standby"},
+        {0x10, 1, 305, "Startup Control", "outdoor_state", "startup_control"},
+        {0x10, 1, 303, "Oil Return Operation", "outdoor_state", "oil_return_operation"},
+        {0x10, 1, 302, "Pressure equalizing operation", "outdoor_state",
+         "pressure_equalizing_operation"},
+        {0x10, 1, 301, "Demand Signal", "outdoor_state", "demand_signal"},
+        {0x10, 1, 300, "Low noise control", "outdoor_state", "low_noise_control"},
+        {0x30, 11, 307, "4 Way Valve", "actuators", "4_way_valve"},
+        {0x30, 12, 307, "Crank case heater", "actuators", "crank_case_heater"},
+        {0x30, 13, 307, "Hot gas bypass valve (Y3S)", "actuators",
+         "hot_gas_bypass_valve_y3s"},
+        {0x30, 13, 306, "LP bypass valve (Y2S)", "actuators", "lp_bypass_valve_y2s"},
+        {0x30, 13, 305, "Y3S", "actuators", "y3s"},
+        {0x60, 4, 152, "Error detailed code", "hydronic", "error_detailed_code"},
+        {0x60, 11, 306, "Thermal protector (Q1L) BUH", "hydronic",
+         "thermal_protector_q1l_buh"},
+        {0x60, 11, 303, "Solar input", "hydronic", "solar_input"},
+        {0x60, 12, 302, "Floor loop shut off valve", "hydronic",
+         "floor_loop_shut_off_valve"},
+        {0x62, 2, 302, "System OFF (ON:System off)", "hydronic_state",
+         "system_off_on_system_off"},
+        {0x62, 7, 307, "Add. Ext. RT Input Cool.", "hydronic_state",
+         "add_ext_rt_input_cool"},
+        {0x62, 7, 306, "Add. Ext. RT Input Heat.", "hydronic_state",
+         "add_ext_rt_input_heat"},
+        {0x62, 7, 305, "Main RT Cooling", "hydronic_state", "main_rt_cooling"},
+        {0x62, 7, 304, "Main RT Heating", "hydronic_state", "main_rt_heating"},
+        {0x62, 7, 303, "Pwr consumption limit 4", "hydronic_state",
+         "pwr_consumption_limit_4"},
+        {0x62, 7, 302, "Pwr consumption limit 3", "hydronic_state",
+         "pwr_consumption_limit_3"},
+        {0x62, 7, 301, "Pwr consumption limit 2", "hydronic_state",
+         "pwr_consumption_limit_2"},
+        {0x62, 7, 300, "Pwr consumption limit 1", "hydronic_state",
+         "pwr_consumption_limit_1"},
+        {0x62, 8, 304, "PHE Heater", "hydronic_state", "phe_heater"},
+        {0x63, 13, 311, "BUH output capacity", "mains_current", "buh_output_capacity"},
+    };
+    CHECK(sizeof(observation_ids) / sizeof(observation_ids[0]) == def::OBSERVABILITY_ROW_COUNT);
+    CHECK(def::OBSERVABILITY_ROW_COUNT == 27);
+
+    const auto& target_base = def::lookup(def::OBSERVABILITY_PROFILE);
+    const auto target = def::resolved(target_base);
+    CHECK(target.extra2_count == def::OBSERVABILITY_ROW_COUNT);
+    int binary_rows = 0;
+    for (size_t i = 0; i < def::OBSERVABILITY_ROW_COUNT; i++) {
+        const ValueDef& d = def::observability_rows[i];
+        CHECK(d.size == 1 && d.type == -1 && !d.no_publish && d.conv != 405);
+        CHECK(profile_has_page(target_base.values, target_base.count, d.reg));
+        if (conv_is_binary(d.conv)) binary_rows++;
+        CHECK(std::string(ha_component(d)) ==
+              (conv_is_binary(d.conv) ? "binary_sensor" : "sensor"));
+
+        int hits = 0;
+        for (const auto& e : observation_ids) {
+            if (d.reg == e.reg && d.offset == e.off && d.conv == e.conv &&
+                std::string(d.label) == e.label && std::string(group_for_page(d.reg)) == e.group &&
+                object_id(d.label) == e.metric)
+                hits++;
+        }
+        CHECK(hits == 1);
+
+        // No state key may collide with any earlier base/retry/observation row in the resolved view.
+        const size_t at = target.base_count + target.extra_count + i;
+        for (size_t k = 0; k < at; k++) CHECK(row_object_id(target[k]) != row_object_id(d));
+    }
+    CHECK(binary_rows == 25);
+
+    // End-to-end packed-bit decoding of the eight 0x62/7 rows. 0xA5 = 1010 0101, so converters
+    // 307..300 must read 1,0,1,0,0,1,0,1 respectively rather than the whole byte.
+    const uint8_t control_word[] = {0xA5};
+    const int expected_bits[] = {1, 0, 1, 0, 0, 1, 0, 1};
+    int control_bits = 0;
+    for (size_t i = 0; i < def::OBSERVABILITY_ROW_COUNT; i++) {
+        const ValueDef& d = def::observability_rows[i];
+        if (d.reg != 0x62 || d.offset != 7) continue;
+        const auto decoded = convert(d, control_word);
+        CHECK(decoded.ok && approx(decoded.value, expected_bits[307 - d.conv]));
+        control_bits++;
+    }
+    CHECK(control_bits == 8);
+
+    // HP Forced FG is intentionally NOT published yet. It aliases bit 7 of the existing one-byte
+    // CT-L3 current field. The availability ledger must reject that current while the bit is
+    // asserted rather than fabricate +64 A; raw-data evidence or a documented mask is required
+    // before exposing the flag or decoding a simultaneous current.
+    for (size_t i = 0; i < def::OBSERVABILITY_ROW_COUNT; i++) {
+        const ValueDef& d = def::observability_rows[i];
+        CHECK(!(d.reg == 0x63 && d.offset == 16 && d.conv == 307));
+    }
+    const uint8_t shared_ct_byte[] = {0x80};
+    const ValueDef ct_l3{0x63, 16, 161, 1, -1, "Current measured by CT sensor of L3"};
+    CHECK(convert(ct_l3, shared_ct_byte).ok);  // intrinsic converter remains a whole-byte ×0.5-A decode
+    CHECK(approx(convert(ct_l3, shared_ct_byte).value, 64.0));
+    uint8_t shared_ct_page[17] = {};
+    shared_ct_page[16] = 0x80;
+    CHECK(!value_available(ct_l3, true, 64.0, shared_ct_page, sizeof(shared_ct_page)));
+    CHECK(value_available(ct_l3, true, 64.0)); // no page witness: availability rules fail open
+    const uint8_t ordinary_ct_byte[] = {0x7f};
+    CHECK(convert(ct_l3, ordinary_ct_byte).ok);
+    CHECK(approx(convert(ct_l3, ordinary_ct_byte).value, 63.5));
+    shared_ct_page[16] = 0x7f;
+    CHECK(value_available(ct_l3, true, 63.5, shared_ct_page, sizeof(shared_ct_page)));
+    const ValueDef ct_l2{0x63, 15, 161, 1, -1, "Current measured by CT sensor of L2"};
+    CHECK(convert(ct_l2, shared_ct_byte).ok);
+    CHECK(approx(convert(ct_l2, shared_ct_byte).value, 64.0));
+    shared_ct_page[15] = 0x80;
+    CHECK(value_available(ct_l2, true, 64.0, shared_ct_page, sizeof(shared_ct_page)));
 
     // ── The metric IDs these rows have already become in VictoriaMetrics (#180) ──────────────────
     // Verified 2026-07-26: these 11 rows are INGESTED. Telegraf reads the grouped X10A topic and
@@ -10714,7 +10869,7 @@ static void test_metric_identity() {
     // group for that reason, and it is hand-maintained on purpose (a name computed from the detected
     // profile's rows would differ per model, so a re-detect would rename a live entity).
     //
-    // So: same computation, opposite verdict. It must be EXACTLY the ledger — a sixth reused label
+    // So: same computation, opposite verdict. It must be EXACTLY the ledger — another reused label
     // that nobody added to the ledger would ship two identically-named entities and a `_2`.
     //
     // Keyed on distinct PAGES, not distinct (reg, offset): the group is what disambiguates, so a
@@ -10725,8 +10880,9 @@ static void test_metric_identity() {
     std::set<std::string> reused;
     for (const auto& p : def::profiles) {
         std::map<std::string, std::set<int>> by_obj;   // object_id -> distinct register pages
-        for (size_t i = 0; i < p.count; i++) {
-            const auto& v = p.values[i];
+        const auto view = def::resolved(p);
+        for (size_t i = 0; i < view.count(); i++) {
+            const auto& v = view[i];
             if (v.no_publish) continue;
             by_obj[object_id(v.label)].insert(v.reg);
         }
@@ -10955,7 +11111,7 @@ static std::vector<Fingerprint> tie_break_sweep() {
 // identifier (ha_slug -> HA entity id + VictoriaMetrics series suffix), so a moved tie-break stops one
 // series and starts another at zero, which reads downstream as the plant going quiet rather than as a
 // rename (#180/#217). Measured before the fix: permuting the registry moved the published identity on
-// 11275 of 200x336 trials over 64 distinct identifiers. Criterion (4) is now the lowest profile id,
+// 11275 of 200x336 trials over 90 distinct identifiers. Criterion (4) is now the lowest profile id,
 // which is intrinsic to the profile, so the same tie resolves the same way in any order.
 //
 // Permutation is hand-rolled Fisher-Yates on an LCG, NOT std::shuffle: how std::shuffle consumes its
@@ -11041,8 +11197,13 @@ static void test_tie_break_order_independence() {
 // profile left the tie).
 static void test_tie_break_reach() {
     static const char* const REACHABLE[] = {
+    "actuators_4_way_valve",
+    "actuators_crank_case_heater",
     "actuators_expansion_valve_2_pls",
     "actuators_fan_2_step",
+    "actuators_hot_gas_bypass_valve_y3s",
+    "actuators_lp_bypass_valve_y2s",
+    "actuators_y3s",
     "hybrid_2nd_domestic_hot_water_temperature",
     "hybrid_be_cop",
     "hybrid_boiler_dhw_demand",
@@ -11052,12 +11213,26 @@ static void test_tie_break_reach() {
     "hybrid_hybrid_op_mode",
     "hybrid_mixed_water_temp",
     "hybrid_mixed_water_temp_r7t",
+    "hydronic_error_detailed_code",
     "hydronic_error_type",
+    "hydronic_floor_loop_shut_off_valve",
+    "hydronic_solar_input",
+    "hydronic_state_add_ext_rt_input_cool",
+    "hydronic_state_add_ext_rt_input_heat",
+    "hydronic_state_main_rt_cooling",
+    "hydronic_state_main_rt_heating",
+    "hydronic_state_phe_heater",
     "hydronic_state_pressure_sensor",
     "hydronic_state_pressure_sensor_t",
+    "hydronic_state_pwr_consumption_limit_1",
+    "hydronic_state_pwr_consumption_limit_2",
+    "hydronic_state_pwr_consumption_limit_3",
+    "hydronic_state_pwr_consumption_limit_4",
     "hydronic_state_refrigerant_pressure_sensor",
     "hydronic_state_space_h_operation_output",
+    "hydronic_state_system_off_on_system_off",
     "hydronic_state_tank_preheat_on_off",
+    "hydronic_thermal_protector_q1l_buh",
     "hydronic_temps_ext_indoor_ambient_sensor_r6t",
     "hydronic_temps_hpsu_tr_return_temp_r4t",
     "hydronic_temps_hpsu_tv_inflow_temp_r1t",
@@ -11077,6 +11252,13 @@ static void test_tie_break_reach() {
     "mixing_ekmik_bizone_kit_mix_valve_position_m1s",
     "mixing_ekmik_bizone_kit_mixed_leaving_water_temperature_r1t",
     "mixing_mixed_water_temp",
+    "outdoor_state_demand_signal",
+    "outdoor_state_low_noise_control",
+    "outdoor_state_oil_return_operation",
+    "outdoor_state_pressure_equalizing_operation",
+    "outdoor_state_restart_standby",
+    "outdoor_state_startup_control",
+    "outdoor_state_thermostat_on_off",
     "outdoor_sensors_2_phase_thermistor_r4t",
     "outdoor_sensors_discharge_pipe_temp",
     "outdoor_sensors_discharge_pipe_temp_r2t",
@@ -11403,6 +11585,26 @@ static void test_state_dwell() {
     CHECK(!dwell_tracked(204));    // the same event as its 203 companion, spelled differently
     CHECK(!dwell_tracked(105) && !dwell_tracked(151) && !dwell_tracked(211));
 
+    // P2 flags remain current telemetry but do not claim a persistent state age. Pin the complete
+    // structural exclusion list, then positive examples from every P1 page so an over-broad filter
+    // cannot make the capacity gate green by silently dropping valuable diagnostics.
+    CHECK(DWELL_OBSERVATION_ONLY_ROW_COUNT == 8);
+    for (size_t i = 0; i < DWELL_OBSERVATION_ONLY_ROW_COUNT; i++) {
+        const DwellRowKey& k = DWELL_OBSERVATION_ONLY_ROWS[i];
+        CHECK(dwell_observation_only(k.reg, k.off, k.conv));
+        CHECK(dwell_tracked(k.conv));
+        CHECK(!dwell_row_tracked(k.reg, k.off, k.conv));
+    }
+    CHECK(dwell_row_tracked(0x10, 1, 305));  // Startup Control
+    CHECK(dwell_row_tracked(0x30, 11, 307)); // 4 Way Valve
+    CHECK(dwell_row_tracked(0x60, 11, 306)); // BUH thermal protector
+    CHECK(dwell_row_tracked(0x62, 2, 302));  // System OFF
+
+    DwellSlot excluded[DWELL_MAX_SLOTS] = {};
+    const DwellObservation p2_row[] = {{0x10, 1, 307, 2}};
+    dwell_step(excluded, DWELL_MAX_SLOTS, p2_row, 1, 1);
+    CHECK(!dwell_lookup(excluded, DWELL_MAX_SLOTS, 0x10, 1, 307).known);
+
     DwellSlot slots[DWELL_MAX_SLOTS] = {};
     const DwellObservation off_row[] = {{0x62, 2, 304, 1}};
     const DwellObservation on_row[]  = {{0x62, 2, 304, 2}};
@@ -11538,6 +11740,11 @@ static void test_state_dwell() {
     // ── the restore ─────────────────────────────────────────────────────────────────────────────
     const uint32_t fp = dwell_catalog_fingerprint();
     const uint32_t crc = 0x12345678u;
+    DwellRowKey changed_policy[DWELL_OBSERVATION_ONLY_ROW_COUNT] = {};
+    for (size_t i = 0; i < DWELL_OBSERVATION_ONLY_ROW_COUNT; i++)
+        changed_policy[i] = DWELL_OBSERVATION_ONLY_ROWS[i];
+    changed_policy[0].conv--;
+    CHECK(dwell_catalog_fingerprint_for(changed_policy, DWELL_OBSERVATION_ONLY_ROW_COUNT) != fp);
     CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC,
                                 DWELL_PERSIST_VERSION, fp, fp, crc, crc) == DwellRestore::Accept);
     CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::POWERON), DWELL_PERSIST_MAGIC,
@@ -11597,7 +11804,7 @@ static void test_state_dwell() {
         size_t tracked = 0;
         for (size_t i = 0; i < v.count(); i++) {
             const ValueDef& row = v[i];
-            if (!dwell_tracked(row.conv)) continue;
+            if (!dwell_row_tracked(row.reg, row.offset, row.conv)) continue;
             tracked++;
             // A tracked row is a STATE, never a measurement: it must carry no physical unit, or the
             // value list would offer "42.0 °C unchanged for 3 h" as if a thermistor were a switch.
@@ -11606,6 +11813,7 @@ static void test_state_dwell() {
         if (tracked > worst) worst = tracked;
     }
     CHECK(worst > 0);
+    CHECK(worst == 55);
     CHECK(worst <= DWELL_MAX_SLOTS);
     // Headroom is stated rather than assumed: the day a generator run takes the worst case past the
     // table this fails here instead of on a device, where the symptom is one row quietly having no
@@ -12219,6 +12427,22 @@ static void test_availability() {
     // A text/enum row has no number to judge and passes through untouched.
     CHECK(value_available(cond, false, 0.0));
 
+    // CT-L3 shares bit 7 with the documented HP Forced FG. The intrinsic converter stays
+    // whole-byte ×0.5 A; availability withholds only the affected row when the current page proves
+    // the flag is asserted. A caller without that witness fails open, like the other page rules.
+    const ValueDef ct_l3{0x63, 16, 161, 1, -1, "Current measured by CT sensor of L3"};
+    uint8_t page63[17] = {};
+    page63[16] = 0x80;
+    CHECK(availability_policy(ct_l3) == AvailabilityPolicy::Bit7MeansAbsent);
+    CHECK(!value_available(ct_l3, true, 64.0, page63, sizeof(page63)));
+    CHECK(value_available(ct_l3, true, 64.0));
+    page63[16] = 0x7f;
+    CHECK(value_available(ct_l3, true, 63.5, page63, sizeof(page63)));
+    const ValueDef ct_l2{0x63, 15, 161, 1, -1, "Current measured by CT sensor of L2"};
+    page63[15] = 0x80;
+    CHECK(availability_policy(ct_l2) == AvailabilityPolicy::Always);
+    CHECK(value_available(ct_l2, true, 64.0, page63, sizeof(page63)));
+
     // ── The page-0x21 zero rows, and the label key that makes them safe (#224) ───────────────────
     // The three air-source rows are withheld at exactly 0.0 …
     const ValueDef fan1{0x21, 6, 105, 2, 1, "Fan1 Fin temp."};
@@ -12455,7 +12679,7 @@ static void test_availability() {
 
     // ── Against the real catalog ──────────────────────────────────────────────────────────────────
     int profiles_total = 0, evap_rows = 0, cond_rows = 0, suppressed = 0, odd_label = 0;
-    int eev_rows = 0, conv151_rows = 0, page_absence_rows = 0;
+    int eev_rows = 0, conv151_rows = 0, page_absence_rows = 0, ct_l3_rows = 0;
     int zero_rows = 0, fan1_rows = 0, fan2_rows = 0, cout_rows = 0, geo_shared_rows = 0;
     int liq_rows = 0, liq_brine_rows = 0;
     for (const auto& p : def::profiles) {
@@ -12540,6 +12764,16 @@ static void test_availability() {
             // established that for.
             if (pol == AvailabilityPolicy::ZeroAbsentAboveSaturation)
                 CHECK(d.reg == 0x20 && d.offset == 10 && d.conv == 105);
+            if (pol == AvailabilityPolicy::Bit7MeansAbsent) {
+                ct_l3_rows++;
+                CHECK(d.reg == 0x63 && d.offset == 16 && d.conv == 161);
+                CHECK(row_publishable(d));
+                uint8_t p63[17] = {};
+                p63[16] = 0x80;
+                CHECK(!value_available(d, true, 64.0, p63, sizeof(p63)));
+                p63[16] = 0x7f;
+                CHECK(value_available(d, true, 63.5, p63, sizeof(p63)));
+            }
             // The pulse ceiling and conv 151 must be the SAME set, in both directions. Left to
             // right: nothing but an expansion valve may acquire a ceiling meant for one. Right to
             // left: every conv-151 row is covered, since a coordinate the ledger missed would
@@ -12628,6 +12862,7 @@ static void test_availability() {
     // re-reading before the ceiling is allowed to follow it there.
     CHECK(conv151_rows == 113);
     CHECK(eev_rows == conv151_rows);
+    CHECK(ct_l3_rows == 22);
     // The reach of the two page rules, pinned as one number over the real catalog. 21 profiles carry
     // the two raw Water-HX rows and 19 of those carry both 0xA1 target rows (80 rows), while 19
     // carry all six 0xA0 rows (114) — 194 in total. It moves when a profile is added or when the

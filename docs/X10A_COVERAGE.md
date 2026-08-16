@@ -2,9 +2,8 @@
 
 As of 2026-08-16, this inventory compares the complete representative field list in
 [`REGISTERS.md`](REGISTERS.md) with the actually published view of the currently selected
-`altherma_ebla_edla_d_series_4_8kw_monobloc` profile, including the hand-written page-`0x10`
-overlay. It applies the exact `row_publishable()` decision used by the poller, MQTT/HA and the web
-UI.
+`altherma_ebla_edla_d_series_4_8kw_monobloc` profile, including both hand-written overlay blocks.
+It applies the exact `row_publishable()` decision used by the poller, MQTT/HA and the web UI.
 
 The result is profile-specific; it does not claim that this plant physically supports every field
 listed below. In particular, `0x64` contains hybrid/boiler fields and `0x65` hydrosplit/bizone
@@ -12,18 +11,34 @@ accessory fields. Resolve a different profile and this comparison must be run ag
 
 ## Summary
 
-- **102 fields** are decoded, cached and displayed.
-- **93 additional fields** live on a page that is already queried. Their bytes are therefore read
+- **129 fields** are decoded, cached and displayed.
+- **66 additional fields** live on a page that is already queried. Their bytes are therefore read
   from the bus, but they are not decoded, stored or displayed as individual fields.
 - **26 fields** live on pages that are not currently polled cyclically: `0x11` (6), `0x64` (15) and
   `0x65` (5). Page `0x64` remains in this profile solely as a `no_publish` detection signature; the
   poller intentionally skips a page whose rows are all unpublishable.
-- In total, **119 fields described by the reference table are not queried and displayed as
+- In total, **92 fields described by the reference table are not queried and displayed as
   measurements**.
 
 “Not displayed” and “not read” are deliberately separate: X10A always reads a complete page. An
 additional row on an already active page causes no extra bus query, but it does expand the cache,
 MQTT, HA and UI contracts.
+
+## Diagnostic observability supplement
+
+The active profile now publishes 27 additional rows from pages it already queried. They are split
+by evidence strength, not by whether they are visible:
+
+| Class | Rows | Firmware state age | Long-term use |
+|---|---|---|---|
+| P1 control/safety | System OFF; Main/Add. RT Heat/Cool; power-limit bits 1–4; BUH Q1L protector and output capacity; detailed error code; Startup, Restart standby, Oil Return and Pressure equalising; 4-way valve; crankcase heater; PHE heater | compact Dwell for the 17 binary rows; numeric rows have no state age | MQTT → VictoriaMetrics/Grafana |
+| P2 observational | Outdoor thermostat, Demand Signal, Low noise; Hot-gas/LP-bypass/Y3S; Solar input; floor-loop shut-off | deliberately none until polarity/meaning is live-correlated | MQTT → VictoriaMetrics/Grafana, neutral ON/OFF only |
+
+No additional 24-hour history rings are allocated: the fixed ring budget is full, and these series
+belong in VictoriaMetrics. `HP Forced FG` is deliberately still absent. It aliases bit 7 of the
+existing one-byte CT-L3 current field at `0x63/16`; the intrinsic full-byte converter would add a
+fictitious 64 A. The availability ledger now withholds CT-L3 while bit 7 is asserted. The flag and a
+simultaneous current remain unavailable until raw-data or documented mask evidence exists.
 
 ## Complete list
 
@@ -44,21 +59,14 @@ MQTT, HA and UI contracts.
 | 10 | 1 | 152 | O/U MPU ID (xx) |
 | 11 | 1 | 152 | O/U MPU ID (yy) |
 
-### Page `0x10` — page read; 8 fields not decoded/displayed
+### Page `0x10` — page read; 1 field not decoded/displayed
 
 | Off | Len | Conv | Field |
 |---:|---:|---:|---|
-| 1 | 1 | 307 | Thermostat ON/OFF |
-| 1 | 1 | 306 | Restart standby |
-| 1 | 1 | 305 | Startup Control |
-| 1 | 1 | 303 | Oil Return Operation |
-| 1 | 1 | 302 | Pressure equalizing operation |
-| 1 | 1 | 301 | Demand Signal |
-| 1 | 1 | 300 | Low noise control |
 | 12 | 1 | 311 | Not in use |
 
-The eleven protection/retry fields at offsets 10–12 are already supplied by `def/overlay.hpp` and
-are therefore not part of this gap.
+The seven control fields at offset 1 and the eleven protection/retry fields at offsets 10–12 are
+supplied by `def/overlay.hpp` and are therefore not part of this gap.
 
 ### Page `0x11` — page not polled cyclically; 6 fields not displayed
 
@@ -71,26 +79,16 @@ are therefore not part of this gap.
 | 4 | 1 | 215 | O/U EEPROM (10th digit) |
 | 5 | 1 | 214 | O/U EEPROM (11th digit) |
 
-### Page `0x30` — page read; 5 fields not decoded/displayed
+### Page `0x30` — page read; complete for the reference field list
 
-| Off | Len | Conv | Field |
-|---:|---:|---:|---|
-| 11 | 1 | 307 | 4 Way Valve |
-| 12 | 1 | 307 | Crank case heater |
-| 13 | 1 | 307 | Hot gas bypass valve (Y3S) |
-| 13 | 1 | 306 | LP bypass valve (Y2S) |
-| 13 | 1 | 305 | Y3S |
+The five actuator fields at offsets 11–13 are supplied by the profile-specific overlay.
 
-### Page `0x60` — page read; 10 fields not decoded/displayed
+### Page `0x60` — page read; 6 fields not decoded/displayed
 
 | Off | Len | Conv | Field |
 |---:|---:|---:|---|
 | 0 | 1 | 304 | Data Enable/Disable |
 | 1 | 1 | 152 | Indoor Unit Address |
-| 4 | 1 | 152 | Error detailed code |
-| 11 | 1 | 306 | Thermal protector (Q1L) BUH |
-| 11 | 1 | 303 | Solar input |
-| 12 | 1 | 302 | Floor loop shut off valve |
 | 13 | 1 | 152 | Indoor Option Code |
 | 15 | 1 | 215 | I/U Software ID (xx) |
 | 14 | 1 | 215 | I/U Software ID (yy) |
@@ -103,26 +101,16 @@ are therefore not part of this gap.
 | 0 | 1 | 307 | Data Enable/Disable |
 | 1 | 1 | 152 | Indoor Unit Address |
 
-### Page `0x62` — page read; 18 fields not decoded/displayed
+### Page `0x62` — page read; 8 fields not decoded/displayed
 
 | Off | Len | Conv | Field |
 |---:|---:|---:|---|
 | 0 | 1 | 307 | Data Enable/Disable |
 | 1 | 1 | 152 | Indoor Unit Address |
-| 2 | 1 | 302 | System OFF (ON:System off) |
 | 2 | 1 | 301 | Not in use |
-| 7 | 1 | 307 | Add. Ext. RT Input Cool. |
-| 7 | 1 | 306 | Add. Ext. RT Input Heat. |
-| 7 | 1 | 305 | Main RT Cooling |
-| 7 | 1 | 304 | Main RT Heating |
-| 7 | 1 | 303 | Pwr consumption limit 4 |
-| 7 | 1 | 302 | Pwr consumption limit 3 |
-| 7 | 1 | 301 | Pwr consumption limit 2 |
-| 7 | 1 | 300 | Pwr consumption limit 1 |
 | 8 | 1 | 307 | None |
 | 8 | 1 | 306 | Not in use |
 | 8 | 1 | 305 | Not in use |
-| 8 | 1 | 304 | PHE Heater |
 | 13 | 1 | 152 | [Future] 3 way Valve Mixing 1 |
 | 14 | 1 | 152 | [Future] 3 way Valve Mixing 2 |
 
@@ -130,7 +118,7 @@ are therefore not part of this gap.
 in this list. It now also has its own timeline. This field is not equated with the HomeHub's actual
 disinfection operation.
 
-### Page `0x63` — page read; 15 fields not decoded/displayed
+### Page `0x63` — page read; 14 fields not decoded/displayed
 
 | Off | Len | Conv | Field |
 |---:|---:|---:|---|
@@ -147,7 +135,6 @@ disinfection operation.
 | 10 | 1 | 215 | Not in use |
 | 11 | 1 | 215 | Not in use |
 | 12 | 1 | 215 | Not in use |
-| 13 | 1 | 311 | BUH output capacity |
 | 16 | 1 | 307 | HP Forced FG |
 
 ### Page `0x64` — page not polled cyclically; 15 fields not displayed

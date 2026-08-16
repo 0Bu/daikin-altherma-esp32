@@ -386,7 +386,7 @@ static void service_retained_cleanup_probe(const std::string& topic, std::atomic
 // task once a SECOND for the life of the device, so the shortfall is a grow/copy/free of a vector of
 // three-std::string elements every cycle, forever. That is precisely the incremental-realloc churn
 // hp_poll's own `fresh.reserve(view.count())` exists to avoid, on a heap whose binding limit is the
-// largest contiguous block. Counting conv-203 rows is ~116 integer compares; the allocation it
+// largest contiguous block. Counting conv-203 rows is one compare per resolved row; the allocation it
 // avoids is not.
 //
 // Two rows are dropped here rather than published:
@@ -563,7 +563,7 @@ static void retract_stale_values(const logic::ProfileView& prof, const std::stri
 static void publish_x10a_discovery() {
     const std::string profile_id = config().profile;
     // The VIEW, not the raw profile: every row hp_poll caches needs a discovery config, and the
-    // page-0x10 supplement (def/overlay.hpp) is part of that row set. Announcing fewer rows than the
+    // applicable overlay blocks (def/overlay.hpp) are part of that row set. Announcing fewer rows than the
     // X10A topic carries would leave the extra values in MQTT with no HA entity to land in.
     const auto prof = def::resolved(def::lookup(profile_id.c_str()));
     // Delete every config published under a superseded identity FIRST — the un-grouped ids (#221)

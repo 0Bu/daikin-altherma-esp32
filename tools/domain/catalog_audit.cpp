@@ -757,16 +757,16 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    // The RESOLVED row set, not the raw generated tables: def/overlay.hpp supplies the page-0x10
-    // protection words the offline generator does not emit yet (#110 Part B), and a hand-written
-    // supplement that the domain gate cannot see would be exactly the un-audited second source of
+    // The RESOLVED row set, not the raw generated tables: def/overlay.hpp supplies all applicable
+    // hand-written blocks, including the page-0x10 protection words the offline generator does not
+    // emit yet (#110 Part B). An overlay that the domain gate cannot see would be exactly the un-audited second source of
     // truth this tool exists to prevent. Resolving here audits those rows against docs/REGISTERS.md
     // §5 on every profile, identically to a generated row — and it is what makes DELETING the
     // supplement, once the generator emits the rows, a no-op for this file.
     std::vector<Row> rows;
     for (const auto& p : def::profiles) {
-        // The BASE table picks the conv-405 curve — the supplement carries no pressure row (pinned by
-        // a static_assert in def/overlay.hpp), so resolving here would change nothing but would imply
+        // The BASE table picks the conv-405 curve — the overlays carry no pressure row (pinned by
+        // static_asserts in def/overlay.hpp), so resolving here would change nothing but would imply
         // it could.
         rtype_map()[p.id] = profile_refrigerant(p.values, p.count);
         const auto v = def::resolved(p);

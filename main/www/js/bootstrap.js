@@ -793,7 +793,7 @@ function wireRestOfApp() {
 // overflowed its stack (#241). A poll fails LOUDLY and LOCALLY: one request, one visible error,
 // retried on the next tick. Nothing about the dashboard needed the socket.
 //
-// Two cadences, ONE chain. /values (~6 kB) every 2 s feeds the drawing and the value rows; /status
+// Two cadences, ONE chain. /values (model-dependent) every 2 s feeds the drawing and the value rows; /status
 // (~3.5 kB) every 8 s carries the slow half — model, health, heap, uptime, OTA, the banners. Both
 // numbers are the transport's, not the plant's: the poll engine still reads the bus at 1 Hz and the
 // schematic's motion is CSS, so this is how fast the SCREEN catches up, not how fast we measure.
