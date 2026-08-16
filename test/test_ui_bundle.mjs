@@ -106,12 +106,12 @@ assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+[\s\S]{0,160}?diagno
   "dependent plant and heating-curve cards must render only after the Firmware opt-in");
 assert.match(app, /S\.status\?\.diagnostics\?\.enabled === true && S\.status\?\.hp\?\.connected[\s\S]{0,80}?checkupCardHtml/,
   "the dashboard's 24-hour diagnosis must share the same master opt-in");
-// A source that is CURRENT but cannot produce a verdict must not be the one row that looks fine
-// while the state row above it reports the diagnosis blocked.
-assert.match(app, /if \(!r\.control_eligible\)[\s\S]{0,180}?key: "unusable"[\s\S]{0,120}?cls: "warn"/,
-  "a fresh but ineligible room source must not render as OK");
-assert.match(app, /return \{ key: "usable", detail: "", cls: "ok" \}/,
-  "only an overall usable room source may render as OK");
+// A current measurement and its diagnosis eligibility are separate facts. The source row stays
+// amber when the diagnosis is blocked, but the general status must still say the reading is valid.
+assert.match(app, /const diagnosis = !r\.control_eligible[\s\S]{0,180}?key: "unusable"[\s\S]{0,220}?key: "measurement_valid"[\s\S]{0,100}?cls: r\.control_eligible \? "ok" : "warn"/,
+  "a fresh ineligible source must separate valid measurement from its amber diagnosis block");
+assert.match(app, /ref\.detail\.diagnosis_label[\s\S]{0,120}?roomSourceStatusText\(status\.diagnosis\)/,
+  "the source tongue must render diagnosis usability under its own label");
 // The blocked line must name the room source's OWN reason, from one table both the state row and
 // the source explanation read, so the two cannot give different accounts of one block.
 assert.match(app, /const ROOM_BLOCK_LINES = \{[\s\S]*disabled:\s*"dyn\.room_off"/,
@@ -124,8 +124,8 @@ for (const reason of referenceReasons)
     `room-source UI must translate the firmware reason ${reason}`);
 assert.match(app, /d\.reason === "room_unavailable"[\s\S]{0,200}?ROOM_BLOCK_LINES\[room\.reason\]/,
   "a blocked diagnosis must say WHY the room source is unusable");
-assert.match(app, /function roomSourceStatus\([\s\S]*key: "unusable", detail: t\(ROOM_BLOCK_LINES\[r\.reason\]/,
-  "the source verdict must read the same reason table as the state row");
+assert.match(app, /function roomSourceStatus\([\s\S]*const diagnosis = !r\.control_eligible[\s\S]*detail: t\(ROOM_BLOCK_LINES\[r\.reason\]/,
+  "the diagnosis verdict must read the same reason table as the state row");
 assert.match(app, /const sourceStatus = roomSourceStatus\(r, mqtt\);\s*const sourceCls = sourceStatus\.cls/,
   "the source colour must come from the same overall verdict as its visible status");
 assert.match(app, /return vcard\(t\("dyn\.card"\), rows\);/,
