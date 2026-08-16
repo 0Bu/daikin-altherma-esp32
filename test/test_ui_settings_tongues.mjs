@@ -55,6 +55,8 @@ const labels = {
   "ref.clock_unsynced": "Geräteuhr nicht synchronisiert",
   "ref.age_unknown": "unbekannt",
   "ref.detail.status_label": "Status:",
+  "ref.detail.diagnosis_label": "Heizkurven-Diagnose:",
+  "ref.status.measurement_valid": "Messwert gültig",
   "ref.status.not_configured": "Nicht eingerichtet",
   "ref.status.usable": "Verwendbar",
   "ref.status.unusable": "Nicht verwendbar",
@@ -179,7 +181,8 @@ S.status = {
   modbus: { enabled: true, connected: true },
   reference_temperature: {
     configured: true, name: "Example room", has_value: true, temperature_c: 25.1,
-    has_setpoint: true, setpoint_c: 22.0, age_s: 17, fresh: true, control_eligible: true,
+    has_setpoint: true, setpoint_c: 22.0, age_s: 17, fresh: true,
+    temperature_valid: true, control_eligible: true,
   },
   weather_forecast: {
     configured: true, has_value: true, outdoor_mean_2h_c: 22.6,
@@ -370,9 +373,10 @@ assert.equal((html.match(/class="settings-info-value/g) || []).length, 4,
 assert.doesNotMatch(html, /settings-source-summary|Konfiguriert · 25,1 °C|Open-Meteo · 22,6 °C \/ 2 h/,
   "obsolete green summary lines must not duplicate values inside the tongues");
 const roomTongue = html.match(/<div class="vdesc-body settings-info-tongue" id="dynamic-room-sources-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
-assert.equal((roomTongue.match(/class="vdesc-p"/g) || []).length, 5,
-  "a healthy room tongue needs its verdict, values, latest-reading time and one purpose paragraph");
-assert.match(roomTongue, /<span class="vdesc-n">Status:<\/span> Verwendbar/);
+assert.equal((roomTongue.match(/class="vdesc-p"/g) || []).length, 6,
+  "a healthy room tongue needs separate measurement and diagnosis verdicts, values, time and purpose");
+assert.match(roomTongue, /<span class="vdesc-n">Status:<\/span> Messwert gültig/);
+assert.match(roomTongue, /<span class="vdesc-n">Heizkurven-Diagnose:<\/span> Verwendbar/);
 assert.match(roomTongue, /<span class="vdesc-n">Raumtemperatur:<\/span> 25,1 °C/);
 assert.match(roomTongue, /<span class="vdesc-n">Solltemperatur:<\/span> 22 °C/);
 assert.match(roomTongue, /<span class="vdesc-n">Letzter Messwert:<\/span> vor 17 s/);
@@ -403,8 +407,8 @@ assert.doesNotMatch(roomButton, /<span>Konfiguriert<\/span>/,
 // DESIGN.md §9/§5.6: a row whose face is a NAME states its condition in colour, which is allowed
 // only because the accessible name says it in words. Dropping the state word from BOTH would make
 // this the one row a screen-reader or colourblind user cannot read the status of.
-assert.match(roomButton, /aria-label="Raumtemperaturquelle: Example room · Verwendbar"/,
-  "the accessible name must spell out the status the colour is carrying");
+assert.match(roomButton, /aria-label="Raumtemperaturquelle: Example room · Messwert gültig · Heizkurven-Diagnose: Verwendbar"/,
+  "the accessible name must distinguish measurement validity from diagnosis usability");
 assert.doesNotMatch(html, /1 Quelle|Raumtemperaturquellen/,
   "the single room-temperature input must not be presented as a source count or plural collection");
 assert.doesNotMatch(roomButton, /25,1 °C|vor 17 s/,
@@ -532,7 +536,7 @@ S.status.heating_curve = { method_version: 2, armed: true, state: "blocked", rea
 S.status.reference_temperature = {
   configured: true, name: "Example room", has_value: true, temperature_c: 25.1,
   has_setpoint: true, setpoint_c: 22, age_s: 17, fresh: true,
-  control_eligible: false, reason: "disabled",
+  temperature_valid: true, control_eligible: false, reason: "disabled",
 };
 S.status.weather_forecast = {
   configured: true, has_value: true, outdoor_mean_2h_c: 22.6,
@@ -546,13 +550,15 @@ assert.match(html, /Raumthermostat ausgeschaltet/,
 const blockedRoomButton = html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "";
 assert.match(blockedRoomButton, /class="[^"]*\bwarn\b/,
   "the source that is blocking the diagnosis must not be the one row rendered as OK");
-assert.match(blockedRoomButton, /aria-label="Raumtemperaturquelle: Example room · Nicht verwendbar — Raumthermostat ausgeschaltet"/,
-  "a current-but-unusable source must name the block in its accessible name, not merely go orange");
-assert.match(html, /<span class="vdesc-n">Status:<\/span> Nicht verwendbar — Raumthermostat ausgeschaltet/,
-  "the source tongue must give one amber-compatible verdict with the same reason as the state row");
+assert.match(blockedRoomButton, /aria-label="Raumtemperaturquelle: Example room · Messwert gültig · Heizkurven-Diagnose: Nicht verwendbar — Raumthermostat ausgeschaltet"/,
+  "a current source must expose both its valid measurement and the diagnosis block accessibly");
+assert.match(html, /<span class="vdesc-n">Status:<\/span> Messwert gültig/,
+  "the general source status must not call a valid temperature measurement unusable");
+assert.match(html, /<span class="vdesc-n">Heizkurven-Diagnose:<\/span> Nicht verwendbar — Raumthermostat ausgeschaltet/,
+  "the diagnosis line must retain the exact reason it cannot use the valid reading");
 const blockedRoomTongue = html.match(/id="dynamic-room-sources-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
-assert.doesNotMatch(blockedRoomTongue, /<span class="vdesc-n">Verwertbar:<\/span>|Aktuell —/,
-  "freshness must not appear as a competing positive status on an unusable source");
+assert.doesNotMatch(blockedRoomTongue, /<span class="vdesc-n">Status:<\/span> Nicht verwendbar/,
+  "diagnosis usability must never be presented as the general measurement status");
 
 // Protocol and Firmware use the same info-tongue contract while keeping their independent controls.
 S.status = {
