@@ -995,9 +995,9 @@ Body, ordered:
      "OFF" answers what a flag *is*,
      and for a flag that is half the question: `Powerful DHW Operation: OFF` describes a plant that
      finished a charge four seconds ago and one that has not charged since Tuesday equally well.
-     Scoped to the bit flags and the fault class (`logic/state_dwell.hpp` decides which by converter
-     plus an exact `(page, offset, converter)` exclusion for eight observation-only P2 flags) and
-     deliberately not offered on measurements, where "time since the last change"
+     Scoped to every bit flag and the fault class (`logic/state_dwell.hpp` decides which by
+     converter), including neutral observation-only P2 flags whose duration does not establish
+     polarity or proprietary meaning, and deliberately not offered on measurements, where "time since the last change"
      is merely the poll period and would bury the state rows where it means something. **The device
      states the claim and the browser only renders it**, and there are three
      of them because the number alone is not one: a run whose transition was never witnessed reads
