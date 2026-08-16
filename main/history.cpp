@@ -451,16 +451,18 @@ int64_t source_anchor_bucket_locked(HistorySource src) {
 }
 
 // ── The history flash journal ───────────────────────────────────────────────────────────────────
-// One dense trend vector per completed five-minute bucket, or one exact diagnostic payload per
-// completed hour, appended into 256-byte slots. Sixteen slots share a 4 KiB erase sector and the
-// whole 4 MiB partition is traversed before any sector is reused. The commit word is programmed
-// last, so a power cut can invalidate only the record being written; the preceding slot remains the
-// head.
+// One dense trend vector per completed five-minute bucket, one exact diagnostic payload per
+// completed hour, or one rare catalog manifest, appended into 256-byte slots. A manifest binds the
+// vector indices to stable semantic ids without repeating them in every bucket. Sixteen slots share
+// a 4 KiB erase sector and the whole 4 MiB partition is traversed before any sector is reused. The
+// commit word is programmed last, so a power cut can invalidate only the record being written; the
+// preceding slot remains the head.
 struct FlashJournalRecord {
     logic::HistoryJournalHeader header;
-    // Raw because the first three sources carry dense int16 samples while source four carries one
-    // CheckupJournalPayload. The common header's value_count remains a count of 16-bit words, so old
-    // v1 trend records stay byte-for-byte readable.
+    // Raw because ordinary trend records carry dense int16 samples, source four carries one
+    // CheckupJournalPayload, and the manifest flag changes the payload to uint32 ids. For ordinary
+    // and checkup records value_count remains a count of 16-bit words, so old v1 trend records stay
+    // byte-for-byte readable.
     alignas(8) uint8_t payload[logic::HISTORY_JOURNAL_SLOT_BYTES -
                                logic::HISTORY_JOURNAL_HEADER_BYTES];
 };
@@ -491,6 +493,23 @@ uint16_t s_flash_restore_slot_count[kJournalSources] = {};
 size_t   s_flash_restore_ring = 0;
 size_t   s_flash_restored_rings = 0;
 size_t   s_flash_service_source = 0;
+
+struct FlashManifestCache {
+    bool     valid;
+    uint8_t  source;
+    uint16_t count;
+    uint16_t rings[3];
+    uint32_t catalog_fp;
+    uint32_t schema_fp;
+    uint64_t sequence;
+    int64_t  bucket;
+    int8_t   stored_index[logic::HISTORY_MANIFEST_MAX_IDS];
+};
+static_assert(sizeof(FlashManifestCache) <= 96,
+              "four manifest generations per source must stay below 1.2 KiB total");
+FlashManifestCache s_flash_manifests[3][logic::HISTORY_MANIFEST_CACHE_PER_SOURCE];
+uint32_t s_flash_current_manifest_fp[3] = {};
+int64_t  s_flash_current_manifest_bucket[3] = {INT64_MIN, INT64_MIN, INT64_MIN};
 
 // Static scratch avoids adding a 4 KiB scan buffer or four 576-byte restore blocks to the poll
 // task's measured 8 KiB stack. All access is serialised on the poll task or s_flash_mtx.
@@ -1201,26 +1220,114 @@ logic::HistoryJournalSource journal_source(HistorySource src) {
     return static_cast<logic::HistoryJournalSource>(static_cast<uint8_t>(src));
 }
 
+bool flash_is_manifest(const logic::HistoryJournalHeader& h) {
+    return h.flags == logic::HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST &&
+           h.source < static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
+}
+
+void flash_manifest_cache_reset() {
+    for (auto& by_source : s_flash_manifests)
+        for (auto& m : by_source) m = {};
+    for (size_t src = 0; src < 3; ++src) {
+        s_flash_current_manifest_fp[src] = 0;
+        s_flash_current_manifest_bucket[src] = INT64_MIN;
+    }
+}
+
+const FlashManifestCache* flash_manifest_find(const logic::HistoryJournalHeader& h) {
+    if (h.source >= 3) return nullptr;
+    for (const auto& m : s_flash_manifests[h.source]) {
+        if (!m.valid || m.catalog_fp != h.catalog_fp || m.source != h.source ||
+            m.count != h.value_count) continue;
+        bool same = true;
+        for (size_t i = 0; i < 3; ++i)
+            if (m.rings[i] != h.rings[i]) { same = false; break; }
+        if (same) return &m;
+    }
+    return nullptr;
+}
+
+bool flash_manifest_cache_add(const FlashJournalRecord& r) {
+    const auto& h = r.header;
+    const auto* ids = reinterpret_cast<const uint32_t*>(r.payload);
+    if (!logic::history_journal_manifest_payload_matches(h, ids) || h.source >= 3) return false;
+    auto& cache = s_flash_manifests[h.source];
+    size_t chosen = logic::HISTORY_MANIFEST_CACHE_PER_SOURCE;
+    uint64_t oldest = UINT64_MAX;
+    for (size_t i = 0; i < logic::HISTORY_MANIFEST_CACHE_PER_SOURCE; ++i) {
+        if (cache[i].valid && cache[i].catalog_fp == h.catalog_fp) {
+            if (cache[i].sequence >= h.sequence) return true;
+            chosen = i;
+            break;
+        }
+        if (!cache[i].valid) { chosen = i; break; }
+        if (cache[i].sequence < oldest) { oldest = cache[i].sequence; chosen = i; }
+    }
+    if (chosen >= logic::HISTORY_MANIFEST_CACHE_PER_SOURCE) return false;
+    auto& out = cache[chosen];
+    out = {};
+    out.valid = true;
+    out.source = h.source;
+    out.count = h.value_count;
+    for (size_t i = 0; i < 3; ++i) out.rings[i] = h.rings[i];
+    out.catalog_fp = h.catalog_fp;
+    out.schema_fp = logic::history_journal_schema_fingerprint(h);
+    out.sequence = h.sequence;
+    out.bucket = h.bucket;
+    for (auto& index : out.stored_index) index = -1;
+    const auto source = static_cast<logic::HistoryJournalSource>(h.source);
+    const size_t current_count = logic::history_journal_source_rings(source);
+    for (size_t current = 0; current < current_count; ++current) {
+        const uint32_t id = logic::history_series_id(source, current);
+        for (size_t stored = 0; stored < h.value_count; ++stored) {
+            if (ids[stored] != id) continue;
+            out.stored_index[current] = static_cast<int8_t>(stored);
+            break;
+        }
+    }
+    if (h.catalog_fp == P().catalog_fp &&
+        h.value_count == logic::history_journal_source_rings(
+            static_cast<logic::HistoryJournalSource>(h.source)) &&
+        out.schema_fp == logic::history_current_series_list_fingerprint(
+            static_cast<logic::HistoryJournalSource>(h.source)) &&
+        (s_flash_current_manifest_bucket[h.source] == INT64_MIN ||
+         h.bucket >= s_flash_current_manifest_bucket[h.source])) {
+        s_flash_current_manifest_fp[h.source] = h.catalog_fp;
+        s_flash_current_manifest_bucket[h.source] = h.bucket;
+    }
+    return true;
+}
+
+bool flash_trend_scope_matches(const logic::HistoryJournalHeader& h) {
+    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::X10a))
+        return logic::history_journal_scope(h) == s_x10a_target_fp.load();
+    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Modbus))
+        return logic::history_journal_scope(h) == s_mb_target_fp.load();
+    return h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Env3);
+}
+
+bool flash_current_layout_matches(const logic::HistoryJournalHeader& h) {
+    return logic::history_journal_trend_layout_matches(
+        h, P().catalog_fp, static_cast<uint16_t>(TREND_COUNT),
+        static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT),
+        static_cast<uint16_t>(ENV3_HISTORY_COUNT));
+}
+
 bool flash_record_physically_valid(const FlashJournalRecord& r) {
     const auto& h = r.header;
     const bool checkup = h.source ==
         static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
-    const bool x10a = h.source ==
-        static_cast<uint8_t>(logic::HistoryJournalSource::X10a);
-    const bool modbus = h.source ==
-        static_cast<uint8_t>(logic::HistoryJournalSource::Modbus);
     const bool header_ok = checkup
         ? logic::history_journal_header_matches(
               h, logic::checkup_journal_fingerprint(),
               static_cast<uint16_t>(logic::CHECKUP_JOURNAL_WORDS), logic::CHECKUP_DT_S)
-        : (x10a
-            ? logic::history_journal_header_matches_scoped_layout(
-                  h, P().catalog_fp, logic::HistoryJournalSource::X10a)
-            : modbus
-            ? logic::history_journal_header_matches_scoped_layout(
-                  h, P().catalog_fp, logic::HistoryJournalSource::Modbus)
-            : logic::history_journal_header_matches(h, P().catalog_fp));
-    const size_t payload_bytes = static_cast<size_t>(h.value_count) * sizeof(HistorySample);
+        : (flash_is_manifest(h)
+            ? logic::history_journal_manifest_header_matches(h)
+            : logic::history_journal_trend_header_structural_matches(h));
+    const size_t payload_bytes = logic::history_journal_payload_bytes(h);
+    if (!header_ok || payload_bytes > sizeof(r.payload)) return false;
+    if (flash_is_manifest(h) && !logic::history_journal_manifest_payload_matches(
+            h, reinterpret_cast<const uint32_t*>(r.payload))) return false;
     return header_ok && h.crc ==
         logic::history_journal_crc_bytes(h, r.payload, payload_bytes);
 }
@@ -1228,11 +1335,23 @@ bool flash_record_physically_valid(const FlashJournalRecord& r) {
 bool flash_record_valid(const FlashJournalRecord& r) {
     if (!flash_record_physically_valid(r)) return false;
     const auto& h = r.header;
-    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::X10a))
-        return logic::history_journal_scope(h) == s_x10a_target_fp.load();
-    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Modbus))
-        return logic::history_journal_scope(h) == s_mb_target_fp.load();
-    return true;
+    if (flash_is_manifest(h)) return false;
+    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup)) return true;
+    if (!flash_trend_scope_matches(h)) return false;
+    return flash_current_layout_matches(h) ||
+           logic::history_legacy_disinfection_layout_matches(h) ||
+           flash_manifest_find(h) != nullptr;
+}
+
+int flash_record_stored_index(const logic::HistoryJournalHeader& h, size_t current_index) {
+    if (h.source >= 3) return -1;
+    const auto src = static_cast<logic::HistoryJournalSource>(h.source);
+    if (current_index >= logic::history_journal_source_rings(src)) return -1;
+    if (flash_current_layout_matches(h)) return static_cast<int>(current_index);
+    if (logic::history_legacy_disinfection_layout_matches(h))
+        return logic::history_legacy_disinfection_stored_index(src, current_index);
+    const auto* manifest = flash_manifest_find(h);
+    return manifest ? manifest->stored_index[current_index] : -1;
 }
 
 esp_err_t flash_read_record(size_t slot, FlashJournalRecord& out) {
@@ -1243,14 +1362,16 @@ esp_err_t flash_read_record(size_t slot, FlashJournalRecord& out) {
 
 // Pass 1 finds the newest committed record and each source's latest bucket. Pass 2 walks backwards
 // from that physical head and remembers only slots inside the source's last 24-hour window. The
-// index is 1.7 KiB; retaining a second 26 KiB matrix beside the live rings would defeat the static
-// memory budget this feature was designed around.
+// restore index is 1.7 KiB and the bounded manifest cache stays below 1.2 KiB; retaining a second
+// 26 KiB matrix beside the live rings would defeat the static memory budget this feature was
+// designed around.
 bool flash_journal_scan() {
     uint64_t highest_sequence = 0;
     uint64_t newest_sequence[kJournalSources] = {};
     size_t head_slot = 0;
     size_t valid_records = 0;
     size_t bad_records = 0;
+    flash_manifest_cache_reset();
     for (size_t src = 0; src < kJournalSources; src++) {
         s_flash_last_bucket[src] = INT64_MIN;
         s_flash_newest_bucket[src] = INT64_MIN;
@@ -1280,16 +1401,10 @@ bool flash_journal_scan() {
                 continue;
             }
             valid_records++;
+            if (flash_is_manifest(r.header)) (void)flash_manifest_cache_add(r);
             if (r.header.sequence > highest_sequence) {
                 highest_sequence = r.header.sequence;
                 head_slot = slot;
-            }
-            if (!flash_record_valid(r)) continue;  // old target: head-visible, restore-ineligible
-            const size_t src = r.header.source;
-            if (r.header.sequence > newest_sequence[src]) {
-                newest_sequence[src] = r.header.sequence;
-                s_flash_newest_bucket[src] = r.header.bucket;
-                s_flash_last_bucket[src] = r.header.bucket;
             }
         }
     }
@@ -1298,11 +1413,10 @@ bool flash_journal_scan() {
     s_flash_next_slot = highest_sequence
         ? (head_slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT : 0;
 
-    bool done[kJournalSources];
-    size_t remaining = 0;
+    bool done[kJournalSources] = {};
+    size_t remaining = kJournalSources;
     for (size_t src = 0; src < kJournalSources; src++) {
-        done[src] = newest_sequence[src] == 0;
-        if (!done[src]) remaining++;
+        newest_sequence[src] = 0;
     }
     if (highest_sequence) {
         size_t slot = head_slot;
@@ -1321,6 +1435,11 @@ bool flash_journal_scan() {
             }
             if (flash_record_valid(r)) {
                 const size_t src = r.header.source;
+                if (newest_sequence[src] == 0) {
+                    newest_sequence[src] = r.header.sequence;
+                    s_flash_newest_bucket[src] = r.header.bucket;
+                    s_flash_last_bucket[src] = r.header.bucket;
+                }
                 if (!done[src]) {
                     const size_t retain = src ==
                         static_cast<size_t>(logic::HistoryJournalSource::Checkup)
@@ -1344,6 +1463,9 @@ bool flash_journal_scan() {
             slot = slot ? slot - 1 : logic::HISTORY_JOURNAL_SLOT_COUNT - 1;
         }
     }
+
+    for (size_t src = 0; src < kJournalSources; ++src)
+        if (newest_sequence[src] == 0) done[src] = true;
 
     const size_t checkup_src = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
     s_flash_checkup_restore_done = newest_sequence[checkup_src] == 0;
@@ -1453,6 +1575,50 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     return true;
 }
 
+bool flash_manifest_due(HistorySource src, int64_t bucket) {
+    const size_t i = static_cast<size_t>(src);
+    if (i >= 3 || bucket == INT64_MIN) return false;
+    if (s_flash_current_manifest_fp[i] != P().catalog_fp ||
+        s_flash_current_manifest_bucket[i] == INT64_MIN) return true;
+    if (bucket < s_flash_current_manifest_bucket[i]) return true;  // wall clock moved backwards
+    return static_cast<uint64_t>(bucket - s_flash_current_manifest_bucket[i]) >=
+           logic::HISTORY_MANIFEST_REFRESH_BUCKETS;
+}
+
+bool flash_build_manifest_record(HistorySource src, int64_t bucket, FlashJournalRecord& out) {
+    const auto source = journal_source(src);
+    const size_t value_count = logic::history_journal_source_rings(source);
+    if (static_cast<size_t>(src) >= 3 || bucket == INT64_MIN || !value_count ||
+        value_count > logic::HISTORY_MANIFEST_MAX_IDS) return false;
+    std::memset(&out, 0xff, sizeof(out));
+    auto* ids = reinterpret_cast<uint32_t*>(out.payload);
+    if (logic::history_current_series_ids(source, ids, logic::HISTORY_MANIFEST_MAX_IDS) != value_count)
+        return false;
+
+    auto& h = out.header;
+    h.magic = logic::HISTORY_JOURNAL_MAGIC;
+    h.version = logic::HISTORY_JOURNAL_VERSION;
+    h.source = static_cast<uint8_t>(source);
+    h.flags = logic::HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST;
+    h.catalog_fp = P().catalog_fp;
+    h.crc = 0;
+    h.commit = logic::HISTORY_JOURNAL_ERASED;
+    h.value_count = static_cast<uint16_t>(value_count);
+    h.slot_bytes = static_cast<uint16_t>(logic::HISTORY_JOURNAL_SLOT_BYTES);
+    h.sequence = s_flash_next_sequence;
+    h.bucket = bucket;
+    h.dt_s = logic::HISTORY_DT_S;
+    h.rings[0] = static_cast<uint16_t>(TREND_COUNT);
+    h.rings[1] = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+    h.rings[2] = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+    h.reserved = 0xffff;
+    logic::history_journal_set_schema_fingerprint(
+        h, logic::history_series_list_fingerprint(source, ids, value_count));
+    h.crc = logic::history_journal_crc_bytes(
+        h, out.payload, value_count * sizeof(uint32_t));
+    return true;
+}
+
 bool flash_build_next_checkup_record(FlashJournalRecord& out, TickType_t wait_ticks) {
     (void)wait_ticks; // checkup_flash_next uses the non-blocking independent owner lock
     std::memset(&out, 0xff, sizeof(out));
@@ -1498,8 +1664,7 @@ esp_err_t flash_append_record(FlashJournalRecord& r) {
     esp_err_t e = flash_prepare_next_slot(slot);
     if (e != ESP_OK) return e;
     const size_t offset = logic::history_journal_slot_offset(slot);
-    const size_t body_bytes = sizeof(r.header) +
-                              static_cast<size_t>(r.header.value_count) * sizeof(HistorySample);
+    const size_t body_bytes = sizeof(r.header) + logic::history_journal_payload_bytes(r.header);
     e = esp_partition_write(s_flash_part, offset, &r, body_bytes);
     if (e == ESP_OK) {
         const uint32_t commit = logic::HISTORY_JOURNAL_COMMITTED;
@@ -1509,7 +1674,7 @@ esp_err_t flash_append_record(FlashJournalRecord& r) {
     }
     FlashJournalRecord verify;
     const esp_err_t read_e = flash_read_record(slot, verify);
-    const bool committed = read_e == ESP_OK && flash_record_valid(verify) &&
+    const bool committed = read_e == ESP_OK && flash_record_physically_valid(verify) &&
                            verify.header.sequence == r.header.sequence &&
                            verify.header.bucket == r.header.bucket;
     // A low-level program call may report an error after the chip accepted the bytes. The readback
@@ -1518,8 +1683,12 @@ esp_err_t flash_append_record(FlashJournalRecord& r) {
     if (!committed) return e != ESP_OK ? e : (read_e != ESP_OK ? read_e : ESP_ERR_INVALID_RESPONSE);
 
     const size_t src = r.header.source;
-    s_flash_last_bucket[src] = r.header.bucket;
-    s_flash_newest_bucket[src] = r.header.bucket;
+    if (flash_is_manifest(r.header)) {
+        if (!flash_manifest_cache_add(verify)) return ESP_ERR_INVALID_RESPONSE;
+    } else {
+        s_flash_last_bucket[src] = r.header.bucket;
+        s_flash_newest_bucket[src] = r.header.bucket;
+    }
     s_flash_next_slot = (slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT;
     s_flash_next_sequence++;
     return ESP_OK;
@@ -1599,9 +1768,12 @@ void history_service_flash_restore() {
                 continue;
             const size_t pos = static_cast<size_t>(r.header.bucket - oldest);
             for (size_t b = 0; b < batch; b++) {
+                const int stored = flash_record_stored_index(r.header, first_idx + b);
+                if (stored < 0 || static_cast<size_t>(stored) >= r.header.value_count) continue;
                 HistorySample sample = HISTORY_NO_READING;
                 std::memcpy(&sample,
-                            r.payload + (first_idx + b) * sizeof(HistorySample), sizeof(sample));
+                            r.payload + static_cast<size_t>(stored) * sizeof(HistorySample),
+                            sizeof(sample));
                 s_flash_restore_blocks[b][pos] = sample;
             }
         }
@@ -1658,6 +1830,32 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
                     ? flash_build_next_checkup_record(r, wait_ticks)
                     : flash_build_next_record(static_cast<HistorySource>(src_i), r, wait_ticks);
             if (!built) continue;
+            if (src_i < 3 &&
+                flash_manifest_due(static_cast<HistorySource>(src_i), r.header.bucket)) {
+                const int64_t manifest_bucket = r.header.bucket;
+                // Reuse the one 256-byte stack record. Keeping the already-built data record beside
+                // a manifest would consume another 256 bytes on poll's measured tight stack; the
+                // same data bucket is rebuilt on the next loop after this durable schema barrier.
+                if (!flash_build_manifest_record(
+                        static_cast<HistorySource>(src_i), manifest_bucket, r)) {
+                    diag_printf("history: catalog manifest build failed for source %u\n",
+                                static_cast<unsigned>(src_i));
+                    return written;
+                }
+                const esp_err_t manifest_e = flash_append_record(r);
+                if (manifest_e != ESP_OK) {
+                    diag_printf("history: catalog manifest append failed at slot %u (%s)\n",
+                                static_cast<unsigned>(s_flash_next_slot),
+                                esp_err_to_name(manifest_e));
+                    return written;
+                }
+                written++;
+                appended = true;
+                // Keep this source selected: the data vector whose manifest was just committed is
+                // still pending and must follow before another source consumes the bounded budget.
+                s_flash_service_source = src_i;
+                break;
+            }
             const esp_err_t e = flash_append_record(r);
             if (e != ESP_OK) {
                 diag_printf("history: journal append failed at slot %u (%s)\n",
@@ -1715,6 +1913,7 @@ bool history_flash_forget() {
             s_flash_oldest_bucket[src] = INT64_MIN;
             s_flash_restore_slot_count[src] = 0;
         }
+        flash_manifest_cache_reset();
         s_flash_restore_done = true;
         s_flash_checkup_restore_done = true;
         s_flash_scan_ok = false;

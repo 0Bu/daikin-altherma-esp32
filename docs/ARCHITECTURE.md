@@ -110,8 +110,9 @@ history.cpp/.hpp    → the 24-hour trend rings: one fixed-cadence buffer per lo
                       merged — they have separate liveness. Storage + mutex; the mechanics are the
                       host-tested logic/history.hpp. In .noinit DRAM rather than heap, so a reset
                       that KEPT POWER keeps the readings, and the five-minute append journal in
-                      upper-flash `history` covers OTA and power loss — both sealed by a catalog
-                      fingerprint, since a ring is addressed by INDEX
+                      upper-flash `history` covers OTA and power loss. `.noinit` is sealed by the
+                      whole catalog fingerprint; flash also stores bounded semantic-id manifests,
+                      so unchanged series survive catalog insertion and reordering
 checkup.cpp/.hpp    → the 24-hour PLANT CHECKUP behind /status.health: counted EVENTS and window
                       MINIMA (compressor starts + mean run length, defrost share, pressure and flow
                       minima, backup-heater minutes, fault class, retry counters). Storage + mutex
@@ -1233,7 +1234,7 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
      its predecessors. A torn mid-sector slot is skipped because erasing it would also erase older
      committed slots. Slot width grows by powers of two with the largest source catalog, and a
      compile-time guard requires at least 72 hours with all four sources active. Today 16,384 slots
-     make one physical rotation about 52.5 days with X10A plus diagnosis or 18.5 days with all trend
+     make one physical rotation about 52.3 days with X10A plus diagnosis or 18.4 days with all trend
      sources plus diagnosis — roughly 7.0 or 19.8 erases per sector/year.
      Older physical records are wear reserve rather than being erased at the
      72-hour display boundary. The former 8 KB partition is removed entirely. Because OTA does not
@@ -1255,14 +1256,31 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    instead of mistaking its recorded absences for unwritten leading scratch.
    Measurement history is no longer copied through browser `sessionStorage`; that storage keeps only
    the transient status/value render frame while an OTA is in flight. There is no sparse/coarse
-   fallback record. Both paths are gated on a **catalog fingerprint** over every trend id, kind, locator
-   and the ring geometry, because a ring is addressed by its index — insert or reorder a trend and
-   slot 12 stops meaning what it meant when the bytes were written, which would hand the expansion
-   valve's day to the DHW tank. The seal deliberately excludes the open bucket's `pending`: covering
+   fallback record. The `.noinit` path remains gated on a **catalog fingerprint** over every trend
+   id, kind, locator and the ring geometry, because its live rings are addressed only by index. Its
+   seal deliberately excludes the open bucket's `pending`: covering
    it would leave the CRC stale for all but microseconds of every five minutes, so a crash — the case
    this exists for most — would discard a day of intact readings essentially always.
+
+   Flash keeps the same compact index-addressed five-minute records but makes each catalog generation
+   self-describing with a separate **semantic-id manifest** per source. The id covers the public trend
+   id plus every field that changes a stored sample's meaning: source, locator, kind, converter and
+   unit for X10A; register and event-folding policy for HomeHub; id and unit for ENV III. Display
+   labels are deliberately excluded. Restore maps the current id to the stored index, so adding or
+   reordering a row preserves every unchanged curve while a genuinely new or reinterpreted series
+   alone starts empty. Duplicate ids, an unknown pre-manifest generation or a damaged manifest fail
+   closed. A manifest is written before a generation's next data record and refreshed once per
+   24-hour ring, keeping a recent copy in the circular journal without repeating ids in every bucket.
+   Four generations per source are cached in bounded static memory. The exact 31/12/3 catalog before
+   the disinfection histories has an explicit legacy adapter; the two then-new disinfection series
+   correctly have no predecessor. Existing 32/13/3 records from the current generation match its
+   layout directly.
+   Diagnostic checkup records carry their own fingerprint and remain independent of trend counts.
+
    `/status.history.persist` names how this boot's rings came to be, so a chart that emptied itself
-   has a stated cause instead of looking like a defect. Three more `logic/history_persist.hpp`
+   has a stated cause instead of looking like a defect. It describes the `.noinit` adoption decision;
+   a refused RAM image can still be extended from a compatible flash generation after SNTP. Three
+   more `logic/history_persist.hpp`
    rules, all pure so they are asserted rather than discovered on a board: **which reset reasons
    leave DRAM intact is an ALLOW list** with everything unrecognised refused — BROWNOUT and
    PWR_GLITCH are refused rather than left to the CRC, since a dipped supply proves nothing about

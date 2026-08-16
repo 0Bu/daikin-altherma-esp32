@@ -12038,6 +12038,9 @@ static void test_history_persist() {
 
     // --- the verdict, and the ORDER it decides in -----------------------------------------------
     const uint32_t fp = history_catalog_fingerprint();
+    // PR #8's exact catalog: existing dev.6/dev.7 flash records must stay on the
+    // direct fast path while manifests make future catalog edits migratable.
+    CHECK(fp == 0xda95bbc0u);
     const uint32_t sw = static_cast<uint32_t>(CrashReason::SW);
     CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, fp, 7, 7)
           == HistoryRestore::Accept);
@@ -12078,6 +12081,8 @@ static void test_history_persist() {
     CHECK(HISTORY_FLASH_ERASE_BYTES == 4096);
     CHECK(HISTORY_JOURNAL_HEADER_BYTES == 64);
     CHECK(HISTORY_JOURNAL_MAX_SOURCE_RINGS == 32);
+    CHECK(history_journal_slot_bytes(HISTORY_JOURNAL_HEADER_BYTES + 48 * sizeof(uint32_t)) == 256);
+    CHECK(history_journal_slot_bytes(HISTORY_JOURNAL_HEADER_BYTES + 49 * sizeof(uint32_t)) == 512);
     CHECK(history_journal_slot_bytes(256) == 256);
     CHECK(history_journal_slot_bytes(257) == 512);
     CHECK(history_journal_slot_bytes(513) == 1024);
@@ -12174,6 +12179,102 @@ static void test_history_persist() {
     CHECK(history_journal_header_matches_scoped_layout(
         xh, fp, HistoryJournalSource::X10a));    // restore scope and global sequence are separate
 
+    // Catalog manifests make the dense vector self-describing without repeating ids in every
+    // five-minute record. Reordering is mapped, additions are absent only for the new series, and a
+    // collision is refused rather than letting two plausible curves share one identity.
+    CHECK(HISTORY_JOURNAL_PAYLOAD_BYTES == 192);
+    CHECK(HISTORY_MANIFEST_MAX_IDS == 48);
+    CHECK(HISTORY_MANIFEST_CACHE_PER_SOURCE == 4);
+    CHECK(HISTORY_MANIFEST_REFRESH_BUCKETS == HISTORY_SAMPLES);
+    uint32_t x_ids[HISTORY_MANIFEST_MAX_IDS] = {};
+    uint32_t mb_ids[HISTORY_MANIFEST_MAX_IDS] = {};
+    uint32_t env_ids[HISTORY_MANIFEST_MAX_IDS] = {};
+    CHECK(history_current_series_ids(HistoryJournalSource::X10a, x_ids,
+                                     HISTORY_MANIFEST_MAX_IDS) == TREND_COUNT);
+    CHECK(history_current_series_ids(HistoryJournalSource::Modbus, mb_ids,
+                                     HISTORY_MANIFEST_MAX_IDS) == HOMEHUB_HISTORY_COUNT);
+    CHECK(history_current_series_ids(HistoryJournalSource::Env3, env_ids,
+                                     HISTORY_MANIFEST_MAX_IDS) == ENV3_HISTORY_COUNT);
+    CHECK(history_series_ids_valid(x_ids, TREND_COUNT));
+    CHECK(history_series_ids_valid(mb_ids, HOMEHUB_HISTORY_COUNT));
+    CHECK(history_series_ids_valid(env_ids, ENV3_HISTORY_COUNT));
+    CHECK(history_current_series_list_fingerprint(HistoryJournalSource::X10a) ==
+          history_series_list_fingerprint(HistoryJournalSource::X10a, x_ids, TREND_COUNT));
+    CHECK(history_series_id(HistoryJournalSource::X10a, TREND_COUNT) == 0);
+    CHECK(history_series_id(HistoryJournalSource::Checkup, 0) == 0);
+
+    uint32_t reordered[HISTORY_MANIFEST_MAX_IDS] = {};
+    std::memcpy(reordered, x_ids, TREND_COUNT * sizeof(uint32_t));
+    const uint32_t first_id = reordered[0];
+    reordered[0] = reordered[TREND_COUNT - 1];
+    reordered[TREND_COUNT - 1] = first_id;
+    CHECK(history_series_index(reordered, TREND_COUNT, x_ids[0]) ==
+          static_cast<int>(TREND_COUNT - 1));
+    CHECK(history_series_index(reordered, TREND_COUNT, x_ids[TREND_COUNT - 1]) == 0);
+    CHECK(history_series_index(reordered, TREND_COUNT, 0x12345678u) == -1);  // new series
+    reordered[1] = reordered[0];
+    CHECK(!history_series_ids_valid(reordered, TREND_COUNT));
+    CHECK(history_series_index(reordered, TREND_COUNT, x_ids[0]) == -1);
+
+    HistoryJournalHeader manifest = xh;
+    manifest.flags = HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST;
+    manifest.value_count = static_cast<uint16_t>(TREND_COUNT);
+    history_journal_set_schema_fingerprint(
+        manifest, history_series_list_fingerprint(
+            HistoryJournalSource::X10a, x_ids, TREND_COUNT));
+    CHECK(history_journal_payload_bytes(manifest) == TREND_COUNT * sizeof(uint32_t));
+    CHECK(history_journal_manifest_header_matches(manifest));
+    CHECK(history_journal_manifest_payload_matches(manifest, x_ids));
+    x_ids[2] ^= 1u;
+    CHECK(!history_journal_manifest_payload_matches(manifest, x_ids));
+    x_ids[2] ^= 1u;
+    manifest.value_count = HISTORY_MANIFEST_MAX_IDS + 1;
+    CHECK(!history_journal_manifest_header_matches(manifest));
+
+    // Exact pre-#3 wire contract, measured by compiling that historical tree. Its dense vectors are
+    // the only pre-manifest generation promised a built-in adapter: every old series maps by its
+    // semantic id, while the two newly-added disinfection histories correctly have no predecessor.
+    CHECK(history_legacy_disinfection_catalog_fingerprint() == 0x63ec0a62u);
+    CHECK(history_legacy_disinfection_catalog_fingerprint() != fp);
+    uint32_t legacy_x[HISTORY_MANIFEST_MAX_IDS] = {};
+    uint32_t legacy_mb[HISTORY_MANIFEST_MAX_IDS] = {};
+    CHECK(history_legacy_disinfection_series_ids(
+              HistoryJournalSource::X10a, legacy_x, HISTORY_MANIFEST_MAX_IDS) == 31);
+    CHECK(history_legacy_disinfection_series_ids(
+              HistoryJournalSource::Modbus, legacy_mb, HISTORY_MANIFEST_MAX_IDS) == 12);
+    CHECK(history_legacy_disinfection_series_id(HistoryJournalSource::X10a, 31) == 0);
+    CHECK(history_legacy_disinfection_series_id(HistoryJournalSource::Modbus, 12) == 0);
+    int tank_preheat_index = -1;
+    for (size_t i = 0; i < TREND_COUNT; ++i)
+        if (trend_cstr_eq(TRENDS[i].id, "tank_preheat_state")) tank_preheat_index = static_cast<int>(i);
+    CHECK(tank_preheat_index >= 0);
+    CHECK(history_series_index(legacy_x, 31,
+                               x_ids[static_cast<size_t>(tank_preheat_index)]) == -1);
+    CHECK(history_series_index(legacy_mb, 12, mb_ids[HOMEHUB_HISTORY_COUNT - 1]) == -1);
+    CHECK(history_series_index(legacy_x, 31, x_ids[0]) == 0);
+    CHECK(history_series_index(legacy_x, 31, x_ids[0] ^ 1u) == -1);  // changed semantics
+    CHECK(history_series_index(legacy_mb, 12, mb_ids[0]) == 0);
+    CHECK(history_legacy_disinfection_stored_index(
+              HistoryJournalSource::X10a, static_cast<size_t>(tank_preheat_index)) == -1);
+    CHECK(history_legacy_disinfection_stored_index(HistoryJournalSource::X10a, 0) == 0);
+    CHECK(history_legacy_disinfection_stored_index(
+              HistoryJournalSource::X10a, static_cast<size_t>(tank_preheat_index + 1)) ==
+          tank_preheat_index);
+    CHECK(history_legacy_disinfection_stored_index(
+              HistoryJournalSource::Modbus, HOMEHUB_HISTORY_COUNT - 1) == -1);
+    CHECK(history_legacy_disinfection_stored_index(HistoryJournalSource::Env3, 2) == 2);
+
+    HistoryJournalHeader legacy = xh;
+    legacy.catalog_fp = history_legacy_disinfection_catalog_fingerprint();
+    legacy.value_count = 31;
+    legacy.rings[0] = 31;
+    legacy.rings[1] = 12;
+    legacy.rings[2] = 3;
+    CHECK(history_journal_trend_header_structural_matches(legacy));
+    CHECK(history_legacy_disinfection_layout_matches(legacy));
+    legacy.rings[1] = 13;
+    CHECK(!history_legacy_disinfection_layout_matches(legacy));
+
     // The fourth source extends v1 without changing the first three ids or invalidating their old
     // records. Its own layout fingerprint, hourly raster and word-rounded payload width are all
     // mandatory, and CRC covers the exact persisted CheckupBucket + DhwLossBucket bytes.
@@ -12206,6 +12307,9 @@ static void test_history_persist() {
                                           CHECKUP_JOURNAL_WORDS, CHECKUP_DT_S));
     CHECK(!history_journal_header_matches(ch, checkup_journal_fingerprint(),
                                           CHECKUP_JOURNAL_WORDS, HISTORY_DT_S));
+    ch.rings[0] = 31; ch.rings[1] = 12; ch.rings[2] = 3;
+    CHECK(history_journal_header_matches(ch, checkup_journal_fingerprint(),
+                                         CHECKUP_JOURNAL_WORDS, CHECKUP_DT_S));
 
     // --- absolute buckets -----------------------------------------------------------------------
     CHECK(history_bucket_from_unix(0) == 0);

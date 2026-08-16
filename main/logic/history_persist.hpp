@@ -39,13 +39,14 @@
 // is never written: there is no defensible place to put it, and putting it at "now" would slide a
 // week-old curve onto today.
 //
-// ── Why a catalog fingerprint, not just a CRC ───────────────────────────────────────────────────
-// A ring is addressed by its INDEX in TRENDS. Insert a trend, reorder two, change a locator or the
-// ring geometry, and index 12 stops meaning what it meant when the bytes were written — so a valid
-// CRC would hand the expansion valve's day to the DHW tank. That is the same substitution
-// history.hpp's locator rule exists to prevent, arriving through the back door of a firmware update.
-// The fingerprint covers every id, kind, locator and the geometry, so any catalog edit invalidates
-// every persisted ring automatically and nobody has to remember to bump a version.
+// ── Why catalog manifests, not just a CRC ───────────────────────────────────────────────────────
+// A dense record addresses rings by INDEX. Insert a trend or reorder two and index 12 stops meaning
+// what it meant when the bytes were written — so a valid payload CRC alone could hand the expansion
+// valve's day to the DHW tank. Every catalog generation therefore has a fingerprint, while a rare
+// manifest record stores one stable semantic id per index. Restore maps ids rather than positions:
+// unchanged series survive additions/reordering, new series start empty, and a changed semantic id
+// invalidates only that series. One known pre-manifest catalog has an explicit, equally fail-closed
+// mapping. The five-minute data records stay dense, small and byte-for-byte rollback-readable.
 #include "logic/config_store.hpp"   // config_crc32_update — the firmware's ONE CRC implementation
 #include "logic/crashinfo.hpp"      // CrashReason — the reset vocabulary, not a second copy of it
 #include "logic/env3.hpp"
@@ -73,8 +74,9 @@ inline constexpr uint16_t HISTORY_PERSIST_VERSION = 2;  // v2 binds .noinit Home
 //
 // One record is page-aligned and large enough for the largest source's dense int16 vector. At the
 // current 32/13/3 rings this is 256 bytes: sixteen records share one erased sector. If the catalog
-// grows past 96 rings in one source the expression moves the format to 512 bytes automatically; the
-// checked 72-hour capacity below then fails before a catalog can silently outgrow the reservation.
+// grows past 48 rings in one source the manifest becomes the binding payload and the expression
+// moves the format to 512 bytes automatically; the checked 72-hour capacity below then fails before
+// a catalog can silently outgrow the reservation.
 inline constexpr uint32_t HISTORY_FLASH_PARTITION_OFFSET = 0x400000u;
 inline constexpr size_t   HISTORY_FLASH_PARTITION_BYTES = 4u * 1024u * 1024u;
 inline constexpr size_t   HISTORY_FLASH_ERASE_BYTES = 4096;
@@ -117,7 +119,7 @@ inline constexpr size_t history_journal_slot_bytes(size_t body_bytes) {
 
 inline constexpr size_t HISTORY_JOURNAL_MAX_SOURCE_RINGS = history_journal_max_source_rings();
 inline constexpr size_t HISTORY_JOURNAL_SLOT_BYTES = history_journal_slot_bytes(
-    HISTORY_JOURNAL_HEADER_BYTES + HISTORY_JOURNAL_MAX_SOURCE_RINGS * sizeof(HistorySample));
+    HISTORY_JOURNAL_HEADER_BYTES + HISTORY_JOURNAL_MAX_SOURCE_RINGS * sizeof(uint32_t));
 inline constexpr size_t HISTORY_JOURNAL_SLOTS_PER_SECTOR =
     HISTORY_FLASH_ERASE_BYTES / HISTORY_JOURNAL_SLOT_BYTES;
 inline constexpr size_t HISTORY_JOURNAL_SLOT_COUNT =
@@ -128,6 +130,16 @@ inline constexpr uint16_t HISTORY_JOURNAL_VERSION = 1;
 inline constexpr uint32_t HISTORY_JOURNAL_ERASED = 0xffffffffu;
 inline constexpr uint32_t HISTORY_JOURNAL_COMMITTED = 0x54494d43u;   // "CMIT" little-endian
 inline constexpr uint8_t  HISTORY_JOURNAL_FLAG_TARGET_SCOPED = 0x01u;
+inline constexpr uint8_t  HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST = 0x02u;
+
+// A manifest carries uint32 semantic ids instead of int16 samples. It uses the same physical slot,
+// so adding a trend cannot silently overflow the manifest even when the dense vector still fits.
+inline constexpr size_t HISTORY_JOURNAL_PAYLOAD_BYTES =
+    HISTORY_JOURNAL_SLOT_BYTES - HISTORY_JOURNAL_HEADER_BYTES;
+inline constexpr size_t HISTORY_MANIFEST_MAX_IDS =
+    HISTORY_JOURNAL_PAYLOAD_BYTES / sizeof(uint32_t);
+inline constexpr size_t HISTORY_MANIFEST_CACHE_PER_SOURCE = 4;
+inline constexpr size_t HISTORY_MANIFEST_REFRESH_BUCKETS = HISTORY_SAMPLES;  // at least daily
 
 // Wire format. `commit` remains erased while the body is programmed and is changed to CMIT in one
 // final 1->0 write. A torn body or torn commit is therefore never mistaken for a valid record.
@@ -137,7 +149,7 @@ struct HistoryJournalHeader {
     uint8_t  source;         //  6 — HistoryJournalSource
     uint8_t  flags;          //  7 — zero in v1
     uint32_t catalog_fp;     //  8
-    uint32_t crc;            // 12 — normalised header + `value_count` samples
+    uint32_t crc;            // 12 — normalised header + `value_count` payload elements
     uint32_t commit;         // 16 — written LAST
     uint16_t value_count;    // 20
     uint16_t slot_bytes;     // 22
@@ -159,12 +171,18 @@ inline bool history_journal_header_matches(const HistoryJournalHeader& h, uint32
         h.commit != HISTORY_JOURNAL_COMMITTED || h.flags != 0 || h.catalog_fp != identity_fp ||
         h.slot_bytes != HISTORY_JOURNAL_SLOT_BYTES || h.dt_s != dt_s ||
         h.sequence == 0 || h.bucket == INT64_MIN || h.source >= HISTORY_JOURNAL_SOURCE_COUNT ||
-        h.rings[0] != TREND_COUNT || h.rings[1] != HOMEHUB_HISTORY_COUNT ||
-        h.rings[2] != ENV3_HISTORY_COUNT)
+        h.rings[0] == 0 || h.rings[0] > HISTORY_MANIFEST_MAX_IDS ||
+        h.rings[1] == 0 || h.rings[1] > HISTORY_MANIFEST_MAX_IDS ||
+        h.rings[2] == 0 || h.rings[2] > HISTORY_MANIFEST_MAX_IDS)
         return false;
     return h.value_count == value_count && value_count > 0 &&
            static_cast<size_t>(value_count) * sizeof(HistorySample) <=
                HISTORY_JOURNAL_SLOT_BYTES - HISTORY_JOURNAL_HEADER_BYTES;
+}
+
+inline bool history_journal_rings_match_current(const HistoryJournalHeader& h) {
+    return h.rings[0] == TREND_COUNT && h.rings[1] == HOMEHUB_HISTORY_COUNT &&
+           h.rings[2] == ENV3_HISTORY_COUNT;
 }
 
 // Compatibility wrapper for the three original dense trend sources.  Existing host tests and old
@@ -174,7 +192,7 @@ inline bool history_journal_header_matches(const HistoryJournalHeader& h, uint32
     if (h.source >= static_cast<uint8_t>(HistoryJournalSource::Checkup) ||
         h.source == static_cast<uint8_t>(HistoryJournalSource::Modbus))
         return false;  // HomeHub records additionally require the configured-target fingerprint
-    return history_journal_header_matches(
+    return history_journal_rings_match_current(h) && history_journal_header_matches(
         h, catalog_fp,
         static_cast<uint16_t>(history_journal_source_rings(
             static_cast<HistoryJournalSource>(h.source))), HISTORY_DT_S);
@@ -193,6 +211,76 @@ inline uint32_t history_journal_scope(const HistoryJournalHeader& h) {
            (static_cast<uint32_t>(h.pad[3]) << 24);
 }
 
+inline void history_journal_set_schema_fingerprint(HistoryJournalHeader& h, uint32_t fp) {
+    h.pad[4] = static_cast<uint8_t>(fp);
+    h.pad[5] = static_cast<uint8_t>(fp >> 8);
+    h.pad[6] = static_cast<uint8_t>(fp >> 16);
+    h.pad[7] = static_cast<uint8_t>(fp >> 24);
+}
+
+inline uint32_t history_journal_schema_fingerprint(const HistoryJournalHeader& h) {
+    return static_cast<uint32_t>(h.pad[4]) | (static_cast<uint32_t>(h.pad[5]) << 8) |
+           (static_cast<uint32_t>(h.pad[6]) << 16) |
+           (static_cast<uint32_t>(h.pad[7]) << 24);
+}
+
+// Structural validity which is deliberately independent of THIS build's catalog. It lets the scan
+// find the physical head and CRC-check an older dense vector before deciding whether a manifest or
+// an explicit legacy map can interpret it. Restore eligibility is a separate, stricter question.
+inline bool history_journal_trend_header_structural_matches(const HistoryJournalHeader& h) {
+    if (h.magic != HISTORY_JOURNAL_MAGIC || h.version != HISTORY_JOURNAL_VERSION ||
+        h.commit != HISTORY_JOURNAL_COMMITTED || h.catalog_fp == 0 ||
+        h.slot_bytes != HISTORY_JOURNAL_SLOT_BYTES || h.dt_s != HISTORY_DT_S ||
+        h.sequence == 0 || h.bucket == INT64_MIN ||
+        h.source >= static_cast<uint8_t>(HistoryJournalSource::Checkup) ||
+        (h.flags & ~HISTORY_JOURNAL_FLAG_TARGET_SCOPED) != 0)
+        return false;
+    const auto src = static_cast<HistoryJournalSource>(h.source);
+    if ((src == HistoryJournalSource::X10a || src == HistoryJournalSource::Modbus) !=
+        ((h.flags & HISTORY_JOURNAL_FLAG_TARGET_SCOPED) != 0))
+        return false;
+    if ((src == HistoryJournalSource::X10a || src == HistoryJournalSource::Modbus) &&
+        history_journal_scope(h) == 0)
+        return false;
+    if (h.value_count == 0 || h.value_count > HISTORY_JOURNAL_PAYLOAD_BYTES / sizeof(HistorySample))
+        return false;
+    for (size_t i = 0; i < 3; ++i)
+        if (h.rings[i] == 0 || h.rings[i] > HISTORY_MANIFEST_MAX_IDS) return false;
+    return h.value_count == h.rings[h.source];
+}
+
+inline bool history_journal_trend_layout_matches(const HistoryJournalHeader& h,
+                                                 uint32_t catalog_fp,
+                                                 uint16_t x10a_rings,
+                                                 uint16_t modbus_rings,
+                                                 uint16_t env3_rings) {
+    if (!history_journal_trend_header_structural_matches(h) || h.catalog_fp != catalog_fp) return false;
+    const uint16_t rings[3] = {x10a_rings, modbus_rings, env3_rings};
+    for (size_t i = 0; i < 3; ++i)
+        if (h.rings[i] != rings[i]) return false;
+    return h.value_count == rings[h.source];
+}
+
+inline bool history_journal_manifest_header_matches(const HistoryJournalHeader& h) {
+    if (h.magic != HISTORY_JOURNAL_MAGIC || h.version != HISTORY_JOURNAL_VERSION ||
+        h.commit != HISTORY_JOURNAL_COMMITTED || h.flags != HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST ||
+        h.catalog_fp == 0 || h.slot_bytes != HISTORY_JOURNAL_SLOT_BYTES ||
+        h.dt_s != HISTORY_DT_S || h.sequence == 0 || h.bucket == INT64_MIN ||
+        h.source >= static_cast<uint8_t>(HistoryJournalSource::Checkup) ||
+        h.value_count == 0 || h.value_count > HISTORY_MANIFEST_MAX_IDS ||
+        history_journal_schema_fingerprint(h) == 0)
+        return false;
+    for (size_t i = 0; i < 3; ++i)
+        if (h.rings[i] == 0 || h.rings[i] > HISTORY_MANIFEST_MAX_IDS) return false;
+    return h.value_count == h.rings[h.source];
+}
+
+inline size_t history_journal_payload_bytes(const HistoryJournalHeader& h) {
+    const size_t width = h.flags == HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST
+        ? sizeof(uint32_t) : sizeof(HistorySample);
+    return static_cast<size_t>(h.value_count) * width;
+}
+
 // Structural/CRC-independent validity for a target-scoped source, without choosing the currently
 // configured target. Journal head discovery must see records from old targets too; otherwise it can
 // reuse their global sequence numbers. Scope equality belongs only to restore/index selection.
@@ -205,7 +293,7 @@ inline bool history_journal_header_matches_scoped_layout(const HistoryJournalHea
         return false;
     HistoryJournalHeader structural = h;
     structural.flags = 0;
-    return history_journal_header_matches(
+    return history_journal_rings_match_current(structural) && history_journal_header_matches(
         structural, catalog_fp,
         static_cast<uint16_t>(history_journal_source_rings(source)), HISTORY_DT_S);
 }
@@ -281,9 +369,14 @@ static_assert(HISTORY_JOURNAL_HEADER_BYTES +
                   HISTORY_JOURNAL_MAX_SOURCE_RINGS * sizeof(HistorySample) <=
               HISTORY_JOURNAL_SLOT_BYTES,
               "the largest dense source vector must fit one journal slot");
+static_assert(TREND_COUNT <= HISTORY_MANIFEST_MAX_IDS &&
+              HOMEHUB_HISTORY_COUNT <= HISTORY_MANIFEST_MAX_IDS &&
+              ENV3_HISTORY_COUNT <= HISTORY_MANIFEST_MAX_IDS,
+              "each source catalog must fit one manifest slot");
 static_assert(HISTORY_JOURNAL_SLOT_COUNT <= UINT16_MAX,
               "restore indexes store physical slot numbers as uint16_t");
-static_assert(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS,
+static_assert(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS +
+                  3 * (HISTORY_FLASH_FUTURE_SAMPLES / HISTORY_MANIFEST_REFRESH_BUCKETS + 1),
               "the history partition must retain 72 h with every source active");
 
 // ── Which resets leave DRAM intact ──────────────────────────────────────────────────────────────
@@ -381,6 +474,110 @@ inline uint32_t history_fp_u32(uint32_t crc, uint32_t v) {
     return config_crc32_update(crc, b, 4);
 }
 
+// Stable identity of ONE stored series. The public trend id is the semantic anchor; the source and
+// every field which can change the meaning of its int16 sample are also included. Consequently a
+// label-only edit survives, while a locator/converter/unit/folding change starts only that series
+// empty. The catalog-wide fingerprint below remains order-sensitive; these ids deliberately do not.
+inline uint32_t history_series_id(HistoryJournalSource src, size_t index) {
+    uint32_t crc = CONFIG_CRC32_INIT;
+    crc = history_fp_u32(crc, 0x53455231u);  // "SER1" semantic-id contract
+    crc = history_fp_u32(crc, static_cast<uint32_t>(src));
+    switch (src) {
+        case HistoryJournalSource::X10a: {
+            if (index >= TREND_COUNT) return 0;
+            const auto& d = TRENDS[index];
+            crc = history_fp_str(crc, d.id);
+            crc = history_fp_u32(crc, static_cast<uint32_t>(d.kind));
+            crc = history_fp_u32(crc, d.reg);
+            crc = history_fp_u32(crc, d.off);
+            crc = history_fp_str(crc, d.unit);
+            crc = history_fp_u32(crc, static_cast<uint32_t>(d.conv));
+            break;
+        }
+        case HistoryJournalSource::Modbus: {
+            if (index >= HOMEHUB_HISTORY_COUNT) return 0;
+            const auto& d = HOMEHUB_HISTORIES[index];
+            crc = history_fp_str(crc, d.trend_id);
+            crc = history_fp_u32(crc, d.offset);
+            crc = history_fp_u32(crc, d.event ? 1u : 0u);
+            break;
+        }
+        case HistoryJournalSource::Env3: {
+            if (index >= ENV3_HISTORY_COUNT) return 0;
+            const auto& d = ENV3_HISTORIES[index];
+            crc = history_fp_str(crc, d.id);
+            crc = history_fp_str(crc, d.unit);
+            break;
+        }
+        case HistoryJournalSource::Checkup:
+            return 0;
+    }
+    const uint32_t out = config_crc32_final(crc);
+    return out ? out : 1u;  // zero is the invalid/out-of-range sentinel
+}
+
+inline uint32_t history_series_list_fingerprint(HistoryJournalSource src, const uint32_t* ids,
+                                                size_t count) {
+    if (!ids || !count || count > HISTORY_MANIFEST_MAX_IDS) return 0;
+    uint32_t crc = CONFIG_CRC32_INIT;
+    crc = history_fp_u32(crc, 0x4d414e31u);  // "MAN1" manifest payload contract
+    crc = history_fp_u32(crc, HISTORY_DT_S);
+    crc = history_fp_u32(crc, HISTORY_SAMPLES);
+    crc = history_fp_u32(crc, static_cast<uint32_t>(src));
+    crc = history_fp_u32(crc, static_cast<uint32_t>(count));
+    for (size_t i = 0; i < count; ++i) crc = history_fp_u32(crc, ids[i]);
+    const uint32_t out = config_crc32_final(crc);
+    return out ? out : 1u;
+}
+
+inline bool history_series_ids_valid(const uint32_t* ids, size_t count) {
+    if (!ids || !count || count > HISTORY_MANIFEST_MAX_IDS) return false;
+    for (size_t i = 0; i < count; ++i) {
+        if (ids[i] == 0) return false;
+        for (size_t j = i + 1; j < count; ++j)
+            if (ids[i] == ids[j]) return false;  // a collision makes mapping ambiguous: fail closed
+    }
+    return true;
+}
+
+inline int history_series_index(const uint32_t* stored_ids, size_t stored_count,
+                                uint32_t current_id) {
+    if (!history_series_ids_valid(stored_ids, stored_count) || current_id == 0) return -1;
+    for (size_t i = 0; i < stored_count; ++i)
+        if (stored_ids[i] == current_id) return static_cast<int>(i);
+    return -1;
+}
+
+inline size_t history_current_series_ids(HistoryJournalSource src, uint32_t* out, size_t max) {
+    const size_t count = history_journal_source_rings(src);
+    if (!out || count == 0 || count > max) return 0;
+    for (size_t i = 0; i < count; ++i) out[i] = history_series_id(src, i);
+    return history_series_ids_valid(out, count) ? count : 0;
+}
+
+inline uint32_t history_current_series_list_fingerprint(HistoryJournalSource src) {
+    const size_t count = history_journal_source_rings(src);
+    if (!count || count > HISTORY_MANIFEST_MAX_IDS) return 0;
+    uint32_t crc = CONFIG_CRC32_INIT;
+    crc = history_fp_u32(crc, 0x4d414e31u);
+    crc = history_fp_u32(crc, HISTORY_DT_S);
+    crc = history_fp_u32(crc, HISTORY_SAMPLES);
+    crc = history_fp_u32(crc, static_cast<uint32_t>(src));
+    crc = history_fp_u32(crc, static_cast<uint32_t>(count));
+    for (size_t i = 0; i < count; ++i) crc = history_fp_u32(crc, history_series_id(src, i));
+    const uint32_t out = config_crc32_final(crc);
+    return out ? out : 1u;
+}
+
+inline bool history_journal_manifest_payload_matches(const HistoryJournalHeader& h,
+                                                     const uint32_t* ids) {
+    return history_journal_manifest_header_matches(h) &&
+           history_series_ids_valid(ids, h.value_count) &&
+           history_series_list_fingerprint(
+               static_cast<HistoryJournalSource>(h.source), ids, h.value_count) ==
+               history_journal_schema_fingerprint(h);
+}
+
 // The physical HomeHub observation identity. Flash and .noinit history must never cross this
 // boundary: a new host, port or unit id is a different plant even when the register catalog matches.
 inline uint32_t history_homehub_target_fingerprint(const char* host, uint32_t port, uint32_t unit) {
@@ -407,8 +604,10 @@ inline uint32_t history_x10a_target_fingerprint(const char* profile, int32_t rx_
 }
 
 // Every fact that decides WHICH physical quantity ring index i holds, plus the geometry that decides
-// how its bytes are laid out. A change to any of them must invalidate the persisted set, and the
-// point of deriving it rather than hand-maintaining a version byte is that nobody can forget.
+// how its bytes are laid out. The order-sensitive value seals .noinit RAM and identifies one dense
+// flash generation. Flash restore may still map that generation through its semantic-id manifest;
+// deriving the value rather than hand-maintaining a version byte means nobody can forget to
+// distinguish the layouts.
 //
 // The three sources are all here because they share the record: adding a HomeHub history shifts no
 // X10A index, but it does change the payload length, and a length change with a matching CRC is
@@ -434,6 +633,92 @@ inline uint32_t history_catalog_fingerprint() {
     }
     for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++) crc = history_fp_str(crc, ENV3_HISTORIES[i].id);
     return config_crc32_final(crc);
+}
+
+// Exact catalog shipped immediately before disinfection histories: 31 X10A, 12 Modbus, 3 ENV III.
+// It had no manifest, so its semantic ids and fingerprint are frozen here as one deliberate legacy
+// promise. They must NOT be derived from today's catalog: future additions, reordering or semantic
+// changes must not mutate what those historical indices meant. Any other unknown pre-manifest
+// fingerprint remains unreadable rather than guessed.
+inline constexpr uint32_t HISTORY_LEGACY_DISINFECTION_CATALOG_FP = 0x63ec0a62u;
+inline constexpr uint32_t HISTORY_LEGACY_DISINFECTION_X10A_IDS[] = {
+    0x675148b7u, 0xda1ce8ceu, 0x8569d7c4u, 0x3e4b2950u,
+    0x9c4c3108u, 0x49e93d56u, 0xa7a62607u, 0x6d08f527u,
+    0x713475b0u, 0x637974cau, 0x93587f76u, 0x5fb1e088u,
+    0x0caab8acu, 0x22811bf0u, 0x18efe2bfu, 0xdb699cbeu,
+    0x26dd146cu, 0x92f08686u, 0x366b8b7eu, 0x4c2a31b0u,
+    0x63511b32u, 0xa66efda8u, 0xca3a725eu, 0x6116b33eu,
+    0x0c16f578u, 0xa2732bb5u, 0x09af8c11u, 0xeeea5107u,
+    0xa342c80cu, 0xefbedd67u, 0xa6e93395u,
+};
+inline constexpr uint32_t HISTORY_LEGACY_DISINFECTION_MODBUS_IDS[] = {
+    0x0eaa4cfbu, 0x89b9fdb1u, 0x1ee1ca38u, 0x9f716983u,
+    0x44543af9u, 0x5653ffb8u, 0x8a1edca3u, 0xd422946eu,
+    0x9799e234u, 0x7ef69fa2u, 0x4fa15cb6u, 0xadc0c041u,
+};
+inline constexpr uint32_t HISTORY_LEGACY_DISINFECTION_ENV3_IDS[] = {
+    0xbf2d4bb5u, 0xf5aa0790u, 0x337a9c00u,
+};
+static_assert(sizeof(HISTORY_LEGACY_DISINFECTION_X10A_IDS) / sizeof(uint32_t) == 31 &&
+              sizeof(HISTORY_LEGACY_DISINFECTION_MODBUS_IDS) / sizeof(uint32_t) == 12 &&
+              sizeof(HISTORY_LEGACY_DISINFECTION_ENV3_IDS) / sizeof(uint32_t) == 3,
+              "the pre-manifest adapter is an exact 31/12/3 wire contract");
+
+inline constexpr uint32_t history_legacy_disinfection_catalog_fingerprint() {
+    return HISTORY_LEGACY_DISINFECTION_CATALOG_FP;
+}
+
+inline const uint32_t* history_legacy_disinfection_id_list(HistoryJournalSource src,
+                                                           size_t& count) {
+    switch (src) {
+        case HistoryJournalSource::X10a:
+            count = sizeof(HISTORY_LEGACY_DISINFECTION_X10A_IDS) / sizeof(uint32_t);
+            return HISTORY_LEGACY_DISINFECTION_X10A_IDS;
+        case HistoryJournalSource::Modbus:
+            count = sizeof(HISTORY_LEGACY_DISINFECTION_MODBUS_IDS) / sizeof(uint32_t);
+            return HISTORY_LEGACY_DISINFECTION_MODBUS_IDS;
+        case HistoryJournalSource::Env3:
+            count = sizeof(HISTORY_LEGACY_DISINFECTION_ENV3_IDS) / sizeof(uint32_t);
+            return HISTORY_LEGACY_DISINFECTION_ENV3_IDS;
+        case HistoryJournalSource::Checkup:
+            count = 0;
+            return nullptr;
+    }
+    count = 0;
+    return nullptr;
+}
+
+inline size_t history_legacy_disinfection_series_ids(HistoryJournalSource src, uint32_t* out,
+                                                     size_t max) {
+    size_t count = 0;
+    const uint32_t* ids = history_legacy_disinfection_id_list(src, count);
+    if (!out || !ids || !count || count > max || !history_series_ids_valid(ids, count)) return 0;
+    for (size_t i = 0; i < count; ++i) out[i] = ids[i];
+    return count;
+}
+
+inline uint32_t history_legacy_disinfection_series_id(HistoryJournalSource src, size_t legacy_index) {
+    size_t count = 0;
+    const uint32_t* ids = history_legacy_disinfection_id_list(src, count);
+    return ids && legacy_index < count ? ids[legacy_index] : 0;
+}
+
+inline int history_legacy_disinfection_stored_index(HistoryJournalSource src,
+                                                    size_t current_index) {
+    const uint32_t id = history_series_id(src, current_index);
+    if (!id) return -1;
+    size_t count = 0;
+    const uint32_t* ids = history_legacy_disinfection_id_list(src, count);
+    return history_series_index(ids, count, id);
+}
+
+inline bool history_legacy_disinfection_layout_matches(const HistoryJournalHeader& h) {
+    static constexpr uint16_t rings[3] = {31, 12, 3};
+    if (!history_journal_trend_header_structural_matches(h) ||
+        h.catalog_fp != history_legacy_disinfection_catalog_fingerprint()) return false;
+    for (size_t i = 0; i < 3; ++i)
+        if (h.rings[i] != rings[i]) return false;
+    return h.value_count == rings[h.source];
 }
 
 // ── Absolute buckets ────────────────────────────────────────────────────────────────────────────
