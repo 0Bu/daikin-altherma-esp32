@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Host-side mock build: compile and run the IDF-free pure-logic tests (test/) with the system
 # toolchain — no ESP-IDF, no Docker, no board. Catches decode/config/discovery regressions in
-# seconds, in any environment (local terminal, CI, Claude Code web session). This is the real
-# "run it and see" loop a cloud session has (it cannot build firmware or USB-flash).
+# seconds, in any environment (local terminal, CI, or agent sandbox). This is the fast hardware-free
+# "run it and see" loop even when a session has neither Docker nor USB access.
 #
 # Usage: scripts/run-mock-tests.sh [--coverage]
 # Requires a C++17 host compiler (g++/clang++); cmake is used when present, with a direct-

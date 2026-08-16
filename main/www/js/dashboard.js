@@ -846,7 +846,8 @@ const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 // endpoint and the MQTT heartbeat are for. As curves they answer the one memory question this
 // firmware actually has: is it DRIFTING? A leak shows as a slope; fragmentation shows as the two
 // lines separating, free heap holding while the largest block sinks. Nothing else in the UI can say
-// that, and it is the failure mode the whole "Memory constraints" section of CLAUDE.md is about.
+// that, and it is the failure mode the "Memory, concurrency, and HTTP safety" section of AGENTS.md
+// is about.
 //
 // Both rows are expandable exactly like a value row — same accordion, same chart, same scrub and pin
 // — and attach their series by TREND ID, since the row labels here are translated and there is no

@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "legacy_root": ".claude",
+  "canonical_instructions": "AGENTS.md",
+  "legacy_tree_sha256_format": "sha256(path-utf8 + NUL + raw-bytes + NUL for each tracked .claude file in bytewise path order)",
+  "legacy_tree_sha256": "c41d7da6fc2991fd4c00fd55daa43ce9013e86e2071cc8fc3d08a0e9185c7dd4",
+  "entries": [
+    {
+      "source": ".claude/CLAUDE.md",
+      "status": "adapter",
+      "targets": ["AGENTS.md", "docs/ARCHITECTURE.md"]
+    },
+    {
+      "source": ".claude/agents/doc-drift-checker.md",
+      "status": "canonical",
+      "targets": [".codex/agents/doc-drift-checker.toml"]
+    },
+    {
+      "source": ".claude/agents/heap-safety-reviewer.md",
+      "status": "canonical",
+      "targets": [".codex/agents/heap-safety-reviewer.toml"]
+    },
+    {
+      "source": ".claude/agents/x10a-decode-reviewer.md",
+      "status": "canonical",
+      "targets": [".codex/agents/x10a-decode-reviewer.toml"]
+    },
+    {
+      "source": ".claude/hooks/clang-format-edit.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/agent_hook.py"]
+    },
+    {
+      "source": ".claude/hooks/crash-triage-context.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/agent_hook.py", ".codex/hooks.json"]
+    },
+    {
+      "source": ".claude/hooks/guard-partitions.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/agent_hook.py"]
+    },
+    {
+      "source": ".claude/hooks/guard-secrets.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/agent_hook.py"]
+    },
+    {
+      "source": ".claude/hooks/pr-gate-lib.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/pr-gate-lib.sh"]
+    },
+    {
+      "source": ".claude/hooks/report-capabilities.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/agent_hook.py"]
+    },
+    {
+      "source": ".claude/hooks/require-absence-review.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/require-pr-gates.sh"]
+    },
+    {
+      "source": ".claude/hooks/require-domain-review.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/require-pr-gates.sh"]
+    },
+    {
+      "source": ".claude/hooks/require-feature-docs.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/require-pr-gates.sh"]
+    },
+    {
+      "source": ".claude/hooks/require-project-review.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/require-pr-gates.sh"]
+    },
+    {
+      "source": ".claude/hooks/require-schematic-review.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/require-pr-gates.sh"]
+    },
+    {
+      "source": ".claude/hooks/require-ui-gif.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/require-pr-gates.sh"]
+    },
+    {
+      "source": ".claude/hooks/require-ui-use-case-review.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/require-pr-gates.sh"]
+    },
+    {
+      "source": ".claude/hooks/run-logic-tests.sh",
+      "status": "adapter",
+      "targets": ["tools/agent-hooks/agent_hook.py", ".codex/hooks.json"]
+    },
+    {
+      "source": ".claude/settings.json",
+      "status": "adapter",
+      "targets": [".codex/config.toml", ".codex/hooks.json"]
+    },
+    {
+      "source": ".claude/skills/absence-review/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/absence-review/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/add-logic-test/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/add-logic-test/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/bug-triage/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/bug-triage/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/device-triage/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/device-triage/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/diagnostic-evidence-review/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/diagnostic-evidence-review/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/diagnostic-evidence-review/agents/openai.yaml",
+      "status": "canonical",
+      "targets": [".agents/skills/diagnostic-evidence-review/agents/openai.yaml"]
+    },
+    {
+      "source": ".claude/skills/domain-review/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/domain-review/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/feature-docs/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/feature-docs/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/flash-esp32/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/flash-esp32/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/metrics-audit/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/metrics-audit/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/project-review/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/project-review/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/renovate-review/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/renovate-review/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/schematic-review/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/schematic-review/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/ui-gif/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/ui-gif/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/ui-use-case-review/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/ui-use-case-review/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/ui-use-case-review/agents/openai.yaml",
+      "status": "canonical",
+      "targets": [".agents/skills/ui-use-case-review/agents/openai.yaml"]
+    },
+    {
+      "source": ".claude/skills/user-docs-review/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/user-docs-review/SKILL.md"]
+    },
+    {
+      "source": ".claude/skills/user-docs-review/agents/openai.yaml",
+      "status": "canonical",
+      "targets": [".agents/skills/user-docs-review/agents/openai.yaml"]
+    },
+    {
+      "source": ".claude/skills/value-plausibility/SKILL.md",
+      "status": "canonical",
+      "targets": [".agents/skills/value-plausibility/SKILL.md"]
+    }
+  ]
+}

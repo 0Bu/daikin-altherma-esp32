@@ -134,7 +134,8 @@ CrashInfo diag_crash_info() {
 // `dismissed` is written from the httpd task while the poll task's WS broadcaster and the MQTT task
 // read s_ci concurrently. That is a single byte store which only ever goes false -> true, so a
 // concurrent reader sees one state or the other and both are self-consistent renderings of the same
-// CrashInfo — no lock, and none of the paths involved may take one anyway (see CLAUDE.md).
+// CrashInfo — no lock, and none of the paths involved may take one anyway (see AGENTS.md → Memory,
+// concurrency, and HTTP safety).
 // The IDF-free mirror in logic/crashinfo.hpp must be the real value, or the rule above would key on
 // a code the device never returns and quietly go back to blocking every dismissal on a board with no
 // coredump partition.

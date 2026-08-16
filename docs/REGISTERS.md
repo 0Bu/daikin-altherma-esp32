@@ -332,7 +332,7 @@ the I/U capacity code (`0x60` offset 6).
 >
 > **The conv in the table above is deliberately still `114`** — it records what the generated `def/`
 > tables carry, and those are machine output from maintainer-only offline tooling not distributed in this repo
-> (`.claude/CLAUDE.md`: never hand-edit one). The correction is applied by
+> ([`AGENTS.md`](../AGENTS.md): never hand-edit one). The correction is applied by
 > `logic/conv_override.hpp`, which maps `(0x10, 6, 114) → 109` at every point a row enters the
 > pipeline, carries the evidence beside the rule, and is asserted against all 54 wire integers and
 > the whole 45-profile catalog in `test/test_logic.cpp`. conv `114` itself is untouched — it is a

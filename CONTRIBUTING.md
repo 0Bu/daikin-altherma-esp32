@@ -44,7 +44,7 @@ scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data
 tools/absence/selftest.sh          # can the source-absence matrix still go red?
 scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
 scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
-scripts/run-claude-md-budget.sh    # is .claude/CLAUDE.md still inside its byte budget?
+scripts/run-agent-instructions-budget.sh # are agent budgets, mappings and safety parity intact?
 ```
 
 `run-mock-tests.sh --coverage` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
@@ -131,7 +131,7 @@ plain-language section. All maintained repository Markdown is English-only; loca
 in the UI translation tables, not in `docs/` or review skills. The guide's
 source stamp covers the evaluator and visible diagnosis contract, so a changed threshold, result or
 wording makes the gate fail even when no row was added. Run the
-[`user-docs-review` skill](.claude/skills/user-docs-review/SKILL.md), update the prose first, and only
+[`$user-docs-review` skill](.agents/skills/user-docs-review/SKILL.md), update the prose first, and only
 then use `scripts/run-user-docs-audit.sh --update` to record that review. The stamp is not an
 alternative to reviewing the diff. `tools/user_docs/selftest.sh` proves the gate still rejects a
 missing localization/action/section, non-English documentation, false whole-plant reassurance, and
@@ -162,10 +162,10 @@ branch its sensor does not read) are refused outright. Touching the audit means 
 `tools/schematic/selftest.sh`, which re-seeds every one of those historical defects (one `run_case`
 each, so `grep -c run_case` is the count) and asserts each is still caught. What it *cannot* decide
 — is the drawing still true of the plant, is a new part in the right place, is the German copy right
-— it stays quiet about; that half is the maintainer's `/schematic-review`, which is a **merge gate**
-on any PR that reaches the drawing, its contract or the tools that judge it (the regex in
-`.claude/hooks/require-schematic-review.sh` is the one definition — it is maintainer tooling, so as
-an outside contributor you never run it; assume any change under `main/www/` needs it).
+— it stays quiet about; that half is the maintainer's `$schematic-review`, which is a **merge gate**
+on any PR that reaches the drawing, its contract or the tools that judge it. The runner-neutral gate
+under `tools/agent-hooks/` is the one definition; `.claude/hooks/` remains a compatibility adapter.
+As an outside contributor you never run it; assume any change under `main/www/` needs it.
 
 `run-ui-use-case-tests.sh` exercises the production UI wiring rather than merely parsing it. Its
 matrix must name every production modal and drives Settings/Back, open, Cancel, backdrop, Escape,
@@ -173,13 +173,14 @@ accepted and rejected Save paths, representative invalid input, board-dependent 
 the two-step bug-report dialog. It also runs every existing `test_ui_*.mjs` contract and a selftest
 that re-introduces the historical ENV III failure where visible Cancel and Save buttons called an
 undefined close function. CI runs the same command in the required `gates` job. For UI-relevant
-changes, the maintainer's `/ui-use-case-review` adds real narrow/desktop click-through and records a
-SHA-stamped result; `.claude/hooks/require-ui-use-case-review.sh` requires that current record and
-reruns the deterministic suite immediately before a command-line merge.
+changes, the maintainer's `$ui-use-case-review` adds real narrow/desktop click-through and records a
+SHA-stamped result. The runner-neutral aggregate PR gate used by both Codex and the retained Claude
+adapters requires that current record and reruns the deterministic suite immediately before a
+command-line merge.
 
-`/absence-review` is the same shape for the states above: **conditional**, required when a PR
-touches an optional source's lifecycle or a surface that reports one, with
-`.claude/hooks/require-absence-review.sh` as the single definition of that set. Like the schematic
+`$absence-review` is the same shape for the states above: **conditional**, required when a PR
+touches an optional source's lifecycle or a surface that reports one, with the neutral hook core as
+the single definition of that set. Like the schematic
 gate it exists because the mechanical half cannot judge whether a *new* source is in the matrix,
 whether removing one source quietly removed another, or whether the copy names a blocker the reader
 can actually act on.
@@ -216,7 +217,7 @@ recording. The cost of the old arrangement was not hypothetical: with the record
 nobody's merge condition, legacy-462 swapped the
 schematic's circuits and the README went stale the same day, against a stamp written hours earlier.
 If you are an outside contributor and cannot re-record, say so in the PR and leave it to the
-maintainer's `/ui-gif` skill rather than touching the stamp.
+maintainer's `$ui-gif` skill (legacy Claude spelling `/ui-gif`) rather than touching the stamp.
 
 **A UI change is not automatically a recording change**, and this gate is careful about the
 difference. The CI step is a fingerprint comparison that takes a second and passes unless the
@@ -225,7 +226,7 @@ charts or the value list touches the same three files as the schematic and still
 here — what the gate reads is the `#schem` figure, the `.sc-*` rules and the six painting
 functions, not the files containing them.
 
-The maintainer's `/ui-gif` review is required when this PR **re-made** the recording, because a new
+The maintainer's `$ui-gif` review is required when this PR **re-made** the recording, because a new
 recording is the one thing no check can judge. A **stale** one is not a review question at all: the
 merge hook refuses outright, and no ticked checkbox overrides it. A review record is evidence that
 somebody looked at a recording, and that can never outrank the mechanical fact that the recording on
@@ -257,7 +258,7 @@ It films the real UI (`index.html` + `style.css` + the ordered
 [`app.sources`](main/www/app.sources) fragments, spliced the way the firmware build splices them)
 with only the *device* stubbed, so what the GIF shows is what `renderLive()` drew.
 Look at the result before committing: the gate proves the recording is current, never that it is a
-good picture — that half is the maintainer's `/ui-gif` skill, itself a merge gate.
+good picture — that half is the maintainer's `$ui-gif` skill, itself a merge gate.
 `tools/uigif/selftest.sh` proves the gate still catches each way the recording can go stale, and
 that the stamp still cannot be earned without one.
 
@@ -274,14 +275,40 @@ looked at every table would have called it clean. It does **not** require an id 
 profile: the catalog genuinely disagrees across models, and the docs should state a majority id and
 name the alternatives beside it. `tools/docs/selftest.sh` re-seeds the defects it was built for.
 
-`run-claude-md-budget.sh` keeps [`.claude/CLAUDE.md`](.claude/CLAUDE.md) inside a byte budget. That
-file is loaded into every Claude Code session, so every byte in it is paid on every turn, and it
-grows by accretion — each merged PR is tempted to leave its whole story there (it reached 329 KB
-before the 2026-08 reduction). The file's own header states the editorial rule the gate enforces:
-a new finding lands there as the *rule* plus a pointer, while the measurement and the defect story
-go to `docs/` (ARCHITECTURE.md for the chassis, PLANT.md for plant features, this file for the
-gates). When it fires, move narrative out — never trim a rule, and never raise the budget to clear
-the red. `tools/claudemd/selftest.sh` proves it fails closed.
+`run-agent-instructions-budget.sh` is the canonical runner-neutral agent contract. It keeps the
+always-loaded [`AGENTS.md`](AGENTS.md) below 24 KiB and the Claude compatibility instructions below
+64 KiB, validates every tracked `.claude` file exactly once against
+`.codex/migration-manifest.json`, requires every canonical/adapter target, checks skill identity and
+OpenAI metadata parity, and verifies the explicit safety invariants occur in both instruction
+files. Narrative belongs in `docs/`; do not raise a budget to clear a red gate.
+
+`scripts/run-claude-md-budget.sh` remains a compatibility wrapper with its historical environment
+variables and exit codes. New automation must call the neutral command. The mutation canaries are:
+
+| Canary | Expected evidence |
+|---|---|
+| Missing instruction file or unreadable manifest input | Exit 2; never a vacuous pass |
+| Canonical instructions over 24 KiB or Claude compatibility instructions over 64 KiB | Exit 1 with the measured byte count |
+| Missing, extra or duplicate tracked `.claude` mapping; missing declared target | Non-zero mapping failure |
+| Canonical/legacy skill-set or name drift; changed `agents/openai.yaml` | Non-zero parity failure |
+| A required safety invariant absent from either instruction file | Non-zero parity failure naming the invariant |
+| Legacy wrapper over budget / missing / within budget | Fail / exit 2 / pass, proved by `tools/claudemd/selftest.sh` |
+
+Run `tools/agent-config/selftest.sh` after changing agent instructions, the migration manifest,
+skills, subagent definitions, hook mappings, or the checker itself.
+
+The same `gates` job runs `tools/agent-policy/selftest.sh` and, on a pull request, invokes
+`scripts/run-agent-policy.sh` with the current PR body, head SHA and complete changed-file list from
+GitHub. Missing/partial inputs, an event SHA that is no longer the PR head, an unchecked or missing
+required review, and a stamp for an older commit all exit 2. A current `$name` record passes;
+transitional `/name` records pass the same parser. Editing the PR body does not start a workflow, so
+after the maintainer records the reviews, re-run the existing `gates` job; it fetches the live body
+rather than the old event snapshot. Any later commit invalidates every prior stamp.
+
+This CI parser proves exact record syntax, applicability, completeness and head freshness; it cannot
+prove who last edited a PR body. An outside contributor must still leave the section alone, and a
+maintainer must inspect/record the reviews before using their GitHub merge permission. Repository
+merge authorization and the branch ruleset are the actor trust boundary, not a checked Markdown box.
 
 Four more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
 need them locally — run them if you touch
@@ -369,7 +396,8 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
 - **Heap is the binding constraint** (the largest *contiguous* free block, not total free). HTTP
   handlers must stay under the shared OOM try/catch; every allocating task loop must self-guard; never
   allocate while holding a mutex. The rules and the reasoning are in
-  [`.claude/CLAUDE.md`](.claude/CLAUDE.md) → "Memory constraints".
+  [`AGENTS.md`](AGENTS.md) → "Memory, concurrency, and HTTP safety"; `.claude/CLAUDE.md` remains the
+  Claude compatibility entry point.
 - C/C++ formatting is [`.clang-format`](.clang-format). Match the surrounding comment density —
   explaining *why*, not *what*, is the house style.
 - **Warnings are part of the contract in `main/`.** [`main/CMakeLists.txt`](main/CMakeLists.txt) pins
@@ -389,7 +417,7 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
   deepest httpd path (`POST /mcp`, which reuses the same builder) from 14512 bytes of a 16384 stack
   to 6480. Deleting that one line silently restores a ~1.8 KB margin. If you touch it, re-measure —
   the frame is read off the ELF's `entry a1,N`, never off an idle heap reading, and the command is in
-  [`.claude/CLAUDE.md`](.claude/CLAUDE.md) under "Memory constraints".
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#memory-constraints).
 - **There is deliberately no clang-tidy or cppcheck gate**, and that was measured rather than
   assumed. Over `main/logic/` + `main/def/`, a blanket config reports ~7000 findings — over half of
   them this project's own `CHECK` macro — and a curated bug-finding set reports ~50 with **zero** real
@@ -417,11 +445,11 @@ silence a *new* finding on code your PR touches — that is the gate working.
 ## Pull requests
 
 Fill in [the template](.github/pull_request_template.md). Seven checkboxes on it
-(`/project-review`, `/feature-docs`, `/domain-review`, `/schematic-review`,
-`/ui-use-case-review`, `/absence-review`, `/ui-gif`) are **maintainer-only** —
-they invoke Claude Code skills in this repo's `.claude/` directory and are not something an outside
-contributor can run. Leave them unchecked; the maintainer runs them before merge. Your equivalents
-are the scripts above plus an honest note about hardware.
+(`$project-review`, `$feature-docs`, `$domain-review`, `$schematic-review`,
+`$ui-use-case-review`, `$absence-review`, `$ui-gif`) are **maintainer-only** repository skills under
+`.agents/skills/`; legacy Claude `/name` aliases remain accepted during migration. They are not
+something an outside contributor can run. Leave them unchecked; the maintainer runs them before
+merge. Your equivalents are the scripts above plus an honest note about hardware.
 
 `main` is kept **strictly linear**, so PRs land as **squash merges** — enforced by a branch ruleset
 on `main` (require a pull request, require linear history, and the `gates` / `build` checks green),

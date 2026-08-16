@@ -120,8 +120,8 @@ using Lock = SemGuard;
 // The row a locator addresses, or -1. Composes logic/checkup.hpp's pure predicate rather than taking
 // the parallel-array checkup_select(): building (reg, off, conv) views for ~116 rows would cost a
 // kilobyte of the POLL TASK's 8 KB stack every second, and the stack is the budget that fails
-// silently on this board (CLAUDE.md → Memory constraints). checkup_select() still exists — it is what
-// the catalog test sweeps the whole profile set with.
+// silently on this board (AGENTS.md → Memory, concurrency, and HTTP safety). checkup_select() still
+// exists — it is what the catalog test sweeps the whole profile set with.
 int find_row(const CachedValue* v, size_t n, const logic::CheckupLocator& l) {
     for (size_t i = 0; i < n; i++)
         if (logic::checkup_row_matches(l, v[i].reg, v[i].off, v[i].conv)) return static_cast<int>(i);

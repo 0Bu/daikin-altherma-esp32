@@ -3,7 +3,7 @@
 #
 # Usage:
 #   scripts/run-diagnostic-evidence-audit.sh           # validate; CI always uses this form
-#   scripts/run-diagnostic-evidence-audit.sh --update  # only after /diagnostic-evidence-review
+#   scripts/run-diagnostic-evidence-audit.sh --update  # only after $diagnostic-evidence-review
 # Exit: 0 = clean/updated, 1 = findings, 2 = usage/runtime error. Requires node >=18.
 set -euo pipefail
 cd "$(dirname "$0")/.."

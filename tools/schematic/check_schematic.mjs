@@ -39,7 +39,7 @@
 // the local loop, not to CI.
 //
 // Where a question cannot be DECIDED mechanically — is this still a true picture of the plant, is a
-// new element in the right place, is the German copy right — this stays quiet and the /schematic-review
+// new element in the right place, is the German copy right — this stays quiet and the $schematic-review
 // skill (the judgement half) answers it. A gate that guesses teaches people to ignore it.
 //
 // Usage:  node tools/schematic/check_schematic.mjs [--html <index.html>] [--app <app.sources|app.js>]
@@ -1327,5 +1327,5 @@ console.error(
   `  A finding that is CORRECT as it stands goes in ${EXC} — copy its key: line, with a reason.\n` +
   '  S001 and E002 are refused there: fix the drawing.\n' +
   '  What this CANNOT decide — is the picture still true, is a new part in the right place, is the\n' +
-  '  German copy right — is the /schematic-review skill\'s half.');
+  '  German copy right — is the $schematic-review skill\'s half.');
 process.exit(1);

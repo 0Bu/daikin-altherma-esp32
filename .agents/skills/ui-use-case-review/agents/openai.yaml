@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI Use-Case Review"
+  short_description: "Test all UI flows before merge"
+  default_prompt: "Use $ui-use-case-review to exercise every affected UI path and block merge on failures."

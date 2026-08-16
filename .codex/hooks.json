@@ -1,0 +1,91 @@
+{
+  "description": "Runner-neutral project safety, lifecycle, review-policy, formatting, and subagent-context hooks.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "^(?:startup|resume|clear|compact)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" capabilities",
+            "statusMessage": "Detecting repository capabilities",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" subagent-context",
+            "statusMessage": "Loading repository subagent boundaries",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" prompt-context",
+            "statusMessage": "Checking whether crash-triage context applies",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" stop-logic-tests",
+            "statusMessage": "Running changed host logic tests",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(?:Read|Edit|Write|Bash|apply_patch|exec_command|shell|shell_command)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" pre-tool-guards --runner codex",
+            "statusMessage": "Checking secrets and partition safety",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "^(?:Bash|exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request))$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/tools/agent-hooks/require-pr-gates.sh\"",
+            "statusMessage": "Checking current PR review evidence",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(?:Edit|Write|apply_patch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" format",
+            "statusMessage": "Formatting edited C and C++ files",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

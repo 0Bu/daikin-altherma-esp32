@@ -1,6 +1,6 @@
 ---
 name: project-review
-description: Pre-merge project review — check the diff for doc drift (CLAUDE.md ↔ docs ↔ code), memory-safety on HTTP handlers, multi-target build implications, and that new pure logic has host tests. Use before opening/merging a PR.
+description: Pre-merge project review — check the diff for doc drift (AGENTS.md ↔ docs ↔ code), memory safety on HTTP handlers, target/build implications, and host tests for new pure logic. Use before opening or merging a PR. Review is read-only unless the user explicitly requests fixes or publication.
 model: opus
 ---
 
@@ -11,7 +11,7 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
 ## Checklist
 
 1. **Doc drift.** If the diff changed the component map, NVS keys, the HTTP API, the config
-   model, or the poll/OTA/MQTT behaviour, are `.claude/CLAUDE.md`, `docs/README.md` and
+   model, or the poll/OTA/MQTT behaviour, are `AGENTS.md`, `docs/README.md` and
    `docs/ARCHITECTURE.md` updated to match? They must not disagree with the code.
 2. **Memory safety.** New HTTP handlers run under the OOM discipline (try/catch → 503, no big
    contiguous `std::string`, stream large output). New large allocations (JSON, TLS) size-checked.
@@ -27,10 +27,11 @@ Report findings grouped by the above; block on doc drift and untested logic.
 
 ## Recording the pass (merge gate — no file marker)
 
-The `require-project-review.sh` PreToolUse hook refuses every PR merge (`gh pr merge` **and**
-`mcp__github__merge_pull_request`) until this review is recorded in the PR body as a ticked,
-SHA-stamped checkbox whose stamp still matches the PR head. So when the review passes with **no
-blocking findings**, tick + stamp the PR's `/project-review` box with the reviewed commit:
+The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) gates the
+documented host-, repository-, numeric-PR- and full-head-bound `gh` CLI merge path; direct
+REST/GraphQL/MCP merge and auto-merge paths are blocked. CI independently enforces the same
+current-head evidence. When the review passes with **no blocking findings**, tick + stamp the PR's
+`/project-review` box with the reviewed commit:
 
 ```
 - [x] `/project-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD

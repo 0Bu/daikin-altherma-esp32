@@ -5,100 +5,22 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read|Edit|Write|Bash",
+        "matcher": "^(?:Read|Edit|Write|Bash)$",
         "hooks": [
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard-secrets.sh\"",
-            "statusMessage": "Checking for private key material\u2026"
+            "statusMessage": "Checking secrets and partition safety…"
           }
         ]
       },
       {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard-partitions.sh\"",
-            "statusMessage": "Checking partition-table safety\u2026"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
+        "matcher": "^(?:Bash|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request))$",
         "hooks": [
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-project-review.sh\"",
-            "statusMessage": "Checking project-review gate\u2026"
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-feature-docs.sh\"",
-            "statusMessage": "Checking feature-docs gate\u2026"
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-domain-review.sh\"",
-            "statusMessage": "Checking domain-correctness gate\u2026"
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-schematic-review.sh\""
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-use-case-review.sh\"",
-            "statusMessage": "Running complete UI use-case gate\u2026"
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh\"",
-            "statusMessage": "Checking source-absence gate\u2026"
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-gif.sh\"",
-            "statusMessage": "Checking README-recording gate\u2026"
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__github__merge_pull_request|mcp__codex_apps__github_merge_pull_request",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-project-review.sh\"",
-            "statusMessage": "Checking project-review gate\u2026"
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-feature-docs.sh\"",
-            "statusMessage": "Checking feature-docs gate\u2026"
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-domain-review.sh\"",
-            "statusMessage": "Checking domain-correctness gate\u2026"
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-schematic-review.sh\""
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-use-case-review.sh\"",
-            "statusMessage": "Running complete UI use-case gate\u2026"
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh\"",
-            "statusMessage": "Checking source-absence gate\u2026"
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-gif.sh\"",
-            "statusMessage": "Checking README-recording gate\u2026"
+            "statusMessage": "Checking current PR review evidence…"
           }
         ]
       }
@@ -109,19 +31,19 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/report-capabilities.sh\"",
-            "statusMessage": "Detecting toolchain capabilities\u2026"
+            "statusMessage": "Detecting toolchain capabilities…"
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "^(?:Edit|Write)$",
         "hooks": [
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/clang-format-edit.sh\"",
-            "statusMessage": "Formatting edited C/C++\u2026"
+            "statusMessage": "Formatting edited C/C++…"
           }
         ]
       }
@@ -132,7 +54,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/run-logic-tests.sh\"",
-            "statusMessage": "Running host logic tests\u2026"
+            "statusMessage": "Running host logic tests…"
           }
         ]
       }
@@ -143,7 +65,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/crash-triage-context.sh\"",
-            "statusMessage": "Checking for a device-crash report\u2026"
+            "statusMessage": "Checking for a device-crash report…"
           }
         ]
       }

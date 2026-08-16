@@ -106,8 +106,53 @@ try {
       `public-readiness audit rejected ${name} for the wrong reason`);
   }
   fs.writeFileSync(contributingFile, originalContributing);
+
+  // The tracked Claude compatibility settings are public repository input and executable after
+  // project trust. Keep them least-privilege and consolidated: no shell auto-grant may return, and
+  // one old per-policy hook must not silently turn the aggregate review gate back into N dispatches.
+  const settingsFile = path.join(seededRoot, ".claude/settings.json");
+  const originalSettingsText = fs.readFileSync(settingsFile, "utf8");
+  const settingsSeeds = [
+    [
+      "missing explicit shell auto-grant list",
+      (settings) => { delete settings.permissions.allow; },
+      /auto-grant no shell commands/,
+    ],
+    [
+      "tracked shell auto-grant",
+      (settings) => { settings.permissions.allow = ["Bash(git status:*)"]; },
+      /auto-grant no shell commands/,
+    ],
+    [
+      "duplicate legacy policy dispatch",
+      (settings) => {
+        settings.hooks.PreToolUse.push({
+          matcher: "Bash",
+          hooks: [{
+            type: "command",
+            command: 'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-domain-review.sh"',
+          }],
+        });
+      },
+      /PreToolUse Claude hook dispatch count drifted/,
+    ],
+  ];
+  for (const [name, mutate, expected] of settingsSeeds) {
+    const settings = JSON.parse(originalSettingsText);
+    mutate(settings);
+    fs.writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
+    const seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
+      cwd: seededRoot,
+      env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
+      encoding: "utf8",
+    });
+    assert.notEqual(seeded.status, 0, `public-readiness audit accepted ${name}`);
+    assert.match(`${seeded.stdout}\n${seeded.stderr}`, expected,
+      `public-readiness audit rejected ${name} for the wrong reason`);
+  }
+  fs.writeFileSync(settingsFile, originalSettingsText);
   console.log(
-    "public readiness: Node + Git/no-rg baseline, four private fixtures, and two legacy-link mutations pass",
+    "public readiness: Node + Git/no-rg baseline, four private fixtures, two legacy-link mutations, and three Claude-settings mutations pass",
   );
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });

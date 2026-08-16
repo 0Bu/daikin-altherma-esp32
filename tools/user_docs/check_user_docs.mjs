@@ -8,7 +8,7 @@
 //
 // The prose itself still needs human judgement. The source fingerprint closes the maintenance gap:
 // any change to the evaluator or the visible diagnosis contract makes the guide stale until the
-// /user-docs-review skill has reviewed the change and deliberately refreshed the stamp.
+// $user-docs-review skill has reviewed the change and deliberately refreshed the stamp.
 //
 // Usage: node tools/user_docs/check_user_docs.mjs [--root DIR] [--app FILE] [--doc FILE]
 //        [--evidence FILE] [--update]

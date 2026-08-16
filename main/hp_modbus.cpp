@@ -1073,9 +1073,10 @@ static void mb_poll_once() {
 
 static void mb_task_start_if_enabled();
 
-// The task. Self-guarded like every other allocating FreeRTOS loop here (CLAUDE.md → Memory
-// constraints): an escaping std::bad_alloc would reach std::terminate and reboot the board over a
-// SECOND, optional data source — the one failure this stack must never cause the other one.
+// The task. Self-guarded like every other allocating FreeRTOS loop here (AGENTS.md → Memory,
+// concurrency, and HTTP safety): an escaping std::bad_alloc would reach std::terminate and reboot
+// the board over a SECOND, optional data source — the one failure this stack must never cause the
+// other one.
 //
 // It exits itself when the HomeHub is disabled, which is what makes "no HomeHub, no stack" literal
 // rather than a claim: the task, its 6 KB stack and the socket all go away.

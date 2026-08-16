@@ -37,9 +37,12 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
 3. **History — always, before concluding anything.** `/status` and `/diag` only show **now**: uptime
    is a single number (you cannot see a reboot from it) and the `/diag` ring is a few hundred lines of
    RAM that a chatty failure mode (e.g. `HP timeout` every ~0.3 s) overwrites within a minute. The
-   device forwards **every** `diag_printf()` line to syslog (`syslog.cpp`), so the real history lives
-   in **VictoriaLogs** — use the `victoria-logs` MCP (`mcp__victoria-logs__query` / `streams` / `hits`).
-   Check `/status.syslog` first: `{configured:true, resolved:true}` means the device is shipping logs.
+   device offers each non-syslog `diag_printf()` line to a bounded, best-effort syslog queue
+   (`syslog.cpp`), so **delivered** durable history lives in **VictoriaLogs** — use the
+   `victoria-logs` MCP (`mcp__victoria-logs__query` / `streams` / `hits`). Queue pressure, DNS,
+   allocation, or send failures can drop lines; VictoriaLogs is never complete negative evidence.
+   Check `/status.syslog` first: `{configured:true, resolved:true}` means delivery is configured and
+   currently resolved, not that every line arrived.
 
    **Select by stream label, not by word.** The device name is a *stream label*; a bare word query
    searches `_msg` and silently returns almost nothing — this is the easy mistake:
@@ -51,24 +54,31 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
    Confirm the stream exists and its volume with `mcp__victoria-logs__streams` (query `*`) before
    concluding "no logs". Timestamps (`_time`) are **UTC**; the user's wall clock may not be.
 
-   **Reconstruct boots from the uptime stamp — the key technique.** Every `_msg` is prefixed with the
-   device's own uptime, `[  1234.567]`. It resets to ~0 on every boot, so *an uptime that jumps
-   backwards is a reboot* — the only way to see reboot history at all. `mqtt: connected` is the
-   cleanest per-boot marker (one per boot, at ~8–9 s uptime):
+   **Reconstruct boots from replay plus uptime.** Query the intended one-per-boot `boot:` replay
+   first. A partial replay failure can resend it on the next resolve, so deduplicate it with uptime
+   epochs rather than counting records blindly. Ordinary `_msg` lines carry the device's uptime
+   prefix, `[  1234.567]`; it resets to ~0 on every boot, so an uptime jump backwards corroborates a
+   reboot. MQTT connection lines are reconnect-capable supporting evidence, not one-per-boot markers:
    ```
-   {hostname="daikin-altherma-esp32"} "mqtt: connected"          # 1 line per boot
+   {hostname="daikin-altherma-esp32"} "boot:"                    # best-effort boot replay
+   {hostname="daikin-altherma-esp32"} "client connected"        # connect or reconnect
    {hostname="daikin-altherma-esp32"} NOT "HP timeout" NOT "detect:"   # drop the poll spam
    ```
-   Several `mqtt: connected` at ~8 s uptime, tens of seconds apart = a **reboot burst / boot loop**.
-   Cross-check `uptime_s` from step 2: `_time − uptime_s` = the boot instant; if that lands far after
-   the last burst, the device recovered and has been stable since. Correlate broker-side with
-   `{kubernetes.container_name="mosquitto"}`.
+   Multiple `client connected` records can be ordinary reconnects. Group by uptime epochs. For each
+   historical prefixed record, `_time − [embedded uptime]` estimates that epoch's boot instant;
+   separately, snapshot `_time − /status.uptime_s` estimates the current boot instant. A cluster of
+   low-uptime epochs is a **reboot burst / boot loop**; if the current epoch starts later, the device
+   recovered. Correlate broker-side with
+   `{kubernetes.container_name="mosquitto"}` and keep missing records bounded by delivery failures.
 
-   **Known gap — do not expect the crash line here.** `diag_crash_capture()` runs at `main.cpp:45`,
-   before WiFi and the syslog task exist, so its `crash: reset=… coredump=…` line reaches the RAM ring
-   **only** and is never forwarded. Absence of a `crash:` line in VictoriaLogs is therefore **not**
-   evidence of no crash — take the reason from `/status.last_crash` (step 4), and the boot history
-   from the uptime resets above.
+   **Use the boot/crash replay, but keep absence bounded.** `diag_crash_capture()` runs before WiFi
+   and the syslog task exist, so the live line first reaches only the RAM ring. Once a collector DNS
+   name resolves, `syslog.cpp` sends one `boot:` record and up to three `crash:` records directly to
+   syslog. Query `{hostname="daikin-altherma-esp32"} "crash:"` as part of the history review. These
+   replayed records intentionally have no `[uptime]` prefix, and their timestamp dates the replay,
+   not the previous boot's crash. Replay is best-effort and can be skipped on allocation/send/DNS
+   failure, so absence still does **not** prove that no crash happened; cross-check
+   `/status.last_crash` (step 4) and the uptime resets above.
 
 4. **Crash?** If `/status.last_crash` is non-null, it already carries a partial picture from the
    boot-time cache — report it first, no download needed:

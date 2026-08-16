@@ -110,7 +110,7 @@ void history_checkup_reset();
 
 // Copy trend `t`'s samples OLDEST-FIRST into `out`. Returns the count written (0 .. HISTORY_SAMPLES,
 // and 0 when the profile carries no such row or nothing has been recorded yet). Non-allocating under
-// the lock — a plain copy of int16s, per CLAUDE.md's "never allocate while holding a mutex".
+// the lock — a plain copy of int16s, per AGENTS.md → Memory, concurrency, and HTTP safety.
 size_t history_snapshot(size_t t, logic::HistorySample* out, size_t max);
 
 // Copy the HomeHub series for history slot `t` (logic::HOMEHUB_HISTORIES), oldest first.

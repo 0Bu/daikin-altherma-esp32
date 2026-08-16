@@ -63,8 +63,8 @@ void dwell_reset();
 void dwell_forget();
 
 // What this board can say about one row, or `known == false` when the answer is nothing. Copies a
-// plain POD out under the lock, so nothing allocates inside the critical section (CLAUDE.md →
-// never allocate while holding a mutex).
+// plain POD out under the lock, so nothing allocates inside the critical section (AGENTS.md →
+// Memory, concurrency, and HTTP safety).
 logic::DwellReading dwell_reading(uint8_t reg, uint8_t off, int conv);
 
 } // namespace daik

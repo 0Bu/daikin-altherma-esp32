@@ -245,9 +245,10 @@ This is **never a brick**: no eFuses are burned and ROM download mode stays enab
 always re-flashable over USB. The containment is therefore *prevention*, not recovery:
 
 - **`scripts/require-signed.sh <app.bin>`** refuses to flash an unsigned image (it parses
-  `espsecure signature-info-v2`) and prints the signing command. The `flash-esp32` skill and the
-  CLAUDE.md flash steps run it before `esptool write_flash`, so the mode-3 crash-loop is stopped at
-  the source. Recovery from a board that already got an unsigned image = re-flash a **signed** one.
+  `espsecure signature-info-v2`) and prints the signing command. The `$flash-esp32` skill and the
+  canonical [`AGENTS.md`](../AGENTS.md) flash rules run it before `esptool write_flash`, so the
+  mode-3 crash-loop is stopped at the source. Recovery from a board that already got an unsigned
+  image = re-flash a **signed** one.
 - **`scripts/ci-build-all.sh`** closes the *Web-Serial* half of mode 3, which no host-side guard can
   reach: after building the canonical `-merged.bin`, it carves out the individual `flash_args`
   ranges, runs `require-signed.sh` on the final staged app and publishes those sparse parts. The

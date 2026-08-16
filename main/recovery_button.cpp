@@ -108,7 +108,8 @@ void button_task(void*) {
                 static_cast<unsigned long>(BUTTON_FIRE_MS / 1000));
 
     for (;;) {
-        // Same self-guard as the other task loops (.claude/CLAUDE.md → Memory constraints):
+        // Same self-guard as the other task loops (AGENTS.md → Memory, concurrency, and HTTP
+        // safety):
         // diag_printf allocates, and an escaping bad_alloc from a task entry is std::terminate ->
         // reboot. A dropped sample costs nothing — the hold is re-evaluated from scratch next tick.
         try {

@@ -2,13 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 
 // Repository documentation is English-only. Localized UI strings belong in main/www, not in the
-// maintained guides, contributor documentation, or review skills. This intentionally uses a small,
-// high-confidence German-language signature instead of pretending to be a general language model.
+// maintained guides, contributor documentation, review skills, or agent instruction/config files.
+// This intentionally uses a small, high-confidence German-language signature instead of pretending
+// to be a general language model.
 const GERMAN_CHARACTERS = /[ÄÖÜäöüß]/u;
 const HIGH_CONFIDENCE_GERMAN = /\b(?:beziehungsweise|durchgehend|einfach|fachbetrieb|gerätemeldung|hinweis|keine|keinen|keiner|können|müssen|nicht|pflege-regel|projektanteil|prüfung|prüft|rückregelungen|störung|übernommen|verfügbar|vollständig|während|warnung|wenn|werden|wurde|wurden|zusätzlich|zusatzheizer)\b/iu;
 const GERMAN_FUNCTION_WORDS = /\b(?:das|dass|dem|den|des|diese|dieser|dieses|eine|einem|einen|einer|kein|keine|keinen|keiner|nicht|sich|sind|und|vom|wenn|wird|werden|zum|zur)\b/giu;
 
 const ROOT_DOCS = [
+  "AGENTS.md",
   "CODE_OF_CONDUCT.md",
   "CONTRIBUTING.md",
   "README.md",
@@ -16,22 +18,30 @@ const ROOT_DOCS = [
   "main/www/js/README.md",
   "test/README.md",
 ];
-const DOC_TREES = ["docs", ".claude/agents", ".claude/skills"];
+const DOC_TREES = [
+  { path: "docs", extensions: [".md"] },
+  { path: ".agents/skills", extensions: [".md", ".yaml", ".yml"] },
+  { path: ".codex", extensions: [".md", ".toml"] },
+  { path: ".claude/agents", extensions: [".md"] },
+  { path: ".claude/skills", extensions: [".md", ".yaml", ".yml"] },
+];
 
-function markdownFiles(directory) {
+function documentationTreeFiles(directory, extensions) {
   if (!fs.existsSync(directory)) return [];
   const files = [];
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const target = path.join(directory, entry.name);
-    if (entry.isDirectory()) files.push(...markdownFiles(target));
-    else if (entry.isFile() && entry.name.endsWith(".md")) files.push(target);
+    if (entry.isDirectory()) files.push(...documentationTreeFiles(target, extensions));
+    else if (entry.isFile() && extensions.includes(path.extname(entry.name))) files.push(target);
   }
   return files;
 }
 
 export function documentationFiles(root) {
   const files = ROOT_DOCS.map((relative) => path.join(root, relative)).filter(fs.existsSync);
-  for (const relative of DOC_TREES) files.push(...markdownFiles(path.join(root, relative)));
+  for (const tree of DOC_TREES) {
+    files.push(...documentationTreeFiles(path.join(root, tree.path), tree.extensions));
+  }
   return [...new Set(files)].sort();
 }
 

@@ -16,7 +16,7 @@ if (args.some((arg) => /@latest\b/.test(arg))) {
 }
 
 const settings = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
-const grants = settings?.permissions?.allow ?? [];
+const grants = settings?.permissions?.allow;
 if (!Array.isArray(grants) || grants.length !== 0) {
   throw new Error(
     `tracked Claude settings must auto-grant no shell commands; found: ${JSON.stringify(grants)}`,
@@ -24,39 +24,50 @@ if (!Array.isArray(grants) || grants.length !== 0) {
 }
 
 // Project hooks are executable by design, but their settings-side surface is an exact local list:
-// no inline shell, arbitrary script path or newly-added hook becomes trusted without changing this
-// audit. This does not claim to authenticate a hook's source after project trust; it makes the
-// tracked settings contract narrow and reviewable.
-const allowedHookCommands = new Set([
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard-secrets.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard-partitions.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-project-review.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-feature-docs.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-domain-review.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-schematic-review.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-use-case-review.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-absence-review.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-gif.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/report-capabilities.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/clang-format-edit.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/run-logic-tests.sh"',
-  'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/crash-triage-context.sh"',
-]);
-const seenHookCommands = new Set();
-for (const groups of Object.values(settings?.hooks ?? {})) {
-  if (!Array.isArray(groups)) throw new Error("Claude hook groups must be arrays");
-  for (const group of groups) {
-    if (!Array.isArray(group?.hooks)) throw new Error("Claude hook entry is missing its hooks array");
-    for (const hook of group.hooks) {
-      if (hook?.type !== "command" || !allowedHookCommands.has(hook?.command)) {
-        throw new Error(`unapproved tracked Claude hook command: ${JSON.stringify(hook?.command)}`);
-      }
-      seenHookCommands.add(hook.command);
+// no inline shell, arbitrary script path, duplicate policy evaluation or newly-added hook becomes
+// trusted without changing this audit. Secret/partition guards and all PR-review gates are each
+// consolidated behind one compatibility dispatch; the runner-neutral cores own their full policy.
+// This does not authenticate hook source after project trust. It keeps the tracked settings
+// contract narrow, deterministic and reviewable.
+const claudeRoot = "${CLAUDE_PROJECT_DIR:-.}";
+const expectedHookDispatches = {
+  PreToolUse: [
+    ["^(?:Read|Edit|Write|Bash)$", `bash "${claudeRoot}/.claude/hooks/guard-secrets.sh"`],
+    ["^(?:Bash|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request))$", `bash "${claudeRoot}/.claude/hooks/require-project-review.sh"`],
+  ],
+  SessionStart: [[undefined, `bash "${claudeRoot}/.claude/hooks/report-capabilities.sh"`]],
+  PostToolUse: [["^(?:Edit|Write)$", `bash "${claudeRoot}/.claude/hooks/clang-format-edit.sh"`]],
+  Stop: [[undefined, `bash "${claudeRoot}/.claude/hooks/run-logic-tests.sh"`]],
+  UserPromptSubmit: [[undefined, `bash "${claudeRoot}/.claude/hooks/crash-triage-context.sh"`]],
+};
+const hooks = settings?.hooks;
+if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) {
+  throw new Error("tracked Claude settings must define hook dispatches");
+}
+const actualEvents = Object.keys(hooks).sort();
+const expectedEvents = Object.keys(expectedHookDispatches).sort();
+if (JSON.stringify(actualEvents) !== JSON.stringify(expectedEvents)) {
+  throw new Error(`tracked Claude hook event set drifted: ${JSON.stringify(actualEvents)}`);
+}
+for (const [event, expectedGroups] of Object.entries(expectedHookDispatches)) {
+  const groups = hooks[event];
+  if (!Array.isArray(groups) || groups.length !== expectedGroups.length) {
+    throw new Error(`${event} Claude hook dispatch count drifted`);
+  }
+  for (let index = 0; index < expectedGroups.length; index += 1) {
+    const group = groups[index];
+    const [expectedMatcher, expectedCommand] = expectedGroups[index];
+    if ((group?.matcher ?? undefined) !== expectedMatcher) {
+      throw new Error(`${event}[${index}] Claude hook matcher drifted`);
+    }
+    if (!Array.isArray(group?.hooks) || group.hooks.length !== 1) {
+      throw new Error(`${event}[${index}] must contain exactly one consolidated Claude hook`);
+    }
+    const hook = group.hooks[0];
+    if (hook?.type !== "command" || hook?.command !== expectedCommand) {
+      throw new Error(`${event}[${index}] unapproved tracked Claude hook command`);
     }
   }
-}
-for (const command of allowedHookCommands) {
-  if (!seenHookCommands.has(command)) throw new Error(`required Claude hook is missing: ${command}`);
 }
 
 const routeDocs = [".claude/CLAUDE.md", ".claude/skills/device-triage/SKILL.md"];
@@ -272,4 +283,4 @@ if git grep -nE -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' -- . >/dev/
   exit 1
 fi
 
-echo "Public-readiness audit passed: exact MCP version, zero tracked shell auto-grants, exact local hook list, public contracts, synthetic fixtures, notices, no tracked private key"
+echo "Public-readiness audit passed: exact MCP version, zero tracked shell auto-grants, consolidated Claude hook dispatches, public contracts, synthetic fixtures, notices, no tracked private key"

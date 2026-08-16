@@ -155,8 +155,9 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
 # (scripts/idf-version.sh), so this would discard every cached object it cannot invalidate. Scoped
 # this way the command line changes for exactly one object.
 #
-# Re-measure after anything that grows this builder (the command is in .claude/CLAUDE.md under
-# "Memory constraints"); read the worst PATH, never the biggest FRAME, and never an idle heap number.
+# Re-measure after anything that grows this builder (the command is in docs/ARCHITECTURE.md under
+# "Memory constraints"); read the worst PATH, never the biggest FRAME, and never an idle heap
+# number.
 set_source_files_properties(http_status.cpp PROPERTIES COMPILE_OPTIONS "-Os")
 
 # Assemble, minify and pre-compress the web UI at build time. The sources are split for edit locality —

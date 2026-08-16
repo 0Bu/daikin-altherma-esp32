@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 458491c7881556ea8666d07ec4a62357a159e13a39288ea79136b332a990dd98 -->
+<!-- diagnostic-evidence-contract: 2e006e73d35ee531d561c09ee6f6d484b812a95c71e5240b053bc6542632eee3 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -269,7 +269,7 @@ implementation, visible diagnosis IDs, five protection counters, and the related
 in `docs/REGISTERS.md`. It also checks the complete evidence matrix, source references, HTTPS
 resolution, and each Daikin source's models, document number, revision, and used section. A change to
 any of those inputs or this page raises `E010`. Refresh the fingerprint only after a content review
-with `/diagnostic-evidence-review`:
+with `$diagnostic-evidence-review`:
 
 ```bash
 scripts/run-diagnostic-evidence-audit.sh --update

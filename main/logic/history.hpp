@@ -303,8 +303,8 @@ constexpr bool trend_row_matches(const TrendDef& d, unsigned reg, unsigned off, 
 // The page/offset views are uint8_t because that is what they ARE (ValueDef and CachedValue both
 // store them as one byte), and because the caller builds these views on the POLL TASK's 8 KB stack:
 // as `unsigned` the two arrays alone would cost 2 KB of it per cycle, a quarter of the task, for
-// two values that never exceed 255. The stack is the budget that fails silently here (CLAUDE.md →
-// Memory constraints, the v1.0.12 overflow), so it is spent by the byte.
+// two values that never exceed 255. The stack is the budget that fails silently here (AGENTS.md →
+// Memory, concurrency, and HTTP safety; the v1.0.12 overflow), so it is spent by the byte.
 inline int trend_select(const TrendDef& d, const uint8_t* regs, const uint8_t* offs,
                         const char* const* units, size_t n) {
     for (size_t i = 0; i < n; ++i)

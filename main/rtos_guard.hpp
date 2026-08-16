@@ -1,7 +1,7 @@
 #pragma once
 // ONE unwind-safe RAII guard for every FreeRTOS mutex in this firmware.
 //
-// WHY IT IS SHARED. CLAUDE.md's "Never allocate while holding a mutex" rule gives two ways to be
+// WHY IT IS SHARED. AGENTS.md's "Memory, concurrency, and HTTP safety" section gives two ways to be
 // safe — keep the critical section non-allocating, or take the lock through an RAII guard — and this
 // is the second one. Nine files had grown their OWN copy of it (config, hp_poll, hp_modbus, mqtt_ha,
 // syslog, ota_update, history, checkup, weather_forecast), in TWO shapes that had already diverged:
@@ -12,7 +12,8 @@
 // guard IS, and only one of the shapes can express the bounded acquire below at all.
 //
 // WHY IT MATTERS AT ALL. C++ exceptions are enabled here and std::bad_alloc is a REACHABLE failure,
-// not a theoretical one — the whole "Memory constraints" section of CLAUDE.md is about that. A raw
+// not a theoretical one — the "Memory, concurrency, and HTTP safety" section of AGENTS.md is about
+// that. A raw
 // xSemaphoreTake that unwinds past its give leaves every later reader blocked on portMAX_DELAY, and
 // the device wedges into a watchdog reboot: strictly worse than the OOM it came from. A guard
 // releases on the normal return path AND while an exception unwinds.
