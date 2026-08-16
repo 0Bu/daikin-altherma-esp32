@@ -128,8 +128,11 @@ state_dwell.cpp/.hpp → HOW LONG EACH ELIGIBLE SWITCHED ROW HAS READ WHAT IT RE
                       logic/state_dwell.hpp. THREE facts on /values, not one
                       number: dwell_s, dwell_min (the transition was never witnessed, so the age is a
                       lower bound) and dwell_blind_s (how much of the run the bus did not answer for)
-def/{altherma*,minichiller*}.hpp → embedded per-model value profiles (machine-generated in the
-                       ValueDef row format); generated registry/model/signature headers index them
+def/{altherma*,minichiller*}.hpp → offline-generated per-model ValueDef profiles, except the
+                       hand-written altherma3_r_erga.hpp host-test fixture
+def/registry.hpp     → hand-written registry/lookup over generated profiles plus generic/test fixtures
+def/models_catalog.hpp → generator-assembled legacy metadata for the read-only /models endpoint
+def/signatures.hpp   → detection signatures derived at compile time from the registry profiles
 def/overlay.hpp     → hand-written X10A page-0x10 supplement layered onto generated profiles
 def/homehub.hpp     → curated read-only HomeHub Modbus value catalog
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
