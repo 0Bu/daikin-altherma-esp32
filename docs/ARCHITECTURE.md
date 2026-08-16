@@ -132,7 +132,7 @@ def/{altherma*,minichiller*}.hpp → offline-generated per-model ValueDef profil
                        hand-written altherma3_r_erga.hpp host-test fixture
 def/registry.hpp     → hand-written registry/lookup over generated profiles plus generic/test fixtures
 def/models_catalog.hpp → generator-assembled legacy metadata for the read-only /models endpoint
-def/signatures.hpp   → detection signatures derived at compile time from the registry profiles
+def/signatures.hpp   → detection signatures lazily derived once at runtime from registry profiles
 def/overlay.hpp     → hand-written X10A page-0x10 supplement layered onto generated profiles
 def/homehub.hpp     → curated read-only HomeHub Modbus value catalog
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
