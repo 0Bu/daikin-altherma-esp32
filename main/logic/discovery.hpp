@@ -73,7 +73,7 @@ inline std::string row_object_id(const ValueDef& def) {
 // "Hydronic Error Code" — the rule the derived companions below have always followed.
 //
 // Only these. Group-scoping every name would give every one of the ~164 entities a new entity_id,
-// and recorder history plus long-term statistics are keyed on entity_id: the other ~154 keep their
+// and recorder history plus long-term statistics are keyed on entity_id: the other rows keep their
 // name, so they delete-and-reclaim their own id and their history carries over.
 //
 // A hand-maintained ledger and deliberately NOT a scan of the detected profile: "Target Discharge
@@ -81,9 +81,10 @@ inline std::string row_object_id(const ValueDef& def) {
 // model and a re-detect would rename a running entity — the damage this issue is about. The cost is
 // that a profile carrying only one side of a pair still gets the qualified name; the gain is a name
 // that is identical on every model forever. test_metric_identity() asserts this list is EXACTLY the
-// set of label slugs the shipped catalog reuses across pages, so a sixth cannot appear unnoticed.
+// set of label slugs the shipped catalog reuses across pages, so a new collision cannot appear unnoticed.
 inline constexpr const char* AMBIGUOUS_LABEL_SLUGS[] = {
     "error_code", "error_type", "mixed_water_temp", "pressure_sensor_t", "target_discharge_temp",
+    "thermostat_on_off",
 };
 inline constexpr size_t AMBIGUOUS_LABEL_SLUG_COUNT =
     sizeof(AMBIGUOUS_LABEL_SLUGS) / sizeof(AMBIGUOUS_LABEL_SLUGS[0]);

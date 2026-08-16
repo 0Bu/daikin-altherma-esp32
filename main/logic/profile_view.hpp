@@ -1,15 +1,16 @@
 #pragma once
 // A profile's rows AS EVERY CONSUMER MUST SEE THEM: the GENERATED per-model table (def/*.hpp) plus
-// the hand-written supplement in def/overlay.hpp, presented as ONE indexable sequence.
+// the hand-written supplements in def/overlay.hpp, presented as ONE indexable sequence.
 //
 // WHY A VIEW AND NOT A MERGED ARRAY — the rows are `constexpr` tables in flash; concatenating 43 of
 // them at build time is not expressible, and doing it at runtime would mean a heap allocation on the
-// poll path (every second) for data that never changes. A view is two pointers and two lengths, all
+// poll path (every second) for data that never changes. A view is three pointers and three lengths,
+// all
 // pointing at static storage: no allocation, nothing to free, nothing to strand a mutex.
 //
 // WHY EVERY CONSUMER AND NOT JUST THE DECODER — four call sites read the row set, and they are not
 // independent: hp_poll decodes them into the cache, mqtt_ha announces one HA discovery config per
-// row, and BOTH http_status (`/values`, the WS broadcast) and mqtt_ha (the grouped X10A topic) size
+// row, and BOTH http_status (`/values`) and mqtt_ha (the grouped X10A topic) size
 // their snapshot buffer from the row COUNT, which is the exact upper bound on cached values. Grow
 // the cache without growing the count and the extra values are silently TRUNCATED out of `/values`
 // and out of MQTT — an absent-value bug with no error anywhere, the #35-#39 shape. So the view is
@@ -28,18 +29,24 @@ inline bool profile_has_page(const ValueDef* v, size_t n, uint8_t page) {
     return false;
 }
 
-// The base table followed by the applicable supplement rows. Index 0..base_count-1 are the model's
-// own generated rows in their generated order, so anything that keyed on that order still holds.
+// The base table followed by up to two applicable supplement blocks. Index 0..base_count-1 are the
+// model's own generated rows in their generated order, so anything that keyed on that order still
+// holds. Two spans are enough for the catalog-wide page-0x10 retry block plus the profile-specific
+// observability block; both point at static flash data and allocate nothing.
 struct ProfileView {
     const ValueDef* base       = nullptr;
     size_t          base_count = 0;
     const ValueDef* extra      = nullptr;   // nullptr / 0 when the supplement does not apply
     size_t          extra_count = 0;
+    const ValueDef* extra2      = nullptr;
+    size_t          extra2_count = 0;
 
-    size_t count() const { return base_count + extra_count; }
+    size_t count() const { return base_count + extra_count + extra2_count; }
 
     const ValueDef& operator[](size_t i) const {
-        return i < base_count ? base[i] : extra[i - base_count];
+        if (i < base_count) return base[i];
+        i -= base_count;
+        return i < extra_count ? extra[i] : extra2[i - extra_count];
     }
 };
 
@@ -74,6 +81,21 @@ inline ProfileView profile_view(const ValueDef* base, size_t n,
         v.extra       = extra;
         v.extra_count = m;
     }
+    return v;
+}
+
+// Add one profile-specific mixed-page block after the ordinary single-page supplement. Every page
+// named by the new rows must already exist in the GENERATED base table. This is deliberately
+// all-or-nothing: a generator/profile mismatch withholds the whole observational block instead of
+// publishing an accidental subset, and checking only the base table means one supplement can never
+// justify a page introduced by another supplement.
+inline ProfileView profile_view_extend_existing_pages(ProfileView v,
+                                                       const ValueDef* extra, size_t m) {
+    if (!extra || m == 0 || v.extra2 || v.extra2_count) return v;
+    for (size_t i = 0; i < m; i++)
+        if (!profile_has_page(v.base, v.base_count, extra[i].reg)) return v;
+    v.extra2       = extra;
+    v.extra2_count = m;
     return v;
 }
 

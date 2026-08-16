@@ -42,15 +42,6 @@ E001 lp
 # in the drawing, and it sits on the one pipe that carries no water at all.
 E001 disch
 
-# ── ADJUDICATION — "Low noise control" is documented but not generated ───────────────────────────
-# FORWARD-ARMED, exactly like the D002 line in tools/descriptions/audit_exceptions.txt.
-# docs/REGISTERS.md documents the register; no generated profile in main/def/ carries a row for it
-# yet (the generator's input is narrower than the spec — the same narrowness that left the page-0x10
-# protection words undecoded until def/overlay.hpp supplied them, issue #110). The quiet-mode pill
-# and its inspector copy are written for the documented register and stay ready for it. Delete this
-# line when the generator emits the row — S000 will remind you.
-S003 quiet
-
 # ── ADJUDICATION — R1T (leaving-water) is LIFTED above its run and tied DOWN to the run's midpoint ─
 # G006 caps a free pill at 14 px from the run it names, because a pill floating beside nothing
 # attributes a reading to a place no pipe is. R1T is not that case. It is measured at the plate's

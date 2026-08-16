@@ -195,7 +195,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, histCacheKey, historyView, histHtml, scrubText," +
-  " scrubMove, ensureHist, ensureHistPair, ensureDerived };", context,
+  " scrubMove, ensureHist, ensureHistPair, ensureDerived, DERIVED };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
 
@@ -266,6 +266,29 @@ await h.ensureDerived("dt");
 assert.equal(S.hist.get("dt").b0, 100);
 assert.deepEqual(Array.from(S.hist.get("dt").v), [null, 60, 60],
   "the earlier bucket remains a gap instead of being cut off with the shorter input");
+
+// The CT overlay at 0x63/16 can make CT-L3 unavailable for one bucket while L1/L2 still answer.
+// That is not a two-phase installation and must never become a plausible partial input sum. Both
+// derived consumers follow the live card: fall back to the INV ring until every CT phase declared
+// by this snapshot is present; only a complete positive CT set owns the whole-unit boundary.
+const threeCtPhases = { ct_l1: true, ct_l2: true, ct_l3: true, inv_current: true };
+assert.equal(h.DERIVED.pel.fn(
+  { ct_l1: 10, ct_l2: 10, ct_l3: null, inv_current: 5 }, threeCtPhases), 1.15,
+  "a withheld CT-L3 bucket must use INV current instead of publishing the L1+L2 partial sum");
+assert.equal(h.DERIVED.pel.fn(
+  { ct_l1: 10, ct_l2: 10, ct_l3: 10, inv_current: 5 }, threeCtPhases), 6.9,
+  "a complete positive CT set remains the preferred whole-unit electrical estimate");
+const partialCtCop = h.DERIVED.cop.fn({
+  flow: 20, leaving_water: 35, return_water: 30, comp_rps: 45, inv_current: 5,
+  ct_l1: 1, ct_l2: 1, ct_l3: null,
+}, threeCtPhases);
+assert.ok(partialCtCop > 0,
+  "an incomplete CT set must use the matching INV boundary instead of suppressing COP as CT-sourced");
+assert.equal(h.DERIVED.cop.fn({
+  flow: 20, leaving_water: 35, return_water: 30, comp_rps: 45, inv_current: 5,
+  ct_l1: 1, ct_l2: 1, ct_l3: 1,
+}, threeCtPhases), null,
+  "a complete positive CT set must still suppress the mismatched historical COP boundary");
 
 // A successful HomeHub poll proves transport freshness, not when the controller last refreshed its
 // outdoor-temperature register. Keep that qualification in the graph popup: the chart must remain

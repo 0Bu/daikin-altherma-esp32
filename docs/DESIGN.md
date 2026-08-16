@@ -403,10 +403,11 @@ Body, ordered:
    trailing catalog value legends such as `ON/OFF` and `On:…_Off:…` from visible reading names:
    `Space heating Operation ON/OFF` therefore reads `Space heating Operation` beside its **ON/OFF**
    value. The exact catalog label remains the identity used by `/values`, MQTT, history,
-   selectors and description matching. Five labels occur on more than one X10A page; those rows
+   selectors and description matching. Six labels occur on more than one X10A page; those rows
    additionally carry the sparse `x10a_group` marker from the MQTT page namespace. The visual
-   boundary prefixes only those names (for example `Outdoor State Error Code` and
-   `Hydronic Error Code`) and scopes their accordion keys the same way. Both measurements remain
+   boundary prefixes only those names (for example `Outdoor State Error Code` / `Hydronic Error
+   Code` and the two independently reported `Thermostat ON/OFF` rows) and scopes their accordion
+   keys the same way. Both measurements remain
    visible, while no duplicate label and no shared open/closed state remains.
    The system-wide **BOOST pill is permanent for the same reason**. Its face always says only BOOST:
    mode 2 (Recommended on) changes border/fill/text from light grey to petrol; every other or unknown
@@ -994,10 +995,11 @@ Body, ordered:
      "OFF" answers what a flag *is*,
      and for a flag that is half the question: `Powerful DHW Operation: OFF` describes a plant that
      finished a charge four seconds ago and one that has not charged since Tuesday equally well.
-     Scoped to the bit flags and the fault class (`logic/state_dwell.hpp` decides which, structurally
-     by converter) and deliberately not offered on measurements, where "time since the last change"
-     is the poll period — a number that would read 1–3 s on ~50 rows and bury the ~34 where it means
-     something. **The device states the claim and the browser only renders it**, and there are three
+     Scoped to the bit flags and the fault class (`logic/state_dwell.hpp` decides which by converter
+     plus an exact `(page, offset, converter)` exclusion for eight observation-only P2 flags) and
+     deliberately not offered on measurements, where "time since the last change"
+     is merely the poll period and would bury the state rows where it means something. **The device
+     states the claim and the browser only renders it**, and there are three
      of them because the number alone is not one: a run whose transition was never witnessed reads
      *"OFF ≥ 3 h 20 min"* — a weaker claim in a compact relation symbol that reads identically in both
      languages, never the same sentence as a measured run, and **floored**, since rounding a bound to

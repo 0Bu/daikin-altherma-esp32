@@ -118,8 +118,8 @@ CheckupFlashRecord     s_restore_live[logic::CHECKUP_COMPLETED_BUCKETS];
 using Lock = SemGuard;
 
 // The row a locator addresses, or -1. Composes logic/checkup.hpp's pure predicate rather than taking
-// the parallel-array checkup_select(): building (reg, off, conv) views for ~116 rows would cost a
-// kilobyte of the POLL TASK's 8 KB stack every second, and the stack is the budget that fails
+// the parallel-array checkup_select(): building (reg, off, conv) views for a full resolved profile
+// would consume material space on the POLL TASK's 8 KB stack every second, and that stack fails
 // silently on this board (AGENTS.md → Memory, concurrency, and HTTP safety). checkup_select() still
 // exists — it is what the catalog test sweeps the whole profile set with.
 int find_row(const CachedValue* v, size_t n, const logic::CheckupLocator& l) {

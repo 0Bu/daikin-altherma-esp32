@@ -16,7 +16,7 @@
 //
 // What is left over is exactly the residue #209 measured on a live ERGA/EHB unit against a
 // manufacturer-documented HomeHub reference: a field that decodes to an ordinary-looking number
-// which is not a measurement of anything. Three shapes are adjudicated per ROW, and all of them
+// which is not a measurement of anything. The non-default ROW policies below all
 // require evidence — never a global rule:
 //
 //   ZeroMeansAbsent   raw 0x0000 behaves as "this field is not populated on this unit". A GLOBAL
@@ -32,8 +32,14 @@
 //                     whose envelopes are keyed on the dataType (1 = °C, 2 = bar) and so cannot see
 //                     a dataType -1 row at all. The only thing that identifies such a row is its
 //                     (page, offset, converter) coordinate, which is exactly this ledger's key.
+//   ZeroAbsentAboveSaturation
+//                     an exact zero is withheld only when a same-cycle cross-page saturation
+//                     witness makes it physically impossible; without that witness it fails open.
+//   Bit7MeansAbsent   this one-byte numeric row shares bit 7 with a documented flag. When the
+//                     current page proves that bit is asserted, the unmasked number is not a
+//                     current measurement and is withheld rather than fabricating +64 A.
 //
-// A FOURTH verdict is not about a row at all — PAGE_ABSENCE_RULES below. When the reply to a whole
+// PAGE_ABSENCE_RULES is a separate page-level verdict. When the reply to a whole
 // REGISTER PAGE carries the signature of hardware that is not fitted, the finding is about the page,
 // so it is keyed on the page and reaches every row on it. #297 first shipped this as one row-level
 // entry per coordinate (the four 0xA1 rows), which restates one fact four times and leaves two gaps
@@ -85,6 +91,7 @@ enum class AvailabilityPolicy : uint8_t {
     AboveRangeIsAbsent, // a decoded value above this row's physical ceiling is not a reading
     ZeroAbsentAboveSaturation,  // an exact zero REFUTED by a simultaneously-measured saturation
                                 // temperature — conditional, and silent without that witness
+    Bit7MeansAbsent,    // current page shows a documented overlaid bit, so the number is not usable
 };
 
 // ── THE CROSS-PAGE SATURATION WITNESS ─────────────────────────────────────────────────────────────
@@ -421,6 +428,14 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
      LIQUID_LINE_SAT_CEILING,
      "#224: same row, third of three air-source spellings the catalog carries at this coordinate"},
 
+    // CT-L3 and HP Forced FG share the one-byte field 0x63/16 in docs/REGISTERS.md. conv 161 is an
+    // intrinsic whole-byte ×0.5-A decode, so bit 7 alone becomes 64 A even though the register map
+    // identifies it as a flag. No documented current mask exists: reject the current only while the
+    // reply proves that bit is set, and fail open for callers without the page witness.
+    {0x63, 16, 161, nullptr, AvailabilityPolicy::Bit7MeansAbsent, 0.0,
+     "docs/REGISTERS.md: HP Forced FG bit 7 overlays the one-byte CT-L3 field; an unmasked bit "
+     "would fabricate +64 A"},
+
     // The four 0xA1 rows USED TO BE HERE, one ZeroPageMeansAbsent entry each. The verdict has not
     // changed — it moved to PAGE_ABSENCE_RULES above, where a fact about a page is stated once and
     // reaches every row on it. See the note at the top of this file for why the row-level shape did
@@ -527,6 +542,9 @@ inline constexpr bool value_available(const ValueDef& d, bool ok, double value,
     if (!ok) return true;
     if (r->policy == AvailabilityPolicy::ZeroMeansAbsent && value == 0.0) return false;
     if (r->policy == AvailabilityPolicy::AboveRangeIsAbsent && value > r->ceiling) return false;
+    if (r->policy == AvailabilityPolicy::Bit7MeansAbsent && page && page_len > d.offset &&
+        (page[d.offset] & 0x80u))
+        return false;
     // CONDITIONAL, and the two `sat` terms are the whole safety property: with no witness (a caller
     // that does not supply one, a profile with no witness row, a cycle where the witness page did
     // not answer, or a unit whose pressure sensor conv 405 refused) this FAILS OPEN and the zero

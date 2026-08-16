@@ -325,7 +325,7 @@ the rest in, so an install created by an older, MAC-identified build keeps its e
 > On its first connect after the upgrade the firmware **deletes every pre-legacy-221 retained config** —
 > both the `sensor` and the `binary_sensor` shape, under the current node id *and* under the MAC-era
 > one — in a single pass that completes **before** any replacement is published. Friendly names are
-> unchanged except for the ten entities in the table below, so the other ~154 entities reclaim their
+> unchanged except for the ten entities then covered by the collision ledger, so the other ~154 entities reclaim their
 > own `entity_id`, and with it their recorder history and long-term statistics. Per-entity
 > customisations, keyed on `unique_id`, do not carry over.
 >
@@ -339,9 +339,10 @@ the rest in, so an install created by an older, MAC-identified build keeps its e
 > gained. Use HA's **⋮ → Delete** on the MQTT device instead and reboot the board, which republishes
 > everything from scratch.
 >
-> The ten entities that gain a group-qualified **name** (and therefore a new `entity_id`) are the
-> ones whose label the catalog reuses — without this they would be two identically-named entities
-> and a `…_2`:
+> The collision ledger now contains the six labels below. The first five pairs — ten entities —
+> gained a group-qualified **name** during the legacy-221 migration (and therefore a new default
+> `entity_id`); without that qualification they would be identically named and one would land as
+> `…_2`:
 >
 > | Label | Entities after the upgrade |
 > |---|---|
@@ -350,13 +351,21 @@ the rest in, so an install created by an older, MAC-identified build keeps its e
 > | Mixed water temp. | Hybrid Mixed Water Temp. · Mixing Mixed Water Temp. |
 > | Pressure sensor(T) | Outdoor Sensors Pressure Sensor(T) · Hydronic State Pressure Sensor(T) |
 > | Target Discharge Temp. | Outdoor State Target Discharge Temp. · Water Hx Target Discharge Temp. |
+> | Thermostat ON/OFF | Outdoor State Thermostat ON/OFF · Hydronic Thermostat ON/OFF |
 >
 > Which of these a given install sees depends on its detected model — most profiles carry only some
 > of the pairs. The name is qualified on **every** model regardless, so it cannot change under a
-> re-detect. Worked example, measured on `altherma_ebla_edla_d_series_4_8kw_monobloc`: **100 value
-> entities before, 102 after** (the two *Error Code* / *Error type* pairs), with six names qualified —
-> the other four labels appear only once on that profile, so they gain a qualified name but no
-> sibling.
+> re-detect. Historical worked example at the legacy-221 migration, measured on
+> `altherma_ebla_edla_d_series_4_8kw_monobloc`: **100 value entities before, 102 after** (the two
+> *Error Code* / *Error type* pairs), with six names qualified — the other four labels appeared only
+> once on that profile, so they gained a qualified name but no sibling.
+>
+> The later profile-specific diagnostic overlay adds the second `Thermostat ON/OFF` row. The current
+> reference profile publishes **129 X10A rows** and shows **eight group-qualified names**. Existing
+> installations keep the already group-scoped hydronic entity's `unique_id` and discovery topic;
+> only its friendly name becomes `Hydronic Thermostat ON/OFF`, while the outdoor entity is new.
+> Because the ledger is global, profiles that carry only the hydronic row still receive that stable
+> qualified friendly name after upgrading.
 >
 > The legacy-221 entity-id migration did not alter JSON keys or metric suffixes. The later source-topic
 > split intentionally moves that same grouped X10A payload from `<base>/state` to `<base>/x10a`;

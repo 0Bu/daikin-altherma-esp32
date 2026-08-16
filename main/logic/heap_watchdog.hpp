@@ -12,7 +12,7 @@
 // guards and the result is a device that is powered, associated, answering 503 to every request,
 // republishing nothing, and reporting no fault — for as long as the shortage lasts, which may be
 // until somebody walks to the board. The poll task allocates a value vector every cycle, the httpd
-// task builds a ~6 KB /values snapshot per request, the MQTT bridge builds a grouped document per
+// task builds a model-dependent /values snapshot per request, the MQTT bridge builds a grouped document per
 // change, and OTA and the weather client each want a whole TLS session; a fragmented heap starves
 // all of them at once. Each one catches, logs at most once, and tries again a second later.
 //
@@ -81,7 +81,7 @@ inline constexpr size_t HEAP_CRITICAL_BYTES = 4096;
 // watchdog had disarmed itself over a ~512 B flicker of ordinary allocator churn.
 //
 // So a largest block of exactly HEAP_CRITICAL_BYTES is not a recovery, and calling it one is the
-// bug: /status is ~7 KB and /values ~6 KB, and http_config.cpp's /set_mqtt pre-flight already
+// bug: /status is ~7 KB and /values is a larger model-dependent allocation; http_config.cpp's /set_mqtt pre-flight already
 // refuses even a PLAINTEXT probe below 12 KB. 2x is a FACTOR rather than a fitted constant — the
 // threshold is defined as the point below which normal operation's allocations cannot be served, so
 // twice it is the nearest defensible statement of "genuinely clear of that", and it moves with the

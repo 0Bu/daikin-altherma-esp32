@@ -272,7 +272,7 @@ assert.match(status, /if \(dw\.known\) \{\s*\n\s*j \+= ",\\"dwell_s\\":";/,
 // And only for a row that STATES A VALUE. The slot outlives a row the sweep could not read — that is
 // what booking blind seconds means — but such a row is published as `"value":null`, and an age
 // beside a value that is not there describes nothing: rendered, the pair reads "— for 3 h 20 min".
-assert.match(status, /logic::dwell_tracked\(v\[i\]\.conv\) && !v\[i\]\.value\.empty\(\)/,
+assert.match(status, /logic::dwell_row_tracked\(v\[i\]\.reg, v\[i\]\.off, v\[i\]\.conv\) && !v\[i\]\.value\.empty\(\)/,
   "/values must withhold the state age for a row it is publishing as null");
 
 // ── 9. Whole seconds come from ABSOLUTE timestamps, never from a floored interval ───────────────

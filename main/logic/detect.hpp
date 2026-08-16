@@ -210,7 +210,7 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 // rename (#180/#217). Keying that on file order means adding, removing or REORDERING a profile —
 // none of them a suspicious act — silently reassigns identifiers. Measured over the 39 detectable
 // profiles across every (page mask x capacity x capacity-source) fingerprint a real unit can present:
-// permuting the registry moves the published identity on 11275 of 200x336 trials, over 64 distinct
+// permuting the registry moves the published identity on 11275 of 200x336 trials, over 90 distinct
 // identifiers. The id is intrinsic to the profile, so the same tie resolves the same way whatever
 // order the registry is written in — and the permutation test asserts exactly that
 // (test_tie_break_order_independence). It also costs nothing to adopt: on all 336 fingerprints the

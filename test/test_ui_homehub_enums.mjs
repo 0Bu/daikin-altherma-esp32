@@ -128,6 +128,10 @@ const scopedLabels = [
   [{ label: "Error Code", reg: 0x10, x10a_group: "outdoor_state" }, "Outdoor State Error Code"],
   [{ label: "Error Code", reg: 0x60, x10a_group: "hydronic" }, "Hydronic Error Code"],
   [{ label: "Mixed water temp.", reg: 0x65, x10a_group: "mixing" }, "Mixing Mixed water temp."],
+  [{ label: "Thermostat ON/OFF", reg: 0x10, x10a_group: "outdoor_state" },
+    "Outdoor State Thermostat"],
+  [{ label: "Thermostat ON/OFF", reg: 0x60, x10a_group: "hydronic" },
+    "Hydronic Thermostat"],
 ];
 for (const [row, shown] of scopedLabels) {
   assert.equal(en.displayReadingLabel(row.label, row), shown, `${shown}: structural page scope shown`);

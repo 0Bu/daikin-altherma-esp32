@@ -1240,7 +1240,7 @@ static void append_values_array(std::string& j) {
         j += jstr(v[i].unit);
         j += ",\"reg\":";
         j += std::to_string(v[i].reg);
-        // Five catalog labels occur on more than one register page. They are not duplicate
+        // A small audited set of catalog labels occurs on more than one register page. They are not duplicate
         // measurements: for example, both the outdoor controller and the hydronic controller carry
         // their own Error Code. Sending only one would hide a real fault; sending both under the
         // same visible name made the dashboard look duplicated and also gave both accordions the
@@ -1293,7 +1293,7 @@ static void append_values_array(std::string& j) {
         // which is ou_stale.hpp's inspector defect (a blanked pill restated one line below itself)
         // arriving in a new place. No value, no age — and the firmware decides that, so a consumer
         // that is not the browser cannot reach a different answer.
-        if (logic::dwell_tracked(v[i].conv) && !v[i].value.empty()) {
+        if (logic::dwell_row_tracked(v[i].reg, v[i].off, v[i].conv) && !v[i].value.empty()) {
             const logic::DwellReading dw = dwell_reading(v[i].reg, v[i].off, v[i].conv);
             // `known` false is a first-class answer and is emitted as ABSENCE: a silent bus, a page
             // that stopped answering, a row seen too long ago to vouch for. An omitted key says "no
@@ -1430,7 +1430,7 @@ static esp_err_t h_models(httpd_req_t* req) {
 // which is the same refusal-to-fabricate logic/timestamp.hpp already makes for syslog timestamps.
 // `b0` is sample zero's monotonic bucket and aligns every source exactly even without wall time.
 //
-// Sent in CHUNKS. The body is ~1.5 KB — smaller than /values' ~6 KB — but it is a new allocation on
+// Sent in CHUNKS. The body is ~1.5 KB — smaller than the model-dependent /values body — but it is a new allocation on
 // a heap where the largest contiguous block is the binding limit, and chunking costs nothing here.
 static esp_err_t h_history(httpd_req_t* req) {
     char q[96] = {0};

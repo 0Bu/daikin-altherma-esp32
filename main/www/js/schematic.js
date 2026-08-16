@@ -6,6 +6,8 @@
 // static (index.html) and updated in place: an innerHTML rebuild like #valueGroups' would restart
 // the CSS flow animations on every poll.
 const vRow = (re) => (S._values || []).find((x) => re.test(x.label || "") && x.value != null);
+const vRowGroup = (re, group) => (S._values || []).find((x) =>
+  re.test(x.label || "") && x.x10a_group === group && x.value != null);
 const vNum = (re) => { const r = vRow(re); if (!r) return null; const n = parseFloat(r.value); return Number.isFinite(n) ? n : null; };
 // Bit-flag values arrive as numeric 1/0 (logic/convert.hpp conv 300-307). null = row absent.
 const vOn = (re) => { const r = vRow(re); return r ? String(r.value).trim() === "1" : null; };
@@ -186,8 +188,13 @@ function liveData() {
   // credit the resistive heater to the heat pump.
   const lwt = vLwt();   // pre-BUH R1T measurement, never a setpoint (see vLwt / logic/lwt_select.hpp)
   const ret = vNum(/inlet water/i);
-  const cts = (S._values || []).filter((x) => /current measured by ct/i.test(x.label || "") && x.value != null);
-  const ct = cts.reduce((a, x) => a + (parseFloat(x.value) || 0), 0);
+  const ctRows = (S._values || []).filter((x) => /current measured by ct/i.test(x.label || ""));
+  // A phase withheld by the firmware is not a zero-current phase. In particular, CT-L3 is null
+  // while its byte's overlaid HP-Forced bit is asserted. Summing only the surviving phases would
+  // understate plant input and inflate COP, so CT is usable only as one complete declared set.
+  const ctComplete = ctRows.length > 0 && ctRows.every((x) =>
+    x.value != null && Number.isFinite(Number(x.value)));
+  const ct = ctComplete ? ctRows.reduce((a, x) => a + Number(x.value), 0) : 0;
   const inv = vNum(/inv primary current/i);
   const postBuh = postBuhRow();
   const d = {
@@ -235,7 +242,11 @@ function liveData() {
     // Cooling while Thermostat is OFF (live unit, 2026-08-01). Keep the exact row anchor, but name
     // the field for what Daikin documents instead of preserving the old interpretation in code.
     spaceOp: stateOf(/^space heating operation/i, 53),
-    quiet: stateOf(/low noise control|silent mode/i, 9),
+    // Only the validated hydronic `Silent Mode` row is the Quiet state. The profile-specific
+    // outdoor `Low noise control` bit is P2 observation telemetry whose polarity/trigger remains
+    // uncorrelated; letting it fall through here would colour the pill and feed quiet history when
+    // the hydronic page misses one sweep.
+    quiet: stateOf(/^silent mode$/i, 9),
     // HomeHub holding offset 56 is the EXTERNAL Smart-Grid request. It is intentionally independent
     // of the plant's operating mode: mode 2 proves that evcc's boost reached the controller, while
     // the DHW flag / valve / flow separately prove whether the controller acted on it.
@@ -339,7 +350,7 @@ function liveData() {
   // — the #35-#39 shape, and the same reason d.circP already gates. Asserted against the whole
   // catalog by logic/ou_stale.hpp's test (which page each of these two rows lives on).
   const invLive = !d.ouHeldOver && inv != null;
-  const ctLive  = cts.length > 0 && ct > 0;
+  const ctLive  = ctComplete && ct > 0;
   d.pel = ctLive ? ct * 230 / 1000 : invLive ? inv * 230 / 1000 : null;
   // NULL when neither source is usable — the third state the old two-way expression could not say.
   // It is what decides the COP's SCOPE below, so "no source" must not read as "the inverter".
@@ -699,8 +710,8 @@ const tx = (o) => (o == null ? "" : typeof o === "string" ? o : (LANG === "de" &
 const degC = (n) => (n == null ? "—" : fmt1(n) + " °C");
 
 const PEL_ESTIMATED_WHAT = {
-  en: "A rough electrical-input ESTIMATE used as the COP or EER divisor. The UI adds available phase currents and multiplies by an assumed 230 V; it does not know actual voltage or power factor. Inverter current covers the compressor side only. CT currents can cover more loads, but the exact boundary depends on how the transformers are installed and wired.",
-  de: "Eine grobe SCHÄTZUNG der elektrischen Aufnahme und der Nenner von COP oder EER. Die UI addiert verfügbare Phasenströme und multipliziert sie mit angenommenen 230 V; tatsächliche Spannung und Leistungsfaktor sind unbekannt. Der Inverterstrom deckt nur die Verdichterseite ab. Stromwandler können weitere Verbraucher erfassen; die genaue Bilanzgrenze hängt jedoch von Einbau und Verdrahtung ab.",
+  en: "Electrical-input ESTIMATE for COP/EER. The UI requires every declared CT phase and uses summed current × assumed 230 V; actual voltage and power factor are unknown. Inverter current covers only the compressor. CT scope depends on transformer wiring.",
+  de: "SCHÄTZUNG der elektrischen Aufnahme für COP/EER. Die UI verlangt jede gemeldete CT-Phase und rechnet Stromsumme × angenommene 230 V; Spannung und Leistungsfaktor sind unbekannt. Inverterstrom deckt nur den Verdichter ab. Der CT-Umfang hängt von der Verdrahtung ab.",
 };
 const PEL_MEASURED_WHAT = {
       en: "The electrical power-consumption value reported by the heat-pump system through HomeHub input register 51. Unlike X10A's current×230 V estimate, the UI does not calculate this number. The public HomeHub register guide does not establish its calibration, exact measurement point or whether every electric heater is included; do not treat it as a certified whole-plant meter.",
@@ -746,7 +757,8 @@ const INSPECT = {
     // "Thermostat ON/OFF" belongs HERE, not on the heating riser it used to be drawn on: it is a bit
     // in the very same status byte as the operating mode above it (0x60/2), and it says the indoor
     // unit is asking for the compressor — for hot water just as much as for the house.
-    rows: [/i\/u operation mode/i, /thermostat on/i, /(error|fault) code/i],
+    rows: [/i\/u operation mode/i, { sel: /thermostat on/i, group: "hydronic" },
+           /(error|fault) code/i],
   },
   // Board-local observation rather than a heat-pump register. Its custom renderer keeps all three
   // current measurements together and hands their three independent history rings to one combined
@@ -1229,7 +1241,7 @@ const INSPECT = {
   },
   quiet: {
     t: { en: "Quiet mode", de: "Leise-Modus" },
-    re: /low noise control|silent mode/i, sample: "Low noise control",
+    re: /^silent mode$/i, sample: "Silent Mode",
     trend: "quiet_state",
     now: (d) => d.quiet == null ? null : d.quiet
       ? { en: "Quiet mode is active.", de: "Der Leise-Modus ist aktiv." }
@@ -1393,8 +1405,10 @@ function inspMember(sel) {
   // on a board with NO X10A row to source the concept from — X10A absent, HomeHub live. Without it the
   // space-operation evidence (the only reading a HomeHub-only plant can offer here) vanished with the
   // X10A rows, leaving the RAUMKREIS explainer empty though the gateway was answering.
-  const selector = sel && sel.cid ? sel.sel : sel;
-  const cid = sel && sel.cid ? sel.cid : null;
+  const spec = sel && sel.sel ? sel : null;
+  const selector = spec && spec.group ? () => vRowGroup(spec.sel, spec.group)
+                 : spec ? spec.sel : sel;
+  const cid = spec && spec.cid ? spec.cid : null;
   const r = pickRow(selector);
   // X10A down: the retained row is not a reading any more. The gateway stands in where it carries
   // the same quantity (mbFallbackFor — the helper whose whole job is that substitution) and the
