@@ -1222,7 +1222,8 @@ static esp_err_t h_status(httpd_req_t* req) {
 // the catalog spells them ~50 different ways across the 43 profiles ("Outdoor air temp.",
 // "R1T-Outdoor air temp.", "Outdoor Air Temp (R1T)", …), so a pattern list would silently stop
 // covering a row the C++ test still gates.
-static void append_values_array(std::string& j) {
+template <typename JsonOut>
+static void append_values_array(JsonOut& j) {
     const size_t cap = hp_values_capacity();
     std::vector<CachedValue> v(cap ? cap : 1);
     size_t n = hp_values_snapshot(v.data(), v.size());
@@ -1364,6 +1365,56 @@ static std::string build_modbus_values_array(bool& live) {
     return j;
 }
 
+// /values is the UI's largest model-dependent response. Building the complete body in one
+// std::string made its contiguous allocation grow with the active profile: the 129-row reference
+// profile needs more than the 15-16 KB largest block a healthy, fully started target commonly has,
+// so the route could return 503 forever while /status, MQTT and the bus were all healthy. Keep the
+// snapshot (the cache must still be copied atomically), but stream the representation in bounded
+// chunks. HTTP chunks are transport framing only; concatenating them yields the exact same JSON.
+class HttpJsonChunks {
+public:
+    explicit HttpJsonChunks(httpd_req_t* req) : req_(req) { chunk_.reserve(kFlushBytes + 256); }
+
+    HttpJsonChunks& operator+=(const char* s) {
+        append(std::string_view(s));
+        return *this;
+    }
+    HttpJsonChunks& operator+=(const std::string& s) {
+        append(std::string_view(s));
+        return *this;
+    }
+
+    esp_err_t finish() {
+        flush();
+        if (failed_) return ESP_FAIL;
+        return httpd_resp_send_chunk(req_, nullptr, 0);
+    }
+
+private:
+    static constexpr size_t kFlushBytes = 1024;
+
+    void append(std::string_view s) {
+        if (failed_) return;
+        if (!chunk_.empty() && chunk_.size() + s.size() > kFlushBytes) flush();
+        if (failed_) return;
+        chunk_.append(s.data(), s.size());
+        if (chunk_.size() >= kFlushBytes) flush();
+    }
+
+    void flush() {
+        if (failed_ || chunk_.empty()) return;
+        if (httpd_resp_send_chunk(req_, chunk_.c_str(), chunk_.size()) != ESP_OK) {
+            failed_ = true;
+            return;
+        }
+        chunk_.clear();
+    }
+
+    httpd_req_t* req_ = nullptr;
+    std::string chunk_;
+    bool failed_ = false;
+};
+
 // The two sources ride ONE response but stay two arrays, mirroring the two stacks behind them:
 // `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only when that stack is enabled, so
 // a device without one sees exactly the payload it saw before this feature existed.
@@ -1395,9 +1446,20 @@ void http_append_values_json(std::string& j) {
 }
 
 static esp_err_t h_values(httpd_req_t* req) {
-    std::string j;
-    http_append_values_json(j);
-    return http_send_json(req, j.c_str());
+    httpd_resp_set_type(req, "application/json");
+    HttpJsonChunks j(req);
+    j += "{\"values\":";
+    append_values_array(j);
+    if (mb_status().connected) {
+        bool live = false;
+        const std::string arr = build_modbus_values_array(live);
+        if (live) {
+            j += ",\"modbus\":";
+            j += arr;
+        }
+    }
+    j += "}";
+    return j.finish();
 }
 
 // Model catalog + pin hint (def/models_catalog.hpp, generated alongside the def/*.hpp profiles).
