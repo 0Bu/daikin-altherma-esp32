@@ -183,11 +183,11 @@ void status_led_task(void*) {
     emit(false, LedPattern{});   // start dark, whatever the pin's reset state was
 
     for (;;) {
-        // Guarded like mqtt_task/poll_task (.claude/CLAUDE.md → Memory constraints): mqtt_status()
-        // and hp_stats() copy std::strings out of a locked snapshot, so either can throw
-        // std::bad_alloc under memory pressure (wifi_info() is POD and cannot — the tick is guarded
-        // for the two that can) — and a task entry is a C frame
-        // boundary, so an escape means std::terminate() and a reboot triggered by a cosmetic LED.
+        // Guarded like mqtt_task/poll_task (AGENTS.md → Memory, concurrency, and HTTP safety):
+        // mqtt_status() and hp_stats() copy std::strings out of a locked snapshot, so either can
+        // throw std::bad_alloc under memory pressure (wifi_info() is POD and cannot — the tick is
+        // guarded for the two that can) — and a task entry is a C frame boundary, so an escape means
+        // std::terminate() and a reboot triggered by a cosmetic LED.
         // The pattern is recomputed from scratch each tick, so dropping one costs nothing.
         try {
             status_led_tick();

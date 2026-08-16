@@ -6,6 +6,12 @@ model: opus
 
 # ui-gif
 
+## Authorization boundary
+
+Treat review and audit work as read-only unless the user explicitly asks for a change. Do not edit
+files, update GitHub state, merge, flash, deploy, clear evidence, or mutate a live system merely
+because this skill activated. Re-record the GIF only when explicitly requested.
+
 `docs/media/dashboard.gif` is the first thing a new user sees in the README, and it is the one
 artefact in this repo that **rots invisibly**. It is a recording: it keeps rendering perfectly long
 after the thing it recorded has changed. Every other gate stays green while it goes wrong — the
@@ -18,7 +24,7 @@ That is why the gate is a **stamp**, not a re-render: CI has no browser. And it 
 only ever prove the recording is *current* — never that it is *right*. The second half is this
 skill's.
 
-**This is a merge gate** (`.claude/hooks/require-ui-gif.sh`) and the audit is a CI `gates` step.
+**This is a merge gate** (`tools/agent-hooks/require-pr-gates.sh`) and the audit is a CI `gates` step.
 Neither was true before: the audit was kept out of CI because a gate whose remedy is unavailable
 where it fires gets the *stamp* rewritten rather than the recording re-made. That escape is closed —
 `check_ui_gif.mjs` refuses to write a stamp whose `ui` moved while `gif` stayed byte-identical, which
@@ -34,8 +40,8 @@ comment-only edit to the recorder can do). **Never** hand-edit `tools/uigif/gif_
 exactly the sources the gate fingerprints — and they share their files with the settings modal, the
 charts and the value list, which is why the merge hook asks the audit rather than a path regex: an
 edit that cannot move a pixel must not cost anybody a 10-minute re-record. So **the gate tells you
-whether it applies** — run it first. **You re-record and apply the fixes**, you do not just report
-them.
+whether it applies** — run it first. When the user asked to make or finalize relevant changes,
+re-record and apply the fixes; for review-only work, report findings without mutating files.
 
 ## 1. Run the gate (the mechanical half)
 
@@ -167,10 +173,11 @@ of the firmware.
 ## 5. Keep the contract in sync
 
 `README.md` § Web UI is the copy that surrounds the recording — if a scene changes, the sentence
-describing what the dashboard states changes with it. `.claude/CLAUDE.md` and `CONTRIBUTING.md`
-list the local gates; a new check here belongs in both. Since this became a merge gate, the PR
-template carries its checkbox and `.claude/hooks/require-ui-gif.sh` carries the ONLY definition of
-when it applies — and that definition is the audit itself, so widening what the gate covers means
-widening what `check_ui_gif.mjs` fingerprints, never a list in the prose that points at it. If the schematic itself changed, this skill
+describing what the dashboard states changes with it. `AGENTS.md` and `CONTRIBUTING.md` list the
+local gates; a new check here belongs in both. Since this became a merge gate, the PR template
+carries its checkbox and `tools/agent-hooks/require-pr-gates.sh` carries the runner-neutral
+enforcement. The audit itself is the only definition of when it applies, so widening what the gate
+covers means widening what `check_ui_gif.mjs` fingerprints, never a list in prose that points at it.
+If the schematic itself changed, this skill
 is the *second* half of that work — `/schematic-review` decides whether the drawing is true, and
 this one makes sure the README stops showing the old one.

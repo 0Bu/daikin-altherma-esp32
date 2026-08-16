@@ -19,7 +19,7 @@
 //
 // The VALUE is replaced, the KEY is kept. Dropping the field instead would be indistinguishable
 // from an OLDER firmware that never had it, and "which build produced this?" is the first question
-// triage asks of a frozen report (.claude/skills/bug-triage) — a privacy measure must not forge a
+// triage asks of a frozen report ($bug-triage) — a privacy measure must not forge a
 // version signal.
 //
 // Deliberately NOT redacted, because they identify the FIRMWARE rather than the reporter:
@@ -102,7 +102,7 @@ inline std::string redact_or(const std::string& value, bool on) {
 // An UNSET field carries nothing to hide, and "<redacted>" over one manufactures an identifier that
 // does not exist: a report from a device with no room source, no circulation witness, no HomeHub and
 // no syslog collector reads exactly like a report from a device that has all four and scrubbed them.
-// That is the first question triage asks of a frozen report (.claude/skills/bug-triage) — which
+// That is the first question triage asks of a frozen report ($bug-triage) — which
 // optional sources is this installation even running — and answering it wrongly costs a round trip
 // to the reporter for a fact the payload already had. mqtt.broker is the sharpest case: empty IS the
 // disabled state, so the redacted form asserted a broker on every device that has none.

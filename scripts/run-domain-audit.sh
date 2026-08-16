@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Domain-correctness audit of the value catalog — the mechanical half of the /domain-review
+# Domain-correctness audit of the value catalog — the mechanical half of the $domain-review
 # merge gate. Compiles tools/domain/catalog_audit.cpp against the REAL catalog (main/def) and the
 # REAL converters (main/logic/convert.hpp) and cross-checks both against docs/REGISTERS.md §5.
 #

@@ -15,7 +15,7 @@
 // own framing — and fails when that fingerprint no longer matches the one recorded beside the GIF.
 //
 // What it therefore does NOT claim: that the GIF looks good, that the operating-state atlas is
-// complete, or that a number in it is physically true. That is the /ui-gif skill's half, and the
+// complete, or that a number in it is physically true. That is the $ui-gif skill's half, and the
 // domain/schematic gates'. This one answers one question — was this GIF made from these sources.
 //
 // Usage:  node tools/uigif/check_ui_gif.mjs [--write-stamp [--allow-identical-gif]] [-v]

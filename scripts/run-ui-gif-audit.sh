@@ -16,7 +16,7 @@
 #
 # The fix for a failure is always to RE-RECORD (scripts/record-dashboard-gif.sh, needs Chrome +
 # ffmpeg locally) — never to edit the stamp. The judgement half — are all normal operating scenes
-# present, do their transitions and readings stay honest — is the /ui-gif skill.
+# present, do their transitions and readings stay honest — is the $ui-gif skill.
 #
 # Usage: scripts/run-ui-gif-audit.sh [-v]
 # Exit:  0 = current, 1 = findings, 2 = usage / the fingerprint could not be taken.

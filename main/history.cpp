@@ -330,7 +330,7 @@ inline void advance_raster_locked(int64_t now_us, uint32_t bucket) {
 
 // The board's own memory, read BEFORE any lock: heap_caps_get_largest_free_block takes the heap's
 // internal lock, and taking that under ours would invent a lock order this file has no reason to
-// have (CLAUDE.md → never allocate while holding a mutex; the same argument applies to a second,
+// have (AGENTS.md → Memory, concurrency, and HTTP safety; the same argument applies to a second,
 // unrelated lock). Both are plain reads of a counter — nothing allocates.
 struct BoardSample {
     HistorySample free_heap = HISTORY_NO_READING;

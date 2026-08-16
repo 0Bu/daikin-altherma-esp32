@@ -124,10 +124,11 @@ that lacks one.
 
 ## Recording the pass (merge gate — no file marker)
 
-`require-domain-review.sh` refuses **every** PR merge (`gh pr merge` **and**
-`mcp__github__merge_pull_request`) until this review is recorded in the PR body as a ticked,
-SHA-stamped checkbox whose stamp still matches the PR head. When the review passes with **no
-blocking findings**, tick + stamp it with the reviewed commit:
+The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) gates the
+documented host-, repository-, numeric-PR- and full-head-bound `gh` CLI merge path; direct
+REST/GraphQL/MCP merge and auto-merge paths are blocked. CI independently enforces the same
+current-head evidence. When the review passes with **no blocking findings**, tick + stamp it with
+the reviewed commit:
 
 ```
 - [x] `/domain-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD

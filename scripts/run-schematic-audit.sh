@@ -16,7 +16,7 @@
 # rotors centred on their hub, no run's invisible tap area reaching into the fitting it meets) and
 # domain (a repeated unit needs a name; a return-run reading stays
 # on the common section). What it cannot decide — is the picture still TRUE, is a new part in the
-# right place, is the German copy right — is the /schematic-review skill's half.
+# right place, is the German copy right — is the $schematic-review skill's half.
 #
 # Usage: scripts/run-schematic-audit.sh [extra args passed to the checker, e.g. -v]
 # Exit:  0 = clean, 1 = findings, 2 = usage/parse/vacuity error.

@@ -6,8 +6,8 @@ the **config model / validation**, and the **HA-discovery payloads**. They all l
 headers under [`main/logic/`](../main/logic), so they can be compiled and run on the host with
 the plain system toolchain — no ESP-IDF, no Docker, no board.
 
-This is the **real local verification loop**: a cloud Claude Code session can't build firmware or
-USB-flash, but it *can* run these in seconds and know a decode/config change is correct.
+This is the **real local verification loop**: an agent sandbox without Docker or USB access cannot
+build firmware or flash a board, but it *can* run these in seconds and verify a decode/config change.
 
 ## Run
 
@@ -46,9 +46,14 @@ Settings/Back, stable popup URLs, reload restoration, browser Back/Forward, open
 Escape, accepted and rejected Save paths, representative invalid input, board-gated ENV III states,
 and both bug-report steps. `tools/ui/selftest.sh`
 re-introduces the historical undefined ENV III close handler and proves the matrix fails on the
-actual click path. It also simulates CLI and app-MCP merges, proving the hook accepts only a current
-review stamp and returns exit 2 for a failed suite or stale stamp. CI calls the same top-level
-command, rather than maintaining a second list.
+actual click path. The runner-neutral policy canaries also simulate the supported
+`gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <numeric-pr> --match-head-commit
+<full-40-hex-head-sha> --squash` shape and blocked app-MCP merge/auto-merge requests. The CLI path
+accepts only a current review stamp and matching expected-head lease; REST, GraphQL, and all MCP
+merge, auto-merge, or queue-activation forms are intentionally rejected. Every real local merge also
+runs the UI-GIF audit as a mechanical hard block; changing the GIF or stamp adds the current-head
+`$ui-gif` review requirement. A failed suite or stale stamp returns exit 2. CI calls the same
+top-level policy rather than maintaining a second gate list.
 
 `node test/test_ui_fan_icon.mjs` pins the header to the supplied static three-blade PNG mark at 48 px.
 It separately keeps the live `#scFan` rotation in the system schematic and rejects a second header
@@ -343,6 +348,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
    `.cpp` must be a thin wrapper that calls it, never a second copy.
 2. Add a `CHECK(...)` in `test_logic.cpp` asserting against a known-good reference (for converters,
    a known-good reference output for the same raw bytes; for CRC, a real captured frame).
-3. `scripts/run-mock-tests.sh` — must pass (the Stop hook and CI enforce it).
+3. `scripts/run-mock-tests.sh` — must pass; run it explicitly before handoff, and CI enforces it.
+   The Codex and retained Claude Stop lifecycle hooks both repeat it through the same neutral core.
 
-See the `add-logic-test` skill (`.claude/skills/add-logic-test/`).
+See the `$add-logic-test` skill (`.agents/skills/add-logic-test/`).

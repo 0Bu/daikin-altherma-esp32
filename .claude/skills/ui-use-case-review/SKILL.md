@@ -68,9 +68,10 @@ unrepresented new use case, live UI assertion failure, or visual/accessibility r
 
 ## 5. Record the pass
 
-The `require-ui-use-case-review.sh` hook reruns the complete suite at merge time and requires a
-current PR record for UI-relevant changes. After every blocking finding is fixed, stamp the reviewed
-head in the PR body:
+The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) reruns the
+complete suite at merge time and requires a current PR record for UI-relevant changes. The legacy
+`.claude/hooks/require-ui-use-case-review.sh` path is only a compatibility adapter. After every
+blocking finding is fixed, stamp the reviewed head in the PR body:
 
 ```text
 - [x] `/ui-use-case-review` clean — merge gate @ <short-sha>

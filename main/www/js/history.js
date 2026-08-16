@@ -157,7 +157,8 @@ function histHeld(h, i) {
 
 // Fetch a row's series at most once a minute. The buffer moves one sample per `dt` (300 s), so a
 // per-poll refetch would send ~300 identical responses per new data point — and each response is a
-// ~1 KB contiguous string on the single httpd task (CLAUDE.md → Memory constraints).
+// ~1 KB contiguous string on the single httpd task (AGENTS.md → Memory, concurrency, and HTTP
+// safety).
 const histCacheKey = (id, source) => source === "modbus" ? `modbus:${id}`
   : source === "env3" ? `env3:${id}` : id;
 async function ensureHist(id, source = "x10a", paint = true, signal = null) {

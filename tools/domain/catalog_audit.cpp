@@ -1,7 +1,7 @@
 // Domain-correctness audit of the shipped value catalog — the mechanical half of the
-// /domain-review merge gate. Answers "are these values physically RIGHT?", not "does it compile?".
+// $domain-review merge gate. Answers "are these values physically RIGHT?", not "does it compile?".
 //
-// WHY THIS EXISTS. The technical gates (/project-review, /feature-docs) check consistency and doc
+// WHY THIS EXISTS. The technical gates ($project-review, $feature-docs) check consistency and doc
 // drift; the host tests check the logic they are given. None of them can see a value that is
 // well-formed, compiles, passes every test — and is physically wrong. That class shipped on main in
 // eight profiles at once (see the 2026-07-16 review): a mixed-water temperature decoded with the

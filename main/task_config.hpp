@@ -11,8 +11,9 @@
 //
 // STACK SIZES deliberately stay at the call sites. They are the opposite kind of fact — each one is
 // justified by what that particular task's deepest call chain does (syslog's getaddrinfo + socket
-// chain, the OTA task's TLS handshake, the poll task's decode) and CLAUDE.md's memory section is
-// emphatic that a stack budget is read off a measured frame, not chosen from a table. A shared table
+// chain, the OTA task's TLS handshake, the poll task's decode) and AGENTS.md's "Memory, concurrency,
+// and HTTP safety" section is emphatic that a stack budget is read off a measured frame, not chosen
+// from a table. A shared table
 // of sizes would invite exactly the copy-the-neighbour sizing it warns against.
 //
 // Relative ordering (higher preempts lower):

@@ -4,9 +4,9 @@
 //
 // WHY THIS EXISTS. Every OOM guard in this firmware turns "out of memory" into "recover and
 // continue", and every one of them is right to: http_common.cpp's handle_all trampoline answers
-// 503, each allocating task loop catches std::bad_alloc and — in the words of CLAUDE.md's own rule
-// — skips "the cycle keeping the last good state", the MQTT bridge drops one publish. That is the
-// correct response to a TRANSIENT shortage and must stay.
+// 503, each allocating task loop catches std::bad_alloc and — per AGENTS.md → Memory, concurrency,
+// and HTTP safety — skips "the cycle keeping the last good state"; the MQTT bridge drops one
+// publish. That is the correct response to a TRANSIENT shortage and must stay.
 //
 // What nothing here has ever asked is the NEXT question: what if it never recovers? Compose those
 // guards and the result is a device that is powered, associated, answering 503 to every request,
@@ -18,8 +18,8 @@
 //
 // A hang is the worst failure shape available. A crash reboots in seconds and leaves a reset reason,
 // a core dump and a syslog record; a wedge looks exactly like a powered-off device, heals never, and
-// reports nothing — CLAUDE.md's "Memory constraints" section already names the cost ("A reboot loop
-// also stops the poll cycle and drops MQTT availability"), and an unbroken wedge pays that cost
+// reports nothing — docs/ARCHITECTURE.md's "Memory constraints" section already explains that a
+// reboot loop stops the poll cycle and drops MQTT availability, and an unbroken wedge pays that cost
 // permanently instead of for four seconds. So: when the heap has been unusable CONTINUOUSLY for
 // long enough that no transient explains it, restart deliberately.
 //

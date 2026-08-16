@@ -325,7 +325,8 @@ void syslog_init() {
         const TickType_t check_interval = pdMS_TO_TICKS(10000); // re-resolve + re-probe cadence
 
         while (true) {
-          // Guard the whole cycle like mqtt_task/poll_task (.claude/CLAUDE.md → Memory constraints):
+          // Guard the whole cycle like mqtt_task/poll_task (AGENTS.md → Memory, concurrency, and
+          // HTTP safety):
           // this loop allocates every pass (the config() snapshot copies ~10 std::strings, plus
           // getaddrinfo/last_host), and a FreeRTOS task entry is a C-frame boundary — an escaping
           // std::bad_alloc would reach std::terminate and reboot, dropping the poll cycle + MQTT the

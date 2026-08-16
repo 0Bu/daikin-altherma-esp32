@@ -1,10 +1,16 @@
 ---
 name: absence-review
-description: Review what the firmware and the web UI do when a third-party system is unconfigured, deleted, or unreachable — the MQTT broker, the HomeHub, ENV III, the MQTT room source, the circulation witness, Open-Meteo, the X10A bus, and safe mode. Runs the deterministic absence matrix and then judges what it cannot: whether every state is handled honestly, whether removing one source silently removed another, and whether the copy tells the reader the truth. Use after any change that adds, removes or reads an optional source — and applies the fixes.
+description: Review what the firmware and the web UI do when a third-party system is unconfigured, deleted, or unreachable — the MQTT broker, the HomeHub, ENV III, the MQTT room source, the circulation witness, Open-Meteo, the X10A bus, and safe mode. Runs the deterministic absence matrix and then judges what it cannot. Use after changes that add, remove, or read an optional source. Report findings by default; apply fixes only when explicitly requested.
 model: opus
 ---
 
 # absence-review
+
+## Authorization boundary
+
+Treat review and audit work as read-only unless the user explicitly asks for a change. Do not edit
+files, update GitHub state, merge, flash, deploy, clear evidence, or mutate a live system merely
+because this skill activated. When a mutation is explicitly requested, keep it within that scope.
 
 Every source this firmware reads except the board itself is **optional**, and each can be absent
 independently of the others: the MQTT broker, the MQTT room source, the MQTT circulation witness, the
@@ -36,9 +42,11 @@ None of these is visible in a value, a converter, a payload schema or a pixel. T
 one place: the pair (what is configured, what is answering).
 
 **This review is CONDITIONAL**, like `/feature-docs` and `/schematic-review` and unlike
-`/domain-review`. The filter lives in `.claude/hooks/require-absence-review.sh` and that regex is its
-only definition — read it there rather than trusting a list here, and grow it there if an optional
-source moves. **You apply the fixes**, you do not just report them.
+`/domain-review`. The canonical filter lives behind
+[`tools/agent-hooks/require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh); read it
+rather than trusting a copied list, and grow it if an optional source moves.
+`.claude/hooks/require-absence-review.sh` is only a compatibility adapter. Report findings; apply
+fixes only when the user explicitly requests them.
 
 ## 1. Run the deterministic half
 
@@ -121,10 +129,11 @@ Safe mode removes every optional consumer at once. A card that reports its sourc
 naming safe mode sends the reader to re-configure something that is already correct. The global
 banner helps but does not excuse a per-card lie.
 
-## 3. Apply the fixes
+## 3. Apply authorized fixes
 
-Fix in the firmware where the answer is a fact about the device, in the browser where it is a fact
-about presentation, and in `main/logic/` where it is a rule — with a `CHECK` in `test/test_logic.cpp`
+When the user requested fixes, fix in the firmware where the answer is a fact about the device, in
+the browser where it is a fact about presentation, and in `main/logic/` where it is a rule — with a
+`CHECK` in `test/test_logic.cpp`
 for the rule, an entry in the matrix for the state, and a seed in `tools/absence/selftest.sh` for any
 check you add. Then re-run all three commands in §1 plus `scripts/run-mock-tests.sh`.
 

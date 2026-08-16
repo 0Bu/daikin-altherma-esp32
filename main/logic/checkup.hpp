@@ -151,7 +151,7 @@ constexpr CheckupOperatingMode checkup_operating_mode(const char* text) {
 
 // Index of the addressed row, or -1 when this profile carries none. The parallel-array shape mirrors
 // trend_select(): the caller builds byte-wide views on the POLL TASK's stack, which is the budget
-// that fails silently on this board (CLAUDE.md → Memory constraints).
+// that fails silently on this board (AGENTS.md → Memory, concurrency, and HTTP safety).
 inline int checkup_select(const CheckupLocator& l, const uint8_t* regs, const uint8_t* offs,
                          const int* convs, size_t n) {
     for (size_t i = 0; i < n; i++)
@@ -683,7 +683,7 @@ constexpr uint32_t DHW_LOSS_BLOCKED_MIN_ABORTS = 6;
 // Widening it is a DOMAIN decision, not a code cleanup, and it trades in the direction this project
 // normally refuses: a higher cut lets a real draw be counted as a standing loss, i.e. it buys
 // coverage with the risk of reporting a leak that is not there. That wants the reference
-// installation's own draw profile, so it belongs with a measurement and /domain-review rather than
+// installation's own draw profile, so it belongs with a measurement and $domain-review rather than
 // with a guessed constant.
 //
 // The stated cut and the real one also differ: at 0.1 K resolution both the anchor and the sample are

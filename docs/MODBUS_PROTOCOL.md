@@ -163,7 +163,7 @@ only the visual boundary prints `OFF`/`ON`.
 > `test/test_logic.cpp`) verify the *decode mechanics* — scaling, the special-value guard, `Text16`,
 > the offset→PDU mapping, and that a negative temperature keeps its sign. Whether a given offset means
 > what the guide says it means on *your* unit is a hardware check, the same rule the X10A domain audit
-> exists to enforce ("passing the tests is not the same as being RIGHT", `.claude/CLAUDE.md`).
+> exists to enforce ("passing the tests is not the same as being RIGHT", [`AGENTS.md`](../AGENTS.md)).
 
 ## Two independent stacks
 

@@ -1,10 +1,16 @@
 ---
 name: renovate-review
-description: Review and merge a Renovate dependency PR. The two tracked firmware deps (esptool-js, espressif/esp-idf) are deliberately never auto-merged because a green build cannot prove either still works — each needs a real hardware test the user must perform. Use when a Renovate PR needs review or merging.
+description: Review a Renovate dependency PR and merge only when the user explicitly requests it after validation. The two tracked firmware dependencies (esptool-js and espressif/esp-idf) are never auto-merged because a green build cannot prove hardware behavior. Use when a Renovate PR needs review or an explicitly authorized merge.
 model: sonnet
 ---
 
 # renovate-review
+
+## Authorization boundary
+
+Treat review and audit work as read-only unless the user explicitly asks for a change. Do not edit
+files, update GitHub state, merge, flash, deploy, clear evidence, or mutate a live system merely
+because this skill activated. When a mutation is explicitly requested, keep it within that scope.
 
 Most Renovate PRs here self-merge. The two that don't are the point of this skill: a green build
 proves the firmware **compiles**, which is not the question either of these bumps raises.
@@ -165,16 +171,19 @@ to confirm WiFi associates, MQTT connects, X10A decodes real values, and the hea
 
 ## 4. Merging
 
-The gates are unchanged by this being a bot's PR. **Derive which apply** — never trust a list
-written down anywhere, including here:
+The gates are unchanged by this being a bot's PR. **Derive which apply** from the canonical
+[`tools/agent-hooks/require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh), never
+from a copied list. The legacy `.claude/hooks/require-*.sh` files are compatibility adapters, not
+the canonical definitions. The only supported merge command is the lease-bound path documented in
+[`docs/AGENT_MIGRATION.md`](../../../docs/AGENT_MIGRATION.md):
 
 ```bash
-ls .claude/hooks/require-*.sh          # each names its gate + its relevance filter
+gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <number> --match-head-commit <full-current-head-sha> --squash
 ```
 
 Run each applicable skill, then tick + SHA-stamp its box in the PR body against the PR head
-(`gh pr edit <N> --body-file <file>`; append to Renovate's body, don't replace it). Merge
-`--squash` — `main` stays linear and GPG-signed via GitHub's web-flow key.
+(`gh pr edit <N> --body-file <file>`; append to Renovate's body, don't replace it). `main` stays
+linear and GPG-signed via GitHub's web-flow key.
 
 Record the hardware result in the PR body. It is the only evidence that the thing CI cannot test was
 tested, and after the squash it is the sole surviving trace.

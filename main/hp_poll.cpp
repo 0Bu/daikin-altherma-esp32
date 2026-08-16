@@ -632,7 +632,8 @@ void hp_poll_start() {
     //     0x3fcbf3b4     httpd      5/5     1456/10820
     //
     // The task table's USED/FREE column in the next core dump is where the exact figure lives
-    // (CLAUDE.md -> Memory constraints), but this task no longer waits for one to be readable: it
+    // (AGENTS.md → Memory, concurrency, and HTTP safety), but this task no longer waits for one to
+    // be readable: it
     // records its own high-water mark every cycle and the MQTT heartbeat publishes it as
     // poll_stack_min_free_bytes (main/stack_watch.hpp), so a shrinking margin is a falling line
     // months before it is a panic. If a future change gives this task a large builder or a deep
