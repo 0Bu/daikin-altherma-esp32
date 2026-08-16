@@ -43,6 +43,17 @@ function hasHist(id) {
   return D ? D.ready(Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]))) : hasDeviceHist(id);
 }
 
+// Sum CT current only when every phase ring declared by this firmware snapshot has a value in the
+// bucket. A null is not zero: CT-L3 is deliberately withheld while its shared byte carries the
+// HP-Forced flag, and adding the surviving phases would understate input. Returning null lets both
+// derived consumers use their INV fallback, exactly like liveData(); a real complete 0 A set still
+// returns zero and therefore also falls back for the compressor-only estimate.
+function completeCtCurrent(s, has) {
+  const keys = ["ct_l1", "ct_l2", "ct_l3"].filter((k) => has && has[k]);
+  return !keys.length || keys.some((k) => s[k] == null)
+    ? null : keys.reduce((a, k) => a + s[k], 0);
+}
+
 // ── Derived trends: computed pills and combined component states ───────────────────────────────
 // Pump speed, ΔT, heat output, electrical input and COP have no directly matching register value, so
 // the device has nothing to buffer for the displayed figure itself. BUH likewise has two physical
@@ -98,18 +109,17 @@ const DERIVED = {
     fn: (s) => (s.flow == null || s.leaving_water == null || s.return_water == null
                   ? null : (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water)),
   },
-  // Amps × an assumed 230 V, CT clamps preferred over the inverter current — liveData()'s rule, one
-  // sample at a time. The live version needs `d.ouHeldOver` to gate the INV fallback because
-  // /values still carries last run's number; here the ring has already withheld it, so a null is
-  // simply a null. `ctLive` keeps the "sum > 0" test: an idle plant reads 0 A on clamps that are
-  // fitted, and the fallback is what makes that a compressor figure rather than a flat zero.
+  // Amps × an assumed 230 V, a complete declared CT set preferred over inverter current —
+  // liveData()'s rule, one sample at a time. The live version needs `d.ouHeldOver` to gate the INV
+  // fallback because /values still carries last run's number; here the ring has already withheld
+  // it, so a null is simply a null. An idle plant reads 0 A on fitted clamps, and the fallback is
+  // what makes that a compressor figure rather than a flat zero.
   pel: {
     unit: "kW", ins: ["ct_l1", "ct_l2", "ct_l3", "inv_current"],
     ready: (h) => h.inv_current || h.ct_l1 || h.ct_l2 || h.ct_l3,
-    fn: (s) => {
-      const parts = [s.ct_l1, s.ct_l2, s.ct_l3].filter((x) => x != null);
-      const ct = parts.reduce((a, x) => a + x, 0);
-      if (parts.length && ct > 0) return (ct * 230) / 1000;
+    fn: (s, has) => {
+      const ct = completeCtCurrent(s, has);
+      if (ct != null && ct > 0) return (ct * 230) / 1000;
       return s.inv_current == null ? null : (s.inv_current * 230) / 1000;
     },
   },
@@ -131,9 +141,9 @@ const DERIVED = {
       de: "Kein COP-Verlauf, solange der Stromwert von den Stromwandlern kommt. Welche Lasten sie erfassen, hängt von ihrer Verdrahtung ab; die gepufferte Wärmeseite endet zugleich vor dem Zusatzheizer und kann direkt eingebrachte Wärme des Speicherheizstabs nicht erfassen. Eine passende Bilanzgrenze ist daher nicht gesichert.",
     },
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
-    fn: (s) => {
-      const ct = [s.ct_l1, s.ct_l2, s.ct_l3].filter((x) => x != null).reduce((a, x) => a + x, 0);
-      if (ct > 0) return null;                         // whole-unit divisor — see the note above
+    fn: (s, has) => {
+      const ct = completeCtCurrent(s, has);
+      if (ct != null && ct > 0) return null;           // whole-unit divisor — see the note above
       if (s.inv_current == null || s.flow == null) return null;
       if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
       const dt = s.leaving_water - s.return_water;
@@ -231,7 +241,8 @@ async function ensureDerived(id) {
   if (S.histBusy.has(id)) return;
   S.histBusy.add(id);
   try {
-    const use = D.ins.filter((k) => hasDeviceHist(k));
+    const has = Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]));
+    const use = D.ins.filter((k) => has[k]);
     await Promise.all(use.map((k) => ensureHist(k)));
     const src = use.map((k) => [k, S.hist.get(k)]).filter(([, h]) => h && !h.err && h.v.length);
     if (!src.length) { S.hist.set(id, { at: Date.now(), err: true, v: [] }); return; }
@@ -262,7 +273,7 @@ async function ensureDerived(id) {
         s[k] = raw == null ? null : raw / 10;             // tenths on the wire, units in the formula
         if (raw == null) { missing++; if (j >= 0 && j < h.v.length && histHeld(h, j)) heldMissing++; }
       }
-      const out = D.fn(s);
+      const out = D.fn(s, has);
       v.push(out == null || !Number.isFinite(out) ? null : Math.round(out * 10));
       // A gap inherits its REASON, and only when EVERY missing input carries it: "the outdoor unit
       // was resting" is a statement that nothing failed, so one input that genuinely failed to
