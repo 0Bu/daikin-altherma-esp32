@@ -12,9 +12,9 @@
 //
 // Each key below was measured over the real catalog rather than guessed:
 //   node -e '…read main/def/*.hpp labels…' | check which group each lands in
-// Measured before this list was last edited: 66 of the 169 published labels fell into the catch-all
-// "Other values" at the bottom, including the unit's own Error Code on 44 of 45 profiles — §6 group
-// 1's named row, sitting below everything because "fault" was a key and "error" was not. Four keys
+// The catalog audit once found dozens of published labels in the catch-all "Other values" at the
+// bottom, including the unit's own Error Code — §6 group 1's named row, sitting below everything
+// because "fault" was a key and "error" was not. Four keys
 // were also claiming rows from the group after them ("target" took the three REFRIGERANT targets,
 // "valve" took the five expansion valves, "domestic hot water" took the extra DHW SENSOR into
 // Operation, "inv " took compressor speed into Electrical). None of that is visible from a single
@@ -43,25 +43,30 @@ const GROUPS = [
   // test_ui_source_matrix.mjs now asserts that count through the real groupOf, so a broader key
   // elsewhere can no longer take a row from here in silence.
   ["Protection", ["drop", "retry"]],
-  // "error" catches exactly "Error type" + "Error Code" and nothing else in the catalog. The DHW
+  // "error" catches the error type, code and detailed-code rows. The DHW
   // on-off flag §6 names here spells itself "Powerful DHW Operation. ON/OFF", so it lands in the DHW
   // group below; the old "domestic hot water" key matched ONLY the 2nd-tank SENSOR, i.e. it never
   // did the job it was written for and did one it should not have.
-  ["Operation", ["operation mode", "thermostat", "space heat", "fault", "error", "defrost", "silent mode"]],
+  ["Operation", ["operation mode", "thermostat", "space heat", "fault", "error", "defrost", "silent mode",
+                 "restart standby", "startup control", "oil return operation",
+                 "pressure equalizing operation", "demand signal", "low noise control",
+                 "system off", "rt input", "main rt", "pwr consumption limit", "solar input"]],
   ["Domestic hot water", ["tank", "dhw", "hot water"]],
   // "heating target" for the hybrid/boiler water targets, NOT bare "target": that also took
   // Target Evap./Cond./Discharge Temp. — refrigerant-circuit control targets — into the water group.
   // Same for the valves: bare "valve" took all five expansion valves off the refrigerant circuit.
   ["Water circuit", ["leaving water", "return water", "inlet water", "outlet water", "mixed water",
                      "flow", "water pressure", "heating-flow", "heating flow", "heating target",
-                     "lw setpoint", "delta", "pump", "2way valve", "3way valve", "3-way", "mix valve"]],
+                     "lw setpoint", "delta", "pump", "2way valve", "3way valve", "3-way", "mix valve",
+                     "floor loop shut off"]],
   // Bare "pressure" is safe HERE and only here: the two water-pressure spellings are claimed by the
   // group above, so what is left ("Pressure", "Pressure sensor(T)", …) is refrigerant — the same
   // generically-named rows logic/hp_convert.cpp documents as its known is_refrigerant_pressure gap.
   ["Refrigerant / outdoor", ["outdoor", "heat-exchanger", "heat exchanger", "o/u heat exch",
                              "pressure", "refrigerant", "refrig.", "compressor", "fan",
                              "expansion valve", "discharge", "suction", "liquid", "deicer",
-                             "target evap", "target cond", "inv frequency"]],
+                             "target evap", "target cond", "inv frequency", "4 way valve",
+                             "bypass valve", "y3s"]],
   // "ct sensor" beside "ct l": the catalog spells the clamps BOTH ways ("CT Sensor (L1)" and
   // "Current measured by CT sensor of L1") and only the second contains "current", so the short
   // spelling fell through to "Other values". "buh" brings BUH Step1/Step2 — §6's "backup-heater …
@@ -73,7 +78,7 @@ const GROUPS = [
   // (O/U, I/U, Indoor Unit) that are not electrical readings at all, while the one row it was meant
   // for, "BUH output capacity", is already claimed by "buh".
   ["Electrical", ["current", "ct l", "ct sensor", "inv ", "backup-heater", "backup heater", "buh",
-                  "heat sink", "fin temp"]],
+                  "heat sink", "fin temp", "crank case heater", "phe heater"]],
   ["Device", ["wi-fi", "wifi", "mqtt", "hp link", "link", "poll", "uptime", "firmware", "rssi"]],
 ];
 // DESIGN.md §6's reading order — "what is it doing" first, then detail. This is what the page is

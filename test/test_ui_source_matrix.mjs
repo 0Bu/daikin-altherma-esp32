@@ -225,6 +225,8 @@ const X_BSH = (on) => ({ label: "BSH", value: on ? "1" : "0", unit: "", reg: 0x6
 const M_BSH = (on) => M_FLAG(32, "Booster heater run", on, "bsh_state");
 const X_QUIET = (on) => ({ label: "Silent Mode", value: on ? "1" : "0", unit: "", reg: 0x60,
                            binary: true, concept: "quiet_state" });
+const X_LOW_NOISE = (on) => ({ label: "Low noise control", value: on ? "1" : "0", unit: "",
+                               reg: 0x10, binary: true });
 const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
 const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" : "0",
                          unit: "", reg: 0x60, binary: true, binary_semantic: "valve_heat" });
@@ -266,6 +268,27 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.doesNotMatch(xMode.what, /configured HomeHub/i);
   assert.match(mbMode.what, /configured HomeHub heat\/cool selection/i);
   assert.match(mbMode.what, /holding register 3/i);
+
+  const indoorThermostat = c.descFor("Thermostat ON/OFF",
+    { reg: 0x60, x10a_group: "hydronic" });
+  const outdoorThermostat = c.descFor("Thermostat ON/OFF",
+    { reg: 0x10, x10a_group: "outdoor_state" });
+  assert.match(indoorThermostat.what, /indoor unit is currently asking the outdoor unit/i);
+  assert.match(outdoorThermostat.what, /outdoor controller's own thermostat-state flag/i);
+  assert.notEqual(indoorThermostat, outdoorThermostat,
+    "the two identically labelled thermostat bits must keep distinct explanations");
+  const statusCtx = ctx({ x10a: true, mbEnabled: false, mbConnected: false, values: [
+    { label: "Thermostat ON/OFF", value: "1", reg: 0x10, binary: true,
+      x10a_group: "outdoor_state" },
+    { label: "Thermostat ON/OFF", value: "0", reg: 0x60, binary: true,
+      x10a_group: "hydronic" },
+    { label: "I/U operation mode", value: "Heating", reg: 0x60 },
+  ] });
+  const statusThermostats = statusCtx.inspMembers(statusCtx.INSPECT.status, null, null)
+    .map((m) => m.x10a).filter((r) => r?.label === "Thermostat ON/OFF");
+  assert.equal(statusThermostats.length, 1);
+  assert.equal(statusThermostats[0].x10a_group, "hydronic",
+    "status inspector must select the indoor thermostat even when outdoor arrives first");
 
   const flowSwitch = c.descFor("Water flow switch", { reg: 0x60 });
   assert.match(flowSwitch.what, /binary X10A status/i);
@@ -374,6 +397,13 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
     "HomeHub input 9 keeps Quiet current when X10A is silent");
   assert.equal(down.INSPECT.quiet.trend, "quiet_state");
   assert.equal(down.INSPECT.defrost.trend, "defrost_state");
+
+  const p2Only = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                       values: [{ ...X_QUIET(false), value: null }, X_LOW_NOISE(true)] });
+  assert.equal(p2Only.liveData().quiet, null,
+    "P2 Low noise control must not become validated Quiet when Silent Mode is unread");
+  assert.equal(p2Only.INSPECT.quiet.re.test("Low noise control"), false,
+    "the Quiet inspector must not attach quiet-state copy/history to the P2 bit");
 }
 
 // The two X10A contact bits are not two user-facing modes. Pin the documented truth table and the
@@ -1018,6 +1048,29 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
   assert.equal(byUnit.off, 57, "the unit-keyed lookup this replaced would have taken the limit");
 }
 
+// A fail-closed CT phase is absence, not zero. Summing the remaining phases would replace the
+// rejected +64-A spike with an understated denominator and an inflated COP/EER. A complete CT set
+// wins; an incomplete one falls back to live inverter current or to no estimate.
+{
+  const CT = (phase, value) => ({ label: `Current measured by CT sensor of L${phase}`, value,
+                                  unit: "A", reg: 0x63 });
+  const INV = { label: "INV primary current", value: "4.0", unit: "A", reg: 0x21 };
+  const complete = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                         values: [CT(1, "2.0"), CT(2, "2.1"), CT(3, "2.2"), INV] });
+  assert.equal(complete.liveData().pelSrc, "CT", "a complete declared CT set remains preferred");
+
+  const partial = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                        values: [CT(1, "2.0"), CT(2, "2.1"), CT(3, null), INV] });
+  assert.equal(partial.liveData().pelSrc, "INV",
+    "L1/L2 plus fail-closed L3 must never become a partial CT estimate");
+  assert.equal(partial.liveData().pel, 0.92, "live inverter current is the safe fallback");
+
+  const noFallback = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                           values: [CT(1, "2.0"), CT(2, "2.1"), CT(3, null)] });
+  assert.equal(noFallback.liveData().pelSrc, null);
+  assert.equal(noFallback.liveData().pel, null, "partial CT without live INV remains blank");
+}
+
 // ── 19. Cooling semantics: residual-hot circulation is not cooling capacity ────────────────────
 // This reproduces the live 57.8/57.5 °C screenshot: Cooling selected, space circulation active,
 // compressor stopped. The two temperatures are internal PHE readings after a DHW run. Arithmetic
@@ -1144,11 +1197,21 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   // renamed label fails here rather than quietly moving a row to the bottom of the page.
   const filed = {
     "Error Code": "Operation", "Error type": "Operation", "Silent Mode": "Operation",
+    "Thermostat ON/OFF": "Operation", "Restart standby": "Operation",
+    "Startup Control": "Operation", "Oil Return Operation": "Operation",
+    "Pressure equalizing operation": "Operation", "Demand Signal": "Operation",
+    "Low noise control": "Operation", "System OFF (ON:System off)": "Operation",
+    "Add. Ext. RT Input Cool.": "Operation", "Add. Ext. RT Input Heat.": "Operation",
+    "Main RT Cooling": "Operation", "Main RT Heating": "Operation",
+    "Pwr consumption limit 4": "Operation", "Pwr consumption limit 3": "Operation",
+    "Pwr consumption limit 2": "Operation", "Pwr consumption limit 1": "Operation",
+    "Solar input": "Operation", "Error detailed code": "Operation",
     "2nd Domestic hot water temperature": "Domestic hot water",
     "Inlet water temp.(R4T)": "Water circuit",
     "Outlet Water Heat Exch. Temp. (R1T)": "Water circuit",
     "Outlet Water BUH Temp. (R2T)": "Water circuit",
     "LW setpoint (main)": "Water circuit",
+    "Floor loop shut off valve": "Water circuit",
     "INV frequency (rps)": "Refrigerant / outdoor",
     "Target Evap. Temp.": "Refrigerant / outdoor",
     "Target Cond. Temp.": "Refrigerant / outdoor",
@@ -1156,9 +1219,14 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
     "Discharge pipe temp.": "Refrigerant / outdoor",
     "O/U Heat Exch. Temp.": "Refrigerant / outdoor",
     "Suction pipe temp.": "Refrigerant / outdoor",
+    "4 Way Valve": "Refrigerant / outdoor",
+    "Hot gas bypass valve (Y3S)": "Refrigerant / outdoor",
+    "LP bypass valve (Y2S)": "Refrigerant / outdoor", "Y3S": "Refrigerant / outdoor",
     "CT Sensor (L1)": "Electrical",
     "Current measured by CT sensor of L1": "Electrical",
     "BUH Step1": "Electrical",
+    "Crank case heater": "Electrical", "Thermal protector (Q1L) BUH": "Electrical",
+    "PHE Heater": "Electrical", "BUH output capacity": "Electrical",
   };
   for (const [label, group] of Object.entries(filed)) {
     assert.ok(labels.has(label), `"${label}" must still exist in the catalog`);

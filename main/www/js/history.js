@@ -1645,7 +1645,7 @@ function displayReadingLabel(label, row = null) {
     .replace(/[\s.]+ON\/OFF\s*$/i, "")
     .trim();
   const shown = cleaned || raw;
-  // /values marks the five catalog labels that occur on more than one X10A page with the SAME
+  // /values marks the six catalog labels that occur on more than one X10A page with the SAME
   // structural group used by MQTT/HA. Those rows are separate measurements, not duplicates — an
   // outdoor error and a hydronic error can occur independently — so dropping one would hide plant
   // state. Qualifying only that audited set removes duplicate visible names without renaming every

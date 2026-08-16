@@ -119,11 +119,12 @@ checkup.cpp/.hpp    → the 24-hour PLANT CHECKUP behind /status.health: counted
                       history's append journal, so power loss does not reset evidence. NOT a view over the
                       trend rings — TrendRing::fold keeps the LAST reading of a 5-minute bucket, so
                       the short cycling this exists to find leaves no trace in that raster
-state_dwell.cpp/.hpp → HOW LONG EACH SWITCHED ROW HAS READ WHAT IT READS — the value list's other
+state_dwell.cpp/.hpp → HOW LONG EACH ELIGIBLE SWITCHED ROW HAS READ WHAT IT READS — the value list's other
                       half, since "OFF" describes a plant that finished a charge four seconds ago and
                       one that has not charged since Tuesday equally well. Bit flags + the fault
-                      class only, 48 scalar slots (a 24-hour ring would cost 576 B per row). Storage
-                      + mutex; the rules are logic/state_dwell.hpp. THREE facts on /values, not one
+                      class, except eight exact observation-only P2 tuples, in 64 scalar slots (a
+                      24-hour ring would cost 576 B per row). Storage + mutex; the rules are
+                      logic/state_dwell.hpp. THREE facts on /values, not one
                       number: dwell_s, dwell_min (the transition was never witnessed, so the age is a
                       lower bound) and dwell_blind_s (how much of the run the bus did not answer for)
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
@@ -452,13 +453,13 @@ host-testable core is unusually large and valuable, because the risky parts are 
   is a read-only migration hint: an exact historical field match recovers the same name the old UI
   displayed, while untouched defaults never acquire an identity.
 - `logic/profile_view.hpp` — the active model's rows **as every consumer must see them**: the
-  generated table plus the hand-written `def/overlay.hpp` supplement, as one indexable sequence. Four
+  generated table plus the applicable hand-written `def/overlay.hpp` blocks, as one indexable sequence. Four
   call sites read the row set and they are not independent — `hp_poll` decodes them, `mqtt_ha`
   announces one HA discovery config per row, and both `http_status` and `mqtt_ha` size their snapshot
   buffer from the row **count**. Grow the cache without growing the count and the extra values are
   silently truncated out of `/values` and MQTT: an absent-value bug with no error anywhere, the
-  legacy-35–39 shape. Hence one view, not four merges. It carries the **overlay rule** (a supplement
-  applies only if the base already references its page), which is what keeps a hand-written block from
+  legacy-35–39 shape. Hence one view, not four merges. It carries the **overlay rule** (every page a
+  supplement block uses must already exist in the generated base), which keeps a hand-written block from
   doing what hand-editing a generated table would do — move detection — or adding a per-cycle bus
   round-trip that, on a model which does not answer the page, reads on `/diag` exactly like a wiring
   fault.
@@ -486,8 +487,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   else answers a narrower question — `convert()` handles the wire format's own `0x8000` no-data
   marker, `reading_plausible()` catches a number that is *impossible*, `ValueDef::no_publish` carries
   what the generator knew. What is left is a field that decodes to an entirely ordinary number which
-  is not a measurement of anything, and only per-row evidence can identify it. Four row verdicts
-  exist and three are in force. `ZeroMeansAbsent` withholds only an exact zero from an adjudicated row,
+  is not a measurement of anything, and only per-row evidence can identify it. Five non-default row
+  policies exist and four are in force. `ZeroMeansAbsent` withholds only an exact zero from an adjudicated row,
   because a global "0 °C is unavailable" rule would destroy every thermistor reading that crosses
   zero. Four rows carry it: `Target Cond. Temp.` (raw `0x0000` flat through a full compressor cycle)
   and, since legacy-224, the page-`0x21`
@@ -573,14 +574,21 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `Target Evap. Temp.` while that row's scale was unknown, and legacy-194 then showed the row was
   mis-*decoded* rather than unmeasurable, so the verdict moved to `logic/conv_override.hpp`. A
   quarantine and a mis-decode are different findings; recording them as one would make the fix read
-  as a suppression quietly lifted. Rules are keyed on `(page, offset, converter)` — the row's
+  as a suppression quietly lifted. `Bit7MeansAbsent` covers CT-L3 at `0x63/16`: the register map
+  places `HP Forced FG` on bit 7 of that same one-byte field, while intrinsic conv 161 decodes the
+  complete byte ×0.5 A. The live page is therefore the witness — when bit 7 is set, CT-L3 is
+  withheld instead of becoming a fictitious +64 A; a caller without the optional page fails open,
+  and `convert()` remains row-agnostic. The browser accepts CT as an electrical-input source only
+  when every CT phase row declared in the snapshot is numeric, so a withheld L3 cannot turn the
+  safe failure into an L1+L2 partial sum and inflated COP. Rules are keyed on `(page, offset, converter)` — the row's
   structural identity — plus, where that coordinate is demonstrably **not** one quantity, the exact
   generated label as a fourth component (the three `0x21` zero rows above, and nothing else). Never
   a profile id: the catalog test proves each rule selects the adjudicated quantity across all 45
   profiles. Adding a rule is an adjudication
   with the same evidentiary bar as `tools/domain/audit_exceptions.txt`, not a way to make an
-  inconvenient number disappear.
-  A **fourth** verdict is not about a row at all. `PAGE_ABSENCE_RULES` is keyed on the register
+  inconvenient number disappear. Five non-default row policies exist; four have live entries,
+  while `Unproven` deliberately has none after the converter adjudication above.
+  A separate verdict is not about a row at all. `PAGE_ABSENCE_RULES` is keyed on the register
   **page** and reaches every row on it, because "the hardware behind this reply is not fitted" is a
   fact about the page rather than about any one field. Two are in force, both the **absent second
   outdoor unit** of legacy-224. `0xA1` (Water-HX)
@@ -819,16 +827,19 @@ host-testable core is unusually large and valuable, because the risky parts are 
   that the board actually watched. The value list answers *what is it now*; for a bit flag that is
   half the question, since `Powerful DHW Operation: OFF` describes a plant that finished a charge
   four seconds ago and one that has not charged since Tuesday equally well. Tracked rows are the bit
-  flags (converters 300–307) plus the fault class (203), selected structurally by converter — never
-  by label — and addressed by **(page, offset, converter)** for `checkup.hpp`'s reason two bullets
-  up: six flags share the byte `0x60/12`.
+  flags (converters 300–307) plus the fault class (203), selected structurally — never by label —
+  and addressed by **(page, offset, converter)** for `checkup.hpp`'s reason two bullets up: six flags
+  share the byte `0x60/12`. Eight P2 overlay flags are intentionally excluded by that exact tuple:
+  they remain current MQTT/VM telemetry, but their proprietary polarity/meaning is not strong enough
+  to claim a persistent event age. The exclusion list is part of the persistence fingerprint.
 
   It is a **scalar, not a ring**, and that is the whole sizing argument. Nine of these rows already
   have the better answer — a 24-hour categorical timeline whose tooltip names phase start, end and
   sampled duration — and it cannot be extended to the rest: a ring costs 576 B, the trend budget is
   exactly full (`TREND_COUNT × 576 == 18432`, its own ceiling), the remaining rows are not on the
   schematic and so are excluded by `history.hpp`'s selection rule, and each would need a hand-written
-  bilingual legend. The whole table is 48 × 16 B = **768 B** in `.noinit`, adopted across a
+  bilingual legend. The whole table is 64 × 16 B = **1024 B** in `.noinit`; the current worst
+  profile uses 55 slots, leaving nine spare. It is adopted across a
   power-preserving reset under the same seal, verdict vocabulary and union-storage rule as the trends
   and the checkup.
 
@@ -1121,23 +1132,30 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
   hand-edited — maintainers regenerate them offline, and the checked-in rows are verified against
   [`REGISTERS.md`](REGISTERS.md). Contributors can propose catalog corrections without possessing
   the generator input; the maintainer performs regeneration and includes the resulting diff.
-- **One hand-written supplement exists, and it is temporary: `def/overlay.hpp`.** Every generated
+- **One hand-written supplement file exists, and it is temporary: `def/overlay.hpp`.** Every generated
   profile carries six rows for page `0x10` where [`REGISTERS.md`](REGISTERS.md) §5 documents
   twenty-six — uniformly, all 43 tables agreeing row-for-row, so it is the generator's page-`0x10`
   input that is narrow, not a per-model absence. Among the missing rows are the **protection-retry
   counters** (offsets 10–12, converters 303/307/310/311), the input signal for the "silent protection
   retries" early warning (issue legacy-69 UC5 / legacy-110). Converter 310 has been implemented since PR legacy-111 but
-  had no row to decode, so it decoded nothing in the field. The supplement supplies those rows without
-  touching a generated table, and `logic/profile_view.hpp` presents *generated + supplement* as one
-  row sequence to every consumer. **The overlay rule — a supplement block applies only if the base
-  profile already references its register page** — is what makes this safe where hand-editing a
+  had no row to decode, so it decoded nothing in the field. The first supplement block supplies
+  those 11 rows without touching a generated table. A second block adds 27 control, safety and
+  actuator rows only to the reference 4–8 kW monobloc profile; 19 are P1 diagnostic inputs and eight
+  retain neutral P2 observation semantics. `HP Forced FG` is withheld because its bit aliases the
+  complete one-byte CT-L3 field; the availability ledger withholds CT-L3 while that bit is asserted,
+  and neither the flag nor a simultaneous current is claimed until a mask is evidenced.
+  `logic/profile_view.hpp` presents *generated + applicable blocks* as one row sequence to every
+  consumer. **The overlay rule — every register page a block uses must already occur in the base
+  profile** — is what makes this safe where hand-editing a
   generated table would not be: it can never set a page bit that was not already set, so it cannot
   move detection (`def/signatures.hpp` builds its mask over the base tables and never sees a view
-  anyway) and cannot add a bus round-trip. The rows are audited like generated ones —
+  anyway) and cannot add a bus round-trip. The mixed-page block is all-or-nothing: one absent base
+  page withholds the complete block rather than publishing a partial contract. The rows are audited
+  like generated ones —
   `tools/domain/catalog_audit.cpp` resolves the view, so they are cross-checked against
-  [`REGISTERS.md`](REGISTERS.md) §5 per profile. **Delete this file and its plumbing when
-  `gen_profiles.py` emits the rows**; a supplement that outlives its generator run is a second source
-  of truth for the catalog.
+  [`REGISTERS.md`](REGISTERS.md) §5 per profile. **Delete each block when `gen_profiles.py` emits its
+  rows byte-identically, and delete the file/plumbing when none remain**; a supplement that outlives
+  its generator run is a second source of truth for the catalog.
 - At runtime `config` holds the active `profile` id. The poll engine expands it to the concrete
   register set to request — every value of the profile except rows flagged `ValueDef::no_publish`
   ("detect-only"). There is no *user-facing* enable mask; the flag is a catalog property for
@@ -1163,8 +1181,8 @@ regenerate can't silently drift.
 
 A single task owns the X10A UART (there is exactly one link). Each cycle:
 
-0. Resolve the active profile to its **row view** (`def::resolved` — the generated table plus the
-   page-`0x10` supplement above). Everything below iterates the view, and so do the HA-discovery
+0. Resolve the active profile to its **row view** (`def::resolved` — the generated table plus every
+   applicable supplement block above). Everything below iterates the view, and so do the HA-discovery
    announcer and the two `/values`/MQTT-state buffer sizings: the row **count** is the exact upper
    bound on cached values, so a consumer reading a shorter row set than the cache would silently
    **truncate** values out of `/values` and MQTT rather than error.
@@ -1471,7 +1489,7 @@ which own the credential/service fields and are serialized on the single httpd t
   That is why criterion (4) is the **lowest profile id** rather than "first in signature order":
   registry order is an incidental property of a *file*, so adding, removing or merely **reordering** a
   profile silently reassigned identifiers — measured at **11275** moved publications over 200
-  registry permutations × 336 fingerprints, across **64** distinct identifiers. Keying the tie on the
+  registry permutations × 336 fingerprints, across **90** distinct identifiers. Keying the tie on the
   id makes the (still arbitrary) choice **stable**, and `test_tie_break_order_independence()` asserts
   it by permuting the registry and requiring the same pick. Adopting it moved **nothing**: 0 of the
   336 fingerprints re-label anything, the live reference unit included, so no installed device needed
@@ -1479,7 +1497,7 @@ which own the credential/service fields and are serialized on the single httpd t
   would assert a model the bus cannot evidence, and two alternatives were measured and rejected
   (fewest-identifiers moves 13 ids on 8 fingerprints for no evidentiary gain; exact-page-mask changes
   nothing at all, an inert rule that would read like a guarantee). What remains is bounded rather than
-  solved: `test_tie_break_reach()` freezes the **64** identifiers a tie-break can still decide, beside
+  solved: `test_tie_break_reach()` freezes the **90** identifiers a tie-break can still decide, beside
   `test_tie_break_identity()`'s **34** register-equivalent divergences — neither set contains the
   other (2 ids are equivalence-only, 32 reachable-only).
 
@@ -2844,14 +2862,16 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   browser still derives it, but a non-browser consumer gets it without
                   reimplementing the rule, and the marker travels WITH the row rather than being
                   recomputed from a snapshot taken elsewhere.
-                  A SWITCHED row (conv 300-307 or the conv-203 fault class) also carries HOW LONG IT
-                  HAS READ WHAT IT READS (state_dwell.cpp): `dwell_s` seconds, plus `dwell_min":true`
+                  An ELIGIBLE switched row (conv 300-307 or the conv-203 fault class) also carries
+                  HOW LONG IT HAS READ WHAT IT READS (state_dwell.cpp): `dwell_s` seconds, plus `dwell_min":true`
                   when the transition itself was never witnessed — so the true age is at LEAST that —
                   plus `dwell_blind_s` when part of the run went unread. THREE keys rather than one
                   number, because the number alone is not the claim: a consumer that prints `dwell_s`
                   and ignores the other two states something stronger than the device knows, which is
-                  the legacy-35–39 shape drawn as a duration. All three are omitted where they do not
-                  apply, so the ~65 measurement rows cost nothing — and an ABSENT `dwell_s` is a
+                  the legacy-35–39 shape drawn as a duration. Eight exact P2 overlay tuples are
+                  observation-only and excluded from dwell until their proprietary semantics are
+                  established; measurements are excluded as before. All three fields are omitted
+                  where they do not apply, and an ABSENT `dwell_s` is a
                   first-class answer meaning the device declines to describe that run at all (silent
                   bus, a row unread past DWELL_MAX_GAP_S). A zero would say "it changed just now",
                   which is why absence is a missing key and never a 0.
@@ -2912,8 +2932,8 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   clock, so it survives SNTP setting the time mid-boot) and OMITTED when the clock
                   has never synced — the UI then reads out an age rather than a fabricated time,
                   the same refusal logic/timestamp.hpp makes. An unknown id is 404, never a
-                  defaulted trend. Sent in CHUNKS (~1.1 kB body): smaller than /values' ~6 kB, but
-                  still a new allocation on a heap whose largest contiguous block is the real
+                  defaulted trend. Sent in CHUNKS (~1.1 kB body): smaller than the model-dependent
+                  `/values` body, but still a new allocation on a heap whose largest contiguous block is the real
                   ceiling. Which rows HAVE a trend is /status.history — a row the profile does not
                   carry is omitted, an absent feature stated by absence rather than an empty chart
 (no /events)      There is NO live-push route. The web UI POLLS: GET /values every 2 s and
