@@ -1,5 +1,10 @@
 # daikin-altherma-esp32
 
+> **Compatibility entry point:** [`AGENTS.md`](../AGENTS.md) is canonical. This `.claude/` tree is
+> retained for Claude compatibility; its reviewed mapping and operating notes are
+> [`.codex/migration-manifest.json`](../.codex/migration-manifest.json) and
+> [`docs/AGENT_MIGRATION.md`](../docs/AGENT_MIGRATION.md). Update canonical policy first.
+
 ESP-IDF 6.x firmware for the ESP32-S3 chip (CI pins **v6.0.2**; `main/idf_component.yml` requires
 `>=6.0` because the managed W5500 2.x component uses the ESP-IDF 6 `esp_eth` API). Reads a
 **Daikin Altherma** heat pump over its **X10A** service port and bridges every value to
@@ -35,6 +40,17 @@ Builds for the **esp32s3** target only.
 > outside-contributor half of the rules this file states for us (the local gates, the
 > `main/logic/` + test rule, the strictly-linear merge model), so a change to any of those belongs
 > in **both**; keep them in sync (the `project-review` skill checks for drift).
+
+## Authorization boundary
+
+- Treat requests to inspect, analyze, diagnose, review, or report as read-only. Do not edit files,
+  change GitHub state, merge, publish, flash, deploy, clear evidence, or mutate a live device unless
+  the user explicitly requested that action.
+- A request to implement or fix authorizes scoped repository edits and proportionate verification,
+  but not a commit, push, PR, merge, release, OTA, USB flash, or live configuration change.
+- A request to merge, deploy, OTA, or flash authorizes only that named delivery chain. Preserve
+  user-owned worktree changes and secrets, and report host/CI, hardware, API, and visual evidence
+  separately.
 
 **Conventions:** always write the full name `daikin-altherma-esp32` (hostname, SoftAP, MQTT base
 topic, docs) — never shorten it to `daikin-altherma`. Do not reference other projects by name in
@@ -82,9 +98,10 @@ Rules an agent needs before touching any of that:
   **PR-merge gate on every merge** — unconditional, because deciding up front which files can change
   a value's meaning is the guess that let #35–#39 ship.
 - Four more review skills are CONDITIONAL merge gates — `/schematic-review`, `/absence-review`,
-  `/ui-use-case-review`, `/ui-gif` — each keyed on a relevance test whose ONLY definition is its
-  `.claude/hooks/require-*.sh` hook; read it there, never trust a list written elsewhere. Three are
-  a diff regex. `/ui-gif` deliberately is NOT: the schematic shares `index.html`/`style.css`/`js/`
+  `/ui-use-case-review`, `/ui-gif` — each keyed on the runner-neutral
+  [`tools/agent-hooks/require-pr-gates.sh`](../tools/agent-hooks/require-pr-gates.sh); the retained
+  `.claude/hooks/require-*.sh` files are compatibility adapters, not policy definitions. Three use
+  a diff regex. `/ui-gif` deliberately does not: the schematic shares `index.html`/`style.css`/`js/`
   with the settings modal and the charts, so any path filter would demand a 10-minute re-record for
   edits that cannot move a pixel. It asks the AUDIT: a STALE recording is refused outright (a ticked
   box never outranks a mechanical mismatch — the way out is the recorder), while a clean one is

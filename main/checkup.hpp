@@ -73,7 +73,7 @@ void checkup_dhw_reset();
 
 // The judged 24-hour window. Read by GET /status (httpd task) and by the WebSocket status broadcast
 // (poll task), so it copies out under the lock — the report is a plain POD, so nothing allocates
-// inside the critical section (CLAUDE.md → never allocate while holding a mutex).
+// inside the critical section (AGENTS.md → Memory, concurrency, and HTTP safety).
 logic::CheckupReport checkup_report();
 
 // Copy the next completed hourly pair after `after_bucket` into a journal payload. `now_unix_s`

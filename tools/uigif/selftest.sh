@@ -147,24 +147,70 @@ check "schematic css gone"     2 -  \
 # /ui-gif stamp. The clean direction remains conditional — an unrelated PR needs no stamp, while a
 # PR carrying a new recording does.
 hook_d="$(seed merge-hook)"
-mkdir -p "$hook_d/.claude/hooks" "$hook_d/bin"
+git -C "$hook_d" init -q
+git -C "$hook_d" remote add origin https://github.com/0Bu/daikin-altherma-esp32.git
+mkdir -p "$hook_d/.claude/hooks" "$hook_d/tools/agent-hooks" \
+    "$hook_d/tools/agent-policy" "$hook_d/bin"
 cp "$ROOT/.claude/hooks/pr-gate-lib.sh" "$hook_d/.claude/hooks/"
 cp "$ROOT/.claude/hooks/require-ui-gif.sh" "$hook_d/.claude/hooks/"
+cp "$ROOT/tools/agent-hooks/pr-gate-lib.sh" "$hook_d/tools/agent-hooks/"
+cp "$ROOT/tools/agent-hooks/require-pr-gates.sh" "$hook_d/tools/agent-hooks/"
+cp "$ROOT/tools/agent-hooks/merge_payload.py" "$hook_d/tools/agent-hooks/"
+cp "$ROOT/tools/agent-hooks/run_with_timeout.py" "$hook_d/tools/agent-hooks/"
+cp "$ROOT/tools/agent-policy/extract_changed_files.py" "$hook_d/tools/agent-policy/"
 cat > "$hook_d/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+[ "${GH_HOST:-}" = github.com ] || exit 95
+[ "${GH_REPO:-}" = github.com/0Bu/daikin-altherma-esp32 ] || exit 96
 case "$1 $2" in
+  "repo view") printf '%s\n' '0Bu/daikin-altherma-esp32' ;;
   "pr view")
-    printf '{"body":"%s","headRefOid":"abcdef1234567890"}\n' "${UI_GIF_GATE_BODY:-}"
+    python3 - <<'PY'
+import json, os
+print(json.dumps({
+    "number": 468,
+    "body": os.environ.get("UI_GIF_GATE_BODY", ""),
+    "headRefOid": "abcdef1234567890abcdef1234567890abcdef12",
+    "changedFiles": len(os.environ.get("UI_GIF_GATE_FILES", "docs/README.md").splitlines()),
+}))
+PY
     ;;
-  "pr diff") printf '%s\n' "${UI_GIF_GATE_FILES:-docs/README.md}" ;;
+  "api --hostname")
+    [ "${3:-}" = github.com ] || exit 97
+    python3 - <<'PY'
+import json, os
+print(json.dumps([[{"filename": line} for line in
+                   os.environ.get("UI_GIF_GATE_FILES", "docs/README.md").splitlines()]]))
+PY
+    ;;
   *) exit 1 ;;
 esac
 EOF
-chmod +x "$hook_d/bin/gh"
+chmod +x "$hook_d/bin/gh" "$hook_d/.claude/hooks/pr-gate-lib.sh" \
+    "$hook_d/.claude/hooks/require-ui-gif.sh" "$hook_d/tools/agent-hooks/require-pr-gates.sh"
 
-merge_input='{"tool_name":"Bash","tool_input":{"command":"gh pr merge 468 --squash"}}'
-mcp_merge_input='{"tool_name":"mcp__codex_apps__github_merge_pull_request","tool_input":{"pr_number":468}}'
-review_stamp='- [x] /ui-gif clean - merge gate @ abcdef123456'
+ui_gif_head=abcdef1234567890abcdef1234567890abcdef12
+merge_input="$(python3 - "$hook_d" "$ui_gif_head" <<'PY'
+import json, sys
+print(json.dumps({"cwd": sys.argv[1], "tool_name": "Bash", "tool_input": {
+    "command": f"gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 468 --match-head-commit {sys.argv[2]} --squash"
+}}))
+PY
+)"
+mcp_merge_input="$(python3 - "$ui_gif_head" <<'PY'
+import json, sys
+print(json.dumps({"tool_name": "mcp__codex_apps__github_merge_pull_request", "tool_input": {
+    "pr_number": 468,
+    "repository_full_name": "0Bu/daikin-altherma-esp32",
+    "expected_head_sha": sys.argv[1],
+}}))
+PY
+)"
+base_reviews="$(printf '%s\n' \
+    "- [x] /project-review clean - merge gate @ $ui_gif_head" \
+    "- [x] /domain-review clean - merge gate @ $ui_gif_head")"
+review_stamp="$base_reviews
+- [x] /ui-gif clean - merge gate @ $ui_gif_head"
 
 hook_run() {
     local input=$1; shift
@@ -172,11 +218,11 @@ hook_run() {
         bash "$hook_d/.claude/hooks/require-ui-gif.sh" >/dev/null 2>&1
 }
 
-# Clean + unrelated: no human review needed. Clean + new recording: refuse until stamped, then pass.
-hook_run "$merge_input" env UI_GIF_GATE_FILES=docs/README.md || {
+# Clean + unrelated: no UI-GIF review needed. Clean + new recording: refuse until stamped, then pass.
+hook_run "$merge_input" env UI_GIF_GATE_FILES=docs/README.md UI_GIF_GATE_BODY="$base_reviews" || {
     echo "uigif selftest: clean unrelated PR was gated" >&2; exit 1; }
 set +e
-hook_run "$merge_input" env UI_GIF_GATE_FILES=docs/media/dashboard.gif
+hook_run "$merge_input" env UI_GIF_GATE_FILES=docs/media/dashboard.gif UI_GIF_GATE_BODY="$base_reviews"
 new_unstamped_rc=$?
 set -e
 [ "$new_unstamped_rc" -eq 2 ] || {

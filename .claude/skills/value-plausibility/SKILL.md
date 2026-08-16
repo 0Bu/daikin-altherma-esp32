@@ -1,10 +1,16 @@
 ---
 name: value-plausibility
-description: Audit a live daikin-altherma-esp32's PUBLISHED values for plausibility — current values over MQTT and long-term series in VictoriaMetrics — and flag physically-wrong, absent-feature, sentinel-placeholder and duplicate values. Classifies idle-vs-broken using history (a value that is 0/OFF now but nonzero in the long term is idle, not broken), cross-checks device /values ↔ MQTT ↔ VictoriaMetrics for gaps, and opens a PR with fixes. Use when values look wrong or missing on the web UI, in Home Assistant, or in Grafana, or to periodically verify the catalog against a real unit.
+description: Audit a live daikin-altherma-esp32's published values for plausibility across MQTT and VictoriaMetrics, distinguish idle from broken using history, and flag physically wrong, absent-feature, sentinel-placeholder, duplicate, or missing values. Use when values look wrong or missing in the web UI, Home Assistant, or Grafana, or for periodic catalog verification. Report findings by default; fix or open a PR only when explicitly requested.
 model: sonnet
 ---
 
 # value-plausibility
+
+## Authorization boundary
+
+Treat review and audit work as read-only unless the user explicitly asks for a change. Do not edit
+files, update GitHub state, merge, flash, deploy, clear evidence, or mutate a live system merely
+because this skill activated. When a mutation is explicitly requested, keep it within that scope.
 
 Answer one question about a **running** unit: **are the values it publishes physically true,
 complete and authentic?** This is the live-data counterpart to `/domain-review` (which audits the
@@ -19,8 +25,8 @@ refrigerant circuit, or a whole hybrid-boiler page on a non-hybrid unit. Those a
 against a **real unit's live and historical data**; a static audit cannot see them (issues #35–#39
 were exactly this shape, found by slow manual review). This skill mechanizes that review.
 
-**Read-only** on the device and the observability stack. The only writes are the branch/commit/PR at
-the end, and only after you have reported findings and the user is on board.
+**Read-only** on the device and the observability stack. Repository and GitHub writes happen only
+when the user explicitly requests them, and each remains scoped to that request.
 
 ## Inputs — discover them, do not hardcode
 
@@ -123,8 +129,9 @@ why it is wrong).
    - Always re-run the gates before committing: `scripts/run-mock-tests.sh`,
      `scripts/run-domain-audit.sh`, `tools/domain/selftest.sh`, and `node --check` for any UI change.
 
-   Then open the PR on a worktree branch against `main` (linear history, signed commits — the repo
-   config handles signing). Describe every finding, the fix layer chosen, what was verified, and any
+   When the user explicitly requested a PR, open it on a worktree branch against `main` (linear
+   history, signed commits — the repo config handles signing). Describe every finding, the fix layer
+   chosen, what was verified, and any
    deferred item (with its options) for the user to decide. Note which merge gates apply
    (`project-review` + `domain-review` are unconditional; `feature-docs` if a technical feature landed).
 
@@ -138,5 +145,5 @@ why it is wrong).
 - Do not "fix" an idle-but-real value by hiding it — hard-hiding a low/zero reading fleet-wide can
   suppress genuine cold/zero data on units that legitimately report it. Prefer fixing detection/the
   profile for the specific model, or the display, over a blanket value filter.
-- The skill is read-only on the device and the stack; the PR is the only side effect, and only with
-  the user's go-ahead.
+- The skill is read-only on the device and the stack; repository/GitHub mutations require the
+  user's explicit request.

@@ -5,12 +5,13 @@
 // WHY THIS EXISTS. logic/lwt_select.hpp, logic/cop_scope.hpp and logic/ou_stale.hpp each say, in
 // their own header, that they have no firmware caller: they exist so CI can gate a rule the browser
 // actually applies. That gets the C++ copy right and says nothing whatever about the JavaScript one
-// — and the JavaScript one is the copy that ships to the user. The gap is not hypothetical: a looser
+// — and the JavaScript one is the copy that ships to the user. docs/FEATURES.md records why this
+// cross-language parity corpus exists. The gap is not hypothetical: a looser
 // second copy of the leaving-water pattern once matched the bizone kit's MIXED leaving-water row,
 // which is the #35-#39 shape (a correct number attributed to the wrong sensor) reaching ΔT, heat
-// output and COP at once. CLAUDE.md names the failure mode — "being a copy, the CI gate on this rule
-// no longer covers it" — and this closes it: the two copies are now compared, not merely both
-// present.
+// output and COP at once. docs/FEATURES.md explains why a looser second copy is not a test, and
+// scripts/check-presenter-parity.sh names the resulting coverage gap. This closes it: the two
+// copies are now compared, not merely both present.
 //
 // The corpus is the REAL catalOg, not a sample. Every distinct (label, register) pair the shipped
 // profiles produce is emitted, because that is exactly the input space the rules run on and exactly

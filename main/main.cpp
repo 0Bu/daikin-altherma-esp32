@@ -172,7 +172,7 @@ static void boot_sequence() {
 // An escape from the boot sequence, named and then made to count.
 //
 // app_main is a C frame boundary like every HTTP handler and task loop this firmware already guards
-// (CLAUDE.md → "Every allocating FreeRTOS task loop must self-guard"): an exception that leaves it
+// (AGENTS.md → Memory, concurrency, and HTTP safety): an exception that leaves it
 // reaches std::terminate and abort()s ANONYMOUSLY, with the reset reason the only evidence that
 // anything happened. And boot is not a fanciful place to throw — config_load(), http_start() and the
 // service starts below it all allocate, on a device whose whole memory section is about

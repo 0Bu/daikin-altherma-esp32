@@ -1,11 +1,10 @@
 # Architecture reference
 
 Deep internal reference for daikin-altherma-esp32. This is the **on-demand** companion to
-[`.claude/CLAUDE.md`](../.claude/CLAUDE.md): CLAUDE.md carries the always-needed essentials
-(build/flash, component map, NVS table, HTTP API, memory constraints); the full narrative lives
-here so it isn't reloaded into every session. Read it when working on the poll engine, the value
-model, the MQTT bridge, WiFi/LAN connectivity, or OTA. Keep both in sync — the `project-review`
-skill checks for drift.
+[`AGENTS.md`](../AGENTS.md), the canonical always-loaded project policy: `AGENTS.md` carries the
+cross-runner rules and source-of-truth pointers; the full narrative lives here so it isn't reloaded
+into every session. Read it when working on the poll engine, the value model, the MQTT bridge,
+WiFi/LAN connectivity, or OTA. Keep both in sync — the `$project-review` skill checks for drift.
 
 ## Design split
 
@@ -14,7 +13,7 @@ framing, the value-definition tables (`def/*`) and the converter functions — i
 heat-pump knowledge, ported byte-for-byte so readings match a known-good implementation. The
 **chassis** — the ESP-IDF/CMake esp32s3 build, the web installer, captive-portal
 provisioning, the MQTT/HA discovery bridge, signed OTA, the `main/logic/` host-test split and the
-CI / Claude-Code developer setup — is the delivery machinery. Anything about *talking to the heat
+CI and agent-runner developer setup — is the delivery machinery. Anything about *talking to the heat
 pump* is the domain; anything about *installing, configuring and shipping* is the chassis. IDF
 idioms are used throughout (`esp_http_server`, `uart_driver`, `esp-mqtt`).
 
@@ -2038,7 +2037,8 @@ Structure:
 
 - **Target:** esp32s3 only (`scripts/ci-build-all.sh`). No BLE is used; the official baseline is a WiFi ESP32-S3 with ≥8 MB flash. Uses native USB-Serial/JTAG console.
 - **8 MB dual-OTA `partitions.csv`:** app at `0x20000`; `nvs` at `0x9000` untouched
-  by OTA so WiFi + model config survive upgrades. The Web Serial manifest likewise publishes
+  by OTA so WiFi/service settings and the X10A link cache survive upgrades. Detected model identity
+  remains RAM-only and is re-established after boot. The Web Serial manifest likewise publishes
   sparse `flash_args` parts around NVS; its build-time sector-overlap check makes the no-Erase path
   preserve the same configuration. Existing addresses through `ota_1` still end at `0x400000`;
   `history` uses the remaining 4 MiB through `0x7fffff`. Its append journal rotates 256-byte records
@@ -2525,9 +2525,8 @@ paste-ready crash bundle, no longer a row on any Settings card.
 
 ## HTTP API reference
 
-The complete field-by-field contract of every route. The compact route table an editor needs first
-is in [`.claude/CLAUDE.md`](../.claude/CLAUDE.md) → "HTTP API"; this is the full reference it
-points at.
+The complete field-by-field contract of every route. The canonical always-loaded instructions in
+[`AGENTS.md`](../AGENTS.md) point editors here for the system architecture and full HTTP fields.
 
 ```
 GET  /            embedded web UI (gzipped into the app binary)
@@ -3322,8 +3321,8 @@ to HTTP handlers:
 
 ### The stack: the second budget, and how it was measured
 
-The rules distilled from this history live in [`.claude/CLAUDE.md`](../.claude/CLAUDE.md) →
-"Memory constraints"; this is the evidence behind them.
+The rules distilled from this history live in [`AGENTS.md`](../AGENTS.md) → "Memory, concurrency,
+and HTTP safety"; this is the evidence behind them.
 
 **The STACK is a second, separate budget — and it fails silently.** Everything above is about the
 heap; the crash that took v1.0.12 down was a *stack* overflow, and none of the heap rules could see
@@ -3457,5 +3456,5 @@ a large mechanical edit to the most stack-critical function in the firmware, for
 build line buys. **`cfg.stack_size` stays 16384 and was deliberately NOT raised**: 4 KB of permanent
 RAM on a board whose binding limit is the largest CONTIGUOUS free block, spent on a compiler
 artefact, while `-Os` buys twice as much for one line. Should the `-Os` scoping ever be reverted,
-the stack must go to 20480 in the same commit — ~1872 bytes free is under CLAUDE.md's own "anything
-under ~1 KB free wants raising" line once ISRs and the unwind path are counted.
+the stack must go to 20480 in the same commit — ~1872 bytes measured before ISR and unwind demands
+does not leave enough margin over `AGENTS.md`'s roughly 1 KiB action threshold.

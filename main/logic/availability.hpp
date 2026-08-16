@@ -41,7 +41,8 @@
 // fact, and a row a future generator run adds to the page is covered by nothing at all.
 //
 // WHY A LEDGER IN logic/ AND NOT A FLAG IN def/ — the generated per-model tables are machine output
-// (.claude/CLAUDE.md: never hand-edit one), and these verdicts are OURS, derived from live captures
+// (AGENTS.md → Build and deterministic gates: never hand-edit one), and these verdicts are OURS,
+// derived from live captures
 // rather than from Daikin's catalog. Keeping them here means (a) the generator can be re-run without
 // losing an adjudication, (b) each entry carries its evidence in the same place as the rule, and
 // (c) the whole thing is IDF-free, so the CI logic test asserts the verdicts against the real

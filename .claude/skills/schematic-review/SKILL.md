@@ -1,10 +1,16 @@
 ---
 name: schematic-review
-description: Review the dashboard schematic — the inline SVG in main/www/index.html, its CSS and its bindings. Runs the mechanical audit (structure, geometry, editorial) and then judges what the audit cannot: does the drawing still tell the truth about the plant, is a new element in the right place, is the copy right in both languages. Use after any change to the schematic, its pills, its pipes or its inspector copy — and applies the fixes.
+description: Review the dashboard schematic — the inline SVG in main/www/index.html, its CSS, and its bindings. Run the mechanical audit and judge whether the drawing tells the truth about the plant, places elements correctly, and has correct bilingual copy. Use after schematic, pill, pipe, binding, or inspector-copy changes. Report findings by default; apply fixes only when explicitly requested.
 model: opus
 ---
 
 # schematic-review
+
+## Authorization boundary
+
+Treat review and audit work as read-only unless the user explicitly asks for a change. Do not edit
+files, update GitHub state, merge, flash, deploy, clear evidence, or mutate a live system merely
+because this skill activated. When a mutation is explicitly requested, keep it within that scope.
 
 The dashboard schematic is the whole "what is the plant doing right now" answer (`docs/DESIGN.md`
 §5.3). It is also the one artefact in this repo where **every gate can be green and the picture can
@@ -21,7 +27,7 @@ well-formed, plausible, and attributing a real number to the wrong thing.
 **This review unlike `/domain-review` is conditional** — it is for changes that reach the drawing:
 `main/www/index.html`, `main/www/style.css`, the `INSPECT` / `I18N` / `liveData` / `paintSchematic`
 half of `main/www/js/schematic.js` plus `i18n.js`, or `docs/DESIGN.md` §5.3 / §7. A change that cannot reach the drawing
-does not need it. **You apply the fixes**, you do not just report them.
+does not need it. Report findings; apply fixes only when the user explicitly requests them.
 
 ## 1. Run the audit (the mechanical half)
 
@@ -130,23 +136,26 @@ must resolve through the one `lwtRow()`.
 `docs/DESIGN.md` §5.3 (the dashboard) and §7 (component vocabulary) are the drawing's specification,
 not a description of it. A new component, a new pill, a changed rule about naming or blanking lands
 in **both** the SVG and the spec — a drawing that has outgrown its contract is how the next change
-gets made against a rule nobody still follows. `.claude/CLAUDE.md` and `CONTRIBUTING.md` list the
+gets made against a rule nobody still follows. `AGENTS.md` and `CONTRIBUTING.md` list the
 local gates; if the audit itself grew a rule, say so where the gate is described.
 
-Report findings grouped by the sections above, then **apply the fixes**. Block the merge on: any
+Report findings grouped by the sections above. If fixes were explicitly requested, apply them and
+re-run the verification. Block the merge on: any
 live audit finding, a reading attributed to a part that does not measure it, a new pill that cannot
 blank when its page goes stale, or a ledger entry added to quiet a finding this change created.
 
 ## Recording the pass (merge gate — no file marker)
 
-`require-schematic-review.sh` refuses a PR merge (`gh pr merge` **and**
-`mcp__github__merge_pull_request`) until this review is recorded in the PR body as a ticked,
-SHA-stamped checkbox whose stamp still matches the PR head. It is **conditional**, like
+The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) gates the
+documented lease-bound `gh` CLI merge path until this review is recorded in the PR body as a ticked,
+SHA-stamped checkbox whose stamp still matches the PR head. Direct REST/GraphQL/MCP merge and
+auto-merge paths are blocked. It is **conditional**, like
 `/feature-docs` and unlike `/project-review` and `/domain-review`: it fires when the PR reaches the
 drawing, its contract, or the tools that judge it — **including this file**, so changing what the
 review asks means putting the new questions to the current drawing before it lands. The regex in
-`.claude/hooks/require-schematic-review.sh` is the one definition of that set; this page deliberately
-does not repeat it.
+`tools/agent-hooks/require-pr-gates.sh` is the canonical definition of that set;
+`.claude/hooks/require-schematic-review.sh` is only a compatibility adapter. This page deliberately
+does not repeat the filter.
 
 That filter is defensible here in a way it deliberately is **not** for `/domain-review`, and the
 difference is the point: a value's meaning can change from almost anywhere — #35–#39 reached Home

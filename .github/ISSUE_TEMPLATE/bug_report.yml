@@ -9,7 +9,8 @@
 # genuinely needed it is requested privately. See docs/REPORTING.md.
 #
 # The field LABELS below are a parsing contract: GitHub renders each answer under "### <label>" and
-# the `id` never reaches the issue body, so .claude/skills/bug-triage keys on the label text.
+# the `id` never reaches the issue body, so the canonical .agents/skills/bug-triage skill keys on
+# the label text (the .claude/skills compatibility copy uses the same contract).
 # Renaming a label is a breaking change — bump the form-vN label in `labels:` when you do.
 #
 # Prefilled by the device: the web UI's Settings -> the footer line -> "Report a bug" opens this

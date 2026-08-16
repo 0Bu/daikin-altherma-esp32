@@ -13,10 +13,9 @@
 #
 # It exists because each of those headers says, in its own comments, that it has no firmware caller:
 # it is there so CI can gate a rule the browser applies. That gates the C++ copy and says nothing
-# about the JavaScript one — the copy that actually ships. CLAUDE.md already names what that costs
-# ("being a copy, the CI gate on this rule no longer covers it"), and it has been paid once: a looser
-# leaving-water pattern matched the bizone kit's MIXED row, putting a correct number on the wrong
-# sensor in ΔT, heat output and COP at once.
+# about the JavaScript one — the copy that actually ships. docs/FEATURES.md documents what that costs,
+# and it has been paid once: a looser leaving-water pattern matched the bizone kit's MIXED row,
+# putting a correct number on the wrong sensor in ΔT, heat output and COP at once.
 #
 # Needs a C++17 compiler + node — both present in CI's `gates` job. Run directly, or automatically at
 # the end of scripts/run-mock-tests.sh.

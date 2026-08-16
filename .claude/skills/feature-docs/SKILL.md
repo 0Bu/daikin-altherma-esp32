@@ -53,7 +53,7 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
    hypothetical one: the catalog once reached 1510 lines, a third of it inside "the short version"
    matrix, because each new feature appended its full rationale to a table cell. Keep out the bug
    that motivated the feature (→ the issue), the measurement that settled it (→ the issue or
-   `ARCHITECTURE.md`), the field-by-field API listing (→ `.claude/CLAUDE.md` → HTTP API), and the
+   `ARCHITECTURE.md`), the field-by-field API listing (→ `docs/ARCHITECTURE.md`), and the
    per-header reasoning (→ the header's own comment). A reader comes here to learn *that* a mechanism
    exists and *where* it lives; every line past that belongs somewhere it can be found on purpose.
    If an entry needs more room, the deep-dive doc is the room.
@@ -82,14 +82,15 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
   defensible paragraph at a time. Prune while you are in there.
 - **Ids are stable keys.** Never renumber or reuse a matrix id; a gap means a retired feature.
 - **Don't rename the file or restructure sections** without reason — other docs, the README and
-  [`.claude/CLAUDE.md`](../../CLAUDE.md) may link to `docs/FEATURES.md` and its anchors.
+  [`AGENTS.md`](../../../AGENTS.md) may link to `docs/FEATURES.md` and its anchors.
 - **The project convention holds:** always write the full name `daikin-altherma-esp32`, and don't name
   other projects in the catalog (the README credit is the sole exception).
 
 ## Recording the pass (merge gate — no file marker)
 
-The `require-feature-docs.sh` PreToolUse hook gates every PR merge (`gh pr merge` **and**
-`mcp__github__merge_pull_request`), the sibling of the `/project-review` gate. It is **conditional**:
+The retained `require-feature-docs.sh` adapter delegates to the runner-neutral aggregate gate for
+the documented host-, repository-, PR- and head-bound CLI merge path; CI independently enforces the
+same current-head evidence. Its `/feature-docs` check is **conditional**:
 it fires only when the PR changes technical-feature surface (`main/`, `test/`, `sdkconfig.defaults`,
 `partitions.csv`, or the CI build workflow). A docs-only / script-only / chore PR is not gated.
 

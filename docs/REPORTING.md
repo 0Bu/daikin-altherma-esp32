@@ -214,4 +214,4 @@ See [SECURITY.md](SECURITY.md).
 4. Set up whichever funding accounts you want and uncomment them in
    [`.github/FUNDING.yml`](../.github/FUNDING.yml); the Sponsor button renders on public
    repositories only.
-5. Walk one real report all the way through: button → issue → `/bug-triage`.
+5. Walk one real report all the way through: button → issue → `$bug-triage`.

@@ -764,8 +764,8 @@ void http_append_status_json(std::string& j, bool redact) {
     // attach a trend to the value row it is already rendering. Rows the profile does not carry are
     // omitted entirely — an absent feature is stated by its absence, not by an empty chart. Built
     // with successive += like everything else here: a `a + b + c` chain materialises every
-    // intermediate at once, all live in one frame on the httpd task's stack (CLAUDE.md → Memory
-    // constraints, the v1.0.12 stack overflow — which happened on THIS task).
+    // intermediate at once, all live in one frame on the httpd task's stack (AGENTS.md → Memory,
+    // concurrency, and HTTP safety; the v1.0.12 stack overflow happened on THIS task).
     j += "\"history\":{\"dt\":" + std::to_string(logic::HISTORY_DT_S);
     // How this boot's rings came to be. "accept" = adopted across a reset that kept power; anything
     // else NAMES why they started empty. Reported because a chart that emptied itself otherwise
@@ -776,8 +776,9 @@ void http_append_status_json(std::string& j, bool redact) {
     // The same question for the per-row STATE AGES (logic/state_dwell.hpp), which ride the same
     // .noinit medium under the same rules and therefore reset for the same reasons. It sits here
     // rather than in a block of its own for the reason this whole builder is written the way it is:
-    // every byte added to /status is paid for on the httpd task's stack (CLAUDE.md → Memory
-    // constraints), and one more key in an existing object is the cheapest honest place to say it.
+    // every byte added to /status is paid for on the httpd task's stack (AGENTS.md → Memory,
+    // concurrency, and HTTP safety), and one more key in an existing object is the cheapest honest
+    // place to say it.
     j += ",\"dwell_persist\":";
     j += jstr(dwell_persist_state());
     j += ",\"rows\":[";
@@ -951,7 +952,7 @@ void http_append_status_json(std::string& j, bool redact) {
                     // NAMES, not the raw mask: the browser would otherwise carry a copy of the bit
                     // meanings, which is a second definition of the rule free to drift from
                     // checkup.hpp's. Appended one literal at a time (the stack budget this builder
-                    // is measured against — CLAUDE.md → Memory constraints).
+                    // is measured against — AGENTS.md → Memory, concurrency, and HTTP safety).
                     j += ",\"abort_reasons\":[";
                     {
                         bool first = true;
@@ -1058,7 +1059,8 @@ void http_append_status_json(std::string& j, bool redact) {
     //
     // Appended with successive += rather than extended onto the chain above: this builder is the
     // one whose frame overflowed the httpd stack twice, and a chain materialises every intermediate
-    // std::string in one frame (CLAUDE.md -> Memory constraints). Four integers, one at a time.
+    // std::string in one frame (AGENTS.md → Memory, concurrency, and HTTP safety). Four integers,
+    // one at a time.
     j += ",\"stack_min_free_bytes\":{\"httpd\":";
     append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Httpd));
     j += ",\"poll\":";
@@ -1126,7 +1128,8 @@ void http_append_status_json(std::string& j, bool redact) {
     // interchangeable: a 6 kW outdoor unit is routinely paired with an 8 kW indoor unit, so
     // substituting one for the other under a single name would publish a figure for the wrong half
     // of the plant. Reported side by side, the UI can say which unit a shown capacity came from.
-    // Successive += with bare literals (never one + chain) — see CLAUDE.md "Memory constraints":
+    // Successive += with bare literals (never one + chain) — see AGENTS.md → Memory, concurrency,
+    // and HTTP safety:
     // the httpd task's stack is the tight one, and a chain holds every intermediate at once.
     auto kw_field = [&j](const char* name, int tenths) {
         j += ",\"";
@@ -1225,8 +1228,8 @@ static void append_values_array(std::string& j) {
     size_t n = hp_values_snapshot(v.data(), v.size());
     j += "[";
     // Successive += rather than one a + b + c + … chain: a chain materialises every intermediate
-    // std::string in the same frame, and this runs on the httpd task (see CLAUDE.md "Memory
-    // constraints" — the v1.0.12 stack overflow).
+    // std::string in the same frame, and this runs on the httpd task (see AGENTS.md → Memory,
+    // concurrency, and HTTP safety; the v1.0.12 stack overflow).
     for (size_t i = 0; i < n; i++) {
         if (i) j += ",";
         j += "{\"label\":";

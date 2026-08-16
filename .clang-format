@@ -5,7 +5,7 @@
 # assignments/declarations/trailing comments, short funcs kept on one line — matched to the
 # hand-formatted sources to minimize churn.
 #
-# The .claude/hooks/clang-format-edit.sh hook honours this only where clang-format is
+# The runner-neutral formatter in tools/agent-hooks/ honours this only where clang-format is
 # installed. VERIFY CHURN ONCE before relying on auto-format:
 #     clang-format --dry-run -Werror main/*.cpp main/*.hpp main/logic/*.hpp test/*.cpp
 ---

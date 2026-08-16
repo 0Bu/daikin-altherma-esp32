@@ -3,7 +3,7 @@
 // Structural checks keep every diagnosis traceable to an external source and distinguish that
 // source from the firmware rule and project heuristic. The fingerprint binds the reviewed ledger
 // to production semantics. Any implementation or ledger change is stale until a human follows the
-// /diagnostic-evidence-review workflow and deliberately runs --update.
+// $diagnostic-evidence-review workflow and deliberately runs --update.
 //
 // Usage: node tools/diagnostic_evidence/check_diagnostic_evidence.mjs
 //        [--root DIR] [--app FILE] [--evidence FILE] [--update]

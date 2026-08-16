@@ -24,7 +24,7 @@ docs, the source comments and the issues:
 > with the file that implements it. **What does not** — the bug that motivated it, the measurement
 > that settled it, a per-field API listing, or a per-header rationale. Those have homes above; a
 > catalog that absorbs them stops being readable as a catalog. Keep entries to a line or two (see
-> [the `feature-docs` skill](../.claude/skills/feature-docs/SKILL.md)).
+> [the `feature-docs` skill](../.agents/skills/feature-docs/SKILL.md)).
 >
 > **The subject is the BOARD.** A feature whose subject is the plant, the building or the weather
 > around them belongs in [`PLANT.md`](PLANT.md), however much firmware it took — the checkup, the
@@ -97,7 +97,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 51 | **Converter adjudication** — which converter a generated row is actually *encoded* with, when the generator's id is demonstrably wrong | ✅ 🧪 | [`logic/conv_override.hpp`](../main/logic/conv_override.hpp) |
 | 52 | **Source freshness ≠ publish freshness** — the outdoor unit stops refreshing its own pages when it rests, so those rows are marked and withheld rather than republished as live | ✅ 🧪 | [`logic/ou_stale.hpp`](../main/logic/ou_stale.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp) |
 | 53 | **Numeric fault flags beside the textual code** — a metrics store can hold neither `"U4"` nor a dropped string, so each error row also publishes `error_active`/`warning_active` | ✅ 🧪 | [`logic/fault_state.hpp`](../main/logic/fault_state.hpp) |
-| 54 | **README-recording gate** — fingerprints what the dashboard GIF was recorded from, since a recording rots invisibly; the stamp writer refuses a moved fingerprint over unchanged bytes, so red clears only by re-recording | ✅ | [`check_ui_gif.mjs`](../tools/uigif/check_ui_gif.mjs), [`record-dashboard-gif.sh`](../scripts/record-dashboard-gif.sh) |
+| 54 | **README-recording merge gate** — every merge fails mechanically when the dashboard GIF is stale or unverifiable; red clears only by re-recording, and a new GIF/stamp additionally needs a current-head `$ui-gif` review | ✅ | [`check_ui_gif.mjs`](../tools/uigif/check_ui_gif.mjs), [`require-pr-gates.sh`](../tools/agent-hooks/require-pr-gates.sh), [`record-dashboard-gif.sh`](../scripts/record-dashboard-gif.sh) |
 | 56 | **Group-scoped HA entity identity** — `uniq_id` and the discovery topic carry the register group, because a label is unique only within its page while both namespaces are flat | ✅ 🧪 | [`logic/discovery.hpp`](../main/logic/discovery.hpp), [`HOME_ASSISTANT.md`](HOME_ASSISTANT.md) |
 | 57 | **Doc entity-id gate** — resolves the docs' copy-pasteable entity ids through the real slug rule over the real catalog, and only against *detectable* profiles | ✅ | [`entity_id_audit.cpp`](../tools/docs/entity_id_audit.cpp), [`run-doc-entity-audit.sh`](../scripts/run-doc-entity-audit.sh) |
 | 58 | **Deleting a crash report** (`POST /crash/dismiss`) — a device action, not page state: erase first, mark second, so status, MQTT and every browser agree | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
@@ -123,7 +123,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 77 | **Optional wired transport (W5500 / PoE)** — a second network transport detected at boot from one SPI identity register, with the boot fork (wire → radio → portal), the route priority, the pulled-cable reboot and the probe's refusal to drive a configured pad as host-tested rules | ✅ 🧪 | [`logic/net_link.hpp`](../main/logic/net_link.hpp), [`net.cpp`](../main/net.cpp), [`test_transport_contract.mjs`](../test/test_transport_contract.mjs) |
 | 78 | **Transport-independent HTTP trust surface** — the restricted provisioning route set follows the OPEN setup AP's existence rather than the WiFi mode, so a wired board is not locked out of its own API and a live AP cannot be widened by a cable | ✅ 🧪 | [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_server.cpp`](../main/http_server.cpp) |
 | 80 | **Per-row state age** — how long each switched row has read what it reads, published as three separate facts (the seconds, whether the transition was *witnessed*, and how much of the run the bus did not answer for) so a consumer cannot state a stronger claim than the board made | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
-| 81 | **CLAUDE.md byte-budget gate** — the always-loaded agent instructions are held under a byte budget in CI, forcing new findings into `docs/` as narrative and into `.claude/CLAUDE.md` only as rules | ✅ | [`run-claude-md-budget.sh`](../scripts/run-claude-md-budget.sh), [`selftest.sh`](../tools/claudemd/selftest.sh) |
+| 89 | **Agent instruction budget, mapping and parity gate** — canonical `AGENTS.md` and the Claude compatibility instructions are byte-bounded; all 38 legacy paths map exactly once, while a reviewed source-tree fingerprint, skill identity, OpenAI metadata and explicit safety invariants fail closed on drift | ✅ | [`run-agent-instructions-budget.sh`](../scripts/run-agent-instructions-budget.sh), [`selftest.sh`](../tools/agent-config/selftest.sh) |
 | 85 | **Browser serial-permission release** — the Pages installer exposes a granted, closed port's `forget()` action without opening a chooser when nothing can be revoked or interrupting an active flash | ✅ 🧪 | [`serial-port-release.mjs`](serial-port-release.mjs), [`serial_port_release.test.mjs`](../test/serial_port_release.test.mjs) |
 | 86 | **Inline Web Serial installer + monitor** — only the native port chooser leaves the branded Pages UI; ESP32-S3 probing, NVS-preserving sparse flash, cross-part progress, reset and a real 115200-baud monitor run in-page | ✅ 🧪 | [`web-installer.mjs`](web-installer.mjs), [`web_installer.test.mjs`](../test/web_installer.test.mjs) |
 | 87 | **Diagnostic-evidence contract gate** — every visible plant diagnosis stays bound to an external basis, its implemented rule and an explicit claim limit | ✅ | [`check_diagnostic_evidence.mjs`](../tools/diagnostic_evidence/check_diagnostic_evidence.mjs), [`run-diagnostic-evidence-audit.sh`](../scripts/run-diagnostic-evidence-audit.sh) |
@@ -165,7 +165,7 @@ Because the app must carry a valid signature to run, an **unsigned image crash-l
 
 - [`require-signed.sh`](../scripts/require-signed.sh) exits non-zero **with the exact signing
   command** if a `.bin` has no signature block; the
-  [`flash-esp32`](../.claude/skills/flash-esp32/SKILL.md) skill runs it before every flash.
+  [`flash-esp32`](../.agents/skills/flash-esp32/SKILL.md) skill runs it before every flash.
 - CI hard-errors on a `main` build with no signing key; fork PRs downgrade to an unsigned
   *compile-only* build that publishes nothing.
 - CI applies the same guard to the **browser installer**, which no host-side check reaches: each
@@ -344,7 +344,7 @@ other.
 
 - **`esp_http_server` on `:80`**, with `CONFIG_HTTPD_WS_SUPPORT=n` — stated explicitly because this
   firmware deliberately has **no** push transport. The full HTTP surface is in
-  [`.claude/CLAUDE.md`](../.claude/CLAUDE.md) and [`docs/README.md`](README.md).
+  [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/README.md`](README.md).
 - **✅ The live UI is a POLL, and the absence of a push is the feature.** The browser fetches
   `/values` and `/status` on one recursive-`setTimeout` chain (never `setInterval`: a slow answer
   must delay the next request, not stack one behind it), backs off while unreachable and suspends
@@ -652,8 +652,8 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
   `main/logic/` itself, with a selftest proving an empty or below-floor report fails closed. This is
   the real "run it and see" loop even in an environment that cannot build firmware or USB-flash.
 - **The rule** — new decode/config/discovery logic goes in `main/logic/` with a `CHECK`, never buried
-  in a device-only `.cpp`. The [`add-logic-test`](../.claude/skills/add-logic-test/SKILL.md) skill
-  and the [`x10a-decode-reviewer`](../.claude/agents/x10a-decode-reviewer.md) agent enforce it.
+  in a device-only `.cpp`. The [`add-logic-test`](../.agents/skills/add-logic-test/SKILL.md) skill
+  and the [`x10a-decode-reviewer`](../.codex/agents/x10a-decode-reviewer.toml) agent enforce it.
 
 **🧪 What's covered.** Each header states its own reasoning; this is the map, not a re-derivation:
 
@@ -708,7 +708,7 @@ Four properties of that core are worth naming because they are not obvious from 
   windows and one wire field described by two physical units — each with a decode witness. Its
   [`selftest.sh`](../tools/domain/selftest.sh) re-introduces every defect the gate was built for, so
   a checker that has quietly stopped checking cannot pass as clean. The judgement half is the
-  [`domain-review`](../.claude/skills/domain-review/SKILL.md) skill, a PR-merge gate on every merge.
+  [`domain-review`](../.agents/skills/domain-review/SKILL.md) skill, a PR-merge gate on every merge.
 - **✅ Diagnostic claims keep their evidence.**
   [`run-diagnostic-evidence-audit.sh`](../scripts/run-diagnostic-evidence-audit.sh) binds every visible
   plant-diagnostic row to its primary external source, the exact implemented rule and a claim
@@ -759,13 +759,18 @@ Four properties of that core are worth naming because they are not obvious from 
   a 760-line function. `-Os` takes it to **3744**, and the deepest httpd path (`POST /mcp`, which
   reuses the same builder) from 14512 bytes of a 16384 stack to 6480; the stack itself was left at
   16384. The trade — less exact backtraces in the one file whose core dumps mattered — and the
-  reproduce command are stated where the pin lives and in [`.claude/CLAUDE.md`](../.claude/CLAUDE.md)
-  under "Memory constraints".
-- **✅ CLAUDE.md byte-budget gate.** `.claude/CLAUDE.md` is loaded into every Claude Code session, so
-  every byte there is paid on every turn — and it grows by accretion (329 KB before the 2026-08
-  reduction). [`run-claude-md-budget.sh`](../scripts/run-claude-md-budget.sh) holds it under 64 KiB
-  as a CI `gates` step; the fix when it fires is moving narrative to `docs/`, never trimming a rule.
-  [`tools/claudemd/selftest.sh`](../tools/claudemd/selftest.sh) proves it fails closed.
+  reproduce command are stated where the pin lives and in
+  [`ARCHITECTURE.md`](ARCHITECTURE.md#memory-constraints).
+- **✅ Agent instruction budget, mapping and parity gate.** [`AGENTS.md`](../AGENTS.md) is the
+  runner-neutral always-loaded contract and stays below 24 KiB; `.claude/CLAUDE.md` remains a
+  64 KiB compatibility entry point. [`run-agent-instructions-budget.sh`](../scripts/run-agent-instructions-budget.sh)
+  also validates all 38 tracked legacy files against `.codex/migration-manifest.json`, their
+  deterministic reviewed source-tree fingerprint, every canonical/adapter target, canonical skill
+  identity and OpenAI metadata, and the explicit safety invariants shared by both instruction files.
+  The fix for a budget failure is moving narrative to `docs/`, never trimming a rule or raising the
+  limit. `run-claude-md-budget.sh` is a compatibility wrapper only;
+  [`tools/agent-config/selftest.sh`](../tools/agent-config/selftest.sh) and
+  [`tools/claudemd/selftest.sh`](../tools/claudemd/selftest.sh) prove both entry points fail closed.
 - **🔭 No generic static-analyser gate — measured, not assumed.** Recorded here so it is not
   re-litigated: clang-tidy over the pure headers reports thousands of findings on a blanket config
   (over half of them this project's own `CHECK` macro) and, curated to bug-finding checks, roughly
@@ -912,4 +917,4 @@ web UI**; the heat-pump model is **re-detected on every boot**.
 ---
 
 *Keep this catalog in sync with the code — when a new technical feature lands, run the
-[`feature-docs`](../.claude/skills/feature-docs/SKILL.md) skill.*
+[`feature-docs`](../.agents/skills/feature-docs/SKILL.md) skill.*

@@ -1,10 +1,16 @@
 ---
 name: bug-triage
-description: Triage a bug report filed by an external user — read the GitHub issue and the device report pasted into it, verify which firmware build it came from, route by symptom, name the missing evidence in one comment, and reproduce a wrong value against the real converters on the host. Use when handling an incoming issue number; for a board you can actually reach over the network, use device-triage instead.
+description: Triage a bug report filed by an external user — read the GitHub issue and device report, verify firmware provenance, route by symptom, identify missing evidence, and reproduce wrong values against the real converters on the host. Use for an incoming issue number; for a reachable board, use device-triage instead. Keep triage read-only unless the user explicitly asks to comment, label, or edit the issue.
 model: sonnet
 ---
 
 # bug-triage
+
+## Authorization boundary
+
+Treat triage as read-only unless the user explicitly requests repository or GitHub mutation. Do not
+comment, label, edit the issue, commit, push, open a PR, merge, flash, deploy, or mutate a live
+device merely because this skill activated.
 
 Triage `<issue number>` — a report from someone whose device you cannot reach.
 
@@ -85,8 +91,9 @@ when the backtrace in `last_crash` is genuinely not enough (step 5).
    bytes, what they should read, what they do read. That converts a user's screenshot into evidence,
    and it is the highest-value thing this skill does.
 
-7. **Label and comment.** Apply the class label with `gh issue edit` (not a workflow — a labeler
-   Action is an always-on job, and `.claude/CLAUDE.md` explains why every Actions job is billed
+7. **Label and comment, when explicitly authorized.** Apply the class label with `gh issue edit`
+   only when the user requested GitHub mutation (not a workflow — a labeler Action is an always-on
+   job, and `AGENTS.md` explains why every Actions job is billed
    rounded up to a whole minute):
 
    `value-correctness` · `detection` · `x10a` · `home-assistant` · `mqtt` · `wifi` · `ota` ·

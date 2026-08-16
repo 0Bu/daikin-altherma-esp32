@@ -215,7 +215,8 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation) {
     // thing here sized by the catalog, and it is a POD on the poll task's stack: DWELL_MAX_SLOTS
     // (48) entries of 6 bytes is 288 B of an 8 KB stack — the array is sized by the TABLE, not by
     // the 38-row worst case it will actually hold, so quote the size the code allocates. That stack
-    // is the budget which fails silently on this board (CLAUDE.md → Memory constraints). A row that produced no usable state is simply
+    // is the budget which fails silently on this board (AGENTS.md → Memory, concurrency, and HTTP
+    // safety). A row that produced no usable state is simply
     // left out — logic/state_dwell.hpp treats absent and undecodable identically, so the caller
     // never has to encode "present but unknown".
     logic::DwellObservation obs[logic::DWELL_MAX_SLOTS];

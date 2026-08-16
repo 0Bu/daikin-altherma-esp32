@@ -3,7 +3,8 @@
 // generator emitted is demonstrably the wrong one.
 //
 // This is the sibling of logic/availability.hpp and it exists for the same structural reason: the
-// per-model tables in def/ are machine output (.claude/CLAUDE.md: never hand-edit one), the offline
+// per-model tables in def/ are machine output (AGENTS.md → Build and deterministic gates: never
+// hand-edit one), the offline
 // generator lives outside this repo, and a correction that lived in a generated table would be lost
 // on the next generator run. So the verdict lives here, in logic/, IDF-free, keyed on the row's
 // structural identity and carrying its evidence beside the rule — where the CI logic test can

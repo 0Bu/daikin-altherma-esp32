@@ -6,8 +6,10 @@ model: sonnet
 
 # flash-esp32
 
-Build the current tree for a target and flash it from the host, preserving NVS (WiFi + model
-config survive). Docker builds, host `esptool` flashes (Docker Desktop has no USB passthrough).
+Build the current tree for a target and flash it from the host, preserving NVS (WiFi/service
+settings and the X10A link cache survive; detected model identity stays RAM-only and is
+re-established after boot). Docker builds, host `esptool` flashes (Docker Desktop has no USB
+passthrough).
 
 ## Steps
 
@@ -49,8 +51,11 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
   auto-rollback details: [docs/SECURITY.md](../../../docs/SECURITY.md) → Boot recovery.
 - First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-esp32-setup` portal.
 - A full-erase recovery: `esptool --chip esp32s3 -p <port> erase_flash` then reflash.
-- This skill does NOT merge or release — it works on the local tree only. PRs merge with
-  `gh pr merge` once every applicable gate box is ticked and SHA-stamped; derive which apply from
-  `ls .claude/hooks/require-*.sh` (each names its gate + relevance filter) rather than a list
-  written down here, which goes stale as gates are added. Releases are cut by CI from `main`
-  ([build.yml](../../../.github/workflows/build.yml)).
+- This skill does NOT merge or release — it works on the local tree only. The supported merge path
+  is `gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <number> --match-head-commit
+  <full-current-head-sha> --squash` once every applicable gate box is ticked and SHA-stamped; see
+  [`docs/AGENT_MIGRATION.md`](../../../docs/AGENT_MIGRATION.md) for the full contract and derive
+  which gates apply from
+  [`tools/agent-hooks/require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) rather
+  than a list written down here, which goes stale as gates are added. Releases are cut by CI from
+  `main` ([build.yml](../../../.github/workflows/build.yml)).

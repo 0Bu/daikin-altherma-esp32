@@ -397,7 +397,7 @@ configuration on a row whose own copy says the value changes nothing about what 
 ---
 
 *Platform-level features are in [`FEATURES.md`](FEATURES.md); keep both current with the
-[`feature-docs`](../.claude/skills/feature-docs/SKILL.md) skill.*
+[`feature-docs`](../.agents/skills/feature-docs/SKILL.md) skill.*
 
 ---
 

@@ -1,0 +1,1004 @@
+#!/usr/bin/env bash
+# Positive and negative mutation tests for Claude/Codex hook payloads and the consolidated PR gate.
+set -uo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+hook="$root/tools/agent-hooks/agent_hook.py"
+pr_gate="$root/tools/agent-hooks/require-pr-gates.sh"
+tmp="$(mktemp -d)" || exit 2
+trap 'rm -rf "$tmp"' EXIT
+pass=0
+fail=0
+
+payload() {
+    local payload_cwd="${AGENT_TEST_PAYLOAD_CWD:-$root}"
+    python3 - "$1" "$2" "$3" "$payload_cwd" <<'PY'
+import json, sys
+tool, key, value, cwd = sys.argv[1:]
+print(json.dumps({"hook_event_name": "PreToolUse", "cwd": cwd,
+                  "tool_name": tool, "tool_input": {key: value}}))
+PY
+}
+
+decision() {
+    python3 -c 'import json,sys
+s=sys.stdin.read().strip()
+if not s: print("")
+else: print(json.loads(s)["hookSpecificOutput"]["permissionDecision"])' 2>/dev/null
+}
+
+guard_case() {
+    local name="$1" runner="$2" input="$3" expected="$4" out got rc
+    out="$(printf '%s' "$input" | python3 "$hook" pre-tool-guards --runner "$runner" 2>&1)"; rc=$?
+    got="$(printf '%s' "$out" | decision)"
+    if [ "$rc" -eq 0 ] && [ "$got" = "$expected" ]; then
+        echo "PASS  $name"; pass=$((pass + 1))
+    else
+        echo "FAIL  $name (rc=$rc decision=$got output=$out)" >&2; fail=$((fail + 1))
+    fi
+}
+
+guard_case "Claude safe documentation read" claude \
+    "$(payload Read file_path "$root/docs/SECURITY.md")" ""
+guard_case "Claude private PEM read denied" claude \
+    "$(payload Read file_path "$root/ota_signing_key.pem")" deny
+guard_case "Claude multiline key shell access denied" claude \
+    "$(payload Bash command $'echo safe\ncat ota_signing_key.pem')" deny
+guard_case "Claude exact espsecure signer allowed" claude \
+    "$(payload Bash command 'espsecure.py sign_data --keyfile /offline/ota_signing_key.pem --output signed.bin app.bin')" ""
+guard_case "Claude exact espsecure signer environment path allowed" claude \
+    "$(payload Bash command 'espsecure.py sign_data --keyfile "$OTA_SIGNING_KEY_FILE" --output signed.bin app.bin')" ""
+guard_case "espsecure cannot reuse the key as payload or PEM output" claude \
+    "$(payload Bash command 'espsecure.py sign_data --version 2 --keyfile /offline/ota_signing_key.pem --output leaked.pem /offline/ota_signing_key.pem')" deny
+guard_case "Codex sensitive apply_patch target denied" codex \
+    "$(payload apply_patch command $'*** Begin Patch\n*** Add File: secrets.env\n+TOKEN=x\n*** End Patch')" deny
+guard_case "Codex safe patch that documents PEM allowed" codex \
+    "$(payload apply_patch command $'*** Begin Patch\n*** Update File: docs/SECURITY.md\n@@\n-Old\n+Never read ota_signing_key.pem\n*** End Patch')" ""
+guard_case "Codex process-environment dump denied" codex \
+    "$(payload exec_command command 'printenv')" deny
+guard_case "exec argv alias cannot hide environment dump" codex \
+    "$(payload exec_command command 'exec -a harmless printenv')" deny
+guard_case "timeout wrapper cannot hide environment dump" codex \
+    "$(payload exec_command command 'timeout 1 printenv')" deny
+guard_case "xargs cannot invoke environment dump" codex \
+    "$(payload exec_command command "printf 'GH_TOKEN' | xargs printenv")" deny
+guard_case "find exec cannot invoke environment dump" codex \
+    "$(payload exec_command command "find . -maxdepth 0 -exec printenv GH_TOKEN ';'")" deny
+guard_case "wrapped terminal env dump is denied" codex \
+    "$(payload exec_command command 'setsid env')" deny
+guard_case "dynamic printenv executable is denied" codex \
+    "$(payload exec_command command 'p=printenv; "$p"')" deny
+guard_case "Python process environment dump is denied" codex \
+    "$(payload exec_command command "python3 -c 'import os; print(os.environ)'")" deny
+guard_case "Node process environment dump is denied" codex \
+    "$(payload exec_command command "node -e 'console.log(process.env)'")" deny
+guard_case "Linux proc environment dump is denied" codex \
+    "$(payload exec_command command 'cat /proc/self/environ')" deny
+guard_case "BSD ps environment dump is denied" codex \
+    "$(payload exec_command command 'ps eww -p $$')" deny
+guard_case "Darwin ps environment flag is denied" codex \
+    "$(payload exec_command command 'ps -E -p $$')" deny
+guard_case "combined BSD ps environment flags are denied" codex \
+    "$(payload exec_command command 'ps auxeww')" deny
+guard_case "ordinary process listing without environment is allowed" codex \
+    "$(payload exec_command command 'ps -ef')" ""
+guard_case "Codex multiline process-environment dump denied" codex \
+    "$(payload exec_command command $'echo safe\nprintenv')" deny
+guard_case "direct GitHub token expansion is denied" codex \
+    "$(payload exec_command command 'printf "%s\\n" "$GH_TOKEN"')" deny
+guard_case "OTA signer path variable cannot be read" codex \
+    "$(payload exec_command command 'cat "$OTA_SIGNING_KEY_FILE"')" deny
+guard_case "env with assignments but no command is an environment dump" codex \
+    "$(payload exec_command command 'env SELFTEST_VALUE=safe')" deny
+guard_case "env wrapping an ordinary command is allowed" codex \
+    "$(payload exec_command command 'env LC_ALL=C ls docs')" ""
+guard_case "naked export environment dump is denied" codex \
+    "$(payload exec_command command 'export')" deny
+guard_case "option-only export environment dump is denied" codex \
+    "$(payload exec_command command 'export -n')" deny
+guard_case "GitHub auth token output is denied" codex \
+    "$(payload exec_command command 'gh auth token')" deny
+guard_case "GitHub auth status short token flag is denied" codex \
+    "$(payload exec_command command 'env gh auth status -t')" deny
+guard_case "dynamic GitHub executable cannot dump a token" codex \
+    "$(payload exec_command command 'g=gh; "$g" auth token')" deny
+guard_case "shell-wrapped GitHub auth token output is denied" codex \
+    "$(payload exec_command command 'bash -c "gh auth token"')" deny
+guard_case "backtick-wrapped GitHub auth token output is denied" codex \
+    "$(payload exec_command command 'echo `gh auth token`')" deny
+guard_case "multiline GitHub auth token output is denied" codex \
+    "$(payload exec_command command $'echo safe\ngh auth token')" deny
+guard_case "Git credential fill output is denied" codex \
+    "$(payload exec_command command 'git credential fill')" deny
+guard_case "AWS secret getter output is denied" codex \
+    "$(payload exec_command command 'aws configure get aws_secret_access_key')" deny
+guard_case "environment declarations are denied" codex \
+    "$(payload exec_command command 'declare -px')" deny
+guard_case "typeset environment declarations are denied" codex \
+    "$(payload exec_command command 'typeset -p')" deny
+guard_case "plus-flag environment declarations are denied" codex \
+    "$(payload exec_command command 'declare +x')" deny
+guard_case "named sensitive environment declaration is denied" codex \
+    "$(payload exec_command command 'declare GH_TOKEN')" deny
+guard_case "readonly environment listing is denied" codex \
+    "$(payload exec_command command 'readonly -p')" deny
+guard_case "combined shell flags cannot hide a token dump" codex \
+    "$(payload exec_command command "bash -lc 'gh auth token'")" deny
+guard_case "quoted command substitution cannot hide a token dump" codex \
+    "$(payload exec_command command 'echo "$(gh auth token)"')" deny
+guard_case "ordinary wrappers cannot hide a token dump" codex \
+    "$(payload exec_command command 'time gh auth token')" deny
+guard_case "stdin-executed shell is denied" codex \
+    "$(payload exec_command command "printf '%s' 'gh auth token' | bash")" deny
+guard_case "stdin shell flags are denied" codex \
+    "$(payload exec_command command "printf '%s' 'gh auth token' | bash -s")" deny
+guard_case "stdin shell wrapper is denied" codex \
+    "$(payload exec_command command "printf '%s' 'gh auth token' | env bash")" deny
+guard_case "credentials JSON shell path is denied" codex \
+    "$(payload exec_command command 'cat credentials.json')" deny
+guard_case "private SSH shell path is denied" codex \
+    "$(payload exec_command command 'cat ~/.ssh/id_ed25519_sk')" deny
+guard_case "private SSH Read target outside dot-ssh is denied" codex \
+    "$(payload Read file_path '/tmp/id_ed25519_sk')" deny
+guard_case "generic private-key Write target is denied" codex \
+    "$(payload Write file_path '/tmp/private_key')" deny
+guard_case "credential YAML Read target is denied" codex \
+    "$(payload Read file_path '/tmp/credentials.yml')" deny
+guard_case "quote-split private key shell path is denied" codex \
+    "$(payload exec_command command "cat ota_signing_key.p''em")" deny
+guard_case "private key glob shell path is denied" codex \
+    "$(payload exec_command command 'cat ota_signing_key.p?m')" deny
+guard_case "credential glob shell path is denied" codex \
+    "$(payload exec_command command 'cat .git-cred*')" deny
+guard_case "Git credential helper output is denied" codex \
+    "$(payload exec_command command 'git credential-osxkeychain get')" deny
+guard_case "Git credential executable output is denied" codex \
+    "$(payload exec_command command 'git-credential-osxkeychain get')" deny
+guard_case "macOS keychain stderr credential output is denied" codex \
+    "$(payload exec_command command 'security find-generic-password -g -s selftest')" deny
+guard_case "qualified AWS credential getter is denied" codex \
+    "$(payload exec_command command 'aws --profile prod configure get profile.prod.aws_secret_access_key')" deny
+guard_case "global gcloud option cannot hide token output" codex \
+    "$(payload exec_command command 'gcloud --project demo auth print-access-token')" deny
+guard_case "global kubectl option cannot hide raw credentials" codex \
+    "$(payload exec_command command 'kubectl --context harmless config view --raw')" deny
+guard_case "kubectl raw assignment cannot expose credentials" codex \
+    "$(payload exec_command command 'kubectl config view --raw=true')" deny
+guard_case "Docker credential helper output is denied" codex \
+    "$(payload exec_command command 'docker-credential-osxkeychain get')" deny
+guard_case "macOS identity export is denied" codex \
+    "$(payload exec_command command 'security export -t identities -f pemseq')" deny
+guard_case "private key brace expansion is denied" codex \
+    "$(payload exec_command command 'cat ota_signing_key.{pem,bak}')" deny
+guard_case "ANSI-C quoted private key suffix is denied" codex \
+    "$(payload exec_command command "cat ota_signing_key.\$'pem'")" deny
+guard_case "private key brace range is denied" codex \
+    "$(payload exec_command command 'cat ota_signing_key.p{e..e}m')" deny
+guard_case "locale-quoted private key suffix is denied" codex \
+    "$(payload exec_command command 'cat ota_signing_key.p$"em"')" deny
+guard_case "line-continued private key suffix is denied" codex \
+    "$(payload exec_command command $'cat ota_signing_key.\\\npem')" deny
+guard_case "deep static credential braces fail closed" codex \
+    "$(payload exec_command command 'cat cred{e,e}{n,n}{t,t}{i,i}{a,a}{l,l}{s,s}.json')" deny
+guard_case "combinatorial brace expansion fails closed without full expansion" codex \
+    "$(payload exec_command command 'echo {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}')" deny
+guard_case "Bash extglob is conservatively denied" codex \
+    "$(payload exec_command command "bash -O extglob -c 'cat ota_signing_key.p@(em)'")" deny
+guard_case "Malformed secret payload fails closed" codex "{" deny
+guard_case "missing tool name fails closed" codex '{}' deny
+guard_case "non-string tool name fails closed" codex \
+    '{"tool_name":123,"tool_input":{"cmd":"cat ota_signing_key.pem"}}' deny
+guard_case "unknown matched tool suffix fails closed" codex \
+    '{"tool_name":"exec_command_v2","tool_input":{"cmd":"cat ota_signing_key.pem"}}' deny
+guard_case "conflicting shell input aliases fail closed" codex \
+    '{"cwd":"/tmp","tool_name":"exec_command","tool_input":{"command":"echo safe","cmd":"cat ota_signing_key.pem"}}' deny
+
+guard_case "Claude Edit partitions asks" claude \
+    "$(payload Edit file_path "$root/partitions.csv")" ask
+guard_case "Codex apply_patch partitions denies" codex \
+    "$(payload apply_patch command $'*** Begin Patch\n*** Update File: partitions.csv\n@@\n-old\n+new\n*** End Patch')" deny
+guard_case "Codex sed -i partitions denies" codex \
+    "$(payload exec_command command "sed -i '' 's/a/b/' partitions.csv")" deny
+guard_case "Codex sed --in-place partitions denies" codex \
+    "$(payload exec_command command 'sed --in-place s/a/b/ partitions.csv')" deny
+guard_case "Codex sed glob partitions denies" codex \
+    "$(payload exec_command command "sed -i '' 's/a/b/' *.csv")" deny
+guard_case "Codex Python glob partitions writer denies" codex \
+    "$(payload exec_command command 'python3 -c '\''from pathlib import Path; [p.write_text("x") for p in Path(".").glob("*.csv")]'\''')" deny
+guard_case "Codex partitions brace expansion denies" codex \
+    "$(payload exec_command command 'rm partitions.{csv,bak}')" deny
+guard_case "Codex split-name brace expansion denies" codex \
+    "$(payload exec_command command 'rm partit{ions.csv,ions.bak}')" deny
+guard_case "Codex partitions brace range denies" codex \
+    "$(payload exec_command command 'rm partitions.c{s..s}v')" deny
+guard_case "Codex locale-quoted partitions suffix denies" codex \
+    "$(payload exec_command command 'rm partitions.c$"sv"')" deny
+guard_case "Codex line-continued partitions name denies" codex \
+    "$(payload exec_command command $'rm parti\\\ntions.csv')" deny
+deep_partitions_command="sed -i '' 's/a/b/' part{it,it}{io,io}{ns,ns}{.,.}{cs,cs}{v,v}"
+guard_case "Codex deep static partitions braces deny" codex \
+    "$(payload exec_command command "$deep_partitions_command")" deny
+guard_case "Codex partitions extglob is conservatively denied" codex \
+    "$(payload exec_command command "bash -O extglob -c 'rm partitions.c@(sv)'")" deny
+guard_case "Claude tee partitions asks" claude \
+    "$(payload Bash command 'printf x | tee partitions.csv')" ask
+guard_case "Codex redirect partitions denies" codex \
+    "$(payload exec_command command 'printf x > partitions.csv')" deny
+guard_case "Codex cp destination partitions denies" codex \
+    "$(payload exec_command command 'cp /tmp/new.csv ./partitions.csv')" deny
+guard_case "Codex mv destination partitions denies" codex \
+    "$(payload exec_command command 'mv /tmp/new.csv partitions.csv')" deny
+guard_case "Codex unknown Python partitions writer denies" codex \
+    "$(payload exec_command command 'python3 -c '\''open("partitions.csv", "w").write("changed")'\''')" deny
+guard_case "Codex computed Python partitions writer denies" codex \
+    "$(payload exec_command command 'python3 -c '\''open("partitions"+".csv", "w").write("changed")'\''')" deny
+guard_case "Codex command-substituted partitions redirect denies" codex \
+    "$(payload exec_command command 'printf x > "$(printf partitions).csv"')" deny
+guard_case "Codex variable-built partitions redirect denies" codex \
+    "$(payload exec_command command 'p=partitions; printf x > "$p.csv"')" deny
+guard_case "Codex multiline partitions writer denies" codex \
+    "$(payload exec_command command $'cat partitions.csv\npython3 -c '\''open("partitions.csv", "w").write("changed")'\''')" deny
+guard_case "Codex read tool redirected onto partitions denies" codex \
+    "$(payload exec_command command 'cat /tmp/new.csv > partitions.csv')" deny
+guard_case "Codex quote-split partitions redirect denies" codex \
+    "$(payload exec_command command "printf x > partition''s.csv")" deny
+guard_case "Codex sed write-command partitions denies" codex \
+    "$(payload exec_command command "sed -n 'w partitions.csv' /tmp/new.csv")" deny
+guard_case "Codex git output option partitions denies" codex \
+    "$(payload exec_command command 'git show --output partitions.csv HEAD')" deny
+guard_case "Codex less output option partitions denies" codex \
+    "$(payload exec_command command 'less -o partitions.csv /tmp/new.csv')" deny
+guard_case "Codex narrow partitions read allowed" codex \
+    "$(payload exec_command command 'head -n 10 partitions.csv')" ""
+guard_case "Codex cat partitions read allowed" codex \
+    "$(payload exec_command command 'cat partitions.csv')" ""
+guard_case "Claude partitions diff allowed" claude \
+    "$(payload Bash command 'git diff -- partitions.csv')" ""
+
+prompt_out="$(printf '%s' '{"prompt":"Das Gerät ist offline nach einem reboot"}' \
+    | python3 "$hook" prompt-context 2>&1)"
+if printf '%s' "$prompt_out" | grep -qF '<crash-triage-reminder>'; then
+    echo "PASS  UserPromptSubmit crash report injects neutral triage context"; pass=$((pass + 1))
+else
+    echo "FAIL  UserPromptSubmit crash report missed triage context" >&2; fail=$((fail + 1))
+fi
+prompt_out="$(printf '%s' '{"prompt":"Please update one documentation sentence"}' \
+    | python3 "$hook" prompt-context 2>&1)"
+if [ -z "$prompt_out" ]; then
+    echo "PASS  ordinary UserPromptSubmit stays context-free"; pass=$((pass + 1))
+else
+    echo "FAIL  ordinary UserPromptSubmit injected context: $prompt_out" >&2; fail=$((fail + 1))
+fi
+
+lifecycle_root="$tmp/lifecycle-root"
+mkdir -p "$lifecycle_root/tools/agent-hooks" "$lifecycle_root/scripts" \
+    "$lifecycle_root/main/logic" "$lifecycle_root/test" "$tmp/lifecycle-bin"
+cp "$hook" "$lifecycle_root/tools/agent-hooks/agent_hook.py"
+git -C "$lifecycle_root" init -q
+cat >"$lifecycle_root/scripts/run-mock-tests.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'run\n' >>"$AGENT_STOP_LOG"
+printf 'selftest host failure\n'
+exit "${AGENT_STOP_TEST_RC:-0}"
+EOF
+cat >"$tmp/lifecycle-bin/cmake" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$lifecycle_root/scripts/run-mock-tests.sh" "$tmp/lifecycle-bin/cmake"
+lifecycle_payload="$(python3 - "$lifecycle_root" <<'PY'
+import json, sys
+print(json.dumps({"cwd": sys.argv[1], "stop_hook_active": False}))
+PY
+)"
+stop_log="$tmp/stop.log"
+stop_out="$(printf '%s' "$lifecycle_payload" | env PATH="$tmp/lifecycle-bin:$PATH" \
+    AGENT_STOP_LOG="$stop_log" python3 "$lifecycle_root/tools/agent-hooks/agent_hook.py" stop-logic-tests 2>&1)"
+if [ -z "$stop_out" ] && [ ! -e "$stop_log" ]; then
+    echo "PASS  Stop hook skips a tree without main/test changes"; pass=$((pass + 1))
+else
+    echo "FAIL  Stop hook ran without main/test changes" >&2; fail=$((fail + 1))
+fi
+printf '%s\n' '// untracked lifecycle canary' >"$lifecycle_root/main/logic/untracked.hpp"
+stop_out="$(printf '%s' "$lifecycle_payload" | env PATH="$tmp/lifecycle-bin:$PATH" \
+    AGENT_STOP_LOG="$stop_log" python3 "$lifecycle_root/tools/agent-hooks/agent_hook.py" stop-logic-tests 2>&1)"
+if [ -z "$stop_out" ] && [ "$(cat "$stop_log" 2>/dev/null)" = run ]; then
+    echo "PASS  Stop hook tests an untracked main/logic file"; pass=$((pass + 1))
+else
+    echo "FAIL  Stop hook missed untracked main/logic change" >&2; fail=$((fail + 1))
+fi
+: >"$stop_log"
+active_payload="$(python3 - "$lifecycle_root" <<'PY'
+import json, sys
+print(json.dumps({"cwd": sys.argv[1], "stop_hook_active": True}))
+PY
+)"
+stop_out="$(printf '%s' "$active_payload" | env PATH="$tmp/lifecycle-bin:$PATH" \
+    AGENT_STOP_LOG="$stop_log" python3 "$lifecycle_root/tools/agent-hooks/agent_hook.py" stop-logic-tests 2>&1)"
+if [ -z "$stop_out" ] && [ ! -s "$stop_log" ]; then
+    echo "PASS  active Stop continuation does not loop"; pass=$((pass + 1))
+else
+    echo "FAIL  active Stop continuation reran tests" >&2; fail=$((fail + 1))
+fi
+stop_out="$(printf '%s' "$lifecycle_payload" | env PATH="$tmp/lifecycle-bin:$PATH" \
+    AGENT_STOP_LOG="$stop_log" AGENT_STOP_TEST_RC=1 \
+    python3 "$lifecycle_root/tools/agent-hooks/agent_hook.py" stop-logic-tests 2>&1)"
+if printf '%s' "$stop_out" | python3 -c 'import json,sys; value=json.load(sys.stdin); raise SystemExit(0 if value.get("decision") == "block" and "selftest host failure" in value.get("reason", "") else 1)'; then
+    echo "PASS  failing Stop logic tests request continuation"; pass=$((pass + 1))
+else
+    echo "FAIL  failing Stop logic tests did not emit block JSON: $stop_out" >&2; fail=$((fail + 1))
+fi
+
+head_sha="abcdef1234567890abcdef1234567890abcdef12"
+cat >"$tmp/all-gates.md" <<EOF
+- [x] /project-review clean — merge gate @ $head_sha
+- [x] /domain-review clean — merge gate @ $head_sha
+- [x] /feature-docs synced — merge gate @ $head_sha
+- [x] /schematic-review clean — merge gate @ $head_sha
+- [x] /ui-use-case-review clean — merge gate @ $head_sha
+- [x] /absence-review clean — merge gate @ $head_sha
+- [x] /ui-gif clean — merge gate @ $head_sha
+EOF
+printf '%s\n' 'main/www/js/dashboard.js' >"$tmp/all-files.txt"
+
+pr_case() {
+    local name="$1" expected_rc="$2" body="$3" files="$4" input="${5:-}" out rc
+    out="$(printf '%s' "$input" | env AGENT_POLICY_CI=1 AGENT_PR_BODY_FILE="$body" \
+        AGENT_PR_HEAD_SHA="$head_sha" AGENT_CHANGED_FILES_FILE="$files" \
+        "$pr_gate" 2>&1)"; rc=$?
+    if [ "$rc" -eq "$expected_rc" ]; then
+        echo "PASS  $name"; pass=$((pass + 1))
+    else
+        echo "FAIL  $name (wanted rc=$expected_rc got rc=$rc output=$out)" >&2; fail=$((fail + 1))
+    fi
+}
+
+pr_case "CI all applicable gates pass" 0 "$tmp/all-gates.md" "$tmp/all-files.txt"
+cat >"$tmp/docs-gates.md" <<EOF
+- [x] /project-review clean — merge gate @ $head_sha
+- [x] /domain-review clean — merge gate @ $head_sha
+EOF
+printf '%s\n' 'docs/README.md' >"$tmp/docs-files.txt"
+pr_case "CI docs-only skips conditional gates" 0 "$tmp/docs-gates.md" "$tmp/docs-files.txt"
+sed "s/$head_sha/deadbee/" "$tmp/all-gates.md" >"$tmp/stale.md"
+pr_case "CI stale stamps fail closed" 2 "$tmp/stale.md" "$tmp/all-files.txt"
+short_head_sha="${head_sha:0:12}"
+sed "s/$head_sha/$short_head_sha/g" "$tmp/all-gates.md" >"$tmp/short-stamp.md"
+pr_case "CI one bounded 12-hex current-head prefix satisfies a gate" 0 \
+    "$tmp/short-stamp.md" "$tmp/all-files.txt"
+sed "1s/merge gate @ $head_sha/foo@$short_head_sha merge gate/" \
+    "$tmp/all-gates.md" >"$tmp/premature-stamp.md"
+pr_case "CI SHA before the merge-gate phrase is not a stamp" 2 \
+    "$tmp/premature-stamp.md" "$tmp/all-files.txt"
+sed "1s/$head_sha/${short_head_sha}Z/" "$tmp/all-gates.md" >"$tmp/alphanumeric-stamp.md"
+pr_case "CI alphanumeric continuation invalidates a SHA stamp" 2 \
+    "$tmp/alphanumeric-stamp.md" "$tmp/all-files.txt"
+sed "1s/$head_sha/${head_sha}a/" "$tmp/all-gates.md" >"$tmp/overlong-stamp.md"
+pr_case "CI 41-hex stamp cannot satisfy a canonical gate" 2 \
+    "$tmp/overlong-stamp.md" "$tmp/all-files.txt"
+sed "1s/$/ @ $head_sha/" "$tmp/all-gates.md" >"$tmp/double-stamp.md"
+pr_case "CI two SHA stamps make a canonical gate invalid" 2 \
+    "$tmp/double-stamp.md" "$tmp/all-files.txt"
+
+cat "$tmp/all-gates.md" >"$tmp/fenced-decoy.md"
+cat >>"$tmp/fenced-decoy.md" <<'EOF'
+```markdown
+- [x] /project-review clean — merge gate @ deadbee
+```
+EOF
+pr_case "CI fenced gate example cannot shadow the real record" 0 \
+    "$tmp/fenced-decoy.md" "$tmp/all-files.txt"
+cat "$tmp/all-gates.md" >"$tmp/long-fence-decoy.md"
+cat >>"$tmp/long-fence-decoy.md" <<'EOF'
+````markdown
+```
+- [ ] /project-review clean — merge gate @ deadbee
+````
+EOF
+pr_case "CI shorter same-character fence cannot expose a fake gate" 0 \
+    "$tmp/long-fence-decoy.md" "$tmp/all-files.txt"
+cat "$tmp/all-gates.md" >"$tmp/fence-comment-order.md"
+cat >>"$tmp/fence-comment-order.md" <<'EOF'
+~~~ info <!--
+-->
+- [ ] /project-review clean — merge gate @ deadbee
+~~~
+EOF
+pr_case "CI a fence opener takes precedence over comment text in its info string" 0 \
+    "$tmp/fence-comment-order.md" "$tmp/all-files.txt"
+cat "$tmp/all-gates.md" >"$tmp/nested-task-decoy.md"
+printf '%s\n' '  - [ ] /project-review clean — merge gate @ deadbee' >>"$tmp/nested-task-decoy.md"
+pr_case "CI nested two-space task cannot shadow a column-zero gate" 0 \
+    "$tmp/nested-task-decoy.md" "$tmp/all-files.txt"
+printf '%s\n' 'prose <!-- same-line comment closes here -->' >"$tmp/comment-decoy.md"
+cat "$tmp/all-gates.md" >>"$tmp/comment-decoy.md"
+cat >>"$tmp/comment-decoy.md" <<'EOF'
+prose <!--
+- [ ] /project-review clean — merge gate @ deadbee
+-->
+EOF
+pr_case "CI HTML-comment gate examples stay invisible without leaking state" 0 \
+    "$tmp/comment-decoy.md" "$tmp/all-files.txt"
+cat >"$tmp/multi-comment-decoy.md" <<'EOF'
+<!-- first --><!-- second
+- [ ] /project-review clean — merge gate @ deadbee
+-->
+EOF
+cat "$tmp/all-gates.md" >>"$tmp/multi-comment-decoy.md"
+pr_case "CI multiple ordered HTML markers preserve the open-comment state" 0 \
+    "$tmp/multi-comment-decoy.md" "$tmp/all-files.txt"
+cat >"$tmp/raw-html-decoy.md" <<'EOF'
+<pre>
+- [ ] /project-review clean — merge gate @ deadbee
+</pre><pre>
+- [ ] /project-review clean — merge gate @ deadbee
+</pre>
+<pre>
+</pre><!--
+- [ ] /project-review clean — merge gate @ deadbee
+-->
+<?pi
+- [ ] /project-review clean — merge gate @ deadbee
+?>
+<![CDATA[
+- [ ] /project-review clean — merge gate @ deadbee
+]]>
+<span>
+- [ ] /project-review clean — merge gate @ deadbee
+
+</span>
+- [ ] /project-review clean — merge gate @ deadbee
+
+</div>
+- [ ] /project-review clean — merge gate @ deadbee
+
+<div
+- [ ] /project-review clean — merge gate @ deadbee
+
+EOF
+cat "$tmp/all-gates.md" >>"$tmp/raw-html-decoy.md"
+pr_case "CI raw HTML code blocks cannot shadow the real gate record" 0 \
+    "$tmp/raw-html-decoy.md" "$tmp/all-files.txt"
+cat "$tmp/all-gates.md" >"$tmp/duplicate-record.md"
+printf '%s\n' '- [ ] /project-review clean — merge gate @ <short-sha>' >>"$tmp/duplicate-record.md"
+pr_case "CI duplicate real gate records fail closed" 2 \
+    "$tmp/duplicate-record.md" "$tmp/all-files.txt"
+
+printf '%s\n' 'docs/media/dashboard.gif' >"$tmp/gif-files.txt"
+pr_case "CI new dashboard recording accepts current UI-GIF review" 0 \
+    "$tmp/all-gates.md" "$tmp/gif-files.txt"
+grep -v '/ui-gif' "$tmp/all-gates.md" >"$tmp/no-ui-gif.md"
+pr_case "CI new dashboard recording requires UI-GIF review" 2 \
+    "$tmp/no-ui-gif.md" "$tmp/gif-files.txt"
+
+# Exercise the REST fallback without a gh binary. The fake curl accepts the credential only on
+# stdin, rejects it in argv, and returns the two minimal GitHub API responses discovery requires.
+fallback_bin="$tmp/fallback-bin"
+mkdir -p "$fallback_bin"
+ln -s "$(command -v python3)" "$fallback_bin/python3"
+cat >"$fallback_bin/curl" <<'EOF'
+#!/usr/bin/env bash
+for argument in "$@"; do
+    [ "$argument" != "$SELFTEST_EXPECTED_TOKEN" ] || exit 91
+    case "$argument" in
+        *"$SELFTEST_EXPECTED_TOKEN"*) exit 92 ;;
+    esac
+done
+header="$(cat)"
+[ "$header" = "Authorization: Bearer $SELFTEST_EXPECTED_TOKEN" ] || exit 93
+url="${!#}"
+case "$url" in
+    */pulls/123)
+        printf '%s\n' '{"number":123,"body":"review evidence","changed_files":1,"head":{"sha":"abcdef1234567890abcdef1234567890abcdef12"}}'
+        ;;
+    */pulls/123/files\?*)
+        printf '%s\n' '[{"filename":"docs/README.md"}]'
+        ;;
+    *) exit 94 ;;
+esac
+EOF
+chmod +x "$fallback_bin/curl"
+curl_body="$tmp/curl-body.md"
+curl_files="$tmp/curl-files.txt"
+fake_token="selftest-token-not-a-real-credential"
+out="$(env PATH="$fallback_bin:/usr/bin:/bin" GH_TOKEN="$fake_token" \
+    SELFTEST_EXPECTED_TOKEN="$fake_token" AGENT_REPO_SLUG="0Bu/daikin-altherma-esp32" \
+    /bin/bash -c '. "$1"; agent_gate_discover_pr 123 "$2" "$3" "$4"' \
+    _ "$root/tools/agent-hooks/pr-gate-lib.sh" "$root" "$curl_body" "$curl_files" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] \
+    && [ "$(cat "$curl_body" 2>/dev/null)" = "review evidence" ] \
+    && [ "$(cat "$curl_files" 2>/dev/null)" = "docs/README.md" ] \
+    && [ ! -e "$curl_body.curl-headers" ]; then
+    echo "PASS  REST fallback streams token only on curl stdin"; pass=$((pass + 1))
+else
+    echo "FAIL  REST fallback credential transport failed (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+out="$(printf '{' | "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ]; then
+    echo "PASS  malformed hook JSON fails closed"; pass=$((pass + 1))
+else
+    echo "FAIL  malformed hook JSON bypassed (rc=$rc output=$out)" >&2; fail=$((fail + 1))
+fi
+
+out="$(printf '' | "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'empty hook payload'; then
+    echo "PASS  empty hook payload fails closed"; pass=$((pass + 1))
+else
+    echo "FAIL  empty hook payload bypassed policy (rc=$rc output=$out)" >&2; fail=$((fail + 1))
+fi
+
+nonmerge="$(payload exec_command command 'git status --short')"
+mkdir -p "$tmp/read-fail-bin"
+cat >"$tmp/read-fail-bin/cat" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$tmp/read-fail-bin/cat"
+printf '%s\n' "$nonmerge" >"$tmp/read-fail-payload.json"
+out="$(env PATH="$tmp/read-fail-bin:$PATH" "$pr_gate" --payload-file "$tmp/read-fail-payload.json" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'could not read payload file'; then
+    echo "PASS  failed payload-file read fails closed"; pass=$((pass + 1))
+else
+    echo "FAIL  failed payload-file read bypassed policy (rc=$rc output=$out)" >&2; fail=$((fail + 1))
+fi
+
+out="$(env AGENT_POLICY_CI=1 AGENT_PR_BODY_FILE="$tmp/all-gates.md" \
+    AGENT_PR_HEAD_SHA="$head_sha" AGENT_CHANGED_FILES_FILE="$tmp" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ]; then
+    echo "PASS  unreadable/invalid changed-files input fails closed"; pass=$((pass + 1))
+else
+    echo "FAIL  invalid changed-files input bypassed (rc=$rc output=$out)" >&2; fail=$((fail + 1))
+fi
+
+out="$(printf '%s' "$nonmerge" | "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ]; then
+    echo "PASS  non-merge hook payload is ignored"; pass=$((pass + 1))
+else
+    echo "FAIL  non-merge hook payload blocked (rc=$rc output=$out)" >&2; fail=$((fail + 1))
+fi
+
+# A local merge keeps the historical last-mile UI and absence reruns, but uses the one already
+# discovered body/head/file set. Stub only the external PR and suite boundaries; exercise the real
+# aggregate parser, relevance filters, and failure propagation.
+merge_root="$tmp/merge-root"
+mkdir -p "$merge_root/scripts" "$merge_root/tools/absence" "$tmp/bin"
+git -C "$merge_root" init -q
+git -C "$merge_root" remote add origin https://github.com/0Bu/daikin-altherma-esp32.git
+cat >"$tmp/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+[ "${GH_HOST:-}" = github.com ] || exit 95
+[ "${GH_REPO:-}" = github.com/0Bu/daikin-altherma-esp32 ] || exit 96
+case "${1:-} ${2:-}" in
+    "repo view") printf '%s\n' '0Bu/daikin-altherma-esp32' ;;
+    "pr view")
+        python3 - <<'PY'
+import json
+head = "abcdef1234567890abcdef1234567890abcdef12"
+body = "\n".join([
+    f"- [x] /project-review clean — merge gate @ {head}",
+    f"- [x] /domain-review clean — merge gate @ {head}",
+    f"- [x] /feature-docs synced — merge gate @ {head}",
+    f"- [x] /schematic-review clean — merge gate @ {head}",
+    f"- [x] /ui-use-case-review clean — merge gate @ {head}",
+    f"- [x] /absence-review clean — merge gate @ {head}",
+])
+print(json.dumps({"number": 123, "body": body, "headRefOid": head,
+                  "changedFiles": int(__import__("os").environ.get("AGENT_GH_REPORTED_FILES", "1"))}))
+PY
+        ;;
+    "api --hostname")
+        [ "${3:-}" = github.com ] || exit 97
+        returned="${AGENT_GH_RETURNED_FILES:-1}"
+        python3 - "$returned" "${AGENT_GH_RENAME:-0}" <<'PY'
+import json, sys
+count = int(sys.argv[1])
+if sys.argv[2] == "1":
+    records = [{"filename": "docs/dashboard.old", "previous_filename": "main/www/js/dashboard.js"}]
+else:
+    records = [
+        {"filename": "main/www/js/dashboard.js" if count == 1 else f"docs/file-{index:04d}.md"}
+        for index in range(1, count + 1)
+    ]
+print(json.dumps([records[offset:offset + 100] for offset in range(0, len(records), 100)]))
+PY
+        ;;
+    *) exit 1 ;;
+esac
+EOF
+cat >"$merge_root/scripts/run-ui-use-case-tests.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'ui\n' >>"$AGENT_SUITE_LOG"
+[ -z "${AGENT_UI_SUITE_SLEEP:-}" ] || sleep "$AGENT_UI_SUITE_SLEEP"
+exit "${AGENT_UI_SUITE_RC:-0}"
+EOF
+cat >"$merge_root/scripts/run-ui-gif-audit.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'uigif\n' >>"$AGENT_SUITE_LOG"
+exit "${AGENT_UI_GIF_AUDIT_RC:-0}"
+EOF
+cat >"$merge_root/tools/absence/selftest.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'absence\n' >>"$AGENT_SUITE_LOG"
+exit "${AGENT_ABSENCE_SUITE_RC:-0}"
+EOF
+chmod +x "$tmp/bin/gh" "$merge_root/scripts/run-ui-use-case-tests.sh" \
+    "$merge_root/scripts/run-ui-gif-audit.sh" "$merge_root/tools/absence/selftest.sh"
+
+AGENT_TEST_PAYLOAD_CWD="$merge_root"
+merge_input="$(payload Bash command "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash")"
+suite_log="$tmp/suites.log"
+out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$suite_log" 2>/dev/null)" = $'uigif\nui\nabsence' ]; then
+    echo "PASS  local merge reruns UI-GIF, UI, and absence suites"; pass=$((pass + 1))
+else
+    echo "FAIL  local merge suite parity failed (rc=$rc output=$out log=$(cat "$suite_log" 2>/dev/null))" >&2
+    fail=$((fail + 1))
+fi
+
+git -C "$merge_root" remote set-url origin https://ghe.example/0Bu/daikin-altherma-esp32.git
+: >"$suite_log"
+out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -s "$suite_log" ] \
+    && printf '%s' "$out" | grep -qF 'not the current project repository'; then
+    echo "PASS  same-slug foreign-host origin cannot supply merge evidence"; pass=$((pass + 1))
+else
+    echo "FAIL  same-slug foreign-host origin supplied merge evidence (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+git -C "$merge_root" remote set-url origin https://github.com/0Bu/daikin-altherma-esp32.git
+
+: >"$suite_log"
+out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" \
+    AGENT_GH_REPORTED_FILES=301 AGENT_GH_RETURNED_FILES=300 "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -s "$suite_log" ] \
+    && printf '%s' "$out" | grep -qF 'could not read the pull request'; then
+    echo "PASS  incomplete paginated PR file discovery fails closed before suites"; pass=$((pass + 1))
+else
+    echo "FAIL  truncated PR file discovery skipped conditional suites (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+: >"$suite_log"
+out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" \
+    AGENT_GH_RENAME=1 "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$suite_log" 2>/dev/null)" = $'uigif\nui\nabsence' ]; then
+    echo "PASS  renamed relevant old path still triggers conditional suites"; pass=$((pass + 1))
+else
+    echo "FAIL  renamed relevant old path skipped conditional suites (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+: >"$suite_log"
+out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" GH_HOST=ghe.example \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$suite_log" 2>/dev/null)" = $'uigif\nui\nabsence' ]; then
+    echo "PASS  explicit github.com host binding overrides ambient GH_HOST"; pass=$((pass + 1))
+else
+    echo "FAIL  ambient GH_HOST overrode explicit host binding (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+: >"$suite_log"
+out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" \
+    AGENT_UI_SUITE_SLEEP=1 AGENT_GATE_SUITE_TIMEOUT=0.05 "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'UI use-case suite failed'; then
+    echo "PASS  bounded local suite timeout fails closed before the outer hook timeout"; pass=$((pass + 1))
+else
+    echo "FAIL  local suite timeout did not fail closed (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+for guarded_command in \
+    'command gh pr merge 123 --squash' \
+    'false || gh pr merge 123 --squash' \
+    'env -u GH_TOKEN gh pr merge 123 --squash' \
+    'sudo gh pr merge 123 --squash' \
+    'gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --squash' \
+    "bash -lc 'gh pr merge 123 --squash'" \
+    "sh -ec 'gh pr merge 123 --squash'" \
+    "env -S 'gh pr merge 123 --squash'" \
+    'echo "$(gh pr merge 123 --squash)"' \
+    'time gh pr merge 123 --squash' \
+    'if true; then gh pr merge 123 --squash; fi' \
+    '{ gh pr merge 123 --squash; }' \
+    '! gh pr merge 123 --squash' \
+    'nice gh pr merge 123 --squash' \
+    'nohup gh pr merge 123 --squash' \
+    'echo `gh pr merge 123 --squash`' \
+    $'printf done\ngh pr merge 123 --squash'; do
+    : >"$suite_log"
+    current_repo='github.com/0Bu/daikin-altherma-esp32'
+    guarded_command="${guarded_command//gh pr merge/gh --repo $current_repo pr merge}"
+    guarded_command="${guarded_command/--squash/--match-head-commit $head_sha --squash}"
+    guarded_input="$(payload Bash command "$guarded_command")"
+    out="$(printf '%s' "$guarded_input" | env PATH="$tmp/bin:$PATH" \
+        AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ "$(cat "$suite_log" 2>/dev/null)" = $'uigif\nui\nabsence' ]; then
+        echo "PASS  wrapped merge is gated: $guarded_command"; pass=$((pass + 1))
+    else
+        echo "FAIL  wrapped merge bypassed policy: $guarded_command (rc=$rc output=$out)" >&2
+        fail=$((fail + 1))
+    fi
+done
+
+for blocked_command in \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --admin --squash" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --auto --squash" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --disable-auto --squash" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --merge --squash" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --rebase --squash" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash --squash" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha -s" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge https://github.com/0Bu/daikin-altherma-esp32/pull/123 --match-head-commit $head_sha --squash" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge feature/target --match-head-commit $head_sha --squash" \
+    "gh --repo=github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash" \
+    'gh --repo owner/other pr merge 123 --squash' \
+    'GH_REPO=owner/other gh pr merge 123 --squash' \
+    'GH_REPO=owner/other; gh pr merge 123 --squash' \
+    'export GH_REPO=owner/other; gh pr merge 123 --squash' \
+    'cd /tmp/other && gh pr merge 123 --squash' \
+    'if cd /tmp/other; then gh pr merge 123 --squash; fi' \
+    'env -C /tmp/other gh pr merge 123 --squash' \
+    'env --chdir=/tmp/other gh pr merge 123 --squash' \
+    'sudo -D /tmp/other gh pr merge 123 --squash' \
+    'sudo --chdir=/tmp/other gh pr merge 123 --squash' \
+    "printf '123' | xargs gh pr merge --squash" \
+    "printf '123' | xargs -n1 gh pr merge --squash" \
+    "bash -O extglob -c '/tmp/g@(h) pr merge 123 --squash'" \
+    "bash -c 'cd /tmp/other; gh pr merge 123 --squash'" \
+    "eval 'cd /tmp/other; gh pr merge 123 --squash'" \
+    "bash -c 'git remote set-url origin https://github.com/owner/other.git; gh pr merge 123 --match-head-commit $head_sha --squash'" \
+    "eval 'printf -v GH_REPO %s owner/other; export GH_REPO; gh pr merge 123 --match-head-commit $head_sha --squash'" \
+    "printf -v GH_REPO '%s' owner/other; export GH_REPO; gh pr merge 123 --match-head-commit $head_sha --squash" \
+    "read -r GH_REPO <<< owner/other; export GH_REPO; gh pr merge 123 --match-head-commit $head_sha --squash" \
+    "git remote set-url origin https://github.com/owner/other.git; gh pr merge 123 --match-head-commit $head_sha --squash" \
+    'unset x; gh ${x:-pr} merge 123' \
+    'unset x; gh pr ${x:-merge} 123' \
+    'p=pr; m=merge; gh "$p" "$m" 123' \
+    'gh pr merge 123; gh -R owner/other pr merge 456' \
+    "gh alias set pm 'pr merge'; gh pm 123" \
+    'gh pm 123' \
+    "cmd='gh pr merge 123'; eval \"\$cmd\"" \
+    'c=gh; $c pr merge 123' \
+    '$(command -v gh) pr merge 123' \
+    'gh api --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge' \
+    'gh api --method PUT "repos/0Bu/daikin-altherma-esp32/pulls/123/merge?merge_method=squash"' \
+    'gh pr merge "$PR_NUMBER" --squash' \
+    'gh api --method PUT "repos/0Bu/daikin-altherma-esp32/pulls/$PR_NUMBER/merge"' \
+    "gh api graphql -f 'query=mutation { mergePullRequest(input:{pullRequestId:\"PR_kwDO123\"}) { pullRequest { merged } } }'" \
+    "gh api graphql -f 'query=mutation { enqueuePullRequest(input:{pullRequestId:\"PR_kwDO123\"}) { pullRequest { merged } } }'" \
+    'gh api graphql -F query=@mutation.graphql' \
+    'gh api graphql --input query.json' \
+    "curl -d 'mutation { enablePullRequestAutoMerge(input:{pullRequestId:\"PR_kwDO123\"}) { pullRequest { merged } } }' https://api.github.com/graphql" \
+    'curl -X POST https://api.github.com/graphql --data-binary @query.json' \
+    "gh pr merge --match-head-commit $head_sha --squash" \
+    "gh pr merge feature/target --match-head-commit $head_sha --squash" \
+    "printf '%s' 'gh pr merge 123 --squash' | bash" \
+    "printf '%s' 'gh pr merge 123 --squash' | bash -s" \
+    "printf '%s' 'gh pr merge 123 --squash' | env bash" \
+    "printf '%s' 'gh pr merge 123 --squash' | sudo bash" \
+    "bash -s <<< 'gh pr merge 123 --squash'"; do
+    : >"$suite_log"
+    blocked_input="$(payload Bash command "$blocked_command")"
+    out="$(printf '%s' "$blocked_input" | env PATH="$tmp/bin:$PATH" \
+        AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+    if [ "$rc" -eq 2 ] && [ ! -s "$suite_log" ]; then
+        echo "PASS  ambiguous/cross-repository merge is blocked: $blocked_command"; pass=$((pass + 1))
+    else
+        echo "FAIL  ambiguous/cross-repository merge was not blocked: $blocked_command (rc=$rc output=$out)" >&2
+        fail=$((fail + 1))
+    fi
+done
+
+workdir_merge_input="$(python3 - "$merge_root" "$head_sha" <<'PY'
+import json, sys
+print(json.dumps({"cwd": sys.argv[1], "tool_name": "exec_command", "tool_input": {
+    "command": f"gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit {sys.argv[2]} --squash", "workdir": "/tmp"
+}}))
+PY
+)"
+out="$(printf '%s' "$workdir_merge_input" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'execution directory is outside'; then
+    echo "PASS  tool workdir outside project is blocked"; pass=$((pass + 1))
+else
+    echo "FAIL  tool workdir outside project bypassed binding (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+conflicting_workdir_merge="$(python3 - "$merge_root" "$head_sha" <<'PY'
+import json, sys
+print(json.dumps({"cwd": sys.argv[1], "tool_name": "shell", "tool_input": {
+    "command": f"gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit {sys.argv[2]} --squash",
+    "workdir": ".", "cwd": "/tmp/other"
+}}))
+PY
+)"
+out="$(printf '%s' "$conflicting_workdir_merge" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'conflicting workdir/cwd'; then
+    echo "PASS  conflicting shell workdir aliases are blocked"; pass=$((pass + 1))
+else
+    echo "FAIL  conflicting shell workdir aliases bypassed binding (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+selector_override_input="$(payload Bash command "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 456 --match-head-commit $head_sha --squash")"
+out="$(printf '%s' "$selector_override_input" | env PATH="$tmp/bin:$PATH" AGENT_PR_SELECTOR=123 \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'selector conflicts'; then
+    echo "PASS  explicit selector cannot override merge payload"; pass=$((pass + 1))
+else
+    echo "FAIL  explicit selector overrode merge payload (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+missing_cwd_merge="{\"tool_name\":\"exec_command\",\"tool_input\":{\"cmd\":\"gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash\"}}"
+out="$(printf '%s' "$missing_cwd_merge" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'no execution cwd'; then
+    echo "PASS  shell merge payload without cwd is blocked"; pass=$((pass + 1))
+else
+    echo "FAIL  shell merge payload without cwd bypassed binding (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+conflicting_command_merge="$(python3 - "$merge_root" <<'PY'
+import json, sys
+print(json.dumps({"cwd": sys.argv[1], "tool_name": "exec_command", "tool_input": {
+    "command": "echo safe", "cmd": "gh pr merge 123 --squash"
+}}))
+PY
+)"
+out="$(printf '%s' "$conflicting_command_merge" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'conflicting command/cmd'; then
+    echo "PASS  conflicting shell command aliases are blocked"; pass=$((pass + 1))
+else
+    echo "FAIL  conflicting shell command aliases bypassed binding (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+implicit_repo_input="$(payload Bash command "gh pr merge 123 --match-head-commit $head_sha --squash")"
+out="$(printf '%s' "$implicit_repo_input" | env PATH="$tmp/bin:$PATH" GH_REPO="owner/other" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'must use exactly --repo'; then
+    echo "PASS  inherited GH_REPO cannot replace explicit command binding"; pass=$((pass + 1))
+else
+    echo "FAIL  inherited GH_REPO replaced explicit command binding (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+implicit_host_input="$(payload Bash command "gh --repo 0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash")"
+out="$(printf '%s' "$implicit_host_input" | env PATH="$tmp/bin:$PATH" GH_HOST=ghe.example \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'must use exactly --repo'; then
+    echo "PASS  inherited GH_HOST cannot replace explicit command binding"; pass=$((pass + 1))
+else
+    echo "FAIL  inherited GH_HOST replaced explicit command binding (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+for conflicting_mcp_input in \
+    '{"tool_name":"mcp__codex_apps__github_merge_pull_request","tool_input":{"pullNumber":123,"pull_number":456,"repository_full_name":"0Bu/daikin-altherma-esp32"}}' \
+    '{"tool_name":"mcp__codex_apps__github_merge_pull_request","tool_input":{"pr_number":123,"repo":"daikin-altherma-esp32","owner":"0Bu","repository_full_name":"owner/other"}}' \
+    '{"tool_name":"mcp__codex_apps__github_merge_pull_request","tool_input":{"pr_number":123,"repo":{"owner":"0Bu"}}}' \
+    '{"tool_name":"mcp__codex_apps__github_merge_pull_request","tool_input":{"pr_number":123,"repo":{"owner":"0Bu","name":"daikin-altherma-esp32","repo":"other"}}}' \
+    '{"tool_name":"mcp__codex_apps__github_merge_pull_request","tool_input":{"pr_number":123}}'; do
+    out="$(printf '%s' "$conflicting_mcp_input" | env PATH="$tmp/bin:$PATH" \
+        AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "PASS  ambiguous MCP merge aliases/repository are blocked"; pass=$((pass + 1))
+    else
+        echo "FAIL  ambiguous MCP merge aliases/repository bypassed binding (rc=$rc output=$out)" >&2
+        fail=$((fail + 1))
+    fi
+done
+
+for blocked_mcp_input in \
+    "{\"tool_name\":\"mcp__another_github__merge_pull_request\",\"tool_input\":{\"owner\":\"0Bu\",\"repo\":\"daikin-altherma-esp32\",\"hostname\":\"github.com\",\"pull_number\":123,\"expected_head_sha\":\"$head_sha\"}}" \
+    "{\"tool_name\":\"mcp__codex_apps__github_merge_pull_request\",\"tool_input\":{\"pr_number\":123,\"repository_full_name\":\"0Bu/daikin-altherma-esp32\",\"expected_head_sha\":\"$head_sha\"}}" \
+    '{"tool_name":"mcp__codex_apps__github_enable_auto_merge","tool_input":{"repository_full_name":"0Bu/daikin-altherma-esp32","pr_number":123}}' \
+    '{"tool_name":"mcp__another__enable_pull_request_auto_merge","tool_input":{"pr_number":123}}' \
+    '{"tool_name":"mcp__another__enqueue_pull_request","tool_input":{"pr_number":123}}'; do
+    : >"$suite_log"
+    out="$(printf '%s' "$blocked_mcp_input" | env PATH="$tmp/bin:$PATH" \
+        AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+    if [ "$rc" -eq 2 ] && [ ! -s "$suite_log" ] \
+        && printf '%s' "$out" | grep -qF 'MCP merge and auto-merge activation tools are unsupported'; then
+        echo "PASS  MCP merge/auto-merge activation is blocked"; pass=$((pass + 1))
+    else
+        echo "FAIL  MCP merge/auto-merge activation bypassed CLI-only policy (rc=$rc output=$out)" >&2
+        fail=$((fail + 1))
+    fi
+done
+
+parser_case() {
+    local name="$1" command="$2" expected_action="$3" expected_selector="$4" expected_repo="$5" expected_host="$6" expected_error="$7"
+    if printf '%s' "$(payload Bash command "$command")" \
+        | python3 "$root/tools/agent-hooks/merge_payload.py" \
+        | python3 -c 'import sys
+fields = [part.decode() for part in sys.stdin.buffer.read().split(b"\0")[:-1]]
+expected = sys.argv[1:]
+actual = [fields[0], fields[1], fields[3], fields[4], fields[5]]
+raise SystemExit(0 if actual == expected else 1)' \
+            "$expected_action" "$expected_selector" "$expected_repo" "$expected_host" "$expected_error"; then
+        echo "PASS  $name"; pass=$((pass + 1))
+    else
+        echo "FAIL  $name" >&2; fail=$((fail + 1))
+    fi
+}
+
+parser_case "canonical CLI merge remains bound" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash" \
+    'gh pr merge' '123' '0Bu/daikin-altherma-esp32' 'github.com' ''
+parser_case "branch merge selector is rejected" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge feature/target --match-head-commit $head_sha --squash" \
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'merge selector must be a static numeric pull request: feature/target'
+parser_case "subject option value is not a PR selector" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --subject x --match-head-commit $head_sha --squash" \
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'unsupported gh pr merge option: --subject'
+parser_case "body option value is not a PR selector" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --body x --match-head-commit $head_sha --squash" \
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'unsupported gh pr merge option: --body'
+parser_case "match-head option value is not a PR selector" \
+    'gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit 1234567 --squash' \
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' '--match-head-commit must be a full static 40-hex SHA'
+parser_case "author-email option value is not a PR selector" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --author-email maintainer@example.invalid --match-head-commit $head_sha --squash" \
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'unsupported gh pr merge option: --author-email'
+parser_case "dynamic selector fails closed" \
+    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge \"\$PR_NUMBER\" --match-head-commit $head_sha --squash" \
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'merge selector must be a static numeric pull request: $PR_NUMBER'
+parser_case "combined env split-string merge is recognized" \
+    "env -S'gh pr merge 123 --squash'" 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+parser_case "locale-quoted merge executable is recognized" \
+    "bash -c 'g\$\"h\" pr merge 123 --squash'" 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+parser_case "ANSI-C hex merge executable is recognized" \
+    "g\$'\\x68' pr merge 123 --squash" 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+parser_case "line-continued merge executable is recognized" \
+    $'g\\\nh pr merge 123 --squash' 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+parser_case "globbed merge executable is recognized" \
+    '/tmp/g[h] pr merge 123 --squash' 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+parser_case "brace-range merge executable is recognized" \
+    'g{h..h} pr merge 123 --squash' 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+
+: >"$suite_log"
+out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" AGENT_UI_GIF_AUDIT_RC=1 \
+    "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'dashboard recording is stale'; then
+    echo "PASS  failing mechanical UI-GIF audit blocks merge despite current reviews"; pass=$((pass + 1))
+else
+    echo "FAIL  failing mechanical UI-GIF audit did not block (rc=$rc output=$out)" >&2; fail=$((fail + 1))
+fi
+
+: >"$suite_log"
+out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" AGENT_UI_SUITE_RC=1 \
+    "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'UI use-case suite failed'; then
+    echo "PASS  failing local UI suite blocks merge"; pass=$((pass + 1))
+else
+    echo "FAIL  failing local UI suite did not block (rc=$rc output=$out)" >&2; fail=$((fail + 1))
+fi
+
+: >"$suite_log"
+out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" AGENT_ABSENCE_SUITE_RC=1 \
+    "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'source-absence mutation suite failed'; then
+    echo "PASS  failing local absence suite blocks merge"; pass=$((pass + 1))
+else
+    echo "FAIL  failing local absence suite did not block (rc=$rc output=$out)" >&2; fail=$((fail + 1))
+fi
+
+echo "agent hook selftest: $pass passed, $fail failed"
+[ "$fail" -eq 0 ]

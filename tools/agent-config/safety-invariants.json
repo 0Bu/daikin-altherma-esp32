@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "invariants": [
+    {
+      "id": "esp32s3-target",
+      "pattern": "\\besp32s3\\b"
+    },
+    {
+      "id": "pinned-docker-build-path",
+      "pattern": "scripts/idf-docker\\.sh"
+    },
+    {
+      "id": "signed-flash-gate",
+      "pattern": "scripts/require-signed\\.sh"
+    },
+    {
+      "id": "secure-boot-v2",
+      "pattern": "Secure Boot v2"
+    },
+    {
+      "id": "nvs-offset",
+      "pattern": "0x9000"
+    },
+    {
+      "id": "homehub-read-only",
+      "pattern": "(?:read[- ]only[\\s\\S]{0,120}HomeHub|HomeHub[\\s\\S]{0,120}read[- ]only)"
+    },
+    {
+      "id": "host-testable-logic",
+      "pattern": "main/logic/[\\s\\S]{0,160}test/test_logic\\.cpp"
+    },
+    {
+      "id": "generated-tables-not-hand-edited",
+      "pattern": "(?:generated[\\s\\S]{0,180}(?:never|do not)\\s+hand-edit|(?:never|do not)\\s+hand-edit[\\s\\S]{0,180}generated)"
+    },
+    {
+      "id": "contiguous-heap-budget",
+      "pattern": "largest\\s+(?:\\*\\*)?contiguous"
+    },
+    {
+      "id": "host-test-entrypoint",
+      "pattern": "scripts/run-mock-tests\\.sh"
+    },
+    {
+      "id": "project-review-gate",
+      "pattern": "project-review"
+    },
+    {
+      "id": "domain-review-gate",
+      "pattern": "domain-review"
+    },
+    {
+      "id": "read-only-authorization-boundary",
+      "pattern": "Treat requests to inspect[\\s\\S]{0,180}read-only"
+    }
+  ]
+}

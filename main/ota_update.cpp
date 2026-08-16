@@ -10,8 +10,9 @@
 //   • The downgrade gate runs BEFORE any download, and against a FRESHLY fetched manifest (not the
 //     one /ota/check happened to see). A signature proves authenticity, not freshness.
 //   • Nothing runs on the httpd worker. /set_mqtt's ~8 s pre-flight is deliberately the ONE
-//     request-path network block in this firmware (.claude/CLAUDE.md); a multi-MB TLS download
-//     would park the single httpd task for minutes and take the whole web UI down with it.
+//     request-path network block in this firmware (docs/ARCHITECTURE.md → HTTP API); a multi-MB
+//     TLS download would park the single httpd task for minutes and take the whole web UI down with
+//     it.
 //   • One OTA operation at a time, ever. Two concurrent HTTPS/esp_ota sessions would each open a
 //     TLS context on a heap whose binding limit is the largest CONTIGUOUS free block.
 #include "ota_update.hpp"
@@ -58,8 +59,7 @@ namespace {
 // mutex. Readers copy std::strings out under the lock, which CAN throw — so the lock is taken
 // through an RAII guard, never a bare xSemaphoreTake. A raw take that unwinds past the give leaves
 // every later reader blocked on portMAX_DELAY and wedges the device into a watchdog reboot, which
-// is strictly worse than the OOM it came from (.claude/CLAUDE.md → "Never allocate while holding a
-// mutex").
+// is strictly worse than the OOM it came from (AGENTS.md → Memory, concurrency, and HTTP safety).
 OtaStatus         s_status;
 // Created at STATIC INIT — before app_main, before any task exists to race for it. The obvious
 // alternative, a lazy `if (!s_mtx) s_mtx = xSemaphoreCreateMutex()` on first use, is a real bug
@@ -754,8 +754,8 @@ const char kUpdateDowngradeMode = 2;
 // One task body for both operations, so there is exactly one stack and one place the busy flag is
 // cleared. The body self-guards: a task is a C frame boundary like an HTTP handler is, so an
 // escaping std::bad_alloc means std::terminate -> reboot — and rebooting the heat-pump bridge
-// because an update CHECK ran out of memory would be absurd (.claude/CLAUDE.md → every allocating
-// FreeRTOS task loop must self-guard).
+// because an update CHECK ran out of memory would be absurd (AGENTS.md → Memory, concurrency, and
+// HTTP safety).
 void ota_task(void* arg) {
     const char mode      = arg ? *static_cast<const char*>(arg) : 0;
     const bool update    = mode != 0;
@@ -881,7 +881,8 @@ static void health_gate_task(void*) {
     // boot record this window exists to explain — heap_guard.cpp's throttle, for the same reason.
     bool skip_reported = false;
     for (int elapsed = 0;; elapsed += kHealthPollS) {
-        // THE BODY SELF-GUARDS, like every other allocating task loop here (.claude/CLAUDE.md), and
+        // THE BODY SELF-GUARDS, like every other allocating task loop here (AGENTS.md → Memory,
+        // concurrency, and HTTP safety), and
         // it is worth saying why it counts as one: net_kind() is atomic-only,
         // provisioning_ap_active() is boot-latched and health_gate_decide() is pure.
         // The window this task runs in is the worst possible place to leave that unguarded: 90-600 s
@@ -934,7 +935,8 @@ static void health_gate_task(void*) {
 // 4096, raised from 3072 in the same commit that gave the loop its try/catch — the guard is the
 // reason, not a round number. The deepest frame is unchanged (config() BY VALUE, ~656 B of Config
 // plus its std::string copies), but a task that previously could only std::terminate now UNWINDS,
-// and CLAUDE.md's memory section measures that path at ~700 B below the throwing frame. Adding it
+// and docs/ARCHITECTURE.md's "Memory constraints" section measures that path at ~700 B below the
+// throwing frame. Adding it
 // to a stack sized before it existed is how a guard against OOM becomes a stack overflow during
 // one — the failure it was added to prevent, in the shape this firmware has already shipped twice
 // (#241, #318). The right way to settle the number is off the ELF, which a cloud session cannot
