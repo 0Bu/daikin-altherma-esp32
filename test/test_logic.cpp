@@ -13,12 +13,14 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "logic/availability.hpp"
 #include "logic/conv_override.hpp"
 #include "logic/board_pins.hpp"
 #include "logic/board_presets.hpp"
 #include "logic/binary_semantics.hpp"
+#include "logic/chunk_sink.hpp"
 #include "logic/fault_state.hpp"
 #include "logic/raw_capture.hpp"
 #include "logic/state_dwell.hpp"
@@ -1752,6 +1754,22 @@ static void test_json() {
     std::string acc = "x=";
     json_append_escaped(acc, "a\tb");
     CHECK(acc == "x=a\\tb");
+
+    // The streaming whole-value form is the exact same encoder used by /values and MCP. A tiny
+    // chunk bound forces quotes, UTF-8 and every escape family across transport boundaries.
+    const std::string mixed = std::string("Café \\\"\n\t") + std::string("\0\x1f", 2);
+    std::string streamed;
+    size_t finals = 0;
+    auto emit = [&](std::string_view bytes, bool final) {
+        if (final) finals++;
+        else streamed.append(bytes.data(), bytes.size());
+        return true;
+    };
+    BoundedChunkSink<decltype(emit), 4> chunks(emit);
+    json_append_quoted(chunks, mixed);
+    CHECK(chunks.finish());
+    CHECK(streamed == json_quote(mixed));
+    CHECK(finals == 1 && chunks.max_buffered() <= 4);
 }
 
 static void test_mqtt_group() {
@@ -6692,10 +6710,72 @@ static void test_mcp() {
     std::string streamed;
     mcp_result_begin(streamed, "8");
     mcp_tool_result_begin(streamed, "snapshot");
-    streamed += "{\"values\":[1]}";   // device appends /status or /values into this same buffer
+    // String oracle for get_status; get_hp_values applies these same envelope helpers to the
+    // bounded transport sink exercised below.
+    streamed += "{\"values\":[1]}";
     mcp_tool_result_end(streamed);
     mcp_result_end(streamed);
     CHECK(streamed == "{\"jsonrpc\":\"2.0\",\"id\":8,\"result\":" + tool_result + "}");
+
+    // The production response sink must remain bounded even when ONE append is much larger than the
+    // limit. The old HTTP helper appended first and flushed afterwards, so a source-only assertion
+    // about a 1 KiB constant did not prove that the live high-water was actually 1 KiB.
+    std::string large(20 * 1024, 'x');
+    std::string joined;
+    size_t data_flushes = 0;
+    size_t final_flushes = 0;
+    size_t largest_chunk = 0;
+    auto capture = [&](std::string_view bytes, bool final) {
+        if (final) {
+            final_flushes++;
+        } else {
+            data_flushes++;
+            largest_chunk = std::max(largest_chunk, bytes.size());
+            joined.append(bytes.data(), bytes.size());
+        }
+        return true;
+    };
+    BoundedChunkSink<decltype(capture), 1024> chunks(capture);
+    chunks += large;
+    CHECK(chunks.finish());
+    CHECK(chunks.finish());  // idempotent: never emits a second HTTP terminator
+    CHECK(joined == large);
+    CHECK(data_flushes > 1);
+    CHECK(final_flushes == 1);
+    CHECK(largest_chunk <= 1024);
+    CHECK(chunks.max_buffered() <= 1024);
+
+    // The same production sink carries the MCP prefix, structured values object and suffix. Joining
+    // its transport chunks must reproduce the existing string builder byte-for-byte — including a
+    // raw UTF-8 label, escaped JSON text, null, both sources and the isError field.
+    const std::string structured =
+        "{\"values\":[{\"label\":\"Café \\\"flow\\\"\",\"value\":null}],"
+        "\"modbus\":[{\"value\":12.5}]}";
+    joined.clear();
+    data_flushes = 0;
+    final_flushes = 0;
+    largest_chunk = 0;
+    auto capture_mcp = [&](std::string_view bytes, bool final) {
+        if (final) {
+            final_flushes++;
+        } else {
+            data_flushes++;
+            largest_chunk = std::max(largest_chunk, bytes.size());
+            joined.append(bytes.data(), bytes.size());
+        }
+        return true;
+    };
+    BoundedChunkSink<decltype(capture_mcp), 1024> mcp_chunks(capture_mcp);
+    mcp_result_begin(mcp_chunks, "8");
+    mcp_tool_result_begin(mcp_chunks, "snapshot");
+    mcp_chunks += structured;
+    mcp_tool_result_end(mcp_chunks);
+    mcp_result_end(mcp_chunks);
+    CHECK(mcp_chunks.finish());
+    CHECK(joined == mcp_result("8", mcp_tool_result(structured, "snapshot")));
+    CHECK(final_flushes == 1);
+    CHECK(largest_chunk <= 1024);
+    CHECK(mcp_chunks.max_buffered() <= 1024);
 
     // The scanner rejects broken escapes/surrogates and an attacker-controlled nesting bomb.
     CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":\"\\uD800\",\"method\":\"tools/list\"}")

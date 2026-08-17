@@ -50,6 +50,18 @@
 #    18. weather advertising its network interval only after the pre-TLS grace, too late for MQTT
 #        to release an already-running snapshot
 #    19. MQTT quiescing for OTA but not for the weather TLS interval that caused the live failure
+#    20. a copied HomeHub cache declared live without the snapshot's generation/liveness proof
+#    21. HomeHub output gated on a later task-status read instead of the proven snapshot
+#    22. MCP get_hp_values bypassing the shared bounded values sender
+#    23. GET /values bypassing that same shared sender
+#    24. the production HTTP chunk cap widened beyond the host-tested 1 KiB contract
+#    25. one oversized append copied whole before the chunk sink splits it
+#    26. response streaming constructed before the allocating source snapshots complete
+#    27. allocating X10A label classification moved back inside streamed row rendering
+#    28. owning std::to_string formatting restored after streaming begins
+#    29. HomeHub rows rebuilt as a second complete temporary string
+#    30. MCP's old whole-values append restored beside the bounded sender
+#    31. the fixed UINT64 formatter shortened below its documented 20-digit capacity
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -381,6 +393,174 @@ assert seed != s, "seed 19 did not apply — the combined network gate moved"
 open(p, "w").write(seed)
 PY2
 expect_red "weather TLS omitted from the MQTT hold-off" run_contract
+restore
+
+# 20. Ignore the liveness result returned with the copied HomeHub cache. A stale cache can then be
+#     labelled current after a disconnect/reconnect generation race.
+python3 - "$TMP/main/http_status.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("        snapshot.modbus_live = live;",
+                 "        snapshot.modbus_live = true;", 1)
+assert seed != s, "seed 20 did not apply — the snapshot liveness assignment moved"
+open(p, "w").write(seed)
+PY3
+expect_red "a HomeHub cache declared live without snapshot proof" run_contract
+restore
+
+# 21. Re-read task state while serialising instead of using the generation-bound snapshot result.
+#     The cache and the later status then describe different instants.
+python3 - "$TMP/main/http_status.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("    if (snapshot.modbus_live) {",
+                 "    if (mb_status().connected) {", 1)
+assert seed != s, "seed 21 did not apply — the HomeHub emission gate moved"
+open(p, "w").write(seed)
+PY3
+expect_red "HomeHub output gated on later task state instead of its snapshot" run_contract
+restore
+
+# 22. Send MCP's already-built prefix directly again, bypassing the only sender that can append the
+#     model-sized values object without materialising it.
+python3 - "$TMP/main/mcp_server.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("                return http_send_values_json(req, response, suffix);",
+                 "                return http_send_json(req, response.c_str());", 1)
+assert seed != s, "seed 22 did not apply — the MCP values sender moved"
+open(p, "w").write(seed)
+PY3
+expect_red "MCP get_hp_values bypassing the shared bounded sender" run_contract
+restore
+
+# 23. Bypass the same sender from GET /values. The two public representations can then drift even
+#     if the MCP branch remains correct.
+python3 - "$TMP/main/http_status.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("    return http_send_values_json(req);",
+                 "    return ESP_FAIL;", 1)
+assert seed != s, "seed 23 did not apply — the GET /values handler moved"
+open(p, "w").write(seed)
+PY3
+expect_red "GET /values bypassing the shared bounded sender" run_contract
+restore
+
+# 24. Widen only the production alias. The generic sink tests would stay green while the ESP32 path
+#     silently regained a larger contiguous requirement.
+python3 - "$TMP/main/http_status.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;",
+                 "using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 2048>;", 1)
+assert seed != s, "seed 24 did not apply — the production chunk alias moved"
+open(p, "w").write(seed)
+PY3
+expect_red "the production HTTP chunk cap widened past 1 KiB" run_contract
+restore
+
+# 25. Append one large input whole. Small row fragments still look bounded, but one future builder
+#     can now grow the buffer beyond MaxBytes before any flush.
+python3 - "$TMP/main/logic/chunk_sink.hpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("            const size_t take = std::min(available, value.size());",
+                 "            const size_t take = value.size();", 1)
+assert seed != s, "seed 25 did not apply — the oversized-append split moved"
+open(p, "w").write(seed)
+PY3
+expect_red "one oversized append copied whole before splitting" run_contract
+restore
+
+# 26. Construct the chunk stream before the source snapshots. A later bad_alloc can then arrive
+#     after response state exists instead of inside the clean-503 staging window.
+python3 - "$TMP/main/http_status.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = "    ValuesSnapshot snapshot = take_values_snapshot();\n    HttpJsonChunks j(HttpChunkEmitter{req});"
+new = "    HttpJsonChunks j(HttpChunkEmitter{req});\n    ValuesSnapshot snapshot = take_values_snapshot();"
+seed = s.replace(old, new, 1)
+assert seed != s, "seed 26 did not apply — snapshot/stream construction moved"
+open(p, "w").write(seed)
+PY3
+expect_red "stream construction before allocating source snapshots" run_contract
+restore
+
+# 27. Recompute an ambiguous label slug inside the streamed X10A loop. object_id()/ha_slug() owns a
+#     temporary string, so OOM after the first chunk can no longer become a clean 503.
+python3 - "$TMP/main/http_status.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("        if (i < ambiguous.size() && ambiguous[i]) {",
+                 "        if (label_slug_is_ambiguous(object_id(v[i].label))) {", 1)
+assert seed != s, "seed 27 did not apply — the staged ambiguity lookup moved"
+open(p, "w").write(seed)
+PY3
+expect_red "allocating label classification inside streamed rows" run_contract
+restore
+
+# 28. Restore an owning numeric conversion in the streamed X10A loop.
+python3 - "$TMP/main/http_status.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("        append_json_uint(j, v[i].reg);",
+                 "        j += std::to_string(v[i].reg);", 1)
+assert seed != s, "seed 28 did not apply — the register formatter moved"
+open(p, "w").write(seed)
+PY3
+expect_red "owning number formatting inside streamed rows" run_contract
+restore
+
+# 29. Reintroduce a second complete HomeHub-array string even though the outer response is chunked.
+python3 - "$TMP/main/http_status.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("        append_modbus_values_array(j, snapshot.modbus);",
+                 "        const std::string arr = \"[]\";\n        j += arr;", 1)
+assert seed != s, "seed 29 did not apply — the HomeHub serializer moved"
+open(p, "w").write(seed)
+PY3
+expect_red "HomeHub rows rebuilt as a complete temporary string" run_contract
+restore
+
+# 30. Restore the old whole-values call in MCP. Keeping the new sender beside it must not fool the
+#     positive call-path assertion into accepting the contiguous allocation again.
+python3 - "$TMP/main/mcp_server.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+needle = "                return http_send_values_json(req, response, suffix);"
+seed = s.replace(needle,
+                 "                http_append_values_json(response);\n" + needle, 1)
+assert seed != s, "seed 30 did not apply — the MCP values return moved"
+open(p, "w").write(seed)
+PY3
+expect_red "MCP's old whole-values append restored" run_contract
+restore
+
+# 31. Make the stack formatter one digit too small for UINT64_MAX. The source contract owns this
+#     width because streamed rendering must not fall back to an allocating formatter.
+python3 - "$TMP/main/http_status.cpp" <<'PY3'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("    char digits[20];  // UINT64_MAX has exactly 20 decimal digits",
+                 "    char digits[19];  // seeded truncation", 1)
+assert seed != s, "seed 31 did not apply — the fixed number buffer moved"
+open(p, "w").write(seed)
+PY3
+expect_red "the fixed UINT64 formatter shortened below 20 digits" run_contract
 restore
 
 if [ "$fail" -ne 0 ]; then

@@ -68,7 +68,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 22 | Traceable build identity (`app_elf_sha256`) matching a dump to its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 24 | Status indicator — **runtime-selectable GPIO-LED / WS2812 back-end**, one image per board family | ✅ 🧪 | [`status_led.cpp`](../main/status_led.cpp), [`logic/led_pattern.hpp`](../main/logic/led_pattern.hpp) |
-| 25 | **Read-only MCP server** — stateless Streamable HTTP, exactly `get_status` + `get_hp_values`, no SSE/session, plus an embedded static setup page | ✅ 🧪 | [`mcp_server.cpp`](../main/mcp_server.cpp), [`logic/mcp.hpp`](../main/logic/mcp.hpp), [`MCP.md`](MCP.md) |
+| 25 | **Read-only MCP server** — stateless Streamable HTTP, exactly `get_status` + bounded-chunk-streamed `get_hp_values`, no SSE/session, plus an embedded static setup page | ✅ 🧪 | [`mcp_server.cpp`](../main/mcp_server.cpp), [`logic/mcp.hpp`](../main/logic/mcp.hpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp), [`MCP.md`](MCP.md) |
 | 26 | **MQTT broker save-time pre-flight** (DNS/TCP/connect+auth, fail-closed under heap pressure) before persist | ✅ | [`http_config.cpp`](../main/http_config.cpp) |
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 28 | **`/status.sys`** — always-on heap headroom + last-boot reason, needing no broker | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
@@ -351,9 +351,9 @@ other.
   while the tab is hidden. The `/events` WebSocket was **removed**: a push fails silently and
   globally, a request fails loudly and locally under a `503` this server already returns. The
   measurements are in [`ARCHITECTURE.md` → "Push vs. poll"](ARCHITECTURE.md); the cost is one
-  cadence of latency on a dashboard whose motion is CSS. `/values` takes one atomic cache snapshot
-  and streams its representation in bounded chunks, so profile growth does not require one
-  equally-growing contiguous response allocation.
+  cadence of latency on a dashboard whose motion is CSS. `/values` and MCP `get_hp_values` stage
+  their source snapshots and stream the same representation through a bounded 1 KiB sink, so
+  profile growth does not require one equally-growing contiguous response allocation.
 - **🧪 Request bodies are reassembled, not assumed**
   ([`logic/http_body.hpp`](../main/logic/http_body.hpp)): a POST body is a TCP stream, so the loop
   runs until `content_len` is consumed. A timeout is retried only while progress resets the idle
@@ -659,7 +659,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | Detection | `detect`, `detect_backoff`, `uart_plan` |
 | Config & board | `config_model`, `config_store`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
 | MQTT / HA | `discovery`, `ha_device`, `mqtt_base`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus` |
-| HTTP | `http_body`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `redact` |
+| HTTP | `http_body`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `chunk_sink`, `redact` |
 | OTA & boot | `health_gate`, `version_cmp`, `ota_manifest`, `ota_channel`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |
 | Network policy | `wifi_rollback`, `link_watch`, `syslog_policy`, `timestamp` |
 | On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `outdoor_evidence`, `state_dwell`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |

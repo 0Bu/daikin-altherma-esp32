@@ -68,8 +68,15 @@ static esp_err_t mcp_post(httpd_req_t* req) {
                 mcp_tool_result_begin(response, "Current device and heat-pump status.");
                 http_append_status_json(response, false);
             } else {
+                // The complete reference-profile values object is larger than the target's normal
+                // largest contiguous heap block. Keep only the small JSON-RPC framing strings here;
+                // http_send_values_json() streams the structuredContent through the same bounded
+                // serializer as GET /values.
                 mcp_tool_result_begin(response, "Current decoded heat-pump readings.");
-                http_append_values_json(response);
+                std::string suffix;
+                mcp_tool_result_end(suffix);
+                mcp_result_end(suffix);
+                return http_send_values_json(req, response, suffix);
             }
             mcp_tool_result_end(response);
             break;

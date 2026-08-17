@@ -27,7 +27,9 @@ The implemented subset follows the date-versioned MCP specification:
 
 The request body is bounded to 1 KiB and parsed by the IDF-free, host-tested
 [`logic/mcp.hpp`](../main/logic/mcp.hpp) core. Every route invocation still runs under the shared
-HTTP OOM guard.
+HTTP OOM guard. `get_hp_values` stages its X10A/HomeHub snapshots before the first byte, then emits
+the JSON-RPC envelope and shared `/values` representation through a host-tested 1 KiB chunk sink;
+the complete model-sized response is never one contiguous allocation.
 
 ## Browser setup page
 
@@ -49,7 +51,8 @@ requests. Its restrictive CSP includes `connect-src 'none'`.
 
 Each call result also contains a short `TextContent` summary. The full snapshot is emitted once as
 `structuredContent`: serialising and JSON-escaping the same multi-kilobyte value array a second time
-would create avoidable contiguous-heap pressure on the ESP32-S3.
+would create avoidable contiguous-heap pressure on the ESP32-S3. Transport chunks do not change the
+JSON shape; concatenating them produces the documented result object.
 
 ## Client config
 
