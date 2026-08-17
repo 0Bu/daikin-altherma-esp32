@@ -5,6 +5,7 @@
 #include "env3.hpp"
 #include "logic/board_pins.hpp"
 #include "logic/board_presets.hpp"
+#include "logic/chunk_sink.hpp"
 #include "logic/env3.hpp"
 #include "logic/captive.hpp"
 #include "def/model_names.hpp"
@@ -58,6 +59,7 @@
 #include "esp_core_dump.h"
 #include "diag_log.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -1210,10 +1212,61 @@ static esp_err_t h_status(httpd_req_t* req) {
     return http_send_json(req, j.c_str());
 }
 
+struct ValuesSnapshot {
+    std::vector<CachedValue> x10a;
+    std::vector<uint8_t> x10a_label_ambiguous;
+    std::vector<CachedValue> modbus;
+    bool modbus_live = false;
+};
+
+// Copy every source before sending the first response byte. Besides giving the two wire surfaces
+// one snapshot contract, this keeps an allocation failure in the shared HTTP guard's clean-503
+// window: once chunked transfer starts, the response status can no longer be changed.
+static ValuesSnapshot take_values_snapshot() {
+    ValuesSnapshot snapshot;
+
+    const size_t x10a_cap = hp_values_capacity();
+    snapshot.x10a.resize(x10a_cap ? x10a_cap : 1);
+    snapshot.x10a.resize(hp_values_snapshot(snapshot.x10a.data(), snapshot.x10a.size()));
+    snapshot.x10a_label_ambiguous.resize(snapshot.x10a.size());
+    for (size_t i = 0; i < snapshot.x10a.size(); i++) {
+        // object_id()/ha_slug() owns a temporary std::string. Resolve it before transfer starts so
+        // even that small allocation remains inside the clean-503 window.
+        snapshot.x10a_label_ambiguous[i] =
+            label_slug_is_ambiguous(object_id(snapshot.x10a[i].label)) ? 1 : 0;
+    }
+
+    // The initial status read is only a cheap skip. mb_values_snapshot() re-checks liveness after
+    // copying the cache and closes both disconnect and reconnect races with generation counters.
+    if (mb_status().connected) {
+        const size_t modbus_cap = mb_values_capacity();
+        snapshot.modbus.resize(modbus_cap ? modbus_cap : 1);
+        bool live = false;
+        const size_t n = mb_values_snapshot(snapshot.modbus.data(), snapshot.modbus.size(), live);
+        snapshot.modbus.resize(n);
+        snapshot.modbus_live = live;
+        if (!live) snapshot.modbus.clear();
+    }
+    return snapshot;
+}
+
+// Every number emitted by /values is non-negative. Format it into a fixed stack buffer so row
+// rendering remains allocation-free after the first HTTP chunk has been sent.
+template <typename JsonOut>
+static void append_json_uint(JsonOut& out, uint64_t value) {
+    char digits[20];  // UINT64_MAX has exactly 20 decimal digits
+    char* begin = digits + sizeof(digits);
+    char* p = begin;
+    do {
+        *--p = static_cast<char>('0' + (value % 10));
+        value /= 10;
+    } while (value);
+    out += std::string_view(p, static_cast<size_t>(begin - p));
+}
+
 // The decoded-values JSON array "[{label,value,unit,reg},…]" behind GET /values — the route the
-// dashboard polls every 2 s. The caller wraps it in the {"values":…} envelope. Can throw
-// std::bad_alloc — handle_all guards every route, so this stays unguarded (it had a second caller,
-// the WS broadcast, with its own try/catch; there is one caller and one guard now).
+// dashboard polls every 2 s. The caller wraps it in the {"values":…} envelope. The snapshot is
+// already complete, so this serializer performs no model-sized allocation after transfer starts.
 //
 // `reg` is the X10A register PAGE the row was decoded from, and it is what makes the browser's
 // held-over rule STRUCTURAL: logic/ou_stale.hpp's ou_page_holds_over() keys on the page (0x20/0x21
@@ -1223,24 +1276,23 @@ static esp_err_t h_status(httpd_req_t* req) {
 // "R1T-Outdoor air temp.", "Outdoor Air Temp (R1T)", …), so a pattern list would silently stop
 // covering a row the C++ test still gates.
 template <typename JsonOut>
-static void append_values_array(JsonOut& j) {
-    const size_t cap = hp_values_capacity();
-    std::vector<CachedValue> v(cap ? cap : 1);
-    size_t n = hp_values_snapshot(v.data(), v.size());
+static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
+                                const std::vector<uint8_t>& ambiguous) {
     j += "[";
     // Successive += rather than one a + b + c + … chain: a chain materialises every intermediate
     // std::string in the same frame, and this runs on the httpd task (see AGENTS.md → Memory,
     // concurrency, and HTTP safety; the v1.0.12 stack overflow).
-    for (size_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < v.size(); i++) {
         if (i) j += ",";
         j += "{\"label\":";
-        j += jstr(v[i].label);
+        json_append_quoted(j, v[i].label);
         j += ",\"value\":";
-        j += v[i].value.empty() ? "null" : jstr(v[i].value);
+        if (v[i].value.empty()) j += "null";
+        else json_append_quoted(j, v[i].value);
         j += ",\"unit\":";
-        j += jstr(v[i].unit);
+        json_append_quoted(j, v[i].unit);
         j += ",\"reg\":";
-        j += std::to_string(v[i].reg);
+        append_json_uint(j, v[i].reg);
         // A small audited set of catalog labels occurs on more than one register page. They are not duplicate
         // measurements: for example, both the outdoor controller and the hydronic controller carry
         // their own Error Code. Sending only one would hide a real fault; sending both under the
@@ -1249,9 +1301,9 @@ static void append_values_array(JsonOut& j) {
         // MQTT payload's existing page namespace, rather than maintaining another label list here.
         // The marker is sparse (only ambiguous rows carry it), so ordinary /values frames do not
         // pay a group-name payload cost for every reading.
-        if (label_slug_is_ambiguous(object_id(v[i].label))) {
+        if (i < ambiguous.size() && ambiguous[i]) {
             j += ",\"x10a_group\":";
-            j += jstr(group_for_page(v[i].reg));
+            json_append_quoted(j, group_for_page(v[i].reg));
         }
         // Keep the value itself at the firmware-wide numeric 0/1 boundary. The structural marker
         // is intentionally emitted only for binary rows: it lets the browser render ON/OFF without
@@ -1264,7 +1316,7 @@ static void append_values_array(JsonOut& j) {
             // Emit only the four catalog identities with documented non-boolean semantics; all
             // ordinary flags retain the compact payload and the familiar ON/OFF presentation.
             if (const char* sid = logic::binary_semantic_for(v[i].reg, v[i].off, v[i].conv))
-                { j += ",\"binary_semantic\":"; j += jstr(sid); }
+                { j += ",\"binary_semantic\":"; json_append_quoted(j, sid); }
         }
         // The DEVICE's own answer to "is this reading still current?" — logic/ou_stale.hpp applied on
         // the poll task (#209 defect 5), emitted only when true so the many live rows cost no bytes.
@@ -1301,9 +1353,12 @@ static void append_values_array(JsonOut& j) {
             // reading"; a zero would say "it changed just now".
             if (dw.known) {
                 j += ",\"dwell_s\":";
-                j += std::to_string(dw.since_s);
+                append_json_uint(j, dw.since_s);
                 if (!dw.exact) j += ",\"dwell_min\":true";
-                if (dw.blind_s) { j += ",\"dwell_blind_s\":"; j += std::to_string(dw.blind_s); }
+                if (dw.blind_s) {
+                    j += ",\"dwell_blind_s\":";
+                    append_json_uint(j, dw.blind_s);
+                }
             }
         }
         // The row's CONCEPT — the structural id logic/homehub_map.hpp pairs the two independent
@@ -1317,7 +1372,7 @@ static void append_values_array(JsonOut& j) {
         // byte 0x60/12 and differ only in which bit their converter masks, so without it the diverter
         // and the circulation pump are one row.
         if (const char* cid = logic::x10a_concept_for(v[i].reg, v[i].off, v[i].unit, v[i].conv))
-            { j += ",\"concept\":"; j += jstr(cid); }
+            { j += ",\"concept\":"; json_append_quoted(j, cid); }
         j += "}";
     }
     j += "]";
@@ -1328,138 +1383,91 @@ static void append_values_array(JsonOut& j) {
 // make "is this reading current?" a per-row question the consumer cannot answer. Each row carries the
 // concept it pairs on, or none when the HomeHub has no X10A counterpart for it (the real power
 // measurement, the Smart-Grid mode) — those are simply Modbus-only readings.
-static std::string build_modbus_values_array(bool& live) {
-    const size_t cap = mb_values_capacity();
-    std::vector<CachedValue> v(cap ? cap : 1);
-    const size_t n = mb_values_snapshot(v.data(), v.size(), live);
-    std::string j = "[";
-    for (size_t i = 0; i < n; i++) {
+template <typename JsonOut>
+static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue>& v) {
+    j += "[";
+    for (size_t i = 0; i < v.size(); i++) {
         const def::HomeHubReg* reg = def::homehub_find(v[i].off);
         if (i) j += ",";
         j += "{\"label\":";
-        j += jstr(v[i].label);
+        json_append_quoted(j, v[i].label);
         j += ",\"value\":";
         if (v[i].value.empty() || !reg) j += "null";
-        else if (def::homehub_is_text(*reg)) j += jstr(v[i].value);
+        else if (def::homehub_is_text(*reg)) json_append_quoted(j, v[i].value);
         else if (is_json_number(v[i].value)) j += v[i].value;
         else j += "null";  // fail closed: never repair a broken numeric contract by quoting it
         j += ",\"unit\":";
-        j += jstr(v[i].unit);
+        json_append_quoted(j, v[i].unit);
         j += ",\"off\":";
-        j += std::to_string(v[i].off);
+        append_json_uint(j, v[i].off);
         if (conv_is_binary(v[i].conv)) j += ",\"binary\":true";
         // Keep the value raw and transport-friendly. The semantic id is metadata for the browser's
         // last-mile rendering, so mode 2 can display as "Recommended on" without being sent as text.
         if (reg)
             if (const char* eid = def::homehub_enum_id(reg->kind))
-                { j += ",\"enum\":"; j += jstr(eid); }
+                { j += ",\"enum\":"; json_append_quoted(j, eid); }
         if (const char* cid = logic::homehub_concept_for(v[i].off))
-            { j += ",\"concept\":"; j += jstr(cid); }
+            { j += ",\"concept\":"; json_append_quoted(j, cid); }
         // History metadata is wider than source pairing: a Modbus-only timeline must be attachable
         // to this row without pretending that it has an X10A `concept` twin.
         if (const char* hid = logic::homehub_history_for(v[i].off))
-            { j += ",\"history\":"; j += jstr(hid); }
+            { j += ",\"history\":"; json_append_quoted(j, hid); }
         j += "}";
     }
     j += "]";
-    return j;
 }
 
-// /values is the UI's largest model-dependent response. Building the complete body in one
-// std::string made its contiguous allocation grow with the active profile: the 129-row reference
-// profile needs more than the 15-16 KB largest block a healthy, fully started target commonly has,
-// so the route could return 503 forever while /status, MQTT and the bus were all healthy. Keep the
-// snapshot (the cache must still be copied atomically), but stream the representation in bounded
-// chunks. HTTP chunks are transport framing only; concatenating them yields the exact same JSON.
-class HttpJsonChunks {
-public:
-    explicit HttpJsonChunks(httpd_req_t* req) : req_(req) { chunk_.reserve(kFlushBytes + 256); }
+struct HttpChunkEmitter {
+    httpd_req_t* req = nullptr;
 
-    HttpJsonChunks& operator+=(const char* s) {
-        append(std::string_view(s));
-        return *this;
+    bool operator()(std::string_view bytes, bool final) const {
+        if (final) return httpd_resp_send_chunk(req, nullptr, 0) == ESP_OK;
+        return httpd_resp_send_chunk(req, bytes.data(), bytes.size()) == ESP_OK;
     }
-    HttpJsonChunks& operator+=(const std::string& s) {
-        append(std::string_view(s));
-        return *this;
-    }
-
-    esp_err_t finish() {
-        flush();
-        if (failed_) return ESP_FAIL;
-        return httpd_resp_send_chunk(req_, nullptr, 0);
-    }
-
-private:
-    static constexpr size_t kFlushBytes = 1024;
-
-    void append(std::string_view s) {
-        if (failed_) return;
-        if (!chunk_.empty() && chunk_.size() + s.size() > kFlushBytes) flush();
-        if (failed_) return;
-        chunk_.append(s.data(), s.size());
-        if (chunk_.size() >= kFlushBytes) flush();
-    }
-
-    void flush() {
-        if (failed_ || chunk_.empty()) return;
-        if (httpd_resp_send_chunk(req_, chunk_.c_str(), chunk_.size()) != ESP_OK) {
-            failed_ = true;
-            return;
-        }
-        chunk_.clear();
-    }
-
-    httpd_req_t* req_ = nullptr;
-    std::string chunk_;
-    bool failed_ = false;
 };
+using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 
 // The two sources ride ONE response but stay two arrays, mirroring the two stacks behind them:
-// `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only when that stack is enabled, so
-// a device without one sees exactly the payload it saw before this feature existed.
-void http_append_values_json(std::string& j) {
+// `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only for a snapshot proven live, so
+// a device without one sees exactly the payload it saw before this feature existed. The one shared
+// serializer keeps GET /values and MCP structuredContent byte-for-byte equivalent.
+template <typename JsonOut>
+static void append_values_json(JsonOut& j, const ValuesSnapshot& snapshot) {
     j += "{\"values\":";
-    append_values_array(j);
+    append_values_array(j, snapshot.x10a, snapshot.x10a_label_ambiguous);
     // Emitted only while the link is CONNECTED, not merely enabled. That is a payload invariant
     // worth having: if the `modbus` array is present, every row in it was read this cycle. Gating on
     // `enabled` alone served the last good cache after the link dropped, and a consumer has no way
     // to tell — the rows look identical. The browser is not the only consumer, so the guarantee
     // belongs here rather than in a check each client has to remember to make.
     //
-    // TWO checks, and the second is the one that makes the invariant true. The first is only a cheap
-    // skip so a device without a HomeHub builds nothing; asking it and THEN copying the cache leaves
-    // a window in which the link drops in between, and the response would carry the previous
-    // session's rows under a guarantee that they were read this cycle. `live` comes back from the
-    // snapshot itself, which is the only place the cache and the link state can be tied into one
-    // answer (they sit behind two mutexes). Not live → the key is not written at all: an ABSENT
-    // array and an empty one are different claims, and only absence says "no current reading".
-    if (mb_status().connected) {
-        bool live = false;
-        const std::string arr = build_modbus_values_array(live);
-        if (live) {
-            j += ",\"modbus\":";
-            j += arr;
-        }
+    // mb_values_snapshot() tied the cache copy and the link generations into `modbus_live` before
+    // transfer started. Not live → the key is not written at all: an ABSENT array and an empty one
+    // are different claims, and only absence says "no current reading".
+    if (snapshot.modbus_live) {
+        j += ",\"modbus\":";
+        append_modbus_values_array(j, snapshot.modbus);
     }
     j += "}";
 }
 
-static esp_err_t h_values(httpd_req_t* req) {
+// /values is the UI's largest model-dependent response. Building the complete body in one string
+// made its contiguous allocation grow beyond the 15-16 KB block a healthy target commonly has.
+// MCP get_hp_values used to repeat that defect around a JSON-RPC envelope. Both now stage their
+// snapshots before the first byte and stream the same representation through this strict 1 KiB sink.
+esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix,
+                                std::string_view suffix) {
+    ValuesSnapshot snapshot = take_values_snapshot();
+    HttpJsonChunks j(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
-    HttpJsonChunks j(req);
-    j += "{\"values\":";
-    append_values_array(j);
-    if (mb_status().connected) {
-        bool live = false;
-        const std::string arr = build_modbus_values_array(live);
-        if (live) {
-            j += ",\"modbus\":";
-            j += arr;
-        }
-    }
-    j += "}";
-    return j.finish();
+    j += prefix;
+    append_values_json(j, snapshot);
+    j += suffix;
+    return j.finish() ? ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t h_values(httpd_req_t* req) {
+    return http_send_values_json(req);
 }
 
 // Model catalog + pin hint (def/models_catalog.hpp, generated alongside the def/*.hpp profiles).

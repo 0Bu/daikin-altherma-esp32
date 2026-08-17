@@ -29,7 +29,8 @@ namespace daik {
 // full RFC 8259 set. Everything from 0x20 up other than '"' and '\' passes through verbatim —
 // including 0x7F (DEL), which the RFC does NOT require escaping, and raw UTF-8, whose bytes are
 // legal unescaped and must survive intact for an SSID like "Café".
-inline void json_append_escaped(std::string& out, std::string_view s) {
+template <typename JsonOut>
+inline void json_append_escaped(JsonOut& out, std::string_view s) {
     static const char hex[] = "0123456789abcdef";
     for (const char c : s) {
         // MUST be unsigned: `char` is signed on both xtensa and the host, so a UTF-8 lead byte
@@ -55,13 +56,20 @@ inline void json_append_escaped(std::string& out, std::string_view s) {
     }
 }
 
-// `s` as a complete, quoted JSON string — the whole-value form of the above.
+// Append `s` as a complete quoted JSON string to either std::string or a bounded streaming sink.
+// Keeping the escaping here prevents a transport-specific serializer from drifting from RFC 8259.
+template <typename JsonOut>
+inline void json_append_quoted(JsonOut& out, std::string_view s) {
+    out += '"';
+    json_append_escaped(out, s);
+    out += '"';
+}
+
+// `s` as a complete, quoted JSON string — the owning whole-value form of the above.
 inline std::string json_quote(std::string_view s) {
     std::string o;
     o.reserve(s.size() + 2);                     // exact for the common escape-free case
-    o += '"';
-    json_append_escaped(o, s);
-    o += '"';
+    json_append_quoted(o, s);
     return o;
 }
 
