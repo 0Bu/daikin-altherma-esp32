@@ -123,7 +123,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 77 | **Optional wired transport (W5500 / PoE)** — a second network transport detected at boot from one SPI identity register, with the boot fork (wire → radio → portal), the route priority, the pulled-cable reboot and the probe's refusal to drive a configured pad as host-tested rules | ✅ 🧪 | [`logic/net_link.hpp`](../main/logic/net_link.hpp), [`net.cpp`](../main/net.cpp), [`test_transport_contract.mjs`](../test/test_transport_contract.mjs) |
 | 78 | **Transport-independent HTTP trust surface** — the restricted provisioning route set follows the OPEN setup AP's existence rather than the WiFi mode, so a wired board is not locked out of its own API and a live AP cannot be widened by a cable | ✅ 🧪 | [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_server.cpp`](../main/http_server.cpp) |
 | 80 | **Per-row state age** — how long every binary row (including neutral observation-only flags) has read what it reads, published as three separate facts (the seconds, whether the transition was *witnessed*, and how much of the run the bus did not answer for) so a consumer cannot state a stronger claim than the board made | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
-| 89 | **Agent instruction budget, mapping and parity gate** — canonical `AGENTS.md` and the Claude compatibility instructions are byte-bounded; all 38 legacy paths map exactly once, while a reviewed source-tree fingerprint, skill identity, OpenAI metadata and explicit safety invariants fail closed on drift | ✅ | [`run-agent-instructions-budget.sh`](../scripts/run-agent-instructions-budget.sh), [`selftest.sh`](../tools/agent-config/selftest.sh) |
+| 89 | **Agent instruction and configuration integrity gate** — canonical `AGENTS.md` is byte-bounded; skill identity and OpenAI metadata, reviewer sandboxing, hook dispatch, the credential-safe GitHub CLI wrapper and explicit safety invariants fail closed on drift | ✅ | [`run-agent-instructions-budget.sh`](../scripts/run-agent-instructions-budget.sh), [`gh-with-git-credentials.sh`](../scripts/gh-with-git-credentials.sh), [`selftest.sh`](../tools/agent-config/selftest.sh) |
 | 85 | **Browser serial-permission release** — the Pages installer exposes a granted, closed port's `forget()` action without opening a chooser when nothing can be revoked or interrupting an active flash | ✅ 🧪 | [`serial-port-release.mjs`](serial-port-release.mjs), [`serial_port_release.test.mjs`](../test/serial_port_release.test.mjs) |
 | 86 | **Inline Web Serial installer + monitor** — only the native port chooser leaves the branded Pages UI; ESP32-S3 probing, NVS-preserving sparse flash, cross-part progress, reset and a real 115200-baud monitor run in-page | ✅ 🧪 | [`web-installer.mjs`](web-installer.mjs), [`web_installer.test.mjs`](../test/web_installer.test.mjs) |
 | 87 | **Diagnostic-evidence contract gate** — every visible plant diagnosis stays bound to an external basis, its implemented rule and an explicit claim limit | ✅ | [`check_diagnostic_evidence.mjs`](../tools/diagnostic_evidence/check_diagnostic_evidence.mjs), [`run-diagnostic-evidence-audit.sh`](../scripts/run-diagnostic-evidence-audit.sh) |
@@ -756,16 +756,15 @@ Four properties of that core are worth naming because they are not obvious from 
   16384. The trade — less exact backtraces in the one file whose core dumps mattered — and the
   reproduce command are stated where the pin lives and in
   [`ARCHITECTURE.md`](ARCHITECTURE.md#memory-constraints).
-- **✅ Agent instruction budget, mapping and parity gate.** [`AGENTS.md`](../AGENTS.md) is the
-  runner-neutral always-loaded contract and stays below 24 KiB; `.claude/CLAUDE.md` remains a
-  64 KiB compatibility entry point. [`run-agent-instructions-budget.sh`](../scripts/run-agent-instructions-budget.sh)
-  also validates all 38 tracked legacy files against `.codex/migration-manifest.json`, their
-  deterministic reviewed source-tree fingerprint, every canonical/adapter target, canonical skill
-  identity and OpenAI metadata, and the explicit safety invariants shared by both instruction files.
-  The fix for a budget failure is moving narrative to `docs/`, never trimming a rule or raising the
-  limit. `run-claude-md-budget.sh` is a compatibility wrapper only;
-  [`tools/agent-config/selftest.sh`](../tools/agent-config/selftest.sh) and
-  [`tools/claudemd/selftest.sh`](../tools/claudemd/selftest.sh) prove both entry points fail closed.
+- **✅ Agent instruction and configuration integrity gate.** [`AGENTS.md`](../AGENTS.md) is the
+  runner-neutral always-loaded contract and stays below 24 KiB.
+  [`run-agent-instructions-budget.sh`](../scripts/run-agent-instructions-budget.sh) also validates
+  canonical skill identity and OpenAI metadata, focused-reviewer configuration, lifecycle-hook
+  dispatch, the credential-safe [`gh` wrapper](../scripts/gh-with-git-credentials.sh), the
+  exact noninteractive PR-publication form, the synchronous expected-head REST merge shape, and
+  explicit safety invariants. The fix for a budget failure is moving narrative to `docs/`, never
+  trimming a rule or raising the limit;
+  [`tools/agent-config/selftest.sh`](../tools/agent-config/selftest.sh) proves each check fails closed.
 - **🔭 No generic static-analyser gate — measured, not assumed.** Recorded here so it is not
   re-litigated: clang-tidy over the pure headers reports thousands of findings on a blanket config
   (over half of them this project's own `CHECK` macro) and, curated to bug-finding checks, roughly

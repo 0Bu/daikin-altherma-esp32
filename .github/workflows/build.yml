@@ -271,7 +271,7 @@ jobs:
       # (#462 swapped the schematic's circuits on 2026-08-13, against a stamp written the same day),
       # and no gate anywhere could say so. The judgement half — are the nine operating scenes still
       # true, are the readings still honest — remains the canonical $ui-gif skill's, now a merge
-      # gate of its own (the runner-neutral policy retains Claude's /ui-gif record spelling).
+      # gate of its own.
       - name: Audit the README's dashboard recording
         run: ./scripts/run-ui-gif-audit.sh
       - name: Verify the recording audit still has teeth
@@ -302,22 +302,18 @@ jobs:
           python3 scripts/report-firmware-size.py --self-test
           python3 scripts/check-manifest-provenance.py --self-test
 
-      # The runner-neutral instruction contract owns the always-loaded budgets, the complete
-      # .claude -> canonical/adapter manifest and the deterministic parity that can actually be
-      # checked across different config formats. The old Claude command stays a compatibility
-      # adapter; CI names and executes the canonical contract.
-      - name: Check agent instruction budgets, mappings and parity
+      # The canonical instruction contract owns the always-loaded budget and the deterministic
+      # skill, reviewer, hook and safety-invariant checks.
+      - name: Check agent instruction and configuration integrity
         run: ./scripts/run-agent-instructions-budget.sh
       - name: Verify the agent configuration gate still has teeth
         run: ./tools/agent-config/selftest.sh
       - name: Verify runner-neutral hook guards and merge binding
         run: ./tools/agent-hooks/selftest.sh
-      - name: Verify the Claude budget compatibility adapter
-        run: ./tools/claudemd/selftest.sh
 
       # Review evidence is PR state, not a file marker. The canaries prove missing inputs, missing or
-      # stale stamps and conditional relevance fail CLOSED, while both canonical `$name` and legacy
-      # `/name` records remain readable during migration. The live PR step then fetches the CURRENT
+      # stale stamps and conditional relevance fail CLOSED for canonical `$name` records. The live
+      # PR step then fetches the CURRENT
       # body/head/file list instead of trusting the event payload snapshot: editing the body and
       # re-running this job can satisfy the gate, while a run for an old head cannot.
       - name: Verify the PR evidence policy still has teeth

@@ -1,4 +1,0 @@
-interface:
-  display_name: "User Docs Review"
-  short_description: "Keep English user help clear and current"
-  default_prompt: "Use $user-docs-review to update and verify the English plain-language documentation for this change."

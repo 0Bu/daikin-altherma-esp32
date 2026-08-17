@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 
 node <<'JS'
 const fs = require("node:fs");
+const { createHash } = require("node:crypto");
 
 const mcp = JSON.parse(fs.readFileSync(".mcp.json", "utf8"));
 const args = mcp?.mcpServers?.context7?.args;
@@ -15,62 +16,84 @@ if (args.some((arg) => /@latest\b/.test(arg))) {
   throw new Error("floating @latest dependency in .mcp.json");
 }
 
-const settings = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
-const grants = settings?.permissions?.allow;
-if (!Array.isArray(grants) || grants.length !== 0) {
-  throw new Error(
-    `tracked Claude settings must auto-grant no shell commands; found: ${JSON.stringify(grants)}`,
-  );
+const codexConfig = fs.readFileSync(".codex/config.toml", "utf8");
+function tomlSection(name) {
+  const lines = [];
+  let active = false;
+  for (const line of codexConfig.split(/\r?\n/)) {
+    const header = line.match(/^\s*\[([^\]]+)\]\s*$/);
+    if (header) {
+      active = header[1] === name;
+      continue;
+    }
+    if (active && line.trim() && !line.trimStart().startsWith("#")) lines.push(line.trim());
+  }
+  return lines.sort();
+}
+const agentConfig = tomlSection("agents");
+if (JSON.stringify(agentConfig) !== JSON.stringify([
+  "enabled = true",
+  "max_concurrent_threads_per_session = 3",
+])) {
+  throw new Error(`canonical multi-agent settings drifted: ${JSON.stringify(agentConfig)}`);
+}
+const context7Config = tomlSection("mcp_servers.context7");
+if (JSON.stringify(context7Config) !== JSON.stringify([
+  'args = ["-y", "@upstash/context7-mcp@4.0.2"]',
+  'command = "npx"',
+])) {
+  throw new Error(`canonical Context7 settings drifted: ${JSON.stringify(context7Config)}`);
 }
 
-// Project hooks are executable by design, but their settings-side surface is an exact local list:
+// Project hooks are executable by design, but their configuration-side surface is an exact list:
 // no inline shell, arbitrary script path, duplicate policy evaluation or newly-added hook becomes
-// trusted without changing this audit. Secret/partition guards and all PR-review gates are each
-// consolidated behind one compatibility dispatch; the runner-neutral cores own their full policy.
-// This does not authenticate hook source after project trust. It keeps the tracked settings
-// contract narrow, deterministic and reviewable.
-const claudeRoot = "${CLAUDE_PROJECT_DIR:-.}";
+// trusted without changing this audit. Secret/partition guards and all PR-review gates remain
+// consolidated behind canonical dispatches. This does not authenticate hook source after project
+// trust. It keeps the tracked configuration narrow, deterministic and reviewable.
 const expectedHookDispatches = {
   PreToolUse: [
-    ["^(?:Read|Edit|Write|Bash)$", `bash "${claudeRoot}/.claude/hooks/guard-secrets.sh"`],
-    ["^(?:Bash|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request))$", `bash "${claudeRoot}/.claude/hooks/require-project-review.sh"`],
+    ["^(?:Read|Edit|Write|Bash|apply_patch|exec_command|shell|shell_command)$", 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" pre-tool-guards', "Checking secrets and partition safety", 10],
+    ["^(?:Bash|exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request))$", 'bash "$(git rev-parse --show-toplevel)/tools/agent-hooks/require-pr-gates.sh"', "Checking current PR review evidence", 600],
   ],
-  SessionStart: [[undefined, `bash "${claudeRoot}/.claude/hooks/report-capabilities.sh"`]],
-  PostToolUse: [["^(?:Edit|Write)$", `bash "${claudeRoot}/.claude/hooks/clang-format-edit.sh"`]],
-  Stop: [[undefined, `bash "${claudeRoot}/.claude/hooks/run-logic-tests.sh"`]],
-  UserPromptSubmit: [[undefined, `bash "${claudeRoot}/.claude/hooks/crash-triage-context.sh"`]],
+  SessionStart: [["^(?:startup|resume|clear|compact)$", 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" capabilities', "Detecting repository capabilities", 15]],
+  SubagentStart: [[undefined, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" subagent-context', "Loading repository subagent boundaries", 10]],
+  UserPromptSubmit: [[undefined, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" prompt-context', "Checking whether crash-triage context applies", 10]],
+  Stop: [[undefined, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" stop-logic-tests', "Running changed host logic tests", 600]],
+  PostToolUse: [["^(?:Edit|Write|apply_patch)$", 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" format', "Formatting edited C and C++ files", 30]],
 };
-const hooks = settings?.hooks;
+const hooksFile = JSON.parse(fs.readFileSync(".codex/hooks.json", "utf8"));
+const hooks = hooksFile?.hooks;
 if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) {
-  throw new Error("tracked Claude settings must define hook dispatches");
+  throw new Error("canonical Codex hook configuration must define hook dispatches");
 }
 const actualEvents = Object.keys(hooks).sort();
 const expectedEvents = Object.keys(expectedHookDispatches).sort();
 if (JSON.stringify(actualEvents) !== JSON.stringify(expectedEvents)) {
-  throw new Error(`tracked Claude hook event set drifted: ${JSON.stringify(actualEvents)}`);
+  throw new Error(`canonical Codex hook event set drifted: ${JSON.stringify(actualEvents)}`);
 }
 for (const [event, expectedGroups] of Object.entries(expectedHookDispatches)) {
   const groups = hooks[event];
   if (!Array.isArray(groups) || groups.length !== expectedGroups.length) {
-    throw new Error(`${event} Claude hook dispatch count drifted`);
+    throw new Error(`${event} Codex hook dispatch count drifted`);
   }
   for (let index = 0; index < expectedGroups.length; index += 1) {
     const group = groups[index];
-    const [expectedMatcher, expectedCommand] = expectedGroups[index];
+    const [expectedMatcher, expectedCommand, expectedStatus, expectedTimeout] = expectedGroups[index];
     if ((group?.matcher ?? undefined) !== expectedMatcher) {
-      throw new Error(`${event}[${index}] Claude hook matcher drifted`);
+      throw new Error(`${event}[${index}] Codex hook matcher drifted`);
     }
     if (!Array.isArray(group?.hooks) || group.hooks.length !== 1) {
-      throw new Error(`${event}[${index}] must contain exactly one consolidated Claude hook`);
+      throw new Error(`${event}[${index}] must contain exactly one canonical Codex hook`);
     }
     const hook = group.hooks[0];
-    if (hook?.type !== "command" || hook?.command !== expectedCommand) {
-      throw new Error(`${event}[${index}] unapproved tracked Claude hook command`);
+    if (hook?.type !== "command" || hook?.command !== expectedCommand ||
+        hook?.statusMessage !== expectedStatus || hook?.timeout !== expectedTimeout) {
+      throw new Error(`${event}[${index}] unapproved canonical Codex hook definition`);
     }
   }
 }
 
-const routeDocs = [".claude/CLAUDE.md", ".claude/skills/device-triage/SKILL.md"];
+const routeDocs = ["docs/ARCHITECTURE.md", ".agents/skills/device-triage/SKILL.md"];
 for (const file of routeDocs) {
   const text = fs.readFileSync(file, "utf8");
   if (/\/(?:diag|coredump)\?clear(?:=1)?/.test(text)) {
@@ -80,8 +103,110 @@ for (const file of routeDocs) {
     if (!text.includes(route)) throw new Error(`${file} does not document ${route}`);
   }
 }
-if (!fs.readFileSync(".claude/CLAUDE.md", "utf8").includes("trusted-LAN route count (36)")) {
-  throw new Error(".claude/CLAUDE.md has drifted from the 36-handler trusted-LAN surface");
+if (!fs.readFileSync("docs/ARCHITECTURE.md", "utf8").includes("trusted-LAN route count of 36")) {
+  throw new Error("docs/ARCHITECTURE.md no longer documents the exact trusted-LAN route budget");
+}
+const credentialWrapperPath = "scripts/gh-with-git-credentials.sh";
+const credentialWrapperStat = fs.lstatSync(credentialWrapperPath);
+if (!credentialWrapperStat.isFile() || (credentialWrapperStat.mode & 0o111) === 0) {
+  throw new Error("canonical GitHub credential wrapper is missing or not executable");
+}
+const credentialWrapper = fs.readFileSync(credentialWrapperPath, "utf8");
+const credentialWrapperMarkers = [
+  "#!/bin/bash -p",
+  "set +x",
+  "GH_BINARY_CANDIDATES='/opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh'",
+  "GIT_BINARY_CANDIDATES='/usr/bin/git /opt/homebrew/bin/git /usr/local/bin/git'",
+  "unset BASH_ENV ENV LD_AUDIT LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH",
+  "SAFE_PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+  '[ ! -L "$wrapper_source" ]',
+  '[ "$wrapper_logical_dir" = "$wrapper_physical_dir" ]',
+  '[ "$wrapper_physical_dir/${wrapper_source##*/}" = "$wrapper_identity" ]',
+  'binding_git_env=(',
+  '"GIT_NO_REPLACE_OBJECTS=1"',
+  "rev-parse --show-toplevel",
+  "ls-files --error-unmatch -- scripts/gh-with-git-credentials.sh",
+  "for-each-ref --format='%(refname)' refs/replace",
+  '[ -z "$replacement_refs" ]',
+  '/usr/bin/id -P "$credential_user"',
+  '/usr/bin/getent passwd "$credential_user"',
+  'credential_file="$credential_home/.git-credentials"',
+  'cd "$config_dir" || exit 1',
+  '/usr/bin/env -i HOME="$config_dir" XDG_CONFIG_HOME="$config_dir" PATH="$SAFE_PATH"',
+  "GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null",
+  'GIT_CEILING_DIRECTORIES="$config_dir" GIT_TERMINAL_PROMPT=0',
+  '"$git_bin" credential-store --file "$credential_file" get',
+  'wrapper_identity="$PROJECT_ROOT/scripts/gh-with-git-credentials.sh"',
+  '"$merge_gate" --payload-file "$gate_payload" >/dev/null',
+  '/usr/bin/env -i PATH="$SAFE_PATH" AGENT_PROJECT_DIR="$PROJECT_ROOT"',
+  'GIT_NO_REPLACE_OBJECTS=1 \\\n        "$merge_gate"',
+  "only github.com is allowed",
+  "aliases and extensions are not allowed",
+  '[ "${#args[@]}" -eq 12 ]',
+  '[ "${args[1]}" = github.com/0Bu/daikin-altherma-esp32 ]',
+  '[ "${args[7]}" = main ]',
+  '[ "$body_file_converted" -eq 1 ]',
+  "symbolic-ref --quiet --short HEAD",
+  "status --porcelain=v1 --untracked-files=normal",
+  "os.O_RDONLY | os.O_NOFOLLOW",
+  "os.fstat(body_fd)",
+  'secret_components = {".git", ".ssh", ".gnupg", ".aws", ".kube", "secrets", ".secrets"}',
+  '".git" + "-credentials"',
+  "check_directory(fd)",
+  "info.st_nlink != 1",
+  "info.st_uid != os.getuid()",
+  "info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)",
+  'child_env+=("AGENT_GH_PR_CREATE_EXPECTED_HEAD=$pr_create_expected_head")',
+  'repos/0Bu/daikin-altherma-esp32/git/ref/heads/$AGENT_GH_PR_CREATE_BRANCH',
+  "--jq .object.sha",
+  'created_output="$("$@" --draft)"',
+  "--json headRefOid --jq .headRefOid",
+  '[ "$created_head" != "$AGENT_GH_PR_CREATE_EXPECTED_HEAD" ]',
+  'pr close "$created_number"',
+  'pr ready "$created_number"',
+  'cleanup_created_pr "created PR head lookup failed"',
+  'cleanup_created_pr "published PR head lookup failed"',
+  '[ "$published_head" != "$AGENT_GH_PR_CREATE_EXPECTED_HEAD" ]',
+  "PR creation must use the exact reviewed noninteractive repository form",
+  '"issue develop"|"issue transfer"|"pr checkout"|"pr co"|"pr new"|"pr revert"|"repo clone"|"repo create"|"repo new"|"repo fork"|"repo rename"|"repo set-default"|"repo sync"',
+  '"release create"|"release new"|"release download"|"release upload"|"release verify-asset"|"repo deploy-key"|"repo read-file"|"run download"',
+  '"GH_PROMPT_DISABLED=1"',
+  '"GH_TELEMETRY=0"',
+  '"GH_NO_UPDATE_NOTIFIER=1"',
+  '"GH_NO_EXTENSION_UPDATE_NOTIFIER=1"',
+  '"GH_PAGER=cat"',
+  '"GH_CONFIG_DIR=$config_dir"',
+  'child_env=(',
+  "extra_child_env=()",
+  'unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN',
+  "token_child_script='set +x",
+  'IFS= read -r token <&9 || exit 2',
+  'export GH_TOKEN="$token"',
+  'cd "$HOME" || exit 2',
+  '/usr/bin/mkfifo -m 600 "$token_fifo"',
+  'exec 9<> "$token_fifo"',
+  '/bin/rm -f -- "$token_fifo"',
+  'printf \'%s\\n\' "$token" >&9',
+  'unset token',
+  'if [ "${#extra_child_env[@]}" -gt 0 ]; then',
+  '/usr/bin/env -i "${child_env[@]}" "${extra_child_env[@]}"',
+  '/usr/bin/env -i "${child_env[@]}"',
+  '/bin/bash -p -c "$token_child_script" _ "$gh_bin" "${args[@]}"',
+];
+const reviewedCredentialWrapperSha256 =
+  "dfc430f5848ca8788e72fc4f696ea069984abea20bba08c62987d26425323e8b";
+const credentialWrapperSha256 = createHash("sha256").update(credentialWrapper).digest("hex");
+const isolatedCwdMentions = credentialWrapper.match(/cd "\$config_dir" \|\| exit 1/g) ?? [];
+const credentialStoreMentions = credentialWrapper.match(/[.]git-credentials/g) ?? [];
+if (!credentialWrapperMarkers.every((marker) => credentialWrapper.includes(marker)) ||
+    isolatedCwdMentions.length !== 1 ||
+    credentialStoreMentions.length !== 1 ||
+    credentialWrapperSha256 !== reviewedCredentialWrapperSha256) {
+  throw new Error("canonical GitHub credential wrapper no longer keeps credentials transient");
+}
+const httpServer = fs.readFileSync("main/http_server.cpp", "utf8");
+if (!/current exact total to 36[\s\S]{0,80}cfg\.max_uri_handlers\s*=\s*36;/.test(httpServer)) {
+  throw new Error("http_server.cpp has drifted from the documented 36-handler trusted-LAN surface");
 }
 
 const funding = fs.readFileSync(".github/FUNDING.yml", "utf8");
@@ -176,6 +301,7 @@ const fixtureFiles = execFileSync("git", ["ls-files", "-z", "--", "test", "tools
   .filter(Boolean);
 const fixtures = [];
 for (const file of fixtureFiles) {
+  if (!fs.existsSync(file)) continue; // Deletions are absent from the working tree before commit.
   const raw = fs.readFileSync(file);
   if (raw.includes(0)) continue; // Match ripgrep's default binary-file behavior.
   fixtures.push({ file, text: raw.toString("utf8") });
@@ -283,4 +409,4 @@ if git grep -nE -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' -- . >/dev/
   exit 1
 fi
 
-echo "Public-readiness audit passed: exact MCP version, zero tracked shell auto-grants, consolidated Claude hook dispatches, public contracts, synthetic fixtures, notices, no tracked private key"
+echo "Public-readiness audit passed: exact MCP version, canonical Codex configuration and hooks, public contracts, synthetic fixtures, notices, no tracked private key"

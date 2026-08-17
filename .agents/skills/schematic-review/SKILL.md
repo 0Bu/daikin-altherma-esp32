@@ -153,8 +153,7 @@ SHA-stamped checkbox whose stamp still matches the PR head. It is **conditional*
 `$feature-docs` and unlike `$project-review` and `$domain-review`: it fires when the PR reaches the
 drawing, its contract, or the tools that judge it — **including this file**, so changing what the
 review asks means putting the new questions to the current drawing before it lands. Its canonical
-filter is defined by the runner-neutral gate; `.claude/hooks/require-schematic-review.sh` is only a
-Claude compatibility adapter. This page deliberately does not repeat the filter.
+filter is defined by the runner-neutral gate. This page deliberately does not repeat the filter.
 
 That filter is defensible here in a way it deliberately is **not** for `$domain-review`, and the
 difference is the point: a value's meaning can change from almost anywhere — #35–#39 reached Home
@@ -168,7 +167,8 @@ When the review passes with **no blocking findings**, tick + stamp it with the r
 - [x] `$schematic-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
 ```
 
-Edit the PR body with `gh pr edit <pr> --body-file <file>` (or the GitHub MCP update tool in
-web/remote). Any later commit re-stales the stamp, forcing a fresh review. Don't tick it if findings
+Edit the PR body with
+`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <absolute-physical-temp-path>/review-body.md`.
+Any later commit re-stales the stamp, forcing a fresh review. Don't tick it if findings
 block the merge — fix first. The gate fails **closed**: if GitHub can't be read, the merge is
 blocked with guidance.

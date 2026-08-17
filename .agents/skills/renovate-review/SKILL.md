@@ -28,8 +28,8 @@ So for these two, **"CI is green" is not a merge argument**. The evidence has to
 Read the diff — don't infer from the title:
 
 ```bash
-gh pr diff <N> --name-only
-gh pr checks <N>
+scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr diff <N> --name-only
+scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr checks <N>
 ```
 
 | Changed | Dependency | What it needs |
@@ -89,11 +89,16 @@ The PR's own CI run already built and signed the exact image, because same-repo 
 get the secret:
 
 ```bash
-gh pr checks <N>                       # grab the run id
-gh api repos/0Bu/daikin-altherma-esp32/actions/runs/<run-id>/artifacts \
-  --jq '.artifacts[] | "\(.name) expired=\(.expired)"'
-gh run download <run-id> -n daikin-altherma-esp32-<version>-PR-<N> -D <dir>
+scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 \
+  pr checks <N>                         # grab the run id
+scripts/gh-with-git-credentials.sh api --hostname github.com --method GET \
+  repos/0Bu/daikin-altherma-esp32/actions/runs/<run-id>/artifacts
 ```
+
+The credential wrapper intentionally refuses `run download` and every other local-file download
+surface. Before hardware validation, have an explicitly authorized maintainer provide the named
+artifact in `<dir>` and verify its run id, artifact name and digest against the JSON above; do not
+bypass the wrapper or expose a credential to fetch it.
 
 Verify before it goes near the board — the signature, and that the app *inside* the merged image is
 the signed one (`@flash_args` puts the app at `0x20000`; carve it back out and compare):
@@ -173,17 +178,19 @@ to confirm WiFi associates, MQTT connects, X10A decodes real values, and the hea
 
 The gates are unchanged by this being a bot's PR. **Derive which apply** from the canonical
 [`tools/agent-hooks/require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh), never
-from a copied list. The legacy `.claude/hooks/require-*.sh` files are Claude compatibility adapters,
-not the canonical definitions. The only supported merge command is the lease-bound path documented
-in [`docs/AGENT_MIGRATION.md`](../../../docs/AGENT_MIGRATION.md):
+from a copied list. The only supported merge command is the lease-bound path documented in
+[`docs/AGENT_MIGRATION.md`](../../../docs/AGENT_MIGRATION.md):
 
 ```bash
-gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <number> --match-head-commit <full-current-head-sha> --squash
+scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT \
+  repos/0Bu/daikin-altherma-esp32/pulls/<number>/merge \
+  -f sha=<full-current-head-sha> -f merge_method=squash
 ```
 
 Run each applicable skill, then tick + SHA-stamp its box in the PR body against the PR head
-(`gh pr edit <N> --body-file <file>`; append to Renovate's body, don't replace it). `main` stays
-linear and GPG-signed via GitHub's web-flow key.
+(`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <N>
+--body-file <absolute-physical-temp-path>/review-body.md`; append to Renovate's body,
+don't replace it). `main` stays linear and GPG-signed via GitHub's web-flow key.
 
 Record the hardware result in the PR body. It is the only evidence that the thing CI cannot test was
 tested, and after the squash it is the sole surviving trace.

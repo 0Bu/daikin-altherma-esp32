@@ -93,8 +93,9 @@ comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 
 > **Bringing the site up the first time — the order matters.** Bootstrap `gh-pages` once as a
 > reviewed **signed orphan commit**, then set **Settings → Pages → Deploy from a branch →
-> `gh-pages` / `(root)`**, and only then trigger `gh workflow run build.yml` (leave `release`
-> unchecked for the dev channel). The publisher intentionally refuses a missing branch instead of
+> `gh-pages` / `(root)`**, and only then trigger
+> `scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 workflow run build.yml`
+> (leave `release` unchecked for the dev channel). The publisher intentionally refuses a missing branch instead of
 > silently creating an unsigned first commit. Every later update uses GitHub's
 > `createCommitOnBranch` mutation with `expectedHeadOid`; GitHub signs those commits and CI fails if
 > the returned signature is not Verified. Until the source setting exists, the installer URL in

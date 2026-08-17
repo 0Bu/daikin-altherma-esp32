@@ -14,7 +14,6 @@ const ROOT_DOCS = [
   "CODE_OF_CONDUCT.md",
   "CONTRIBUTING.md",
   "README.md",
-  ".claude/CLAUDE.md",
   "main/www/js/README.md",
   "test/README.md",
 ];
@@ -22,8 +21,6 @@ const DOC_TREES = [
   { path: "docs", extensions: [".md"] },
   { path: ".agents/skills", extensions: [".md", ".yaml", ".yml"] },
   { path: ".codex", extensions: [".md", ".toml"] },
-  { path: ".claude/agents", extensions: [".md"] },
-  { path: ".claude/skills", extensions: [".md", ".yaml", ".yml"] },
 ];
 
 function documentationTreeFiles(directory, extensions) {
