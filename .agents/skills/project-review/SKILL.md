@@ -43,6 +43,6 @@ blocking findings**, tick + stamp the PR's `$project-review` box with the review
 ```
 
 Edit the PR body with
-`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <file>`.
+`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <absolute-physical-temp-path>/review-body.md`.
 Any later commit changes the head sha and re-stales the box, forcing a fresh review
 before the next merge. Don't tick it if findings block the merge — fix first.

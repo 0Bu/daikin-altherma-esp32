@@ -46,14 +46,19 @@ Settings/Back, stable popup URLs, reload restoration, browser Back/Forward, open
 Escape, accepted and rejected Save paths, representative invalid input, board-gated ENV III states,
 and both bug-report steps. `tools/ui/selftest.sh`
 re-introduces the historical undefined ENV III close handler and proves the matrix fails on the
-actual click path. The runner-neutral policy canaries also simulate the supported
-`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <numeric-pr> --match-head-commit
-<full-40-hex-head-sha> --squash` shape and blocked app-MCP merge/auto-merge requests. The CLI path
-accepts only a current review stamp and matching expected-head lease; REST, GraphQL, and all MCP
-merge, auto-merge, or queue-activation forms are intentionally rejected. Every real local merge also
-runs the UI-GIF audit as a mechanical hard block; changing the GIF or stamp adds the current-head
-`$ui-gif` review requirement. A failed suite or stale stamp returns exit 2. CI calls the same
-top-level policy rather than maintaining a second gate list.
+actual click path. The runner-neutral policy canaries simulate exactly
+`scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT
+repos/0Bu/daikin-altherma-esp32/pulls/<numeric-pr>/merge -f sha=<full-40-hex-head-sha> -f
+    merge_method=squash`. The gate accepts only that repository wrapper, static repository/PR route, `PUT`, one full
+expected-head SHA, `merge_method=squash`, and current review stamps. `gh pr merge`, every other REST
+mutation or merge shape, GraphQL mutations, MCP, auto-merge, and merge-queue activation stay negative
+canaries. Every
+real local merge also runs the UI-GIF audit as a mechanical hard block; changing the GIF or stamp
+adds the current-head `$ui-gif` review requirement. A failed suite or stale stamp returns exit 2. CI
+calls the same top-level policy rather than maintaining a second gate list.
+The credential-wrapper selftest separately allows PR publication only with the fixed repository,
+the checked-out and already-pushed `agent/*` head, base `main`, one literal title, and one regular
+body file; direct `gh`, prompt/fill/editor/web forms, stale heads, and extra arguments stay negative.
 
 `node test/test_ui_fan_icon.mjs` pins the header to the supplied static three-blade PNG mark at 48 px.
 It separately keeps the live `#scFan` rotation in the system schematic and rejects a second header

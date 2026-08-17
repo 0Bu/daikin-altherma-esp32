@@ -95,8 +95,8 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
 ## Recording the pass (merge gate — no file marker)
 
 The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) gates the
-documented host-, repository-, PR- and head-bound CLI merge path; CI independently enforces the same
-current-head evidence. Its feature-docs check, the sibling of the `$project-review` gate, is
+documented synchronous, repository-, PR- and head-bound REST CAS merge path; CI independently
+enforces the same current-head evidence. Its feature-docs check, the sibling of the `$project-review` gate, is
 **conditional**:
 it fires only when the PR changes technical-feature surface (`main/`, `test/`, `sdkconfig.defaults`,
 `partitions.csv`, or the CI build workflow). A docs-only / script-only / chore PR is not gated.
@@ -110,7 +110,7 @@ the code — by TICKING and SHA-STAMPING the PR's `$feature-docs` box with the r
 
 The gate allows the merge only while that box is checked AND its stamp still matches the PR head, so
 any later commit re-stales it and forces a fresh run. Edit the PR body with
-`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <file>`.
+`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <absolute-physical-temp-path>/review-body.md`.
 If the skill
 concludes no catalog change was needed (§*When to run* → "nothing"), the docs are already in sync —
 still tick + stamp the box to record that you checked. Don't tick it if FEATURES.md is out of date —

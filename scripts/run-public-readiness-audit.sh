@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 
 node <<'JS'
 const fs = require("node:fs");
+const { createHash } = require("node:crypto");
 
 const mcp = JSON.parse(fs.readFileSync(".mcp.json", "utf8"));
 const args = mcp?.mcpServers?.context7?.args;
@@ -106,7 +107,7 @@ if (!fs.readFileSync("docs/ARCHITECTURE.md", "utf8").includes("trusted-LAN route
   throw new Error("docs/ARCHITECTURE.md no longer documents the exact trusted-LAN route budget");
 }
 const credentialWrapperPath = "scripts/gh-with-git-credentials.sh";
-const credentialWrapperStat = fs.statSync(credentialWrapperPath);
+const credentialWrapperStat = fs.lstatSync(credentialWrapperPath);
 if (!credentialWrapperStat.isFile() || (credentialWrapperStat.mode & 0o111) === 0) {
   throw new Error("canonical GitHub credential wrapper is missing or not executable");
 }
@@ -118,6 +119,15 @@ const credentialWrapperMarkers = [
   "GIT_BINARY_CANDIDATES='/usr/bin/git /opt/homebrew/bin/git /usr/local/bin/git'",
   "unset BASH_ENV ENV LD_AUDIT LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH",
   "SAFE_PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+  '[ ! -L "$wrapper_source" ]',
+  '[ "$wrapper_logical_dir" = "$wrapper_physical_dir" ]',
+  '[ "$wrapper_physical_dir/${wrapper_source##*/}" = "$wrapper_identity" ]',
+  'binding_git_env=(',
+  '"GIT_NO_REPLACE_OBJECTS=1"',
+  "rev-parse --show-toplevel",
+  "ls-files --error-unmatch -- scripts/gh-with-git-credentials.sh",
+  "for-each-ref --format='%(refname)' refs/replace",
+  '[ -z "$replacement_refs" ]',
   '/usr/bin/id -P "$credential_user"',
   '/usr/bin/getent passwd "$credential_user"',
   'credential_file="$credential_home/.git-credentials"',
@@ -126,21 +136,72 @@ const credentialWrapperMarkers = [
   "GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null",
   'GIT_CEILING_DIRECTORIES="$config_dir" GIT_TERMINAL_PROMPT=0',
   '"$git_bin" credential-store --file "$credential_file" get',
+  'wrapper_identity="$PROJECT_ROOT/scripts/gh-with-git-credentials.sh"',
+  '"$merge_gate" --payload-file "$gate_payload" >/dev/null',
+  '/usr/bin/env -i PATH="$SAFE_PATH" AGENT_PROJECT_DIR="$PROJECT_ROOT"',
+  'GIT_NO_REPLACE_OBJECTS=1 \\\n        "$merge_gate"',
   "only github.com is allowed",
   "aliases and extensions are not allowed",
-  '"issue develop"|"pr checkout"|"pr create"|"repo clone"|"repo create"|"repo fork"|"repo rename"|"repo sync"',
+  '[ "${#args[@]}" -eq 12 ]',
+  '[ "${args[1]}" = github.com/0Bu/daikin-altherma-esp32 ]',
+  '[ "${args[7]}" = main ]',
+  '[ "$body_file_converted" -eq 1 ]',
+  "symbolic-ref --quiet --short HEAD",
+  "status --porcelain=v1 --untracked-files=normal",
+  "os.O_RDONLY | os.O_NOFOLLOW",
+  "os.fstat(body_fd)",
+  'secret_components = {".git", ".ssh", ".gnupg", ".aws", ".kube", "secrets", ".secrets"}',
+  '".git" + "-credentials"',
+  "check_directory(fd)",
+  "info.st_nlink != 1",
+  "info.st_uid != os.getuid()",
+  "info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)",
+  'child_env+=("AGENT_GH_PR_CREATE_EXPECTED_HEAD=$pr_create_expected_head")',
+  'repos/0Bu/daikin-altherma-esp32/git/ref/heads/$AGENT_GH_PR_CREATE_BRANCH',
+  "--jq .object.sha",
+  'created_output="$("$@" --draft)"',
+  "--json headRefOid --jq .headRefOid",
+  '[ "$created_head" != "$AGENT_GH_PR_CREATE_EXPECTED_HEAD" ]',
+  'pr close "$created_number"',
+  'pr ready "$created_number"',
+  'cleanup_created_pr "created PR head lookup failed"',
+  'cleanup_created_pr "published PR head lookup failed"',
+  '[ "$published_head" != "$AGENT_GH_PR_CREATE_EXPECTED_HEAD" ]',
+  "PR creation must use the exact reviewed noninteractive repository form",
+  '"issue develop"|"issue transfer"|"pr checkout"|"pr co"|"pr new"|"pr revert"|"repo clone"|"repo create"|"repo new"|"repo fork"|"repo rename"|"repo set-default"|"repo sync"',
+  '"release create"|"release new"|"release download"|"release upload"|"release verify-asset"|"repo deploy-key"|"repo read-file"|"run download"',
   '"GH_PROMPT_DISABLED=1"',
+  '"GH_TELEMETRY=0"',
+  '"GH_NO_UPDATE_NOTIFIER=1"',
+  '"GH_NO_EXTENSION_UPDATE_NOTIFIER=1"',
+  '"GH_PAGER=cat"',
   '"GH_CONFIG_DIR=$config_dir"',
+  'child_env=(',
   "extra_child_env=()",
+  'unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN',
+  "token_child_script='set +x",
+  'IFS= read -r token <&9 || exit 2',
+  'export GH_TOKEN="$token"',
+  'cd "$HOME" || exit 2',
+  '/usr/bin/mkfifo -m 600 "$token_fifo"',
+  'exec 9<> "$token_fifo"',
+  '/bin/rm -f -- "$token_fifo"',
+  'printf \'%s\\n\' "$token" >&9',
+  'unset token',
   'if [ "${#extra_child_env[@]}" -gt 0 ]; then',
-  '/usr/bin/env -i "${gh_env[@]}" "${extra_child_env[@]}" "$gh_bin" "$@"',
-  '/usr/bin/env -i "${gh_env[@]}" "$gh_bin" "$@"',
+  '/usr/bin/env -i "${child_env[@]}" "${extra_child_env[@]}"',
+  '/usr/bin/env -i "${child_env[@]}"',
+  '/bin/bash -p -c "$token_child_script" _ "$gh_bin" "${args[@]}"',
 ];
+const reviewedCredentialWrapperSha256 =
+  "dfc430f5848ca8788e72fc4f696ea069984abea20bba08c62987d26425323e8b";
+const credentialWrapperSha256 = createHash("sha256").update(credentialWrapper).digest("hex");
 const isolatedCwdMentions = credentialWrapper.match(/cd "\$config_dir" \|\| exit 1/g) ?? [];
 const credentialStoreMentions = credentialWrapper.match(/[.]git-credentials/g) ?? [];
 if (!credentialWrapperMarkers.every((marker) => credentialWrapper.includes(marker)) ||
-    isolatedCwdMentions.length !== 2 ||
-    credentialStoreMentions.length !== 1) {
+    isolatedCwdMentions.length !== 1 ||
+    credentialStoreMentions.length !== 1 ||
+    credentialWrapperSha256 !== reviewedCredentialWrapperSha256) {
   throw new Error("canonical GitHub credential wrapper no longer keeps credentials transient");
 }
 const httpServer = fs.readFileSync("main/http_server.cpp", "utf8");

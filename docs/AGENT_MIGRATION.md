@@ -36,15 +36,53 @@ documented in [`MCP.md`](MCP.md), not a second project-policy source.
   granted by `.codex/config.toml`; they remain explicit, task-scoped actions.
 - Merge policy comes from the runner-neutral aggregate gate under `tools/agent-hooks/`; it is the
   single policy definition.
-- The supported local merge form is exactly the repository-bound CLI action
-  `scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge <numeric-pr> --match-head-commit
-  <full-40-hex-head-sha> --squash`. The aggregate gate compares that atomic
-  expected-head lease with the reviewed PR head before allowing the command. Direct REST, GraphQL,
-  and all MCP merge, auto-merge, or queue-activation tools are intentionally blocked; no MCP tool is
-  allowlisted as an equivalent path. The wrapper resolves the configured `github.com` Git
-  credential in-process and exports it only to `gh`; it never prints, writes, persists, or places the
-  token in argv. A literal equivalent `gh` command remains supported for already-authenticated CI
-  and trusted automation, and is subject to the same parser and gate.
+- The supported local merge form is exactly this synchronous, repository-bound REST CAS action:
+
+  ```bash
+  scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT \
+    repos/0Bu/daikin-altherma-esp32/pulls/<numeric-pr>/merge \
+    -f sha=<full-40-hex-head-sha> -f merge_method=squash
+  ```
+
+  The endpoint binds repository and PR, `sha` is GitHub's atomic expected-head lease, and
+  `merge_method=squash` preserves linear history. The aggregate gate compares that lease with the
+  reviewed PR head before allowing the command. `gh pr merge` is blocked because it can activate
+  auto-merge or a merge queue instead of completing synchronously. Every other REST merge or
+  mutation route or shape, GraphQL mutations, and all MCP merge, auto-merge, or queue-activation
+  tools are also blocked; static read-only REST GET/HEAD requests and read-only GraphQL queries
+  remain allowed, and no MCP tool is allowlisted as an equivalent merge path. The wrapper resolves
+  the configured `github.com` Git credential in-process and exports it only to `gh`; an unlinked
+  private FIFO bridges the clean child environment, and an isolated Git shim strips the token from
+  any Git descendant. The token is never printed, persisted, written to a regular file, or placed in
+  argv. A readable regular `--body-file` is opened exactly once through no-follow directory
+  descriptors, verified with
+  `fstat`, and converted to bounded literal UTF-8 text before credential lookup. It must be a
+  single-link file owned by the current user, must not be group/world writable, and must not use a
+  credential-, secret-, or private-key path. The wrapper accepts `--body-file` only as a physical,
+  absolute, non-symlinked path and rejects relative paths: for example,
+  `/private/tmp/review-body.md` on macOS. On Linux, `/tmp/review-body.md` is valid only when
+  `(cd /tmp && pwd -P)` still resolves to `/tmp`. Other local-file inputs and process pseudo-files
+  are rejected. The wrapper itself reclassifies every API request and `pr merge` invocation before
+  credential lookup: only GET/HEAD, static read-only GraphQL queries, and the exact CAS merge above
+  may proceed. The merge reruns the aggregate evidence gate even when an opaque helper invoked the
+  wrapper. A literal `gh` executable is never accepted as the local merge transport.
+- An explicitly authorized PR is published only after its branch is pushed, with the wrapper's
+  exact noninteractive shape:
+
+  ```bash
+  scripts/gh-with-git-credentials.sh \
+    --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/<branch> --base main \
+    --title '<title>' --body-file <absolute-physical-temp-path>/<reviewed-regular-file>
+  ```
+
+  The wrapper requires this exact argument order, a clean checked-out head, and a live
+  `github.com` branch SHA equal to local `HEAD`; it converts the body before credential lookup and
+  enforces the body-path contract above. Internally it creates a draft, verifies the created PR's
+  head, marks it ready, and verifies the published head again. Any post-create lookup, ready, or
+  head mismatch reports the PR URL and attempts to close the affected PR; if cleanup fails, the
+  error explicitly requires manual cleanup. The caller cannot request commit-fill, template,
+  draft, editor, browser, implicit-head, fork, or push variants.
 - Every actual local merge reruns `scripts/run-ui-gif-audit.sh`. A stale or unverifiable recording is
   a hard mechanical block that no checked review record can override. The SHA-stamped `$ui-gif`
   review is additionally required only when the PR changes `docs/media/dashboard.gif` or

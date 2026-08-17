@@ -6,6 +6,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 hook="$root/tools/agent-hooks/agent_hook.py"
 pr_gate="$root/tools/agent-hooks/require-pr-gates.sh"
 tmp="$(mktemp -d)" || exit 2
+tmp_physical="$(cd "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
 pass=0
 fail=0
@@ -17,6 +18,15 @@ import json, sys
 tool, key, value, cwd = sys.argv[1:]
 print(json.dumps({"hook_event_name": "PreToolUse", "cwd": cwd,
                   "tool_name": tool, "tool_input": {key: value}}))
+PY
+}
+
+payload_with_workdir() {
+    python3 - "$1" "$2" "$3" "$4" <<'PY'
+import json, sys
+tool, command, cwd, workdir = sys.argv[1:]
+print(json.dumps({"hook_event_name": "PreToolUse", "cwd": cwd,
+                  "tool_name": tool, "tool_input": {"cmd": command, "workdir": workdir}}))
 PY
 }
 
@@ -68,12 +78,30 @@ guard_case "wrapped terminal env dump is denied" \
     "$(payload exec_command command 'setsid env')" deny
 guard_case "dynamic printenv executable is denied" \
     "$(payload exec_command command 'p=printenv; "$p"')" deny
+guard_case "dynamic env executable is denied" \
+    "$(payload exec_command command 'p=env; "$p"')" deny
+guard_case "dynamic set builtin is denied" \
+    "$(payload exec_command command 'p=set; "$p"')" deny
+guard_case "dynamic export builtin is denied" \
+    "$(payload exec_command command 'p=export; "$p" -p')" deny
+guard_case "dynamic declare builtin is denied" \
+    "$(payload exec_command command 'p=declare; "$p" -p')" deny
 guard_case "Python process environment dump is denied" \
     "$(payload exec_command command "python3 -c 'import os; print(os.environ)'")" deny
 guard_case "Node process environment dump is denied" \
     "$(payload exec_command command "node -e 'console.log(process.env)'")" deny
 guard_case "Linux proc environment dump is denied" \
     "$(payload exec_command command 'cat /proc/self/environ')" deny
+guard_case "Linux thread-self environment dump is denied" \
+    "$(payload exec_command command 'cat /proc/thread-self/environ')" deny
+guard_case "Linux task environment dump is denied" \
+    "$(payload exec_command command 'cat /proc/123/task/456/environ')" deny
+guard_case "Linux repeated-slash environment dump is denied" \
+    "$(payload exec_command command 'cat /proc//thread-self/environ')" deny
+guard_case "Linux dot-component environment dump is denied" \
+    "$(payload exec_command command 'cat /proc/./thread-self/environ')" deny
+guard_case "Linux parent-component environment dump is denied" \
+    "$(payload exec_command command 'cat /proc/self/../thread-self/environ')" deny
 guard_case "BSD ps environment dump is denied" \
     "$(payload exec_command command 'ps eww -p $$')" deny
 guard_case "Darwin ps environment flag is denied" \
@@ -98,12 +126,150 @@ guard_case "option-only export environment dump is denied" \
     "$(payload exec_command command 'export -n')" deny
 guard_case "GitHub auth token output is denied" \
     "$(payload exec_command command 'gh auth token')" deny
+guard_case "brace-expanded GitHub auth token output is denied" \
+    "$(payload exec_command command 'g{h..h} auth token')" deny
 guard_case "GitHub auth status short token flag is denied" \
     "$(payload exec_command command 'env gh auth status -t')" deny
+guard_case "dynamic GitHub auth status token flag is denied" \
+    "$(payload exec_command command 'g=gh; "$g" auth status -t')" deny
+guard_case "GitHub auth status token assignment is denied" \
+    "$(payload exec_command command 'gh auth status --show-token=true')" deny
+guard_case "dynamic GitHub auth status token assignment is denied" \
+    "$(payload exec_command command 'g=gh; "$g" auth status --show-token=true')" deny
+guard_case "direct GitHub API formatter cannot expose its environment" \
+    "$(payload exec_command command "gh api user --jq 'env.GH_TOKEN'")" deny
+guard_case "direct GitHub non-API formatter cannot expose its environment" \
+    "$(payload exec_command command "gh pr view 5 --json number --jq 'env.GH_TOKEN'")" deny
+guard_case "dynamic GitHub formatter cannot expose its environment" \
+    "$(payload exec_command command "g=gh; \"\$g\" api user --jq 'env.GH_TOKEN'")" deny
+guard_case "substituted GitHub formatter cannot expose its environment" \
+    "$(payload exec_command command "\"\$(printf gh)\" api user --template '{{env \"GH_TOKEN\"}}'")" deny
+guard_case "brace-expanded GitHub formatter cannot expose its environment" \
+    "$(payload exec_command command "g{h..h} api user --jq 'env.GH_TOKEN'")" deny
+guard_case "globbed GitHub formatter cannot expose its environment" \
+    "$(payload exec_command command "/usr/bin/g[h] api user --jq 'env.GH_TOKEN'")" deny
 guard_case "credential wrapper cannot print a GitHub token" \
     "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh auth token")" deny
 guard_case "credential wrapper ordinary GitHub command is allowed" \
     "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh pr view 5 --json number")" ""
+guard_case "credential wrapper exact noninteractive PR creation is allowed" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr create --head agent/selftest-pr --base main --title 'Selftest PR' --body-file $tmp_physical/selftest-pr.md")" ""
+guard_case "literal gh cannot create a PR outside the credential wrapper" \
+    "$(payload exec_command command "gh --repo github.com/0Bu/daikin-altherma-esp32 pr create --head agent/selftest-pr --base main --title selftest --body selftest")" deny
+guard_case "foreign absolute gh cannot create a PR outside the credential wrapper" \
+    "$(payload exec_command command "/tmp/gh --repo github.com/0Bu/daikin-altherma-esp32 pr create --head agent/selftest-pr --base main --title selftest --body selftest")" deny
+guard_case "PATH-selected gh cannot create a PR outside the credential wrapper" \
+    "$(payload exec_command command "PATH=/tmp gh --repo github.com/0Bu/daikin-altherma-esp32 pr create --head agent/selftest-pr --base main --title selftest --body selftest")" deny
+guard_case "dynamic direct gh PR action is denied" \
+    "$(payload exec_command command 'action=create; gh pr "$action" --title selftest --body selftest')" deny
+guard_case "substituted direct gh PR action is denied" \
+    "$(payload exec_command command 'gh pr "$(printf create)" --title selftest --body selftest')" deny
+guard_case "dynamic gh executable and PR action are denied together" \
+    "$(payload exec_command command 'c=gh; a=edit; "$c" pr "$a" 5 --title selftest')" deny
+guard_case "dynamic gh executable cannot perform API writes" \
+    "$(payload exec_command command 'c=gh; "$c" api --method POST repos/0Bu/daikin-altherma-esp32/issues -f title=selftest')" deny
+guard_case "credential wrapper cannot create a revert PR" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr revert 5")" deny
+guard_case "credential wrapper cannot transfer an issue to another host" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh issue transfer 5 ghe.example/owner/repo")" deny
+pr_create_command="scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr create --head agent/selftest-pr --base main --title selftest --body-file $tmp_physical/selftest-pr.md"
+AGENT_TEST_PAYLOAD_CWD="$tmp" guard_case "relative PR-create wrapper is denied from a foreign payload cwd" \
+    "$(AGENT_TEST_PAYLOAD_CWD="$tmp" payload exec_command command "$pr_create_command")" deny
+guard_case "relative PR-create wrapper is denied by a foreign tool workdir" \
+    "$(payload_with_workdir exec_command "$pr_create_command" "$root" "$tmp")" deny
+relative_wrapper_command="scripts/gh-with-git-credentials.sh pr view 5 --json number"
+AGENT_TEST_PAYLOAD_CWD="$tmp" guard_case "relative credential wrapper is denied from a foreign payload cwd" \
+    "$(AGENT_TEST_PAYLOAD_CWD="$tmp" payload exec_command command "$relative_wrapper_command")" deny
+guard_case "relative credential wrapper is denied by a foreign tool workdir" \
+    "$(payload_with_workdir exec_command "$relative_wrapper_command" "$root" "$tmp")" deny
+pr_create_out="$(printf '%s' "$(AGENT_TEST_PAYLOAD_CWD="$tmp" payload exec_command command "$pr_create_command")" \
+    | "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$pr_create_out" | grep -qF 'PR creation transport could not be bound safely'; then
+    echo "PASS  aggregate gate binds relative PR-create wrapper to payload cwd"; pass=$((pass + 1))
+else
+    echo "FAIL  aggregate gate accepted foreign-cwd PR creation (rc=$rc output=$pr_create_out)" >&2
+    fail=$((fail + 1))
+fi
+pr_create_out="$(printf '%s' "$(payload_with_workdir exec_command "$pr_create_command" "$root" "$tmp")" \
+    | "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$pr_create_out" | grep -qF 'PR creation transport could not be bound safely'; then
+    echo "PASS  aggregate gate binds relative PR-create wrapper to tool workdir"; pass=$((pass + 1))
+else
+    echo "FAIL  aggregate gate accepted foreign-workdir PR creation (rc=$rc output=$pr_create_out)" >&2
+    fail=$((fail + 1))
+fi
+guard_case "credential wrapper read-only REST API request is allowed" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api --method GET repos/0Bu/daikin-altherma-esp32/git/ref/heads/main")" ""
+guard_case "credential wrapper repository API path is not mistaken for a foreign repo" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api --method GET repos/0Bu/daikin-altherma-esp32")" ""
+guard_case "credential wrapper workflow path is not mistaken for a foreign repo" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh workflow view .github/workflows/build.yml")" ""
+guard_case "static read-only GraphQL query is allowed" \
+    "$(payload exec_command command "gh api graphql -f 'query=query { viewer { login } }'")" ""
+guard_case "canonical credential-wrapper merge reaches the aggregate gate" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/5/merge -f sha=abcdef1234567890abcdef1234567890abcdef12 -f merge_method=squash")" ""
+guard_case "literal gh cannot impersonate the canonical merge transport" \
+    "$(payload exec_command command "gh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/5/merge -f sha=abcdef1234567890abcdef1234567890abcdef12 -f merge_method=squash")" deny
+guard_case "credential wrapper rejects an arbitrary REST write" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api --method PATCH repos/0Bu/daikin-altherma-esp32/git/refs/heads/main -f sha=abcdef1234567890abcdef1234567890abcdef12")" deny
+guard_case "literal gh rejects an implicit REST write" \
+    "$(payload exec_command command "gh api repos/0Bu/daikin-altherma-esp32/issues -f title=selftest")" deny
+guard_case "curl rejects an explicit GitHub REST write" \
+    "$(payload exec_command command "curl -X PATCH https://api.github.com/repos/0Bu/daikin-altherma-esp32/git/refs/heads/main -d '{\"sha\":\"abcdef\"}'")" deny
+guard_case "curl rejects an implicit GitHub REST write" \
+    "$(payload exec_command command "curl https://api.github.com/repos/0Bu/daikin-altherma-esp32/pulls -d '{\"title\":\"selftest\"}'")" deny
+guard_case "direct curl GitHub GET is rejected" \
+    "$(payload exec_command command "curl -sS https://api.github.com/repos/0Bu/daikin-altherma-esp32")" deny
+guard_case "curl URL option cannot hide a GitHub REST write" \
+    "$(payload exec_command command "curl --url=https://api.github.com/repos/0Bu/daikin-altherma-esp32/git/refs/heads/main -X PATCH -d sha=abcdef")" deny
+guard_case "curl config input cannot hide a GitHub REST write" \
+    "$(payload exec_command command "curl --config /tmp/curl-selftest.conf")" deny
+guard_case "non-GitHub curl remains allowed" \
+    "$(payload exec_command command "curl -sS https://example.com/health")" ""
+guard_case "dynamic curl executable cannot perform a GitHub REST write" \
+    "$(payload exec_command command "c=curl; \"\$c\" --request DELETE https://api.github.com/repos/0Bu/daikin-altherma-esp32/git/refs/heads/x")" deny
+guard_case "dynamic curl executable cannot hide a GitHub target in --url" \
+    "$(payload exec_command command "c=curl; \"\$c\" --url=https://api.github.com/repos/0Bu/daikin-altherma-esp32/git/refs/heads/x --request DELETE")" deny
+guard_case "dynamic curl executable cannot import a config file" \
+    "$(payload exec_command command "c=curl; \"\$c\" --config /tmp/curl-selftest.conf")" deny
+guard_case "substituted curl executable cannot perform a GitHub REST write" \
+    "$(payload exec_command command "\"\$(printf curl)\" -X POST https://api.github.com/repos/0Bu/daikin-altherma-esp32/issues -d title=x")" deny
+guard_case "credential wrapper rejects every GraphQL mutation" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api graphql -f 'query=mutation { createRef(input:{name:\"refs/heads/x\"}) { clientMutationId } }'")" deny
+guard_case "REST option value cannot impersonate the GraphQL endpoint" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api --method POST --preview graphql repos/0Bu/daikin-altherma-esp32/git/refs -f ref=refs/heads/x -f sha=abcdef1234567890abcdef1234567890abcdef12")" deny
+guard_case "credential wrapper jq environment output is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api user --jq 'env.GH_TOKEN'")" deny
+guard_case "credential wrapper clustered jq output is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api user -iqenv.GH_TOKEN")" deny
+guard_case "credential wrapper template output is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api user --template '{{.}}'")" deny
+guard_case "credential wrapper verbose assignment is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api user --verbose=true")" deny
+guard_case "credential wrapper short browser flag is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh pr view 5 -w")" deny
+guard_case "credential wrapper short editor flag is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh issue create -e")" deny
+guard_case "credential wrapper mixed-case absolute URL is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh api HtTpS://ghe.example/user")" deny
+guard_case "credential wrapper short body-file input is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh pr edit 5 -F /tmp/body.md")" deny
+guard_case "credential wrapper positional foreign repository is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh repo view ghe.example/owner/repo")" deny
+guard_case "credential wrapper SSH-style foreign repository is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh repo view git@ghe.example:owner/repo")" deny
+guard_case "credential wrapper built-in checkout alias is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh pr co 5")" deny
+guard_case "credential wrapper branch-deleting close is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh pr close 5 --delete-branch")" deny
+guard_case "credential wrapper release asset verification is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh release verify-asset artifact.bin")" deny
+guard_case "credential wrapper raw terminal escape output is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh repo read-file owner/repo:path --allow-escape-sequences")" deny
+guard_case "credential wrapper release download is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh release download v1.2.3")" deny
+guard_case "credential wrapper run download is denied" \
+    "$(payload exec_command command "$root/scripts/gh-with-git-credentials.sh run download 123")" deny
 guard_case "credential wrapper rejects Git config injection" \
     "$(payload exec_command command "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=/tmp/selftest-helper $root/scripts/gh-with-git-credentials.sh pr view 5")" deny
 guard_case "credential wrapper rejects quoted loader injection" \
@@ -145,6 +311,8 @@ guard_case "multiline GitHub auth token output is denied" \
     "$(payload exec_command command $'echo safe\ngh auth token')" deny
 guard_case "Git credential fill output is denied" \
     "$(payload exec_command command 'git credential fill')" deny
+guard_case "dynamic Git credential fill output is denied" \
+    "$(payload exec_command command 'g=git; "$g" credential fill')" deny
 guard_case "AWS secret getter output is denied" \
     "$(payload exec_command command 'aws configure get aws_secret_access_key')" deny
 guard_case "environment declarations are denied" \
@@ -189,6 +357,8 @@ guard_case "Git credential helper output is denied" \
     "$(payload exec_command command 'git credential-osxkeychain get')" deny
 guard_case "Git credential executable output is denied" \
     "$(payload exec_command command 'git-credential-osxkeychain get')" deny
+guard_case "dynamic Git credential executable output is denied" \
+    "$(payload exec_command command 'g=git-credential-osxkeychain; "$g" get')" deny
 guard_case "macOS keychain stderr credential output is denied" \
     "$(payload exec_command command 'security find-generic-password -g -s selftest')" deny
 guard_case "qualified AWS credential getter is denied" \
@@ -201,8 +371,12 @@ guard_case "kubectl raw assignment cannot expose credentials" \
     "$(payload exec_command command 'kubectl config view --raw=true')" deny
 guard_case "Docker credential helper output is denied" \
     "$(payload exec_command command 'docker-credential-osxkeychain get')" deny
+guard_case "dynamic Docker credential helper output is denied" \
+    "$(payload exec_command command 'g=docker-credential-osxkeychain; "$g" get')" deny
 guard_case "macOS identity export is denied" \
     "$(payload exec_command command 'security export -t identities -f pemseq')" deny
+guard_case "dynamic macOS keychain credential output is denied" \
+    "$(payload exec_command command 's=security; "$s" find-generic-password -w -s selftest')" deny
 guard_case "private key brace expansion is denied" \
     "$(payload exec_command command 'cat ota_signing_key.{pem,bak}')" deny
 guard_case "ANSI-C quoted private key suffix is denied" \
@@ -296,15 +470,71 @@ guard_case "Canonical partitions diff allowed" \
 wrapper_bin="$tmp/wrapper-bin"
 wrapper_args="$tmp/wrapper-args.txt"
 wrapper_marker="$tmp/wrapper-git-called"
+wrapper_child_marker="$tmp/wrapper-git-child-called"
 wrapper_fail_toggle="$tmp/wrapper-git-fail"
 wrapper_config_path="$tmp/wrapper-config-path.txt"
+wrapper_remote_mismatch_toggle="$tmp/wrapper-remote-mismatch"
+wrapper_created_mismatch_toggle="$tmp/wrapper-created-mismatch"
+wrapper_created_lookup_fail_toggle="$tmp/wrapper-created-lookup-fail"
+wrapper_ready_fail_toggle="$tmp/wrapper-ready-fail"
+wrapper_published_lookup_fail_toggle="$tmp/wrapper-published-lookup-fail"
+wrapper_published_mismatch_toggle="$tmp/wrapper-published-mismatch"
+wrapper_closed_marker="$tmp/wrapper-pr-closed"
+wrapper_ready_marker="$tmp/wrapper-pr-ready"
+wrapper_replace_toggle="$tmp/wrapper-replace-ref"
 wrapper_credential_file="$tmp/wrapper-credentials"
 wrapper_hostile_config="$tmp/wrapper-hostile-config"
 wrapper_injected_marker="$tmp/wrapper-injected-helper"
 wrapper_injected_helper="$tmp/wrapper-injected-helper.sh"
 mkdir -p "$wrapper_bin"
+wrapper_fixture_root="$tmp_physical/wrapper-root"
 cat >"$wrapper_bin/git" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = -c ] && [ "${2:-}" = core.fsmonitor=false ] \
+    && [ "${3:-}" = -C ] && [ -n "${4:-}" ]; then
+    [ "${4:-}" = __WRAPPER_PROJECT_ROOT__ ] || exit 91
+    [ "${GIT_NO_REPLACE_OBJECTS:-}" = 1 ] || exit 92
+    case "${5:-} ${6:-} ${7:-} ${8:-}" in
+        "rev-parse --show-toplevel  ")
+            printf '%s\n' "${4:-}"
+            exit 0
+            ;;
+        "ls-files --error-unmatch -- scripts/gh-with-git-credentials.sh")
+            printf '%s\n' scripts/gh-with-git-credentials.sh
+            exit 0
+            ;;
+        "for-each-ref --format=%(refname) refs/replace ")
+            if [ -e __WRAPPER_REPLACE_REF__ ]; then
+                printf '%s\n' refs/replace/selftest
+            fi
+            exit 0
+            ;;
+        "symbolic-ref --quiet --short HEAD")
+            printf '%s\n' agent/selftest-pr
+            exit 0
+            ;;
+        "rev-parse --verify HEAD^{commit} ")
+            printf '%s\n' abcdef1234567890abcdef1234567890abcdef12
+            exit 0
+            ;;
+        "rev-parse --verify refs/remotes/origin/agent/selftest-pr^{commit} ")
+            printf '%s\n' abcdef1234567890abcdef1234567890abcdef12
+            exit 0
+            ;;
+        "status --porcelain=v1 --untracked-files=normal ")
+            exit 0
+            ;;
+    esac
+    exit 93
+fi
+if [ "$#" -eq 1 ] && [ "${1:-}" = selftest-child-probe ]; then
+    for name in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do
+        [ -z "${!name+x}" ] || exit 79
+    done
+    case "${PATH:-}" in /tmp/daikin-gh-config.*/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin) ;; *) exit 78 ;; esac
+    printf 'called\n' >__WRAPPER_CHILD_MARKER__
+    exit 0
+fi
 [ "$#" -eq 4 ] || exit 80
 [ "${1:-}" = credential-store ] && [ "${2:-}" = --file ] \
     && [ "${3:-}" = __WRAPPER_CREDENTIAL_FILE__ ] && [ "${4:-}" = get ] || exit 81
@@ -323,7 +553,7 @@ if [ "${GIT_CONFIG_COUNT:-}" = 1 ] && [ -x "${GIT_CONFIG_VALUE_0:-}" ]; then
 fi
 for name in GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_DIR GIT_EXEC_PATH \
     LD_AUDIT LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH \
-    HTTP_PROXY HTTPS_PROXY ALL_PROXY SSL_CERT_FILE SSL_CERT_DIR; do
+    HTTP_PROXY HTTPS_PROXY ALL_PROXY SSL_CERT_FILE SSL_CERT_DIR token; do
     [ -z "${!name+x}" ] || exit 89
 done
 printf 'called\n' >>__WRAPPER_MARKER__
@@ -336,8 +566,10 @@ cat >"$wrapper_bin/gh" <<'EOF'
 [ "${GH_HOST:-}" = github.com ] || exit 90
 [ "${GH_TOKEN:-}" = selftest-wrapper-token ] || exit 91
 [ "${GH_PROMPT_DISABLED:-}" = 1 ] || exit 92
-[ "${GH_PAGER:-}" = /bin/cat ] && [ "${PAGER:-}" = /bin/cat ] \
-    && [ "${GIT_PAGER:-}" = /bin/cat ] || exit 93
+[ "${GH_PAGER:-}" = cat ] && [ "${PAGER:-}" = cat ] \
+    && [ "${GIT_PAGER:-}" = cat ] || exit 93
+[ "${GH_TELEMETRY:-}" = 0 ] && [ "${GH_NO_UPDATE_NOTIFIER:-}" = 1 ] \
+    && [ "${GH_NO_EXTENSION_UPDATE_NOTIFIER:-}" = 1 ] || exit 105
 [ "${GH_BROWSER:-}" = /usr/bin/false ] && [ "${BROWSER:-}" = /usr/bin/false ] || exit 94
 [ "${GH_EDITOR:-}" = /usr/bin/false ] && [ "${EDITOR:-}" = /usr/bin/false ] \
     && [ "${VISUAL:-}" = /usr/bin/false ] && [ "${GIT_EDITOR:-}" = /usr/bin/false ] || exit 95
@@ -347,13 +579,52 @@ cat >"$wrapper_bin/gh" <<'EOF'
 [ "$(pwd -P)" = "$(cd "$GH_CONFIG_DIR" && pwd -P)" ] || exit 102
 [ ! -e "$GH_CONFIG_DIR/config.yml" ] || exit 98
 [ "${GH_CONFIG_DIR:-}" != __WRAPPER_HOSTILE_CONFIG__ ] || exit 99
-[ "${PATH:-}" = /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin ] || exit 100
+case "${PATH:-}" in /tmp/daikin-gh-config.*/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin) ;; *) exit 100 ;; esac
 for name in GITHUB_TOKEN GH_ENTERPRISE_TOKEN GIT_SSH_COMMAND GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 \
     GIT_CONFIG_VALUE_0 GIT_DIR GIT_EXEC_PATH LD_AUDIT LD_PRELOAD LD_LIBRARY_PATH \
     DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH HTTP_PROXY HTTPS_PROXY ALL_PROXY \
-    SSL_CERT_FILE SSL_CERT_DIR; do
+    SSL_CERT_FILE SSL_CERT_DIR token; do
     [ -z "${!name+x}" ] || exit 101
 done
+if /usr/bin/env | /usr/bin/grep -Eq '^(BAD-NAME|9BAD|BASH_FUNC_evil%%)='; then exit 103; fi
+if [ "$*" = "api --hostname github.com --method GET repos/0Bu/daikin-altherma-esp32/git/ref/heads/agent/selftest-pr --jq .object.sha" ]; then
+    if [ -e __WRAPPER_REMOTE_MISMATCH__ ]; then
+        printf '%s\n' 0000000000000000000000000000000000000000
+    else
+        printf '%s\n' abcdef1234567890abcdef1234567890abcdef12
+    fi
+    exit 0
+fi
+if [ "${1:-} ${2:-} ${3:-} ${4:-}" = "--repo github.com/0Bu/daikin-altherma-esp32 pr create" ]; then
+    [ "${!#}" = --draft ] || exit 106
+    printf '%s\n' "$*" >__WRAPPER_ARGS__
+    printf '%s\n' 'https://github.com/0Bu/daikin-altherma-esp32/pull/123'
+    exit 0
+fi
+if [ "$*" = "pr view 123 --repo github.com/0Bu/daikin-altherma-esp32 --json headRefOid --jq .headRefOid" ]; then
+    if [ -e __WRAPPER_CREATED_LOOKUP_FAIL__ ] && [ ! -e __WRAPPER_READY__ ]; then
+        exit 107
+    elif [ -e __WRAPPER_PUBLISHED_LOOKUP_FAIL__ ] && [ -e __WRAPPER_READY__ ]; then
+        exit 108
+    elif [ -e __WRAPPER_CREATED_MISMATCH__ ] && [ ! -e __WRAPPER_READY__ ]; then
+        printf '%s\n' 0000000000000000000000000000000000000000
+    elif [ -e __WRAPPER_PUBLISHED_MISMATCH__ ] && [ -e __WRAPPER_READY__ ]; then
+        printf '%s\n' 0000000000000000000000000000000000000000
+    else
+        printf '%s\n' abcdef1234567890abcdef1234567890abcdef12
+    fi
+    exit 0
+fi
+if [ "$*" = "pr close 123 --repo github.com/0Bu/daikin-altherma-esp32" ]; then
+    printf '%s\n' closed >__WRAPPER_CLOSED__
+    exit 0
+fi
+if [ "$*" = "pr ready 123 --repo github.com/0Bu/daikin-altherma-esp32" ]; then
+    [ ! -e __WRAPPER_READY_FAIL__ ] || exit 109
+    printf '%s\n' ready >__WRAPPER_READY__
+    exit 0
+fi
+git selftest-child-probe || exit 104
 printf '%s\n' "$*" >__WRAPPER_ARGS__
 printf '%s\n' "$GH_CONFIG_DIR" >__WRAPPER_CONFIG_PATH__
 EOF
@@ -365,13 +636,25 @@ EOF
 sed \
     -e "s#__WRAPPER_CREDENTIAL_FILE__#$wrapper_credential_file#g" \
     -e "s#__WRAPPER_MARKER__#$wrapper_marker#g" \
+    -e "s#__WRAPPER_CHILD_MARKER__#$wrapper_child_marker#g" \
     -e "s#__WRAPPER_FAIL_TOGGLE__#$wrapper_fail_toggle#g" \
+    -e "s#__WRAPPER_REPLACE_REF__#$wrapper_replace_toggle#g" \
+    -e "s#__WRAPPER_PROJECT_ROOT__#$wrapper_fixture_root#g" \
     "$wrapper_bin/git" >"$wrapper_bin/git.rendered"
 mv "$wrapper_bin/git.rendered" "$wrapper_bin/git"
 sed \
     -e "s#__WRAPPER_HOSTILE_CONFIG__#$wrapper_hostile_config#g" \
     -e "s#__WRAPPER_ARGS__#$wrapper_args#g" \
     -e "s#__WRAPPER_CONFIG_PATH__#$wrapper_config_path#g" \
+    -e "s#__WRAPPER_REMOTE_MISMATCH__#$wrapper_remote_mismatch_toggle#g" \
+    -e "s#__WRAPPER_CREATED_MISMATCH__#$wrapper_created_mismatch_toggle#g" \
+    -e "s#__WRAPPER_CREATED_LOOKUP_FAIL__#$wrapper_created_lookup_fail_toggle#g" \
+    -e "s#__WRAPPER_READY_FAIL__#$wrapper_ready_fail_toggle#g" \
+    -e "s#__WRAPPER_PUBLISHED_LOOKUP_FAIL__#$wrapper_published_lookup_fail_toggle#g" \
+    -e "s#__WRAPPER_PUBLISHED_MISMATCH__#$wrapper_published_mismatch_toggle#g" \
+    -e "s#__WRAPPER_CLOSED__#$wrapper_closed_marker#g" \
+    -e "s#__WRAPPER_READY__#$wrapper_ready_marker#g" \
+    -e "s#__WRAPPER_REPLACE_REF__#$wrapper_replace_toggle#g" \
     "$wrapper_bin/gh" >"$wrapper_bin/gh.rendered"
 mv "$wrapper_bin/gh.rendered" "$wrapper_bin/gh"
 sed -e "s#__WRAPPER_INJECTED_MARKER__#$wrapper_injected_marker#g" \
@@ -379,15 +662,26 @@ sed -e "s#__WRAPPER_INJECTED_MARKER__#$wrapper_injected_marker#g" \
 mv "$wrapper_injected_helper.rendered" "$wrapper_injected_helper"
 chmod +x "$wrapper_bin/git" "$wrapper_bin/gh" "$wrapper_injected_helper"
 : >"$wrapper_credential_file"
-wrapper_under_test="$tmp/gh-with-git-credentials.sh"
+mkdir -p "$wrapper_fixture_root/scripts" "$wrapper_fixture_root/tools/agent-hooks" \
+    "$wrapper_fixture_root/tools/agent-policy"
+cp "$root/tools/agent-hooks/pr-gate-lib.sh" "$wrapper_fixture_root/tools/agent-hooks/"
+cp "$root/tools/agent-hooks/require-pr-gates.sh" "$wrapper_fixture_root/tools/agent-hooks/"
+cp "$root/tools/agent-hooks/merge_payload.py" "$wrapper_fixture_root/tools/agent-hooks/"
+cp "$root/tools/agent-hooks/run_with_timeout.py" "$wrapper_fixture_root/tools/agent-hooks/"
+cp "$root/tools/agent-policy/extract_changed_files.py" "$wrapper_fixture_root/tools/agent-policy/"
+chmod +x "$wrapper_fixture_root/tools/agent-hooks/require-pr-gates.sh"
+wrapper_under_test="$wrapper_fixture_root/scripts/gh-with-git-credentials.sh"
+wrapper_python="$(command -v python3)"
 sed \
     -e "s#^GH_BINARY_CANDIDATES=.*#GH_BINARY_CANDIDATES='$wrapper_bin/gh'#" \
     -e "s#^GIT_BINARY_CANDIDATES=.*#GIT_BINARY_CANDIDATES='$wrapper_bin/git'#" \
+    -e "s#^PYTHON_BINARY_CANDIDATES=.*#PYTHON_BINARY_CANDIDATES='$wrapper_python'#" \
     -e "s#^    credential_file=.*#    credential_file='$wrapper_credential_file'#" \
     "$root/scripts/gh-with-git-credentials.sh" >"$wrapper_under_test"
 chmod +x "$wrapper_under_test"
 mkdir -p "$wrapper_hostile_config"
 printf '%s\n' 'http_unix_socket: /tmp/untrusted.sock' >"$wrapper_hostile_config/config.yml"
+rm -f "$wrapper_child_marker"
 wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
     GH_CONFIG_DIR="$wrapper_hostile_config" XDG_CONFIG_HOME="$wrapper_hostile_config" \
     GH_ENTERPRISE_TOKEN=selftest-enterprise-token \
@@ -402,13 +696,16 @@ wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin"
     HTTP_PROXY=http://127.0.0.1:9 ALL_PROXY=socks5://127.0.0.1:9 \
     SSL_CERT_FILE=/tmp/untrusted-ca.pem SSL_CERT_DIR=/tmp/untrusted-ca-dir \
     LD_AUDIT=/tmp/untrusted-audit.so \
+    token=selftest-ambient-token \
+    'BAD-NAME=selftest-invalid' '9BAD=selftest-invalid' \
+    'BASH_FUNC_evil%%=() { printf injected; }' \
     "$wrapper_under_test" \
     pr view 5 --json number 2>&1)"; rc=$?
 wrapper_seen_config="$(cat "$wrapper_config_path" 2>/dev/null || true)"
 if [ "$rc" -eq 0 ] \
     && [ "$(cat "$wrapper_args" 2>/dev/null)" = "pr view 5 --json number" ] \
     && [ -n "$wrapper_seen_config" ] && [ "$wrapper_seen_config" != "$wrapper_hostile_config" ] \
-    && [ ! -e "$wrapper_seen_config" ] && [ -e "$wrapper_marker" ] \
+    && [ ! -e "$wrapper_seen_config" ] && [ -e "$wrapper_marker" ] && [ -e "$wrapper_child_marker" ] \
     && [ ! -e "$wrapper_injected_marker" ] \
     && ! printf '%s' "$wrapper_out" | grep -qF 'selftest-wrapper-token'; then
     echo "PASS  credential-store and gh ignore hostile Git, loader, proxy, and TLS state"; pass=$((pass + 1))
@@ -417,7 +714,7 @@ else
     fail=$((fail + 1))
 fi
 
-rm -f "$wrapper_args" "$wrapper_marker"
+rm -f "$wrapper_args" "$wrapper_marker" "$wrapper_closed_marker" "$wrapper_ready_marker"
 wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
     "$wrapper_under_test" pr view 5 --json number 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ] && [ ! -e "$wrapper_marker" ] && [ -z "$wrapper_out" ] \
@@ -425,6 +722,35 @@ if [ "$rc" -eq 0 ] && [ ! -e "$wrapper_marker" ] && [ -z "$wrapper_out" ] \
     echo "PASS  pre-authenticated CI token bypasses Git credential lookup"; pass=$((pass + 1))
 else
     echo "FAIL  pre-authenticated wrapper path touched Git credentials (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+
+tmp_physical="$(cd "$tmp" && pwd -P)"
+wrapper_body_file="$tmp_physical/wrapper-body.md"
+printf '%s\n' 'review body canary' >"$wrapper_body_file"
+rm -f "$wrapper_args" "$wrapper_marker"
+wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
+    "$wrapper_under_test" pr edit 5 --body-file "$wrapper_body_file" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && [ ! -e "$wrapper_marker" ] && [ -z "$wrapper_out" ] \
+    && [ "$(cat "$wrapper_args" 2>/dev/null)" = "pr edit 5 --body review body canary" ]; then
+    echo "PASS  PR body files are read before credential forwarding"; pass=$((pass + 1))
+else
+    echo "FAIL  safe PR body file was not converted before credential forwarding (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+
+rm -f "$wrapper_args" "$wrapper_marker"
+wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
+    "$wrapper_under_test" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/selftest-pr --base main --title 'Selftest PR' \
+    --body-file "$wrapper_body_file" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && [ ! -e "$wrapper_marker" ] && [ -e "$wrapper_ready_marker" ] \
+    && [ ! -e "$wrapper_closed_marker" ] \
+    && [ "$wrapper_out" = 'https://github.com/0Bu/daikin-altherma-esp32/pull/123' ] \
+    && [ "$(cat "$wrapper_args" 2>/dev/null)" = "--repo github.com/0Bu/daikin-altherma-esp32 pr create --head agent/selftest-pr --base main --title Selftest PR --body review body canary --draft" ]; then
+    echo "PASS  exact noninteractive PR creation reaches gh without repository discovery"; pass=$((pass + 1))
+else
+    echo "FAIL  exact PR creation form was not preserved (rc=$rc output=$wrapper_out)" >&2
     fail=$((fail + 1))
 fi
 
@@ -499,6 +825,40 @@ wrapper_block_case() {
         fail=$((fail + 1))
     fi
 }
+wrapper_link="$tmp/wrapper-entry-link"
+ln -s "$wrapper_under_test" "$wrapper_link"
+rm -f "$wrapper_marker" "$wrapper_args"
+wrapper_out="$(env GH_TOKEN=selftest-wrapper-token "$wrapper_link" pr view 5 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] && [ ! -e "$wrapper_args" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'must not be invoked through a symlink'; then
+    echo "PASS  credential wrapper rejects a symlinked entry point"; pass=$((pass + 1))
+else
+    echo "FAIL  credential wrapper accepted a symlinked entry point (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+wrapper_foreign_dir="$tmp_physical/foreign-wrapper/scripts"
+mkdir -p "$wrapper_foreign_dir"
+cp "$wrapper_under_test" "$wrapper_foreign_dir/gh-with-git-credentials.sh"
+chmod +x "$wrapper_foreign_dir/gh-with-git-credentials.sh"
+wrapper_out="$(env GH_TOKEN=selftest-wrapper-token \
+    "$wrapper_foreign_dir/gh-with-git-credentials.sh" pr view 5 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$wrapper_out" | grep -qF 'not inside a Git worktree'; then
+    echo "PASS  credential wrapper rejects a copied foreign entry point"; pass=$((pass + 1))
+else
+    echo "FAIL  credential wrapper accepted a copied foreign entry point (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+rm -f "$wrapper_marker" "$wrapper_args"
+: >"$wrapper_replace_toggle"
+wrapper_out="$(env GH_TOKEN=selftest-wrapper-token "$wrapper_under_test" pr view 5 2>&1)"; rc=$?
+rm -f "$wrapper_replace_toggle"
+if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] && [ ! -e "$wrapper_args" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'replacement refs are forbidden'; then
+    echo "PASS  credential wrapper rejects Git replacement refs"; pass=$((pass + 1))
+else
+    echo "FAIL  credential wrapper accepted Git replacement refs (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
 wrapper_block_case "credential wrapper rejects a foreign hostname before lookup" \
     "only github.com is allowed" api --hostname ghe.example user
 wrapper_block_case "credential wrapper rejects a foreign host-qualified repo before lookup" \
@@ -511,24 +871,283 @@ wrapper_block_case "credential wrapper rejects token-output commands before look
     "authentication commands are not allowed" auth token
 wrapper_block_case "credential wrapper rejects absolute API targets before lookup" \
     "absolute API URLs are not allowed" api https://ghe.example/user
+wrapper_block_case "credential wrapper rejects mixed-case absolute API targets before lookup" \
+    "absolute API URLs are not allowed" api HtTpS://ghe.example/user
 wrapper_block_case "credential wrapper rejects verbose request output before lookup" \
     "verbose request output is not allowed" api --verbose user
+wrapper_block_case "credential wrapper rejects verbose assignments before lookup" \
+    "verbose request output is not allowed" api user --verbose=true
+wrapper_block_case "credential wrapper rejects jq environment output before lookup" \
+    "jq and template formatting are not allowed" api user --jq 'env.GH_TOKEN'
+wrapper_block_case "credential wrapper rejects combined jq output before lookup" \
+    "jq and template formatting are not allowed" api user -qenv.GH_TOKEN
+wrapper_block_case "credential wrapper rejects clustered jq output before lookup" \
+    "combined short options are not allowed" api user -iqenv.GH_TOKEN
+wrapper_block_case "credential wrapper rejects template output before lookup" \
+    "jq and template formatting are not allowed" api user --template '{{.}}'
 wrapper_block_case "credential wrapper rejects browser execution before lookup" \
     "browser and editor execution is not allowed" pr view 5 --web
+wrapper_block_case "credential wrapper rejects browser assignments before lookup" \
+    "browser and editor execution is not allowed" pr view 5 --web=true
+wrapper_block_case "credential wrapper rejects short browser execution before lookup" \
+    "browser and editor execution is not allowed" pr view 5 -w
 wrapper_block_case "credential wrapper rejects editor execution before lookup" \
     "browser and editor execution is not allowed" issue create --editor
+wrapper_block_case "credential wrapper rejects editor assignments before lookup" \
+    "browser and editor execution is not allowed" issue create --editor=true
+wrapper_block_case "credential wrapper rejects short editor execution before lookup" \
+    "browser and editor execution is not allowed" issue create -e
+wrapper_block_case "credential wrapper rejects process environment files before lookup" \
+    "process pseudo-files are not allowed" pr comment 5 --body-file /proc/thread-self/environ
+wrapper_body_link="$tmp/wrapper-body-link.md"
+ln -s "$wrapper_body_file" "$wrapper_body_link"
+wrapper_block_case "credential wrapper rejects symlinked body files before lookup" \
+    "cannot read the requested PR body file safely" pr edit 5 --body-file "$wrapper_body_link"
+wrapper_body_parent_link="$tmp/wrapper-body-parent-link"
+ln -s "$tmp" "$wrapper_body_parent_link"
+wrapper_block_case "credential wrapper rejects symlinked body parent directories before lookup" \
+    "cannot read the requested PR body file safely" pr edit 5 --body-file "$wrapper_body_parent_link/wrapper-body.md"
+wrapper_secret_body="$tmp_physical/.git-credentials"
+printf '%s\n' 'harmless-secret-path-canary' >"$wrapper_secret_body"
+wrapper_block_case "credential wrapper rejects credential-named body files before lookup" \
+    "cannot read the requested PR body file safely" pr edit 5 --body-file "$wrapper_secret_body"
+wrapper_env_body="$tmp_physical/.env.production"
+printf '%s\n' 'harmless-env-path-canary' >"$wrapper_env_body"
+wrapper_block_case "credential wrapper rejects environment body files before lookup" \
+    "cannot read the requested PR body file safely" pr edit 5 --body-file "$wrapper_env_body"
+wrapper_package_body="$tmp_physical/.npmrc"
+printf '%s\n' 'harmless-package-path-canary' >"$wrapper_package_body"
+wrapper_block_case "credential wrapper rejects package credential body files before lookup" \
+    "cannot read the requested PR body file safely" pr edit 5 --body-file "$wrapper_package_body"
+wrapper_yaml_body="$tmp_physical/credentials.yml"
+printf '%s\n' 'harmless-yaml-path-canary' >"$wrapper_yaml_body"
+wrapper_block_case "credential wrapper rejects credential YAML body files before lookup" \
+    "cannot read the requested PR body file safely" pr edit 5 --body-file "$wrapper_yaml_body"
+wrapper_docker_dir="$tmp_physical/.docker"
+mkdir -p "$wrapper_docker_dir"
+wrapper_docker_body="$wrapper_docker_dir/config.json"
+printf '%s\n' 'harmless-docker-path-canary' >"$wrapper_docker_body"
+wrapper_block_case "credential wrapper rejects Docker credential body files before lookup" \
+    "cannot read the requested PR body file safely" pr edit 5 --body-file "$wrapper_docker_body"
+wrapper_key_body="$tmp_physical/selftest-private.pem"
+printf '%s\n' 'harmless-key-path-canary' >"$wrapper_key_body"
+wrapper_block_case "credential wrapper rejects private-key body files before lookup" \
+    "cannot read the requested PR body file safely" pr edit 5 --body-file "$wrapper_key_body"
+wrapper_hardlink_body="$tmp_physical/wrapper-body-hardlink.md"
+ln "$wrapper_body_file" "$wrapper_hardlink_body"
+wrapper_block_case "credential wrapper rejects hardlinked body files before lookup" \
+    "cannot read the requested PR body file safely" pr edit 5 --body-file "$wrapper_hardlink_body"
+rm -f "$wrapper_hardlink_body"
+wrapper_block_case "credential wrapper rejects process pseudo-file arguments before lookup" \
+    "process pseudo-files are not allowed" api /proc/thread-self/environ
+wrapper_block_case "credential wrapper rejects API file input before lookup" \
+    "local file input is not allowed" api --input /tmp/request.json repos/0Bu/daikin-altherma-esp32/pulls/5
+wrapper_block_case "credential wrapper rejects typed file fields before lookup" \
+    "local file input is not allowed" api -F body=@/tmp/body.txt repos/0Bu/daikin-altherma-esp32/pulls/5
+wrapper_block_case "credential wrapper rejects short body-file input before lookup" \
+    "local file input is not allowed" pr edit 5 -F "$wrapper_body_link"
+wrapper_block_case "credential wrapper rejects relative body files before lookup" \
+    "physical absolute path" pr edit 5 --body-file wrapper-body.md
 wrapper_block_case "credential wrapper rejects checkout subprocesses before lookup" \
     "Git-spawning PR and repository commands are not allowed" pr checkout 5
-wrapper_block_case "credential wrapper rejects PR creation before lookup" \
-    "Git-spawning PR and repository commands are not allowed" pr create
+wrapper_block_case "credential wrapper rejects checkout aliases before lookup" \
+    "Git-spawning PR and repository commands are not allowed" pr co 5
+wrapper_block_case "credential wrapper rejects incomplete PR creation before lookup" \
+    "exact reviewed noninteractive repository form" pr create
+wrapper_block_case "credential wrapper rejects PR creation commit-fill before lookup" \
+    "exact reviewed noninteractive repository form" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/selftest-pr --base main --fill --title selftest --body selftest
+wrapper_block_case "credential wrapper rejects PR creation against another base before lookup" \
+    "exact reviewed noninteractive repository form" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/selftest-pr --base develop --title selftest --body selftest
+wrapper_block_case "credential wrapper rejects direct PR body text before lookup" \
+    "exact reviewed noninteractive repository form" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/selftest-pr --base main --title selftest --body selftest
+
+rm -f "$wrapper_args" "$wrapper_marker" "$wrapper_closed_marker" "$wrapper_ready_marker"
+: >"$wrapper_remote_mismatch_toggle"
+wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
+    "$wrapper_under_test" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/selftest-pr --base main --title selftest \
+    --body-file "$wrapper_body_file" 2>&1)"; rc=$?
+rm -f "$wrapper_remote_mismatch_toggle"
+if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] && [ ! -e "$wrapper_args" ] \
+    && [ ! -e "$wrapper_closed_marker" ] && [ ! -e "$wrapper_ready_marker" ]; then
+    echo "PASS  PR creation rejects a live GitHub head that differs from local HEAD"; pass=$((pass + 1))
+else
+    echo "FAIL  PR creation accepted a stale live GitHub head (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+rm -f "$wrapper_args" "$wrapper_marker" "$wrapper_closed_marker" "$wrapper_ready_marker"
+: >"$wrapper_created_mismatch_toggle"
+wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
+    "$wrapper_under_test" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/selftest-pr --base main --title selftest \
+    --body-file "$wrapper_body_file" 2>&1)"; rc=$?
+rm -f "$wrapper_created_mismatch_toggle"
+if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] && [ -e "$wrapper_closed_marker" ] \
+    && [ ! -e "$wrapper_ready_marker" ] \
+    && [ "$(cat "$wrapper_args" 2>/dev/null)" = "--repo github.com/0Bu/daikin-altherma-esp32 pr create --head agent/selftest-pr --base main --title selftest --body review body canary --draft" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'https://github.com/0Bu/daikin-altherma-esp32/pull/123' \
+    && printf '%s' "$wrapper_out" | grep -qF 'PR head changed during creation; the PR above was closed' \
+    && ! printf '%s' "$wrapper_out" | grep -qF 'selftest-wrapper-token'; then
+    echo "PASS  PR creation closes and reports a draft whose head moved after preflight"; pass=$((pass + 1))
+else
+    echo "FAIL  PR creation missed the created-PR head postcondition (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+rm -f "$wrapper_args" "$wrapper_marker" "$wrapper_closed_marker" "$wrapper_ready_marker"
+: >"$wrapper_created_lookup_fail_toggle"
+wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
+    "$wrapper_under_test" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/selftest-pr --base main --title selftest \
+    --body-file "$wrapper_body_file" 2>&1)"; rc=$?
+rm -f "$wrapper_created_lookup_fail_toggle"
+if [ "$rc" -eq 2 ] && [ -e "$wrapper_closed_marker" ] && [ ! -e "$wrapper_ready_marker" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'https://github.com/0Bu/daikin-altherma-esp32/pull/123' \
+    && printf '%s' "$wrapper_out" | grep -qF 'created PR head lookup failed; the PR above was closed' \
+    && ! printf '%s' "$wrapper_out" | grep -qF 'selftest-wrapper-token'; then
+    echo "PASS  PR creation closes and reports a draft after created-head lookup failure"; pass=$((pass + 1))
+else
+    echo "FAIL  created-head lookup failure left an unreported PR (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+rm -f "$wrapper_args" "$wrapper_marker" "$wrapper_closed_marker" "$wrapper_ready_marker"
+: >"$wrapper_ready_fail_toggle"
+wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
+    "$wrapper_under_test" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/selftest-pr --base main --title selftest \
+    --body-file "$wrapper_body_file" 2>&1)"; rc=$?
+rm -f "$wrapper_ready_fail_toggle"
+if [ "$rc" -eq 2 ] && [ -e "$wrapper_closed_marker" ] && [ ! -e "$wrapper_ready_marker" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'https://github.com/0Bu/daikin-altherma-esp32/pull/123' \
+    && printf '%s' "$wrapper_out" | grep -qF 'marking the draft ready failed; the PR above was closed' \
+    && ! printf '%s' "$wrapper_out" | grep -qF 'selftest-wrapper-token'; then
+    echo "PASS  PR creation closes and reports a draft after ready failure"; pass=$((pass + 1))
+else
+    echo "FAIL  ready failure left an unreported PR (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+rm -f "$wrapper_args" "$wrapper_marker" "$wrapper_closed_marker" "$wrapper_ready_marker"
+: >"$wrapper_published_lookup_fail_toggle"
+wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
+    "$wrapper_under_test" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/selftest-pr --base main --title selftest \
+    --body-file "$wrapper_body_file" 2>&1)"; rc=$?
+rm -f "$wrapper_published_lookup_fail_toggle"
+if [ "$rc" -eq 2 ] && [ -e "$wrapper_closed_marker" ] && [ -e "$wrapper_ready_marker" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'https://github.com/0Bu/daikin-altherma-esp32/pull/123' \
+    && printf '%s' "$wrapper_out" | grep -qF 'published PR head lookup failed; the PR above was closed' \
+    && ! printf '%s' "$wrapper_out" | grep -qF 'selftest-wrapper-token'; then
+    echo "PASS  PR creation closes and reports a ready PR after head lookup failure"; pass=$((pass + 1))
+else
+    echo "FAIL  published-head lookup failure left an unreported PR (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+rm -f "$wrapper_args" "$wrapper_marker" "$wrapper_closed_marker" "$wrapper_ready_marker"
+: >"$wrapper_published_mismatch_toggle"
+wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
+    "$wrapper_under_test" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/selftest-pr --base main --title selftest \
+    --body-file "$wrapper_body_file" 2>&1)"; rc=$?
+rm -f "$wrapper_published_mismatch_toggle"
+if [ "$rc" -eq 2 ] && [ -e "$wrapper_closed_marker" ] && [ -e "$wrapper_ready_marker" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'https://github.com/0Bu/daikin-altherma-esp32/pull/123' \
+    && printf '%s' "$wrapper_out" | grep -qF 'PR head changed while becoming ready; the PR above was closed' \
+    && ! printf '%s' "$wrapper_out" | grep -qF 'selftest-wrapper-token'; then
+    echo "PASS  PR creation closes and reports a ready PR whose head changed"; pass=$((pass + 1))
+else
+    echo "FAIL  published-head mismatch left an unreported PR (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+wrapper_block_case "credential wrapper rejects non-agent PR head before lookup" \
+    "explicit already-pushed agent branch" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head main --base main --title selftest --body-file "$wrapper_body_file"
+wrapper_block_case "credential wrapper rejects a PR head other than the checked-out branch" \
+    "PR head must equal the checked-out branch" --repo github.com/0Bu/daikin-altherma-esp32 \
+    pr create --head agent/other --base main --title selftest --body-file "$wrapper_body_file"
+wrapper_block_case "credential wrapper rejects PR creation aliases before lookup" \
+    "Git-spawning PR and repository commands are not allowed" pr new
+wrapper_block_case "credential wrapper rejects PR revert creation before lookup" \
+    "Git-spawning PR and repository commands are not allowed" pr revert 5
+wrapper_block_case "credential wrapper rejects issue transfer before lookup" \
+    "Git-spawning PR and repository commands are not allowed" issue transfer 5 ghe.example/owner/repo
+wrapper_block_case "credential wrapper rejects branch-deleting PR close before lookup" \
+    "Git-spawning PR and repository commands are not allowed" pr close 5 --delete-branch
 wrapper_block_case "credential wrapper rejects issue branch creation before lookup" \
     "Git-spawning PR and repository commands are not allowed" issue develop 5 --checkout
 wrapper_block_case "credential wrapper rejects repository forks before lookup" \
     "Git-spawning PR and repository commands are not allowed" repo fork 0Bu/example
 wrapper_block_case "credential wrapper rejects repository creation before lookup" \
     "Git-spawning PR and repository commands are not allowed" repo create example
+wrapper_block_case "credential wrapper rejects repository creation aliases before lookup" \
+    "Git-spawning PR and repository commands are not allowed" repo new example
+wrapper_block_case "credential wrapper rejects release creation aliases before lookup" \
+    "local-file, upload, download, and interactive commands are not allowed" release new v1.2.3
+wrapper_block_case "credential wrapper rejects release asset file reads before lookup" \
+    "local-file, upload, download, and interactive commands are not allowed" release verify-asset artifact.bin
+wrapper_block_case "credential wrapper rejects raw terminal escape output before lookup" \
+    "raw terminal escape output is not allowed" repo read-file owner/repo:path --allow-escape-sequences
+wrapper_block_case "credential wrapper rejects release downloads before lookup" \
+    "local-file, upload, download, and interactive commands are not allowed" release download v1.2.3
+wrapper_block_case "credential wrapper rejects run downloads before lookup" \
+    "local-file, upload, download, and interactive commands are not allowed" run download 123
+wrapper_block_case "credential wrapper rejects repository file reads before lookup" \
+    "local-file, upload, download, and interactive commands are not allowed" repo read-file owner/repo:path
 wrapper_block_case "credential wrapper rejects repository rename before lookup" \
     "Git-spawning PR and repository commands are not allowed" repo rename renamed
+wrapper_block_case "credential wrapper rejects repository default changes before lookup" \
+    "Git-spawning PR and repository commands are not allowed" repo set-default 0Bu/example
+wrapper_block_case "credential wrapper rejects positional foreign repositories before lookup" \
+    "--repo must name github.com/OWNER/REPO" repo view ghe.example/owner/repo
+wrapper_block_case "credential wrapper rejects SSH-style foreign repositories before lookup" \
+    "SSH-style repository targets are not allowed" repo view git@ghe.example:owner/repo
+wrapper_block_case "credential wrapper runtime gate rejects an arbitrary REST write" \
+    "aggregate GitHub action gate rejected" api --method PATCH \
+    repos/0Bu/daikin-altherma-esp32/git/refs/heads/main -f sha=abcdef1234567890abcdef1234567890abcdef12
+wrapper_block_case "credential wrapper runtime gate rejects an implicit REST write" \
+    "aggregate GitHub action gate rejected" api repos/0Bu/daikin-altherma-esp32/issues -f title=selftest
+wrapper_block_case "credential wrapper runtime gate rejects an unknown GraphQL mutation" \
+    "aggregate GitHub action gate rejected" api graphql -f \
+    'query=mutation { createIssue(input:{repositoryId:"R_123",title:"x"}) { clientMutationId } }'
+wrapper_block_case "credential wrapper runtime gate binds GraphQL to the endpoint position" \
+    "aggregate GitHub action gate rejected" api --method POST --preview graphql \
+    repos/0Bu/daikin-altherma-esp32/git/refs -f ref=refs/heads/x \
+    -f sha=abcdef1234567890abcdef1234567890abcdef12
+wrapper_block_case "credential wrapper runtime gate retires gh pr merge" \
+    "aggregate GitHub action gate rejected" pr merge 5 --squash
+
+rm -f "$wrapper_marker" "$wrapper_args"
+wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
+    GH_REPO=0Bu/daikin-altherma-esp32 "$wrapper_under_test" \
+    --repo github.com/0Bu/daikin-altherma-esp32 pr create --head agent/selftest-pr \
+    --base main --title selftest --body-file "$wrapper_body_file" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] && [ ! -e "$wrapper_args" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'PR creation does not accept an ambient GH_REPO override'; then
+    echo "PASS  credential wrapper rejects ambient PR repository selection"; pass=$((pass + 1))
+else
+    echo "FAIL  credential wrapper accepted ambient PR repository selection (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
+
+opaque_wrapper_caller="$tmp/opaque-wrapper-caller.sh"
+cat >"$opaque_wrapper_caller" <<'EOF'
+#!/usr/bin/env bash
+exec "$1" api --hostname github.com --method PUT \
+    repos/0Bu/daikin-altherma-esp32/pulls/5/merge \
+    -f sha=abcdef1234567890abcdef1234567890abcdef12 -f merge_method=squash
+EOF
+chmod +x "$opaque_wrapper_caller"
+rm -f "$wrapper_marker" "$wrapper_args"
+wrapper_out="$(cd "$tmp" && env GH_TOKEN=selftest-wrapper-token \
+    "$opaque_wrapper_caller" "$wrapper_under_test" 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -e "$wrapper_marker" ] && [ ! -e "$wrapper_args" ] \
+    && printf '%s' "$wrapper_out" | grep -qF 'merge execution directory is outside'; then
+    echo "PASS  opaque child invocation cannot bypass the wrapper runtime merge gate"; pass=$((pass + 1))
+else
+    echo "FAIL  opaque child invocation bypassed the wrapper runtime merge gate (rc=$rc output=$wrapper_out)" >&2
+    fail=$((fail + 1))
+fi
 rm -f "$wrapper_marker"
 wrapper_out="$(env -u GH_TOKEN -u GITHUB_TOKEN PATH="$wrapper_bin:/usr/bin:/bin" \
     GH_REPO=ghe.example/owner/repo "$wrapper_under_test" \
@@ -560,6 +1179,7 @@ lifecycle_root="$tmp/lifecycle-root"
 mkdir -p "$lifecycle_root/tools/agent-hooks" "$lifecycle_root/scripts" \
     "$lifecycle_root/main/logic" "$lifecycle_root/test" "$tmp/lifecycle-bin"
 cp "$hook" "$lifecycle_root/tools/agent-hooks/agent_hook.py"
+cp "$root/tools/agent-hooks/merge_payload.py" "$lifecycle_root/tools/agent-hooks/merge_payload.py"
 git -C "$lifecycle_root" init -q
 cat >"$lifecycle_root/scripts/run-mock-tests.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -855,7 +1475,7 @@ fi
 # A local merge keeps the historical last-mile UI and absence reruns, but uses the one already
 # discovered body/head/file set. Stub only the external PR and suite boundaries; exercise the real
 # aggregate parser, relevance filters, and failure propagation.
-merge_root="$tmp/merge-root"
+merge_root="$tmp_physical/merge-root"
 mkdir -p "$merge_root/scripts" "$merge_root/tools/absence" \
     "$merge_root/tools/agent-hooks" "$merge_root/tools/agent-policy" "$tmp/bin"
 cp "$root/tools/agent-hooks/pr-gate-lib.sh" "$merge_root/tools/agent-hooks/"
@@ -928,11 +1548,13 @@ EOF
 chmod +x "$tmp/bin/gh" "$merge_root/scripts/run-ui-use-case-tests.sh" \
     "$merge_root/scripts/run-ui-gif-audit.sh" "$merge_root/scripts/gh-with-git-credentials.sh" \
     "$merge_root/tools/absence/selftest.sh" "$merge_root/tools/agent-hooks/require-pr-gates.sh"
+git -C "$merge_root" add -- scripts/gh-with-git-credentials.sh
 
 AGENT_TEST_PAYLOAD_CWD="$merge_root"
 export GH_TOKEN=agent-hook-selftest-token
 pr_gate="$merge_root/tools/agent-hooks/require-pr-gates.sh"
-merge_input="$(payload Bash command "$merge_root/scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash")"
+canonical_merge_command="scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f merge_method=squash"
+merge_input="$(payload Bash command "$canonical_merge_command")"
 suite_log="$tmp/suites.log"
 out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \
     AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
@@ -1025,10 +1647,11 @@ for guarded_command in \
     guarded_input="$(payload Bash command "$guarded_command")"
     out="$(printf '%s' "$guarded_input" | env PATH="$tmp/bin:$PATH" \
         AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
-    if [ "$rc" -eq 0 ] && [ "$(cat "$suite_log" 2>/dev/null)" = $'uigif\nui\nabsence' ]; then
-        echo "PASS  wrapped merge is gated: $guarded_command"; pass=$((pass + 1))
+    if [ "$rc" -eq 2 ] && [ ! -s "$suite_log" ] \
+        && printf '%s' "$out" | grep -qF 'may activate auto-merge or a merge queue'; then
+        echo "PASS  wrapped queue-capable gh pr merge is retired: $guarded_command"; pass=$((pass + 1))
     else
-        echo "FAIL  wrapped merge bypassed policy: $guarded_command (rc=$rc output=$out)" >&2
+        echo "FAIL  wrapped queue-capable gh pr merge remained supported: $guarded_command (rc=$rc output=$out)" >&2
         fail=$((fail + 1))
     fi
 done
@@ -1074,15 +1697,55 @@ for blocked_command in \
     'c=gh; $c pr merge 123' \
     '$(command -v gh) pr merge 123' \
     'gh api --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge' \
+    "scripts/gh-with-git-credentials.sh api --method PATCH repos/0Bu/daikin-altherma-esp32/git/refs/heads/main -f sha=$head_sha" \
+    "scripts/gh-with-git-credentials.sh api --method PUT repos/0Bu/daikin-altherma-esp32/contents/selftest.txt -f message=selftest -f content=eA==" \
+    "scripts/gh-with-git-credentials.sh api repos/0Bu/daikin-altherma-esp32/issues -f title=selftest" \
+    "scripts/gh-with-git-credentials.sh api graphql -f 'query=mutation { createIssue(input:{repositoryId:\"R_123\",title:\"x\"}) { clientMutationId } }'" \
+    "gh api --method DELETE repos/0Bu/daikin-altherma-esp32/git/refs/heads/selftest" \
+    "gh api --hostname github.com --method POST repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f merge_method=squash" \
+    "gh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=1234567 -f merge_method=squash" \
+    "gh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f merge_method=merge" \
+    "gh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f sha=$head_sha -f merge_method=squash" \
+    "$canonical_merge_command; gh api --hostname github.com --method POST repos/0Bu/daikin-altherma-esp32/merges -f base=main -f head=feature" \
+    "$canonical_merge_command; gh pr view 123" \
     'gh api --method PUT "repos/0Bu/daikin-altherma-esp32/pulls/123/merge?merge_method=squash"' \
+    'gh api --method PUT "HtTpS://API.GITHUB.COM//repos/0Bu/daikin-altherma-esp32/pulls/123/%6derge/"' \
+    "gh api --hostname github.com --method PUT 'HtTpS://API.GITHUB.COM//repos/0Bu/daikin-altherma-esp32/pulls/123/%6derge/' -f sha=$head_sha -f merge_method=squash" \
+    'gh api --method PUT "HtTpS://API.GITHUB.COM//repos/0Bu/daikin-altherma-esp32/pulls/123/%6derge-async/"' \
+    "gh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge-async -f sha=$head_sha -f merge_method=squash" \
+    'gh api --method POST "HtTpS://API.GITHUB.COM//repos/0Bu/daikin-altherma-esp32/%6derges/" -f base=main -f head=feature' \
+    'gh api --method PUT "//repos/0Bu/daikin-altherma-esp32/pulls/123/%6derge"' \
+    "gh api --hostname github.com --method PUT '//repos/0Bu/daikin-altherma-esp32/pulls/123/%6derge' -f sha=$head_sha -f merge_method=squash" \
+    'gh api --method PUT "//repos/0Bu/daikin-altherma-esp32/pulls/123/%6derge-async"' \
+    'gh api --method POST "//repos/0Bu/daikin-altherma-esp32/%6derges" -f base=main -f head=feature' \
+    "gh api --hostname github.com --method PUT 'repos/0Bu/daikin-altherma-esp32/pulls/123/merge?apiVersion=2022-11-28' -f sha=$head_sha -f merge_method=squash" \
+    "gh api --hostname github.com --method PUT Repos/0Bu/daikin-altherma-esp32/Pulls/123/Merge -f sha=$head_sha -f merge_method=squash" \
     'gh pr merge "$PR_NUMBER" --squash' \
     'gh api --method PUT "repos/0Bu/daikin-altherma-esp32/pulls/$PR_NUMBER/merge"' \
+    'action=merge; gh api --method PUT "repos/0Bu/daikin-altherma-esp32/pulls/123/$action"' \
+    "part=merge; gh api graphql -f \"query=mutation { \${part}PullRequest(input:{pullRequestId:\\\"PR_kwDO123\\\"}) { pullRequest { merged } } }\"" \
     "gh api graphql -f 'query=mutation { mergePullRequest(input:{pullRequestId:\"PR_kwDO123\"}) { pullRequest { merged } } }'" \
+    "gh api 'HtTpS://API.GITHUB.COM/%67raphql/' -f 'query=mutation { mergePullRequest(input:{pullRequestId:\"PR_kwDO123\"}) { pullRequest { merged } } }'" \
+    "gh api graphql -f 'query=mutation { mergeBranch(input:{repositoryId:\"R_123\",base:\"main\",head:\"feature\"}) { mergeCommit { oid } } }'" \
     "gh api graphql -f 'query=mutation { enqueuePullRequest(input:{pullRequestId:\"PR_kwDO123\"}) { pullRequest { merged } } }'" \
     'gh api graphql -F query=@mutation.graphql' \
     'gh api graphql --input query.json' \
+    'gh api "HtTpS://API.GITHUB.COM//%67raphql/" --input query.json' \
     "curl -d 'mutation { enablePullRequestAutoMerge(input:{pullRequestId:\"PR_kwDO123\"}) { pullRequest { merged } } }' https://api.github.com/graphql" \
+    'curl -X PUT "HtTpS://API.GITHUB.COM/repos/0Bu/daikin-altherma-esp32/pulls/123/%6derge/"' \
+    'curl -X PUT "HtTpS://API.GITHUB.COM/repos/0Bu/daikin-altherma-esp32/pulls/123/%6derge-async/"' \
+    'curl -X POST "HtTpS://API.GITHUB.COM/repos/0Bu/daikin-altherma-esp32/%6derges/" -d base=main -d head=feature' \
+    'curl --url=https://api.github.com/repos/0Bu/daikin-altherma-esp32/git/refs/heads/main -X PATCH -d sha=abcdef' \
+    'curl --config /tmp/curl-selftest.conf' \
+    'c=curl; "$c" --url=https://api.github.com/repos/0Bu/daikin-altherma-esp32/git/refs/heads/main -X PATCH -d sha=abcdef' \
+    'c=curl; "$c" --config /tmp/curl-selftest.conf' \
+    'c'"''"'url -X PUT "HtTpS://API.GITHUB.COM/repos/0Bu/daikin-altherma-esp32/pulls/123/%6derge-async/"' \
+    '/usr/bin/cur[l] -X POST "HtTpS://API.GITHUB.COM/repos/0Bu/daikin-altherma-esp32/%6derges/" -d base=main -d head=feature' \
+    "curl -d 'mutation { mergePullRequest(input:{pullRequestId:\"PR_kwDO123\"}) { pullRequest { merged } } }' 'HtTpS://API.GITHUB.COM//%67raphql/'" \
     'curl -X POST https://api.github.com/graphql --data-binary @query.json' \
+    'curl -X POST "HtTpS://API.GITHUB.COM//%67raphql/" --data-binary @query.json' \
+    'c'"''"'url "HtTpS://API.GITHUB.COM//%67raphql/" -d@query.json' \
+    'curl "HtTpS://API.GITHUB.COM//%67raphql/" --d'"''"'ata-binary @query.json' \
     "gh pr merge --match-head-commit $head_sha --squash" \
     "gh pr merge feature/target --match-head-commit $head_sha --squash" \
     "printf '%s' 'gh pr merge 123 --squash' | bash" \
@@ -1102,10 +1765,22 @@ for blocked_command in \
     fi
 done
 
-workdir_merge_input="$(python3 - "$merge_root" "$head_sha" <<'PY'
+: >"$suite_log"
+read_only_api_input="$(payload Bash command "scripts/gh-with-git-credentials.sh api --method GET repos/0Bu/daikin-altherma-esp32/git/ref/heads/main")"
+out="$(printf '%s' "$read_only_api_input" | env PATH="$tmp/bin:$PATH" \
+    AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && [ ! -s "$suite_log" ]; then
+    echo "PASS  provably read-only GitHub API request bypasses merge-only suites"; pass=$((pass + 1))
+else
+    echo "FAIL  read-only GitHub API request was treated as a merge/write action (rc=$rc output=$out)" >&2
+    fail=$((fail + 1))
+fi
+
+merge_root_real="$(cd "$merge_root" && pwd -P)"
+workdir_merge_input="$(python3 - "$merge_root" "$head_sha" "$merge_root_real" <<'PY'
 import json, sys
 print(json.dumps({"cwd": sys.argv[1], "tool_name": "exec_command", "tool_input": {
-    "command": f"gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit {sys.argv[2]} --squash", "workdir": "/tmp"
+    "command": f"{sys.argv[3]}/scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha={sys.argv[2]} -f merge_method=squash", "workdir": "/tmp"
 }}))
 PY
 )"
@@ -1121,7 +1796,7 @@ fi
 conflicting_workdir_merge="$(python3 - "$merge_root" "$head_sha" <<'PY'
 import json, sys
 print(json.dumps({"cwd": sys.argv[1], "tool_name": "shell", "tool_input": {
-    "command": f"gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit {sys.argv[2]} --squash",
+    "command": f"scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha={sys.argv[2]} -f merge_method=squash",
     "workdir": ".", "cwd": "/tmp/other"
 }}))
 PY
@@ -1135,7 +1810,7 @@ else
     fail=$((fail + 1))
 fi
 
-selector_override_input="$(payload Bash command "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 456 --match-head-commit $head_sha --squash")"
+selector_override_input="$(payload Bash command "scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/456/merge -f sha=$head_sha -f merge_method=squash")"
 out="$(printf '%s' "$selector_override_input" | env PATH="$tmp/bin:$PATH" AGENT_PR_SELECTOR=123 \
     AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
 if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'selector conflicts'; then
@@ -1145,7 +1820,7 @@ else
     fail=$((fail + 1))
 fi
 
-missing_cwd_merge="{\"tool_name\":\"exec_command\",\"tool_input\":{\"cmd\":\"gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash\"}}"
+missing_cwd_merge="{\"tool_name\":\"exec_command\",\"tool_input\":{\"cmd\":\"scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f merge_method=squash\"}}"
 out="$(printf '%s' "$missing_cwd_merge" | env PATH="$tmp/bin:$PATH" \
     AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
 if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'no execution cwd'; then
@@ -1171,20 +1846,20 @@ else
     fail=$((fail + 1))
 fi
 
-implicit_repo_input="$(payload Bash command "gh pr merge 123 --match-head-commit $head_sha --squash")"
+implicit_repo_input="$(payload Bash command "gh api --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f merge_method=squash")"
 out="$(printf '%s' "$implicit_repo_input" | env PATH="$tmp/bin:$PATH" GH_REPO="owner/other" \
     AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
-if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'must use exactly --repo'; then
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'needs exactly --hostname github.com'; then
     echo "PASS  inherited GH_REPO cannot replace explicit command binding"; pass=$((pass + 1))
 else
     echo "FAIL  inherited GH_REPO replaced explicit command binding (rc=$rc output=$out)" >&2
     fail=$((fail + 1))
 fi
 
-implicit_host_input="$(payload Bash command "gh --repo 0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash")"
+implicit_host_input="$(payload Bash command "gh api --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f merge_method=squash")"
 out="$(printf '%s' "$implicit_host_input" | env PATH="$tmp/bin:$PATH" GH_HOST=ghe.example \
     AGENT_PROJECT_DIR="$merge_root" AGENT_SUITE_LOG="$suite_log" "$pr_gate" 2>&1)"; rc=$?
-if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'must use exactly --repo'; then
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF 'needs exactly --hostname github.com'; then
     echo "PASS  inherited GH_HOST cannot replace explicit command binding"; pass=$((pass + 1))
 else
     echo "FAIL  inherited GH_HOST replaced explicit command binding (rc=$rc output=$out)" >&2
@@ -1220,7 +1895,7 @@ for blocked_mcp_input in \
         && printf '%s' "$out" | grep -qF 'MCP merge and auto-merge activation tools are unsupported'; then
         echo "PASS  MCP merge/auto-merge activation is blocked"; pass=$((pass + 1))
     else
-        echo "FAIL  MCP merge/auto-merge activation bypassed CLI-only policy (rc=$rc output=$out)" >&2
+        echo "FAIL  MCP merge/auto-merge activation bypassed REST-only policy (rc=$rc output=$out)" >&2
         fail=$((fail + 1))
     fi
 done
@@ -1241,45 +1916,53 @@ raise SystemExit(0 if actual == expected else 1)' \
     fi
 }
 
-parser_case "canonical CLI merge remains bound" \
-    "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash" \
-    'gh pr merge' '123' '0Bu/daikin-altherma-esp32' 'github.com' ''
+noncanonical_merge_error="local merge actions must use this repository's reviewed credential wrapper"
+parser_case "literal gh cannot impersonate the canonical merge transport" \
+    "gh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f merge_method=squash" \
+    'gh api merge' '123' '0Bu/daikin-altherma-esp32' 'github.com' "$noncanonical_merge_error"
 parser_case "credential wrapper merge remains bound" \
-    "$root/scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash" \
-    'gh pr merge' '123' '0Bu/daikin-altherma-esp32' 'github.com' ''
+    "$root/scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f merge_method=squash" \
+    'gh api merge' '123' '0Bu/daikin-altherma-esp32' 'github.com' ''
+parser_case "foreign absolute gh cannot impersonate the canonical merge transport" \
+    "/tmp/gh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f merge_method=squash" \
+    'gh api merge' '123' '0Bu/daikin-altherma-esp32' 'github.com' "$noncanonical_merge_error"
+parser_case "PATH-selected gh cannot impersonate the canonical merge transport" \
+    "PATH=/tmp gh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha=$head_sha -f merge_method=squash" \
+    'gh api merge' '123' '0Bu/daikin-altherma-esp32' 'github.com' "$noncanonical_merge_error"
 parser_case "foreign same-name credential wrapper is not trusted" \
     "/tmp/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit $head_sha --squash" \
     'shell merge' '' '' '' 'literal merge operation is present but its executable or target is dynamic'
+retired_pr_merge_error='gh pr merge may activate auto-merge or a merge queue; use the canonical synchronous REST merge path'
 parser_case "branch merge selector is rejected" \
     "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge feature/target --match-head-commit $head_sha --squash" \
-    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'merge selector must be a static numeric pull request: feature/target'
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' "$retired_pr_merge_error"
 parser_case "subject option value is not a PR selector" \
     "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --subject x --match-head-commit $head_sha --squash" \
-    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'unsupported gh pr merge option: --subject'
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' "$retired_pr_merge_error"
 parser_case "body option value is not a PR selector" \
     "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --body x --match-head-commit $head_sha --squash" \
-    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'unsupported gh pr merge option: --body'
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' "$retired_pr_merge_error"
 parser_case "match-head option value is not a PR selector" \
     'gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit 1234567 --squash' \
-    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' '--match-head-commit must be a full static 40-hex SHA'
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' "$retired_pr_merge_error"
 parser_case "author-email option value is not a PR selector" \
     "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --author-email maintainer@example.invalid --match-head-commit $head_sha --squash" \
-    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'unsupported gh pr merge option: --author-email'
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' "$retired_pr_merge_error"
 parser_case "dynamic selector fails closed" \
     "gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge \"\$PR_NUMBER\" --match-head-commit $head_sha --squash" \
-    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' 'merge selector must be a static numeric pull request: $PR_NUMBER'
+    'gh pr merge' '' '0Bu/daikin-altherma-esp32' 'github.com' "$retired_pr_merge_error"
 parser_case "combined env split-string merge is recognized" \
-    "env -S'gh pr merge 123 --squash'" 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+    "env -S'gh pr merge 123 --squash'" 'gh pr merge' '123' '' '' "$retired_pr_merge_error"
 parser_case "locale-quoted merge executable is recognized" \
-    "bash -c 'g\$\"h\" pr merge 123 --squash'" 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+    "bash -c 'g\$\"h\" pr merge 123 --squash'" 'gh pr merge' '123' '' '' "$retired_pr_merge_error"
 parser_case "ANSI-C hex merge executable is recognized" \
-    "g\$'\\x68' pr merge 123 --squash" 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+    "g\$'\\x68' pr merge 123 --squash" 'gh pr merge' '123' '' '' "$retired_pr_merge_error"
 parser_case "line-continued merge executable is recognized" \
-    $'g\\\nh pr merge 123 --squash' 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+    $'g\\\nh pr merge 123 --squash' 'gh pr merge' '123' '' '' "$retired_pr_merge_error"
 parser_case "globbed merge executable is recognized" \
-    '/tmp/g[h] pr merge 123 --squash' 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+    '/tmp/g[h] pr merge 123 --squash' 'gh pr merge' '123' '' '' "$retired_pr_merge_error"
 parser_case "brace-range merge executable is recognized" \
-    'g{h..h} pr merge 123 --squash' 'gh pr merge' '123' '' '' 'gh pr merge needs exactly one full --match-head-commit'
+    'g{h..h} pr merge 123 --squash' 'gh pr merge' '123' '' '' "$retired_pr_merge_error"
 
 : >"$suite_log"
 out="$(printf '%s' "$merge_input" | env PATH="$tmp/bin:$PATH" \

@@ -69,7 +69,7 @@ fi
 echo "ui selftest: iPhone dynamic-viewport regression is detected"
 
 # Prove the neutral local merge gate fails closed without copying a runner-specific implementation.
-hook_tmp="$(mktemp -d)"
+hook_tmp="$(cd "$(mktemp -d)" && pwd -P)"
 mkdir -p "$hook_tmp/bin" "$hook_tmp/scripts" "$hook_tmp/tools/absence" \
   "$hook_tmp/tools/agent-hooks" "$hook_tmp/tools/agent-policy"
 cp "$proj/tools/agent-hooks/pr-gate-lib.sh" "$hook_tmp/tools/agent-hooks/"
@@ -163,10 +163,11 @@ esac
 EOF
 chmod +x "$hook_tmp/bin/gh"
 chmod +x "$hook_tmp/scripts/gh-with-git-credentials.sh"
+git -C "$hook_tmp" add -- scripts/gh-with-git-credentials.sh
 
 merge_input="$(python3 - "$hook_tmp" "$ui_head" <<'PY'
 import json, sys
-print(json.dumps({"cwd": sys.argv[1], "tool_name": "Bash", "tool_input": {"command": f"gh --repo github.com/0Bu/daikin-altherma-esp32 pr merge 123 --match-head-commit {sys.argv[2]} --squash"}}))
+print(json.dumps({"cwd": sys.argv[1], "tool_name": "Bash", "tool_input": {"command": f"scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/123/merge -f sha={sys.argv[2]} -f merge_method=squash"}}))
 PY
 )"
 mcp_merge_input="$(python3 - "$hook_tmp" <<'PY'
@@ -177,7 +178,7 @@ PY
 printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
   UI_GATE_BODY_FILE="$hook_tmp/body.md" UI_GATE_FILES_FILE="$hook_tmp/files.txt" \
   "$hook_tmp/tools/agent-hooks/require-pr-gates.sh" >/dev/null \
-  || { echo "ui selftest: neutral local CLI merge gate rejected current canonical UI proof" >&2; exit 1; }
+  || { echo "ui selftest: neutral local REST merge gate rejected current canonical UI proof" >&2; exit 1; }
 
 set +e
 mcp_out="$(printf '%s' "$mcp_merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
@@ -186,7 +187,7 @@ mcp_out="$(printf '%s' "$mcp_merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TO
 set -e
 [ "$mcp_rc" -eq 2 ] \
   && printf '%s' "$mcp_out" | grep -qF 'MCP merge and auto-merge activation tools are unsupported' \
-  || { echo "ui selftest: MCP merge bypassed the documented CLI-only path" >&2; exit 1; }
+  || { echo "ui selftest: MCP merge bypassed the documented REST-only path" >&2; exit 1; }
 
 set +e
 printf '%s' "$merge_input" | env PATH="$hook_tmp/bin:$PATH" GH_TOKEN=ui-hook-selftest-token AGENT_PROJECT_DIR="$hook_tmp" \
@@ -297,7 +298,7 @@ printf '%s\n' '- [ ] `$project-review` clean — merge gate @ <short-sha>' >"$un
 
 echo "ui selftest: merge hook accepts current proof and blocks failing or stale proof"
 echo "ui selftest: all $tpl_n PR-template stamp lines are readable by the merge gate"
-echo "ui selftest: bound CLI merge accepts current UI proof; MCP merge stays CLI-only"
+echo "ui selftest: bound REST merge accepts current UI proof; MCP merge stays REST-only"
 
 rm -rf "$hook_tmp"
 

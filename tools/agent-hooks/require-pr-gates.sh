@@ -72,6 +72,11 @@ if [ -n "$payload" ]; then
     parse_error="${fields[5]:-}"
     expected_head="${fields[6]:-}"
     [ -n "$action" ] || exit 0
+    if [ "$action" = "gh pr create" ]; then
+        [ -z "$parse_error" ] \
+            || { echo "BLOCKED: PR creation transport could not be bound safely: $parse_error" >&2; exit 2; }
+        exit 0
+    fi
     if [ -n "$selector" ] && [ "$selector" != "$parsed_selector" ]; then
         echo "BLOCKED: explicit PR selector conflicts with the merge action target." >&2
         exit 2

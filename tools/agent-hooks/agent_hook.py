@@ -13,12 +13,15 @@ import fnmatch
 import json
 import os
 from pathlib import Path
+import posixpath
 import re
 import shlex
 import shutil
 import subprocess
 import sys
 from typing import Any, Iterable
+
+from merge_payload import find_merge as classify_github_action
 
 
 FILE_TOOLS = {"read", "edit", "write"}
@@ -69,6 +72,25 @@ def payload_cwd(payload: dict[str, Any]) -> Path:
     if not isinstance(value, str) or not value:
         value = os.environ.get("AGENT_PROJECT_DIR") or os.environ.get("PROJECT_DIR") or os.getcwd()
     return Path(value).expanduser().resolve(strict=False)
+
+
+def effective_shell_cwd(payload: dict[str, Any]) -> tuple[Path | None, str | None]:
+    raw_cwd = payload.get("cwd")
+    if not isinstance(raw_cwd, str) or not raw_cwd.strip():
+        return None, "shell GitHub action payload has no execution cwd"
+    values = [
+        str(tool_input(payload)[key])
+        for key in ("workdir", "cwd")
+        if tool_input(payload).get(key) not in (None, "")
+    ]
+    distinct = list(dict.fromkeys(values))
+    if len(distinct) > 1:
+        return None, "conflicting workdir/cwd fields in GitHub action payload"
+    cwd = Path(raw_cwd).expanduser()
+    if distinct:
+        workdir = Path(distinct[0]).expanduser()
+        cwd = workdir if workdir.is_absolute() else cwd / workdir
+    return cwd.resolve(strict=False), None
 
 
 def project_root(payload: dict[str, Any]) -> Path:
@@ -240,14 +262,126 @@ def shell_injects_credential_wrapper(command: str) -> bool:
     if any(re.fullmatch(r"[;&|()!<>]+", token) for token in tokens):
         return True
     canonical_wrapper = str((HOOK_ROOT / "scripts/gh-with-git-credentials.sh").resolve())
-    return not tokens or tokens[0] not in {
+    if not tokens or tokens[0] not in {
         canonical_wrapper,
         "scripts/gh-with-git-credentials.sh",
         "./scripts/gh-with-git-credentials.sh",
-    }
+    }:
+        return True
+    if any(
+        tokens[index : index + 2]
+        in (
+            ["pr", "checkout"],
+            ["pr", "co"],
+            ["pr", "new"],
+            ["pr", "revert"],
+            ["issue", "transfer"],
+            ["release", "create"],
+            ["release", "new"],
+            ["release", "download"],
+            ["release", "upload"],
+            ["release", "verify-asset"],
+            ["repo", "create"],
+            ["repo", "new"],
+            ["repo", "read-file"],
+            ["repo", "set-default"],
+            ["run", "download"],
+        )
+        for index in range(len(tokens) - 1)
+    ):
+        return True
+    if any(tokens[index : index + 2] == ["pr", "close"] for index in range(len(tokens) - 1)) and any(
+        token in {"-d", "--delete-branch"} or token.startswith("--delete-branch=") for token in tokens
+    ):
+        return True
+
+    def foreign_repo_spec(value: str) -> bool:
+        parts = value.removesuffix(".git").split("/")
+        return (
+            len(parts) == 3
+            and parts[0].lower() != "github.com"
+            and all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in parts)
+        )
+
+    for index, token in enumerate(tokens[1:], 1):
+        if token in {"--repo", "-R"} and index + 1 < len(tokens):
+            if foreign_repo_spec(tokens[index + 1]):
+                return True
+        elif token.startswith("--repo=") and foreign_repo_spec(token.split("=", 1)[1]):
+            return True
+    if len(tokens) > 3 and tokens[1:3] == ["repo", "view"] and foreign_repo_spec(tokens[3]):
+        return True
+
+    return any(
+        token in {"--jq", "-q", "--template", "-t", "--verbose", "--web", "-w", "--editor", "-e", "-F", "--allow-escape-sequences"}
+        or token.startswith(("--jq=", "--template=", "--verbose=", "--web=", "--editor=", "--allow-escape-sequences="))
+        or (token.startswith("-q") and len(token) > 2)
+        or (token.startswith("-t") and len(token) > 2)
+        or re.fullmatch(r"-[^-].+", token) is not None
+        or "://" in token
+        or re.fullmatch(r"[^/:]+@?[^/:]*:[^/]+/[^/]+", token) is not None
+        for token in tokens[1:]
+    )
+
+
+def direct_credential_wrapper_token(command: str) -> str:
+    """Return the executable token for a direct, already-validated wrapper invocation."""
+    normalized = normalize_ansi_c_quotes(command).replace("\n", " ; ")
+    try:
+        lexer = shlex.shlex(normalized, posix=True, punctuation_chars=";&|()!<>")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return ""
+    canonical_wrapper = str((HOOK_ROOT / "scripts/gh-with-git-credentials.sh").resolve())
+    if tokens and tokens[0] in {
+        canonical_wrapper,
+        "scripts/gh-with-git-credentials.sh",
+        "./scripts/gh-with-git-credentials.sh",
+    }:
+        return tokens[0]
+    return ""
 
 
 SHELL_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", re.DOTALL)
+STATIC_VARIABLE = re.compile(r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$")
+
+
+def resolve_static_shell_token(token: str, assignments: dict[str, str]) -> tuple[str, bool]:
+    match = STATIC_VARIABLE.fullmatch(token)
+    if match:
+        value = assignments.get(match.group(1) or match.group(2))
+        if value is None or re.search(r"[$`;&|<>()]", value):
+            return token, False
+        return value, True
+    if re.search(r"[$`]", token):
+        return token, False
+    return token, True
+
+
+def token_may_name_command(token: str, *names: str) -> bool:
+    """Match a literal/static expansion, or a dynamic token that visibly names a command."""
+    for expanded in expand_static_braces(token):
+        if expanded == "__AGENT_AMBIGUOUS_BRACE__":
+            return True
+        candidate = Path(expanded).name
+        for name in names:
+            if candidate == name:
+                return True
+            if any(character in candidate for character in "*?[") and fnmatch.fnmatchcase(
+                name, candidate
+            ):
+                return True
+            if re.search(r"[$`]", candidate) and re.search(
+                rf"(?:^|[^A-Za-z0-9_-]){re.escape(name)}(?:[^A-Za-z0-9_-]|$)", candidate
+            ):
+                return True
+    return False
+
+
+def dynamic_command_token(token: str) -> bool:
+    return re.search(r"[$`]", token) is not None
 
 SUDO_OPTIONS_WITH_VALUE = {
     "-C",
@@ -386,8 +520,20 @@ def shell_token_sets(command: str, depth: int = 0) -> list[tuple[list[str], bool
                 segments.append([])
             continue
         segments[-1].append(token)
+    persistent_assignments: dict[str, str] = {}
     for segment_tokens in (segment for segment in segments if segment):
-        tokens, env_without_command = effective_shell_tokens(shlex.join(segment_tokens))
+        if all(SHELL_ASSIGNMENT.fullmatch(token) for token in segment_tokens):
+            for token in segment_tokens:
+                name, value = token.split("=", 1)
+                if re.search(r"[$`;&|<>()]", value):
+                    persistent_assignments.pop(name, None)
+                else:
+                    persistent_assignments[name] = value
+            continue
+        resolved_segment = [
+            resolve_static_shell_token(token, persistent_assignments)[0] for token in segment_tokens
+        ]
+        tokens, env_without_command = effective_shell_tokens(shlex.join(resolved_segment))
         results.append((tokens, env_without_command))
         if not tokens:
             continue
@@ -412,8 +558,6 @@ def shell_token_sets(command: str, depth: int = 0) -> list[tuple[list[str], bool
 def shell_dumps_environment(command: str) -> bool:
     if re.search(r"\bprintenv\b", command):
         return True
-    if re.search(r"/proc/(?:self|[0-9]+)/environ(?:[\s'\";&|<>]|$)", command):
-        return True
     if re.search(r"(?:^|[;&|]\s*)ps\s+e(?:w{0,2})(?:\s|$)", command):
         return True
     if re.search(r"\b(?:os\.(?:environ|getenv)|process\.env|ENVIRON)\b", command):
@@ -432,25 +576,37 @@ def shell_dumps_environment(command: str) -> bool:
             return True
         if not tokens:
             continue
-        executable = Path(tokens[0]).name
-        if executable == "ps" and any(
+        for token in tokens:
+            for candidate in re.split(r"[=@]", token):
+                normalized = posixpath.normpath(candidate)
+                components = [component for component in normalized.split("/") if component]
+                if components and components[-1] == "environ" and "proc" in components:
+                    return True
+        command_token = tokens[0]
+        executable = Path(command_token).name
+        if token_may_name_command(command_token, "ps") and any(
             (argument.startswith("-") and "E" in argument.lstrip("-"))
             or (not argument.startswith("-") and re.search(r"[eE]", argument))
             for argument in tokens[1:]
             if re.fullmatch(r"-?[A-Za-z]+", argument)
         ):
             return True
-        if executable == "printenv":
+        if token_may_name_command(command_token, "printenv"):
             return True
-        if executable == "set" and len(tokens) == 1:
+        if token_may_name_command(command_token, "env") and len(tokens) == 1:
+            return True
+        if token_may_name_command(command_token, "set") and len(tokens) == 1:
             return True
         # All three builtins have output-producing forms whose option semantics differ between
         # bash and zsh (`declare GH_TOKEN`, `typeset +x`, naked `readonly`, ...).  Agents do not
         # need these declaration builtins for repository work, so fail closed instead of trying to
         # maintain a shell-version-specific list of printing combinations.
-        if executable in {"declare", "typeset", "readonly"}:
+        if any(
+            token_may_name_command(command_token, name)
+            for name in ("declare", "typeset", "readonly")
+        ):
             return True
-        if executable == "export":
+        if token_may_name_command(command_token, "export"):
             args = tokens[1:]
             if (
                 not args
@@ -485,16 +641,25 @@ def shell_dumps_credentials(command: str) -> bool:
         for command_index, token in enumerate(tokens):
             executable = Path(token).name
             args = tokens[command_index + 1 :]
-            if executable in {"gh", "gh-with-git-credentials.sh"} and (
+            token_may_resolve_gh = token_may_name_command(token, "gh")
+            token_is_dynamic = dynamic_command_token(token)
+            if (token_may_resolve_gh or token_is_dynamic) and any(
+                argument in {"--jq", "-q", "--template", "-t"}
+                or argument.startswith(("--jq=", "--template="))
+                or re.fullmatch(r"-[A-Za-z]*[qt].*", argument) is not None
+                for argument in args
+            ):
+                return True
+            if (token_may_resolve_gh or token_is_dynamic or executable == "gh-with-git-credentials.sh") and (
                 any(args[index : index + 2] == ["auth", "token"] for index in range(len(args) - 1))
-                or "--show-token" in args
+                or any(argument == "--show-token" or argument.startswith("--show-token=") for argument in args)
                 or (
                     any(args[index : index + 2] == ["auth", "status"] for index in range(len(args) - 1))
                     and "-t" in args
                 )
             ):
                 return True
-            if executable == "git" and (
+            if (token_may_name_command(token, "git") or token_is_dynamic) and (
                 any(args[index : index + 2] == ["credential", "fill"] for index in range(len(args) - 1))
                 or any(
                     args[index].startswith("credential-") and args[index + 1] == "get"
@@ -502,11 +667,17 @@ def shell_dumps_credentials(command: str) -> bool:
                 )
             ):
                 return True
-            if executable.startswith("git-credential-") and args[:1] == ["get"]:
+            if (
+                executable.startswith("git-credential-")
+                or (token_is_dynamic and "credential" in token)
+            ) and args[:1] == ["get"]:
                 return True
-            if executable.startswith("docker-credential-") and args[:1] == ["get"]:
+            if (
+                executable.startswith("docker-credential-")
+                or (token_is_dynamic and "credential" in token)
+            ) and args[:1] == ["get"]:
                 return True
-            if executable == "aws" and any(
+            if (token_may_name_command(token, "aws") or token_is_dynamic) and any(
                 args[index : index + 2] == ["configure", "export-credentials"]
                 or (
                     args[index : index + 2] == ["configure", "get"]
@@ -517,22 +688,22 @@ def shell_dumps_credentials(command: str) -> bool:
                 for index in range(len(args))
             ):
                 return True
-            if executable == "gcloud" and any(
+            if (token_may_name_command(token, "gcloud") or token_is_dynamic) and any(
                 args[index : index + 2]
                 in (["auth", "print-access-token"], ["auth", "print-identity-token"])
                 or args[index : index + 3] == ["auth", "application-default", "print-access-token"]
                 for index in range(len(args))
             ):
                 return True
-            if executable == "kubectl" and any(
+            if (token_may_name_command(token, "kubectl") or token_is_dynamic) and any(
                 args[index : index + 2] == ["config", "view"] for index in range(len(args))
             ) and any(arg == "--raw" or arg.startswith("--raw=") for arg in args):
                 return True
-            if executable == "security" and any(arg.startswith("find-") for arg in args) and any(
+            if (token_may_name_command(token, "security") or token_is_dynamic) and any(arg.startswith("find-") for arg in args) and any(
                 arg in {"-g", "-w"} for arg in args
             ):
                 return True
-            if executable == "security" and "export" in args:
+            if (token_may_name_command(token, "security") or token_is_dynamic) and "export" in args:
                 return True
     return False
 
@@ -726,9 +897,22 @@ def secret_violation(payload: dict[str, Any]) -> str | None:
             return f"cannot determine the {tool} command from the hook payload"
         if shell_injects_credential_wrapper(command):
             return (
-                "the credential wrapper must be invoked directly without shell wrappers, assignments, "
-                "substitutions, redirections, or chaining"
+                "the credential wrapper must use the reviewed direct form without shell wrappers, "
+                "assignments, substitutions, redirections, chaining, or unreviewed output and child-process flags"
             )
+        wrapper_token = direct_credential_wrapper_token(command)
+        if wrapper_token:
+            effective_cwd, cwd_error = effective_shell_cwd(payload)
+            if cwd_error:
+                return cwd_error
+            wrapper = Path(wrapper_token)
+            if not wrapper.is_absolute():
+                wrapper = effective_cwd / wrapper
+            if wrapper.resolve(strict=False) != (HOOK_ROOT / "scripts/gh-with-git-credentials.sh").resolve():
+                return "credential wrapper is not the canonical repository script"
+        github_action = classify_github_action(command)
+        if github_action is not None and github_action.get("error"):
+            return github_action["error"]
         if SHELL_EXTGLOB.search(command):
             return "shell extglob expansion is not statically bounded by the credential/partition guard"
         if shell_dumps_environment(command):

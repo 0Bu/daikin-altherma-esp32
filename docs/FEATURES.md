@@ -760,9 +760,10 @@ Four properties of that core are worth naming because they are not obvious from 
   runner-neutral always-loaded contract and stays below 24 KiB.
   [`run-agent-instructions-budget.sh`](../scripts/run-agent-instructions-budget.sh) also validates
   canonical skill identity and OpenAI metadata, focused-reviewer configuration, lifecycle-hook
-  dispatch, the credential-safe [`gh` wrapper](../scripts/gh-with-git-credentials.sh), and explicit
-  safety invariants. The fix for a budget failure is moving narrative to `docs/`, never trimming a
-  rule or raising the limit;
+  dispatch, the credential-safe [`gh` wrapper](../scripts/gh-with-git-credentials.sh), the
+  exact noninteractive PR-publication form, the synchronous expected-head REST merge shape, and
+  explicit safety invariants. The fix for a budget failure is moving narrative to `docs/`, never
+  trimming a rule or raising the limit;
   [`tools/agent-config/selftest.sh`](../tools/agent-config/selftest.sh) proves each check fails closed.
 - **🔭 No generic static-analyser gate — measured, not assumed.** Recorded here so it is not
   re-litigated: clang-tidy over the pure headers reports thousands of findings on a blanket config

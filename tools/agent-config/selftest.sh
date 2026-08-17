@@ -99,12 +99,18 @@ expect_failure "missing canonical GitHub credential wrapper" "$fixture" "credent
 fixture="$WORK/credential-wrapper-direct-read"
 make_fixture "$fixture"
 printf '%s\n' 'head -n1 ~/.git-credentials' >> "$fixture/scripts/gh-with-git-credentials.sh"
-expect_failure "direct credential-store read in wrapper" "$fixture" "must bind exactly one reviewed credential-store path"
+expect_failure "direct credential-store read in wrapper" "$fixture" "token never enters argv"
 
 fixture="$WORK/credential-wrapper-not-executable"
 make_fixture "$fixture"
 chmod -x "$fixture/scripts/gh-with-git-credentials.sh"
 expect_failure "non-executable canonical GitHub credential wrapper" "$fixture" "credential wrapper is not executable"
+
+fixture="$WORK/credential-wrapper-symlink"
+make_fixture "$fixture"
+mv "$fixture/scripts/gh-with-git-credentials.sh" "$fixture/gh-wrapper-copy.sh"
+ln -s ../gh-wrapper-copy.sh "$fixture/scripts/gh-with-git-credentials.sh"
+expect_failure "symlinked canonical GitHub credential wrapper" "$fixture" "credential wrapper is not a regular file"
 
 fixture="$WORK/credential-wrapper-xtrace"
 make_fixture "$fixture"
@@ -120,16 +126,124 @@ expect_failure "credential wrapper host binding drift" "$fixture" "credential wr
 
 fixture="$WORK/credential-wrapper-config"
 make_fixture "$fixture"
-sed -i.bak 's#/usr/bin/env -i "${gh_env\[@\]}"#/usr/bin/env "${gh_env[@]}"#' \
+sed -i.bak 's#/usr/bin/env -i "${child_env\[@\]}"#/usr/bin/env "${child_env[@]}"#' \
   "$fixture/scripts/gh-with-git-credentials.sh"
 rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
 expect_failure "credential wrapper config isolation drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-token-argv"
+make_fixture "$fixture"
+perl -0pi -e 's#/bin/bash -p -c "\$token_child_script"#GH_TOKEN="\$token" /bin/bash -p -c "\$token_child_script"#g' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+expect_failure "credential wrapper token argv exposure" "$fixture" "token never enters argv"
+
+fixture="$WORK/credential-wrapper-pre-environment-token"
+make_fixture "$fixture"
+perl -0pi -e 's#\nrepo_override="\$\{GH_REPO:-\}"#\n/usr/bin/env "GH_TOKEN=\$token" /usr/bin/true\n\nrepo_override="\${GH_REPO:-}"#' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+expect_failure "credential wrapper pre-environment token exposure" "$fixture" "token never enters argv"
+
+fixture="$WORK/credential-wrapper-child-env-token"
+make_fixture "$fixture"
+perl -0pi -e 's#^extra_child_env=\(\)$#extra_child_env=()\nchild_env[0]="GH_TOKEN=\$token"#m' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+expect_failure "credential wrapper child environment reassignment" "$fixture" "token never enters argv"
+
+fixture="$WORK/credential-wrapper-extra-env-token"
+make_fixture "$fixture"
+perl -0pi -e 's#^extra_child_env=\(\)$#extra_child_env=()\nleak="GH_TOKEN=\$token"\nextra_child_env[0]="\$leak"#m' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+expect_failure "credential wrapper indirect test seam token exposure" "$fixture" "token never enters argv"
+
+fixture="$WORK/credential-wrapper-child-script-token"
+make_fixture "$fixture"
+perl -0pi -e 's#exec "\$@"\x27#exec /usr/bin/env GH_TOKEN="\$token" "\$@"\x27#' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+expect_failure "credential wrapper child script token exposure" "$fixture" "token never enters argv"
 
 fixture="$WORK/credential-wrapper-cwd"
 make_fixture "$fixture"
 sed -i.bak 's/cd "$config_dir" || exit 1/:/' "$fixture/scripts/gh-with-git-credentials.sh"
 rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
 expect_failure "credential wrapper cwd isolation drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-physical-root"
+make_fixture "$fixture"
+sed -i.bak 's/\[ ! -L "$wrapper_source" \]/[ -n "$wrapper_source" ]/' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper physical-root binding drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-git-replacements"
+make_fixture "$fixture"
+sed -i.bak 's/refs\/replace/refs\/heads/' "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper replacement-ref guard drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-no-replace-env"
+make_fixture "$fixture"
+sed -i.bak 's/"GIT_NO_REPLACE_OBJECTS=1"/"GIT_NO_REPLACE_OBJECTS=0"/g' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper replacement-object environment drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-body-nofollow"
+make_fixture "$fixture"
+sed -i.bak 's/os\.O_RDONLY | os\.O_NOFOLLOW/os.O_RDONLY/' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper body-file no-follow drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-body-secret-path"
+make_fixture "$fixture"
+sed -i.bak 's/".ssh", //' "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper body-file secret-path drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-body-hardlink"
+make_fixture "$fixture"
+sed -i.bak 's/info\.st_nlink != 1/False/' "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper body-file hardlink drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-body-owner"
+make_fixture "$fixture"
+sed -i.bak 's/info\.st_uid != os\.getuid()/False/' "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper body-file owner drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-body-mode"
+make_fixture "$fixture"
+sed -i.bak 's/info\.st_mode & (stat\.S_IWGRP | stat\.S_IWOTH)/False/g' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper body-file mode drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-live-pr-head"
+make_fixture "$fixture"
+sed -i.bak 's#git/ref/heads/\$AGENT_GH_PR_CREATE_BRANCH#git/ref/heads/main#' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper live PR-head binding drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-created-pr-head"
+make_fixture "$fixture"
+sed -i.bak 's/--json headRefOid --jq \.headRefOid/--json baseRefOid --jq .baseRefOid/' \
+  "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper created PR-head postcondition drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-pr-revert"
+make_fixture "$fixture"
+sed -i.bak 's/|"pr revert"//' "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper PR-revert guard drift" "$fixture" "credential wrapper contract drifted"
+
+fixture="$WORK/credential-wrapper-issue-transfer"
+make_fixture "$fixture"
+sed -i.bak 's/|"issue transfer"//' "$fixture/scripts/gh-with-git-credentials.sh"
+rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
+expect_failure "credential wrapper issue-transfer guard drift" "$fixture" "credential wrapper contract drifted"
 
 fixture="$WORK/credential-wrapper-spawner"
 make_fixture "$fixture"

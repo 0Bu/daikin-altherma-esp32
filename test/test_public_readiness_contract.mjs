@@ -208,6 +208,88 @@ try {
   });
   assert.notEqual(seeded.status, 0, "public-readiness audit accepted direct credential-store access");
   assert.match(`${seeded.stdout}\n${seeded.stderr}`, /credential wrapper no longer keeps credentials transient/);
+
+  const tokenTransportSeeds = [
+    ["multiline env launch", originalWrapper.replace(
+      '/bin/bash -p -c "$token_child_script" _ "$gh_bin" "${args[@]}"',
+      'GH_TOKEN="$token" \\\n        /bin/bash -p -c "$token_child_script" _ "$gh_bin" "${args[@]}"',
+    )],
+    ["child environment", originalWrapper.replace(
+      "extra_child_env=()",
+      'extra_child_env=()\nchild_env[0]="GH_TOKEN=$token"',
+    )],
+    ["extra child environment", originalWrapper.replace(
+      "extra_child_env=()",
+      'extra_child_env=()\nleak="GH_TOKEN=$token"\nextra_child_env[0]="$leak"',
+    )],
+    ["pre-environment command", originalWrapper.replace(
+      '\nrepo_override="${GH_REPO:-}"',
+      '\n/usr/bin/env "GH_TOKEN=$token" /usr/bin/true\n\nrepo_override="${GH_REPO:-}"',
+    )],
+    ["child script", originalWrapper.replace(
+      'exec "$@"\'',
+      'exec /usr/bin/env GH_TOKEN="$token" "$@"\'',
+    )],
+    ["body no-follow", originalWrapper.replaceAll(
+      "os.O_RDONLY | os.O_NOFOLLOW",
+      "os.O_RDONLY",
+    )],
+    ["physical wrapper identity", originalWrapper.replace(
+      '[ ! -L "$wrapper_source" ]',
+      '[ -n "$wrapper_source" ]',
+    )],
+    ["replacement-object environment", originalWrapper.replace(
+      '"GIT_NO_REPLACE_OBJECTS=1"',
+      '"GIT_NO_REPLACE_OBJECTS=0"',
+    )],
+    ["replacement-ref rejection", originalWrapper.replace(
+      "for-each-ref --format='%(refname)' refs/replace",
+      "for-each-ref --format='%(refname)' refs/heads",
+    )],
+    ["body secret path", originalWrapper.replace(
+      '".git", ".ssh", ".gnupg"',
+      '".git", ".gnupg"',
+    )],
+    ["body hardlink", originalWrapper.replace(
+      "info.st_nlink != 1",
+      "False",
+    )],
+    ["body owner", originalWrapper.replace(
+      "info.st_uid != os.getuid()",
+      "False",
+    )],
+    ["body unsafe mode", originalWrapper.replace(
+      "info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)",
+      "False",
+    )],
+    ["live PR head", originalWrapper.replace(
+      "git/ref/heads/$AGENT_GH_PR_CREATE_BRANCH",
+      "git/ref/heads/main",
+    )],
+    ["created PR head", originalWrapper.replace(
+      "--json headRefOid --jq .headRefOid",
+      "--json baseRefOid --jq .baseRefOid",
+    )],
+    ["PR revert", originalWrapper.replace(
+      '|"pr revert"',
+      "",
+    )],
+    ["issue transfer", originalWrapper.replace(
+      '|"issue transfer"',
+      "",
+    )],
+  ];
+  for (const [name, text] of tokenTransportSeeds) {
+    fs.writeFileSync(wrapperFile, text);
+    seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
+      cwd: seededRoot,
+      env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
+      encoding: "utf8",
+    });
+    assert.notEqual(seeded.status, 0, `public-readiness audit accepted token argv via ${name}`);
+    assert.match(`${seeded.stdout}\n${seeded.stderr}`,
+      /credential wrapper no longer keeps credentials transient/);
+  }
   fs.writeFileSync(wrapperFile, originalWrapper);
   console.log(
     "public readiness: Node + Git/no-rg baseline, privacy/provenance, hook/config, route-count, and credential-wrapper mutations pass",

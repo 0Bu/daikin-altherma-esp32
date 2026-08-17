@@ -168,7 +168,7 @@ When the review passes with **no blocking findings**, tick + stamp it with the r
 ```
 
 Edit the PR body with
-`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <file>`.
+`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <absolute-physical-temp-path>/review-body.md`.
 Any later commit re-stales the stamp, forcing a fresh review. Don't tick it if findings
 block the merge — fix first. The gate fails **closed**: if GitHub can't be read, the merge is
 blocked with guidance.

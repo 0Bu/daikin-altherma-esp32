@@ -44,7 +44,7 @@ scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data
 tools/absence/selftest.sh          # can the source-absence matrix still go red?
 scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
 scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
-scripts/run-agent-instructions-budget.sh # are agent budgets, mappings and safety parity intact?
+scripts/run-agent-instructions-budget.sh # are canonical agent budgets and safety contracts intact?
 ```
 
 `run-mock-tests.sh --coverage` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
@@ -386,10 +386,11 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
   can run — that is logic no one can verify without hardware.
 - **Never hand-edit generated per-model `main/def/*` profile tables.** They are machine-generated;
   `main/def/overlay.hpp` is the hand-written overlay and `main/def/homehub.hpp` is the curated
-  HomeHub definition source. A generated profile's row set
-  *is* its detection signature (`def/signatures.hpp` → maximal page overlap), so deleting a row makes
-  the correct model lose a page to a feature-richer wrong one. An absent-feature row gets the
-  `ValueDef::no_publish` detect-only flag instead of deletion. Verify rows against
+  HomeHub definition source. A generated profile's detection signature is the set of register pages
+  referenced by its rows (`def/signatures.hpp` → maximal page overlap). Deleting a row changes that
+  signature only when it is the last row referencing its page; only then is that page bit removed,
+  which can make the correct model lose a page to a feature-richer wrong one. An absent-feature row
+  gets the `ValueDef::no_publish` detect-only flag instead of deletion. Verify rows against
   [`docs/REGISTERS.md`](docs/REGISTERS.md) §5.
 - **Heap is the binding constraint** (the largest *contiguous* free block, not total free). HTTP
   handlers must stay under the shared OOM try/catch; every allocating task loop must self-guard; never

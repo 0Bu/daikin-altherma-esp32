@@ -160,8 +160,9 @@ scripts/idf-docker.sh idf.py build
   hand-written overlay, while `homehub.hpp` is the curated HomeHub definition source.
 - Do not add separate always-on CI jobs casually. Fast gates are steps of the shared `gates` job;
   GitHub Actions bills per job. Preserve required-check behavior when changing path filters.
-- When waiting for GitHub Actions, use a bounded watcher such as `gh run watch ... --exit-status`;
-  do not sleep-poll.
+- When waiting for GitHub Actions, use a bounded watcher such as
+  `scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 run watch
+  <run-id> --exit-status`; do not sleep-poll.
 
 ## Data-source and persistence invariants
 
@@ -221,9 +222,11 @@ scripts/idf-docker.sh idf.py build
 - Review the actual diff and current head SHA. A checked box from an older commit is stale.
 - Before every merge, run `$project-review` and `$domain-review`; run conditional skills according to
   the affected paths and behavior. Record only completed reviews against the exact head commit.
-- A PR checkbox is evidence, not authorization. Use only the repository-bound, expected-head merge
-  path documented in `docs/AGENT_MIGRATION.md`; direct API, GraphQL, and all MCP merge, auto-merge,
-  or queue-activation forms are intentionally blocked.
+- A PR checkbox is evidence, not authorization. Use only the repository-bound, expected-head REST
+  merge path documented in `docs/AGENT_MIGRATION.md`. `gh pr merge`, every other REST merge or
+  mutation shape, GraphQL mutations, and all MCP merge, auto-merge, or queue-activation forms are
+  intentionally blocked. Static read-only REST GET/HEAD requests and read-only GraphQL queries
+  remain allowed.
 - Do not let a subagent self-certify its own implementation. Use an independent read-only reviewer
   for high-risk decode, heap, documentation, security, persistence, or UI changes.
 - Do not merge while required CI, review findings, requested hardware evidence, or user decisions are
