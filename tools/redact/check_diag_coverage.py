@@ -157,7 +157,7 @@ def status_unwrapped_config_sites():
     lines = STATUS.read_text().splitlines()
     start = next(i for i, line in enumerate(lines) if "void http_append_status_json" in line)
     end = next(i for i, line in enumerate(lines[start + 1:], start + 1)
-               if "void http_append_values_json" in line)
+               if "struct ValuesSnapshot" in line)
     public = {"c.board_user_set", "c.profile", "c.fp_valid"}
     findings = []
     for i in range(start, end):

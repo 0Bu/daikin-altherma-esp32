@@ -21,6 +21,8 @@ const pollHeader = read("main/hp_poll.hpp");
 const mqtt = read("main/mqtt_ha.cpp");
 const weather = read("main/weather_forecast.cpp");
 const status = read("main/http_status.cpp");
+const mcp = read("main/mcp_server.cpp");
+const chunkSink = read("main/logic/chunk_sink.hpp");
 const redact = read("main/logic/redact.hpp");
 const diagnosis = read("main/logic/heating_curve_diagnosis.hpp");
 
@@ -238,25 +240,46 @@ assert.match(status, /static std::string jstr_r\(const std::string& s, bool reda
 // Only absence says "no current reading". /values omits the HomeHub key entirely when that link is
 // not live, rather than shipping [] under a guarantee that every row in it was read this cycle.
 assert.match(status,
-  /if \(mb_status\(\)\.connected\) \{[\s\S]*?if \(live\) \{\s*\n\s*j \+= ",\\"modbus\\":";/,
+  /if \(mb_status\(\)\.connected\) \{[\s\S]*?mb_values_snapshot\([\s\S]*?snapshot\.modbus_live = live;/,
+  "/values must prove HomeHub liveness against the copied cache before transfer starts");
+assert.match(status,
+  /if \(snapshot\.modbus_live\) \{\s*\n\s*j \+= ",\\"modbus\\":";\s*\n\s*append_modbus_values_array\(j, snapshot\.modbus\);/,
   "/values must emit the HomeHub array only while that link is live, and omit the key otherwise");
 
 // The complete 129-row target body is larger than the contiguous block a healthy running board can
-// commonly provide. The HTTP route must therefore reuse the exact row serializer through a bounded
-// chunk sink, not rebuild the whole JSON string before its first byte is sent. The MCP tool keeps its
-// complete string because it owns a different response envelope; this assertion isolates h_values.
-const hValuesStart = status.indexOf("static esp_err_t h_values(");
-const hValuesEnd = status.indexOf("\n}\n\n// Model catalog", hValuesStart);
-assert.ok(hValuesStart >= 0 && hValuesEnd > hValuesStart,
-  "the source contract must be able to isolate the /values handler");
-const hValues = status.slice(hValuesStart, hValuesEnd);
+// commonly provide. Both GET /values and MCP must therefore reuse the exact serializer through the
+// production bounded sink, never rebuild the whole JSON or a secondary whole HomeHub array.
 assert.match(status,
-  /class HttpJsonChunks[\s\S]*?kFlushBytes = 1024[\s\S]*?httpd_resp_send_chunk/,
-  "/values must keep its response chunks bounded and use HTTP chunk framing");
-assert.match(hValues, /HttpJsonChunks j\(req\)[\s\S]*?append_values_array\(j\)[\s\S]*?j\.finish\(\)/,
-  "/values must stream the shared row representation through the bounded chunk sink");
-assert.doesNotMatch(hValues, /http_append_values_json\(/,
-  "/values must not materialise the complete model-dependent response before sending it");
+  /using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;/,
+  "values responses must bind the host-tested sink to a strict 1 KiB HTTP chunk bound");
+assert.match(chunkSink,
+  /while \(!value\.empty\(\)\)[\s\S]*?const size_t take = std::min\(available, value\.size\(\)\)[\s\S]*?value\.remove_prefix\(take\)/,
+  "one oversized append must be split before it can grow the production buffer past its bound");
+assert.match(status,
+  /esp_err_t http_send_values_json\([\s\S]*?ValuesSnapshot snapshot = take_values_snapshot\(\);[\s\S]*?HttpJsonChunks j\(HttpChunkEmitter\{req\}\);[\s\S]*?j \+= prefix;[\s\S]*?append_values_json\(j, snapshot\);[\s\S]*?j \+= suffix;[\s\S]*?j\.finish\(\)/,
+  "the shared sender must snapshot before streaming prefix + values + suffix through one sink");
+const valuesSerializerStart = status.indexOf("static void append_values_array(");
+const valuesSerializerEnd = status.indexOf("\n}\n\n// The HomeHub rows", valuesSerializerStart);
+assert.ok(valuesSerializerStart >= 0 && valuesSerializerEnd > valuesSerializerStart,
+  "the source contract must be able to isolate the streamed X10A row serializer");
+const valuesSerializer = status.slice(valuesSerializerStart, valuesSerializerEnd);
+assert.doesNotMatch(valuesSerializer, /object_id\(|std::to_string\(/,
+  "streamed X10A rows must not allocate after the first response chunk");
+assert.match(status,
+  /snapshot\.x10a_label_ambiguous\.resize\([\s\S]*?label_slug_is_ambiguous\(object_id\(snapshot\.x10a\[i\]\.label\)\)/,
+  "allocating label classification must be staged before the response stream is constructed");
+assert.match(status,
+  /static void append_json_uint\([\s\S]*?char digits\[20\][\s\S]*?out \+= std::string_view/,
+  "streamed numeric fields must use the fixed stack formatter rather than an owning string");
+assert.match(status, /static esp_err_t h_values\(httpd_req_t\* req\) \{\s*\n\s*return http_send_values_json\(req\);/,
+  "GET /values must use the shared bounded sender");
+assert.match(mcp,
+  /mcp_tool_result_begin\(response, "Current decoded heat-pump readings\."\);[\s\S]{0,400}?mcp_tool_result_end\(suffix\);[\s\S]{0,200}?mcp_result_end\(suffix\);[\s\S]{0,200}?return http_send_values_json\(req, response, suffix\);/,
+  "MCP get_hp_values must stream its JSON-RPC prefix and suffix around the shared values object");
+assert.doesNotMatch(mcp, /http_append_values_json\s*\(\s*response\s*\)/,
+  "MCP must never materialise the complete values object in its response string");
+assert.doesNotMatch(status, /build_modbus_values_array|const std::string arr\s*=/,
+  "HomeHub rows must stream into the same bounded sink instead of a secondary whole-array string");
 
 // ── 7. A SILENT BUS must age the state ages out, not freeze them ────────────────────────────────
 // The per-row state ages (logic/state_dwell.hpp) claim how long a flag has read what it reads, so

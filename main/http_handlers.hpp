@@ -5,6 +5,7 @@
 #include "esp_http_server.h"
 #include "logic/http_surface.hpp"   // HttpSurface — which routes each trust surface exposes (F01)
 #include <string>
+#include <string_view>
 
 namespace daik {
 
@@ -15,11 +16,12 @@ esp_err_t http_send_gzip(httpd_req_t* req, const char* content_type,
 // Read a JSON request body into a bounded buffer; returns bytes or <0.
 int       http_read_body(httpd_req_t* req, char* buf, size_t max);
 
-// Append the read-only snapshots shared by their HTTP routes and MCP tools. Appending matters: MCP
-// can write its envelope first and then the snapshot into that SAME response buffer, avoiding a
-// second multi-kilobyte contiguous allocation while preserving one source of truth per wire shape.
+// Append the status snapshot shared by its HTTP route and MCP tool. The values snapshot is larger
+// than the target's normal largest contiguous block, so its shared sender streams an optional small
+// prefix/suffix around the exact /values object instead of materialising a complete response.
 void http_append_status_json(std::string& out, bool redact = false);
-void http_append_values_json(std::string& out);
+esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix = {},
+                                std::string_view suffix = {});
 
 // Register a route whose handler runs under the shared handle_all LAN-browser policy and try/catch
 // OOM guard: Host/Origin/Fetch Metadata are checked globally, body-bearing POSTs must be JSON, and an uncaught

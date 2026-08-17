@@ -228,9 +228,11 @@ def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus c
 http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — POST is the stateless Streamable-HTTP MCP device glue. It dispatches
                       only read-only get_status/get_hp_values and reuses http_status.cpp's exact
-                      JSON builders. GET serves one embedded/gzipped, static setup and information
-                      page (no network activity/SSE/session/external assets). Parsing/catalog/
-                      envelopes live in host-tested logic/mcp.hpp
+                      JSON builders; the model-sized values result streams through the same bounded
+                      sink as GET /values rather than one JSON-RPC-sized string. GET serves one
+                      embedded/gzipped, static setup and information page (no network activity/SSE/
+                      session/external assets). Parsing/catalog/envelopes live in host-tested
+                      logic/mcp.hpp
 provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-esp32-setup) when no WiFi.
                       Runs AP-only: the portal takes the SSID as free text and never scans, so it
                       needs no station interface (esp_wifi_scan_start() would — an earlier version
@@ -2898,11 +2900,13 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   first-class answer meaning the device declines to describe that run at all (silent
                   bus, a row unread past DWELL_MAX_GAP_S). A zero would say "it changed just now",
                   which is why absence is a missing key and never a 0.
-                  THE RESPONSE IS CHUNK-STREAMED in bounded ~1 KB pieces after one atomic cache
-                  snapshot. HTTP chunk boundaries carry no domain meaning; concatenating them yields
-                  the same JSON object. This keeps the body of a 129-row profile from demanding one
-                  contiguous allocation larger than the healthy target's 15-16 KB largest block,
-                  while the snapshot still guarantees that a response never mixes poll cycles.
+                  THE RESPONSE IS CHUNK-STREAMED in bounded 1 KB pieces after complete X10A and live
+                  HomeHub snapshots. HTTP chunk boundaries carry no domain meaning; concatenating
+                  them yields the same JSON object. The exact serializer and sink also carry MCP
+                  get_hp_values, with its small JSON-RPC prefix/suffix around that object. This keeps
+                  a 129-row profile from demanding one contiguous allocation larger than the healthy
+                  target's 15-16 KB largest block, while the staged snapshots still guarantee that a
+                  response never mixes poll cycles or starts before a snapshot allocation can fail.
                   X10A rows also carry `concept` where logic/homehub_map.hpp pairs them with a
                   HomeHub register — the browser matches on that string and does NO matching of its
                   own, since a label match here is the substitution lwt_select/ou_stale exist to
@@ -3293,7 +3297,9 @@ GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, u
 GET  /mcp         embedded/gzipped static MCP information + setup page; no external assets or
                   network requests, CSP connect-src 'none', never SSE
 POST /mcp         stateless read-only MCP: initialize / tools/list / tools/call; get_status +
-                  get_hp_values mirror /status + /values. Notifications → 202; no SSE/session
+                  get_hp_values mirror /status + /values. The model-sized values result is bounded-
+                  chunk streamed, not materialised as one JSON-RPC string. Notifications → 202; no
+                  SSE/session
 ```
 
 No HTTP auth / TLS by design — trusted LAN only. See docs/SECURITY.md.
@@ -3336,9 +3342,9 @@ try-lock acquire a callback context needs.
 
 Heap is tight (WiFi + MQTT + TLS dominate; the binding limit is the
 largest *contiguous* free block): keep every HTTP handler under the `handle_all` try/catch (503 on
-OOM), stream `/diag` and the MQTT discovery instead of building one big `std::string`, and treat
-any new large contiguous allocation (big JSON, OTA TLS) as a crash risk to size-check. A reboot
-loop is bad here too — it stops the poll cycle and drops MQTT availability.
+OOM), stream `/diag`, `/values`, MCP get_hp_values and MQTT discovery instead of building one big
+`std::string`, and treat any new large contiguous allocation (big JSON, OTA TLS) as a crash risk to
+size-check. A reboot loop is bad here too — it stops the poll cycle and drops MQTT availability.
 
 Two rules follow from that, and they apply to **every** FreeRTOS task loop that allocates, not just
 to HTTP handlers:

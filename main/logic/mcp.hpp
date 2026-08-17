@@ -427,13 +427,15 @@ inline std::string mcp_result(const std::string& id_raw, const std::string& resu
     return out;
 }
 
-inline void mcp_result_begin(std::string& out, const std::string& id_raw) {
+template <typename JsonOut>
+inline void mcp_result_begin(JsonOut& out, const std::string& id_raw) {
     out += "{\"jsonrpc\":\"2.0\",\"id\":";
     out += id_raw.empty() ? "null" : id_raw;
     out += ",\"result\":";
 }
 
-inline void mcp_result_end(std::string& out) {
+template <typename JsonOut>
+inline void mcp_result_end(JsonOut& out) {
     out += "}";
 }
 
@@ -465,7 +467,8 @@ inline const char* mcp_tools_list_result() {
         "]}";
 }
 
-inline void mcp_tool_result_begin(std::string& out, const char* summary) {
+template <typename JsonOut>
+inline void mcp_tool_result_begin(JsonOut& out, const char* summary) {
     // Modern MCP clients consume structuredContent. A short TextContent block keeps the mandatory
     // content array useful without serialising + escaping the complete snapshot a second time — on
     // this board that duplicate contiguous buffer is a materially worse heap peak than /values.
@@ -474,7 +477,8 @@ inline void mcp_tool_result_begin(std::string& out, const char* summary) {
     out += "}],\"structuredContent\":";
 }
 
-inline void mcp_tool_result_end(std::string& out) {
+template <typename JsonOut>
+inline void mcp_tool_result_end(JsonOut& out) {
     out += ",\"isError\":false}";
 }
 
