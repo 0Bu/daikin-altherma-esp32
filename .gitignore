@@ -26,19 +26,6 @@ __pycache__/
 *.swp
 *~
 
-# Local Claude Code preview-server config (personal tooling)
-.claude/launch.json
-
-# Personal/per-developer Claude Code settings (permissions, env) — team settings
-# live in the committed .claude/settings.json; this overlay stays local.
-.claude/settings.local.json
-
-# Logic-tests Stop-gate marker (per-tree, transient — never commit)
-.claude/.logic-tests-blocked
-
-# Build-efficiency SessionStart-hook dedup marker (last audited run id — never commit)
-.claude/.build-efficiency-audited
-
 # macOS
 .DS_Store
 

@@ -45,8 +45,7 @@ one place: the pair (what is configured, what is answering).
 `$domain-review`. The canonical filter lives behind
 [`tools/agent-hooks/require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh); read the
 canonical gate rather than trusting a copied list, and grow it if an optional source moves.
-`.claude/hooks/require-absence-review.sh` is only a Claude compatibility adapter. Report findings;
-apply fixes only when the user explicitly requests them.
+Report findings; apply fixes only when the user explicitly requests them.
 
 ## 1. Run the deterministic half
 

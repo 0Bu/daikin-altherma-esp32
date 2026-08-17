@@ -161,7 +161,7 @@ agent_gate_checkbox_status() {
 import re, sys
 key = re.escape(sys.argv[1])
 pattern = re.compile(
-    rf"^[-*]\s+\[[ xX]\]\s+`?[$/]{key}`?(?=\s|$).*\bmerge\s+gate\b",
+    rf"^[-*]\s+\[[ xX]\]\s+`?\${key}`?(?=\s|$).*\bmerge\s+gate\b",
     re.IGNORECASE,
 )
 matches = [candidate for candidate in sys.stdin.read().splitlines() if pattern.search(candidate)]
@@ -302,18 +302,20 @@ agent_gate_workdir_matches() {
 agent_gate_discover_pr() {
     local selector="$1" root="$2" body_file="$3" files_file="$4"
     local json number branch slug token owner list count page page_json page_count
-    local changed_count pages_file policy_extractor retrieved_count separator
+    local changed_count pages_file policy_extractor retrieved_count separator gh_runner
     AGENT_DISCOVERED_HEAD=""
     slug="$(agent_gate_repo_slug "$root")"; [ -n "$slug" ] || return 2
     policy_extractor="$(cd "$(dirname "${BASH_SOURCE[0]}")/../agent-policy" && pwd)/extract_changed_files.py" \
         || return 2
-    if command -v gh >/dev/null 2>&1; then
+    gh_runner="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/gh-with-git-credentials.sh" \
+        || return 2
+    if [ -x "$gh_runner" ]; then
         if [ -n "$selector" ]; then
-            json="$(agent_gate_run_bounded 30 env GH_HOST=github.com GH_REPO="github.com/$slug" gh pr view "$selector" --json number,body,headRefOid,changedFiles 2>/dev/null)" || return 2
+            json="$(agent_gate_run_bounded 30 env GH_HOST=github.com GH_REPO="github.com/$slug" "$gh_runner" pr view "$selector" --json number,body,headRefOid,changedFiles 2>/dev/null)" || return 2
         else
             branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 2
             [ -n "$branch" ] && [ "$branch" != "HEAD" ] || return 2
-            list="$(agent_gate_run_bounded 30 env GH_HOST=github.com GH_REPO="github.com/$slug" gh pr list --head "$branch" --state open --json number,body,headRefOid,changedFiles 2>/dev/null)" || return 2
+            list="$(agent_gate_run_bounded 30 env GH_HOST=github.com GH_REPO="github.com/$slug" "$gh_runner" pr list --head "$branch" --state open --json number,body,headRefOid,changedFiles 2>/dev/null)" || return 2
             count="$(printf '%s' "$list" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null)" || return 2
             [ "$count" != "0" ] || return 1
             json="$(printf '%s' "$list" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)[0]))')" || return 2
@@ -332,7 +334,7 @@ print(value)
         [ "$changed_count" -le 3000 ] || return 2
         pages_file="${files_file}.pages.json"
         if ! agent_gate_run_bounded 60 env GH_HOST=github.com GH_REPO="github.com/$slug" \
-            gh api --hostname github.com --paginate --slurp \
+            "$gh_runner" api --hostname github.com --paginate --slurp \
             "repos/$slug/pulls/$number/files?per_page=100" >"$pages_file" 2>/dev/null; then
             rm -f "$pages_file"
             return 2

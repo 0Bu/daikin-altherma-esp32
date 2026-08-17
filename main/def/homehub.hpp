@@ -12,11 +12,11 @@
 // "no value" and is published as unavailable, never as a large number. Offsets are the EKRHH data
 // model's 1-based offsets (guide 4P744838-1E §9.2); the wire PDU address is offset-1 (mb_pdu_address).
 //
-// SEMANTICS follow the EKRHH Installer reference guide §9.2 UC3 tables. This repo cannot build or
-// flash (see .claude/CLAUDE.md), so the physical correctness of each row is confirmed ON HARDWARE
-// before it is trusted — the same "passing a test is not being RIGHT" rule the X10A domain audit
-// exists for. The host test below verifies the DECODE MECHANICS (scaling, special values, offset ->
-// PDU), which is what can be checked without a HomeHub on the bus.
+// SEMANTICS follow the EKRHH Installer reference guide §9.2 UC3 tables. Host and CI checks cannot
+// establish the physical correctness of each row, so every row is confirmed ON HARDWARE before it
+// is trusted — the same "passing a test is not being RIGHT" rule the X10A domain audit exists for.
+// The host test below verifies the DECODE MECHANICS (scaling, special values, offset -> PDU), which
+// is what can be checked without a HomeHub on the bus.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>

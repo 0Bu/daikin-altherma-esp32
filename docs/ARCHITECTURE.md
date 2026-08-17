@@ -128,8 +128,13 @@ state_dwell.cpp/.hpp → HOW LONG EACH ELIGIBLE SWITCHED ROW HAS READ WHAT IT RE
                       logic/state_dwell.hpp. THREE facts on /values, not one
                       number: dwell_s, dwell_min (the transition was never witnessed, so the age is a
                       lower bound) and dwell_blind_s (how much of the run the bus did not answer for)
-def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
-                       format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
+def/{altherma*,minichiller*}.hpp → offline-generated per-model ValueDef profiles, except the
+                       hand-written altherma3_r_erga.hpp host-test fixture
+def/registry.hpp     → hand-written registry/lookup over generated profiles plus generic/test fixtures
+def/models_catalog.hpp → generator-assembled legacy metadata for the read-only /models endpoint
+def/signatures.hpp   → detection signatures lazily derived once at runtime from registry profiles
+def/overlay.hpp     → hand-written X10A page-0x10 supplement layered onto generated profiles
+def/homehub.hpp     → curated read-only HomeHub Modbus value catalog
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
                       cache (pins/proto/identity) persisted, model RAM-only; mutex-guarded snapshot
                       via config().
@@ -158,7 +163,7 @@ http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns registe
                       an unauthenticated radio client; with no setup AP, the configured WiFi or
                       Ethernet LAN registers the full API.
                       Boundary = host-tested logic/http_surface.hpp (F01). `cfg.max_uri_handlers` is
-                      sized EXACTLY to the trusted-LAN route count, so adding a route means raising
+                      sized EXACTLY to the trusted-LAN route count of 36, so adding a route means raising
                       it in the same commit: overflowing is silent and hits the WRONG route (the
                       casualty is whatever registers last, deliberately the captive/SPA catch-all, so
                       the symptom would be deep links breaking rather than the new route 404ing).

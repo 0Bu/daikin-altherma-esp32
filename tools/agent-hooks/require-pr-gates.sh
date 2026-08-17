@@ -72,6 +72,11 @@ if [ -n "$payload" ]; then
     parse_error="${fields[5]:-}"
     expected_head="${fields[6]:-}"
     [ -n "$action" ] || exit 0
+    if [ "$action" = "gh pr create" ]; then
+        [ -z "$parse_error" ] \
+            || { echo "BLOCKED: PR creation transport could not be bound safely: $parse_error" >&2; exit 2; }
+        exit 0
+    fi
     if [ -n "$selector" ] && [ "$selector" != "$parsed_selector" ]; then
         echo "BLOCKED: explicit PR selector conflicts with the merge action target." >&2
         exit 2
@@ -123,7 +128,7 @@ else
     case "$discovery_rc" in
         0) head_sha="$AGENT_DISCOVERED_HEAD" ;;
         1) echo "BLOCKED: no open pull request found for ${selector:-the current branch}." >&2; exit 2 ;;
-        *) echo "BLOCKED: could not read the pull request. Authenticate gh or provide the three AGENT_* CI inputs." >&2; exit 2 ;;
+        *) echo "BLOCKED: could not read the pull request. Configure a github.com Git credential for scripts/gh-with-git-credentials.sh or provide the three AGENT_* CI inputs." >&2; exit 2 ;;
     esac
 fi
 
@@ -164,12 +169,12 @@ check_gate "domain-review" "domain correctness review"
 check_gate "feature-docs" "feature documentation sync" \
     '^(main/|test/|sdkconfig\.defaults$|partitions\.csv$|\.github/workflows/build\.yml$)'
 check_gate "schematic-review" "schematic review" \
-    '^(main/www/|docs/DESIGN\.md$|tools/schematic/|\.claude/skills/schematic-review/|\.agents/skills/schematic-review/)'
+    '^(main/www/|docs/DESIGN\.md$|tools/schematic/|\.agents/skills/schematic-review/)'
 check_gate "ui-use-case-review" "complete UI use-case review" \
-    '^(main/www/|test/test_ui_|test/test_homehub_discovery_contract\.mjs$|test/test_mcp_dashboard\.mjs$|scripts/run-ui-use-case-tests\.sh$|tools/ui/|\.claude/skills/ui-use-case-review/|\.agents/skills/ui-use-case-review/|tools/agent-hooks/|\.codex/hooks\.json$|\.claude/settings\.json$|\.github/(pull_request_template\.md|workflows/build\.yml)$|docs/DESIGN\.md$)' \
+    '^(main/www/|test/test_ui_|test/test_homehub_discovery_contract\.mjs$|test/test_mcp_dashboard\.mjs$|scripts/run-ui-use-case-tests\.sh$|tools/ui/|\.agents/skills/ui-use-case-review/|tools/agent-hooks/|\.codex/hooks\.json$|\.github/(pull_request_template\.md|workflows/build\.yml)$|docs/DESIGN\.md$)' \
     ui_suite_relevant
 check_gate "absence-review" "source-absence review" \
-    '^(main/(http_status|http_config|history|mqtt_ha|hp_modbus|hp_poll|env3|weather_forecast|safe_mode|main)\.cpp$|main/logic/(redact|heating_curve_diagnosis|circulation_source|history|env3)\.hpp$|main/www/js/|test/test_(ui_absence_matrix|source_absence_contract)\.mjs$|tools/absence/|\.claude/skills/absence-review/|\.agents/skills/absence-review/)' \
+    '^(main/(http_status|http_config|history|mqtt_ha|hp_modbus|hp_poll|env3|weather_forecast|safe_mode|main)\.cpp$|main/logic/(redact|heating_curve_diagnosis|circulation_source|history|env3)\.hpp$|main/www/js/|test/test_(ui_absence_matrix|source_absence_contract)\.mjs$|tools/absence/|\.agents/skills/absence-review/)' \
     absence_suite_relevant
 check_gate "ui-gif" "dashboard recording review" \
     '^(docs/media/dashboard\.gif$|tools/uigif/gif_stamp\.txt$)'

@@ -46,7 +46,8 @@ try {
   const tracked = execFileSync(git, ["ls-files", "-z"], { cwd: root })
     .toString("utf8")
     .split("\0")
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((file) => fs.existsSync(path.join(root, file)));
   for (const file of tracked) {
     const destination = path.join(seededRoot, file);
     fs.mkdirSync(path.dirname(destination), { recursive: true });
@@ -107,52 +108,191 @@ try {
   }
   fs.writeFileSync(contributingFile, originalContributing);
 
-  // The tracked Claude compatibility settings are public repository input and executable after
-  // project trust. Keep them least-privilege and consolidated: no shell auto-grant may return, and
-  // one old per-policy hook must not silently turn the aggregate review gate back into N dispatches.
-  const settingsFile = path.join(seededRoot, ".claude/settings.json");
-  const originalSettingsText = fs.readFileSync(settingsFile, "utf8");
-  const settingsSeeds = [
+  // Canonical project hooks are public repository input and executable after project trust. Keep
+  // them exact and consolidated: a guard cannot disappear, an arbitrary command cannot replace a
+  // reviewed core, and one per-policy hook cannot turn the aggregate gate back into N dispatches.
+  const hooksFile = path.join(seededRoot, ".codex/hooks.json");
+  const originalHooksText = fs.readFileSync(hooksFile, "utf8");
+  const hookSeeds = [
     [
-      "missing explicit shell auto-grant list",
-      (settings) => { delete settings.permissions.allow; },
-      /auto-grant no shell commands/,
+      "missing secret and partition guard",
+      (hooks) => { hooks.hooks.PreToolUse.shift(); },
+      /PreToolUse Codex hook dispatch count drifted/,
     ],
     [
-      "tracked shell auto-grant",
-      (settings) => { settings.permissions.allow = ["Bash(git status:*)"]; },
-      /auto-grant no shell commands/,
+      "unapproved inline hook command",
+      (hooks) => { hooks.hooks.PreToolUse[0].hooks[0].command = "bash -c 'env'"; },
+      /unapproved canonical Codex hook definition/,
     ],
     [
-      "duplicate legacy policy dispatch",
-      (settings) => {
-        settings.hooks.PreToolUse.push({
-          matcher: "Bash",
+      "duplicate policy dispatch",
+      (hooks) => {
+        hooks.hooks.PreToolUse.push({
+          matcher: "^(?:Bash|exec_command)$",
           hooks: [{
             type: "command",
-            command: 'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-domain-review.sh"',
+            command: 'bash "$(git rev-parse --show-toplevel)/tools/agent-hooks/require-pr-gates.sh"',
+            statusMessage: "Duplicate policy evaluation",
+            timeout: 600,
           }],
         });
       },
-      /PreToolUse Claude hook dispatch count drifted/,
+      /PreToolUse Codex hook dispatch count drifted/,
     ],
   ];
-  for (const [name, mutate, expected] of settingsSeeds) {
-    const settings = JSON.parse(originalSettingsText);
-    mutate(settings);
-    fs.writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
+  for (const [name, mutate, expected] of hookSeeds) {
+    const hooks = JSON.parse(originalHooksText);
+    mutate(hooks);
+    fs.writeFileSync(hooksFile, `${JSON.stringify(hooks, null, 2)}\n`);
     const seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
       cwd: seededRoot,
       env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
       encoding: "utf8",
     });
-    assert.notEqual(seeded.status, 0, `public-readiness audit accepted ${name}`);
+    assert.notEqual(seeded.status, 0, `public-readiness audit accepted hook mutation: ${name}`);
     assert.match(`${seeded.stdout}\n${seeded.stderr}`, expected,
       `public-readiness audit rejected ${name} for the wrong reason`);
   }
-  fs.writeFileSync(settingsFile, originalSettingsText);
+  fs.writeFileSync(hooksFile, originalHooksText);
+
+  const configFile = path.join(seededRoot, ".codex/config.toml");
+  const originalConfig = fs.readFileSync(configFile, "utf8");
+  const configSeeds = [
+    ["disabled multi-agent mode", originalConfig.replace("enabled = true", "enabled = false"),
+      /canonical multi-agent settings drifted/],
+    ["floating canonical MCP dependency",
+      originalConfig.replace("@upstash/context7-mcp@4.0.2", "@upstash/context7-mcp@latest"),
+      /canonical Context7 settings drifted/],
+  ];
+  for (const [name, text, expected] of configSeeds) {
+    fs.writeFileSync(configFile, text);
+    const seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
+      cwd: seededRoot,
+      env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
+      encoding: "utf8",
+    });
+    assert.notEqual(seeded.status, 0, `public-readiness audit accepted config mutation: ${name}`);
+    assert.match(`${seeded.stdout}\n${seeded.stderr}`, expected,
+      `public-readiness audit rejected ${name} for the wrong reason`);
+  }
+  fs.writeFileSync(configFile, originalConfig);
+
+  const architectureFile = path.join(seededRoot, "docs/ARCHITECTURE.md");
+  const originalArchitecture = fs.readFileSync(architectureFile, "utf8");
+  fs.writeFileSync(
+    architectureFile,
+    originalArchitecture.replace("trusted-LAN route count of 36", "trusted-LAN route count of 35"),
+  );
+  let seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
+    cwd: seededRoot,
+    env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
+    encoding: "utf8",
+  });
+  assert.notEqual(seeded.status, 0, "public-readiness audit accepted route-count documentation drift");
+  assert.match(`${seeded.stdout}\n${seeded.stderr}`, /exact trusted-LAN route budget/);
+  fs.writeFileSync(architectureFile, originalArchitecture);
+
+  const wrapperFile = path.join(seededRoot, "scripts/gh-with-git-credentials.sh");
+  const originalWrapper = fs.readFileSync(wrapperFile, "utf8");
+  fs.writeFileSync(
+    wrapperFile,
+    originalWrapper.replace(
+      '"$git_bin" credential-store --file "$credential_file" get',
+      'head -n1 "$credential_file"',
+    ),
+  );
+  seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
+    cwd: seededRoot,
+    env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
+    encoding: "utf8",
+  });
+  assert.notEqual(seeded.status, 0, "public-readiness audit accepted direct credential-store access");
+  assert.match(`${seeded.stdout}\n${seeded.stderr}`, /credential wrapper no longer keeps credentials transient/);
+
+  const tokenTransportSeeds = [
+    ["multiline env launch", originalWrapper.replace(
+      '/bin/bash -p -c "$token_child_script" _ "$gh_bin" "${args[@]}"',
+      'GH_TOKEN="$token" \\\n        /bin/bash -p -c "$token_child_script" _ "$gh_bin" "${args[@]}"',
+    )],
+    ["child environment", originalWrapper.replace(
+      "extra_child_env=()",
+      'extra_child_env=()\nchild_env[0]="GH_TOKEN=$token"',
+    )],
+    ["extra child environment", originalWrapper.replace(
+      "extra_child_env=()",
+      'extra_child_env=()\nleak="GH_TOKEN=$token"\nextra_child_env[0]="$leak"',
+    )],
+    ["pre-environment command", originalWrapper.replace(
+      '\nrepo_override="${GH_REPO:-}"',
+      '\n/usr/bin/env "GH_TOKEN=$token" /usr/bin/true\n\nrepo_override="${GH_REPO:-}"',
+    )],
+    ["child script", originalWrapper.replace(
+      'exec "$@"\'',
+      'exec /usr/bin/env GH_TOKEN="$token" "$@"\'',
+    )],
+    ["body no-follow", originalWrapper.replaceAll(
+      "os.O_RDONLY | os.O_NOFOLLOW",
+      "os.O_RDONLY",
+    )],
+    ["physical wrapper identity", originalWrapper.replace(
+      '[ ! -L "$wrapper_source" ]',
+      '[ -n "$wrapper_source" ]',
+    )],
+    ["replacement-object environment", originalWrapper.replace(
+      '"GIT_NO_REPLACE_OBJECTS=1"',
+      '"GIT_NO_REPLACE_OBJECTS=0"',
+    )],
+    ["replacement-ref rejection", originalWrapper.replace(
+      "for-each-ref --format='%(refname)' refs/replace",
+      "for-each-ref --format='%(refname)' refs/heads",
+    )],
+    ["body secret path", originalWrapper.replace(
+      '".git", ".ssh", ".gnupg"',
+      '".git", ".gnupg"',
+    )],
+    ["body hardlink", originalWrapper.replace(
+      "info.st_nlink != 1",
+      "False",
+    )],
+    ["body owner", originalWrapper.replace(
+      "info.st_uid != os.getuid()",
+      "False",
+    )],
+    ["body unsafe mode", originalWrapper.replace(
+      "info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)",
+      "False",
+    )],
+    ["live PR head", originalWrapper.replace(
+      "git/ref/heads/$AGENT_GH_PR_CREATE_BRANCH",
+      "git/ref/heads/main",
+    )],
+    ["created PR head", originalWrapper.replace(
+      "--json headRefOid --jq .headRefOid",
+      "--json baseRefOid --jq .baseRefOid",
+    )],
+    ["PR revert", originalWrapper.replace(
+      '|"pr revert"',
+      "",
+    )],
+    ["issue transfer", originalWrapper.replace(
+      '|"issue transfer"',
+      "",
+    )],
+  ];
+  for (const [name, text] of tokenTransportSeeds) {
+    fs.writeFileSync(wrapperFile, text);
+    seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
+      cwd: seededRoot,
+      env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
+      encoding: "utf8",
+    });
+    assert.notEqual(seeded.status, 0, `public-readiness audit accepted token argv via ${name}`);
+    assert.match(`${seeded.stdout}\n${seeded.stderr}`,
+      /credential wrapper no longer keeps credentials transient/);
+  }
+  fs.writeFileSync(wrapperFile, originalWrapper);
   console.log(
-    "public readiness: Node + Git/no-rg baseline, four private fixtures, two legacy-link mutations, and three Claude-settings mutations pass",
+    "public readiness: Node + Git/no-rg baseline, privacy/provenance, hook/config, route-count, and credential-wrapper mutations pass",
   );
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });

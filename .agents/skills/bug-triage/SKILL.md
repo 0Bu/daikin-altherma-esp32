@@ -32,7 +32,8 @@ when the backtrace in `last_crash` is genuinely not enough (step 5).
 
 1. **Read the issue.**
    ```bash
-   gh issue view "$N" --json number,title,body,labels,createdAt
+   scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 \
+     issue view "$N" --json number,title,body,labels,createdAt
    ```
    Pull the `Device report` section out of the body with the extraction below. If it is absent, or
    the user answered that the device was unreachable, **say so and stop before diagnosing**. A report
@@ -73,8 +74,9 @@ when the backtrace in `last_crash` is genuinely not enough (step 5).
    `last_crash` already gives reason, task, PC, backtrace and `elf_sha256`. When the backtrace is
    genuinely insufficient, ask the reporter to send `/coredump` through the **private advisory form**,
    **zipped** (GitHub rejects `.bin` as an attachment outright). Never ask for it in the public issue
-   and never accept it there. Then symbolize offline: `gh run download` the build matching
-   `app_elf_sha256`, and `scripts/decode-coredump.sh coredump.bin build/daikin-altherma-esp32.elf.xz`
+   and never accept it there. The credential wrapper intentionally blocks artifact downloads, so an
+   explicitly authorized maintainer must provide the build matching `app_elf_sha256`; then symbolize
+   offline with `scripts/decode-coredump.sh coredump.bin build/daikin-altherma-esp32.elf.xz`
    (CI archives the ELF xz-wrapped; the decoder unwraps it). A mismatch warning from `esp-coredump`
    means you fetched the wrong build. A dev-build artifact older than 3 days is gone; a PR artifact
    is gone as soon as the PR merges or after at most 7 days — report that the dump cannot be decoded
@@ -91,7 +93,8 @@ when the backtrace in `last_crash` is genuinely not enough (step 5).
    bytes, what they should read, what they do read. That converts a user's screenshot into evidence,
    and it is the highest-value thing this skill does.
 
-7. **Label and comment, when explicitly authorized.** Apply the class label with `gh issue edit`
+7. **Label and comment, when explicitly authorized.** Apply the class label with
+   `scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 issue edit`
    only when the user requested GitHub mutation (not a workflow — a labeler Action is an always-on
    job, and `AGENTS.md` explains why every Actions job is billed
    rounded up to a whole minute):
@@ -124,7 +127,10 @@ GitHub renders each issue-form answer under `### <label>`; the field `id` never 
 **the label text is the key**. Inside the `Device report` answer the sections are `## ` headings.
 
 ```bash
-gh issue view "$N" --json body -q .body > /tmp/issue.md
+scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 \
+  issue view "$N" --json body
+# After checking that the returned issue body contains no private attachment or credential,
+# place only its JSON body string in /tmp/issue.md for the local parsing steps below.
 sec() { awk -v h="### $1" '$0==h{f=1;next} /^### /{f=0} f' /tmp/issue.md; }
 sec "What kind of problem is it?"
 sec "Device report" > /tmp/report.md

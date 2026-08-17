@@ -116,7 +116,8 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
    ```
    The dump is useless without the **matching-version** unstripped `.elf` — CI archives one per
    build (`dist/*.elf.xz`, keyed by `app_elf_sha256` from step 2). Fetch that build's ELF into
-   `build/` (e.g. `gh run download <run-id> -n <artifact>` for the run that built this `version`),
+   `build/` through an explicitly authorized maintainer handoff (the credential wrapper refuses
+   local artifact downloads),
    then — the decoder unwraps the `.xz` itself, so either name works:
    ```bash
    scripts/decode-coredump.sh coredump.bin build/daikin-altherma-esp32.elf.xz
