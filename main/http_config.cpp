@@ -966,7 +966,7 @@ static esp_err_t set_ntp(httpd_req_t* req) {
 // strict decimal coordinates are required. Saving is local and non-blocking: the dedicated weather
 // task performs TLS/DNS/JSON work only after this response.
 static esp_err_t set_weather(httpd_req_t* req) {
-    char body[192];
+    char body[256];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
     cJSON* j = cJSON_Parse(body);
     if (!j) return send_err(req, "400 Bad Request", "bad json");
@@ -1253,6 +1253,16 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
     if (reply.status == ProbeStatus::NoLink || reply.status == ProbeStatus::Timeout)
         return send_err(req, "503 Service Unavailable", probe_status_name(reply.status));
 
+    // ONE status, decided before a byte is emitted. The slice bound can only be applied after the
+    // reply arrives, so the obvious shape appends a second `status` once the payload turns out to be
+    // shorter than the caller assumed — and a JSON object with two `status` keys is a response whose
+    // meaning depends on which one the parser keeps. Decide first, emit once.
+    const bool sliced = reply.status == ProbeStatus::Ok &&
+                        probe_slice_fits(q.offset, q.size, reply.payload_len);
+    const ProbeStatus status = (reply.status == ProbeStatus::Ok && !sliced)
+                                   ? ProbeStatus::OutOfBounds
+                                   : reply.status;
+
     char reg_hex[8];
     snprintf(reg_hex, sizeof(reg_hex), "0x%02X", static_cast<unsigned>(q.reg));
     std::string out = "{\"reg\":\"";
@@ -1264,7 +1274,7 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
     out += ",\"offset\":" + std::to_string(q.offset);
     out += ",\"size\":" + std::to_string(q.size);
     out += ",\"status\":\"";
-    out += probe_status_name(reply.status);
+    out += probe_status_name(status);
     out += '"';
 
     if (reply.status != ProbeStatus::Ok) {
@@ -1286,12 +1296,11 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
     out += hex;
     out += "\",\"payload_len\":" + std::to_string(reply.payload_len);
 
-    if (!probe_slice_fits(q.offset, q.size, reply.payload_len)) {
-        // The page is real and shorter than the caller assumed. A finding, not a transport error —
-        // and the payload hex above already shows exactly how much there is.
-        out += ",\"status\":\"";
-        out += probe_status_name(ProbeStatus::OutOfBounds);
-        out += "\",\"ok\":false}";
+    if (!sliced) {
+        // The page is real and shorter than the caller assumed — already reported as out_of_bounds
+        // above. A finding, not a transport error, and the payload hex just emitted shows exactly
+        // how much there is.
+        out += ",\"ok\":false}";
         return http_send_json(req, out.c_str());
     }
 

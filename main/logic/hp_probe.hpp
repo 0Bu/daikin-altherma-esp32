@@ -28,6 +28,15 @@
 // Nothing here can change a setting on the unit, and that property comes from the protocol, not
 // from restraint in this file.
 //
+// A PROBE RESULT IS A DECODE, NOT A MEASUREMENT — say it here because nothing downstream can.
+// The publish path runs every number through hp_format(): reading_plausible() drops a physically
+// impossible °C or a 0-bar refrigerant pressure, and value_available() adjudicates whether the row
+// is populated on this unit at all. This path deliberately runs NEITHER. That is the point — the
+// question is "what do these bytes read as", and a filter that hid the impossible answer would hide
+// exactly the evidence #194 needs. But it means a probe can hand back 240.6 °C where /values and
+// Home Assistant correctly show nothing, so nothing here may be quoted as a reading, and the two
+// numbers disagreeing is the tool working rather than a defect.
+//
 // Pure and IDF-free so the request bounds, the reply-status mapping and — the part that actually
 // carries risk — the CONVERTER SWEEP are asserted on the host. The sweep runs every candidate
 // converter over caller-supplied bytes, which is a much wider input domain than the poll path ever
@@ -141,6 +150,45 @@ inline ProbeStatus probe_status_from_query(int n) {
 // when a page is shorter than the caller assumed — which is itself a finding worth reporting.
 inline bool probe_slice_fits(int offset, int size, int payload_len) {
     return offset >= 0 && size > 0 && payload_len > 0 && offset + size <= payload_len;
+}
+
+// ── The REQUEST SLOT: how a caller and the poll task agree on WHOSE answer this is ────────────
+// The probe crosses two tasks, and the gate mutex that serialises callers does NOT serialise a
+// caller against the poll task: a caller whose timeout expires releases the gate and walks away
+// while the poll task may already be inside its 300 ms round-trip. The next caller then arms its
+// own register, and without the ticket below two things go wrong at once — the abandoned service
+// clears the slot, silently discarding the new request, and its completion signal wakes the new
+// caller, which reads the PREVIOUS register's reply as its own. That last one is this feature's own
+// failure mode turned against it: a confident answer about a page nobody asked for.
+//
+// So the request carries a ticket, the reply is stamped with it, and both withdrawals are
+// compare-exchanges against the exact packed value — each side clears only the request it owns.
+// The packing lives here, pure, because the interleaving is the part worth asserting on the host:
+// it is not reachable from a device test, and it is where the bug was.
+inline constexpr uint32_t PROBE_TICKET_MASK = 0x00FFFFFFu;   // 24 bits above the register byte
+
+// Ticket 0 is never handed out. `pending == 0` means "no request", and a masked-zero ticket packed
+// with register 0x00 is exactly that value — so the one register whose probe would silently do
+// nothing is the one a user exploring from the start of the map asks for first.
+inline constexpr uint32_t probe_ticket_normalize(uint32_t raw) {
+    const uint32_t t = raw & PROBE_TICKET_MASK;
+    return t == 0 ? 1u : t;
+}
+
+inline constexpr uint32_t probe_pack(uint32_t ticket, uint8_t reg) {
+    return (probe_ticket_normalize(ticket) << 8) | reg;
+}
+inline constexpr uint32_t probe_ticket_of(uint32_t pending) { return pending >> 8; }
+inline constexpr uint8_t  probe_reg_of(uint32_t pending) {
+    return static_cast<uint8_t>(pending & 0xFFu);
+}
+
+// Is the published reply the one THIS caller is waiting for? Compared on the packed (masked) ticket
+// and never on the raw counter: the counter is 32-bit and the field is 24, so after 2^24 probes a
+// raw comparison would reject every reply and the route would time out forever on a device that is
+// working perfectly.
+inline constexpr bool probe_reply_matches(uint32_t reply_ticket, uint32_t my_ticket) {
+    return reply_ticket == probe_ticket_normalize(my_ticket);
 }
 
 // ── The CANDIDATE TABLE ───────────────────────────────────────────────────────────────────────

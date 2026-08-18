@@ -62,24 +62,33 @@ static DetectBackoff         s_backoff;
 static int64_t               s_next_detect_us = 0;
 static std::atomic<bool>     s_detect_reset{false};
 
-// Free-register-probe hand-off (hp_poll.hpp → hp_probe_run). Three objects, each doing one job:
-//   s_probe_gate  — ONE submitter at a time. Taken with zero timeout, so a second concurrent
-//                   request is answered Busy immediately rather than queueing behind a bus that
-//                   only serves one probe per second anyway.
-//   s_probe_req   — the register, published by the submitter and consumed by the poll task. Atomic
-//                   because it crosses tasks; -1 means "no request", which is also what the poll
-//                   task writes back so a timed-out submitter cannot leave a request armed for a
-//                   later cycle to execute against a caller that is already gone.
-//   s_probe_done  — the completion signal. A binary semaphore rather than a flag+poll: the httpd
-//                   task must BLOCK (it is waiting on a physical round-trip up to a poll interval
-//                   away), and spinning there would burn the one task with the deepest stack.
-// s_probe_reply is written only between the poll task's read of s_probe_req and its give of
-// s_probe_done, and read only after the submitter's take succeeds — the semaphore pair is the
-// ordering, so the struct itself needs no lock.
-static SemaphoreHandle_t     s_probe_gate = nullptr;
-static SemaphoreHandle_t     s_probe_done = nullptr;
-static std::atomic<int>      s_probe_req{-1};
-static HpProbeReply          s_probe_reply;
+// Free-register-probe hand-off (hp_poll.hpp → hp_probe_run).
+//
+//   s_probe_gate    — ONE submitter at a time. Taken with zero timeout, so a second concurrent
+//                     request is answered Busy immediately rather than queueing behind a bus that
+//                     only serves one probe per second anyway.
+//   s_probe_pending — the request: a TICKET packed above the register byte, 0 = none. Atomic
+//                     because it crosses tasks.
+//   s_probe_done    — the completion signal. A binary semaphore rather than a flag+poll: the httpd
+//                     task must BLOCK (it is waiting on a physical round-trip up to a poll interval
+//                     away), and spinning there would burn the one task with the deepest stack.
+//   s_probe_reply / s_probe_reply_ticket — the answer and WHOSE it is.
+//
+// THE TICKET IS NOT BOOKKEEPING, it is the correctness argument. The gate serialises submitters,
+// but it does NOT serialise a submitter against the poll task: a caller whose 3 s ran out releases
+// the gate and walks away while the poll task may already be inside its 300 ms round-trip. Without
+// a ticket the next caller would then (a) have its own register overwritten by the abandoned
+// service's slot reset, and (b) be woken by that service's give and read the PREVIOUS register's
+// reply as its own — the exact failure this feature exists to prevent, one layer up: a confident
+// answer about a page nobody asked for. So the reply is stamped, the submitter accepts only its
+// own stamp, and the poll task withdraws the request with a compare-exchange that clears only the
+// request it actually served.
+static SemaphoreHandle_t      s_probe_gate = nullptr;
+static SemaphoreHandle_t      s_probe_done = nullptr;
+static std::atomic<uint32_t>  s_probe_pending{0};        // ticket << 8 | reg, 0 = no request
+static std::atomic<uint32_t>  s_probe_ticket{0};         // last ticket handed out
+static std::atomic<uint32_t>  s_probe_reply_ticket{0};   // whose answer s_probe_reply holds
+static HpProbeReply           s_probe_reply;
 
 // Poll cycles the OOM guard below dropped (#380, hp_poll.hpp → hp_skipped_cycles). Written from the
 // catch handler and read from the MQTT publish task, so it is atomic; relaxed is enough because
@@ -522,8 +531,9 @@ static bool poll_detect() {                         // false only when an attemp
 // runs at the tail of a cycle whose own OOM guard has already fired if the heap is exhausted, and
 // it must still work then, because a probe is exactly what someone debugging that state reaches for.
 static void poll_probe_service() {
-    const int reg = s_probe_req.load(std::memory_order_acquire);
-    if (reg < 0) return;
+    const uint32_t pending = s_probe_pending.load(std::memory_order_acquire);
+    if (pending == 0) return;
+    const uint8_t reg = probe_reg_of(pending);
 
     HpProbeReply r;
     const Config c = config();
@@ -541,7 +551,7 @@ static void poll_probe_service() {
         // user with a shell loop evict the boot's real evidence from a 6 KB ring. A checksum failure
         // or an impossible length still logs — those describe the LINK, not the page, and they are
         // the same defect whoever is watching /diag is there for.
-        const int n = hp_query(static_cast<uint8_t>(reg), c.proto, r.frame, sizeof(r.frame),
+        const int n = hp_query(reg, c.proto, r.frame, sizeof(r.frame),
                                HpQueryLogPolicy::IntegrityOnly);
         if (n < 0) {
             r.status = probe_status_from_query(n);
@@ -556,10 +566,16 @@ static void poll_probe_service() {
     }
 
     s_probe_reply = r;
-    // Clear the request BEFORE signalling: a submitter that timed out a moment ago has already
-    // stopped waiting, and leaving the register armed would have the next cycle put a second query
-    // on the bus for a caller that is gone.
-    s_probe_req.store(-1, std::memory_order_release);
+    // Publish the answer, THEN stamp it: a submitter reads the struct only after seeing its own
+    // ticket, so the release store on the ticket is what makes the whole reply visible.
+    s_probe_reply_ticket.store(probe_ticket_of(pending), std::memory_order_release);
+    // Withdraw ONLY the request we just served. A submitter that gave up during the round-trip may
+    // already have released the gate and let the next one arm its own register; an unconditional
+    // reset would silently discard that request, and the caller would wait out its whole timeout
+    // for a query that was never put on the bus.
+    uint32_t served = pending;
+    s_probe_pending.compare_exchange_strong(served, 0, std::memory_order_acq_rel,
+                                            std::memory_order_relaxed);
     if (s_probe_done) xSemaphoreGive(s_probe_done);
 }
 
@@ -826,18 +842,39 @@ bool hp_probe_run(uint8_t reg, HpProbeReply& out, int timeout_ms) {
         return false;
     }
 
-    // Drain any completion left over from a previous submitter that timed out and walked away: its
-    // give would otherwise satisfy THIS take instantly and hand back the previous reply.
+    // Drain a completion left over from a submitter that gave up and walked away. Not required for
+    // correctness — the ticket check below rejects a foreign reply anyway — but it saves this
+    // caller one wasted wake-up on the task with the deepest stack in the firmware.
     while (xSemaphoreTake(s_probe_done, 0) == pdTRUE) { }
 
-    s_probe_req.store(static_cast<int>(reg), std::memory_order_release);
-    if (xSemaphoreTake(s_probe_done, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
-        // Withdraw the request so no later cycle executes it. A race with a poll task that is
-        // already inside poll_probe_service() is harmless: it clears the slot itself and its give
-        // is drained by the next submitter above.
-        s_probe_req.store(-1, std::memory_order_release);
-        out.status = ProbeStatus::Timeout;
-        return false;
+    // The packing, the never-zero rule and the match test are logic/hp_probe.hpp's — pure, so the
+    // interleaving they exist for is asserted on the host rather than hoped for on a board.
+    const uint32_t ticket  = probe_ticket_normalize(
+        s_probe_ticket.fetch_add(1, std::memory_order_relaxed) + 1);
+    const uint32_t pending = probe_pack(ticket, reg);
+    s_probe_pending.store(pending, std::memory_order_release);
+
+    // Wait for OUR answer, not merely for an answer. A late give from an abandoned probe is
+    // consumed and ignored rather than mistaken for this one; the deadline is absolute, so those
+    // wake-ups cannot extend the wait past what the caller asked for.
+    const int64_t deadline_us = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000;
+    for (;;) {
+        const int64_t remaining_us = deadline_us - esp_timer_get_time();
+        const bool woken = remaining_us > 0 &&
+                           xSemaphoreTake(s_probe_done,
+                                          pdMS_TO_TICKS(static_cast<int>(remaining_us / 1000) + 1))
+                               == pdTRUE;
+        if (woken && probe_reply_matches(s_probe_reply_ticket.load(std::memory_order_acquire),
+                                         ticket)) break;
+        if (remaining_us <= 0 || !woken) {
+            // Withdraw our own request — and only ours, so a probe the poll task is already
+            // executing for us is not confused with one a later caller armed.
+            uint32_t mine = pending;
+            s_probe_pending.compare_exchange_strong(mine, 0, std::memory_order_acq_rel,
+                                                    std::memory_order_relaxed);
+            out.status = ProbeStatus::Timeout;
+            return false;
+        }
     }
     out = s_probe_reply;
     return out.status == ProbeStatus::Ok;

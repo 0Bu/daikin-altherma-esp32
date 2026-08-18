@@ -4727,6 +4727,59 @@ static bool probe_has_alias(const ProbeDecode& d, int conv) {
 }
 
 static void test_hp_probe() {
+    // ── The request slot. The gate mutex serialises CALLERS but not a caller against the poll task,
+    // so the interleaving below is reachable on a real device and is where the bug was: a caller
+    // whose timeout expired walks away mid-round-trip, the next one arms its own register, and the
+    // abandoned service completes. Replayed here because no device test can reach it.
+    CHECK(probe_pack(1, 0x60) == ((1u << 8) | 0x60));
+    CHECK(probe_reg_of(probe_pack(7, 0xA1)) == 0xA1);
+    CHECK(probe_ticket_of(probe_pack(7, 0xA1)) == 7u);
+    CHECK(probe_reply_matches(7, 7));
+    CHECK(!probe_reply_matches(7, 8));
+    // 0 is "no request", so a masked-zero ticket must never be handed out — otherwise probing
+    // register 0x00, the first page anyone walking the map asks for, would pack to exactly "none".
+    CHECK(probe_ticket_normalize(0) == 1u);
+    CHECK(probe_pack(0, 0x00) != 0u);
+    CHECK(probe_pack(1u << 24, 0x00) != 0u);
+    // The field is 24 bits and the counter is 32, so the match test must compare the MASKED ticket:
+    // a raw comparison would reject every reply after 2^24 probes and time the route out forever on
+    // a device that is working perfectly.
+    CHECK(probe_ticket_of(probe_pack(1u << 24 | 5u, 0x10)) == 5u);
+    CHECK(probe_reply_matches(probe_ticket_of(probe_pack(1u << 24 | 5u, 0x10)), (1u << 24) | 5u));
+
+    {
+        // Replay: A arms 0x60, the poll task takes it, A gives up, B arms 0x61, A's service commits.
+        uint32_t slot = 0, reply_ticket = 0;
+        uint8_t  reply_reg = 0;
+        const uint32_t a = probe_ticket_normalize(1), b = probe_ticket_normalize(2);
+
+        slot = probe_pack(a, 0x60);                       // A submits
+        const uint32_t taken = slot;                      // poll task takes it and starts a query
+        CHECK(probe_reg_of(taken) == 0x60);
+
+        uint32_t mine = probe_pack(a, 0x60);              // A times out and withdraws ITS request
+        if (slot == mine) slot = 0;                       // (compare-exchange)
+        CHECK(slot == 0);
+
+        slot = probe_pack(b, 0x61);                       // B arms its own register
+
+        reply_reg = probe_reg_of(taken);                  // A's service completes
+        reply_ticket = probe_ticket_of(taken);
+        uint32_t served = taken;
+        if (slot == served) slot = 0;                     // withdraw only what WAS served
+        // B's request survived: an unconditional reset here discarded it and B waited out its whole
+        // timeout for a query that was never put on the bus.
+        CHECK(slot == probe_pack(b, 0x61));
+        // ...and B refuses the reply it was woken by, because it is A's.
+        CHECK(!probe_reply_matches(reply_ticket, b));
+        CHECK(reply_reg == 0x60);
+        // B's own service then answers B.
+        reply_ticket = probe_ticket_of(slot);
+        reply_reg    = probe_reg_of(slot);
+        CHECK(probe_reply_matches(reply_ticket, b));
+        CHECK(reply_reg == 0x61);
+    }
+
     // ── Request bounds: everything decidable WITHOUT the reply is decided before the bus is used.
     ProbeRequest q{0x60, 11, 1, 105};
     CHECK(probe_validate(q) == ProbeReject::None);

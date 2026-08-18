@@ -611,6 +611,13 @@ POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-cho
                                    #   READ-ONLY BY CONSTRUCTION, not by restraint: X10A has no write
                                    #   command in either framing (X10A_PROTOCOL.md), so an arbitrary
                                    #   register byte is an arbitrary read and nothing else.
+                                   #   A DECODE, NOT A MEASUREMENT: unlike /values and MQTT, this path
+                                   #   runs neither reading_plausible() nor the availability ledger,
+                                   #   on purpose — a filter that hid an impossible answer would hide
+                                   #   the evidence the probe exists to collect. So a probe can report
+                                   #   240.6 °C on a row Home Assistant correctly shows as unavailable.
+                                   #   The two disagreeing is the tool working; never quote a probe
+                                   #   number as a reading.
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)
 POST /ota/update                   # start the background self-update (downloads, then reboots)
 GET  /ota/status                   # { state, progress, message, available, update_available, current }
