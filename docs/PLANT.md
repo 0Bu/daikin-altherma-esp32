@@ -294,7 +294,7 @@ each rejecting the others' pins with a named reason.
 | Moving pins while running | refused — disable first, because two masters briefly driving one shared wire is a bus fault, not a config change |
 | Disabling | **nothing at all** — it is the recovery path and must never depend on hardware that may be the problem |
 
-Each refusal carries a machine code beside the English text, so the bilingual UI translates without
+Each refusal carries a machine code beside the English text, so the localized UI translates without
 the API losing its one wording. Board identity, LED/button and the sensor are submitted as **one**
 atomic proposed snapshot, so choosing a board and attaching its sensor cannot half-save.
 

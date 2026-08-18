@@ -50,7 +50,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 4 | OTA rollback + **connectivity-proving health gate** (not an uptime timer) | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
 | 5 | OTA manifest check + signed manual HTTPS stream + **two-point downgrade gate**, transport cleanup before validation, dual INTERNAL-heap gate and bounded MQTT/X10A/weather quiescing | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
 | 6 | Live UI by **polling** `/status` + chunk-streamed `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
-| 7 | Minified, deterministic-gzip web UI **embedded in the app image**, under a 150 KiB delivery budget | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs) |
+| 7 | Minified deterministic-gzip UI **embedded in the app image**: startup page under 150 KiB, each device-local locale under 32 KiB | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs) |
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline | ✅ | [`http_common.cpp`](../main/http_common.cpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
 | 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
@@ -102,7 +102,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 57 | **Doc entity-id gate** — resolves the docs' copy-pasteable entity ids through the real slug rule over the real catalog, and only against *detectable* profiles | ✅ | [`entity_id_audit.cpp`](../tools/docs/entity_id_audit.cpp), [`run-doc-entity-audit.sh`](../scripts/run-doc-entity-audit.sh) |
 | 58 | **Deleting a crash report** (`POST /crash/dismiss`) — a device action, not page state: erase first, mark second, so status, MQTT and every browser agree | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
 | 59 | **Pinned warning contract on `main/`** — `-Werror=return-type,format,unused-result` on that component alone, so three constructs written as if a warning were fatal actually are | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt) |
-| 60 | **Manual UI-language override** — a persistent de/en/auto picker overriding the browser guess, applied live | ✅ 🧪 | [`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp), [`www/js/i18n.js`](../main/www/js/i18n.js) |
+| 60 | **Device-local multilingual UI** — browser detection plus a persistent en/de/es/fr/it/pl/cs/uk override, applied live from bounded signed-image locale assets | ✅ 🧪 | [`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp), [`www/js/i18n.js`](../main/www/js/i18n.js), [`www/locales/`](../main/www/locales/) |
 | 61 | **Second SOURCE: read-only Modbus TCP to a Daikin HomeHub (EKRHH)** — a stack beside X10A, not an alternative; no source file can frame a write; the 31-row map is batched into ten full-cycle requests while two diagnosis gates and one plant-outdoor context batch stay at 1 Hz | ✅ 🧪 | [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`logic/modbus.hpp`](../main/logic/modbus.hpp), [`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
 | 62 | **Configurable MQTT living-room source** — independent exact `topic$json-path` mappings for temperature, an optional source time and an MQTT-backed or fixed target; saving records the mapping even when a path is empty or wrong, but subscription/decoding starts only under the v19 Plant diagnostics master, then the next real MQTT frame supplies runtime decoder evidence; without source time, only live non-retained arrival is accepted | ✅ 🧪 | [`logic/reference_temperature.hpp`](../main/logic/reference_temperature.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 66 | **Complete UI interaction merge gate** — the assembled production UI is *executed* in a deterministic DOM harness, covering every modal in the production registry | ✅ 🧪 | [`test_ui_use_cases.mjs`](../test/test_ui_use_cases.mjs), [`run-ui-use-case-tests.sh`](../scripts/run-ui-use-case-tests.sh) |
@@ -312,7 +312,8 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   HTTP UI.
 - **LWIP tuned for the workload**: the socket cap is lifted (http server + mDNS + SNTP + MQTT + OTA
   can otherwise starve the download of a socket) and the TCP windows doubled. A **150 KiB gzip hard
-  limit** on the UI fails the build before asset growth can silently justify more buffers.
+  limit** on the single startup-page response fails the build before that response can silently
+  justify more buffers; each separately requested locale asset has its own **32 KiB** limit.
 
   The sources keep their load-bearing comments and the artefact carries none: the offline minifier
   ([`minify_and_gzip.py`](../tools/web_asset/minify_and_gzip.py)) strips **HTML, CSS and JS**
@@ -373,11 +374,12 @@ other.
   nulls whose reason rides **alongside** rather than inside the value array. `t0` is derived from the
   newest sample's age on the monotonic clock — and **omitted** entirely while the clock has never
   synced, so the UI reads out an age rather than a fabricated timestamp.
-- **✅ 🧪 Manual UI-language override** ([`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp)): the
-  bilingual UI picks its language from `navigator.language` by default; a persistent picker overrides
-  that per installation and applies **live**, with `auto` a first-class value decoded defensively so
-  an unknown or pre-field blob keeps the browser default. Heat-pump **value labels** stay English in
-  both languages — they are X10A register names.
+- **✅ 🧪 Device-local multilingual UI** ([`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp),
+  [`www/locales/`](../main/www/locales/)): the UI detects en/de/es/fr/it/pl/cs/uk from
+  `navigator.language`; a persistent picker overrides that per installation and applies **live**.
+  English is the startup fallback, while the other catalogs are separately compressed signed-image
+  assets. Heat-pump **value labels** stay English — they are X10A register names; detailed value and
+  inspector explanations remain English/German and fall back to English in the six newer locales.
 
 ---
 

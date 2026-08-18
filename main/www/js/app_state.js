@@ -366,7 +366,7 @@ async function refreshStatus(paint = true) {
   try { s = await j("/status", { signal: pollSignal() }); } catch { markUnreachable(); return false; }
   S.status = s;
   hydrateRoutedPopup();
-  setLangFromStatus(s);   // apply the device's language override (if any) before painting this frame
+  await setLangFromStatus(s);  // load/apply the device language before painting this frame
   if (paint) renderApp();
   return true;
 }

@@ -75,6 +75,20 @@ extern const unsigned char favicon_ico_start[]   asm("_binary_favicon_ico_start"
 extern const unsigned char favicon_ico_end[]     asm("_binary_favicon_ico_end");
 extern const unsigned char heat_pump_icon_png_start[] asm("_binary_heat_pump_icon_png_start");
 extern const unsigned char heat_pump_icon_png_end[]   asm("_binary_heat_pump_icon_png_end");
+extern const unsigned char locale_de_js_gz_start[] asm("_binary_locale_de_js_gz_start");
+extern const unsigned char locale_de_js_gz_end[]   asm("_binary_locale_de_js_gz_end");
+extern const unsigned char locale_es_js_gz_start[] asm("_binary_locale_es_js_gz_start");
+extern const unsigned char locale_es_js_gz_end[]   asm("_binary_locale_es_js_gz_end");
+extern const unsigned char locale_fr_js_gz_start[] asm("_binary_locale_fr_js_gz_start");
+extern const unsigned char locale_fr_js_gz_end[]   asm("_binary_locale_fr_js_gz_end");
+extern const unsigned char locale_it_js_gz_start[] asm("_binary_locale_it_js_gz_start");
+extern const unsigned char locale_it_js_gz_end[]   asm("_binary_locale_it_js_gz_end");
+extern const unsigned char locale_pl_js_gz_start[] asm("_binary_locale_pl_js_gz_start");
+extern const unsigned char locale_pl_js_gz_end[]   asm("_binary_locale_pl_js_gz_end");
+extern const unsigned char locale_cs_js_gz_start[] asm("_binary_locale_cs_js_gz_start");
+extern const unsigned char locale_cs_js_gz_end[]   asm("_binary_locale_cs_js_gz_end");
+extern const unsigned char locale_uk_js_gz_start[] asm("_binary_locale_uk_js_gz_start");
+extern const unsigned char locale_uk_js_gz_end[]   asm("_binary_locale_uk_js_gz_end");
 
 namespace daik {
 
@@ -160,6 +174,39 @@ static esp_err_t h_heat_pump_icon(httpd_req_t* req) {
     httpd_resp_set_type(req, "image/png");
     return httpd_resp_send(req, reinterpret_cast<const char*>(heat_pump_icon_png_start),
                            heat_pump_icon_png_end - heat_pump_icon_png_start);
+}
+
+struct LocaleAsset {
+    const char* code;
+    const unsigned char* start;
+    const unsigned char* end;
+};
+
+static esp_err_t h_locale(httpd_req_t* req) {
+    char query[24] = {0};
+    char lang[4] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "lang", lang, sizeof(lang)) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing locale");
+    }
+    static const LocaleAsset assets[] = {
+        {"de", locale_de_js_gz_start, locale_de_js_gz_end},
+        {"es", locale_es_js_gz_start, locale_es_js_gz_end},
+        {"fr", locale_fr_js_gz_start, locale_fr_js_gz_end},
+        {"it", locale_it_js_gz_start, locale_it_js_gz_end},
+        {"pl", locale_pl_js_gz_start, locale_pl_js_gz_end},
+        {"cs", locale_cs_js_gz_start, locale_cs_js_gz_end},
+        {"uk", locale_uk_js_gz_start, locale_uk_js_gz_end},
+    };
+    for (const auto& asset : assets) {
+        if (strcmp(lang, asset.code) != 0) continue;
+        char etag[80] = {0};
+        bool not_modified = false;
+        const esp_err_t cache_err = static_asset_cache(req, asset.code, etag, sizeof(etag), not_modified);
+        if (cache_err != ESP_OK || not_modified) return cache_err;
+        return http_send_gzip(req, "text/javascript; charset=utf-8", asset.start, asset.end);
+    }
+    return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Unknown locale");
 }
 
 // The catch-all ("/*"). In SETUP mode an unmatched GET is an OS connectivity probe far more often
@@ -1100,9 +1147,9 @@ void http_append_status_json(std::string& j, bool redact) {
     j += "\"ota\":{\"channel\":" + jstr(ota_channel_name(c.ota_channel)) + "},";
 
     // The web UI's manual language override (logic/ui_lang.hpp; POST /set_lang). "auto" (the default)
-    // means the browser keeps detecting the language on its own; "de"/"en" force one on every client.
+    // means the browser keeps detecting the language on its own; a supported code forces one on every client.
     // Reported here for the same reason as the channel: the ESP32 card's language selector renders
-    // from /status, and the browser applies "de"/"en" over its own navigator.language guess.
+    // from /status, and the browser applies a named language over its navigator.language guess.
     j += "\"ui\":{\"lang\":" + jstr(ui_lang_name(c.ui_lang)) + "},";
 
     // Last reset: null on a clean boot, else the crash summary (reset reason + core-dump backtrace).
@@ -1777,6 +1824,7 @@ void http_register_status(httpd_handle_t s, HttpSurface surface) {
     if (!http_surface_serves(surface, "/status", /*is_post=*/false)) return;
 
     http_register(s, "/heat-pump-icon.png", HTTP_GET, h_heat_pump_icon);
+    http_register(s, "/locale.js", HTTP_GET, h_locale);
     http_register(s, "/status", HTTP_GET, h_status);
     http_register(s, "/values", HTTP_GET, h_values);
     http_register(s, "/history", HTTP_GET, h_history);

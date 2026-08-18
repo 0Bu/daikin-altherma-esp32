@@ -758,7 +758,7 @@ function otaCacheStore() {
   } catch { return false; }                    // quota or serialization failure keeps safe fallback
 }
 
-function otaCacheRestore(otaStatus) {
+async function otaCacheRestore(otaStatus) {
   // The normal poll may beat the compact resume request on a healthy board. Never replace a frame
   // freshly obtained in this page with an older persisted one merely because the two requests raced.
   if (S.status) return false;
@@ -780,7 +780,7 @@ function otaCacheRestore(otaStatus) {
   S._values = cached.values;
   S._modbus = cached.modbus;
   S.otaCached = true;
-  setLangFromStatus(S.status);
+  await setLangFromStatus(S.status);
   renderApp();
   return true;
 }
@@ -923,7 +923,7 @@ async function resumeOta() {
     // Prefer the complete last frame saved by this tab. If it is absent, stale or belongs to another
     // running version, /status is still the largest response the device builds and may legitimately
     // be unavailable while OTA TLS owns the scarce heap; retain the accurate OTA-only shell then.
-    const restored = otaCacheRestore(s);
+    const restored = await otaCacheRestore(s);
     const otaOnly = !restored && renderOtaResumeShell(s);
     syncOtaSettingsLock();
     if (s.state === "updating") otaInline(t("ota.pct", s.progress ?? 0), { ring: true, pct: s.progress ?? 0 });

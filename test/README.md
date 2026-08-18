@@ -100,6 +100,12 @@ one. The error is a full-row, inset, bottom-rounded tinted tongue with the same 
 typography and downward slide as a value explainer; it is no longer constrained to the endpoint's
 right-hand value column. The global reduced-motion contract removes that non-essential animation.
 
+`node test/test_ui_locale_catalogs.mjs` evaluates the separately shipped de/es/fr/it/pl/cs/uk
+modules against the embedded English fallback. All 734 keys, value types and parameter-function
+arities must match; browser detection and the Firmware selector must name the same eight languages;
+concurrent loads coalesce onto `/locale.js`; and every deterministic gzip stays within its tight
+32 KiB per-locale budget.
+
 `node test/test_homehub_discovery_contract.mjs` pins the IDF-facing lifecycle that the pure C++ host
 suite cannot link: fresh firmware runs one persisted search before HTTP, the Modbus poll task never
 browses mDNS, and an explicitly empty address creates no task or future boot search. The dialog's

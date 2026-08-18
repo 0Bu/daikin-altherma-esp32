@@ -33,25 +33,29 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
    (WiFi credentials, MQTT broker, Syslog server, NTP server, RX/TX pins, board hardware, OTA update
    channel) are explicit and report their outcome.
 4. **Terse, dense, technical.** Tabular numbers, short labels, no decorative copy.
-5. **Browser-detected language (de / en) by default, with a manual override.** This principle scopes
+5. **Browser-detected language (en / de / es / fr / it / pl / cs / uk) by default, with a manual override.** This principle scopes
    to the **device UI** (`main/www/`) — the GitHub Pages installer of §5.5 is English-only by decision,
-   and `setup.html` is served before the device UI script exists. The UI **chrome** (system status block, card
-   titles, connection rows, schematic labels, the inspector, modals, banners, toasts) and the tap-to-expand
-   value **descriptions** (§6) are rendered in German for a `de*` browser (`navigator.language`) and
-   English otherwise — English is the fallback for every string. That browser guess is the **default**;
+   and `setup.html` is served before the device UI script exists. The UI **chrome** (system status
+   block, card titles, connection rows, static schematic labels, modals, banners and toasts) is
+   rendered from the matching device-local catalog selected through
+   `navigator.language`, with English as the fallback for every string. The detailed value
+   descriptions and schematic inspector prose (§6) remain English/German; the six newer locales
+   deliberately fall back to English for that specialist layer. That browser guess is the **default**;
    on top of it the device carries an optional **manual override** — the Firmware settings card's
-   **Sprache** picker (Browser / English / Deutsch — "Browser" because that option IS the browser's
-   own guess, not a separate automatic mode) `POST`s `/set_lang`, which persists the choice in **NVS**
+   **Language** picker (Browser plus the eight languages, each named in its own language — "Browser"
+   because that option IS the browser's own guess, not a separate automatic mode) `POST`s
+   `/set_lang`, which persists the choice in **NVS**
    (`config ui_lang`, `logic/ui_lang.hpp`) and reports it back on `/status.ui.lang`. Once the user
    picks a language it wins over the browser guess on **every** client that opens the dashboard, until
    they set it back to Browser; the browser applies it live (`setLang()` in
-   `js/i18n.js` re-runs `applyStaticI18n()`), no reload. The **firmware is still English-only** — the
+   `js/i18n.js` re-runs `applyStaticI18n()`), no reload. The **firmware APIs remain English-only** — the
    heat-pump **value labels** arrive over `/values` as English X10A register names
-   (`docs/REGISTERS.md`) and are shown verbatim in **both** languages (the German descriptions explain
-   them); the firmware ships no localized strings. All UI copy lives in one `I18N` dictionary; dynamic
-   strings go through `t()`, static `main/www/index.html` markup through `data-i18n` +
-   `applyStaticI18n()` (spelled in full now that this contract also covers a second `index.html`, the
-   installer of §5.5).
+   (`docs/REGISTERS.md`) and are shown verbatim in **every** language (the English/German descriptions
+   explain them). Core localized copy shares one `I18N` object; dynamic strings go through `t()`,
+   static `main/www/index.html` markup through `data-i18n` +
+   `applyStaticI18n()`. English ships in the startup page; every other catalog is a separately
+   compressed, signed-image asset loaded from `/locale.js?lang=…` on the same device. No CDN or
+   internet service participates in localization.
 
 ## 2. Brand & colour tokens
 
@@ -635,7 +639,8 @@ Body, ordered:
    clickability is carried by the hit targets themselves (hover/press feedback, `role="button"`,
    the SVG's own `aria-label`), and a standing line of instructional copy under an otherwise quiet
    dashboard is exactly the decorative copy §1.4 rules out. Selected it shows:
-   a **title** (the concept in the UI language, e.g. "Leaving water"), the **headline reading** for
+   a **title** (German in the German UI, otherwise the specialist layer's English fallback, e.g.
+   "Leaving water"), the **headline reading** for
    that target (its `/values` row, or the derived figure for ΔT / heat output — an assembly like the
    outdoor unit has no single number and gets no headline rather than a "—" that would read as a
    missing value), the **source row label** in mono (the verbatim English register name, so a number
@@ -983,7 +988,7 @@ Body, ordered:
      drift into two slightly different expanders, and Model-card keys are prefixed (`model:`) so they
      can never collide with a catalog label in the open-state set. Each entry carries an English `what`/`normal` plus a German `de` copy; the browser language
      (§1) picks which is shown (English fallback). The value label above the box stays the English
-     register name in both languages.
+     register name in every language.
      **A switched row's panel opens with HOW LONG IT HAS READ THAT** — the one live sentence in a
      panel whose explainer is otherwise the same copy on every device at every hour, which is why it
      goes first. Only the **state word** carries emphasis — the panel's existing `.vdesc-n` lead-in
@@ -1164,9 +1169,9 @@ is exactly what a user would want to see move.
   available out-of-band at `GET /diag` (verbose/redact via query; clearing is `POST /diag/clear`);
   another card on Settings is where
   it would go if it ever comes back.
-- The UI language follows the **browser** (de / en) by default, with an optional **manual override**
-  on the Firmware card (Sprache → `/set_lang`, persisted in NVS as `ui_lang`; §1). The firmware itself
-  ships no localized strings.
+- The UI language follows the **browser** for en/de/es/fr/it/pl/cs/uk by default, with an optional **manual override**
+  on the Firmware card (Language → `/set_lang`, persisted in NVS as `ui_lang`; §1). Firmware API
+  strings and X10A value labels remain English; the device-local UI catalogs are signed-image assets.
 
 ### 5.5 Installer landing page (`docs/index.html`, GitHub Pages)
 This is the page a user meets **first**, before the device can serve its own UI. It therefore uses
@@ -1209,7 +1214,7 @@ mobile shell returns to the plain page background. The shell never widens the vi
 - The copy states what the firmware actually does: the model is **auto-detected** and the device has
   **one dashboard** — there is no "Setup" screen, no model picker and no RX/TX step to send people to
   (§5.2, §5.3).
-- **English only — deliberately, not by omission.** The de/en browser detection of §1 stops at the
+- **English only — deliberately, not by omission.** The device-UI browser detection of §1 stops at the
   device UI: this page ships no `I18N` dictionary. The divergence from the dashboard is **not** a
   gap to close — do not add a translation layer here to make the two consistent.
 
@@ -1330,7 +1335,7 @@ vocabulary exactly:
    that begins mid-chart is explained by the row above it instead of reading as lost data. Rendered
    at **two units at most, coarsest first** (`3 d 2 h`, `5 h 12 min`, `47 min`, `38 s`) — at three
    days nobody is reading the minutes, and a figure that reshuffles every second is a clock, not a
-   diagnostic. The unit symbols are SI and identical in both languages, so the row needs no
+   diagnostic. The unit symbols are SI and identical in every language, so the row needs no
    translated unit strings (the Checkup window already prints `min`/`h` untranslated).
    **The card's order encodes what the rows are**: the board's own setting (Hardware) → its own
    health (uptime, then the two memory rows).
@@ -1342,7 +1347,8 @@ vocabulary exactly:
    explanation tongue; the right-side value or pin selector remains an independent action.
 4. **Firmware card** — the running software: the **Version** (`version`) and the **Update channel**
    select (`ota.channel` → `POST /set_ota`, §5.4), then **Language** (`ui.lang` → `POST /set_lang`,
-   §1) — a three-option select, **Browser** / English / Deutsch, "Browser" because that option *is*
+   §1) — a nine-option select, **Browser** plus English, Deutsch, Español, Français, Italiano,
+   Polski, Čeština and Українська, "Browser" because that option *is*
    the browser's own guess (`navigator.language`), not a separate automatic mode. Picking one is a
    live write like the channel beside it: no reboot, and the browser re-localises immediately
    (`setLang()` re-runs `applyStaticI18n()` + the schematic's hit-target labels) rather than waiting

@@ -63,7 +63,7 @@ static esp_err_t send_err(httpd_req_t* req, const char* status, const char* msg)
     return http_send_json(req, (std::string("{\"ok\":false,\"error\":\"") + msg + "\"}").c_str());
 }
 
-// A rejection carrying a stable machine `code` beside the English `error`, so the bilingual UI can
+// A rejection carrying a stable machine `code` beside the English `error`, so the localized UI can
 // translate it while direct API clients still receive a useful explanation. Both arguments are
 // internal literals by contract — like send_err above, this does no escaping, so neither may ever
 // carry caller-supplied text.
@@ -1132,7 +1132,7 @@ static esp_err_t set_ota(httpd_req_t* req) {
 }
 
 // The web UI's manual language override. "auto" hands the choice back to the browser (the default);
-// "de"/"en" force a language on every client that opens the dashboard. See logic/ui_lang.hpp.
+// a supported code forces a language on every client that opens the dashboard. See logic/ui_lang.hpp.
 //
 // No reboot, like /set_ota: nothing claims the language at task start — the UI reads it from /status,
 // so the next poll already applies it. An unknown name is REJECTED rather than defaulted: answering

@@ -261,7 +261,8 @@ network — the way back in when it has joined a network you can no longer get o
 Not persisted: the **hostname** is fixed at `daikin-altherma-esp32`, the **poll cadence** at 1 s, and
 the **value-catalog labels** (the heat-pump register names) stay **English-only**; the **model**
 (`profile` + the detection fingerprint) is re-detected fresh on every boot and kept in RAM (a swapped
-unit is re-identified). The **UI's own language** is browser-detected the same way by default, but —
+unit is re-identified). The **UI's own language** is browser-detected from the supported
+en/de/es/fr/it/pl/cs/uk set by default, but —
 unlike the labels above — a manual pick *is* persisted (the `ui_lang` field in the `cfg` row above).
 See [ARCHITECTURE.md](ARCHITECTURE.md) → Auto-detection.
 
@@ -277,6 +278,7 @@ Origin/Fetch Metadata), and every POST body is `application/json`; see [SECURITY
 
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
+GET  /locale.js?lang=<code>        # device-local de/es/fr/it/pl/cs/uk UI catalog (gzip; trusted LAN)
 GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporter-identifying values
                                    #   read "<redacted>" — network/location identifiers, user-typed
                                    #   names/topics and all seven user-typed JSON paths. The exact

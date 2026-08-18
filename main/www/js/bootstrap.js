@@ -896,6 +896,7 @@ function pollStop() {
 }
 
 async function boot() {
+  if (!(await loadLocale(LANG))) LANG = "en";  // device-local asset failure degrades as one language
   applyStaticI18n();       // localise the static index.html markup (data-i18n) before the first render
   labelSchematicHits();    // name the clickable schematic parts from the INSPECT table
   wire();

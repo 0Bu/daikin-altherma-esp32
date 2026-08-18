@@ -2,10 +2,11 @@
 // Each heat-pump reading gets a short "what is this / what's normal" note, keyed to the value LABEL
 // by a first-match-wins regex — the same pattern-over-label technique pickValue()/groupOf()/vLwt use,
 // so one entry covers every profile's spelling of a concept (there are ~200 distinct labels but far
-// fewer physical quantities). English only, matching the fixed English labels and the §1 design
-// contract (there is no language selector). ORDER MATTERS: put specific/compound labels before the
-// general ones they contain (e.g. "after BUH" before plain "leaving water", BUH/capacity before the
-// bare "capacity" catch). A row whose label matches nothing here stays a plain, non-expandable row.
+// fewer physical quantities). The baseline is English, matching the fixed English labels; entries
+// also carry German where available, while the six newer UI locales deliberately fall back to the
+// English specialist copy (§1). ORDER MATTERS: put specific/compound labels before the general ones
+// they contain (e.g. "after BUH" before plain "leaving water", BUH/capacity before the bare
+// "capacity" catch). A row whose label matches nothing here stays a plain, non-expandable row.
 // `normal` is optional guidance on typical vs worth-a-look values — deliberately hedged; the exact
 // figures are model- and install-specific.
 // Keep the English column byte-for-byte aligned with logic/error_codes.hpp. That header enriches
