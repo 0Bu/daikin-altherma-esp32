@@ -7,6 +7,26 @@ see that report**, so there is nothing left in it that needs hiding — see
 
 ---
 
+## Is it a question, or a bug?
+
+This page is for a bug: the firmware states something you can show is wrong, or stops doing what it
+is supposed to do. That needs the device's own evidence, and the steps below collect it.
+
+If you instead want to know **how something works**, whether your wiring is right, or what a reading
+means, ask in
+[Discussions → Q&A](https://github.com/0Bu/daikin-altherma-esp32/discussions/new?category=q-a).
+An answer can be marked as the answer there, and it stays findable for the next person with the same
+unit. If the question turns out to be a bug, the report is a few clicks away — start it from the
+device as below.
+
+The difference matters for your data, not just for tidiness. **The bug path redacts for you; a
+discussion does not.** The report the device prepares has already had your network name, addresses,
+broker and server names removed before it is shown to you. A `/status` page you opened in a browser
+tab has not — append `?redact=1` before pasting any of it into a public thread, and never post a
+core dump in one (see [the one exception](#the-one-exception-crash-dumps)).
+
+---
+
 ## The short way
 
 1. Open your device's web page → **Settings** (the gear) → scroll to the bottom → **Report a bug**,

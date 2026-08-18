@@ -1,0 +1,76 @@
+# The QUESTION route — deliberately not a second bug tracker.
+#
+# A question and a bug report need opposite things. A bug needs the device's own evidence, which the
+# web UI's "Report a bug" action collects, and it needs to stay findable later by symptom: that is an
+# issue (.github/ISSUE_TEMPLATE/bug_report.yml). A question needs an answer, and this is the only
+# place where an answer can be marked as one. Routing bugs here would put reports somewhere nothing
+# triages them.
+#
+# The filename is a contract: GitHub matches a discussion category form to its category by SLUG, so
+# this file does nothing unless the category's slug is `q-a`. Renaming the category renames the file.
+#
+# What this form mostly exists to do is REDACTION. The bug path never shows anyone their raw device
+# data: `?redact=1` removes the network name, addresses, broker and server names before the report is
+# displayed (docs/REPORTING.md). A free-text question has no such guard — someone pastes a `/status`
+# page straight out of a browser tab. The notice and the acknowledgement below are the whole
+# substitute for that guard, which is why they are worth a required checkbox.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Is it a question, or is the firmware wrong?**
+
+        - A question — how something works, whether your wiring is right, why your unit behaves the
+          way it does, what a reading means: you are in the right place.
+        - Something the firmware gets **wrong**: start on the device instead — its web page →
+          **Settings** → **Report a bug** at the bottom. It assembles the evidence and opens an
+          issue form with it. See
+          [docs/REPORTING.md](https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/REPORTING.md).
+        - A **security problem**: the
+          [private advisory form](https://github.com/0Bu/daikin-altherma-esp32/security/advisories/new),
+          never a public thread.
+
+        **Before you paste anything from your device:** use the device's own **Report a bug** view,
+        or append `?redact=1` to the address (`http://<device>/status?redact=1`). Without it, a
+        `/status` page carries your network name, your addresses, your MAC and BSSID, your broker URL
+        — which can contain a password — and your coordinates to six decimals. Nothing here is
+        private, and edits do not un-publish what was already indexed.
+
+        **Never post a core dump.** It is raw task memory and a short password can sit inside it;
+        no redaction reaches that. If one is ever needed, you will be asked for it privately.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What do you want to know? Say what you are trying to achieve, not only what you tried.
+      placeholder: I have an ERGA04E and the flow temperature reads lower than the wall controller — is one of them a different sensor?
+    validations:
+      required: true
+
+  - type: input
+    id: fw_version
+    attributes:
+      label: Firmware version
+      description: From the footer of the device's web page. Leave blank if the question is not about a running device.
+      placeholder: 1.4.2 (esp32s3)
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What you have already tried or read
+      description: >-
+        Which docs you looked at, what you changed, what you expected to happen. This is what keeps
+        an answer from repeating something you already ruled out.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Your data
+      options:
+        - label: >-
+            Anything I pasted above came from the device's redacted output (`?redact=1`), or I removed
+            my network name, addresses, MAC/BSSID, broker URL and coordinates by hand.
+          required: true
+        - label: There is no core dump in this post.
+          required: true

@@ -13,6 +13,19 @@ signed commit history refer to predecessor pull requests, not to issue numbers i
 The current source and documentation are authoritative; open a new public issue when old context is
 needed for a present problem.
 
+## Where things go
+
+| | |
+| :--- | :--- |
+| **A question** | [Discussions → Q&A](https://github.com/0Bu/daikin-altherma-esp32/discussions/new?category=q-a). An answer can be marked as one there and stays findable; an issue is for something that is *wrong*. |
+| **A bug** | One issue carrying the device's own evidence — start at the web UI's **Report a bug** action ([`docs/REPORTING.md`](docs/REPORTING.md)). |
+| **An idea, while it is still a question** | [Discussions → Ideas](https://github.com/0Bu/daikin-altherma-esp32/discussions/new?category=ideas). Once it is an actionable spec with acceptance criteria, it is a [feature/task issue](https://github.com/0Bu/daikin-altherma-esp32/issues/new?template=feature_or_task.yml). |
+| **A security problem** | The [private advisory form](https://github.com/0Bu/daikin-altherma-esp32/security/advisories/new) — never a public issue or discussion. |
+
+A discussion is a public thread with no redaction step in front of it, unlike the bug path. Before
+pasting device output into one, take it from the device's own report view or append `?redact=1`; a
+core dump never belongs in a public thread at all ([`docs/REPORTING.md`](docs/REPORTING.md)).
+
 ## What is most useful
 
 | | |

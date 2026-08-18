@@ -52,6 +52,17 @@ cannot currently stand behind shown as `—` rather than as a number.
 
 ![The dashboard through its normal operating states, with smooth transitions between standby, heating, defrost, circulation, hot water and cooling](docs/media/dashboard.gif)
 
+## Questions & problems
+
+| | |
+| :--- | :--- |
+| **A question** — how something works, whether your wiring is right, what a reading means | [Discussions → Q&A](https://github.com/0Bu/daikin-altherma-esp32/discussions/new?category=q-a) |
+| **Something the firmware gets wrong** | The device collects the evidence for you: **Settings → Report a bug**, then one issue — [docs/REPORTING.md](docs/REPORTING.md) |
+| **A security problem** | [Private advisory](https://github.com/0Bu/daikin-altherma-esp32/security/advisories/new), never a public thread — [docs/SECURITY.md](docs/SECURITY.md) |
+
+Whichever you pick: the report the device prepares is redacted before you ever see it; a `/status`
+page opened in a browser tab is not.
+
 ## Reference
 
 | Doc | Description |

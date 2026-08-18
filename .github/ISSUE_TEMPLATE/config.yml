@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Ask a question (Discussions -> Q&A)
+    url: https://github.com/0Bu/daikin-altherma-esp32/discussions/new?category=q-a
+    about: >-
+      How does X work, is my wiring right, what does this reading mean. A question gets an answer
+      that can be marked as one and stays findable; an issue is for something the firmware gets
+      wrong. Read the redaction notice there before pasting anything from your device.
   - name: How to report a bug (read this first)
     url: https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/REPORTING.md
     about: The two steps — a public issue for what goes wrong, and a private report for the device data. Your device prepares both.

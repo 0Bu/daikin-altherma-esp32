@@ -18,8 +18,8 @@ hardware.**
 
 Harassment, personal attacks, demeaning or discriminatory comments, sexualised language or imagery,
 sustained disruption, deliberate intimidation, publishing others' private information, and
-persistently pushing a change after a clear decision. This applies in issues, pull requests, commit
-messages, code comments and any other project space.
+persistently pushing a change after a clear decision. This applies in issues, discussions, pull
+requests, commit messages, code comments and any other project space.
 
 Also not acceptable, because of what this project touches: **encouraging anyone to do something
 unsafe with mains voltage or a refrigerant circuit.** Wiring instructions in this repo say "breaker
