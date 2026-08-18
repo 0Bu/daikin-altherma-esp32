@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include "logic/crc.hpp"        // Protocol — the framing a probe reply was read with
+#include "logic/hp_probe.hpp"   // ProbeStatus — the outcomes hp_probe_run() reports
 
 namespace daik {
 
@@ -133,5 +135,36 @@ bool     hp_poll_generation_matches(uint32_t generation);
 
 // Signal the poll task to re-read config (called by /set_hp after config_save).
 void hp_poll_reconfigure();
+
+// ── Free register probe (logic/hp_probe.hpp, POST /hp/query) ─────────────────────────────────────
+// One CRC-verified reply to one caller-chosen register, with the raw frame attached.
+//
+// This runs ON THE POLL TASK and not on the httpd task that asks for it, for the same reason
+// everything else that touches the bus does: the link is half-duplex with exactly one master, and a
+// second task writing a request while a sweep is mid-reply desynchronises the reader — the failure
+// would not be a lost probe but corrupted PUBLISHED values, from a query no consumer of those
+// values ever made. The submitter therefore hands over a register and blocks; the poll task serves
+// at most one probe per cycle, between two sweeps, and hands back the bytes.
+//
+// The reply carries the FRAME, not a decoded value. Decoding is the caller's (logic/hp_probe.hpp),
+// and keeping it out here is deliberate: the whole point of the feature is that the catalog's
+// decode may be the thing under suspicion, so the transport must not pre-interpret what it read.
+struct HpProbeReply {
+    ProbeStatus status      = ProbeStatus::NoLink;
+    Protocol    proto       = Protocol::I;   // the framing actually used (config's cached/detected one)
+    int         rx_pin      = -1;
+    int         tx_pin      = -1;
+    uint8_t     frame[64]   = {};            // the complete reply INCLUDING header and checksum
+    int         frame_len   = 0;
+    int         payload_off = 0;             // where the value bytes start inside frame[]
+    int         payload_len = 0;             // frame_len - payload_off - 1 (the checksum byte)
+};
+
+// Ask for `reg` and wait up to `timeout_ms` for the poll task to serve it. Returns false only for
+// Busy/NoLink/Timeout — every bus-level outcome is reported through `out.status`, which is the
+// distinction the caller has to relay (a refused page and a wedged scheduler are different findings).
+// Allocation-free: it must stay callable from the httpd task under the same heap pressure that
+// makes every other handler return 503.
+bool hp_probe_run(uint8_t reg, HpProbeReply& out, int timeout_ms);
 
 } // namespace daik

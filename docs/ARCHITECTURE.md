@@ -181,7 +181,7 @@ http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_te
                       /test_circulation, /set_circulation,
                       /set_syslog,
                       /set_ntp, /set_hp, /discover_homehub, /set_board, /set_env3, /set_ota, /set_lang,
-                      /detect — all SIXTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
+                      /detect, /hp/query — all SEVENTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
                       exactly to (and which must be LOWERED in the same commit that retires a route,
                       as retiring /set_dynamic_lwt did: a count left above the real one is a comment
                       that has stopped describing the code depending on it). /set_ref_temp persists
@@ -1349,7 +1349,17 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    five blind seconds and consumes that handoff once; a panic never replays an older checkpoint.
    See *The host-tested logic core* for why a
    row is addressed by (page, offset, **converter**) here and by (page, offset, unit) in the trends.
-5. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
+5. Serve at most one pending **free register probe** (`logic/hp_probe.hpp`, `POST /hp/query`) — a
+   caller-chosen page read once and handed back as its raw frame. It runs *here*, on this task,
+   because the link is half-duplex with exactly one master: a second task writing a request while a
+   sweep is mid-reply would desynchronise the reader, and the damage would not be a lost probe but
+   corrupted **published** values from a query no consumer of those values ever made. The step is
+   outside the cycle's OOM guard and allocates nothing, so a sweep that threw cannot starve the one
+   route someone reaches for when the sweep is misbehaving; the OTA hold-off above still keeps the
+   bus quiet during an update, and a submitter waiting on it is told `timeout` rather than served
+   late. One probe is in flight at a time (a second caller gets `409`), and the httpd task blocks on
+   a semaphore rather than spinning — it is waiting on a physical round-trip up to a poll interval away.
+6. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
    the cache; they never touch the UART. X10A, HomeHub and ENV III trends are not published to MQTT — they exist for
    the web UI, and Home Assistant already records its own history for every entity.
 

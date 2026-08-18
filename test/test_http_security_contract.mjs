@@ -6,6 +6,8 @@ const read = (path) => fs.readFileSync(new URL(`../${path}`, import.meta.url), "
 const common = read("main/http_common.cpp");
 const status = read("main/http_status.cpp");
 const mcp = read("main/mcp_server.cpp");
+const configRoutes = read("main/http_config.cpp");
+const surface = read("main/logic/http_surface.hpp");
 const appState = read("main/www/js/app_state.js");
 
 // The policy belongs in the one trampoline every registered route traverses, before the real
@@ -36,6 +38,21 @@ assert.match(status, /"\/coredump\/clear", HTTP_POST, h_coredump_clear/);
 assert.match(status, /"\/crash\/dismiss", HTTP_POST, h_crash_dismiss/);
 assert.match(appState, /fetch\("\/crash\/dismiss", \{ method: "POST" \}\)/,
   "Delete report must remain a POST device action");
+
+// The free register probe puts a frame on a shared physical bus and spends a poll cycle's bus time,
+// so it must stay a POST registered through the surface gate: a GET would be takeable by a link
+// prefetcher, and a raw http_register would put a bus-driving route on the OPEN setup AP.
+assert.match(configRoutes, /http_register_on\(s, surface, "\/hp\/query", HTTP_POST, hp_query_probe\)/,
+  "the register probe must be a surface-gated POST");
+assert.doesNotMatch(configRoutes, /http_register\(s, "\/hp\/query"/,
+  "the register probe must never bypass the AP/LAN surface gate");
+assert.match(surface, /\/hp\/query/,
+  "the trust-surface policy must name the register probe among the trusted-LAN-only routes");
+// X10A has no write command, and the probe is the one route that takes a caller-chosen register.
+// It must therefore reach the bus through hp_probe_run() alone — never by framing its own request.
+assert.match(configRoutes, /hp_probe_run\(/, "the probe must go through the poll task's hand-off");
+assert.doesNotMatch(configRoutes, /build_request\(|uart_write_bytes\(/,
+  "no HTTP handler may frame or write an X10A request itself");
 
 // All seven user-entered JSON selectors must use the redacting writer. The redaction audit covers
 // count/list drift and never-wrapped new Config strings; this pins the current high-risk set by name.

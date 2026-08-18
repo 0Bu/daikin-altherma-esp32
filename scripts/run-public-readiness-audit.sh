@@ -205,8 +205,8 @@ if (!credentialWrapperMarkers.every((marker) => credentialWrapper.includes(marke
   throw new Error("canonical GitHub credential wrapper no longer keeps credentials transient");
 }
 const httpServer = fs.readFileSync("main/http_server.cpp", "utf8");
-if (!/current exact total to 36[\s\S]{0,80}cfg\.max_uri_handlers\s*=\s*36;/.test(httpServer)) {
-  throw new Error("http_server.cpp has drifted from the documented 36-handler trusted-LAN surface");
+if (!/current exact total to 37[\s\S]{0,80}cfg\.max_uri_handlers\s*=\s*37;/.test(httpServer)) {
+  throw new Error("http_server.cpp has drifted from the documented 37-handler trusted-LAN surface");
 }
 
 const funding = fs.readFileSync(".github/FUNDING.yml", "utf8");

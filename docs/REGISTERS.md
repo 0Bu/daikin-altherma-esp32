@@ -663,6 +663,26 @@ the I/U capacity code (`0x60` offset 6).
 
 ## 7. Porting a model
 
+**Before step 1: ask the unit.** `POST /hp/query` reads one caller-chosen register on the live bus
+and answers with the raw frame plus every converter the requested slice admits — merged where they
+agree, so the reply names a *choice* rather than repeating a number
+([`logic/hp_probe.hpp`](../main/logic/hp_probe.hpp), fields in [`README.md`](README.md#http-api)).
+It is the only path here whose subject is a register this catalog does **not** already claim, which
+makes it the tool for the two questions a port starts with — what does this model put on page `0x__`,
+and which converter is the row actually encoded with:
+
+```sh
+# What is on page 0x60, at byte 11, read as a 1-byte field? (no `conv` = sweep them all)
+curl -s -X POST http://daikin-altherma-esp32.local/hp/query \
+     -H 'Content-Type: application/json' \
+     -d '{"reg":96,"offset":11,"size":1}'
+```
+
+Copy `frame`/`payload` into the evidence for a proposed row: a decoded number can be wrong in three
+independent ways (offset, converter, layout) and the wire bytes separate them. An unimplemented
+`conv` reports itself as such rather than as an empty answer, which is how a port discovers it needs
+a new converter before it needs a new profile.
+
 1. Get the model's rows as `{reg, offset, conv, size, type, label}` (one row per value).
 2. A maintainer feeds them to the non-distributed offline profile generator → an embedded
    `def/<family>.hpp` table. Contributors can submit evidence or catalog corrections without access

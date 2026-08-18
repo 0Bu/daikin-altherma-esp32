@@ -1,14 +1,16 @@
 // POST config routes: /set_wifi, /set_mqtt, /set_ref_temp,
 // /test_circulation, /set_circulation, /set_weather,
 // /set_syslog, /set_ntp, /set_hp,
-// /set_board, /set_env3, /set_ota, /set_lang, /set_diagnostics, /discover_homehub, /detect.
+// /set_board, /set_env3, /set_ota, /set_lang, /set_diagnostics, /discover_homehub, /detect,
+// /hp/query.
 // Parse JSON, validate, then apply:
 // WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping persists immediately and
 // rebinds live only while the v19 diagnostics master is enabled; when enabled, its subscriber
 // reports missing/wrong paths only after a payload arrives;
 // /set_hp persists the RX/TX pin cache (no reboot) but keeps the model session-only;
 // /set_ota and /set_lang persist their UI settings and apply them live; /detect re-runs detection in
-// RAM.
+// RAM; /hp/query persists nothing at all — it is the free register probe, a one-shot read of a
+// caller-chosen page served on the poll task (logic/hp_probe.hpp).
 #include "http_handlers.hpp"
 #include "checkup.hpp"
 #include "state_dwell.hpp"
@@ -17,10 +19,14 @@
 #include "heap_guard.hpp"
 #include "history.hpp"
 #include "hp_poll.hpp"
+#include "def/registry.hpp"    // def::lookup — the active profile, for conv 405's refrigerant curve
 #include "logic/config_model.hpp"
 #include "logic/board_presets.hpp"
 #include "logic/env3.hpp"
 #include "logic/history_persist.hpp"
+#include "logic/hexdump.hpp"    // hex_render — the raw frame a probe reply carries
+#include "logic/hp_probe.hpp"   // the free register probe: request bounds, sweep, statuses
+#include "logic/json.hpp"       // json_append_escaped — the ONE encoder every payload uses
 #include "logic/mqtt_base.hpp"  // mqtt_base_valid — the installation base topic's rules, host-tested
 #include "logic/mqtt_uri.hpp"   // parse_mqtt_uri — host/port/TLS split, host-tested
 #include "logic/reference_temperature.hpp"
@@ -48,6 +54,7 @@
 #include <fcntl.h>
 #include <cmath>
 #include <cerrno>       // errno / EINPROGRESS in the non-blocking TCP probe
+#include <cstdio>       // snprintf — the probe's fixed-precision value + register rendering
 #include <cstring>
 
 namespace daik {
@@ -1171,6 +1178,155 @@ static esp_err_t do_detect(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true}");
 }
 
+// ── POST /hp/query — the free register probe (logic/hp_probe.hpp) ────────────────────────────────
+// Ask the bus for ONE caller-chosen page and report the raw frame plus every decode the requested
+// slice admits. This is the only route whose subject is a register the value catalog does not
+// claim, and it is what makes a model nobody has mapped explorable without a rebuild.
+//
+// It is a POST despite reading nothing on the device, for one reason that is not style: it puts a
+// frame on a shared physical bus and consumes a poll cycle's bus time. GET must stay the method
+// that costs nothing, or a link prefetcher becomes a bus load.
+//
+// STATUS CODES SPLIT ALONG WHO FAILED. A malformed request is 400 and a second concurrent probe is
+// 409 — the caller's problem. No poll task or an unserved request is 503 — ours. But a page the
+// unit does not answer, refuses, or answers too short is a RESULT: the firmware did exactly what
+// was asked and the finding is that this unit has nothing there. Those come back 200 with
+// `ok:false` and a stable `status`, because a client exploring a register map will hit them
+// constantly and an HTTP error would tell it the device is broken when it is working perfectly.
+static void probe_append_decode(std::string& out, const ProbeDecode& d) {
+    out += "{\"conv\":";
+    out += std::to_string(d.conv);
+    if (d.alias_count > 0) {
+        out += ",\"aliases\":[";
+        for (int i = 0; i < d.alias_count; i++) {
+            if (i) out += ',';
+            out += std::to_string(d.alias[i]);
+        }
+        out += ']';
+    }
+    if (d.is_text) {
+        out += ",\"text\":\"";
+        json_append_escaped(out, d.text);
+        out += '"';
+    } else if (d.ok) {
+        char b[32];
+        snprintf(b, sizeof(b), "%.*f", display_decimals(d.conv), d.value);
+        out += ",\"value\":";
+        out += b;
+    } else {
+        // The converter ran and REFUSED these bytes (conv 405 on a non-positive pressure, 107/114
+        // on the 0x8000 sentinel). Reported as its own state rather than omitted: "this converter
+        // reads these bytes as the no-data marker" is the finding that separates a sentinel from a
+        // real reading, and it is exactly the distinction a catalog row has to encode.
+        out += ",\"refused\":true";
+    }
+    out += '}';
+}
+
+static esp_err_t hp_query_probe(httpd_req_t* req) {
+    char body[192];
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
+    cJSON* j = cJSON_Parse(body);
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    ProbeRequest q;
+    q.reg    = ji(j, "reg", -1);
+    q.offset = ji(j, "offset", 0);
+    q.size   = ji(j, "size", 1);
+    // No converter named = sweep. That is the DEFAULT on purpose: requiring an id before any value
+    // is visible would ask the user to answer the question they came here to ask.
+    q.conv   = cJSON_HasObjectItem(j, "conv") ? ji(j, "conv", PROBE_SWEEP) : PROBE_SWEEP;
+    cJSON_Delete(j);
+
+    const ProbeReject reject = probe_validate(q);
+    if (reject != ProbeReject::None)
+        return send_err(req, "400 Bad Request", probe_reject_name(reject));
+
+    HpProbeReply reply;
+    // 3 s: the poll cadence is 1 s and one sweep of a resolved profile can hold the bus for several
+    // hundred ms per silent register, so a probe submitted just after a cycle started waits out the
+    // rest of it plus its own 300 ms round-trip. Long enough that a healthy device never times out,
+    // short enough that a browser is not left hanging on a wedged one.
+    hp_probe_run(static_cast<uint8_t>(q.reg), reply, 3000);
+
+    if (reply.status == ProbeStatus::Busy)
+        return send_err(req, "409 Conflict", "another register probe is in flight");
+    if (reply.status == ProbeStatus::NoLink || reply.status == ProbeStatus::Timeout)
+        return send_err(req, "503 Service Unavailable", probe_status_name(reply.status));
+
+    char reg_hex[8];
+    snprintf(reg_hex, sizeof(reg_hex), "0x%02X", static_cast<unsigned>(q.reg));
+    std::string out = "{\"reg\":\"";
+    out += reg_hex;
+    out += "\",\"proto\":\"";
+    out += static_cast<char>(reply.proto);
+    out += "\",\"rx_pin\":" + std::to_string(reply.rx_pin);
+    out += ",\"tx_pin\":" + std::to_string(reply.tx_pin);
+    out += ",\"offset\":" + std::to_string(q.offset);
+    out += ",\"size\":" + std::to_string(q.size);
+    out += ",\"status\":\"";
+    out += probe_status_name(reply.status);
+    out += '"';
+
+    if (reply.status != ProbeStatus::Ok) {
+        out += ",\"ok\":false}";
+        return http_send_json(req, out.c_str());
+    }
+
+    // The RAW FRAME, always — header, payload and checksum, exactly as it arrived. This is the part
+    // that survives every wrong assumption above it: if the offsets, the converter and the catalog
+    // are all wrong, the bytes still say what the unit sent. Emitted before any decode for the same
+    // reason logic/hexdump.hpp exists at all.
+    char hex[3 * 64];
+    hex_render(reply.frame, reply.frame_len, hex, static_cast<int>(sizeof(hex)));
+    out += ",\"frame\":\"";
+    out += hex;
+    out += "\",\"payload\":\"";
+    hex_render(reply.frame + reply.payload_off, reply.payload_len, hex,
+               static_cast<int>(sizeof(hex)));
+    out += hex;
+    out += "\",\"payload_len\":" + std::to_string(reply.payload_len);
+
+    if (!probe_slice_fits(q.offset, q.size, reply.payload_len)) {
+        // The page is real and shorter than the caller assumed. A finding, not a transport error —
+        // and the payload hex above already shows exactly how much there is.
+        out += ",\"status\":\"";
+        out += probe_status_name(ProbeStatus::OutOfBounds);
+        out += "\",\"ok\":false}";
+        return http_send_json(req, out.c_str());
+    }
+
+    // conv 405's curve. The active profile's refrigerant where one is resolved; on `generic` — the
+    // profile this tool is most useful on — profile_refrigerant falls back to its own default.
+    // The BASE table and not the view, for the reason hp_poll.cpp states at its own call: the
+    // overlay blocks carry no pressure or conv-405 row, and def/overlay.hpp's static_asserts pin that.
+    const def::Profile& prof = def::lookup(config().profile.c_str());
+    const int  rtype = profile_refrigerant(prof.values, prof.count);
+    const uint8_t* payload = reply.frame + reply.payload_off;
+
+    out += ",\"ok\":true,\"decodes\":[";
+    if (q.conv == PROBE_SWEEP) {
+        ProbeDecode decodes[PROBE_MAX_DECODES];
+        const int n = probe_sweep(payload, reply.payload_len, q.offset, q.size,
+                                  decodes, PROBE_MAX_DECODES, rtype);
+        for (int i = 0; i < n; i++) {
+            if (i) out += ',';
+            probe_append_decode(out, decodes[i]);
+        }
+    } else {
+        ProbeDecode d;
+        bool unimpl = false;
+        if (probe_decode_one(payload, reply.payload_len, q.offset, q.size, q.conv, d, unimpl, rtype))
+            probe_append_decode(out, d);
+        else if (unimpl)
+            // "Nothing decodes this" is an answer, and a load-bearing one: it tells a contributor
+            // the id they were handed is not ported, rather than leaving them to read an empty list
+            // as "the bytes are empty".
+            out += "{\"conv\":" + std::to_string(q.conv) + ",\"unimplemented\":true}";
+    }
+    out += "]}";
+    return http_send_json(req, out.c_str());
+}
+
 void http_register_config(httpd_handle_t s, HttpSurface surface) {
     // /set_wifi is the ONE config route the open setup AP exposes (it is how you provision the
     // network); http_register_on withholds the rest there (F01) — MQTT/syslog/NTP/HP config and
@@ -1191,6 +1347,7 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_lang", HTTP_POST, set_lang);
     http_register_on(s, surface, "/set_diagnostics", HTTP_POST, set_diagnostics);
     http_register_on(s, surface, "/detect", HTTP_POST, do_detect);
+    http_register_on(s, surface, "/hp/query", HTTP_POST, hp_query_probe);
 }
 
 } // namespace daik

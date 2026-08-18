@@ -583,6 +583,34 @@ POST /set_env3                     # Compatibility route: { enabled, sda?, scl? 
 #  all persistent /set_* above     # an NVS write failure → 500 {ok:false,error:"config write failed"},
                                    #   nothing applied and no reboot (the failing key is logged to /diag)
 POST /detect                       # re-run auto-detection (reset profile to "auto" + invalidate fingerprint)
+POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-chosen page and report the
+                                   #   raw frame plus every decode the requested slice admits. The only
+                                   #   route whose subject is a register the value catalog does not
+                                   #   claim, and what makes an unmapped model explorable without a
+                                   #   rebuild (logic/hp_probe.hpp).
+                                   #   { reg: 0..255, offset: 0..31, size: 1|2, conv?: 0..999 }
+                                   #   Omitting `conv` SWEEPS every candidate converter of that width
+                                   #   and merges identical decodes, so the answer names a choice
+                                   #   ("105, also 107/114/119 -> 26.6") instead of repeating a number.
+                                   #   -> { reg, proto, rx_pin, tx_pin, offset, size, status, ok,
+                                   #        frame, payload, payload_len,
+                                   #        decodes:[{conv, aliases?, value|text|refused|unimplemented}] }
+                                   #   `frame` is the COMPLETE reply including header and checksum: if
+                                   #   the offset, the converter and the catalog are all wrong, the
+                                   #   bytes still say what the unit sent.
+                                   #   A page this unit does not answer, refuses (0x15 0xEA) or answers
+                                   #   too short is a RESULT, not an HTTP error: 200 with ok:false and a
+                                   #   stable `status` (no_reply/rejected/bad_crc/short_reply/
+                                   #   out_of_bounds), because a client walking a register map hits
+                                   #   those constantly. 400 = malformed request, 409 = a probe already
+                                   #   in flight (one bus, one question), 503 = no poll task or the
+                                   #   request went unserved for 3 s.
+                                   #   POST despite reading nothing on the device: it puts a frame on a
+                                   #   shared physical bus and spends a poll cycle's bus time, and GET
+                                   #   must stay the method a prefetcher may take freely.
+                                   #   READ-ONLY BY CONSTRUCTION, not by restraint: X10A has no write
+                                   #   command in either framing (X10A_PROTOCOL.md), so an arbitrary
+                                   #   register byte is an arbitrary read and nothing else.
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)
 POST /ota/update                   # start the background self-update (downloads, then reboots)
 GET  /ota/status                   # { state, progress, message, available, update_available, current }

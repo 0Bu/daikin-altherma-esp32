@@ -86,6 +86,7 @@
 #include "logic/reset_reason.hpp"
 #include "logic/syslog_policy.hpp"
 #include "logic/hexdump.hpp"
+#include "logic/hp_probe.hpp"
 #include "logic/timestamp.hpp"
 #include "logic/uart_plan.hpp"
 #include "logic/net_link.hpp"
@@ -4711,6 +4712,165 @@ static void test_timestamp() {
 }
 
 // ── raw page hex rendering (logic/hexdump.hpp) ───────────────────────────────────────────────
+// ── logic/hp_probe.hpp — the free register probe ────────────────────────────────────────────────
+// The sweep is the part that carries risk: it pairs EVERY candidate converter with caller-chosen
+// bytes, a far wider input domain than the poll path reaches (the catalog only ever pairs a
+// converter with the offsets its own model uses). Enum-table bounds, sentinel handling and the
+// dedup rule are therefore asserted here rather than discovered on a board.
+static const ProbeDecode* probe_find(const ProbeDecode* d, int n, int conv) {
+    for (int i = 0; i < n; i++) if (d[i].conv == conv) return &d[i];
+    return nullptr;
+}
+static bool probe_has_alias(const ProbeDecode& d, int conv) {
+    for (int i = 0; i < d.alias_count; i++) if (d.alias[i] == conv) return true;
+    return false;
+}
+
+static void test_hp_probe() {
+    // ── Request bounds: everything decidable WITHOUT the reply is decided before the bus is used.
+    ProbeRequest q{0x60, 11, 1, 105};
+    CHECK(probe_validate(q) == ProbeReject::None);
+    CHECK(probe_validate({-1, 0, 1, PROBE_SWEEP}) == ProbeReject::Register);
+    CHECK(probe_validate({0x100, 0, 1, PROBE_SWEEP}) == ProbeReject::Register);
+    CHECK(probe_validate({0x60, -1, 1, PROBE_SWEEP}) == ProbeReject::Offset);
+    CHECK(probe_validate({0x60, PROBE_MAX_PAYLOAD, 1, PROBE_SWEEP}) == ProbeReject::Offset);
+    CHECK(probe_validate({0x60, 0, 0, PROBE_SWEEP}) == ProbeReject::Size);
+    CHECK(probe_validate({0x60, 0, 3, PROBE_SWEEP}) == ProbeReject::Size);
+    CHECK(probe_validate({0x60, 0, 2, 1000}) == ProbeReject::Converter);
+    // The sweep sentinel is NOT an out-of-range converter, and an UNIMPLEMENTED id is not rejected:
+    // "nothing decodes this" is an answer the probe exists to give, not a request to refuse.
+    CHECK(probe_validate({0x60, 0, 2, PROBE_SWEEP}) == ProbeReject::None);
+    CHECK(probe_validate({0x60, 0, 2, 462}) == ProbeReject::None);
+    CHECK(std::string(probe_reject_name(ProbeReject::None)).empty());
+    for (auto r : {ProbeReject::Register, ProbeReject::Offset, ProbeReject::Size,
+                   ProbeReject::Converter})
+        CHECK(probe_reject_name(r)[0] != '\0');
+    CHECK(std::string(probe_reject_name(static_cast<ProbeReject>(99))) == "invalid request");
+
+    // ── hp_query's negative returns keep exactly one interpretation.
+    CHECK(probe_status_from_query(12) == ProbeStatus::Ok);
+    CHECK(probe_status_from_query(-1) == ProbeStatus::NoReply);
+    CHECK(probe_status_from_query(-2) == ProbeStatus::Rejected);
+    CHECK(probe_status_from_query(-3) == ProbeStatus::BadCrc);
+    for (auto st : {ProbeStatus::Ok, ProbeStatus::Busy, ProbeStatus::NoLink, ProbeStatus::Timeout,
+                    ProbeStatus::NoReply, ProbeStatus::Rejected, ProbeStatus::BadCrc,
+                    ProbeStatus::ShortReply, ProbeStatus::OutOfBounds})
+        CHECK(probe_status_name(st)[0] != '\0');
+    CHECK(std::string(probe_status_name(ProbeStatus::Ok)) == "ok");
+    CHECK(std::string(probe_status_name(ProbeStatus::OutOfBounds)) == "out_of_bounds");
+    CHECK(std::string(probe_status_name(static_cast<ProbeStatus>(99))) == "error");
+
+    // ── The slice bound applied AFTER the reply: a page shorter than the caller assumed is a
+    // finding, not a transport error.
+    CHECK(probe_slice_fits(0, 2, 2));
+    CHECK(probe_slice_fits(6, 2, 8));
+    CHECK(!probe_slice_fits(7, 2, 8));
+    CHECK(!probe_slice_fits(-1, 2, 8));
+    CHECK(!probe_slice_fits(0, 0, 8));
+    CHECK(!probe_slice_fits(0, 2, 0));
+
+    ProbeDecode d[PROBE_MAX_DECODES];
+
+    // ── A 2-byte field: 0x010A little-endian = 266 raw, 26.6 as a ×0.1 temperature.
+    const uint8_t two[2] = {0x0A, 0x01};
+    int n = probe_sweep(two, 2, 0, 2, d, PROBE_MAX_DECODES);
+    CHECK(n > 0 && n <= PROBE_MAX_DECODES);
+    const ProbeDecode* t = probe_find(d, n, 105);
+    CHECK(t && t->ok && !t->is_text && t->value == 26.6);
+    // 107/114/119 are the same maths with a sentinel test that does not fire here, so they must
+    // MERGE into 105's row rather than repeat the number three more times.
+    CHECK(t && probe_has_alias(*t, 107) && probe_has_alias(*t, 114) && probe_has_alias(*t, 119));
+    CHECK(probe_find(d, n, 107) == nullptr);
+    // Endianness genuinely differs, so 106 stays its own row (and takes 108 with it).
+    const ProbeDecode* be = probe_find(d, n, 106);
+    CHECK(be && be->value == 256.1 && probe_has_alias(*be, 108));
+    // Signed and unsigned agree on a positive value — an honest merge, not a lost row.
+    const ProbeDecode* raw = probe_find(d, n, 101);
+    CHECK(raw && raw->value == 266.0 && probe_has_alias(*raw, 151));
+    // Distinct scales must NOT merge: 103 (/256) and 109 (/256 ×2) differ by a factor of two, and
+    // choosing between them is the whole point of a sweep.
+    const ProbeDecode* s256 = probe_find(d, n, 103);
+    const ProbeDecode* s512 = probe_find(d, n, 109);
+    CHECK(s256 && s512 && s256->value != s512->value);
+    // conv 405 reads the same bytes as a pressure and answers a saturation temperature.
+    const ProbeDecode* sat = probe_find(d, n, 405);
+    CHECK(sat && sat->ok && sat->value != 26.6);
+
+    // ── The 0x8000 sentinel is exactly where 105 and 107 part company, and getting that wrong is
+    // the difference between publishing -3276.8 °C and reporting "no data".
+    const uint8_t sentinel[2] = {0x00, 0x80};
+    n = probe_sweep(sentinel, 2, 0, 2, d, PROBE_MAX_DECODES);
+    const ProbeDecode* plain = probe_find(d, n, 105);
+    CHECK(plain && plain->ok && plain->value == -3276.8);
+    const ProbeDecode* guarded = probe_find(d, n, 107);
+    CHECK(guarded && !guarded->ok && !guarded->is_text);
+    CHECK(guarded && probe_has_alias(*guarded, 114) && probe_has_alias(*guarded, 119));
+
+    // ── A converter that RAN and refused is kept as its own answer: 405 on 0 bar is an absent
+    // transducer, which is a different finding from "no converter decodes this".
+    const uint8_t zero[2] = {0x00, 0x00};
+    n = probe_sweep(zero, 2, 0, 2, d, PROBE_MAX_DECODES);
+    const ProbeDecode* refused = probe_find(d, n, 405);
+    CHECK(refused && !refused->ok && !refused->is_text);
+
+    // ── A 1-byte field, 0x05: bits 0 and 2 set, and every enum table indexed by a byte the poll
+    // path may never have handed it. OP_MODE[5] is "Auto Cool"; conv 203/316 have no entry for 5
+    // and must answer "?" rather than read past their tables.
+    const uint8_t one[1] = {0x05};
+    n = probe_sweep(one, 1, 0, 1, d, PROBE_MAX_DECODES);
+    const ProbeDecode* rawbyte = probe_find(d, n, 211);
+    CHECK(rawbyte && rawbyte->value == 5.0);
+    CHECK(rawbyte && probe_has_alias(*rawbyte, 219) && probe_has_alias(*rawbyte, 214));
+    // conv 311 masks the low three bits, which on 0x05 is the whole byte — so it merges, correctly.
+    CHECK(rawbyte && probe_has_alias(*rawbyte, 311));
+    const ProbeDecode* mode = probe_find(d, n, 217);
+    CHECK(mode && mode->is_text && std::string(mode->text) == "Auto Cool");
+    const ProbeDecode* cls = probe_find(d, n, 203);
+    CHECK(cls && cls->is_text && std::string(cls->text) == "?");
+    const ProbeDecode* code = probe_find(d, n, 204);
+    CHECK(code && code->is_text && std::string(code->text) == "5");
+    const ProbeDecode* iu = probe_find(d, n, 315);
+    CHECK(iu && iu->is_text && std::string(iu->text) == "Stop");
+    // The set bit and the clear bits are different answers; the clear ones merge with each other.
+    const ProbeDecode* bit0 = probe_find(d, n, 300);
+    CHECK(bit0 && bit0->value == 1.0 && probe_has_alias(*bit0, 302));
+    CHECK(probe_find(d, n, 301) == nullptr || probe_find(d, n, 301)->value == 0.0);
+
+    // Every byte value must stay inside every enum table — the sweep is what makes 0..255 reachable
+    // on converters the catalog only ever pairs with a few offsets.
+    for (int b = 0; b <= 0xFF; b++) {
+        const uint8_t byte[1] = {static_cast<uint8_t>(b)};
+        const int m = probe_sweep(byte, 1, 0, 1, d, PROBE_MAX_DECODES);
+        CHECK(m > 0 && m <= PROBE_MAX_DECODES);
+        for (int i = 0; i < m; i++) CHECK(d[i].alias_count <= PROBE_MAX_ALIASES);
+    }
+
+    // ── Refusals and bounds.
+    CHECK(probe_sweep(two, 2, 1, 2, d, PROBE_MAX_DECODES) == 0);   // slice past the payload
+    CHECK(probe_sweep(nullptr, 2, 0, 2, d, PROBE_MAX_DECODES) == 0);
+    CHECK(probe_sweep(two, 2, 0, 2, nullptr, PROBE_MAX_DECODES) == 0);
+    CHECK(probe_sweep(two, 2, 0, 2, d, 0) == 0);
+    CHECK(probe_sweep(two, 2, 0, 2, d, 1) == 1);                   // bounded output, not a crash
+
+    // ── One named converter: the same row shape as a sweep, so the caller sees one schema.
+    ProbeDecode single;
+    bool unimpl = false;
+    CHECK(probe_decode_one(two, 2, 0, 2, 105, single, unimpl) && !unimpl);
+    CHECK(single.conv == 105 && single.value == 26.6 && single.alias_count == 0);
+    // An id the catalog documents but this firmware has not ported reports UNIMPLEMENTED — a real
+    // answer for a contributor holding a converter id from the reference tables.
+    CHECK(!probe_decode_one(two, 2, 0, 2, 462, single, unimpl) && unimpl);
+    CHECK(!probe_decode_one(two, 2, 1, 2, 105, single, unimpl) && !unimpl);
+    CHECK(!probe_decode_one(nullptr, 2, 0, 2, 105, single, unimpl));
+    // A converter that runs and refuses is a successful decode with ok=false, not a failure.
+    CHECK(probe_decode_one(zero, 2, 0, 2, 405, single, unimpl) && !single.ok && !unimpl);
+
+    // The output bound is structural: no field width can offer more candidates than one answer holds.
+    CHECK(probe_candidate_count_for(1) <= PROBE_MAX_DECODES);
+    CHECK(probe_candidate_count_for(2) <= PROBE_MAX_DECODES);
+    CHECK(probe_candidate_count_for(4) == 0);
+}
+
 static void test_hexdump() {
     char out[128];
 
@@ -13641,6 +13801,7 @@ int main() {
     test_syslog_policy();
     test_timestamp();
     test_hexdump();
+    test_hp_probe();
     test_link_watch();
     test_wifi_rollback();
     test_reset_reason();
