@@ -1301,7 +1301,7 @@ function scrubText(h, i) {
     const forecast = forecastScrubView(h);
     const point = forecast?.points[i - h.v.length];
     if (!point) return "";
-    const locale = LANG === "de" ? "de-DE" : "en-US";
+    const locale = LANG;
     const when = new Date(point.time * 1000)
       .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
     const value = (raw) => raw.toLocaleString(locale, {
@@ -1339,7 +1339,7 @@ function scrubText(h, i) {
          : histHeld(s, i) ? t("hist.held") : cfg?.missing ? t(cfg.missing) : t("hist.nm");
   };
   if (h.id === ENV3_COMBINED_ID) {
-    const locale = LANG === "de" ? "de-DE" : "en-US";
+    const locale = LANG;
     const rows = h.series.map((s) => {
       const v = s.v[i];
       const shown = v == null ? t("hist.nm")

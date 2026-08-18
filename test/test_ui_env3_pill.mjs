@@ -5,12 +5,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const dashboard = fs.readFileSync(new URL("../main/www/js/dashboard.js", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
-const source = readAppFragments(["i18n.js", "dashboard.js", "descriptions.js", "history.js", "schematic.js"]);
+const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
+  readAppFragments(["dashboard.js", "descriptions.js", "history.js", "schematic.js"]);
 
 assert.match(index,
   /id="gEnv3"[^>]*data-insp="env3"[\s\S]*?class="sc-env3-box" x="624"[\s\S]*?id="gSgRequest"[\s\S]*?x="706"/,

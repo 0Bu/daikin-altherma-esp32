@@ -381,7 +381,7 @@ async function refreshStatus(paint = true) {
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
     loadHpProbeCatalog(profile);
   hydrateRoutedPopup();
-  setLangFromStatus(s);   // apply the device's language override (if any) before painting this frame
+  await setLangFromStatus(s);  // load/apply the device language before painting this frame
   if (paint) renderApp();
   return true;
 }

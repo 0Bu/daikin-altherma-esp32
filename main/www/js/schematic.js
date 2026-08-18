@@ -507,7 +507,7 @@ function env3State(env) {
 
 function env3Value(env, key, digits, unit) {
   if (!env.fresh || !Number.isFinite(Number(env[key]))) return `— ${unit}`;
-  const locale = LANG === "de" ? "de-DE" : "en-US";
+  const locale = LANG;
   const value = Number(env[key]).toLocaleString(locale,
     { minimumFractionDigits: digits, maximumFractionDigits: digits });
   return `${value} ${unit}`;

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const appStateSource = readAppFragments(["app_state.js"]);
 const schematicSource = readAppFragments(["schematic.js"]);
@@ -171,7 +171,7 @@ assertPersistentBannerRepaints(
 // The dictionary half: both languages carry the new key, and the advice actually differs in the way
 // that matters. A half-translated pair is exactly how one language silently keeps the wrong advice.
 {
-  const i18n = readAppFragments(["i18n.js"]);
+  const i18n = readAppFragments(["i18n.js"]) + readUiLocale("de");
   // i18n.js is a page fragment, so it reaches for browser globals at load time (navigator.language
   // for the auto-detect, localStorage for the stored override). Stub only what loading needs — the
   // dictionaries themselves are plain data and the point of reading the REAL file is that no second

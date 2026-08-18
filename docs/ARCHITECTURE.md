@@ -174,11 +174,11 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       unwinding through esp_http_server's C frames to std::terminate → reboot.
                       No route is exempt any more: the one that was (/events, raw-registered
                       because is_websocket bypasses the trampoline) no longer exists
-http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
+http_status.cpp     → GET / (web UI), /locale.js, /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. The live /status and /values bodies use one bounded 1 KiB
                       chunk sink instead of a body-sized contiguous allocation;
-                      http_append_status_json() runs on the httpd task ALONE — see "Push vs. poll"
-                      below for why that sentence is load-bearing
+                      http_append_status_json() runs on the httpd task ALONE —
+                      see "Push vs. poll" below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_temp, /set_weather,
                       /test_circulation, /set_circulation,
                       /set_syslog,
@@ -2547,10 +2547,12 @@ minimal state a restart would be trying to reach.
 
 `www/` is split for edit locality: `index.html`, `style.css` and the JavaScript fragments listed in
 `app.sources`. Firmware, tests and audits all consume that one ordered manifest; the fragments share
-one classic-script scope and are spliced into ONE self-contained, pre-gzipped page at build time
-(`inline_assets.cmake`). **Write the comments — and know they ship nowhere:**
+one classic-script scope and are spliced into ONE self-contained, pre-gzipped **startup page** at
+build time (`inline_assets.cmake`). English is its embedded fallback; a non-English selection adds
+one same-device request for the separately compressed `/locale.js?lang=…` catalog. **Write the
+comments — and know they ship nowhere:**
 `tools/web_asset/minify_and_gzip.py` strips HTML, CSS and JS comments alike under the 163840-byte
-delivery budget (`UI_GZIP_MAX_BYTES` in `main/CMakeLists.txt`, pinned by
+single-response startup budget (`UI_GZIP_MAX_BYTES` in `main/CMakeLists.txt`, pinned by
 `test/test_ui_delivery_contract.mjs`). Markup was the one language it did NOT cover until the
 budget was measured per fragment: `index.html` is spliced in raw, so 39 KB of drawing/layout
 commentary shipped in the image at 14 KB gzipped — 9.5% of the budget — with every gate green,
@@ -2558,7 +2560,8 @@ because a page that is 14 KB too big renders exactly as well as one that is not;
 build-breaking, so the cost arrives as an unrelated feature's CI failure months later. Only
 comments are stripped from markup; HTML indentation stays (whitespace between inline elements is
 significant, and ~1.1 KB is not worth a layout defect that renders correctly on the machine that
-made it). The UI is **two screens**:
+made it). Locale assets use the same JavaScript minifier and a separate 32768-byte cap. The UI is
+**two screens**:
 the dashboard (the plant — schematic, model, values, no config at all) and **Settings** behind the
 header gear (the Connections tile + three ESP32 board cards — ESP32 board health, Protokoll
 [X10A link + pins +, only while connected, a closed protocol-diagnosis tongue containing the X10A query form] and Firmware
@@ -2674,9 +2677,10 @@ place:
   1.0 W OFF, 120 s age, 60 s confirmation), but remain editable. The board subscribes to the same
   Shelly MQTT message that an external VictoriaMetrics pipeline may store; it does not query
   VictoriaMetrics and does not publish a Shelly command.
-- **Language** → `/set_lang` (Settings **Firmware** card). The UI is bilingual (de/en) and picks its
-  language client-side from `navigator.language` by default — a browser fact, not device state — but
-  the card's picker (**Browser** / English / Deutsch) can force one, which then **persists** in the
+- **Language** → `/set_lang` (Settings **Firmware** card). The UI supports
+  en/de/es/fr/it/pl/cs/uk and picks its language client-side from `navigator.language` by default —
+  a browser fact, not device state — but the card's picker (**Browser** plus all eight languages)
+  can force one, which then **persists** in the
   config blob (v4, `logic/ui_lang.hpp`) and wins over every client's own browser guess. `auto`
   (labelled "Browser" — it *is* the browser's own guess, not a separate mode) is the struct default,
   so a fresh device or one OTA-upgraded from a pre-v4 blob keeps auto-detecting exactly as before.
@@ -2684,7 +2688,10 @@ place:
   re-reads `/status.ui.lang` on its next poll and re-localises (`setLang()` re-runs
   `applyStaticI18n()` + `labelSchematicHits()`), no reload. The heat-pump **value labels** are
   untouched by any of this — they arrive over `/values` as English X10A register names and stay
-  verbatim in both languages (see DESIGN.md §1).
+  verbatim in every language (see DESIGN.md §1). English is embedded in the startup page; the other
+  catalogs are bounded, pre-compressed assets from the signed image, selected by the trusted-LAN
+  `GET /locale.js?lang=…` route. Specialist value and inspector explanations remain English/German
+  and fall back to English in the six newer locales.
 - **Firmware / OTA** — tapping the version runs the real update flow. Both places the version is
   printed as a control are the same trigger (`checkFirmwareUpdate`): the header meta line beside the
   IP, and the **Version** row on the Settings **Firmware** card. Neither one navigates — the readout
@@ -2723,6 +2730,8 @@ The complete field-by-field contract of every route. The canonical always-loaded
 GET  /            embedded web UI (gzipped into the app binary)
 GET  /favicon.ico inert embedded setup/dashboard icon; also available on the open setup AP
 GET  /heat-pump-icon.png embedded dashboard app icon; trusted-LAN only
+GET  /locale.js?lang=de|es|fr|it|pl|cs|uk   query-selected, pre-compressed UI catalog from the
+                  signed application image; trusted-LAN only, cached with the app-image ETag
 GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity — matches a core dump
                   to its .elf), pins_avail[] (the chip-safe X10A GPIOs for the RX/TX picker, minus the
                   pins the firmware itself drives — the status indicator and the recovery button —
@@ -2899,9 +2908,10 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   selector from /status like every other setting; a device can be SET to a channel it
                   is not yet running a build from, so it is reported rather than inferred from the
                   running version's "-dev.N" suffix,
-                  ui{lang} — "auto"|"de"|"en", the web UI's MANUAL language override (POST /set_lang,
-                  logic/ui_lang.hpp). "auto" (the default) = browser-detected; "de"/"en" force a
-                  language on every client. Reported here so the Firmware card's Sprache selector
+                  ui{lang} — "auto"|"en"|"de"|"es"|"fr"|"it"|"pl"|"cs"|"uk", the web UI's MANUAL
+                  language override (POST /set_lang, logic/ui_lang.hpp). "auto" (the default) =
+                  browser-detected; a named language forces a
+                  language on every client. Reported here so the Firmware card's Language selector
                   renders from /status like the channel, and the browser applies it over its own
                   navigator.language guess,
                   ntp{server,synced,time} — server is the CONFIGURED address (config().ntp_server:
@@ -3232,7 +3242,7 @@ POST /set_mqtt    {broker,user,pass,clear_creds,base} -> pre-flight the broker s
                   shared base. Rules
                   are checked BEFORE the broker pre-flight (free and local, versus a DNS lookup + up
                   to ~8 s of the httpd task) and each refusal carries its own machine code beside the
-                  English text — the ENV III pattern, so the bilingual UI translates without the API
+                  English text — the ENV III pattern, so the localized UI translates without the API
                   losing its one wording. The browser deliberately keeps NO second copy of the rules:
                   the load-bearing one is that the base must still slugify to something, since
                   device_node_id() falls back to the constant "daikin" and would put two boards back
@@ -3343,7 +3353,7 @@ POST /set_env3    {enabled,sda,scl} -> validate + PROVE + persist + REBOOT. A st
                   env3_disable_first (two masters must never briefly drive one shared wire), and
                   DISABLING checks nothing at all — it is the recovery path and must not depend on
                   the hardware that may be the problem. Each refusal carries a machine `code` beside
-                  the English `error` so the bilingual UI can translate without the API losing its
+                  the English `error` so the localized UI can translate without the API losing its
                   one wording. Reboots on a real change, unlike /set_hp's live apply: the I2C driver
                   owns the bus for the task's life
 POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id}
@@ -3426,11 +3436,12 @@ POST /set_ota     {channel:"release"|"dev"} -> validate + persist, applied LIVE 
                   it fetches, so the very next check uses the new feed). An unknown name is REJECTED,
                   not defaulted — answering ok to a typo would look like a saved setting. Unchanged
                   -> {"ok":true,"reboot":false} like the other /set_* routes
-POST /set_lang    {lang:"auto"|"de"|"en"} -> validate + persist, applied LIVE (no reboot, like
+POST /set_lang    {lang:"auto"|"en"|"de"|"es"|"fr"|"it"|"pl"|"cs"|"uk"} -> validate + persist,
+                  applied LIVE (no reboot, like
                   /set_ota: nothing claims the language at task start — the UI reads /status.ui.lang,
                   so the next poll applies it). The web UI's MANUAL language override on top of the
                   browser default (logic/ui_lang.hpp): "auto" hands the choice back to the browser
-                  (navigator.language), "de"/"en" force one on every client that opens the dashboard.
+                  (navigator.language); a named language forces one on every client that opens the dashboard.
                   An unknown name is REJECTED, not defaulted (a typo would look saved). Unchanged
                   -> {"ok":true,"reboot":false} like the other /set_* routes
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the

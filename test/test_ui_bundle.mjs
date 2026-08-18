@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { appSourceFiles, readAppFragments, readAppSource } from "../tools/ui/read_app_source.mjs";
+import { appSourceFiles, readAppFragments, readAppSource, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const files = appSourceFiles();
 assert.ok(files.length > 1, "the UI must remain split into multiple source files");
@@ -16,12 +16,13 @@ for (const file of files) {
     `${file} must remain a complete, independently parseable source fragment`);
 }
 
-const app = readAppSource();
-assert.match(app, /^\/\/ Web UI for daikin-altherma-esp32/);
-assert.match(app, /\n"use strict";/);
-assert.match(app, /\nasync function boot\(\)/);
-assert.match(app, /\nboot\(\);\s*$/);
-assert.doesNotThrow(() => new vm.Script(app, { filename: "main/www/app.sources" }),
+const baseApp = readAppSource();
+const app = baseApp + readUiLocale("de");
+assert.match(baseApp, /^\/\/ Web UI for daikin-altherma-esp32/);
+assert.match(baseApp, /\n"use strict";/);
+assert.match(baseApp, /\nasync function boot\(\)/);
+assert.match(baseApp, /\nboot\(\);\s*$/);
+assert.doesNotThrow(() => new vm.Script(baseApp, { filename: "main/www/app.sources" }),
   "the ordered source fragments must parse as one classic script");
 assert.match(app, /async function refreshStatus\(paint = true\)[\s\S]*if \(paint\) renderApp\(\)/,
   "status refresh must allow the poller to defer its full render");
@@ -517,4 +518,4 @@ assert.match(app, /wireModalFieldSelection\(document\)/,
 assert.doesNotMatch(app, /document\.addEventListener\("click", \(e\) => \{\s*selectModalFieldContents\(e\.target\)/,
   "ordinary clicks in an active field must not unconditionally select all again");
 
-console.log(`ui bundle: ${files.length} sources, ${Buffer.byteLength(app)} bytes — valid classic script`);
+console.log(`ui bundle: ${files.length} startup sources, ${Buffer.byteLength(baseApp)} bytes — valid classic script`);

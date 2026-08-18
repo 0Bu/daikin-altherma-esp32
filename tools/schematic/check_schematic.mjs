@@ -49,7 +49,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { readAppSource } from '../ui/read_app_source.mjs';
+import { readAppFragments, readAppSource } from '../ui/read_app_source.mjs';
 
 // ── arguments ────────────────────────────────────────────────────────────────────────────────────
 let HTML = 'main/www/index.html';
@@ -299,12 +299,33 @@ const INSPECT = evalTable('const INSPECT = {', '\n};', '{', 'INSPECT', {
   lwtRow: noop, postBuhRow: noop, vRow: noop, pickValue: noop, PEL_INSPECT,
   OUTDOOR_HX_RE: /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|Outdoor heat exchanger temp\.|R4T-Deicer temp\.)$/i,
 });
-const I18N = evalTable('const I18N = {', '\n};', '{', 'I18N');
+function loadI18n() {
+  if (!APP.endsWith('.sources')) return evalTable('const I18N = {', '\n};', '{', 'I18N');
+  const context = vm.createContext({
+    navigator: { language: 'en' },
+    localStorage: { getItem: () => null, setItem: () => {} },
+    document: { getElementById: () => null },
+  });
+  try {
+    vm.runInContext(readAppFragments(['i18n.js'], APP), context, { filename: 'i18n.js' });
+    const localeDir = path.join(path.dirname(APP), 'locales');
+    for (const file of fs.readdirSync(localeDir).filter((name) => /^[a-z]{2}\.js$/.test(name)).sort()) {
+      vm.runInContext(fs.readFileSync(path.join(localeDir, file), 'utf8'), context,
+        { filename: path.join(localeDir, file) });
+    }
+    vm.runInContext('globalThis.__auditI18n = I18N;', context);
+    return context.__auditI18n;
+  } catch (e) {
+    die(2, `I18N/locale modules do not evaluate: ${e.message}`);
+  }
+}
+const I18N = loadI18n();
 // The same table the value rows use — an INSPECT `sample` is a key into it (renderInspect →
 // descFor), so a sample nothing matches leaves the panel's explainer blank.
 const DESCRIPTIONS = evalTable('const DESCRIPTIONS = [', '\n];', '[', 'DESCRIPTIONS');
 if (!INSPECT || typeof INSPECT !== 'object' || Object.keys(INSPECT).length === 0) die(2, 'INSPECT evaluated empty — refusing to pass vacuously');
-if (!I18N || !I18N.en || !I18N.de) die(2, 'I18N did not evaluate to an {en, de} pair');
+if (!I18N || !I18N.en || !I18N.de) die(2, 'I18N did not evaluate with English and German');
+const I18N_LANGS = Object.keys(I18N).sort();
 
 // Every "svXxx" string literal in the assembled UI: the ids the app WRITES. Nothing else here is
 // named that way, which is what makes the two directions checkable at all.
@@ -529,12 +550,12 @@ function fontOf(el) {
   }
   return { size: size ?? 11, weight };
 }
-// The rendered string of a <text>, in both languages: a data-i18n node takes its text from the
-// dictionary, and German is routinely the longer one — measuring only the markup would clear a
-// label that overflows on exactly the half of the userbase §1.5 renders German for.
+// Every rendered string of a <text>: a data-i18n node takes its text from the selected catalog.
+// Measuring only the markup would miss whichever translation is longest and clear a label that
+// overflows for users of that locale.
 function textVariants(el) {
   const runs = textRuns.get(el.off) || [];
-  const langs = ['en', 'de'];
+  const langs = I18N_LANGS;
   const out = {};
   for (const L of langs) {
     let s = '';
@@ -779,9 +800,9 @@ for (const id of [...appSvIds].sort()) {
 for (const n of allEls) {
   const key = n.el.attrs['data-i18n'];
   if (key === undefined) continue;
-  for (const L of ['en', 'de']) {
+  for (const L of I18N_LANGS) {
     if (I18N[L][key] === undefined) add('S006', `${key}/${L}`, `data-i18n="${key}" has no ${L} entry (${at(n)})`,
-      L === 'de' ? 'a German page prints the English string (or the raw key)' : 'the raw key would be printed');
+      L === 'en' ? 'the raw key would be printed' : `${L} would fall back to English (or the raw key)`);
   }
 }
 // S007/S008: ids are unique document-wide (a duplicate makes getElementById a coin flip) and every
