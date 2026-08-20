@@ -181,6 +181,20 @@ static esp_err_t h_captive(httpd_req_t* req) {
     return httpd_resp_send(req, nullptr, 0);   // empty body — nothing to gzip, nothing to render
 }
 
+// A status/values response must never require one body-sized contiguous allocation. The emitter is
+// synchronous: esp_http_server consumes each view before returning, so the sink can immediately
+// reuse its one bounded buffer. Keep this definition above the status builder so GET /status and
+// GET /values instantiate the exact same transport contract.
+struct HttpChunkEmitter {
+    httpd_req_t* req = nullptr;
+
+    bool operator()(std::string_view bytes, bool final) const {
+        if (final) return httpd_resp_send_chunk(req, nullptr, 0) == ESP_OK;
+        return httpd_resp_send_chunk(req, bytes.data(), bytes.size()) == ESP_OK;
+    }
+};
+using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
+
 // `redact` withholds the reporter-identifying values (logic/redact.hpp) so a snapshot can be
 // pasted into a bug report. Defaulted OFF: the dashboard polls this same route and legitimately
 // shows the SSID and the broker — only GET /status?redact=1 asks for the scrubbed form.
@@ -188,10 +202,17 @@ static esp_err_t h_captive(httpd_req_t* req) {
 // how many would be the sixth restatement of a number that had already drifted in four places.
 //
 // Runs on ONE task: the httpd worker. It used to run on the poll task too (the /events WebSocket
-// broadcaster), and that second runner is what overflowed hp_poll's stack (#241) — a ~3.5 KB JSON
-// builder is the largest thing either task does, so putting it on the task that owns the X10A UART
-// funded a reboot where a 503 would have done. Keep it that way: this is a request-path builder.
-void http_append_status_json(std::string& j, bool redact) {
+// broadcaster), and that second runner is what overflowed hp_poll's stack (#241). GET /status now
+// instantiates this serializer with a 1 KiB bounded sink: the live payload is already ~8.7 KiB and a
+// growing whole-body std::string needed a ~15 KiB contiguous reallocation under OTA/weather TLS,
+// making the shared OOM guard return 503. The owning std::string instantiation remains only for the
+// MCP get_status envelope, whose outer protocol still owns one response string. This serializer
+// still takes ordinary small snapshots and formats temporary strings. If one of those allocations
+// fails before the first emission, the shared guard can return 503; once an emission is attempted
+// the bounded-stream helper returns ESP_FAIL so httpd closes a possibly-started response instead of
+// attempting a second one or throwing through C.
+template <typename JsonOut>
+static void append_status_json(JsonOut& j, bool redact) {
     const Config& c = config();
     const BoardPreset* selected_board = board_selected_preset(c);
     HpStats     hp  = hp_stats();
@@ -1198,6 +1219,10 @@ void http_append_status_json(std::string& j, bool redact) {
     j += "}";
 }
 
+void http_append_status_json(std::string& j, bool redact) {
+    append_status_json(j, redact);
+}
+
 static esp_err_t h_status(httpd_req_t* req) {
     // ?redact=1 -> the bug-report form of this payload (logic/redact.hpp). Same flag policy as
     // ?clear / ?verbose / ?downgrade: fires on exactly "1", so ?redact=0 is not a near-miss that
@@ -1208,9 +1233,11 @@ static esp_err_t h_status(httpd_req_t* req) {
         char v[4];
         if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
     }
-    std::string j;
-    http_append_status_json(j, redact);
-    return http_send_json(req, j.c_str());
+    HttpJsonChunks chunks(HttpChunkEmitter{req});
+    httpd_resp_set_type(req, "application/json");
+    return finish_bounded_stream(chunks, [redact](auto& out) {
+        append_status_json(out, redact);
+    }) ? ESP_OK : ESP_FAIL;
 }
 
 struct ValuesSnapshot {
@@ -1417,16 +1444,6 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
     }
     j += "]";
 }
-
-struct HttpChunkEmitter {
-    httpd_req_t* req = nullptr;
-
-    bool operator()(std::string_view bytes, bool final) const {
-        if (final) return httpd_resp_send_chunk(req, nullptr, 0) == ESP_OK;
-        return httpd_resp_send_chunk(req, bytes.data(), bytes.size()) == ESP_OK;
-    }
-};
-using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 
 // The two sources ride ONE response but stay two arrays, mirroring the two stacks behind them:
 // `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only for a snapshot proven live, so

@@ -16,7 +16,8 @@ esp_err_t http_send_gzip(httpd_req_t* req, const char* content_type,
 // Read a JSON request body into a bounded buffer; returns bytes or <0.
 int       http_read_body(httpd_req_t* req, char* buf, size_t max);
 
-// Append the status snapshot shared by its HTTP route and MCP tool. The values snapshot is larger
+// Append the owning status snapshot used by MCP get_status. GET /status instantiates the same
+// serializer directly against a bounded HTTP sink in http_status.cpp. The values snapshot is larger
 // than the target's normal largest contiguous block, so its shared sender streams an optional small
 // prefix/suffix around the exact /values object instead of materialising a complete response.
 void http_append_status_json(std::string& out, bool redact = false);

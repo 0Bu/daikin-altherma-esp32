@@ -238,7 +238,9 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   the device uses, not a test-only re-derivation of cJSON output.
 - `logic/chunk_sink.hpp` — the production bounded response sink used by `/values` and MCP
   `get_hp_values`: a single oversized append is split before the buffer can exceed 1 KiB, emitted
-  chunks concatenate byte-for-byte to the input, and exactly one successful terminator is produced.
+  chunks concatenate byte-for-byte to the input, exactly one successful terminator is produced,
+  and injected OOM is rethrown before the first emission but converted to a failed stream after
+  either a successful or failed first transport attempt.
 - `logic/http_request.hpp` — the global trusted-LAN browser boundary: exact mDNS/WiFi/Ethernet Host
   authorities, independent Origin validation, Fetch-Metadata rejection, native-client omissions and
   the `application/json` media-type gate for body-bearing POSTs.

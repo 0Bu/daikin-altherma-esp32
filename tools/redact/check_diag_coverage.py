@@ -155,7 +155,10 @@ def status_unwrapped_config_sites():
     never-wrapped direction that a count of jstr_r() calls structurally cannot see.
     """
     lines = STATUS.read_text().splitlines()
-    start = next(i for i, line in enumerate(lines) if "void http_append_status_json" in line)
+    # The live builder is templated so HTTP can stream while MCP keeps an owning wrapper. Start at
+    # that production serializer, not at the compatibility wrapper below it; otherwise every field
+    # in the real body falls outside this audit and the never-wrapped mutation passes silently.
+    start = next(i for i, line in enumerate(lines) if "static void append_status_json" in line)
     end = next(i for i, line in enumerate(lines[start + 1:], start + 1)
                if "struct ValuesSnapshot" in line)
     public = {"c.board_user_set", "c.profile", "c.fp_valid"}

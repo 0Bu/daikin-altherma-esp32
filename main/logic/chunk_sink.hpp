@@ -44,6 +44,10 @@ public:
     }
 
     bool failed() const { return failed_; }
+    // True as soon as the first data emission is attempted. The transport may send status/headers
+    // before reporting a later socket error, so even a false result must conservatively close the
+    // clean-503 window. A later serializer failure then aborts instead of sending a second response.
+    bool emission_started() const { return emission_started_; }
     size_t max_buffered() const { return max_buffered_; }
     static constexpr size_t max_chunk_bytes() { return MaxBytes; }
 
@@ -64,6 +68,7 @@ private:
 
     void flush() {
         if (failed_ || buffer_.empty()) return;
+        emission_started_ = true;
         if (!emit_(std::string_view(buffer_), false)) {
             failed_ = true;
             return;
@@ -75,7 +80,23 @@ private:
     std::string buffer_;
     size_t max_buffered_ = 0;
     bool failed_ = false;
+    bool emission_started_ = false;
     bool finished_ = false;
 };
+
+// Serialize and finish a bounded HTTP-style stream without ever letting an exception cross a C
+// server frame. Before the first accepted data chunk the caller still owns the response status, so
+// rethrow and let its outer OOM/exception guard produce 503/500. After commit the status is already
+// on the wire; returning false tells the server to close the incomplete response cleanly.
+template <typename Sink, typename Append>
+inline bool finish_bounded_stream(Sink& sink, Append&& append) {
+    try {
+        std::forward<Append>(append)(sink);
+        return sink.finish();
+    } catch (...) {
+        if (!sink.emission_started()) throw;
+        return false;
+    }
+}
 
 } // namespace daik
