@@ -129,6 +129,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 87 | **Diagnostic-evidence contract gate** — every visible plant diagnosis stays bound to an external basis, its implemented rule and an explicit claim limit | ✅ | [`check_diagnostic_evidence.mjs`](../tools/diagnostic_evidence/check_diagnostic_evidence.mjs), [`run-diagnostic-evidence-audit.sh`](../scripts/run-diagnostic-evidence-audit.sh) |
 | 88 | **English-only documentation contract** — maintained Markdown stays English while localized UI copy remains independently complete and equally bounded | ✅ 🧪 | [`english_docs.mjs`](../tools/user_docs/english_docs.mjs), [`run-user-docs-audit.sh`](../scripts/run-user-docs-audit.sh) |
 | 90 | **Bounded X10A publish path + weather-fetch headroom gate** — direct size/digest probing of the source-tagged poll cache avoids duplicate cache/group storage and a permanent payload block; changed state uses one exact transient payload with a revision-checked copy and a 12 KiB refusal ceiling. Open-Meteo waits for X10A/MQTT quiescence and retries below 56 KiB free / 24 KiB largest contiguous block | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`logic/x10a_snapshot.hpp`](../main/logic/x10a_snapshot.hpp), [`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp), [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`logic/weather_forecast.hpp`](../main/logic/weather_forecast.hpp), [`test_x10a_publish_heap_contract.mjs`](../test/test_x10a_publish_heap_contract.mjs) |
+| 91 | **X10A protocol diagnosis** — connection-gated, closed Settings tongue with an exact-or-labelled-generic `main/def` register catalog plus a bounded `POST /hp/query`: one caller-chosen page, raw/partial frame and every converter the slice admits | ✅ 🧪 | [`logic/hp_probe.hpp`](../main/logic/hp_probe.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`http_config.cpp`](../main/http_config.cpp), [`dashboard.js`](../main/www/js/dashboard.js) |
 
 ---
 
@@ -374,6 +375,16 @@ other.
   nulls whose reason rides **alongside** rather than inside the value array. `t0` is derived from the
   newest sample's age on the monotonic clock — and **omitted** entirely while the clock has never
   synced, so the UI reads out an age rather than a fabricated timestamp.
+- **✅ 🧪 Free register probe** ([`logic/hp_probe.hpp`](../main/logic/hp_probe.hpp)): `POST /hp/query`
+  reads one caller-chosen register and returns the raw frame plus, by default, every converter the
+  requested slice admits — identical decodes merged so the answer names a choice rather than repeating
+  a number. It runs on the poll task (one master on a half-duplex bus), one probe in flight at a time,
+  and reports a page the unit refuses as a *result* rather than an HTTP error. X10A has no write
+  command in either framing, so an arbitrary register is an arbitrary **read**. The closed Settings
+  tongue lazily streams the detected profile's exact `main/def` labels through `GET /models?active=1`;
+  unresolved/stale detection uses explicitly labelled `generic` examples. Choosing one fills the
+  editable tuple. Both responses use a bounded 1 KiB
+  sink, and raw negative/partial replies survive. Trusted-LAN only.
 - **✅ 🧪 Manual UI-language override** ([`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp)): the
   bilingual UI picks its language from `navigator.language` by default; a persistent picker overrides
   that per installation and applies **live**, with `auto` a first-class value decoded defensively so
@@ -655,7 +666,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 
 | Concern | Headers |
 |---------|---------|
-| Wire decode | `crc`, `convert`, `registers`, `value_def`, `error_codes`, `hexdump`, `raw_capture` |
+| Wire decode | `crc`, `convert`, `registers`, `value_def`, `error_codes`, `hexdump`, `raw_capture`, `hp_probe` |
 | Value adjudication | `availability`, `conv_override`, `label_override`, `fault_state`, `ou_stale`, `lwt_select`, `cop_scope`, `feature_gate`, `profile_view` |
 | Detection | `detect`, `detect_backoff`, `uart_plan` |
 | Config & board | `config_model`, `config_store`, `board_pins`, `board_presets`, `env3`, `ui_lang` |

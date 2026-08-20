@@ -163,7 +163,7 @@ http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns registe
                       an unauthenticated radio client; with no setup AP, the configured WiFi or
                       Ethernet LAN registers the full API.
                       Boundary = host-tested logic/http_surface.hpp (F01). `cfg.max_uri_handlers` is
-                      sized EXACTLY to the trusted-LAN route count of 36, so adding a route means raising
+                      sized EXACTLY to the trusted-LAN route count of 37, so adding a route means raising
                       it in the same commit: overflowing is silent and hits the WRONG route (the
                       casualty is whatever registers last, deliberately the captive/SPA catch-all, so
                       the symptom would be deep links breaking rather than the new route 404ing).
@@ -181,7 +181,7 @@ http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_te
                       /test_circulation, /set_circulation,
                       /set_syslog,
                       /set_ntp, /set_hp, /discover_homehub, /set_board, /set_env3, /set_ota, /set_lang,
-                      /detect — all SIXTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
+                      /detect, /hp/query — all SEVENTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
                       exactly to (and which must be LOWERED in the same commit that retires a route,
                       as retiring /set_dynamic_lwt did: a count left above the real one is a comment
                       that has stopped describing the code depending on it). /set_ref_temp persists
@@ -1349,7 +1349,18 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    five blind seconds and consumes that handoff once; a panic never replays an older checkpoint.
    See *The host-tested logic core* for why a
    row is addressed by (page, offset, **converter**) here and by (page, offset, unit) in the trends.
-5. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
+5. Serve at most one pending **free register probe** (`logic/hp_probe.hpp`, `POST /hp/query`) — a
+   caller-chosen page read once and handed back as its raw frame. It runs *here*, on this task,
+   because the link is half-duplex with exactly one master: a second task writing a request while a
+   sweep is mid-reply would desynchronise the reader, and the damage would not be a lost probe but
+   corrupted **published** values from a query no consumer of those values ever made. The step is
+   after the allocating sweep guard but uses `config_link_snapshot()` (three POD fields, no Config
+   string copy) and has its own catch boundary, so a future allocation becomes a 503 instead of an
+   exception through the FreeRTOS task entry. Its gate/completion semaphores are static `.bss`, not
+   heap allocations. The OTA hold-off still keeps the bus quiet during an update. One probe is in
+   flight at a time; the UI disables repeat submission and pauses normal polling while the single
+   httpd task blocks on the completion semaphore for at most 3 s.
+6. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
    the cache; they never touch the UART. X10A, HomeHub and ENV III trends are not published to MQTT — they exist for
    the web UI, and Home Assistant already records its own history for every entity.
 
@@ -2472,7 +2483,7 @@ minimal state a restart would be trying to reach.
 `app.sources`. Firmware, tests and audits all consume that one ordered manifest; the fragments share
 one classic-script scope and are spliced into ONE self-contained, pre-gzipped page at build time
 (`inline_assets.cmake`). **Write the comments — and know they ship nowhere:**
-`tools/web_asset/minify_and_gzip.py` strips HTML, CSS and JS comments alike under the 153600-byte
+`tools/web_asset/minify_and_gzip.py` strips HTML, CSS and JS comments alike under the 163840-byte
 delivery budget (`UI_GZIP_MAX_BYTES` in `main/CMakeLists.txt`, pinned by
 `test/test_ui_delivery_contract.mjs`). Markup was the one language it did NOT cover until the
 budget was measured per fragment: `index.html` is spliced in raw, so 39 KB of drawing/layout
@@ -2484,7 +2495,9 @@ significant, and ~1.1 KB is not worth a layout defect that renders correctly on 
 made it). The UI is **two screens**:
 the dashboard (the plant — schematic, model, values, no config at all) and **Settings** behind the
 header gear (the Connections tile + three ESP32 board cards — ESP32 board health, Protokoll
-[X10A link + pins] and Firmware [version/OTA/language + default-off plant-diagnostics consent] —
+[X10A link + pins +, only while connected, a closed protocol-diagnosis tongue containing the X10A query form] and Firmware
+[version/OTA/language + default-off plant-diagnostics consent]. Opening that tongue lazily loads the
+register definitions; its form sends one explicit read request,
 plus conditional Anlagendiagnose and heating-curve source cards while enabled; flat, no sub-screens,
 all built by one `esp32CardHtml()` and rebuilt together on every poll).
 Settings drives the config endpoints in
@@ -2568,6 +2581,17 @@ place:
   `{mb_host, mb_port, mb_unit_id}`, but not both in one request: a mixed patch returns 400
   `"update X10A and HomeHub in separate requests"` before changing either. The UI language is its own
   setting now (see the **Language** bullet below), never a `/set_hp` field.
+- **X10A protocol diagnosis** → `GET /models?active=1` + `POST /hp/query`. The Protokoll-card row is
+  an ordinary explanation tongue shown only while `hp.connected` is true: closed after every load,
+  browser-session only and never persisted. The complete row disappears when the X10A link is down.
+  Opening it reveals the X10A query form directly, without a nested card or repeated heading, and
+  lazily streams the resolved active
+  `main/def` rows. If detection is `auto` or stale, the feed returns the `generic` definition rows
+  with explicit `definition:"generic",fallback:true` provenance. The visible Register option
+  is the exact catalog label (duplicate labels keep separate tuple identities), and selecting one
+  fills editable page/offset/size/converter inputs. The request is one explicit bus read. Its response
+  is 1 KiB chunk-streamed and retains raw NAK, partial, bad-CRC and wrong-page frames; the displayed
+  decodes bypass publication plausibility/availability by design and are not measurements.
 - **Plant diagnostics** → `/set_diagnostics` (Settings **Firmware** card). The persisted boolean is
   false on a fresh device and on every pre-v19 config migration. A real toggle advances a persisted
   generation, saves it first, and then applies live without reboot. Off wipes the rolling checkup,
@@ -3030,11 +3054,18 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   "Push vs. poll" section above carries the measurements. Consequences worth knowing: EVERY route is
                   now under the http_register OOM guard (the raw-registered WS handler was the one
                   exception), CONFIG_HTTPD_WS_SUPPORT=n, and /status is built on ONE task
-GET  /models      pin hint + catalog metadata (def/models_catalog.hpp). Detection is fully automatic;
-                  the UI no longer offers a manual model picker. NO shipped client reads this — the
-                  web UI never fetches it, and the RX/TX dropdown takes its GPIOs from
-                  /status.pins_avail (logic/board_pins.hpp), NOT from this pin_hint. Legacy metadata
-                  behind a read-only inspection endpoint for humans/scripts
+GET  /models      without a query: legacy pin hint + catalog metadata (def/models_catalog.hpp) for
+                  humans/scripts; detection is fully automatic and the UI offers no model picker.
+GET  /models?active=1   lazy X10A-diagnosis feed: streams exact queryable ValueDef labels and
+                  reg/offset/size/conv tuples. Shape: {profile,definition,fallback,values:[…]}.
+                  The UI fetches it with `no-store` and a unique `ms=<epoch>` query only while the
+                  browser-session Protokolldiagnose tongue is open; the response is also
+                  server-marked `no-store` because detection and firmware updates can change the
+                  definition under the stable route.
+                  A resolved profile uses its exact definition with fallback:false; `profile:"auto"`
+                  and unknown/stale ids use definition:"generic",fallback:true, so example rows stay
+                  available without claiming that generic was detected. The RX/TX dropdown still takes its GPIOs from
+                  /status.pins_avail, NOT from the legacy pin_hint
 GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. ?redact=1 scrubs the handful of
                   lines that interpolate a host/IP/SSID (logic/redact.hpp) and switches the response
                   to CHUNKED: a replacement is longer than most values it replaces, so the redacted

@@ -11,6 +11,16 @@ namespace daik {
 // `const Config& c = config();` to keep the snapshot alive for the scope.
 Config config();
 
+// Allocation-free snapshot for the UART owner. A full Config copy includes many std::strings and
+// can throw under heap pressure; the probe service needs only these three POD fields and runs even
+// after an allocating poll cycle was skipped.
+struct ConfigLinkSnapshot {
+    Protocol proto = Protocol::I;
+    int rx_pin = -1;
+    int tx_pin = -1;
+};
+ConfigLinkSnapshot config_link_snapshot();
+
 // Load from NVS, seeding any missing key from its Kconfig default.
 void config_load();
 

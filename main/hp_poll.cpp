@@ -62,6 +62,36 @@ static DetectBackoff         s_backoff;
 static int64_t               s_next_detect_us = 0;
 static std::atomic<bool>     s_detect_reset{false};
 
+// Free-register-probe hand-off (hp_poll.hpp → hp_probe_run).
+//
+//   s_probe_gate    — ONE submitter at a time. Taken with zero timeout, so a second concurrent
+//                     request is answered Busy immediately rather than queueing behind a bus that
+//                     only serves one probe per second anyway.
+//   s_probe_pending — the request: a TICKET packed above the register byte, 0 = none. Atomic
+//                     because it crosses tasks.
+//   s_probe_done    — the completion signal. A binary semaphore rather than a flag+poll: the httpd
+//                     task must BLOCK (it is waiting on a physical round-trip up to a poll interval
+//                     away), and spinning there would burn the one task with the deepest stack.
+//   s_probe_reply / s_probe_reply_ticket — the answer and WHOSE it is.
+//
+// THE TICKET IS NOT BOOKKEEPING, it is the correctness argument. The gate serialises submitters,
+// but it does NOT serialise a submitter against the poll task: a caller whose 3 s ran out releases
+// the gate and walks away while the poll task may already be inside its 300 ms round-trip. Without
+// a ticket the next caller would then (a) have its own register overwritten by the abandoned
+// service's slot reset, and (b) be woken by that service's give and read the PREVIOUS register's
+// reply as its own — the exact failure this feature exists to prevent, one layer up: a confident
+// answer about a page nobody asked for. So the reply is stamped, the submitter accepts only its
+// own stamp, and the poll task withdraws the request with a compare-exchange that clears only the
+// request it actually served.
+static SemaphoreHandle_t      s_probe_gate = nullptr;
+static SemaphoreHandle_t      s_probe_done = nullptr;
+static StaticSemaphore_t      s_probe_gate_storage;
+static StaticSemaphore_t      s_probe_done_storage;
+static std::atomic<uint32_t>  s_probe_pending{0};        // ticket << 8 | reg, 0 = no request
+static std::atomic<uint32_t>  s_probe_ticket{0};         // last ticket handed out
+static std::atomic<uint32_t>  s_probe_reply_ticket{0};   // whose answer s_probe_reply holds
+static HpProbeReply           s_probe_reply;
+
 // Poll cycles the OOM guard below dropped (#380, hp_poll.hpp → hp_skipped_cycles). Written from the
 // catch handler and read from the MQTT publish task, so it is atomic; relaxed is enough because
 // nothing is ordered against it and a reader one cycle behind is reading a counter that moves once
@@ -78,7 +108,8 @@ static int                   s_no_match = 0;
 
 // Raw page-dump budget for the RUNNING compressor (logic/raw_capture.hpp) — poll-task-owned, RAM
 // only, never refilled within a boot. The detect-pass dump in hp_detect.cpp captures the same pages
-// at REST; this one exists because the values #194 is about are only wrong while the unit runs.
+// at REST; this one supplied #194's decisive running-state evidence and remains available for the
+// next converter/layout mismatch.
 static logic::RawCaptureState s_raw_capture;
 
 // The CROSS-PAGE saturation witness, carried from the PREVIOUS cycle (logic/availability.hpp).
@@ -309,11 +340,10 @@ static void poll_once() {
         cv.held = logic::ou_reading_held_over(cv.reg, rps_known, rps_running);
     const bool ou_held = rps_known && !rps_running;
 
-    // ── RAW page bytes WHILE THE COMPRESSOR RUNS (#194's decisive experiment, #209 root cause) ────
-    // The only evidence that can separate a wrong converter scale from a wrong offset for
-    // Target Evap. Temp., and it has never been captured: hp_detect.cpp dumps the same pages, but
-    // only on a detect pass, which is always a unit at rest — the state where the value is not wrong.
-    // Budgeted and edge-triggered so this cannot flood the 6 KB diag ring (logic/raw_capture.hpp).
+    // ── RAW page bytes WHILE THE COMPRESSOR RUNS (#194 evidence, added by #209) ───────────────────
+    // This supplied the wire evidence that separated #194's wrong converter scale from a wrong
+    // offset; hp_detect.cpp alone had covered only rest-state frames. Keep the bounded running-state
+    // sampler for future converter/layout mismatches without flooding the 6 KB diag ring.
     if (hp_poll_generation_matches(cycle_generation) &&
         logic::raw_capture_due(s_raw_capture, rps_running, esp_timer_get_time())) {
         const struct { uint8_t reg; const uint8_t* buf; int len; } run_raw[] = {
@@ -498,6 +528,59 @@ static bool poll_detect() {                         // false only when an attemp
     return true;
 }
 
+// Serve one pending free-register probe, on the task that owns the UART. Allocation-free by
+// construction: no Config copy escapes, no string is built, and the reply is a fixed struct — this
+// runs at the tail of a cycle whose own OOM guard has already fired if the heap is exhausted, and
+// it must still work then, because a probe is exactly what someone debugging that state reaches for.
+static void poll_probe_service() {
+    const uint32_t pending = s_probe_pending.load(std::memory_order_acquire);
+    if (pending == 0) return;
+    const uint8_t reg = probe_reg_of(pending);
+
+    HpProbeReply r;
+    const ConfigLinkSnapshot c = config_link_snapshot();
+    r.proto  = c.proto;
+    r.rx_pin = c.rx_pin;
+    r.tx_pin = c.tx_pin;
+    if (!hp_uart_init(c.rx_pin, c.tx_pin)) {
+        r.status = ProbeStatus::NoLink;
+    } else {
+        // One more feed before a read that blocks up to the 300 ms serial timeout — the same rule
+        // poll_once applies per register, for the same reason: a slow answer must never read as a hang.
+        esp_task_wdt_reset();
+        // IntegrityOnly, not All: a probe's whole job is to ask about pages this unit may not have,
+        // so "no reply" and "0x15 0xEA" are ORDINARY outcomes here and logging each one would let a
+        // user with a shell loop evict the boot's real evidence from a 6 KB ring. A checksum failure
+        // or an impossible length still logs — those describe the LINK, not the page, and they are
+        // the same defect whoever is watching /diag is there for.
+        const HpQueryResult query = hp_query_detailed(reg, c.proto, r.frame, sizeof(r.frame),
+                                                      HpQueryLogPolicy::IntegrityOnly);
+        r.frame_len = query.received;
+        if (query.kind != HpReplyKind::Ok) {
+            r.status = probe_status_from_reply(query.kind);
+        } else {
+            r.payload_off = payload_offset(c.proto);
+            r.payload_len = query.received - r.payload_off - 1; // minus header and checksum
+            // A framing-valid reply that carries no payload is not an error of the transport, and
+            // reporting it as one would send the user to check wiring that is demonstrably fine.
+            r.status = r.payload_len > 0 ? ProbeStatus::Ok : ProbeStatus::ShortReply;
+        }
+    }
+
+    s_probe_reply = r;
+    // Publish the answer, THEN stamp it: a submitter reads the struct only after seeing its own
+    // ticket, so the release store on the ticket is what makes the whole reply visible.
+    s_probe_reply_ticket.store(probe_ticket_of(pending), std::memory_order_release);
+    // Withdraw ONLY the request we just served. A submitter that gave up during the round-trip may
+    // already have released the gate and let the next one arm its own register; an unconditional
+    // reset would silently discard that request, and the caller would wait out its whole timeout
+    // for a query that was never put on the bus.
+    uint32_t served = pending;
+    s_probe_pending.compare_exchange_strong(served, 0, std::memory_order_acq_rel,
+                                            std::memory_order_relaxed);
+    if (s_probe_done) xSemaphoreGive(s_probe_done);
+}
+
 // The cycle body allocates freely — poll_once builds one CachedValue per resolved profile row
 // every second, hp_detect_run grows more — so the whole body is guarded like mqtt_task's: an OOM in a
 // fragmented moment (concurrent MQTT TLS reconnect, /set_mqtt's probe client) must skip the cycle and
@@ -615,6 +698,23 @@ static void poll_task(void*) {
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             diag_printf("poll: cycle skipped (oom?)\n");
         }
+        // Serve at most one free probe after the sweep. Its Config access is POD-only and normally
+        // allocation-free, but keep a separate task-level boundary anyway: a future edit must turn
+        // into a 503/no-link result rather than unwind through the FreeRTOS C task entry and reboot.
+        try {
+            poll_probe_service();
+        } catch (...) {
+            const uint32_t pending = s_probe_pending.load(std::memory_order_acquire);
+            if (pending != 0) {
+                s_probe_reply = HpProbeReply{};
+                s_probe_reply.status = ProbeStatus::NoLink;
+                s_probe_reply_ticket.store(probe_ticket_of(pending), std::memory_order_release);
+                uint32_t failed = pending;
+                s_probe_pending.compare_exchange_strong(failed, 0, std::memory_order_acq_rel,
+                                                        std::memory_order_relaxed);
+                if (s_probe_done) xSemaphoreGive(s_probe_done);
+            }
+        }
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));     // fixed 1 s cadence
     }
 }
@@ -622,6 +722,13 @@ static void poll_task(void*) {
 void hp_poll_start() {
     s_mtx = xSemaphoreCreateMutex();
     if (!s_mtx) diag_printf("hp_poll: cache mutex alloc failed — value snapshots return empty\n");
+    // Probe hand-off primitives live in .bss rather than consuming/fragmenting internal heap before
+    // the core poll task's 8 KiB stack is allocated. The null check remains defensive against a
+    // FreeRTOS configuration that refuses static creation; only POST /hp/query is then disabled.
+    s_probe_gate = xSemaphoreCreateMutexStatic(&s_probe_gate_storage);
+    s_probe_done = xSemaphoreCreateBinaryStatic(&s_probe_done_storage);
+    if (!s_probe_gate || !s_probe_done)
+        diag_printf("hp_poll: probe semaphore init failed — POST /hp/query unavailable this boot\n");
     // The poll engine is the core of the device; if its task can't be created there is no heat-pump
     // polling at all. Report it loudly — the web UI + OTA still come up, so the board stays fixable.
     //
@@ -728,6 +835,63 @@ HpStats hp_stats() {
 }
 
 uint32_t hp_skipped_cycles() { return s_cycles_skipped.load(std::memory_order_relaxed); }
+
+bool hp_probe_run(uint8_t reg, HpProbeReply& out, int timeout_ms) {
+    out = HpProbeReply{};
+    if (!s_probe_gate || !s_probe_done) { out.status = ProbeStatus::NoLink; return false; }
+    // ONE question at a time, refused rather than queued. The bus serves one probe per poll cycle,
+    // so a queue would only convert a fast "busy" into a slow "busy" while holding an httpd worker.
+    if (xSemaphoreTake(s_probe_gate, 0) != pdTRUE) { out.status = ProbeStatus::Busy; return false; }
+
+    struct GateRelease {                       // unwind-safe: the OOM trampoline can throw past here
+        SemaphoreHandle_t h;
+        ~GateRelease() { xSemaphoreGive(h); }
+    } release{s_probe_gate};
+
+    if (!s_poll_task_running.load(std::memory_order_acquire)) {
+        // Safe/minimal mode, or the task failed to start. Nothing will ever serve the request, so
+        // say so now instead of making the caller wait out the full timeout for the same answer.
+        out.status = ProbeStatus::NoLink;
+        return false;
+    }
+
+    // Drain a completion left over from a submitter that gave up and walked away. Not required for
+    // correctness — the ticket check below rejects a foreign reply anyway — but it saves this
+    // caller one wasted wake-up on the task with the deepest stack in the firmware.
+    while (xSemaphoreTake(s_probe_done, 0) == pdTRUE) { }
+
+    // The packing, the never-zero rule and the match test are logic/hp_probe.hpp's — pure, so the
+    // interleaving they exist for is asserted on the host rather than hoped for on a board.
+    const uint32_t ticket  = probe_ticket_normalize(
+        s_probe_ticket.fetch_add(1, std::memory_order_relaxed) + 1);
+    const uint32_t pending = probe_pack(ticket, reg);
+    s_probe_pending.store(pending, std::memory_order_release);
+
+    // Wait for OUR answer, not merely for an answer. A late give from an abandoned probe is
+    // consumed and ignored rather than mistaken for this one; the deadline is absolute, so those
+    // wake-ups cannot extend the wait past what the caller asked for.
+    const int64_t deadline_us = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000;
+    for (;;) {
+        const int64_t remaining_us = deadline_us - esp_timer_get_time();
+        const bool woken = remaining_us > 0 &&
+                           xSemaphoreTake(s_probe_done,
+                                          pdMS_TO_TICKS(static_cast<int>(remaining_us / 1000) + 1))
+                               == pdTRUE;
+        if (woken && probe_reply_matches(s_probe_reply_ticket.load(std::memory_order_acquire),
+                                         ticket)) break;
+        if (remaining_us <= 0 || !woken) {
+            // Withdraw our own request — and only ours, so a probe the poll task is already
+            // executing for us is not confused with one a later caller armed.
+            uint32_t mine = pending;
+            s_probe_pending.compare_exchange_strong(mine, 0, std::memory_order_acq_rel,
+                                                    std::memory_order_relaxed);
+            out.status = ProbeStatus::Timeout;
+            return false;
+        }
+    }
+    out = s_probe_reply;
+    return out.status == ProbeStatus::Ok;
+}
 
 bool hp_poll_network_quiesced() {
     return !s_poll_task_running.load(std::memory_order_acquire) ||

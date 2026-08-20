@@ -83,8 +83,11 @@ and the OTA-signing / key lifecycle.
   The optional HomeHub link no longer has one either: its bounded register-54 actuator was **removed**
   when dynamic LWT actuation was retired ([`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md)), so no source
   file contains a write entry point, an FC06/FC16 request builder or an issued write function code,
-  and a CI contract test walks every file to keep it that way. No MQTT command subscription, writable
-  HA entity, HTTP/MCP register route or Modbus proxy exists either. The unauthenticated
+  and a CI contract test walks every file to keep it that way. No MQTT command subscription,
+  writable HA entity, **Modbus** register route/proxy or MCP write tool exists. The trusted-LAN-only
+  `POST /hp/query` is a narrower X10A exception: it can issue only the read frame defined by
+  `build_request()`, returns raw reply bytes and persists nothing. X10A defines no write command in
+  either supported framing, so choosing an arbitrary page does not create actuation. The unauthenticated
   `HA → MQTT/HTTP → raw Modbus → pump` bridge is therefore absent by construction rather than by
   policy — which is what lets the rest of this document accept an unauthenticated surface on a
   trusted LAN. Note the converse: `:502` has no Modbus credential, so OTHER clients on the LAN

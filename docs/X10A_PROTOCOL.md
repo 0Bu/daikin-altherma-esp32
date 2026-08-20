@@ -104,6 +104,11 @@ is the single validity test for a received frame. Implemented as `daik::crc()` i
 ```
 
 - The reply echoes `40 <reg>`, then a **`LEN`** byte.
+- The transport validates that echo after checksum verification. A CRC-valid `40 <other-reg>` frame
+  is classified as `unexpected_reply`, never attached to the requested page. This identity rule is
+  Protocol-I-only; no undocumented echo rule is inferred for Protocol S.
+- A `LEN` that advertises a frame shorter than the four mandatory bytes, or longer than the bounded
+  receive buffer, is `invalid_length`; bytes already received remain available in the raw frame.
 - **`LEN` counts itself + the payload + the checksum.** So `payload_len = LEN − 2`, and the whole
   reply is `2 + LEN` bytes on the wire. The firmware reads 3 bytes, then reads `LEN + 2` total
   (`reply_len_dynamic()` = `buf[2] + 2` in [`logic/crc.hpp`](../main/logic/crc.hpp)).

@@ -276,6 +276,192 @@ function diagnosticsRow(enabled) {
     `<div class="vdesc-p">${esc(t("card.diagnostics_help"))}</div>`);
 }
 
+// Browser-session accordion for the expert register reader. There is deliberately no second On/Off
+// control or nested card: opening this ordinary explanation tongue reveals the form directly and
+// closing it hides the form. The disclosure state is neither posted nor persisted.
+function protocolDiagnosticsRow() {
+  return settingsInfoRow("protocol:diagnosis", "protocol-diagnosis-detail", t("probe.toggle"), "",
+    x10aDiagnosisCardHtml(), "protocol-diagnosis-item", "", true);
+}
+
+function hpProbeRegNumber(value) {
+  const text = String(value ?? "").trim();
+  if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(text)) return null;
+  const n = Number.parseInt(text, /^0x/i.test(text) ? 16 : 10);
+  return Number.isInteger(n) && n >= 0 && n <= 255 ? n : null;
+}
+
+// Converter choices are the exact implemented candidates the firmware can sweep for each field
+// width (logic/hp_probe.hpp). The host UI contract compares both tables so a firmware candidate
+// cannot appear as an unexplained number here, or a stale browser option outlive its decoder.
+const HP_PROBE_CONVERTERS = Object.freeze([
+  [105, 2], [106, 2], [107, 2], [108, 2], [114, 2], [119, 2],
+  [101, 2], [102, 2], [103, 2], [104, 2], [109, 2], [110, 2], [111, 2], [118, 2],
+  [151, 2], [152, 2], [161, 2], [405, 2],
+  [105, 1], [101, 1], [152, 1], [161, 1],
+  [211, 1], [219, 1], [214, 1], [215, 1], [310, 1], [311, 1],
+  [217, 1], [203, 1], [204, 1], [315, 1], [316, 1],
+  [300, 1], [301, 1], [302, 1], [303, 1], [304, 1], [305, 1], [306, 1], [307, 1],
+]);
+
+function hpProbeConvertersForSize(size) {
+  const width = Number(size);
+  return HP_PROBE_CONVERTERS.filter((entry) => entry[1] === width).map((entry) => entry[0]);
+}
+
+function hpProbeConverterDescription(conv, size) {
+  const one = Number(size) === 1;
+  switch (Number(conv)) {
+    case 101: return one ? t("probe.conv_raw_byte") : t("probe.conv_signed_raw_le");
+    case 102: return t("probe.conv_signed_raw_be");
+    case 103: return t("probe.conv_signed_256_le");
+    case 104: return t("probe.conv_signed_256_be");
+    case 105: return one ? t("probe.conv_tenth_byte") : t("probe.conv_signed_tenth_le");
+    case 106: return t("probe.conv_signed_tenth_be");
+    case 107: case 114: case 119: return t("probe.conv_signed_tenth_nodata_le");
+    case 108: return t("probe.conv_signed_tenth_nodata_be");
+    case 109: return t("probe.conv_signed_128_le");
+    case 110: return t("probe.conv_signed_128_be");
+    case 111: return t("probe.conv_signed_half_be");
+    case 118: return t("probe.conv_signed_hundredth_be");
+    case 151: return t("probe.conv_unsigned_raw_le");
+    case 152: return one ? t("probe.conv_unsigned_byte") : t("probe.conv_unsigned_raw_be");
+    case 161: return one ? t("probe.conv_unsigned_half_byte") : t("probe.conv_unsigned_half_be");
+    case 405: return t("probe.conv_saturation");
+    case 211: return t("probe.conv_raw_fan");
+    case 219: return t("probe.conv_capacity");
+    case 214: return t("probe.conv_eeprom_digit");
+    case 215: return t("probe.conv_eeprom_pair");
+    case 310: return t("probe.conv_bits_high");
+    case 311: return t("probe.conv_bits_low");
+    case 217: return t("probe.conv_operation_mode");
+    case 203: return t("probe.conv_error_class");
+    case 204: return t("probe.conv_error_code");
+    case 315: return t("probe.conv_indoor_mode");
+    case 316: return t("probe.conv_hybrid_mode");
+    default:
+      return Number(conv) >= 300 && Number(conv) <= 307
+        ? t("probe.conv_bit", Number(conv) - 300) : t("probe.conv_unknown");
+  }
+}
+
+function hpProbeDraftRequest(draft = S.hpProbeDraft) {
+  const reg = hpProbeRegNumber(draft.reg);
+  const offset = Number(draft.offset), size = Number(draft.size);
+  const convText = String(draft.conv ?? "").trim();
+  const sweep = draft.mode === "sweep";
+  const conv = sweep ? null : Number(convText);
+  if (reg == null || !Number.isInteger(offset) || offset < 0 || offset > 31 ||
+      (size !== 1 && size !== 2) ||
+      (!sweep && (!Number.isInteger(conv) || conv < 0 || conv > 999))) return null;
+  const request = { reg, offset, size };
+  if (conv != null) request.conv = conv;
+  return request;
+}
+
+function hpProbeHexBytes(value) {
+  return String(value || "").trim().split(/\s+/).filter((byte) => /^[0-9a-f]{2}$/i.test(byte));
+}
+
+function hpProbeResultHtml() {
+  if (S.hpProbeError) return `<div class="probe-error" role="status">${esc(S.hpProbeError)}</div>`;
+  const r = S.hpProbeResult;
+  if (!r) return "";
+  const status = String(r.status || "error");
+  const statusText = t(`probe.status_${status}`);
+  const frameBytes = hpProbeHexBytes(r.frame);
+  const payloadBytes = hpProbeHexBytes(r.payload);
+  const offset = Number.isInteger(r.offset) ? r.offset : Number(S.hpProbeDraft.offset);
+  const size = Number.isInteger(r.size) ? r.size : Number(S.hpProbeDraft.size);
+  const reg = r.reg || (hpProbeRegNumber(S.hpProbeDraft.reg) == null ? S.hpProbeDraft.reg
+    : `0x${hpProbeRegNumber(S.hpProbeDraft.reg).toString(16).toUpperCase().padStart(2, "0")}`);
+  const meta = [r.proto ? `X10A-${r.proto}` : "X10A", Number.isInteger(r.rx_pin) ? `RX ${r.rx_pin}` : "",
+    Number.isInteger(r.tx_pin) ? `TX ${r.tx_pin}` : "", `${frameBytes.length} ${t(frameBytes.length === 1 ? "probe.byte" : "probe.bytes")}`]
+    .filter(Boolean).join(" · ");
+  let payload = "";
+  if (payloadBytes.length) {
+    const bytes = payloadBytes.map((byte, index) =>
+      `<span class="probe-byte${index >= offset && index < offset + size ? " selected" : ""}">${esc(byte.toUpperCase())}</span>`).join("");
+    payload = `<div class="probe-subheading">${esc(t("probe.payload_marked"))}</div>` +
+      `<div class="probe-byte-strip" aria-label="${esc(t("probe.payload"))}">${bytes}</div>`;
+    if (r.slice) payload += `<div class="probe-slice-note">${esc(t("probe.slice_note", offset, size, r.slice.toUpperCase()))}</div>`;
+  }
+  const frame = r.frame ? `<div class="probe-subheading">${esc(t("probe.full_frame"))}</div>` +
+    `<div class="probe-frame">${esc(r.frame.toUpperCase())}</div>` : "";
+  let decoded = "";
+  const values = Array.isArray(r.decodes) ? r.decodes : [];
+  for (const d of values) {
+    const aliases = Array.isArray(d.aliases) && d.aliases.length
+      ? `<small>${esc(t("probe.aliases"))}: ${d.aliases.map((v) => `conv ${esc(v)}`).join(", ")}</small>` : "";
+    const value = d.text != null ? d.text : d.value != null ? String(d.value)
+      : d.refused ? t("probe.refused") : d.unimplemented ? t("probe.unimplemented") : "—";
+    decoded += `<div class="probe-decode"><span class="probe-converter">conv ${esc(d.conv)}${aliases}</span>` +
+      `<span class="probe-decode-label">${esc(t("probe.decode_value"))}</span>` +
+      `<span class="probe-decode-value">${esc(value)}</span></div>`;
+  }
+  const interpretation = decoded ? `<div class="probe-subheading">${esc(t("probe.interpretation"))}</div>` +
+    `<div class="probe-decodes">${decoded}</div>`
+    : r.ok ? `<div class="probe-subheading">${esc(t("probe.interpretation"))}</div>` +
+      `<div class="probe-empty">${esc(t("probe.no_decodes"))}</div>` : "";
+  return `<div class="probe-response" aria-live="polite"><div class="probe-result-head"><div>` +
+    `<div class="probe-result-title">${esc(t("probe.response_for", reg))}</div>` +
+    `<div class="probe-result-meta">${esc(meta)}</div></div>` +
+    `<div class="probe-result-status ${r.ok ? "ok" : "err"}"><span></span>${esc(statusText)}</div></div>` +
+    `<div class="probe-transport ${r.ok ? "ok" : "err"}">${esc(t(`probe.transport_${status}`))}</div>` +
+    payload + frame + interpretation + `</div>`;
+}
+
+function x10aDiagnosisCardHtml() {
+  const d = S.hpProbeDraft || { selected: "", reg: "0x60", offset: "11", size: "1", mode: "specific", conv: "105" };
+  let registerOptions = `<option value="">${esc(t("probe.manual"))}</option>`;
+  const catalog = Array.isArray(S.hpProbeCatalog) ? S.hpProbeCatalog : [];
+  catalog.forEach((row, index) => {
+    registerOptions += `<option value="${index}"${d.selected === String(index) ? " selected" : ""}>` +
+      `${esc(row.label)}</option>`;
+  });
+  const catalogState = S.hpProbeCatalogBusy ? t("probe.catalog_loading")
+    : S.hpProbeCatalogError ? t("probe.catalog_error")
+    : !catalog.length ? t("probe.catalog_empty")
+    : S.hpProbeCatalogFallback
+      ? t("probe.catalog_fallback", S.hpProbeCatalogDefinition || "generic", S.hpProbeCatalogProfile || "auto")
+      : t("probe.catalog_profile", S.hpProbeCatalogDefinition || S.hpProbeCatalogProfile);
+  const sizeOption = (n) => `<option value="${n}"${String(d.size) === String(n) ? " selected" : ""}>` +
+    `${n} ${esc(t(n === 1 ? "probe.byte" : "probe.bytes"))}</option>`;
+  const mode = d.mode === "sweep" ? "sweep" : "specific";
+  const converters = hpProbeConvertersForSize(d.size);
+  const selectedConv = converters.includes(Number(d.conv)) ? Number(d.conv) : converters[0];
+  const converterOptions = `<option value="sweep"${mode === "sweep" ? " selected" : ""}>${esc(t("probe.converter_auto"))}</option>` +
+    converters.map((conv) => `<option value="${conv}"${mode !== "sweep" && conv === selectedConv ? " selected" : ""}>` +
+    `${conv}</option>`).join("");
+  const regNumber = hpProbeRegNumber(d.reg);
+  const regLabel = regNumber == null ? "—" : `0x${regNumber.toString(16).toUpperCase().padStart(2, "0")}`;
+  const body = `<p class="probe-intro">${esc(t("probe.intro"))}</p>` +
+    `<form id="hpProbeForm" class="probe-form">` +
+    `<div class="probe-section-title">${esc(t("probe.request"))}</div><div class="probe-grid">` +
+    `<label class="probe-field probe-wide"><span class="probe-field-label">${esc(t("probe.register"))}</span>` +
+    `<select class="input probe-control" id="hpProbeRegister"${S.hpProbeCatalogBusy ? " disabled" : ""}>${registerOptions}</select>` +
+    (catalogState ? `<span class="field-help${S.hpProbeCatalogError ? " err" : ""}">${esc(catalogState)}</span>` : "") +
+    `</label><label class="probe-field"><span class="probe-field-label">${esc(t("probe.page"))}` +
+    `<span class="probe-normalized" id="hpProbeRegNormalized">${esc(regLabel)}</span></span>` +
+    `<input class="input mono probe-control" id="hpProbeReg" value="${esc(d.reg)}" inputmode="text" autocomplete="off">` +
+    `<span class="field-help">${esc(t("probe.page_help"))}</span></label>` +
+    `<label class="probe-field"><span class="probe-field-label">${esc(t("probe.offset"))}</span>` +
+    `<input class="input mono num probe-control" id="hpProbeOffset" value="${esc(d.offset)}" type="number" min="0" max="31">` +
+    `<span class="field-help">${esc(t("probe.offset_help"))}</span></label>` +
+    `<label class="probe-field"><span class="probe-field-label">${esc(t("probe.size"))}</span>` +
+    `<select class="input probe-control" id="hpProbeSize">${sizeOption(1)}${sizeOption(2)}</select>` +
+    `<span class="field-help">${esc(t("probe.size_help"))}</span></label>` +
+    `<label class="probe-field"><span class="probe-field-label">${esc(t("probe.converter"))}</span>` +
+    `<select class="input probe-control" id="hpProbeConv">${converterOptions}</select>` +
+    `<span class="field-help">${esc(mode === "sweep" ? t("probe.converter_auto_help", d.size) :
+      hpProbeConverterDescription(selectedConv, d.size))}</span></label></div>` +
+    `<div class="probe-action-row"><span class="probe-action-note">${esc(t("probe.action_note"))}</span>` +
+    `<button class="btn primary probe-submit" id="hpProbeSubmit" type="submit" aria-busy="${S.hpProbeBusy ? "true" : "false"}"${S.hpProbeBusy ? " disabled" : ""}>` +
+    (S.hpProbeBusy ? `<span class="spin"></span>${esc(t("probe.querying"))}` : esc(t("probe.send"))) + `</button></div>` +
+    `</form>${hpProbeResultHtml()}`;
+  return `<div class="probe-card">${body}</div>`;
+}
+
 // The version row (Firmware card): the running version, and the SAME OTA trigger the dashboard
 // header's version is — one gesture with one meaning wherever the version is printed. Not a second
 // copy of the flow: the tap runs checkFirmwareUpdate() itself. It does NOT leave the screen. An
@@ -402,7 +588,8 @@ function esp32CardHtml() {
     pinRow(t("card.rxpin"), "e32Rx", pinsLocked ? hp.rx : picker.rx,
       pinsLocked ? hp.tx : picker.tx, "rx", t("card.rxpin_help")) +
     pinRow(t("card.txpin"), "e32Tx", pinsLocked ? hp.tx : picker.tx,
-      pinsLocked ? hp.rx : picker.rx, "tx", t("card.txpin_help"));
+      pinsLocked ? hp.rx : picker.rx, "tx", t("card.txpin_help")) +
+    (hp.connected ? protocolDiagnosticsRow() : "");
   // Firmware — running build, update feed, language and the explicit plant-diagnostics consent.
   // This is not a heat-pump controller mode: it only gates optional observations and their sources.
   const diagnosticsEnabled = s.diagnostics?.enabled === true;
@@ -1486,7 +1673,7 @@ function renderSettings() {
   const a = document.activeElement;
   const picking = !!(a && a.classList && (a.classList.contains("pin-sel") ||
     a.classList.contains("chan-sel") || a.classList.contains("lang-sel") ||
-    a.classList.contains("diagnostics-sel")));
+    a.classList.contains("diagnostics-sel") || a.classList.contains("probe-control")));
   if (!picking) {
     $("connTile").hidden = false;             // resumeOta hides the unavailable pre-status shell
     setHtml("connTile", connectionsHtml());
