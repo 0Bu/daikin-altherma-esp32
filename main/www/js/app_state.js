@@ -342,7 +342,10 @@ function renderHeader() {
   const dash = S.stage === "dashboard";
   $("hdrDash").hidden = !dash;
   $("hdrBack").hidden = dash;
-  if (!dash) $("backTitle").textContent = (TITLE[S.stage] || (() => ""))();
+  if (!dash) {
+    $("btnBack").setAttribute("aria-label", t("nav.back"));
+    $("backTitle").textContent = (TITLE[S.stage] || (() => ""))();
+  }
 }
 
 // ── Toasts ───────────────────────────────────────────────────────────────
