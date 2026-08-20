@@ -22,6 +22,7 @@
 #include "logic/hexdump.hpp"
 #include "logic/history.hpp"   // history_parse_tenths — the SAME parse history.cpp applies to the witness
 #include "logic/history_persist.hpp"  // source identity fingerprint for durable X10A history
+#include "logic/mqtt_group.hpp" // allocation-free grouped JSON probe/copy over the committed cache
 #include "logic/ou_stale.hpp"
 #include "logic/ota_quiesce.hpp"
 #include "logic/raw_capture.hpp"
@@ -49,6 +50,7 @@ static SemaphoreHandle_t      s_mtx = nullptr;
 static std::vector<CachedValue> s_cache;
 static const char*              s_cache_profile = "";  // static def::Profile::id, guarded by s_mtx
 static uint64_t                 s_cache_identity_fp = 0; // same committed source, guarded by s_mtx
+static uint32_t                 s_cache_revision = 0; // every cache/reconfigure commit, guarded by s_mtx
 static HpStats               s_stats;
 static int64_t               s_last_ok_us = -1;
 
@@ -360,6 +362,7 @@ static void poll_once() {
         s_cache            = std::move(fresh);
         s_cache_profile    = prof.id;
         s_cache_identity_fp = c.x10a_identity_fp;
+        ++s_cache_revision;
         s_stats.connected  = any_ok;
         s_stats.registers  = regs;
         s_stats.values     = static_cast<int>(s_cache.size());
@@ -676,6 +679,44 @@ bool hp_values_snapshot_aligned(CachedValue* out, size_t count, const char* expe
            logic::X10aSnapshotAlignResult::Ok;
 }
 
+HpX10aJsonProbe hp_values_x10a_json_probe(const char* expected_profile,
+                                          uint64_t expected_identity_fp) {
+    HpX10aJsonProbe result;
+    if (!s_mtx) return result;
+    Lock lk(s_mtx);
+    if (!logic::x10a_snapshot_source_matches(s_cache_profile, s_cache_identity_fp,
+                                             expected_profile, expected_identity_fp)) return result;
+    const X10aCacheJsonProbe probe = probe_x10a_cache_json(s_cache);
+    result.source_matches = true;
+    result.bytes = probe.bytes;
+    result.digest = probe.digest;
+    result.revision = s_cache_revision;
+    return result;
+}
+
+HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t expected_bytes,
+                                              uint64_t expected_digest,
+                                              uint32_t expected_revision,
+                                              const char* expected_profile,
+                                              uint64_t expected_identity_fp) {
+    // Capacity is established by the caller before this lock. Refuse rather than growing while
+    // holding the poll-cache mutex — an exception there would otherwise strand every reader.
+    if (out.capacity() < expected_bytes) return HpX10aJsonCopyResult::BufferTooSmall;
+    if (!s_mtx) return HpX10aJsonCopyResult::SourceMismatch;
+    Lock lk(s_mtx);
+    if (!logic::x10a_snapshot_source_matches(s_cache_profile, s_cache_identity_fp,
+                                             expected_profile, expected_identity_fp))
+        return HpX10aJsonCopyResult::SourceMismatch;
+    if (s_cache_revision != expected_revision) return HpX10aJsonCopyResult::RevisionChanged;
+    const X10aCacheJsonProbe probe = probe_x10a_cache_json(s_cache);
+    if (probe.bytes != expected_bytes || probe.digest != expected_digest)
+        return HpX10aJsonCopyResult::RevisionChanged;
+    out.clear();
+    append_x10a_cache_json(out, s_cache);
+    return out.size() == expected_bytes ? HpX10aJsonCopyResult::Ok
+                                        : HpX10aJsonCopyResult::RevisionChanged;
+}
+
 HpStats hp_stats() {
     HpStats st;
     if (!s_mtx) return st;
@@ -722,6 +763,7 @@ void hp_poll_reconfigure() {
     s_cache.clear();
     s_cache_profile = "";
     s_cache_identity_fp = 0;
+    ++s_cache_revision;
     s_stats.connected = false;
     s_stats.registers = 0;
     s_stats.values = 0;

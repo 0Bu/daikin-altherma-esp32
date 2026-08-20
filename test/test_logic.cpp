@@ -1896,55 +1896,84 @@ static void test_mqtt_group() {
         CHECK(tight.capacity() == cap_before);
         CHECK(tight == build_grouped_json(one));
     }
-    // The device-owned form is backed by static storage, not a 12 KiB heap string. Exact capacity
-    // succeeds byte-for-byte and stays NUL-terminated for esp-mqtt; a one-byte-short sink reports a
-    // sticky overflow without writing past its caller-owned storage or emitting a partial fragment.
+    // Device path: derive group/key/type/companions directly from the ONE committed poll cache.
+    // This must stay byte-identical to the owning GroupedValue builder while omitting empty/held
+    // rows, and its combined count+digest pass must describe exactly the bytes later written.
     {
-        const std::vector<GroupedValue> one = {
-            {"hydronic", "dhw_setpoint", "48", PublishedKind::Number}};
-        const std::string golden = build_grouped_json(one);
-        std::vector<char> exact_storage(golden.size() + 1, '\x7f');
-        BoundedJsonBuffer exact(exact_storage.data(), golden.size());
-        append_grouped_json(exact, one);
-        CHECK(!exact.overflowed());
-        CHECK(exact.size() == golden.size());
-        CHECK(std::string_view(exact.data(), exact.size()) == golden);
-        CHECK(exact_storage[golden.size()] == '\0');
-
-        std::vector<char> short_storage(golden.size(), '\x7f');
-        BoundedJsonBuffer short_out(short_storage.data(), golden.size() - 1);
-        append_grouped_json(short_out, one);
-        CHECK(short_out.overflowed());
-        CHECK(short_out.size() <= golden.size() - 1);
-        CHECK(short_storage[short_out.size()] == '\0');
-        short_out.clear();
-        CHECK(!short_out.overflowed());
-        CHECK(short_out.size() == 0);
-        CHECK(short_storage[0] == '\0');
-    }
-    // A stopped/held page must not shrink the slot vector. Toggling presence removes the bytes and
-    // then restores the exact retained document without destroying or regrowing any owned string.
-    {
-        std::vector<GroupedValue> stable = {
-            {"outdoor_state", "operation_mode", "Heating", PublishedKind::Text},
-            {"outdoor_sensors", "r1t_outdoor_air_temp", "10.0", PublishedKind::Number},
-            {"hydronic", "dhw_setpoint", "48.0", PublishedKind::Number},
+        struct CacheRow {
+            const char* label;
+            std::string value;
+            uint8_t reg;
+            bool held;
+            int conv;
         };
-        const std::string full = build_grouped_json(stable);
-        const size_t slots = stable.size();
-        const size_t group_cap = stable[1].group.capacity();
-        const size_t key_cap = stable[1].key.capacity();
-        const size_t value_cap = stable[1].value.capacity();
-        stable[1].present = false;
-        CHECK(build_grouped_json(stable) ==
-              "{\"outdoor_state\":{\"operation_mode\":\"Heating\"},"
-              "\"hydronic\":{\"dhw_setpoint\":48.0}}");
-        stable[1].present = true;
-        CHECK(build_grouped_json(stable) == full);
-        CHECK(stable.size() == slots);
-        CHECK(stable[1].group.capacity() == group_cap);
-        CHECK(stable[1].key.capacity() == key_cap);
-        CHECK(stable[1].value.capacity() == value_cap);
+        const std::vector<CacheRow> cache = {
+            {"Operation Mode", "Heating", 0x10, false, 217},
+            {"Error type", "Error", 0x10, false, 203},
+            {"R1T-Outdoor air temp.", "10.0", 0x20, true, 105},
+            {"Missing row", "", 0x21, false, 105},
+            {"DHW setpoint", "48.0", 0x60, false, 105},
+            {"Error type", "Warning", 0x60, false, 203},
+            {"Odd / Label", "a\n\"b", 0x62, false, 217},
+        };
+        const std::string golden =
+            "{\"outdoor_state\":{\"operation_mode\":\"Heating\",\"error_type\":\"Error\","
+            "\"error_active\":1,\"warning_active\":0},"
+            "\"hydronic\":{\"dhw_setpoint\":48.0,\"error_type\":\"Warning\","
+            "\"error_active\":0,\"warning_active\":1},"
+            "\"hydronic_state\":{\"odd_label\":\"a\\n\\\"b\"}}";
+        const X10aCacheJsonProbe probe = probe_x10a_cache_json(cache);
+        CHECK(probe.bytes == golden.size());
+        CHECK(probe.digest == fnv1a64(golden));
+        std::string actual;
+        actual.reserve(probe.bytes);
+        append_x10a_cache_json(actual, cache);
+        CHECK(actual == golden);
+        CHECK(actual.capacity() >= probe.bytes);
+
+        CountingOut slug_count;
+        ha_slug_append(slug_count, "  Outdoor air temp. (R1T)  ");
+        CHECK(slug_count.n == ha_slug("  Outdoor air temp. (R1T)  ").size());
+    }
+    // A stopped/held page changes only the direct view of the existing cache. Reuse one already
+    // reserved transient sink through thousands of full/held/full transitions: exact bytes and
+    // digest must recover without any capacity growth in the encoder.
+    {
+        struct CacheRow {
+            const char* label;
+            std::string value;
+            uint8_t reg;
+            bool held;
+            int conv;
+        };
+        std::vector<CacheRow> cache = {
+            {"Operation Mode", "Heating", 0x10, false, 217},
+            {"R1T Outdoor Air Temp", "10.0", 0x20, false, 105},
+            {"DHW Setpoint", "48.0", 0x60, false, 105},
+        };
+        const X10aCacheJsonProbe full_probe = probe_x10a_cache_json(cache);
+        std::string out;
+        out.reserve(full_probe.bytes);
+        const size_t capacity = out.capacity();
+        append_x10a_cache_json(out, cache);
+        const std::string full = out;
+        for (int cycle = 0; cycle < 4000; ++cycle) {
+            cache[1].held = true;
+            const X10aCacheJsonProbe held_probe = probe_x10a_cache_json(cache);
+            out.clear();
+            append_x10a_cache_json(out, cache);
+            CHECK(out.size() == held_probe.bytes);
+            CHECK(fnv1a64(out) == held_probe.digest);
+            CHECK(out.capacity() == capacity);
+
+            cache[1].held = false;
+            out.clear();
+            append_x10a_cache_json(out, cache);
+            CHECK(out == full);
+            CHECK(out.size() == full_probe.bytes);
+            CHECK(fnv1a64(out) == full_probe.digest);
+            CHECK(out.capacity() == capacity);
+        }
     }
     // The counting sink shares the ESCAPING template: counted bytes == written bytes for hostile
     // text, on both encoders (json.hpp CountingOut + the group builder above).
@@ -1967,11 +1996,20 @@ static void test_mqtt_group() {
               X10A_FORMATTED_VALUE_MAX_BYTES);
     // Catalog-wide hard-cap proof: fill every publishable row with the longest representation its
     // device slot permits, include every possible fault companion, and require every resolved
-    // profile to fit the fixed 12 KiB JSON block. A catalog growth that exceeds it must fail here,
+    // profile to fit the 12 KiB refusal ceiling. A catalog growth that exceeds it must fail here,
     // not first appear as a silently refused state document on hardware.
+    struct CatalogCacheRow {
+        const char* label;
+        std::string value;
+        uint8_t reg;
+        bool held;
+        int conv;
+    };
     for (const auto& p : def::profiles) {
         const logic::ProfileView profile = def::resolved(p);
         std::vector<GroupedValue> worst;
+        std::vector<CatalogCacheRow> direct_cache;
+        std::vector<GroupedValue> direct_expected;
         std::set<std::string> aligned_identities;
         for (size_t i = 0; i < profile.count(); i++) {
             const ValueDef d = logic::adjudicated(profile[i]);
@@ -1987,8 +2025,28 @@ static void test_mqtt_group() {
                 for (const FaultCompanion& companion : FAULT_COMPANIONS)
                     worst.push_back({group_for_page(d.reg), companion.key, "1",
                                      PublishedKind::Number});
+
+            const PublishedKind kind = published_kind(d.conv);
+            const std::string value = d.conv == 203 ? "Error" :
+                                      kind == PublishedKind::Text ? std::string("a\n\"\\\x01") :
+                                                                    std::string("999.9");
+            direct_cache.push_back({d.label, value, d.reg, false, d.conv});
+            direct_expected.push_back({group_for_page(d.reg), ha_slug(d.label), value, kind});
+            if (d.conv == 203) {
+                const FaultClass fc = fault_class_from_text(value.c_str());
+                for (size_t c = 0; c < FAULT_COMPANION_COUNT; ++c)
+                    direct_expected.push_back({group_for_page(d.reg), FAULT_COMPANIONS[c].key,
+                                               fault_companion_state(c, fc), PublishedKind::Number});
+            }
         }
         CHECK(grouped_json_size(worst) <= X10A_GROUPED_JSON_MAX_BYTES);
+        const X10aCacheJsonProbe direct_probe = probe_x10a_cache_json(direct_cache);
+        std::string direct_json;
+        direct_json.reserve(direct_probe.bytes);
+        append_x10a_cache_json(direct_json, direct_cache);
+        CHECK(direct_json == build_grouped_json(direct_expected));
+        CHECK(direct_json.size() == direct_probe.bytes);
+        CHECK(fnv1a64(direct_json) == direct_probe.digest);
     }
     {
         const std::string a = build_grouped_json(vals);
