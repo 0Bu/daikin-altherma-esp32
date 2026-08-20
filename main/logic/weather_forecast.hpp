@@ -113,6 +113,27 @@ inline bool weather_reason_valid(std::string_view reason) {
            reason == "incomplete_horizon";
 }
 
+// ── Fetch headroom gate ──────────────────────────────────────────────────────────────────────────
+//
+// One Open-Meteo fetch transiently claims ≈ 16 KiB mbedTLS in-buffer + 4 KiB out-buffer, HTTP/TCP
+// buffers, the response string and the cJSON tree, on a heap whose binding limit is the largest
+// CONTIGUOUS internal block — and the fetch runs on a 45-minute grid, so it cannot wait for a
+// friendlier instant the way a retry loop can. Live evidence (private issue 10): one fetch landed
+// on a fragmentation trough and pushed the boot's `min_free_heap` low-water to 800 B; it survived
+// only because the claim is brief. The gate below keeps the next fetch OUT of such a trough: below
+// the floors the caller skips one raster period and tries again on schedule. Forecast data is slow
+// — a skipped cycle costs nothing; a heap watchdog reboot costs the boot. Same shape as
+// logic/ota_headroom.hpp, where the floors are the OTA verifier's, not this fetch's: the 16 KiB
+// floor is the mbedTLS input buffer this firmware configures (CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN),
+// and the 40 KiB total keeps the ~28 KiB transient claim from grazing the watchdog's own reserve.
+inline constexpr size_t WEATHER_FETCH_MIN_FREE_BYTES          = 40 * 1024;
+inline constexpr size_t WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES = 16 * 1024;
+
+inline bool weather_fetch_headroom_ok(size_t free_bytes, size_t largest_free_block) {
+    return free_bytes >= WEATHER_FETCH_MIN_FREE_BYTES &&
+           largest_free_block >= WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES;
+}
+
 struct WeatherForecastSample {
     int version = 0;
     std::string_view provider;

@@ -10,6 +10,7 @@
 // subscripts the group + object (logic/discovery.hpp).
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 #include "convert.hpp"   // PublishedKind — the row's JSON type, taken from its DEFINITION
 #include "json.hpp"      // json_append_escaped — the shared RFC 8259 string encoder
@@ -98,7 +99,8 @@ struct GroupedValue {
     PublishedKind kind = PublishedKind::Number;
 };
 
-inline void append_published_value(std::string& j, const GroupedValue& value) {
+template <typename JsonOut>
+inline void append_published_value(JsonOut& j, const GroupedValue& value) {
     if (value.kind == PublishedKind::Text) {
         j += '"'; json_append_escaped(j, value.value); j += '"';
     } else if (is_json_number(value.value)) {
@@ -110,33 +112,104 @@ inline void append_published_value(std::string& j, const GroupedValue& value) {
     }
 }
 
+// ── Bounded grouped-JSON builder ────────────────────────────────────────────────────────────────
+//
+// The DEVICE builds this payload once a second, and before this rewrite it did so into a fresh
+// std::string with an incremental-doubling realloc policy on a heap whose binding limit is the
+// largest contiguous block (private issue 10: `publish skipped at x10a (std::bad_alloc)`, once a
+// day on the live plant). The bytes are unchanged — every host test below pins them — but the
+// ownership model is different:
+//
+//   • `grouped_json_size` is an allocation-free counting pass that walks the SAME template
+//     instantiation that writes the bytes, so the reported size is exact by construction.
+//   • `append_grouped_json` writes into a caller-owned, already-reserved std::string. Writing into
+//     reserved capacity performs no allocation and cannot throw, so the per-cycle JSON allocation
+//     and its realloc ladder are gone; the buffer lives for the publisher's whole life instead.
+//   • `build_grouped_json` remains as the owning one-shot form (host tests, one-off callers): it is
+//     the counting pass + reserve + append, i.e. ONE encoder, not a second copy.
+//
+// Group ordering (first-seen group, rows in input order) is decided WITHOUT the order/buckets
+// scratch vectors the old builder allocated per call: a row opens its group exactly when no EARLIER
+// row carried that group name. That is the same rule the buckets used, walked in place. O(n²)
+// string compares for n ≈ 130 rows is microseconds on the target and far cheaper than the
+// fragmentation the removed allocations caused.
+namespace detail {
+inline bool group_seen_before(const std::vector<GroupedValue>& vals, size_t i) {
+    for (size_t k = 0; k < i; ++k)
+        if (vals[k].group == vals[i].group) return true;
+    return false;
+}
+
+template <typename Out>
+inline void append_grouped_json_impl(Out& out, const std::vector<GroupedValue>& vals) {
+    out += '{';
+    bool first_group = true;
+    // Groups in FIRST-SEEN order (the outer pass takes the first row of each group), rows inside a
+    // group in INPUT order (the inner pass re-walks all rows) — exactly the order/buckets rule the
+    // old builder implemented with two scratch vectors, here without any allocation. The inner
+    // walk cannot be replaced by "rows until the next group change": groups are contiguous in the
+    // page-ordered device snapshot but the builder must not depend on that.
+    for (size_t g = 0; g < vals.size(); ++g) {
+        if (group_seen_before(vals, g)) continue;
+        if (!first_group) out += ',';
+        first_group = false;
+        out += '"';
+        out += vals[g].group;
+        out += "\":{";
+        bool first_row = true;
+        for (size_t r = 0; r < vals.size(); ++r) {
+            if (vals[r].group != vals[g].group) continue;
+            if (!first_row) out += ',';
+            first_row = false;
+            out += '"';
+            out += vals[r].key;
+            out += "\":";
+            append_published_value(out, vals[r]);
+        }
+        out += '}';
+    }
+    out += '}';
+}
+}  // namespace detail
+
+// Exact byte count of the grouped payload, without allocating a single byte.
+inline size_t grouped_json_size(const std::vector<GroupedValue>& vals) {
+    CountingOut out;
+    detail::append_grouped_json_impl(out, vals);
+    return out.n;
+}
+
+// Append the grouped payload to `out`. The caller must have reserved capacity for
+// grouped_json_size(vals) first: writing into reserved capacity performs no allocation, which is
+// the entire point on the device (a grow here is what the counting pass exists to prevent).
+inline void append_grouped_json(std::string& out, const std::vector<GroupedValue>& vals) {
+    detail::append_grouped_json_impl(out, vals);
+}
+
 // Build the retained state payload { "<group>": { "<key>": value, … }, … }. Groups and keys keep
 // first-seen order (the poll cache is already page-ordered). A Number field is emitted unquoted, a
 // Text field quoted — always, in every state. Pure — the device streams the result to <base>/x10a.
 inline std::string build_grouped_json(const std::vector<GroupedValue>& vals) {
-    std::vector<std::string>                     order;    // group names, in first-seen order
-    std::vector<std::vector<const GroupedValue*>> buckets; // values per group, index-aligned to order
-    for (const auto& v : vals) {
-        size_t gi = 0;
-        for (; gi < order.size(); ++gi) if (order[gi] == v.group) break;
-        if (gi == order.size()) { order.push_back(v.group); buckets.emplace_back(); }
-        buckets[gi].push_back(&v);
-    }
-    std::string j = "{";
-    j.reserve(vals.size() * 32 + 16);                     // avoid incremental-doubling realloc churn
-    for (size_t gi = 0; gi < order.size(); ++gi) {
-        if (gi) j += ',';
-        j += '"'; j += order[gi]; j += "\":{";
-        const auto& bucket = buckets[gi];
-        for (size_t k = 0; k < bucket.size(); ++k) {
-            if (k) j += ',';
-            j += '"'; j += bucket[k]->key; j += "\":";
-            append_published_value(j, *bucket[k]);
-        }
-        j += '}';
-    }
-    j += '}';
+    std::string j;
+    j.reserve(grouped_json_size(vals));   // exact, so the append below cannot grow
+    append_grouped_json(j, vals);
     return j;
+}
+
+// ── Publish dedup digest ─────────────────────────────────────────────────────────────────────────
+//
+// The X10A topic is retained and re-published only when it changed; the OLD guard held a copy of
+// the last full payload (~3 KB permanently) and compared it byte-wise. Comparing a digest instead
+// removes that permanent block and the per-cycle copy, at the cost of a theoretical 2^-64 collision
+// whose worst outcome is one duplicate publish — the topic is retained and idempotent, so the trade
+// is strictly favourable. FNV-1a 64: tiny, dependency-free and byte-stable across platforms.
+inline uint64_t fnv1a64(std::string_view data) {
+    uint64_t h = 0xcbf29ce484222325ULL;
+    for (const unsigned char c : data) {
+        h ^= c;
+        h *= 0x100000001b3ULL;
+    }
+    return h;
 }
 
 // Build the HomeHub payload for <base>/modbus. The topic already identifies the source, so repeating

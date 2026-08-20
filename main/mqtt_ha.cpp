@@ -69,6 +69,7 @@
 #include "logic/discovery.hpp"
 #include "logic/env3.hpp"
 #include "logic/fault_state.hpp"
+#include "logic/ha_device.hpp"   // ha_slug_into — re-slug object ids into reused slots (issue 10 B)
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
@@ -86,6 +87,7 @@
 
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"   // the allocation-free heap snapshot the publish-skip catch logs (issue 10 E)
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -236,10 +238,21 @@ static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_a
                    s_modbus, s_weather, s_env3, s_retired_weather, s_retired_modbus_status,
                    s_legacy_state, s_heartbeat, s_heating_curve_topic, s_crash;
 static std::string s_announced_profile;               // profile we last published discovery for (mqtt_task only)
-static std::string s_last_x10a_json;                  // per-topic dedup guards (mqtt_task only)
+static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards (mqtt_task only):
+                                                      // fnv1a64 of the last X10A payload — the old
+                                                      // full-string copy cost a permanent ~3 KB block
+                                                      // and one copy per cycle (private issue 10)
 static std::string s_last_modbus_json;
 static std::string s_last_weather_json;
 static std::string s_last_env3_json;
+// The X10A publish path's task-owned, once-allocated buffers (private issue 10 B). fill_x10a_values
+// writes into these instead of returning fresh vectors every second, so the 6 KB cache + 13 KB
+// grouped-snapshot churn — the allocation that threw std::bad_alloc when a TLS session or a status
+// build split the largest contiguous block — happens at most once per profile change. mqtt_task
+// only; sized on first fill and grown only if the active profile grows.
+static std::vector<CachedValue>  s_x10a_cache;
+static std::vector<GroupedValue> s_x10a_grouped;
+static std::string               s_x10a_json;         // reusable payload buffer (bounded builder, A)
 static uint32_t    s_last_env3_samples          = 0;
 static bool        s_modbus_disabled_cleaned    = false;
 static bool        s_env3_disabled_cleaned      = false;
@@ -376,18 +389,20 @@ static void service_retained_cleanup_probe(const std::string& topic, std::atomic
     }
 }
 
-// Current publishable values from the poll cache, grouped by register page. The scratch buffer is
-// sized to the active profile's row count — an exact upper bound on the cached value count, so
-// nothing is truncated out of the JSON without over-allocating a fixed worst case.
+// Current publishable values from the poll cache, grouped by register page, written into the
+// caller's once-allocated buffers (private issue 10 B). `cache` and `out` are task-owned and are
+// sized here on first use / on profile growth only: hp_values_snapshot assigns into existing
+// CachedValue rows, the GroupedValue slots are filled by ASSIGNMENT (a string assignment reuses the
+// slot's capacity instead of allocating a fresh copy), and keys are re-slugged into their slot with
+// ha_slug_into rather than through a per-row temporary. The steady-state cycle therefore allocates
+// nothing here — the old per-cycle churn (a fresh 6 KB cache + a fresh ~13 KB grouped vector + one
+// small heap block per long label) is what threw `std::bad_alloc` once a day when a TLS session or
+// a status build split the largest contiguous block.
 //
-// `out` is reserved to that count PLUS the derived companions, counted in a first pass rather than
-// assumed. The companions are not cached rows, so reserving the snapshot count alone leaves the
-// vector one entry short on every profile that carries an error class — and this runs on the publish
-// task once a SECOND for the life of the device, so the shortfall is a grow/copy/free of a vector of
-// three-std::string elements every cycle, forever. That is precisely the incremental-realloc churn
-// hp_poll's own `fresh.reserve(view.count())` exists to avoid, on a heap whose binding limit is the
-// largest contiguous block. Counting conv-203 rows is one compare per resolved row; the allocation it
-// avoids is not.
+// `out` is kept large enough for the snapshot PLUS the derived companions, counted in a first pass
+// rather than assumed. The companions are not cached rows, so reserving the snapshot count alone
+// leaves the vector one entry short on every profile that carries an error class. Counting conv-203
+// rows is one compare per resolved row; the allocation it avoids is not.
 //
 // Two rows are dropped here rather than published:
 //   • no value this cycle (the register timed out, or the reading was refused by the plausibility
@@ -397,21 +412,26 @@ static void service_retained_cleanup_probe(const std::string& topic, std::atomic
 //     temperature look freshly observed to every consumer downstream. The heartbeat's
 //     bus_ou_held_over says WHY the field went away, so this reads as a resting unit and not as a
 //     broken link.
-static std::vector<GroupedValue> current_x10a_values() {
+static size_t fill_x10a_values(std::vector<CachedValue>& cache, std::vector<GroupedValue>& out) {
     const size_t cap = hp_values_capacity();
-    std::vector<CachedValue> cache(cap ? cap : 1);
+    if (cache.size() < (cap ? cap : 1)) cache.resize(cap ? cap : 1);
     const size_t n = hp_values_snapshot(cache.data(), cache.size());
-    std::vector<GroupedValue> out;
-    size_t cap_out = n;                                    // + the companions each error class adds
+    size_t need = n;                                    // + the companions each error class adds
     for (size_t i = 0; i < n; i++)
-        if (cache[i].conv == 203) cap_out += FAULT_COMPANION_COUNT;
-    out.reserve(cap_out);
+        if (!cache[i].value.empty() && !cache[i].held && cache[i].conv == 203)
+            need += FAULT_COMPANION_COUNT;
+    if (out.capacity() < need) out.reserve(need);       // once per profile; guarded by the task catch
+    out.resize(need);                                   // default slots: allocation-free within capacity
+    size_t k = 0;
     for (size_t i = 0; i < n; i++) {
         if (cache[i].value.empty()) continue;
         if (cache[i].held) continue;
         const char* group = group_for_page(cache[i].reg);
-        out.push_back({group, object_id(cache[i].label), cache[i].value,
-                       published_kind(cache[i].conv)});
+        GroupedValue& g = out[k++];
+        g.group = group;
+        ha_slug_into(g.key, cache[i].label);            // == object_id(), without the per-row temp
+        g.value = cache[i].value;
+        g.kind = published_kind(cache[i].conv);
         // A textual error class also publishes its permanently-numeric companions, so a metrics
         // consumer that cannot store "U4" still sees the fault go active (#209 defect 4). Derived
         // from the class, in the class's own group; an unreadable class publishes neither rather than
@@ -419,12 +439,17 @@ static std::vector<GroupedValue> current_x10a_values() {
         if (cache[i].conv == 203) {
             const FaultClass fc = fault_class_from_text(cache[i].value.c_str());
             if (fault_companions_publishable(fc))
-                for (size_t k = 0; k < FAULT_COMPANION_COUNT; k++)
-                    out.push_back({group, FAULT_COMPANIONS[k].key, fault_companion_state(k, fc),
-                                   PublishedKind::Number});
+                for (size_t c = 0; c < FAULT_COMPANION_COUNT; c++) {
+                    GroupedValue& comp = out[k++];
+                    comp.group = group;
+                    comp.key = FAULT_COMPANIONS[c].key;
+                    comp.value = fault_companion_state(c, fc);
+                    comp.kind = PublishedKind::Number;
+                }
         }
     }
-    return out;
+    out.resize(k);
+    return k;
 }
 
 // Current HomeHub values, but only when the accessor proves the copied cache belongs to the TCP
@@ -597,7 +622,7 @@ static void publish_x10a_discovery() {
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
         // The DERIVED numeric fault flags that ride beside a textual error class (#209 defect 4).
         // Announced here, from the same row loop that publishes the class itself, so the entity set
-        // and the payload cannot drift apart — current_x10a_values() emits these keys for exactly the
+        // and the payload cannot drift apart — fill_x10a_values() emits these keys for exactly the
         // rows this branch announces.
         if (d.conv == 203) {
             const std::string group = group_for_page(d.reg);
@@ -650,11 +675,23 @@ static void retract_weather_discovery() {
 // Build + publish each source independently. The X10A payload is grouped by register page; the
 // Modbus topic is flat because its topic already supplies the source group. When the HomeHub link is
 // not live, `{}` actively removes every state instead of retaining values from an old TCP session.
+//
+// X10A is the bounded path (private issue 10 A+C): the snapshot lands in the task-owned vectors
+// (fill_x10a_values, no allocation), the payload is counted first and then written into the reused
+// s_x10a_json buffer (append_grouped_json, no allocation after the one-time reserve — the reserve
+// below can only fire on catalog growth, and then once), and the dedup guard compares the 8-byte
+// FNV-1a digest instead of holding a second full copy of the payload. The only allocation left on
+// this path is esp-mqtt's own ~3 KB enqueue copy inside mqtt_publish.
 static bool publish_x10a_state(bool force) {
-    const std::string js = build_grouped_json(current_x10a_values());
-    if (!force && js == s_last_x10a_json) return false;
-    mqtt_publish(s_x10a, js.c_str(), static_cast<int>(js.size()), 0, 1);
-    s_last_x10a_json = js;
+    fill_x10a_values(s_x10a_cache, s_x10a_grouped);
+    s_x10a_json.clear();
+    const size_t need = grouped_json_size(s_x10a_grouped);
+    if (s_x10a_json.capacity() < need) s_x10a_json.reserve(need);   // catalog growth only
+    append_grouped_json(s_x10a_json, s_x10a_grouped);
+    const uint64_t digest = fnv1a64(s_x10a_json);
+    if (!force && digest == s_last_x10a_digest) return false;
+    mqtt_publish(s_x10a, s_x10a_json.c_str(), static_cast<int>(s_x10a_json.size()), 0, 1);
+    s_last_x10a_digest = digest;
     return true;
 }
 
@@ -2068,7 +2105,7 @@ static void mqtt_task(void*) {
             // s_announce remains set and the full ordinary reconnect path below owns the reseed.
             if (gate.resumed && s_connected && !s_announce.load()) {
                 mqtt_publish(s_avail, "online", 0, 0, 1);
-                s_last_x10a_json.clear();
+                s_last_x10a_digest = 0;
                 heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;
                 diag_printf("mqtt: X10A restored — publishing resumed\n");
             }
@@ -2077,7 +2114,7 @@ static void mqtt_task(void*) {
                 publish_stage = "announce";
                 if (s_announce.exchange(false)) {              // consume: just (re)connected
                     s_announced_profile.clear();               // force a fresh discovery below
-                    s_last_x10a_json.clear();                  // force full per-topic state re-seeds
+                    s_last_x10a_digest = 0;                    // force full per-topic state re-seeds
                     s_last_modbus_json.clear();
                     s_last_weather_json.clear();
                     s_disabled_weather_cleaned = false;
@@ -2143,7 +2180,7 @@ static void mqtt_task(void*) {
                     // A short all-page timeout stays inside the availability grace, but poll_once()
                     // correctly replaced its cache with an empty snapshot. Do not turn that honest
                     // local absence into a retained `{}` for every downstream consumer. The next
-                    // answering sweep seeds state because s_last_x10a_json is still empty here.
+                    // answering sweep seeds state because s_last_x10a_digest is still zero here.
                     if (hp.connected) publish_x10a_state(true);
                 } else if (hp.connected && !s_announced_profile.empty() &&
                            prof == s_announced_profile) {
@@ -2240,11 +2277,24 @@ static void mqtt_task(void*) {
             // guard exists to prevent). The atomic add cannot fail, so the cycle is recorded even
             // when the line describing it never reaches the ring — which is the whole complaint in
             // #380: the ring was the only evidence, and a chatty boot overwrites it.
+            //
+            // The heap snapshot rides the SAME line (private issue 10 E): both sampler calls are
+            // allocation-free, and the throw second's free/largest-block pair is what identifies the
+            // collision partner (status build, TLS teardown tail, …) that split the block mid-cycle
+            // — the one datum every earlier `publish skipped` line lacked, which made the events
+            // provably heap-healthy at 10-s sampling and unprovable at the throw instant.
             s_mqtt_skipped.fetch_add(1, std::memory_order_relaxed);
-            diag_printf("mqtt: publish skipped at %s (%s)\n", publish_stage, e.what());
+            diag_printf("mqtt: publish skipped at %s (%s; free=%u B largest=%u B)\n", publish_stage,
+                        e.what(),
+                        static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT |
+                                                                      MALLOC_CAP_INTERNAL)),
+                        static_cast<unsigned>(heap_largest_internal_block()));
         } catch (...) {
             s_mqtt_skipped.fetch_add(1, std::memory_order_relaxed);
-            diag_printf("mqtt: publish skipped at %s (oom?)\n", publish_stage);
+            diag_printf("mqtt: publish skipped at %s (oom?; free=%u B largest=%u B)\n", publish_stage,
+                        static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT |
+                                                                      MALLOC_CAP_INTERNAL)),
+                        static_cast<unsigned>(heap_largest_internal_block()));
         }
         vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
     }

@@ -21,8 +21,8 @@ namespace daik {
 
 // Slug rules shared by every id this firmware generates (HA object ids, the device node id):
 // lowercase, keep alnum, collapse every other run into a single '_', no leading/trailing '_'.
-inline std::string ha_slug(const char* s) {
-    std::string o;
+inline void ha_slug_into(std::string& o, const char* s) {
+    o.clear();
     for (const char* p = s; *p; ++p) {
         char c = *p;
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
@@ -30,6 +30,15 @@ inline std::string ha_slug(const char* s) {
         else if (!o.empty() && o.back() != '_')             o += '_';
     }
     while (!o.empty() && o.back() == '_') o.pop_back();
+}
+
+// The owning form. The into-slot form above exists so the per-second X10A publish path can re-slug
+// into a reused string buffer (private issue 10): the returned temporary here is a heap allocation
+// for every label longer than the SSO buffer, once per row per cycle, which is exactly the churn the
+// bounded publish buffer removes.
+inline std::string ha_slug(const char* s) {
+    std::string o;
+    ha_slug_into(o, s);
     return o;
 }
 

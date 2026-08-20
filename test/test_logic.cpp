@@ -1846,6 +1846,89 @@ static void test_mqtt_group() {
     CHECK(group_display_name("hydronic") == "Hydronic");
     CHECK(group_display_name("water_hx") == "Water Hx");
     CHECK(group_display_name("") == "");
+
+    // ── Bounded builder (private issue 10 A): the counting pass + append into reserved capacity ──
+    // must produce the EXACT bytes the owning build_grouped_json produces — the MQTT contract may
+    // not change by a single byte — for every shape the device can hand over: all four kinds of
+    // value, escaping, non-numeric Numbers, interleaved and repeated groups, empty rows and rows
+    // whose group name itself needs escaping discipline.
+    {
+        const std::vector<GroupedValue> corpus = {
+            {"outdoor_state", "operation_mode", "Heating", PublishedKind::Text},
+            {"hydronic",      "dhw_setpoint",   "48",      PublishedKind::Number},
+            {"actuators",     "raw",            "a\nb\"\\\x01", PublishedKind::Text},
+            {"hydronic",      "lw_setpoint",    "35.4",    PublishedKind::Number},
+            {"outdoor_state", "error_type",     "Normal",  PublishedKind::Text},
+            {"actuators",     "broken",         "OFF",     PublishedKind::Number},  // -> null
+            {"",             "",               "",        PublishedKind::Number},
+            {"other",        "raw2",           "\x1f\x7f\xc3\xa9", PublishedKind::Text},
+        };
+        const std::string golden = build_grouped_json(corpus);
+        CHECK(grouped_json_size(corpus) == golden.size());
+        std::string bounded;
+        bounded.reserve(grouped_json_size(corpus));
+        append_grouped_json(bounded, corpus);
+        CHECK(bounded == golden);
+        CHECK(bounded.size() == grouped_json_size(corpus));          // exact: the reserve was a no-op
+    }
+    // The same byte-identity for the existing fixtures above, which pin the contract.
+    for (const std::vector<GroupedValue>& fixture : std::vector<std::vector<GroupedValue>>{
+             vals, {}, {{"hydronic", "thermostat_on_off", "1"}, {"hydronic", "silent_mode", "0"}},
+             {{"other", "raw", "a\nb", PublishedKind::Text}},
+             {{"actuators", "fan_1_step", "OFF", PublishedKind::Number}}}) {
+        const std::string golden = build_grouped_json(fixture);
+        std::string bounded;
+        bounded.reserve(grouped_json_size(fixture));
+        append_grouped_json(bounded, fixture);
+        CHECK(bounded == golden);
+        CHECK(bounded.size() == grouped_json_size(fixture));
+    }
+    // Writing into reserved capacity performs no allocation: a deliberately small buffer must NOT
+    // be grown by the append itself (callers own the one-time reserve; a grow here is the churn the
+    // counting pass exists to prevent).
+    {
+        const std::vector<GroupedValue> one = {{"hydronic", "dhw_setpoint", "48", PublishedKind::Number}};
+        std::string tight;
+        tight.reserve(grouped_json_size(one));
+        const size_t cap_before = tight.capacity();
+        append_grouped_json(tight, one);
+        CHECK(tight.capacity() == cap_before);
+        CHECK(tight == build_grouped_json(one));
+    }
+    // The counting sink shares the ESCAPING template: counted bytes == written bytes for hostile
+    // text, on both encoders (json.hpp CountingOut + the group builder above).
+    for (const char* hostile : {"", "a", "a\nb", "\"", "\\", "\x01\x1f\x7f", "Café", "a\tb\r"}) {
+        CHECK(json_quoted_size(hostile) ==
+              build_grouped_json({{"g", "k", hostile, PublishedKind::Text}}).size() - 12u);
+        CHECK(json_escaped_size(hostile) + 2 == json_quoted_size(hostile));
+    }
+
+    // ── Publish dedup digest (private issue 10 C) ─────────────────────────────────────────────────
+    // FNV-1a 64 known-answer vectors pin the implementation across host/target; the semantics test
+    // mirrors publish_x10a_state: equal payloads share a digest (skip), any change differs (send).
+    CHECK(fnv1a64("") == 0xcbf29ce484222325ULL);
+    CHECK(fnv1a64("a") == 0xaf63dc4c8601ec8cULL);
+    CHECK(fnv1a64("foobar") == 0x85944171f73967e8ULL);
+    {
+        const std::string a = build_grouped_json(vals);
+        const std::string b = build_grouped_json(vals);
+        CHECK(fnv1a64(a) == fnv1a64(b));                      // unchanged -> dedup skips the publish
+        const std::vector<GroupedValue> changed = vals;
+        const std::string c = build_grouped_json(changed);
+        CHECK(fnv1a64(a) == fnv1a64(c));                      // same rows, same payload
+        CHECK(fnv1a64(a) != fnv1a64(build_grouped_json(
+                                   {{"hydronic", "dhw_setpoint", "49", PublishedKind::Number}})));
+    }
+    // ha_slug_into re-slugs into a reused slot and matches the owning form byte-for-byte.
+    {
+        std::string slot;
+        ha_slug_into(slot, "Outdoor air temp. (R1T)");
+        CHECK(slot == ha_slug("Outdoor air temp. (R1T)"));
+        const size_t cap = slot.capacity();
+        ha_slug_into(slot, "DHW setpoint");
+        CHECK(slot == ha_slug("DHW setpoint"));
+        CHECK(slot.capacity() == cap);                        // into-slot reuse: no reallocation
+    }
 }
 
 // ── The published JSON TYPE of every converter (#209 defect 3, the telemetry-contract section) ────
@@ -2109,6 +2192,27 @@ static void test_ota_headroom() {
     CHECK(!ota_verify_headroom_ok(OTA_VERIFY_MIN_FREE_BYTES - 1, 32u * 1024u));
     // Neither-short case closes the vacuous path where only one side is really consulted.
     CHECK(!ota_verify_headroom_ok(0, 0));
+}
+
+// The weather fetch's own headroom gate (private issue 10 D) — same predicate shape as the OTA
+// gate above, but with the floors the Open-Meteo TLS fetch actually needs: ~16 KiB contiguous for
+// the mbedTLS input buffer plus ~28 KiB transient total, on a heap whose low-water the issue's
+// 800 B event came from.
+static void test_weather_fetch_headroom() {
+    CHECK(WEATHER_FETCH_MIN_FREE_BYTES == 40u * 1024u);
+    CHECK(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES == 16u * 1024u);
+
+    CHECK(weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES,
+                                    WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES));
+    CHECK(weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES + 1,
+                                    WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES + 1));
+
+    // The live fragmentation trough from the issue: plenty of aggregate bytes, but the largest
+    // block no longer fits the TLS in-buffer — the fetch must stand down for one raster period.
+    CHECK(!weather_fetch_headroom_ok(59u * 1024u, WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES - 1));
+    // Aggregate exhaustion is refused even with a large block free.
+    CHECK(!weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES - 1, 32u * 1024u));
+    CHECK(!weather_fetch_headroom_ok(0, 0));
 }
 
 // The initial feed must be absolute HTTPS; redirects may use an ordinary relative reference but
@@ -13335,6 +13439,7 @@ int main() {
     test_homehub_map();
     test_ota_quiesce();
     test_ota_headroom();
+    test_weather_fetch_headroom();
     test_ota_transport();
     test_heartbeat();
     test_crashinfo();

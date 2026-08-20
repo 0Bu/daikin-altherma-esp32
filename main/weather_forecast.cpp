@@ -267,6 +267,29 @@ void weather_task(void*) {
                 continue;
             }
 
+            // HEADROOM GATE (private issue 10): the fetch's TLS in/out buffers alone want ~20 KiB
+            // CONTIGUOUS internal heap on top of a ~28 KiB transient total claim. Live evidence
+            // showed a fetch landing on a fragmentation trough push min_free_heap to 800 B; it is
+            // the first thing this firmware does that can graze the heap watchdog's reserve while
+            // still succeeding. The gate is the OTA pattern applied fail-closed to a SLOW data
+            // source: below the floors, skip one full 45-minute raster period and try again on
+            // schedule. The probe is allocation-free (http_client_diag.hpp), so asking "is the heap
+            // healthy enough?" cannot itself fail on that heap. A previous valid forecast stays
+            // available untouched — only the refresh is deferred.
+            const HttpClientProbe headroom = http_client_probe();
+            if (!weather_fetch_headroom_ok(headroom.free_internal, headroom.largest_internal)) {
+                diag_printf("weather: fetch skipped by low heap (free=%u B largest=%u B; "
+                            "need %u/%u B)\n",
+                            static_cast<unsigned>(headroom.free_internal),
+                            static_cast<unsigned>(headroom.largest_internal),
+                            static_cast<unsigned>(WEATHER_FETCH_MIN_FREE_BYTES),
+                            static_cast<unsigned>(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES));
+                { Lock lk(s_mtx); s_status.fetching = false; s_status.state = "waiting";
+                  s_status.reason = "heap_headroom"; }
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_FETCH_INTERVAL_S * 1000u));
+                continue;
+            }
+
             int64_t now = -1;
             int32_t ms = 0;
             time_now(now, ms);
