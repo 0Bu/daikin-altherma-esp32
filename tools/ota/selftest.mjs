@@ -13,6 +13,7 @@ const contract = path.join(root, "test/test_ota_heap_contract.mjs");
 const files = [
   "sdkconfig.defaults",
   "main/ota_update.cpp",
+  "main/mqtt_ha.cpp",
   "main/hp_poll.cpp",
   "main/logic/ota_headroom.hpp",
   "main/logic/ota_transport.hpp",
@@ -112,14 +113,37 @@ try {
         "transfer_failure = OtaTransferFailure::Read;")],
     ["the held X10A task no longer acknowledges quiescence", () =>
       replaceOnce("main/hp_poll.cpp",
-        "s_ota_quiesced.store(true, std::memory_order_release);",
-        "s_ota_quiesced.store(false, std::memory_order_release);")],
+        "s_network_quiesced.store(true, std::memory_order_release);",
+        "s_network_quiesced.store(false, std::memory_order_release);")],
+    ["the held MQTT task no longer acknowledges quiescence", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "s_publish_network_quiesced.store(true, std::memory_order_release);\n            vTaskDelay",
+        "s_publish_network_quiesced.store(false, std::memory_order_release);\n            vTaskDelay")],
+    ["the MQTT acknowledgement ignores an asynchronous TLS reconnect", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "!s_transport_connecting.load(std::memory_order_acquire);",
+        "true;")],
+    ["MQTT BEFORE_CONNECT waits against a publisher that needs client_stop", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "if (!s_publish_network_quiesced.load(std::memory_order_acquire)) {",
+        "if (false) {")],
+    ["MQTT startup allocates beside an OTA that already owns TLS", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "if (!competing_tls_active()) return;",
+        "if (true) return;")],
+    ["MQTT promotion leaves a stale transport claim after client stop", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "s_transport_connecting.store(false, std::memory_order_release);\n\n    s_connected = false;",
+        "s_transport_connecting.store(true, std::memory_order_release);\n\n    s_connected = false;")],
     ["OTA starts without waiting for the X10A acknowledgement", () =>
       replaceOnce("main/ota_update.cpp", "if (!wait_for_poll_quiesce())",
         "if (false)")],
+    ["OTA starts without waiting for the MQTT acknowledgement", () =>
+      replaceOnce("main/ota_update.cpp", "else if (!wait_for_mqtt_quiesce())",
+        "else if (false)")],
     ["the X10A poll no longer enters the bounded OTA quiesce", () =>
-      replaceOnce("main/hp_poll.cpp", "ota_quiesce_step(ota_quiesce, ota_active)",
-        "ota_quiesce_bypassed(ota_quiesce, ota_active)")],
+      replaceOnce("main/hp_poll.cpp", "ota_quiesce_step(network_quiesce, network_active)",
+        "ota_quiesce_bypassed(network_quiesce, network_active)")],
   ];
 
   let caught = 0;

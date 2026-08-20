@@ -25,6 +25,7 @@ const code = (rel) => read(rel)
 const occurrences = (text, token) => text.split(token).length - 1;
 
 const ota = code("main/ota_update.cpp");
+const mqtt = code("main/mqtt_ha.cpp");
 const poll = code("main/hp_poll.cpp");
 const headroom = code("main/logic/ota_headroom.hpp");
 const transport = code("main/logic/ota_transport.hpp");
@@ -250,14 +251,16 @@ const pollStart = poll.indexOf("static void poll_task(");
 const pollEnd = poll.indexOf("void hp_poll_start()", pollStart);
 assert.ok(pollStart >= 0 && pollEnd > pollStart, "the X10A poll task must remain identifiable");
 const pollTask = poll.slice(pollStart, pollEnd);
-assert.match(pollTask, /OtaQuiesceState\s+ota_quiesce/,
-  "the poll task must own an independent bounded OTA hold-off counter");
+assert.match(pollTask, /OtaQuiesceState\s+network_quiesce/,
+  "the poll task must own an independent bounded network hold-off counter");
 const active = pollTask.indexOf("ota_download_active(");
-const quiesce = pollTask.indexOf("ota_quiesce_step(", active);
+const weatherActive = pollTask.indexOf("weather_fetch_active(", active);
+const quiesce = pollTask.indexOf("ota_quiesce_step(network_quiesce, network_active)", weatherActive);
 const configRead = pollTask.indexOf("config().profile");
 const pollOnce = pollTask.indexOf("poll_once(");
-assert.ok(active >= 0 && quiesce > active && configRead > quiesce && pollOnce > quiesce,
-  "the bounded OTA hold must run before allocation-rich config and X10A polling");
+assert.ok(active >= 0 && weatherActive > active && quiesce > weatherActive &&
+          configRead > quiesce && pollOnce > quiesce,
+  "the bounded OTA/weather hold must run before allocation-rich config and X10A polling");
 const holdEnd = pollTask.indexOf("continue;", quiesce);
 assert.ok(holdEnd > quiesce, "a held poll cycle must leave before constructing a snapshot");
 const hold = pollTask.slice(quiesce, holdEnd);
@@ -266,22 +269,50 @@ assert.ok(watchdogReset >= 0,
   "an intentional OTA hold must keep the X10A task watchdog fed");
 assert.match(hold, /vTaskDelay\(/,
   "an intentional OTA hold must yield at the normal poll cadence");
-assert.match(hold, /s_ota_quiesced\.store\(true,\s*std::memory_order_release\)/,
+assert.match(hold, /s_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
   "the held poll path must acknowledge that its allocation-rich cycle has ended");
 assert.doesNotMatch(hold, /s_cycles_skipped\.fetch_add/,
   "intentional OTA holds must not masquerade as allocation failures");
 assert.match(pollTask.slice(holdEnd, configRead),
-  /s_ota_quiesced\.store\(false,\s*std::memory_order_release\)/,
+  /s_network_quiesced\.store\(false,\s*std::memory_order_release\)/,
   "polling must withdraw its acknowledgement before allocation-rich work resumes");
 
-const pollAckStart = poll.indexOf("bool hp_poll_ota_quiesced(");
-const pollAckEnd = poll.indexOf("uint32_t hp_poll_generation(", pollAckStart);
+const pollAckStart = poll.indexOf("bool hp_poll_network_quiesced(");
+const pollAckEnd = poll.indexOf("bool hp_poll_ota_quiesced(", pollAckStart);
 assert.ok(pollAckStart >= 0 && pollAckEnd > pollAckStart,
   "the lock-free poll acknowledgement boundary must remain identifiable");
 const pollAck = poll.slice(pollAckStart, pollAckEnd);
 assert.match(pollAck,
-  /!s_poll_task_running\.load\(std::memory_order_acquire\)\s*\|\|\s*s_ota_quiesced\.load\(std::memory_order_acquire\)/,
+  /!s_poll_task_running\.load\(std::memory_order_acquire\)\s*\|\|\s*s_network_quiesced\.load\(std::memory_order_acquire\)/,
   "no poll task is already quiescent; a running one must explicitly acknowledge the hold");
+
+const mqttAckStart = mqtt.indexOf("bool mqtt_publish_network_quiesced(");
+const mqttAckEnd = mqtt.indexOf("ReferenceTemperatureStatus reference_temperature_status(", mqttAckStart);
+assert.ok(mqttAckStart >= 0 && mqttAckEnd > mqttAckStart,
+  "the lock-free MQTT acknowledgement boundary must remain identifiable");
+assert.match(mqtt.slice(mqttAckStart, mqttAckEnd),
+  /s_publish_network_quiesced\.load\(std::memory_order_acquire\)\s*&&\s*!s_transport_connecting\.load\(std::memory_order_acquire\)/,
+  "one authoritative MQTT acknowledgement must cover firmware publishing and esp-mqtt transport TLS");
+assert.match(mqtt,
+  /case MQTT_EVENT_BEFORE_CONNECT:[\s\S]{0,120}?mqtt_transport_before_connect\(\)/,
+  "every asynchronous esp-mqtt connection attempt must enter the shared heap handshake");
+assert.match(mqtt,
+  /mqtt_transport_before_connect\(\)[\s\S]{0,500}?if\s*\(!s_publish_network_quiesced\.load\(std::memory_order_acquire\)\)[\s\S]{0,160}?s_transport_connecting\.store\(true,\s*std::memory_order_release\)[\s\S]{0,80}?return;/,
+  "BEFORE_CONNECT must give an existing publish owner priority instead of deadlocking client_stop");
+const mqttTaskStart = mqtt.indexOf("static void mqtt_task(");
+const mqttTaskEnd = mqtt.indexOf("static bool build_client(", mqttTaskStart);
+assert.ok(mqttTaskStart >= 0 && mqttTaskEnd > mqttTaskStart,
+  "the MQTT publish task must remain identifiable");
+const mqttTask = mqtt.slice(mqttTaskStart, mqttTaskEnd);
+assert.match(mqttTask,
+  /ota_quiesce_step\(network_quiesce, network_busy\)[\s\S]{0,600}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,200}?continue;/,
+  "the held MQTT path must acknowledge that its allocation-rich cycle has ended");
+assert.match(mqtt,
+  /struct\s+MqttStartupActivity[\s\S]{0,800}?s_publish_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,300}?if\s*\(!competing_tls_active\(\)\)\s*return;[\s\S]{0,200}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
+  "MQTT startup must claim/recheck and yield to an OTA that began before mqtt_ha_start");
+assert.match(mqtt,
+  /esp_mqtt_client_stop\(s_client\)[\s\S]{0,600}?s_transport_connecting\.store\(false,\s*std::memory_order_release\)[\s\S]{0,600}?esp_mqtt_client_destroy\(s_client\)/,
+  "MQTT promotion must clear BEFORE_CONNECT state because client_stop emits no disconnect event");
 
 const pollBarrierStart = ota.indexOf("bool wait_for_poll_quiesce(");
 const pollBarrierEnd = ota.indexOf("OtaChannel channel_now()", pollBarrierStart);
@@ -294,10 +325,12 @@ assert.match(pollBarrier,
   /while\s*\(\s*!hp_poll_ota_quiesced\(\)[\s\S]*?<\s*kPollQuiesceWait\s*\)/,
   "OTA must wait on the acknowledgement only within the bounded window");
 const pollBarrierCall = task.indexOf("wait_for_poll_quiesce()");
-const weatherBarrierCall = task.indexOf("wait_for_weather_quiesce()");
+const mqttBarrierCall = task.indexOf("wait_for_mqtt_quiesce()", pollBarrierCall);
+const weatherBarrierCall = task.indexOf("wait_for_weather_quiesce()", mqttBarrierCall);
 const updateCall = task.indexOf("run_update(");
-assert.ok(pollBarrierCall >= 0 && weatherBarrierCall > pollBarrierCall && updateCall > weatherBarrierCall,
-  "OTA must receive poll and weather quiescence acknowledgements before entering the install path");
+assert.ok(pollBarrierCall >= 0 && mqttBarrierCall > pollBarrierCall &&
+          weatherBarrierCall > mqttBarrierCall && updateCall > weatherBarrierCall,
+  "OTA must receive poll, MQTT and weather quiescence acknowledgements before entering the install path");
 
 console.log("OTA heap: TLS-before-verify release, dual headroom gate, signed validation, bounded " +
-            "poll quiesce and retryable diagnostics are pinned");
+            "poll/MQTT quiesce and retryable diagnostics are pinned");

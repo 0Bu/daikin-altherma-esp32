@@ -22,12 +22,16 @@ MqttStatus mqtt_status();
 
 // Publish cycles that produced nothing, since boot — the heartbeat's mqtt_skipped/mqtt_quiesced
 // (#380). `skipped` threw and lost the reading; `quiesced` stood aside on purpose while an OTA
-// download owned the heap (logic/ota_quiesce.hpp). Reported on /status too, and not only on the
+// download or weather fetch owned the heap (logic/ota_quiesce.hpp). Reported on /status too, and not only on the
 // heartbeat, because the heartbeat needs a BROKER: an installation whose MQTT is misconfigured — or
 // one being debugged over the LAN with nothing subscribed — is exactly where a reader is asking why
 // values keep disappearing, and it is the one place that could not answer.
 struct MqttSkipStats { uint32_t skipped = 0, quiesced = 0; };
 MqttSkipStats mqtt_skip_stats();
+
+// Has the firmware publish cycle left its allocating work, with no esp-mqtt TLS handshake/reconnect
+// in flight? True when no publisher task exists. Weather and OTA use this acknowledgement before TLS.
+bool mqtt_publish_network_quiesced();
 
 // Observation + decision-readiness status for the one configured living-room source. `received_ms` is
 // monotonic MQTT arrival time; source_unix_s is present only when the configured payload field was
