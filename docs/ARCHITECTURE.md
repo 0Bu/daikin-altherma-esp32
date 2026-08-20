@@ -175,8 +175,10 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       No route is exempt any more: the one that was (/events, raw-registered
                       because is_websocket bypasses the trampoline) no longer exists
 http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
-                      POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
-                      see "Push vs. poll" below for why that sentence is load-bearing
+                      POST /crash/dismiss. The live /status and /values bodies use one bounded 1 KiB
+                      chunk sink instead of a body-sized contiguous allocation;
+                      http_append_status_json() runs on the httpd task ALONE — see "Push vs. poll"
+                      below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_temp, /set_weather,
                       /test_circulation, /set_circulation,
                       /set_syslog,
@@ -2343,6 +2345,14 @@ Structure:
   fix then kept a second row/group layout alive for the whole boot; dev.13 additionally moved a
   12 KiB payload block into static RAM without removing those duplicate objects. On the 129-row
   plant that left only 7.5–11 KiB contiguous and made `/status` permanently return 503.
+  The live `/status` route now drives its existing serializer through the same bounded 1 KiB HTTP
+  sink as `/values`, instead of growing one body-sized string (the observed 8.7 KiB body otherwise
+  requested roughly 15 KiB on its capacity-growth step). The owning serializer instantiation remains
+  for MCP `get_status`; the HTTP route's response size is no longer a contiguous-allocation demand,
+  while its ordinary snapshot allocations remain covered by the OOM boundary. Before the first
+  chunk, an allocation failure still becomes 503. After the first chunk HTTP cannot truthfully
+  replace the response status; the commit-aware stream helper catches the failure and makes httpd
+  close the incomplete response, rather than allowing an exception to cross its C dispatch frames.
   The publisher now walks the **one committed poll cache directly**. Under its mutex an
   allocation-free pass derives every group/key/type/fault companion and computes the exact JSON byte
   count plus an FNV-1a digest. Unchanged state stops there without allocating a payload. Changed state
@@ -2652,11 +2662,13 @@ place:
   the config saves use — an OTA replaces the served UI itself, so `otaWaitReboot` waits for the board
   to come back (version changed / `uptime_s` went backwards / seen down→up) and **reloads the page**.
   A download already running on the device is adopted on page load (`resumeOta`), so a reload
-  mid-update keeps showing the progress. Because the OTA status payload is much smaller than the
-  full `/status` builder, it also owns the refresh fallback: while TLS heap pressure prevents the
-  latter from landing, the dashboard reports the known installation state and Settings shows a
-  version/channel-only Firmware card. A later successful `/status` replaces that shell with the
-  complete Settings cards once without wiping the OTA progress slot.
+  mid-update keeps showing the progress. Because the OTA status payload is much smaller and cheaper
+  than the complete `/status` snapshot, it also owns the refresh fallback: while heap pressure or a
+  transport error prevents that snapshot from landing, the dashboard reports the known installation
+  state and Settings shows a version/channel-only Firmware card. The live `/status` body itself is
+  now emitted through a bounded 1 KiB sink, but a snapshot or transport can still fail transiently;
+  a later successful `/status` replaces that shell with the complete Settings cards once without
+  wiping the OTA progress slot.
 
 The board/platform is reported by `/status.platform` — read by `/status` consumers and the web UI's
 paste-ready crash bundle, no longer a row on any Settings card.
@@ -3444,7 +3456,8 @@ try-lock acquire a callback context needs.
 
 Heap is tight (WiFi + MQTT + TLS dominate; the binding limit is the
 largest *contiguous* free block): keep every HTTP handler under the `handle_all` try/catch (503 on
-OOM), stream `/diag`, `/values`, MCP get_hp_values and MQTT discovery instead of building one big
+OOM before response commit; failed connection after a streamed response commits), stream `/diag`,
+`/status`, `/values`, MCP get_hp_values and MQTT discovery instead of building one big
 `std::string`, and treat any new large contiguous allocation (big JSON, OTA TLS) as a crash risk to
 size-check. A reboot loop is bad here too — it stops the poll cycle and drops MQTT availability.
 

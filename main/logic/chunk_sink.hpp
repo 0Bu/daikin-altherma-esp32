@@ -44,6 +44,10 @@ public:
     }
 
     bool failed() const { return failed_; }
+    // True after at least one data chunk was accepted by the transport. From that point an HTTP
+    // caller can no longer replace the response with a 503/500 status; a later serializer failure
+    // must abort the stream instead of pretending it still owns the headers.
+    bool committed() const { return committed_; }
     size_t max_buffered() const { return max_buffered_; }
     static constexpr size_t max_chunk_bytes() { return MaxBytes; }
 
@@ -68,6 +72,7 @@ private:
             failed_ = true;
             return;
         }
+        committed_ = true;
         buffer_.clear();
     }
 
@@ -75,7 +80,23 @@ private:
     std::string buffer_;
     size_t max_buffered_ = 0;
     bool failed_ = false;
+    bool committed_ = false;
     bool finished_ = false;
 };
+
+// Serialize and finish a bounded HTTP-style stream without ever letting an exception cross a C
+// server frame. Before the first accepted data chunk the caller still owns the response status, so
+// rethrow and let its outer OOM/exception guard produce 503/500. After commit the status is already
+// on the wire; returning false tells the server to close the incomplete response cleanly.
+template <typename Sink, typename Append>
+inline bool finish_bounded_stream(Sink& sink, Append&& append) {
+    try {
+        std::forward<Append>(append)(sink);
+        return sink.finish();
+    } catch (...) {
+        if (!sink.committed()) throw;
+        return false;
+    }
+}
 
 } // namespace daik

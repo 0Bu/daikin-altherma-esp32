@@ -11,6 +11,7 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <new>
 #include <set>
 #include <string>
 #include <vector>
@@ -1792,6 +1793,36 @@ static void test_json() {
     CHECK(chunks.finish());
     CHECK(streamed == json_quote(mixed));
     CHECK(finals == 1 && chunks.max_buffered() <= 4);
+
+    // An OOM before the first chunk must escape to the HTTP trampoline, which can still select a
+    // 503 response. The same failure after a successful flush must be consumed at the stream
+    // boundary: headers are committed, so the only truthful result is a failed/incomplete response.
+    size_t oom_data_chunks = 0;
+    size_t oom_final_chunks = 0;
+    auto oom_emit = [&](std::string_view, bool final) {
+        if (final) ++oom_final_chunks; else ++oom_data_chunks;
+        return true;
+    };
+    BoundedChunkSink<decltype(oom_emit), 4> precommit(oom_emit);
+    bool precommit_rethrew = false;
+    try {
+        (void)finish_bounded_stream(precommit, [](auto& out) {
+            out += "abc";
+            throw std::bad_alloc();
+        });
+    } catch (const std::bad_alloc&) {
+        precommit_rethrew = true;
+    }
+    CHECK(precommit_rethrew && !precommit.committed());
+    CHECK(oom_data_chunks == 0 && oom_final_chunks == 0);
+
+    BoundedChunkSink<decltype(oom_emit), 4> postcommit(oom_emit);
+    CHECK(!finish_bounded_stream(postcommit, [](auto& out) {
+        out += "abcde";  // fifth byte forces the first four-byte chunk onto the wire
+        throw std::bad_alloc();
+    }));
+    CHECK(postcommit.committed());
+    CHECK(oom_data_chunks == 1 && oom_final_chunks == 0);
 }
 
 static void test_mqtt_group() {

@@ -49,9 +49,9 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ 🧪 | [`partitions.csv`](../partitions.csv), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** (not an uptime timer) | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
 | 5 | OTA manifest check + signed manual HTTPS stream + **two-point downgrade gate**, transport cleanup before validation, dual INTERNAL-heap gate and bounded MQTT/X10A/weather quiescing | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
-| 6 | Live UI by **polling** `/status` + chunk-streamed `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
+| 6 | Live UI by **polling** bounded-chunk-streamed `/status` + `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`test_status_heap_contract.mjs`](../test/test_status_heap_contract.mjs), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
 | 7 | Minified, deterministic-gzip web UI **embedded in the app image**, under a 150 KiB delivery budget | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs) |
-| 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline | ✅ | [`http_common.cpp`](../main/http_common.cpp) |
+| 8 | HTTP handlers under an **OOM boundary**: `503` before response commit; clean connection abort if a streamed response fails after its first chunk | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
 | 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 11 | Core dump to flash + offline symbolication, with a proven **orphan dump** erased so no undecodable download is ever offered | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
@@ -354,9 +354,10 @@ other.
   while the tab is hidden. The `/events` WebSocket was **removed**: a push fails silently and
   globally, a request fails loudly and locally under a `503` this server already returns. The
   measurements are in [`ARCHITECTURE.md` → "Push vs. poll"](ARCHITECTURE.md); the cost is one
-  cadence of latency on a dashboard whose motion is CSS. `/values` and MCP `get_hp_values` stage
-  their source snapshots and stream the same representation through a bounded 1 KiB sink, so
-  profile growth does not require one equally-growing contiguous response allocation.
+  cadence of latency on a dashboard whose motion is CSS. `/status` and `/values` serialize their
+  live responses through a bounded 1 KiB sink; `/values` and MCP `get_hp_values` additionally stage
+  their source snapshots and share the same representation. Growing live response bodies therefore
+  do not require equally-growing contiguous allocations.
 - **🧪 Request bodies are reassembled, not assumed**
   ([`logic/http_body.hpp`](../main/logic/http_body.hpp)): a POST body is a TCP stream, so the loop
   runs until `content_len` is consumed. A timeout is retried only while progress resets the idle
@@ -364,8 +365,10 @@ other.
 - **✅ Gzipped UI embedded in the app image**: the build inlines the page and its fragments,
   minifies, and pre-gzips deterministically (`EMBED_FILES`), cutting first-paint bytes ~3× over WiFi.
 - **✅ OOM discipline** ([`http_common.cpp`](../main/http_common.cpp)): every route runs under one
-  trampoline whose `try/catch` returns **503 instead of crashing**, since an uncaught throw would
-  unwind through esp_http_server's C frames into `std::terminate`.
+  trampoline whose `try/catch` returns **503 instead of crashing** while it still owns the response
+  status. A chunked route cannot change status after its first chunk; the bounded stream helper then
+  consumes the exception and returns failure so httpd closes the incomplete response. Host tests
+  inject both pre-commit and post-commit OOM. Neither path unwinds through esp_http_server's C frames.
 - **✅ The same discipline covers every allocating FreeRTOS task loop**, since a task entry is a C
   frame boundary exactly like a handler. Its corollary: **a throw must never strand a mutex** —
   `xSemaphoreTake` is not released by unwinding, so critical sections are either non-allocating or
