@@ -26,6 +26,7 @@ import threading
 import time
 from typing import Any
 from urllib.parse import urlencode, urljoin, urlparse, urlunparse
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -44,7 +45,6 @@ MIN_FINAL_LARGEST_BLOCK = 16 * 1024
 MAX_X10A_TIMEOUT_DELTA = 3
 HTTP_TIMEOUT_S = 5
 OTA_TIMEOUT_S = 180
-OTA_OFFER_SETTLE_SECONDS = 1.0
 OTA_OFFER_POLL_SECONDS = 0.1
 DEV_MANIFEST_SUFFIX = "/dev/manifest.json"
 OFFICIAL_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json"
@@ -105,8 +105,10 @@ def request_bytes(url: str, *, method: str = "GET", timeout: int = HTTP_TIMEOUT_
         return response.read()
 
 
-def request_json(host: str, path: str, *, timeout: int = HTTP_TIMEOUT_S) -> dict[str, Any]:
-    raw = request_bytes(f"http://{host}{path}", timeout=timeout)
+def request_json(
+    host: str, path: str, *, method: str = "GET", timeout: int = HTTP_TIMEOUT_S,
+) -> dict[str, Any]:
+    raw = request_bytes(f"http://{host}{path}", method=method, timeout=timeout)
     value = json.loads(raw)
     if not isinstance(value, dict):
         fail(f"{host}{path} did not return a JSON object")
@@ -424,55 +426,55 @@ def run_local_gates() -> None:
     run_checked([str(ROOT / "scripts/run-contract-tests.sh")])
 
 
-def ota_offer_settled(
-    status: dict[str, Any], expected_version: str, seen_checking: bool,
-    first_seen_at: float | None, now: float,
-) -> tuple[bool, bool, float | None]:
-    """Require one exact idle offer to remain stable before the sole update POST.
-
-    The caller must first observe this check generation's ``checking`` state.  That prevents a
-    previous exact idle offer from arming during the firmware's 1.1-second pre-check quiesce lead.
-    The firmware then publishes the final check result immediately before its OTA task releases the
-    internal busy claim, so a second exact idle sample after the bounded settle interval closes the
-    other side of the hand-off without adding a retrying write path.
-    """
+def ota_offer_ready(
+    status: dict[str, Any], expected_version: str, expected_generation: int,
+) -> bool:
+    """Accept only the completed status of the exact synchronously accepted check task."""
+    generation = status.get("generation")
+    if not isinstance(generation, int) or generation != expected_generation:
+        fail("production OTA operation generation changed during offer check")
+    if status.get("busy") is True:
+        return False
+    if status.get("busy") is not False:
+        fail("production firmware does not expose the required OTA busy handshake")
     if status.get("state") == "error":
         fail(f"production OTA check failed: {status.get('message', '')}")
-    if status.get("state") == "checking":
-        return False, True, None
-    if not seen_checking:
-        return False, False, None
     if status.get("state") != "idle" or not status.get("available"):
-        return False, True, None
+        return False
     if status.get("available") != expected_version or not status.get("update_available"):
-        # /ota/check is asynchronous.  Its first status sample may still be the previous completed
-        # check, so a stale idle offer neither authorizes the write nor fails a check that has not
-        # published its own result yet.  Only the expected offer can start the settle interval.
-        return False, True, None
-    if first_seen_at is None:
-        return False, True, now
-    return now - first_seen_at >= OTA_OFFER_SETTLE_SECONDS, True, first_seen_at
+        fail("production board did not offer the exact gated dev version")
+    return True
 
 
-def wait_for_ota_offer(host: str, expected_version: str) -> dict[str, Any]:
-    request_json(host, f"/ota/check?ms={int(time.time() * 1000)}")
+def wait_for_ota_offer(host: str, expected_version: str) -> int:
+    try:
+        accepted = request_json(host, f"/ota/check?ms={int(time.time() * 1000)}")
+    except HTTPError as error:
+        fail(f"production firmware refused OTA check with HTTP {error.code}")
+    generation = accepted.get("generation")
+    if accepted.get("ok") is not True or not isinstance(generation, int) or generation <= 0:
+        fail("production firmware did not accept OTA check with a generation token")
     deadline = time.monotonic() + 30
-    seen_checking = False
-    first_seen_at: float | None = None
     while time.monotonic() < deadline:
         status = request_json(host, "/ota/status")
-        ready, seen_checking, first_seen_at = ota_offer_settled(
-            status, expected_version, seen_checking, first_seen_at, time.monotonic(),
-        )
-        if ready:
-            return status
+        if ota_offer_ready(status, expected_version, generation):
+            return generation
         time.sleep(OTA_OFFER_POLL_SECONDS)
     fail("production OTA check did not settle on the exact gated dev version within 30 seconds")
 
 
-def post_update_once(host: str) -> None:
+def post_update_once(host: str, check_generation: int) -> int:
     # Deliberately one un-retried write. Every loop after this function is GET-only.
-    request_bytes(f"http://{host}/ota/update", method="POST", timeout=HTTP_TIMEOUT_S)
+    try:
+        accepted = request_json(host, "/ota/update", method="POST", timeout=HTTP_TIMEOUT_S)
+    except HTTPError as error:
+        fail(f"production firmware refused the sole OTA update write with HTTP {error.code}")
+    generation = accepted.get("generation")
+    if accepted.get("ok") is not True or not isinstance(generation, int) or generation <= 0:
+        fail("production firmware did not accept the sole OTA update write")
+    if generation == check_generation:
+        fail("production OTA update did not receive a fresh operation generation")
+    return generation
 
 
 def wait_for_new_firmware(host: str, version: str, elf: str) -> dict[str, Any]:
@@ -523,29 +525,17 @@ def self_test() -> None:
     assert x10a_timeout_delta_exceeded(
         require_x10a=True, baseline=timeout_before, final=timeout_after,
     )
-    checking = {"state": "checking", "available": ""}
-    offered = {
-        "state": "idle", "available": "1.2.3-dev.4", "update_available": True,
-    }
-    ready, generation, seen = ota_offer_settled(offered, "1.2.3-dev.4", False, None, 9.0)
-    assert not ready and not generation and seen is None  # stale exact offer cannot arm
-    ready, generation, seen = ota_offer_settled(checking, "1.2.3-dev.4", False, None, 10.0)
-    assert not ready and generation and seen is None
-    ready, generation, seen = ota_offer_settled(
-        offered, "1.2.3-dev.4", generation, None, 20.0,
-    )
-    assert not ready and generation and seen == 20.0
-    ready, generation, seen = ota_offer_settled(
-        offered, "1.2.3-dev.4", generation, seen, 20.999,
-    )
-    assert not ready and generation and seen == 20.0
-    ready, generation, seen = ota_offer_settled(
-        offered, "1.2.3-dev.4", generation, seen, 21.0,
-    )
-    assert ready and generation and seen == 20.0
-    stale = {"state": "idle", "available": "1.2.3-dev.3", "update_available": True}
-    ready, generation, seen = ota_offer_settled(stale, "1.2.3-dev.4", True, None, 22.0)
-    assert not ready and generation and seen is None
+    checking = {"state": "checking", "busy": True, "generation": 7, "available": ""}
+    offered = {"state": "idle", "busy": False, "generation": 7,
+               "available": "1.2.3-dev.4", "update_available": True}
+    assert not ota_offer_ready(checking, "1.2.3-dev.4", 7)
+    assert ota_offer_ready(offered, "1.2.3-dev.4", 7)
+    try:
+        ota_offer_ready({**offered, "generation": 8}, "1.2.3-dev.4", 7)
+    except GateError:
+        pass
+    else:
+        raise AssertionError("a concurrent OTA generation replaced the accepted check")
     with tempfile.TemporaryDirectory(prefix="daikin-production-ota-selftest-") as tmp:
         inventory_path = Path(tmp) / "inventory.json"
         inventory_path.write_text(json.dumps({
@@ -638,8 +628,8 @@ def main() -> int:
         fail("production X10A must be live before promotion")
     if not production_before.get("mqtt", {}).get("connected"):
         fail("production MQTT must be connected before promotion")
-    wait_for_ota_offer(production["host"], args.expected_version)
-    post_update_once(production["host"])
+    check_generation = wait_for_ota_offer(production["host"], args.expected_version)
+    post_update_once(production["host"], check_generation)
     returned = wait_for_new_firmware(production["host"], args.expected_version, elf)
     validate_identity(returned, host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf)
     production_evidence = stress_board(

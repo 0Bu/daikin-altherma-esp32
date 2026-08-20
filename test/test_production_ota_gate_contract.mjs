@@ -16,6 +16,7 @@ const gate = read("scripts/production-ota-gate.py");
 const hook = read("tools/agent-hooks/agent_hook.py");
 const health = read("main/logic/health_gate.hpp");
 const ota = read("main/ota_update.cpp");
+const httpOta = read("main/http_ota.cpp");
 const mqtt = read("main/mqtt_ha.cpp");
 
 assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/,
@@ -53,7 +54,7 @@ assert.match(gate, /scripts\/run-contract-tests\.sh/,
 const testStress = gate.indexOf("test_evidence = stress_board(");
 const productionConfirmation = gate.indexOf("if args.confirm_production != PRODUCTION_ROLE");
 const offer = gate.indexOf('wait_for_ota_offer(production["host"], args.expected_version)');
-const post = gate.indexOf('    post_update_once(production["host"])', productionConfirmation);
+const post = gate.indexOf('    post_update_once(production["host"], check_generation)', productionConfirmation);
 const returned = gate.indexOf('wait_for_new_firmware(production["host"], args.expected_version, elf)');
 const productionStress = gate.indexOf("production_evidence = stress_board(");
 const retained = gate.indexOf("retained = verify_retained_x10a(final_status)");
@@ -70,24 +71,33 @@ assert.equal(occurrences(gate, 'method="POST"'), 1,
   "the entire promotion implementation may contain exactly one production POST");
 assert.match(gate, /Deliberately one un-retried write/,
   "the sole production write must remain explicitly non-retrying");
-assert.match(gate, /OTA_OFFER_SETTLE_SECONDS\s*=\s*1\.0/,
-  "the exact OTA offer must settle past the retiring check task before the sole update POST");
 assert.match(gate, /OTA_OFFER_POLL_SECONDS\s*=\s*0\.1/,
-  "the gate must poll quickly enough to observe the fresh check generation fail-closed");
+  "the gate must observe the accepted operation without a long blind polling gap");
 assert.match(gate,
-  /status\.get\("state"\)\s*==\s*"checking":[\s\S]{0,80}?return\s+False,\s*True,\s*None[\s\S]{0,100}?if not seen_checking:[\s\S]{0,80}?return\s+False,\s*False,\s*None/,
-  "a fresh checking transition must be observed before any idle offer can arm");
+  /generation\s*=\s*status\.get\("generation"\)[\s\S]{0,180}?generation\s*!=\s*expected_generation[\s\S]{0,120}?operation generation changed/,
+  "offer status must stay bound to the synchronously accepted check generation");
 assert.match(gate,
-  /first_seen_at\s+is\s+None[\s\S]{0,120}?return\s+False,\s*True,\s*now[\s\S]{0,180}?now\s*-\s*first_seen_at\s*>=\s*OTA_OFFER_SETTLE_SECONDS/,
-  "the first idle offer sample must arm, not pass, the production write boundary");
+  /status\.get\("busy"\)\s+is\s+True:[\s\S]{0,80}?return False[\s\S]{0,140}?status\.get\("busy"\)\s+is\s+not\s+False[\s\S]{0,140}?required OTA busy handshake/,
+  "the exact generation must explicitly release its busy claim before the production write");
 assert.match(gate,
-  /status\.get\("available"\)\s*!=\s*expected_version\s+or\s+not\s+status\.get\("update_available"\):[\s\S]{0,400}?return\s+False,\s*True,\s*None\s+if first_seen_at is None/,
-  "a stale result from the previous asynchronous check must wait, never authorize or reject the write");
+  /accepted\s*=\s*request_json\(host, f"\/ota\/check[\s\S]{0,240}?generation\s*=\s*accepted\.get\("generation"\)[\s\S]{0,220}?generation token/,
+  "the manifest check must synchronously return the generation that status polling follows");
 assert.match(gate,
-  /wait_for_ota_offer[\s\S]{0,900}?seen_checking\s*=\s*False[\s\S]{0,300}?ota_offer_settled\([\s\S]{0,200}?if ready:[\s\S]{0,80}?return status/,
-  "production offer polling must use the stable two-sample hand-off decision");
+  /post_update_once[\s\S]{0,700}?request_json\(host, "\/ota\/update", method="POST"[\s\S]{0,700}?generation\s*==\s*check_generation[\s\S]{0,180}?fresh operation generation/,
+  "the sole update POST must be synchronously accepted as a distinct operation generation");
 assert.match(gate, /did not settle on the exact gated dev version within 30 seconds/,
   "a stale or wrong offer must remain bounded and fail closed at the polling deadline");
+assert.equal(occurrences(httpOta, '503 Service Unavailable'), 2,
+  "both busy check and busy update requests must return a non-success HTTP status");
+const checkAccepted = httpOta.indexOf('ota_check_async(ms)');
+const updateAccepted = httpOta.indexOf('ota_update_async(downgrade)');
+const firstGenerationResponse = httpOta.indexOf('{\\"ok\\":true,\\"generation\\":%lu}', checkAccepted);
+const secondGenerationResponse = httpOta.indexOf('{\\"ok\\":true,\\"generation\\":%lu}', updateAccepted);
+assert.ok(checkAccepted >= 0 && firstGenerationResponse > checkAccepted &&
+          updateAccepted > firstGenerationResponse && secondGenerationResponse > updateAccepted,
+  "accepted check and update requests must each return their authoritative generation");
+assert.match(httpOta, /,\\"busy\\":.*s\.busy[\s\S]{0,180}?,\\"generation\\":.*std::to_string\(s\.generation\)/,
+  "OTA status must expose busy and generation from the same mutex-protected snapshot");
 assert.match(gate, /for key in \("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"\)/,
   "heap/OOM/X10A failure counters must remain stable through each pressure window");
 assert.match(gate,

@@ -2270,12 +2270,12 @@ Structure:
   requires a clean exact local source; runs the host catalog and heap contracts; and applies a fixed
   three-minute concurrent status/values/diag + OTA-manifest-TLS pressure window to the same signed
   image on the MAC-bound private-inventory `bench` role. Only then, with the current version lease
-  and an explicit confirmation of the distinct `production` role, it must observe the fresh check's
-  `checking` transition and then requires the exact idle update offer to remain stable for one
-  second before it sends one un-retried update POST. That generation-bound hand-off ignores stale
-  results — including the same target version — from the previous asynchronous check and closes the firmware's
-  final-check-result/busy-release interval: an HTTP `ok` can no longer hide an update request that
-  the retiring check task ignored as busy.
+  and an explicit confirmation of the distinct `production` role, it requires `/ota/check` to
+  synchronously return a non-zero accepted-operation generation. `/ota/status` must report that same
+  generation with `busy=false` and the exact idle offer before the gate sends one un-retried update
+  POST. The POST itself must synchronously return a distinct accepted generation; a concurrent or
+  unavailable operation is HTTP 503, never a false `ok`. This mutex-bound handshake closes both
+  stale-result and final-GET-to-POST races rather than relying on timing.
   Reboot observation, the second pressure window and retained-X10A MQTT proof are GET/read-only. The
   bench board need not be physically connected to X10A, so it proves binary and allocation behavior
   rather than plant I/O; expected UART timeouts there are not a plant-link regression. The
@@ -2305,7 +2305,7 @@ Structure:
   skips deliberately: the same missing second, spending none of the block the download needs, and
   counted as `mqtt_quiesced` instead of vanishing into a log ring. Lock-free
   `std::atomic<bool>` flags are armed by RAII guards across each network interval — **not**
-  `ota_status().state`, which copies three `std::string`s out under the mutex the OTA task holds, so
+  `ota_status().state`, which copies several `std::string`s out under the mutex the OTA task holds, so
   asking "is the heap under pressure?" would itself allocate, once a second, on the task the pressure
   is aimed at. The OTA window has seven exits, which is why its flag is cleared by a destructor
   rather than by hand at each. The hold-off is **bounded** (`OTA_QUIESCE_MAX_CYCLES`, 300 cycles ≈ 5
@@ -3414,9 +3414,12 @@ POST /set_lang    {lang:"auto"|"de"|"en"} -> validate + persist, applied LIVE (n
                   -> {"ok":true,"reboot":false} like the other /set_* routes
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the
                   fingerprint (RAM only) -> the next poll cycle sweeps protocol + re-fingerprints
-GET  /ota/check   start an async manifest check (?ms= is parsed but gates nothing — TLS date
-                  validation is compiled out, so OTA needs no wall clock even though SNTP now exists)
+GET  /ota/check   synchronously claim an async manifest check and return
+                  {ok:true,generation}; busy/task-unavailable -> HTTP 503 + ok:false. ?ms= is parsed
+                  but gates nothing — TLS date validation is compiled out, so OTA needs no wall clock
 POST /ota/update[?downgrade=1]  start the async download of the SELECTED channel's build.
+                  Acceptance returns {ok:true,generation}; busy/task-unavailable is HTTP 503, never
+                  a false success. The generation is distinct from the preceding accepted check.
                   Re-fetches the manifest and re-runs the downgrade gate
                   itself rather than trusting what /ota/check left behind: this route is reachable on
                   its own, so gating only in /ota/check would mean no gate at all for a direct caller.
@@ -3424,7 +3427,8 @@ POST /ota/update[?downgrade=1]  start the async download of the SELECTED channel
                   the only way to install a build older than the running one (dev -> the last
                   release). Per-request, never stored
 GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, update_available,
-                  downgrade, channel, available, current} — the UI polls this; all strings go through
+                  downgrade, channel, busy, generation, available, current} — `busy` and
+                  `generation` are copied under the same OTA mutex; the UI polls this; all strings go through
                   json_quote. `downgrade` = the offered build is installable but OLDER (the
                   dev -> release direction); the UI needs BOTH flags, since update_available alone
                   makes a release-channel check on a dev board read "up to date" forever

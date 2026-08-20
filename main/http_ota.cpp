@@ -4,6 +4,7 @@
 #include "logic/json.hpp"        // json_quote — the ONE RFC 8259 encoder every payload goes through
 #include "logic/query_flag.hpp"  // query_flag_on — a flag fires on "1" and nothing else
 #include "esp_http_server.h"
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -16,8 +17,15 @@ static esp_err_t ota_check(httpd_req_t* req) {
         char v[24];
         if (httpd_query_key_value(q, "ms", v, sizeof(v)) == ESP_OK) ms = strtoll(v, nullptr, 10);
     }
-    ota_check_async(ms);
-    return http_send_json(req, "{\"ok\":true}");
+    const uint32_t generation = ota_check_async(ms);
+    if (!generation) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"ota operation not accepted\"}");
+    }
+    char response[48];
+    snprintf(response, sizeof(response), "{\"ok\":true,\"generation\":%lu}",
+             static_cast<unsigned long>(generation));
+    return http_send_json(req, response);
 }
 
 // POST /ota/update[?downgrade=1] — start the download of the SELECTED channel's build.
@@ -36,8 +44,15 @@ static esp_err_t ota_do(httpd_req_t* req) {
         char v[8];
         if (httpd_query_key_value(q, "downgrade", v, sizeof(v)) == ESP_OK) downgrade = query_flag_on(v);
     }
-    ota_update_async(downgrade);
-    return http_send_json(req, "{\"ok\":true}");
+    const uint32_t generation = ota_update_async(downgrade);
+    if (!generation) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"ota operation not accepted\"}");
+    }
+    char response[48];
+    snprintf(response, sizeof(response), "{\"ok\":true,\"generation\":%lu}",
+             static_cast<unsigned long>(generation));
+    return http_send_json(req, response);
 }
 
 static esp_err_t ota_stat(httpd_req_t* req) {
@@ -46,7 +61,7 @@ static esp_err_t ota_stat(httpd_req_t* req) {
     // `available` ARE network-derived now that the manifest check has landed (a version parsed from
     // a remote manifest, an error string chosen from a fetch failure), and one '"' or control byte
     // there would break JSON.parse in the UI's update flow. `state`/`current` remain internal, but
-    // routing all four through the one encoder is what meant the OTA work did not have to remember.
+    // routing every string through the one encoder is what meant the OTA work did not have to remember.
     // json_quote emits the surrounding quotes.
     std::string j = "{\"state\":" + json_quote(s.state) +
                     ",\"progress\":" + std::to_string(s.progress) +
@@ -57,6 +72,8 @@ static esp_err_t ota_stat(httpd_req_t* req) {
                     // a release-channel check on a dev board read as "up to date" forever.
                     ",\"downgrade\":" + (s.downgrade ? "true" : "false") +
                     ",\"channel\":" + json_quote(s.channel) +
+                    ",\"busy\":" + (s.busy ? "true" : "false") +
+                    ",\"generation\":" + std::to_string(s.generation) +
                     ",\"available\":" + json_quote(s.available) +
                     ",\"current\":" + json_quote(s.current) + "}";
     return http_send_json(req, j.c_str());

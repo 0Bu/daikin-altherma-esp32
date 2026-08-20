@@ -25,6 +25,7 @@ const code = (rel) => read(rel)
 const occurrences = (text, token) => text.split(token).length - 1;
 
 const ota = code("main/ota_update.cpp");
+const httpOta = code("main/http_ota.cpp");
 const mqtt = code("main/mqtt_ha.cpp");
 const poll = code("main/hp_poll.cpp");
 // Keep this source verbatim: it contains the legitimate captive-portal URI string "/*", which a
@@ -33,6 +34,24 @@ const httpStatus = read("main/http_status.cpp");
 const headroom = code("main/logic/ota_headroom.hpp");
 const transport = code("main/logic/ota_transport.hpp");
 const sdkconfig = read("sdkconfig.defaults");
+
+// ── HTTP acceptance is the authoritative OTA operation boundary ──────────────────────────────
+// An asynchronous check/update request is not successful merely because the HTTP handler ran.
+// The OTA mutex claim and operation generation are created together; busy/task-creation refusal
+// must be non-2xx, and status exposes the same mutex-protected generation+busy snapshot.
+assert.match(ota,
+  /uint32_t\s+start\([^)]*\)[\s\S]{0,500}?if\s*\(s_busy\)\s*return 0;[\s\S]{0,220}?generation\s*=\s*\+\+s_generation/,
+  "OTA start must atomically refuse busy and assign a non-zero operation generation");
+assert.match(ota,
+  /uint32_t\s+ota_check_async[\s\S]{0,300}?return generation;[\s\S]{0,1200}?uint32_t\s+ota_update_async[\s\S]{0,300}?return generation;/,
+  "both asynchronous operations must return their accepted generation to HTTP");
+assert.equal(occurrences(httpOta, '503 Service Unavailable'), 2,
+  "busy or unavailable check/update starts must both be HTTP non-success");
+assert.equal(occurrences(httpOta, '{\\"ok\\":true,\\"generation\\":%lu}'), 2,
+  "both accepted operation responses must carry their generation token");
+assert.match(httpOta,
+  /,\\"busy\\":.*s\.busy[\s\S]{0,180}?,\\"generation\\":.*std::to_string\(s\.generation\)/,
+  "status must expose the mutex-consistent busy and generation handshake");
 
 // ── The verifier remains mandatory ────────────────────────────────────────────────────────────
 // esp_ota_end() is the ESP-IDF boundary that performs image verification under these Kconfig
@@ -239,7 +258,7 @@ assert.match(update,
 // Every failure returns through ota_task, whose single epilogue releases s_busy. That is what makes
 // the memory refusal retryable without a power-cycle-only latch.
 const taskStart = ota.indexOf("void ota_task(");
-const taskEnd = ota.indexOf("bool start(", taskStart);
+const taskEnd = ota.indexOf("uint32_t start(", taskStart);
 assert.ok(taskStart >= 0 && taskEnd > taskStart, "the OTA task epilogue must remain identifiable");
 const task = ota.slice(taskStart, taskEnd);
 assert.ok(task.indexOf("run_update(") < task.lastIndexOf("s_busy = false"),

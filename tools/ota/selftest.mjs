@@ -13,6 +13,7 @@ const contract = path.join(root, "test/test_ota_heap_contract.mjs");
 const files = [
   "sdkconfig.defaults",
   "main/ota_update.cpp",
+  "main/http_ota.cpp",
   "main/mqtt_ha.cpp",
   "main/hp_poll.cpp",
   "main/http_status.cpp",
@@ -158,6 +159,15 @@ try {
     ["the X10A poll no longer enters the bounded OTA quiesce", () =>
       replaceOnce("main/hp_poll.cpp", "ota_quiesce_step(network_quiesce, network_active)",
         "ota_quiesce_bypassed(network_quiesce, network_active)")],
+    ["a busy OTA check is acknowledged as HTTP success", () =>
+      replaceOnce("main/http_ota.cpp", 'httpd_resp_set_status(req, "503 Service Unavailable");',
+        'httpd_resp_set_status(req, "200 OK");')],
+    ["accepted OTA operations lose their generation response", () =>
+      replaceOnce("main/http_ota.cpp", '"{\\"ok\\":true,\\"generation\\":%lu}"',
+        '"{\\"ok\\":true}"')],
+    ["OTA status hides the busy handshake", () =>
+      replaceOnce("main/http_ota.cpp", '",\\"busy\\":" + (s.busy ? "true" : "false") +',
+        '",\\"busy\\":false" +')],
   ];
 
   let caught = 0;

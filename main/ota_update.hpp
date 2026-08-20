@@ -19,19 +19,22 @@ namespace daik {
 // Per-target OTA image suffix (always "" since esp32s3 is the only target).
 const char* ota_img_suffix();
 
-void ota_check_async(int64_t browser_epoch_ms);   // GET /ota/check
+// Accepted operations return a non-zero generation which is also exposed by ota_status(). A zero
+// return means the task was not accepted (busy or task-creation failure); HTTP must not report that
+// request as successful.
+uint32_t ota_check_async(int64_t browser_epoch_ms);   // GET /ota/check
 // POST /ota/update. `allow_downgrade` is set ONLY by an explicit ?downgrade=1 — the UI sends it
 // after the user picks a channel whose newest build is older than what is running (dev -> release).
 // It relaxes the version ORDER and nothing else: the signature check is untouched, and a manifest
 // can never ask for it. See logic/version_cmp.hpp → ota_install_allowed.
-void ota_update_async(bool allow_downgrade = false);
+uint32_t ota_update_async(bool allow_downgrade = false);
 void ota_health_gate_arm();                        // main.cpp: arm rollback health gate
 
 // Is an OTA network operation in flight RIGHT NOW — manifest TLS check or image download? Read every
 // second by the MQTT publish task so it can stand aside
 // instead of losing the allocation race and throwing std::bad_alloc (#380, logic/ota_quiesce.hpp).
 //
-// Deliberately NOT `ota_status().state == "updating"`: that copies three std::strings out under a
+// Deliberately NOT `ota_status().state == "updating"`: that copies several std::strings out under a
 // mutex, so the question "is the heap under pressure?" would itself allocate — asked once per second
 // by the very task the pressure is aimed at, on a lock the OTA task holds while it works. This is a
 // lock-free atomic load of a bool and cannot throw, block or fail.
@@ -60,6 +63,8 @@ struct OtaStatus {
     std::string available;        // manifest version of the SELECTED channel
     std::string current;          // running version
     std::string channel;          // "release" | "dev" — the feed `available` was read from
+    bool        busy = false;     // one accepted check/update task still owns the OTA operation
+    uint32_t    generation = 0;   // non-zero monotonic accepted-operation identity
     // The offered build is INSTALLABLE but OLDER than what is running (the dev -> release
     // direction). Reported separately from update_available so the UI can word it as a switch-back
     // and ask for confirmation, rather than either hiding it or calling an older build an "update".
@@ -68,7 +73,7 @@ struct OtaStatus {
 OtaStatus ota_status();
 
 // Is a check or a download in flight? Separate from ota_status() because the caller is the heap
-// watchdog (heap_guard.cpp), which runs when allocation is failing: copying an OtaStatus copies four
+// watchdog (heap_guard.cpp), which runs when allocation is failing: copying an OtaStatus copies several
 // std::strings out under the lock and can itself throw std::bad_alloc, on the one path that must
 // stay allocation-free. This reads the same mutex-guarded bool and returns it.
 //

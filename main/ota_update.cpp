@@ -77,6 +77,7 @@ using Lock = SemGuard;
 // One OTA operation at a time. Guarded by s_mtx (not a bare bool): /ota/check and /ota/update are
 // both reachable from the network and a double-tap in the UI must not spawn two TLS sessions.
 bool s_busy = false;
+uint32_t s_generation = 0;
 
 // "An OTA network operation is in flight" — the ONE piece of OTA state read from outside on a
 // per-second cadence
@@ -806,12 +807,16 @@ void ota_task(void* arg) {
     vTaskDelete(nullptr);
 }
 
-// Spawn the single OTA task, refusing if one is already running. Returns false if busy.
-bool start(bool update, bool allow_downgrade = false) {
+// Spawn the single OTA task, refusing if one is already running. A non-zero generation proves that
+// xTaskCreate accepted this exact operation; zero means the caller must report a non-success.
+uint32_t start(bool update, bool allow_downgrade = false) {
+    uint32_t generation = 0;
     {
         Lock lk(s_mtx);
-        if (s_busy) return false;
+        if (s_busy) return 0;
         s_busy = true;
+        generation = ++s_generation;
+        if (generation == 0) generation = ++s_generation;  // reserve zero for "not accepted"
     }
     const char* sentinel = allow_downgrade ? &kUpdateDowngradeMode : &kUpdateMode;
     void* mode = update ? const_cast<void*>(static_cast<const void*>(sentinel)) : nullptr;
@@ -822,9 +827,9 @@ bool start(bool update, bool allow_downgrade = false) {
         s_busy         = false;
         s_status.state = "error";
         s_status.message = "Out of memory — retry in a moment";
-        return false;
+        return 0;
     }
-    return true;
+    return generation;
 }
 
 }  // namespace
@@ -835,21 +840,24 @@ const char* ota_img_suffix() {
 
 bool ota_download_active() { return s_network_active.load(std::memory_order_acquire); }
 
-void ota_check_async(int64_t /*browser_epoch_ms*/) {
+uint32_t ota_check_async(int64_t /*browser_epoch_ms*/) {
     // browser_epoch_ms stays plumbed (the route parses ?ms=) but gates nothing: TLS certificate
     // DATE validation is compiled out (MBEDTLS_HAVE_TIME_DATE is not set), so the fetch needs no
     // wall clock. SNTP exists now for syslog timestamps, but making OTA wait on it would strand a
     // board whose NTP server is unreachable — see docs/SECURITY.md.
-    if (!start(/*update=*/false)) ESP_LOGW("ota", "check ignored: an OTA operation is already running");
+    const uint32_t generation = start(/*update=*/false);
+    if (!generation) ESP_LOGW("ota", "check ignored: OTA busy or task unavailable");
+    return generation;
 }
 
-void ota_update_async(bool allow_downgrade) {
-    if (!start(/*update=*/true, allow_downgrade))
-        ESP_LOGW("ota", "update ignored: an OTA operation is already running");
+uint32_t ota_update_async(bool allow_downgrade) {
+    const uint32_t generation = start(/*update=*/true, allow_downgrade);
+    if (!generation) ESP_LOGW("ota", "update ignored: OTA busy or task unavailable");
+    return generation;
 }
 
 bool ota_busy() {
-    // Deliberately NOT ota_status().state != "idle": that builder copies four std::strings out and
+    // Deliberately NOT ota_status().state != "idle": that builder copies several std::strings out and
     // also takes the CONFIG mutex, and its one caller here is the heap watchdog running on a heap
     // that is failing. This critical section allocates nothing at all.
     Lock lk(s_mtx);
@@ -866,6 +874,8 @@ OtaStatus ota_status() {
     Lock lk(s_mtx);
     s_status.current = esp_app_get_description()->version;
     s_status.channel = ch;
+    s_status.busy = s_busy;
+    s_status.generation = s_generation;
     return s_status;
 }
 

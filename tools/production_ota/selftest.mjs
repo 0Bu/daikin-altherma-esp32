@@ -15,6 +15,7 @@ const files = [
   "tools/agent-hooks/agent_hook.py",
   "main/logic/health_gate.hpp",
   "main/ota_update.cpp",
+  "main/http_ota.cpp",
   "main/mqtt_ha.cpp",
 ];
 const pristine = new Map(files.map(rel => [rel, fs.readFileSync(path.join(root, rel), "utf8")]));
@@ -54,17 +55,15 @@ try {
         'BENCH_ROLE = "production"')],
     ["the pressure window is shortened", () =>
       replaceOnce("scripts/production-ota-gate.py", "STRESS_SECONDS = 180", "STRESS_SECONDS = 60")],
-    ["the production write races the retiring OTA check task", () =>
-      replaceOnce("scripts/production-ota-gate.py", "OTA_OFFER_SETTLE_SECONDS = 1.0",
-        "OTA_OFFER_SETTLE_SECONDS = 0.0")],
-    ["an old exact offer bypasses the fresh check generation", () =>
-      replaceOnce("scripts/production-ota-gate.py", "if not seen_checking:",
-        "if False and not seen_checking:")],
-    ["a stale offer from the previous check aborts the fresh check", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        '        return False, True, None\n    if first_seen_at is None:',
-        '        fail("production board did not offer the exact gated dev version")\n' +
-        '    if first_seen_at is None:')],
+    ["offer polling ignores a replaced operation generation", () =>
+      replaceOnce("scripts/production-ota-gate.py", "generation != expected_generation",
+        "False")],
+    ["offer polling ignores the authoritative busy claim", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'if status.get("busy") is True:',
+        "if False:")],
+    ["a rejected firmware operation is reported as HTTP success", () =>
+      replaceOnce("main/http_ota.cpp", 'httpd_resp_set_status(req, "503 Service Unavailable");',
+        'httpd_resp_set_status(req, "200 OK");')],
     ["the signature verifier is bypassed", () =>
       replaceOnce("scripts/production-ota-gate.py", 'ROOT / "scripts/require-signed.sh"',
         'ROOT / "scripts/signature-check-bypassed.sh"')],
