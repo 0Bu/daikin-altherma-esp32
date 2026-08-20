@@ -83,6 +83,7 @@
 #include "logic/env3.hpp"
 #include "logic/mcp.hpp"
 #include "logic/http_surface.hpp"
+#include "logic/http_values_wait.hpp"
 #include "logic/registers.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/syslog_policy.hpp"
@@ -2473,6 +2474,23 @@ static void test_weather_fetch_headroom() {
     // Aggregate exhaustion is refused even with a large block free.
     CHECK(!weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES - 1, 32u * 1024u));
     CHECK(!weather_fetch_headroom_ok(0, 0));
+}
+
+// /values must wait behind either known firmware-owned TLS allocator, but only for a bounded
+// interval. Pin the independent owners and the exact inclusive timeout edge: using && would miss
+// the ordinary one-owner case, while using > would add another retry beyond the four-second cap.
+static void test_http_values_wait() {
+    using logic::HttpValuesWaitDecision;
+    CHECK(logic::http_values_wait_decision(false, false, 0, 4000) ==
+          HttpValuesWaitDecision::Ready);
+    CHECK(logic::http_values_wait_decision(true, false, 0, 4000) ==
+          HttpValuesWaitDecision::Wait);
+    CHECK(logic::http_values_wait_decision(false, true, 3999, 4000) ==
+          HttpValuesWaitDecision::Wait);
+    CHECK(logic::http_values_wait_decision(true, true, 4000, 4000) ==
+          HttpValuesWaitDecision::TimedOut);
+    CHECK(logic::http_values_wait_decision(false, false, 4000, 4000) ==
+          HttpValuesWaitDecision::Ready);
 }
 
 // The initial feed must be absolute HTTPS; redirects may use an ordinary relative reference but
@@ -13991,6 +14009,7 @@ int main() {
     test_ota_quiesce();
     test_ota_headroom();
     test_weather_fetch_headroom();
+    test_http_values_wait();
     test_ota_transport();
     test_heartbeat();
     test_crashinfo();

@@ -2323,6 +2323,18 @@ Structure:
   hold, connect/startup deferral is capped at five minutes rather than trusting a stuck activity bit
   forever. MQTT startup claims the same acknowledgement before its first Config/topic/client
   allocation and waits if an OTA request won the interval after HTTP startup.
+- **The model-sized values snapshot yields to those known TLS owners.** A fresh-production canary
+  measured `min_free_heap=700 B` and one clean `/values` 503 while the board otherwise recovered
+  without a restart or allocation-skip counter. Before the model-sized snapshot allocation, the
+  shared `/values`/MCP `get_hp_values` sender now checks the lock-free OTA and Weather activity flags
+  every 250 ms for at most four seconds. The 129-row plant needs a 5,160-byte contiguous
+  `CachedValue` block before the smaller ambiguity vector and 1 KiB response sink; waiting lets the
+  observed roughly two-second TLS/parse owner unwind instead of racing that block. A stalled owner
+  still produces an explicit bounded busy-503 after four seconds; it cannot park the HTTP server
+  indefinitely. `/status`, `/diag` and `/ota/status` are not themselves gated; once the bounded
+  values request completes, health and update progress remain observable during a long firmware
+  download. No model-sized buffer is retained across requests —
+  reintroducing one would recreate the dev.13 fragmentation failure this coordination replaces.
 - **The weather fetch gates on headroom immediately before opening TLS** (`logic/weather_forecast.hpp` →
   `weather_fetch_headroom_ok`, live-10). An Open-Meteo fetch transiently claims ~16 KiB mbedTLS
   in-buffer + 4 KiB out-buffer, HTTP/TCP buffers, the response string and the cJSON tree, and it

@@ -27,6 +27,7 @@
 #include "logic/history.hpp"
 #include "logic/hp_probe.hpp" // active-profile rows accepted by POST /hp/query
 #include "logic/http_cache.hpp"
+#include "logic/http_values_wait.hpp"
 #include "logic/convert.hpp"   // conv_is_binary — /values marks a bit-flag row from its converter id
 #include "logic/discovery.hpp" // ambiguous X10A labels need their existing MQTT page scope in the UI
 #include "logic/mqtt_base.hpp"  // mqtt_base_effective — report the base actually published under
@@ -58,6 +59,8 @@
 #include "esp_system.h"
 #include "esp_partition.h"
 #include "esp_core_dump.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "diag_log.hpp"
 #include <algorithm>
 #include <cstdint>
@@ -78,6 +81,35 @@ extern const unsigned char heat_pump_icon_png_start[] asm("_binary_heat_pump_ico
 extern const unsigned char heat_pump_icon_png_end[]   asm("_binary_heat_pump_icon_png_end");
 
 namespace daik {
+
+// GET /values needs one contiguous 40-byte CachedValue slot per live X10A row (5,160 B on the
+// 129-row production profile). Weather/OTA TLS can temporarily leave less than that even though the
+// heap recovers immediately. Wait only on this proven allocation path, before it owns a snapshot or
+// mutex, instead of keeping another boot-long buffer (the dev.13 regression). Status, diagnostics
+// and OTA progress are not themselves gated; this request releases the single HTTP task after the
+// bounded wait if a TLS owner remains active.
+constexpr TickType_t kValuesTlsWait = pdMS_TO_TICKS(4000);
+constexpr TickType_t kValuesTlsRetry = pdMS_TO_TICKS(250);
+
+static bool wait_for_values_tls_owner() {
+    const TickType_t started = xTaskGetTickCount();
+    for (;;) {
+        const TickType_t elapsed = xTaskGetTickCount() - started;
+        const auto decision = logic::http_values_wait_decision(
+            ota_download_active(), weather_fetch_active(),
+            static_cast<uint32_t>(elapsed * portTICK_PERIOD_MS),
+            static_cast<uint32_t>(kValuesTlsWait * portTICK_PERIOD_MS));
+        if (decision == logic::HttpValuesWaitDecision::Ready) return true;
+        if (decision == logic::HttpValuesWaitDecision::TimedOut) return false;
+        vTaskDelay(kValuesTlsRetry);
+    }
+}
+
+static esp_err_t values_tls_busy(httpd_req_t* req) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "network operation in progress");
+}
 
 // Quote a string for JSON via the shared RFC 8259 encoder (logic/json.hpp) — the same one the MQTT
 // payloads use. Not a local escaper: /scan echoes SSIDs, i.e. arbitrary bytes chosen by any AP in
@@ -1475,6 +1507,7 @@ static void append_values_json(JsonOut& j, const ValuesSnapshot& snapshot) {
 // snapshots before the first byte and stream the same representation through this strict 1 KiB sink.
 esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix,
                                 std::string_view suffix) {
+    if (!wait_for_values_tls_owner()) return values_tls_busy(req);
     ValuesSnapshot snapshot = take_values_snapshot();
     HttpJsonChunks j(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");

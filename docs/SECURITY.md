@@ -307,6 +307,10 @@ normally installed by the NVS-preserving signed USB flash workflow. The gate the
 host logic/X10A/OTA contracts and a fixed
 three-minute concurrent `/status` + `/values` + `/diag` pressure window with a real OTA-manifest
 TLS fetch. Optional Open-Meteo evidence is not a bench prerequisite.
+The shared `/values`/MCP values sender waits in 250-ms steps for at most four seconds before taking
+its model-sized snapshot while either firmware TLS owner is active. The cap remains below the gate's
+five-second request timeout; expiry is a blocking busy-503, not an accepted retry. `/status`,
+`/diag` and `/ota/status` are not themselves gated and resume after the bounded values request.
 
 Only after that stage and an explicit `production` confirmation does the command perform exactly
 one un-retried `POST /ota/update`. All subsequent observation is read-only: exact version/ELF and

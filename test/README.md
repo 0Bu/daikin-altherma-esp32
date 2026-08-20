@@ -121,12 +121,14 @@ is reachable from the cleanup boundary. Re-enabling before broker delivery cance
 the host: firmware bytes stream through the low-level HTTP/OTA APIs, HTTP/TLS is fully released
 before `esp_ota_end()` performs RSA validation, total-free and largest-contiguous headroom are gated
 both before transfer and immediately before validation, and boot selection remains strictly after a
-successful verifier result. It also requires the allocation-rich X10A poll to use the existing
-bounded quiesce rule, distinguishes intentional holds from OOM skips, and keeps IDF's umbrella image
-validation error generic rather than falsely claiming a bad signature. Initial feed URLs and every
-redirect stay on forced HTTPS, and an oversized response remains a size-policy refusal rather than
-masquerading as an interrupted connection. `tools/ota/selftest.mjs` removes each of those safeguards
-independently and proves the contract turns red.
+successful verifier result. It also requires the allocation-rich X10A poll and MQTT publisher to use
+their bounded quiesce rules, distinguishes intentional holds from OOM skips, and pins the shared
+`/values`/MCP sender's fail-closed four-second wait behind active OTA or Weather TLS owners before
+its model-sized snapshot. IDF's umbrella image-validation error stays generic rather than falsely
+claiming a bad signature. Initial feed URLs and every redirect stay on forced HTTPS, and an oversized
+response remains a size-policy refusal rather than masquerading as an interrupted connection.
+`tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently and proves the
+source contract turns red; the IDF-free wait decision itself is exercised by `test/test_logic.cpp`.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation

@@ -31,6 +31,13 @@ HTTP OOM guard. `get_hp_values` stages its X10A/HomeHub snapshots before the fir
 the JSON-RPC envelope and shared `/values` representation through a host-tested 1 KiB chunk sink;
 the complete model-sized response is never one contiguous allocation.
 
+Immediately before that model-sized snapshot, the shared values sender waits in 250 ms steps for
+at most four seconds while a firmware OTA or Weather TLS operation is active. Request parsing and
+the small JSON-RPC envelope strings may already exist at this point. If the TLS owner remains active
+at the cap, the request fails before the snapshot and before the first response byte with HTTP `503`,
+`Content-Type: text/plain`, and `network operation in progress`. This transport-level busy response
+is deliberately not a JSON-RPC error object; clients may retry the complete read-only call later.
+
 ## Browser setup page
 
 Open [`http://daikin-altherma-esp32.local/mcp`](http://daikin-altherma-esp32.local/mcp) in a browser.
