@@ -48,7 +48,7 @@ assert.ok(publish.indexOf("grouped_json_size(s_x10a_grouped)") >= 0,
   "the exact-size counting pass must run before the write");
 assert.ok(publish.indexOf("append_grouped_json(s_x10a_json, s_x10a_grouped)") >= 0,
   "the payload must be written into the reused buffer via the bounded append");
-assert.ok(publish.indexOf("fnv1a64(s_x10a_json)") >= 0,
+assert.ok(publish.indexOf("fnv1a64(std::string_view(s_x10a_json.data(), s_x10a_json.size()))") >= 0,
   "the dedup guard must compare the digest of the built payload");
 assert.ok(publish.indexOf("build_grouped_json") < 0,
   "the owning one-shot builder must not run on the per-second publish path");
@@ -73,8 +73,14 @@ assert.match(mqtt, /static\s+std::vector<CachedValue>\s+s_x10a_cache;/,
   "the snapshot cache must be task-owned and persistent");
 assert.match(mqtt, /static\s+std::vector<X10aGroupedSlot>\s+s_x10a_grouped;/,
   "the grouped snapshot must be task-owned and persistent");
-assert.match(mqtt, /static\s+std::string\s+s_x10a_json;/,
-  "the payload buffer must be task-owned and persistent");
+assert.match(mqtt,
+  /static\s+std::array<char,\s*X10A_GROUPED_JSON_MAX_BYTES\s*\+\s*1>\s+s_x10a_json_storage\s*\{\s*\};/,
+  "the payload bytes must live in fixed static storage, not a large heap string");
+assert.match(mqtt,
+  /static\s+BoundedJsonBuffer\s+s_x10a_json\s*\(\s*s_x10a_json_storage\.data\(\),\s*X10A_GROUPED_JSON_MAX_BYTES\s*\);/,
+  "the device serializer must expose the fixed storage through the bounded sink");
+assert.doesNotMatch(mqtt, /s_x10a_json\.reserve\s*\(/,
+  "the fixed X10A payload must never reserve a heap block");
 
 // Profile preparation creates every base/companion slot and reserves value capacity once. The
 // per-cycle fill only updates presence/views from the allocation-free aligned snapshot.
@@ -85,9 +91,9 @@ assert.ok(prepareStart >= 0 && fillStart > prepareStart && fillEnd > fillStart,
   "the profile preparation and snapshot fill must remain identifiable");
 const prepare = mqtt.slice(prepareStart, fillStart);
 const fill = mqtt.slice(fillStart, fillEnd);
-assert.ok(prepare.indexOf("s_x10a_json.reserve(X10A_GROUPED_JSON_MAX_BYTES)") >= 0 &&
+assert.ok(prepare.indexOf("s_x10a_json.reserve") < 0 &&
           prepare.indexOf("ha_slug_into(base.key, d.label)") >= 0,
-  "the fixed JSON block and row keys must be allocated during profile preparation");
+  "profile preparation may allocate row slots, but the fixed JSON bytes must already be static");
 assert.ok(fill.indexOf("hp_values_snapshot_aligned") >= 0 &&
           fill.indexOf("slot.present") >= 0 &&
           fill.indexOf("resize(") < 0 && fill.indexOf("reserve(") < 0,

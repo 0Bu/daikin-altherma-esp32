@@ -263,7 +263,14 @@ struct X10aGroupedSlot {
 // after a real profile change), then reused without capacity growth in every one-second cycle.
 static std::vector<CachedValue>      s_x10a_cache;
 static std::vector<X10aGroupedSlot>  s_x10a_grouped;
-static std::string                   s_x10a_json;
+// Static storage, not a 12 KiB heap allocation. On the live X10A plant that single persistent
+// block left only 7.5-11 KiB contiguous for GET /status even though 30+ KiB was free in aggregate,
+// so the endpoint returned a permanent clean 503 after publisher startup. Keeping the same hard
+// payload ceiling in .bss removes that fragmentation while BoundedJsonBuffer preserves count-first,
+// fail-closed serialization and the C-string required by esp-mqtt.
+static std::array<char, X10A_GROUPED_JSON_MAX_BYTES + 1> s_x10a_json_storage{};
+static BoundedJsonBuffer s_x10a_json(s_x10a_json_storage.data(),
+                                     X10A_GROUPED_JSON_MAX_BYTES);
 static std::string                   s_x10a_buffer_profile;
 static bool                          s_x10a_json_oversize_logged = false;
 static bool                          s_last_x10a_digest_valid = false;
@@ -477,9 +484,6 @@ static void prepare_x10a_buffers(const std::string& profile_id) {
     // Mark the layout invalid before the first allocation. If any reserve/resize throws, the task
     // catch retries the whole preparation next cycle instead of accepting a half-built old layout.
     s_x10a_buffer_profile.clear();
-    if (s_x10a_json.capacity() < X10A_GROUPED_JSON_MAX_BYTES)
-        s_x10a_json.reserve(X10A_GROUPED_JSON_MAX_BYTES);
-
     const logic::ProfileView profile = def::resolved(def::lookup(profile_id.c_str()));
     size_t rows = 0;
     size_t slots = 0;
@@ -806,7 +810,12 @@ static bool publish_x10a_state(const Config& config, bool force) {
         return false;
     }
     append_grouped_json(s_x10a_json, s_x10a_grouped);
-    const uint64_t digest = fnv1a64(s_x10a_json);
+    if (s_x10a_json.overflowed() || s_x10a_json.size() != need) {
+        diag_printf("mqtt: X10A fixed JSON buffer overflowed after an exact %u B count\n",
+                    static_cast<unsigned>(need));
+        return false;
+    }
+    const uint64_t digest = fnv1a64(std::string_view(s_x10a_json.data(), s_x10a_json.size()));
     if (!force && s_last_x10a_digest_valid && digest == s_last_x10a_digest) return false;
     if (!mqtt_publish(s_x10a, s_x10a_json.c_str(), static_cast<int>(s_x10a_json.size()), 0, 1))
         return false;

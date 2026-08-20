@@ -95,6 +95,63 @@ struct CountingOut {
     }
 };
 
+// A non-owning, fixed-capacity byte sink with the same append surface as std::string. The caller
+// provides `capacity + 1` bytes so this can keep a trailing NUL for C APIs without counting it as
+// payload. An overflow is sticky and writes no partial fragment; callers can therefore count first,
+// append once, and fail closed without a heap allocation or a truncated JSON document.
+class BoundedJsonBuffer {
+public:
+    BoundedJsonBuffer(char* storage, size_t capacity)
+        : storage_(storage), capacity_(capacity) {
+        clear();
+    }
+
+    void clear() {
+        size_ = 0;
+        overflowed_ = false;
+        if (storage_) storage_[0] = '\0';
+    }
+
+    BoundedJsonBuffer& operator+=(char c) {
+        append(std::string_view(&c, 1));
+        return *this;
+    }
+    BoundedJsonBuffer& operator+=(const char* s) {
+        append(s ? std::string_view(s) : std::string_view{});
+        return *this;
+    }
+    BoundedJsonBuffer& operator+=(const std::string& s) {
+        append(s);
+        return *this;
+    }
+    BoundedJsonBuffer& operator+=(std::string_view s) {
+        append(s);
+        return *this;
+    }
+
+    const char* c_str() const { return storage_ ? storage_ : ""; }
+    const char* data() const { return c_str(); }
+    size_t size() const { return size_; }
+    size_t capacity() const { return capacity_; }
+    bool overflowed() const { return overflowed_; }
+
+private:
+    void append(std::string_view s) {
+        if (overflowed_) return;
+        if (!storage_ || s.size() > capacity_ - size_) {
+            overflowed_ = true;
+            return;
+        }
+        for (const char c : s) storage_[size_++] = c;
+        storage_[size_] = '\0';
+    }
+
+    char*  storage_ = nullptr;
+    size_t capacity_ = 0;
+    size_t size_ = 0;
+    bool   overflowed_ = false;
+};
+
 // Exact encoded byte counts, allocation-free, using the same template instantiation that writes the
 // real bytes. `json_quoted_size` includes the surrounding quotes (RFC 8259 §7 string = quotes +
 // inside).
