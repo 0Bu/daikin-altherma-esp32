@@ -203,8 +203,8 @@ inline size_t grouped_json_size(const Values& vals) {
 // Append the grouped payload to `out`. The caller must have reserved capacity for
 // grouped_json_size(vals) first: writing into reserved capacity performs no allocation, which is
 // the entire point on the device (a grow here is what the counting pass exists to prevent).
-template <typename Values>
-inline void append_grouped_json(std::string& out, const Values& vals) {
+template <typename JsonOut, typename Values>
+inline void append_grouped_json(JsonOut& out, const Values& vals) {
     detail::append_grouped_json_impl(out, vals);
 }
 
