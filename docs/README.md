@@ -542,8 +542,8 @@ POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
                                    #   mb_port 1..65535, mb_unit_id 1..247, mb_host at most 512
                                    #   chars (the persisted blob's field bound; longer is a 400
                                    #   "mb_host is too long") — docs/MODBUS_PROTOCOL.md.
-                                   #   The link is READ-ONLY: no actuation field is accepted and no
-                                   #   HTTP raw-register route exists (docs/MODBUS_PROTOCOL.md).
+                                   #   The HomeHub link is READ-ONLY: no actuation field is accepted
+                                   #   and no raw Modbus route exists (docs/MODBUS_PROTOCOL.md).
 POST /discover_homehub             # {} → bounded mDNS search started only by the HomeHub dialog's
                                    #   Search button. Success: {ok:true,host:"<IPv4>"}; miss: 404.
                                    #   Never persists or reconfigures — Save owns that boundary.
@@ -583,6 +583,54 @@ POST /set_env3                     # Compatibility route: { enabled, sda?, scl? 
 #  all persistent /set_* above     # an NVS write failure → 500 {ok:false,error:"config write failed"},
                                    #   nothing applied and no reboot (the failing key is logged to /diag)
 POST /detect                       # re-run auto-detection (reset profile to "auto" + invalidate fingerprint)
+GET  /models?active=1              # X10A profile rows for the Settings register picker:
+                                   #   {profile,definition,fallback,values:[{reg,offset,conv,size,label}]}.
+                                   #   Rows stream from the exact resolved main/def view. Auto or a
+                                   #   stale id uses definition:"generic",fallback:true, preserving
+                                   #   useful examples without claiming that generic was detected.
+POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-chosen page and report the
+                                   #   raw frame plus every decode the requested slice admits. The only
+                                   #   route whose subject is a register the value catalog does not
+                                   #   claim, and what makes an unmapped model explorable without a
+                                   #   rebuild (logic/hp_probe.hpp).
+                                   #   { reg: 0..255, offset: 0..31, size: 1|2, conv?: 0..999 }
+                                   #   Omitting `conv` SWEEPS every candidate converter of that width
+                                   #   and merges identical decodes, so the answer names a choice
+                                   #   ("105, also 107/114/119 -> 26.6") instead of repeating a number.
+                                   #   -> { reg, proto, rx_pin, tx_pin, offset, size, status, ok,
+                                   #        frame, payload, payload_len, slice,
+                                   #        decodes:[{conv, aliases?, value|text|refused|unimplemented}] }
+                                   #   `frame` is every byte received, including a NAK, a bad-CRC or
+                                   #   partial reply. For a valid reply it is the complete header,
+                                   #   payload and checksum; `slice` is the requested payload field.
+                                   #   A page this unit does not answer, refuses (0x15 0xEA) or answers
+                                   #   too short is a RESULT, not an HTTP error: 200 with ok:false and a
+                                   #   stable `status` (no_reply/rejected/bad_crc/unexpected_reply/
+                                   #   invalid_length/short_reply/out_of_bounds), because a client walking a map hits
+                                   #   those constantly. 400 = malformed request, 409 = a probe already
+                                   #   in flight (one bus, one question), 503 = no poll task or the
+                                   #   request went unserved for 3 s.
+                                   #   POST despite reading nothing on the device: it puts a frame on a
+                                   #   shared physical bus and spends a poll cycle's bus time, and GET
+                                   #   must stay the method a prefetcher may take freely.
+                                   #   READ-ONLY BY CONSTRUCTION, not by restraint: X10A has no write
+                                   #   command in either framing (X10A_PROTOCOL.md), so an arbitrary
+                                   #   register byte is an arbitrary read and nothing else.
+                                   #   A DECODE, NOT A MEASUREMENT: unlike /values and MQTT, this path
+                                   #   runs neither reading_plausible() nor the availability ledger,
+                                   #   on purpose — a filter that hid an impossible answer would hide
+                                   #   the evidence the probe exists to collect. So a probe can report
+                                   #   240.6 °C on a row Home Assistant correctly shows as unavailable.
+                                   #   The two disagreeing is the tool working; never quote a probe
+                                   #   number as a reading.
+                                   #   While the X10A link is connected, Settings → Protocol → Protocol
+                                   #   diagnostics appears as a closed accordion whose tongue directly
+                                   #   contains the X10A query form. The row is absent while X10A is offline. Its
+                                   #   Register dropdown shows exact labels from the detected main/def
+                                   #   profile, or a labelled generic fallback when unresolved; a selection fills
+                                   #   the editable reg/offset/size/conv fields, sent only by the
+                                   #   Query button. The button and normal UI polling pause while the
+                                   #   single HTTP worker waits up to 3 s for the poll task.
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)
 POST /ota/update                   # start the background self-update (downloads, then reboots)
 GET  /ota/status                   # { state, progress, message, available, update_available, current }

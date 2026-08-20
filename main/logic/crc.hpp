@@ -54,6 +54,13 @@ inline bool reply_len_fits(int reply_len, size_t buflen) {
     return reply_len >= 0 && static_cast<size_t>(reply_len) <= buflen;
 }
 
+inline bool reply_len_valid(Protocol proto, int reply_len, size_t buflen) {
+    // A normal I reply needs opcode, page, LEN and checksum even with an empty payload. The 2-byte
+    // NAK is recognized separately before dynamic length parsing.
+    const int minimum = proto == Protocol::I ? 4 : 2;
+    return reply_len >= minimum && reply_len_fits(reply_len, buflen);
+}
+
 // HP "did not understand the request" reply (both protocols).
 inline bool is_error_reply(const uint8_t* buf, int len) {
     return len >= 2 && buf[0] == 0x15 && buf[1] == 0xea;
@@ -62,6 +69,30 @@ inline bool is_error_reply(const uint8_t* buf, int len) {
 // Verify the trailing-byte checksum over the first len-1 bytes.
 inline bool crc_ok(const uint8_t* buf, int len) {
     return len >= 1 && crc(buf, len - 1) == buf[len - 1];
+}
+
+// A CRC-valid Protocol-I reply still belongs to a particular request: bytes 0/1 must echo the
+// read opcode and requested page. Protocol S has no documented equivalent echo, so only I applies
+// this identity check. Kept pure so wrong-page and partial-frame cases are host tested.
+enum class HpReplyKind : uint8_t {
+    Ok,
+    NoReply,
+    Rejected,
+    ShortReply,
+    BadCrc,
+    UnexpectedReply,
+    InvalidLength,
+};
+
+inline HpReplyKind hp_reply_classify(uint8_t reg, Protocol proto, const uint8_t* buf,
+                                     int received, int expected) {
+    if (!buf || received <= 0) return HpReplyKind::NoReply;
+    if (received >= 2 && is_error_reply(buf, received)) return HpReplyKind::Rejected;
+    if (expected < 0 || received < expected) return HpReplyKind::ShortReply;
+    if (!crc_ok(buf, received)) return HpReplyKind::BadCrc;
+    if (proto == Protocol::I && (buf[0] != 0x40 || buf[1] != reg))
+        return HpReplyKind::UnexpectedReply;
+    return HpReplyKind::Ok;
 }
 
 // Where the value payload starts inside a full reply (past the header): protocol S = 1,

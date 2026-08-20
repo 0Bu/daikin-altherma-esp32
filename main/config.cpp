@@ -65,6 +65,11 @@ Config config() {
     return g_cfg;
 }
 
+ConfigLinkSnapshot config_link_snapshot() {
+    Lock lk(g_mtx);
+    return {g_cfg.proto, g_cfg.rx_pin, g_cfg.tx_pin};
+}
+
 static uint32_t next_revision(uint32_t current) {
     uint32_t next = current + 1;
     return next ? next : 1;

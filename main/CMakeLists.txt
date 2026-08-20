@@ -175,7 +175,9 @@ set(UI_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_and_gzip.
 set(UI_MINIFIER_VENDOR
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rjsmin.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rcssmin.py")
-set(UI_GZIP_MAX_BYTES 153600)
+# The default-off X10A diagnosis form/result renderer added 3.3 KiB compressed to the former
+# 150 KiB ceiling. Keep a measured 160 KiB cap rather than disabling the gate or rounding it away.
+set(UI_GZIP_MAX_BYTES 163840)
 idf_build_get_property(PYTHON PYTHON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APP_JS_MANIFEST}")
 file(STRINGS "${APP_JS_MANIFEST}" APP_JS_ENTRIES ENCODING UTF-8)

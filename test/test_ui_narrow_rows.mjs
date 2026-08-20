@@ -55,8 +55,8 @@ const share = Number(style.match(/\.vrow > \.vrow-label \{ flex: 1 1 (\d\d)%/)[1
 assert.ok(share >= 45 && share <= 65,
   `the label share (${share}%) must leave the reading a usable column without stacking ordinary ones`);
 assert.match(style,
-  /\.vrow \.chan-sel, \.vrow \.lang-sel, \.vrow \.diagnostics-sel \{[^}]*min-width:\s*124px;[^}]*max-width:\s*60%;/,
-  "all Firmware selectors must remain compact beside their labels instead of filling a second line");
+  /\.vrow \.chan-sel, \.vrow \.lang-sel, \.vrow \.diagnostics-sel,\s*\.vrow \.protocol-diagnostics-sel \{[^}]*min-width:\s*124px;[^}]*max-width:\s*60%;/,
+  "all word-valued Settings selectors must remain compact beside their labels instead of filling a second line");
 
 // ── Both, plus the split Settings rows: a dropped reading stays in its own column ───────────────
 // `space-between` flushes a lone item to the LEFT — under the name, where a reading reads as a

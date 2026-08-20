@@ -17,7 +17,7 @@ const input = path.join(work, "index_inlined.html");
 const gzipA = path.join(work, "index-a.html.gz");
 const gzipB = path.join(work, "index-b.html.gz");
 const minifiedPath = path.join(work, "index.min.html");
-const budget = 153600;
+const budget = 163840;
 
 try {
   const html = fs.readFileSync(path.join(root, "main/www/index.html"), "utf8");
@@ -70,8 +70,8 @@ try {
     "shipped markup must carry no HTML comments — the source keeps them, the artefact must not");
 
   const cmake = fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8");
-  assert.match(cmake, /set\(UI_GZIP_MAX_BYTES 153600\)/,
-    "CMake and the host contract must share the 150 KiB budget");
+  assert.match(cmake, /set\(UI_GZIP_MAX_BYTES 163840\)/,
+    "CMake and the host contract must share the 160 KiB budget");
   assert.match(cmake, /minify_and_gzip\.py[\s\S]*--max-gzip-bytes \$\{UI_GZIP_MAX_BYTES\}/,
     "firmware build must execute the checked minifier and size gate");
 

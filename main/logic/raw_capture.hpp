@@ -1,15 +1,13 @@
 #pragma once
 // WHEN to put raw X10A page bytes on /diag from the POLL path — the missing half of logic/hexdump.hpp.
 //
-// hexdump.hpp names its own limitation, and it is the reason #194 is still open: the raw dump fires
-// only on a DETECT pass (boot, or POST /detect), and a detect pass essentially never coincides with
-// a compressor run. Target Evap. Temp. is only wrong WHILE the compressor runs — at rest it decodes
-// to 240.6 °C and the ±200 °C envelope already drops it — so the bytes behind the impossible value
-// have never been captured at the instant it is impossible, and #194's diagnosis had to be
-// back-derived from a number already rounded to one decimal. Issue #209 asks for exactly this
-// capture ("record the raw target bytes … while the compressor is running") and cannot be closed
-// without it: quarantining the row (logic/availability.hpp) stops the false value reaching Home
-// Assistant, but only the wire bytes can decide the scale and let the row come back.
+// hexdump.hpp names its original limitation: the raw dump fires only on a DETECT pass (boot, or
+// POST /detect), and a detect pass essentially never coincides with a compressor run. Target Evap.
+// Temp. was only wrong WHILE the compressor ran — at rest it decoded to 240.6 °C and the ±200 °C
+// envelope already dropped it — so the first #194 diagnosis had to be back-derived from a number
+// already rounded to one decimal. The runtime capture requested in #209 supplied the missing wire
+// evidence and #194 is now resolved through logic/conv_override.hpp; this cadence remains useful for
+// the next converter or layout mismatch.
 //
 // The cadence is the whole design. A dump every poll cycle would be 1 line/second into a 6 KB diag
 // ring and out to syslog — it would evict the rest of the boot's evidence within a minute, which is

@@ -12,6 +12,16 @@ namespace daik {
 bool hp_uart_init(int rx_pin, int tx_pin);
 void hp_uart_deinit();
 
+struct HpQueryResult {
+    HpReplyKind kind = HpReplyKind::NoReply;
+    int received = 0;  // copied bytes, including partial and negative replies
+};
+
+// Detailed result for diagnostics. It retains raw bytes for NAK, CRC, wrong-echo and short replies;
+// hp_query() below keeps the established integer contract for the poll and detection paths.
+HpQueryResult hp_query_detailed(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen,
+                                HpQueryLogPolicy log_policy = HpQueryLogPolicy::All);
+
 // Query one register. Writes the reply into buf (capacity buflen); returns the number of verified
 // bytes (payload framing intact, CRC ok) or <0 on timeout / rejection / bad CRC. Detection passes
 // use IntegrityOnly because absent pages are an expected part of fingerprinting; normal polling

@@ -18,13 +18,12 @@
 // side runs 25-40 bar. A plausibility bound cannot catch those; only the wire bytes distinguish an
 // absent sensor from a wrong offset, which is why 0x10 and 0x20 are dumped too.
 //
-// KNOWN LIMITATION, and it is why the Target Evap. Temp. case above stayed undiagnosed (#194):
-// this dump is emitted ONLY on a detect pass — at boot, or on POST /detect. A detect pass essentially
-// never coincides with a compressor run, and that row is only wrong WHILE the compressor runs (at
-// rest it decodes to 240.6 °C and the ±200 °C envelope already drops it). So the wire bytes behind
-// the impossible value have never actually been captured at the moment it occurs, and the diagnosis
-// in #194 had to back-derive them from a value already rounded to one decimal. The dump makes the
-// question decidable in principle; it does not yet make it decidable at the instant that matters.
+// HISTORICAL LIMITATION: this dump is emitted ONLY on a detect pass — at boot, or on POST /detect.
+// A detect pass essentially never coincides with a compressor run, and Target Evap. Temp. was only
+// wrong WHILE the compressor ran. #209 added the complementary runtime capture and the resulting
+// wire evidence resolved #194 through logic/conv_override.hpp. The detect dump remains intentionally
+// separate: it answers page/layout questions during discovery, while raw_capture.hpp samples a
+// bounded number of running-state frames.
 #include <cstdint>
 
 namespace daik {

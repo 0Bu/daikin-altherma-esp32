@@ -652,6 +652,158 @@ async function onDiagnosticsPick() {
   toast(t(enabled ? "diagnostics.saved_on" : "diagnostics.saved_off"), "ok");
 }
 
+function hpProbeSelectionMatches(row, request = hpProbeDraftRequest()) {
+  return !!row && !!request && request.reg === row.reg && request.offset === row.offset &&
+    request.size === row.size && request.conv === row.conv;
+}
+
+function hpProbeIsOpen() {
+  return S.descOpen?.has("protocol:diagnosis") === true;
+}
+
+async function loadHpProbeCatalog(expectedProfile = S.status?.profile?.id || "") {
+  if (!hpProbeIsOpen() || S.hpProbeCatalogBusy) return;
+  S.hpProbeCatalogBusy = true;
+  S.hpProbeCatalogError = "";
+  renderSettings();
+  try {
+    const response = await j(`/models?active=1&ms=${Date.now()}`, { cache: "no-store" });
+    const activeNow = S.status?.profile?.id || "";
+    if (!hpProbeIsOpen() || response?.profile !== activeNow ||
+        (expectedProfile && expectedProfile !== activeNow)) {
+      // Never leave rows from the previous installation selectable after detection changes while
+      // this request is in flight. The next status refresh reloads the current profile.
+      S.hpProbeCatalog = [];
+      S.hpProbeCatalogProfile = "";
+      S.hpProbeCatalogDefinition = "";
+      S.hpProbeCatalogFallback = false;
+      S.hpProbeDraft.selected = "";
+      return;
+    }
+    const rows = Array.isArray(response.values) ? response.values : [];
+    S.hpProbeCatalog = rows.filter((row) => row && typeof row.label === "string" && row.label &&
+      Number.isInteger(row.reg) && row.reg >= 0 && row.reg <= 255 &&
+      Number.isInteger(row.offset) && row.offset >= 0 && row.offset <= 31 &&
+      (row.size === 1 || row.size === 2) && Number.isInteger(row.conv) &&
+      row.conv >= 0 && row.conv <= 999);
+    S.hpProbeCatalogProfile = response.profile;
+    S.hpProbeCatalogDefinition = typeof response.definition === "string" ? response.definition : response.profile;
+    S.hpProbeCatalogFallback = response.fallback === true;
+    // A profile change can reuse the same array index for a different row. Never show that new
+    // label as selected over the old tuple; keep the editable tuple and return the picker to manual.
+    const selected = S.hpProbeCatalog[Number(S.hpProbeDraft.selected)];
+    if (!hpProbeSelectionMatches(selected)) S.hpProbeDraft.selected = "";
+  } catch {
+    if ((S.status?.profile?.id || "") === expectedProfile) {
+      S.hpProbeCatalog = [];
+      S.hpProbeCatalogProfile = expectedProfile;
+      S.hpProbeCatalogDefinition = "";
+      S.hpProbeCatalogFallback = false;
+      S.hpProbeCatalogError = "load";
+    }
+  } finally {
+    S.hpProbeCatalogBusy = false;
+    renderSettings();
+  }
+}
+
+async function onProtocolDiagnosticsDisclosure() {
+  if (!hpProbeIsOpen()) return;
+  S.hpProbeError = "";
+  await loadHpProbeCatalog(S.status?.profile?.id || "");
+}
+
+function onHpProbeRegisterPick() {
+  const select = $("hpProbeRegister");
+  const index = select.value;
+  select.blur();
+  if (index === "" || !S.hpProbeCatalog[Number(index)]) {
+    S.hpProbeDraft.selected = "";
+    renderSettings();
+    return;
+  }
+  const row = S.hpProbeCatalog[Number(index)];
+  S.hpProbeDraft = {
+    selected: index,
+    reg: `0x${row.reg.toString(16).toUpperCase().padStart(2, "0")}`, mode: "specific",
+    offset: String(row.offset), size: String(row.size), conv: String(row.conv),
+  };
+  S.hpProbeResult = null;
+  S.hpProbeError = "";
+  renderSettings();
+}
+
+function onHpProbeDraftInput(input) {
+  const field = { hpProbeReg: "reg", hpProbeOffset: "offset", hpProbeSize: "size",
+    hpProbeConv: "converter" }[input.id];
+  if (!field) return;
+  if (field === "converter") {
+    S.hpProbeDraft.mode = input.value === "sweep" ? "sweep" : "specific";
+    if (input.value !== "sweep") S.hpProbeDraft.conv = input.value;
+  } else {
+    S.hpProbeDraft[field] = input.value;
+  }
+  if (field === "size") {
+    const converters = hpProbeConvertersForSize(input.value);
+    if (!converters.includes(Number(S.hpProbeDraft.conv)))
+      S.hpProbeDraft.conv = String(converters[0]);
+  }
+  // The option is a complete, known tuple rather than a label for one field. As soon as any tuple
+  // field is edited, even to the same textual value, the form is now explicitly manual. This keeps
+  // the picker truthful and makes selecting the known row again an unambiguous reset to its def.
+  S.hpProbeDraft.selected = "";
+  const register = $("hpProbeRegister");
+  if (register) register.value = "";
+  const normalized = $("hpProbeRegNormalized");
+  const reg = hpProbeRegNumber(S.hpProbeDraft.reg);
+  if (normalized) normalized.textContent = reg == null ? "—" : `0x${reg.toString(16).toUpperCase().padStart(2, "0")}`;
+  if (field === "converter") {
+    input.blur();
+    renderSettings();
+  }
+}
+
+function syncHpProbeSubmitBusy() {
+  // renderSettings deliberately freezes the card while a probe input owns focus. A form submitted
+  // with Enter can therefore keep that input focused and skip the rebuild; update the live button
+  // as well so the visible lock always matches the handler's one-shot guard.
+  const button = $("hpProbeSubmit");
+  if (button) button.disabled = S.hpProbeBusy;
+}
+
+async function runHpProbe() {
+  if (S.hpProbeBusy) return;
+  const request = hpProbeDraftRequest();
+  if (!request) {
+    S.hpProbeError = t("probe.invalid");
+    S.hpProbeResult = null;
+    renderSettings();
+    return;
+  }
+  S.hpProbeBusy = true;
+  S.hpProbeError = "";
+  S.hpProbeResult = null;
+  renderSettings();
+  syncHpProbeSubmitBusy();
+  try {
+    const response = await post("/hp/query", request);
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      S.hpProbeError = body && typeof body.error === "string" ? body.error : t("probe.failed");
+    } else if (body && typeof body === "object") {
+      S.hpProbeResult = body;
+    } else {
+      S.hpProbeError = t("probe.failed");
+    }
+  } catch {
+    S.hpProbeError = t("toast.unreachable");
+  } finally {
+    S.hpProbeBusy = false;
+    renderSettings();
+    syncHpProbeSubmitBusy();
+  }
+}
+
 // ── Firmware / OTA ───────────────────────────────────────────────────────
 // Tapping the version in the header meta line checks for an OTA update, and offers to install one:
 // the full /ota/check -> /ota/status -> /ota/update flow is wired below against the device-side

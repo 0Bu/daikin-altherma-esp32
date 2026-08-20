@@ -23,6 +23,7 @@ enum class HpQueryFailure : uint8_t {
     ShortReply,
     InvalidLength,
     BadCrc,
+    UnexpectedReply,
 };
 
 inline bool hp_query_should_log(HpQueryLogPolicy policy, HpQueryFailure failure) {
