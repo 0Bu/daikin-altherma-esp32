@@ -109,6 +109,7 @@
 #include <cstring>
 #include <exception>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace daik {
@@ -245,14 +246,27 @@ static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards 
 static std::string s_last_modbus_json;
 static std::string s_last_weather_json;
 static std::string s_last_env3_json;
-// The X10A publish path's task-owned, once-allocated buffers (private issue 10 B). fill_x10a_values
-// writes into these instead of returning fresh vectors every second, so the 6 KB cache + 13 KB
-// grouped-snapshot churn — the allocation that threw std::bad_alloc when a TLS session or a status
-// build split the largest contiguous block — happens at most once per profile change. mqtt_task
-// only; sized on first fill and grown only if the active profile grows.
-static std::vector<CachedValue>  s_x10a_cache;
-static std::vector<GroupedValue> s_x10a_grouped;
-static std::string               s_x10a_json;         // reusable payload buffer (bounded builder, A)
+// One stable grouped slot. group/key own their bytes for the active profile; value only views the
+// matching pre-reserved cache string (or a static companion literal). Missing/held rows toggle
+// `present` instead of compacting the vector and destroying tail string capacities.
+struct X10aGroupedSlot {
+    std::string      group;
+    std::string      key;
+    std::string_view value;
+    PublishedKind    kind = PublishedKind::Number;
+    bool             present = false;
+    size_t           cache_index = 0;
+    int              companion = -1;  // -1 = the source row; otherwise FAULT_COMPANIONS index
+};
+
+// Task-owned X10A publisher buffers. They are built once for the active profile (and rebuilt only
+// after a real profile change), then reused without capacity growth in every one-second cycle.
+static std::vector<CachedValue>      s_x10a_cache;
+static std::vector<X10aGroupedSlot>  s_x10a_grouped;
+static std::string                   s_x10a_json;
+static std::string                   s_x10a_buffer_profile;
+static bool                          s_x10a_json_oversize_logged = false;
+static bool                          s_last_x10a_digest_valid = false;
 static uint32_t    s_last_env3_samples          = 0;
 static bool        s_modbus_disabled_cleaned    = false;
 static bool        s_env3_disabled_cleaned      = false;
@@ -306,6 +320,55 @@ static std::atomic<uint32_t> s_mqtt_reconnects{0};
 // guaranteed not to throw a second time.
 static std::atomic<uint32_t> s_mqtt_skipped{0};
 static std::atomic<uint32_t> s_mqtt_quiesced{0};
+static std::atomic<bool> s_publish_network_quiesced{true};
+static std::atomic<bool> s_transport_connecting{false};
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "MQTT network quiesce acknowledgement must remain allocation- and lock-free");
+
+// The held branch publishes the acknowledgement directly. Every non-held cycle owns this guard,
+// so the bit returns to true even when an allocation throws into the task's exception boundary.
+struct MqttPublishActivity {
+    MqttPublishActivity() {
+        s_publish_network_quiesced.store(false, std::memory_order_release);
+    }
+    ~MqttPublishActivity() {
+        s_publish_network_quiesced.store(true, std::memory_order_release);
+    }
+};
+
+static bool competing_tls_active() {
+    return ota_download_active() || weather_fetch_active();
+}
+
+// HTTP/OTA is already reachable when app_main calls mqtt_ha_start(). Claim the publish allocator
+// before the very first Config/topic/client allocation, then either hand ownership to mqtt_task or
+// restore "no task" on every early return. This closes the pre-xTaskCreate startup window without
+// adding a mutex or an allocating status read to the network gate.
+struct MqttStartupActivity {
+    MqttStartupActivity() {
+        // HTTP/OTA already exists. Claim, recheck, and yield the claim if that owner won first. If
+        // the owner rises after a successful recheck it sees our false acknowledgement and waits.
+        // This is the same two-party handshake as BEFORE_CONNECT, applied before config() allocates.
+        const TickType_t started = xTaskGetTickCount();
+        const TickType_t max_wait = pdMS_TO_TICKS(OTA_QUIESCE_MAX_CYCLES * 1000u);
+        for (;;) {
+            s_publish_network_quiesced.store(false, std::memory_order_release);
+            if (!competing_tls_active()) return;
+            s_publish_network_quiesced.store(true, std::memory_order_release);
+            if (xTaskGetTickCount() - started >= max_wait) {
+                s_publish_network_quiesced.store(false, std::memory_order_release);
+                return;
+            }
+            vTaskDelay(pdMS_TO_TICKS(250));
+        }
+    }
+    ~MqttStartupActivity() {
+        if (handed_off) return;
+        s_publish_network_quiesced.store(true, std::memory_order_release);
+    }
+    void hand_off() { handed_off = true; }
+    bool handed_off = false;
+};
 
 // Heartbeat is diagnostics, not real-time telemetry — publish on a fixed cadence rather than on
 // every poll cycle.
@@ -347,7 +410,7 @@ static std::string board_id() {
 // Every outbound publish funnels through here so the heartbeat's mqtt_count/mqtt_fails reflect
 // every discovery/state/heartbeat/availability message, not just one of them. esp_mqtt_client_publish() returns the message id (>=0) on success
 // or -1 if it couldn't even be queued (e.g. dropped mid-disconnect).
-static void mqtt_publish(const std::string& topic, const char* payload, int len, int qos, int retain) {
+static bool mqtt_publish(const std::string& topic, const char* payload, int len, int qos, int retain) {
     const int rc = esp_mqtt_client_publish(s_client, topic.c_str(), payload, len, qos, retain);
     if (rc >= 0) s_mqtt_pub_ok++; else s_mqtt_pub_fail++;
     // Feed the watchdog per completed publish — mirrors poll_once's per-register reset. A single
@@ -357,6 +420,7 @@ static void mqtt_publish(const std::string& topic, const char* payload, int len,
     // is still making progress. This runs only in mqtt_pub (the sole caller path), which is
     // subscribed, so a genuinely wedged write still trips the timeout — a progressing one never does.
     esp_task_wdt_reset();
+    return rc >= 0;
 }
 
 // Start and service one exact-topic retained cleanup probe. Both functions run only on mqtt_task;
@@ -390,19 +454,15 @@ static void service_retained_cleanup_probe(const std::string& topic, std::atomic
 }
 
 // Current publishable values from the poll cache, grouped by register page, written into the
-// caller's once-allocated buffers (private issue 10 B). `cache` and `out` are task-owned and are
-// sized here on first use / on profile growth only: hp_values_snapshot assigns into existing
-// CachedValue rows, the GroupedValue slots are filled by ASSIGNMENT (a string assignment reuses the
-// slot's capacity instead of allocating a fresh copy), and keys are re-slugged into their slot with
-// ha_slug_into rather than through a per-row temporary. The steady-state cycle therefore allocates
-// nothing here — the old per-cycle churn (a fresh 6 KB cache + a fresh ~13 KB grouped vector + one
-// small heap block per long label) is what threw `std::bad_alloc` once a day when a TLS session or
-// a status build split the largest contiguous block.
+// task-owned, profile-stable buffers (private issue 10 B). Profile preparation creates every source
+// and derived-companion slot, pre-reserves formatted values and slugs keys once. The aligned cache
+// copy then clears/assigns those same strings, while grouped slots view them and toggle `present`.
+// No tail slot is destroyed when a page becomes held or times out, and no Config copy is needed to
+// size the per-second snapshot.
 //
-// `out` is kept large enough for the snapshot PLUS the derived companions, counted in a first pass
-// rather than assumed. The companions are not cached rows, so reserving the snapshot count alone
-// leaves the vector one entry short on every profile that carries an error class. Counting conv-203
-// rows is one compare per resolved row; the allocation it avoids is not.
+// The layout contains the snapshot PLUS every possible derived companion, whether the current fault
+// row is readable or not. A later Normal→Error or timeout→recovery transition therefore cannot grow
+// the vector inside the sensitive publish stage.
 //
 // Two rows are dropped here rather than published:
 //   • no value this cycle (the register timed out, or the reading was refused by the plausibility
@@ -412,44 +472,91 @@ static void service_retained_cleanup_probe(const std::string& topic, std::atomic
 //     temperature look freshly observed to every consumer downstream. The heartbeat's
 //     bus_ou_held_over says WHY the field went away, so this reads as a resting unit and not as a
 //     broken link.
-static size_t fill_x10a_values(std::vector<CachedValue>& cache, std::vector<GroupedValue>& out) {
-    const size_t cap = hp_values_capacity();
-    if (cache.size() < (cap ? cap : 1)) cache.resize(cap ? cap : 1);
-    const size_t n = hp_values_snapshot(cache.data(), cache.size());
-    size_t need = n;                                    // + the companions each error class adds
-    for (size_t i = 0; i < n; i++)
-        if (!cache[i].value.empty() && !cache[i].held && cache[i].conv == 203)
-            need += FAULT_COMPANION_COUNT;
-    if (out.capacity() < need) out.reserve(need);       // once per profile; guarded by the task catch
-    out.resize(need);                                   // default slots: allocation-free within capacity
-    size_t k = 0;
-    for (size_t i = 0; i < n; i++) {
-        if (cache[i].value.empty()) continue;
-        if (cache[i].held) continue;
-        const char* group = group_for_page(cache[i].reg);
-        GroupedValue& g = out[k++];
-        g.group = group;
-        ha_slug_into(g.key, cache[i].label);            // == object_id(), without the per-row temp
-        g.value = cache[i].value;
-        g.kind = published_kind(cache[i].conv);
-        // A textual error class also publishes its permanently-numeric companions, so a metrics
-        // consumer that cannot store "U4" still sees the fault go active (#209 defect 4). Derived
-        // from the class, in the class's own group; an unreadable class publishes neither rather than
-        // asserting "no fault" on a byte nobody could decode.
-        if (cache[i].conv == 203) {
-            const FaultClass fc = fault_class_from_text(cache[i].value.c_str());
-            if (fault_companions_publishable(fc))
-                for (size_t c = 0; c < FAULT_COMPANION_COUNT; c++) {
-                    GroupedValue& comp = out[k++];
-                    comp.group = group;
-                    comp.key = FAULT_COMPANIONS[c].key;
-                    comp.value = fault_companion_state(c, fc);
-                    comp.kind = PublishedKind::Number;
-                }
-        }
+static void prepare_x10a_buffers(const std::string& profile_id) {
+    if (profile_id == s_x10a_buffer_profile) return;
+    // Mark the layout invalid before the first allocation. If any reserve/resize throws, the task
+    // catch retries the whole preparation next cycle instead of accepting a half-built old layout.
+    s_x10a_buffer_profile.clear();
+    if (s_x10a_json.capacity() < X10A_GROUPED_JSON_MAX_BYTES)
+        s_x10a_json.reserve(X10A_GROUPED_JSON_MAX_BYTES);
+
+    const logic::ProfileView profile = def::resolved(def::lookup(profile_id.c_str()));
+    size_t rows = 0;
+    size_t slots = 0;
+    for (size_t i = 0; i < profile.count(); i++) {
+        const ValueDef d = logic::adjudicated(profile[i]);
+        if (!row_publishable(d)) continue;
+        rows++;
+        slots += 1 + (d.conv == 203 ? FAULT_COMPANION_COUNT : 0);
     }
-    out.resize(k);
-    return k;
+
+    s_x10a_cache.clear();
+    s_x10a_cache.resize(rows);
+    s_x10a_grouped.clear();
+    s_x10a_grouped.resize(slots);
+    size_t cache_i = 0;
+    size_t slot_i = 0;
+    for (size_t i = 0; i < profile.count(); i++) {
+        const ValueDef d = logic::adjudicated(profile[i]);
+        if (!row_publishable(d)) continue;
+
+        CachedValue& cache = s_x10a_cache[cache_i];
+        cache.label = d.label;
+        cache.value.clear();
+        cache.value.reserve(x10a_formatted_value_capacity(d.conv));
+        cache.unit = unit_for_datatype(d.type);
+        cache.reg = d.reg;
+        cache.off = d.offset;
+        cache.held = false;
+        cache.conv = d.conv;
+
+        X10aGroupedSlot& base = s_x10a_grouped[slot_i++];
+        base.group = group_for_page(d.reg);
+        ha_slug_into(base.key, d.label);
+        base.value = {};
+        base.kind = published_kind(d.conv);
+        base.present = false;
+        base.cache_index = cache_i;
+        base.companion = -1;
+        if (d.conv == 203) {
+            for (size_t c = 0; c < FAULT_COMPANION_COUNT; c++) {
+                X10aGroupedSlot& companion = s_x10a_grouped[slot_i++];
+                companion.group = base.group;
+                companion.key = FAULT_COMPANIONS[c].key;
+                companion.value = {};
+                companion.kind = PublishedKind::Number;
+                companion.present = false;
+                companion.cache_index = cache_i;
+                companion.companion = static_cast<int>(c);
+            }
+        }
+        cache_i++;
+    }
+    s_x10a_json_oversize_logged = false;
+    s_x10a_buffer_profile = profile_id;
+}
+
+static bool fill_x10a_values(const Config& config) {
+    if (!hp_values_snapshot_aligned(s_x10a_cache.data(), s_x10a_cache.size(),
+                                    config.profile.c_str(), config.x10a_identity_fp)) return false;
+    for (X10aGroupedSlot& slot : s_x10a_grouped) {
+        const CachedValue& cache = s_x10a_cache[slot.cache_index];
+        slot.present = !cache.value.empty() && !cache.held;
+        if (!slot.present) {
+            slot.value = {};
+            continue;
+        }
+        if (slot.companion < 0) {
+            slot.value = cache.value;
+            continue;
+        }
+        const FaultClass fc = fault_class_from_text(cache.value.c_str());
+        slot.present = fault_companions_publishable(fc);
+        slot.value = slot.present
+                   ? std::string_view(fault_companion_state(static_cast<size_t>(slot.companion), fc))
+                   : std::string_view{};
+    }
+    return true;
 }
 
 // Current HomeHub values, but only when the accessor proves the copied cache belongs to the TCP
@@ -678,20 +785,33 @@ static void retract_weather_discovery() {
 //
 // X10A is the bounded path (private issue 10 A+C): the snapshot lands in the task-owned vectors
 // (fill_x10a_values, no allocation), the payload is counted first and then written into the reused
-// s_x10a_json buffer (append_grouped_json, no allocation after the one-time reserve — the reserve
-// below can only fire on catalog growth, and then once), and the dedup guard compares the 8-byte
-// FNV-1a digest instead of holding a second full copy of the payload. The only allocation left on
-// this path is esp-mqtt's own ~3 KB enqueue copy inside mqtt_publish.
-static bool publish_x10a_state(bool force) {
-    fill_x10a_values(s_x10a_cache, s_x10a_grouped);
+// fixed 12 KiB s_x10a_json buffer (oversize fails closed), and the dedup guard compares the 8-byte
+// FNV-1a digest instead of holding a second full copy of the payload. The digest advances only when
+// esp-mqtt accepts the write, so an immediate broker failure is retried on the next cycle.
+static bool publish_x10a_state(const Config& config, bool force) {
+    prepare_x10a_buffers(config.profile);
+    if (!fill_x10a_values(config)) {
+        diag_printf("mqtt: X10A snapshot no longer matches the prepared profile; state deferred\n");
+        return false;
+    }
     s_x10a_json.clear();
     const size_t need = grouped_json_size(s_x10a_grouped);
-    if (s_x10a_json.capacity() < need) s_x10a_json.reserve(need);   // catalog growth only
+    if (need > X10A_GROUPED_JSON_MAX_BYTES) {
+        if (!s_x10a_json_oversize_logged) {
+            diag_printf("mqtt: X10A payload needs %u B; fixed %u B buffer refuses it\n",
+                        static_cast<unsigned>(need),
+                        static_cast<unsigned>(X10A_GROUPED_JSON_MAX_BYTES));
+            s_x10a_json_oversize_logged = true;
+        }
+        return false;
+    }
     append_grouped_json(s_x10a_json, s_x10a_grouped);
     const uint64_t digest = fnv1a64(s_x10a_json);
-    if (!force && digest == s_last_x10a_digest) return false;
-    mqtt_publish(s_x10a, s_x10a_json.c_str(), static_cast<int>(s_x10a_json.size()), 0, 1);
+    if (!force && s_last_x10a_digest_valid && digest == s_last_x10a_digest) return false;
+    if (!mqtt_publish(s_x10a, s_x10a_json.c_str(), static_cast<int>(s_x10a_json.size()), 0, 1))
+        return false;
     s_last_x10a_digest = digest;
+    s_last_x10a_digest_valid = true;
     return true;
 }
 
@@ -1924,8 +2044,47 @@ static void service_reference_frames(const Config& c) {
     }
 }
 
+// esp-mqtt owns its transport/TLS task, so the firmware publish-cycle acknowledgement alone cannot
+// describe a handshake or reconnect. MQTT_EVENT_BEFORE_CONNECT runs synchronously on that task
+// immediately before esp_transport_connect(). This two-phase handshake either waits behind the
+// already-advertised OTA/weather owner, or marks transport allocation active and rechecks the owner
+// before returning. A network owner that starts in either store/check gap therefore sees
+// s_transport_connecting=true; one that won first keeps MQTT before the TLS call.
+//
+// The wait has the same five-minute cap as the publisher/poll holds. A broken activity flag must not
+// suppress broker reconnects forever; after the cap the pre-fix behavior resumes, while the remote
+// operation's own bounded acknowledgement wait still reports/refuses the collision where possible.
+static void mqtt_transport_before_connect() {
+    // This callback runs under esp-mqtt's MQTT_API_LOCK. If the firmware publish/startup path
+    // already owns the allocator it may be about to call esp_mqtt_client_stop(), which needs that
+    // same lock. Never wait behind a later OTA/weather claimant in that ordering: claim transport
+    // immediately and let the remote owner wait on the already-false publish acknowledgement.
+    if (!s_publish_network_quiesced.load(std::memory_order_acquire)) {
+        s_transport_connecting.store(true, std::memory_order_release);
+        return;
+    }
+    const TickType_t started = xTaskGetTickCount();
+    const TickType_t max_wait = pdMS_TO_TICKS(OTA_QUIESCE_MAX_CYCLES * 1000u);
+    for (;;) {
+        const bool network_active = competing_tls_active();
+        const bool wait_spent = xTaskGetTickCount() - started >= max_wait;
+        if (network_active && !wait_spent) {
+            s_transport_connecting.store(false, std::memory_order_release);
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+        s_transport_connecting.store(true, std::memory_order_release);
+        if (!competing_tls_active() || wait_spent) return;
+        // The owner rose between our first check and publication. Withdraw, let it pass, retry.
+        s_transport_connecting.store(false, std::memory_order_release);
+    }
+}
+
 static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
     switch (static_cast<esp_mqtt_event_id_t>(id)) {
+    case MQTT_EVENT_BEFORE_CONNECT:
+        mqtt_transport_before_connect();
+        break;
     case MQTT_EVENT_CONNECTED:
         if (s_mqtt_ever_connected) s_mqtt_reconnects.fetch_add(1);   // a later CONNECTED is a RE-connect
         s_mqtt_ever_connected = true;
@@ -1934,11 +2093,13 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         s_circulation_probe_reconfigure = true; set_status(true, nullptr);
         diag_printf("mqtt: %s client connected\n",
                     s_client_is_publisher ? "publisher" : "observation");
+        s_transport_connecting.store(false, std::memory_order_release);
         break;
     case MQTT_EVENT_DISCONNECTED:
         s_connected = false; s_heartbeat_announced = false; set_status(false, nullptr);
         { Lock lk(s_mtx); s_ref_status.subscribed = false; s_circulation_status.subscribed = false; }
         diag_printf("mqtt: disconnected (will retry)\n");
+        s_transport_connecting.store(false, std::memory_order_release);
         break;
     case MQTT_EVENT_ERROR: {
         auto* e = static_cast<esp_mqtt_event_handle_t>(data);
@@ -1995,6 +2156,7 @@ static void mqtt_task(void*) {
     // no installation LWT, and the gate below still encloses EVERY explicit publish. It can therefore
     // subscribe to the room source without letting an unwired board speak for the installation.
     if (!start_current_client()) {
+        s_publish_network_quiesced.store(true, std::memory_order_release);
         esp_task_wdt_delete(NULL);
         vTaskDelete(NULL);
     }
@@ -2035,9 +2197,12 @@ static void mqtt_task(void*) {
                             ota_busy ? "OTA" : "weather");
                 network_quiesce_logged = true;
             }
+            s_publish_network_quiesced.store(true, std::memory_order_release);
             vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
             continue;
         }
+        {
+        MqttPublishActivity publish_activity;
         // Not holding off this cycle — either no TLS operation is running, or the budget ran out
         // while one still is. Those two are worth telling apart in the log: the second means the
         // publisher is back to competing with a TLS session for the heap, so a `publish skipped` can
@@ -2106,6 +2271,7 @@ static void mqtt_task(void*) {
             if (gate.resumed && s_connected && !s_announce.load()) {
                 mqtt_publish(s_avail, "online", 0, 0, 1);
                 s_last_x10a_digest = 0;
+                s_last_x10a_digest_valid = false;
                 heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;
                 diag_printf("mqtt: X10A restored — publishing resumed\n");
             }
@@ -2115,6 +2281,7 @@ static void mqtt_task(void*) {
                 if (s_announce.exchange(false)) {              // consume: just (re)connected
                     s_announced_profile.clear();               // force a fresh discovery below
                     s_last_x10a_digest = 0;                    // force full per-topic state re-seeds
+                    s_last_x10a_digest_valid = false;
                     s_last_modbus_json.clear();
                     s_last_weather_json.clear();
                     s_disabled_weather_cleaned = false;
@@ -2173,18 +2340,18 @@ static void mqtt_task(void*) {
                     s_heartbeat_announced = true;
                 }
                 publish_stage = "x10a";
-                const std::string prof = ref_config.profile;
+                const std::string& prof = ref_config.profile;
                 if (prof != "auto" && prof != s_announced_profile) {
                     publish_x10a_discovery();                  // discovery for the (new) profile
                     s_announced_profile = prof;
                     // A short all-page timeout stays inside the availability grace, but poll_once()
                     // correctly replaced its cache with an empty snapshot. Do not turn that honest
                     // local absence into a retained `{}` for every downstream consumer. The next
-                    // answering sweep seeds state because s_last_x10a_digest is still zero here.
-                    if (hp.connected) publish_x10a_state(true);
+                    // answering sweep seeds state because the digest guard is still invalid here.
+                    if (hp.connected) publish_x10a_state(ref_config, true);
                 } else if (hp.connected && !s_announced_profile.empty() &&
                            prof == s_announced_profile) {
-                    publish_x10a_state(false);                 // republish only when it changed
+                    publish_x10a_state(ref_config, false);     // republish only when it changed
                 }
                 // prof == "auto" (detection pending): wait — don't publish transient generic sensors.
 
@@ -2296,6 +2463,7 @@ static void mqtt_task(void*) {
                                                                       MALLOC_CAP_INTERNAL)),
                         static_cast<unsigned>(heap_largest_internal_block()));
         }
+        }
         vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
     }
 }
@@ -2381,6 +2549,10 @@ static bool promote_client_to_publisher() {
         diag_printf("mqtt: subscriber client stop failed (%s)\n", esp_err_to_name(stop_rc));
         return false;
     }
+    // esp_mqtt_client_stop() deliberately emits no DISCONNECTED event. Withdraw a possible
+    // BEFORE_CONNECT claim explicitly after the transport task has stopped; MqttPublishActivity
+    // still keeps the firmware acknowledgement false throughout this promotion.
+    s_transport_connecting.store(false, std::memory_order_release);
 
     s_connected = false;
     set_status(false, "");
@@ -2405,6 +2577,7 @@ static bool promote_client_to_publisher() {
 }
 
 void mqtt_ha_start() {
+    MqttStartupActivity startup_activity;
     const Config& c = config();
     s_mtx = xSemaphoreCreateMutex();
     if (!s_mtx) diag_printf("mqtt: status mutex alloc failed — status reads run unsynchronized\n");
@@ -2457,11 +2630,14 @@ void mqtt_ha_start() {
     // chained temporary strings, and 6 KiB restores explicit headroom for future bounded mappings.
     if (xTaskCreate(mqtt_task, "mqtt_pub", 6144, nullptr, TASK_PRIO_MQTT, nullptr) != pdPASS) {
         // No task -> the client was built but never started, so neither subscriptions nor publishes
-        // are possible. Release it and say so rather than looking configured-but-silent in /status.
+        // are possible. Keep the startup claim through cleanup; its destructor releases the claim
+        // only after the client and diagnostic work finish.
         esp_mqtt_client_destroy(s_client);
         s_client = nullptr;
         set_status(false, "publish task alloc failed");
         diag_printf("mqtt: publish task alloc failed — no MQTT activity this boot\n");
+    } else {
+        startup_activity.hand_off();
     }
 }
 
@@ -2480,6 +2656,11 @@ MqttSkipStats mqtt_skip_stats() {
     st.skipped  = s_mqtt_skipped.load(std::memory_order_relaxed);
     st.quiesced = s_mqtt_quiesced.load(std::memory_order_relaxed);
     return st;
+}
+
+bool mqtt_publish_network_quiesced() {
+    return s_publish_network_quiesced.load(std::memory_order_acquire) &&
+           !s_transport_connecting.load(std::memory_order_acquire);
 }
 
 ReferenceTemperatureStatus reference_temperature_status() {

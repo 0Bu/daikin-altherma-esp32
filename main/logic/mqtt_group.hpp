@@ -17,6 +17,18 @@
 
 namespace daik {
 
+// Hard ceilings for the task-owned X10A publisher buffers. A profile/layout change may allocate
+// these slots once; a steady-state cycle may not grow them. The formatted-value ceiling covers the
+// longest enriched fault text in logic/error_codes.hpp (host-audited below) as well as hp_format's
+// 31-byte numeric buffer and Reading's 23-byte enum buffer.
+inline constexpr size_t X10A_GROUPED_JSON_MAX_BYTES    = 12 * 1024;
+inline constexpr size_t X10A_FORMATTED_VALUE_MAX_BYTES = 96;
+
+inline constexpr size_t x10a_formatted_value_capacity(int conv) {
+    if (conv == 204) return X10A_FORMATTED_VALUE_MAX_BYTES;  // enriched error-code description
+    return published_kind(conv) == PublishedKind::Text ? 23u : 31u;  // Reading::text / hp_format b[]
+}
+
 // X10A register page -> stable, human-readable group key (docs/X10A_PROTOCOL.md §5 page catalog).
 // Pages outside the catalog fall back to "other". Names are snake_case and safe as raw JSON keys.
 inline const char* group_for_page(uint8_t reg) {
@@ -66,7 +78,7 @@ inline std::string group_display_name(const std::string& group) {
 // True if `s` is a JSON number as produced by hp_format ("-3.5", "48", "0.0"): an optional leading
 // '-', at least one digit, at most one '.' with a digit on each side. Enum/text values ("Heating",
 // "A1", "R32") are not. Numbers are emitted unquoted, text quoted.
-inline bool is_json_number(const std::string& s) {
+inline bool is_json_number(std::string_view s) {
     if (s.empty()) return false;
     size_t i = 0;
     if (s[i] == '-' && ++i == s.size()) return false;
@@ -97,10 +109,14 @@ struct GroupedValue {
     std::string   key;     // object_id(label)
     std::string   value;   // formatted string (hp_format)
     PublishedKind kind = PublishedKind::Number;
+    // A stable device-side layout keeps every profile row in its original slot and only toggles
+    // this bit when a page is absent or held over. The owning host/one-shot form defaults present,
+    // preserving all existing aggregate initializers and wire bytes.
+    bool          present = true;
 };
 
-template <typename JsonOut>
-inline void append_published_value(JsonOut& j, const GroupedValue& value) {
+template <typename JsonOut, typename Value>
+inline void append_published_value(JsonOut& j, const Value& value) {
     if (value.kind == PublishedKind::Text) {
         j += '"'; json_append_escaped(j, value.value); j += '"';
     } else if (is_json_number(value.value)) {
@@ -134,14 +150,17 @@ inline void append_published_value(JsonOut& j, const GroupedValue& value) {
 // string compares for n ≈ 130 rows is microseconds on the target and far cheaper than the
 // fragmentation the removed allocations caused.
 namespace detail {
-inline bool group_seen_before(const std::vector<GroupedValue>& vals, size_t i) {
+template <typename Values>
+inline bool group_seen_before(const Values& vals, size_t i) {
+    if (!vals[i].present) return true;
     for (size_t k = 0; k < i; ++k)
-        if (vals[k].group == vals[i].group) return true;
+        if (vals[k].present && std::string_view(vals[k].group) == std::string_view(vals[i].group))
+            return true;
     return false;
 }
 
-template <typename Out>
-inline void append_grouped_json_impl(Out& out, const std::vector<GroupedValue>& vals) {
+template <typename Out, typename Values>
+inline void append_grouped_json_impl(Out& out, const Values& vals) {
     out += '{';
     bool first_group = true;
     // Groups in FIRST-SEEN order (the outer pass takes the first row of each group), rows inside a
@@ -158,7 +177,8 @@ inline void append_grouped_json_impl(Out& out, const std::vector<GroupedValue>& 
         out += "\":{";
         bool first_row = true;
         for (size_t r = 0; r < vals.size(); ++r) {
-            if (vals[r].group != vals[g].group) continue;
+            if (!vals[r].present ||
+                std::string_view(vals[r].group) != std::string_view(vals[g].group)) continue;
             if (!first_row) out += ',';
             first_row = false;
             out += '"';
@@ -173,7 +193,8 @@ inline void append_grouped_json_impl(Out& out, const std::vector<GroupedValue>& 
 }  // namespace detail
 
 // Exact byte count of the grouped payload, without allocating a single byte.
-inline size_t grouped_json_size(const std::vector<GroupedValue>& vals) {
+template <typename Values>
+inline size_t grouped_json_size(const Values& vals) {
     CountingOut out;
     detail::append_grouped_json_impl(out, vals);
     return out.n;
@@ -182,7 +203,8 @@ inline size_t grouped_json_size(const std::vector<GroupedValue>& vals) {
 // Append the grouped payload to `out`. The caller must have reserved capacity for
 // grouped_json_size(vals) first: writing into reserved capacity performs no allocation, which is
 // the entire point on the device (a grow here is what the counting pass exists to prevent).
-inline void append_grouped_json(std::string& out, const std::vector<GroupedValue>& vals) {
+template <typename Values>
+inline void append_grouped_json(std::string& out, const Values& vals) {
     detail::append_grouped_json_impl(out, vals);
 }
 
@@ -200,9 +222,10 @@ inline std::string build_grouped_json(const std::vector<GroupedValue>& vals) {
 //
 // The X10A topic is retained and re-published only when it changed; the OLD guard held a copy of
 // the last full payload (~3 KB permanently) and compared it byte-wise. Comparing a digest instead
-// removes that permanent block and the per-cycle copy, at the cost of a theoretical 2^-64 collision
-// whose worst outcome is one duplicate publish — the topic is retained and idempotent, so the trade
-// is strictly favourable. FNV-1a 64: tiny, dependency-free and byte-stable across platforms.
+// removes that permanent block and the per-cycle copy, at the cost of a theoretical 2^-64 collision.
+// A collision would suppress one changed retained payload until a forced reseed (reconnect, profile
+// change or X10A recovery), so this is explicitly a probabilistic dedup guard rather than exact byte
+// equality. FNV-1a 64 is tiny, dependency-free and byte-stable across platforms.
 inline uint64_t fnv1a64(std::string_view data) {
     uint64_t h = 0xcbf29ce484222325ULL;
     for (const unsigned char c : data) {

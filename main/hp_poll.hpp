@@ -75,6 +75,13 @@ size_t   hp_values_capacity();
 
 // Thread-safe snapshot copy of the current value cache. Returns count written.
 size_t   hp_values_snapshot(CachedValue* out, size_t max);
+
+// Copy the current cache into a caller-prepared, profile-stable layout. The caller supplies the
+// row identities (label/reg/off/conv) and pre-reserves each value string. Missing rows are cleared
+// in place; no destination is resized and no allocation occurs under the cache mutex. False means
+// the profile changed underneath the caller or one formatted value exceeded its reserved slot.
+bool     hp_values_snapshot_aligned(CachedValue* out, size_t count, const char* expected_profile,
+                                    uint64_t expected_identity_fp);
 HpStats  hp_stats();
 
 // Poll cycles the task guard DROPPED — a sweep that threw (std::bad_alloc under OTA/TLS heap
@@ -85,9 +92,11 @@ HpStats  hp_stats();
 // allocation-free, because the increment happens inside the OOM catch handler.
 uint32_t hp_skipped_cycles();
 
-// Has the running X10A task observed OTA's lock-free quiesce request and left its allocation-rich
-// cycle? True also when no poll task exists (safe/minimal mode or task-start failure), because there
-// is then no cycle for OTA to wait on. Used only by ota_update.cpp's bounded pre-TLS barrier.
+// Has the running X10A task observed either OTA or weather's lock-free network-heap quiesce request
+// and left its allocation-rich cycle? True also when no poll task exists.
+bool hp_poll_network_quiesced();
+
+// OTA-facing compatibility name; the acknowledgement is shared with weather.
 bool hp_poll_ota_quiesced();
 
 // Identity token for one complete X10A cycle. A config change bumps it before arming the consumer

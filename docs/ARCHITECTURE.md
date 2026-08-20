@@ -1907,9 +1907,11 @@ The Home Assistant bridge:
   permanently-unavailable text entity. The entity domain changes, so HA history for these does not
   carry over.
 - **Publish-on-change.** The heat pump is polled at a fixed 1 s interval for near-real-time readings,
-  but the task republishes the state JSON **only when the payload actually changed** since the last
-  publish (a plain string compare — a single JSON topic can't be updated per-value, so it is
-  all-or-nothing). A full retained (re)seed goes out on (re)connect and when auto-detection resolves
+  but the task republishes the state JSON **only when its 64-bit FNV-1a payload digest changed**
+  since the last write accepted by `esp_mqtt_client_publish()` (a single JSON topic can't be updated per-value, so it is
+  all-or-nothing). This removes the second retained payload copy. The tradeoff is explicit: the
+  theoretical 2^-64 collision suppresses a changed retained document until the next forced reseed;
+  it does not cause a harmless duplicate. A full retained (re)seed goes out on (re)connect and when auto-detection resolves
   a new profile (which also re-streams discovery). So an idle pump does not flood the broker. The
   per-cycle build is wrapped in a try/catch: an OOM `std::string` build skips the cycle rather than
   throwing through the FreeRTOS task and rebooting.
@@ -2274,35 +2276,55 @@ Structure:
   — the behaviour that shipped before, i.e. the worst case of this fix is the status quo. The
   watchdog is fed above the check, and esp-mqtt runs keepalive on its own task, so a quiesced minute
   is a gap in HA rather than an `offline`. X10A applies the same check before its first Config/cache
-  allocation and acknowledges OTA after any in-flight sweep has finished. Weather raises its own
-  lock-free activity flag before its second OTA check, closing the race in both directions: either
-  the existing weather request unwinds first or the new one never opens TLS.
-- **The weather fetch gates on headroom before opening TLS** (`logic/weather_forecast.hpp` →
+  allocation for **both OTA and weather** and exposes a lock-free acknowledgement after any in-flight
+  sweep has finished. The MQTT task exposes the equivalent acknowledgement around its complete
+  allocation-capable publish cycle. Its independent esp-mqtt task also claims the gate from the
+  synchronous `MQTT_EVENT_BEFORE_CONNECT` callback through `CONNECTED`/`DISCONNECTED`; a two-phase
+  active-flag recheck prevents a handshake or reconnect from starting behind an already-advertised
+  Weather/OTA owner. If the firmware publish/startup claim won first, `BEFORE_CONNECT` never waits
+  under esp-mqtt's API lock (the publisher may need that lock for `client_stop`); it claims transport
+  immediately and the later network owner waits. Weather waits up to 15 seconds for both acknowledgements before its second OTA
+  check; OTA waits for them before its own network operation. This closes the race in both directions:
+  either the existing network request unwinds first or the new one reaches TLS only while X10A, the
+  firmware MQTT publish cycle and an esp-mqtt handshake/reconnect are quiescent. Like the publisher
+  hold, connect/startup deferral is capped at five minutes rather than trusting a stuck activity bit
+  forever. MQTT startup claims the same acknowledgement before its first Config/topic/client
+  allocation and waits if an OTA request won the interval after HTTP startup.
+- **The weather fetch gates on headroom immediately before opening TLS** (`logic/weather_forecast.hpp` →
   `weather_fetch_headroom_ok`, live-10). An Open-Meteo fetch transiently claims ~16 KiB mbedTLS
   in-buffer + 4 KiB out-buffer, HTTP/TCP buffers, the response string and the cJSON tree, and it
-  runs on a fixed 45-minute grid — it cannot wait for a friendlier instant the way a retry loop
-  can. Live evidence showed one fetch landing on a fragmentation trough push `min_free_heap` to
+  runs on a fixed 45-minute grid. Live evidence showed one fetch landing on a fragmentation trough push `min_free_heap` to
   **800 B**; it survived only because the claim is brief. The weather task now reads the
-  allocation-free `HttpClientProbe` before the fetch: below **40 KiB total free / 16 KiB largest
+  allocation-free `HttpClientProbe` after the 1.1 s scheduling lead, both publisher
+  acknowledgements, fixed 8 KiB response and 32-byte error reservation, and URL construction, at
+  the last point before `esp_http_client`
+  creates TLS state. HTTP and cJSON owners are unwind-safe, so a later parser allocation failure
+  releases the C resources before retry. Below **56 KiB total free / 24 KiB largest
   contiguous internal block** it logs the sample, sets `state=waiting, reason=heap_headroom` and
-  sleeps one full raster period instead — the previous valid forecast stays available, so a skipped
-  refresh costs nothing and the next attempt comes exactly one grid interval later. (The floors are
-  this fetch's, not the OTA verifier's: the 16 KiB bound is the configured TLS input buffer and the
-  40 KiB bound keeps the ~28 KiB transient claim off the heap watchdog's reserve.)
+  retries after five minutes — the previous valid forecast stays available. The 24 KiB contiguous
+  floor rejects the measured 15.9 KiB trough while admitting the same board's healthy 31.7 KiB
+  ceiling; a provisional 40 KiB largest-block floor would disable weather permanently there. The
+  56 KiB aggregate floor leaves about 16 KiB outside the measured ~40 KiB transient claim.
 - **The X10A publish cycle is allocation-bounded end to end** (live-10; the last unbounded
   full-string builder after the MCP streaming fix). The old per-second chain built a fresh ~6 KB
   cache, a fresh ~13 KB grouped snapshot, the JSON string with its doubling realloc ladder and a
   second retained copy of the payload — 25–30 KB in 4–5 separate contiguous allocations per cycle,
   of which one failed as soon as a status build or a TLS teardown tail split the largest block
-  (`mqtt: publish skipped at x10a (std::bad_alloc)`, 1–3×/day on the live plant). Now the snapshot
-  vectors, the payload buffer and the 8-byte FNV-1a dedup digest are task-owned and reused:
-  `fill_x10a_values` assigns into existing slots (keys are re-slugged with `ha_slug_into`, values
-  reuse their slot capacity), `grouped_json_size` counts the exact bytes through the same template
-  that writes them, and `append_grouped_json` writes into reserved capacity — allocation-free. The
-  steady-state cycle allocates nothing but esp-mqtt's own ~3 KB enqueue copy, and the MQTT contract
-  is unchanged by a single byte (host-pinned). The publish-skip catch now logs the throw second's
-  allocation-free heap snapshot (`free=`/`largest=`) on the same line, so the next collision's
-  partner is identifiable from the ring instead of inferred from 10-s samples.
+  (`mqtt: publish skipped at x10a (std::bad_alloc)`, 1–3×/day on the live plant). Now the stable
+  snapshot, stable grouped layout, **fixed 12 KiB payload buffer** and the 8-byte FNV-1a dedup digest
+  are task-owned and reused. `prepare_x10a_buffers` resolves every publishable profile row and fault companion
+  once per actual profile change; the cache commit carries its static profile id and X10A identity
+  fingerprint, so a config-change window cannot publish an old subset under a new discovery layout.
+  The host-tested aligned accessor validates that source identity transactionally, then copies into
+  pre-reserved row slots without calling `config()`, resizing, or allocating under its mutex. Missing and held-over rows
+  toggle a presence bit instead of compacting the vector and destroying tail strings. The grouped
+  encoder skips those slots, counts the exact bytes through the same template that writes them, and
+  refuses a document over 12 KiB instead of growing the block. Thus the firmware-owned steady-state
+  X10A build has no heap growth and its MQTT bytes are unchanged (host-pinned). The digest is committed
+  only after `esp_mqtt_client_publish()` accepted the retained write, so a transient `-1` is retried
+  rather than deduplicated away. The publish-skip catch logs the throw second's
+  allocation-free heap snapshot (`free=`/`largest=`) on the same line, narrowing the next collision
+  to the allocations active at that second instead of relying only on 10-s samples.
 - **Boot recovery / anti-brick** — an unsigned app aborts pre-`app_main`, so only the bootloader can
   recover, and only via a recorded previous OTA slot; a direct USB flash of an unsigned build both
   crash-loops and blanks the otadata rollback record. Contained by the pre-flash guard

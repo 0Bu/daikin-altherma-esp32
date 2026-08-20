@@ -70,6 +70,7 @@
 #include "logic/mqtt_uri.hpp"
 #include "logic/reference_temperature.hpp"
 #include "logic/weather_forecast.hpp"
+#include "logic/x10a_snapshot.hpp"
 #include "logic/weather_mqtt.hpp"
 #include "logic/open_meteo.hpp"
 #include "logic/modbus.hpp"
@@ -1895,6 +1896,30 @@ static void test_mqtt_group() {
         CHECK(tight.capacity() == cap_before);
         CHECK(tight == build_grouped_json(one));
     }
+    // A stopped/held page must not shrink the slot vector. Toggling presence removes the bytes and
+    // then restores the exact retained document without destroying or regrowing any owned string.
+    {
+        std::vector<GroupedValue> stable = {
+            {"outdoor_state", "operation_mode", "Heating", PublishedKind::Text},
+            {"outdoor_sensors", "r1t_outdoor_air_temp", "10.0", PublishedKind::Number},
+            {"hydronic", "dhw_setpoint", "48.0", PublishedKind::Number},
+        };
+        const std::string full = build_grouped_json(stable);
+        const size_t slots = stable.size();
+        const size_t group_cap = stable[1].group.capacity();
+        const size_t key_cap = stable[1].key.capacity();
+        const size_t value_cap = stable[1].value.capacity();
+        stable[1].present = false;
+        CHECK(build_grouped_json(stable) ==
+              "{\"outdoor_state\":{\"operation_mode\":\"Heating\"},"
+              "\"hydronic\":{\"dhw_setpoint\":48.0}}");
+        stable[1].present = true;
+        CHECK(build_grouped_json(stable) == full);
+        CHECK(stable.size() == slots);
+        CHECK(stable[1].group.capacity() == group_cap);
+        CHECK(stable[1].key.capacity() == key_cap);
+        CHECK(stable[1].value.capacity() == value_cap);
+    }
     // The counting sink shares the ESCAPING template: counted bytes == written bytes for hostile
     // text, on both encoders (json.hpp CountingOut + the group builder above).
     for (const char* hostile : {"", "a", "a\nb", "\"", "\\", "\x01\x1f\x7f", "Café", "a\tb\r"}) {
@@ -1909,6 +1934,36 @@ static void test_mqtt_group() {
     CHECK(fnv1a64("") == 0xcbf29ce484222325ULL);
     CHECK(fnv1a64("a") == 0xaf63dc4c8601ec8cULL);
     CHECK(fnv1a64("foobar") == 0x85944171f73967e8ULL);
+    CHECK(X10A_GROUPED_JSON_MAX_BYTES == 12u * 1024u);
+    CHECK(X10A_FORMATTED_VALUE_MAX_BYTES == 96u);
+    for (const ErrorCodeEntry& entry : ERROR_CODE_TABLE)
+        CHECK(std::strlen(entry.code) + 2u + std::strlen(entry.description) <=
+              X10A_FORMATTED_VALUE_MAX_BYTES);
+    // Catalog-wide hard-cap proof: fill every publishable row with the longest representation its
+    // device slot permits, include every possible fault companion, and require every resolved
+    // profile to fit the fixed 12 KiB JSON block. A catalog growth that exceeds it must fail here,
+    // not first appear as a silently refused state document on hardware.
+    for (const auto& p : def::profiles) {
+        const logic::ProfileView profile = def::resolved(p);
+        std::vector<GroupedValue> worst;
+        std::set<std::string> aligned_identities;
+        for (size_t i = 0; i < profile.count(); i++) {
+            const ValueDef d = logic::adjudicated(profile[i]);
+            if (!row_publishable(d)) continue;
+            const std::string identity = std::to_string(d.reg) + "/" + std::to_string(d.offset) +
+                                         "/" + std::to_string(d.conv) + "/" + d.label;
+            CHECK(aligned_identities.insert(identity).second);
+            worst.push_back({group_for_page(d.reg), ha_slug(d.label),
+                             std::string(x10a_formatted_value_capacity(d.conv),
+                                         published_kind(d.conv) == PublishedKind::Text ? '\x01' : '9'),
+                             published_kind(d.conv)});
+            if (d.conv == 203)
+                for (const FaultCompanion& companion : FAULT_COMPANIONS)
+                    worst.push_back({group_for_page(d.reg), companion.key, "1",
+                                     PublishedKind::Number});
+        }
+        CHECK(grouped_json_size(worst) <= X10A_GROUPED_JSON_MAX_BYTES);
+    }
     {
         const std::string a = build_grouped_json(vals);
         const std::string b = build_grouped_json(vals);
@@ -1929,6 +1984,60 @@ static void test_mqtt_group() {
         CHECK(slot == ha_slug("DHW setpoint"));
         CHECK(slot.capacity() == cap);                        // into-slot reuse: no reallocation
     }
+}
+
+static void test_x10a_snapshot_align() {
+    struct Row {
+        const char* label;
+        std::string value;
+        uint8_t reg;
+        uint8_t off;
+        bool held;
+        int conv;
+    };
+    std::vector<Row> layout = {
+        {"A", "old-a", 0x10, 0, false, 217},
+        {"B", "old-b", 0x20, 2, false, 105},
+        {"C", "old-c", 0x21, 4, true, 105},
+    };
+    CHECK(logic::x10a_snapshot_source_matches("generic", 0x1234, "generic", 0x1234));
+    CHECK(!logic::x10a_snapshot_source_matches("generic", 0x1234,
+                                               "altherma_bizone_cb_04_08kw", 0x5678));
+    CHECK(!logic::x10a_snapshot_source_matches("generic", 0x1234, "generic", 0x5678));
+    for (Row& row : layout) row.value.reserve(16);
+    const std::vector<size_t> capacities = {
+        layout[0].value.capacity(), layout[1].value.capacity(), layout[2].value.capacity()};
+
+    // Compact source order is irrelevant; a missing row becomes absent and held follows its own
+    // identity. The copied label has different storage, exercising strcmp rather than pointer luck.
+    const std::string copied_b = "B";
+    const std::vector<Row> source = {
+        {copied_b.c_str(), "2.5", 0x20, 2, true, 105},
+        {"A", "Heating", 0x10, 0, false, 217},
+    };
+    CHECK(logic::x10a_snapshot_align(layout.data(), layout.size(), source.data(), source.size()) ==
+          logic::X10aSnapshotAlignResult::Ok);
+    CHECK(layout[0].value == "Heating" && !layout[0].held);
+    CHECK(layout[1].value == "2.5" && layout[1].held);
+    CHECK(layout[2].value.empty() && !layout[2].held);
+    for (size_t i = 0; i < layout.size(); i++) CHECK(layout[i].value.capacity() == capacities[i]);
+
+    // Validation is transactional: an extra/changed identity, a duplicate source or a value over
+    // capacity refuses the snapshot without partially clearing the last good aligned state.
+    const std::vector<std::string> before = {layout[0].value, layout[1].value, layout[2].value};
+    const Row unknown{"D", "1", 0x30, 1, false, 300};
+    CHECK(logic::x10a_snapshot_align(layout.data(), layout.size(), &unknown, 1) ==
+          logic::X10aSnapshotAlignResult::IdentityMismatch);
+    CHECK(layout[0].value == before[0] && layout[1].value == before[1] &&
+          layout[2].value == before[2]);
+    const Row duplicate[] = {source[0], source[0]};
+    CHECK(logic::x10a_snapshot_align(layout.data(), layout.size(), duplicate, 2) ==
+          logic::X10aSnapshotAlignResult::IdentityMismatch);
+    Row oversized{"A", std::string(layout[0].value.capacity() + 1, 'x'), 0x10, 0, false, 217};
+    CHECK(logic::x10a_snapshot_align(layout.data(), layout.size(), &oversized, 1) ==
+          logic::X10aSnapshotAlignResult::ValueTooLarge);
+    CHECK(layout[0].value == before[0] && layout[1].value == before[1] &&
+          layout[2].value == before[2]);
 }
 
 // ── The published JSON TYPE of every converter (#209 defect 3, the telemetry-contract section) ────
@@ -2195,12 +2304,12 @@ static void test_ota_headroom() {
 }
 
 // The weather fetch's own headroom gate (private issue 10 D) — same predicate shape as the OTA
-// gate above, but with the floors the Open-Meteo TLS fetch actually needs: ~16 KiB contiguous for
-// the mbedTLS input buffer plus ~28 KiB transient total, on a heap whose low-water the issue's
-// 800 B event came from.
+// gate above, but with evidence-based floors that reject the measured 15.9 KiB fragmentation
+// trough, admit the board's healthy 31.7 KiB ceiling and preserve aggregate reserve around the
+// fetch's measured ~40 KiB transient claim.
 static void test_weather_fetch_headroom() {
-    CHECK(WEATHER_FETCH_MIN_FREE_BYTES == 40u * 1024u);
-    CHECK(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES == 16u * 1024u);
+    CHECK(WEATHER_FETCH_MIN_FREE_BYTES == 56u * 1024u);
+    CHECK(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES == 24u * 1024u);
 
     CHECK(weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES,
                                     WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES));
@@ -2208,7 +2317,7 @@ static void test_weather_fetch_headroom() {
                                     WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES + 1));
 
     // The live fragmentation trough from the issue: plenty of aggregate bytes, but the largest
-    // block no longer fits the TLS in-buffer — the fetch must stand down for one raster period.
+    // block does not leave enough room for the complete TLS/HTTP setup — retry later.
     CHECK(!weather_fetch_headroom_ok(59u * 1024u, WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES - 1));
     // Aggregate exhaustion is refused even with a large block free.
     CHECK(!weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES - 1, 32u * 1024u));
@@ -13430,6 +13539,7 @@ int main() {
     test_detect();
     test_json();
     test_mqtt_group();
+    test_x10a_snapshot_align();
     test_mqtt_base();
     test_mqtt_uri();
     test_modbus();
