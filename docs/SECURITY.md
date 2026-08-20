@@ -315,7 +315,9 @@ retained X10A MQTT payload must pass a second fixed three-minute canary. The com
 a release and an arbitrary 48-hour wait is not a substitute for these targeted proofs. A bench
 without physical X10A proves the exact binary, HTTP/TLS concurrency and heap recovery;
 catalog-wide host replay and the source/mutation contracts cover the publisher, and the real
-retained payload is proved only on the production role after the single update.
+retained payload is proved only on the production role after the single update. Expected UART
+timeouts on that intentionally unwired bench do not fail the bench stage; the production role keeps
+the bounded X10A timeout-delta requirement.
 
 The private inventory shape is:
 

@@ -60,12 +60,19 @@ const retained = gate.indexOf("retained = verify_retained_x10a(final_status)");
 assert.ok(testStress >= 0 && productionConfirmation > testStress && offer > productionConfirmation &&
           post > offer && returned > post && productionStress > returned && retained > productionStress,
   "bench stress, explicit production confirmation, one update, reboot proof, canary stress and retained X10A must stay ordered");
+assert.match(gate, /test_evidence = stress_board\([\s\S]{0,200}?require_x10a=False/,
+  "the intentionally unwired bench must not claim live X10A");
+assert.match(gate, /production_evidence = stress_board\([\s\S]{0,200}?require_x10a=True/,
+  "the production canary must keep live X10A and timeout-delta enforcement enabled");
 assert.equal(occurrences(gate, 'method="POST"'), 1,
   "the entire promotion implementation may contain exactly one production POST");
 assert.match(gate, /Deliberately one un-retried write/,
   "the sole production write must remain explicitly non-retrying");
 assert.match(gate, /for key in \("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"\)/,
   "heap/OOM/X10A failure counters must remain stable through each pressure window");
+assert.match(gate,
+  /return require_x10a and final\["timeout_err"\] - baseline\["timeout_err"\] > MAX_X10A_TIMEOUT_DELTA/,
+  "an X10A-less bench must not fail on expected bus timeouts while production remains bounded");
 assert.match(gate, /worker\.start\(\)[\s\S]{0,500}?\/ota\/check\?ms=/,
   "real OTA manifest TLS must overlap the concurrent HTTP pressure workers");
 assert.match(gate, /ota_check\.get\("state"\)\s*!=\s*"idle"[\s\S]{0,100}?ota_check\.get\("available"\)\s*!=\s*version/,
