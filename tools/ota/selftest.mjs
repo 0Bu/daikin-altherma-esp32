@@ -15,6 +15,8 @@ const files = [
   "main/ota_update.cpp",
   "main/mqtt_ha.cpp",
   "main/hp_poll.cpp",
+  "main/http_status.cpp",
+  "main/logic/http_values_wait.hpp",
   "main/logic/ota_headroom.hpp",
   "main/logic/ota_transport.hpp",
 ];
@@ -141,6 +143,18 @@ try {
     ["OTA starts without waiting for the MQTT acknowledgement", () =>
       replaceOnce("main/ota_update.cpp", "else if (!wait_for_mqtt_quiesce())",
         "else if (false)")],
+    ["values snapshots no longer wait behind an OTA TLS owner", () =>
+      replaceOnce("main/http_status.cpp", "ota_download_active(), weather_fetch_active()",
+        "false, weather_fetch_active()")],
+    ["values snapshots no longer wait behind a weather TLS owner", () =>
+      replaceOnce("main/http_status.cpp", "ota_download_active(), weather_fetch_active()",
+        "ota_download_active(), false")],
+    ["the values TLS wait exceeds the live request timeout", () =>
+      replaceOnce("main/http_status.cpp", "pdMS_TO_TICKS(4000)",
+        "pdMS_TO_TICKS(6000)")],
+    ["the values snapshot allocates before its TLS-owner wait", () =>
+      replaceOnce("main/http_status.cpp", "if (!wait_for_values_tls_owner())",
+        "if (!wait_for_values_tls_owner_bypassed())")],
     ["the X10A poll no longer enters the bounded OTA quiesce", () =>
       replaceOnce("main/hp_poll.cpp", "ota_quiesce_step(network_quiesce, network_active)",
         "ota_quiesce_bypassed(network_quiesce, network_active)")],
