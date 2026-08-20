@@ -330,8 +330,8 @@ const safety = readJson(invariantFile, "safety invariant contract");
 if (safety?.schema_version !== 1 || !Array.isArray(safety?.invariants)) {
   die(2, "safety invariant contract needs schema_version 1 and an invariants array");
 }
-if (safety.invariants.length !== 13) {
-  die(1, `safety invariant contract must contain exactly 13 invariants (got ${safety.invariants.length})`);
+if (safety.invariants.length !== 15) {
+  die(1, `safety invariant contract must contain exactly 15 invariants (got ${safety.invariants.length})`);
 }
 const instructions = readText(canonicalInstructions, "canonical instructions");
 const invariantIds = new Set();

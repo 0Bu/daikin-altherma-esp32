@@ -523,7 +523,7 @@ const contract = JSON.parse(fs.readFileSync(file, "utf8"));
 contract.invariants.pop();
 fs.writeFileSync(file, JSON.stringify(contract, null, 2) + "\n");
 NODE
-expect_failure "safety invariant count drift" "$fixture" "exactly 13 invariants"
+expect_failure "safety invariant count drift" "$fixture" "exactly 15 invariants"
 
 fixture="$WORK/safety-invariant"
 make_fixture "$fixture"

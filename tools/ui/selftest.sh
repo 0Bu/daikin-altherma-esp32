@@ -219,7 +219,7 @@ set -e
 # a gate means adding it here in the
 # same commit, which is the point: a gate whose template line nobody checks is a gate whose stamp
 # nobody can be sure is readable.
-expected_gate_keys=(project-review feature-docs domain-review schematic-review ui-use-case-review absence-review ui-gif)
+expected_gate_keys=(project-review heap-safety-review feature-docs domain-review schematic-review ui-use-case-review absence-review ui-gif)
 tpl_content="$(cat "$proj/.github/pull_request_template.md")"
 tpl_lines="$(printf '%s\n' "$tpl_content" | agent_gate_task_lines | grep -iE 'gate')"
 tpl_n=0
