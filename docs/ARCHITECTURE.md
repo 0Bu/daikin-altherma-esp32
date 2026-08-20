@@ -2270,9 +2270,10 @@ Structure:
   requires a clean exact local source; runs the host catalog and heap contracts; and applies a fixed
   three-minute concurrent status/values/diag + OTA-manifest-TLS pressure window to the same signed
   image on the MAC-bound private-inventory `bench` role. Only then, with the current version lease
-  and an explicit confirmation of the distinct `production` role, it requires the exact idle update
-  offer to remain stable for one second before it sends one un-retried update POST. That hand-off
-  ignores a stale result from the previous asynchronous check and closes the firmware's
+  and an explicit confirmation of the distinct `production` role, it must observe the fresh check's
+  `checking` transition and then requires the exact idle update offer to remain stable for one
+  second before it sends one un-retried update POST. That generation-bound hand-off ignores stale
+  results — including the same target version — from the previous asynchronous check and closes the firmware's
   final-check-result/busy-release interval: an HTTP `ok` can no longer hide an update request that
   the retiring check task ignored as busy.
   Reboot observation, the second pressure window and retained-X10A MQTT proof are GET/read-only. The
@@ -2280,7 +2281,7 @@ Structure:
   rather than plant I/O; expected UART timeouts there are not a plant-link regression. The
   bench always overlaps real OTA-manifest TLS but does not require the optional weather task when
   diagnostics consent is off. The production role supplies the real X10A and weather canaries and
-  keeps the bounded timeout delta. The source contract and sixteen mutation canaries make stage
+  keeps the bounded timeout delta. The source contract and seventeen mutation canaries make stage
   removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
   rollback fail locally and in CI. This workflow creates no release and contains no 48-hour soak gate.
 - **Validation gets the transport's heap back first.** The firmware downloads through a fixed

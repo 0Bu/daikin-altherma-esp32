@@ -314,9 +314,10 @@ five-second request timeout; expiry is a blocking busy-503, not an accepted retr
 
 Only after that stage and an explicit `production` confirmation does the command perform exactly
 one un-retried `POST /ota/update`. Before that sole write, the exact idle dev offer must remain
-stable for one second so the completed manifest-check task has released its internal busy claim;
-an idle result left by the previous asynchronous check is ignored, and the first exact idle sample
-alone is not write authorization. All subsequent observation is read-only:
+stable for one second after the gate has observed the fresh check's `checking` state, so the
+completed manifest-check task has released its internal busy claim. An idle result left by the
+previous asynchronous check — even the same target version — is ignored, and the first exact idle
+sample alone is not write authorization. All subsequent observation is read-only:
 exact version/ELF and
 MAC, rollback/crash/safe-mode state, stable heap/OOM/X10A counters, live X10A values, and the
 retained X10A MQTT payload must pass a second fixed three-minute canary. The command does not create

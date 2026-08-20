@@ -45,6 +45,7 @@ MAX_X10A_TIMEOUT_DELTA = 3
 HTTP_TIMEOUT_S = 5
 OTA_TIMEOUT_S = 180
 OTA_OFFER_SETTLE_SECONDS = 1.0
+OTA_OFFER_POLL_SECONDS = 0.1
 DEV_MANIFEST_SUFFIX = "/dev/manifest.json"
 OFFICIAL_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json"
 
@@ -424,42 +425,48 @@ def run_local_gates() -> None:
 
 
 def ota_offer_settled(
-    status: dict[str, Any], expected_version: str, first_seen_at: float | None, now: float,
-) -> tuple[bool, float | None]:
+    status: dict[str, Any], expected_version: str, seen_checking: bool,
+    first_seen_at: float | None, now: float,
+) -> tuple[bool, bool, float | None]:
     """Require one exact idle offer to remain stable before the sole update POST.
 
-    The firmware publishes the final check result immediately before its OTA task releases the
-    internal busy claim.  Returning on that first idle sample races POST /ota/update against the
-    retiring check task: the HTTP handler says ``ok`` while the still-busy OTA adapter ignores the
-    update.  A second exact sample after the bounded settle interval proves that hand-off has had
-    time to complete without adding a retrying write path.
+    The caller must first observe this check generation's ``checking`` state.  That prevents a
+    previous exact idle offer from arming during the firmware's 1.1-second pre-check quiesce lead.
+    The firmware then publishes the final check result immediately before its OTA task releases the
+    internal busy claim, so a second exact idle sample after the bounded settle interval closes the
+    other side of the hand-off without adding a retrying write path.
     """
     if status.get("state") == "error":
         fail(f"production OTA check failed: {status.get('message', '')}")
-    if status.get("state") not in ("", "idle") or not status.get("available"):
-        return False, None
+    if status.get("state") == "checking":
+        return False, True, None
+    if not seen_checking:
+        return False, False, None
+    if status.get("state") != "idle" or not status.get("available"):
+        return False, True, None
     if status.get("available") != expected_version or not status.get("update_available"):
         # /ota/check is asynchronous.  Its first status sample may still be the previous completed
         # check, so a stale idle offer neither authorizes the write nor fails a check that has not
         # published its own result yet.  Only the expected offer can start the settle interval.
-        return False, None
+        return False, True, None
     if first_seen_at is None:
-        return False, now
-    return now - first_seen_at >= OTA_OFFER_SETTLE_SECONDS, first_seen_at
+        return False, True, now
+    return now - first_seen_at >= OTA_OFFER_SETTLE_SECONDS, True, first_seen_at
 
 
 def wait_for_ota_offer(host: str, expected_version: str) -> dict[str, Any]:
     request_json(host, f"/ota/check?ms={int(time.time() * 1000)}")
     deadline = time.monotonic() + 30
+    seen_checking = False
     first_seen_at: float | None = None
     while time.monotonic() < deadline:
         status = request_json(host, "/ota/status")
-        ready, first_seen_at = ota_offer_settled(
-            status, expected_version, first_seen_at, time.monotonic(),
+        ready, seen_checking, first_seen_at = ota_offer_settled(
+            status, expected_version, seen_checking, first_seen_at, time.monotonic(),
         )
         if ready:
             return status
-        time.sleep(1)
+        time.sleep(OTA_OFFER_POLL_SECONDS)
     fail("production OTA check did not settle on the exact gated dev version within 30 seconds")
 
 
@@ -520,19 +527,25 @@ def self_test() -> None:
     offered = {
         "state": "idle", "available": "1.2.3-dev.4", "update_available": True,
     }
-    ready, seen = ota_offer_settled(checking, "1.2.3-dev.4", None, 10.0)
-    assert not ready and seen is None
-    ready, seen = ota_offer_settled(offered, "1.2.3-dev.4", None, 20.0)
-    assert not ready and seen == 20.0
-    ready, seen = ota_offer_settled(offered, "1.2.3-dev.4", seen, 20.999)
-    assert not ready and seen == 20.0
-    ready, seen = ota_offer_settled(offered, "1.2.3-dev.4", seen, 21.0)
-    assert ready and seen == 20.0
-    ready, seen = ota_offer_settled(checking, "1.2.3-dev.4", seen, 21.1)
-    assert not ready and seen is None
+    ready, generation, seen = ota_offer_settled(offered, "1.2.3-dev.4", False, None, 9.0)
+    assert not ready and not generation and seen is None  # stale exact offer cannot arm
+    ready, generation, seen = ota_offer_settled(checking, "1.2.3-dev.4", False, None, 10.0)
+    assert not ready and generation and seen is None
+    ready, generation, seen = ota_offer_settled(
+        offered, "1.2.3-dev.4", generation, None, 20.0,
+    )
+    assert not ready and generation and seen == 20.0
+    ready, generation, seen = ota_offer_settled(
+        offered, "1.2.3-dev.4", generation, seen, 20.999,
+    )
+    assert not ready and generation and seen == 20.0
+    ready, generation, seen = ota_offer_settled(
+        offered, "1.2.3-dev.4", generation, seen, 21.0,
+    )
+    assert ready and generation and seen == 20.0
     stale = {"state": "idle", "available": "1.2.3-dev.3", "update_available": True}
-    ready, seen = ota_offer_settled(stale, "1.2.3-dev.4", None, 22.0)
-    assert not ready and seen is None
+    ready, generation, seen = ota_offer_settled(stale, "1.2.3-dev.4", True, None, 22.0)
+    assert not ready and generation and seen is None
     with tempfile.TemporaryDirectory(prefix="daikin-production-ota-selftest-") as tmp:
         inventory_path = Path(tmp) / "inventory.json"
         inventory_path.write_text(json.dumps({

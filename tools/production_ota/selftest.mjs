@@ -57,9 +57,12 @@ try {
     ["the production write races the retiring OTA check task", () =>
       replaceOnce("scripts/production-ota-gate.py", "OTA_OFFER_SETTLE_SECONDS = 1.0",
         "OTA_OFFER_SETTLE_SECONDS = 0.0")],
+    ["an old exact offer bypasses the fresh check generation", () =>
+      replaceOnce("scripts/production-ota-gate.py", "if not seen_checking:",
+        "if False and not seen_checking:")],
     ["a stale offer from the previous check aborts the fresh check", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        '        return False, None\n    if first_seen_at is None:',
+        '        return False, True, None\n    if first_seen_at is None:',
         '        fail("production board did not offer the exact gated dev version")\n' +
         '    if first_seen_at is None:')],
     ["the signature verifier is bypassed", () =>
