@@ -60,10 +60,12 @@ const retained = gate.indexOf("retained = verify_retained_x10a(final_status)");
 assert.ok(testStress >= 0 && productionConfirmation > testStress && offer > productionConfirmation &&
           post > offer && returned > post && productionStress > returned && retained > productionStress,
   "bench stress, explicit production confirmation, one update, reboot proof, canary stress and retained X10A must stay ordered");
-assert.match(gate, /test_evidence = stress_board\([\s\S]{0,200}?require_x10a=False/,
-  "the intentionally unwired bench must not claim live X10A");
-assert.match(gate, /production_evidence = stress_board\([\s\S]{0,200}?require_x10a=True/,
-  "the production canary must keep live X10A and timeout-delta enforcement enabled");
+assert.match(gate,
+  /test_evidence = stress_board\([\s\S]{0,200}?require_x10a=False, require_weather=False/,
+  "the bench must not require intentionally absent X10A or optional weather consent");
+assert.match(gate,
+  /production_evidence = stress_board\([\s\S]{0,200}?require_x10a=True, require_weather=True/,
+  "the production canary must keep live X10A, timeout-delta and weather-TLS enforcement enabled");
 assert.equal(occurrences(gate, 'method="POST"'), 1,
   "the entire promotion implementation may contain exactly one production POST");
 assert.match(gate, /Deliberately one un-retried write/,
@@ -77,8 +79,9 @@ assert.match(gate, /worker\.start\(\)[\s\S]{0,500}?\/ota\/check\?ms=/,
   "real OTA manifest TLS must overlap the concurrent HTTP pressure workers");
 assert.match(gate, /ota_check\.get\("state"\)\s*!=\s*"idle"[\s\S]{0,100}?ota_check\.get\("available"\)\s*!=\s*version/,
   "the overlapping OTA TLS request must finish against the exact promoted dev artifact");
-assert.match(gate, /weather\.get\("successes", 0\)[\s\S]{0,160}?weather\.get\("fetched_at"\)/,
-  "each fresh hardware boot must carry successful real weather TLS evidence");
+assert.match(gate,
+  /if require_weather:[\s\S]{0,500}?weather\.get\("successes", 0\)[\s\S]{0,160}?weather\.get\("fetched_at"\)/,
+  "the production role must carry successful real weather TLS evidence from its fresh boot");
 assert.match(gate, /MIN_FINAL_LARGEST_BLOCK\s*=\s*16\s*\*\s*1024/,
   "hardware acceptance must recover a 16 KiB contiguous block");
 assert.match(gate, /release_created": False/,

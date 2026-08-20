@@ -220,6 +220,7 @@ def x10a_timeout_delta_exceeded(
 
 def stress_board(
     *, host: str, mac: str, version: str, elf: str, require_x10a: bool,
+    require_weather: bool,
 ) -> dict[str, Any]:
     started = request_json(host, "/status")
     validate_identity(started, host=host, mac=mac, version=version, elf=elf)
@@ -312,14 +313,15 @@ def stress_board(
     if int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
         fail(f"{host} final largest block is below {MIN_FINAL_LARGEST_BLOCK} bytes")
     weather = finished.get("weather_forecast", {})
-    if not weather.get("configured"):
-        fail(f"{host} weather must be configured so the stress covers a real TLS fetch")
-    if weather.get("state") != "ok" or int(weather.get("errors", 0)) != 0:
-        fail(f"{host} weather TLS did not finish cleanly during the gate")
-    if int(weather.get("successes", 0)) <= 0 or not weather.get("fetched_at"):
-        fail(f"{host} has no successful weather TLS evidence from this fresh boot")
-    if int(weather.get("successes", 0)) < int(weather_before.get("successes", 0)):
-        fail(f"{host} weather success counter regressed during live stress")
+    if require_weather:
+        if not weather.get("configured"):
+            fail(f"{host} weather must be configured so the stress covers a real TLS fetch")
+        if weather.get("state") != "ok" or int(weather.get("errors", 0)) != 0:
+            fail(f"{host} weather TLS did not finish cleanly during the gate")
+        if int(weather.get("successes", 0)) <= 0 or not weather.get("fetched_at"):
+            fail(f"{host} has no successful weather TLS evidence from this fresh boot")
+        if int(weather.get("successes", 0)) < int(weather_before.get("successes", 0)):
+            fail(f"{host} weather success counter regressed during live stress")
     return {
         "samples": samples,
         "uptime": [uptimes[0], uptimes[-1]],
@@ -551,7 +553,7 @@ def main() -> int:
         fail("bench must be freshly booted into the exact artifact so the stress overlaps first TLS activity")
     test_evidence = stress_board(
         host=bench["host"], mac=bench["mac"], version=args.expected_version, elf=elf,
-        require_x10a=False,
+        require_x10a=False, require_weather=False,
     )
 
     result: dict[str, Any] = {
@@ -586,7 +588,7 @@ def main() -> int:
     validate_identity(returned, host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf)
     production_evidence = stress_board(
         host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf,
-        require_x10a=True,
+        require_x10a=True, require_weather=True,
     )
     final_status = request_json(production["host"], "/status")
     retained = verify_retained_x10a(final_status)
