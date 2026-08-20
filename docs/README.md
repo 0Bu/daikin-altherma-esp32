@@ -421,6 +421,11 @@ GET  /values                       # decoded readings
                                    #   reported (the trend rings need it to tell "held over" from
                                    #   "no reading"), but it is not a current measurement, and the
                                    #   MQTT X10A topic withholds it entirely.
+                                   #   Before allocating the model-sized snapshot, this route waits
+                                   #   up to 4 s behind active firmware OTA/Weather TLS work. If the
+                                   #   owner remains active it returns 503 text/plain
+                                   #   "network operation in progress" before any JSON byte; retry
+                                   #   the complete read-only request later.
 GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sample first:
                                    #   {id,label,dt,unit,t0,v[],held[[from,count],…]}
                                    #   unit = the ROW's own unit (never a hardcoded °C).
@@ -641,6 +646,9 @@ POST /mcp                          # stateless, read-only Streamable-HTTP MCP se
                                    #   get_hp_values, mirroring GET /status and GET /values.
                                    #   JSON-RPC errors -32700/-32600/-32601/-32602; notifications →
                                    #   202 with no body; no SSE/session.
+                                   #   get_hp_values shares GET /values' bounded TLS-owner wait and
+                                   #   may return its transport-level plain-text 503 instead of a
+                                   #   JSON-RPC body; see docs/MCP.md.
                                    #   Bounded parser/dispatcher: logic/mcp.hpp; see docs/MCP.md.
 ```
 

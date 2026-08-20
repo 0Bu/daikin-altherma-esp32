@@ -27,6 +27,9 @@ const occurrences = (text, token) => text.split(token).length - 1;
 const ota = code("main/ota_update.cpp");
 const mqtt = code("main/mqtt_ha.cpp");
 const poll = code("main/hp_poll.cpp");
+// Keep this source verbatim: it contains the legitimate captive-portal URI string "/*", which a
+// regex comment stripper would mistake for an unterminated block comment and erase most handlers.
+const httpStatus = read("main/http_status.cpp");
 const headroom = code("main/logic/ota_headroom.hpp");
 const transport = code("main/logic/ota_transport.hpp");
 const sdkconfig = read("sdkconfig.defaults");
@@ -332,5 +335,39 @@ assert.ok(pollBarrierCall >= 0 && mqttBarrierCall > pollBarrierCall &&
           weatherBarrierCall > mqttBarrierCall && updateCall > weatherBarrierCall,
   "OTA must receive poll, MQTT and weather quiescence acknowledgements before entering the install path");
 
+// The model-sized /values snapshot is the remaining HTTP allocator that collided with the fresh-
+// boot OTA/Weather TLS windows on the 129-row plant. It waits before the snapshot, bounded below the
+// live gate's five-second client timeout. Status/diag/OTA status are not themselves gated; only the
+// proven values path (and MCP's shared sender) stands aside.
+const valuesSendStart = httpStatus.indexOf("esp_err_t http_send_values_json(");
+const valuesSendEnd = httpStatus.indexOf("static esp_err_t h_values(", valuesSendStart);
+assert.ok(valuesSendStart >= 0 && valuesSendEnd > valuesSendStart,
+  "the shared /values + MCP sender must remain identifiable");
+const valuesSend = httpStatus.slice(valuesSendStart, valuesSendEnd);
+const valuesWait = valuesSend.indexOf("wait_for_values_tls_owner()");
+const valuesSnapshot = valuesSend.indexOf("take_values_snapshot()", valuesWait);
+assert.ok(valuesWait >= 0 && valuesSnapshot > valuesWait,
+  "/values must finish its bounded TLS-owner wait before allocating the model-sized snapshot");
+assert.match(valuesSend,
+  /if\s*\(!wait_for_values_tls_owner\(\)\)\s*return values_tls_busy\(req\);/,
+  "a timed-out TLS-owner wait must fail closed before the values snapshot allocation");
+assert.equal(occurrences(httpStatus, "wait_for_values_tls_owner()"), 2,
+  "only the wait helper and the shared values sender may use the values-only gate");
+assert.match(httpStatus,
+  /values_tls_busy\(httpd_req_t\* req\)[\s\S]*?503 Service Unavailable[\s\S]*?text\/plain[\s\S]*?network operation in progress/,
+  "the bounded refusal must stay a small explicit pre-response busy-503");
+assert.match(httpStatus,
+  /http_values_wait_decision\(\s*ota_download_active\(\),\s*weather_fetch_active\(\)/,
+  "the values wait must observe both lock-free firmware TLS owners independently");
+assert.match(httpStatus, /kValuesTlsWait\s*=\s*pdMS_TO_TICKS\(4000\)/,
+  "the values wait must remain below the five-second live-gate request timeout");
+assert.match(httpStatus, /kValuesTlsRetry\s*=\s*pdMS_TO_TICKS\(250\)/,
+  "the values wait must yield in bounded 250-ms steps");
+const statusStart = httpStatus.indexOf("static esp_err_t h_status(");
+const statusEnd = httpStatus.indexOf("struct ValuesSnapshot", statusStart);
+assert.ok(statusStart >= 0 && statusEnd > statusStart &&
+          !httpStatus.slice(statusStart, statusEnd).includes("wait_for_values_tls_owner"),
+  "/status must stay outside the values-only TLS wait so health and OTA progress remain observable");
+
 console.log("OTA heap: TLS-before-verify release, dual headroom gate, signed validation, bounded " +
-            "poll/MQTT quiesce and retryable diagnostics are pinned");
+            "poll/MQTT/values quiesce and retryable diagnostics are pinned");
