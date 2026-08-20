@@ -305,8 +305,8 @@ whose distinct `bench` and `production` roles prevent a swapped target without p
 installation identifiers. The exact signed artifact must first run on the MAC-bound `bench` role,
 normally installed by the NVS-preserving signed USB flash workflow. The gate then runs the complete
 host logic/X10A/OTA contracts and a fixed
-three-minute concurrent `/status` + `/values` + `/diag` pressure window with a real configured
-weather TLS fetch.
+three-minute concurrent `/status` + `/values` + `/diag` pressure window with a real OTA-manifest
+TLS fetch. Optional Open-Meteo evidence is not a bench prerequisite.
 
 Only after that stage and an explicit `production` confirmation does the command perform exactly
 one un-retried `POST /ota/update`. All subsequent observation is read-only: exact version/ELF and
@@ -317,7 +317,9 @@ without physical X10A proves the exact binary, HTTP/TLS concurrency and heap rec
 catalog-wide host replay and the source/mutation contracts cover the publisher, and the real
 retained payload is proved only on the production role after the single update. Expected UART
 timeouts on that intentionally unwired bench do not fail the bench stage; the production role keeps
-the bounded X10A timeout-delta requirement.
+the bounded X10A timeout-delta requirement. The bench always overlaps a real OTA-manifest TLS check
+with the pressure workers, but does not require the optional Open-Meteo task when device-wide
+diagnostics consent is off; the production role still requires a successful weather fetch.
 
 The private inventory shape is:
 

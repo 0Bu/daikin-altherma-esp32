@@ -2268,16 +2268,17 @@ Structure:
   [`scripts/production-ota-gate.py`](../scripts/production-ota-gate.py) binds the official dev
   manifest to the expected source SHA, version, application SHA-256, ESP32-S3 metadata and signature;
   requires a clean exact local source; runs the host catalog and heap contracts; and applies a fixed
-  three-minute concurrent status/values/diag + weather-TLS pressure window to the same signed image
-  on the MAC-bound private-inventory `bench` role. Only then, with the current version lease and an
-  explicit confirmation of the distinct `production` role, it sends one un-retried update POST.
+  three-minute concurrent status/values/diag + OTA-manifest-TLS pressure window to the same signed
+  image on the MAC-bound private-inventory `bench` role. Only then, with the current version lease
+  and an explicit confirmation of the distinct `production` role, it sends one un-retried update POST.
   Reboot observation, the second pressure window and retained-X10A MQTT proof are GET/read-only. The
   bench board need not be physically connected to X10A, so it proves binary and allocation behavior
   rather than plant I/O; expected UART timeouts there are not a plant-link regression. The
-  production role supplies the real X10A canary and keeps the bounded timeout delta. The source
-  contract and thirteen mutation canaries make stage removal, shortened
-  stress, signature bypass, weaker heap floors, raw OTA writes and disabled rollback fail locally
-  and in CI. This workflow creates no release and contains no 48-hour soak gate.
+  bench always overlaps real OTA-manifest TLS but does not require the optional weather task when
+  diagnostics consent is off. The production role supplies the real X10A and weather canaries and
+  keeps the bounded timeout delta. The source contract and fourteen mutation canaries make stage
+  removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
+  rollback fail locally and in CI. This workflow creates no release and contains no 48-hour soak gate.
 - **Validation gets the transport's heap back first.** The firmware downloads through a fixed
   2 KiB INTERNAL buffer and closes/frees both that buffer and the complete HTTP/TLS client before
   calling `esp_ota_end()`. That call remains IDF's mandatory RSA-3072/PSA verifier; only its success
