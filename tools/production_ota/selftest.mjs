@@ -73,6 +73,10 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         /(production_evidence = stress_board\([\s\S]{0,200}?)require_x10a=True,/,
         "$1require_x10a=False,")],
+    ["the production canary disables its weather TLS requirement", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        /(production_evidence = stress_board\([\s\S]{0,200}?)require_weather=True,/,
+        "$1require_weather=False,")],
     ["the no-release result is falsified", () =>
       replaceOnce("scripts/production-ota-gate.py", '"release_created": False',
         '"release_created": True')],
