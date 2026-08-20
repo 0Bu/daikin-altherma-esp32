@@ -686,16 +686,20 @@ function applyStaticI18n() {
   document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
 }
 // Switch the live language: swap LANG, cache it for the next first paint, and re-localise the parts
-// that are NOT rebuilt on a poll — the static HTML + inline SVG (applyStaticI18n) and the schematic's
-// hit-target labels (labelSchematicHits, with English fallback for specialist copy). Dynamic strings repaint through
-// t()/tx() on the caller's next render. A no-op (returns false) when the language is unchanged, so a
-// poll that reports the same language costs nothing.
+// that are NOT rebuilt on a poll — the static HTML + inline SVG (applyStaticI18n), the schematic's
+// hit-target labels (labelSchematicHits, with English fallback for specialist copy), and the active
+// navigation title. Dynamic cards repaint through t()/tx() on the caller's next render. renderHeader
+// is defined by app_state.js later in the assembled page; the guard keeps this fragment usable in
+// the focused dictionary/render harnesses that intentionally load no navigation code. A no-op
+// (returns false) when the language is unchanged, so a poll that reports the same language costs
+// nothing.
 function activateLang(next) {
   if (next === LANG) return false;
   LANG = next;
   lsSet("uiLang", next);
   applyStaticI18n();
   labelSchematicHits();
+  if (typeof renderHeader === "function") renderHeader();
   return true;
 }
 function setLang(next) {

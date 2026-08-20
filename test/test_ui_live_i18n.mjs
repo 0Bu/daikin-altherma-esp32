@@ -55,6 +55,36 @@ function assertPersistentBannerRepaints(name, status) {
   assert.notEqual(target.innerHTML, english, `${name} must replace the old-language copy`);
 }
 
+// The Settings title is route-owned rather than data-i18n markup. A live language pick used to
+// repaint every card while leaving this one header in the previous language until the user went
+// Back and opened Settings again. Exercise the real language activation + route header together so
+// a source-only assertion cannot pass while the interaction stays broken.
+{
+  const elements = {
+    hdrDash: { hidden: false },
+    hdrBack: { hidden: true },
+    backTitle: { textContent: "" },
+  };
+  const context = {
+    navigator: { language: "en" },
+    localStorage: { getItem: () => null, setItem: () => {} },
+    document: {
+      documentElement: {},
+      getElementById: (id) => elements[id],
+      querySelectorAll: () => [],
+    },
+    labelSchematicHits: () => {},
+  };
+  const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + appStateSource;
+  const { api } = productionApi(source, ["S", "activateLang", "renderHeader"], context);
+  api.S.stage = "settings";
+  api.renderHeader();
+  assert.equal(elements.backTitle.textContent, "Settings");
+  assert.equal(api.activateLang("de"), true);
+  assert.equal(elements.backTitle.textContent, "Einstellungen",
+    "a live language switch must repaint the active route title without a navigation round-trip");
+}
+
 {
   const { api } = productionApi(
     appStateSource,
