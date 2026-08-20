@@ -623,8 +623,9 @@ POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-cho
                                    #   240.6 °C on a row Home Assistant correctly shows as unavailable.
                                    #   The two disagreeing is the tool working; never quote a probe
                                    #   number as a reading.
-                                   #   Settings → Protocol → Protocol diagnostics is a closed
-                                   #   accordion whose tongue contains the X10A Diagnosis card. Its
+                                   #   While the X10A link is connected, Settings → Protocol → Protocol
+                                   #   diagnostics appears as a closed accordion whose tongue directly
+                                   #   contains the X10A query form. The row is absent while X10A is offline. Its
                                    #   Register dropdown shows exact labels from the detected main/def
                                    #   profile, or a labelled generic fallback when unresolved; a selection fills
                                    #   the editable reg/offset/size/conv fields, sent only by the

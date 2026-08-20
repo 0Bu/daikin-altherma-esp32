@@ -7,16 +7,14 @@ import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
 const source = readAppFragments(["dashboard.js", "settings.js"]);
 const labels = {
-  "probe.toggle": "Protokolldiagnose", "probe.title": "X10A Diagnose",
-  "probe.readonly": "Nur lesen",
+  "probe.toggle": "Protokolldiagnose",
   "probe.intro": "Direkte X10A-Abfrage.", "probe.request": "Anfrage",
   "probe.register": "Register", "probe.manual": "Manuelle Eingabe",
   "probe.page": "Registerseite", "probe.offset": "Payload-Offset", "probe.size": "Feldbreite",
   "probe.byte": "Byte", "probe.bytes": "Bytes", "probe.converter": "Converter",
   "probe.page_help": "Hex oder dezimal", "probe.offset_help": "Index", "probe.size_help": "Bytes",
-  "probe.converter_auto": "Automatisch – alle passenden Converter prüfen",
+  "probe.converter_auto": "Automatisch",
   "probe.converter_auto_help": (size) => `Prüft alle implementierten Converter für ${size} Byte.`,
-  "probe.converter_selected": (id, description) => `Converter ${id}: ${description}`,
   "probe.conv_tenth_byte": "Rohbyte × 0,1",
   "probe.conv_raw_byte": "Rohbyte · 0…255",
   "probe.conv_unsigned_byte": "vorzeichenloses Rohbyte",
@@ -84,8 +82,8 @@ assert.match(html, />Protokolldiagnose</);
 assert.match(html, /protocol-diagnosis-detail/,
   "protocol diagnosis must expose the same explanation tongue as the other Protocol rows");
 assert.match(html, /aria-expanded="false"/, "the protocol-diagnosis tongue must start closed");
-assert.match(html, /X10A Diagnose/,
-  "the complete diagnosis card must live inside the protocol-diagnosis tongue");
+assert.match(html, /Direkte X10A-Abfrage/,
+  "the complete diagnosis form must live inside the protocol-diagnosis tongue");
 assert.doesNotMatch(html, /e32ProtocolDiagnostics|value="off"|value="on"/,
   "opening the tongue replaces the redundant On/Off selector");
 
@@ -97,7 +95,10 @@ S.hpProbeCatalog = [
   { reg: 0x61, offset: 2, conv: 105, size: 2, label: '"><script>bad()</script>' },
 ];
 html = sandbox.__card();
-assert.match(html, /X10A Diagnose/);
+assert.doesNotMatch(html, /X10A Diagnose|probe-card-head|probe-readonly|class="card probe-card"/,
+  "the diagnosis form must not repeat its tongue label or add a nested rounded card");
+assert.match(html, /^<div class="probe-card"><p class="probe-intro">/,
+  "the diagnosis form must start directly in the tongue with its technical introduction");
 assert.doesNotMatch(html, /POST \/hp\/query|hpProbeRequest/,
   "the editable fields replace a redundant POST/JSON preview block");
 assert.match(html, /<span class="probe-field-label">Register<\/span>/,
@@ -111,12 +112,16 @@ assert.match(html, /&quot;&gt;&lt;script&gt;bad\(\)&lt;\/script&gt;/,
   "profile labels must be escaped before interpolation");
 assert.match(html, /<select class="input probe-control" id="hpProbeConv">/,
   "automatic and specific converters must share one list instead of a bare number input");
-assert.match(html, /id="hpProbeConv"><option value="sweep">Automatisch – alle passenden Converter prüfen<\/option>/,
+assert.match(html, /id="hpProbeConv"><option value="sweep">Automatisch<\/option>/,
   "automatic evaluation must be the first converter option");
-assert.match(html, />105 · Rohbyte × 0,1<\/option>/,
-  "converter options must explain the decoding rule beside the ID");
-assert.match(html, /Converter 105: Rohbyte × 0,1/,
-  "the selected converter must keep its technical explanation visible below the list");
+assert.match(html, /<option value="105" selected>105<\/option>/,
+  "converter options must contain only their numeric ID");
+assert.doesNotMatch(html, /<option value="105"[^>]*>105 ·/,
+  "converter explanations must not make the dropdown wider");
+assert.match(html, /<label class="probe-field"><span class="probe-field-label">Converter<\/span>/,
+  "field width and converter must remain opposite each other in the request grid");
+assert.match(html, />Rohbyte × 0,1<\/span><\/label>/,
+  "the selected converter description must remain visible below the dropdown without repeating its ID");
 
 // The browser list is a presentation of the firmware's exact supported sweep candidates, not an
 // independently maintained approximation that can silently offer stale or unexplained IDs.
@@ -166,7 +171,7 @@ elements.hpProbeConv.id = "hpProbeConv";
 sandbox.__input(elements.hpProbeConv);
 assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__request())), { reg: 0, offset: 12, size: 1 },
   "automatic converter evaluation must omit conv from the generated request");
-assert.match(sandbox.__card(), /<option value="sweep" selected>Automatisch – alle passenden Converter prüfen<\/option>/,
+assert.match(sandbox.__card(), /<option value="sweep" selected>Automatisch<\/option>/,
   "automatic evaluation must remain selected in the common converter dropdown");
 assert.match(sandbox.__card(), /Prüft alle implementierten Converter für 1 Byte\./,
   "automatic mode must explain the width-filtered sweep");
@@ -176,8 +181,8 @@ sandbox.__input(elements.hpProbeConv);
 assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__request())),
   { reg: 0, offset: 12, size: 1, conv: 152 },
   "selecting an explained converter must put that exact ID back into the request");
-assert.match(sandbox.__card(), /Converter 152: vorzeichenloses Rohbyte/,
-  "the selected numbered converter must retain its explanation below the dropdown");
+assert.match(sandbox.__card(), />vorzeichenloses Rohbyte<\/span><\/label>/,
+  "the selected numbered converter must retain only its explanation below the dropdown");
 
 // An unresolved live profile must still receive useful generic examples, labelled as fallback
 // provenance rather than pretending that generic was detected on this installation.

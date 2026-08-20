@@ -1338,13 +1338,14 @@ vocabulary exactly:
    board's own health does (*is the bus alive*, not *is the board healthy*): the heat-pump link
    (Online/Offline) and X10A protocol, then the **RX/TX pins** — read-only when detected, else a
    usable-GPIO dropdown (§5.2). From `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`. **Link
-   facts, top to bottom** (link, protocol, RX, TX), followed by **Protocol diagnostics**. That final
-   row is itself an ordinary chevron-controlled explanation tongue, closed on each page load and
-   persisted nowhere. Its `--brand-tint` tongue directly contains the white **X10A Diagnosis** card;
-   there is no redundant Off/On selector or separate card between Protocol and Firmware. Each of the
+   facts, top to bottom** (link, protocol, RX, TX), followed by **Protocol diagnostics** only while
+   `hp.connected` is true. The complete diagnosis row disappears when X10A is offline. While
+   available it is an ordinary chevron-controlled explanation tongue, closed on each page load and
+   persisted nowhere. Its `--brand-tint` tongue contains the X10A query form directly, without a
+   repeated heading, white nested card or redundant Off/On selector. Each of the
    four link-fact labels opens its own explanation tongue; a right-side value or pin selector remains
    an independent action.
-   The nested diagnosis card is a compact technical form, not an information panel: one sentence, an
+   The diagnosis surface is a compact technical form, not an information panel: one sentence, an
    **Request** section, a dropdown labelled only **Register**, page/offset/field-width/converter inputs
    and one Query button. There is no redundant POST/JSON preview below the editable fields. Register
    option text is the exact `ValueDef::label` from
@@ -1352,10 +1353,10 @@ vocabulary exactly:
    tuple is internal, so duplicate labels remain independently selectable.
    Selecting one fills all four editable inputs. Editing any tuple field immediately returns the
    dropdown to **Manual input**; selecting a register again restores its complete definition tuple.
-   The single **Converter** dropdown starts with automatic evaluation of every matching converter,
-   followed by the field-width-filtered implemented set. Every numbered option and the help line
-   state its signedness, scaling, byte order or enum/bit meaning rather than exposing a bare numeric
-   input.
+   The **Converter** dropdown sits opposite **Field width** and starts with automatic evaluation of
+   every matching converter, followed by the field-width-filtered implemented numeric IDs. The
+   selected converter's help line states its signedness, scaling, byte order or enum/bit meaning
+   without widening the dropdown itself.
    The Query button stays disabled for the full request/response round-trip. Response rows show
    status, full received frame, valid payload, selected bytes and converter results. No automatic
    query is issued.

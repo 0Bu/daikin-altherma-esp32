@@ -277,8 +277,8 @@ function diagnosticsRow(enabled) {
 }
 
 // Browser-session accordion for the expert register reader. There is deliberately no second On/Off
-// control: opening this ordinary explanation tongue reveals the complete read-only card and closing
-// it hides the card. The disclosure state is neither posted nor persisted.
+// control or nested card: opening this ordinary explanation tongue reveals the form directly and
+// closing it hides the form. The disclosure state is neither posted nor persisted.
 function protocolDiagnosticsRow() {
   return settingsInfoRow("protocol:diagnosis", "protocol-diagnosis-detail", t("probe.toggle"), "",
     x10aDiagnosisCardHtml(), "protocol-diagnosis-item", "", true);
@@ -432,12 +432,10 @@ function x10aDiagnosisCardHtml() {
   const selectedConv = converters.includes(Number(d.conv)) ? Number(d.conv) : converters[0];
   const converterOptions = `<option value="sweep"${mode === "sweep" ? " selected" : ""}>${esc(t("probe.converter_auto"))}</option>` +
     converters.map((conv) => `<option value="${conv}"${mode !== "sweep" && conv === selectedConv ? " selected" : ""}>` +
-    `${conv} · ${esc(hpProbeConverterDescription(conv, d.size))}</option>`).join("");
+    `${conv}</option>`).join("");
   const regNumber = hpProbeRegNumber(d.reg);
   const regLabel = regNumber == null ? "—" : `0x${regNumber.toString(16).toUpperCase().padStart(2, "0")}`;
-  const body = `<div class="probe-card-head"><h2 class="probe-card-title" id="hpProbeTitle">${esc(t("probe.title"))}</h2>` +
-    `<span class="probe-readonly">${esc(t("probe.readonly"))}</span></div>` +
-    `<p class="probe-intro">${esc(t("probe.intro"))}</p>` +
+  const body = `<p class="probe-intro">${esc(t("probe.intro"))}</p>` +
     `<form id="hpProbeForm" class="probe-form">` +
     `<div class="probe-section-title">${esc(t("probe.request"))}</div><div class="probe-grid">` +
     `<label class="probe-field probe-wide"><span class="probe-field-label">${esc(t("probe.register"))}</span>` +
@@ -453,15 +451,15 @@ function x10aDiagnosisCardHtml() {
     `<label class="probe-field"><span class="probe-field-label">${esc(t("probe.size"))}</span>` +
     `<select class="input probe-control" id="hpProbeSize">${sizeOption(1)}${sizeOption(2)}</select>` +
     `<span class="field-help">${esc(t("probe.size_help"))}</span></label>` +
-    `<label class="probe-field probe-wide"><span class="probe-field-label">${esc(t("probe.converter"))}</span>` +
+    `<label class="probe-field"><span class="probe-field-label">${esc(t("probe.converter"))}</span>` +
     `<select class="input probe-control" id="hpProbeConv">${converterOptions}</select>` +
     `<span class="field-help">${esc(mode === "sweep" ? t("probe.converter_auto_help", d.size) :
-      t("probe.converter_selected", selectedConv, hpProbeConverterDescription(selectedConv, d.size)))}</span></label></div>` +
+      hpProbeConverterDescription(selectedConv, d.size))}</span></label></div>` +
     `<div class="probe-action-row"><span class="probe-action-note">${esc(t("probe.action_note"))}</span>` +
     `<button class="btn primary probe-submit" id="hpProbeSubmit" type="submit" aria-busy="${S.hpProbeBusy ? "true" : "false"}"${S.hpProbeBusy ? " disabled" : ""}>` +
     (S.hpProbeBusy ? `<span class="spin"></span>${esc(t("probe.querying"))}` : esc(t("probe.send"))) + `</button></div>` +
     `</form>${hpProbeResultHtml()}`;
-  return `<section class="card probe-card" aria-labelledby="hpProbeTitle">${body}</section>`;
+  return `<div class="probe-card">${body}</div>`;
 }
 
 // The version row (Firmware card): the running version, and the SAME OTA trigger the dashboard
@@ -591,7 +589,7 @@ function esp32CardHtml() {
       pinsLocked ? hp.tx : picker.tx, "rx", t("card.rxpin_help")) +
     pinRow(t("card.txpin"), "e32Tx", pinsLocked ? hp.tx : picker.tx,
       pinsLocked ? hp.rx : picker.rx, "tx", t("card.txpin_help")) +
-    protocolDiagnosticsRow();
+    (hp.connected ? protocolDiagnosticsRow() : "");
   // Firmware — running build, update feed, language and the explicit plant-diagnostics consent.
   // This is not a heat-pump controller mode: it only gates optional observations and their sources.
   const diagnosticsEnabled = s.diagnostics?.enabled === true;

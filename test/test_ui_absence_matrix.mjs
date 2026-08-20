@@ -388,6 +388,18 @@ for (const scenario of SCENARIOS) {
   // liveData() is the schematic's snapshot rather than markup; it must survive the same states.
   assert.doesNotThrow(() => ui.liveData(), `${scenario.name}: liveData() threw`);
 
+  // The arbitrary register reader requires a live X10A transport. Hiding only its form would leave
+  // an empty disclosure that promises an action the poll task cannot execute; the complete row is
+  // therefore present exactly while /status.hp.connected is true.
+  if (status.hp.connected) {
+    assert.match(rendered.esp32CardHtml, /protocol-diagnosis-detail/,
+      `${scenario.name}: a live X10A link must expose protocol diagnosis`);
+  } else {
+    assert.doesNotMatch(rendered.esp32CardHtml, /protocol-diagnosis-detail|Protokolldiagnose|Protocol diagnostics/,
+      `${scenario.name}: protocol diagnosis must disappear with the X10A link`);
+  }
+  checks++;
+
   // RULE 3b — a pill whose SOURCE depends on which systems exist must never describe one that does
   // not. The Smart-Grid request is the only pill with two possible instruments (the HomeHub register
   // and the X10A SG-Ready contacts), so it is the only one that can name the wrong one — and it did:

@@ -2495,9 +2495,9 @@ significant, and ~1.1 KB is not worth a layout defect that renders correctly on 
 made it). The UI is **two screens**:
 the dashboard (the plant — schematic, model, values, no config at all) and **Settings** behind the
 header gear (the Connections tile + three ESP32 board cards — ESP32 board health, Protokoll
-[X10A link + pins + a closed protocol-diagnosis tongue containing the X10A Diagnosis card] and Firmware
+[X10A link + pins +, only while connected, a closed protocol-diagnosis tongue containing the X10A query form] and Firmware
 [version/OTA/language + default-off plant-diagnostics consent]. Opening that tongue lazily loads the
-register definitions; its card sends one explicit read request,
+register definitions; its form sends one explicit read request,
 plus conditional Anlagendiagnose and heating-curve source cards while enabled; flat, no sub-screens,
 all built by one `esp32CardHtml()` and rebuilt together on every poll).
 Settings drives the config endpoints in
@@ -2582,8 +2582,10 @@ place:
   `"update X10A and HomeHub in separate requests"` before changing either. The UI language is its own
   setting now (see the **Language** bullet below), never a `/set_hp` field.
 - **X10A protocol diagnosis** → `GET /models?active=1` + `POST /hp/query`. The Protokoll-card row is
-  an ordinary explanation tongue: closed after every load, browser-session only and never persisted.
-  Opening it reveals the complete X10A Diagnosis card and lazily streams the resolved active
+  an ordinary explanation tongue shown only while `hp.connected` is true: closed after every load,
+  browser-session only and never persisted. The complete row disappears when the X10A link is down.
+  Opening it reveals the X10A query form directly, without a nested card or repeated heading, and
+  lazily streams the resolved active
   `main/def` rows. If detection is `auto` or stale, the feed returns the `generic` definition rows
   with explicit `definition:"generic",fallback:true` provenance. The visible Register option
   is the exact catalog label (duplicate labels keep separate tuple identities), and selecting one
