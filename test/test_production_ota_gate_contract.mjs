@@ -70,6 +70,19 @@ assert.equal(occurrences(gate, 'method="POST"'), 1,
   "the entire promotion implementation may contain exactly one production POST");
 assert.match(gate, /Deliberately one un-retried write/,
   "the sole production write must remain explicitly non-retrying");
+assert.match(gate, /OTA_OFFER_SETTLE_SECONDS\s*=\s*1\.0/,
+  "the exact OTA offer must settle past the retiring check task before the sole update POST");
+assert.match(gate,
+  /first_seen_at\s+is\s+None[\s\S]{0,120}?return\s+False,\s*now[\s\S]{0,160}?now\s*-\s*first_seen_at\s*>=\s*OTA_OFFER_SETTLE_SECONDS/,
+  "the first idle offer sample must arm, not pass, the production write boundary");
+assert.match(gate,
+  /status\.get\("available"\)\s*!=\s*expected_version\s+or\s+not\s+status\.get\("update_available"\):[\s\S]{0,400}?return\s+False,\s*None\s+if first_seen_at is None/,
+  "a stale result from the previous asynchronous check must wait, never authorize or reject the write");
+assert.match(gate,
+  /wait_for_ota_offer[\s\S]{0,700}?ota_offer_settled\([\s\S]{0,160}?if ready:[\s\S]{0,80}?return status/,
+  "production offer polling must use the stable two-sample hand-off decision");
+assert.match(gate, /did not settle on the exact gated dev version within 30 seconds/,
+  "a stale or wrong offer must remain bounded and fail closed at the polling deadline");
 assert.match(gate, /for key in \("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"\)/,
   "heap/OOM/X10A failure counters must remain stable through each pressure window");
 assert.match(gate,

@@ -54,6 +54,14 @@ try {
         'BENCH_ROLE = "production"')],
     ["the pressure window is shortened", () =>
       replaceOnce("scripts/production-ota-gate.py", "STRESS_SECONDS = 180", "STRESS_SECONDS = 60")],
+    ["the production write races the retiring OTA check task", () =>
+      replaceOnce("scripts/production-ota-gate.py", "OTA_OFFER_SETTLE_SECONDS = 1.0",
+        "OTA_OFFER_SETTLE_SECONDS = 0.0")],
+    ["a stale offer from the previous check aborts the fresh check", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '        return False, None\n    if first_seen_at is None:',
+        '        fail("production board did not offer the exact gated dev version")\n' +
+        '    if first_seen_at is None:')],
     ["the signature verifier is bypassed", () =>
       replaceOnce("scripts/production-ota-gate.py", 'ROOT / "scripts/require-signed.sh"',
         'ROOT / "scripts/signature-check-bypassed.sh"')],

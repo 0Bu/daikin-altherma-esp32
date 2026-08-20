@@ -313,7 +313,11 @@ five-second request timeout; expiry is a blocking busy-503, not an accepted retr
 `/diag` and `/ota/status` are not themselves gated and resume after the bounded values request.
 
 Only after that stage and an explicit `production` confirmation does the command perform exactly
-one un-retried `POST /ota/update`. All subsequent observation is read-only: exact version/ELF and
+one un-retried `POST /ota/update`. Before that sole write, the exact idle dev offer must remain
+stable for one second so the completed manifest-check task has released its internal busy claim;
+an idle result left by the previous asynchronous check is ignored, and the first exact idle sample
+alone is not write authorization. All subsequent observation is read-only:
+exact version/ELF and
 MAC, rollback/crash/safe-mode state, stable heap/OOM/X10A counters, live X10A values, and the
 retained X10A MQTT payload must pass a second fixed three-minute canary. The command does not create
 a release and an arbitrary 48-hour wait is not a substitute for these targeted proofs. A bench
