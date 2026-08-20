@@ -212,6 +212,12 @@ def board_counters(status: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def x10a_timeout_delta_exceeded(
+    *, require_x10a: bool, baseline: dict[str, int], final: dict[str, int],
+) -> bool:
+    return require_x10a and final["timeout_err"] - baseline["timeout_err"] > MAX_X10A_TIMEOUT_DELTA
+
+
 def stress_board(
     *, host: str, mac: str, version: str, elf: str, require_x10a: bool,
 ) -> dict[str, Any]:
@@ -296,7 +302,9 @@ def stress_board(
     for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"):
         if final[key] != baseline[key]:
             fail(f"{host} {key} changed during live stress ({baseline[key]} -> {final[key]})")
-    if final["timeout_err"] - baseline["timeout_err"] > MAX_X10A_TIMEOUT_DELTA:
+    if x10a_timeout_delta_exceeded(
+        require_x10a=require_x10a, baseline=baseline, final=final,
+    ):
         fail(f"{host} X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA}")
     system = finished.get("sys", {})
     if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP:
@@ -472,6 +480,14 @@ def self_test() -> None:
         "sys": {"safe_mode": False}, "last_crash": None,
     }
     validate_identity(healthy, host="bench.invalid", mac=fixture_mac, version="x", elf="e")
+    timeout_before = {"timeout_err": 1}
+    timeout_after = {"timeout_err": MAX_X10A_TIMEOUT_DELTA + 2}
+    assert not x10a_timeout_delta_exceeded(
+        require_x10a=False, baseline=timeout_before, final=timeout_after,
+    )
+    assert x10a_timeout_delta_exceeded(
+        require_x10a=True, baseline=timeout_before, final=timeout_after,
+    )
     with tempfile.TemporaryDirectory(prefix="daikin-production-ota-selftest-") as tmp:
         inventory_path = Path(tmp) / "inventory.json"
         inventory_path.write_text(json.dumps({

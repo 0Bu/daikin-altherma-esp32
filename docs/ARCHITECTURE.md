@@ -2273,8 +2273,9 @@ Structure:
   explicit confirmation of the distinct `production` role, it sends one un-retried update POST.
   Reboot observation, the second pressure window and retained-X10A MQTT proof are GET/read-only. The
   bench board need not be physically connected to X10A, so it proves binary and allocation behavior
-  rather than plant I/O; the production role supplies the real X10A canary. The source contract and
-  ten mutation canaries make stage removal, shortened
+  rather than plant I/O; expected UART timeouts there are not a plant-link regression. The
+  production role supplies the real X10A canary and keeps the bounded timeout delta. The source
+  contract and thirteen mutation canaries make stage removal, shortened
   stress, signature bypass, weaker heap floors, raw OTA writes and disabled rollback fail locally
   and in CI. This workflow creates no release and contains no 48-hour soak gate.
 - **Validation gets the transport's heap back first.** The firmware downloads through a fixed
