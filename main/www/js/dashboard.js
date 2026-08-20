@@ -291,6 +291,60 @@ function hpProbeRegNumber(value) {
   return Number.isInteger(n) && n >= 0 && n <= 255 ? n : null;
 }
 
+// Converter choices are the exact implemented candidates the firmware can sweep for each field
+// width (logic/hp_probe.hpp). The host UI contract compares both tables so a firmware candidate
+// cannot appear as an unexplained number here, or a stale browser option outlive its decoder.
+const HP_PROBE_CONVERTERS = Object.freeze([
+  [105, 2], [106, 2], [107, 2], [108, 2], [114, 2], [119, 2],
+  [101, 2], [102, 2], [103, 2], [104, 2], [109, 2], [110, 2], [111, 2], [118, 2],
+  [151, 2], [152, 2], [161, 2], [405, 2],
+  [105, 1], [101, 1], [152, 1], [161, 1],
+  [211, 1], [219, 1], [214, 1], [215, 1], [310, 1], [311, 1],
+  [217, 1], [203, 1], [204, 1], [315, 1], [316, 1],
+  [300, 1], [301, 1], [302, 1], [303, 1], [304, 1], [305, 1], [306, 1], [307, 1],
+]);
+
+function hpProbeConvertersForSize(size) {
+  const width = Number(size);
+  return HP_PROBE_CONVERTERS.filter((entry) => entry[1] === width).map((entry) => entry[0]);
+}
+
+function hpProbeConverterDescription(conv, size) {
+  const one = Number(size) === 1;
+  switch (Number(conv)) {
+    case 101: return one ? t("probe.conv_raw_byte") : t("probe.conv_signed_raw_le");
+    case 102: return t("probe.conv_signed_raw_be");
+    case 103: return t("probe.conv_signed_256_le");
+    case 104: return t("probe.conv_signed_256_be");
+    case 105: return one ? t("probe.conv_tenth_byte") : t("probe.conv_signed_tenth_le");
+    case 106: return t("probe.conv_signed_tenth_be");
+    case 107: case 114: case 119: return t("probe.conv_signed_tenth_nodata_le");
+    case 108: return t("probe.conv_signed_tenth_nodata_be");
+    case 109: return t("probe.conv_signed_128_le");
+    case 110: return t("probe.conv_signed_128_be");
+    case 111: return t("probe.conv_signed_half_be");
+    case 118: return t("probe.conv_signed_hundredth_be");
+    case 151: return t("probe.conv_unsigned_raw_le");
+    case 152: return one ? t("probe.conv_unsigned_byte") : t("probe.conv_unsigned_raw_be");
+    case 161: return one ? t("probe.conv_unsigned_half_byte") : t("probe.conv_unsigned_half_be");
+    case 405: return t("probe.conv_saturation");
+    case 211: return t("probe.conv_raw_fan");
+    case 219: return t("probe.conv_capacity");
+    case 214: return t("probe.conv_eeprom_digit");
+    case 215: return t("probe.conv_eeprom_pair");
+    case 310: return t("probe.conv_bits_high");
+    case 311: return t("probe.conv_bits_low");
+    case 217: return t("probe.conv_operation_mode");
+    case 203: return t("probe.conv_error_class");
+    case 204: return t("probe.conv_error_code");
+    case 315: return t("probe.conv_indoor_mode");
+    case 316: return t("probe.conv_hybrid_mode");
+    default:
+      return Number(conv) >= 300 && Number(conv) <= 307
+        ? t("probe.conv_bit", Number(conv) - 300) : t("probe.conv_unknown");
+  }
+}
+
 function hpProbeDraftRequest(draft = S.hpProbeDraft) {
   const reg = hpProbeRegNumber(draft.reg);
   const offset = Number(draft.offset), size = Number(draft.size);
@@ -374,7 +428,11 @@ function x10aDiagnosisCardHtml() {
   const sizeOption = (n) => `<option value="${n}"${String(d.size) === String(n) ? " selected" : ""}>` +
     `${n} ${esc(t(n === 1 ? "probe.byte" : "probe.bytes"))}</option>`;
   const mode = d.mode === "sweep" ? "sweep" : "specific";
-  const modeOption = (value, label) => `<option value="${value}"${mode === value ? " selected" : ""}>${esc(label)}</option>`;
+  const converters = hpProbeConvertersForSize(d.size);
+  const selectedConv = converters.includes(Number(d.conv)) ? Number(d.conv) : converters[0];
+  const converterOptions = `<option value="sweep"${mode === "sweep" ? " selected" : ""}>${esc(t("probe.converter_auto"))}</option>` +
+    converters.map((conv) => `<option value="${conv}"${mode !== "sweep" && conv === selectedConv ? " selected" : ""}>` +
+    `${conv} · ${esc(hpProbeConverterDescription(conv, d.size))}</option>`).join("");
   const regNumber = hpProbeRegNumber(d.reg);
   const regLabel = regNumber == null ? "—" : `0x${regNumber.toString(16).toUpperCase().padStart(2, "0")}`;
   const body = `<div class="probe-card-head"><h2 class="probe-card-title" id="hpProbeTitle">${esc(t("probe.title"))}</h2>` +
@@ -395,15 +453,12 @@ function x10aDiagnosisCardHtml() {
     `<label class="probe-field"><span class="probe-field-label">${esc(t("probe.size"))}</span>` +
     `<select class="input probe-control" id="hpProbeSize">${sizeOption(1)}${sizeOption(2)}</select>` +
     `<span class="field-help">${esc(t("probe.size_help"))}</span></label>` +
-    `<label class="probe-field"><span class="probe-field-label">${esc(t("probe.converter"))}</span>` +
-    `<select class="input probe-control" id="hpProbeMode">${modeOption("sweep", t("probe.converter_auto"))}` +
-    `${modeOption("specific", t("probe.converter_specific"))}</select>` +
-    `<span class="field-help">${esc(t("probe.converter_mode_help"))}</span></label>` +
-    (mode === "specific" ? `<label class="probe-field probe-wide"><span class="probe-field-label">${esc(t("probe.converter_id"))}</span>` +
-      `<input class="input mono num probe-control" id="hpProbeConv" value="${esc(d.conv)}" type="number" min="0" max="999">` +
-      `<span class="field-help">${esc(t("probe.converter_help"))}</span></label>` : "") + `</div>` +
+    `<label class="probe-field probe-wide"><span class="probe-field-label">${esc(t("probe.converter"))}</span>` +
+    `<select class="input probe-control" id="hpProbeConv">${converterOptions}</select>` +
+    `<span class="field-help">${esc(mode === "sweep" ? t("probe.converter_auto_help", d.size) :
+      t("probe.converter_selected", selectedConv, hpProbeConverterDescription(selectedConv, d.size)))}</span></label></div>` +
     `<div class="probe-action-row"><span class="probe-action-note">${esc(t("probe.action_note"))}</span>` +
-    `<button class="btn primary probe-submit" type="submit"${S.hpProbeBusy ? " disabled" : ""}>` +
+    `<button class="btn primary probe-submit" id="hpProbeSubmit" type="submit" aria-busy="${S.hpProbeBusy ? "true" : "false"}"${S.hpProbeBusy ? " disabled" : ""}>` +
     (S.hpProbeBusy ? `<span class="spin"></span>${esc(t("probe.querying"))}` : esc(t("probe.send"))) + `</button></div>` +
     `</form>${hpProbeResultHtml()}`;
   return `<section class="card probe-card" aria-labelledby="hpProbeTitle">${body}</section>`;

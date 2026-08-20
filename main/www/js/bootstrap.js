@@ -206,10 +206,10 @@ function wireRestOfApp() {
     else if (e.target.id === "e32Lang") onLangPick();
     else if (e.target.id === "e32Diagnostics") onDiagnosticsPick();
     else if (e.target.id === "hpProbeRegister") onHpProbeRegisterPick();
-    else if (e.target.id === "hpProbeSize" || e.target.id === "hpProbeMode") onHpProbeDraftInput(e.target);
+    else if (["hpProbeSize", "hpProbeConv"].includes(e.target.id)) onHpProbeDraftInput(e.target);
   });
   $("settingsCards").addEventListener("input", (e) => {
-    if (["hpProbeReg", "hpProbeOffset", "hpProbeConv"].includes(e.target.id))
+    if (["hpProbeReg", "hpProbeOffset"].includes(e.target.id))
       onHpProbeDraftInput(e.target);
   });
   $("settingsCards").addEventListener("submit", (e) => {

@@ -735,22 +735,40 @@ function onHpProbeRegisterPick() {
 
 function onHpProbeDraftInput(input) {
   const field = { hpProbeReg: "reg", hpProbeOffset: "offset", hpProbeSize: "size",
-    hpProbeMode: "mode", hpProbeConv: "conv" }[input.id];
+    hpProbeConv: "converter" }[input.id];
   if (!field) return;
-  S.hpProbeDraft[field] = input.value;
-  const selected = S.hpProbeCatalog[Number(S.hpProbeDraft.selected)];
-  if (!hpProbeSelectionMatches(selected)) {
-    S.hpProbeDraft.selected = "";
-    const register = $("hpProbeRegister");
-    if (register) register.value = "";
+  if (field === "converter") {
+    S.hpProbeDraft.mode = input.value === "sweep" ? "sweep" : "specific";
+    if (input.value !== "sweep") S.hpProbeDraft.conv = input.value;
+  } else {
+    S.hpProbeDraft[field] = input.value;
   }
+  if (field === "size") {
+    const converters = hpProbeConvertersForSize(input.value);
+    if (!converters.includes(Number(S.hpProbeDraft.conv)))
+      S.hpProbeDraft.conv = String(converters[0]);
+  }
+  // The option is a complete, known tuple rather than a label for one field. As soon as any tuple
+  // field is edited, even to the same textual value, the form is now explicitly manual. This keeps
+  // the picker truthful and makes selecting the known row again an unambiguous reset to its def.
+  S.hpProbeDraft.selected = "";
+  const register = $("hpProbeRegister");
+  if (register) register.value = "";
   const normalized = $("hpProbeRegNormalized");
   const reg = hpProbeRegNumber(S.hpProbeDraft.reg);
   if (normalized) normalized.textContent = reg == null ? "—" : `0x${reg.toString(16).toUpperCase().padStart(2, "0")}`;
-  if (field === "mode") {
+  if (field === "converter") {
     input.blur();
     renderSettings();
   }
+}
+
+function syncHpProbeSubmitBusy() {
+  // renderSettings deliberately freezes the card while a probe input owns focus. A form submitted
+  // with Enter can therefore keep that input focused and skip the rebuild; update the live button
+  // as well so the visible lock always matches the handler's one-shot guard.
+  const button = $("hpProbeSubmit");
+  if (button) button.disabled = S.hpProbeBusy;
 }
 
 async function runHpProbe() {
@@ -766,6 +784,7 @@ async function runHpProbe() {
   S.hpProbeError = "";
   S.hpProbeResult = null;
   renderSettings();
+  syncHpProbeSubmitBusy();
   try {
     const response = await post("/hp/query", request);
     const body = await response.json().catch(() => null);
@@ -781,6 +800,7 @@ async function runHpProbe() {
   } finally {
     S.hpProbeBusy = false;
     renderSettings();
+    syncHpProbeSubmitBusy();
   }
 }
 

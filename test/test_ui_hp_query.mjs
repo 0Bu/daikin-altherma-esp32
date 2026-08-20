@@ -2,6 +2,7 @@
 // selection, editable request generation and bounded one-shot submission.
 import assert from "node:assert/strict";
 import vm from "node:vm";
+import { readFileSync } from "node:fs";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
 const source = readAppFragments(["dashboard.js", "settings.js"]);
@@ -13,9 +14,14 @@ const labels = {
   "probe.page": "Registerseite", "probe.offset": "Payload-Offset", "probe.size": "Feldbreite",
   "probe.byte": "Byte", "probe.bytes": "Bytes", "probe.converter": "Converter",
   "probe.page_help": "Hex oder dezimal", "probe.offset_help": "Index", "probe.size_help": "Bytes",
-  "probe.converter_auto": "Automatisch prüfen", "probe.converter_specific": "Converter-ID verwenden",
-  "probe.converter_mode_help": "Auswahl", "probe.converter_id": "Converter-ID",
-  "probe.converter_help": "ID 0…999", "probe.send": "Register lesen", "probe.querying": "Anfrage läuft…",
+  "probe.converter_auto": "Automatisch – alle passenden Converter prüfen",
+  "probe.converter_auto_help": (size) => `Prüft alle implementierten Converter für ${size} Byte.`,
+  "probe.converter_selected": (id, description) => `Converter ${id}: ${description}`,
+  "probe.conv_tenth_byte": "Rohbyte × 0,1",
+  "probe.conv_raw_byte": "Rohbyte · 0…255",
+  "probe.conv_unsigned_byte": "vorzeichenloses Rohbyte",
+  "probe.conv_unsigned_half_byte": "vorzeichenloses Byte × 0,5",
+  "probe.send": "Register lesen", "probe.querying": "Anfrage läuft…",
   "probe.action_note": "Eine Anfrage pro Poll-Zyklus.",
   "probe.catalog_loading": "Laden", "probe.catalog_empty": "Keine Definitionen",
   "probe.catalog_error": "Fehler", "probe.response": "Antwort", "probe.frame": "Frame",
@@ -67,6 +73,7 @@ vm.runInContext(`${source}
   this.__card = x10aDiagnosisCardHtml;
   this.__result = hpProbeResultHtml;
   this.__request = hpProbeDraftRequest;
+  this.__converters = hpProbeConvertersForSize;
   this.__pick = onHpProbeRegisterPick;
   this.__input = onHpProbeDraftInput;
   this.__load = loadHpProbeCatalog;
@@ -102,6 +109,26 @@ assert.equal((html.match(/>Error Code<\/option>/g) || []).length, 2,
 assert.doesNotMatch(html, /<script>bad\(\)<\/script>/);
 assert.match(html, /&quot;&gt;&lt;script&gt;bad\(\)&lt;\/script&gt;/,
   "profile labels must be escaped before interpolation");
+assert.match(html, /<select class="input probe-control" id="hpProbeConv">/,
+  "automatic and specific converters must share one list instead of a bare number input");
+assert.match(html, /id="hpProbeConv"><option value="sweep">Automatisch – alle passenden Converter prüfen<\/option>/,
+  "automatic evaluation must be the first converter option");
+assert.match(html, />105 · Rohbyte × 0,1<\/option>/,
+  "converter options must explain the decoding rule beside the ID");
+assert.match(html, /Converter 105: Rohbyte × 0,1/,
+  "the selected converter must keep its technical explanation visible below the list");
+
+// The browser list is a presentation of the firmware's exact supported sweep candidates, not an
+// independently maintained approximation that can silently offer stale or unexplained IDs.
+const probeHeader = readFileSync(new URL("../main/logic/hp_probe.hpp", import.meta.url), "utf8");
+const candidateBlock = probeHeader.match(/PROBE_CANDIDATES\[\][\s\S]*?\n};/)?.[0] || "";
+const firmwarePairs = [...candidateBlock.matchAll(/\{(\d+),\s*([12])\}/g)]
+  .map((match) => [Number(match[1]), Number(match[2])]);
+for (const width of [1, 2]) {
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__converters(width))),
+    firmwarePairs.filter((entry) => entry[1] === width).map((entry) => entry[0]),
+    `the ${width}-byte converter dropdown must match logic/hp_probe.hpp exactly`);
+}
 
 elements.hpProbeRegister = element("0");
 sandbox.__pick();
@@ -120,13 +147,37 @@ assert.equal(elements.hpProbeRegister.value, "");
 assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__request())),
   { reg: 0, offset: 13, size: 1, conv: 105 }, "the edited fields must be the submitted request");
 
-elements.hpProbeMode = element("sweep");
-elements.hpProbeMode.id = "hpProbeMode";
-sandbox.__input(elements.hpProbeMode);
-assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__request())), { reg: 0, offset: 13, size: 1 },
+// Picking the known row again is an explicit reset to the def tuple. Any later edit owns the tuple
+// manually, even when the browser reports the same textual value (an input event is the user action).
+elements.hpProbeRegister.value = "0";
+sandbox.__pick();
+assert.deepEqual(JSON.parse(JSON.stringify(S.hpProbeDraft)), {
+  selected: "0", reg: "0x00", offset: "12", size: "1", mode: "specific", conv: "105",
+}, "reselecting a known row must restore all four def fields");
+elements.hpProbeReg = element("0x00");
+elements.hpProbeReg.id = "hpProbeReg";
+sandbox.__input(elements.hpProbeReg);
+assert.equal(S.hpProbeDraft.selected, "",
+  "editing a def-backed field must show Manual input even when its text remains equal");
+assert.equal(elements.hpProbeRegister.value, "");
+
+elements.hpProbeConv = element("sweep");
+elements.hpProbeConv.id = "hpProbeConv";
+sandbox.__input(elements.hpProbeConv);
+assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__request())), { reg: 0, offset: 12, size: 1 },
   "automatic converter evaluation must omit conv from the generated request");
-assert.doesNotMatch(sandbox.__card(), /id="hpProbeConv"/,
-  "the converter ID field must be hidden while automatic evaluation is selected");
+assert.match(sandbox.__card(), /<option value="sweep" selected>Automatisch – alle passenden Converter prüfen<\/option>/,
+  "automatic evaluation must remain selected in the common converter dropdown");
+assert.match(sandbox.__card(), /Prüft alle implementierten Converter für 1 Byte\./,
+  "automatic mode must explain the width-filtered sweep");
+elements.hpProbeConv = element("152");
+elements.hpProbeConv.id = "hpProbeConv";
+sandbox.__input(elements.hpProbeConv);
+assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__request())),
+  { reg: 0, offset: 12, size: 1, conv: 152 },
+  "selecting an explained converter must put that exact ID back into the request");
+assert.match(sandbox.__card(), /Converter 152: vorzeichenloses Rohbyte/,
+  "the selected numbered converter must retain its explanation below the dropdown");
 
 // An unresolved live profile must still receive useful generic examples, labelled as fallback
 // provenance rather than pretending that generic was detected on this installation.
@@ -183,6 +234,8 @@ assert.equal(S.hpProbeDraft.reg, "0x00", "the editable manual draft must survive
 // retained as state for the response/interpretation block.
 S.hpProbeDraft = { selected: "", reg: "0x00", offset: "12", size: "1", mode: "specific", conv: "105" };
 let postCalls = 0, postedUrl = "", postedBody = null, resolvePost;
+elements.hpProbeSubmit = element();
+elements.hpProbeSubmit.disabled = false;
 nextPost = (url, body) => {
   postCalls++;
   postedUrl = url;
@@ -190,8 +243,12 @@ nextPost = (url, body) => {
   return new Promise((resolve) => { resolvePost = resolve; });
 };
 const first = sandbox.__run();
+assert.equal(elements.hpProbeSubmit.disabled, true,
+  "the visible query button must lock for the complete request round-trip");
 await sandbox.__run();
 assert.equal(postCalls, 1);
+assert.equal(elements.hpProbeSubmit.disabled, true,
+  "a second submit attempt must neither send nor unlock the in-flight request");
 assert.equal(postedUrl, "/hp/query");
 assert.deepEqual(postedBody, { reg: 0, offset: 12, size: 1, conv: 105 },
   "the values visible in the four fields must be the exact submitted body");
@@ -204,6 +261,8 @@ resolvePost({ ok: true, json: async () => ({
 await first;
 assert.equal(S.hpProbeResult.decodes[0].value, 8);
 assert.equal(S.hpProbeBusy, false);
+assert.equal(elements.hpProbeSubmit.disabled, false,
+  "the query button must unlock only after the response has been handled");
 assert.ok(renders > 0);
 
 html = sandbox.__result();

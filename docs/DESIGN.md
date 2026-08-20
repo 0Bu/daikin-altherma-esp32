@@ -1350,8 +1350,15 @@ vocabulary exactly:
    option text is the exact `ValueDef::label` from
    the selected definition: the detected profile, or an explicitly labelled generic fallback. Its
    tuple is internal, so duplicate labels remain independently selectable.
-   Selecting one fills all four editable inputs. Response rows show status, full received frame,
-   valid payload, selected bytes and converter results. No automatic query is issued.
+   Selecting one fills all four editable inputs. Editing any tuple field immediately returns the
+   dropdown to **Manual input**; selecting a register again restores its complete definition tuple.
+   The single **Converter** dropdown starts with automatic evaluation of every matching converter,
+   followed by the field-width-filtered implemented set. Every numbered option and the help line
+   state its signedness, scaling, byte order or enum/bit meaning rather than exposing a bare numeric
+   input.
+   The Query button stays disabled for the full request/response round-trip. Response rows show
+   status, full received frame, valid payload, selected bytes and converter results. No automatic
+   query is issued.
 4. **Firmware card** — the running software: the **Version** (`version`) and the **Update channel**
    select (`ota.channel` → `POST /set_ota`, §5.4), then **Language** (`ui.lang` → `POST /set_lang`,
    §1) — a three-option select, **Browser** / English / Deutsch, "Browser" because that option *is*
