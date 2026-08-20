@@ -13,14 +13,17 @@
 #include <string_view>
 #include <vector>
 #include "convert.hpp"   // PublishedKind — the row's JSON type, taken from its DEFINITION
+#include "fault_state.hpp" // derived numeric companions beside textual fault classes
+#include "ha_device.hpp" // allocation-free label -> JSON-key slugging
 #include "json.hpp"      // json_append_escaped — the shared RFC 8259 string encoder
 
 namespace daik {
 
-// Hard ceilings for the task-owned X10A publisher buffers. A profile/layout change may allocate
-// these slots once; a steady-state cycle may not grow them. The formatted-value ceiling covers the
-// longest enriched fault text in logic/error_codes.hpp (host-audited below) as well as hp_format's
-// 31-byte numeric buffer and Reading's 23-byte enum buffer.
+// Hard refusal ceilings for the X10A publisher. The JSON limit is not reserved permanently: a
+// changed state owns one exact-sized transient payload, while an unchanged state only runs the
+// allocation-free probe. The formatted-value ceiling covers the longest enriched fault text in
+// logic/error_codes.hpp (host-audited below) as well as hp_format's 31-byte numeric buffer and
+// Reading's 23-byte enum buffer.
 inline constexpr size_t X10A_GROUPED_JSON_MAX_BYTES    = 12 * 1024;
 inline constexpr size_t X10A_FORMATTED_VALUE_MAX_BYTES = 96;
 
@@ -139,8 +142,8 @@ inline void append_published_value(JsonOut& j, const Value& value) {
 //   • `grouped_json_size` is an allocation-free counting pass that walks the SAME template
 //     instantiation that writes the bytes, so the reported size is exact by construction.
 //   • `append_grouped_json` writes into a caller-owned, already-reserved std::string. Writing into
-//     reserved capacity performs no allocation and cannot throw, so the per-cycle JSON allocation
-//     and its realloc ladder are gone; the buffer lives for the publisher's whole life instead.
+//     reserved capacity performs no allocation and cannot throw, so the incremental realloc ladder
+//     is gone. The direct cache path below releases its one exact payload after synchronous publish.
 //   • `build_grouped_json` remains as the owning one-shot form (host tests, one-off callers): it is
 //     the counting pass + reserve + append, i.e. ONE encoder, not a second copy.
 //
@@ -233,6 +236,117 @@ inline uint64_t fnv1a64(std::string_view data) {
         h *= 0x100000001b3ULL;
     }
     return h;
+}
+
+// Allocation-free source-cache encoder. Unlike GroupedValue, a poll-cache row owns only its
+// formatted value; group and JSON key are derived from the static register/label metadata. This is
+// deliberate: private issue 10's first implementation kept a second vector of every row, another
+// vector of every slug/group, and a 12 KiB payload block alive for the whole boot. On the real
+// 129-row plant those persistent allocations drove the largest free block to 7.5 KiB and made
+// /status permanently return 503. The cache encoder walks the ONE existing poll cache in place.
+namespace detail {
+template <typename Row>
+inline bool x10a_cache_row_present(const Row& row) {
+    return !row.value.empty() && !row.held;
+}
+
+template <typename Values>
+inline bool x10a_cache_group_seen_before(const Values& vals, size_t i) {
+    if (!x10a_cache_row_present(vals[i])) return true;
+    const std::string_view group = group_for_page(vals[i].reg);
+    for (size_t k = 0; k < i; ++k)
+        if (x10a_cache_row_present(vals[k]) &&
+            std::string_view(group_for_page(vals[k].reg)) == group) return true;
+    return false;
+}
+
+template <typename Out, typename Values>
+inline void append_x10a_cache_json_impl(Out& out, const Values& vals) {
+    out += '{';
+    bool first_group = true;
+    for (size_t g = 0; g < vals.size(); ++g) {
+        if (x10a_cache_group_seen_before(vals, g)) continue;
+        if (!first_group) out += ',';
+        first_group = false;
+        const std::string_view group = group_for_page(vals[g].reg);
+        out += '"'; out += group; out += "\":{";
+        bool first_row = true;
+        for (size_t r = 0; r < vals.size(); ++r) {
+            const auto& row = vals[r];
+            if (!x10a_cache_row_present(row) ||
+                std::string_view(group_for_page(row.reg)) != group) continue;
+            if (!first_row) out += ',';
+            first_row = false;
+            out += '"'; ha_slug_append(out, row.label); out += "\":";
+            struct PublishedView {
+                std::string_view value;
+                PublishedKind kind;
+            } view{std::string_view(row.value), published_kind(row.conv)};
+            append_published_value(out, view);
+
+            if (row.conv != 203) continue;
+            const FaultClass fc = fault_class_from_text(row.value.c_str());
+            if (!fault_companions_publishable(fc)) continue;
+            for (size_t c = 0; c < FAULT_COMPANION_COUNT; ++c) {
+                out += ",\""; out += FAULT_COMPANIONS[c].key; out += "\":";
+                out += fault_companion_state(c, fc);
+            }
+        }
+        out += '}';
+    }
+    out += '}';
+}
+} // namespace detail
+
+template <typename Out, typename Values>
+inline void append_x10a_cache_json(Out& out, const Values& vals) {
+    detail::append_x10a_cache_json_impl(out, vals);
+}
+
+struct X10aCacheJsonProbe {
+    size_t bytes = 0;
+    uint64_t digest = 0xcbf29ce484222325ULL;
+};
+
+// One sink computes both the exact allocation size and the dedup digest. An unchanged snapshot
+// therefore performs no payload allocation at all; a changed snapshot allocates exactly `bytes`
+// once, outside the poll-cache mutex, and is serialized only if the cache revision still matches.
+struct X10aCacheProbeOut {
+    size_t n = 0;
+    uint64_t digest = 0xcbf29ce484222325ULL;
+
+    X10aCacheProbeOut& operator+=(char c) {
+        add(std::string_view(&c, 1));
+        return *this;
+    }
+    X10aCacheProbeOut& operator+=(const char* s) {
+        add(s ? std::string_view(s) : std::string_view{});
+        return *this;
+    }
+    X10aCacheProbeOut& operator+=(const std::string& s) {
+        add(s);
+        return *this;
+    }
+    X10aCacheProbeOut& operator+=(std::string_view s) {
+        add(s);
+        return *this;
+    }
+
+private:
+    void add(std::string_view s) {
+        n += s.size();
+        for (const unsigned char c : s) {
+            digest ^= c;
+            digest *= 0x100000001b3ULL;
+        }
+    }
+};
+
+template <typename Values>
+inline X10aCacheJsonProbe probe_x10a_cache_json(const Values& vals) {
+    X10aCacheProbeOut out;
+    append_x10a_cache_json(out, vals);
+    return {out.n, out.digest};
 }
 
 // Build the HomeHub payload for <base>/modbus. The topic already identifies the source, so repeating

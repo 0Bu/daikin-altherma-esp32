@@ -2305,28 +2305,29 @@ Structure:
   floor rejects the measured 15.9 KiB trough while admitting the same board's healthy 31.7 KiB
   ceiling; a provisional 40 KiB largest-block floor would disable weather permanently there. The
   56 KiB aggregate floor leaves about 16 KiB outside the measured ~40 KiB transient claim.
-- **The X10A publish cycle is allocation-bounded end to end** (live-10; the last unbounded
+- **The X10A publish cycle uses one cache and at most one exact payload allocation** (live-10; the last unbounded
   full-string builder after the MCP streaming fix). The old per-second chain built a fresh ~6 KB
   cache, a fresh ~13 KB grouped snapshot, the JSON string with its doubling realloc ladder and a
   second retained copy of the payload — 25–30 KB in 4–5 separate contiguous allocations per cycle,
   of which one failed as soon as a status build or a TLS teardown tail split the largest block
-  (`mqtt: publish skipped at x10a (std::bad_alloc)`, 1–3×/day on the live plant). Now the stable
-  snapshot, stable grouped layout, **fixed 12 KiB payload buffer in static storage** and the 8-byte
-  FNV-1a dedup digest are task-owned and reused. Keeping the payload bytes out of the heap is part of
-  the contract: the first live X10A run proved that a persistent 12 KiB heap block could leave only
-  7.5–11 KiB contiguous for the otherwise healthy `/status` builder. `prepare_x10a_buffers` resolves
-  every publishable profile row and fault companion
-  once per actual profile change; the cache commit carries its static profile id and X10A identity
-  fingerprint, so a config-change window cannot publish an old subset under a new discovery layout.
-  The host-tested aligned accessor validates that source identity transactionally, then copies into
-  pre-reserved row slots without calling `config()`, resizing, or allocating under its mutex. Missing and held-over rows
-  toggle a presence bit instead of compacting the vector and destroying tail strings. The grouped
-  encoder skips those slots, counts the exact bytes through the same template that writes them into
-  the static bounded sink, and refuses a document over 12 KiB instead of touching the heap. Thus the
-  firmware-owned steady-state X10A build has no heap growth and its MQTT bytes are unchanged
-  (host-pinned). The digest is committed
-  only after `esp_mqtt_client_publish()` accepted the retained write, so a transient `-1` is retried
-  rather than deduplicated away. The publish-skip catch logs the throw second's
+  (`mqtt: publish skipped at x10a (std::bad_alloc)`, 1–3×/day on the live plant). The first attempted
+  fix then kept a second row/group layout alive for the whole boot; dev.13 additionally moved a
+  12 KiB payload block into static RAM without removing those duplicate objects. On the 129-row
+  plant that left only 7.5–11 KiB contiguous and made `/status` permanently return 503.
+  The publisher now walks the **one committed poll cache directly**. Under its mutex an
+  allocation-free pass derives every group/key/type/fault companion and computes the exact JSON byte
+  count plus an FNV-1a digest. Unchanged state stops there without allocating a payload. Changed state
+  reserves one exact-sized local string outside the mutex, then re-enters only after checking the
+  source profile, X10A identity and cache revision; the same encoder writes into that already-sized
+  block without growth. A revision change defers the publish to the next one-second cycle. Missing and
+  held-over rows are skipped from the source cache rather than compacted into another vector. The
+  12 KiB value is a refusal ceiling, not a permanent reservation, and the local payload is released
+  immediately after synchronous QoS0 submission. Catalog-wide host tests compare the direct encoder
+  byte-for-byte with the owning reference builder for every resolved profile and reject future
+  worst-case growth over that ceiling. The digest is committed only after
+  `esp_mqtt_client_publish()` accepted the retained write, so a transient `-1` is retried rather than
+  deduplicated away. The one exact changed-state allocation can still fail under external heap
+  pressure; the publish-skip catch keeps the prior retained state and logs the throw second's
   allocation-free heap snapshot (`free=`/`largest=`) on the same line, narrowing the next collision
   to the allocations active at that second instead of relying only on 10-s samples.
 - **Boot recovery / anti-brick** — an unsigned app aborts pre-`app_main`, so only the bootloader can

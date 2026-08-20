@@ -2,11 +2,12 @@
 // (private issue 10: recurring `publish skipped at x10a (std::bad_alloc)` + the 800 B heap
 // low-water at a weather TLS fetch).
 //
-// The host C++ suite proves the pure parts — the counting pass writes the exact bytes the old
-// builder wrote, the digest is FNV-1a 64, the headroom predicate has the right floors — but it
-// cannot link ESP-IDF and therefore cannot prove the load-bearing call sites: the per-second X10A
-// cycle must go through the reused buffers and the bounded builder (never the owning one-shot form),
-// the dedup guard must be the digest (not a retained full-payload copy), the publish-skip catch
+// The host C++ suite proves the pure parts — the direct cache encoder writes exact grouped bytes,
+// its allocation-free probe returns the exact size + FNV-1a digest, and the headroom predicate has
+// the right floors — but it cannot link ESP-IDF and therefore cannot prove the load-bearing call
+// sites: the per-second X10A cycle must probe the one poll cache, allocate only one exact changed
+// payload outside the cache mutex, then revision-check before copying. No duplicate cache/group
+// vectors or boot-long maximum payload block may return. The publish-skip catch
 // must carry the allocation-free heap snapshot, and the weather fetch must stand down for one
 // short retry when the last-moment headroom gate refuses. Those are whole-component claims, so this test
 // reads the production call sites.
@@ -31,32 +32,28 @@ const snapshot = code("main/logic/x10a_snapshot.hpp");
 const weather = code("main/weather_forecast.cpp");
 const group = code("main/logic/mqtt_group.hpp");
 
-// ── The per-second X10A cycle owns its buffers and the bounded builder ─────────────────────────
-// The owning build_grouped_json allocates a fresh string per call and is the churn this fix
-// removes; the cycle must run on the task-owned vectors, the counting pass and the append into the
-// reusable buffer. A stray call to the owning form on this path silently reintroduces the
-// per-cycle allocation this contract exists to prevent.
+// ── The per-second X10A cycle probes first, allocates once only when changed ────────────────────
 const publishStart = mqtt.indexOf("static bool publish_x10a_state(");
 const publishEnd = mqtt.indexOf("static void publish_modbus_state()", publishStart);
 assert.ok(publishStart >= 0 && publishEnd > publishStart,
   "the X10A publish boundary must remain identifiable");
 const publish = mqtt.slice(publishStart, publishEnd);
-assert.ok(publish.indexOf("prepare_x10a_buffers(config.profile)") >= 0 &&
-          publish.indexOf("fill_x10a_values(config)") >= 0,
-  "the cycle must use the prepared stable snapshot layout, not build fresh vectors");
-assert.ok(publish.indexOf("grouped_json_size(s_x10a_grouped)") >= 0,
-  "the exact-size counting pass must run before the write");
-assert.ok(publish.indexOf("append_grouped_json(s_x10a_json, s_x10a_grouped)") >= 0,
-  "the payload must be written into the reused buffer via the bounded append");
-assert.ok(publish.indexOf("fnv1a64(std::string_view(s_x10a_json.data(), s_x10a_json.size()))") >= 0,
-  "the dedup guard must compare the digest of the built payload");
+const probeAt = publish.indexOf("hp_values_x10a_json_probe(");
+const capAt = publish.indexOf("probe.bytes > X10A_GROUPED_JSON_MAX_BYTES", probeAt);
+const dedupAt = publish.indexOf("probe.digest == s_last_x10a_digest", capAt);
+const payloadAt = publish.indexOf("std::string payload", dedupAt);
+const reservePayloadAt = publish.indexOf("payload.reserve(probe.bytes)", payloadAt);
+const copyAt = publish.indexOf("hp_values_x10a_json_copy(", reservePayloadAt);
+const brokerAt = publish.indexOf("mqtt_publish(s_x10a, payload.c_str()", copyAt);
+assert.ok(probeAt >= 0 && capAt > probeAt && dedupAt > capAt && payloadAt > dedupAt &&
+          reservePayloadAt > payloadAt && copyAt > reservePayloadAt && brokerAt > copyAt,
+  "X10A must probe/dedup before one exact changed-payload allocation, then copy and publish");
 assert.ok(publish.indexOf("build_grouped_json") < 0,
   "the owning one-shot builder must not run on the per-second publish path");
-assert.ok(publish.indexOf("need > X10A_GROUPED_JSON_MAX_BYTES") >= 0 &&
-          publish.indexOf("reserve(need)") < 0,
-  "the device path must refuse an oversized payload instead of growing its fixed buffer");
+assert.equal(occurrences(publish, ".reserve("), 1,
+  "a changed X10A payload may perform exactly one caller-owned reservation");
 assert.match(publish,
-  /if\s*\(\s*!mqtt_publish\(s_x10a[\s\S]*?\)\s*\)\s*return false;\s*s_last_x10a_digest\s*=\s*digest;/,
+  /if\s*\(\s*!mqtt_publish\(s_x10a[\s\S]*?\)\s*\)\s*return false;\s*s_last_x10a_digest\s*=\s*probe\.digest;/,
   "a failed broker publish must return before committing the digest, so the next cycle retries");
 const x10aStage = mqtt.indexOf('publish_stage = "x10a"');
 const x10aStageEnd = mqtt.indexOf('publish_stage = "modbus"', x10aStage);
@@ -69,37 +66,37 @@ assert.match(mqtt, /static\s+uint64_t\s+s_last_x10a_digest\s*=\s*0;/,
   "the X10A dedup guard must be the 8-byte digest (0 = nothing published yet)");
 assert.doesNotMatch(mqtt, /s_last_x10a_json/,
   "no full-payload dedup copy may remain anywhere in the publisher");
-assert.match(mqtt, /static\s+std::vector<CachedValue>\s+s_x10a_cache;/,
-  "the snapshot cache must be task-owned and persistent");
-assert.match(mqtt, /static\s+std::vector<X10aGroupedSlot>\s+s_x10a_grouped;/,
-  "the grouped snapshot must be task-owned and persistent");
-assert.match(mqtt,
-  /static\s+std::array<char,\s*X10A_GROUPED_JSON_MAX_BYTES\s*\+\s*1>\s+s_x10a_json_storage\s*\{\s*\};/,
-  "the payload bytes must live in fixed static storage, not a large heap string");
-assert.match(mqtt,
-  /static\s+BoundedJsonBuffer\s+s_x10a_json\s*\(\s*s_x10a_json_storage\.data\(\),\s*X10A_GROUPED_JSON_MAX_BYTES\s*\);/,
-  "the device serializer must expose the fixed storage through the bounded sink");
-assert.doesNotMatch(mqtt, /s_x10a_json\.reserve\s*\(/,
-  "the fixed X10A payload must never reserve a heap block");
+assert.doesNotMatch(mqtt, /static\s+std::vector<CachedValue>\s+s_x10a_cache;/,
+  "the publisher must not retain a second copy of the poll cache");
+assert.doesNotMatch(mqtt, /X10aGroupedSlot|s_x10a_grouped/,
+  "the publisher must not retain a second vector of groups/slugs/views");
+assert.doesNotMatch(mqtt,
+  /static\s+std::array<char,\s*X10A_GROUPED_JSON_MAX_BYTES/,
+  "the maximum X10A payload must be a refusal ceiling, not boot-long internal RAM");
 
-// Profile preparation creates every base/companion slot and reserves value capacity once. The
-// per-cycle fill only updates presence/views from the allocation-free aligned snapshot.
-const prepareStart = mqtt.indexOf("static void prepare_x10a_buffers(");
-const fillStart = mqtt.indexOf("static bool fill_x10a_values(", prepareStart);
-const fillEnd = mqtt.indexOf("static std::vector<GroupedValue> current_modbus_values(bool& live)", fillStart);
-assert.ok(prepareStart >= 0 && fillStart > prepareStart && fillEnd > fillStart,
-  "the profile preparation and snapshot fill must remain identifiable");
-const prepare = mqtt.slice(prepareStart, fillStart);
-const fill = mqtt.slice(fillStart, fillEnd);
-assert.ok(prepare.indexOf("s_x10a_json.reserve") < 0 &&
-          prepare.indexOf("ha_slug_into(base.key, d.label)") >= 0,
-  "profile preparation may allocate row slots, but the fixed JSON bytes must already be static");
-assert.ok(fill.indexOf("hp_values_snapshot_aligned") >= 0 &&
-          fill.indexOf("slot.present") >= 0 &&
-          fill.indexOf("resize(") < 0 && fill.indexOf("reserve(") < 0,
-  "the per-cycle fill must update stable slots without resizing or reserving");
-assert.ok(fill.indexOf("hp_values_capacity") < 0,
-  "the per-cycle X10A stage must not copy Config merely to size its snapshot");
+// Both cache passes run under the poll-cache lock. Capacity is established before the copy takes
+// that lock; source identity + revision + size/digest are revalidated before the non-growing append.
+const probeStart = hpPoll.indexOf("HpX10aJsonProbe hp_values_x10a_json_probe(");
+const copyStart = hpPoll.indexOf("HpX10aJsonCopyResult hp_values_x10a_json_copy(", probeStart);
+const copyEnd = hpPoll.indexOf("HpStats hp_stats()", copyStart);
+assert.ok(probeStart >= 0 && copyStart > probeStart && copyEnd > copyStart,
+  "the X10A cache probe/copy boundaries must remain identifiable");
+const cacheProbe = hpPoll.slice(probeStart, copyStart);
+const cacheCopy = hpPoll.slice(copyStart, copyEnd);
+assert.ok(cacheProbe.indexOf("Lock lk(s_mtx)") >= 0 &&
+          cacheProbe.indexOf("x10a_snapshot_source_matches(") >= 0 &&
+          cacheProbe.indexOf("probe_x10a_cache_json(s_cache)") >= 0,
+  "the allocation-free size/digest probe must read one source-validated locked cache");
+const capacityAt = cacheCopy.indexOf("out.capacity() < expected_bytes");
+const lockAt = cacheCopy.indexOf("Lock lk(s_mtx)");
+const revisionAt = cacheCopy.indexOf("s_cache_revision != expected_revision", lockAt);
+const reprobeAt = cacheCopy.indexOf("probe_x10a_cache_json(s_cache)", revisionAt);
+const appendAt = cacheCopy.indexOf("append_x10a_cache_json(out, s_cache)", reprobeAt);
+assert.ok(capacityAt >= 0 && lockAt > capacityAt && revisionAt > lockAt &&
+          reprobeAt > revisionAt && appendAt > reprobeAt,
+  "copy must pre-size outside the lock, then revalidate revision/digest before non-growing append");
+assert.ok(occurrences(hpPoll, "++s_cache_revision") >= 2,
+  "normal cache commits and reconfiguration must both invalidate an in-flight probe");
 assert.match(hpPoll,
   /x10a_snapshot_source_matches\(s_cache_profile,\s*s_cache_identity_fp,\s*expected_profile,\s*expected_identity_fp\)[\s\S]{0,200}?x10a_snapshot_align\(out, count, s_cache\.data\(\), s_cache\.size\(\)\)/,
   "the cache lock must delegate to the host-tested aligned snapshot primitive");
@@ -130,11 +127,11 @@ assert.ok(downloadStart >= 0 && downloadEnd > downloadStart,
 const download = weather.slice(downloadStart, downloadEnd);
 const reserveAt = download.indexOf("out.reserve(kPayloadMax)");
 const urlAt = download.indexOf("open_meteo_url(weather)");
-const probeAt = download.indexOf("http_client_probe()");
-const gateAt = download.indexOf("weather_fetch_headroom_ok(", probeAt);
+const weatherProbeAt = download.indexOf("http_client_probe()");
+const gateAt = download.indexOf("weather_fetch_headroom_ok(", weatherProbeAt);
 const clientAt = download.indexOf("esp_http_client_init(", gateAt);
-assert.ok(reserveAt >= 0 && urlAt > reserveAt && probeAt > urlAt &&
-          gateAt > probeAt && clientAt > gateAt,
+assert.ok(reserveAt >= 0 && urlAt > reserveAt && weatherProbeAt > urlAt &&
+          gateAt > weatherProbeAt && clientAt > gateAt,
   "response and URL allocations must finish before the final gate and client/TLS setup");
 assert.ok(download.indexOf("HttpClientCleanup cleanup(client)", clientAt) > clientAt &&
           download.indexOf("out.reserve(", reserveAt + 1) < 0,
@@ -212,3 +209,9 @@ assert.match(group, /inline\s+void\s+append_grouped_json\(/,
   "the bounded append must be exposed for the device call site");
 assert.match(group, /inline\s+uint64_t\s+fnv1a64\(/,
   "the dedup digest must be a pure, host-tested function");
+assert.match(group, /inline\s+void\s+append_x10a_cache_json\(/,
+  "the device path must expose the direct poll-cache encoder");
+assert.match(group, /inline\s+X10aCacheJsonProbe\s+probe_x10a_cache_json\(/,
+  "the device path must expose the allocation-free exact size/digest probe");
+assert.match(group, /ha_slug_append\(out,\s*row\.label\)/,
+  "the direct encoder must slug into its sink without allocating a temporary string");
