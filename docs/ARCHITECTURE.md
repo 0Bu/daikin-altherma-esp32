@@ -2690,8 +2690,10 @@ place:
   untouched by any of this — they arrive over `/values` as English X10A register names and stay
   verbatim in every language (see DESIGN.md §1). English is embedded in the startup page; the other
   catalogs are bounded, pre-compressed assets from the signed image, selected by the trusted-LAN
-  `GET /locale.js?lang=…` route. Specialist value and inspector explanations remain English/German
-  and fall back to English in the six newer locales.
+  `GET /locale.js?lang=…` route. Each lazy module also carries concise copy for all 40 schematic
+  inspector targets plus stable offset-keyed HomeHub row names. The much longer value/model
+  accordion descriptions remain English/German and fall back to English in the six newer locales;
+  X10A register labels remain the unchanged English transport identity.
 - **Firmware / OTA** — tapping the version runs the real update flow. Both places the version is
   printed as a control are the same trigger (`checkFirmwareUpdate`): the header meta line beside the
   IP, and the **Version** row on the Settings **Firmware** card. Neither one navigates — the readout

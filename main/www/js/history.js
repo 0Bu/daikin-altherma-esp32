@@ -6,6 +6,9 @@
 // The device keeps every source at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
 // would be an empty chart by design.
+const histFmt1 = (n) => Number(n).toLocaleString(LANG, {
+  minimumFractionDigits: 1, maximumFractionDigits: 1,
+});
 // Each entry is {id, label}: the ID is the stable history key GET /history takes. Paired sources
 // deliberately reuse logic/history.hpp's TRENDS ids ("dhw_tank", "outdoor_air", …); an honest
 // single-source timeline such as Modbus disinfection has its own id. The LABEL is how this profile
@@ -781,7 +784,7 @@ function stateRunWhen(view, from, count) {
   const n = view.recordedN ?? view.v.length;
   const old = ((n - from) * view.dt) / 3600;
   const recent = ((n - from - count) * view.dt) / 3600;
-  return t("hist.boost_ago_range", old.toFixed(1), Math.max(0, recent).toFixed(1));
+  return t("hist.boost_ago_range", histFmt1(old), histFmt1(Math.max(0, recent)));
 }
 // The complete contiguous phase containing sample `i`. The same helper serves categorical states
 // and the HomeHub outdoor-register plateau note: both are answers about an INTERVAL, not just the
@@ -962,7 +965,7 @@ function histHtml(id, unit, name, source = "") {
   }).join("");
   const shownUnit = view.unit || unit;
   const u = shownUnit ? ` ${shownUnit}` : "";
-  const rng = `${lo.toFixed(1)} – ${hi.toFixed(1)}${u}`;
+  const rng = `${histFmt1(lo)} – ${histFmt1(hi)}${u}`;
 
   // The scrub layer: a translucent tooltip OVER the plot (ApexCharts-style), plus the crosshair and
   // marker dot inside it. The bubble follows the cursor horizontally but never changes the plot's
@@ -1010,7 +1013,7 @@ function histHtml(id, unit, name, source = "") {
     `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
       // Idle time is reported ahead of dropouts: on an outdoor-air trend it is normally the larger
       // share of the day and the one that explains the shape of the chart.
-      (held ? `<span class="vhist-idle">${esc(t("hist.heldnote", ((held * view.dt) / 3600).toFixed(1)))}</span>` : "") +
+      (held ? `<span class="vhist-idle">${esc(t("hist.heldnote", histFmt1((held * view.dt) / 3600)))}</span>` : "") +
       (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
       `<span>${esc(t("hist.now"))}</span></div>`,
     view.series.length > 1 ? "vhist-multi" : ""
@@ -1317,7 +1320,7 @@ function scrubText(h, i) {
         .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
     }
     const ageH = (((h.recordedN ?? h.v.length) - 1 - i) * h.dt) / 3600;
-    return ageH < 0.05 ? t("hist.now") : t("hist.rel", ageH.toFixed(1));
+    return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
   };
   const valueText = (s) => {
     const v = s.v[i];
@@ -1335,7 +1338,7 @@ function scrubText(h, i) {
       return Number.isInteger(mode) && mode >= 0 && mode <= 3
         ? `${t(`sg.mode${mode}`)}${mode === 2 ? ` · ${label}` : ""}` : t("hist.nm");
     }
-    return v != null ? (v / 10).toFixed(1) + (s.unit ? " " + s.unit : "")
+    return v != null ? histFmt1(v / 10) + (s.unit ? " " + s.unit : "")
          : histHeld(s, i) ? t("hist.held") : cfg?.missing ? t(cfg.missing) : t("hist.nm");
   };
   if (h.id === ENV3_COMBINED_ID) {
@@ -1706,8 +1709,9 @@ const HOMEHUB_LABEL_DE = Object.freeze({
 });
 function displayHomeHubLabel(row) {
   const fallback = displayReadingLabel(row && row.label, row);
-  if (LANG !== "de" || !row || row.off == null) return fallback;
-  return HOMEHUB_LABEL_DE[row.off] || fallback;
+  if (!row || row.off == null) return fallback;
+  if (LANG === "de") return HOMEHUB_LABEL_DE[row.off] || fallback;
+  return HOMEHUB_LABEL_I18N[LANG]?.[row.off] || fallback;
 }
 
 // The expandable row itself — a <button> header plus the collapsible panel beneath it. Shared by

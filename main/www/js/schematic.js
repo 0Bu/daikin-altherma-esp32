@@ -103,7 +103,11 @@ const copPlan = (pelSrc, buh1, buh2, bsh, pbOk) => {
   if (pbOk)              return { scope: "plant", block: null,          postBuh: true  };
   return { scope: "plant", block: heaterQuiet ? null : "buh_no_r2t", postBuh: false };
 };
-const fmt1 = (n) => (n == null ? "—" : n.toFixed(1));
+// Diagram numbers are user-facing copy too. Keep their width fixed to one decimal while using the
+// selected locale's decimal separator (for example 24,3 in Ukrainian instead of 24.3).
+const fmt1 = (n) => (n == null ? "—" : Number(n).toLocaleString(LANG, {
+  minimumFractionDigits: 1, maximumFractionDigits: 1,
+}));
 const fmt0 = (n) => (n == null ? "—" : String(Math.round(n)));
 const setTxt = (id, s) => { const el = $(id); if (el && el.textContent !== s) el.textContent = s; };
 
@@ -482,16 +486,19 @@ function updateSchematicStateA11y(d) {
     const el = $(id);
     if (el) el.setAttribute("aria-label", `${label}: ${state}`);
   };
-  set("gSgRequest", t("schem.sg_boost"), sgModeText(d && d.sgMode));
-  set("gBshState", t("schem.bsh_label"),
+  const concept = (key, fallback) => INSPECT?.[key]
+    ? (inspHasLocaleField(INSPECT[key], "aria") ? inspFieldText(INSPECT[key], "aria", d) : fallback)
+    : fallback;
+  set("gSgRequest", concept("sgrequest", t("schem.sg_boost")), sgModeText(d && d.sgMode));
+  set("gBshState", concept("bsh", t("schem.bsh_label")),
       !d || d.bsh == null ? "—" : t(d.bsh ? "state.on" : "state.off"));
-  set("gDefrostState", t("schem.defrost_pill"),
+  set("gDefrostState", concept("defrost", t("schem.defrost_pill")),
       !d || d.defrost == null ? "—" : t(d.defrost ? "state.on" : "state.off"));
-  set("gQuietState", t("chip.quiet"),
+  set("gQuietState", concept("quiet", t("chip.quiet")),
       !d || d.quiet == null ? "—" : t(d.quiet ? "state.on" : "state.off"));
-  set("g2wv", t("schem.valve2"),
+  set("g2wv", concept("valve2", t("schem.valve2")),
       !d || d.valve2On == null ? "—" : t(d.valve2On ? "state.on" : "state.off"));
-  set("gFlowSwitch", t("schem.flow_switch"),
+  set("gFlowSwitch", concept("flow_switch", t("schem.flow_switch")),
       !d || d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"));
 }
 
@@ -687,7 +694,7 @@ function renderLive() {
   // are in the inspector. The compact "≈" still matters in the closed drawing, but only for X10A's
   // current×230 V estimate; the HomeHub register is a measurement and pelApproxText removes it.
   setTxt("svCopLabel", d.efficiencyKind === "eer" ? "EER" : "COP");
-  setTxt("svCop", d.cop == null ? "—" : d.cop.toFixed(1));
+  setTxt("svCop", fmt1(d.cop));
   setTxt("pelApprox", pelApproxText(d));
   setTxt("svPel", fmt1(d.pel));
 
@@ -705,8 +712,10 @@ function renderLive() {
 //   • a COMPONENT (outdoor unit, PHE, space circuit, …) — carries its own `what` (nothing in
 //     DESCRIPTIONS describes an assembly) plus `now(d)`, a sentence built from the live values that
 //     says what the part is doing right now, and `rows`, the readings that belong to it.
-// Copy is bilingual like DESCRIPTIONS ({en, de}); `now` returns the same shape.
-const tx = (o) => (o == null ? "" : typeof o === "string" ? o : (LANG === "de" && o.de) ? o.de : o.en);
+// English/German copy remains beside the source logic. The six newer locale modules mirror only the
+// human-facing fields by stable INSPECT key; `now` functions receive the same live snapshot without
+// duplicating any source-selection or plant-state logic.
+const tx = (o) => (o == null ? "" : typeof o === "string" ? o : o[LANG] ?? o.en);
 const degC = (n) => (n == null ? "—" : fmt1(n) + " °C");
 
 const PEL_ESTIMATED_WHAT = {
@@ -1017,10 +1026,10 @@ const INSPECT = {
               de: "Derzeit ist keine Wärmeleistung berechenbar, weil die aktuellen Pumpen- und Durchflusswerte keine Wasserbewegung durch den PHE belegen. Das ist kein nutzbarer Arbeitspunkt und nicht eine Leistung von null." })
       : d.pth == null ? null
       : d.pthKind === "cooling"
-      ? { en: `≈ ${fmt1(d.pth)} kW cooling${d.cop != null ? `, EER ${d.cop.toFixed(1)}` : ""}.`,
-          de: `≈ ${fmt1(d.pth)} kW Kälteleistung${d.cop != null ? `; EER ${d.cop.toFixed(1)}` : ""}.` }
-      : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${d.cop.toFixed(1)}` : ""}.`,
-          de: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${d.cop.toFixed(1)}` : ""}.` },
+      ? { en: `≈ ${fmt1(d.pth)} kW cooling${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.`,
+          de: `≈ ${fmt1(d.pth)} kW Kälteleistung${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.` }
+      : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`,
+          de: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.` },
     rows: [/flow sensor/i, /target delta t heating/i, /current measured by ct/i, /inv primary current/i],
   },
   // Its own pill next to the heat output, so its own entry — and the one derived figure with no
@@ -1048,7 +1057,7 @@ const INSPECT = {
       en: "Estimated heat output divided by estimated electrical input. The two values must describe compatible boundaries: with CT currents the UI uses heat after the backup heater when that sensor exists; with inverter current it shows the heat pump alone. Whether the CTs include every relevant electrical load depends on their installation, so this is not automatically a whole-plant meter. The result inherits the fluid, sensor, voltage and power-factor assumptions of both estimates. Use it as a live indication; metered seasonal energy is more meaningful. With the compressor stopped it shows \"—\".",
       de: "Geschätzte Wärmeleistung geteilt durch geschätzte elektrische Aufnahme. Beide Werte müssen zueinander passende Bilanzgrenzen beschreiben: Bei Stromwandlern verwendet die UI die Wärme hinter dem Zusatzheizer, sofern dieser Fühler vorhanden ist; beim Inverterstrom zeigt sie nur die Wärmepumpe. Ob die Stromwandler alle relevanten elektrischen Verbraucher erfassen, hängt von ihrem Einbau ab; der Wert ist daher nicht automatisch ein Gesamtanlagen-Zähler. Das Ergebnis übernimmt die Annahmen zu Medium, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Als Live-Hinweis verwenden; aussagekräftiger ist saisonal gemessene Energie. Bei stehendem Verdichter zeigt er „—“.",
       },
-    head: (d) => (d.cop == null ? "—" : d.cop.toFixed(1)),
+    head: (d) => fmt1(d.cop),
     // Every block reason gets its OWN sentence. A suppressed wrong claim must not be replaced by
     // another one, so "the heater is firing and this profile has no post-BUH sensor", "the gateway
     // measures a different system" and "there is no current reading at all" cannot share a sentence
@@ -1079,13 +1088,13 @@ const INSPECT = {
             de: "Derzeit kein COP — dieses Profil meldet überhaupt keine elektrische Aufnahme (weder Stromwandler noch Inverterstrom), daher lässt sich kein Effizienzquotient bilden." })
       : d.cop == null ? null
       : d.efficiencyKind === "eer"
-      ? { en: `${d.cop.toFixed(1)} kW of cooling per kW of electricity — ≈ ${fmt1(d.copPth)} kW removed for ≈ ${fmt1(d.pel)} kW in.`,
-          de: `${d.cop.toFixed(1)} kW Kälteleistung je kW Strom — ≈ ${fmt1(d.copPth)} kW entzogen bei ≈ ${fmt1(d.pel)} kW Aufnahme.` }
+      ? { en: `${fmt1(d.cop)} kW of cooling per kW of electricity — ≈ ${fmt1(d.copPth)} kW removed for ≈ ${fmt1(d.pel)} kW in.`,
+          de: `${fmt1(d.cop)} kW Kälteleistung je kW Strom — ≈ ${fmt1(d.copPth)} kW entzogen bei ≈ ${fmt1(d.pel)} kW Aufnahme.` }
       : d.copScope === "plant"
-      ? { en: `${d.cop.toFixed(1)} kW of post-BUH water-side heat per kW of CT-estimated electricity — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The CT installation determines which electrical loads are included.`,
-          de: `${d.cop.toFixed(1)} kW wasserseitige Wärme hinter dem BUH je kW aus Stromwandlern geschätzter Aufnahme — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Welche elektrischen Lasten enthalten sind, bestimmt der Einbau der Stromwandler.` }
-      : { en: `${d.cop.toFixed(1)} kW of heat per kW of electricity for the heat-pump boundary — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The backup heater is outside both figures; whole-plant efficiency therefore cannot be derived from this value while the heater runs.`,
-          de: `${d.cop.toFixed(1)} kW Wärme je kW Strom innerhalb der Wärmepumpen-Bilanz — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Der Zusatzheizer liegt außerhalb beider Bilanzgrößen; die Effizienz der Gesamtanlage lässt sich daraus während seines Betriebs nicht ableiten.` },
+      ? { en: `${fmt1(d.cop)} kW of post-BUH water-side heat per kW of CT-estimated electricity — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The CT installation determines which electrical loads are included.`,
+          de: `${fmt1(d.cop)} kW wasserseitige Wärme hinter dem BUH je kW aus Stromwandlern geschätzter Aufnahme — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Welche elektrischen Lasten enthalten sind, bestimmt der Einbau der Stromwandler.` }
+      : { en: `${fmt1(d.cop)} kW of heat per kW of electricity for the heat-pump boundary — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The backup heater is outside both figures; whole-plant efficiency therefore cannot be derived from this value while the heater runs.`,
+          de: `${fmt1(d.cop)} kW Wärme je kW Strom innerhalb der Wärmepumpen-Bilanz — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Der Zusatzheizer liegt außerhalb beider Bilanzgrößen; die Effizienz der Gesamtanlage lässt sich daraus während seines Betriebs nicht ableiten.` },
     // The numerator's own row, but ONLY while the plan actually uses it (d.copPostBuh) — listing it
     // under a heat-pump COP would name an input that figure never touched. Resolved through the one
     // postBuhRow(), never a second pattern: a looser copy here is exactly how the (R2T) tag would
@@ -1376,6 +1385,30 @@ const INSPECT = {
   },
 };
 
+// Locale modules mirror only the human-facing fields of INSPECT, keyed by this stable target id.
+// Keeping the live selectors and source arbitration here prevents a translated copy table from
+// becoming a second implementation of plant logic. A locale may use a function for dynamic copy;
+// it receives the same liveData snapshot as the English/German source field.
+for (const [key, entry] of Object.entries(INSPECT)) entry.i18nKey = key;
+const inspLocaleEntry = (e) => INSPECT_I18N[LANG]?.[e?.i18nKey];
+const inspHasLocaleField = (e, field) =>
+  !!inspLocaleEntry(e) && Object.prototype.hasOwnProperty.call(inspLocaleEntry(e), field);
+const inspLocaleField = (e, field, d) => {
+  const value = inspLocaleEntry(e)?.[field];
+  return typeof value === "function" ? value(d) : value;
+};
+const inspSourceField = (e, field, d) => {
+  const value = e && e[field];
+  return typeof value === "function" ? value(d) : value;
+};
+const inspFieldText = (e, field, d) => {
+  if (inspHasLocaleField(e, field)) {
+    const localized = inspLocaleField(e, field, d);
+    return localized == null ? null : String(localized);
+  }
+  return tx(inspSourceField(e, field, d));
+};
+
 // A row selector is either a label pattern or a PICKER FUNCTION. Quantities whose selection is a
 // judgement rather than a match — leaving water, where a setpoint / mixed-zone / post-BUH row must
 // never be substituted for the measurement (issue #121) — name their picker, so the rule lives in
@@ -1495,14 +1528,18 @@ const HELD_OVER_NOW = {
 // substituted a live HomeHub reading for this target. In that case the inspector names the Modbus
 // row and must not append a contradictory "No current reading" note.
 const inspHeld = (e, d) => !!d && rowHeldOver(inspRow(e), d) && !mbForInspect(S.insp);
-const inspHeldHtml = (e, d) =>
-  (inspHeld(e, d) ? descNoteHtml(tx(HELD_OVER_NOW.lead), tx(HELD_OVER_NOW.why)) : "");
+const inspHeldHtml = (e, d) => {
+  if (!inspHeld(e, d)) return "";
+  const localized = INSPECT_I18N[LANG]?.held;
+  return descNoteHtml(localized?.lead || tx(HELD_OVER_NOW.lead),
+                      localized?.why || tx(HELD_OVER_NOW.why));
+};
 
 // The live sentence above the timeless description — dropped entirely while the reading is held
 // over, where the note below the description answers instead.
 const inspNowText = (e, d) => {
   if (!d || inspHeld(e, d)) return null;
-  return e.now ? tx(e.now(d)) : null;
+  return (e.now || INSPECT_I18N[LANG]?.[e.i18nKey]?.now) ? inspFieldText(e, "now", d) : null;
 };
 
 // An entry's title, which may DEPEND on the live values — `t` takes the same {en,de}-or-function
@@ -1511,7 +1548,7 @@ const inspNowText = (e, d) => {
 // number itself looks identical either way. Resolved through one helper so renderInspect and
 // inspectSig cannot disagree about it — a dynamic title left out of the signature would simply
 // stop repainting when the scope flipped.
-const inspTitleText = (e, d) => tx(typeof e.t === "function" ? e.t(d) : e.t);
+const inspTitleText = (e, d) => inspFieldText(e, "t", d);
 
 // Everything the panel would draw, as one string — the change key for the render guard above. It
 // covers the selection, the headline, the live sentence and every member reading, so a value moving
@@ -1730,8 +1767,9 @@ function renderInspect() {
   // reads as a broken value.
   const sentence = inspNowText(e, d);
   const desc = e.sample ? descFor(e.sample, row || fb) : null;
-  const ownWhat = typeof e.what === "function" ? e.what(d) : e.what;
-  const what = ownWhat ? descParaHtml(esc(tx(ownWhat)))
+  const localizedWhat = inspLocaleField(e, "what", d);
+  const ownWhat = localizedWhat ?? inspSourceField(e, "what", d);
+  const what = ownWhat ? descParaHtml(esc(localizedWhat ?? tx(ownWhat)))
                        : (desc ? descBodyHtml(desc, (row || fb)?.value) : "");
   // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
   // together after the chart in the divided value list below.
@@ -1778,7 +1816,8 @@ function labelSchematicHits() {
     // which is where a screen reader meets it too. Falling back through inspTitleText rather than
     // tx() keeps a future function-form title a real string instead of the literal "undefined"
     // that tx() returns for a function.
-    const name = e.aria ? tx(e.aria) : inspTitleText(e, null);
+    const name = (e.aria || INSPECT_I18N[LANG]?.[e.i18nKey]?.aria)
+      ? inspFieldText(e, "aria", null) : inspTitleText(e, null);
     el.setAttribute("aria-label", name);
     // Re-entrant: a language switch re-runs this on the SAME nodes, so reuse the existing <title>
     // rather than inserting a second one — an unconditional insert here left one stale, un-removed

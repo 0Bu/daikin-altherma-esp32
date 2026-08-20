@@ -377,6 +377,31 @@ open(p, 'w').write(s.replace('x="522" y="255" width="112"', 'x="522" y="255" wid
 PY
 run_case "text overflowing its pill is caught" 1 "G004"
 
+# 14bb — the markup/English/German all fit, but a lazy locale does not. The production regression
+# was Ukrainian, and a bilingual-only width sweep stayed green despite loading all eight catalogs.
+reset
+patch_file "$WORK/main/www/locales/uk.js" <<'PY'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+new = re.sub(r'/\* schem\.defrost_pill \*/ "[^"]+"',
+             '/* schem.defrost_pill */ "❄ надзвичайно-довге-розморожування"', s, count=1)
+if new == s: sys.exit(1)
+open(p, 'w').write(new)
+PY
+run_case "a non-English locale overflowing its pill is caught" 1 "G004 defrost/uk"
+
+# 14bc — two separate captions can each fit their own component and still run into each other.
+reset
+patch_file "$WORK/main/www/locales/uk.js" <<'PY'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+new = re.sub(r'/\* schem\.return \*/ "[^"]+"',
+             '/* schem.return */ "НАДЗВИЧАЙНО ДОВГИЙ ВХІД ПЛАСТИНЧАТОГО ТЕПЛООБМІННИКА"', s, count=1)
+if new == s: sys.exit(1)
+open(p, 'w').write(new)
+PY
+run_case "neighbouring locale labels overlapping are caught" 1 "G013"
+
 # 14c — a pipe that is not axis-aligned. A 4 px skew over an 80 px run is invisible in review and
 # permanent in the image.
 reset

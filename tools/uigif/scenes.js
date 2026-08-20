@@ -319,13 +319,15 @@ const DEMO = (() => {
            electricalInput: MB_POWER, history: hist };
 })();
 
-// The README recording is English by default, while `?lang=de` gives UI reviews a deterministic
-// German render. The real app still chooses through navigator.language (DESIGN.md §2).
+// The README recording is English by default, while `?lang=<supported code>` gives UI reviews a
+// deterministic render for every device locale. The real app still chooses through
+// navigator.language (DESIGN.md §2); the query is a demo-driver control, not production UI state.
 try {
-  const demoLang = /(?:^|[?&])lang=de(?:&|$)/.test(location.search) ? "de-DE" : "en-GB";
+  const requested = (location.search.match(/(?:^|[?&])lang=(en|de|es|fr|it|pl|cs|uk)(?:&|$)/) || [])[1];
+  const demoLang = requested ? `${requested}-${requested.toUpperCase()}` : "en-GB";
   Object.defineProperty(navigator, "language", { value: demoLang, configurable: true });
   Object.defineProperty(navigator, "languages", {
-    value: demoLang === "de-DE" ? ["de-DE", "de"] : ["en-GB", "en"], configurable: true,
+    value: [demoLang, requested || "en"], configurable: true,
   });
 } catch { /* leave the browser's own language */ }
 

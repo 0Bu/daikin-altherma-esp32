@@ -149,9 +149,10 @@ one is a physically correct value attached to the wrong thing — the `legacy-35
 It parses the real SVG (coordinates, transforms, path geometry, text metrics) and evaluates the real
 binding tables, so no second copy of either can drift, and reports in three layers: **structure**
 (`S…` — hit target ↔ inspector entry ↔ element id ↔ translation), **geometry** (`G…` — viewBox,
-overlaps, labels struck through, axis-aligned runs, a pill's distance to its own pipe, rotor
-symmetry and pump rotation direction, and a run's *invisible* tap area not reaching into the fitting
-it meets: the hit lines are
+overlaps, labels struck through, axis-aligned runs, text fit across all eight locales (inside fixed
+pills and between neighbouring captions), a pill's distance to its own pipe, rotor symmetry and
+pump rotation direction, and a run's *invisible* tap area not reaching into the fitting it meets:
+the hit lines are
 `stroke-linecap: round`, so each one also covers half a stroke past its declared endpoint, and every
 trim in the drawing had been computed as if the cap were flat — the 3-way valve outlined itself on
 hover and then opened the DHW branch) and **domain** (`E…` — a repeated unit needs a name; a

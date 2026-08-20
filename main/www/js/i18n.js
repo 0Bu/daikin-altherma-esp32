@@ -17,12 +17,33 @@ const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Typ
 // the browser guess on every client that opens the dashboard, until they set it back to "Browser"
 // (DESIGN.md §1). The heat-pump VALUE LABELS are NOT translated here: they arrive from the firmware
 // over /values as English X10A register names (docs/REGISTERS.md) and stay verbatim; the
-// tap-to-expand descriptions currently carry German and English prose; another selected language
-// falls back to English for that specialist layer. Dynamic strings built in this file go through
-// t(); the static markup in index.html is localised by applyStaticI18n() reading data-i18n
+// tap-to-expand value/model descriptions currently carry German and English prose; another selected
+// language falls back to English for that specialist layer. The schematic inspector and HomeHub row
+// names are localized separately in each lazy locale asset. Dynamic strings built in this file go
+// through t(); the static markup in index.html is localised by applyStaticI18n() reading data-i18n
 // attributes, re-run by setLang() when the language changes live.
 const UI_LANGS = Object.freeze(["en", "de", "es", "fr", "it", "pl", "cs", "uk"]);
 const uiLangSupported = (lang) => UI_LANGS.includes(lang);
+// The compact UI catalog above is not the only visible copy surface. The schematic inspector and
+// HomeHub source rows need longer, domain-specific wording that would make the already tight startup
+// page too large if all languages were inlined. Locale modules therefore register those two tables
+// alongside I18N and they are consumed only after the same device-local /locale.js request succeeds.
+// English/German retain their established in-bundle tables; the six newer locales supply concise
+// inspector prose and offset-keyed HomeHub names here without changing the manufacturer's transport
+// labels or using prose as an identifier.
+const INSPECT_I18N = Object.create(null);
+const HOMEHUB_LABEL_I18N = Object.create(null);
+// Locale assets store their compact UI translations positionally against the English key order.
+// The comments in those source files retain the readable key mapping, while the shipped scripts
+// omit 734 repeated property names per language. This keeps the six complete catalogs within the
+// fixed application partition without weakening the English fallback contract.
+function localeValues(values) {
+  const keys = Object.keys(I18N.en);
+  if (!Array.isArray(values) || values.length !== keys.length) throw new Error("locale catalog length");
+  const catalog = {};
+  keys.forEach((key, index) => { catalog[key] = values[index]; });
+  return catalog;
+}
 const autoLang = () => {
   const primary = String(navigator.language || "").trim().toLowerCase().split(/[-_]/, 1)[0];
   return uiLangSupported(primary) ? primary : "en";
@@ -749,7 +770,7 @@ function applyStaticI18n() {
 }
 // Switch the live language: swap LANG, cache it for the next first paint, and re-localise the parts
 // that are NOT rebuilt on a poll — the static HTML + inline SVG (applyStaticI18n), the schematic's
-// hit-target labels (labelSchematicHits, with English fallback for specialist copy), and the active
+// hit-target labels (labelSchematicHits, including locale-specific inspector copy), and the active
 // navigation title. Dynamic cards repaint through t()/tx() on the caller's next render. renderHeader
 // is defined by app_state.js later in the assembled page; the guard keeps this fragment usable in
 // the focused dictionary/render harnesses that intentionally load no navigation code. A no-op
