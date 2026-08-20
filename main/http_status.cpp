@@ -208,8 +208,9 @@ using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 // making the shared OOM guard return 503. The owning std::string instantiation remains only for the
 // MCP get_status envelope, whose outer protocol still owns one response string. This serializer
 // still takes ordinary small snapshots and formats temporary strings. If one of those allocations
-// fails before the first chunk, the shared guard can return 503; after commit the bounded-stream
-// helper returns ESP_FAIL so httpd closes the incomplete response instead of throwing through C.
+// fails before the first emission, the shared guard can return 503; once an emission is attempted
+// the bounded-stream helper returns ESP_FAIL so httpd closes a possibly-started response instead of
+// attempting a second one or throwing through C.
 template <typename JsonOut>
 static void append_status_json(JsonOut& j, bool redact) {
     const Config& c = config();

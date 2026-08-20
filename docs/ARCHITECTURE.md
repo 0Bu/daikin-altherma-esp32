@@ -2350,9 +2350,10 @@ Structure:
   requested roughly 15 KiB on its capacity-growth step). The owning serializer instantiation remains
   for MCP `get_status`; the HTTP route's response size is no longer a contiguous-allocation demand,
   while its ordinary snapshot allocations remain covered by the OOM boundary. Before the first
-  chunk, an allocation failure still becomes 503. After the first chunk HTTP cannot truthfully
-  replace the response status; the commit-aware stream helper catches the failure and makes httpd
-  close the incomplete response, rather than allowing an exception to cross its C dispatch frames.
+  emission, an allocation failure still becomes 503. Once emission begins HTTP may already have
+  sent status/headers even if the first chunk call later reports a socket error; the stream helper
+  therefore catches every subsequent failure and makes httpd close the incomplete response, rather
+  than attempting a second response or allowing an exception to cross its C dispatch frames.
   The publisher now walks the **one committed poll cache directly**. Under its mutex an
   allocation-free pass derives every group/key/type/fault companion and computes the exact JSON byte
   count plus an FNV-1a digest. Unchanged state stops there without allocating a payload. Changed state
@@ -3456,7 +3457,7 @@ try-lock acquire a callback context needs.
 
 Heap is tight (WiFi + MQTT + TLS dominate; the binding limit is the
 largest *contiguous* free block): keep every HTTP handler under the `handle_all` try/catch (503 on
-OOM before response commit; failed connection after a streamed response commits), stream `/diag`,
+OOM before response emission; failed connection after a streamed response starts), stream `/diag`,
 `/status`, `/values`, MCP get_hp_values and MQTT discovery instead of building one big
 `std::string`, and treat any new large contiguous allocation (big JSON, OTA TLS) as a crash risk to
 size-check. A reboot loop is bad here too — it stops the poll cycle and drops MQTT availability.

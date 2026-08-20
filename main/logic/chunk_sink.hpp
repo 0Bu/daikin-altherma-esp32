@@ -44,10 +44,10 @@ public:
     }
 
     bool failed() const { return failed_; }
-    // True after at least one data chunk was accepted by the transport. From that point an HTTP
-    // caller can no longer replace the response with a 503/500 status; a later serializer failure
-    // must abort the stream instead of pretending it still owns the headers.
-    bool committed() const { return committed_; }
+    // True as soon as the first data emission is attempted. The transport may send status/headers
+    // before reporting a later socket error, so even a false result must conservatively close the
+    // clean-503 window. A later serializer failure then aborts instead of sending a second response.
+    bool emission_started() const { return emission_started_; }
     size_t max_buffered() const { return max_buffered_; }
     static constexpr size_t max_chunk_bytes() { return MaxBytes; }
 
@@ -68,11 +68,11 @@ private:
 
     void flush() {
         if (failed_ || buffer_.empty()) return;
+        emission_started_ = true;
         if (!emit_(std::string_view(buffer_), false)) {
             failed_ = true;
             return;
         }
-        committed_ = true;
         buffer_.clear();
     }
 
@@ -80,7 +80,7 @@ private:
     std::string buffer_;
     size_t max_buffered_ = 0;
     bool failed_ = false;
-    bool committed_ = false;
+    bool emission_started_ = false;
     bool finished_ = false;
 };
 
@@ -94,7 +94,7 @@ inline bool finish_bounded_stream(Sink& sink, Append&& append) {
         std::forward<Append>(append)(sink);
         return sink.finish();
     } catch (...) {
-        if (!sink.committed()) throw;
+        if (!sink.emission_started()) throw;
         return false;
     }
 }

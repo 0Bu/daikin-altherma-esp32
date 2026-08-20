@@ -51,7 +51,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 5 | OTA manifest check + signed manual HTTPS stream + **two-point downgrade gate**, transport cleanup before validation, dual INTERNAL-heap gate and bounded MQTT/X10A/weather quiescing | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
 | 6 | Live UI by **polling** bounded-chunk-streamed `/status` + `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`test_status_heap_contract.mjs`](../test/test_status_heap_contract.mjs), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
 | 7 | Minified, deterministic-gzip web UI **embedded in the app image**, under a 150 KiB delivery budget | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs) |
-| 8 | HTTP handlers under an **OOM boundary**: `503` before response commit; clean connection abort if a streamed response fails after its first chunk | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp) |
+| 8 | HTTP handlers under an **OOM boundary**: `503` before the first response emission; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
 | 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 11 | Core dump to flash + offline symbolication, with a proven **orphan dump** erased so no undecodable download is ever offered | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
@@ -366,9 +366,11 @@ other.
   minifies, and pre-gzips deterministically (`EMBED_FILES`), cutting first-paint bytes ~3× over WiFi.
 - **✅ OOM discipline** ([`http_common.cpp`](../main/http_common.cpp)): every route runs under one
   trampoline whose `try/catch` returns **503 instead of crashing** while it still owns the response
-  status. A chunked route cannot change status after its first chunk; the bounded stream helper then
-  consumes the exception and returns failure so httpd closes the incomplete response. Host tests
-  inject both pre-commit and post-commit OOM. Neither path unwinds through esp_http_server's C frames.
+  status. A chunked route may have sent status/headers even when its first chunk call reports a
+  socket error; the bounded stream helper therefore closes the 503 window before that call and then
+  consumes later exceptions so httpd closes the incomplete response. Host tests inject OOM before
+  emission, after a successful first chunk, and after a failed first chunk. No path unwinds through
+  esp_http_server's C frames.
 - **✅ The same discipline covers every allocating FreeRTOS task loop**, since a task entry is a C
   frame boundary exactly like a handler. Its corollary: **a throw must never strand a mutex** —
   `xSemaphoreTake` is not released by unwinding, so critical sections are either non-allocating or

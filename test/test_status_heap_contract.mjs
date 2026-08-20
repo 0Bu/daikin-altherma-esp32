@@ -25,7 +25,7 @@ assert.ok(routeStart >= 0 && routeEnd > routeStart,
 const route = status.slice(routeStart, routeEnd);
 assert.match(route,
   /HttpJsonChunks chunks\(HttpChunkEmitter\{req\}\)[\s\S]*?httpd_resp_set_type\(req, "application\/json"\)[\s\S]*?finish_bounded_stream\(chunks,[\s\S]*?append_status_json\(out, redact\)/,
-  "GET /status must stream through the commit-aware boundary and shared serializer");
+  "GET /status must stream through the emission-aware boundary and shared serializer");
 assert.doesNotMatch(route, /std::string\s+j\b|http_append_status_json\(j|http_send_json\(/,
   "GET /status must never restore a whole-body owning string");
 
@@ -36,10 +36,10 @@ assert.match(sink,
   /while \(!value\.empty\(\)\)[\s\S]*?const size_t take = std::min\(available, value\.size\(\)\)[\s\S]*?value\.remove_prefix\(take\)/,
   "one large append must be split before the production buffer can exceed its bound");
 assert.match(sink,
-  /if \(!sink\.committed\(\)\) throw;[\s\S]*?return false;/,
+  /emission_started_ = true;[\s\S]*?emit_\([\s\S]*?if \(!sink\.emission_started\(\)\) throw;[\s\S]*?return false;/,
   "a serializer exception must remain a clean 503 before commit and abort the response after commit");
 assert.match(heartbeat,
   /template <typename JsonOut>\s*\ninline void append_stack_bytes\(JsonOut& j, uint32_t words\)/,
   "status helpers used by the streamed instantiation must not force an owning std::string");
 
-console.log("status heap contract: GET /status is bounded streamed with an explicit commit boundary");
+console.log("status heap contract: GET /status is bounded streamed with an explicit emission boundary");
