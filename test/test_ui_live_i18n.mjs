@@ -63,6 +63,10 @@ function assertPersistentBannerRepaints(name, status) {
   const elements = {
     hdrDash: { hidden: false },
     hdrBack: { hidden: true },
+    btnBack: {
+      ariaLabel: "",
+      setAttribute(name, value) { if (name === "aria-label") this.ariaLabel = value; },
+    },
     backTitle: { textContent: "" },
   };
   const context = {
@@ -80,9 +84,12 @@ function assertPersistentBannerRepaints(name, status) {
   api.S.stage = "settings";
   api.renderHeader();
   assert.equal(elements.backTitle.textContent, "Settings");
+  assert.equal(elements.btnBack.ariaLabel, "Back");
   assert.equal(api.activateLang("de"), true);
   assert.equal(elements.backTitle.textContent, "Einstellungen",
     "a live language switch must repaint the active route title without a navigation round-trip");
+  assert.equal(elements.btnBack.ariaLabel, "Zurück",
+    "a live language switch must repaint the active Back control's accessible name");
 }
 
 {
