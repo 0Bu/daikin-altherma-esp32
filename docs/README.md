@@ -583,10 +583,11 @@ POST /set_env3                     # Compatibility route: { enabled, sda?, scl? 
 #  all persistent /set_* above     # an NVS write failure → 500 {ok:false,error:"config write failed"},
                                    #   nothing applied and no reboot (the failing key is logged to /diag)
 POST /detect                       # re-run auto-detection (reset profile to "auto" + invalidate fingerprint)
-GET  /models?active=1              # active detected X10A profile rows for the Settings register
-                                   #   picker: {profile,values:[{reg,offset,conv,size,label}]}. Rows
-                                   #   are streamed from the resolved main/def view; profile "auto"
-                                   #   returns an empty list rather than pretending generic was detected.
+GET  /models?active=1              # X10A profile rows for the Settings register picker:
+                                   #   {profile,definition,fallback,values:[{reg,offset,conv,size,label}]}.
+                                   #   Rows stream from the exact resolved main/def view. Auto or a
+                                   #   stale id uses definition:"generic",fallback:true, preserving
+                                   #   useful examples without claiming that generic was detected.
 POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-chosen page and report the
                                    #   raw frame plus every decode the requested slice admits. The only
                                    #   route whose subject is a register the value catalog does not
@@ -622,10 +623,11 @@ POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-cho
                                    #   240.6 °C on a row Home Assistant correctly shows as unavailable.
                                    #   The two disagreeing is the tool working; never quote a probe
                                    #   number as a reading.
-                                   #   Settings → Protocol → Protocol diagnostics (default Off)
-                                   #   reveals the X10A Diagnosis card. Its Register dropdown shows
-                                   #   exact labels from the active main/def profile; a selection fills
-                                   #   reg/offset/size/conv and the editable request is sent only by the
+                                   #   Settings → Protocol → Protocol diagnostics is a closed
+                                   #   accordion whose tongue contains the X10A Diagnosis card. Its
+                                   #   Register dropdown shows exact labels from the detected main/def
+                                   #   profile, or a labelled generic fallback when unresolved; a selection fills
+                                   #   the editable reg/offset/size/conv fields, sent only by the
                                    #   Query button. The button and normal UI polling pause while the
                                    #   single HTTP worker waits up to 3 s for the poll task.
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)

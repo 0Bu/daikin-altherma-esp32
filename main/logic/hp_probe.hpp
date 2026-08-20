@@ -318,13 +318,28 @@ inline bool probe_catalog_row(const ValueDef& row) {
 }
 
 // Exact profile lookup for the UI feed. The production registry's ordinary lookup deliberately
-// falls back to generic for polling continuity; a picker labelled as this installation's detected
-// profile must instead fail closed or it would misattribute generic rows to a bad/stale id.
+// falls back to generic for polling continuity; callers that expose the detected id need to know
+// whether they selected that exact definition or the explicit generic diagnostic fallback.
 template <typename ProfileT, size_t N>
 inline const ProfileT* probe_profile_exact(const ProfileT (&profiles)[N], std::string_view id) {
     for (const auto& profile : profiles)
         if (id == profile.id) return &profile;
     return nullptr;
+}
+
+// Pick the definition rows offered by the protocol-diagnosis register menu. An exact detected
+// profile wins. While detection is unresolved ("auto") or a stale id is loaded, generic remains a
+// useful set of known request examples, but `fallback` forces the HTTP/UI contract to label their
+// provenance instead of pretending that generic was detected on this installation.
+template <typename ProfileT, size_t N>
+inline const ProfileT* probe_catalog_profile(const ProfileT (&profiles)[N], std::string_view id,
+                                             bool& fallback) {
+    if (const ProfileT* exact = probe_profile_exact(profiles, id)) {
+        fallback = false;
+        return exact;
+    }
+    fallback = true;
+    return probe_profile_exact(profiles, "generic");
 }
 
 // Two decodes are the SAME answer when every observable field agrees. Deliberately an exact

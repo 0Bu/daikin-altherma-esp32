@@ -186,7 +186,12 @@ function wireRestOfApp() {
     // collapse the panel the user was reading — the same guard #valueGroups carries.
     if (e.target.closest(".vhist-graph")) return;
     const desc = e.target.closest("[data-desc]");
-    if (desc) return toggleDesc(desc);        // memory rows and Hardware's left action expand
+    if (desc) {
+      const probe = desc.dataset.desc === "protocol:diagnosis";
+      toggleDesc(desc);                       // memory rows and Hardware's left action expand
+      if (probe) onProtocolDiagnosticsDisclosure();
+      return;
+    }
     const act = e.target.closest("[data-act]");
     if (!act) return;
     if (act.dataset.act === "board") openBoard();
@@ -200,9 +205,8 @@ function wireRestOfApp() {
     else if (e.target.id === "e32Chan") onChannelPick();
     else if (e.target.id === "e32Lang") onLangPick();
     else if (e.target.id === "e32Diagnostics") onDiagnosticsPick();
-    else if (e.target.id === "e32ProtocolDiagnostics") onProtocolDiagnosticsPick();
     else if (e.target.id === "hpProbeRegister") onHpProbeRegisterPick();
-    else if (e.target.id === "hpProbeSize") onHpProbeDraftInput(e.target);
+    else if (e.target.id === "hpProbeSize" || e.target.id === "hpProbeMode") onHpProbeDraftInput(e.target);
   });
   $("settingsCards").addEventListener("input", (e) => {
     if (["hpProbeReg", "hpProbeOffset", "hpProbeConv"].includes(e.target.id))

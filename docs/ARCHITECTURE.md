@@ -2495,9 +2495,9 @@ significant, and ~1.1 KB is not worth a layout defect that renders correctly on 
 made it). The UI is **two screens**:
 the dashboard (the plant — schematic, model, values, no config at all) and **Settings** behind the
 header gear (the Connections tile + three ESP32 board cards — ESP32 board health, Protokoll
-[X10A link + pins + default-off protocol-diagnosis disclosure] and Firmware
-[version/OTA/language + default-off plant-diagnostics consent] — plus the conditional X10A Diagnosis
-card, which lazily loads the active profile and sends one explicit read request,
+[X10A link + pins + a closed protocol-diagnosis tongue containing the X10A Diagnosis card] and Firmware
+[version/OTA/language + default-off plant-diagnostics consent]. Opening that tongue lazily loads the
+register definitions; its card sends one explicit read request,
 plus conditional Anlagendiagnose and heating-curve source cards while enabled; flat, no sub-screens,
 all built by one `esp32CardHtml()` and rebuilt together on every poll).
 Settings drives the config endpoints in
@@ -2581,9 +2581,11 @@ place:
   `{mb_host, mb_port, mb_unit_id}`, but not both in one request: a mixed patch returns 400
   `"update X10A and HomeHub in separate requests"` before changing either. The UI language is its own
   setting now (see the **Language** bullet below), never a `/set_hp` field.
-- **X10A protocol diagnosis** → `GET /models?active=1` + `POST /hp/query`. The Protokoll-card
-  selector is browser-session state, defaults Off after every load and persists nothing. Enabling it
-  lazily streams the resolved active `main/def` rows; `auto` returns none. The visible Register option
+- **X10A protocol diagnosis** → `GET /models?active=1` + `POST /hp/query`. The Protokoll-card row is
+  an ordinary explanation tongue: closed after every load, browser-session only and never persisted.
+  Opening it reveals the complete X10A Diagnosis card and lazily streams the resolved active
+  `main/def` rows. If detection is `auto` or stale, the feed returns the `generic` definition rows
+  with explicit `definition:"generic",fallback:true` provenance. The visible Register option
   is the exact catalog label (duplicate labels keep separate tuple identities), and selecting one
   fills editable page/offset/size/converter inputs. The request is one explicit bus read. Its response
   is 1 KiB chunk-streamed and retains raw NAK, partial, bad-CRC and wrong-page frames; the displayed
@@ -3052,10 +3054,15 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   exception), CONFIG_HTTPD_WS_SUPPORT=n, and /status is built on ONE task
 GET  /models      without a query: legacy pin hint + catalog metadata (def/models_catalog.hpp) for
                   humans/scripts; detection is fully automatic and the UI offers no model picker.
-GET  /models?active=1   lazy X10A-diagnosis feed for the detected profile: streams exact queryable
-                  ValueDef labels and reg/offset/size/conv tuples. The UI fetches it only while the
-                  browser-session Protokolldiagnose card is open. `profile:"auto"` and unknown/stale
-                  ids yield an empty list rather than silently substituting generic. The RX/TX dropdown still takes its GPIOs from
+GET  /models?active=1   lazy X10A-diagnosis feed: streams exact queryable ValueDef labels and
+                  reg/offset/size/conv tuples. Shape: {profile,definition,fallback,values:[…]}.
+                  The UI fetches it with `no-store` and a unique `ms=<epoch>` query only while the
+                  browser-session Protokolldiagnose tongue is open; the response is also
+                  server-marked `no-store` because detection and firmware updates can change the
+                  definition under the stable route.
+                  A resolved profile uses its exact definition with fallback:false; `profile:"auto"`
+                  and unknown/stale ids use definition:"generic",fallback:true, so example rows stay
+                  available without claiming that generic was detected. The RX/TX dropdown still takes its GPIOs from
                   /status.pins_avail, NOT from the legacy pin_hint
 GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. ?redact=1 scrubs the handful of
                   lines that interpolate a host/IP/SSID (logic/redact.hpp) and switches the response

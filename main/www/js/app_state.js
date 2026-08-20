@@ -76,14 +76,15 @@ const S = {
   // frame must be allowed to replace the OTA-only recovery card even while otaShown freezes all
   // subsequent card rebuilds.
   settingsHydrated: false,
-  // Expert X10A protocol diagnosis is a browser-session disclosure, not a device setting. It starts
-  // closed on every load and fetches the active profile's definition rows only when opened.
-  protocolDiagnostics: false,
+  // Expert X10A protocol diagnosis is a browser-session accordion, not a device setting. Its open
+  // state lives in descOpen and it fetches definition rows only when that tongue is opened.
   hpProbeCatalog: [],
   hpProbeCatalogProfile: "",
+  hpProbeCatalogDefinition: "",
+  hpProbeCatalogFallback: false,
   hpProbeCatalogBusy: false,
   hpProbeCatalogError: "",
-  hpProbeDraft: { selected: "", reg: "0x60", offset: "11", size: "1", conv: "105" },
+  hpProbeDraft: { selected: "", reg: "0x60", offset: "11", size: "1", mode: "specific", conv: "105" },
   hpProbeBusy: false,
   hpProbeResult: null,
   hpProbeError: "",
@@ -377,7 +378,7 @@ async function refreshStatus(paint = true) {
   try { s = await j("/status", { signal: pollSignal() }); } catch { markUnreachable(); return false; }
   S.status = s;
   const profile = s?.profile?.id || "";
-  if (S.protocolDiagnostics && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
+  if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
     loadHpProbeCatalog(profile);
   hydrateRoutedPopup();
   setLangFromStatus(s);   // apply the device's language override (if any) before painting this frame

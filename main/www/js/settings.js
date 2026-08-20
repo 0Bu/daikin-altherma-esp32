@@ -652,41 +652,34 @@ async function onDiagnosticsPick() {
   toast(t(enabled ? "diagnostics.saved_on" : "diagnostics.saved_off"), "ok");
 }
 
-function hpProbeRegNumber(value) {
-  const text = String(value ?? "").trim();
-  if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(text)) return null;
-  const n = Number.parseInt(text, /^0x/i.test(text) ? 16 : 10);
-  return Number.isInteger(n) && n >= 0 && n <= 255 ? n : null;
-}
-
-function hpProbeDraftRequest(draft = S.hpProbeDraft) {
-  const reg = hpProbeRegNumber(draft.reg);
-  const offset = Number(draft.offset), size = Number(draft.size);
-  const convText = String(draft.conv ?? "").trim();
-  const conv = convText === "" ? null : Number(convText);
-  if (reg == null || !Number.isInteger(offset) || offset < 0 || offset > 31 ||
-      (size !== 1 && size !== 2) ||
-      (conv != null && (!Number.isInteger(conv) || conv < 0 || conv > 999))) return null;
-  const request = { reg, offset, size };
-  if (conv != null) request.conv = conv;
-  return request;
-}
-
 function hpProbeSelectionMatches(row, request = hpProbeDraftRequest()) {
   return !!row && !!request && request.reg === row.reg && request.offset === row.offset &&
     request.size === row.size && request.conv === row.conv;
 }
 
+function hpProbeIsOpen() {
+  return S.descOpen?.has("protocol:diagnosis") === true;
+}
+
 async function loadHpProbeCatalog(expectedProfile = S.status?.profile?.id || "") {
-  if (!S.protocolDiagnostics || S.hpProbeCatalogBusy) return;
+  if (!hpProbeIsOpen() || S.hpProbeCatalogBusy) return;
   S.hpProbeCatalogBusy = true;
   S.hpProbeCatalogError = "";
   renderSettings();
   try {
-    const response = await j("/models?active=1");
+    const response = await j(`/models?active=1&ms=${Date.now()}`, { cache: "no-store" });
     const activeNow = S.status?.profile?.id || "";
-    if (!S.protocolDiagnostics || response?.profile !== activeNow ||
-        (expectedProfile && expectedProfile !== activeNow)) return;
+    if (!hpProbeIsOpen() || response?.profile !== activeNow ||
+        (expectedProfile && expectedProfile !== activeNow)) {
+      // Never leave rows from the previous installation selectable after detection changes while
+      // this request is in flight. The next status refresh reloads the current profile.
+      S.hpProbeCatalog = [];
+      S.hpProbeCatalogProfile = "";
+      S.hpProbeCatalogDefinition = "";
+      S.hpProbeCatalogFallback = false;
+      S.hpProbeDraft.selected = "";
+      return;
+    }
     const rows = Array.isArray(response.values) ? response.values : [];
     S.hpProbeCatalog = rows.filter((row) => row && typeof row.label === "string" && row.label &&
       Number.isInteger(row.reg) && row.reg >= 0 && row.reg <= 255 &&
@@ -694,6 +687,8 @@ async function loadHpProbeCatalog(expectedProfile = S.status?.profile?.id || "")
       (row.size === 1 || row.size === 2) && Number.isInteger(row.conv) &&
       row.conv >= 0 && row.conv <= 999);
     S.hpProbeCatalogProfile = response.profile;
+    S.hpProbeCatalogDefinition = typeof response.definition === "string" ? response.definition : response.profile;
+    S.hpProbeCatalogFallback = response.fallback === true;
     // A profile change can reuse the same array index for a different row. Never show that new
     // label as selected over the old tuple; keep the editable tuple and return the picker to manual.
     const selected = S.hpProbeCatalog[Number(S.hpProbeDraft.selected)];
@@ -702,6 +697,8 @@ async function loadHpProbeCatalog(expectedProfile = S.status?.profile?.id || "")
     if ((S.status?.profile?.id || "") === expectedProfile) {
       S.hpProbeCatalog = [];
       S.hpProbeCatalogProfile = expectedProfile;
+      S.hpProbeCatalogDefinition = "";
+      S.hpProbeCatalogFallback = false;
       S.hpProbeCatalogError = "load";
     }
   } finally {
@@ -710,16 +707,9 @@ async function loadHpProbeCatalog(expectedProfile = S.status?.profile?.id || "")
   }
 }
 
-async function onProtocolDiagnosticsPick() {
-  const select = $("e32ProtocolDiagnostics");
-  S.protocolDiagnostics = select.value === "on";
-  select.blur();
-  if (!S.protocolDiagnostics) {
-    renderSettings();
-    return;
-  }
+async function onProtocolDiagnosticsDisclosure() {
+  if (!hpProbeIsOpen()) return;
   S.hpProbeError = "";
-  renderSettings();
   await loadHpProbeCatalog(S.status?.profile?.id || "");
 }
 
@@ -735,7 +725,7 @@ function onHpProbeRegisterPick() {
   const row = S.hpProbeCatalog[Number(index)];
   S.hpProbeDraft = {
     selected: index,
-    reg: `0x${row.reg.toString(16).toUpperCase().padStart(2, "0")}`,
+    reg: `0x${row.reg.toString(16).toUpperCase().padStart(2, "0")}`, mode: "specific",
     offset: String(row.offset), size: String(row.size), conv: String(row.conv),
   };
   S.hpProbeResult = null;
@@ -744,7 +734,8 @@ function onHpProbeRegisterPick() {
 }
 
 function onHpProbeDraftInput(input) {
-  const field = { hpProbeReg: "reg", hpProbeOffset: "offset", hpProbeSize: "size", hpProbeConv: "conv" }[input.id];
+  const field = { hpProbeReg: "reg", hpProbeOffset: "offset", hpProbeSize: "size",
+    hpProbeMode: "mode", hpProbeConv: "conv" }[input.id];
   if (!field) return;
   S.hpProbeDraft[field] = input.value;
   const selected = S.hpProbeCatalog[Number(S.hpProbeDraft.selected)];
@@ -753,8 +744,13 @@ function onHpProbeDraftInput(input) {
     const register = $("hpProbeRegister");
     if (register) register.value = "";
   }
-  const preview = $("hpProbeRequest");
-  if (preview) preview.textContent = hpProbeRequestText();
+  const normalized = $("hpProbeRegNormalized");
+  const reg = hpProbeRegNumber(S.hpProbeDraft.reg);
+  if (normalized) normalized.textContent = reg == null ? "—" : `0x${reg.toString(16).toUpperCase().padStart(2, "0")}`;
+  if (field === "mode") {
+    input.blur();
+    renderSettings();
+  }
 }
 
 async function runHpProbe() {

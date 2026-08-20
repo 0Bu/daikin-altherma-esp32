@@ -4961,6 +4961,13 @@ static void test_hp_probe() {
     CHECK(probe_profile_exact(def::profiles, "generic") == &def::profiles[0]);
     CHECK(probe_profile_exact(def::profiles, "auto") == nullptr);
     CHECK(probe_profile_exact(def::profiles, "nonexistent") == nullptr);
+    bool catalog_fallback = false;
+    CHECK(probe_catalog_profile(def::profiles, "generic", catalog_fallback) == &def::profiles[0]);
+    CHECK(!catalog_fallback);
+    CHECK(probe_catalog_profile(def::profiles, "auto", catalog_fallback) == &def::profiles[0]);
+    CHECK(catalog_fallback);
+    CHECK(probe_catalog_profile(def::profiles, "nonexistent", catalog_fallback) == &def::profiles[0]);
+    CHECK(catalog_fallback);
 
     // ── Refusals and bounds.
     CHECK(probe_sweep(two, 2, 1, 2, d, PROBE_MAX_DECODES) == 0);   // slice past the payload

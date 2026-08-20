@@ -1483,16 +1483,26 @@ static bool models_active_requested(httpd_req_t* req) {
 
 // Lazy picker feed for the expert X10A probe. It is deliberately a query variant of the existing
 // model-catalog route: no extra resident URI record, and no growth of the frequently-polled
-// /status or /values payloads. "auto" yields no rows — def::lookup("auto") falls back to generic,
-// which would falsely present generic definitions as belonging to an already detected unit.
+// /status or /values payloads. An unresolved/stale detected id uses the explicit generic definition
+// as a diagnostic example set; `definition` + `fallback` keep that provenance distinct from the
+// installation's `profile` instead of silently pretending generic was detected.
 static esp_err_t h_active_model_values(httpd_req_t* req) {
     const Config c = config(); // allocate/snapshot before response headers; handle_all maps OOM to 503
+    bool fallback = false;
+    const def::Profile* profile = probe_catalog_profile(def::profiles, c.profile, fallback);
     HttpJsonChunks j(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
+    // Detection and firmware updates can change the selected definition while this URL stays the
+    // same. A cached unresolved response would leave the expert picker empty after the device has
+    // newer rows, so this live, installation-specific catalog must never be reused.
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     j += "{\"profile\":";
     json_append_quoted(j, c.profile);
+    j += ",\"definition\":";
+    json_append_quoted(j, profile ? std::string_view(profile->id) : std::string_view{});
+    j += ",\"fallback\":";
+    j += fallback ? "true" : "false";
     j += ",\"values\":[";
-    const def::Profile* profile = probe_profile_exact(def::profiles, c.profile);
     if (profile) {
         const auto view = def::resolved(*profile);
         bool comma = false;

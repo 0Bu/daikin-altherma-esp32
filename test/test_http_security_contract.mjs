@@ -54,17 +54,19 @@ assert.match(configRoutes, /hp_probe_run\(/, "the probe must go through the poll
 assert.doesNotMatch(configRoutes, /build_request\(|uart_write_bytes\(/,
   "no HTTP handler may frame or write an X10A request itself");
 
-// The register picker reuses the trusted-LAN-only /models handler. It must stream the active
-// resolved profile lazily, refuse the generic fallback while detection is still "auto", and escape
-// exact ValueDef labels rather than growing /status or building an owning profile JSON response.
+// The register picker reuses the trusted-LAN-only /models handler. It must stream the exact active
+// profile when available, explicitly label a generic diagnostic fallback while detection is
+// unresolved/stale, and escape ValueDef labels rather than growing /status or owning the response.
 const activeModels = status.slice(status.indexOf("static esp_err_t h_active_model_values("),
                                   status.indexOf("static esp_err_t h_models("));
 assert.match(activeModels, /const Config c = config\(\)[\s\S]*HttpJsonChunks j/,
   "the active-profile snapshot must allocate before streaming starts so OOM remains a clean 503");
-assert.match(activeModels, /probe_profile_exact\(def::profiles, c\.profile\)[\s\S]*def::resolved\(\*profile\)/,
-  "an auto, unknown or stale profile id must never masquerade as the generic definition");
+assert.match(activeModels, /probe_catalog_profile\(def::profiles, c\.profile, fallback\)[\s\S]*\\"definition\\"[\s\S]*\\"fallback\\"[\s\S]*def::resolved\(\*profile\)/,
+  "auto or stale ids may use generic rows only with explicit definition/fallback provenance");
 assert.match(activeModels, /probe_catalog_row\(row\)/,
   "only tuples accepted by the probe contract may reach the register menu");
+assert.match(activeModels, /Cache-Control[\s\S]*no-store/,
+  "the installation-specific register catalog must not survive detection or firmware changes in a browser cache");
 assert.match(activeModels, /json_append_quoted\(j, row\.label\)/,
   "the exact ValueDef label must be JSON-escaped into the streamed response");
 assert.match(status, /models_active_requested\(req\)[\s\S]*h_active_model_values\(req\)/,

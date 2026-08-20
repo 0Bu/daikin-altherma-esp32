@@ -1339,14 +1339,17 @@ vocabulary exactly:
    (Online/Offline) and X10A protocol, then the **RX/TX pins** — read-only when detected, else a
    usable-GPIO dropdown (§5.2). From `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`. **Link
    facts, top to bottom** (link, protocol, RX, TX), followed by **Protocol diagnostics**. That final
-   plain row has only an Off/On selector: no chevron or explanation tongue, defaults Off on each page
-   load and persists nothing. On reveals the separate **X10A Diagnosis** card immediately below this
-   card and above Firmware. Each of the four link-fact labels opens the ordinary `--brand-tint`
-   explanation tongue; the right-side value or pin selector remains an independent action.
-   The diagnosis card is a compact technical form, not an information panel: one sentence, an
-   **Request** section, a dropdown labelled only **Register**, page/offset/field-width/converter inputs,
-   valid JSON preview and one Query button. Register option text is the exact active-profile
-   `ValueDef::label`; its tuple is internal, so duplicate labels remain independently selectable.
+   row is itself an ordinary chevron-controlled explanation tongue, closed on each page load and
+   persisted nowhere. Its `--brand-tint` tongue directly contains the white **X10A Diagnosis** card;
+   there is no redundant Off/On selector or separate card between Protocol and Firmware. Each of the
+   four link-fact labels opens its own explanation tongue; a right-side value or pin selector remains
+   an independent action.
+   The nested diagnosis card is a compact technical form, not an information panel: one sentence, an
+   **Request** section, a dropdown labelled only **Register**, page/offset/field-width/converter inputs
+   and one Query button. There is no redundant POST/JSON preview below the editable fields. Register
+   option text is the exact `ValueDef::label` from
+   the selected definition: the detected profile, or an explicitly labelled generic fallback. Its
+   tuple is internal, so duplicate labels remain independently selectable.
    Selecting one fills all four editable inputs. Response rows show status, full received frame,
    valid payload, selected bytes and converter results. No automatic query is issued.
 4. **Firmware card** — the running software: the **Version** (`version`) and the **Update channel**
@@ -1747,7 +1750,8 @@ The design needs these additions to the firmware (all small, tracked as follow-u
   UI groups by register-id ranges + label keywords.
 - `/models`: without a query returns the legacy model lists, `profile_map` and `pin_hint`; the UI
   does not use that model-picker metadata. `?active=1` is the separate lazy Protokolldiagnose feed:
-  it streams the detected profile's queryable `ValueDef` labels and request tuples.
+  it streams the detected profile's queryable `ValueDef` labels and request tuples. While detection
+  is unresolved or stale it streams `generic` examples with explicit fallback provenance.
 - `POST /detect`: re-run auto-detection (resets `profile` to `"auto"` + invalidates the fingerprint).
   Still served for API/MCP use; the UI no longer exposes a re-detect button.
 
