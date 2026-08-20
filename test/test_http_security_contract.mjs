@@ -54,6 +54,22 @@ assert.match(configRoutes, /hp_probe_run\(/, "the probe must go through the poll
 assert.doesNotMatch(configRoutes, /build_request\(|uart_write_bytes\(/,
   "no HTTP handler may frame or write an X10A request itself");
 
+// The register picker reuses the trusted-LAN-only /models handler. It must stream the active
+// resolved profile lazily, refuse the generic fallback while detection is still "auto", and escape
+// exact ValueDef labels rather than growing /status or building an owning profile JSON response.
+const activeModels = status.slice(status.indexOf("static esp_err_t h_active_model_values("),
+                                  status.indexOf("static esp_err_t h_models("));
+assert.match(activeModels, /const Config c = config\(\)[\s\S]*HttpJsonChunks j/,
+  "the active-profile snapshot must allocate before streaming starts so OOM remains a clean 503");
+assert.match(activeModels, /probe_profile_exact\(def::profiles, c\.profile\)[\s\S]*def::resolved\(\*profile\)/,
+  "an auto, unknown or stale profile id must never masquerade as the generic definition");
+assert.match(activeModels, /probe_catalog_row\(row\)/,
+  "only tuples accepted by the probe contract may reach the register menu");
+assert.match(activeModels, /json_append_quoted\(j, row\.label\)/,
+  "the exact ValueDef label must be JSON-escaped into the streamed response");
+assert.match(status, /models_active_requested\(req\)[\s\S]*h_active_model_values\(req\)/,
+  "GET /models?active=1 must dispatch through the existing trusted-LAN model route");
+
 // All seven user-entered JSON selectors must use the redacting writer. The redaction audit covers
 // count/list drift and never-wrapped new Config strings; this pins the current high-risk set by name.
 for (const member of [

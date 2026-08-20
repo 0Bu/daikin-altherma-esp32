@@ -150,6 +150,21 @@ static void test_crc() {
     frame[3] ^= 0xff;
     CHECK(!crc_ok(frame, 4));
 
+    // Protocol-I identity is part of validity: a CRC-correct frame for page 0x61 must never be
+    // attached to a query for 0x60. Negative and partial replies retain distinct classifications.
+    uint8_t good_i[] = {0x40, 0x60, 0x04, 0xaa, 0xbb, 0};
+    good_i[5] = crc(good_i, 5);
+    CHECK(hp_reply_classify(0x60, Protocol::I, good_i, 6, 6) == HpReplyKind::Ok);
+    uint8_t wrong_i[] = {0x40, 0x61, 0x04, 0xaa, 0xbb, 0};
+    wrong_i[5] = crc(wrong_i, 5);
+    CHECK(hp_reply_classify(0x60, Protocol::I, wrong_i, 6, 6) ==
+          HpReplyKind::UnexpectedReply);
+    CHECK(hp_reply_classify(0x60, Protocol::I, good_i, 4, 6) == HpReplyKind::ShortReply);
+    good_i[5] ^= 0xff;
+    CHECK(hp_reply_classify(0x60, Protocol::I, good_i, 6, 6) == HpReplyKind::BadCrc);
+    CHECK(hp_reply_classify(0x60, Protocol::I, err, 2, 6) == HpReplyKind::Rejected);
+    CHECK(hp_reply_classify(0x60, Protocol::I, nullptr, 0, 6) == HpReplyKind::NoReply);
+
     // --- Dynamic length and safety bounds checks (Vulnerability 2.1) ---
     // Test that reply_len_dynamic parses the length byte at index 2 correctly (buf[2] + 2).
     uint8_t d_buf[] = {0x40, 0x00, 10}; // buf[2] = 10 -> reply length should be 12
@@ -169,6 +184,10 @@ static void test_crc() {
     CHECK(reply_len_fits(257, test_buflen) == false);
     // Negative length case (should be rejected)
     CHECK(reply_len_fits(-1, test_buflen) == false);
+    CHECK(reply_len_valid(Protocol::I, 4, test_buflen));
+    CHECK(!reply_len_valid(Protocol::I, 3, test_buflen));
+    CHECK(reply_len_valid(Protocol::S, 2, test_buflen));
+    CHECK(!reply_len_valid(Protocol::S, 1, test_buflen));
 
     // The STATIC length is now bound-checked too (hp_comm.cpp's hp_query, before the request goes
     // out) — the dynamic override was checked from the start while reply_len()'s own answer was
@@ -195,6 +214,7 @@ static void test_hp_query_log_policy() {
     CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::ShortReply));
     CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::InvalidLength));
     CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::BadCrc));
+    CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::UnexpectedReply));
     CHECK(hp_query_should_log(HpQueryLogPolicy::All, HpQueryFailure::NoReply));
     CHECK(hp_query_should_log(HpQueryLogPolicy::All, HpQueryFailure::Rejected));
 }
@@ -4725,6 +4745,11 @@ static bool probe_has_alias(const ProbeDecode& d, int conv) {
     for (int i = 0; i < d.alias_count; i++) if (d.alias[i] == conv) return true;
     return false;
 }
+static const ProbeDecode* probe_find_or_alias(const ProbeDecode* d, int n, int conv) {
+    for (int i = 0; i < n; i++)
+        if (d[i].conv == conv || probe_has_alias(d[i], conv)) return &d[i];
+    return nullptr;
+}
 
 static void test_hp_probe() {
     // ── The request slot. The gate mutex serialises CALLERS but not a caller against the poll task,
@@ -4807,10 +4832,14 @@ static void test_hp_probe() {
     CHECK(probe_status_from_query(-3) == ProbeStatus::BadCrc);
     for (auto st : {ProbeStatus::Ok, ProbeStatus::Busy, ProbeStatus::NoLink, ProbeStatus::Timeout,
                     ProbeStatus::NoReply, ProbeStatus::Rejected, ProbeStatus::BadCrc,
+                    ProbeStatus::UnexpectedReply, ProbeStatus::InvalidLength,
                     ProbeStatus::ShortReply, ProbeStatus::OutOfBounds})
         CHECK(probe_status_name(st)[0] != '\0');
     CHECK(std::string(probe_status_name(ProbeStatus::Ok)) == "ok");
     CHECK(std::string(probe_status_name(ProbeStatus::OutOfBounds)) == "out_of_bounds");
+    CHECK(std::string(probe_status_name(ProbeStatus::UnexpectedReply)) == "unexpected_reply");
+    CHECK(std::string(probe_status_name(ProbeStatus::InvalidLength)) == "invalid_length");
+    CHECK(probe_status_from_reply(HpReplyKind::InvalidLength) == ProbeStatus::InvalidLength);
     CHECK(std::string(probe_status_name(static_cast<ProbeStatus>(99))) == "error");
 
     // ── The slice bound applied AFTER the reply: a page shorter than the caller assumed is a
@@ -4871,11 +4900,16 @@ static void test_hp_probe() {
     // and must answer "?" rather than read past their tables.
     const uint8_t one[1] = {0x05};
     n = probe_sweep(one, 1, 0, 1, d, PROBE_MAX_DECODES);
-    const ProbeDecode* rawbyte = probe_find(d, n, 211);
+    const ProbeDecode* rawbyte = probe_find_or_alias(d, n, 211);
     CHECK(rawbyte && rawbyte->value == 5.0);
-    CHECK(rawbyte && probe_has_alias(*rawbyte, 219) && probe_has_alias(*rawbyte, 214));
+    CHECK(rawbyte && probe_find_or_alias(d, n, 219) == rawbyte &&
+          probe_find_or_alias(d, n, 214) == rawbyte);
     // conv 311 masks the low three bits, which on 0x05 is the whole byte — so it merges, correctly.
-    CHECK(rawbyte && probe_has_alias(*rawbyte, 311));
+    CHECK(rawbyte && probe_find_or_alias(d, n, 311) == rawbyte);
+    const ProbeDecode* scaled = probe_find_or_alias(d, n, 105);
+    const ProbeDecode* current = probe_find_or_alias(d, n, 161);
+    CHECK(scaled && scaled->ok && scaled->value == 0.5);
+    CHECK(current && current->ok && current->value == 2.5);
     const ProbeDecode* mode = probe_find(d, n, 217);
     CHECK(mode && mode->is_text && std::string(mode->text) == "Auto Cool");
     const ProbeDecode* cls = probe_find(d, n, 203);
@@ -4897,6 +4931,36 @@ static void test_hp_probe() {
         CHECK(m > 0 && m <= PROBE_MAX_DECODES);
         for (int i = 0; i < m; i++) CHECK(d[i].alias_count <= PROBE_MAX_ALIASES);
     }
+
+    // Concrete catalog witnesses for the width-1 numeric converters that the original sweep
+    // omitted: 0x50 is 8.0 kW through conv 105 and 16.0 A through conv 161.
+    const uint8_t width_one[1] = {0x50};
+    n = probe_sweep(width_one, 1, 0, 1, d, PROBE_MAX_DECODES);
+    const ProbeDecode* kw = probe_find_or_alias(d, n, 105);
+    const ProbeDecode* amps = probe_find_or_alias(d, n, 161);
+    const ProbeDecode* u8 = probe_find_or_alias(d, n, 101);
+    const ProbeDecode* s8 = probe_find_or_alias(d, n, 152);
+    CHECK(kw && kw->value == 8.0);
+    CHECK(amps && amps->value == 40.0);
+    CHECK(u8 && u8->value == 80.0);
+    CHECK(s8 && s8->value == 80.0);
+
+    // Every implemented, data-consuming (converter,width) pair used by any resolved production
+    // profile must be available in the default sweep. This derives coverage from the real catalog,
+    // so a regenerated profile cannot silently add another omitted width.
+    const uint8_t sample_bytes[2] = {1, 0};
+    for (const auto& profile : def::profiles) {
+        const auto view = def::resolved(profile);
+        for (size_t i = 0; i < view.count(); i++) {
+            const ValueDef& row = view[i];
+            if (!probe_catalog_row(row)) continue;
+            const Reading reading = convert(row, sample_bytes);
+            if (!reading.unimpl) CHECK(probe_candidate_offered(row.conv, row.size));
+        }
+    }
+    CHECK(probe_profile_exact(def::profiles, "generic") == &def::profiles[0]);
+    CHECK(probe_profile_exact(def::profiles, "auto") == nullptr);
+    CHECK(probe_profile_exact(def::profiles, "nonexistent") == nullptr);
 
     // ── Refusals and bounds.
     CHECK(probe_sweep(two, 2, 1, 2, d, PROBE_MAX_DECODES) == 0);   // slice past the payload
@@ -4922,6 +4986,10 @@ static void test_hp_probe() {
     CHECK(probe_candidate_count_for(1) <= PROBE_MAX_DECODES);
     CHECK(probe_candidate_count_for(2) <= PROBE_MAX_DECODES);
     CHECK(probe_candidate_count_for(4) == 0);
+    CHECK(probe_catalog_row({0x00, 12, 105, 1, -1, "O/U capacity (kW)"}));
+    CHECK(!probe_catalog_row({0x00, 0, 802, 0, -1, "Refrigerant type"}));
+    CHECK(!probe_catalog_row({0x00, 0, 105, 1, -1, "", false}));
+    CHECK(!probe_catalog_row({0x00, 0, 105, 1, -1, "detect", true}));
 }
 
 static void test_hexdump() {

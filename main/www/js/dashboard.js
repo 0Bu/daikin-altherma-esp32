@@ -276,6 +276,83 @@ function diagnosticsRow(enabled) {
     `<div class="vdesc-p">${esc(t("card.diagnostics_help"))}</div>`);
 }
 
+// Browser-session switch for the expert register reader. This is deliberately a plain Settings
+// row: no chevron and no explanatory tongue. It reveals a tool; it changes no device setting.
+function protocolDiagnosticsRow() {
+  const enabled = S.protocolDiagnostics === true;
+  const option = (value, label) =>
+    `<option value="${value}"${value === (enabled ? "on" : "off") ? " selected" : ""}>${esc(label)}</option>`;
+  return `<div class="vrow"><label class="vrow-label" for="e32ProtocolDiagnostics">${esc(t("probe.toggle"))}</label>` +
+    `<select class="input protocol-diagnostics-sel probe-control" id="e32ProtocolDiagnostics">` +
+    option("off", t("diagnostics.off")) + option("on", t("diagnostics.on")) + `</select></div>`;
+}
+
+function hpProbeRequestText() {
+  const d = S.hpProbeDraft;
+  const parsed = hpProbeDraftRequest(d);
+  if (!parsed) return `POST /hp/query\n${JSON.stringify({ reg: d.reg, offset: d.offset, size: d.size, conv: d.conv })}`;
+  return `POST /hp/query\n${JSON.stringify(parsed)}`;
+}
+
+function hpProbeResultHtml() {
+  if (S.hpProbeError) return `<div class="probe-error" role="status">${esc(S.hpProbeError)}</div>`;
+  const r = S.hpProbeResult;
+  if (!r) return "";
+  let rows = vrow("Status", r.status || "—", { cls: r.ok ? "ok mono" : "err mono" });
+  if (r.frame) rows += vrow(t("probe.frame"), r.frame, { cls: "mono probe-hex" });
+  if (r.payload) rows += vrow(t("probe.payload"), r.payload, { cls: "mono probe-hex" });
+  if (r.slice) rows += vrow(t("probe.slice"), r.slice, { cls: "mono probe-hex" });
+  let decoded = "";
+  const values = Array.isArray(r.decodes) ? r.decodes : [];
+  for (const d of values) {
+    const aliases = Array.isArray(d.aliases) && d.aliases.length
+      ? ` · ${t("probe.aliases")} ${d.aliases.map((v) => `conv ${v}`).join(", ")}` : "";
+    const value = d.text != null ? d.text : d.value != null ? String(d.value)
+      : d.refused ? t("probe.refused") : d.unimplemented ? t("probe.unimplemented") : "—";
+    decoded += `<div class="probe-decode"><span class="mono">conv ${esc(d.conv)}${esc(aliases)}</span>` +
+      `<span>${esc(value)}</span></div>`;
+  }
+  if (r.ok && !decoded) decoded = `<div class="empty">${esc(t("probe.no_decodes"))}</div>`;
+  return `<div class="probe-response"><div class="probe-subtitle">${esc(t("probe.response"))}</div>${rows}` +
+    (decoded ? `<div class="probe-subtitle probe-interpretation">${esc(t("probe.interpretation"))}</div>${decoded}` : "") +
+    `</div>`;
+}
+
+function x10aDiagnosisCardHtml() {
+  const d = S.hpProbeDraft;
+  let registerOptions = `<option value="">${esc(t("probe.manual"))}</option>`;
+  S.hpProbeCatalog.forEach((row, index) => {
+    registerOptions += `<option value="${index}"${d.selected === String(index) ? " selected" : ""}>` +
+      `${esc(row.label)}</option>`;
+  });
+  const catalogState = S.hpProbeCatalogBusy ? t("probe.catalog_loading")
+    : S.hpProbeCatalogError ? t("probe.catalog_error")
+    : !S.hpProbeCatalog.length ? t("probe.catalog_empty") : "";
+  const sizeOption = (n) => `<option value="${n}"${String(d.size) === String(n) ? " selected" : ""}>` +
+    `${n} ${esc(t(n === 1 ? "probe.byte" : "probe.bytes"))}</option>`;
+  const body = `<p class="probe-intro">${esc(t("probe.intro"))}</p>` +
+    `<form id="hpProbeForm" class="probe-form">` +
+    `<div class="probe-subtitle">${esc(t("probe.request"))}</div>` +
+    `<label class="field probe-register"><span class="field-label">${esc(t("probe.register"))}</span>` +
+    `<select class="input probe-control" id="hpProbeRegister"${S.hpProbeCatalogBusy ? " disabled" : ""}>${registerOptions}</select>` +
+    (catalogState ? `<span class="field-help${S.hpProbeCatalogError ? " err" : ""}">${esc(catalogState)}</span>` : "") +
+    `</label><div class="probe-grid">` +
+    `<label class="field"><span class="field-label">${esc(t("probe.page"))}</span>` +
+    `<input class="input mono probe-control" id="hpProbeReg" value="${esc(d.reg)}" inputmode="text"></label>` +
+    `<label class="field"><span class="field-label">${esc(t("probe.offset"))}</span>` +
+    `<input class="input mono num probe-control" id="hpProbeOffset" value="${esc(d.offset)}" type="number" min="0" max="31"></label>` +
+    `<label class="field"><span class="field-label">${esc(t("probe.size"))}</span>` +
+    `<select class="input probe-control" id="hpProbeSize">${sizeOption(1)}${sizeOption(2)}</select></label>` +
+    `<label class="field"><span class="field-label">${esc(t("probe.converter"))}</span>` +
+    `<input class="input mono num probe-control" id="hpProbeConv" value="${esc(d.conv)}" type="number" min="0" max="999">` +
+    `<span class="field-help">${esc(t("probe.converter_help"))}</span></label></div>` +
+    `<pre class="probe-request" id="hpProbeRequest">${esc(hpProbeRequestText())}</pre>` +
+    `<button class="btn primary probe-submit" type="submit"${S.hpProbeBusy ? " disabled" : ""}>` +
+    (S.hpProbeBusy ? `<span class="spin"></span>${esc(t("probe.querying"))}` : esc(t("probe.send"))) + `</button>` +
+    `</form>${hpProbeResultHtml()}`;
+  return vcard(t("probe.title"), body);
+}
+
 // The version row (Firmware card): the running version, and the SAME OTA trigger the dashboard
 // header's version is — one gesture with one meaning wherever the version is printed. Not a second
 // copy of the flow: the tap runs checkFirmwareUpdate() itself. It does NOT leave the screen. An
@@ -402,7 +479,8 @@ function esp32CardHtml() {
     pinRow(t("card.rxpin"), "e32Rx", pinsLocked ? hp.rx : picker.rx,
       pinsLocked ? hp.tx : picker.tx, "rx", t("card.rxpin_help")) +
     pinRow(t("card.txpin"), "e32Tx", pinsLocked ? hp.tx : picker.tx,
-      pinsLocked ? hp.rx : picker.rx, "tx", t("card.txpin_help"));
+      pinsLocked ? hp.rx : picker.rx, "tx", t("card.txpin_help")) +
+    protocolDiagnosticsRow();
   // Firmware — running build, update feed, language and the explicit plant-diagnostics consent.
   // This is not a heat-pump controller mode: it only gates optional observations and their sources.
   const diagnosticsEnabled = s.diagnostics?.enabled === true;
@@ -412,6 +490,7 @@ function esp32CardHtml() {
     langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto") +
     diagnosticsRow(diagnosticsEnabled);
   return vcard("ESP32", esp32Rows) + vcard(t("card.proto_title"), protoRows) +
+         (S.protocolDiagnostics ? x10aDiagnosisCardHtml() : "") +
          vcard(t("card.fw_title"), fwRows) +
          (diagnosticsEnabled ? circulationSettingsCardHtml() + dynamicControlCardHtml() : "");
 }
@@ -1486,7 +1565,7 @@ function renderSettings() {
   const a = document.activeElement;
   const picking = !!(a && a.classList && (a.classList.contains("pin-sel") ||
     a.classList.contains("chan-sel") || a.classList.contains("lang-sel") ||
-    a.classList.contains("diagnostics-sel")));
+    a.classList.contains("diagnostics-sel") || a.classList.contains("probe-control")));
   if (!picking) {
     $("connTile").hidden = false;             // resumeOta hides the unavailable pre-status shell
     setHtml("connTile", connectionsHtml());

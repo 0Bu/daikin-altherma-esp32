@@ -200,6 +200,18 @@ function wireRestOfApp() {
     else if (e.target.id === "e32Chan") onChannelPick();
     else if (e.target.id === "e32Lang") onLangPick();
     else if (e.target.id === "e32Diagnostics") onDiagnosticsPick();
+    else if (e.target.id === "e32ProtocolDiagnostics") onProtocolDiagnosticsPick();
+    else if (e.target.id === "hpProbeRegister") onHpProbeRegisterPick();
+    else if (e.target.id === "hpProbeSize") onHpProbeDraftInput(e.target);
+  });
+  $("settingsCards").addEventListener("input", (e) => {
+    if (["hpProbeReg", "hpProbeOffset", "hpProbeConv"].includes(e.target.id))
+      onHpProbeDraftInput(e.target);
+  });
+  $("settingsCards").addEventListener("submit", (e) => {
+    if (e.target.id !== "hpProbeForm") return;
+    e.preventDefault();
+    runHpProbe();
   });
   // The Connections tile (#connTile) is rebuilt every poll too — each row's pencil opens its own
   // edit modal (WiFi/MQTT/Syslog/NTP), delegated the same way.
@@ -840,7 +852,7 @@ async function pollTick() {
   // Nobody is looking. Skip the requests and re-check at the normal cadence — the tick itself is
   // kept alive (a few clamped, empty timer wake-ups) rather than stopping the chain, because a
   // chain that only restarts on an event is dead for good if that event never arrives.
-  if (document.hidden) { pollSchedule(POLL_VALUES_MS); return; }
+  if (document.hidden || S.hpProbeBusy) { pollSchedule(POLL_VALUES_MS); return; }
   // A tick already in flight: never two /values builds queued on one HTTP worker.
   if (_pollBusy) { pollSchedule(POLL_VALUES_MS); return; }
 

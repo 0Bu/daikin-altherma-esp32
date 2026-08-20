@@ -61,8 +61,8 @@ void hp_uart_deinit() {
     if (s_inited) { uart_driver_delete(PORT); s_inited = false; }
 }
 
-int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen,
-             HpQueryLogPolicy log_policy) {
+HpQueryResult hp_query_detailed(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen,
+                                HpQueryLogPolicy log_policy) {
     // The buffer has to hold the reply we are about to ASK FOR. Checked before the request goes out
     // rather than while parsing it: there is no point putting a query on the bus whose answer we
     // would have to abandon, and the answer is knowable here.
@@ -75,11 +75,11 @@ int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen,
     // per-byte write guard cannot prevent, and that no static analyser finds either, since it needs
     // the caller's buffer size and the register table at once. One local check retires it.
     int replyLen = reply_len(reg, proto);
-    if (!reply_len_fits(replyLen, buflen)) {
+    if (!reply_len_valid(proto, replyLen, buflen)) {
         if (hp_query_should_log(log_policy, HpQueryFailure::InvalidLength))
             diag_printf("HP reply buffer too small for reg 0x%02x: need %d, have %u (rx=%d tx=%d)\n",
                         reg, replyLen, static_cast<unsigned>(buflen), s_rx, s_tx);
-        return -1;
+        return {HpReplyKind::InvalidLength, 0};
     }
 
     uint8_t req[4];
@@ -98,39 +98,61 @@ int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen,
             len++;
             if (proto == Protocol::I && len == 3) {
                 replyLen = reply_len_dynamic(buf);
-                if (!reply_len_fits(replyLen, buflen)) {
+                if (!reply_len_valid(proto, replyLen, buflen)) {
                     if (hp_query_should_log(log_policy, HpQueryFailure::InvalidLength))
                         diag_printf("HP invalid dynamic reply len %d (max %u) on reg 0x%02x (rx=%d tx=%d)\n",
                                     replyLen, static_cast<unsigned>(buflen), reg, s_rx, s_tx);
-                    return -1;
+                    return {HpReplyKind::InvalidLength, len};
                 }
             }
             if (len == 2 && is_error_reply(buf, len)) {
                 if (hp_query_should_log(log_policy, HpQueryFailure::Rejected))
                     diag_printf("HP query rejected for reg 0x%02x (protocol %c, reply 0x15 0xEA; rx=%d tx=%d)\n",
                                 reg, static_cast<char>(proto), s_rx, s_tx);
-                return -2;
+                return {HpReplyKind::Rejected, len};
             }
         }
     }
-    if (len == 0) {
-        if (hp_query_should_log(log_policy, HpQueryFailure::NoReply))
-            diag_printf("HP no reply for reg 0x%02x (protocol %c; rx=%d tx=%d)\n",
-                        reg, static_cast<char>(proto), s_rx, s_tx);
-        return -1;
+    // The pure classifier is the production rule as well as the host-test target; do not keep a
+    // second handwritten precedence ladder here that can drift on wrong-page/short/CRC replies.
+    const HpReplyKind kind = hp_reply_classify(reg, proto, buf, len, replyLen);
+    switch (kind) {
+        case HpReplyKind::NoReply:
+            if (hp_query_should_log(log_policy, HpQueryFailure::NoReply))
+                diag_printf("HP no reply for reg 0x%02x (protocol %c; rx=%d tx=%d)\n",
+                            reg, static_cast<char>(proto), s_rx, s_tx);
+            break;
+        case HpReplyKind::ShortReply:
+            if (hp_query_should_log(log_policy, HpQueryFailure::ShortReply))
+                diag_printf("HP short reply reg 0x%02x %d/%d (rx=%d tx=%d)\n",
+                            reg, len, replyLen, s_rx, s_tx);
+            break;
+        case HpReplyKind::BadCrc:
+            if (hp_query_should_log(log_policy, HpQueryFailure::BadCrc))
+                diag_printf("HP wrong CRC reg 0x%02x (rx=%d tx=%d)\n", reg, s_rx, s_tx);
+            break;
+        case HpReplyKind::UnexpectedReply:
+            if (hp_query_should_log(log_policy, HpQueryFailure::UnexpectedReply))
+                diag_printf("HP unexpected reply reg 0x%02x got 0x%02x/0x%02x (rx=%d tx=%d)\n",
+                            reg, buf[0], buf[1], s_rx, s_tx);
+            break;
+        case HpReplyKind::Ok:
+        case HpReplyKind::Rejected:      // NAK returns immediately above
+        case HpReplyKind::InvalidLength: // rejected before/while reading above
+            break;
     }
-    if (len < replyLen) {
-        if (hp_query_should_log(log_policy, HpQueryFailure::ShortReply))
-            diag_printf("HP short reply reg 0x%02x %d/%d (rx=%d tx=%d)\n",
-                        reg, len, replyLen, s_rx, s_tx);
-        return -1;
+    return {kind, len};
+}
+
+int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen,
+             HpQueryLogPolicy log_policy) {
+    const HpQueryResult result = hp_query_detailed(reg, proto, buf, buflen, log_policy);
+    switch (result.kind) {
+        case HpReplyKind::Ok:       return result.received;
+        case HpReplyKind::Rejected: return -2;
+        case HpReplyKind::BadCrc:   return -3;
+        default:                    return -1;
     }
-    if (!crc_ok(buf, len)) {
-        if (hp_query_should_log(log_policy, HpQueryFailure::BadCrc))
-            diag_printf("HP wrong CRC reg 0x%02x (rx=%d tx=%d)\n", reg, s_rx, s_tx);
-        return -3;
-    }
-    return len;
 }
 
 } // namespace daik

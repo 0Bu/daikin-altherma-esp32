@@ -103,7 +103,7 @@ for (const file of routeDocs) {
     if (!text.includes(route)) throw new Error(`${file} does not document ${route}`);
   }
 }
-if (!fs.readFileSync("docs/ARCHITECTURE.md", "utf8").includes("trusted-LAN route count of 36")) {
+if (!fs.readFileSync("docs/ARCHITECTURE.md", "utf8").includes("trusted-LAN route count of 37")) {
   throw new Error("docs/ARCHITECTURE.md no longer documents the exact trusted-LAN route budget");
 }
 const credentialWrapperPath = "scripts/gh-with-git-credentials.sh";

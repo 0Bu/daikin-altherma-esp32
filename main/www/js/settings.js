@@ -652,6 +652,142 @@ async function onDiagnosticsPick() {
   toast(t(enabled ? "diagnostics.saved_on" : "diagnostics.saved_off"), "ok");
 }
 
+function hpProbeRegNumber(value) {
+  const text = String(value ?? "").trim();
+  if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(text)) return null;
+  const n = Number.parseInt(text, /^0x/i.test(text) ? 16 : 10);
+  return Number.isInteger(n) && n >= 0 && n <= 255 ? n : null;
+}
+
+function hpProbeDraftRequest(draft = S.hpProbeDraft) {
+  const reg = hpProbeRegNumber(draft.reg);
+  const offset = Number(draft.offset), size = Number(draft.size);
+  const convText = String(draft.conv ?? "").trim();
+  const conv = convText === "" ? null : Number(convText);
+  if (reg == null || !Number.isInteger(offset) || offset < 0 || offset > 31 ||
+      (size !== 1 && size !== 2) ||
+      (conv != null && (!Number.isInteger(conv) || conv < 0 || conv > 999))) return null;
+  const request = { reg, offset, size };
+  if (conv != null) request.conv = conv;
+  return request;
+}
+
+function hpProbeSelectionMatches(row, request = hpProbeDraftRequest()) {
+  return !!row && !!request && request.reg === row.reg && request.offset === row.offset &&
+    request.size === row.size && request.conv === row.conv;
+}
+
+async function loadHpProbeCatalog(expectedProfile = S.status?.profile?.id || "") {
+  if (!S.protocolDiagnostics || S.hpProbeCatalogBusy) return;
+  S.hpProbeCatalogBusy = true;
+  S.hpProbeCatalogError = "";
+  renderSettings();
+  try {
+    const response = await j("/models?active=1");
+    const activeNow = S.status?.profile?.id || "";
+    if (!S.protocolDiagnostics || response?.profile !== activeNow ||
+        (expectedProfile && expectedProfile !== activeNow)) return;
+    const rows = Array.isArray(response.values) ? response.values : [];
+    S.hpProbeCatalog = rows.filter((row) => row && typeof row.label === "string" && row.label &&
+      Number.isInteger(row.reg) && row.reg >= 0 && row.reg <= 255 &&
+      Number.isInteger(row.offset) && row.offset >= 0 && row.offset <= 31 &&
+      (row.size === 1 || row.size === 2) && Number.isInteger(row.conv) &&
+      row.conv >= 0 && row.conv <= 999);
+    S.hpProbeCatalogProfile = response.profile;
+    // A profile change can reuse the same array index for a different row. Never show that new
+    // label as selected over the old tuple; keep the editable tuple and return the picker to manual.
+    const selected = S.hpProbeCatalog[Number(S.hpProbeDraft.selected)];
+    if (!hpProbeSelectionMatches(selected)) S.hpProbeDraft.selected = "";
+  } catch {
+    if ((S.status?.profile?.id || "") === expectedProfile) {
+      S.hpProbeCatalog = [];
+      S.hpProbeCatalogProfile = expectedProfile;
+      S.hpProbeCatalogError = "load";
+    }
+  } finally {
+    S.hpProbeCatalogBusy = false;
+    renderSettings();
+  }
+}
+
+async function onProtocolDiagnosticsPick() {
+  const select = $("e32ProtocolDiagnostics");
+  S.protocolDiagnostics = select.value === "on";
+  select.blur();
+  if (!S.protocolDiagnostics) {
+    renderSettings();
+    return;
+  }
+  S.hpProbeError = "";
+  renderSettings();
+  await loadHpProbeCatalog(S.status?.profile?.id || "");
+}
+
+function onHpProbeRegisterPick() {
+  const select = $("hpProbeRegister");
+  const index = select.value;
+  select.blur();
+  if (index === "" || !S.hpProbeCatalog[Number(index)]) {
+    S.hpProbeDraft.selected = "";
+    renderSettings();
+    return;
+  }
+  const row = S.hpProbeCatalog[Number(index)];
+  S.hpProbeDraft = {
+    selected: index,
+    reg: `0x${row.reg.toString(16).toUpperCase().padStart(2, "0")}`,
+    offset: String(row.offset), size: String(row.size), conv: String(row.conv),
+  };
+  S.hpProbeResult = null;
+  S.hpProbeError = "";
+  renderSettings();
+}
+
+function onHpProbeDraftInput(input) {
+  const field = { hpProbeReg: "reg", hpProbeOffset: "offset", hpProbeSize: "size", hpProbeConv: "conv" }[input.id];
+  if (!field) return;
+  S.hpProbeDraft[field] = input.value;
+  const selected = S.hpProbeCatalog[Number(S.hpProbeDraft.selected)];
+  if (!hpProbeSelectionMatches(selected)) {
+    S.hpProbeDraft.selected = "";
+    const register = $("hpProbeRegister");
+    if (register) register.value = "";
+  }
+  const preview = $("hpProbeRequest");
+  if (preview) preview.textContent = hpProbeRequestText();
+}
+
+async function runHpProbe() {
+  if (S.hpProbeBusy) return;
+  const request = hpProbeDraftRequest();
+  if (!request) {
+    S.hpProbeError = t("probe.invalid");
+    S.hpProbeResult = null;
+    renderSettings();
+    return;
+  }
+  S.hpProbeBusy = true;
+  S.hpProbeError = "";
+  S.hpProbeResult = null;
+  renderSettings();
+  try {
+    const response = await post("/hp/query", request);
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      S.hpProbeError = body && typeof body.error === "string" ? body.error : t("probe.failed");
+    } else if (body && typeof body === "object") {
+      S.hpProbeResult = body;
+    } else {
+      S.hpProbeError = t("probe.failed");
+    }
+  } catch {
+    S.hpProbeError = t("toast.unreachable");
+  } finally {
+    S.hpProbeBusy = false;
+    renderSettings();
+  }
+}
+
 // ── Firmware / OTA ───────────────────────────────────────────────────────
 // Tapping the version in the header meta line checks for an OTA update, and offers to install one:
 // the full /ota/check -> /ota/status -> /ota/update flow is wired below against the device-side

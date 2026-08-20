@@ -5,15 +5,16 @@
 // "page 0x60, offset 11, conv 105, 1 byte is the flow-line temperature", and the poll engine reads
 // exactly the rows the detected profile names. That is the right shape for producing telemetry and
 // the wrong shape for producing EVIDENCE, because it can only ever confirm what the catalog already
-// claims. Three questions the shipped surface cannot answer, all of them live:
+// claims. Three questions the normal telemetry surface cannot answer, all of them live — this probe
+// is the deliberately separate answer:
 //
 //   • "What does an unmapped model put on this page?" — 44 profiles exist, the fleet has more. A
-//     user whose unit detects as `generic` has no way to find out what its pages carry, so no way
-//     to contribute a profile. Today that requires editing def/*.hpp, building and flashing.
+//     user whose unit detects as `generic` previously had no way to find out what its pages carry
+//     without editing def/*.hpp, building and flashing; an arbitrary probe can now capture them.
 //   • "Is this row's CONVERTER right?" — logic/conv_override.hpp exists precisely because the
-//     generator's id is demonstrably wrong on some rows, and #194's Target Evap. Temp. (page 0x10
-//     offset 6, decoding to an impossible 199.6 °C under load) is still open. Deciding a scale
-//     needs the same bytes read through several converters at once, which no shipped path does.
+//     generator's id has been demonstrably wrong on some rows. #194's resolved Target Evap. Temp.
+//     case (page 0x10 offset 6) is the witness: deciding the corrected scale needed the same bytes
+//     compared through several converters, which the normal publish path does not expose.
 //   • "Are these bytes even where the catalog thinks they are?" — an offset/layout mismatch and a
 //     dead sensor look identical once a value is formatted (logic/hexdump.hpp's opening argument).
 //
@@ -33,7 +34,7 @@
 // impossible °C or a 0-bar refrigerant pressure, and value_available() adjudicates whether the row
 // is populated on this unit at all. This path deliberately runs NEITHER. That is the point — the
 // question is "what do these bytes read as", and a filter that hid the impossible answer would hide
-// exactly the evidence #194 needs. But it means a probe can hand back 240.6 °C where /values and
+// exactly the evidence needed to adjudicate a new row. But it means a probe can hand back 240.6 °C where /values and
 // Home Assistant correctly show nothing, so nothing here may be quoted as a reading, and the two
 // numbers disagreeing is the tool working rather than a defect.
 //
@@ -43,7 +44,9 @@
 // reaches: the catalog only ever pairs a converter with the offsets its own model uses, while this
 // pairs every converter with whatever byte the user pointed at. Table-bounds behaviour under
 // arbitrary bytes is therefore a host test here, not a discovery on someone's board.
+#include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include "convert.hpp"
 #include "value_def.hpp"
 
@@ -113,7 +116,9 @@ enum class ProbeStatus : uint8_t {
     NoReply,     // nothing came back within the serial timeout
     Rejected,    // the unit answered 0x15 0xEA — request understood, page refused
     BadCrc,      // bytes arrived, checksum failed
-    ShortReply,  // framing intact but the payload is too small to hold the requested slice
+    UnexpectedReply, // CRC-valid Protocol-I frame echoed a different page/opcode
+    InvalidLength, // the advertised Protocol-I frame length is impossible or exceeds the buffer
+    ShortReply,  // a partial frame arrived, or a valid frame carries no payload
     OutOfBounds, // the reply is real and the requested (offset,size) lies past its payload
 };
 
@@ -126,21 +131,35 @@ inline const char* probe_status_name(ProbeStatus s) {
         case ProbeStatus::NoReply:     return "no_reply";
         case ProbeStatus::Rejected:    return "rejected";
         case ProbeStatus::BadCrc:      return "bad_crc";
+        case ProbeStatus::UnexpectedReply: return "unexpected_reply";
+        case ProbeStatus::InvalidLength: return "invalid_length";
         case ProbeStatus::ShortReply:  return "short_reply";
         case ProbeStatus::OutOfBounds: return "out_of_bounds";
     }
     return "error";
 }
 
-// hp_query()'s negative returns, named. The mapping lives here rather than at the call site so the
-// transport's codes have exactly one interpretation: hp_comm.cpp returns -2 for the 0x15 0xEA
-// refusal and -3 for a checksum failure, and everything else it can fail on (no reply, short reply,
-// an impossible dynamic length) comes back as -1 with the distinguishing detail already in the diag
-// ring. -1 is therefore reported as NoReply, which is what it is in every case a user can act on.
+// Compatibility mapping for hp_query()'s legacy integer contract (poll/detection callers). The
+// diagnostic path uses probe_status_from_reply() below so short, wrong-echo and partial outcomes
+// retain their distinct status and raw bytes.
 inline ProbeStatus probe_status_from_query(int n) {
     if (n > 0)  return ProbeStatus::Ok;
     if (n == -2) return ProbeStatus::Rejected;
     if (n == -3) return ProbeStatus::BadCrc;
+    return ProbeStatus::NoReply;
+}
+
+inline ProbeStatus probe_status_from_reply(HpReplyKind kind) {
+    switch (kind) {
+        case HpReplyKind::Ok:              return ProbeStatus::Ok;
+        case HpReplyKind::Rejected:        return ProbeStatus::Rejected;
+        case HpReplyKind::BadCrc:          return ProbeStatus::BadCrc;
+        case HpReplyKind::ShortReply:      return ProbeStatus::ShortReply;
+        case HpReplyKind::UnexpectedReply: return ProbeStatus::UnexpectedReply;
+        case HpReplyKind::InvalidLength:   return ProbeStatus::InvalidLength;
+        case HpReplyKind::NoReply:
+            return ProbeStatus::NoReply;
+    }
     return ProbeStatus::NoReply;
 }
 
@@ -221,6 +240,10 @@ inline constexpr ProbeCandidate PROBE_CANDIDATES[] = {
     {151, 2}, {152, 2},                       // unsigned raw
     {161, 2},                                 // unsigned ×0.5 — CT current
     {405, 2},                                 // pressure -> saturation temperature
+    // 1-byte numeric fields used by the production catalog. These converters intentionally accept
+    // width 1 (logic/registers.hpp reads data[0]); omitting them made the default sweep miss real
+    // rows such as O/U capacity (105) and CT current (161).
+    {105, 1}, {101, 1}, {152, 1}, {161, 1},
     // 1-byte fields: the raw byte, then the readings that mask or index it.
     {211, 1}, {219, 1}, {214, 1}, {215, 1},   // data[0] verbatim (aliases of each other)
     {310, 1}, {311, 1},                       // 3-bit windows, bits 4-6 and 0-2
@@ -242,6 +265,12 @@ inline constexpr int probe_candidate_count_for(uint8_t size) {
     return n;
 }
 
+inline constexpr bool probe_candidate_offered(int conv, uint8_t size) {
+    for (int i = 0; i < PROBE_CANDIDATE_COUNT; i++)
+        if (PROBE_CANDIDATES[i].conv == conv && PROBE_CANDIDATES[i].size == size) return true;
+    return false;
+}
+
 // DERIVED, not chosen: the widest field's candidate count. Deriving it is what makes truncation
 // structurally impossible rather than merely unlikely — a hand-picked ceiling that fell one short
 // would drop a row, and a dropped row is indistinguishable from a converter that had nothing to
@@ -255,7 +284,7 @@ inline constexpr int PROBE_MAX_ALIASES = PROBE_MAX_DECODES - 1;
 // The sweep's whole output is ONE stack array in the HTTP handler, on the task with the deepest
 // call chain in the firmware (16 KB, and http_append_status_json already spends ~10.5 KB of it —
 // see http_server.cpp). So the per-row cost is deliberate: `uint16_t` aliases and a bound derived
-// from the table rather than rounded up. MEASURED at today's table: 19 rows x 80 bytes = 1520 bytes,
+// from the table rather than rounded up. MEASURED at today's table: 23 rows x 88 bytes = 2024 bytes,
 // against ~4.6 KB for the obvious `int alias[PROBE_CANDIDATE_COUNT]` in a hand-picked 24-row array.
 // This is not premature: a stack budget is exactly what killed the httpd task twice (v1.0.12, #318).
 static_assert(PROBE_MAX_DECODES <= 32,
@@ -276,6 +305,27 @@ struct ProbeDecode {
                                               // is what the row's stack cost is made of (see above)
     int    alias_count = 0;
 };
+
+static_assert(sizeof(ProbeDecode) * PROBE_MAX_DECODES <= 2048,
+              "the complete probe sweep must stay within a 2 KiB httpd-stack budget");
+
+// Rows offered by the active-profile UI must be executable by ProbeRequest and represent values,
+// not size-0 metadata or detection-only placeholders. The label is the exact ValueDef label shown
+// to the user; duplicate labels remain separate rows at the transport layer.
+inline bool probe_catalog_row(const ValueDef& row) {
+    return !row.no_publish && row.label && row.label[0] != '\0' &&
+           (row.size == 1 || row.size == 2) && row.conv >= 0 && row.conv <= 999;
+}
+
+// Exact profile lookup for the UI feed. The production registry's ordinary lookup deliberately
+// falls back to generic for polling continuity; a picker labelled as this installation's detected
+// profile must instead fail closed or it would misattribute generic rows to a bad/stale id.
+template <typename ProfileT, size_t N>
+inline const ProfileT* probe_profile_exact(const ProfileT (&profiles)[N], std::string_view id) {
+    for (const auto& profile : profiles)
+        if (id == profile.id) return &profile;
+    return nullptr;
+}
 
 // Two decodes are the SAME answer when every observable field agrees. Deliberately an exact
 // double comparison and not an epsilon: both sides come from the same converter code over the same

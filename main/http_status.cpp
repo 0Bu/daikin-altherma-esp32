@@ -25,6 +25,7 @@
 #include "logic/binary_semantics.hpp"
 #include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
+#include "logic/hp_probe.hpp" // active-profile rows accepted by POST /hp/query
 #include "logic/http_cache.hpp"
 #include "logic/convert.hpp"   // conv_is_binary — /values marks a bit-flag row from its converter id
 #include "logic/discovery.hpp" // ambiguous X10A labels need their existing MQTT page scope in the UI
@@ -1470,13 +1471,52 @@ static esp_err_t h_values(httpd_req_t* req) {
     return http_send_values_json(req);
 }
 
+static bool models_active_requested(httpd_req_t* req) {
+    const size_t n = httpd_req_get_url_query_len(req);
+    if (n == 0 || n >= 32) return false;
+    char query[32];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) return false;
+    char active[4];
+    return httpd_query_key_value(query, "active", active, sizeof(active)) == ESP_OK &&
+           std::strcmp(active, "1") == 0;
+}
+
+// Lazy picker feed for the expert X10A probe. It is deliberately a query variant of the existing
+// model-catalog route: no extra resident URI record, and no growth of the frequently-polled
+// /status or /values payloads. "auto" yields no rows — def::lookup("auto") falls back to generic,
+// which would falsely present generic definitions as belonging to an already detected unit.
+static esp_err_t h_active_model_values(httpd_req_t* req) {
+    const Config c = config(); // allocate/snapshot before response headers; handle_all maps OOM to 503
+    HttpJsonChunks j(HttpChunkEmitter{req});
+    httpd_resp_set_type(req, "application/json");
+    j += "{\"profile\":";
+    json_append_quoted(j, c.profile);
+    j += ",\"values\":[";
+    const def::Profile* profile = probe_profile_exact(def::profiles, c.profile);
+    if (profile) {
+        const auto view = def::resolved(*profile);
+        bool comma = false;
+        for (size_t i = 0; i < view.count(); i++) {
+            const ValueDef& row = view[i];
+            if (!probe_catalog_row(row)) continue;
+            if (comma) j += ',';
+            comma = true;
+            j += "{\"reg\":";    append_json_uint(j, row.reg);
+            j += ",\"offset\":"; append_json_uint(j, row.offset);
+            j += ",\"conv\":";   append_json_uint(j, static_cast<uint64_t>(row.conv));
+            j += ",\"size\":";   append_json_uint(j, row.size);
+            j += ",\"label\":";  json_append_quoted(j, row.label);
+            j += '}';
+        }
+    }
+    j += "]}";
+    return j.finish() ? ESP_OK : ESP_FAIL;
+}
+
 // Model catalog + pin hint (def/models_catalog.hpp, generated alongside the def/*.hpp profiles).
-// Detection is fully automatic, so this is NOT a picker feed — and in fact NO shipped client reads
-// it: the web UI never fetches /models (the RX/TX dropdown takes its GPIOs from /status.pins_avail,
-// via logic/board_pins.hpp — a separate mechanism from the embedded `pin_hint`). The whole payload
-// (pin_hint, profile_map, outdoor/indoor/tank lists) is legacy metadata, kept as a read-only
-// inspection endpoint for humans and scripts.
+// Without ?active=1 this remains the legacy read-only inspection payload for humans/scripts.
 static esp_err_t h_models(httpd_req_t* req) {
+    if (models_active_requested(req)) return h_active_model_values(req);
     return http_send_json(req, def::MODELS_JSON);
 }
 

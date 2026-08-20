@@ -137,7 +137,8 @@ bool     hp_poll_generation_matches(uint32_t generation);
 void hp_poll_reconfigure();
 
 // ── Free register probe (logic/hp_probe.hpp, POST /hp/query) ─────────────────────────────────────
-// One CRC-verified reply to one caller-chosen register, with the raw frame attached.
+// One reply attempt for one caller-chosen register, with every received raw byte attached. A valid
+// reply is CRC-verified; negative, corrupt, wrong-echo and partial frames retain their evidence too.
 //
 // This runs ON THE POLL TASK and not on the httpd task that asks for it, for the same reason
 // everything else that touches the bus does: the link is half-duplex with exactly one master, and a
@@ -154,15 +155,15 @@ struct HpProbeReply {
     Protocol    proto       = Protocol::I;   // the framing actually used (config's cached/detected one)
     int         rx_pin      = -1;
     int         tx_pin      = -1;
-    uint8_t     frame[64]   = {};            // the complete reply INCLUDING header and checksum
+    uint8_t     frame[64]   = {};            // all received bytes; complete incl. checksum only when valid
     int         frame_len   = 0;
     int         payload_off = 0;             // where the value bytes start inside frame[]
     int         payload_len = 0;             // frame_len - payload_off - 1 (the checksum byte)
 };
 
-// Ask for `reg` and wait up to `timeout_ms` for the poll task to serve it. Returns false only for
-// Busy/NoLink/Timeout — every bus-level outcome is reported through `out.status`, which is the
-// distinction the caller has to relay (a refused page and a wedged scheduler are different findings).
+// Ask for `reg` and wait up to `timeout_ms` for the poll task to serve it. Returns true only for Ok;
+// every non-ok outcome is retained in `out.status`, which the HTTP caller relays (a refused page and
+// a wedged scheduler are different findings).
 // Allocation-free: it must stay callable from the httpd task under the same heap pressure that
 // makes every other handler return 503.
 bool hp_probe_run(uint8_t reg, HpProbeReply& out, int timeout_ms);

@@ -85,6 +85,8 @@ static std::atomic<bool>     s_detect_reset{false};
 // request it actually served.
 static SemaphoreHandle_t      s_probe_gate = nullptr;
 static SemaphoreHandle_t      s_probe_done = nullptr;
+static StaticSemaphore_t      s_probe_gate_storage;
+static StaticSemaphore_t      s_probe_done_storage;
 static std::atomic<uint32_t>  s_probe_pending{0};        // ticket << 8 | reg, 0 = no request
 static std::atomic<uint32_t>  s_probe_ticket{0};         // last ticket handed out
 static std::atomic<uint32_t>  s_probe_reply_ticket{0};   // whose answer s_probe_reply holds
@@ -106,7 +108,8 @@ static int                   s_no_match = 0;
 
 // Raw page-dump budget for the RUNNING compressor (logic/raw_capture.hpp) — poll-task-owned, RAM
 // only, never refilled within a boot. The detect-pass dump in hp_detect.cpp captures the same pages
-// at REST; this one exists because the values #194 is about are only wrong while the unit runs.
+// at REST; this one supplied #194's decisive running-state evidence and remains available for the
+// next converter/layout mismatch.
 static logic::RawCaptureState s_raw_capture;
 
 // The CROSS-PAGE saturation witness, carried from the PREVIOUS cycle (logic/availability.hpp).
@@ -337,11 +340,10 @@ static void poll_once() {
         cv.held = logic::ou_reading_held_over(cv.reg, rps_known, rps_running);
     const bool ou_held = rps_known && !rps_running;
 
-    // ── RAW page bytes WHILE THE COMPRESSOR RUNS (#194's decisive experiment, #209 root cause) ────
-    // The only evidence that can separate a wrong converter scale from a wrong offset for
-    // Target Evap. Temp., and it has never been captured: hp_detect.cpp dumps the same pages, but
-    // only on a detect pass, which is always a unit at rest — the state where the value is not wrong.
-    // Budgeted and edge-triggered so this cannot flood the 6 KB diag ring (logic/raw_capture.hpp).
+    // ── RAW page bytes WHILE THE COMPRESSOR RUNS (#194 evidence, added by #209) ───────────────────
+    // This supplied the wire evidence that separated #194's wrong converter scale from a wrong
+    // offset; hp_detect.cpp alone had covered only rest-state frames. Keep the bounded running-state
+    // sampler for future converter/layout mismatches without flooding the 6 KB diag ring.
     if (hp_poll_generation_matches(cycle_generation) &&
         logic::raw_capture_due(s_raw_capture, rps_running, esp_timer_get_time())) {
         const struct { uint8_t reg; const uint8_t* buf; int len; } run_raw[] = {
@@ -536,7 +538,7 @@ static void poll_probe_service() {
     const uint8_t reg = probe_reg_of(pending);
 
     HpProbeReply r;
-    const Config c = config();
+    const ConfigLinkSnapshot c = config_link_snapshot();
     r.proto  = c.proto;
     r.rx_pin = c.rx_pin;
     r.tx_pin = c.tx_pin;
@@ -551,14 +553,14 @@ static void poll_probe_service() {
         // user with a shell loop evict the boot's real evidence from a 6 KB ring. A checksum failure
         // or an impossible length still logs — those describe the LINK, not the page, and they are
         // the same defect whoever is watching /diag is there for.
-        const int n = hp_query(reg, c.proto, r.frame, sizeof(r.frame),
-                               HpQueryLogPolicy::IntegrityOnly);
-        if (n < 0) {
-            r.status = probe_status_from_query(n);
+        const HpQueryResult query = hp_query_detailed(reg, c.proto, r.frame, sizeof(r.frame),
+                                                      HpQueryLogPolicy::IntegrityOnly);
+        r.frame_len = query.received;
+        if (query.kind != HpReplyKind::Ok) {
+            r.status = probe_status_from_reply(query.kind);
         } else {
-            r.frame_len   = n;
             r.payload_off = payload_offset(c.proto);
-            r.payload_len = n - r.payload_off - 1;             // minus header, minus the checksum byte
+            r.payload_len = query.received - r.payload_off - 1; // minus header and checksum
             // A framing-valid reply that carries no payload is not an error of the transport, and
             // reporting it as one would send the user to check wiring that is demonstrably fine.
             r.status = r.payload_len > 0 ? ProbeStatus::Ok : ProbeStatus::ShortReply;
@@ -696,12 +698,23 @@ static void poll_task(void*) {
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             diag_printf("poll: cycle skipped (oom?)\n");
         }
-        // Serve at most one free probe per cycle, AFTER the sweep and OUTSIDE the try: it allocates
-        // nothing (one stack frame, one 64-byte reply), so it cannot be the cycle that throws, and
-        // a sweep that DID throw must not starve the one route a user reaches for when the sweep is
-        // misbehaving. It runs only on a cycle that got this far, so the OTA hold-off above still
-        // keeps the bus quiet during an update — a submitter then times out and is told so.
-        poll_probe_service();
+        // Serve at most one free probe after the sweep. Its Config access is POD-only and normally
+        // allocation-free, but keep a separate task-level boundary anyway: a future edit must turn
+        // into a 503/no-link result rather than unwind through the FreeRTOS C task entry and reboot.
+        try {
+            poll_probe_service();
+        } catch (...) {
+            const uint32_t pending = s_probe_pending.load(std::memory_order_acquire);
+            if (pending != 0) {
+                s_probe_reply = HpProbeReply{};
+                s_probe_reply.status = ProbeStatus::NoLink;
+                s_probe_reply_ticket.store(probe_ticket_of(pending), std::memory_order_release);
+                uint32_t failed = pending;
+                s_probe_pending.compare_exchange_strong(failed, 0, std::memory_order_acq_rel,
+                                                        std::memory_order_relaxed);
+                if (s_probe_done) xSemaphoreGive(s_probe_done);
+            }
+        }
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));     // fixed 1 s cadence
     }
 }
@@ -709,13 +722,13 @@ static void poll_task(void*) {
 void hp_poll_start() {
     s_mtx = xSemaphoreCreateMutex();
     if (!s_mtx) diag_printf("hp_poll: cache mutex alloc failed — value snapshots return empty\n");
-    // Probe hand-off primitives. A failure here disables only POST /hp/query — hp_probe_run()
-    // checks both and answers NoLink — so it must not stop the poll task from starting: the bus
-    // link is the product, a diagnostic route is not.
-    s_probe_gate = xSemaphoreCreateMutex();
-    s_probe_done = xSemaphoreCreateBinary();
+    // Probe hand-off primitives live in .bss rather than consuming/fragmenting internal heap before
+    // the core poll task's 8 KiB stack is allocated. The null check remains defensive against a
+    // FreeRTOS configuration that refuses static creation; only POST /hp/query is then disabled.
+    s_probe_gate = xSemaphoreCreateMutexStatic(&s_probe_gate_storage);
+    s_probe_done = xSemaphoreCreateBinaryStatic(&s_probe_done_storage);
     if (!s_probe_gate || !s_probe_done)
-        diag_printf("hp_poll: probe semaphore alloc failed — POST /hp/query unavailable this boot\n");
+        diag_printf("hp_poll: probe semaphore init failed — POST /hp/query unavailable this boot\n");
     // The poll engine is the core of the device; if its task can't be created there is no heat-pump
     // polling at all. Report it loudly — the web UI + OTA still come up, so the board stays fixable.
     //

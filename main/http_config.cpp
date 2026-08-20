@@ -21,6 +21,7 @@
 #include "hp_poll.hpp"
 #include "def/registry.hpp"    // def::lookup — the active profile, for conv 405's refrigerant curve
 #include "logic/config_model.hpp"
+#include "logic/chunk_sink.hpp"
 #include "logic/board_presets.hpp"
 #include "logic/env3.hpp"
 #include "logic/history_persist.hpp"
@@ -56,6 +57,7 @@
 #include <cerrno>       // errno / EINPROGRESS in the non-blocking TCP probe
 #include <cstdio>       // snprintf — the probe's fixed-precision value + register rendering
 #include <cstring>
+#include <string_view>
 
 namespace daik {
 
@@ -1193,14 +1195,31 @@ static esp_err_t do_detect(httpd_req_t* req) {
 // was asked and the finding is that this unit has nothing there. Those come back 200 with
 // `ok:false` and a stable `status`, because a client exploring a register map will hit them
 // constantly and an HTTP error would tell it the device is broken when it is working perfectly.
-static void probe_append_decode(std::string& out, const ProbeDecode& d) {
+struct ProbeChunkEmitter {
+    httpd_req_t* req = nullptr;
+    bool operator()(std::string_view bytes, bool final) const {
+        if (final) return httpd_resp_send_chunk(req, nullptr, 0) == ESP_OK;
+        return httpd_resp_send_chunk(req, bytes.data(), bytes.size()) == ESP_OK;
+    }
+};
+using ProbeJsonChunks = BoundedChunkSink<ProbeChunkEmitter, 1024>;
+
+template <typename JsonOut>
+static void probe_append_int(JsonOut& out, int value) {
+    char b[16];
+    snprintf(b, sizeof(b), "%d", value);
+    out += b;
+}
+
+template <typename JsonOut>
+static void probe_append_decode(JsonOut& out, const ProbeDecode& d) {
     out += "{\"conv\":";
-    out += std::to_string(d.conv);
+    probe_append_int(out, d.conv);
     if (d.alias_count > 0) {
         out += ",\"aliases\":[";
         for (int i = 0; i < d.alias_count; i++) {
             if (i) out += ',';
-            out += std::to_string(d.alias[i]);
+            probe_append_int(out, d.alias[i]);
         }
         out += ']';
     }
@@ -1263,77 +1282,81 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
                                    ? ProbeStatus::OutOfBounds
                                    : reply.status;
 
-    char reg_hex[8];
+    // Stage every potentially allocating snapshot/decode before sending the first chunk. Once the
+    // response starts, formatting uses only fixed buffers and the sink's already-reserved 1 KiB.
+    ProbeDecode decodes[PROBE_MAX_DECODES];
+    int decode_count = 0;
+    bool unimplemented = false;
+    if (sliced) {
+        const Config c = config();
+        const def::Profile& prof = def::lookup(c.profile.c_str());
+        const int rtype = profile_refrigerant(prof.values, prof.count);
+        const uint8_t* payload = reply.frame + reply.payload_off;
+        if (q.conv == PROBE_SWEEP) {
+            decode_count = probe_sweep(payload, reply.payload_len, q.offset, q.size,
+                                       decodes, PROBE_MAX_DECODES, rtype);
+        } else {
+            decode_count = probe_decode_one(payload, reply.payload_len, q.offset, q.size, q.conv,
+                                            decodes[0], unimplemented, rtype) ? 1 : 0;
+        }
+    }
+
+    char reg_hex[8], hex[3 * 64];
     snprintf(reg_hex, sizeof(reg_hex), "0x%02X", static_cast<unsigned>(q.reg));
-    std::string out = "{\"reg\":\"";
+    ProbeJsonChunks out(ProbeChunkEmitter{req});
+    httpd_resp_set_type(req, "application/json");
+    out += "{\"reg\":\"";
     out += reg_hex;
     out += "\",\"proto\":\"";
     out += static_cast<char>(reply.proto);
-    out += "\",\"rx_pin\":" + std::to_string(reply.rx_pin);
-    out += ",\"tx_pin\":" + std::to_string(reply.tx_pin);
-    out += ",\"offset\":" + std::to_string(q.offset);
-    out += ",\"size\":" + std::to_string(q.size);
+    out += "\",\"rx_pin\":"; probe_append_int(out, reply.rx_pin);
+    out += ",\"tx_pin\":"; probe_append_int(out, reply.tx_pin);
+    out += ",\"offset\":"; probe_append_int(out, q.offset);
+    out += ",\"size\":"; probe_append_int(out, q.size);
     out += ",\"status\":\"";
     out += probe_status_name(status);
     out += '"';
 
-    if (reply.status != ProbeStatus::Ok) {
-        out += ",\"ok\":false}";
-        return http_send_json(req, out.c_str());
+    // Preserve every byte that arrived, including NAK, bad-CRC, unexpected-page and partial frames.
+    if (reply.frame_len > 0) {
+        hex_render(reply.frame, reply.frame_len, hex, static_cast<int>(sizeof(hex)));
+        out += ",\"frame\":\""; out += hex; out += '"';
     }
 
-    // The RAW FRAME, always — header, payload and checksum, exactly as it arrived. This is the part
-    // that survives every wrong assumption above it: if the offsets, the converter and the catalog
-    // are all wrong, the bytes still say what the unit sent. Emitted before any decode for the same
-    // reason logic/hexdump.hpp exists at all.
-    char hex[3 * 64];
-    hex_render(reply.frame, reply.frame_len, hex, static_cast<int>(sizeof(hex)));
-    out += ",\"frame\":\"";
-    out += hex;
-    out += "\",\"payload\":\"";
+    if (reply.status != ProbeStatus::Ok) {
+        out += ",\"ok\":false}";
+        return out.finish() ? ESP_OK : ESP_FAIL;
+    }
+
     hex_render(reply.frame + reply.payload_off, reply.payload_len, hex,
                static_cast<int>(sizeof(hex)));
-    out += hex;
-    out += "\",\"payload_len\":" + std::to_string(reply.payload_len);
+    out += ",\"payload\":\""; out += hex; out += "\",\"payload_len\":";
+    probe_append_int(out, reply.payload_len);
 
     if (!sliced) {
         // The page is real and shorter than the caller assumed — already reported as out_of_bounds
         // above. A finding, not a transport error, and the payload hex just emitted shows exactly
         // how much there is.
         out += ",\"ok\":false}";
-        return http_send_json(req, out.c_str());
+        return out.finish() ? ESP_OK : ESP_FAIL;
     }
 
-    // conv 405's curve. The active profile's refrigerant where one is resolved; on `generic` — the
-    // profile this tool is most useful on — profile_refrigerant falls back to its own default.
-    // The BASE table and not the view, for the reason hp_poll.cpp states at its own call: the
-    // overlay blocks carry no pressure or conv-405 row, and def/overlay.hpp's static_asserts pin that.
-    const def::Profile& prof = def::lookup(config().profile.c_str());
-    const int  rtype = profile_refrigerant(prof.values, prof.count);
-    const uint8_t* payload = reply.frame + reply.payload_off;
+    hex_render(reply.frame + reply.payload_off + q.offset, q.size, hex,
+               static_cast<int>(sizeof(hex)));
+    out += ",\"slice\":\""; out += hex; out += '"';
 
     out += ",\"ok\":true,\"decodes\":[";
-    if (q.conv == PROBE_SWEEP) {
-        ProbeDecode decodes[PROBE_MAX_DECODES];
-        const int n = probe_sweep(payload, reply.payload_len, q.offset, q.size,
-                                  decodes, PROBE_MAX_DECODES, rtype);
-        for (int i = 0; i < n; i++) {
-            if (i) out += ',';
-            probe_append_decode(out, decodes[i]);
-        }
-    } else {
-        ProbeDecode d;
-        bool unimpl = false;
-        if (probe_decode_one(payload, reply.payload_len, q.offset, q.size, q.conv, d, unimpl, rtype))
-            probe_append_decode(out, d);
-        else if (unimpl)
-            // "Nothing decodes this" is an answer, and a load-bearing one: it tells a contributor
-            // the id they were handed is not ported, rather than leaving them to read an empty list
-            // as "the bytes are empty".
-            out += "{\"conv\":" + std::to_string(q.conv) + ",\"unimplemented\":true}";
+    for (int i = 0; i < decode_count; i++) {
+        if (i) out += ',';
+        probe_append_decode(out, decodes[i]);
+    }
+    if (unimplemented) {
+        out += "{\"conv\":";
+        probe_append_int(out, q.conv);
+        out += ",\"unimplemented\":true}";
     }
     out += "]}";
-    return http_send_json(req, out.c_str());
+    return out.finish() ? ESP_OK : ESP_FAIL;
 }
 
 void http_register_config(httpd_handle_t s, HttpSurface surface) {

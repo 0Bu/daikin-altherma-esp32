@@ -1338,8 +1338,17 @@ vocabulary exactly:
    board's own health does (*is the bus alive*, not *is the board healthy*): the heat-pump link
    (Online/Offline) and X10A protocol, then the **RX/TX pins** — read-only when detected, else a
    usable-GPIO dropdown (§5.2). From `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`. **Link
-   facts, top to bottom** (link, protocol, RX, TX). Each label opens the ordinary `--brand-tint`
+   facts, top to bottom** (link, protocol, RX, TX), followed by **Protocol diagnostics**. That final
+   plain row has only an Off/On selector: no chevron or explanation tongue, defaults Off on each page
+   load and persists nothing. On reveals the separate **X10A Diagnosis** card immediately below this
+   card and above Firmware. Each of the four link-fact labels opens the ordinary `--brand-tint`
    explanation tongue; the right-side value or pin selector remains an independent action.
+   The diagnosis card is a compact technical form, not an information panel: one sentence, an
+   **Request** section, a dropdown labelled only **Register**, page/offset/field-width/converter inputs,
+   valid JSON preview and one Query button. Register option text is the exact active-profile
+   `ValueDef::label`; its tuple is internal, so duplicate labels remain independently selectable.
+   Selecting one fills all four editable inputs. Response rows show status, full received frame,
+   valid payload, selected bytes and converter results. No automatic query is issued.
 4. **Firmware card** — the running software: the **Version** (`version`) and the **Update channel**
    select (`ota.channel` → `POST /set_ota`, §5.4), then **Language** (`ui.lang` → `POST /set_lang`,
    §1) — a three-option select, **Browser** / English / Deutsch, "Browser" because that option *is*
@@ -1736,8 +1745,9 @@ The design needs these additions to the firmware (all small, tracked as follow-u
   install is confirmed by that as much as by a new `version`).
 - Optional `group` field on `ValueDef` (or generator-stamped) to drive §6 grouping; until then the
   UI groups by register-id ranges + label keywords.
-- `/models`: returns model lists, `profile_map`, `pin_hint`, per-profile value menu — still served
-  and used server-side for candidate-id → display name, though the UI no longer fetches it.
+- `/models`: without a query returns the legacy model lists, `profile_map` and `pin_hint`; the UI
+  does not use that model-picker metadata. `?active=1` is the separate lazy Protokolldiagnose feed:
+  it streams the detected profile's queryable `ValueDef` labels and request tuples.
 - `POST /detect`: re-run auto-detection (resets `profile` to `"auto"` + invalidates the fingerprint).
   Still served for API/MCP use; the UI no longer exposes a re-detect button.
 
