@@ -44,6 +44,7 @@ const M_FLAG = (off, label, on, concept = null) => ({
 
 function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements = {} }) {
   const context = {
+    INSPECT_I18N: Object.create(null),
     S: {
       // The saved ADDRESS rides with `enabled`, because that is the shape http_status.cpp emits: the
       // stack only ever starts from a non-empty mb_host, so an enabled gateway with no address is

@@ -150,9 +150,9 @@ fragments. The test also pins exact matches where a broad catalog regex would be
 notably room-temperature setpoints versus the unrelated `Thermo ON` demand flag.
 
 `node test/test_ui_error_codes.mjs` keeps the Error code row concise and source-aligned. It compares
-the internal 63-code lookup with `main/logic/error_codes.hpp`, requires a short German meaning for
-each code and executes the production renderer in both languages. Only the currently reported code
-and its meaning may appear; unavailable and unknown values have explicit, non-invented fallbacks.
+the internal 63-code lookup with `main/logic/error_codes.hpp`, requires a short meaning in all eight
+UI languages and executes the production renderer in each one. Only the currently reported code and
+its meaning may appear; unavailable and unknown values have explicit, non-invented fallbacks.
 
 `node test/test_ui_board_preset.mjs` executes the production Board Hardware modal functions. It
 pins the first-boot case where the build defaults equal the Seeed XIAO values but the board selector

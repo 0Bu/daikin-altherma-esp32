@@ -297,6 +297,7 @@ assertPersistentBannerRepaints(
 {
   const context = {
     LANG: "en",
+    INSPECT_I18N: Object.create(null),
     S: { insp: "same", live: null },
     // The second source. Null is the shape a device with no HomeHub sees, which is the right
     // baseline here: this asserts that LANG ALONE still moves the signature, so every other input

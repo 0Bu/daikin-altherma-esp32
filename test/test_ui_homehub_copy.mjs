@@ -1,10 +1,10 @@
-// Semantic contract for every HomeHub row: manufacturer label, German visual label and matching
-// explanation. Coverage alone is insufficient here — a temperature setpoint used to match the
+// Semantic contract for every HomeHub row: manufacturer identity, localized visual labels and the
+// established English/German long explanation. Coverage alone is insufficient here — a setpoint used to match the
 // generic "thermostat" bit text and was therefore described as an ON/OFF demand signal.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const descriptionsSource = readAppFragments(["descriptions.js"]);
 const historySource = readAppFragments(["history.js"]);
@@ -28,15 +28,25 @@ const firstDescription = (label) => descriptions.find((d) => {
 });
 
 function labels(lang) {
-  const context = { LANG: lang };
+  const context = {
+    LANG: lang,
+    I18N: Object.create(null),
+    localeValues: () => ({}),
+    INSPECT_I18N: Object.create(null),
+    HOMEHUB_LABEL_I18N: Object.create(null),
+  };
   vm.createContext(context);
+  if (!["en", "de"].includes(lang))
+    vm.runInContext(readUiLocale(lang), context, { filename: `main/www/locales/${lang}.js` });
   vm.runInContext(historySource +
-    "\nthis.__api = { displayHomeHubLabel, HOMEHUB_LABEL_DE };", context,
+    "\nthis.__api = { displayHomeHubLabel, HOMEHUB_LABEL_DE, HOMEHUB_LABEL_I18N };", context,
   { filename: "main/www/app.sources" });
   return context.__api;
 }
 const deLabels = labels("de");
 const enLabels = labels("en");
+const localizedLabels = Object.fromEntries(["es", "fr", "it", "pl", "cs", "uk"]
+  .map((lang) => [lang, labels(lang)]));
 
 const expected = new Map([
   [21, ["Unit abnormality", "Diagnosezustand der Anlage"]],
@@ -81,6 +91,10 @@ for (const row of rows) {
   assert.equal(enLabels.displayHomeHubLabel(row),
     names[0].replace(/[\s.]+ON\/OFF\s*$/i, ""), `English visual label at offset ${row.off}`);
   assert.equal(deLabels.displayHomeHubLabel(row), names[1], `German visual label at offset ${row.off}`);
+  for (const [lang, api] of Object.entries(localizedLabels)) {
+    assert.equal(api.displayHomeHubLabel(row), api.HOMEHUB_LABEL_I18N[lang][row.off],
+      `${lang} visual label at offset ${row.off}`);
+  }
   assert.doesNotMatch(names[1], /[()]/,
     `German visual label at offset ${row.off} should read fluently without parenthetical qualifiers`);
 

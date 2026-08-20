@@ -378,8 +378,9 @@ other.
   [`www/locales/`](../main/www/locales/)): the UI detects en/de/es/fr/it/pl/cs/uk from
   `navigator.language`; a persistent picker overrides that per installation and applies **live**.
   English is the startup fallback, while the other catalogs are separately compressed signed-image
-  assets. Heat-pump **value labels** stay English — they are X10A register names; detailed value and
-  inspector explanations remain English/German and fall back to English in the six newer locales.
+  assets. Heat-pump **value labels** stay English — they are X10A register names; all schematic
+  inspector copy and HomeHub row names are localized, while the longer value/model accordions remain
+  English/German and fall back to English in the six newer locales.
 
 ---
 

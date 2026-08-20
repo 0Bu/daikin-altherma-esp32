@@ -1,6 +1,6 @@
-// Complete, device-local UI locale contract: selection, catalog parity, lazy loading and bounded
-// separately compressed assets. Specialist value explainers intentionally retain their documented
-// English/German layer; this gate covers every string that goes through t()/data-i18n.
+// Complete, device-local UI locale contract: selection, compact-catalog parity, lazy loading,
+// schematic-inspector/HomeHub specialist copy, and bounded separately compressed assets. The much
+// longer value/model accordions intentionally retain their documented English/German layer.
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import fs from "node:fs";
@@ -33,9 +33,16 @@ for (const code of codes.slice(1)) {
   const source = readUiLocale(code);
   assert.doesNotThrow(() => new vm.Script(source, { filename: `main/www/locales/${code}.js` }),
     `${code} locale must parse as a classic script`);
+  if (!["de"].includes(code)) assert.match(source,
+    new RegExp(`^I18N\\.${code}\\s*=\\s*localeValues\\(\\[`),
+    `${code} must omit repeated catalog keys through the positional locale loader`);
   vm.runInContext(source, catalogContext, { filename: `main/www/locales/${code}.js` });
 }
-vm.runInContext("globalThis.__catalog = I18N;", catalogContext);
+vm.runInContext(
+  "globalThis.__catalog = I18N; globalThis.__inspectCopy = INSPECT_I18N; " +
+  "globalThis.__homeHubCopy = HOMEHUB_LABEL_I18N;",
+  catalogContext,
+);
 const catalog = catalogContext.__catalog;
 const englishKeys = Object.keys(catalog.en).sort();
 assert.equal(englishKeys.length, 734, "the test must track the complete current UI catalog");
@@ -60,6 +67,42 @@ for (const code of codes) {
     assert.ok(translatedStrings > stringCount * 0.65,
       `${code} translates too little of the catalog (${translatedStrings}/${stringCount})`);
   }
+}
+
+// The specialist copy visible under the schematic remains lazy, but it is no longer allowed to
+// fall back to English for the six added languages. Every diagram target gets a native title and a
+// concise explanation; HomeHub register names are keyed by their stable offset, never by prose.
+const index = fs.readFileSync(path.join(root, "main/www/index.html"), "utf8");
+const inspectKeys = [...new Set([...index.matchAll(/data-insp="([^"]+)"/g)].map((m) => m[1]))].sort();
+assert.equal(inspectKeys.length, 40, "specialist-copy gate must track every schematic target");
+const inspectNowKeys = new Set(["sgrequest", "ou", "phe", "dt", "pth", "cop", "buh", "bsh",
+  "valve", "valve2", "heat", "pump", "pel", "defrost", "quiet", "rhot", "rcold", "wsup",
+  "wtank", "wheat", "wret", "flow_switch"]);
+const homeHubOffsets = [1, 2, 3, 4, 6, 7, 9, 10, 21, 22, 23, 30, 31, 32, 33, 37,
+  38, 40, 41, 42, 43, 44, 45, 49, 50, 51, 52, 53, 54, 56, 57, 58];
+for (const code of codes.slice(2)) {
+  const inspect = catalogContext.__inspectCopy[code];
+  assert.ok(inspect, `${code} specialist inspector copy did not register itself`);
+  assert.deepEqual(Object.keys(inspect).filter((key) => key !== "held").sort(), inspectKeys,
+    `${code} specialist inspector targets differ from the SVG`);
+  for (const key of inspectKeys) {
+    assert.ok(["string", "function"].includes(typeof inspect[key].t),
+      `${code}/INSPECT.${key}.t is missing`);
+    assert.ok(["string", "function"].includes(typeof inspect[key].what),
+      `${code}/INSPECT.${key}.what is missing`);
+    assert.equal(typeof inspect[key].aria, "string", `${code}/INSPECT.${key}.aria is missing`);
+    if (inspectNowKeys.has(key)) assert.equal(typeof inspect[key].now, "function",
+      `${code}/INSPECT.${key}.now is missing`);
+  }
+  assert.equal(typeof inspect.held?.lead, "string", `${code}/INSPECT.held.lead is missing`);
+  assert.equal(typeof inspect.held?.why, "string", `${code}/INSPECT.held.why is missing`);
+
+  const labels = catalogContext.__homeHubCopy[code];
+  assert.ok(labels, `${code} HomeHub label table did not register itself`);
+  assert.deepEqual(Object.keys(labels).map(Number).sort((a, b) => a - b), homeHubOffsets,
+    `${code} HomeHub label offsets differ from the firmware contract`);
+  for (const offset of homeHubOffsets)
+    assert.ok(String(labels[offset]).trim(), `${code}/HomeHub ${offset} is empty`);
 }
 
 // Browser detection selects the primary BCP-47 subtag; unsupported languages fail closed to the

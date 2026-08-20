@@ -38,9 +38,10 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
    and `setup.html` is served before the device UI script exists. The UI **chrome** (system status
    block, card titles, connection rows, static schematic labels, modals, banners and toasts) is
    rendered from the matching device-local catalog selected through
-   `navigator.language`, with English as the fallback for every string. The detailed value
-   descriptions and schematic inspector prose (§6) remain English/German; the six newer locales
-   deliberately fall back to English for that specialist layer. That browser guess is the **default**;
+   `navigator.language`, with English as the fallback for every string. Schematic inspector prose
+   and HomeHub row names are part of each device-local locale; the much longer value/model
+   accordions remain English/German and deliberately fall back to English in the six newer locales.
+   That browser guess is the **default**;
    on top of it the device carries an optional **manual override** — the Firmware settings card's
    **Language** picker (Browser plus the eight languages, each named in its own language — "Browser"
    because that option IS the browser's own guess, not a separate automatic mode) `POST`s
@@ -639,8 +640,7 @@ Body, ordered:
    clickability is carried by the hit targets themselves (hover/press feedback, `role="button"`,
    the SVG's own `aria-label`), and a standing line of instructional copy under an otherwise quiet
    dashboard is exactly the decorative copy §1.4 rules out. Selected it shows:
-   a **title** (German in the German UI, otherwise the specialist layer's English fallback, e.g.
-   "Leaving water"), the **headline reading** for
+   a **title** in the selected UI language, the **headline reading** for
    that target (its `/values` row, or the derived figure for ΔT / heat output — an assembly like the
    outdoor unit has no single number and gets no headline rather than a "—" that would read as a
    missing value), the **source row label** in mono (the verbatim English register name, so a number
@@ -657,12 +657,13 @@ Body, ordered:
    twin, setpoint and both valve readings together below the chart. An inspector's explainer contains
    explanation only, never a specially placed value line or a sentence that merely repeats those
    numbers. Component targets without a headline likewise keep their complete member list.
-   The explainer copy comes from the **same `DESCRIPTIONS` table** the value rows use (§5.3 item 6) —
-   one source for "what does this mean", never a second parallel one. A value target resolves it
-   through a canonical register label rather than the live one, so a profile's own spelling cannot
-   drift onto a neighbouring entry. Component copy (outdoor unit, PHE, ΔT, heat output, heating
-   circuit) has no equivalent in `DESCRIPTIONS` — nothing there describes an assembly or a derived
-   figure — and lives in the inspector's own table, bilingual in the same `{en, de}` shape.
+   English/German leaf explainers reuse the **same `DESCRIPTIONS` table** as the value rows (§5.3
+   item 6), resolved through a canonical register label rather than the live spelling. The six lazy
+   locale modules carry a shorter inspector-specific explanation for every target so translated copy
+   stays understandable inside this compact surface without embedding all long accordion prose.
+   Component copy (outdoor unit, PHE, ΔT, heat output, heating circuit) likewise lives in the
+   inspector table. Both forms are keyed by the stable `data-insp` target; source selection and plant
+   logic remain only in `INSPECT`.
    **The inspector follows the source the drawing chose, and says why when none can answer.** A stale
    X10A reading the pill withheld — a held-over outdoor-unit row while the compressor rests
    (`logic/ou_stale.hpp`) — must not come back as the headline, as a member reading, or inside a state
