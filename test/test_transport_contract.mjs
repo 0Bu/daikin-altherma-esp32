@@ -146,12 +146,16 @@ assert.ok(/net_eth_fallback_watch_needed\(\s*s_present\.load\(\)\s*,\s*s_carried
   "fallback watch creation must use boot provenance, not a lease that can vanish before task start");
 
 const ota = code("main/ota_update.cpp");
-assert.ok(/const\s+NetLink\s+link\s*=\s*net_kind\(\)/.test(ota) &&
-          /health_gate_decide\([\s\S]*?link\s*,\s*provisioning_ap_active\(\)\s*\)/.test(ota),
-  "OTA health must accept an active transport or an actually running recovery portal");
+assert.ok(/\.link\s*=\s*net_kind\(\)/.test(ota) &&
+          /\.recovery_surface\s*=\s*provisioning_ap_active\(\)/.test(ota) &&
+          /health_gate_decide\([\s\S]*?service\s*\)/.test(ota),
+  "OTA health must sample an active transport and an actually running recovery portal");
+assert.ok(/\.x10a_required\s*=\s*hp_link_connected\(\)/.test(ota) &&
+          !/const\s+HpStats\s+hp\s*=\s*hp_stats\(\)/.test(ota),
+  "rollback proof must sample the X10A link without allocating a copied HpStats string");
 assert.ok(!/wifi_info\(\)\.connected/.test(ota),
   "OTA health must not equate network health with WiFi association");
-assert.ok(!/health_gate_decide\([\s\S]*?wifi_configured\(\)/.test(ota),
+assert.ok(!/\.recovery_surface\s*=\s*wifi_configured\(\)/.test(ota),
   "no stored SSID must not invent a portal on a wired boot that deliberately kept it off");
 
 const weather = code("main/weather_forecast.cpp");

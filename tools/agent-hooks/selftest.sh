@@ -226,6 +226,25 @@ guard_case "curl config input cannot hide a GitHub REST write" \
     "$(payload exec_command command "curl --config /tmp/curl-selftest.conf")" deny
 guard_case "non-GitHub curl remains allowed" \
     "$(payload exec_command command "curl -sS https://example.com/health")" ""
+guard_case "direct production OTA POST is denied" \
+    "$(payload exec_command command "curl -fsS -X POST http://production.invalid/ota/update")" deny
+guard_case "direct test-board OTA POST is denied too" \
+    "$(payload exec_command command "curl -fsS --request POST http://bench.invalid/ota/update")" deny
+guard_case "read-only source search may mention the OTA route" \
+    "$(payload exec_command command "rg -n '/ota/update' main/http_ota.cpp")" ""
+guard_case "read-only source inspection may name the production gate" \
+    "$(payload exec_command command "sed -n '1,80p' scripts/production-ota-gate.py")" ""
+guard_case "quote-split production OTA path is denied" \
+    "$(payload exec_command command "python3 -c 'import requests; requests.post(\"http://production.invalid/ota/\" + \"update\")'")" deny
+guard_case "foreign production gate copy is denied" \
+    "$(payload exec_command command "/tmp/production-ota-gate.py --execute")" deny
+canonical_ota_gate="$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3 --confirm-production production --execute"
+guard_case "canonical argument-bound production OTA gate is allowed" \
+    "$(payload exec_command command "$canonical_ota_gate")" ""
+guard_case "canonical production gate cannot be chained into a watcher" \
+    "$(payload exec_command command "$canonical_ota_gate; curl -X POST http://production.invalid/ota/update")" deny
+guard_case "production gate requires explicit current version" \
+    "$(payload exec_command command "$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --confirm-production production --execute")" deny
 guard_case "dynamic curl executable cannot perform a GitHub REST write" \
     "$(payload exec_command command "c=curl; \"\$c\" --request DELETE https://api.github.com/repos/0Bu/daikin-altherma-esp32/git/refs/heads/x")" deny
 guard_case "dynamic curl executable cannot hide a GitHub target in --url" \
@@ -1239,6 +1258,7 @@ head_sha="abcdef1234567890abcdef1234567890abcdef12"
 cat >"$tmp/all-gates.md" <<EOF
 - [x] \$project-review clean — merge gate @ $head_sha
 - [x] \$domain-review clean — merge gate @ $head_sha
+- [x] \$heap-safety-review clean — merge gate @ $head_sha
 - [x] \$feature-docs synced — merge gate @ $head_sha
 - [x] \$schematic-review clean — merge gate @ $head_sha
 - [x] \$ui-use-case-review clean — merge gate @ $head_sha
@@ -1266,6 +1286,12 @@ cat >"$tmp/docs-gates.md" <<EOF
 EOF
 printf '%s\n' 'docs/README.md' >"$tmp/docs-files.txt"
 pr_case "CI docs-only skips conditional gates" 0 "$tmp/docs-gates.md" "$tmp/docs-files.txt"
+printf '%s\n' 'main/mqtt_ha.cpp' >"$tmp/heap-files.txt"
+grep -vF '$heap-safety-review' "$tmp/all-gates.md" >"$tmp/no-heap-review.md"
+pr_case "CI heap-sensitive changes require independent heap review" 2 \
+    "$tmp/no-heap-review.md" "$tmp/heap-files.txt"
+pr_case "CI heap-sensitive changes accept current independent heap review" 0 \
+    "$tmp/all-gates.md" "$tmp/heap-files.txt"
 sed "s/$head_sha/deadbee/" "$tmp/all-gates.md" >"$tmp/stale.md"
 pr_case "CI stale stamps fail closed" 2 "$tmp/stale.md" "$tmp/all-files.txt"
 short_head_sha="${head_sha:0:12}"

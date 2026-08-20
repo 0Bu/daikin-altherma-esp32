@@ -166,6 +166,8 @@ ui_suite_relevant=0
 absence_suite_relevant=0
 check_gate "project-review" "project review"
 check_gate "domain-review" "domain correctness review"
+check_gate "heap-safety-review" "independent heap safety review" \
+    '^(main/(mqtt_ha|ota_update|weather_forecast|http_status|http_config|hp_poll|heap_guard)\.(cpp|hpp)$|main/logic/(json|mqtt_group|x10a_snapshot|ota_headroom|health_gate|heap_watchdog)\.hpp$|test/test_(x10a_publish_heap_contract|ota_heap_contract|production_ota_gate_contract)\.mjs$|scripts/production-ota-gate\.py$|tools/(ota|production_ota|agent-hooks)/|\.codex/agents/heap-safety-reviewer\.toml$|docs/(ARCHITECTURE|SECURITY|FEATURES)\.md$)'
 check_gate "feature-docs" "feature documentation sync" \
     '^(main/|test/|sdkconfig\.defaults$|partitions\.csv$|\.github/workflows/build\.yml$)'
 check_gate "schematic-review" "schematic review" \

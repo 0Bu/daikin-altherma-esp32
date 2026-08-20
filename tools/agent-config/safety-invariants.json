@@ -50,6 +50,14 @@
       "pattern": "domain-review"
     },
     {
+      "id": "heap-safety-review-gate",
+      "pattern": "heap-safety-review"
+    },
+    {
+      "id": "production-ota-promotion-gate",
+      "pattern": "scripts/production-ota-gate\\.py"
+    },
+    {
       "id": "read-only-authorization-boundary",
       "pattern": "Treat requests to inspect[\\s\\S]{0,180}read-only"
     }

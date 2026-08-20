@@ -113,6 +113,10 @@ HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t expected_
                                               uint64_t expected_identity_fp);
 HpStats  hp_stats();
 
+// Allocation-free link sample for rollback health proof. Unlike hp_stats(), this returns only the
+// primitive guarded field and therefore cannot copy a profile/error std::string while heap is low.
+bool hp_link_connected();
+
 // Poll cycles the task guard DROPPED — a sweep that threw (std::bad_alloc under OTA/TLS heap
 // pressure) and never reached the bus (#380). Deliberately NOT a field of HpStats: every counter in
 // there describes a cycle that RAN, is committed by poll_once() under the stats mutex, and is read

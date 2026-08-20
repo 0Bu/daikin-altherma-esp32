@@ -50,6 +50,8 @@ triage skill stays read-only unless the user asked for changes.
 Use the narrowest relevant skill. Important review gates are:
 
 - `$project-review` and `$domain-review`: required before every PR merge.
+- `$heap-safety-review`: required before merge when HTTP, MQTT, OTA, TLS, JSON, X10A publishing,
+  polling, or heap-allocation paths change; use the independent read-only `heap_safety_reviewer`.
 - `$feature-docs`: required when technical feature surface changes.
 - `$schematic-review`: required when the dashboard schematic, its contract, or audit changes.
 - `$ui-use-case-review`: required when user-visible UI behavior or its test/audit surface changes.
@@ -130,6 +132,11 @@ documentation.
 - Never claim flash, OTA, persistence, or rollback success from a build artifact alone. After an
   authorized device update, verify version/signature, reboot reason, rollback/safe-mode state, heap
   and stack health, X10A/Modbus link state, connectivity, and the requested user-visible behavior.
+- Production OTA promotion must use the direct, unchained
+  `scripts/production-ota-gate.py` command. It binds the exact signed dev artifact, stages and
+  stresses it on the private-inventory `bench` role, performs one un-retried POST to the distinct
+  `production` role, then uses read-only canary and retained-X10A checks. Direct `/ota/update` writes
+  and release creation are outside that gate.
 
 ## Build and deterministic gates
 

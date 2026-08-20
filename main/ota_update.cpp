@@ -869,12 +869,12 @@ OtaStatus ota_status() {
     return s_status;
 }
 
-// Keep rollback armed until this OTA image has proven HEALTHY, not merely survived a timer: it must
-// have run for a base window (survives an early crash-loop -> bootloader reverts) AND expose a
-// recovery path — a live IP transport (WiFi or Ethernet), or a provisioning portal that is actually
-// running in this boot. Stored-credential state alone is not evidence. A boots-but-broken update
-// — e.g. a network regression that can never get online to be re-flashed — is left PENDING_VERIFY, so
-// the next reboot rolls back to the previous slot instead of sealing the break in. The decision is
+// Keep rollback armed until this OTA image has proven HEALTHY, not merely survived a timer. A normal
+// connected boot must also retain measured internal-heap headroom, report no allocation-failure
+// cycles, and — when X10A is live — complete one accepted state publish. The dev.13 incident stayed
+// online while persistent publisher buffers fragmented the largest block and made /status return
+// 503, so link-only health was a false positive. A provisioning portal remains a recovery surface
+// for a fresh/unconfigured board. The decision is
 // the host-tested daik::health_gate_decide(); see logic/health_gate.hpp + docs/SECURITY.md.
 //
 // Only PENDING_VERIFY images are rollback-armed, and those exist ONLY via esp_ota_set_boot_partition
@@ -884,8 +884,23 @@ static constexpr int kHealthBaseWindowS = 90;    // min uptime before committing
 static constexpr int kHealthHardCapS    = 600;   // keep trying to commit this long; a genuinely
                                                  // good image at a briefly-offline site still gets
                                                  // sealed in. Only a still-offline image past this
-                                                 // stays rollback-armed (reverts on next reboot).
+                                                 // is restarted while rollback remains armed.
 static constexpr int kHealthPollS       = 5;     // re-evaluate cadence
+
+static OtaServiceHealth ota_service_health() {
+    const MqttSkipStats mqtt_skips = mqtt_skip_stats();
+    const size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const size_t largest = heap_largest_internal_block();
+    return {
+        .link = net_kind(),
+        .recovery_surface = provisioning_ap_active(),
+        .heap_ready = ota_health_heap_ready(free_bytes, largest),
+        .allocation_failures = heap_guard_restarts() != 0 || mqtt_skips.skipped != 0 ||
+                               hp_skipped_cycles() != 0,
+        .x10a_required = hp_link_connected() && mqtt_x10a_publish_required(),
+        .x10a_published = mqtt_x10a_publish_proven(),
+    };
+}
 
 static void health_gate_task(void*) {
     const esp_partition_t* running = esp_ota_get_running_partition();
@@ -902,7 +917,8 @@ static void health_gate_task(void*) {
         // THE BODY SELF-GUARDS, like every other allocating task loop here (AGENTS.md → Memory,
         // concurrency, and HTTP safety), and
         // it is worth saying why it counts as one: net_kind() is atomic-only,
-        // provisioning_ap_active() is boot-latched and health_gate_decide() is pure.
+        // provisioning_ap_active() proves the provisioning portal is actually running in this
+        // boot; it is boot-latched, and health_gate_decide() is pure.
         // The window this task runs in is the worst possible place to leave that unguarded: 90-600 s
         // into an OTA boot, i.e. exactly when the MQTT discovery burst and a TLS session put the
         // heap at its peak. An escape is std::terminate -> reboot, and a reboot while PENDING_VERIFY
@@ -911,9 +927,9 @@ static void health_gate_task(void*) {
         // Skipping a cycle is safe and is the conservative direction: no verdict is reached, elapsed
         // still advances, and the hard cap still ends the window by leaving the image PENDING_VERIFY.
         try {
-            const NetLink link = net_kind();
+            const OtaServiceHealth service = ota_service_health();
             const HealthVerdict v = health_gate_decide(elapsed, kHealthBaseWindowS, kHealthHardCapS,
-                                                       link, provisioning_ap_active());
+                                                       service);
             if (v == HealthVerdict::Commit) {
                 // The return value decides whether this image survives the next reboot, so it is not
                 // one to discard: a failed commit leaves the image PENDING_VERIFY and the bootloader
@@ -922,7 +938,7 @@ static void health_gate_task(void*) {
                 const esp_err_t e = esp_ota_mark_app_valid_cancel_rollback();
                 if (e == ESP_OK)
                     ESP_LOGI("ota", "image marked valid (health gate passed after %ds, link=%s)",
-                             elapsed, net_link_str(link));
+                             elapsed, net_link_str(service.link));
                 else
                     diag_printf("ota: health gate passed but marking the image valid failed (%s) — "
                                 "the next reboot rolls back to the previous firmware\n",
@@ -930,9 +946,11 @@ static void health_gate_task(void*) {
                 break;
             }
             if (v == HealthVerdict::GiveUp) {
-                ESP_LOGW("ota", "health gate: no connectivity after %ds; leaving image PENDING_VERIFY "
-                                "-> next reboot rolls back to the previous firmware", elapsed);
-                break;
+                ESP_LOGW("ota", "health gate: service proof failed after %ds; rebooting while "
+                                "PENDING_VERIFY -> rollback to the previous firmware", elapsed);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                esp_restart();
+                break;  // esp_restart() does not return; keep the fail-closed intent explicit.
             }
         } catch (const std::exception& ex) {
             if (!skip_reported) {

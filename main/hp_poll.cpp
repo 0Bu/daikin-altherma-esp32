@@ -834,6 +834,12 @@ HpStats hp_stats() {
     return st;
 }
 
+bool hp_link_connected() {
+    if (!s_mtx) return false;
+    Lock lk(s_mtx);
+    return s_stats.connected;
+}
+
 uint32_t hp_skipped_cycles() { return s_cycles_skipped.load(std::memory_order_relaxed); }
 
 bool hp_probe_run(uint8_t reg, HpProbeReply& out, int timeout_ms) {

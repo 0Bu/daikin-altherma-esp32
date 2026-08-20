@@ -37,6 +37,7 @@ done
 # Re-seed each OTA heap regression in a throwaway tree and require this suite's exact checker to
 # reject it; the real tree is never modified.
 node tools/ota/selftest.mjs
+node tools/production_ota/selftest.mjs
 
 ./scripts/run-public-readiness-audit.sh
 

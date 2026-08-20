@@ -867,6 +867,83 @@ def is_exact_espsecure_sign(command: str) -> bool:
     return True
 
 
+def canonical_production_ota_command(payload: dict[str, Any], command: str) -> bool:
+    """Only the reviewed one-shot bench-to-production gate may own a production OTA write."""
+    if "\n" in command or re.search(r"[;&|`<>]|\$\(", command):
+        return False
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    if not tokens:
+        return False
+    effective_cwd, cwd_error = effective_shell_cwd(payload)
+    if cwd_error:
+        return False
+    executable = Path(tokens[0]).expanduser()
+    if not executable.is_absolute():
+        executable = effective_cwd / executable
+    canonical = (HOOK_ROOT / "scripts/production-ota-gate.py").resolve()
+    if executable.resolve(strict=False) != canonical:
+        return False
+    if tokens[1:] == ["--self-test"]:
+        return True
+    if "--execute" not in tokens:
+        return True  # read-only staging/preflight still validates its own required arguments
+    required = {
+        "--manifest-url": "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json",
+        "--confirm-production": "production",
+    }
+    for option, expected in required.items():
+        if tokens.count(option) != 1:
+            return False
+        index = tokens.index(option)
+        if index + 1 >= len(tokens) or tokens[index + 1] != expected:
+            return False
+    for option, pattern in {
+        "--expected-source-sha": r"[0-9a-f]{40}",
+        "--expected-version": r"[0-9A-Za-z._+-]+-dev\.[0-9]+",
+        "--expected-app-sha256": r"[0-9a-f]{64}",
+        "--expected-current-version": r"[0-9A-Za-z._+-]+",
+    }.items():
+        if tokens.count(option) != 1:
+            return False
+        index = tokens.index(option)
+        if index + 1 >= len(tokens) or re.fullmatch(pattern, tokens[index + 1]) is None:
+            return False
+    return tokens.count("--execute") == 1
+
+
+def production_ota_violation(payload: dict[str, Any]) -> str | None:
+    if normalized_tool(payload.get("tool_name")) not in SHELL_TOOLS:
+        return None
+    command = command_from(payload)
+    if not command:
+        return None
+    if canonical_production_ota_command(payload, command):
+        return None
+    compact = re.sub(r"[\s'\"+\\]", "", command.lower())
+    compact = compact.replace("%2f", "/").replace("%75", "u")
+    names_gate = "production-ota-gate.py" in compact
+    names_update = "/ota/update" in compact or "ota/update" in compact
+    write_markers = (
+        "-xpost", "--requestpost", "--request=post", ".post(", "method=post",
+        "method:post", "--data", "--form", "data=",
+    )
+    update_write = names_update and (
+        any(marker in compact for marker in write_markers) or
+        re.search(r"(?:^|[;&|])(?:curl|http|xh)[^;&|]*\s-d(?:\s|$)", command.lower()) is not None
+    )
+    if names_gate and "--execute" in compact:
+        return "the production OTA gate is not the canonical direct, unchained, argument-bound command"
+    if update_write:
+        return (
+            "direct OTA writes are forbidden; run scripts/production-ota-gate.py so the exact signed "
+            "artifact passes bench staging, heap stress, one-shot production promotion and read-only canary proof"
+        )
+    return None
+
+
 def secret_violation(payload: dict[str, Any]) -> str | None:
     raw_tool = payload.get("tool_name")
     if not isinstance(raw_tool, str) or not raw_tool.strip():
@@ -1112,11 +1189,21 @@ def guard_partitions(payload: dict[str, Any], *, shell_only: bool = False) -> bo
     return True
 
 
+def guard_production_ota(payload: dict[str, Any]) -> bool:
+    reason = production_ota_violation(payload)
+    if not reason:
+        return False
+    emit_permission("deny", "Blocked by the production OTA gate: " + reason + ".")
+    return True
+
+
 def run_pre_tool_guards(args: argparse.Namespace) -> int:
     payload, error = read_payload(fail_closed=True)
     if guard_secrets(payload, error):
         return 0
     assert payload is not None
+    if guard_production_ota(payload):
+        return 0
     guard_partitions(payload, shell_only=args.partition_shell_only)
     return 0
 

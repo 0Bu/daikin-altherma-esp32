@@ -95,6 +95,15 @@ documented in [`MCP.md`](MCP.md), not a second project-policy source.
   and cannot prove the intent of arbitrarily generated interpreter code or dynamically computed
   commands and paths. Treat an unrecognized or blocked form as a request to use a simpler,
   statically inspectable command; never treat hook silence as authorization.
+- The hook blocks direct `/ota/update` writes, including interpreter and quote-split forms. A
+  production update is admitted only as the direct, unchained canonical
+  `scripts/production-ota-gate.py` command with the official dev manifest, exact artifact/source
+  identity, explicit `production`-role confirmation and current-version lease. The script owns the
+  private-inventory `bench` stage, sole un-retried write and read-only canary; copying or chaining it
+  is not equivalent.
+- Heap-sensitive changed-file paths make the SHA-stamped `$heap-safety-review` PR record mandatory.
+  That record comes from the independent read-only `heap_safety_reviewer`; project and domain
+  reviews remain independently required on every merge.
 
 Upstream behavior is pinned to the official Codex documentation for
 [`AGENTS.md`](https://learn.chatgpt.com/docs/agent-configuration/agents-md),
