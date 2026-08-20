@@ -2311,16 +2311,20 @@ Structure:
   second retained copy of the payload — 25–30 KB in 4–5 separate contiguous allocations per cycle,
   of which one failed as soon as a status build or a TLS teardown tail split the largest block
   (`mqtt: publish skipped at x10a (std::bad_alloc)`, 1–3×/day on the live plant). Now the stable
-  snapshot, stable grouped layout, **fixed 12 KiB payload buffer** and the 8-byte FNV-1a dedup digest
-  are task-owned and reused. `prepare_x10a_buffers` resolves every publishable profile row and fault companion
+  snapshot, stable grouped layout, **fixed 12 KiB payload buffer in static storage** and the 8-byte
+  FNV-1a dedup digest are task-owned and reused. Keeping the payload bytes out of the heap is part of
+  the contract: the first live X10A run proved that a persistent 12 KiB heap block could leave only
+  7.5–11 KiB contiguous for the otherwise healthy `/status` builder. `prepare_x10a_buffers` resolves
+  every publishable profile row and fault companion
   once per actual profile change; the cache commit carries its static profile id and X10A identity
   fingerprint, so a config-change window cannot publish an old subset under a new discovery layout.
   The host-tested aligned accessor validates that source identity transactionally, then copies into
   pre-reserved row slots without calling `config()`, resizing, or allocating under its mutex. Missing and held-over rows
   toggle a presence bit instead of compacting the vector and destroying tail strings. The grouped
-  encoder skips those slots, counts the exact bytes through the same template that writes them, and
-  refuses a document over 12 KiB instead of growing the block. Thus the firmware-owned steady-state
-  X10A build has no heap growth and its MQTT bytes are unchanged (host-pinned). The digest is committed
+  encoder skips those slots, counts the exact bytes through the same template that writes them into
+  the static bounded sink, and refuses a document over 12 KiB instead of touching the heap. Thus the
+  firmware-owned steady-state X10A build has no heap growth and its MQTT bytes are unchanged
+  (host-pinned). The digest is committed
   only after `esp_mqtt_client_publish()` accepted the retained write, so a transient `-1` is retried
   rather than deduplicated away. The publish-skip catch logs the throw second's
   allocation-free heap snapshot (`free=`/`largest=`) on the same line, narrowing the next collision

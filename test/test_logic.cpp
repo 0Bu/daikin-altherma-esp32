@@ -1896,6 +1896,32 @@ static void test_mqtt_group() {
         CHECK(tight.capacity() == cap_before);
         CHECK(tight == build_grouped_json(one));
     }
+    // The device-owned form is backed by static storage, not a 12 KiB heap string. Exact capacity
+    // succeeds byte-for-byte and stays NUL-terminated for esp-mqtt; a one-byte-short sink reports a
+    // sticky overflow without writing past its caller-owned storage or emitting a partial fragment.
+    {
+        const std::vector<GroupedValue> one = {
+            {"hydronic", "dhw_setpoint", "48", PublishedKind::Number}};
+        const std::string golden = build_grouped_json(one);
+        std::vector<char> exact_storage(golden.size() + 1, '\x7f');
+        BoundedJsonBuffer exact(exact_storage.data(), golden.size());
+        append_grouped_json(exact, one);
+        CHECK(!exact.overflowed());
+        CHECK(exact.size() == golden.size());
+        CHECK(std::string_view(exact.data(), exact.size()) == golden);
+        CHECK(exact_storage[golden.size()] == '\0');
+
+        std::vector<char> short_storage(golden.size(), '\x7f');
+        BoundedJsonBuffer short_out(short_storage.data(), golden.size() - 1);
+        append_grouped_json(short_out, one);
+        CHECK(short_out.overflowed());
+        CHECK(short_out.size() <= golden.size() - 1);
+        CHECK(short_storage[short_out.size()] == '\0');
+        short_out.clear();
+        CHECK(!short_out.overflowed());
+        CHECK(short_out.size() == 0);
+        CHECK(short_storage[0] == '\0');
+    }
     // A stopped/held page must not shrink the slot vector. Toggling presence removes the bytes and
     // then restores the exact retained document without destroying or regrowing any owned string.
     {
