@@ -379,6 +379,15 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
 > [`docs/SECURITY.md`](docs/SECURITY.md). For a contributor the practical path is: build to check it
 > compiles, and let the maintainer test on hardware — or generate your own key for your own board.
 
+Production OTA is a separate maintainer-only promotion gate. Do not call `/ota/update` directly.
+The direct, unchained `scripts/production-ota-gate.py` command binds the exact signed official dev
+artifact, requires a clean matching source tree, runs host contracts, verifies the artifact and a
+fixed pressure window on the MAC-bound private-inventory `bench` role, then permits one un-retried
+update of the distinct `production` role and completes a read-only heap/X10A/MQTT canary. The bench
+board need not have a physical X10A connection; the production canary must therefore prove the real
+retained X10A payload. The command never cuts a release. See
+[`docs/SECURITY.md`](docs/SECURITY.md) for the complete evidence boundary.
+
 ## Where code goes
 
 - **Any decode, config, discovery or policy logic belongs in [`main/logic/`](main/logic/)** as an
@@ -396,6 +405,9 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
   handlers must stay under the shared OOM try/catch; every allocating task loop must self-guard; never
   allocate while holding a mutex. The rules and the reasoning are in
   [`AGENTS.md`](AGENTS.md) → "Memory, concurrency, and HTTP safety".
+- A PR touching HTTP, MQTT, OTA, TLS, JSON, X10A publishing, polling or heap allocation also needs a
+  current-head `$heap-safety-review` record from the independent read-only `heap_safety_reviewer`;
+  the aggregate PR gate enforces applicability and freshness.
 - C/C++ formatting is [`.clang-format`](.clang-format). Match the surrounding comment density —
   explaining *why*, not *what*, is the house style.
 - **Warnings are part of the contract in `main/`.** [`main/CMakeLists.txt`](main/CMakeLists.txt) pins

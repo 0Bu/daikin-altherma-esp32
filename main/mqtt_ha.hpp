@@ -29,6 +29,15 @@ MqttStatus mqtt_status();
 struct MqttSkipStats { uint32_t skipped = 0, quiesced = 0; };
 MqttSkipStats mqtt_skip_stats();
 
+// True after the current boot/profile has produced one X10A payload that esp-mqtt accepted. The
+// OTA rollback health gate uses this only when the bus is live; an installation without X10A is not
+// made un-updatable. Lock-free and allocation-free because it is sampled under heap pressure.
+bool mqtt_x10a_publish_proven();
+
+// Whether this boot has a configured MQTT publisher and therefore owes the rollback gate a real
+// X10A publish when the bus is live. False keeps broker-free installations OTA-updatable.
+bool mqtt_x10a_publish_required();
+
 // Has the firmware publish cycle left its allocating work, with no esp-mqtt TLS handshake/reconnect
 // in flight? True when no publisher task exists. Weather and OTA use this acknowledgement before TLS.
 bool mqtt_publish_network_quiesced();

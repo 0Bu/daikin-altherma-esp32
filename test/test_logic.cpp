@@ -3208,26 +3208,49 @@ static void test_heap_watchdog() {
 }
 
 static void test_health_gate() {
-    // base=90s, cap=300s. Health is an observed transport or an observed recovery surface.
+    // base=90s, cap=300s. A normal boot needs link + service proof; a real portal is its own
+    // recovery surface for an unconfigured board.
     const int base = 90, cap = 300;
+    const OtaServiceHealth healthy_wifi{
+        .link=NetLink::Wifi, .heap_ready=true,
+    };
+    const OtaServiceHealth healthy_eth{
+        .link=NetLink::Eth, .heap_ready=true,
+    };
     // Not yet at the base window -> keep waiting even if already online.
-    CHECK(health_gate_decide(0,  base, cap, NetLink::Wifi, /*portal=*/false) ==
-          HealthVerdict::Wait);
-    CHECK(health_gate_decide(85, base, cap, NetLink::Wifi, false) == HealthVerdict::Wait);
+    CHECK(health_gate_decide(0, base, cap, healthy_wifi) == HealthVerdict::Wait);
+    CHECK(health_gate_decide(85, base, cap, healthy_wifi) == HealthVerdict::Wait);
     // Past the base window AND online -> commit (seal image in, cancel rollback). The Ethernet case
     // is load-bearing: a wired boot intentionally never starts STA even when an SSID is stored.
-    CHECK(health_gate_decide(90,  base, cap, NetLink::Wifi, false) == HealthVerdict::Commit);
-    CHECK(health_gate_decide(90,  base, cap, NetLink::Eth,  false) == HealthVerdict::Commit);
-    CHECK(health_gate_decide(120, base, cap, NetLink::Eth,  false) == HealthVerdict::Commit);
+    CHECK(health_gate_decide(90, base, cap, healthy_wifi) == HealthVerdict::Commit);
+    CHECK(health_gate_decide(90, base, cap, healthy_eth) == HealthVerdict::Commit);
+    CHECK(health_gate_decide(120, base, cap, healthy_eth) == HealthVerdict::Commit);
+    OtaServiceHealth fragmented = healthy_wifi;
+    fragmented.heap_ready = false;
+    CHECK(health_gate_decide(90, base, cap, fragmented) == HealthVerdict::Wait);
+    OtaServiceHealth skipped = healthy_wifi;
+    skipped.allocation_failures = true;
+    CHECK(health_gate_decide(90, base, cap, skipped) == HealthVerdict::Wait);
+    OtaServiceHealth x10a_wait = healthy_wifi;
+    x10a_wait.x10a_required = true;
+    CHECK(health_gate_decide(90, base, cap, x10a_wait) == HealthVerdict::Wait);
+    x10a_wait.x10a_published = true;
+    CHECK(health_gate_decide(90, base, cap, x10a_wait) == HealthVerdict::Commit);
     // No transport and no portal -> wait until the hard cap, then leave rollback armed.
-    CHECK(health_gate_decide(90,  base, cap, NetLink::None, false) == HealthVerdict::Wait);
-    CHECK(health_gate_decide(295, base, cap, NetLink::None, false) == HealthVerdict::Wait);
-    CHECK(health_gate_decide(300, base, cap, NetLink::None, false) == HealthVerdict::GiveUp);
+    const OtaServiceHealth offline{};
+    CHECK(health_gate_decide(90, base, cap, offline) == HealthVerdict::Wait);
+    CHECK(health_gate_decide(295, base, cap, offline) == HealthVerdict::Wait);
+    CHECK(health_gate_decide(300, base, cap, offline) == HealthVerdict::GiveUp);
     // A portal that is actually running is a valid recovery surface after the base window.
-    CHECK(health_gate_decide(90, base, cap, NetLink::None, true) == HealthVerdict::Commit);
-    CHECK(health_gate_decide(0,  base, cap, NetLink::None, true) == HealthVerdict::Wait);
+    OtaServiceHealth portal{};
+    portal.recovery_surface = true;
+    CHECK(health_gate_decide(90, base, cap, portal) == HealthVerdict::Commit);
+    CHECK(health_gate_decide(0, base, cap, portal) == HealthVerdict::Wait);
     // Critical wired/no-SSID loss: lack of credentials does not invent a portal that boot kept off.
-    CHECK(health_gate_decide(90, base, cap, NetLink::None, false) != HealthVerdict::Commit);
+    CHECK(health_gate_decide(90, base, cap, offline) != HealthVerdict::Commit);
+    CHECK(ota_health_heap_ready(24u * 1024u, 16u * 1024u));
+    CHECK(!ota_health_heap_ready(24u * 1024u - 1, 16u * 1024u));
+    CHECK(!ota_health_heap_ready(24u * 1024u, 16u * 1024u - 1));
 }
 
 static void test_board_pins() {

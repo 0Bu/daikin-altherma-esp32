@@ -2249,14 +2249,32 @@ Structure:
   inactive slot, the **two-point downgrade gate** (manifest
   version *and* the image's own embedded `esp_app_desc_t` version, with exact artifact-version
   equality required, so a lying or stale manifest is refused), signed-image validation and the
-  **connectivity health gate**
-  (commit only after a base window AND getting
-  online, else stay `PENDING_VERIFY` → a reboot rolls back). Both default feeds are live, and
+  **service health gate**. A `PENDING_VERIFY` image commits only after the base window, an active
+  IP link, at least 24 KiB free internal heap with a 16 KiB largest block, zero heap/MQTT/poll
+  allocation failures, and — when the X10A link is live and MQTT is configured — one accepted
+  retained X10A publish. Broker-free or physically unwired installations therefore remain
+  OTA-updatable. The
+  provisioning portal remains the recovery exception. A missing proof at the hard cap triggers a
+  controlled restart while rollback is still armed; merely being online can no longer seal a
+  heap-broken image as valid. Both default feeds are live, and
   publishing runs on a private repo too (the Pages site is public either way — see
   [`README.md`](README.md)); a self-hosted URL with nothing served honestly reports "up to date".
   The web installer carves prepared sparse parts from the merged
   image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
   as the OTA feed (the `esptool-js` installer and the device load the same file).
+- **Production promotion is a staged, one-write transaction.**
+  [`scripts/production-ota-gate.py`](../scripts/production-ota-gate.py) binds the official dev
+  manifest to the expected source SHA, version, application SHA-256, ESP32-S3 metadata and signature;
+  requires a clean exact local source; runs the host catalog and heap contracts; and applies a fixed
+  three-minute concurrent status/values/diag + weather-TLS pressure window to the same signed image
+  on the MAC-bound private-inventory `bench` role. Only then, with the current version lease and an
+  explicit confirmation of the distinct `production` role, it sends one un-retried update POST.
+  Reboot observation, the second pressure window and retained-X10A MQTT proof are GET/read-only. The
+  bench board need not be physically connected to X10A, so it proves binary and allocation behavior
+  rather than plant I/O; the production role supplies the real X10A canary. The source contract and
+  ten mutation canaries make stage removal, shortened
+  stress, signature bypass, weaker heap floors, raw OTA writes and disabled rollback fail locally
+  and in CI. This workflow creates no release and contains no 48-hour soak gate.
 - **Validation gets the transport's heap back first.** The firmware downloads through a fixed
   2 KiB INTERNAL buffer and closes/frees both that buffer and the complete HTTP/TLS client before
   calling `esp_ota_end()`. That call remains IDF's mandatory RSA-3072/PSA verifier; only its success

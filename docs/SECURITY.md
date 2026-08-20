@@ -274,15 +274,73 @@ always re-flashable over USB. The containment is therefore *prevention*, not rec
 `ota_health_gate_arm()` (`ota_update.cpp`) starts a task that runs **only** for a `PENDING_VERIFY`
 image — i.e. one installed via `esp_ota_*` (a real OTA), which always leaves a valid previous slot.
 It commits the image (`esp_ota_mark_app_valid_cancel_rollback()`) only once it has proven **healthy**,
-not merely survived a timer: it must run past a base window (~90 s — survives an early crash-loop) AND
-prove either an active IP link (`NetLink::Wifi` or `NetLink::Eth`) or that the provisioning portal is
-actually running in this boot. The presence or absence of stored WiFi credentials is not health
-evidence: a wired boot deliberately keeps the portal off, and losing that Ethernet lease must not be
-mistaken for a recovery surface. An update with neither link nor portal is left `PENDING_VERIFY` up to
-a hard cap (~10 min, forgiving of a briefly-offline site); the next reboot then rolls it back to the
-previous firmware. The decision is the host-tested `daik::health_gate_decide()` in `main/logic/health_gate.hpp`
+not merely survived a timer or acquired an IP address. After the base window (~90 s) a normal boot
+must prove all of these at the same time:
+
+- an active IP link (`NetLink::Wifi` or `NetLink::Eth`);
+- at least 24 KiB free internal heap and a 16 KiB largest contiguous internal block;
+- no inherited heap-watchdog restart evidence, dropped MQTT allocation cycle, or dropped X10A poll
+  cycle in this boot;
+- if the X10A link is live and MQTT is configured, one X10A retained-state payload accepted by the
+  MQTT client.
+
+The provisioning portal remains a recovery exception for a fresh or unconfigured board. The
+presence or absence of stored WiFi credentials is not health evidence: a wired boot deliberately
+keeps the portal off, and losing that Ethernet lease must not be mistaken for a recovery surface.
+If normal service proof is still missing at the ~10-minute hard cap, the firmware deliberately
+restarts while the image remains `PENDING_VERIFY`, so the bootloader selects the previous slot.
+The decision is the host-tested `daik::health_gate_decide()` in `main/logic/health_gate.hpp`
 (covered by `test/test_logic.cpp`). A USB/`@flash_args` image is `UNDEFINED`, never `PENDING_VERIFY`,
 so the gate is a no-op for it and can never strand a fresh board.
+
+### Production OTA promotion gate
+
+The private-inventory `production` role is updated only through the direct, unchained
+`scripts/production-ota-gate.py` command. The command accepts only the official **dev** manifest,
+binds the expected source SHA, version, application SHA-256, ESP32-S3 image metadata and Secure Boot
+v2 signature, and refuses a dirty or different local source tree. Device hosts and MACs live only
+in the untracked schema-versioned local inventory
+`$XDG_CONFIG_HOME/daikin-altherma-esp32/production-ota.json` (or the same path below `~/.config`),
+whose distinct `bench` and `production` roles prevent a swapped target without publishing private
+installation identifiers. The exact signed artifact must first run on the MAC-bound `bench` role,
+normally installed by the NVS-preserving signed USB flash workflow. The gate then runs the complete
+host logic/X10A/OTA contracts and a fixed
+three-minute concurrent `/status` + `/values` + `/diag` pressure window with a real configured
+weather TLS fetch.
+
+Only after that stage and an explicit `production` confirmation does the command perform exactly
+one un-retried `POST /ota/update`. All subsequent observation is read-only: exact version/ELF and
+MAC, rollback/crash/safe-mode state, stable heap/OOM/X10A counters, live X10A values, and the
+retained X10A MQTT payload must pass a second fixed three-minute canary. The command does not create
+a release and an arbitrary 48-hour wait is not a substitute for these targeted proofs. A bench
+without physical X10A proves the exact binary, HTTP/TLS concurrency and heap recovery;
+catalog-wide host replay and the source/mutation contracts cover the publisher, and the real
+retained payload is proved only on the production role after the single update.
+
+The private inventory shape is:
+
+```json
+{
+  "schema_version": 1,
+  "bench": { "host": "<bench-host>", "mac": "<BENCH-MAC>" },
+  "production": { "host": "<production-host>", "mac": "<PRODUCTION-MAC>" }
+}
+```
+
+Run from the clean, exact `main` source after the dev manifest has published and the exact signed
+application has been installed on the bench board:
+
+```bash
+scripts/production-ota-gate.py \
+  --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json \
+  --expected-source-sha <40-lowercase-hex-main-sha> \
+  --expected-version <dev-version> \
+  --expected-app-sha256 <64-lowercase-hex-app-sha256> \
+  --expected-current-version <production-current-version> \
+  --confirm-production production --execute
+```
+
+Do not wrap, chain, shorten, or retry this command; the agent hook admits only this canonical shape.
 
 > **Manual updates and rollback:** only the OTA path (`esp_ota_*`, which writes the *inactive* slot
 > and arms `PENDING_VERIFY`) is auto-rollback-protected. A host `esptool` flash overwrites the running

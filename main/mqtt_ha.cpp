@@ -305,6 +305,8 @@ static std::atomic<uint32_t> s_mqtt_reconnects{0};
 // guaranteed not to throw a second time.
 static std::atomic<uint32_t> s_mqtt_skipped{0};
 static std::atomic<uint32_t> s_mqtt_quiesced{0};
+static std::atomic<bool> s_x10a_publish_required{false};
+static std::atomic<bool> s_x10a_publish_proven{false};
 static std::atomic<bool> s_publish_network_quiesced{true};
 static std::atomic<bool> s_transport_connecting{false};
 static_assert(std::atomic<bool>::is_always_lock_free,
@@ -708,6 +710,7 @@ static bool publish_x10a_state(const Config& config, bool force) {
         return false;
     s_last_x10a_digest = probe.digest;
     s_last_x10a_digest_valid = true;
+    s_x10a_publish_proven.store(true, std::memory_order_release);
     return true;
 }
 
@@ -2168,6 +2171,7 @@ static void mqtt_task(void*) {
                 mqtt_publish(s_avail, "online", 0, 0, 1);
                 s_last_x10a_digest = 0;
                 s_last_x10a_digest_valid = false;
+                s_x10a_publish_proven.store(false, std::memory_order_release);
                 heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;
                 diag_printf("mqtt: X10A restored — publishing resumed\n");
             }
@@ -2178,6 +2182,7 @@ static void mqtt_task(void*) {
                     s_announced_profile.clear();               // force a fresh discovery below
                     s_last_x10a_digest = 0;                    // force full per-topic state re-seeds
                     s_last_x10a_digest_valid = false;
+                    s_x10a_publish_proven.store(false, std::memory_order_release);
                     s_last_modbus_json.clear();
                     s_last_weather_json.clear();
                     s_disabled_weather_cleaned = false;
@@ -2475,6 +2480,7 @@ static bool promote_client_to_publisher() {
 void mqtt_ha_start() {
     MqttStartupActivity startup_activity;
     const Config& c = config();
+    s_x10a_publish_required.store(!c.mqtt_uri.empty(), std::memory_order_release);
     s_mtx = xSemaphoreCreateMutex();
     if (!s_mtx) diag_printf("mqtt: status mutex alloc failed — status reads run unsynchronized\n");
     s_status.configured = !c.mqtt_uri.empty();
@@ -2552,6 +2558,14 @@ MqttSkipStats mqtt_skip_stats() {
     st.skipped  = s_mqtt_skipped.load(std::memory_order_relaxed);
     st.quiesced = s_mqtt_quiesced.load(std::memory_order_relaxed);
     return st;
+}
+
+bool mqtt_x10a_publish_proven() {
+    return s_x10a_publish_proven.load(std::memory_order_acquire);
+}
+
+bool mqtt_x10a_publish_required() {
+    return s_x10a_publish_required.load(std::memory_order_acquire);
 }
 
 bool mqtt_publish_network_quiesced() {
