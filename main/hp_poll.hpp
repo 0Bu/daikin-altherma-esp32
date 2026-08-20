@@ -82,6 +82,33 @@ size_t   hp_values_snapshot(CachedValue* out, size_t max);
 // the profile changed underneath the caller or one formatted value exceeded its reserved slot.
 bool     hp_values_snapshot_aligned(CachedValue* out, size_t count, const char* expected_profile,
                                     uint64_t expected_identity_fp);
+
+// Allocation-free MQTT probe of the committed X10A cache. The first call counts and hashes the
+// exact grouped JSON while holding the cache mutex. A changed payload is then allocated by the
+// caller OUTSIDE the mutex; the copy call serializes only if the same cache revision is still
+// committed. This avoids both an allocating copy under the mutex and the boot-long duplicate
+// vectors/buffer that exhausted the real 129-row board in dev.12/dev.13.
+struct HpX10aJsonProbe {
+    bool     source_matches = false;
+    size_t   bytes = 0;
+    uint64_t digest = 0;
+    uint32_t revision = 0;
+};
+
+enum class HpX10aJsonCopyResult {
+    Ok,
+    SourceMismatch,
+    RevisionChanged,
+    BufferTooSmall,
+};
+
+HpX10aJsonProbe hp_values_x10a_json_probe(const char* expected_profile,
+                                          uint64_t expected_identity_fp);
+HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t expected_bytes,
+                                              uint64_t expected_digest,
+                                              uint32_t expected_revision,
+                                              const char* expected_profile,
+                                              uint64_t expected_identity_fp);
 HpStats  hp_stats();
 
 // Poll cycles the task guard DROPPED — a sweep that threw (std::bad_alloc under OTA/TLS heap

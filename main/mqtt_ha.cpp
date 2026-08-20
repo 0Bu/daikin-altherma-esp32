@@ -69,7 +69,7 @@
 #include "logic/discovery.hpp"
 #include "logic/env3.hpp"
 #include "logic/fault_state.hpp"
-#include "logic/ha_device.hpp"   // ha_slug_into — re-slug object ids into reused slots (issue 10 B)
+#include "logic/ha_device.hpp"
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
@@ -246,33 +246,11 @@ static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards 
 static std::string s_last_modbus_json;
 static std::string s_last_weather_json;
 static std::string s_last_env3_json;
-// One stable grouped slot. group/key own their bytes for the active profile; value only views the
-// matching pre-reserved cache string (or a static companion literal). Missing/held rows toggle
-// `present` instead of compacting the vector and destroying tail string capacities.
-struct X10aGroupedSlot {
-    std::string      group;
-    std::string      key;
-    std::string_view value;
-    PublishedKind    kind = PublishedKind::Number;
-    bool             present = false;
-    size_t           cache_index = 0;
-    int              companion = -1;  // -1 = the source row; otherwise FAULT_COMPANIONS index
-};
-
-// Task-owned X10A publisher buffers. They are built once for the active profile (and rebuilt only
-// after a real profile change), then reused without capacity growth in every one-second cycle.
-static std::vector<CachedValue>      s_x10a_cache;
-static std::vector<X10aGroupedSlot>  s_x10a_grouped;
-// Static storage, not a 12 KiB heap allocation. On the live X10A plant that single persistent
-// block left only 7.5-11 KiB contiguous for GET /status even though 30+ KiB was free in aggregate,
-// so the endpoint returned a permanent clean 503 after publisher startup. Keeping the same hard
-// payload ceiling in .bss removes that fragmentation while BoundedJsonBuffer preserves count-first,
-// fail-closed serialization and the C-string required by esp-mqtt.
-static std::array<char, X10A_GROUPED_JSON_MAX_BYTES + 1> s_x10a_json_storage{};
-static BoundedJsonBuffer s_x10a_json(s_x10a_json_storage.data(),
-                                     X10A_GROUPED_JSON_MAX_BYTES);
-static std::string                   s_x10a_buffer_profile;
-static bool                          s_x10a_json_oversize_logged = false;
+// Rate-limit the hard-cap diagnostic. The payload itself is no longer boot-long storage: dev.12's
+// persistent cache/group vectors and dev.13's static 12 KiB JSON block made the live 129-row board
+// permanently unable to build /status. The two-pass cache accessor below allocates exactly one
+// changed payload only for the synchronous QoS0 call and releases it immediately afterwards.
+static bool        s_x10a_json_oversize_logged = false;
 static bool                          s_last_x10a_digest_valid = false;
 static uint32_t    s_last_env3_samples          = 0;
 static bool        s_modbus_disabled_cleaned    = false;
@@ -460,109 +438,6 @@ static void service_retained_cleanup_probe(const std::string& topic, std::atomic
     }
 }
 
-// Current publishable values from the poll cache, grouped by register page, written into the
-// task-owned, profile-stable buffers (private issue 10 B). Profile preparation creates every source
-// and derived-companion slot, pre-reserves formatted values and slugs keys once. The aligned cache
-// copy then clears/assigns those same strings, while grouped slots view them and toggle `present`.
-// No tail slot is destroyed when a page becomes held or times out, and no Config copy is needed to
-// size the per-second snapshot.
-//
-// The layout contains the snapshot PLUS every possible derived companion, whether the current fault
-// row is readable or not. A later Normal→Error or timeout→recovery transition therefore cannot grow
-// the vector inside the sensitive publish stage.
-//
-// Two rows are dropped here rather than published:
-//   • no value this cycle (the register timed out, or the reading was refused by the plausibility
-//     envelope / the availability ledger) — absence, stated by absence;
-//   • a HELD-OVER reading (#209 defect 5): the outdoor unit is resting and answering with its last
-//     run's numbers. Republishing those in a fresh payload is what made an hours-old outdoor
-//     temperature look freshly observed to every consumer downstream. The heartbeat's
-//     bus_ou_held_over says WHY the field went away, so this reads as a resting unit and not as a
-//     broken link.
-static void prepare_x10a_buffers(const std::string& profile_id) {
-    if (profile_id == s_x10a_buffer_profile) return;
-    // Mark the layout invalid before the first allocation. If any reserve/resize throws, the task
-    // catch retries the whole preparation next cycle instead of accepting a half-built old layout.
-    s_x10a_buffer_profile.clear();
-    const logic::ProfileView profile = def::resolved(def::lookup(profile_id.c_str()));
-    size_t rows = 0;
-    size_t slots = 0;
-    for (size_t i = 0; i < profile.count(); i++) {
-        const ValueDef d = logic::adjudicated(profile[i]);
-        if (!row_publishable(d)) continue;
-        rows++;
-        slots += 1 + (d.conv == 203 ? FAULT_COMPANION_COUNT : 0);
-    }
-
-    s_x10a_cache.clear();
-    s_x10a_cache.resize(rows);
-    s_x10a_grouped.clear();
-    s_x10a_grouped.resize(slots);
-    size_t cache_i = 0;
-    size_t slot_i = 0;
-    for (size_t i = 0; i < profile.count(); i++) {
-        const ValueDef d = logic::adjudicated(profile[i]);
-        if (!row_publishable(d)) continue;
-
-        CachedValue& cache = s_x10a_cache[cache_i];
-        cache.label = d.label;
-        cache.value.clear();
-        cache.value.reserve(x10a_formatted_value_capacity(d.conv));
-        cache.unit = unit_for_datatype(d.type);
-        cache.reg = d.reg;
-        cache.off = d.offset;
-        cache.held = false;
-        cache.conv = d.conv;
-
-        X10aGroupedSlot& base = s_x10a_grouped[slot_i++];
-        base.group = group_for_page(d.reg);
-        ha_slug_into(base.key, d.label);
-        base.value = {};
-        base.kind = published_kind(d.conv);
-        base.present = false;
-        base.cache_index = cache_i;
-        base.companion = -1;
-        if (d.conv == 203) {
-            for (size_t c = 0; c < FAULT_COMPANION_COUNT; c++) {
-                X10aGroupedSlot& companion = s_x10a_grouped[slot_i++];
-                companion.group = base.group;
-                companion.key = FAULT_COMPANIONS[c].key;
-                companion.value = {};
-                companion.kind = PublishedKind::Number;
-                companion.present = false;
-                companion.cache_index = cache_i;
-                companion.companion = static_cast<int>(c);
-            }
-        }
-        cache_i++;
-    }
-    s_x10a_json_oversize_logged = false;
-    s_x10a_buffer_profile = profile_id;
-}
-
-static bool fill_x10a_values(const Config& config) {
-    if (!hp_values_snapshot_aligned(s_x10a_cache.data(), s_x10a_cache.size(),
-                                    config.profile.c_str(), config.x10a_identity_fp)) return false;
-    for (X10aGroupedSlot& slot : s_x10a_grouped) {
-        const CachedValue& cache = s_x10a_cache[slot.cache_index];
-        slot.present = !cache.value.empty() && !cache.held;
-        if (!slot.present) {
-            slot.value = {};
-            continue;
-        }
-        if (slot.companion < 0) {
-            slot.value = cache.value;
-            continue;
-        }
-        const FaultClass fc = fault_class_from_text(cache.value.c_str());
-        slot.present = fault_companions_publishable(fc);
-        slot.value = slot.present
-                   ? std::string_view(fault_companion_state(static_cast<size_t>(slot.companion), fc))
-                   : std::string_view{};
-    }
-    return true;
-}
-
 // Current HomeHub values, but only when the accessor proves the copied cache belongs to the TCP
 // session that is still connected. The register definition supplies the permanent JSON type. Only
 // Text16 is text; flags, enums and ordinary values retain their numeric Modbus constants.
@@ -733,8 +608,8 @@ static void publish_x10a_discovery() {
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
         // The DERIVED numeric fault flags that ride beside a textual error class (#209 defect 4).
         // Announced here, from the same row loop that publishes the class itself, so the entity set
-        // and the payload cannot drift apart — fill_x10a_values() emits these keys for exactly the
-        // rows this branch announces.
+        // and the payload cannot drift apart — the direct cache encoder emits these keys for exactly
+        // the rows this branch announces.
         if (d.conv == 203) {
             const std::string group = group_for_page(d.reg);
             for (size_t k = 0; k < FAULT_COMPANION_COUNT; k++) {
@@ -787,39 +662,51 @@ static void retract_weather_discovery() {
 // Modbus topic is flat because its topic already supplies the source group. When the HomeHub link is
 // not live, `{}` actively removes every state instead of retaining values from an old TCP session.
 //
-// X10A is the bounded path (private issue 10 A+C): the snapshot lands in the task-owned vectors
-// (fill_x10a_values, no allocation), the payload is counted first and then written into the reused
-// fixed 12 KiB s_x10a_json buffer (oversize fails closed), and the dedup guard compares the 8-byte
-// FNV-1a digest instead of holding a second full copy of the payload. The digest advances only when
+// X10A is a two-pass bounded path. The poll-cache accessor counts + hashes the committed cache
+// without allocating. Unchanged state stops there. A changed state reserves ONE exact-sized local
+// payload outside the cache mutex, then re-enters only long enough to verify the revision and write
+// into that already-sized block. The synchronous QoS0 publish consumes it before the local is
+// released. No second cache, slug vector or maximum-sized boot-long block survives the call — those
+// were the dev.12/dev.13 regression that made /status permanently return 503 on the real plant.
+// The 12 KiB value remains a refusal ceiling, not a reservation. The digest advances only when
 // esp-mqtt accepts the write, so an immediate broker failure is retried on the next cycle.
 static bool publish_x10a_state(const Config& config, bool force) {
-    prepare_x10a_buffers(config.profile);
-    if (!fill_x10a_values(config)) {
-        diag_printf("mqtt: X10A snapshot no longer matches the prepared profile; state deferred\n");
+    const HpX10aJsonProbe probe = hp_values_x10a_json_probe(
+        config.profile.c_str(), config.x10a_identity_fp);
+    if (!probe.source_matches) {
+        diag_printf("mqtt: X10A snapshot does not match the active profile/identity; state deferred\n");
         return false;
     }
-    s_x10a_json.clear();
-    const size_t need = grouped_json_size(s_x10a_grouped);
-    if (need > X10A_GROUPED_JSON_MAX_BYTES) {
+    if (probe.bytes > X10A_GROUPED_JSON_MAX_BYTES) {
         if (!s_x10a_json_oversize_logged) {
-            diag_printf("mqtt: X10A payload needs %u B; fixed %u B buffer refuses it\n",
-                        static_cast<unsigned>(need),
+            diag_printf("mqtt: X10A payload needs %u B; %u B safety ceiling refuses it\n",
+                        static_cast<unsigned>(probe.bytes),
                         static_cast<unsigned>(X10A_GROUPED_JSON_MAX_BYTES));
             s_x10a_json_oversize_logged = true;
         }
         return false;
     }
-    append_grouped_json(s_x10a_json, s_x10a_grouped);
-    if (s_x10a_json.overflowed() || s_x10a_json.size() != need) {
-        diag_printf("mqtt: X10A fixed JSON buffer overflowed after an exact %u B count\n",
-                    static_cast<unsigned>(need));
+    s_x10a_json_oversize_logged = false;
+    if (!force && s_last_x10a_digest_valid && probe.digest == s_last_x10a_digest) return false;
+
+    std::string payload;
+    payload.reserve(probe.bytes); // the only changed-state allocation; exact and outside s_cache lock
+    const HpX10aJsonCopyResult copied = hp_values_x10a_json_copy(
+        payload, probe.bytes, probe.digest, probe.revision,
+        config.profile.c_str(), config.x10a_identity_fp);
+    if (copied == HpX10aJsonCopyResult::SourceMismatch) {
+        diag_printf("mqtt: X10A snapshot source changed during payload build; state deferred\n");
         return false;
     }
-    const uint64_t digest = fnv1a64(std::string_view(s_x10a_json.data(), s_x10a_json.size()));
-    if (!force && s_last_x10a_digest_valid && digest == s_last_x10a_digest) return false;
-    if (!mqtt_publish(s_x10a, s_x10a_json.c_str(), static_cast<int>(s_x10a_json.size()), 0, 1))
+    if (copied == HpX10aJsonCopyResult::BufferTooSmall) {
+        diag_printf("mqtt: exact X10A payload reservation supplied less than %u B\n",
+                    static_cast<unsigned>(probe.bytes));
         return false;
-    s_last_x10a_digest = digest;
+    }
+    if (copied == HpX10aJsonCopyResult::RevisionChanged) return false; // retry next one-second cycle
+    if (!mqtt_publish(s_x10a, payload.c_str(), static_cast<int>(payload.size()), 0, 1))
+        return false;
+    s_last_x10a_digest = probe.digest;
     s_last_x10a_digest_valid = true;
     return true;
 }
