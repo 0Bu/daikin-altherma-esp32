@@ -162,7 +162,8 @@ struct HeartbeatFields {
 // sites. Absence is a first-class answer here: a metrics consumer drops a null field and records no
 // sample, which is exactly right, where a 0 would draw a line at the bottom of the chart and read
 // as a board one word from death.
-inline void append_stack_bytes(std::string& j, uint32_t words) {
+template <typename JsonOut>
+inline void append_stack_bytes(JsonOut& j, uint32_t words) {
     if (words == 0) j += "null";
     else            j += std::to_string(words);
 }
