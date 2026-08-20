@@ -66,6 +66,13 @@ try {
     ["the final contiguous-block floor is reduced", () =>
       replaceOnce("scripts/production-ota-gate.py", "MIN_FINAL_LARGEST_BLOCK = 16 * 1024",
         "MIN_FINAL_LARGEST_BLOCK = 8 * 1024")],
+    ["an unwired bench is subjected to the production X10A timeout limit", () =>
+      replaceOnce("scripts/production-ota-gate.py", "return require_x10a and final[\"timeout_err\"]",
+        "return True and final[\"timeout_err\"]")],
+    ["the production canary disables its X10A requirement", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        /(production_evidence = stress_board\([\s\S]{0,200}?)require_x10a=True,/,
+        "$1require_x10a=False,")],
     ["the no-release result is falsified", () =>
       replaceOnce("scripts/production-ota-gate.py", '"release_created": False',
         '"release_created": True')],
