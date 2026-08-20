@@ -113,6 +113,26 @@ inline bool weather_reason_valid(std::string_view reason) {
            reason == "incomplete_horizon";
 }
 
+// ── Fetch headroom gate ──────────────────────────────────────────────────────────────────────────
+//
+// One Open-Meteo fetch transiently claims ≈ 16 KiB mbedTLS in-buffer + 4 KiB out-buffer, HTTP/TCP
+// buffers, the response string and the cJSON tree, on a heap whose binding limit is the largest
+// CONTIGUOUS internal block. Live evidence (private issue 10): one fetch landed
+// on a fragmentation trough and pushed the boot's `min_free_heap` low-water to 800 B; it survived
+// only because the claim is brief. The gate below keeps the next fetch OUT of such a trough. Its
+// 24 KiB contiguous floor rejects the measured 15.9 KiB trough but still admits the board's healthy
+// 31.7 KiB allocator ceiling; requiring the issue's provisional 40 KiB largest-block suggestion
+// would disable weather permanently on that board. The 56 KiB aggregate floor leaves roughly
+// 16 KiB outside the measured ~40 KiB transient claim. A refusal uses the ordinary 5-minute retry,
+// not a full 45-minute raster skip, so a valid forecast does not cross its 90-minute stale boundary.
+inline constexpr size_t WEATHER_FETCH_MIN_FREE_BYTES          = 56 * 1024;
+inline constexpr size_t WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES = 24 * 1024;
+
+inline bool weather_fetch_headroom_ok(size_t free_bytes, size_t largest_free_block) {
+    return free_bytes >= WEATHER_FETCH_MIN_FREE_BYTES &&
+           largest_free_block >= WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES;
+}
+
 struct WeatherForecastSample {
     int version = 0;
     std::string_view provider;

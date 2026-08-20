@@ -25,8 +25,10 @@
 #include "logic/ou_stale.hpp"
 #include "logic/ota_quiesce.hpp"
 #include "logic/raw_capture.hpp"
+#include "logic/x10a_snapshot.hpp"
 #include "http_handlers.hpp"
 #include "ota_update.hpp"
+#include "weather_forecast.hpp"
 
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
@@ -45,6 +47,8 @@ namespace daik {
 
 static SemaphoreHandle_t      s_mtx = nullptr;
 static std::vector<CachedValue> s_cache;
+static const char*              s_cache_profile = "";  // static def::Profile::id, guarded by s_mtx
+static uint64_t                 s_cache_identity_fp = 0; // same committed source, guarded by s_mtx
 static HpStats               s_stats;
 static int64_t               s_last_ok_us = -1;
 
@@ -63,7 +67,7 @@ static std::atomic<bool>     s_detect_reset{false};
 static std::atomic<uint32_t> s_cycles_skipped{0};
 static std::atomic<uint32_t> s_target_generation{1};
 static std::atomic<bool>     s_poll_task_running{false};
-static std::atomic<bool>     s_ota_quiesced{false};
+static std::atomic<bool>     s_network_quiesced{false};
 
 // Consecutive bus-answering sweeps that matched no profile. Poll-task-owned, RAM only, like the
 // backoff above. Falling back to `generic` costs ~46 rows including every derived figure, so it
@@ -354,6 +358,8 @@ static void poll_once() {
         s_sat_witness = sat_out;
         s_sat_witness_generation = cycle_generation;
         s_cache            = std::move(fresh);
+        s_cache_profile    = prof.id;
+        s_cache_identity_fp = c.x10a_identity_fp;
         s_stats.connected  = any_ok;
         s_stats.registers  = regs;
         s_stats.values     = static_cast<int>(s_cache.size());
@@ -501,9 +507,9 @@ static bool poll_detect() {                         // false only when an attemp
 static void poll_task(void*) {
     s_poll_task_running.store(true, std::memory_order_release);
     esp_task_wdt_add(NULL);                                    // this task owns the link — watch it
-    OtaQuiesceState ota_quiesce;
-    bool ota_quiesce_logged = false;
-    bool ota_quiesce_cap_logged = false;
+    OtaQuiesceState network_quiesce;
+    bool network_quiesce_logged = false;
+    bool network_quiesce_cap_logged = false;
     for (;;) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
         // This task's own stack headroom — the budget that killed it in #241 and that nothing
@@ -513,34 +519,37 @@ static void poll_task(void*) {
         // recorded for the cycle that threw, which is the one that went deepest.
         stack_watch_sample(StackWatch::Poll);
 
-        // OTA's TLS client and Secure-Boot-v2 RSA verifier need the same scarce contiguous internal
-        // heap that poll_once() uses for its vector and owned strings.  Stand aside before the first
-        // Config/cache allocation, not after a std::bad_alloc: the latter was the live 1.0.0 failure
-        // mode and left only 632 B free at validation.  The lock-free flag rises 1.1 s before OTA
+        // OTA/weather TLS and the Secure-Boot-v2 RSA verifier need the same scarce contiguous
+        // internal heap that poll_once() uses for its vector and owned strings. Stand aside before
+        // the first Config/cache allocation, not after a std::bad_alloc: the latter was the live 1.0.0 failure
+        // mode and left only 632 B free at validation. The lock-free network flag rises before TLS
         // allocates; a sweep already in progress finishes, then this branch acknowledges every
-        // subsequent cycle by doing no bus/cache work.  Like MQTT, the hold is bounded so a stuck
+        // subsequent cycle by doing no bus/cache work. Like MQTT, the hold is bounded so a stuck
         // flag cannot silence the heat-pump link forever.
         const bool ota_active = ota_download_active();
-        if (ota_quiesce_step(ota_quiesce, ota_active)) {
-            s_ota_quiesced.store(true, std::memory_order_release);
+        const bool weather_active = weather_fetch_active();
+        const bool network_active = ota_active || weather_active;
+        if (ota_quiesce_step(network_quiesce, network_active)) {
+            s_network_quiesced.store(true, std::memory_order_release);
             esp_task_wdt_reset();  // explicit on the held path; keep this true if code moves above it
-            if (!ota_quiesce_logged) {
-                diag_printf("poll: holding off X10A sweeps during OTA\n");
-                ota_quiesce_logged = true;
+            if (!network_quiesce_logged) {
+                diag_printf("poll: holding off X10A sweeps during %s\n",
+                            ota_active ? "OTA" : "weather");
+                network_quiesce_logged = true;
             }
             vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
             continue;
         }
-        s_ota_quiesced.store(false, std::memory_order_release);
-        if (ota_quiesce_exhausted(ota_quiesce, ota_active)) {
-            if (!ota_quiesce_cap_logged) {
-                diag_printf("poll: OTA hold-off budget spent after %u cycles, polling again\n",
+        s_network_quiesced.store(false, std::memory_order_release);
+        if (ota_quiesce_exhausted(network_quiesce, network_active)) {
+            if (!network_quiesce_cap_logged) {
+                diag_printf("poll: network hold-off budget spent after %u cycles, polling again\n",
                             static_cast<unsigned>(OTA_QUIESCE_MAX_CYCLES));
-                ota_quiesce_cap_logged = true;
+                network_quiesce_cap_logged = true;
             }
         } else {
-            ota_quiesce_logged = false;
-            ota_quiesce_cap_logged = false;
+            network_quiesce_logged = false;
+            network_quiesce_cap_logged = false;
         }
         try {
             // The BOARD's own memory trends, before any decision about the bus. They describe the
@@ -656,6 +665,17 @@ size_t hp_values_snapshot(CachedValue* out, size_t max) {
     return n;
 }
 
+bool hp_values_snapshot_aligned(CachedValue* out, size_t count, const char* expected_profile,
+                                uint64_t expected_identity_fp) {
+    if (!s_mtx) return false;
+    Lock lk(s_mtx);
+    if (!logic::x10a_snapshot_source_matches(s_cache_profile, s_cache_identity_fp,
+                                             expected_profile, expected_identity_fp))
+        return false;
+    return logic::x10a_snapshot_align(out, count, s_cache.data(), s_cache.size()) ==
+           logic::X10aSnapshotAlignResult::Ok;
+}
+
 HpStats hp_stats() {
     HpStats st;
     if (!s_mtx) return st;
@@ -668,10 +688,12 @@ HpStats hp_stats() {
 
 uint32_t hp_skipped_cycles() { return s_cycles_skipped.load(std::memory_order_relaxed); }
 
-bool hp_poll_ota_quiesced() {
+bool hp_poll_network_quiesced() {
     return !s_poll_task_running.load(std::memory_order_acquire) ||
-           s_ota_quiesced.load(std::memory_order_acquire);
+           s_network_quiesced.load(std::memory_order_acquire);
 }
+
+bool hp_poll_ota_quiesced() { return hp_poll_network_quiesced(); }
 
 uint32_t hp_poll_generation() {
     return s_target_generation.load(std::memory_order_acquire);
@@ -698,6 +720,8 @@ void hp_poll_reconfigure() {
     if (next == 0) next = 1;
     s_target_generation.store(next, std::memory_order_release);
     s_cache.clear();
+    s_cache_profile = "";
+    s_cache_identity_fp = 0;
     s_stats.connected = false;
     s_stats.registers = 0;
     s_stats.values = 0;

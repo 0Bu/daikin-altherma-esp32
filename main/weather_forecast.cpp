@@ -3,8 +3,10 @@
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "http_client_diag.hpp"
+#include "hp_poll.hpp"
 #include "logic/open_meteo.hpp"
 #include "logic/weather_forecast.hpp"
+#include "mqtt_ha.hpp"
 #include "net.hpp"
 #include "ota_update.hpp"
 #include "sntp_time.hpp"
@@ -31,9 +33,11 @@ namespace {
 
 constexpr size_t kPayloadMax = 8 * 1024;
 constexpr int kHttpTimeoutMs = 20000;
-// Longer than the MQTT publisher's one-second cadence. Set the active flag first, then give an
-// already-running publish time to release its snapshot before the TLS allocator starts.
+// Longer than the MQTT publisher's one-second cadence. Set the active flag first, give MQTT time to
+// release its snapshot, then wait explicitly for the allocation-rich X10A sweep to acknowledge.
 constexpr int kNetworkQuiesceLeadMs = 1100;
+constexpr int kPollQuiesceWaitMs = 15000;
+constexpr int kAllocatorRetryMs = 250;
 constexpr int kTaskStack = 12288;
 constexpr UBaseType_t kTaskPrio = TASK_PRIO_WEATHER;   // see main/task_config.hpp
 constexpr const char* kProvider = "open-meteo";
@@ -49,6 +53,29 @@ static_assert(std::atomic<bool>::is_always_lock_free,
 struct NetworkActivity {
     NetworkActivity() { s_network_active.store(true, std::memory_order_release); }
     ~NetworkActivity() { s_network_active.store(false, std::memory_order_release); }
+};
+
+// C APIs do not participate in C++ unwinding. Keep their cleanup attached to the owning scope so a
+// std::bad_alloc from an error string, response append or parse vector cannot leak the HTTP/TLS
+// client or cJSON tree into the next five-minute retry.
+struct HttpClientCleanup {
+    explicit HttpClientCleanup(esp_http_client_handle_t handle) : handle(handle) {}
+    HttpClientCleanup(const HttpClientCleanup&) = delete;
+    HttpClientCleanup& operator=(const HttpClientCleanup&) = delete;
+    ~HttpClientCleanup() {
+        if (!handle) return;
+        esp_http_client_close(handle);
+        esp_http_client_cleanup(handle);
+    }
+    esp_http_client_handle_t handle;
+};
+
+struct JsonCleanup {
+    explicit JsonCleanup(cJSON* root) : root(root) {}
+    JsonCleanup(const JsonCleanup&) = delete;
+    JsonCleanup& operator=(const JsonCleanup&) = delete;
+    ~JsonCleanup() { cJSON_Delete(root); }
+    cJSON* root;
 };
 
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
@@ -67,9 +94,18 @@ std::string open_meteo_url(const Config& cfg) {
            "&forecast_hours=6&timeformat=unixtime&timezone=GMT&temperature_unit=celsius";
 }
 
-bool download_json(const Config& weather, std::string& out, std::string& error) {
+bool download_json(const Config& weather, std::string& out, std::string& error,
+                   bool& heap_refused, HttpClientProbe& headroom) {
+    // Make every firmware-owned response/error allocation before the final headroom sample. The
+    // response is capped at kPayloadMax, so append() cannot grow while the TLS client is alive.
+    out.clear();
+    out.reserve(kPayloadMax);
+    error.reserve(32);
     const std::string url = open_meteo_url(weather);
     const HttpClientProbe before = http_client_probe();
+    headroom = before;
+    heap_refused = !weather_fetch_headroom_ok(before.free_internal, before.largest_internal);
+    if (heap_refused) return false;
     esp_http_client_config_t cfg = {};
     cfg.url = url.c_str();
     cfg.timeout_ms = kHttpTimeoutMs;
@@ -81,6 +117,7 @@ bool download_json(const Config& weather, std::string& out, std::string& error) 
         error = "out_of_memory";
         return false;
     }
+    HttpClientCleanup cleanup(client);
     esp_http_client_set_header(client, "Accept", "application/json");
 
     bool ok = false;
@@ -97,8 +134,6 @@ bool download_json(const Config& weather, std::string& out, std::string& error) 
         if (claimed > static_cast<int64_t>(kPayloadMax)) {
             error = "payload_too_large";
         } else {
-            out.clear();
-            out.reserve(static_cast<size_t>(claimed > 0 ? std::min<int64_t>(claimed, 2048) : 2048));
             char chunk[1024];
             while (out.size() <= kPayloadMax) {
                 const int n = esp_http_client_read(client, chunk, sizeof(chunk));
@@ -112,8 +147,6 @@ bool download_json(const Config& weather, std::string& out, std::string& error) 
             }
         }
     }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
     return ok;
 }
 
@@ -155,6 +188,7 @@ bool parse_forecast(const std::string& payload, int64_t fetched_unix_s,
                     WeatherForecastSample& sample, std::string& error) {
     cJSON* root = cJSON_ParseWithLength(payload.data(), payload.size());
     if (!root) { error = "json_invalid"; return false; }
+    JsonCleanup cleanup(root);
     bool ok = false;
     do {
         cJSON* utc_offset = cJSON_GetObjectItemCaseSensitive(root, "utc_offset_seconds");
@@ -192,13 +226,13 @@ bool parse_forecast(const std::string& payload, int64_t fetched_unix_s,
         if (!validation.valid) { error = validation.reason; break; }
         ok = true;
     } while (false);
-    cJSON_Delete(root);
     return ok;
 }
 
-bool fetch_forecast(const Config& weather, WeatherForecastSample& sample, std::string& error) {
+bool fetch_forecast(const Config& weather, WeatherForecastSample& sample, std::string& error,
+                    bool& heap_refused, HttpClientProbe& headroom) {
     std::string payload;
-    if (!download_json(weather, payload, error)) return false;
+    if (!download_json(weather, payload, error, heap_refused, headroom)) return false;
     int64_t fetched_unix_s = -1;
     int32_t ms = 0;
     time_now(fetched_unix_s, ms);
@@ -273,7 +307,6 @@ void weather_task(void*) {
             {
                 Lock lk(s_mtx);
                 s_status.fetching = true;
-                s_status.available = false;
                 s_status.state = "fetching";
                 s_status.reason.clear();
                 s_status.error.clear();
@@ -283,6 +316,10 @@ void weather_task(void*) {
             std::string error;
             bool ok = false;
             bool ota_preempted = false;
+            bool poll_quiesce_failed = false;
+            bool mqtt_quiesce_failed = false;
+            bool heap_refused = false;
+            HttpClientProbe headroom;
             {
                 NetworkActivity activity;
                 vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));
@@ -290,19 +327,49 @@ void weather_task(void*) {
                 // this flag and waits, or observes it before we set it; in the latter case this
                 // re-check sees OTA and no TLS allocation starts.  There is no interval in which
                 // both clients may legitimately proceed.
+                const TickType_t poll_wait_started = xTaskGetTickCount();
+                while ((!hp_poll_network_quiesced() || !mqtt_publish_network_quiesced()) &&
+                       xTaskGetTickCount() - poll_wait_started <
+                           pdMS_TO_TICKS(kPollQuiesceWaitMs))
+                    vTaskDelay(pdMS_TO_TICKS(kAllocatorRetryMs));
+                poll_quiesce_failed = !hp_poll_network_quiesced();
+                mqtt_quiesce_failed = !mqtt_publish_network_quiesced();
                 ota_preempted = ota_download_active();
-                if (!ota_preempted) ok = fetch_forecast(cfg, sample, error);
+                if (!ota_preempted && !poll_quiesce_failed && !mqtt_quiesce_failed)
+                    ok = fetch_forecast(cfg, sample, error, heap_refused, headroom);
             }
             if (ota_preempted) {
                 {
                     Lock lk(s_mtx);
                     s_status.fetching = false;
-                    s_status.available = false;
                     s_status.state = "waiting";
                     s_status.reason = "ota_active";
                     s_status.error.clear();
                 }
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+                continue;
+            }
+            if (poll_quiesce_failed || mqtt_quiesce_failed) {
+                const HttpClientProbe blocked = http_client_probe();
+                diag_printf("weather: %s did not quiesce (free=%u B largest=%u B)\n",
+                            poll_quiesce_failed ? "X10A poll" : "MQTT publisher",
+                            static_cast<unsigned>(blocked.free_internal),
+                            static_cast<unsigned>(blocked.largest_internal));
+                { Lock lk(s_mtx); s_status.fetching = false; s_status.state = "waiting";
+                  s_status.reason = poll_quiesce_failed ? "x10a_busy" : "mqtt_busy"; }
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u));
+                continue;
+            }
+            if (heap_refused) {
+                diag_printf("weather: fetch skipped by low heap (free=%u B largest=%u B; "
+                            "need %u/%u B)\n",
+                            static_cast<unsigned>(headroom.free_internal),
+                            static_cast<unsigned>(headroom.largest_internal),
+                            static_cast<unsigned>(WEATHER_FETCH_MIN_FREE_BYTES),
+                            static_cast<unsigned>(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES));
+                { Lock lk(s_mtx); s_status.fetching = false; s_status.state = "waiting";
+                  s_status.reason = "heap_headroom"; }
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u));
                 continue;
             }
             bool updated = false;

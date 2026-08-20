@@ -65,6 +65,47 @@ inline void json_append_quoted(JsonOut& out, std::string_view s) {
     out += '"';
 }
 
+// A byte counter exposing the same `operator+=` surface as std::string and BoundedChunkSink, so the
+// ESCAPING template above can run against it unchanged: `json_escaped_size` reuses the one encoder
+// instead of keeping a parallel escape table that could drift from it. The X10A publish path uses
+// this for its exact-size counting pass before writing into a once-allocated buffer
+// (logic/mqtt_group.hpp) — a payload whose size was counted by different rules than the bytes that
+// follow it would realloc mid-write, which is the doubling churn the counting pass exists to remove.
+struct CountingOut {
+    size_t n = 0;
+
+    CountingOut& operator+=(char) {
+        ++n;
+        return *this;
+    }
+    CountingOut& operator+=(const char* s) {
+        while (*s != '\0') {
+            ++n;
+            ++s;
+        }
+        return *this;
+    }
+    CountingOut& operator+=(const std::string& s) {
+        n += s.size();
+        return *this;
+    }
+    CountingOut& operator+=(std::string_view s) {
+        n += s.size();
+        return *this;
+    }
+};
+
+// Exact encoded byte counts, allocation-free, using the same template instantiation that writes the
+// real bytes. `json_quoted_size` includes the surrounding quotes (RFC 8259 §7 string = quotes +
+// inside).
+inline size_t json_escaped_size(std::string_view s) {
+    CountingOut out;
+    json_append_escaped(out, s);
+    return out.n;
+}
+
+inline size_t json_quoted_size(std::string_view s) { return json_escaped_size(s) + 2; }
+
 // `s` as a complete, quoted JSON string — the owning whole-value form of the above.
 inline std::string json_quote(std::string_view s) {
     std::string o;

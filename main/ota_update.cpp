@@ -27,6 +27,7 @@
 #include "heap_guard.hpp"
 #include "hp_poll.hpp"
 #include "http_client_diag.hpp"
+#include "mqtt_ha.hpp"
 #include "net.hpp"
 #include "provisioning.hpp"
 #include "weather_forecast.hpp"
@@ -240,6 +241,21 @@ bool wait_for_poll_quiesce() {
     if (hp_poll_ota_quiesced()) return true;
     const OtaHeapSample sample = ota_heap_sample();
     diag_printf("ota: X10A poll task did not acknowledge quiesce (free=%u B largest=%u B)\n",
+                static_cast<unsigned>(sample.free_bytes),
+                static_cast<unsigned>(sample.largest_internal_block));
+    return false;
+}
+
+bool wait_for_mqtt_quiesce() {
+    if (mqtt_publish_network_quiesced()) return true;
+    diag_printf("ota: waiting for the MQTT publish cycle to release heap\n");
+    const TickType_t started = xTaskGetTickCount();
+    while (!mqtt_publish_network_quiesced() &&
+           xTaskGetTickCount() - started < kPollQuiesceWait)
+        vTaskDelay(kAllocatorRetryDelay);
+    if (mqtt_publish_network_quiesced()) return true;
+    const OtaHeapSample sample = ota_heap_sample();
+    diag_printf("ota: MQTT publisher did not acknowledge quiesce (free=%u B largest=%u B)\n",
                 static_cast<unsigned>(sample.free_bytes),
                 static_cast<unsigned>(sample.largest_internal_block));
     return false;
@@ -769,6 +785,8 @@ void ota_task(void* arg) {
             // plus margin to unwind, while a new one observes this OTA flag and never starts.
             if (!wait_for_poll_quiesce()) {
                 set_state("error", "Heat-pump polling is still using memory — retry shortly");
+            } else if (!wait_for_mqtt_quiesce()) {
+                set_state("error", "MQTT publishing is still using memory — retry shortly");
             } else if (!wait_for_weather_quiesce()) {
                 set_state("error", "Another network operation is still using memory — retry shortly");
             } else if (update) {

@@ -367,14 +367,21 @@ assert.doesNotMatch(pollHeader, /std::string\s+(?:label|unit)\s*;/,
 const weatherActivity = weather.indexOf("NetworkActivity activity;");
 const weatherLead = weather.indexOf("vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));",
                                   weatherActivity);
-const weatherOtaRecheck = weather.indexOf("ota_preempted = ota_download_active();", weatherLead);
-const weatherFetch = weather.indexOf("if (!ota_preempted) ok = fetch_forecast(", weatherOtaRecheck);
+const weatherPollBarrier = weather.indexOf("hp_poll_network_quiesced()", weatherLead);
+const weatherMqttBarrier = weather.indexOf("mqtt_publish_network_quiesced()", weatherPollBarrier);
+const weatherOtaRecheck = weather.indexOf("ota_preempted = ota_download_active();", weatherMqttBarrier);
+const weatherFetch = weather.indexOf("ok = fetch_forecast(", weatherOtaRecheck);
 assert.ok(weatherActivity >= 0 && weatherLead > weatherActivity &&
-          weatherOtaRecheck > weatherLead && weatherFetch > weatherOtaRecheck,
-  "weather must advertise its heap interval, wait one cadence, re-check OTA and only then fetch");
+          weatherPollBarrier > weatherLead && weatherMqttBarrier > weatherPollBarrier &&
+          weatherOtaRecheck > weatherMqttBarrier &&
+          weatherFetch > weatherOtaRecheck,
+  "weather must advertise its heap interval, wait for X10A and MQTT, re-check OTA and only then fetch");
 assert.match(mqtt,
   /ota_download_active\(\)[\s\S]{0,160}?weather_fetch_active\(\)[\s\S]{0,160}?ota_busy \|\| weather_busy[\s\S]{0,160}?ota_quiesce_step\(network_quiesce, network_busy\)/,
   "MQTT must apply the bounded TLS hold-off to both OTA and weather network activity");
+assert.match(poll,
+  /ota_download_active\(\)[\s\S]{0,200}?weather_fetch_active\(\)[\s\S]{0,200}?ota_active \|\| weather_active[\s\S]{0,200}?ota_quiesce_step\(network_quiesce, network_active\)/,
+  "X10A polling must apply the same bounded hold-off to both OTA and weather TLS activity");
 
 console.log("source absence: board trends own their producer, absent sources state absence, " +
             "armed-but-inactive is named, state ages expire rather than freeze, " +
