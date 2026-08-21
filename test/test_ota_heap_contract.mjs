@@ -392,6 +392,9 @@ assert.match(ota,
 assert.match(ota,
   /const bool allocator_failure\s*=[\s\S]{0,180}?ESP_ERR_MBEDTLS_SSL_SETUP_FAILED[\s\S]{0,220}?set_state\("error",\s*allocator_failure[\s\S]{0,160}?Not enough memory for update TLS/,
   "firmware TLS allocator failure must remain distinct from server reachability");
+assert.match(update,
+  /ESP_ERR_OTA_ROLLBACK_INVALID_STATE[\s\S]{0,140}?Firmware health check is still running — retry in a moment/,
+  "a second OTA during rollback probation must report the real retryable state");
 
 // ESP_ERR_OTA_VALIDATE_FAILED is an umbrella result: it covered allocator failure during RSA on the
 // live board, not only tampering. Do not turn it back into a cryptographic accusation. The actual

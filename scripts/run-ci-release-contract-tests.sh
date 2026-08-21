@@ -164,6 +164,8 @@ require(0 <= provenance_check < source_recheck < root_publish < release_create,
 relevant = re.search(r"relevant='([^']+)'", text)
 require(relevant is not None and "web-installer[.]mjs" in relevant.group(1),
         "docs/web-installer.mjs is missing from change trigger")
+require(re.search(relevant.group(1), "scripts/production-ota-gate.py") is not None,
+        "production OTA gate changes do not publish an exact-source dev artifact")
 require("LICENSE$" in relevant.group(1) and "THIRD_PARTY_NOTICES[.]md$" in relevant.group(1),
         "redistribution notices are missing from the Pages build trigger")
 require(re.search(relevant.group(1), "tools/web_asset/vendor/LICENSE") is not None,

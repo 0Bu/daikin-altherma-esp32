@@ -331,14 +331,17 @@ in the untracked schema-versioned local inventory
 whose distinct `bench` and `production` roles prevent a swapped target without publishing private
 installation identifiers. The exact signed artifact must first run on the MAC-bound `bench` role,
 normally installed by the NVS-preserving signed USB flash workflow. The gate then runs the complete
-host logic/X10A/OTA contracts. Before the sustained pressure window, that exact target switches only
-the bench to the official release feed and performs a **complete signed firmware download** under
+host logic/X10A/OTA contracts. A freshly OTA-installed target must first remain healthy beyond the
+90-second rollback probation; otherwise ESP-IDF rejects the immediate release exercise with
+`ESP_ERR_OTA_ROLLBACK_INVALID_STATE`. A USB-installed target is not rollback-armed but receives the
+same conservative dwell. Before the sustained pressure window, that exact target switches only the
+bench to the official release feed and performs a **complete signed firmware download** under
 concurrent `/status`, `/values`, `/diag` and `/ota/status` pressure. The target must expose sampled
 operation-local free/largest-block minima plus the completed validation state, boot the signed
 release cleanly, and keep it healthy past
 the 90-second rollback probation before switching back to the official dev feed and returning to the
-exact target version/ELF. Waiting is mandatory because ESP-IDF refuses a second OTA write while the
-release is still `PENDING_VERIFY`. The freshly restored target then runs
+exact target version/ELF. Waiting before both replacements is mandatory because ESP-IDF refuses
+another OTA write while the running target or release is still `PENDING_VERIFY`. The freshly restored target then runs
 the fixed three-minute pressure window with another real OTA-manifest TLS fetch. Optional Open-Meteo
 evidence is not a bench prerequisite.
 During OTA, `/status`, the shared `/values` sender, `/history`, `/scan`, `/models?active=1`, redacted
@@ -388,7 +391,9 @@ The private inventory shape is:
 ```
 
 Run from the clean, exact `main` source after the dev manifest has published and the exact signed
-application has been installed on the bench board:
+application has been installed on the bench board. The gate waits through the 105-second health
+window so an OTA-installed target can commit its rollback proof; the following real OTA start remains
+the authoritative state check:
 
 ```bash
 scripts/production-ota-gate.py \

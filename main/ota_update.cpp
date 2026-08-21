@@ -724,6 +724,8 @@ void run_update(const OtaTaskArgs& request) {
         diag_printf("ota: esp_ota_begin failed (%s)\n", esp_err_to_name(e));
         set_state("error", e == ESP_ERR_NO_MEM
                            ? "Not enough memory for the update download — retry after reboot"
+                           : e == ESP_ERR_OTA_ROLLBACK_INVALID_STATE
+                           ? "Firmware health check is still running — retry in a moment"
                            : "Couldn't start the download");
         return;
     }

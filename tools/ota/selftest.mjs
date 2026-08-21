@@ -178,6 +178,9 @@ try {
       replaceOnce("main/ota_update.cpp",
         /(set_state\("error", allocator_failure\s*\n\s*)\? "Not enough memory for update TLS — retry after reboot"/,
         "$1? \"Can't reach the update server\"")],
+    ["rollback probation is mislabeled as an unknown download failure", () =>
+      replaceOnce("main/ota_update.cpp", "e == ESP_ERR_OTA_ROLLBACK_INVALID_STATE",
+        "e == ESP_ERR_INVALID_STATE")],
     ["an image-size overrun is mislabeled as a read failure", () =>
       replaceOnce("main/ota_update.cpp",
         "transfer_failure = OtaTransferFailure::Size;",
