@@ -1,11 +1,11 @@
 {
   "name": "daikin-altherma-esp32",
-  "version": "1.0.2-dev.31",
+  "version": "1.0.2-dev.32",
   "provenance": {
-    "source_sha": "4a4d42091bbc424a8b213563e94665f8cb29758f",
+    "source_sha": "a386f1af6635759bf4e75a8badc52248c10eccdf",
     "idf_version": "v6.0.2",
     "dependencies_lock_sha256": "34d0c1f000f153f2ba6f2b0f2a6ac3a1287129415db22ee381adbd36aa9efb75",
-    "app_sha256": "543d41eb472b2fff0378d7644462bad9e140826ec60d399cfee64bfc54e58b35"
+    "app_sha256": "886ee21672c3158a8bee0899c2652d68a09fd7ee62d728065c969a1feaaa97ce"
   },
   "new_install_prompt_erase": true,
   "builds": [{"chipFamily":"ESP32-S3","parts":[{"path":"daikin-altherma-esp32-web-partition-table.bin","offset":32768},{"path":"daikin-altherma-esp32-web-bootloader.bin","offset":0},{"path":"daikin-altherma-esp32-web-ota_data_initial.bin","offset":61440},{"path":"daikin-altherma-esp32.bin","offset":131072}]}]
