@@ -30,6 +30,15 @@ struct HttpClientOpenFailure {
     int       verify_flags  = 0;
 };
 
+struct HttpClientReadFailure {
+    int       read_result   = 0;
+    int       socket_errno  = 0;
+    esp_err_t tls_error     = ESP_OK;
+    int       mbedtls_error = 0;
+    int       verify_flags  = 0;
+    HttpClientProbe sample{};
+};
+
 HttpClientProbe http_client_probe() noexcept;
 
 // `label` must be a static, non-identifying literal ("ota" or "weather").  The logger uses only
@@ -39,5 +48,14 @@ HttpClientOpenFailure http_client_log_open_failure(const char* label,
                                                    esp_http_client_handle_t client,
                                                    esp_err_t opened,
                                                    const HttpClientProbe& before) noexcept;
+
+// Capture a mid-stream read failure while the live client still owns its socket/TLS error state.
+// The logger is fixed-format and allocation-free so it remains safe when a dynamic TLS record
+// allocation is the failure being diagnosed.
+HttpClientReadFailure http_client_log_read_failure(const char* label,
+                                                   esp_http_client_handle_t client,
+                                                   int read_result, size_t written,
+                                                   int64_t total,
+                                                   uint32_t elapsed_ms) noexcept;
 
 }  // namespace daik

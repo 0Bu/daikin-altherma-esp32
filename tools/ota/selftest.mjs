@@ -16,6 +16,7 @@ const files = [
   "main/ota_update.hpp",
   "main/config.cpp",
   "main/http_ota.cpp",
+  "main/http_client_diag.cpp",
   "main/mqtt_ha.cpp",
   "main/hp_poll.cpp",
   "main/hp_modbus.cpp",
@@ -97,8 +98,28 @@ try {
       replaceOnce("main/ota_update.cpp", "http.disable_auto_redirect = true;",
         "http.disable_auto_redirect = false;")],
     ["redirect Location validation is bypassed", () =>
-      replaceOnce("main/ota_update.cpp", "ota_redirect_location_observe(*policy, event->header_value);",
-        "policy->location_count = 1; policy->location_secure = true;")],
+      replaceOnce("main/ota_update.cpp",
+        "ota_redirect_location_observe(response->redirect, event->header_value);",
+        "response->redirect.location_count = 1; response->redirect.location_secure = true;")],
+    ["Content-Range validation is bypassed", () =>
+      replaceOnce("main/ota_update.cpp",
+        "ota_content_range_observe(response->content_range, event->header_value);",
+        "response->content_range.valid = true;")],
+    ["the resume budget permits a second reconnect", () =>
+      replaceOnce("main/logic/ota_transport.hpp", "OTA_TRANSFER_MAX_RESUMES = 1",
+        "OTA_TRANSFER_MAX_RESUMES = 2")],
+    ["the consumed resume attempt is never recorded", () =>
+      replaceOnce("main/ota_update.cpp", "++resumes;", "resumes += 0;")],
+    ["the HTTP header callback may unwind through C frames", () =>
+      replaceOnce("main/ota_update.cpp",
+        "esp_err_t firmware_http_event(esp_http_client_event_t* event) noexcept",
+        "esp_err_t firmware_http_event(esp_http_client_event_t* event)")],
+    ["duplicate Content-Range headers are accepted", () =>
+      replaceOnce("main/logic/ota_transport.hpp", "state.header_count == 1 && state.valid",
+        "state.header_count >= 1 && state.valid")],
+    ["Content-Range decimal overflow is ignored", () =>
+      replaceOnce("main/logic/ota_transport.hpp",
+        "parsed > (std::numeric_limits<uint64_t>::max() - digit) / 10", "false")],
     ["duplicate Location lets an insecure first header hide behind a secure last header", () => {
       replaceOnce("main/logic/ota_transport.hpp", "else\n        state.location_secure = false;",
         "else\n        state.location_secure = ota_url_is_https_or_relative(value);");
@@ -118,6 +139,75 @@ try {
     ["the redirect response is reused without cleanup", () =>
       replaceOnce("main/ota_update.cpp", "esp_http_client_clear_response_buffer(client);",
         "esp_http_client_response_buffer_left_live(client);")],
+    ["a mid-stream failure is not diagnosed before cleanup", () =>
+      replaceOnce("main/ota_update.cpp", "http_client_log_read_failure(\n            \"ota\", client, n, written, total,",
+        "http_client_read_failure_hidden(\n            \"ota\", client, n, written, total,")],
+    ["mid-stream diagnostics lose the socket errno", () =>
+      replaceOnce("main/http_client_diag.cpp",
+        "failure.socket_errno = esp_http_client_get_errno(client);",
+        "failure.socket_errno = 0;")],
+    ["range resume skips transport-buffer cleanup", () =>
+      replaceOnce("main/ota_update.cpp",
+        "heap_caps_free(buffer);\n        buffer = nullptr;\n        close_http_client(client);",
+        "buffer = nullptr;\n        close_http_client(client);")],
+    ["range resume leaves the failed TLS client alive", () =>
+      replaceOnce("main/ota_update.cpp",
+        "buffer = nullptr;\n        close_http_client(client);\n        ota_heap_sample();",
+        "buffer = nullptr;\n        client = nullptr;\n        ota_heap_sample();")],
+    ["range resume skips the stable TLS headroom gate", () =>
+      replaceOnce("main/ota_update.cpp",
+        "wait_for_ota_headroom_until(\"transfer resume\", OTA_TRANSFER_HEADROOM,",
+        "wait_for_ota_headroom_until_bypassed(\"transfer resume\", OTA_TRANSFER_HEADROOM,")],
+    ["range resume resets the absolute transfer deadline", () =>
+      replaceOnce("main/ota_update.cpp",
+        "kTransferHeadroomMaxAttempts, transfer_started,\n                                         kFirmwareDeadline, resume_heap",
+        "kTransferHeadroomMaxAttempts, xTaskGetTickCount(),\n                                         kFirmwareDeadline, resume_heap")],
+    ["range resume allocates a client after its deadline expired", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(wait_for_ota_headroom_until\("transfer resume"[\s\S]{0,900}?)if \(http_deadline_reached\(transfer_started, kFirmwareDeadline\)\)/,
+        "$1if (false)")],
+    ["firmware opens ignore the remaining operation deadline", () =>
+      replaceOnce("main/ota_update.cpp",
+        "!set_http_timeout_to_deadline(client, operation_started, operation_deadline)",
+        "false")],
+    ["firmware header fetches reuse the pre-handshake timeout", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(esp_http_client_open\(client, 0\);[\s\S]{0,180}?)!set_http_timeout_to_deadline\(client, operation_started, operation_deadline\)/,
+        "$1false")],
+    ["firmware header fetches can cross the operation deadline", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(esp_http_client_fetch_headers\(client\)[\s\S]{0,180}?)http_deadline_reached\(operation_started, operation_deadline\)/,
+        "$1false")],
+    ["a failed TLS open hides an exhausted operation deadline", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(if \(e != ESP_OK\) \{\n)            return http_deadline_reached\(operation_started, operation_deadline\)\n                 \? ESP_ERR_TIMEOUT : e;/,
+        "$1            return e;")],
+    ["a failed header fetch hides an exhausted operation deadline", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(if \(header_result < 0\) \{\n)            return http_deadline_reached\(operation_started, operation_deadline\)\n                 \? ESP_ERR_TIMEOUT : ESP_FAIL;/,
+        "$1            return ESP_FAIL;")],
+    ["initial firmware-open timeout is mislabeled as reachability", () =>
+      replaceOnce("main/ota_update.cpp",
+        'e == ESP_ERR_TIMEOUT ? "Update download timed out"',
+        'false ? "Update download timed out"')],
+    ["range-resume open timeout is mislabeled as a read failure", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(diag_printf\("ota: range resume open failed[\s\S]{0,260}?)transfer_failure = e == ESP_ERR_TIMEOUT \? OtaTransferFailure::Timeout\n                                                    : OtaTransferFailure::Read;/,
+        "$1transfer_failure = OtaTransferFailure::Read;")],
+    ["range resume asks for the image from byte zero", () =>
+      replaceOnce("main/ota_update.cpp", "\"bytes=%llu-\"", "\"bytes=0-\"")],
+    ["range resume accepts a full 200 response", () =>
+      replaceOnce("main/ota_update.cpp",
+        "open_firmware_stream(client, response_state, 206, transfer_started,",
+        "open_firmware_stream(client, response_state, 200, transfer_started,")],
+    ["range resume ignores the exact Content-Range", () =>
+      replaceOnce("main/ota_update.cpp", "const bool range_ok = ota_content_range_matches(",
+        "const bool range_ok = ota_content_range_matches_bypassed(")],
+    ["range resume accepts a chunked suffix", () =>
+      replaceOnce("main/ota_update.cpp", "esp_http_client_is_chunked_response(client)", "false")],
+    ["range resume ignores the remaining Content-Length", () =>
+      replaceOnce("main/ota_update.cpp",
+        "static_cast<uint64_t>(response_length) != remaining", "false")],
     ["the firmware-transfer headroom gate is bypassed", () =>
       replaceOnce("main/ota_update.cpp",
         /if\s*\(!wait_for_ota_headroom\(\s*"transfer"([\s\S]{0,180}?)\)\)\s*\{/,
@@ -156,8 +246,9 @@ try {
       replaceOnce("main/weather_forecast.cpp",
         "xTaskGetTickCount() - download_started >= kDownloadDeadline", "false")],
     ["HTTP cleanup before validation disappears", () =>
-      replaceOnce("main/ota_update.cpp", "buffer = nullptr;\n    close_http_client(client);",
-        "buffer = nullptr;\n    close_http_client_after_validation(client);")],
+      replaceOnce("main/ota_update.cpp",
+        /(\/\/ CRITICAL ORDERING:[\s\S]{0,900}?buffer = nullptr;\n    )close_http_client\(client\);/,
+        "$1close_http_client_after_validation(client);")],
     ["the signed-image verifier is bypassed", () =>
       replaceOnce("main/ota_update.cpp", "esp_ota_end(ota_handle)",
         "esp_ota_end_bypassed(ota_handle)")],

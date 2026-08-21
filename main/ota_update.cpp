@@ -53,6 +53,7 @@
 #include "psa/crypto.h"
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -303,6 +304,31 @@ bool wait_for_ota_headroom(const char* phase, const OtaHeapHeadroom& requirement
     return false;
 }
 
+bool wait_for_ota_headroom_until(const char* phase, const OtaHeapHeadroom& requirement,
+                                 unsigned max_attempts, TickType_t operation_started,
+                                 TickType_t operation_deadline, OtaHeapSample& sample) {
+    unsigned stable = 0;
+    for (unsigned attempt = 0; attempt < max_attempts; ++attempt) {
+        if (http_deadline_reached(operation_started, operation_deadline)) return false;
+        sample = ota_heap_sample();
+        stable = ota_headroom_streak_next(requirement, stable, sample.free_bytes,
+                                          sample.largest_internal_block);
+        if (stable >= requirement.stable_samples) {
+            diag_printf("ota: %s heap ready (free=%u B largest=%u B stable=%u)\n", phase,
+                        static_cast<unsigned>(sample.free_bytes),
+                        static_cast<unsigned>(sample.largest_internal_block), stable);
+            return true;
+        }
+        vTaskDelay(kHeadroomRetryDelay);
+    }
+    sample = ota_heap_sample();
+    diag_printf("ota: %s blocked by low/unstable heap before transfer deadline "
+                "(free=%u B largest=%u B stable=%u)\n",
+                phase, static_cast<unsigned>(sample.free_bytes),
+                static_cast<unsigned>(sample.largest_internal_block), stable);
+    return false;
+}
+
 void close_http_client(esp_http_client_handle_t& client) {
     if (!client) return;
     esp_http_client_close(client);
@@ -310,32 +336,54 @@ void close_http_client(esp_http_client_handle_t& client) {
     client = nullptr;
 }
 
-esp_err_t firmware_http_event(esp_http_client_event_t* event) {
+struct OtaFirmwareResponseState {
+    OtaRedirectLocationState redirect;
+    OtaContentRangeState content_range;
+};
+
+esp_err_t firmware_http_event(esp_http_client_event_t* event) noexcept {
     if (!event || event->event_id != HTTP_EVENT_ON_HEADER || !event->user_data ||
         !event->header_key || !event->header_value) return ESP_OK;
     const std::string_view key(event->header_key);
-    if (key.size() != 8 || !ota_ascii_prefix_ieq(key, "Location")) return ESP_OK;
-    auto* policy = static_cast<OtaRedirectLocationState*>(event->user_data);
-    ota_redirect_location_observe(*policy, event->header_value);
+    auto* response = static_cast<OtaFirmwareResponseState*>(event->user_data);
+    if (key.size() == 8 && ota_ascii_prefix_ieq(key, "Location"))
+        ota_redirect_location_observe(response->redirect, event->header_value);
+    else if (key.size() == 13 && ota_ascii_prefix_ieq(key, "Content-Range"))
+        ota_content_range_observe(response->content_range, event->header_value);
     return ESP_OK;
 }
 
 // Open GET and follow the same standard redirect statuses as esp_https_ota in IDF v6.0.2.  The
 // client owns no body buffer supplied by the server, and the redirect budget is finite even if a
 // broken feed points at itself.
-esp_err_t open_firmware_stream(esp_http_client_handle_t client, OtaRedirectLocationState& policy,
+esp_err_t open_firmware_stream(esp_http_client_handle_t client,
+                               OtaFirmwareResponseState& response, int expected_status,
+                               TickType_t operation_started, TickType_t operation_deadline,
                                int& status) {
     for (unsigned redirects = 0; redirects <= kMaxRedirects; ++redirects) {
-        ota_redirect_location_reset(policy);
+        if (!set_http_timeout_to_deadline(client, operation_started, operation_deadline))
+            return ESP_ERR_TIMEOUT;
+        ota_redirect_location_reset(response.redirect);
+        ota_content_range_reset(response.content_range);
         esp_err_t e = esp_http_client_open(client, 0);
-        if (e != ESP_OK) return e;
-        if (esp_http_client_fetch_headers(client) < 0) return ESP_FAIL;
+        if (e != ESP_OK) {
+            return http_deadline_reached(operation_started, operation_deadline)
+                 ? ESP_ERR_TIMEOUT : e;
+        }
+        if (!set_http_timeout_to_deadline(client, operation_started, operation_deadline))
+            return ESP_ERR_TIMEOUT;
+        const int64_t header_result = esp_http_client_fetch_headers(client);
+        if (header_result < 0) {
+            return http_deadline_reached(operation_started, operation_deadline)
+                 ? ESP_ERR_TIMEOUT : ESP_FAIL;
+        }
+        if (http_deadline_reached(operation_started, operation_deadline)) return ESP_ERR_TIMEOUT;
         status = esp_http_client_get_status_code(client);
-        if (status == 200) return ESP_OK;
+        if (status == expected_status) return ESP_OK;
         const bool redirect = status == 301 || status == 302 || status == 303 ||
                               status == 307 || status == 308;
         if (!redirect || redirects == kMaxRedirects) return ESP_FAIL;
-        if (!ota_redirect_location_accepted(policy)) return ESP_ERR_INVALID_ARG;
+        if (!ota_redirect_location_accepted(response.redirect)) return ESP_ERR_INVALID_ARG;
         e = esp_http_client_set_redirection(client);
         if (e != ESP_OK) return e;
         // `set_redirection` consumes Location while the response still exists.  Only then discard
@@ -838,7 +886,7 @@ void run_update(const OtaTaskArgs& request) {
         return;
     }
 
-    OtaRedirectLocationState redirect_policy;
+    OtaFirmwareResponseState response_state;
     esp_http_client_config_t http = {};
     http.url               = url.c_str();
     http.timeout_ms        = kHttpTimeoutMs;
@@ -851,7 +899,7 @@ void run_update(const OtaTaskArgs& request) {
     // unchecked path.
     http.disable_auto_redirect = true;
     http.event_handler     = firmware_http_event;
-    http.user_data         = &redirect_policy;
+    http.user_data         = &response_state;
     // Small receive buffer on purpose. The image is ~1.5 MB but is written to flash chunk by chunk,
     // so nothing here needs to scale with it — and this allocation competes with the MQTTS session
     // for the largest CONTIGUOUS free block, which is the real ceiling on this device.
@@ -867,7 +915,8 @@ void run_update(const OtaTaskArgs& request) {
 
     const TickType_t transfer_started = xTaskGetTickCount();
     int status = 0;
-    esp_err_t e = open_firmware_stream(client, redirect_policy, status);
+    esp_err_t e = open_firmware_stream(client, response_state, 200, transfer_started,
+                                       kFirmwareDeadline, status);
     const OtaHeapSample transfer_open_heap = ota_heap_sample();
     if (e != ESP_OK) {
         const HttpClientOpenFailure failure =
@@ -879,6 +928,7 @@ void run_update(const OtaTaskArgs& request) {
             e == ESP_ERR_NO_MEM || failure.tls_error == ESP_ERR_MBEDTLS_SSL_SETUP_FAILED;
         set_state("error", allocator_failure
                            ? "Not enough memory for update TLS — retry after reboot"
+                           : e == ESP_ERR_TIMEOUT ? "Update download timed out"
                            : status == 0 ? "Can't reach the update server"
                                          : "Update server returned an error");
         return;
@@ -1073,6 +1123,8 @@ void run_update(const OtaTaskArgs& request) {
     };
 
     bool transfer_ok = write_chunk(buffer, probe_len);
+    bool response_complete = false;
+    unsigned resumes = 0;
     read_timeouts = 0;
     while (transfer_ok) {
         if (!set_http_timeout_to_deadline(client, transfer_started, kFirmwareDeadline)) {
@@ -1089,18 +1141,149 @@ void run_update(const OtaTaskArgs& request) {
             break;
         }
         if (n == -ESP_ERR_HTTP_EAGAIN && read_timeouts++ < 2) continue;
-        if (n < 0) {
-            e = static_cast<esp_err_t>(-n);
+        if (n > 0) {
+            read_timeouts = 0;
+            transfer_ok = write_chunk(buffer, static_cast<size_t>(n));
+            continue;
+        }
+
+        response_complete = esp_http_client_is_complete_data_received(client) &&
+                            (total <= 0 || written == static_cast<uint64_t>(total));
+        if (n == 0 && response_complete) break;
+
+        const TickType_t elapsed_ticks = xTaskGetTickCount() - transfer_started;
+        const uint64_t elapsed_ms_64 = static_cast<uint64_t>(elapsed_ticks) * portTICK_PERIOD_MS;
+        http_client_log_read_failure(
+            "ota", client, n, written, total,
+            elapsed_ms_64 > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(elapsed_ms_64));
+
+        const bool deadline_reached = http_deadline_reached(transfer_started, kFirmwareDeadline);
+        const bool can_resume = total > 0 && ota_transfer_resume_allowed(
+            resumes, written, static_cast<uint64_t>(total), deadline_reached);
+        if (!can_resume) {
+            e = deadline_reached ? ESP_ERR_TIMEOUT
+                : n == -ESP_ERR_HTTP_EAGAIN ? ESP_ERR_HTTP_EAGAIN : ESP_FAIL;
+            transfer_failure = deadline_reached ? OtaTransferFailure::Timeout
+                                                : OtaTransferFailure::Read;
+            transfer_ok = false;
+            break;
+        }
+
+        ++resumes;
+        const uint64_t resume_at = written;
+        diag_printf("ota: firmware read interrupted at %u/%lld B; attempting range resume %u/%u\n",
+                    static_cast<unsigned>(resume_at), static_cast<long long>(total), resumes,
+                    OTA_TRANSFER_MAX_RESUMES);
+
+        // Free all transport-owned dynamic state before applying the same measured admission gate
+        // as the initial image TLS handshake.  The OTA handle and PSA hash deliberately survive:
+        // they already own the exact sequential flash/hash position represented by `written`.
+        heap_caps_free(buffer);
+        buffer = nullptr;
+        close_http_client(client);
+        ota_heap_sample();
+
+        OtaHeapSample resume_heap{};
+        if (!wait_for_ota_headroom_until("transfer resume", OTA_TRANSFER_HEADROOM,
+                                         kTransferHeadroomMaxAttempts, transfer_started,
+                                         kFirmwareDeadline, resume_heap)) {
+            e = http_deadline_reached(transfer_started, kFirmwareDeadline)
+              ? ESP_ERR_TIMEOUT : ESP_ERR_NO_MEM;
+            transfer_failure = e == ESP_ERR_TIMEOUT ? OtaTransferFailure::Timeout
+                                                    : OtaTransferFailure::Read;
+            transfer_ok = false;
+            break;
+        }
+        if (http_deadline_reached(transfer_started, kFirmwareDeadline)) {
+            e = ESP_ERR_TIMEOUT;
+            transfer_failure = OtaTransferFailure::Timeout;
+            transfer_ok = false;
+            break;
+        }
+
+        const HttpClientProbe resume_before = http_client_probe();
+        client = esp_http_client_init(&http);
+        if (!client) {
+            http_client_log_init_failure("ota-resume", resume_before);
+            e = ESP_ERR_NO_MEM;
             transfer_failure = OtaTransferFailure::Read;
             transfer_ok = false;
             break;
         }
-        if (n == 0) break;
+
+        char range_header[64];
+        const int range_len = std::snprintf(range_header, sizeof(range_header), "bytes=%llu-",
+                                            static_cast<unsigned long long>(resume_at));
+        if (range_len <= 0 || static_cast<size_t>(range_len) >= sizeof(range_header) ||
+            esp_http_client_set_header(client, "Range", range_header) != ESP_OK) {
+            e = ESP_ERR_NO_MEM;
+            transfer_failure = OtaTransferFailure::Read;
+            close_http_client(client);
+            transfer_ok = false;
+            break;
+        }
+
+        status = 0;
+        e = open_firmware_stream(client, response_state, 206, transfer_started,
+                                 kFirmwareDeadline, status);
+        const OtaHeapSample resume_open_heap = ota_heap_sample();
+        if (e != ESP_OK) {
+            const HttpClientOpenFailure failure =
+                http_client_log_open_failure("ota-resume", client, e, resume_before);
+            diag_printf("ota: range resume open failed (status=%d err=%s tls=0x%lx)\n", status,
+                        esp_err_to_name(e), static_cast<unsigned long>(failure.tls_error));
+            close_http_client(client);
+            transfer_failure = e == ESP_ERR_TIMEOUT ? OtaTransferFailure::Timeout
+                                                    : OtaTransferFailure::Read;
+            transfer_ok = false;
+            break;
+        }
+
+        const uint64_t remaining = static_cast<uint64_t>(total) - resume_at;
+        const int64_t response_length = esp_http_client_get_content_length(client);
+        const bool range_ok = ota_content_range_matches(
+            response_state.content_range, resume_at, static_cast<uint64_t>(total));
+        if (!range_ok || esp_http_client_is_chunked_response(client) ||
+            response_length < 0 || static_cast<uint64_t>(response_length) != remaining) {
+            diag_printf("ota: range resume rejected (status=%d content_length=%lld expected=%llu "
+                        "content_range_count=%u valid=%d start=%llu end=%llu total=%llu)\n",
+                        status, static_cast<long long>(response_length),
+                        static_cast<unsigned long long>(remaining),
+                        response_state.content_range.header_count,
+                        response_state.content_range.valid ? 1 : 0,
+                        static_cast<unsigned long long>(response_state.content_range.start),
+                        static_cast<unsigned long long>(response_state.content_range.end),
+                        static_cast<unsigned long long>(response_state.content_range.total));
+            e = ESP_ERR_INVALID_RESPONSE;
+            transfer_failure = OtaTransferFailure::Read;
+            close_http_client(client);
+            transfer_ok = false;
+            break;
+        }
+
+        buffer = static_cast<uint8_t*>(
+            heap_caps_malloc(kOtaBufSize, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+        if (!buffer) {
+            const OtaHeapSample failed = ota_heap_sample();
+            diag_printf("ota: resume-buffer allocation failed (free=%u B largest=%u B)\n",
+                        static_cast<unsigned>(failed.free_bytes),
+                        static_cast<unsigned>(failed.largest_internal_block));
+            e = ESP_ERR_NO_MEM;
+            transfer_failure = OtaTransferFailure::Read;
+            close_http_client(client);
+            transfer_ok = false;
+            break;
+        }
+        diag_printf("ota: range resume accepted at %u B (free=%u B largest=%u B)\n",
+                    static_cast<unsigned>(resume_at),
+                    static_cast<unsigned>(resume_open_heap.free_bytes),
+                    static_cast<unsigned>(resume_open_heap.largest_internal_block));
+        e = ESP_OK;
+        transfer_failure = OtaTransferFailure::None;
         read_timeouts = 0;
-        transfer_ok = write_chunk(buffer, static_cast<size_t>(n));
     }
 
-    const bool complete = esp_http_client_is_complete_data_received(client) &&
+    const bool complete = transfer_ok && response_complete &&
                           (total <= 0 || written == static_cast<uint64_t>(total));
 
     // CRITICAL ORDERING: free the fixed download buffer and the HTTP/TLS client BEFORE
@@ -1108,7 +1291,7 @@ void run_update(const OtaTaskArgs& request) {
     // cleanup second — so RSA/PSA verification had to allocate beside TLS and failed on the live
     // board with a 632-byte low-water mark.  The raw esp_ota API preserves the exact same signed
     // image verifier while letting the transport release its heap first.
-    heap_caps_free(buffer);
+    if (buffer) heap_caps_free(buffer);
     buffer = nullptr;
     close_http_client(client);
     ota_heap_sample();
