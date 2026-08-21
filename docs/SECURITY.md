@@ -346,10 +346,11 @@ idle for three seconds before its one restore POST; a silently ignored write fai
 cannot reach production. Waiting before both replacements is mandatory because ESP-IDF refuses
 another OTA write while the running target or release is still `PENDING_VERIFY`. The freshly restored target then runs
 the fixed three-minute pressure window with another real OTA-manifest TLS fetch. Firmware deliberately
-stops MQTT while that TLS owner holds the constrained network heap. The gate ignores disconnect
-samples only for this expected pause after first requiring a connected baseline, requires a new
-connected status sample within 15 seconds after TLS, then fails on any later disconnect or a
-disconnected final status. Optional Open-Meteo
+stops MQTT while either OTA or Open-Meteo TLS holds the constrained network heap. After requiring a
+connected baseline, the gate gives each observed owner at most 15 seconds to recover; the weather
+allowance is armed only by its live `fetching` state or a newly advanced success counter and closes
+on the first connected sample. Any later disconnect or a disconnected final status still fails.
+Optional Open-Meteo
 evidence is not a bench prerequisite.
 During OTA, `/status`, the shared `/values` sender, `/history`, `/scan`, `/models?active=1`, redacted
 `/diag` and the whole MCP POST fail fast with a small busy-503 before allocation-rich work;
