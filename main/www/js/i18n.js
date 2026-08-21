@@ -39,7 +39,7 @@ const FAULT_CODE_I18N = Object.create(null);
 const MB_DELTA_I18N = Object.create(null);
 // Locale assets store their compact UI translations positionally against the English key order.
 // The comments in those source files retain the readable key mapping, while the shipped scripts
-// omit 838 repeated property names per language. This keeps all twelve external catalogs within the
+// omit 840 repeated property names per language. This keeps all twelve external catalogs within the
 // fixed application partition without weakening the English fallback contract.
 function localeValues(values) {
   const keys = Object.keys(I18N.en);
@@ -470,6 +470,8 @@ const I18N = {
     "btn.saving": "Saving…", "btn.verifying": "Verifying…", "btn.save": "Save",
     "btn.cancel": "Cancel", "btn.close": "Close",
     // static index.html markup (data-i18n)
+    "schem.card_aria": "Live system schematic: outdoor unit, refrigerant circuit, plate heat exchanger, water circuit with backup heater and 3-way valve, domestic hot water tank and space circuit",
+    "schem.group_aria": "Live system schematic — tap a value or component for an explanation",
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
     "insp.close": "Close",
     "schem.leaving_water": "R1T", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
@@ -844,6 +846,9 @@ function schematicOperationMode() {
 function applyStaticI18n() {
   document.documentElement.lang = LANG;
   document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+    el.setAttribute("aria-label", t(el.dataset.i18nAria));
+  });
 }
 // Switch the live language: swap LANG, cache it for the next first paint, and re-localise the parts
 // that are NOT rebuilt on a poll — the static HTML + inline SVG (applyStaticI18n), the schematic's

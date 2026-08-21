@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -386,6 +386,8 @@ I18N.fi = localeValues([
   /* btn.save */ "Tallenna",
   /* btn.cancel */ "Peruuta",
   /* btn.close */ "Sulje",
+  /* schem.card_aria */ "Järjestelmän reaaliaikainen kaavio: ulkoyksikkö, kylmäainepiiri, levylämmönvaihdin, varalämmittimellä ja 3-tieventtiilillä varustettu vesipiiri, lämminvesivaraaja ja huonepiiri",
+  /* schem.group_aria */ "Järjestelmän reaaliaikainen kaavio — valitse arvo tai osa saadaksesi selityksen",
   /* schem.outdoor_unit */ "ULKOYKSIKKÖ",
   /* schem.defrost_pill */ "❄ sulatus",
   /* schem.outdoor */ "Ulkoilma",

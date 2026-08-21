@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -386,6 +386,8 @@ I18N.es = localeValues([
   /* btn.save */ "Guardar",
   /* btn.cancel */ "Cancelar",
   /* btn.close */ "Cerrar",
+  /* schem.card_aria */ "Esquema en vivo del sistema: unidad exterior, circuito frigorífico, intercambiador de placas, circuito de agua con calentador auxiliar y válvula de 3 vías, depósito ACS y circuito de climatización",
+  /* schem.group_aria */ "Esquema en vivo — selecciona un valor o componente para ver su explicación",
   /* schem.outdoor_unit */ "UNIDAD EXTERIOR",
   /* schem.defrost_pill */ "❄ desescarche",
   /* schem.outdoor */ "Exterior",

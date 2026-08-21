@@ -73,23 +73,33 @@ function assertPersistentBannerRepaints(name, status) {
     },
     backTitle: { textContent: "" },
   };
+  const schematicAria = ["schem.card_aria", "schem.group_aria"].map((key) => ({
+    dataset: { i18nAria: key },
+    ariaLabel: "",
+    setAttribute(name, value) { if (name === "aria-label") this.ariaLabel = value; },
+  }));
   const context = {
     navigator: { language: "en" },
     localStorage: { getItem: () => null, setItem: () => {} },
     document: {
       documentElement: {},
       getElementById: (id) => elements[id],
-      querySelectorAll: () => [],
+      querySelectorAll: (selector) => selector === "[data-i18n-aria]" ? schematicAria : [],
     },
     labelSchematicHits: () => {},
   };
   const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + appStateSource;
-  const { api } = productionApi(source, ["S", "activateLang", "renderHeader"], context);
+  const { api } = productionApi(source, ["S", "activateLang", "applyStaticI18n", "renderHeader"], context);
   api.S.stage = "settings";
+  api.applyStaticI18n();
   api.renderHeader();
   assert.equal(elements.backTitle.textContent, "Settings");
   assert.equal(elements.btnBack.ariaLabel, "Back");
   assert.equal(elements.verLink.ariaLabel, "Check for firmware updates");
+  assert.match(schematicAria[0].ariaLabel, /^Live system schematic:/,
+    "the schematic card must receive its English accessible name from the catalog");
+  assert.match(schematicAria[1].ariaLabel, /tap a value or component/,
+    "the schematic group must receive its English interaction hint from the catalog");
   assert.equal(api.activateLang("de"), true);
   assert.equal(elements.backTitle.textContent, "Einstellungen",
     "a live language switch must repaint the active route title without a navigation round-trip");
@@ -97,6 +107,10 @@ function assertPersistentBannerRepaints(name, status) {
     "a live language switch must repaint the active Back control's accessible name");
   assert.equal(elements.verLink.ariaLabel, "Nach Firmware-Updates suchen",
     "a live language switch must repaint the persistent update control's accessible name");
+  assert.match(schematicAria[0].ariaLabel, /^Live-Anlagenschema:/,
+    "a live language switch must repaint the schematic card's accessible name");
+  assert.match(schematicAria[1].ariaLabel, /Wert oder Bauteil/,
+    "a live language switch must repaint the schematic group's accessible interaction hint");
 }
 
 {

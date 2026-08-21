@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -386,6 +386,8 @@ I18N.de = localeValues([
   /* btn.save */ "Speichern",
   /* btn.cancel */ "Abbrechen",
   /* btn.close */ "Schließen",
+  /* schem.card_aria */ "Live-Anlagenschema: Außeneinheit, Kältemittelkreis, Plattenwärmetauscher, Wasserkreis mit Zusatzheizer und 3-Wege-Ventil, Warmwasserspeicher und Raumkreis",
+  /* schem.group_aria */ "Live-Anlagenschema — Wert oder Bauteil für eine Erklärung auswählen",
   /* schem.outdoor_unit */ "AUSSENEINHEIT",
   /* schem.defrost_pill */ "❄ Abtauen",
   /* schem.outdoor */ "Außen",

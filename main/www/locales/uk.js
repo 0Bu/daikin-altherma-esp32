@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -386,6 +386,8 @@ I18N.uk = localeValues([
   /* btn.save */ "Зберегти",
   /* btn.cancel */ "Скасувати",
   /* btn.close */ "Закрити",
+  /* schem.card_aria */ "Жива схема системи: зовнішній блок, холодильний контур, пластинчастий теплообмінник, водяний контур з резервним нагрівачем і 3-ходовим клапаном, бак ГВП і контур дому",
+  /* schem.group_aria */ "Жива схема системи — виберіть значення або компонент для пояснення",
   /* schem.outdoor_unit */ "ЗОВНІШНІЙ БЛОК",
   /* schem.defrost_pill */ "❄ відтавання",
   /* schem.outdoor */ "Надворі",

@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -386,6 +386,8 @@ I18N.zh = localeValues([
   /* btn.save */ "保存",
   /* btn.cancel */ "取消",
   /* btn.close */ "关闭",
+  /* schem.card_aria */ "系统实时示意图：室外机、制冷剂回路、板式换热器、带备用加热器和三通阀的水回路、生活热水箱和空间调温回路",
+  /* schem.group_aria */ "系统实时示意图——选择数值或部件可查看说明",
   /* schem.outdoor_unit */ "室外机",
   /* schem.defrost_pill */ "❄ 除霜",
   /* schem.outdoor */ "室外",

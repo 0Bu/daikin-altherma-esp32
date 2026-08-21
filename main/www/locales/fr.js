@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -386,6 +386,8 @@ I18N.fr = localeValues([
   /* btn.save */ "Enregistrer",
   /* btn.cancel */ "Annuler",
   /* btn.close */ "Fermer",
+  /* schem.card_aria */ "Schéma en direct du système : unité extérieure, circuit frigorifique, échangeur à plaques, circuit d'eau avec chauffage d'appoint et vanne 3 voies, ballon ECS et circuit des locaux",
+  /* schem.group_aria */ "Schéma en direct — sélectionnez une valeur ou un composant pour obtenir une explication",
   /* schem.outdoor_unit */ "UNITÉ EXTÉRIEURE",
   /* schem.defrost_pill */ "❄ dégivrage",
   /* schem.outdoor */ "Extérieur",

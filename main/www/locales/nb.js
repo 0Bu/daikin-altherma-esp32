@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -386,6 +386,8 @@ I18N.nb = localeValues([
   /* btn.save */ "Lagre",
   /* btn.cancel */ "Avbryt",
   /* btn.close */ "Lukk",
+  /* schem.card_aria */ "Live systemskjema: utedel, kuldemediekrets, platevarmeveksler, vannkrets med tilleggsvarmer og 3-veisventil, varmtvannstank og romkrets",
+  /* schem.group_aria */ "Live systemskjema — velg en verdi eller komponent for en forklaring",
   /* schem.outdoor_unit */ "UTEDEL",
   /* schem.defrost_pill */ "❄ Avriming",
   /* schem.outdoor */ "Ute",

@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -391,6 +391,8 @@ I18N.pl = localeValues([
   /* btn.save */ "Zapisz",
   /* btn.cancel */ "Anuluj",
   /* btn.close */ "Zamknij",
+  /* schem.card_aria */ "Schemat instalacji na żywo: jednostka zewnętrzna, obieg czynnika chłodniczego, wymiennik płytowy, obieg wody z grzałką pomocniczą i zaworem 3-drogowym, zasobnik CWU i obieg domu",
+  /* schem.group_aria */ "Schemat instalacji na żywo — wybierz wartość lub element, aby wyświetlić objaśnienie",
   /* schem.outdoor_unit */ "JEDNOSTKA ZEWNĘTRZNA",
   /* schem.defrost_pill */ "❄ odszran.",
   /* schem.outdoor */ "Zewn.",

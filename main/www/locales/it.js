@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -386,6 +386,8 @@ I18N.it = localeValues([
   /* btn.save */ "Salva",
   /* btn.cancel */ "Annulla",
   /* btn.close */ "Chiudi",
+  /* schem.card_aria */ "Schema in tempo reale del sistema: unità esterna, circuito frigorifero, scambiatore a piastre, circuito idraulico con riscaldatore ausiliario e valvola a 3 vie, serbatoio ACS e circuito ambienti",
+  /* schem.group_aria */ "Schema in tempo reale — seleziona un valore o componente per una spiegazione",
   /* schem.outdoor_unit */ "UNITÀ ESTERNA",
   /* schem.defrost_pill */ "❄ sbrinamento",
   /* schem.outdoor */ "Esterno",

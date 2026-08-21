@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -386,6 +386,8 @@ I18N.cs = localeValues([
   /* btn.save */ "Uložit",
   /* btn.cancel */ "Zrušit",
   /* btn.close */ "Zavřít",
+  /* schem.card_aria */ "Živé schéma soustavy: venkovní jednotka, chladivový okruh, deskový výměník, vodní okruh se záložním ohřívačem a 3cestným ventilem, zásobník TUV a okruh domu",
+  /* schem.group_aria */ "Živé schéma soustavy — vyberte hodnotu nebo součást pro vysvětlení",
   /* schem.outdoor_unit */ "VENKOVNÍ JEDNOTKA",
   /* schem.defrost_pill */ "❄ odmraz.",
   /* schem.outdoor */ "Venku",

@@ -1,4 +1,4 @@
-// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
+// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -386,6 +386,8 @@ I18N.sv = localeValues([
   /* btn.save */ "Spara",
   /* btn.cancel */ "Avbryt",
   /* btn.close */ "Stäng",
+  /* schem.card_aria */ "Live systemschema: utomhusenhet, köldmediekrets, plattvärmeväxlare, vattenkrets med tillsatsvärmare och 3-vägsventil, varmvattentank och rumskrets",
+  /* schem.group_aria */ "Live systemschema — välj ett värde eller en komponent för en förklaring",
   /* schem.outdoor_unit */ "Utomhusenhet",
   /* schem.defrost_pill */ "❄ Avfrostning",
   /* schem.outdoor */ "Ute",
