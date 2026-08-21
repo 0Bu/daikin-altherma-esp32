@@ -394,7 +394,10 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
 Production OTA is a separate maintainer-only promotion gate. Do not call `/ota/update` directly.
 The direct, unchained `scripts/production-ota-gate.py` command binds the exact signed official dev
 artifact, requires a clean matching source tree, runs host contracts, verifies the artifact and a
-fixed pressure window on the MAC-bound private-inventory `bench` role, then permits one un-retried
+complete signed release-binary download under HTTP pressure on the MAC-bound private-inventory
+`bench` role, observes the completed verifier state, boots that release past its rollback probation,
+returns to the exact dev version/ELF, and runs a fixed manifest-pressure window. Only then does it
+permit one un-retried
 update of the distinct `production` role and completes a read-only heap/X10A/MQTT canary. The bench
 board need not have a physical X10A connection; the production canary must therefore prove the real
 retained X10A payload. The command never cuts a release. See

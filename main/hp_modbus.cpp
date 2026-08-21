@@ -19,7 +19,9 @@
 #include "diag_log.hpp"
 #include "history.hpp"
 #include "net.hpp"
+#include "ota_update.hpp"
 #include "stack_watch.hpp"
+#include "weather_forecast.hpp"
 #include "logic/detect_backoff.hpp"   // the SAME backoff the X10A sweep uses on a silent bus
 #include "logic/homehub_map.hpp"      // the concept a register pairs on
 #include "logic/modbus_plan.hpp"      // WHICH requests a cycle issues — batching + the gate cadence
@@ -104,6 +106,21 @@ static DetectBackoff s_backoff;
 static std::atomic<int64_t> s_next_try_us{0};
 static std::atomic<bool> s_reconfigure_reset{false};
 static std::atomic<uint32_t> s_target_generation{1};
+static std::atomic<bool> s_network_quiesced{true};
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "HomeHub network quiesce acknowledgement must remain allocation- and lock-free");
+
+// Claim the allocation-rich part of one HomeHub cycle. OTA raises its flag first and then waits
+// for this acknowledgement; the recheck immediately after construction closes the opposite race.
+// The destructor restores quiescence even when the task's exception boundary catches an OOM.
+struct MbNetworkActivity {
+    MbNetworkActivity() {
+        s_network_quiesced.store(false, std::memory_order_release);
+    }
+    ~MbNetworkActivity() {
+        s_network_quiesced.store(true, std::memory_order_release);
+    }
+};
 
 enum class MbFailureType {
     None,
@@ -1089,6 +1106,19 @@ static void mb_task(void*) {
         // it now sits where the other three sit — above the `break` that retires this task, so the
         // last cycle before a HomeHub is disabled is recorded like every other.
         stack_watch_sample(StackWatch::Modbus);
+        // A HomeHub cycle copies the string-owning Config and, every fifth cycle, reserves a fresh
+        // model-sized value vector. Neither is needed while OTA owns the allocator. Stand aside
+        // before either allocation; the already-raised OTA flag plus its stable headroom samples
+        // also let an in-flight cycle unwind before TLS is admitted.
+        if (ota_download_active() || weather_fetch_active()) {
+            vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
+            continue;
+        }
+        MbNetworkActivity network_activity;
+        if (ota_download_active() || weather_fetch_active()) {
+            vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
+            continue;
+        }
         try {
             if (s_reconfigure_reset.exchange(false, std::memory_order_acq_rel)) {
                 s_backoff.silent = 0;
@@ -1158,6 +1188,10 @@ static void mb_task_start_if_enabled() {
     // one, but a convention that holds everywhere except the failure path is not a convention.
     if (alloc_failed)
         diag_printf("modbus: task alloc failed — HomeHub readings unavailable this boot\n");
+}
+
+bool mb_network_quiesced() {
+    return s_network_quiesced.load(std::memory_order_acquire);
 }
 
 void mb_start() {

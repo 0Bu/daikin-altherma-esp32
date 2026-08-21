@@ -29,10 +29,12 @@
 namespace daik {
 
 // Consecutive cycles a publisher will stand aside before it resumes regardless. At the 1 s publish
-// cadence (POLL_INTERVAL_S) this is five minutes — comfortably longer than any real operation on
-// this link (tens of seconds), and short enough that one which is never
-// going to finish costs a bounded outage rather than the rest of the boot.
-inline constexpr uint32_t OTA_QUIESCE_MAX_CYCLES = 300;
+// cadence (POLL_INTERVAL_S) this is ten minutes: longer than the firmware's complete bounded OTA
+// path and the host's 480-second authoritative observer. A 300-cycle cap matched the firmware-body
+// deadline itself but started earlier, so it could re-admit polling/publishing during the last valid
+// transfer seconds. Weather's own 60-second deadline normally releases this much sooner; 600 remains
+// a finite stale-flag escape rather than silencing the bridge for the rest of the boot.
+inline constexpr uint32_t OTA_QUIESCE_MAX_CYCLES = 600;
 
 // Per-publisher hold-off state. Lives in the task's own frame — one publisher, one counter, no
 // sharing and therefore no lock.

@@ -60,9 +60,9 @@ const S = {
   otaAvail: null,
   otaBusy: false,
   // True only after an install was accepted by the device (or adopted from /ota/status after a
-  // reload). During that phase the OTA endpoint can still answer while the much larger /status
-  // builder temporarily cannot allocate. That is an UPDATE IN PROGRESS, not proof that the device
-  // is unreachable; markUnreachable uses this bit to keep the dashboard's words truthful.
+  // reload). During any OTA network phase, including the earlier manifest check tracked by
+  // otaBusy, the compact OTA endpoint can still answer while the much larger /status builder is
+  // deliberately refused. That is OTA activity, not proof that the device is unreachable.
   otaInstalling: false,
   // Whether the inline readout currently has something on screen (a ring, a percentage, a terminal
   // message inside its linger window). It is what freezes the Settings rebuild — see renderSettings.
@@ -395,7 +395,7 @@ function markUnreachable() {
   // A live /ota/status response has already proved that the board is reachable. The full /status
   // payload is its largest HTTP allocation and can be refused while the HTTPS OTA task owns the
   // scarce contiguous heap. Do not turn that expected resource window into a red device failure.
-  if (S.otaInstalling) { renderOtaDashboardStatus(); return; }
+  if (S.otaInstalling || S.otaBusy) { renderOtaDashboardStatus(); return; }
   sysSet(t("sys.unreachable"), t("sys.unreachable_sub"), "err");
 }
 

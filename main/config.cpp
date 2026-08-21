@@ -70,6 +70,11 @@ ConfigLinkSnapshot config_link_snapshot() {
     return {g_cfg.proto, g_cfg.rx_pin, g_cfg.tx_pin};
 }
 
+OtaChannel config_ota_channel() {
+    Lock lk(g_mtx);
+    return g_cfg.ota_channel;
+}
+
 static uint32_t next_revision(uint32_t current) {
     uint32_t next = current + 1;
     return next ? next : 1;

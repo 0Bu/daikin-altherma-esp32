@@ -1,10 +1,12 @@
 #include "syslog.hpp"
 #include "config.hpp"
 #include "net.hpp"
+#include "ota_update.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "safe_mode.hpp"
 #include "sntp_time.hpp"
+#include "weather_forecast.hpp"
 #include "logic/bootlog.hpp"
 #include "logic/syslog_policy.hpp"
 #include "logic/timestamp.hpp"
@@ -25,6 +27,7 @@
 #include <cstdio>
 #include <new>
 #include <exception>
+#include <atomic>
 #include <string_view>
 
 namespace daik {
@@ -43,6 +46,22 @@ static SemaphoreHandle_t s_status_mtx = nullptr;
 static bool        s_resolved = false;
 static bool        s_reachable = false;
 static const char* s_error = "";   // string literal only — assigned by set_status without allocating
+static std::atomic<bool> s_network_quiesced{true};
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "Syslog network quiesce acknowledgement must remain allocation- and lock-free");
+
+struct SyslogNetworkActivity {
+    SyslogNetworkActivity() {
+        s_network_quiesced.store(false, std::memory_order_release);
+    }
+    ~SyslogNetworkActivity() { release(); }
+    void release() {
+        if (!claimed) return;
+        claimed = false;
+        s_network_quiesced.store(true, std::memory_order_release);
+    }
+    bool claimed = true;
+};
 
 // RAII guard around s_status_mtx (same idiom as config.cpp / hp_poll.cpp). Replaces the raw
 // take/give pairs so an exception on a reader can't strand the mutex — which would block every later
@@ -325,6 +344,19 @@ void syslog_init() {
         const TickType_t check_interval = pdMS_TO_TICKS(10000); // re-resolve + re-probe cadence
 
         while (true) {
+          // OTA diagnostics themselves wake this queue. Do not answer those lines with a Config
+          // copy, DNS/ping work or a fresh UDP socket beside the TLS handshake. The fixed queue is
+          // intentionally allowed to buffer/drop best-effort syslog while /diag and serial retain
+          // the authoritative local evidence.
+          if (ota_download_active() || weather_fetch_active()) {
+              vTaskDelay(pdMS_TO_TICKS(250));
+              continue;
+          }
+          SyslogNetworkActivity network_activity;
+          if (ota_download_active() || weather_fetch_active()) {
+              vTaskDelay(pdMS_TO_TICKS(250));
+              continue;
+          }
           // Guard the whole cycle like mqtt_task/poll_task (AGENTS.md → Memory, concurrency, and
           // HTTP safety):
           // this loop allocates every pass (the config() snapshot copies ~10 std::strings, plus
@@ -341,6 +373,7 @@ void syslog_init() {
             if (!configured) {
                 if (resolved || reachable) { resolved = reachable = false; set_status(false, false, ""); }
                 // Block until a line arrives, then drop it (nothing to forward) — no busy-spin.
+                network_activity.release();
                 SyslogMsg msg;
                 xQueueReceive(s_queue, &msg, portMAX_DELAY);
                 continue;
@@ -447,6 +480,10 @@ void syslog_init() {
         // esp-mqtt, whose socket work lives in an internal task). 4096 is too thin for that call chain.
     }, "syslog_task", 6144, nullptr, TASK_PRIO_SYSLOG, nullptr))
         diag_printf("syslog: task alloc failed — syslog forwarding disabled this boot\n");
+}
+
+bool syslog_network_quiesced() {
+    return s_network_quiesced.load(std::memory_order_acquire);
 }
 
 void syslog_send(const char* msg, size_t len) {

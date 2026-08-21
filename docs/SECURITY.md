@@ -208,13 +208,28 @@ activate unsigned or tampered firmware.
   dialog spelling out that the build is older — the same trust level that can already erase the
   config or re-point the X10A pins.
 - **Heap-safe validation** *(implemented — `logic/ota_headroom.hpp`, host-tested)* — OTA raises one
-  lock-free quiesce request before any network allocation. MQTT publication and X10A polling stand
-  aside before building their allocation-rich snapshots, while an already-running Open-Meteo TLS
-  request is given one bounded timeout to unwind. The firmware then requires both **24 KiB total
-  free INTERNAL 8-bit heap** and a **12 KiB largest contiguous INTERNAL block**, first before the
-  image transfer and again after the HTTP/TLS client plus fixed 2 KiB download buffer have been
-  freed, immediately before RSA/PSA validation. Each wait is bounded to five seconds and refuses
-  the update on failure; it never weakens or skips signature checking.
+  lock-free quiesce request before any network allocation. MQTT publication, X10A/HomeHub polling
+  and Syslog forwarding stand aside before building allocation-rich state; the owning MQTT task
+  cleanly stops and acknowledges the complete esp-mqtt transport (including MQTTS keepalive and
+  subscribed traffic), while an already-running Open-Meteo TLS request gets one bounded timeout to
+  unwind. A paused MQTTS client resumes only after four stable 56/24-KiB heap samples; direct start
+  failures back off exponentially rather than churning once per second. ESP-IDF's dynamic TLS-record buffers
+  are enabled without the more invasive option that frees registered config/key/CA data. Before
+  every manifest or image handshake, four consecutive samples must show **56 KiB total free
+  INTERNAL 8-bit heap** and a **24 KiB largest contiguous INTERNAL block**. After the HTTP/TLS
+  client plus fixed 2 KiB download buffer have been freed, RSA/PSA validation uses a separate
+  two-sample **24/12 KiB** gate before `esp_ota_end()` and again before the validation performed by
+  `esp_ota_set_boot_partition()`. The TLS wait is bounded to 15 seconds and each validation wait to
+  five; whole-operation deadlines are 30 seconds for a manifest and five minutes for firmware, with
+  each read limited to the remaining interval. A trickling peer therefore cannot hold MQTT/HomeHub/
+  Syslog paused indefinitely. The ten-minute publisher/poller stale-flag cap outlives that complete
+  path and the 480-second host observer, so it cannot expire during a still-valid download. All gates
+  refuse on failure and none weakens or skips signature checking.
+
+  `HTTP_TLS_DYN_BUF_RX_STATIC` would reduce long-transfer record churn, but it is intentionally not
+  enabled on pinned ESP-IDF 6.0.2: Espressif issue #18828 reports a reproducible TLS-1.2
+  invalid-free/assert in that strategy. Retaining the default dynamic strategy is the safer bounded
+  residual until an upstream fix is present in the pinned SDK.
 
   The order is deliberate: IDF's signed-image verifier runs in `esp_ota_end()`. Keeping the TLS
   allocator alive until that call made the verifier compete for the same fragmented internal heap.
@@ -316,13 +331,23 @@ in the untracked schema-versioned local inventory
 whose distinct `bench` and `production` roles prevent a swapped target without publishing private
 installation identifiers. The exact signed artifact must first run on the MAC-bound `bench` role,
 normally installed by the NVS-preserving signed USB flash workflow. The gate then runs the complete
-host logic/X10A/OTA contracts and a fixed
-three-minute concurrent `/status` + `/values` + `/diag` pressure window with a real OTA-manifest
-TLS fetch. Optional Open-Meteo evidence is not a bench prerequisite.
-The shared `/values`/MCP values sender waits in 250-ms steps for at most four seconds before taking
-its model-sized snapshot while either firmware TLS owner is active. The cap remains below the gate's
-five-second request timeout; expiry is a blocking busy-503, not an accepted retry. `/status`,
-`/diag` and `/ota/status` are not themselves gated and resume after the bounded values request.
+host logic/X10A/OTA contracts. Before the sustained pressure window, that exact target switches only
+the bench to the official release feed and performs a **complete signed firmware download** under
+concurrent `/status`, `/values`, `/diag` and `/ota/status` pressure. The target must expose sampled
+operation-local free/largest-block minima plus the completed validation state, boot the signed
+release cleanly, and keep it healthy past
+the 90-second rollback probation before switching back to the official dev feed and returning to the
+exact target version/ELF. Waiting is mandatory because ESP-IDF refuses a second OTA write while the
+release is still `PENDING_VERIFY`. The freshly restored target then runs
+the fixed three-minute pressure window with another real OTA-manifest TLS fetch. Optional Open-Meteo
+evidence is not a bench prerequisite.
+During OTA, `/status`, the shared `/values` sender, `/history`, `/scan`, `/models?active=1`, redacted
+`/diag` and the whole MCP POST fail fast with a small busy-503 before allocation-rich work;
+`/ota/status`, static assets, the static `/models` catalog and the unredacted static `/diag` ring
+remain reachable.
+For the shorter Weather TLS owner, `/values` still waits in 250-ms steps for at most four seconds.
+The cap remains below the gate's five-second request timeout; expiry is a busy-503, not an accepted
+retry.
 
 Only after that stage and an explicit `production` confirmation does the command perform exactly
 one un-retried `POST /ota/update`. Before that sole write, `/ota/check` must synchronously return a
@@ -338,12 +363,12 @@ exact version/ELF and
 MAC, rollback/crash/safe-mode state, stable heap/OOM/X10A counters, live X10A values, and the
 retained X10A MQTT payload must pass a second fixed three-minute canary. The command does not create
 a release and an arbitrary 48-hour wait is not a substitute for these targeted proofs. A bench
-without physical X10A proves the exact binary, HTTP/TLS concurrency and heap recovery;
+without physical X10A proves the target's complete binary TLS path, HTTP concurrency and heap recovery;
 catalog-wide host replay and the source/mutation contracts cover the publisher, and the real
 retained payload is proved only on the production role after the single update. Expected UART
 timeouts on that intentionally unwired bench do not fail the bench stage; the production role keeps
-the bounded X10A timeout-delta requirement. The bench always overlaps a real OTA-manifest TLS check
-with the pressure workers, but does not require the optional Open-Meteo task when device-wide
+the bounded X10A timeout-delta requirement. The bench exercises both the full binary transfer and a
+later OTA-manifest TLS check with pressure workers, but does not require the optional Open-Meteo task when device-wide
 diagnostics consent is off; the production role still requires a successful weather fetch.
 
 A production image which predates the `busy`/generation/artifact handshake cannot enter this path:

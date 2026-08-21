@@ -74,6 +74,10 @@ void mb_autodiscover_initial();
 // call from the httpd task.
 void mb_reconfigure();
 
+// Lock-free acknowledgement for OTA/Weather heap ownership. True means no HomeHub cycle is inside
+// its Config/DNS/socket/vector allocation region; a disabled/non-started task is quiescent too.
+bool mb_network_quiesced();
+
 // Run the bounded mDNS search used by the HomeHub dialog's explicit Search button. This does not
 // modify configuration or the running Modbus link: success returns a numeric IPv4 for the form,
 // and only a later POST /set_hp save makes it persistent. Failure returns false after the bounded

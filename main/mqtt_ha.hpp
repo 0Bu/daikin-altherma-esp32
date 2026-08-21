@@ -42,6 +42,14 @@ bool mqtt_x10a_publish_required();
 // in flight? True when no publisher task exists. Weather and OTA use this acknowledgement before TLS.
 bool mqtt_publish_network_quiesced();
 
+// OTA/Weather raise this lock-free request before waiting for heap ownership. The MQTT publish task
+// cleanly stops esp-mqtt on its own (never from the event callback), which releases an existing
+// MQTTS transport/task and prevents keepalive/subscription I/O from allocating dynamic TLS records
+// after admission. Resume is asynchronous after the network owner clears its activity flag.
+void mqtt_transport_pause_for_network_heap();
+void mqtt_transport_resume_after_network_heap();
+bool mqtt_transport_network_quiesced();
+
 // Observation + decision-readiness status for the one configured living-room source. `received_ms` is
 // monotonic MQTT arrival time; source_unix_s is present only when the configured payload field was
 // parsed. The status endpoint derives freshness from these without mutating the captured sample.

@@ -290,6 +290,13 @@ function elementsFor(...ids) {
     "an expected OTA resource window must not use the error presentation");
 
   sandbox.__api.S.otaInstalling = false;
+  sandbox.__api.S.otaBusy = true;
+  sandbox.__api.S.otaView = { text: "ota.checking" };
+  sandbox.__api.markUnreachable();
+  assert.equal(elements.svStatus.attributes.class, "sc-status idle",
+    "the deliberately refused status snapshot during manifest TLS must not look unreachable");
+
+  sandbox.__api.S.otaBusy = false;
   sandbox.__api.markUnreachable();
   assert.equal(elements.svMode.textContent, "sys.unreachable");
   assert.equal(elements.svStatus.attributes.class, "sc-status err",

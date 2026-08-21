@@ -54,7 +54,7 @@ component or direct managed dependency keys audited by `scripts/run-esp-idf-matr
 | U15 | Multicast DNS | ✅ Direct + 📦 Managed | `mdns`, `espressif/mdns` | Device HTTP service advertisement and explicit HomeHub discovery | [`net.cpp`](../main/net.cpp), [`hp_modbus.cpp`](../main/hp_modbus.cpp) | [mDNS component](https://components.espressif.com/components/espressif/mdns) |
 | U16 | cJSON | ✅ Direct + 📦 Managed | `espressif/cjson` | Bounded config, MQTT and weather-response parsing; large output remains streamed | [`http_config.cpp`](../main/http_config.cpp), [`weather_forecast.cpp`](../main/weather_forecast.cpp) | [cJSON component](https://components.espressif.com/components/espressif/cjson) |
 | U17 | OTA, app-image format, signed-image validation and rollback | ✅ Direct + 🧩 Backend | `app_update`, `esp_app_format`, `bootloader_support` | Low-level slot writes, embedded descriptor checks, boot selection and signed-update verification | [`ota_update.cpp`](../main/ota_update.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [OTA](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-reference/system/ota.html), [application image format](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-reference/system/app_image_format.html) |
-| U18 | Mbed TLS and PSA Crypto | ✅ Direct + 🧩 Backend | `mbedtls` | TLS backend plus direct PSA SHA-256 binding of the downloaded OTA artifact | [`ota_update.cpp`](../main/ota_update.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) | [Mbed TLS support](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-reference/protocols/mbedtls.html) |
+| U18 | Mbed TLS and PSA Crypto | ✅ Direct + 🧩 Backend | `mbedtls` | Dynamic TLS record buffers plus direct PSA SHA-256 binding of the downloaded OTA artifact | [`ota_update.cpp`](../main/ota_update.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [Mbed TLS support](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-reference/protocols/mbedtls.html) |
 | U19 | UART driver | ✅ Direct | `esp_driver_uart` | X10A 9600 8E1 request/response link | [`hp_comm.cpp`](../main/hp_comm.cpp) | [UART](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-reference/peripherals/uart.html) |
 | U20 | I2C master driver | ✅ Direct | `esp_driver_i2c` | Optional ENV III sensor bus using the current master-bus/device API | [`env3.cpp`](../main/env3.cpp) | [I2C](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-reference/peripherals/i2c.html) |
 | U21 | GPIO driver | ✅ Direct | `esp_driver_gpio` | Plain status LED, recovery button and runtime pin configuration | [`status_led.cpp`](../main/status_led.cpp), [`recovery_button.cpp`](../main/recovery_button.cpp) | [GPIO](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-reference/peripherals/gpio.html) |
@@ -137,6 +137,8 @@ to a used feature row.
 | `CONFIG_MBEDTLS_CLIENT_SSL_SESSION_TICKETS` | `n` | U18 |
 | `CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS` | `n` | U18 |
 | `CONFIG_MBEDTLS_FS_IO` | `n` | U18 |
+| `CONFIG_MBEDTLS_DYNAMIC_BUFFER` | `y` | U18 |
+| `CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA` | `n` | U18 |
 | `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN` | `y` | U13 |
 | `CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT` | `y` | U01 |
 | `CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA` | `n` | U08 |

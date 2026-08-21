@@ -1,12 +1,12 @@
 // /ota/check, /ota/update, /ota/status — thin HTTP layer over ota_update.cpp.
 #include "http_handlers.hpp"
 #include "ota_update.hpp"
-#include "logic/json.hpp"        // json_quote — the ONE RFC 8259 encoder every payload goes through
+#include "logic/json.hpp"        // json_append_quoted — the ONE RFC 8259 encoder every payload uses
 #include "logic/query_flag.hpp"  // query_flag_on — a flag fires on "1" and nothing else
 #include "esp_http_server.h"
 #include <cstdio>
 #include <cstdlib>
-#include <string>
+#include <string_view>
 
 namespace daik {
 
@@ -75,29 +75,44 @@ static esp_err_t ota_do(httpd_req_t* req) {
 }
 
 static esp_err_t ota_stat(httpd_req_t* req) {
-    OtaStatus s = ota_status();
-    // Every string field goes through json_quote (json.hpp), not raw concatenation: `message` and
+    const OtaStatus s = ota_status();
+    // Every string field goes through json_append_quoted (json.hpp), not raw concatenation:
+    // `message` and
     // `available` ARE network-derived now that the manifest check has landed (a version parsed from
     // a remote manifest, an error string chosen from a fetch failure), and one '"' or control byte
     // there would break JSON.parse in the UI's update flow. `state`/`current` remain internal, but
     // routing every string through the one encoder is what meant the OTA work did not have to remember.
-    // json_quote emits the surrounding quotes.
-    std::string j = "{\"state\":" + json_quote(s.state) +
-                    ",\"progress\":" + std::to_string(s.progress) +
-                    ",\"message\":" + json_quote(s.message) +
-                    ",\"update_available\":" + (s.update_available ? "true" : "false") +
-                    // `downgrade` says the offered build is installable but OLDER — the dev ->
-                    // release direction. The UI needs both flags: update_available alone would make
-                    // a release-channel check on a dev board read as "up to date" forever.
-                    ",\"downgrade\":" + (s.downgrade ? "true" : "false") +
-                    ",\"channel\":" + json_quote(s.channel) +
-                    ",\"busy\":" + (s.busy ? "true" : "false") +
-                    ",\"generation\":" + std::to_string(s.generation) +
-                    ",\"available\":" + json_quote(s.available) +
-                    ",\"available_sha256\":" + json_quote(s.available_sha256.data()) +
-                    ",\"available_channel\":" + json_quote(s.available_channel) +
-                    ",\"current\":" + json_quote(s.current) + "}";
-    return http_send_json(req, j.c_str());
+    // Keep the progress surface allocation-free: it is polled while X509 owns the heap. The 2 KiB
+    // stack bound covers the worst-case RFC-8259 expansion of every fixed-capacity text field and
+    // fails closed rather than reallocating if that contract ever grows.
+    FixedBuffer<2048> j;
+    auto number = [&j](uint32_t value) {
+        char text[16];
+        const int n = snprintf(text, sizeof(text), "%lu", static_cast<unsigned long>(value));
+        if (n > 0) j += std::string_view(text, static_cast<size_t>(n));
+    };
+    j += "{\"state\":"; json_append_quoted(j, std::string_view(s.state));
+    j += ",\"progress\":"; number(static_cast<uint32_t>(s.progress));
+    j += ",\"message\":"; json_append_quoted(j, std::string_view(s.message));
+    j += ",\"update_available\":"; j += s.update_available ? "true" : "false";
+    // `downgrade` says the offered build is installable but OLDER — the dev -> release direction.
+    j += ",\"downgrade\":"; j += s.downgrade ? "true" : "false";
+    j += ",\"channel\":"; json_append_quoted(j, std::string_view(s.channel));
+    j += ",\"busy\":"; j += s.busy ? "true" : "false";
+    j += ",\"generation\":"; number(s.generation);
+    j += ",\"heap_min_free_bytes\":"; number(s.heap_min_free_bytes);
+    j += ",\"heap_min_largest_block_bytes\":"; number(s.heap_min_largest_block_bytes);
+    j += ",\"available\":"; json_append_quoted(j, std::string_view(s.available));
+    j += ",\"available_sha256\":"; json_append_quoted(j, s.available_sha256.data());
+    j += ",\"available_channel\":";
+    json_append_quoted(j, std::string_view(s.available_channel));
+    j += ",\"current\":"; json_append_quoted(j, std::string_view(s.current));
+    j += '}';
+    if (!j.ok()) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return http_send_json(req, "{\"error\":\"OTA status exceeds its fixed buffer\"}");
+    }
+    return http_send_json(req, j.data());
 }
 
 void http_register_ota(httpd_handle_t s, HttpSurface surface) {

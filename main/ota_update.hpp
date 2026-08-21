@@ -1,4 +1,5 @@
 #pragma once
+#include "logic/fixed_text.hpp"
 // Pull-based signed OTA (esp_http_client -> esp_ota). Flow: check -> lease manifest channel/version/
 // app SHA -> stream and hash daikin-altherma-esp32<suffix>.bin into the inactive slot -> release TLS
 // -> require exact hash + verify signature -> reboot, with a downgrade gate that refuses anything
@@ -42,10 +43,9 @@ void ota_health_gate_arm();                        // main.cpp: arm rollback hea
 // second by the MQTT publish task so it can stand aside
 // instead of losing the allocation race and throwing std::bad_alloc (#380, logic/ota_quiesce.hpp).
 //
-// Deliberately NOT `ota_status().state == "updating"`: that copies several std::strings out under a
-// mutex, so the question "is the heap under pressure?" would itself allocate — asked once per second
-// by the very task the pressure is aimed at, on a lock the OTA task holds while it works. This is a
-// lock-free atomic load of a bool and cannot throw, block or fail.
+// Deliberately NOT `ota_status().state == "updating"`: even its fixed-capacity snapshot takes the
+// OTA and Config mutexes. Asked once per second by the task standing aside, this question must be a
+// lock-free atomic load that cannot throw, block or fail.
 //
 // Covers the manifest handshake as well as the DOWNLOAD window. The response is only ~200 B, but
 // TLS setup itself can lose the largest-block race before one response byte exists.
@@ -64,17 +64,19 @@ void ota_health_gate_arm();                        // main.cpp: arm rollback hea
 bool ota_download_active();
 
 struct OtaStatus {
-    std::string state;            // idle|checking|updating|done|error
+    FixedText<16> state;          // idle|checking|updating|done|error
     int         progress = 0;     // 0..100
-    std::string message;
+    FixedText<128> message;
     bool        update_available = false;
-    std::string available;        // manifest version returned by the completed check
+    FixedText<32> available;      // manifest version returned by the completed check
     std::array<char, 65> available_sha256{}; // exact signed app bytes; fixed to keep status cheap
-    std::string available_channel; // feed which produced available + available_sha256
-    std::string current;          // running version
-    std::string channel;          // "release" | "dev" — the currently selected live feed
+    FixedText<8> available_channel; // feed which produced available + available_sha256
+    FixedText<32> current;        // running version
+    FixedText<8> channel;         // "release" | "dev" — the currently selected live feed
     bool        busy = false;     // one accepted check/update task still owns the OTA operation
     uint32_t    generation = 0;   // non-zero monotonic accepted-operation identity
+    uint32_t    heap_min_free_bytes = 0;     // current operation, INTERNAL 8-bit heap
+    uint32_t    heap_min_largest_block_bytes = 0;
     // The offered build is INSTALLABLE but OLDER than what is running (the dev -> release
     // direction). Reported separately from update_available so the UI can word it as a switch-back
     // and ask for confirmation, rather than either hiding it or calling an older build an "update".
@@ -83,9 +85,9 @@ struct OtaStatus {
 OtaStatus ota_status();
 
 // Is a check or a download in flight? Separate from ota_status() because the caller is the heap
-// watchdog (heap_guard.cpp), which runs when allocation is failing: copying an OtaStatus copies several
-// std::strings out under the lock and can itself throw std::bad_alloc, on the one path that must
-// stay allocation-free. This reads the same mutex-guarded bool and returns it.
+// watchdog (heap_guard.cpp), which runs when allocation is failing: even a fixed status snapshot
+// and narrow Config read would take two locks on the path that must remain allocation-free. This
+// reads the same mutex-guarded bool and returns it.
 //
 // The BROADER of the two flags — see ota_download_active() above for which to reach for.
 bool ota_busy();
