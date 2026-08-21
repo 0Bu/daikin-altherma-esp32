@@ -18,6 +18,7 @@ const files = [
   "main/http_ota.cpp",
   "main/mqtt_ha.cpp",
   "main/logic/ota_quiesce.hpp",
+  ".github/workflows/build.yml",
 ];
 const pristine = new Map(files.map(rel => [rel, fs.readFileSync(path.join(root, rel), "utf8")]));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-production-ota-contract-"));
@@ -72,6 +73,10 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         "full_download_evidence = exercise_bench_full_download(",
         "full_download_evidence = bench_manifest_only_bypass(")],
+    ["the freshly installed target skips rollback probation", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "target_probation = wait_for_bench_ota_probation(",
+        "target_probation = bypass_target_probation(")],
     ["the target is denied its explicit bench downgrade", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'expected_channel="release", allow_downgrade=True',
@@ -82,8 +87,10 @@ try {
         'set_update_channel(host, "release")')],
     ["the release probation wait is bypassed", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        "release_probation = wait_for_bench_release_probation(",
+        "release_probation = wait_for_bench_ota_probation(",
         "release_probation = bypass_release_probation(")],
+    ["a gate-only change no longer republishes an exact-source artifact", () =>
+      replaceOnce(".github/workflows/build.yml", "|production-ota-gate", "")],
     ["full-transfer status busy refusal is no longer required", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'for key in ("status_busy_503", "values_busy_503", "diag_ok", "ota_status_ok"):',

@@ -19,6 +19,7 @@ const ota = read("main/ota_update.cpp");
 const httpOta = read("main/http_ota.cpp");
 const mqtt = read("main/mqtt_ha.cpp");
 const quiesce = read("main/logic/ota_quiesce.hpp");
+const workflow = read(".github/workflows/build.yml");
 
 assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/,
   "the bench stage must remain distinct and ordered before production");
@@ -65,11 +66,15 @@ assert.match(gate, /git",\s*"rev-parse",\s*"HEAD"/,
   "local host contracts must run on the manifest's exact main source");
 assert.match(gate, /git",\s*"status",\s*"--porcelain"/,
   "dirty local code must not stand in for the published source");
+const buildRelevant = workflow.match(/relevant='([^']+)'/)?.[1];
+assert.ok(buildRelevant && new RegExp(buildRelevant).test("scripts/production-ota-gate.py"),
+  "a gate-only source change must publish a new artifact with the same exact source identity");
 assert.match(gate, /scripts\/run-mock-tests\.sh/,
   "catalog-wide pure X10A replay must run before hardware promotion");
 assert.match(gate, /scripts\/run-contract-tests\.sh/,
   "all X10A, OTA, production-promotion and public-readiness contracts must run before hardware promotion");
 
+const targetProbation = gate.indexOf("target_probation = wait_for_bench_ota_probation(");
 const fullDownload = gate.indexOf("full_download_evidence = exercise_bench_full_download(");
 const testStress = gate.indexOf("test_evidence = stress_board(", fullDownload);
 const productionConfirmation = gate.indexOf("if args.confirm_production != PRODUCTION_ROLE");
@@ -78,7 +83,8 @@ const post = gate.indexOf("    post_update_once(", offer);
 const returned = gate.indexOf('wait_for_new_firmware(production["host"], args.expected_version, elf)');
 const productionStress = gate.indexOf("production_evidence = stress_board(");
 const retained = gate.indexOf("retained = verify_retained_x10a(final_status)");
-assert.ok(fullDownload >= 0 && testStress > fullDownload && productionConfirmation > testStress &&
+assert.ok(targetProbation >= 0 && fullDownload > targetProbation && testStress > fullDownload &&
+          productionConfirmation > testStress &&
           offer > productionConfirmation &&
           post > offer && returned > post && productionStress > returned && retained > productionStress,
   "full bench binary OTA, bench stress, production confirmation, one production update, reboot proof, canary stress and retained X10A must stay ordered");
@@ -90,22 +96,28 @@ const fullHelper = gate.slice(fullHelperStart, fullHelperEnd);
 const releaseOffer = fullHelper.indexOf('expected_channel="release", allow_downgrade=True');
 const releasePost = fullHelper.indexOf("post_update_once(", releaseOffer);
 const releaseBoot = fullHelper.indexOf("release_status = wait_for_new_firmware(", releasePost);
-const releaseProbation = fullHelper.indexOf("release_probation = wait_for_bench_release_probation(", releaseBoot);
+const releaseProbation = fullHelper.indexOf("release_probation = wait_for_bench_ota_probation(", releaseBoot);
 const devChannel = fullHelper.indexOf('set_update_channel(host, "dev")', releaseProbation);
 const targetBoot = fullHelper.indexOf("target_status = wait_for_new_firmware(", devChannel);
 assert.ok(releaseOffer >= 0 && releasePost > releaseOffer && releaseBoot > releasePost &&
           releaseProbation > releaseBoot && devChannel > releaseProbation && targetBoot > devChannel,
   "the target must perform a complete release download, survive rollback probation, and return to the exact dev artifact before staging passes");
-assert.match(gate, /BENCH_RELEASE_PROBATION_S\s*=\s*105/,
-  "the old release must survive beyond its 90-second health window");
-const probationStart = gate.indexOf("def wait_for_bench_release_probation(");
+assert.match(gate, /BENCH_OTA_PROBATION_S\s*=\s*105/,
+  "each newly installed bench image must survive beyond its 90-second health window");
+const probationStart = gate.indexOf("def wait_for_bench_ota_probation(");
 const probationEnd = gate.indexOf("\ndef wait_for_legacy_offer(", probationStart);
 const probationHelper = gate.slice(probationStart, probationEnd);
 assert.ok(probationStart >= 0 && probationEnd > probationStart,
-  "the release probation helper must remain identifiable");
+  "the shared target/release probation helper must remain identifiable");
 assert.match(probationHelper,
   /uptime_s[\s\S]{0,900}?heap_restarts[\s\S]{0,300}?mqtt_skipped[\s\S]{0,300}?poll_skipped[\s\S]{0,900}?MIN_FINAL_FREE_HEAP[\s\S]{0,300}?MIN_FINAL_LARGEST_BLOCK/,
-  "release probation must require the commit window, no allocation failures and safe heap");
+  "both probation phases must require the commit window, no allocation failures and safe heap");
+assert.match(gate,
+  /target_probation = wait_for_bench_ota_probation\([\s\S]{0,180}?phase="target"/,
+  "the target must commit its rollback health proof before the release exercise");
+assert.match(fullHelper,
+  /release_probation = wait_for_bench_ota_probation\([\s\S]{0,180}?phase="release"/,
+  "the rollback-exercise release must commit its health proof before dev restore");
 assert.match(gate,
   /for key in \("status_busy_503", "values_busy_503", "diag_ok", "ota_status_ok"\)[\s\S]{0,300}?target OTA did not expose sampled operation-local heap minima/,
   "the full binary exercise must prove fast snapshot refusal, live compact surfaces and OTA-local heap telemetry");

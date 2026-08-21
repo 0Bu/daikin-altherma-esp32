@@ -159,13 +159,13 @@ claiming a bad signature. Initial feed URLs and every redirect stay on forced HT
 response remains a size-policy refusal rather than masquerading as an interrupted connection.
 `tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently (including
 the fixed task lease, generation rollback and whole-stream SHA comparison) and proves the
-source contract turns red; all eighty-four seeded regressions are required. The allocation-free
+source contract turns red; all eighty-five seeded regressions are required. The allocation-free
 `FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
 
 `node test/test_production_ota_gate_contract.mjs` pins the exact-artifact bench-to-production
-workflow: full signed release-binary pressure, the short completed-verifier state, 105-second
-rollback probation, exact dev restore, and the sole production write. Its paired
-`tools/production_ota/selftest.mjs` requires all thirty-two stage-removal mutations to turn that same
+workflow: initial target probation, full signed release-binary pressure, the short completed-verifier state,
+105-second release probation, exact dev restore, and the sole production write. Its paired
+`tools/production_ota/selftest.mjs` requires all thirty-five stage-removal mutations to turn that same
 contract red.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
