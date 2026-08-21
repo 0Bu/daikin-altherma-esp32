@@ -169,7 +169,7 @@ const descNoteHtml = (lead, text) =>
   `<div class="vdesc-p"><span class="vdesc-n">${esc(lead)}</span> ${esc(text)}</div>`;
 const sandbox = vm.createContext({
   S, LANG: "de", t, esc, descNoteHtml, setTimeout, clearTimeout,
-  uiLangSupported: (lang) => ["en", "de", "es", "fr", "it", "pl", "cs", "uk"].includes(lang),
+  uiLangSupported: (lang) => ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"].includes(lang),
   MODEL_DESCRIPTIONS: {}, hasHist: () => false, checkupDuration: (seconds) => `${seconds} s`,
   histHtml: () => `<div class="vhist vhist-state">TIMELINE</div>`,
 });

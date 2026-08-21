@@ -67,6 +67,10 @@ function assertPersistentBannerRepaints(name, status) {
       ariaLabel: "",
       setAttribute(name, value) { if (name === "aria-label") this.ariaLabel = value; },
     },
+    verLink: {
+      ariaLabel: "",
+      setAttribute(name, value) { if (name === "aria-label") this.ariaLabel = value; },
+    },
     backTitle: { textContent: "" },
   };
   const context = {
@@ -85,11 +89,14 @@ function assertPersistentBannerRepaints(name, status) {
   api.renderHeader();
   assert.equal(elements.backTitle.textContent, "Settings");
   assert.equal(elements.btnBack.ariaLabel, "Back");
+  assert.equal(elements.verLink.ariaLabel, "Check for firmware updates");
   assert.equal(api.activateLang("de"), true);
   assert.equal(elements.backTitle.textContent, "Einstellungen",
     "a live language switch must repaint the active route title without a navigation round-trip");
   assert.equal(elements.btnBack.ariaLabel, "Zurück",
     "a live language switch must repaint the active Back control's accessible name");
+  assert.equal(elements.verLink.ariaLabel, "Nach Firmware-Updates suchen",
+    "a live language switch must repaint the persistent update control's accessible name");
 }
 
 {
@@ -292,6 +299,34 @@ assertPersistentBannerRepaints(
   render(null, { label: "row", unit: "°C" });
   assert.equal(target.writes, 2, "renderInspectHist must repaint when only LANG changes");
   assert.equal(target.innerHTML, "de:chart");
+}
+
+// Derived inspector charts used to bypass INSPECT_I18N and expose their English aria name even
+// though the visible inspector title/body were native. Exercise the real chart-name path.
+{
+  const target = element();
+  const context = {
+    LANG: "es",
+    INSPECT_I18N: { es: { pth: { aria: "Potencia térmica estimada" } } },
+    S: { inspHistSig: "", hist: new Map([["pth", { gen: 1 }]]), histPin: new Map() },
+    $: () => target,
+    MB_PAIRS: [],
+    histIdFor: () => "pth",
+    hasHist: () => true,
+    hasModbusHist: () => false,
+    ensureHistPair: () => {},
+    histCacheKey: (id) => id,
+    histHtml: (_id, _unit, name) => name,
+    displayUnit: () => "kW",
+    displayReadingLabel: String,
+    DERIVED: { pth: { unit: "kW" } },
+  };
+  const render = productionApi(schematicSource, ["renderInspectHist"], context).api.renderInspectHist;
+  render({ i18nKey: "pth", aria: { en: "Thermal capacity at the PHE (estimated)",
+                                   de: "Thermische Leistung am PHE (Schätzung)" } },
+         { label: "Thermal capacity", unit: "kW" });
+  assert.equal(target.innerHTML, "Potencia térmica estimada",
+    "a derived chart must use the lazy locale's accessible name");
 }
 
 {

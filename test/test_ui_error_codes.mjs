@@ -4,25 +4,32 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const descriptionsSource = readAppFragments(["descriptions.js"]);
+const baseSource = readAppFragments(["i18n.js", "descriptions.js"]);
 const header = fs.readFileSync(new URL("../main/logic/error_codes.hpp", import.meta.url), "utf8");
 
 const tableContext = {
   LANG: "en",
+  navigator: { language: "en" },
+  localStorage: { getItem: () => null, setItem: () => {} },
+  document: { getElementById: () => null },
   esc: (value) => String(value)
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;"),
-  t: () => "Normal:",
 };
 vm.createContext(tableContext);
-vm.runInContext(descriptionsSource + "\nthis.__ui = { codes: DAIKIN_FAULT_CODES," +
+vm.runInContext(baseSource, tableContext, { filename: "main/www/app.sources" });
+for (const lang of ["de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"])
+  vm.runInContext(readUiLocale(lang), tableContext, { filename: `main/www/locales/${lang}.js` });
+vm.runInContext("this.__ui = { codes: DAIKIN_FAULT_CODES, packs: FAULT_CODE_I18N," +
   " render: faultCodeDetailHtml, setLang: (lang) => { LANG = lang; } };", tableContext,
   { filename: "main/www/app.sources" });
-const languages = ["en", "de", "es", "fr", "it", "pl", "cs", "uk"];
-const uiCodes = Array.from(tableContext.__ui.codes, (entry) => Object.fromEntries(
-  ["code", ...languages].map((key) => [key, entry[key]]),
+const languages = ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"];
+const uiCodes = Array.from(tableContext.__ui.codes, (entry, index) => Object.fromEntries(
+  [["code", entry.code], ...languages.map((lang) =>
+    [lang, tableContext.__ui.packs[lang]?.values[index] || entry[lang]])],
 ));
 
 const firmwareCodes = [...header.matchAll(/\{"([0-9A-Z]{2})",\s*"([^"]+)"\}/g)]
@@ -66,4 +73,4 @@ assert.match(render("en", "--"), /No fault code is currently being transmitted\.
 assert.match(render("de", "ZZ"), /<code>ZZ<\/code>[\s\S]*Keine Kurzbeschreibung/,
   "an unknown two-character code stays visible without an invented meaning");
 
-console.log("Error-code UI: 63-code eight-language lookup is complete; only the current code is rendered");
+console.log("Error-code UI: 63-code 13-language lookup is complete; only the current code is rendered");

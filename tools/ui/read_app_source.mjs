@@ -5,7 +5,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const ROOT = process.env.DAIKIN_UI_ROOT
+  ? path.resolve(process.env.DAIKIN_UI_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEFAULT_APP_SOURCE = path.join(ROOT, "main/www/app.sources");
 const UI_LOCALE_DIR = path.join(ROOT, "main/www/locales");
 
@@ -74,7 +76,7 @@ export function readAppFragments(names, source = DEFAULT_APP_SOURCE) {
 }
 
 // Locale modules are deliberately outside app.sources so they do not consume the dashboard's
-// 150 KiB single-response startup budget. Focused host tests can still execute the exact separately
+// 160 KiB single-response startup budget. Focused host tests can still execute the exact separately
 // shipped source rather than copying translations into fixtures.
 export function readUiLocale(code) {
   if (!/^[a-z]{2}$/.test(code)) fail(`invalid locale code: ${code}`);

@@ -105,11 +105,18 @@ one. The error is a full-row, inset, bottom-rounded tinted tongue with the same 
 typography and downward slide as a value explainer; it is no longer constrained to the endpoint's
 right-hand value column. The global reduced-motion contract removes that non-essential animation.
 
-`node test/test_ui_locale_catalogs.mjs` evaluates the separately shipped de/es/fr/it/pl/cs/uk
-modules against the embedded English fallback. All 734 keys, value types and parameter-function
-arities must match; browser detection and the Firmware selector must name the same eight languages;
-concurrent loads coalesce onto `/locale.js`; and every deterministic gzip stays within its tight
-32 KiB per-locale budget.
+`scripts/run-ui-localization-audit.sh` is the named CI gate for complete device-local copy. Its core,
+`node test/test_ui_locale_catalogs.mjs`, evaluates the separately shipped de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi
+modules against the embedded English fallback. All 838 keys, value types and parameter-function
+arities must match; browser detection and the Firmware selector must name the same thirteen languages;
+all 125 value and 15 model-description rows must have native copy with no English prose fallback
+(compact locales may fold the normal context into their first field); concurrent loads coalesce onto
+`/locale.js`; every deterministic gzip asset stays within its 32 KiB response budget; and all locale
+assets together stay within a 272 KiB aggregate-growth guard. The separate firmware-size gate binds
+the actual signed application image and its slot headroom. A fingerprint over the canonical
+English/domain copy makes every locale stale when a source sentence changes without its translation;
+`node tools/ui_localization/selftest.mjs` proves that stale source copy, missing specialist/domain
+tables and reordered positional fault copy all fail.
 
 `node test/test_homehub_discovery_contract.mjs` pins the IDF-facing lifecycle that the pure C++ host
 suite cannot link: fresh firmware runs one persisted search before HTTP, the Modbus poll task never
@@ -162,13 +169,13 @@ binary ON/OFF flags, structurally named valve selectors and ordinary numeric `0`
 truth table, its derived named row, and fail-closed handling of missing, malformed or stale contacts.
 
 `node test/test_ui_homehub_copy.mjs` audits all 32 curated HomeHub rows as one semantic contract:
-the register guide's English name, the German visual label, the matching bilingual explanation and
-the visible status vocabulary. German labels must use fluent qualifiers instead of parenthetical
+the register guide's English name, all localized visual labels and explanations, and the visible
+status vocabulary. German labels must use fluent qualifiers instead of parenthetical
 fragments. The test also pins exact matches where a broad catalog regex would be misleading,
 notably room-temperature setpoints versus the unrelated `Thermo ON` demand flag.
 
 `node test/test_ui_error_codes.mjs` keeps the Error code row concise and source-aligned. It compares
-the internal 63-code lookup with `main/logic/error_codes.hpp`, requires a short meaning in all eight
+the internal 63-code lookup with `main/logic/error_codes.hpp`, requires a short meaning in all thirteen
 UI languages and executes the production renderer in each one. Only the currently reported code and
 its meaning may appear; unavailable and unknown values have explicit, non-invented fallbacks.
 

@@ -74,6 +74,14 @@ try {
     "CMake and the host contract must share the 160 KiB budget");
   assert.match(cmake, /minify_and_gzip\.py[\s\S]*--max-gzip-bytes \$\{UI_GZIP_MAX_BYTES\}/,
     "firmware build must execute the checked minifier and size gate");
+  const status = fs.readFileSync(path.join(root, "main/http_status.cpp"), "utf8");
+  const common = fs.readFileSync(path.join(root, "main/http_common.cpp"), "utf8");
+  assert.match(status,
+    /http_send_gzip\(req,\s*"text\/html",\s*index_html_gz_start,\s*index_html_gz_end\)/,
+    "the dashboard route must serve the checked gzip artifact");
+  assert.match(common,
+    /http_send_gzip[\s\S]*httpd_resp_set_hdr\(req, "Content-Encoding", "gzip"\)/,
+    "the gzip sender must declare the matching HTTP content encoding");
 
   // rJSmin supports only unnested template literals.  The wrapper must preserve their raw text,
   // including the leading spaces in nested translated clauses; syntax-only validation missed this

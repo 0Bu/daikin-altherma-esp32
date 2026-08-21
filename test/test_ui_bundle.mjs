@@ -17,7 +17,8 @@ for (const file of files) {
 }
 
 const baseApp = readAppSource();
-const app = baseApp + readUiLocale("de");
+const deSource = readUiLocale("de");
+const app = baseApp + deSource;
 assert.match(baseApp, /^\/\/ Web UI for daikin-altherma-esp32/);
 assert.match(baseApp, /\n"use strict";/);
 assert.match(baseApp, /\nasync function boot\(\)/);
@@ -136,8 +137,8 @@ assert.doesNotMatch(app, /"dyn\.experimental"|section-badge\.experimental/,
 assert.match(app,
   /"dyn\.strategy_help": "[^"]*inner control loop[^"]*D2 clipping share[^"]*zone actually requests heat[^"]*"/,
   "English heating-curve help must name the closed-loop masking caveat and corroborating evidence");
-assert.match(app,
-  /"dyn\.strategy_help": "[^"]*inneren Regelkreis[^"]*D2-Clipping-Anteil[^"]*Zone tatsächlich Wärme anfordert[^"]*"/,
+assert.match(deSource,
+  /\/\* dyn\.strategy_help \*\/ "[^"]*inneren Regelkreis[^"]*D2-Clipping-Anteil[^"]*Zone tatsächlich Wärme anfordert[^"]*"/,
   "German heating-curve help must name the closed-loop masking caveat and corroborating evidence");
 const weatherModalHtml = html.match(/<div class="modal" id="weatherModal"[\s\S]*?<\/form>\s*<\/div>/)?.[0] || "";
 assert.match(weatherModalHtml, /id="wxLatitude"[\s\S]*id="wxLongitude"[\s\S]*href="https:\/\/open-meteo\.com\/"[\s\S]*data-i18n="wx\.attribution"/,
@@ -150,14 +151,18 @@ assert.match(app, /dynamicInfoRow\("weather"[\s\S]*"weather", t\("wx\.title"\)\)
   "the forecast value must open latitude and longitude editing through the firmware config route");
 assert.match(app, /function parseWeatherCoordinatePair\([\s\S]*function pasteWeatherCoordinates\([\s\S]*addEventListener\("paste", pasteWeatherCoordinates\)/,
   "a Google Maps coordinate pair pasted into either field must be split before save");
-const weatherCopyLines = app.split("\n").filter((line) =>
+const weatherCopyLines = baseApp.split("\n").filter((line) =>
   /^\s*"wx\.(?:detail\.source|hint\.(?:configured|setup))"\s*:/.test(line));
-assert.equal(weatherCopyLines.length, 6,
+const germanWeatherCopyLines = deSource.split("\n").filter((line) =>
+  /\/\* wx\.(?:detail\.source|hint\.(?:configured|setup)) \*\//.test(line));
+assert.equal(weatherCopyLines.length, 3,
+  "weather provenance plus configured/setup guidance must exist in English");
+assert.equal(germanWeatherCopyLines.length, 3,
   "weather provenance plus configured/setup guidance must exist in both languages");
-for (const line of weatherCopyLines)
+for (const line of [...weatherCopyLines, ...germanWeatherCopyLines])
   assert.doesNotMatch(line, /experimental|experimentell/i,
     "weather copy must not refer to the controller's experimental Firmware switch");
-const configuredGermanWeatherCopy = weatherCopyLines.find((line) => line.includes("Der ESP32 ruft")) || "";
+const configuredGermanWeatherCopy = germanWeatherCopyLines.find((line) => line.includes("Der ESP32 ruft")) || "";
 assert.equal((configuredGermanWeatherCopy.match(/alle 45 Minuten/g) || []).length, 1,
   "configured German weather guidance must state its refresh interval exactly once");
 assert.doesNotMatch(configuredGermanWeatherCopy, /Google Maps/,
@@ -187,10 +192,12 @@ assert.doesNotMatch(boardModalHtml, /envEnabled|envPreset|env\.hint|temperature 
   "the integrated sensor section must contain no enable checkbox, wiring preset, or technical prose");
 assert.match(app, /"env\.pins_hint": "SDA = data \(yellow Grove wire\); SCL = clock \(white Grove wire\)\.[^"]*saves the working assignment automatically\."/,
   "the English Hardware tongue must explain SDA/SCL and automatic reversal");
-assert.match(app, /"env\.pins_hint": "SDA = Datenleitung \(gelbe Grove-Leitung\), SCL = Taktleitung \(weiße Grove-Leitung\)\.[^"]*funktionierende Zuordnung automatisch\."/,
+assert.match(deSource, /\/\* env\.pins_hint \*\/ "SDA = Datenleitung \(gelbe Grove-Leitung\), SCL = Taktleitung \(weiße Grove-Leitung\)\.[^"]*funktionierende Zuordnung automatisch\."/,
   "the German Hardware tongue must explain SDA/SCL and automatic reversal");
-assert.match(app, /"board\.led_rgb_setup": "Blue, blinking slowly[\s\S]*"board\.led_gpio_wiping": "Solid after very rapid blinking[\s\S]*"board\.led_rgb_setup": "Blau, langsam blinkend[\s\S]*"board\.led_gpio_wiping": "Dauerlicht nach sehr schnellem Blinken/,
-  "both concise status-LED legends must stay bilingual");
+assert.match(baseApp, /"board\.led_rgb_setup": "Blue, blinking slowly[\s\S]*"board\.led_gpio_wiping": "Solid after very rapid blinking/,
+  "the concise English status-LED legends must stay complete");
+assert.match(deSource, /\/\* board\.led_rgb_setup \*\/ "Blau, langsam blinkend[\s\S]*\/\* board\.led_gpio_wiping \*\/ "Dauerlicht nach sehr schnellem Blinken/,
+  "the concise German status-LED legends must stay complete");
 assert.match(style, /\.pin-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*\}[\s\S]*\.pin-grid\[hidden\]\s*\{[^}]*display:\s*none/,
   "board and ENV pin fields must stay in two-column rows without overriding their hidden state");
 assert.match(app, /function boardLedLegend\(b\)[\s\S]*if \(b\.led_gpio == null \|\| b\.led_gpio < 0\) return "";[\s\S]*board\.led_\$\{kind\}_\$\{phase\}[\s\S]*function boardRow\(\)[\s\S]*boardLedLegend\(b\)[\s\S]*t\("board\.hint"\)[\s\S]*t\("env\.pins_hint"\)/,
@@ -304,8 +311,9 @@ assert.match(app, /lastIndexOf\("\$"\)/,
   "topic$path parsing must preserve leading $ system topics by splitting at the last delimiter");
 assert.match(app, /validRefTopic\(topic\) && path\.length <= 128/,
   "room-source paths must remain persistable until a real MQTT frame validates them");
-assert.match(app, /"ref\.delete": "Delete"[^]*"ref\.delete": "Löschen"/,
-  "Delete must remain explicit in both supported languages");
+assert.match(baseApp, /"ref\.delete": "Delete"/);
+assert.match(deSource, /\/\* ref\.delete \*\/ "Löschen"/,
+  "Delete must remain explicit in the English/German baseline catalogs");
 assert.doesNotMatch(httpConfig, /test_ref_temp|mqtt_reference_test/,
   "the room-source API must persist without a probe or proof gate");
 assert.match(mqttHa, /set_reference_error[\s\S]*reference temperature payload rejected[\s\S]*decode_reference_frame/,

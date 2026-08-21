@@ -15,6 +15,11 @@
 //   Pl    force Polish
 //   Cs    force Czech
 //   Uk    force Ukrainian
+//   Zh    force Simplified Chinese
+//   Ja    force Japanese
+//   Nb    force Norwegian Bokmal
+//   Sv    force Swedish
+//   Fi    force Finnish
 //
 // `Auto` is a first-class value, NOT the absence of a value: a device fresh out of the box, or one
 // OTA-upgraded from a pre-v4 blob, reports "auto" and the browser keeps auto-detecting. Only when the
@@ -38,6 +43,11 @@ enum class UiLang {
     Pl,    // force Polish
     Cs,    // force Czech
     Uk,    // force Ukrainian
+    Zh,    // force Simplified Chinese
+    Ja,    // force Japanese
+    Nb,    // force Norwegian Bokmal
+    Sv,    // force Swedish
+    Fi,    // force Finnish
 };
 
 inline const char* ui_lang_name(UiLang l) {
@@ -50,6 +60,11 @@ inline const char* ui_lang_name(UiLang l) {
         case UiLang::Pl: return "pl";
         case UiLang::Cs: return "cs";
         case UiLang::Uk: return "uk";
+        case UiLang::Zh: return "zh";
+        case UiLang::Ja: return "ja";
+        case UiLang::Nb: return "nb";
+        case UiLang::Sv: return "sv";
+        case UiLang::Fi: return "fi";
         default: return "auto";
     }
 }
@@ -58,7 +73,8 @@ inline const char* ui_lang_name(UiLang l) {
 // than defaulted: a typo'd language silently meaning "auto" would look like the save worked.
 inline bool ui_lang_valid(const std::string& s) {
     return s == "auto" || s == "de" || s == "en" || s == "es" || s == "fr" || s == "it" ||
-           s == "pl" || s == "cs" || s == "uk";
+           s == "pl" || s == "cs" || s == "uk" || s == "zh" || s == "ja" || s == "nb" ||
+           s == "sv" || s == "fi";
 }
 
 // Parse a stored/POSTed language name, falling back to `def` for anything unrecognised. The fallback
@@ -73,6 +89,11 @@ inline UiLang ui_lang_parse(const std::string& s, UiLang def = UiLang::Auto) {
     if (s == "pl")   return UiLang::Pl;
     if (s == "cs")   return UiLang::Cs;
     if (s == "uk")   return UiLang::Uk;
+    if (s == "zh")   return UiLang::Zh;
+    if (s == "ja")   return UiLang::Ja;
+    if (s == "nb")   return UiLang::Nb;
+    if (s == "sv")   return UiLang::Sv;
+    if (s == "fi")   return UiLang::Fi;
     if (s == "auto") return UiLang::Auto;
     return def;
 }
@@ -90,6 +111,11 @@ inline int32_t ui_lang_to_int(UiLang l) {
         case UiLang::Pl: return 6;
         case UiLang::Cs: return 7;
         case UiLang::Uk: return 8;
+        case UiLang::Zh: return 9;
+        case UiLang::Ja: return 10;
+        case UiLang::Nb: return 11;
+        case UiLang::Sv: return 12;
+        case UiLang::Fi: return 13;
         default: return 0;
     }
 }
@@ -103,6 +129,11 @@ inline UiLang ui_lang_from_int(int32_t v) {
         case 6: return UiLang::Pl;
         case 7: return UiLang::Cs;
         case 8: return UiLang::Uk;
+        case 9: return UiLang::Zh;
+        case 10: return UiLang::Ja;
+        case 11: return UiLang::Nb;
+        case 12: return UiLang::Sv;
+        case 13: return UiLang::Fi;
         default: return UiLang::Auto;
     }
 }

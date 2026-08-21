@@ -137,6 +137,14 @@ jobs:
       - name: Verify the presenter-parity gate still has teeth
         run: ./tools/presenter/selftest.sh
 
+      # Translation completeness is its own fail-closed contract. Key/count parity catches newly
+      # added copy; a canonical-source fingerprint also makes an edited English/domain sentence
+      # stale in every shipped locale until that translation has been reviewed and moved with it.
+      - name: Audit complete UI localization
+        run: ./scripts/run-ui-localization-audit.sh
+      - name: Verify the localization gate still has teeth
+        run: node ./tools/ui_localization/selftest.mjs
+
       # One source of truth for the whole device UI. It executes every test_ui_*.mjs contract, the
       # HomeHub/MCP interaction boundaries and a behavioral matrix over the production one-time
       # wiring: every shipped modal, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, and the
@@ -194,10 +202,11 @@ jobs:
       - name: Verify the description audit still has teeth
         run: ./tools/descriptions/selftest.sh
 
-      # A tappable row can still explain a correct result only in installer language, omit what the
-      # finding does NOT prove, or leave the owner with no supported next step. This binds every
-      # visible plant-diagnostics row to localized actionable copy and to its English guide. The
-      # same gate rejects German prose in maintained repository Markdown.
+      # A tappable row can still explain a correct result only in installer language or omit what the
+      # finding does NOT prove. This binds the English/German diagnosis baseline to its evidence and
+      # English guide without inventing an unsupported recommendation. The separate localization
+      # gate binds every other shipped locale to that reviewed source. This gate also rejects German
+      # prose in maintained repository Markdown.
       # The source stamp makes evaluator/threshold/UI changes stale that guide even when no row was
       # added. The $user-docs-review skill is the human half; this is the fail-closed mechanical one.
       - name: Audit English plain-language diagnosis help

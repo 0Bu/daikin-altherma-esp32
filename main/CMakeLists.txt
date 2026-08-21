@@ -1,4 +1,4 @@
-set(UI_LOCALE_CODES de es fr it pl cs uk)
+set(UI_LOCALE_CODES de es fr it pl cs uk zh ja nb sv fi)
 set(UI_LOCALE_GZIP_FILES "")
 foreach(locale IN LISTS UI_LOCALE_CODES)
     list(APPEND UI_LOCALE_GZIP_FILES "${CMAKE_CURRENT_BINARY_DIR}/locale-${locale}.js.gz")
@@ -184,8 +184,8 @@ set(UI_LOCALE_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_js
 set(UI_MINIFIER_VENDOR
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rjsmin.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rcssmin.py")
-# The default-off X10A diagnosis form/result renderer added 3.3 KiB compressed to the former
-# 150 KiB ceiling. Keep a measured 160 KiB cap rather than disabling the gate or rounding it away.
+# Browsers do not consistently negotiate Brotli on this trusted-LAN HTTP origin. Keep gzip so the
+# payload's Content-Encoding is usable by every supported browser, and gate the measured response.
 set(UI_GZIP_MAX_BYTES 163840)
 idf_build_get_property(PYTHON PYTHON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APP_JS_MANIFEST}")
@@ -228,7 +228,7 @@ add_custom_target(gen_index_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index.html.g
 add_dependencies(${COMPONENT_LIB} gen_index_gz)
 
 # Non-English dashboard catalogs are device-local, separately compressed assets. Keeping them out
-# of index.html preserves the 150 KiB single-response startup contract while /locale.js selects one
+# of index.html preserves the 160 KiB single-response startup contract while /locale.js selects one
 # asset by its query parameter. Each file is still linked into the signed application image; no
 # network service participates in localization. A separate tight cap prevents a catalog from
 # quietly becoming another large response even though it is served straight from flash.

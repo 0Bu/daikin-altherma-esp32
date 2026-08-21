@@ -86,7 +86,7 @@ class Element {
   const context = {
     S,
     LANG: "de",
-    uiLangSupported: (lang) => ["en", "de", "es", "fr", "it", "pl", "cs", "uk"].includes(lang),
+    uiLangSupported: (lang) => ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"].includes(lang),
     MODEL_DESCRIPTIONS: {},
     sessionStorage,
     document: { activeElement: null, createElement: () => new Element() },
@@ -182,7 +182,7 @@ function elementsFor(...ids) {
   const context = {
     S,
     LANG: "de",
-    uiLangSupported: (lang) => ["en", "de", "es", "fr", "it", "pl", "cs", "uk"].includes(lang),
+    uiLangSupported: (lang) => ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"].includes(lang),
     MODEL_DESCRIPTIONS: {},
     document: {
       activeElement: null,

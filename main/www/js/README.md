@@ -28,7 +28,12 @@ concatenation through `tools/ui/read_app_source.mjs`.
 
 Non-English catalogs live under [`../locales`](../locales) and deliberately do not appear in
 `app.sources`. CMake minifies and compresses each one independently; `/locale.js?lang=…` serves the
-selected signed-image asset from the device, and `test/test_ui_locale_catalogs.mjs` enforces key,
+selected signed-image asset from the device. Alongside the compact UI catalog, the eleven newer locale
+modules contain their schematic inspector, HomeHub labels and value/model explanations; German keeps
+that established specialist copy inline in the common source tables. The five latest packs also
+carry their fault-code meanings and the two cross-source difference explanations, so those languages
+do not enlarge the already bounded startup response.
+`test/test_ui_locale_catalogs.mjs` enforces key,
 type, function-arity, selector and size parity. The same asset also registers concise copy for all
 40 schematic inspector targets and stable offset-keyed names for the 32 HomeHub rows visible in the
 UI; X10A transport labels remain unchanged English register identities.

@@ -93,6 +93,16 @@ extern const unsigned char locale_cs_js_gz_start[] asm("_binary_locale_cs_js_gz_
 extern const unsigned char locale_cs_js_gz_end[]   asm("_binary_locale_cs_js_gz_end");
 extern const unsigned char locale_uk_js_gz_start[] asm("_binary_locale_uk_js_gz_start");
 extern const unsigned char locale_uk_js_gz_end[]   asm("_binary_locale_uk_js_gz_end");
+extern const unsigned char locale_zh_js_gz_start[] asm("_binary_locale_zh_js_gz_start");
+extern const unsigned char locale_zh_js_gz_end[]   asm("_binary_locale_zh_js_gz_end");
+extern const unsigned char locale_ja_js_gz_start[] asm("_binary_locale_ja_js_gz_start");
+extern const unsigned char locale_ja_js_gz_end[]   asm("_binary_locale_ja_js_gz_end");
+extern const unsigned char locale_nb_js_gz_start[] asm("_binary_locale_nb_js_gz_start");
+extern const unsigned char locale_nb_js_gz_end[]   asm("_binary_locale_nb_js_gz_end");
+extern const unsigned char locale_sv_js_gz_start[] asm("_binary_locale_sv_js_gz_start");
+extern const unsigned char locale_sv_js_gz_end[]   asm("_binary_locale_sv_js_gz_end");
+extern const unsigned char locale_fi_js_gz_start[] asm("_binary_locale_fi_js_gz_start");
+extern const unsigned char locale_fi_js_gz_end[]   asm("_binary_locale_fi_js_gz_end");
 
 namespace daik {
 
@@ -230,6 +240,11 @@ static esp_err_t h_locale(httpd_req_t* req) {
         {"pl", locale_pl_js_gz_start, locale_pl_js_gz_end},
         {"cs", locale_cs_js_gz_start, locale_cs_js_gz_end},
         {"uk", locale_uk_js_gz_start, locale_uk_js_gz_end},
+        {"zh", locale_zh_js_gz_start, locale_zh_js_gz_end},
+        {"ja", locale_ja_js_gz_start, locale_ja_js_gz_end},
+        {"nb", locale_nb_js_gz_start, locale_nb_js_gz_end},
+        {"sv", locale_sv_js_gz_start, locale_sv_js_gz_end},
+        {"fi", locale_fi_js_gz_start, locale_fi_js_gz_end},
     };
     for (const auto& asset : assets) {
         if (strcmp(lang, asset.code) != 0) continue;

@@ -39,6 +39,7 @@ scripts/run-description-audit.sh   # can a user find out what each value IS?
 scripts/run-user-docs-audit.sh     # are English docs clear, current, and actionable?
 scripts/run-diagnostic-evidence-audit.sh # is each diagnosis still tied to its cited source?
 scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
+scripts/run-ui-localization-audit.sh # did every shipped locale follow changed canonical UI copy?
 scripts/run-ui-use-case-tests.sh   # do all visible UI actions actually work?
 scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data?
 tools/absence/selftest.sh          # can the source-absence matrix still go red?
@@ -125,9 +126,9 @@ cannot look up is the defect the gate exists for, and the fix is copy, not a sup
 the audit means also running `tools/descriptions/selftest.sh`, same argument as the domain one.
 
 `run-user-docs-audit.sh` closes the next gap: a row can have a description and still leave a normal
-owner unable to interpret or act on it. Every visible plant-diagnostics row therefore needs
-localized English and German UI copy that says what was observed, the limit of the claim and a
-concrete next step; [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) needs the matching English
+owner unable to interpret it. Every visible plant-diagnostics row therefore needs localized English
+and German UI copy that says what was observed and the limit of the claim, without recommending an
+action the available evidence cannot support; [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) needs the matching English
 plain-language section. All maintained repository Markdown is English-only; localized prose belongs
 in the UI translation tables, not in `docs/` or review skills. The guide's
 source stamp covers the evaluator and visible diagnosis contract, so a changed threshold, result or
@@ -135,7 +136,7 @@ wording makes the gate fail even when no row was added. Run the
 [`$user-docs-review` skill](.agents/skills/user-docs-review/SKILL.md), update the prose first, and only
 then use `scripts/run-user-docs-audit.sh --update` to record that review. The stamp is not an
 alternative to reviewing the diff. `tools/user_docs/selftest.sh` proves the gate still rejects a
-missing localization/action/section, non-English documentation, false whole-plant reassurance, and
+missing localization/claim-boundary/section, non-English documentation, false whole-plant reassurance, and
 an unstamped source change.
 
 `run-schematic-audit.sh` asks it one layer up again, of the **dashboard schematic** — the inline SVG
@@ -149,7 +150,7 @@ one is a physically correct value attached to the wrong thing — the `legacy-35
 It parses the real SVG (coordinates, transforms, path geometry, text metrics) and evaluates the real
 binding tables, so no second copy of either can drift, and reports in three layers: **structure**
 (`S…` — hit target ↔ inspector entry ↔ element id ↔ translation), **geometry** (`G…` — viewBox,
-overlaps, labels struck through, axis-aligned runs, text fit across all eight locales (inside fixed
+overlaps, labels struck through, axis-aligned runs, text fit across all thirteen locales (inside fixed
 pills and between neighbouring captions), a pill's distance to its own pipe, rotor symmetry and
 pump rotation direction, and a run's *invisible* tap area not reaching into the fitting it meets:
 the hit lines are

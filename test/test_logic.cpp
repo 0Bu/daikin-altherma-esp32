@@ -5644,7 +5644,13 @@ static void test_ui_lang() {
     CHECK(std::string(ui_lang_name(UiLang::Pl)) == "pl");
     CHECK(std::string(ui_lang_name(UiLang::Cs)) == "cs");
     CHECK(std::string(ui_lang_name(UiLang::Uk)) == "uk");
-    for (const char* lang : {"auto", "de", "en", "es", "fr", "it", "pl", "cs", "uk"}) {
+    CHECK(std::string(ui_lang_name(UiLang::Zh)) == "zh");
+    CHECK(std::string(ui_lang_name(UiLang::Ja)) == "ja");
+    CHECK(std::string(ui_lang_name(UiLang::Nb)) == "nb");
+    CHECK(std::string(ui_lang_name(UiLang::Sv)) == "sv");
+    CHECK(std::string(ui_lang_name(UiLang::Fi)) == "fi");
+    for (const char* lang : {"auto", "de", "en", "es", "fr", "it", "pl", "cs", "uk",
+                             "zh", "ja", "nb", "sv", "fi"}) {
         CHECK(ui_lang_valid(lang));
     }
     // A typo is REFUSED, not defaulted: /set_lang answering ok to "german" would look like a save.
@@ -5658,6 +5664,11 @@ static void test_ui_lang() {
     CHECK(ui_lang_parse("pl") == UiLang::Pl);
     CHECK(ui_lang_parse("cs") == UiLang::Cs);
     CHECK(ui_lang_parse("uk") == UiLang::Uk);
+    CHECK(ui_lang_parse("zh") == UiLang::Zh);
+    CHECK(ui_lang_parse("ja") == UiLang::Ja);
+    CHECK(ui_lang_parse("nb") == UiLang::Nb);
+    CHECK(ui_lang_parse("sv") == UiLang::Sv);
+    CHECK(ui_lang_parse("fi") == UiLang::Fi);
     CHECK(ui_lang_parse("nonsense") == UiLang::Auto);                 // load-path fallback
     CHECK(ui_lang_parse("nonsense", UiLang::En) == UiLang::En);
     // The on-flash byte. An unknown value decodes to Auto — a garbled NVS byte must fall back to the
@@ -5667,13 +5678,17 @@ static void test_ui_lang() {
           ui_lang_to_int(UiLang::En) == 2 && ui_lang_to_int(UiLang::Es) == 3 &&
           ui_lang_to_int(UiLang::Fr) == 4 && ui_lang_to_int(UiLang::It) == 5 &&
           ui_lang_to_int(UiLang::Pl) == 6 && ui_lang_to_int(UiLang::Cs) == 7 &&
-          ui_lang_to_int(UiLang::Uk) == 8);
+          ui_lang_to_int(UiLang::Uk) == 8 && ui_lang_to_int(UiLang::Zh) == 9 &&
+          ui_lang_to_int(UiLang::Ja) == 10 && ui_lang_to_int(UiLang::Nb) == 11 &&
+          ui_lang_to_int(UiLang::Sv) == 12 && ui_lang_to_int(UiLang::Fi) == 13);
     CHECK(ui_lang_from_int(0) == UiLang::Auto && ui_lang_from_int(1) == UiLang::De &&
           ui_lang_from_int(2) == UiLang::En && ui_lang_from_int(3) == UiLang::Es &&
           ui_lang_from_int(4) == UiLang::Fr && ui_lang_from_int(5) == UiLang::It &&
           ui_lang_from_int(6) == UiLang::Pl && ui_lang_from_int(7) == UiLang::Cs &&
-          ui_lang_from_int(8) == UiLang::Uk);
-    CHECK(ui_lang_from_int(9) == UiLang::Auto && ui_lang_from_int(-1) == UiLang::Auto);
+          ui_lang_from_int(8) == UiLang::Uk && ui_lang_from_int(9) == UiLang::Zh &&
+          ui_lang_from_int(10) == UiLang::Ja && ui_lang_from_int(11) == UiLang::Nb &&
+          ui_lang_from_int(12) == UiLang::Sv && ui_lang_from_int(13) == UiLang::Fi);
+    CHECK(ui_lang_from_int(14) == UiLang::Auto && ui_lang_from_int(-1) == UiLang::Auto);
 }
 
 // ── OTA manifest parsing (logic/ota_manifest.hpp) ────────────────────────────────────────────

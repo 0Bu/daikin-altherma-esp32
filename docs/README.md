@@ -265,7 +265,7 @@ The **poll cadence** stays fixed at 1 s, and
 the **value-catalog labels** (the heat-pump register names) stay **English-only**; the **model**
 (`profile` + the detection fingerprint) is re-detected fresh on every boot and kept in RAM (a swapped
 unit is re-identified). The **UI's own language** is browser-detected from the supported
-en/de/es/fr/it/pl/cs/uk set by default, but —
+en/de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi set by default, but —
 unlike the labels above — a manual pick *is* persisted (the `ui_lang` field in the `cfg` row above).
 See [ARCHITECTURE.md](ARCHITECTURE.md) → Auto-detection.
 
@@ -280,8 +280,8 @@ LAN only. Browser requests are pinned to that mDNS name or a current WiFi/Ethern
 Origin/Fetch Metadata), and every POST body is `application/json`; see [SECURITY.md](SECURITY.md).
 
 ```
-GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
-GET  /locale.js?lang=<code>        # device-local de/es/fr/it/pl/cs/uk UI catalog (gzip; trusted LAN)
+GET  /  (alias /index.html)        # embedded web UI (gzip-compressed in the app binary)
+GET  /locale.js?lang=<code>        # device-local de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi UI catalog (gzip; trusted LAN)
 GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporter-identifying values
                                    #   read "<redacted>" — network/location identifiers, user-typed
                                    #   names/topics and all seven user-typed JSON paths. The exact
@@ -535,6 +535,10 @@ POST /set_ntp                      # { server } → persist + reboot, no request
                                    #   SNTP client resolves + retries after reboot, same as syslog); an
                                    #   empty server resets to the compile-time default on next boot —
                                    #   SNTP has no disabled state, unlike syslog's empty-means-off.
+POST /set_lang                     # { lang } → persist and apply live without reboot. Accepted values:
+                                   #   auto, en, de, es, fr, it, pl, cs, uk, zh, ja, nb, sv, fi.
+                                   #   auto restores browser
+                                   #   detection; every named locale is served device-locally.
 POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
                                    #     mb_unit_id? } → apply live (no reboot).
                                    #   Every key optional; an omitted one keeps its stored value.

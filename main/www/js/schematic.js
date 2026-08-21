@@ -712,7 +712,7 @@ function renderLive() {
 //   • a COMPONENT (outdoor unit, PHE, space circuit, …) — carries its own `what` (nothing in
 //     DESCRIPTIONS describes an assembly) plus `now(d)`, a sentence built from the live values that
 //     says what the part is doing right now, and `rows`, the readings that belong to it.
-// English/German copy remains beside the source logic. The six newer locale modules mirror only the
+// English/German copy remains beside the source logic. The eleven newer locale modules mirror only the
 // human-facing fields by stable INSPECT key; `now` functions receive the same live snapshot without
 // duplicating any source-selection or plant-state logic.
 const tx = (o) => (o == null ? "" : typeof o === "string" ? o : o[LANG] ?? o.en);
@@ -1650,11 +1650,12 @@ function renderInspectHist(e, row) {
   // the plant" over a series that is, by construction, the heat pump's own — a scope mismatch under
   // a chart, which is the failure cop_scope exists to prevent.
   const mb = pairedId ? mbByConcept(pairedId) : null;
-  const chartName = DERIVED[id] && e && e.aria ? tx(e.aria) : null;
+  const chartName = DERIVED[id] && e && e.aria ? inspFieldText(e, "aria", null) : null;
   el.innerHTML = !id ? ""
     : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label, row), trendSource)
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
-               : histHtml(id, DERIVED[id]?.unit || "", e.aria ? tx(e.aria) : inspTitleText(e, null), trendSource);
+               : histHtml(id, DERIVED[id]?.unit || "",
+                          e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null), trendSource);
 }
 
 function renderInspect() {
@@ -1770,7 +1771,7 @@ function renderInspect() {
   const localizedWhat = inspLocaleField(e, "what", d);
   const ownWhat = localizedWhat ?? inspSourceField(e, "what", d);
   const what = ownWhat ? descParaHtml(esc(localizedWhat ?? tx(ownWhat)))
-                       : (desc ? descBodyHtml(desc, (row || fb)?.value) : "");
+                       : (desc ? descBodyHtml(desc, (row || fb)?.value, descriptionCopy(desc)) : "");
   // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
   // together after the chart in the divided value list below.
   $("inspBody").innerHTML = what + (sentence ? descParaHtml(esc(sentence)) : "")

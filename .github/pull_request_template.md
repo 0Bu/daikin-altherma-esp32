@@ -22,6 +22,7 @@ alone — those are repository-maintainer skills and are not yours to run.
 - [ ] `scripts/run-domain-audit.sh` clean (value-catalog domain correctness — a CI `gates` step)
 - [ ] `scripts/run-description-audit.sh` clean (every visible reading has an explainer)
 - [ ] `scripts/run-schematic-audit.sh` clean (the dashboard drawing — only if the web UI changed)
+- [ ] `scripts/run-ui-localization-audit.sh` passes (all shipped locales follow canonical UI copy)
 - [ ] `scripts/run-ui-use-case-tests.sh` passes (all UI actions and modal lifecycles — a CI `gates` step)
 - [ ] `tools/absence/selftest.sh` passes (the source-absence matrix can still go red — a CI `gates` step; the matrix itself rides the contract + UI suites)
 - [ ] `scripts/run-agent-instructions-budget.sh` passes (agent policy, configuration and instruction budget)

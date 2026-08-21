@@ -254,7 +254,7 @@ function channelRow(cur) {
 // /status.ui.lang like every other setting; "auto" reads as "Browser" (it IS what the browser
 // reports, not a separate automatic mode), and each language is named in its OWN tongue, the
 // convention for a language picker.
-const LANGUAGE_CHOICES = Object.freeze(["en", "de", "es", "fr", "it", "pl", "cs", "uk"]);
+const LANGUAGE_CHOICES = Object.freeze(["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"]);
 function langRow(cur) {
   const opt = (v, label) =>
     `<option value="${v}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
@@ -1054,7 +1054,8 @@ function memoryRows(sys) {
     const val = esc(fmtKiB(bytes));
     if (!hid && !d) return vrow(label, fmtKiB(bytes), { cls: "mono num" });
     return descAccordion(`board:${id}`, label, val, "mono num",
-                         (d ? descBodyHtml(d) : "") + histHtml(hid, "KiB", label), hid);
+                         (d ? descBodyHtml(d, undefined, modelDescriptionCopy(id)) : "") +
+                         histHtml(hid, "KiB", label), hid);
   };
   return row("free_heap", "card.freeheap", sys.free_heap) +
          row("max_alloc", "card.maxalloc", sys.max_alloc);

@@ -45,6 +45,7 @@ const M_FLAG = (off, label, on, concept = null) => ({
 function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements = {} }) {
   const context = {
     INSPECT_I18N: Object.create(null),
+    MB_DELTA_I18N: Object.create(null),
     S: {
       // The saved ADDRESS rides with `enabled`, because that is the shape http_status.cpp emits: the
       // stack only ever starts from a non-empty mb_host, so an enabled gateway with no address is
@@ -78,7 +79,6 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
                    : k === "src.agree" ? "agree"
                    : k === "src.delta" ? `Difference ${a} ${b}`
                    : k === "src.modbus_tag" ? "modbus" : k),
-    tx: (o) => (o == null ? "" : typeof o === "string" ? o : o.en),
     LANG: "en",
     $: (id) => elements[id] || null,
   };
@@ -87,7 +87,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   // explicitly — the same trick test_ui_live_i18n.mjs uses for its production function.
   vm.runInContext(
     SOURCE + "\nthis.__api = { mbByConcept, mbTwin, mbFallbackFor, mbStandInFor, rowNotMeasuring," +
-    " mbLive, mbBool, mbVal, stateOf," +
+    " mbLive, mbBool, mbVal, stateOf, MB_DELTA_WHY," +
     " MB_PAIRS, MB_OFF_POWER, MB_OFF_SMART_GRID, mbPower, modbusEnumNumber, mbSmartGridMode, mbForInspect," +
     " mbUnitAbnormality," +
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
@@ -97,6 +97,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " pelMeasured, pelApproxText, PEL_INSPECT };",
     context, { filename: "main/www/app.sources" });
   context.__api.S = context.S;
+  context.__api.setTxLang = (lang) => { context.LANG = lang; };
   return context.__api;
 }
 
@@ -334,6 +335,27 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
 
   assert.doesNotMatch(c.mbDeltaHtml(LWT_X, LWT_M), /plate heat exchanger|backup heater/i,
     "the two leaving-water sources must not be assigned invented different measurement points");
+
+  // The two concepts with a real structural explanation must render that explanation in the
+  // active device language. A tx() stub fixed to English used to leave this visible path untested.
+  const deltaPairs = [
+    [X("R1T-Outdoor air temp.", "5.0", "outdoor_air"),
+     M(49, "Outdoor air temperature", "6.0", "outdoor_air")],
+    [X("Indoor ambient temp. (R1T)", "20.0", "room_temp"),
+     M(50, "Remote controller room temperature Main", "21.0", "room_temp")],
+  ];
+  // These eight remain inline in MB_DELTA_WHY. The five later lazy packs are structurally and
+  // renderer-gated by test_ui_locale_catalogs.mjs after their locale script registers MB_DELTA_I18N.
+  for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk"]) {
+    c.setTxLang(lang);
+    for (const [x10a, homehub] of deltaPairs) {
+      const expected = c.MB_DELTA_WHY[x10a.concept][lang];
+      const html = c.mbDeltaHtml(x10a, homehub);
+      assert.ok(html.includes(expected),
+        `${lang} ${x10a.concept} comparison did not render ${expected}: ${html}`);
+    }
+  }
+  c.setTxLang("en");
 
   assert.equal(c.waterMoving({ pumpOn: false, flow: 5 }), true,
     "measured flow takes precedence over a contradictory internal-pump status");

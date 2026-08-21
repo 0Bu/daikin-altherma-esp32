@@ -17,25 +17,29 @@ const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Typ
 // the browser guess on every client that opens the dashboard, until they set it back to "Browser"
 // (DESIGN.md §1). The heat-pump VALUE LABELS are NOT translated here: they arrive from the firmware
 // over /values as English X10A register names (docs/REGISTERS.md) and stay verbatim; the
-// tap-to-expand value/model descriptions currently carry German and English prose; another selected
-// language falls back to English for that specialist layer. The schematic inspector and HomeHub row
-// names are localized separately in each lazy locale asset. Dynamic strings built in this file go
+// tap-to-expand value/model descriptions keep their English source labels, but their explanatory
+// prose is localized through the same device-local locale asset. The schematic inspector and HomeHub
+// row names use that asset too. Dynamic strings built in this file go
 // through t(); the static markup in index.html is localised by applyStaticI18n() reading data-i18n
 // attributes, re-run by setLang() when the language changes live.
-const UI_LANGS = Object.freeze(["en", "de", "es", "fr", "it", "pl", "cs", "uk"]);
+const UI_LANGS = Object.freeze(["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"]);
 const uiLangSupported = (lang) => UI_LANGS.includes(lang);
-// The compact UI catalog above is not the only visible copy surface. The schematic inspector and
-// HomeHub source rows need longer, domain-specific wording that would make the already tight startup
-// page too large if all languages were inlined. Locale modules therefore register those two tables
-// alongside I18N and they are consumed only after the same device-local /locale.js request succeeds.
-// English/German retain their established in-bundle tables; the six newer locales supply concise
-// inspector prose and offset-keyed HomeHub names here without changing the manufacturer's transport
-// labels or using prose as an identifier.
+// The compact UI catalog above is not the only visible copy surface. The schematic inspector,
+// HomeHub source rows and tap-to-expand value/model explanations need longer, domain-specific wording
+// that would make the already tight startup page too large if all languages were inlined. Locale
+// modules register those tables alongside I18N after the same device-local /locale.js request.
+// English/German retain their established in-bundle source tables; the eleven newer locales supply
+// concise specialist prose without changing the manufacturer's transport labels or using prose as
+// an identifier.
 const INSPECT_I18N = Object.create(null);
 const HOMEHUB_LABEL_I18N = Object.create(null);
+const DESCRIPTION_I18N = Object.create(null);
+const MODEL_DESCRIPTION_I18N = Object.create(null);
+const FAULT_CODE_I18N = Object.create(null);
+const MB_DELTA_I18N = Object.create(null);
 // Locale assets store their compact UI translations positionally against the English key order.
 // The comments in those source files retain the readable key mapping, while the shipped scripts
-// omit 734 repeated property names per language. This keeps the six complete catalogs within the
+// omit 838 repeated property names per language. This keeps all twelve external catalogs within the
 // fixed application partition without weakening the English fallback contract.
 function localeValues(values) {
   const keys = Object.keys(I18N.en);
@@ -44,8 +48,65 @@ function localeValues(values) {
   keys.forEach((key, index) => { catalog[key] = values[index]; });
   return catalog;
 }
+const INSPECT_LOCALE_KEYS = ("status env3 sgrequest ou comp out ouhx hp disch lp eev r3t phe lwt " +
+  "r2t rwt dt pth cop buh bsh valve valve2 tank heat spaceh room pump pel defrost quiet rhot " +
+  "rcold wsup wtank wheat wret flow flow_switch wp").split(" ");
+const HOMEHUB_LOCALE_OFFSETS =
+  "1 2 3 4 6 7 9 10 21 22 23 30 31 32 33 37 38 40 41 42 43 44 45 49 50 51 52 53 54 56 57 58".split(" ");
+const DESCRIPTION_LOCALE_COUNT = 125;
+const FAULT_CODE_LOCALE_COUNT = 63;
+const MB_DELTA_LOCALE_KEYS = ["outdoor_air", "room_temp"];
+const MODEL_DESCRIPTION_LOCALE_KEYS = ("health_fault health_dhw_loss health_cycling health_defrost " +
+  "health_pressure health_flow health_heater health_retries free_heap max_alloc capacity capacity_iu " +
+  "candidates candidates_nocap oueeprom").split(" ");
+function inspectValues(held, values) {
+  const catalog = { held: { lead: held[0], why: held[1] } };
+  values.forEach((value, index) => {
+    const entry = { t: value[0], aria: value[1] || value[0], what: value[2] };
+    if (value.length === 4) entry.now = value[3];
+    catalog[INSPECT_LOCALE_KEYS[index]] = entry;
+  });
+  return catalog;
+}
+function homeHubValues(values) {
+  const catalog = {};
+  HOMEHUB_LOCALE_OFFSETS.forEach((offset, index) => { catalog[offset] = values[index]; });
+  return Object.freeze(catalog);
+}
+// Value descriptions are already matched by the ordered DESCRIPTIONS table, so the winning array
+// position is their stable locale identifier. Model rows already have stable ids. Each compact row
+// is [what] or [what, normal]; a compact locale may fold essential normal context into `what` and
+// omit the second field, but it never falls back to English. Keeping the rows positional avoids
+// repeating 125 regexes/keys in every signed locale asset. The locale contract pins their order.
+function descriptionValues(values) {
+  if (!Array.isArray(values) || values.length !== DESCRIPTION_LOCALE_COUNT)
+    throw new Error("description locale length");
+  return values;
+}
+function modelDescriptionValues(values) {
+  if (!Array.isArray(values) || values.length !== MODEL_DESCRIPTION_LOCALE_KEYS.length)
+    throw new Error("model description locale length");
+  const catalog = {};
+  MODEL_DESCRIPTION_LOCALE_KEYS.forEach((key, index) => { catalog[key] = values[index]; });
+  return catalog;
+}
+function faultCodeValues(values, none, unknown) {
+  if (!Array.isArray(values) || values.length !== FAULT_CODE_LOCALE_COUNT ||
+      values.some((value) => typeof value !== "string" || !value.trim()) ||
+      typeof none !== "string" || !none.trim() || typeof unknown !== "string" || !unknown.trim())
+    throw new Error("fault-code locale length");
+  return Object.freeze({ values, none, unknown });
+}
+function mbDeltaValues(values) {
+  if (!Array.isArray(values) || values.length !== MB_DELTA_LOCALE_KEYS.length ||
+      values.some((value) => typeof value !== "string" || !value.trim()))
+    throw new Error("Modbus delta locale length");
+  return Object.freeze(Object.fromEntries(MB_DELTA_LOCALE_KEYS.map((key, index) => [key, values[index]])));
+}
+const INLINE_DOMAIN_LANGS = new Set(["en", "de", "es", "fr", "it", "pl", "cs", "uk"]);
 const autoLang = () => {
-  const primary = String(navigator.language || "").trim().toLowerCase().split(/[-_]/, 1)[0];
+  let primary = String(navigator.language || "").trim().toLowerCase().split(/[-_]/, 1)[0];
+  if (primary === "no") primary = "nb"; // generic Norwegian browsers use the Bokmal catalog
   return uiLangSupported(primary) ? primary : "en";
 };
 // localStorage, GUARDED: Safari private mode throws on access, and the UI must not die over a
@@ -59,18 +120,32 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private
 let LANG = (() => { const c = lsGet("uiLang"); return uiLangSupported(c) ? c : autoLang(); })();
 // English stays in the startup page as the guaranteed fallback. Every other catalog is a separate,
 // pre-compressed asset served by this same ESP32: no CDN, no internet dependency, and no attempt to
-// squeeze seven more catalogs into a dashboard already at its delivery limit. One Promise per
+// squeeze twelve more catalogs into a dashboard already at its delivery limit. One Promise per
 // language coalesces boot/status races and a failed asset is remembered for this page lifetime.
 const LOCALE_LOADS = new Map();
+function localeReady(lang) {
+  if (!I18N[lang]) return false;
+  if (lang === "en" || lang === "de") return true;
+  const inspect = INSPECT_I18N[lang], homehub = HOMEHUB_LABEL_I18N[lang];
+  const descriptions = DESCRIPTION_I18N[lang], models = MODEL_DESCRIPTION_I18N[lang];
+  const faultCodes = FAULT_CODE_I18N[lang], mbDeltas = MB_DELTA_I18N[lang];
+  return !!inspect && INSPECT_LOCALE_KEYS.every((key) => !!inspect[key]) && !!inspect.held &&
+         !!homehub && HOMEHUB_LOCALE_OFFSETS.every((offset) => homehub[offset] != null) &&
+         Array.isArray(descriptions) && descriptions.length === DESCRIPTION_LOCALE_COUNT &&
+         !!models && MODEL_DESCRIPTION_LOCALE_KEYS.every((key) => !!models[key]) &&
+         (INLINE_DOMAIN_LANGS.has(lang) ||
+           (!!faultCodes && faultCodes.values.length === FAULT_CODE_LOCALE_COUNT &&
+            !!mbDeltas && MB_DELTA_LOCALE_KEYS.every((key) => !!mbDeltas[key])));
+}
 function loadLocale(lang) {
-  if (lang === "en" || I18N[lang]) return Promise.resolve(true);
+  if (localeReady(lang)) return Promise.resolve(true);
   if (!uiLangSupported(lang)) return Promise.resolve(false);
   if (LOCALE_LOADS.has(lang)) return LOCALE_LOADS.get(lang);
   const pending = new Promise((resolve) => {
     const script = document.createElement("script");
     script.src = `/locale.js?lang=${encodeURIComponent(lang)}`;
     script.async = true;
-    script.onload = () => resolve(!!I18N[lang]);
+    script.onload = () => resolve(localeReady(lang));
     script.onerror = () => resolve(false);
     document.head.appendChild(script);
   });
@@ -712,9 +787,11 @@ const I18N = {
     "probe.transport_error": "Request failed.",
     "lang.auto": "Browser", "lang.de": "Deutsch", "lang.en": "English", "lang.es": "Español",
     "lang.fr": "Français", "lang.it": "Italiano", "lang.pl": "Polski", "lang.cs": "Čeština",
-    "lang.uk": "Українська",
+    "lang.uk": "Українська", "lang.zh": "简体中文", "lang.ja": "日本語",
+    "lang.nb": "Norsk", "lang.sv": "Svenska", "lang.fi": "Suomi",
     "lang.saved": "Language saved",
     "ota.downgrade_confirm": (cur, avail) => `Switch back to v${avail}?\n\nThe installed version v${cur} is newer. This older build is offered because you selected a different update channel. Its signature is verified before installation, and the device restores the current build automatically if the older one cannot get online.`,
+    "hist.cop_none": "No COP curve while electrical input comes from CT clamps. Their wiring decides which loads are included; buffered heat ends before BUH and excludes heat added directly by BSH, so the balance boundaries may not match.",
   },
 };
 function t(k, ...a) {
@@ -787,7 +864,7 @@ function activateLang(next) {
 }
 function setLang(next) {
   if (!uiLangSupported(next)) next = autoLang();
-  if (next === "en" || I18N[next]) return activateLang(next);
+  if (localeReady(next)) return activateLang(next);
   return loadLocale(next).then((loaded) => activateLang(loaded ? next : "en"));
 }
 // Reconcile the language with the device's stored override (/status.ui.lang): a supported language

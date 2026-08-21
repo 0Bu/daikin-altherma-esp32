@@ -1,5 +1,5 @@
-// Semantic contract for every HomeHub row: manufacturer identity, localized visual labels and the
-// established English/German long explanation. Coverage alone is insufficient here — a setpoint used to match the
+// Semantic contract for every HomeHub row: manufacturer identity, localized visual labels and
+// localized explanations. Coverage alone is insufficient here — a setpoint used to match the
 // generic "thermostat" bit text and was therefore described as an ON/OFF demand signal.
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -28,24 +28,37 @@ const firstDescription = (label) => descriptions.find((d) => {
 });
 
 function labels(lang) {
+  const offsets = [1, 2, 3, 4, 6, 7, 9, 10, 21, 22, 23, 30, 31, 32, 33, 37,
+    38, 40, 41, 42, 43, 44, 45, 49, 50, 51, 52, 53, 54, 56, 57, 58];
   const context = {
     LANG: lang,
     I18N: Object.create(null),
     localeValues: () => ({}),
+    inspectValues: () => ({}),
+    homeHubValues: (values) => Object.fromEntries(offsets.map((offset, index) =>
+      [offset, values[index]])),
+    descriptionValues: (values) => values,
+    modelDescriptionValues: (values) => values,
     INSPECT_I18N: Object.create(null),
     HOMEHUB_LABEL_I18N: Object.create(null),
+    DESCRIPTION_I18N: Object.create(null),
+    MODEL_DESCRIPTION_I18N: Object.create(null),
+    FAULT_CODE_I18N: Object.create(null),
+    MB_DELTA_I18N: Object.create(null),
+    faultCodeValues: (values, none, unknown) => ({ values, none, unknown }),
+    mbDeltaValues: (values) => ({ outdoor_air: values[0], room_temp: values[1] }),
   };
   vm.createContext(context);
   if (!["en", "de"].includes(lang))
     vm.runInContext(readUiLocale(lang), context, { filename: `main/www/locales/${lang}.js` });
   vm.runInContext(historySource +
-    "\nthis.__api = { displayHomeHubLabel, HOMEHUB_LABEL_DE, HOMEHUB_LABEL_I18N };", context,
+    "\nthis.__api = { displayHomeHubLabel, HOMEHUB_LABEL_DE, HOMEHUB_LABEL_I18N, DESCRIPTION_I18N };", context,
   { filename: "main/www/app.sources" });
   return context.__api;
 }
 const deLabels = labels("de");
 const enLabels = labels("en");
-const localizedLabels = Object.fromEntries(["es", "fr", "it", "pl", "cs", "uk"]
+const localizedLabels = Object.fromEntries(["es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"]
   .map((lang) => [lang, labels(lang)]));
 
 const expected = new Map([
@@ -94,6 +107,11 @@ for (const row of rows) {
   for (const [lang, api] of Object.entries(localizedLabels)) {
     assert.equal(api.displayHomeHubLabel(row), api.HOMEHUB_LABEL_I18N[lang][row.off],
       `${lang} visual label at offset ${row.off}`);
+    const localized = api.DESCRIPTION_I18N[lang]?.[descriptions.indexOf(firstDescription(row.label))];
+    assert.ok(Array.isArray(localized) && localized[0]?.trim(),
+      `${lang} explanation at offset ${row.off}`);
+    assert.notEqual(localized[0], firstDescription(row.label).what,
+      `${lang} explanation at offset ${row.off} must not fall back to English`);
   }
   assert.doesNotMatch(names[1], /[()]/,
     `German visual label at offset ${row.off} should read fluently without parenthetical qualifiers`);
@@ -155,4 +173,4 @@ assert.doesNotMatch(`${indoorMode.de.what} ${indoorMode.de.normal}`,
   /Wasserseite \(|Heizen\+Warmwasser|\bWW\b/,
   "the German operation-mode explanation uses fluent copy and the visible state names");
 
-console.log("HomeHub copy: 32/32 values, labels and bilingual explanations are semantically pinned");
+console.log("HomeHub copy: 32/32 values, labels and localized explanations are semantically pinned");

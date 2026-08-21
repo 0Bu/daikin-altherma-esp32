@@ -323,7 +323,7 @@ const DEMO = (() => {
 // deterministic render for every device locale. The real app still chooses through
 // navigator.language (DESIGN.md §2); the query is a demo-driver control, not production UI state.
 try {
-  const requested = (location.search.match(/(?:^|[?&])lang=(en|de|es|fr|it|pl|cs|uk)(?:&|$)/) || [])[1];
+  const requested = (location.search.match(/(?:^|[?&])lang=(en|de|es|fr|it|pl|cs|uk|zh|ja|nb|sv|fi)(?:&|$)/) || [])[1];
   const demoLang = requested ? `${requested}-${requested.toUpperCase()}` : "en-GB";
   Object.defineProperty(navigator, "language", { value: demoLang, configurable: true });
   Object.defineProperty(navigator, "languages", {

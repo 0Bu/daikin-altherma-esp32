@@ -1,3 +1,4 @@
+// translation-source: cb974b3df64988a24f2767cde82e46db54cef64910a894328463172448c67675
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -192,7 +193,7 @@ I18N.cs = localeValues([
   /* check.cycling_space */ (n, d) => d ? `prostor ${n} × ${d}` : `prostor ${n}`,
   /* check.cycling_dhw */ (n, d) => d ? `teplá voda ${n} × ${d}` : `teplá voda ${n}`,
   /* check.cycling_cooling */ (n) => `chlazení ${n} vyloučeno`,
-  /* check.cycling_censored */ (n) => `${n} nezařazených`,
+  /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "nezařazený" : n >= 2 && n <= 4 ? "nezařazené" : "nezařazených"}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · průměr ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -364,6 +365,7 @@ I18N.cs = localeValues([
   /* ota.timeout */ "vypršel čas",
   /* ota.cancelled */ "zrušeno",
   /* ota.busy */ "zařízení je zaneprázdněné",
+  /* ota.replaced */ "Operace aktualizace se změnila — zkontrolujte ji znovu",
   /* ota.unreachable */ "zařízení není dostupné",
   /* ota.active_title */ "Aktualizace firmwaru",
   /* ota.active_sub */ (detail) => `Probíhá instalace · ${detail}`,
@@ -722,6 +724,103 @@ I18N.cs = localeValues([
   /* diagnostics.on */ "Zapnuto",
   /* diagnostics.saved_on */ "Diagnostika soustavy zapnuta — sběr začíná nyní",
   /* diagnostics.saved_off */ "Diagnostika soustavy vypnuta — sběr zastaven",
+  /* probe.toggle */ "Diagnostika protokolu",
+  /* probe.intro */ "Přímé čtení stránky registrů X10A s volitelným převodem hodnoty.",
+  /* probe.request */ "Požadavek",
+  /* probe.register */ "Registr",
+  /* probe.manual */ "Ruční zadání",
+  /* probe.page */ "Stránka registru",
+  /* probe.offset */ "Posun v datech",
+  /* probe.size */ "Šířka pole",
+  /* probe.byte */ "bajt",
+  /* probe.bytes */ "bajty",
+  /* probe.converter */ "Převodník",
+  /* probe.page_help */ "Hexadecimálně nebo desítkově · 0…255",
+  /* probe.offset_help */ "Index v datech · 0…31",
+  /* probe.size_help */ "Bajty k dekódování",
+  /* probe.converter_auto */ "Automaticky",
+  /* probe.converter_auto_help */ size=>`Vyzkouší všechny implementované převodníky pro pole o délce ${size} bajtů.`,
+  /* probe.conv_raw_byte */ "nezpracovaný bajt · 0…255",
+  /* probe.conv_unsigned_byte */ "bajt bez znaménka",
+  /* probe.conv_tenth_byte */ "nezpracovaný bajt × 0,1",
+  /* probe.conv_unsigned_half_byte */ "bajt bez znaménka × 0,5",
+  /* probe.conv_signed_raw_le */ "celé číslo se znaménkem · little-endian",
+  /* probe.conv_signed_raw_be */ "celé číslo se znaménkem · big-endian",
+  /* probe.conv_signed_256_le */ "se znaménkem ÷ 256 · little-endian",
+  /* probe.conv_signed_256_be */ "se znaménkem ÷ 256 · big-endian",
+  /* probe.conv_signed_tenth_le */ "se znaménkem × 0,1 · little-endian",
+  /* probe.conv_signed_tenth_be */ "se znaménkem × 0,1 · big-endian",
+  /* probe.conv_signed_tenth_nodata_le */ "se znaménkem × 0,1 · little-endian · 0x8000 = bez dat",
+  /* probe.conv_signed_tenth_nodata_be */ "se znaménkem × 0,1 · big-endian · 0x8000 = bez dat",
+  /* probe.conv_signed_128_le */ "se znaménkem ÷ 256 × 2 · little-endian",
+  /* probe.conv_signed_128_be */ "se znaménkem ÷ 256 × 2 · big-endian",
+  /* probe.conv_signed_half_be */ "se znaménkem × 0,5 · big-endian",
+  /* probe.conv_signed_hundredth_be */ "se znaménkem × 0,01 · big-endian",
+  /* probe.conv_unsigned_raw_le */ "celé číslo bez znaménka · little-endian",
+  /* probe.conv_unsigned_raw_be */ "celé číslo bez znaménka · big-endian",
+  /* probe.conv_unsigned_half_be */ "bez znaménka × 0,5 · big-endian",
+  /* probe.conv_saturation */ "tlak → teplota sytosti",
+  /* probe.conv_raw_fan */ "nezpracovaný bajt / stupeň ventilátoru",
+  /* probe.conv_capacity */ "kód výkonu vnitřní jednotky",
+  /* probe.conv_eeprom_digit */ "nezpracovaná číslice EEPROM",
+  /* probe.conv_eeprom_pair */ "dvojice nezpracovaných číslic EEPROM",
+  /* probe.conv_bits_high */ "bity 4–6 · 3bitové počítadlo",
+  /* probe.conv_bits_low */ "bity 0–2 · 3bitové počítadlo",
+  /* probe.conv_operation_mode */ "provozní režim",
+  /* probe.conv_error_class */ "třída chyby",
+  /* probe.conv_error_code */ "chybový kód Daikin",
+  /* probe.conv_indoor_mode */ "režim vnitřní jednotky · horní nibble",
+  /* probe.conv_hybrid_mode */ "hybridní režim",
+  /* probe.conv_bit */ bit=>`bit ${bit} · 0 nebo 1`,
+  /* probe.conv_unknown */ "neznámý převodník",
+  /* probe.send */ "Přečíst registr",
+  /* probe.querying */ "Probíhá dotaz…",
+  /* probe.action_note */ "Jeden požadavek na cyklus dotazování. Během OTA blokováno.",
+  /* probe.catalog_loading */ "Načítání aktivního profilu…",
+  /* probe.catalog_empty */ "Nejsou dostupné definice registrů.",
+  /* probe.catalog_error */ "Registry profilu se nepodařilo načíst.",
+  /* probe.catalog_profile */ profile=>`Profil: ${profile}`,
+  /* probe.catalog_fallback */ (definition,profile)=>`main/def: ${definition} · profil: ${profile}`,
+  /* probe.response */ "Odpověď",
+  /* probe.frame */ "Rámec",
+  /* probe.payload */ "Data",
+  /* probe.slice */ "Vybrané bajty",
+  /* probe.interpretation */ "Interpretace",
+  /* probe.response_for */ reg=>`Odpověď registru ${reg}`,
+  /* probe.payload_marked */ "Data · vybrané bajty označeny",
+  /* probe.slice_note */ (offset,size,slice)=>`Posun ${offset} · ${size} bajtů · 0x${String(slice).replace(/\s+/g,"")}`,
+  /* probe.full_frame */ "Úplný rámec",
+  /* probe.decode_value */ "Výsledek převodníku",
+  /* probe.no_decodes */ "Bez výsledku převodníku.",
+  /* probe.refused */ "Hodnota odmítnuta",
+  /* probe.unimplemented */ "Neimplementováno",
+  /* probe.aliases */ "také",
+  /* probe.invalid */ "Zkontrolujte stránku, posun, šířku pole a převodník.",
+  /* probe.failed */ "Požadavek selhal.",
+  /* probe.status_ok */ "Platná odpověď",
+  /* probe.status_busy */ "Obsazeno",
+  /* probe.status_no_link */ "Bez spojení X10A",
+  /* probe.status_timeout */ "Čas vypršel",
+  /* probe.status_no_reply */ "Bez odpovědi",
+  /* probe.status_rejected */ "Odmítnuto",
+  /* probe.status_bad_crc */ "Chybný kontrolní součet",
+  /* probe.status_unexpected_reply */ "Neočekávaná odpověď",
+  /* probe.status_invalid_length */ "Neplatná délka",
+  /* probe.status_short_reply */ "Částečná odpověď",
+  /* probe.status_out_of_bounds */ "Mimo data",
+  /* probe.status_error */ "Chyba",
+  /* probe.transport_ok */ "Rámec je úplný a platný.",
+  /* probe.transport_busy */ "Probíhá jiný požadavek na registr.",
+  /* probe.transport_no_link */ "Spojení X10A není dostupné.",
+  /* probe.transport_timeout */ "Dotazovací úloha požadavek neprovedla včas.",
+  /* probe.transport_no_reply */ "Nebyly přijaty žádné bajty odpovědi.",
+  /* probe.transport_rejected */ "Jednotka tuto stránku registrů odmítla.",
+  /* probe.transport_bad_crc */ "Odpověď přijata; kontrolní součet je neplatný.",
+  /* probe.transport_unexpected_reply */ "Odpověď patří jiné stránce registrů.",
+  /* probe.transport_invalid_length */ "Odpověď uvádí neplatnou délku rámce.",
+  /* probe.transport_short_reply */ "Byla přijata jen část odpovědi.",
+  /* probe.transport_out_of_bounds */ "Požadované bajty leží mimo tato data.",
+  /* probe.transport_error */ "Požadavek selhal.",
   /* lang.auto */ "Prohlížeč",
   /* lang.de */ "Deutsch",
   /* lang.en */ "English",
@@ -731,119 +830,272 @@ I18N.cs = localeValues([
   /* lang.pl */ "Polski",
   /* lang.cs */ "Čeština",
   /* lang.uk */ "Українська",
+  /* lang.zh */ "简体中文",
+  /* lang.ja */ "日本語",
+  /* lang.nb */ "Norsk",
+  /* lang.sv */ "Svenska",
+  /* lang.fi */ "Suomi",
   /* lang.saved */ "Jazyk uložen",
   /* ota.downgrade_confirm */ (cur, avail) => `Vrátit se k v${avail}?\n\nNainstalovaná verze v${cur} je novější. Toto starší sestavení se nabízí, protože jste vybrali jiný kanál aktualizací. Před instalací se ověří jeho podpis a pokud se starší verze nemůže připojit, zařízení automaticky obnoví aktuální sestavení.`,
+  /* hist.cop_none */ "Graf COP chybí pro příkon z CT: zapojení určuje spotřebiče a teplo před BUH nezahrnuje BSH, takže hranice bilance nemusí souhlasit.",
 ]);
-INSPECT_I18N.cs = {
-  held: { lead: "Chybí aktuální hodnota:", why: "kompresor stojí a venkovní jednotka obnovuje své snímače jen za chodu. Hodnota z minulého běhu je skryta, aby nepůsobila jako aktuální měření." },
-  status: { t: "Provozní režim", what: "Režim vnitřní jednotky: zastavení, vytápění, chlazení, TUV nebo kombinace. Sám nepotvrzuje chod kompresoru ani přenos tepla." },
-  env3: { t: "Venkovní podmínky", what: "Nezávislé měření teploty, vlhkosti a tlaku ze snímače ENV III připojeného k ESP32." },
-  sgrequest: {
-    t: (d) => sgInspectIsX10a(d) ? "Požadavek Smart Grid přes X10A" : "Požadavek Smart Grid přes Modbus",
-    what: (d) => sgInspectIsX10a(d)
+INSPECT_I18N.cs = inspectValues(
+  ["Chybí aktuální hodnota:", "kompresor stojí a venkovní jednotka obnovuje své snímače jen za chodu. Hodnota z minulého běhu je skryta, aby nepůsobila jako aktuální měření."],
+  [
+    ["Provozní režim", 0, "Režim vnitřní jednotky; sám nepotvrzuje chod kompresoru ani průtok."], // status
+    ["Venkovní podmínky", "Venkovní podmínky z ENV III", "Teplota, vlhkost a tlak ze snímače ENV III u ESP32."], // env3
+    [(d) => sgInspectIsX10a(d) ? "Požadavek Smart Grid přes X10A" : "Požadavek Smart Grid přes Modbus", "Požadavek Smart Grid", (d) => sgInspectIsX10a(d)
       ? "Externí požadavek z fyzických kontaktů SG-Ready: volně, vynuceně vypnuto, doporučeno zapnout nebo vynuceně zapnuto. Je to povel energetického řízení, nikoli režim vytápění/chlazení ani důkaz ohřevu zásobníku; síťový povel se na kontaktech nemusí objevit."
-      : "Externí požadavek přečtený z HomeHub: volně, vynuceně vypnuto, doporučeno zapnout nebo vynuceně zapnuto. Není to režim vytápění/chlazení ani důkaz ohřevu zásobníku.",
-    now: (d) => !d || d.sgMode == null ? "Aktuální hodnota Smart Grid není dostupná."
+      : "Externí požadavek přečtený z HomeHub: volně, vynuceně vypnuto, doporučeno zapnout nebo vynuceně zapnuto. Není to režim vytápění/chlazení ani důkaz ohřevu zásobníku.", (d) => !d || d.sgMode == null ? "Aktuální hodnota Smart Grid není dostupná."
       : d.sgMode === 2 && d.sgSrc === "X10A" ? "Kontakty SG-Ready hlásí doporučené zapnutí. Energetické řízení jej používá pro posílení; režim TUV, 3WV a průtok zvlášť ukazují skutečný ohřev zásobníku."
       : d.sgMode === 2 ? "HomeHub hlásí doporučené zapnutí. Energetické řízení jej používá pro posílení; režim TUV, 3WV a průtok zvlášť ukazují skutečný ohřev zásobníku."
       : d.sgMode === 1 ? "Externí energetické řízení hlásí „vynuceně vypnuto“."
       : d.sgMode === 3 ? "Externí energetické řízení hlásí „vynuceně zapnuto“."
-      : "Externí požadavek Smart Grid není přítomen; zařízení pracuje samostatně.",
-  },
-  ou: {
-    t: "Venkovní jednotka", what: "Ventilátor vede vzduch přes výměník a kompresor zvyšuje tlak a teplotu chladiva. Schéma je zjednodušené; monoblok, zemní a hybridní systém mají jiné uspořádání.",
-    now: (d) => d.defrost ? "Odmrazování — obrácený okruh rozpouští led a krátce odebírá teplo z vody."
+      : "Externí požadavek Smart Grid není přítomen; zařízení pracuje samostatně."], // sgrequest
+    ["Venkovní jednotka", 0, "Ventilátor vede vzduch přes výměník a kompresor zvyšuje tlak a teplotu chladiva. Schéma je zjednodušené; monoblok, zemní a hybridní systém mají jiné uspořádání.", (d) => d.defrost ? "Odmrazování — obrácený okruh rozpouští led a krátce odebírá teplo z vody."
       : compressorRunning(d) ? d.rps != null ? `Běží — kompresor ${fmt0(d.rps)} rps${d.quiet ? ", omezen tichým režimem" : ""}.` : "Běží — HomeHub potvrzuje kompresor; otáčky a podrobnosti vyžadují X10A."
       : d.ouHeldOver && d.mbFields && d.mbFields.has("out") ? "Klid — aktivní přenos neprobíhá. X10A neobnovuje snímače; venkovní teplota je z Modbus bez času zdroje a teplota výtlaku zůstává „—“."
-      : "Klid — kompresor stojí a aktivní vytápění ani chlazení neprobíhá. Neobnovované hodnoty se místo opakování zobrazí jako „—“.",
-  },
-  comp: { t: "Kompresor", what: "Stlačuje chladivo. Otáčky v rps potvrzují chod, ale nejsou tepelným výkonem." },
-  out: { t: "Venkovní teplota", what: "Teplota vzduchu u snímače venkovní jednotky; slunce, proudění a umístění ovlivňují hodnotu." },
-  ouhx: { t: "Teplota venkovního výměníku (R4T)", what: "Při vytápění může výměník klesnout pod 0 °C. Teplota spolu se stavem odmrazování popisuje námrazu a její odstranění." },
-  hp: { t: "Vysoký tlak", what: "Tlak chladiva na vysokotlaké straně. Vyhodnocujte jej s režimem a teplotou výtlaku; nejde o tlak vody." },
-  disch: { t: "Teplota výtlaku", what: "Teplota horkého chladiva za kompresorem. Závisí na zatížení a režimu; při stání se stará hodnota skrývá." },
-  lp: { t: "Nízký tlak", what: "Tlak chladiva na nízkotlaké straně kompresoru. Ne každý profil tento snímač poskytuje." },
-  eev: { t: "Expanzní ventil", what: "Požadovaná poloha elektronického ventilu v impulzech; číslo není procento otevření." },
-  r3t: { t: "Teplota kapalného chladiva (R3T)", what: "Teplota chladiva na kapalné straně vnitřního výměníku; nejde o teplotu vratné vody." },
-  phe: {
-    t: "Deskový výměník tepla", what: "PHE předává energii mezi chladivem a vodou bez smíchání. Výkon se odhaduje z průtoku a R1T/R4T; poloha snímačů závisí na modelu.",
-    now: (d) => !compressorRunning(d, 5) ? "Aktivní přenos chladivem neprobíhá — kompresor stojí. Samotný oběh čerpadla může rozvádět zbytkové teplo, ale není topným ani chladicím výkonem."
+      : "Klid — kompresor stojí a aktivní vytápění ani chlazení neprobíhá. Neobnovované hodnoty se místo opakování zobrazí jako „—“."], // ou
+    ["Kompresor", 0, "Stlačuje chladivo. Otáčky v rps potvrzují chod, ale nejsou tepelným výkonem."], // comp
+    ["Venkovní teplota", 0, "Teplota u snímače venkovní jednotky; ovlivňuje ji slunce a umístění."], // out
+    ["Teplota venkovního výměníku (R4T)", "Teplota venkovního výměníku R4T", "Při vytápění může výměník klesnout pod 0 °C. Teplota spolu se stavem odmrazování popisuje námrazu a její odstranění."], // ouhx
+    ["Vysoký tlak", 0, "Tlak chladiva na vysokotlaké straně. Vyhodnocujte jej s režimem a teplotou výtlaku; nejde o tlak vody."], // hp
+    ["Teplota výtlaku", 0, "Teplota horkého chladiva za kompresorem. Závisí na zatížení a režimu; při stání se stará hodnota skrývá."], // disch
+    ["Nízký tlak", 0, "Tlak chladiva na nízkotlaké straně kompresoru. Ne každý profil tento snímač poskytuje."], // lp
+    ["Expanzní ventil", 0, "Požadovaná poloha elektronického ventilu v impulzech; číslo není procento otevření."], // eev
+    ["Teplota kapalného chladiva (R3T)", "Teplota kapalného chladiva R3T", "Teplota chladiva na kapalné straně vnitřního výměníku; nejde o teplotu vratné vody."], // r3t
+    ["Deskový výměník tepla", 0, "PHE předává energii mezi chladivem a vodou bez smíchání. Výkon se odhaduje z průtoku a R1T/R4T; poloha snímačů závisí na modelu.", (d) => !compressorRunning(d, 5) ? "Aktivní přenos chladivem neprobíhá — kompresor stojí. Samotný oběh čerpadla může rozvádět zbytkové teplo, ale není topným ani chladicím výkonem."
       : d.dtStale ? "Přenos na straně vody nelze spočítat — čerpadlo a průtok nepotvrzují pohyb vody přes PHE."
       : d.pth == null ? "Chybí směrový odhad — hodnoty nepotvrzují užitečný přenos ve zvoleném režimu."
       : d.pthKind === "cooling" ? `Z vody se odebírá asi ${fmt1(d.pth)} kW (${fmt1(d.flow)} l/min, ΔT ${fmt1(d.dt)} K).`
-      : `Do vody se předává asi ${fmt1(d.pth)} kW (${fmt1(d.flow)} l/min, ΔT ${fmt1(d.dt)} K).`,
-  },
-  lwt: { t: "Výstup vody z PHE před BUH (R1T)", what: "Teplota vody opouštějící PHE před BUH. Při vytápění/TUV bývá nad R4T, při chlazení pod ní." },
-  r2t: { t: "Výstupní voda za BUH (R2T)", what: "Teplota vody za BUH; na rozdíl od R1T může obsahovat elektricky přidané teplo." },
-  rwt: { t: "Vstup vody do PHE (R4T)", what: "Teplota vody vracející se do PHE. Vyhodnocujte ji s R1T, průtokem, kompresorem a režimem." },
-  dt: {
-    t: "ΔT vody na PHE", what: "R1T na výstupu minus R4T na vstupu. Počítá se ze dvou snímačů; s průtokem popisuje výměnu, ale neměří teploty u spotřebičů domu.",
-    now: (d) => d.dtStale ? "Chybí pracovní ΔT — čerpadlo a průtok nepotvrzují pohyb vody. Rozdíl chladnoucích snímačů není pracovní bod."
+      : `Do vody se předává asi ${fmt1(d.pth)} kW (${fmt1(d.flow)} l/min, ΔT ${fmt1(d.dt)} K).`], // phe
+    ["Výstup vody z PHE před BUH (R1T)", "Výstup vody z PHE před BUH R1T", "Teplota vody opouštějící PHE před BUH. Při vytápění/TUV bývá nad R4T, při chlazení pod ní."], // lwt
+    ["Výstupní voda za BUH (R2T)", "Výstupní voda za BUH R2T", "Teplota vody za BUH; na rozdíl od R1T může obsahovat elektricky přidané teplo."], // r2t
+    ["Vstup vody do PHE (R4T)", "Vstup vody do PHE R4T", "Teplota vody vracející se do PHE. Vyhodnocujte ji s R1T, průtokem, kompresorem a režimem."], // rwt
+    ["ΔT vody na PHE", "Rozdíl teplot vody na PHE", "R1T na výstupu minus R4T na vstupu. Počítá se ze dvou snímačů; s průtokem popisuje výměnu, ale neměří teploty u spotřebičů domu.", (d) => d.dtStale ? "Chybí pracovní ΔT — čerpadlo a průtok nepotvrzují pohyb vody. Rozdíl chladnoucích snímačů není pracovní bod."
       : d.dt == null ? null : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K při chodu samotného čerpadla — vyrovnávání zbytkového tepla, ne výkon.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Při chlazení má být R1T pod R4T, proto je rozdíl záporný.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? ` proti cíli ${fmt1(d.dtSet)} K` : ""}. Kladná hodnota znamená předávání tepla vodě.`,
-  },
-  pth: {
-    t: (d) => d && d.pthKind === "cooling" ? "Chladicí výkon (odhad)" : "Tepelný výkon (odhad)", what: (d) => d && d.pthKind === "cooling" ? "Odhad tepla odebraného vodě: průtok × (R4T−R1T) × 4,186 při předpokladu vody. Snímače a glykol omezují přesnost; hodnota se ukáže jen při potvrzeném chlazení." : "Odhad tepla předaného vodě: průtok × (R1T−R4T) × 4,186 při předpokladu vody. Snímače a glykol omezují přesnost; BUH za R1T není zahrnut.",
-    now: (d) => d.dtStale ? d.bsh === true ? "Přenos na PHE nelze spočítat bez potvrzeného oběhu. Těleso může dál ohřívat zásobník, ale jeho teplo míjí snímače PHE a sběrnice neudává jeho výkon." : "Výkon nelze spočítat bez potvrzeného pohybu vody přes PHE. Jde o chybějící pracovní bod, ne nulový výkon."
-      : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW chlazení${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`,
-  },
-  cop: {
-    t: (d) => d && d.efficiencyKind === "eer" ? "EER tepelného čerpadla (odhad)" : d && d.copScope === "plant" ? "COP za BUH (odhad)" : "COP tepelného čerpadla (odhad)", what: (d) => d && d.efficiencyKind === "eer" ? "Odhadovaný chladicí výkon dělený odhadovaným příkonem. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku; je okamžitý, ne sezonní." : "Odhadovaný tepelný výkon dělený příkonem se stejnou bilanční hranicí. U CT může být teplo za BUH, u proudu měniče jen tepelné čerpadlo; zapojení CT určuje zahrnuté spotřebiče. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku a je okamžitý, nikoli sezonní.",
-    now: (d) => d.copBlock === "tank_heater" ? "COP není dostupný — těleso zásobníku je zapnuté. Jeho příkon může být v elektrické bilanci, ale teplo jde přímo do zásobníku a míjí vodní snímače."
+      : `${fmt1(d.dt)} K${d.dtSet != null ? ` proti cíli ${fmt1(d.dtSet)} K` : ""}. Kladná hodnota znamená předávání tepla vodě.`], // dt
+    [(d) => d && d.pthKind === "cooling" ? "Chladicí výkon (odhad)" : "Tepelný výkon (odhad)", "Odhadovaný tepelný výkon na PHE", (d) => d && d.pthKind === "cooling" ? "Odhad tepla odebraného vodě: průtok × (R4T−R1T) × 4,186 při předpokladu vody. Snímače a glykol omezují přesnost; hodnota se ukáže jen při potvrzeném chlazení." : "Odhad tepla předaného vodě: průtok × (R1T−R4T) × 4,186 při předpokladu vody. Snímače a glykol omezují přesnost; BUH za R1T není zahrnut.", (d) => d.dtStale ? d.bsh === true ? "Přenos na PHE nelze spočítat bez potvrzeného oběhu. Těleso může dál ohřívat zásobník, ale jeho teplo míjí snímače PHE a sběrnice neudává jeho výkon." : "Výkon nelze spočítat bez potvrzeného pohybu vody přes PHE. Jde o chybějící pracovní bod, ne nulový výkon."
+      : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW chlazení${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
+    [(d) => d && d.efficiencyKind === "eer" ? "EER tepelného čerpadla (odhad)" : d && d.copScope === "plant" ? "COP za BUH (odhad)" : "COP tepelného čerpadla (odhad)", "Odhadovaná účinnost", (d) => d && d.efficiencyKind === "eer" ? "Odhadovaný chladicí výkon dělený odhadovaným příkonem. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku; je okamžitý, ne sezonní." : "Odhadovaný tepelný výkon dělený příkonem se stejnou bilanční hranicí. U CT může být teplo za BUH, u proudu měniče jen tepelné čerpadlo; zapojení CT určuje zahrnuté spotřebiče. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku a je okamžitý, nikoli sezonní.", (d) => d.copBlock === "tank_heater" ? "COP není dostupný — těleso zásobníku je zapnuté. Jeho příkon může být v elektrické bilanci, ale teplo jde přímo do zásobníku a míjí vodní snímače."
       : d.copBlock === "buh_no_r2t" ? "COP není dostupný — BUH topí, ale profil nemá snímač za ním; elektrická a tepelná hranice si neodpovídají."
       : d.copBlock === "mb_scope" ? "COP není dostupný — HomeHub udává příkon celé jednotky včetně těles, ale tepelný výkon jen PHE. Bez stavu těles a snímače za nimi nelze hranice sladit."
       : d.copBlock === "no_pel" ? d.pelHeld ? "COP není dostupný — proud měniče je při stojícím kompresoru z minulého běhu." : "COP není dostupný — profil neudává CT ani proud měniče."
       : d.cop == null ? null : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW chlazení na 1 kW elektřiny — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW příkonu.`
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW tepla za BUH na 1 kW příkonu CT — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW. Rozsah určuje zapojení CT.`
-      : `${fmt1(d.cop)} kW tepla na 1 kW elektřiny v hranici čerpadla — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW. BUH je mimo obě veličiny.`,
-  },
-  buh: { t: "Záložní topné těleso (BUH)", what: "Elektrické těleso ve vodním okruhu pro mráz, odmrazování nebo nouzový provoz. Stupeň není samostatné měření kW.", now: (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stupeň 2 — pracují oba stupně." : d.buh1 ? "Stupeň 1 — pracuje jeden stupeň." : "Vypnuto — žádný stupeň BUH není aktivní." },
-  bsh: { t: "Elektrické těleso zásobníku", what: "Ponorné těleso BSH ohřívá zásobník bez kompresoru a oběhu vody. X10A udává jen stav, ne výkon.", now: () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Elektrické těleso zásobníku je aktivní." : "Vypnuto — zásobník těleso nepoužívá."; } },
-  valve: { t: "Trojcestný ventil", what: "Volí cestu k zásobníku nebo domu. Jde o hlášený povel, ne mechanické potvrzení polohy ani průtoku.", now: (d) => d.valveDhw == null ? null : d.valveDhw ? "Zvolena cesta k zásobníku; samo hlášení nepotvrzuje průtok ani ohřev." : "Zvolena cesta do domu; samo hlášení nepotvrzuje oběh." },
-  valve2: { t: "Výstup dvoucestného ventilu", what: "Binární výstup X10A; není mechanickým potvrzením polohy ani důkazem vytápění/chlazení.", now: (d) => d.valve2On == null ? null : d.valve2On ? "X10A hlásí 2WV ZAP; režim a provoz domu ověřte zvlášť." : "X10A hlásí 2WV VYP; samo to neznamená chlazení ani rozpor s vytápěním při klidu domu." },
-  tank: { t: "Zásobník TUV / akumulace", what: "Teplota R5T, nastavení a cesta 3WV společně popisují zásobník; samotná teplota nepotvrzuje aktivní ohřev." },
-  heat: {
-    t: (d) => activeSpaceKind(d) === "cool" ? "Chladicí okruh" : activeSpaceKind(d) === "heat" ? "Topný okruh" : "Okruh domu", what: "Radiátory, podlahové smyčky nebo fancoily. R1T/R4T jsou uvnitř čerpadla a nepotvrzují teplotu za venkovním potrubím.",
-    now: (d) => d.valveDhw === true ? "Cesta do domu není zvolena; skutečný průtok k zásobníku ukazují čerpadlo a průtok."
-      : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Zbytkově teplá voda proudí do domu. R1T ${degC(d.lwt)}; za spotřebiči není snímač. Nejde o aktivní chlazení.` : `Voda proudí do ${activeSpaceKind(d) === "cool" ? "chladicího" : activeSpaceKind(d) === "heat" ? "topného" : "domovního"} okruhu. R1T ${degC(d.lwt)}; za spotřebiči není snímač.` : "Čerpadlo a průtok nepotvrzují oběh domem.",
-  },
-  spaceh: { t: "Provoz vytápění/chlazení domu", what: "Stav běžného provozu domu. Není to požadavek termostatu a sám nepotvrzuje kompresor." },
-  room: { t: "Teplota místnosti", what: "Teplota ze snímače místnosti vnitřní jednotky. Porovnejte ji s nastavením a skutečným režimem." },
-  pump: {
-    t: "Oběhové čerpadlo", what: "Pohání vodu společným okruhem a cestou zvolenou 3WV. Může běžet při stojícím kompresoru kvůli doběhu nebo ochraně; otáčky samy nepotvrzují průtok.",
-    now: (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
+      : `${fmt1(d.cop)} kW tepla na 1 kW elektřiny v hranici čerpadla — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW. BUH je mimo obě veličiny.`], // cop
+    ["Záložní topné těleso (BUH)", "Záložní topné těleso BUH", "Elektrické těleso ve vodním okruhu pro mráz, odmrazování nebo nouzový provoz. Stupeň není samostatné měření kW.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stupeň 2 — pracují oba stupně." : d.buh1 ? "Stupeň 1 — pracuje jeden stupeň." : "Vypnuto — žádný stupeň BUH není aktivní."], // buh
+    ["Elektrické těleso zásobníku", 0, "Ponorné těleso BSH ohřívá zásobník bez kompresoru a oběhu vody. X10A udává jen stav, ne výkon.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Elektrické těleso zásobníku je aktivní." : "Vypnuto — zásobník těleso nepoužívá."; }], // bsh
+    ["Trojcestný ventil", 0, "Volí cestu k zásobníku nebo domu. Jde o hlášený povel, ne mechanické potvrzení polohy ani průtoku.", (d) => d.valveDhw == null ? null : d.valveDhw ? "Zvolena cesta k zásobníku; samo hlášení nepotvrzuje průtok ani ohřev." : "Zvolena cesta do domu; samo hlášení nepotvrzuje oběh."], // valve
+    ["Výstup dvoucestného ventilu", 0, "Binární výstup X10A; není mechanickým potvrzením polohy ani důkazem vytápění/chlazení.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A hlásí 2WV ZAP; režim a provoz domu ověřte zvlášť." : "X10A hlásí 2WV VYP; samo to neznamená chlazení ani rozpor s vytápěním při klidu domu."], // valve2
+    ["Zásobník TUV / akumulace", "Zásobník TUV nebo akumulace", "Zásobník popisují R5T, nastavení a cesta 3WV; teplota sama nepotvrzuje ohřev."], // tank
+    [(d) => activeSpaceKind(d) === "cool" ? "Chladicí okruh" : activeSpaceKind(d) === "heat" ? "Topný okruh" : "Okruh domu", "Okruh domu", "Radiátory, podlahové smyčky nebo fancoily. R1T/R4T jsou uvnitř čerpadla a nepotvrzují teplotu za venkovním potrubím.", (d) => d.valveDhw === true ? "Cesta do domu není zvolena; skutečný průtok k zásobníku ukazují čerpadlo a průtok."
+      : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Zbytkově teplá voda proudí do domu. R1T ${degC(d.lwt)}; za spotřebiči není snímač. Nejde o aktivní chlazení.` : `Voda proudí do ${activeSpaceKind(d) === "cool" ? "chladicího" : activeSpaceKind(d) === "heat" ? "topného" : "domovního"} okruhu. R1T ${degC(d.lwt)}; za spotřebiči není snímač.` : "Čerpadlo a průtok nepotvrzují oběh domem."], // heat
+    ["Provoz vytápění/chlazení domu", "Provoz vytápění nebo chlazení domu", "Stav běžného provozu domu. Není to požadavek termostatu a sám nepotvrzuje kompresor."], // spaceh
+    ["Teplota místnosti", 0, "Teplota referenční zóny; porovnejte ji s nastavením a režimem."], // room
+    ["Oběhové čerpadlo", "Otáčky oběhového čerpadla", "Pohání vodu společným okruhem a cestou zvolenou 3WV. Může běžet při stojícím kompresoru kvůli doběhu nebo ochraně; otáčky samy nepotvrzují průtok.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
       : pumpFlowConflict(d) ? `Čerpadlo hlásí stání, ale snímač ${fmt1(d.flow)} l/min. Možný je vnější oběh, doběh nebo rozporný/starý signál; ověřte oba údaje.`
       : d.pump != null && d.pump > 0 ? d.flow != null ? `Otáčky ${fmt0(d.pump)} %; průtok ${fmt1(d.flow)} l/min.` : `Otáčky ${fmt0(d.pump)} %, ale průtok chybí; oběh není potvrzen.`
       : waterMoving(d) ? `Průtok ${fmt1(d.flow)} l/min při chybějící použitelné hodnotě otáček.`
       : d.pumpOn === true ? d.flow != null ? `Čerpadlo ZAP, ale průtok jen ${fmt1(d.flow)} l/min; oběh není potvrzen.` : "Čerpadlo ZAP, ale průtok chybí; oběh není potvrzen."
       : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Čerpadlo stojí; snímač ${fmt1(d.flow)} l/min. Hodnoty oběh nepotvrzují.` : "Čerpadlo stojí a průtok chybí."
-      : `Spolehlivý stav čerpadla chybí; ${fmt1(d.flow)} l/min nepotvrzuje oběh.`,
-  },
-  pel: {
-    t: (d) => pelMeasured(d) ? "Elektrický příkon (HomeHub)" : "Elektrický příkon (odhad)", what: (d) => pelMeasured(d) ? "Příkon z registru HomeHub 51. Dokumentace nepotvrzuje kalibraci, bod měření ani zahrnutí všech těles; nejde o certifikovaný elektroměr soustavy." : "Odhad pro COP/EER: součet fází CT × předpokládaných 230 V. Napětí a účiník nejsou známy; proud měniče zahrnuje jen kompresor a rozsah CT určuje zapojení.",
-    now: (d) => d.pelHeld ? "Kompresor stojí, takže proud měniče je z minulého běhu, ne aktuální; příkon ani účinnost nelze uvést."
+      : `Spolehlivý stav čerpadla chybí; ${fmt1(d.flow)} l/min nepotvrzuje oběh.`], // pump
+    [(d) => pelMeasured(d) ? "Elektrický příkon (HomeHub)" : "Elektrický příkon (odhad)", "Elektrický příkon", (d) => pelMeasured(d) ? "Příkon z registru HomeHub 51. Dokumentace nepotvrzuje kalibraci, bod měření ani zahrnutí všech těles; nejde o certifikovaný elektroměr soustavy." : "Odhad pro COP/EER: součet fází CT × předpokládaných 230 V. Napětí a účiník nejsou známy; proud měniče zahrnuje jen kompresor a rozsah CT určuje zapojení.", (d) => d.pelHeld ? "Kompresor stojí, takže proud měniče je z minulého běhu, ne aktuální; příkon ani účinnost nelze uvést."
       : d.pel == null ? "Profil nemá aktuální proud, proto nelze odvodit COP/EER."
       : d.pelSrc === "MB" ? "Hodnota z registru HomeHub 51; přesná hranice měření není zdokumentována."
-      : d.pelSrc === "CT" ? "Odhad z CT; zahrnuté spotřebiče závisejí na zapojení." : "Z proudu měniče — pouze kompresor.",
-  },
-  defrost: { t: "Odmrazování", what: "Obrácený cyklus rozpouští led na venkovním výměníku; vytápění se krátce přeruší.", now: (d) => d.defrost == null ? null : d.defrost ? "Odmrazování je aktivní." : "Vypnuto — odmrazování není aktivní." },
-  quiet: { t: "Tichý režim", what: "Omezuje hluk zpravidla omezením ventilátoru nebo kompresoru, a tím může snížit výkon.", now: (d) => d.quiet == null ? null : d.quiet ? "Tichý režim je aktivní." : "Vypnuto — tichý režim není aktivní." },
-  rhot: { t: "Plynové potrubí", what: "Potrubí split mezi jednotkami. Při vytápění vede horký plyn pod vysokým tlakem k PHE; při chlazení se směr obrátí. Monoblok je nemá.", now: (d) => compressorRunning(d) ? d.rps != null ? `Průtok — ${fmt1(d.circP)} bar při ${fmt0(d.disch)} °C.` : "Průtok — HomeHub potvrzuje kompresor; tlak a teplota vyžadují X10A." : "Aktivní oběh chladiva neprobíhá — kompresor stojí; vyrovnání tlaků závisí na okruhu a době stání." },
-  rcold: { t: "Kapalinové potrubí", what: "Potrubí kapalného chladiva mezi jednotkami split. Při vytápění se vrací k expanznímu ventilu venkovní jednotky; při chlazení se směr obrátí. Monoblok je nemá.", now: (d) => compressorRunning(d) ? d.rps != null ? `Průtok — expanzní ventil ${fmt0(d.eev)} impulzů.` : "Průtok — HomeHub potvrzuje kompresor; poloha ventilu vyžaduje X10A." : "Stojí — kompresor je vypnutý." },
-  wsup: { t: "Výstupní potrubí PHE", what: "Voda z R1T prochází BUH a čerpadlem; 3WV ji vede do domu nebo zásobníku. Při chlazení je studenou stranou; snímač za BUH může zahrnout elektrické teplo.", now: (d) => waterMoving(d) ? `R1T před BUH ${degC(d.lwt)} při ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? "; dále aktivní BUH" : ""}.` : "Čerpadlo a průtok nepotvrzují oběh v potrubí." },
-  wtank: { t: "Okruh zásobníku", what: "Hydraulická větev ohřevu TUV nebo akumulace. Výměník závisí na konstrukci; schéma ukazuje funkci, ne vnitřek modelu.", now: (d) => d.valveDhw === true ? waterMoving(d) ? `Zvolen zásobník, ${fmt1(d.flow)} l/min; PHE ${degC(d.lwt)}, zásobník ${degC(d.tank)}.` : "Zvolen zásobník, ale oběh nepotvrzuje aktivní ohřev." : "Cesta k zásobníku není zvolena; řízení hlásí dům." },
-  wheat: { t: (d) => activeSpaceKind(d) === "cool" ? "Chladicí větev" : activeSpaceKind(d) === "heat" ? "Topná větev" : "Větev domu", what: "Větev k radiátorům, podlahovce nebo fancoilům. R1T/R4T měří uvnitř čerpadla, ne tuto větev; ΔT zahrnuje i potrubí.", now: (d) => d.valveDhw === true ? "Větev domu není zvolena; řízení hlásí zásobník." : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Oběh zbytkového tepla ${fmt1(d.flow)} l/min; bez aktivního chlazení. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : `Oběh do domu ${fmt1(d.flow)} l/min. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : "Oběh větví domu není potvrzen." },
-  wret: { t: "Vratné potrubí k PHE", what: "Společný návrat do R4T po spojení zásobníku a domu. Při vytápění je obvykle chladnější než R1T, při chlazení teplejší; R4T není u spotřebičů.", now: (d) => waterMoving(d) ? `Návrat ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` : "Oběh ve vratném potrubí není potvrzen." },
-  flow: { t: "Průtok vody", what: "Změřený objem vody společným okruhem domu a TUV. Požadované minimum závisí na modelu a režimu." },
-  flow_switch: { t: "Stav spínače průtoku", what: "Binární stav X10A. Neměří l/min a nepotvrzuje minimum pro model.", now: (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A je ZAP; porovnejte s čerpadlem a ${fmt1(d.flow)} l/min.` : `X10A je VYP; při čerpadle porovnejte s ${fmt1(d.flow)} l/min a chybou 7H/C0.` },
-  wp: { t: "Tlak vody", what: "Tlak v uzavřeném hydraulickém okruhu. Povolený rozsah závisí na modelu, výšce a expanzní nádobě; viz návod." },
-};
+      : d.pelSrc === "CT" ? "Odhad z CT; zahrnuté spotřebiče závisejí na zapojení." : "Z proudu měniče — pouze kompresor."], // pel
+    ["Odmrazování", 0, "Obrácený cyklus rozpouští led na venkovním výměníku; vytápění se krátce přeruší.", (d) => d.defrost == null ? null : d.defrost ? "Odmrazování je aktivní." : "Vypnuto — odmrazování není aktivní."], // defrost
+    ["Tichý režim", 0, "Omezuje hluk zpravidla omezením ventilátoru nebo kompresoru, a tím může snížit výkon.", (d) => d.quiet == null ? null : d.quiet ? "Tichý režim je aktivní." : "Vypnuto — tichý režim není aktivní."], // quiet
+    ["Plynové potrubí", 0, "Potrubí split mezi jednotkami. Při vytápění vede horký plyn pod vysokým tlakem k PHE; při chlazení se směr obrátí. Monoblok je nemá.", (d) => compressorRunning(d) ? d.rps != null ? `Průtok — ${fmt1(d.circP)} bar při ${fmt0(d.disch)} °C.` : "Průtok — HomeHub potvrzuje kompresor; tlak a teplota vyžadují X10A." : "Aktivní oběh chladiva neprobíhá — kompresor stojí; vyrovnání tlaků závisí na okruhu a době stání."], // rhot
+    ["Kapalinové potrubí", 0, "Potrubí kapalného chladiva mezi jednotkami split. Při vytápění se vrací k expanznímu ventilu venkovní jednotky; při chlazení se směr obrátí. Monoblok je nemá.", (d) => compressorRunning(d) ? d.rps != null ? `Průtok — expanzní ventil ${fmt0(d.eev)} impulzů.` : "Průtok — HomeHub potvrzuje kompresor; poloha ventilu vyžaduje X10A." : "Stojí — kompresor je vypnutý."], // rcold
+    ["Výstupní potrubí PHE", 0, "Voda z R1T prochází BUH a čerpadlem; 3WV ji vede do domu nebo zásobníku. Při chlazení je studenou stranou; snímač za BUH může zahrnout elektrické teplo.", (d) => waterMoving(d) ? `R1T před BUH ${degC(d.lwt)} při ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? "; dále aktivní BUH" : ""}.` : "Čerpadlo a průtok nepotvrzují oběh v potrubí."], // wsup
+    ["Okruh zásobníku", 0, "Hydraulická větev ohřevu TUV nebo akumulace. Výměník závisí na konstrukci; schéma ukazuje funkci, ne vnitřek modelu.", (d) => d.valveDhw === true ? waterMoving(d) ? `Zvolen zásobník, ${fmt1(d.flow)} l/min; PHE ${degC(d.lwt)}, zásobník ${degC(d.tank)}.` : "Zvolen zásobník, ale oběh nepotvrzuje aktivní ohřev." : "Cesta k zásobníku není zvolena; řízení hlásí dům."], // wtank
+    [(d) => activeSpaceKind(d) === "cool" ? "Chladicí větev" : activeSpaceKind(d) === "heat" ? "Topná větev" : "Větev domu", "Větev domu", "Větev k radiátorům, podlahovce nebo fancoilům. R1T/R4T měří uvnitř čerpadla, ne tuto větev; ΔT zahrnuje i potrubí.", (d) => d.valveDhw === true ? "Větev domu není zvolena; řízení hlásí zásobník." : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Oběh zbytkového tepla ${fmt1(d.flow)} l/min; bez aktivního chlazení. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : `Oběh do domu ${fmt1(d.flow)} l/min. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : "Oběh větví domu není potvrzen."], // wheat
+    ["Vratné potrubí k PHE", 0, "Společný návrat do R4T po spojení zásobníku a domu. Při vytápění je obvykle chladnější než R1T, při chlazení teplejší; R4T není u spotřebičů.", (d) => waterMoving(d) ? `Návrat ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` : "Oběh ve vratném potrubí není potvrzen."], // wret
+    ["Průtok vody", 0, "Průtok společným okruhem; minimum závisí na modelu a režimu."], // flow
+    ["Stav spínače průtoku", 0, "Binární stav X10A; neměří l/min ani nepotvrzuje minimum modelu.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A ZAP; porovnejte s čerpadlem a ${fmt1(d.flow)} l/min.` : `X10A VYP; při chodu čerpadla porovnejte ${fmt1(d.flow)} l/min a chybu 7H/C0.`], // flow_switch
+    ["Tlak vody", 0, "Tlak v uzavřeném hydraulickém okruhu. Povolený rozsah závisí na modelu, výšce a expanzní nádobě; viz návod."], // wp
+  ],
+);
 
-for (const [key, aria] of Object.entries({
-  status:"Provozní režim",env3:"Venkovní podmínky z ENV III",sgrequest:"Požadavek Smart Grid",ou:"Venkovní jednotka",comp:"Kompresor",out:"Venkovní teplota",ouhx:"Teplota venkovního výměníku R4T",hp:"Vysoký tlak",disch:"Teplota výtlaku",lp:"Nízký tlak",eev:"Expanzní ventil",r3t:"Teplota kapalného chladiva R3T",phe:"Deskový výměník tepla",lwt:"Výstup vody z PHE před BUH R1T",r2t:"Výstupní voda za BUH R2T",rwt:"Vstup vody do PHE R4T",dt:"Rozdíl teplot vody na PHE",pth:"Odhadovaný tepelný výkon na PHE",cop:"Odhadovaná účinnost",buh:"Záložní topné těleso BUH",bsh:"Elektrické těleso zásobníku",valve:"Trojcestný ventil",valve2:"Výstup dvoucestného ventilu",tank:"Zásobník TUV nebo akumulace",heat:"Okruh domu",spaceh:"Provoz vytápění nebo chlazení domu",room:"Teplota místnosti",pump:"Otáčky oběhového čerpadla",pel:"Elektrický příkon",defrost:"Odmrazování",quiet:"Tichý režim",rhot:"Plynové potrubí",rcold:"Kapalinové potrubí",wsup:"Výstupní potrubí PHE",wtank:"Okruh zásobníku",wheat:"Větev domu",wret:"Vratné potrubí k PHE",flow:"Průtok vody",flow_switch:"Stav spínače průtoku",wp:"Tlak vody",
-})) INSPECT_I18N.cs[key].aria = aria;
+HOMEHUB_LABEL_I18N.cs = homeHubValues([
+  "Nastavení výstupní vody vytápění hlavní zóny", // 1
+  "Nastavení výstupní vody chlazení hlavní zóny", // 2
+  "Režim vytápění/chlazení", // 3
+  "Vytápění/chlazení domu povoleno", // 4
+  "Nastavení vytápění hlavní zóny", // 6
+  "Nastavení chlazení hlavní zóny", // 7
+  "Tichý režim", // 9
+  "Nastavení dohřevu TUV", // 10
+  "Diagnostický stav jednotky", // 21
+  "Kód chyby jednotky", // 22
+  "Podkód chyby jednotky", // 23
+  "Oběhové čerpadlo aktivní", // 30
+  "Kompresor aktivní", // 31
+  "Těleso zásobníku aktivní", // 32
+  "Dezinfekce zásobníku aktivní", // 33
+  "Poloha trojcestného ventilu", // 37
+  "Aktuální režim vytápění/chlazení", // 38
+  "Teplota výstupu PHE", // 40
+  "Teplota výstupu za BUH", // 41
+  "Teplota vratné vody", // 42
+  "Teplota zásobníku TUV", // 43
+  "Venkovní teplota", // 44
+  "Teplota kapalného chladiva", // 45
+  "Průtok vody", // 49
+  "Pokojová teplota hlavní zóny", // 50
+  "Elektrický příkon", // 51
+  "Provoz TUV", // 52
+  "Provoz vytápění/chlazení domu", // 53
+  "Korekce výstupu hlavní topné zóny", // 54
+  "Režim Smart Grid", // 56
+  "Limit výkonu akumulace", // 57
+  "Celkový limit výkonu", // 58
+]);
 
-HOMEHUB_LABEL_I18N.cs = Object.freeze({
-  21:"Diagnostický stav jednotky",22:"Kód chyby jednotky",23:"Podkód chyby jednotky",30:"Oběhové čerpadlo aktivní",31:"Kompresor aktivní",32:"Těleso zásobníku aktivní",33:"Dezinfekce zásobníku aktivní",37:"Poloha trojcestného ventilu",38:"Aktuální režim vytápění/chlazení",52:"Provoz TUV",53:"Provoz vytápění/chlazení domu",40:"Teplota výstupu PHE",41:"Teplota výstupu za BUH",42:"Teplota vratné vody",43:"Teplota zásobníku TUV",44:"Venkovní teplota",45:"Teplota kapalného chladiva",49:"Průtok vody",50:"Pokojová teplota hlavní zóny",51:"Elektrický příkon",1:"Nastavení výstupní vody vytápění hlavní zóny",2:"Nastavení výstupní vody chlazení hlavní zóny",3:"Režim vytápění/chlazení",4:"Vytápění/chlazení domu povoleno",6:"Nastavení vytápění hlavní zóny",7:"Nastavení chlazení hlavní zóny",9:"Tichý režim",10:"Nastavení dohřevu TUV",54:"Korekce výstupu hlavní topné zóny",56:"Režim Smart Grid",57:"Limit výkonu akumulace",58:"Celkový limit výkonu",
-});
+DESCRIPTION_I18N.cs = descriptionValues([
+  ["Cílová teplota zásobníku TUV nebo akumulační nádrže."], // 0
+  ["Hodnota druhého teplotního čidla v zásobníku TUV, například dolního čidla nádrže."], // 1
+  ["Teplota z čidla R5T. Podle konstrukce jde o TUV nebo vodu v akumulační nádrži."], // 2
+  ["Režim Powerful ihned spustí ohřev zásobníku na komfortní cílovou teplotu."], // 3
+  ["Předehřev X10A není přímý příznak dezinfekce HomeHub ani důkaz jejího běhu."], // 4
+  ["Vstup HomeHub 33 hlásí dezinfekci; impuls mezi úplnými dotazy Modbus může uniknout."], // 5
+  ["Venkovní termostatický bit je oddělen od vnitřního požadavku a nedokazuje kompresor."], // 6
+  ["Bit venkovního omezení hluku; úroveň a spouštěč nejsou ověřeny."], // 7
+  ["Bit solárního vstupu vodního okruhu; funkce a polarita nejsou ověřeny."], // 8
+  ["Příznak fáze čekání po restartu nebo řízení rozběhu."], // 9
+  ["Návrat oleje je vnitřní fáze chladivového okruhu, ne porucha sama o sobě."], // 10
+  ["Vyrovnávání tlaku je řídicí fáze, ne měření ani potvrzení polohy ventilu."], // 11
+  ["Proprietární příznak požadavku má veřejně neurčený význam."], // 12
+  ["Povel/stav 4cestného ventilu pro obrácení okruhu."], // 13
+  ["Povel/stav ohřevu klikové skříně. Neměří proud tělesa ani teplotu kompresoru."], // 14
+  ["Proprietární výstupní bit nedokazuje pohyb ventilu ani aktivní polaritu."], // 15
+  ["Podkód doplňuje hlavní chybu; hodnoty podle modelu nemají ověřený výklad."], // 16
+  ["Příznak volitelného uzávěru podlahové smyčky."], // 17
+  ["ZAP. znamená System off, ale nedokazuje vypnutí všech čerpadel, těles a ochran."], // 18
+  ["Externí termostatický vstup je požadavek, ne pokojová teplota ani stav kompresoru."], // 19
+  ["Bit požadavku pokojového termostatu hlavní zóny pro chlazení či vytápění."], // 20
+  ["Čtyři syrové bity limitu zůstávají zvlášť; jejich kódování není ověřeno."], // 21
+  ["Bit povelu/stavu ohřevu PHE. Katalog neurčuje, zda jde o povel či zpětnou vazbu."], // 22
+  ["Dohřev vrací nádrž na nastavenou teplotu po poklesu pod spínací mez."], // 23
+  ["Aktivní plánovaná předvolba nádrže: Storage comfort používá vyšší cíl, Storage eco nižší."], // 24
+  ["V hybridu regulátor žádá kotel o TUV."], // 25
+  ["Přepínací ventil vede vodu do zásobníku TUV nebo domu."], // 26
+  ["Výstup 2WV zůstává ZAP./VYP.; VYP. nedokazuje chlazení ani polohu ventilu."], // 27
+  ["Otevření směšovacího ventilu druhé zóny."], // 28
+  ["Cílová výstupní teplota pro zvolený režim vytápění či chlazení."], // 29
+  ["Smíšená výstupní teplota za ventilem druhé topné zóny, obvykle chladnější."], // 30
+  ["R2T měří vodu za BUH; umístění závisí na hydraulice, ne na otopných tělesech."], // 31
+  ["R1T měří vodu z PHE před BUH; režim, R4T a průtok určují význam i odhad výkonu."], // 32
+  ["R4T je společná vratka do PHE; R1T−R4T je ΔT PHE, ne přímo otopných těles."], // 33
+  ["Rychlost oběhu vody ve společném okruhu vytápění/chlazení a TUV."], // 34
+  ["Tlak vody; rozsah závisí na modelu, při ≤1,0 bar použijte přesný návod."], // 35
+  ["Povel rychlosti oběhového čerpadla s obrácenou stupnicí: 0 = plná rychlost, 100 = stojí."], // 36
+  ["Běh oběhového čerpadla nedokazuje přenos tepla; potvrďte jej průtokem."], // 37
+  ["Stav čerpadla nakonfigurovaného solárního termického okruhu."], // 38
+  ["Hlášená rychlost čerpadla pojmenovaného profilem."], // 39
+  ["Flow switch X10A hlásí jen pohyb; neměří průtok ani splnění minima modelu."], // 40
+  ["Aktuální režim vodní strany: zastaveno, vytápění, chlazení, TUV nebo kombinace."], // 41
+  ["Smart Grid hlásí čtyřstavový energetický povel, ne režim vytápění/chlazení."], // 42
+  ["Živý režim domu je vytápění/chlazení bez automatiky a sám nedokazuje běh kompresoru."], // 43
+  ["Nastavená volba HomeHub Auto/vytápění/chlazení z registru 3."], // 44
+  ["Stav venkovní jednotky: zastaveno, vytápění nebo chlazení; sám nedokazuje přenos tepla."], // 45
+  ["Odmrazování je v chladu a vlhku normální; samotný bit bez vlhkosti neurčuje četnost."], // 46
+  ["Třída aktivní poruchy: normální stav, chyba, varování nebo upozornění."], // 47
+  ["Význam právě hlášeného kódu poruchy."], // 48
+  ["Nouzový provoz po poruše tepelného čerpadla."], // 49
+  ["Poplachové relé jednotky, sepnuté při poruše pro připojený externí alarm nebo dohled."], // 50
+  ["Cílová pokojová teplota hlavní zóny při vytápění či chlazení."], // 51
+  ["„Thermo ON“ je vnitřní požadavek, ne určení zátěže ani důkaz běhu kompresoru."], // 52
+  ["Stav výstupní svorky „Space H Operation“."], // 53
+  ["Běžný provoz domu není jen vytápění ani termostat; skutečnost ukazuje I/U a pohony."], // 54
+  ["Nastavená cílová pokojová teplota zóny řízené vlastním pokojovým čidlem jednotky."], // 55
+  ["Pokojová teplota měřená vestavěným nebo kabelovým čidlem jednotky."], // 56
+  ["Ochrana výtlaku: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 57
+  ["Ochrana proudu invertoru: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 58
+  ["Ochrana vysokého tlaku: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 59
+  ["Ochrana nízkého tlaku: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 60
+  ["Ochrana teploty chladiče invertoru: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 61
+  ["Vnitřní souhrnný příznak omezení mimo pět pojmenovaných ochran."], // 62
+  ["Teplota vody na vstupu či výstupu PHE mezi chladivem a vodním okruhem."], // 63
+  ["Teplota venkovního výměníku; pod 0 °C bez vlhkosti sama nedokazuje námrazu."], // 64
+  ["Venkovní teplota měřená u jednotky pro ekvitermní řízení a provozní rozhodnutí."], // 65
+  ["Teplota horkého stlačeného chladiva za kompresorem."], // 66
+  ["Teplota chladného nízkotlakého chladiva vracejícího se do kompresoru."], // 67
+  ["Teplota chladiva v kapalinovém potrubí mezi výměníky."], // 68
+  ["Teplota chladiva u vstupu či výstupu výparníku, který odebírá teplo."], // 69
+  ["Teplota vstřikovacího potrubí chladiva pro řízení vstřiku a ochranu okruhu."], // 70
+  ["Teplota dvoufázové směsi chladiva; vnitřní regulační vstup, ne uživatelský cíl."], // 71
+  ["Teplota čidla odmrazování venkovního výměníku, jeden z podkladů pro ochranu a odmrazení."], // 72
+  ["Sytostní teplota vypočtená z tlaku pro nastavené chladivo; není z čidla ani tlakem v bar."], // 73
+  ["Tlak chladiva na vysokotlaké nebo nízkotlaké straně; nejde o jejich rozdíl."], // 74
+  ["Otáčky invertorového kompresoru za sekundu, hlavní regulační veličina výkonu."], // 75
+  ["Povel elektronického expanzního ventilu v krocích/pulsech."], // 76
+  ["Teplota výkonové elektroniky motoru venkovního ventilátoru."], // 77
+  ["Rychlost venkovního ventilátoru jako stupeň nebo ot/min."], // 78
+  ["Vnitřní cílová vypařovací/kondenzační teplota, nikoli uživatelské nastavení."], // 79
+  ["Vnitřní cíl teploty výtlaku/portu kompresoru pro ochrannou logiku."], // 80
+  ["Cílové ΔT závisí na modelu a režimu; může být 8 či 10 K, obecné pravidlo 5 K neplatí."], // 81
+  ["Chladivo jednotky, např. R32/R410A, určující tlakově-teplotní křivku sytosti."], // 82
+  ["Teplota u portu kompresoru pro vnitřní ochranný dohled."], // 83
+  ["Tlak v chladivovém okruhu hlášený venkovní jednotkou."], // 84
+  ["Jen úplná sada CT × 230 V dává nekalibrovaný odhad; zapojení, napětí a účiník výsledek omezují."], // 85
+  ["Proud invertoru kompresoru jako přibližná míra jeho zatížení."], // 86
+  ["Teplota chladiče invertoru/výkonové elektroniky venkovní jednotky."], // 87
+  ["Aktivní stupně elektrického BUH jako výkonový stupeň."], // 88
+  ["Stupeň odporového BUH přidávající teplo přímo do vody."], // 89
+  ["HomeHub 32: stav BSH, ne výkon; registr 51 je zvláštní příkon „tepelného čerpadla“, ne výkon BSH, a jeho rozsah není potvrzen."], // 90
+  ["BSH může topit bez kompresoru a čerpadla; X10A hlásí jen ZAP./VYP., ne výkon."], // 91
+  ["Stav tepelného ochranného řetězce elektrického tělesa."], // 92
+  ["Ochrana potrubí závisí na modelu a napájení; při výpadku ji nelze zaručit."], // 93
+  ["Příznak mrazu X10A není veřejně přiřazen jednoznačně ochraně místnosti či potrubí."], // 94
+  ["Hodnota zemního solankového okruhu geotermální jednotky nebo jeho čerpadla."], // 95
+  ["Zvolený zdroj hybridu: tepelné čerpadlo, kombinace nebo kotel."], // 96
+  ["Cílová výstupní teplota hybridního vytápění, nikoli měřená voda."], // 97
+  ["Zda je bivalentní provoz druhého zdroje aktivní či povolený."], // 98
+  ["Aktuální požadavek regulátoru na kotel v bivalentním/hybridním systému."], // 99
+  ["Cílová teplota vody požadovaná pro kotel, ne měřená teplota."], // 100
+  ["BE_COP porovnává hybridní zdroje; není měřený COP a škála X10A není popsána."], // 101
+  ["Externí tarif, Smart Grid či solar může omezit nebo žádat teplo; akci určuje nastavení."], // 102
+  ["Jmenovitý výkon/velikostní třída vnitřní či venkovní jednotky."], // 103
+  ["Tichý režim snižuje hluk venkovní jednotky a může snížit dostupný výkon."], // 104
+  ["Aktuální diagnostický stav HomeHub: bez chyby, porucha nebo varování."], // 105
+  ["Význam právě hlášeného kódu poruchy."], // 106
+  ["Číselný podkód upřesňující sousední diagnostický kód Daikin."], // 107
+  ["HomeHub hlásí jen běh kompresoru, ne otáčky ani výkon; význam určuje okruh a průtok."], // 108
+  ["Provoz TUV: v provozu = ZAP., klid/bufrování = VYP.; příznak neuvádí důvod."], // 109
+  ["Provoz domu: v provozu = ZAP., klid/bufrování = VYP.; režim určí vytápění/chlazení."], // 110
+  ["Teplota vody z PHE před BUH."], // 111
+  ["Výstupní teplota vody za BUH."], // 112
+  ["Teplota vody v zásobníku TUV."], // 113
+  ["Teplota chladiva v kapalinovém potrubí mezi venkovní jednotkou a vnitřním výměníkem."], // 114
+  ["Pokojová teplota hlavní zóny z dálkového ovladače."], // 115
+  ["Elektrický příkon systému hlášený HomeHub; X10A poskytuje jen odhad z fázových proudů."], // 116
+  ["Cílová výstupní teplota hlavní topné zóny čtená z HomeHub; firmware ji nemění."], // 117
+  ["Cílová výstupní teplota hlavní chladicí zóny čtená z HomeHub; firmware ji nemění."], // 118
+  ["Zda je prostorový okruh vůbec POVOLEN — přepínač, ne aktuální aktivita."], // 119
+  ["Tichý provoz snižuje hluk a může snížit dostupný výkon."], // 120
+  ["Cíl dohřevu TUV není spínací teplota; start závisí i na hysterezi a plánu."], // 121
+  ["Čtená korekce cíle vytápění −10…+10 K; nenulová hodnota nedokazuje aktivní provoz."], // 122
+  ["Limit Smart Grid „doporučené zapnutí“; platí nižší z něj a obecného limitu, nejde o aktuální příkon."], // 123
+  ["Obecný limit HomeHub i při volném provozu; je to nastavený strop, ne měřený příkon."], // 124
+]);
+
+MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
+  ["Hlášení chyby či varování samotné jednotky. Aktivní chyba dává VAROVÁNÍ; varování nebo zpráva vzniklá a zaniklá do 24 h dává POZNÁMKU. Není to odhad projektu. Bez aktuální či zapamatované zprávy po načtení všech polí. Zaniklá zpráva může zůstat 24 h; aktivní kód je v Provozu."], // 0
+  ["Měří chladnutí zásobníku v klidných hodinách; vyřazuje nabíjení, odběr a vnitřní ohřev, volitelný elektroměr ukáže cirkulační čerpadlo. POZNÁMKA od 0,8 K/h je heuristika referenční instalace. Objem a rozdíl k místnosti mění rychlost. Rozpoznatelné je asi do 1,85 K/h; rychlejší ztráta může vypadnout jako odběr. OK nedokazuje izolaci ani ventily."], // 1
+  ["Počítá starty kompresoru a délku úplných běhů, pokud lze zvlášť pro vytápění, TUV a chlazení; nejasné běhy zůstávají nezařazené. Potvrzené topné běhy mají průměr ≥10 min; při nejméně 12 kratších je POZNÁMKA. TUV/chlazení se vyřadí, při mnoha nejasných se hodnotí vše. Není to limit Daikin."], // 2
+  ["Počítá odmrazení a jejich podíl na sledovaném čase kompresoru; v chladu a vlhku jsou normální. Do 15 %. Nad mezí při ≥3 odmrazeních jen POZNÁMKA. Není to limit Daikin; chybí vlhkost a povrchová teplota."], // 3
+  ["Nejnižší platný tlak vody v topném okruhu během klouzavého okna. Nad 1,0 bar. Při ≤1,0 bar ihned POZNÁMKA, po 60 s VAROVÁNÍ. Rozsah závisí na modelu; použijte přesný návod."], // 4
+  ["Nejnižší průtok po 60 s souvislého běhu vnitřního čerpadla; vyřazuje rozběh, klid a výpadky. JEN MĚŘENÍ: minimum při částečné zátěži, ne jmenovitý ani návrhový průtok. Obecná mez není; návod platí jen pro stejný model, režim a podmínky. Jeden nízký údaj bez poruchy málo dokazuje."], // 5
+  ["Odděleně ukazuje dobu běhu BUH pro dům a BSH v zásobníku. JEN MĚŘENÍ. Mráz, nouze, odmrazování, plán TUV či přebytky mohou běh vysvětlit. Obecná mez OK/VAROVÁNÍ není."], // 6
+  ["Experimentálně sleduje pět ochranných čítačů. Počítá jen jasný růst mezi srovnatelnými čteními; základ, stálost, pokles, mezera a reset ne. Bez pozorovaného růstu. Růst dává POZNÁMKU, ne diagnózu; bez růstu nelze kvůli neúplné dokumentaci vyloučit omezení."], // 7
+  ["Paměť RAM právě nevyužitá firmwarem. Krátké změny WiFi, MQTT a webu jsou normální; důležitější je trend 24 h. Má být přibližně stabilní s vratnými propady. Trvalý pokles může znamenat neuvolněné alokace. Restart s napájením drží trend v RAM; běžný restart, update či výpadek obnoví hotové 5min bloky z flash. Chybět může otevřený."], // 8
+  ["Největší souvislý blok volné RAM. TLS a OTA potřebují jeden velký blok i při vyšším celkovém volnu. Je nejvýše roven volné RAM. Klesá-li při stabilní volné RAM, roste fragmentace haldy a velká alokace může selhat před vyčerpáním paměti."], // 9
+  ["Jmenovitý výkon venkovní jednotky z její identifikace; třída hardwaru, ne aktuální výroba."], // 10
+  ["Jmenovitý výkon VNITŘNÍ jednotky, zobrazený protože identifikace venkovní vlastní výkon nemá. Vnitřní a venkovní jednotka mohou mít různé třídy; nejde o výkon venkovní ani celého systému."], // 11
+  ["Stejná třída a registry: volba zástupce nemění dekódované hodnoty."], // 12
+  ["Několik rodin Daikin má stejné servisní registry, takže obchodní název nelze rozlišit; nadpis zůstane „Daikin Altherma“. Venkovní jednotka výkon nehlásí, kandidáti tedy mohou mít různé třídy. Firmware volí variantu nejbližší vnitřní jednotce, ne však s plnou jistotou. Ověřte štítkem."], // 13
+  ["Syrové ID bajty venkovní jednotky bez veřejné tabulky názvů; při nejasnosti je znak po znaku porovnejte se štítkem."], // 14
+]);

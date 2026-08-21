@@ -139,10 +139,7 @@ const DERIVED = {
   cop: {
     unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
                     "ct_l1", "ct_l2", "ct_l3"],
-    none: {
-      en: "No COP curve while the electrical figure comes from the CT clamps. Which loads those clamps include depends on their wiring, while the buffered heat side ends before the backup heater and cannot include heat added directly by the tank heater; a matching boundary is therefore not guaranteed.",
-      de: "Kein COP-Verlauf, solange der Stromwert von den Stromwandlern kommt. Welche Lasten sie erfassen, hängt von ihrer Verdrahtung ab; die gepufferte Wärmeseite endet zugleich vor dem Zusatzheizer und kann direkt eingebrachte Wärme des Speicherheizstabs nicht erfassen. Eine passende Bilanzgrenze ist daher nicht gesichert.",
-    },
+    none: "hist.cop_none",
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
     fn: (s, has) => {
       const ct = completeCtCurrent(s, has);
@@ -888,7 +885,7 @@ function histHtml(id, unit, name, source = "") {
     return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
   if (!view) {
     const D = DERIVED[id];
-    return wrap(`<div class="vhist-note">${esc(D && D.none ? tx(D.none) : t("hist.none"))}</div>`, "vhist-flat");
+    return wrap(`<div class="vhist-note">${esc(D && D.none ? t(D.none) : t("hist.none"))}</div>`, "vhist-flat");
   }
 
   const allPts = view.series.flatMap((s) => s.v.map((x) => x == null ? null : x / 10));
@@ -900,7 +897,7 @@ function histHtml(id, unit, name, source = "") {
   // therefore name its own empty case.
   if (!real.length) {
     const D = DERIVED[id];
-    return wrap(`<div class="vhist-note">${esc(D && D.none ? tx(D.none) : t("hist.none"))}</div>`, "vhist-flat");
+    return wrap(`<div class="vhist-note">${esc(D && D.none ? t(D.none) : t("hist.none"))}</div>`, "vhist-flat");
   }
 
   if (STATE_HIST[id]) return stateHistHtml(id, name, view, wrap, STATE_HIST[id]);
@@ -1784,7 +1781,8 @@ function vDescRow(v) {
   // description. The age goes FIRST because it is the only LIVE fact in the panel — the explainer
   // below it is the same sentence on every device and at every hour.
   return descAccordion(key, shownLabel, val, cls,
-                       dwell + (d ? descBodyHtml(d, src.value) : "") + mbNoteHtml(v, cmp) +
+                       dwell + (d ? descBodyHtml(d, src.value, descriptionCopy(d)) : "") +
+                       mbNoteHtml(v, cmp) +
                        histHtml(hid, displayUnit(v), shownLabel), hid);
 }
 
@@ -1918,7 +1916,7 @@ function modelDescRow(id, label, value, opt = {}) {
   // No trend half here: the firmware keeps series for catalog readings, and these rows are model
   // identity — a nameplate fact, not something that moves.
   return descAccordion(`model:${id}`, label, val, opt.cls || "",
-                       (opt.bodyPrefix || "") + descBodyHtml(d));
+                       (opt.bodyPrefix || "") + descBodyHtml(d, undefined, modelDescriptionCopy(id)));
 }
 
 // Toggle a value row's description accordion. Only the LIVE element is flipped here (so the CSS
@@ -2040,7 +2038,8 @@ function modbusOnlyGroupHtml(all) {
         `<span class="vrow-val src-val-mb">${val}</span></div>`;
     }
     return descAccordion(label, shown, val, "src-val-mb",
-                         (d ? descBodyHtml(d, m.value) : "") + histHtml(hid, unit, shown), hid);
+                         (d ? descBodyHtml(d, m.value, descriptionCopy(d)) : "") +
+                         histHtml(hid, unit, shown), hid);
   }).join("");
   // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
   // false the moment `all` folds the paired rows in beside them.

@@ -3,9 +3,8 @@
 // by a first-match-wins regex — the same pattern-over-label technique pickValue()/groupOf()/vLwt use,
 // so one entry covers every profile's spelling of a concept (there are ~200 distinct labels but far
 // fewer physical quantities). The baseline is English, matching the fixed English labels; entries
-// also carry German where available, while value/model accordions in the six newer UI locales
-// deliberately fall back to this English specialist copy (§1). The compact schematic inspector has
-// its own complete per-locale explanations. ORDER MATTERS: put specific/compound labels before the general ones
+// also carry German. The eleven newer UI locales register compact positional translations in their
+// lazy locale assets. ORDER MATTERS: put specific/compound labels before the general ones
 // they contain (e.g. "after BUH" before plain "leaving water", BUH/capacity before the bare
 // "capacity" catch). A row whose label matches nothing here stays a plain, non-expandable row.
 // `normal` is optional guidance on typical vs worth-a-look values — deliberately hedged; the exact
@@ -1199,7 +1198,8 @@ const MB_DELTA_WHY = {
 // comparing two numbers wants to know whether they agree, and "1.7 K apart, and here is why" is a
 // different statement from two numbers left side by side to be squinted at.
 function mbDeltaHtml(row, mb) {
-  const why = MB_DELTA_WHY[row.concept] ? tx(MB_DELTA_WHY[row.concept]) : "";
+  const why = MB_DELTA_I18N[LANG]?.[row.concept] ||
+    (MB_DELTA_WHY[row.concept] ? tx(MB_DELTA_WHY[row.concept]) : "");
   // A bit flag has no difference to state. Agreement on a flag is unremarkable and says nothing;
   // a MISMATCH is worth a line, since the two sources are then contradicting each other about a
   // discrete fact rather than differing by a tolerance.
@@ -1243,21 +1243,33 @@ const FAULT_CODE_UNKNOWN = Object.freeze({
 function faultCodeDetailHtml(currentValue) {
   const raw = String(currentValue == null ? "" : currentValue).trim();
   const match = raw.match(/^([0-9A-Z]{2})(?=$|[:\s-])/i);
-  if (!match) return descParaHtml(esc(FAULT_CODE_NONE[LANG] || FAULT_CODE_NONE.en));
+  const localePack = FAULT_CODE_I18N[LANG];
+  if (!match) return descParaHtml(esc(localePack?.none || FAULT_CODE_NONE[LANG] || FAULT_CODE_NONE.en));
   const code = match[1].toUpperCase();
-  const entry = DAIKIN_FAULT_CODES.find((candidate) => candidate.code === code);
-  const meaning = entry ? (entry[LANG] || entry.en)
-                        : (FAULT_CODE_UNKNOWN[LANG] || FAULT_CODE_UNKNOWN.en);
+  const index = DAIKIN_FAULT_CODES.findIndex((candidate) => candidate.code === code);
+  const entry = index >= 0 ? DAIKIN_FAULT_CODES[index] : null;
+  const meaning = entry ? (localePack?.values[index] || entry[LANG] || entry.en)
+                        : (localePack?.unknown || FAULT_CODE_UNKNOWN[LANG] || FAULT_CODE_UNKNOWN.en);
   return `<div class="fault-code-current"><code>${esc(code)}</code><span>${esc(meaning)}</span></div>`;
 }
 
 // Description body: the plain "what is it" sentence, then optional interpretation and normal-context
 // paragraphs. `currentValue` is optional because most explainers do not need their row value.
-function descBodyHtml(d, currentValue) {
+function descriptionCopy(d) {
+  if (LANG === "en" || LANG === "de") return null;
+  const index = DESCRIPTIONS.indexOf(d);
+  return index < 0 ? null : DESCRIPTION_I18N[LANG]?.[index] || null;
+}
+function modelDescriptionCopy(id) {
+  return LANG === "en" || LANG === "de" ? null : MODEL_DESCRIPTION_I18N[LANG]?.[id] || null;
+}
+function descBodyHtml(d, currentValue, localized = null) {
   const b = (LANG === "de" && d.de) ? d.de : d;   // German copy when present, else the English row
   if (d.faultCode) return faultCodeDetailHtml(currentValue);
-  const intro = descParaHtml(esc(b.what));
+  const whatText = localized ? localized[0] : b.what;
+  const normalText = localized ? localized[1] : b.normal;
+  const intro = descParaHtml(esc(whatText));
   const meaning = b.meaning ? descNoteHtml(t("meaning.label"), b.meaning) : "";
-  const normal = b.normal ? descNoteHtml(t("normal.label"), b.normal) : "";
+  const normal = normalText ? descNoteHtml(t("normal.label"), normalText) : "";
   return intro + meaning + normal;
 }

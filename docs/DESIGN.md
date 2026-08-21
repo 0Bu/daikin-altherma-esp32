@@ -3,7 +3,8 @@
 Design contract for the embedded web UI (`main/www/`), the captive portal (`main/www/setup.html`)
 and the browser installer served from GitHub Pages (`docs/index.html`, §5.5).
 Implementation-ready: colours, tokens, information architecture, per-view specs, states, and the
-firmware fields the UI keys off. No framework — one self-contained gzipped page + the standalone
+firmware fields the UI keys off. No framework — one self-contained gzip startup page plus one
+same-device locale request when needed + the standalone
 setup page (see `main/CMakeLists.txt`) + the standalone installer page.
 
 The three pages are the **one** product a user walks through in order — install, provision, operate —
@@ -33,17 +34,18 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
    (WiFi credentials, MQTT broker, Syslog server, NTP server, RX/TX pins, board hardware, OTA update
    channel) are explicit and report their outcome.
 4. **Terse, dense, technical.** Tabular numbers, short labels, no decorative copy.
-5. **Browser-detected language (en / de / es / fr / it / pl / cs / uk) by default, with a manual override.** This principle scopes
+5. **Browser-detected language (en / de / es / fr / it / pl / cs / uk / zh / ja / nb / sv / fi) by default, with a manual override.** This principle scopes
    to the **device UI** (`main/www/`) — the GitHub Pages installer of §5.5 is English-only by decision,
    and `setup.html` is served before the device UI script exists. The UI **chrome** (system status
    block, card titles, connection rows, static schematic labels, modals, banners and toasts) is
    rendered from the matching device-local catalog selected through
    `navigator.language`, with English as the fallback for every string. Schematic inspector prose
-   and HomeHub row names are part of each device-local locale; the much longer value/model
-   accordions remain English/German and deliberately fall back to English in the six newer locales.
+   and HomeHub row names and the longer value/model accordions are part of each device-local locale.
+   `zh` is Simplified Chinese; `nb` is Norwegian Bokmål, and a generic browser `no` preference maps
+   to that Bokmål catalog.
    That browser guess is the **default**;
    on top of it the device carries an optional **manual override** — the Firmware settings card's
-   **Language** picker (Browser plus the eight languages, each named in its own language — "Browser"
+   **Language** picker (Browser plus the thirteen languages, each named in its own language — "Browser"
    because that option IS the browser's own guess, not a separate automatic mode) `POST`s
    `/set_lang`, which persists the choice in **NVS**
    (`config ui_lang`, `logic/ui_lang.hpp`) and reports it back on `/status.ui.lang`. Once the user
@@ -51,8 +53,9 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
    they set it back to Browser; the browser applies it live (`setLang()` in
    `js/i18n.js` re-runs `applyStaticI18n()`), no reload. The **firmware APIs remain English-only** — the
    heat-pump **value labels** arrive over `/values` as English X10A register names
-   (`docs/REGISTERS.md`) and are shown verbatim in **every** language (the English/German descriptions
-   explain them). Core localized copy shares one `I18N` object; dynamic strings go through `t()`,
+   (`docs/REGISTERS.md`) and are shown verbatim in **every** language so the source identity remains
+   traceable; their expandable explanations are localized. Core localized copy shares one `I18N`
+   object; dynamic strings go through `t()`,
    static `main/www/index.html` markup through `data-i18n` +
    `applyStaticI18n()`. English ships in the startup page; every other catalog is a separately
    compressed, signed-image asset loaded from `/locale.js?lang=…` on the same device. No CDN or
@@ -667,7 +670,8 @@ Body, ordered:
    English/German leaf explainers reuse the **same `DESCRIPTIONS` table** as the value rows (§5.3
    item 6), resolved through a canonical register label rather than the live spelling. The six lazy
    locale modules carry a shorter inspector-specific explanation for every target so translated copy
-   stays understandable inside this compact surface without embedding all long accordion prose.
+   stays understandable inside this compact surface; their complete value/model accordion prose is
+   stored separately in compact positional tables in the same locale asset.
    Component copy (outdoor unit, PHE, ΔT, heat output, heating circuit) likewise lives in the
    inspector table. Both forms are keyed by the stable `data-insp` target; source selection and plant
    logic remain only in `INSPECT`.
@@ -994,9 +998,10 @@ Body, ordered:
      English label pattern, and entries for them in `DESCRIPTIONS` would correctly read as *dead* to
      the coverage gate. The accordion markup itself is one shared builder, so the two row kinds cannot
      drift into two slightly different expanders, and Model-card keys are prefixed (`model:`) so they
-     can never collide with a catalog label in the open-state set. Each entry carries an English `what`/`normal` plus a German `de` copy; the browser language
-     (§1) picks which is shown (English fallback). The value label above the box stays the English
-     register name in every language.
+     can never collide with a catalog label in the open-state set. Each source entry carries English
+     `what`/`normal` plus German `de` copy; the eleven newer languages register compact positional copy
+     in the lazy locale asset. The value label above the box stays the English register name in every
+     language to preserve the firmware/source identifier.
      **A switched row's panel opens with HOW LONG IT HAS READ THAT** — the one live sentence in a
      panel whose explainer is otherwise the same copy on every device at every hour, which is why it
      goes first. Only the **state word** carries emphasis — the panel's existing `.vdesc-n` lead-in
@@ -1182,7 +1187,7 @@ is exactly what a user would want to see move.
   available out-of-band at `GET /diag` (verbose/redact via query; clearing is `POST /diag/clear`);
   another card on Settings is where
   it would go if it ever comes back.
-- The UI language follows the **browser** for en/de/es/fr/it/pl/cs/uk by default, with an optional **manual override**
+- The UI language follows the **browser** for en/de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi by default, with an optional **manual override**
   on the Firmware card (Language → `/set_lang`, persisted in NVS as `ui_lang`; §1). Firmware API
   strings and X10A value labels remain English; the device-local UI catalogs are signed-image assets.
 
@@ -1380,8 +1385,8 @@ vocabulary exactly:
    query is issued.
 4. **Firmware card** — the running software: the **Version** (`version`) and the **Update channel**
    select (`ota.channel` → `POST /set_ota`, §5.4), then **Language** (`ui.lang` → `POST /set_lang`,
-   §1) — a nine-option select, **Browser** plus English, Deutsch, Español, Français, Italiano,
-   Polski, Čeština and Українська, "Browser" because that option *is*
+   §1) — a fourteen-option select, **Browser** plus English, Deutsch, Español, Français, Italiano,
+   Polski, Čeština, Українська, 简体中文, 日本語, Norsk, Svenska and Suomi, "Browser" because that option *is*
    the browser's own guess (`navigator.language`), not a separate automatic mode. Picking one is a
    live write like the channel beside it: no reboot, and the browser re-localises immediately
    (`setLang()` re-runs `applyStaticI18n()` + the schematic's hit-target labels) rather than waiting
@@ -1745,7 +1750,8 @@ page under near-identical cards). Specific:
   perfectly well. Where a row's two halves are separate tap targets (Settings), the row's vertical
   padding sits on the **buttons**, never on the row with the buttons reaching back through it: reach-back
   targets overlap once the halves stack, and the lower one silently takes the upper one's taps.
-  German is the width that decides all of this, and it is measured at 320px, not reasoned about.
+  The widest shipped locale is what decides all of this, and every locale is measured at 320px,
+  not reasoned about from English or German alone.
 - Wide content (long value tables) never causes horizontal page scroll; the table scrolls in its card.
 - Long modal content scrolls inside the visible dynamic viewport; the background page is locked until
   the final dialog closes, including iOS Safari with its expanding/collapsing browser bars.
@@ -1789,9 +1795,10 @@ The design needs these additions to the firmware (all small, tracked as follow-u
 ## 11. Build / delivery
 
 Pipeline: `www/index.html` (markup + `//@@INLINE` markers) + `www/style.css` + the ordered classic-
-script fragments in `www/app.sources`, spliced by `inline_assets.cmake` into one gzipped page embedded
+script fragments in `www/app.sources`, spliced by `inline_assets.cmake` into one gzip page embedded
 in the firmware; `setup.html` is gzipped separately for the captive portal. The fragments remain one
-lexical scope and add neither browser requests nor a package-manager dependency. The SPA is view-
+lexical scope and add no package-manager dependency; a non-English UI loads one device-local
+`/locale.js` catalog. The SPA is view-
 switched client-side from `/status` and hash-routed through the browser History API; the hash never
 reaches the firmware HTTP server. There are no external assets (CSP-clean, offline-capable on the
 device).

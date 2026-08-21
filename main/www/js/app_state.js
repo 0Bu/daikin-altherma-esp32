@@ -354,6 +354,9 @@ function renderHeader() {
   const dash = S.stage === "dashboard";
   $("hdrDash").hidden = !dash;
   $("hdrBack").hidden = dash;
+  // This button is mounted once by index.html rather than rebuilt with the cards. Refresh its
+  // accessible name here as well: a cached first-paint locale can differ from /status.ui.lang.
+  $("verLink").setAttribute("aria-label", t("aria.ota"));
   if (!dash) {
     $("btnBack").setAttribute("aria-label", t("nav.back"));
     $("backTitle").textContent = (TITLE[S.stage] || (() => ""))();

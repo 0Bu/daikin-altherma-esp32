@@ -67,7 +67,7 @@ CONFIG_LWIP_DHCP_DISABLE_VENDOR_CLASS_ID=n
 CONFIG_LWIP_DHCP_OPTIONS_LEN=109
 
 # LWIP TCP windows — double the default send/receive windows (8xMSS).  The dashboard has a strict
-# 150 KiB gzip build limit and is normally smaller; reducing the artefact is safer than growing
+# 160 KiB gzip build limit and is normally smaller; reducing the artefact is safer than growing
 # per-socket buffers on a device whose contiguous heap is already the binding resource.
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
 CONFIG_LWIP_TCP_WND_DEFAULT=11520
@@ -99,7 +99,11 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # reads as a live safeguard.
 CONFIG_HTTPD_WS_SUPPORT=n
 
-# ── Firmware size reduction (zero-risk / no behaviour change) ──
+# ── Firmware size reduction ──
+# Optimize the release image for size. The complete host suite plus the signed hardware acceptance
+# exercise the same code paths; keeping the default debug optimization would cross the fixed OTA
+# slot after the device-local locale catalogs are embedded.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # Drop code paths this firmware never uses.
 # mbedTLS human-readable error-string tables — we only log numeric TLS codes (MQTTS/OTA). ~6 KB.
 CONFIG_MBEDTLS_ERROR_STRINGS=n

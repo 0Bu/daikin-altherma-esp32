@@ -181,7 +181,7 @@ try {
   const originalArchitecture = fs.readFileSync(architectureFile, "utf8");
   fs.writeFileSync(
     architectureFile,
-    originalArchitecture.replace("trusted-LAN route count of 37", "trusted-LAN route count of 36"),
+    originalArchitecture.replace("trusted-LAN route count of 38", "trusted-LAN route count of 37"),
   );
   let seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
     cwd: seededRoot,
