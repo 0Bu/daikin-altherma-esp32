@@ -2227,8 +2227,9 @@ Structure:
   `dev` (`…/dev/`, republished by every firmware-relevant merge). The URLs are *derived*, not
   configured twice — the dev feed is by construction the `dev/` subdirectory of the configured
   firmware base URL, so the two cannot be pointed at different hosts. The channel is persisted in
-  the config blob (v3) and applied **live**: nothing claims it at task start, `ota_update.cpp` reads
-  it when it fetches, so a check right after the switch already reads the new feed. Dev builds are
+  the config blob (v3) and applied **live**: a check reads the current channel when it fetches, so a
+  check right after the switch already reads the new feed. Once an update is accepted, it pins that
+  checked channel together with the offered version and app SHA-256 for the complete task. Dev builds are
   stamped `<next release>-dev.<n>` — a semver pre-release, so ordering does the work: a dev board
   upgrades to the next release on its own, and a release board never drifts onto a dev build.
   Switching *back* (dev → the last release) is a downgrade by version, which the gate below refuses

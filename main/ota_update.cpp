@@ -876,10 +876,10 @@ uint32_t next_generation(uint32_t current) {
     return current == 0 ? 1 : current;
 }
 
-// Spawn while holding the same mutex that owns busy/generation/task arguments.  The new higher-
-// priority task may become runnable inside xTaskCreate, but cannot inspect the slot until this
-// function releases the mutex.  On task-creation failure the prior generation is restored, so a
-// generation always identifies an operation that actually got a task.
+// Spawn while holding the same mutex that owns busy/generation/task arguments.  Publish the complete
+// slot before xTaskCreate; the busy-owned slot stays immutable until the task has copied it, even if
+// the higher-priority task runs immediately.  On task-creation failure the prior generation is
+// restored, so a generation always identifies an operation that actually got a task.
 uint32_t start_locked(const OtaTaskArgs& request, uint32_t previous_generation) {
     s_busy = true;
     s_task_args = request;
