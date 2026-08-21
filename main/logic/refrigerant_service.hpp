@@ -214,6 +214,7 @@ struct RefrigerantServiceTracker {
     RefrigerantServiceBlocker blocker = RefrigerantServiceBlocker::Unsupported;
     RefrigerantServiceMode mode = RefrigerantServiceMode::Unknown;
     uint32_t generation = 0;
+    bool coverage_evaluated = false;
     int64_t last_us = -1;
     int64_t max_gap_us = 0;
     uint64_t continuous_us = 0;
@@ -250,6 +251,7 @@ struct RefrigerantServiceSnapshot {
     RefrigerantServiceMode mode = RefrigerantServiceMode::Unknown;
     uint32_t continuous_s = 0;
     uint32_t samples = 0;
+    bool coverage_evaluated = false;
     bool special_phases_known = false;
     uint8_t limitation_mask = RefrigerantServiceNoLimitation;
     RefrigerantServiceMetricSnapshot rps;
@@ -277,6 +279,7 @@ inline RefrigerantServiceSnapshot refrigerant_service_snapshot(const Refrigerant
         out.state = RefrigerantServiceState::Interrupted;
         out.blocker = RefrigerantServiceBlocker::PollGap;
         out.mode = t.mode;
+        out.coverage_evaluated = t.coverage_evaluated;
         out.special_phases_known = t.special_phases_known;
         out.limitation_mask = t.limitation_mask;
         return out;
@@ -286,6 +289,7 @@ inline RefrigerantServiceSnapshot refrigerant_service_snapshot(const Refrigerant
     out.mode = t.mode;
     out.continuous_s = static_cast<uint32_t>(t.continuous_us / 1000000ULL);
     out.samples = t.samples;
+    out.coverage_evaluated = t.coverage_evaluated;
     out.special_phases_known = t.special_phases_known;
     out.limitation_mask = t.limitation_mask;
     out.rps = refrigerant_service_metric_snapshot(t.rps);
@@ -384,6 +388,7 @@ inline void refrigerant_service_record(RefrigerantServiceTracker& t,
         t.generation = generation;
     }
     if (max_gap_us > 0) t.max_gap_us = max_gap_us;
+    t.coverage_evaluated = true;
     t.special_phases_known = refrigerant_service_special_phases_known(c);
     const RefrigerantServiceDecision d = refrigerant_service_decide(c, s);
 

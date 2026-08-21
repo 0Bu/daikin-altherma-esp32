@@ -124,8 +124,8 @@ hp_poll.cpp +
 logic/refrigerant_service.hpp
                     → a generation-bound, non-persistent REFRIGERANT SERVICE OBSERVATION folded from
                       the same fresh X10A sweep as the live cache. It publishes a separate
-                      /status.refrigerant_service object after boot-time model detection, never a
-                      ninth health check, and contains no
+                      /status.refrigerant_service object after boot-time model detection and the
+                      first coverage evaluation, never a ninth health check, and contains no
                       service command, settling threshold, range judgement or charge verdict
 state_dwell.cpp/.hpp → HOW LONG EACH ELIGIBLE SWITCHED ROW HAS READ WHAT IT READS — the value list's other
                       half, since "OFF" describes a plant that finished a charge four seconds ago and
@@ -920,7 +920,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   Its gap allowance is derived from the active profile's publishable page count and the shared UART
   timeout. The read-only HTTP snapshot also expires a stalled active window. It reports duration,
   sample count, limitations and min/mean/max values under `/status.refrigerant_service` after this
-  boot has detected a profile (the complete object is omitted before that); explicit
+  boot has detected a profile and evaluated its coverage (the complete object is omitted before
+  both facts are available); explicit
   `load_proven:false` and `eev_feedback:false` prevent the EEV command or passive traffic from being
   mistaken for mechanical feedback, full load, settling, charge or a completed service test.
 - `logic/redact.hpp` — what a diagnostic snapshot must **not** carry when it leaves the device, for
@@ -3011,7 +3012,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   metrics{compressor_rps,discharge_c,eev_command_pls,
                   high_pressure_bar,low_pressure_bar}}, where each metric is null without a sample
                   or {min,mean,max} in the unit named by its key}], omitted until this boot has
-                  detected an X10A profile,
+                  detected an X10A profile and evaluated the current profile's signal coverage,
                   plus
                   modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,
                   values,task_stack_min_free_bytes,plant_gate_known,plant_gate_active
@@ -3748,10 +3749,10 @@ longer an outlier at all — 3744 against `history_record`'s 3296. The accepted 
 debug backtraces in return for both measured stack headroom and the required flash-image headroom.
 
 **Re-measured from the release ELF on 2026-08-21 after the refrigerant-service object.** The only
-remaining status instantiation is the bounded sink at **0x1300 = 4864** bytes; the owning-string
+remaining status instantiation is the bounded sink at **0x12f0 = 4848** bytes; the owning-string
 instantiation no longer exists because MCP streams its small JSON-RPC prefix and suffix around the
 same 1 KiB sink. `mcp_post` is **0x4d0 = 1232** and `http_send_status_json` is **128** bytes. Applying
-the same conservative complete-path walk gives **7568 bytes** of the 16384-byte httpd stack, about
+the same conservative complete-path walk gives **7552 bytes** of the 16384-byte httpd stack, about
 8800 bytes before ISR and exception-unwind frames. This is build evidence; the hardware paragraph
 below proves the original `-Os` change, not this newer payload, whose live high-water mark remains a
 device-validation boundary.

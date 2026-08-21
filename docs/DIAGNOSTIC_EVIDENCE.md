@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: b0f7194a29bffbc71191adee869a21879749937a671b2898a9e1a73c452bbcde -->
+<!-- diagnostic-evidence-contract: 716466ed8a33857e11332656ba9faf052c1988dc46d6fa661e33b62691a988e9 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -54,8 +54,14 @@ universal hot-gas, pressure, EEV-pulse, or twenty-minute settling range for this
 implementation therefore transfers no numeric threshold, superheat formula, defrost-end rule,
 refrigerant-shortage pattern, or claim that a valve fault cannot produce an error code.
 
-**Firmware rule:** [`refrigerant_service.hpp`](../main/logic/refrigerant_service.hpp) accepts only
-fresh same-sweep values during confirmed space heating, with running compressor, non-DHW valve,
+**Firmware rule:** `/status` omits the complete object until this boot has detected an X10A profile
+and the current source generation has evaluated that resolved profile's structural signal coverage.
+The detection commit resets the coverage witness under the service mutex before `/status` can pair
+it with the new fingerprint; the first committed profile sweep (or the resolved-profile UART-failure
+path after structural coverage is known) establishes it. This prevents an unevaluated or absent
+source from being reported as an `unsupported_profile`; only evaluated coverage may make that claim.
+[`refrigerant_service.hpp`](../main/logic/refrigerant_service.hpp) then accepts only fresh same-sweep
+values during confirmed space heating, with running compressor, non-DHW valve,
 defrost off, all declared fault rows current and normal, and every profile-provided special-phase
 witness current and inactive. A profile which lacks one or more of those optional phase witnesses
 may still produce a `limited` window; a witness declared by the profile but unreadable in one sweep

@@ -797,8 +797,8 @@ Four properties of that core are worth naming because they are not obvious from 
   14512 to 6480 bytes. The release image now also uses size optimisation globally to fit its
   embedded catalogs. After
   the refrigerant-service object and bounded MCP status sender, the 2026-08-21 release ELF measures
-  the sole bounded serializer at **4864** and the conservative full
-  path at **7568** of 16384; the stack itself remains unchanged. The trade — less exact backtraces in
+  the sole bounded serializer at **4848** and the conservative full
+  path at **7552** of 16384; the stack itself remains unchanged. The trade — less exact backtraces in
   the one file whose core dumps mattered — and the
   reproduce command are stated where the pin lives and in
   [`ARCHITECTURE.md`](ARCHITECTURE.md#memory-constraints).

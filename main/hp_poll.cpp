@@ -295,6 +295,9 @@ static void poll_once() {
                 s_stats.last_error.swap(err);              // noexcept — see the commit below
                 s_refrigerant_service_coverage = service_coverage;
                 s_refrigerant_service.max_gap_us = service_max_gap_us;
+                s_refrigerant_service.coverage_evaluated = true;
+                s_refrigerant_service.special_phases_known =
+                    logic::refrigerant_service_special_phases_known(service_coverage);
                 logic::refrigerant_service_record_poll_gap(
                     s_refrigerant_service, esp_timer_get_time(), cycle_generation);
             }
@@ -620,6 +623,15 @@ static bool poll_detect() {                         // false only when an attemp
                 committed = config_commit_detected_model(
                     link_revision, detected_profile, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
                     d.eeprom);
+                if (committed) {
+                    // config.fp_valid becomes visible before the first full profile sweep. Retire
+                    // the unidentified-bus placeholder now so /status cannot call that unevaluated
+                    // interval an unsupported detected profile. poll_once() marks coverage evaluated
+                    // only when it commits the resolved profile's structural coverage below.
+                    s_refrigerant_service = logic::RefrigerantServiceTracker{};
+                    s_refrigerant_service.generation = cycle_generation;
+                    s_refrigerant_service_coverage = logic::RefrigerantServiceCoverage{};
+                }
             }
         }
     }

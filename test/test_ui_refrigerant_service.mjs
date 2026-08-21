@@ -22,8 +22,9 @@ assert.match(normalizedStatus, /"load_proven":false,"eev_feedback":false/,
              "the payload must state both unavailable proof boundaries explicitly");
 assert.match(statusSource, /OUTSIDE health\{\}/,
              "the observation must remain independent of the eight health checks");
-assert.match(statusSource, /if \(c\.fp_valid\) \{\s*j \+= "\\\"refrigerant_service\\\"/s,
-             "the payload must omit service state until this boot has detected a profile");
+assert.match(statusSource,
+             /if \(c\.fp_valid && refrigerant_service\.coverage_evaluated\) \{\s*j \+= "\\\"refrigerant_service\\\"/s,
+             "the payload must omit service state until detection and coverage evaluation finish");
 assert.doesNotMatch(logicSource, /RefrigerantServiceState::Complete|REFRIGERANT_SERVICE[^\n]*1200/,
                     "the tracker must not invent a completion threshold or diagnosis");
 assert.match(logicSource, /confirm mechanical EEV movement/,
@@ -32,6 +33,12 @@ assert.match(pollSource, /v && !v->held && logic::history_parse_tenths/,
              "held-over readings must not enter a fresh service window");
 assert.match(pollSource, /service_register_count\) \* HP_QUERY_TIMEOUT_US/,
              "the gap allowance must scale with the active profile sweep");
+assert.match(pollSource,
+             /config_commit_detected_model\([\s\S]{0,500}?if \(committed\) \{[\s\S]{0,500}?s_refrigerant_service = logic::RefrigerantServiceTracker\{\};[\s\S]{0,200}?generation = cycle_generation;/,
+             "detection must retire unidentified coverage before publishing the new fingerprint");
+assert.match(pollSource,
+             /s_refrigerant_service_coverage = service_coverage;[\s\S]{0,250}?refrigerant_service_record\(/,
+             "the resolved profile must publish service state only with committed coverage");
 
 const context = {
   S: { status: null },

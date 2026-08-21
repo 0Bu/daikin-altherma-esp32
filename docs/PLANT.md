@@ -239,9 +239,10 @@ least one structurally identified refrigerant-pressure side are readable. A tran
 required signal becoming unavailable ends the window; a profile that lacks optional context reports
 the window as `limited`.
 
-After this boot has detected an X10A profile, the object under `/status.refrigerant_service` reports
-duration, samples, limitations and window min/mean/max values. Until then—including safe mode, where
-the poll task is not started—the object and card are absent rather than assigning a profile reason.
+After this boot has detected an X10A profile and the poll task has evaluated that profile's signal
+coverage, the object under `/status.refrigerant_service` reports duration, samples, limitations and
+window min/mean/max values. Until then—including safe mode, where the poll task is not started—the
+object and card are absent rather than assigning a profile reason.
 It deliberately has no health verdict, full-load or settling claim, numeric
 normal range, completion threshold or refrigerant-charge conclusion. The EEV pulse value is the
 controller command, not independent proof that the mechanical valve moved. See

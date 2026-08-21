@@ -12518,8 +12518,10 @@ static void test_refrigerant_service() {
     s.outdoor_hx_ok = true; s.outdoor_hx_tenths = -20;
 
     RefrigerantServiceTracker t;
+    CHECK(!refrigerant_service_snapshot(t, 99999999).coverage_evaluated);
     constexpr int64_t service_gap_us = 5000000;
     refrigerant_service_record(t, c, s, 100000000, 7, service_gap_us);
+    CHECK(refrigerant_service_snapshot(t, 100000000).coverage_evaluated);
     CHECK(t.state == RefrigerantServiceState::Observing);
     CHECK(t.continuous_us == 0 && t.samples == 1);
     CHECK(t.discharge.min_tenths == 820 && t.discharge.mean_tenths() == 820);
@@ -12590,6 +12592,7 @@ static void test_refrigerant_service() {
     CHECK(active_gap.mode == RefrigerantServiceMode::Unknown && active_gap.samples == 0);
     RefrigerantServiceTracker idle_gap;
     refrigerant_service_record_poll_gap(idle_gap, 111500000, 7);
+    CHECK(!refrigerant_service_snapshot(idle_gap, 111500000).coverage_evaluated);
     CHECK(idle_gap.state == RefrigerantServiceState::Waiting);
     CHECK(idle_gap.blocker == RefrigerantServiceBlocker::PollGap);
 

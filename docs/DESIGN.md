@@ -965,8 +965,8 @@ Body, ordered:
    beside a bus that is not answering reads as current when it is not.
 5a. **Refrigerant-service observation card** — a separate neutral card immediately after the
    24-hour card and before Model/Operation. Older firmware omits it cleanly; current firmware also
-   omits it until this boot has detected an X10A profile, including when safe mode never starts the
-   poll task. It is not a
+   omits it until this boot has detected an X10A profile and evaluated that profile's signal
+   coverage, including when safe mode never starts the poll task. It is not a
    `CHECKUP_ROW`, contributes no health count or colour verdict, remains visible as WAITING,
    LIMITED or INTERRUPTED when its source conditions are not met, and offers no button or action.
    The compact rows show only the uninterrupted duration/sample count and a blocker when present;
