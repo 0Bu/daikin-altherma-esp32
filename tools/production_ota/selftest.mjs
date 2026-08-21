@@ -141,24 +141,52 @@ try {
         "if False:")],
     ["the intentional OTA MQTT pause is counted as an outage", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        'elif not mqtt_recovery_expected.is_set():',
-        'elif True:')],
+        'ota_expected=ota_expected_before or mqtt_recovery_expected.is_set()',
+        'ota_expected=False')],
+    ["an in-flight OTA status sample loses its request-start pause lease", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'ota_expected=ota_expected_before or mqtt_recovery_expected.is_set()',
+        'ota_expected=mqtt_recovery_expected.is_set()')],
+    ["the OTA pause lease is captured only after the status request", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        /([ \t]*)ota_expected_before = mqtt_recovery_expected\.is_set\(\)\n\1status = request_json\(host, "\/status"\)/,
+        '$1status = request_json(host, "/status")\n$1ota_expected_before = mqtt_recovery_expected.is_set()')],
     ["the intentional weather MQTT pause is counted as an outage", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        'if weather.get("fetching"):',
-        'if False:')],
+        'weather_evidence = weather_fetching or weather_successes > self.weather_successes_seen',
+        'weather_evidence = False')],
     ["the completed weather fetch loses its MQTT resume allowance", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        'if weather_successes > weather_successes_seen:',
-        'if False:')],
+        'weather_successes > self.weather_successes_seen',
+        'False')],
     ["the weather MQTT allowance survives a successful reconnect", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        /(if mqtt\.get\("connected"\):[\s\S]{0,240}?)weather_mqtt_recovery_expected = False/,
-        "$1weather_mqtt_recovery_expected = True")],
+        'self.weather_expected = False',
+        'self.weather_expected = True')],
+    ["fresh weather evidence is closed by an older connected MQTT field", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if not weather_evidence or weather_was_expected or pending_was_observed:',
+        'if True:')],
     ["weather MQTT recovery is no longer time bounded", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        'now > weather_mqtt_recovery_deadline',
+        'now > self.weather_deadline',
         'False')],
+    ["a mixed pre-weather status sample cannot await the following weather edge", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        /(if weather_evidence:[\s\S]{0,400}?)self\.pending_disconnects = 0/,
+        '$1self.pending_disconnects += 0')],
+    ["a mixed status sample can wait forever after reconnect", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if self.pending_disconnects and now > self.pending_deadline:',
+        'if False:')],
+    ["late weather evidence forgives an already expired MQTT gap", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if self.pending_disconnects and now > self.pending_deadline:',
+        'if self.pending_disconnects and now > self.pending_deadline and not weather_evidence:')],
+    ["a pending unexplained disconnect is discarded when stress ends", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'disconnected += mqtt_recovery.finish()',
+        'pass  # pending disconnect bypassed')],
     ["MQTT recovery after OTA TLS is no longer observed", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'if mqtt_recovery_status.get("mqtt", {}).get("connected"):',

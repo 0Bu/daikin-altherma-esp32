@@ -12,6 +12,7 @@ the canary read-only. It never creates a release and never retries a write.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -62,6 +63,68 @@ OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/man
 
 class GateError(RuntimeError):
     pass
+
+
+@dataclass
+class MqttRecoveryTracker:
+    """Classify sampled MQTT gaps without trusting one cross-subsystem status snapshot."""
+
+    weather_successes_seen: int
+    weather_expected: bool = False
+    weather_deadline: float = 0.0
+    pending_disconnects: int = 0
+    pending_deadline: float = 0.0
+
+    def observe(
+        self, *, now: float, mqtt_connected: bool, weather_fetching: bool,
+        weather_successes: int, ota_expected: bool,
+    ) -> int:
+        failures = 0
+        weather_evidence = weather_fetching or weather_successes > self.weather_successes_seen
+        weather_was_expected = self.weather_expected
+        pending_was_observed = self.pending_disconnects > 0
+        # Later owner evidence may explain a still-bounded mixed snapshot, but it must not erase an
+        # unexplained gap whose deadline already passed before this sample was observed.
+        if self.pending_disconnects and now > self.pending_deadline:
+            failures += self.pending_disconnects
+            self.pending_disconnects = 0
+            self.pending_deadline = 0.0
+        if weather_evidence:
+            self.weather_expected = True
+            self.weather_deadline = now + MQTT_RECOVERY_TIMEOUT_S
+            # A streamed status request can straddle the pause and expose old weather fields beside
+            # the new MQTT state. Only a subsequent weather owner/success edge may forgive it.
+            self.pending_disconnects = 0
+            self.pending_deadline = 0.0
+        self.weather_successes_seen = max(self.weather_successes_seen, weather_successes)
+
+        if mqtt_connected:
+            # Keep an unexplained gap pending for the bounded interval: a following status may be
+            # the first consistent snapshot that exposes the weather edge. Without that evidence it
+            # still fails at expiry or finish.
+            if not weather_evidence or weather_was_expected or pending_was_observed:
+                self.weather_expected = False
+        elif not ota_expected:
+            if self.weather_expected:
+                if now > self.weather_deadline:
+                    self.weather_expected = False
+                    failures += 1
+            elif self.pending_disconnects:
+                self.pending_disconnects += 1
+                if now > self.pending_deadline:
+                    failures += self.pending_disconnects
+                    self.pending_disconnects = 0
+                    self.pending_deadline = 0.0
+            else:
+                self.pending_disconnects = 1
+                self.pending_deadline = now + MQTT_RECOVERY_TIMEOUT_S
+        return failures
+
+    def finish(self) -> int:
+        failures = self.pending_disconnects
+        self.pending_disconnects = 0
+        self.pending_deadline = 0.0
+        return failures
 
 
 def fail(message: str) -> None:
@@ -298,9 +361,7 @@ def stress_board(
     disconnected = 0
     manifest_active = threading.Event()
     mqtt_recovery_expected = threading.Event()
-    weather_successes_seen = int(weather_before.get("successes", 0))
-    weather_mqtt_recovery_expected = False
-    weather_mqtt_recovery_deadline = 0.0
+    mqtt_recovery = MqttRecoveryTracker(int(weather_before.get("successes", 0)))
 
     def remember(kind: str, error: BaseException) -> None:
         with lock:
@@ -308,10 +369,10 @@ def stress_board(
                 errors.append(f"{kind}: {error}")
 
     def status_loop() -> None:
-        nonlocal disconnected, weather_successes_seen
-        nonlocal weather_mqtt_recovery_expected, weather_mqtt_recovery_deadline
+        nonlocal disconnected
         while time.monotonic() < deadline:
             try:
+                ota_expected_before = mqtt_recovery_expected.is_set()
                 status = request_json(host, "/status")
                 validate_identity(status, host=host, mac=mac, version=version, elf=elf)
                 hp = status.get("hp", {})
@@ -321,24 +382,19 @@ def stress_board(
                 weather_successes = int(weather.get("successes", 0))
                 # Weather owns the same constrained network heap as OTA and deliberately stops
                 # esp-mqtt while its TLS client is live. `fetching` covers the owner interval; the
-                # success edge covers the short status-update -> asynchronous MQTT-resume gap.
-                if weather.get("fetching"):
-                    weather_mqtt_recovery_expected = True
-                    weather_mqtt_recovery_deadline = now + MQTT_RECOVERY_TIMEOUT_S
-                if weather_successes > weather_successes_seen:
-                    weather_mqtt_recovery_expected = True
-                    weather_mqtt_recovery_deadline = now + MQTT_RECOVERY_TIMEOUT_S
-                weather_successes_seen = max(weather_successes_seen, weather_successes)
+                # success edge covers the short status-update -> asynchronous MQTT-resume gap. The
+                # tracker also defers a straddling mixed snapshot until that evidence can arrive.
                 if require_x10a and (not hp.get("connected") or int(hp.get("values", 0)) <= 0):
                     disconnected += 1
-                if mqtt.get("connected"):
-                    # Close the weather allowance on the first recovered sample. A later broker
-                    # outage must fail even if it occurs inside the original 15-second window.
-                    weather_mqtt_recovery_expected = False
-                elif not mqtt_recovery_expected.is_set():
-                    if (not weather_mqtt_recovery_expected or
-                            now > weather_mqtt_recovery_deadline):
-                        disconnected += 1
+                disconnected += mqtt_recovery.observe(
+                    now=now,
+                    mqtt_connected=bool(mqtt.get("connected")),
+                    weather_fetching=bool(weather.get("fetching")),
+                    weather_successes=weather_successes,
+                    # A request started inside the accepted OTA pause must not be reclassified if
+                    # the main thread clears the event before this streamed snapshot is processed.
+                    ota_expected=ota_expected_before or mqtt_recovery_expected.is_set(),
+                )
                 with lock:
                     samples["status"] += 1
                     uptimes.append(int(status.get("uptime_s", -1)))
@@ -423,6 +479,9 @@ def stress_board(
         )
     for worker in workers:
         worker.join(STRESS_SECONDS + HTTP_TIMEOUT_S + 10)
+
+    # No future weather edge can justify a sample after the pressure workers have stopped.
+    disconnected += mqtt_recovery.finish()
 
     finished = request_json(host, "/status")
     validate_identity(finished, host=host, mac=mac, version=version, elf=elf)
@@ -915,6 +974,77 @@ def self_test() -> None:
     assert x10a_timeout_delta_exceeded(
         require_x10a=True, baseline=timeout_before, final=timeout_after,
     )
+    straddled = MqttRecoveryTracker(weather_successes_seen=0)
+    assert straddled.observe(
+        now=1.0, mqtt_connected=False, weather_fetching=False,
+        weather_successes=0, ota_expected=False,
+    ) == 0
+    assert straddled.observe(
+        now=2.0, mqtt_connected=True, weather_fetching=False,
+        weather_successes=1, ota_expected=False,
+    ) == 0
+    assert straddled.finish() == 0
+    reverse_straddled = MqttRecoveryTracker(weather_successes_seen=0)
+    assert reverse_straddled.observe(
+        now=1.0, mqtt_connected=True, weather_fetching=False,
+        weather_successes=1, ota_expected=False,
+    ) == 0
+    assert reverse_straddled.observe(
+        now=2.0, mqtt_connected=False, weather_fetching=False,
+        weather_successes=1, ota_expected=False,
+    ) == 0
+    assert reverse_straddled.observe(
+        now=3.0, mqtt_connected=True, weather_fetching=False,
+        weather_successes=1, ota_expected=False,
+    ) == 0
+    assert reverse_straddled.finish() == 0
+    unexplained = MqttRecoveryTracker(weather_successes_seen=0)
+    assert unexplained.observe(
+        now=1.0, mqtt_connected=False, weather_fetching=False,
+        weather_successes=0, ota_expected=False,
+    ) == 0
+    assert unexplained.observe(
+        now=2.0, mqtt_connected=True, weather_fetching=False,
+        weather_successes=0, ota_expected=False,
+    ) == 0
+    assert unexplained.observe(
+        now=17.0, mqtt_connected=True, weather_fetching=False,
+        weather_successes=0, ota_expected=False,
+    ) == 1
+    late_weather_evidence = MqttRecoveryTracker(weather_successes_seen=0)
+    assert late_weather_evidence.observe(
+        now=1.0, mqtt_connected=False, weather_fetching=False,
+        weather_successes=0, ota_expected=False,
+    ) == 0
+    assert late_weather_evidence.observe(
+        now=17.1, mqtt_connected=True, weather_fetching=False,
+        weather_successes=1, ota_expected=False,
+    ) == 1
+    assert late_weather_evidence.finish() == 0
+    ota_event_straddled = MqttRecoveryTracker(weather_successes_seen=0)
+    assert ota_event_straddled.observe(
+        now=1.0, mqtt_connected=False, weather_fetching=False,
+        weather_successes=0, ota_expected=True,
+    ) == 0
+    assert ota_event_straddled.observe(
+        now=2.0, mqtt_connected=True, weather_fetching=False,
+        weather_successes=0, ota_expected=False,
+    ) == 0
+    assert ota_event_straddled.finish() == 0
+    later_outage = MqttRecoveryTracker(weather_successes_seen=0)
+    assert later_outage.observe(
+        now=1.0, mqtt_connected=False, weather_fetching=True,
+        weather_successes=0, ota_expected=False,
+    ) == 0
+    assert later_outage.observe(
+        now=2.0, mqtt_connected=True, weather_fetching=False,
+        weather_successes=1, ota_expected=False,
+    ) == 0
+    assert later_outage.observe(
+        now=3.0, mqtt_connected=False, weather_fetching=False,
+        weather_successes=1, ota_expected=False,
+    ) == 0
+    assert later_outage.finish() == 1
     checking = {"state": "checking", "busy": True, "generation": 7, "available": ""}
     offered = {"state": "idle", "busy": False, "generation": 7,
                "available": "1.2.3-dev.4", "available_sha256": app,
