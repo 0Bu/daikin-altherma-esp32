@@ -129,6 +129,21 @@ try {
     ["the signature verifier is bypassed", () =>
       replaceOnce("scripts/production-ota-gate.py", 'ROOT / "scripts/require-signed.sh"',
         'ROOT / "scripts/signature-check-bypassed.sh"')],
+    ["the official dev artifact skips the Range preflight", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "verify_http_range_support(app_url, binary)",
+        "verify_http_range_support_bypassed(app_url, binary)")],
+    ["the official release artifact skips the Range preflight", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "verify_http_range_support(release_url, release_binary)",
+        "verify_http_range_support_bypassed(release_url, release_binary)")],
+    ["the Range preflight accepts a full 200 response", () =>
+      replaceOnce("scripts/production-ota-gate.py", "response.status != 206", "False")],
+    ["the Range preflight ignores returned artifact bytes", () =>
+      replaceOnce("scripts/production-ota-gate.py", "body != binary[:1]", "False")],
+    ["bench pressure workers leak after an OTA failure", () =>
+      replaceOnce("scripts/production-ota-gate.py", "    finally:\n        stop.set()",
+        "    except Exception:\n        raise\n    else:\n        stop.set()")],
     ["the complete source-contract runner is skipped", () =>
       replaceOnce("scripts/production-ota-gate.py", 'ROOT / "scripts/run-contract-tests.sh"',
         'ROOT / "scripts/run-contract-smoke.sh"')],

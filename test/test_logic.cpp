@@ -2603,6 +2603,38 @@ static void test_ota_transport() {
     CHECK(ota_redirect_location_accepted(redirect));
     ota_redirect_location_observe(redirect, "/same-origin.bin");
     CHECK(!ota_redirect_location_accepted(redirect));       // even two secure values are ambiguous
+
+    uint64_t start = 0, end = 0, total = 0;
+    CHECK(ota_content_range_parse("bytes 797696-1839103/1839104", start, end, total));
+    CHECK(start == 797696 && end == 1839103 && total == 1839104);
+    CHECK(ota_content_range_parse("\tbytes\t1-1/2 \t", start, end, total));
+    CHECK(start == 1 && end == 1 && total == 2);
+    CHECK(!ota_content_range_parse("Bytes 1-1/2", start, end, total));
+    CHECK(!ota_content_range_parse("bytes */1839104", start, end, total));
+    CHECK(!ota_content_range_parse("bytes 2-1/3", start, end, total));
+    CHECK(!ota_content_range_parse("bytes 1-3/3", start, end, total));
+    CHECK(!ota_content_range_parse("bytes 1-2/*", start, end, total));
+    CHECK(!ota_content_range_parse("bytes 1-2/3, bytes 1-2/3", start, end, total));
+    CHECK(!ota_content_range_parse("bytes 18446744073709551616-2/3", start, end, total));
+    CHECK(!ota_content_range_parse("bytes 1-2/18446744073709551616", start, end, total));
+
+    OtaContentRangeState range;
+    ota_content_range_observe(range, "bytes 797696-1839103/1839104");
+    CHECK(ota_content_range_matches(range, 797696, 1839104));
+    CHECK(!ota_content_range_matches(range, 797695, 1839104));
+    CHECK(!ota_content_range_matches(range, 797696, 1839105));
+    ota_content_range_observe(range, "bytes 797696-1839103/1839104");
+    CHECK(!ota_content_range_matches(range, 797696, 1839104)); // duplicate stays ambiguous
+    ota_content_range_reset(range);
+    ota_content_range_observe(range, "bytes 797696-1839102/1839104");
+    CHECK(!ota_content_range_matches(range, 797696, 1839104)); // suffix must reach total - 1
+
+    CHECK(ota_transfer_resume_allowed(0, 797696, 1839104, false));
+    CHECK(!ota_transfer_resume_allowed(1, 797696, 1839104, false));
+    CHECK(!ota_transfer_resume_allowed(0, 0, 1839104, false));
+    CHECK(!ota_transfer_resume_allowed(0, 1839104, 1839104, false));
+    CHECK(!ota_transfer_resume_allowed(0, 797696, 0, false));
+    CHECK(!ota_transfer_resume_allowed(0, 797696, 1839104, true));
 }
 
 static void test_heartbeat() {

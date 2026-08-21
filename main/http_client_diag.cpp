@@ -54,4 +54,28 @@ HttpClientOpenFailure http_client_log_open_failure(const char* label,
     return failure;
 }
 
+HttpClientReadFailure http_client_log_read_failure(const char* label,
+                                                   esp_http_client_handle_t client,
+                                                   int read_result, size_t written,
+                                                   int64_t total,
+                                                   uint32_t elapsed_ms) noexcept {
+    HttpClientReadFailure failure;
+    failure.read_result = read_result;
+    failure.socket_errno = esp_http_client_get_errno(client);
+    failure.tls_error = esp_http_client_get_and_clear_last_tls_error(
+        client, &failure.mbedtls_error, &failure.verify_flags);
+    failure.sample = http_client_probe();
+    diag_printf("netdiag: %s read=%d errno=%d tls=%s/0x%lx mbed=%d verify=0x%x "
+                "bytes=%u/%lld elapsed=%lu ms heap=%u/%u stack=%lu\n",
+                label, read_result, failure.socket_errno, esp_err_to_name(failure.tls_error),
+                static_cast<unsigned long>(static_cast<uint32_t>(failure.tls_error)),
+                failure.mbedtls_error, static_cast<unsigned>(failure.verify_flags),
+                static_cast<unsigned>(written), static_cast<long long>(total),
+                static_cast<unsigned long>(elapsed_ms),
+                static_cast<unsigned>(failure.sample.free_internal),
+                static_cast<unsigned>(failure.sample.largest_internal),
+                static_cast<unsigned long>(failure.sample.stack_free_bytes));
+    return failure;
+}
+
 }  // namespace daik

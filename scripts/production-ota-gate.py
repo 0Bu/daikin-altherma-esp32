@@ -199,6 +199,25 @@ def request_json(
     return value
 
 
+def verify_http_range_support(url: str, binary: bytes) -> None:
+    """Require the official artifact host to serve the exact one-byte suffix contract firmware uses."""
+    if not binary:
+        fail("cannot verify Range support for an empty firmware artifact")
+    request = Request(
+        cache_busted(url), method="GET",
+        headers={"User-Agent": "daikin-production-ota-gate/1", "Range": "bytes=0-0"},
+    )
+    with urlopen(request, timeout=HTTP_TIMEOUT_S) as response:
+        content_range = response.headers.get_all("Content-Range") or []
+        content_length = response.headers.get("Content-Length")
+        if response.status != 206 or content_range != [f"bytes 0-0/{len(binary)}"] or \
+           content_length != "1":
+            fail("official firmware host does not provide the exact HTTP Range resume contract")
+        body = response.read(2)
+    if body != binary[:1]:
+        fail("official firmware Range response does not match the signed artifact")
+
+
 def cache_busted(url: str) -> str:
     parsed = urlparse(url)
     query = urlencode({"gate": str(time.time_ns())})
@@ -862,17 +881,19 @@ def exercise_bench_full_download(
         worker.start()
     time.sleep(0.5)
 
-    post_update_once(
-        host, generation, release_version, release_sha256,
-        expected_channel="release", allow_downgrade=True,
-    )
     target_transfer: dict[str, Any] = {}
-    release_status = wait_for_new_firmware(
-        host, release_version, release_elf, target_transfer,
-    )
-    stop.set()
-    for worker in workers:
-        worker.join(HTTP_TIMEOUT_S + 2)
+    try:
+        post_update_once(
+            host, generation, release_version, release_sha256,
+            expected_channel="release", allow_downgrade=True,
+        )
+        release_status = wait_for_new_firmware(
+            host, release_version, release_elf, target_transfer,
+        )
+    finally:
+        stop.set()
+        for worker in workers:
+            worker.join(HTTP_TIMEOUT_S + 2)
 
     validate_identity(
         release_status, host=host, mac=mac, version=release_version, elf=release_elf,
@@ -1118,6 +1139,7 @@ def main() -> int:
     verify_local_source(args.expected_source_sha)
     binary = request_bytes(cache_busted(app_url), timeout=30)
     elf = verify_image(binary, args.expected_version, args.expected_app_sha256)
+    verify_http_range_support(app_url, binary)
     run_local_gates()
     release_manifest = json.loads(request_bytes(cache_busted(OFFICIAL_RELEASE_MANIFEST_URL)))
     if not isinstance(release_manifest, dict):
@@ -1127,6 +1149,7 @@ def main() -> int:
     )
     release_binary = request_bytes(cache_busted(release_url), timeout=30)
     release_elf = verify_image(release_binary, release_version, release_sha256)
+    verify_http_range_support(release_url, release_binary)
 
     inventory = load_inventory()
     bench = inventory[BENCH_ROLE]

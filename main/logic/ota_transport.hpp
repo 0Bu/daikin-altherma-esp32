@@ -4,6 +4,8 @@
 // feeding arbitrary multi-megabyte responses to the flash writer.  Keep the parser small,
 // allocation-free and host-testable; esp_http_client remains responsible for full URL parsing.
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <string_view>
 
 namespace daik {
@@ -78,6 +80,80 @@ inline void ota_redirect_location_observe(OtaRedirectLocationState& state,
 
 inline bool ota_redirect_location_accepted(const OtaRedirectLocationState& state) {
     return state.location_count == 1 && state.location_secure;
+}
+
+// A partial firmware response is accepted only when the server proves exactly which suffix it is
+// serving.  Content-Range is untrusted wire text, so parse it without allocation and saturate the
+// header count: duplicated fields remain ambiguous even if both happen to carry the same value.
+struct OtaContentRangeState {
+    unsigned header_count = 0;
+    bool valid = false;
+    uint64_t start = 0;
+    uint64_t end = 0;
+    uint64_t total = 0;
+};
+
+inline void ota_content_range_reset(OtaContentRangeState& state) {
+    state = {};
+}
+
+inline bool ota_parse_u64(std::string_view value, size_t& pos, uint64_t& out) noexcept {
+    if (pos >= value.size() || value[pos] < '0' || value[pos] > '9') return false;
+    uint64_t parsed = 0;
+    do {
+        const unsigned digit = static_cast<unsigned>(value[pos] - '0');
+        if (parsed > (std::numeric_limits<uint64_t>::max() - digit) / 10) return false;
+        parsed = parsed * 10 + digit;
+        ++pos;
+    } while (pos < value.size() && value[pos] >= '0' && value[pos] <= '9');
+    out = parsed;
+    return true;
+}
+
+inline bool ota_content_range_parse(std::string_view value, uint64_t& start, uint64_t& end,
+                                    uint64_t& total) noexcept {
+    size_t pos = 0;
+    while (pos < value.size() && (value[pos] == ' ' || value[pos] == '\t')) ++pos;
+    constexpr std::string_view unit = "bytes";
+    if (value.size() - pos < unit.size()) return false;
+    for (size_t i = 0; i < unit.size(); ++i)
+        if (value[pos + i] != unit[i]) return false;
+    pos += unit.size();
+    if (pos >= value.size() || (value[pos] != ' ' && value[pos] != '\t')) return false;
+    while (pos < value.size() && (value[pos] == ' ' || value[pos] == '\t')) ++pos;
+    if (!ota_parse_u64(value, pos, start) || pos >= value.size() || value[pos++] != '-')
+        return false;
+    if (!ota_parse_u64(value, pos, end) || pos >= value.size() || value[pos++] != '/')
+        return false;
+    if (!ota_parse_u64(value, pos, total)) return false;
+    while (pos < value.size() && (value[pos] == ' ' || value[pos] == '\t')) ++pos;
+    return pos == value.size() && total > 0 && start <= end && end < total;
+}
+
+inline void ota_content_range_observe(OtaContentRangeState& state,
+                                      std::string_view value) noexcept {
+    if (state.header_count < 2) ++state.header_count;
+    if (state.header_count != 1) {
+        state.valid = false;
+        return;
+    }
+    state.valid = ota_content_range_parse(value, state.start, state.end, state.total);
+}
+
+inline bool ota_content_range_matches(const OtaContentRangeState& state,
+                                      uint64_t expected_start,
+                                      uint64_t expected_total) noexcept {
+    return state.header_count == 1 && state.valid && expected_start < expected_total &&
+           state.start == expected_start && state.end == expected_total - 1 &&
+           state.total == expected_total;
+}
+
+constexpr unsigned OTA_TRANSFER_MAX_RESUMES = 1;
+
+inline bool ota_transfer_resume_allowed(unsigned resumes, uint64_t written, uint64_t total,
+                                        bool deadline_reached) noexcept {
+    return resumes < OTA_TRANSFER_MAX_RESUMES && !deadline_reached && total > 0 &&
+           written > 0 && written < total;
 }
 
 } // namespace daik

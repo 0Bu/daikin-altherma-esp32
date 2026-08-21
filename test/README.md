@@ -168,12 +168,16 @@ largest-INTERNAL-block samples as manifest/image TLS, using dynamic TLS records,
 through a fixed-chunk generation-bound endpoint. The UI's 150-second check poll budget covers both
 15-second TLS-headroom waits, both 30-second document deadlines, the bounded allocator-shaped
 manifest retry and the common quiesce margin.
-IDF's umbrella image-validation error stays generic rather than falsely
+One known-length transfer may reconnect exactly once after its header/app-description prefix is
+validated and committed: the source contract requires pre-cleanup read/socket/TLS/heap diagnostics,
+buffer and client release, fresh 56/24-KiB admission,
+the original deadline, HTTP 206 plus exact single `Content-Range`/remaining `Content-Length`, and the
+same sequential OTA/PSA state. IDF's umbrella image-validation error stays generic rather than falsely
 claiming a bad signature. Initial feed URLs and every redirect stay on forced HTTPS, and an oversized
 response remains a size-policy refusal rather than masquerading as an interrupted connection.
 `tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently (including
 the fixed task lease, generation rollback and whole-stream SHA comparison) and proves the
-source contract turns red; all ninety-six seeded regressions are required. The allocation-free
+source contract turns red; all one hundred twenty-one seeded regressions are required. The allocation-free
 `FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
 
 `node test/test_production_ota_gate_contract.mjs` pins the exact-artifact bench-to-production
@@ -182,7 +186,7 @@ workflow: initial target health window, full signed release-binary pressure, the
 bounded MQTT recovery after intentional OTA- and weather-TLS transport pauses, including either
 ordering of paused MQTT and matching weather evidence in a streamed status snapshot, and the sole generation-bound
 production write, with the OTA pause lease held for every in-flight status response. Its paired
-`tools/production_ota/selftest.mjs` requires all fifty stage-removal mutations to turn that same
+`tools/production_ota/selftest.mjs` requires all fifty-five stage-removal mutations to turn that same
 contract red.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
@@ -369,7 +373,9 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   consecutive healthy-sample streak.
 - `logic/ota_transport.hpp` — fail-closed OTA URL policy: initial feeds require absolute HTTPS;
   redirects admit HTTPS or ordinary relative paths only, with HTTP/other schemes, protocol-relative
-  authorities, malformed origins, whitespace/control bytes and backslash parser ambiguities refused.
+  authorities, malformed origins, whitespace/control bytes and backslash parser ambiguities refused;
+  allocation-free Content-Range parsing rejects duplicates, overflow and mismatched suffixes, while
+  the bounded decision permits one strict-prefix resume only before the original deadline.
 - `logic/version_cmp.hpp` — the OTA downgrade gate: numeric (not lexical) dotted-version ordering, so
   `1.10.0 > 1.9.0`; equal and older refused; a `v` prefix and a semver pre-release suffix handled;
   pre-release identifiers compare numerically too (`-dev.12 > -dev.9`), which is what keeps the dev
