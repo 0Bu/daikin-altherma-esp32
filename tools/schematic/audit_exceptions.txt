@@ -41,16 +41,3 @@ E001 lp
 # unit's box (outdoor air) and every one of them IS named; the discharge pill is the only unnamed °C
 # in the drawing, and it sits on the one pipe that carries no water at all.
 E001 disch
-
-# ── ADJUDICATION — R1T (leaving-water) is LIFTED above its run and tied DOWN to the run's midpoint ─
-# G006 caps a free pill at 14 px from the run it names, because a pill floating beside nothing
-# attributes a reading to a place no pipe is. R1T is not that case. It is measured at the plate's
-# water outlet, and the run there is only 40 px — too short for a 66 px pill to sit beside the plate
-# without overhanging it (index.html documents this at #phe). So the pill sits just above the supply
-# line, over the BUH end of the PHE→BUH run, with a tie dropping to that run's MIDPOINT (x=398) — the
-# point the reading belongs to. The pill's left half and its centre are over the run; the overhang
-# lands on empty drawing toward the BUH. The failure G006 guards against (a reading claiming a point
-# no pipe reaches) cannot occur: the span is on the run and the tie is explicit. If R1T is ever moved
-# back beside the plate (the run re-widened to fit the pill), this line stops suppressing anything
-# and S000 will flag it for deletion.
-G006 lwt

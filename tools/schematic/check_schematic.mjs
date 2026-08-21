@@ -78,6 +78,8 @@ const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch (e) { die
 
 // ── tuning constants — every one of them is a DRAWING CONVENTION, stated once ────────────────────
 const PILL_GAP_MAX = 14;    // a pill beside a pipe sits ~12 px off it; 14 leaves the convention 2 px of slack
+const TIE_EDGE_TOL = 0.5;   // px: a leader must start on the pill's edge, not merely somewhere near it
+const TIE_RUN_CLEARANCE = 1;// px beyond the two strokes: enough for antialiasing, not for a floating leader
 const ROTOR_HUB_TOL = 1.0;  // px between a rotor's bbox centre and its hub before it visibly orbits
 const EDGE_TOL = 0.5;       // px a stroked edge may sit outside the viewBox (antialiasing, not a defect)
 const TEXT_EDGE_TOL = 4;    // px, for the ESTIMATED text box — deliberately looser than EDGE_TOL
@@ -656,6 +658,7 @@ const discs = nodes.filter((n) => n.kind === 'circle' && (has(n, 'sc-valve') || 
 const pipePaths = nodes.filter((n) => n.kind === 'path' && (has(n, 'sc-pipe') || has(n, 'sc-rpipe')));
 const hitLines = nodes.filter((n) => n.kind === 'path' && has(n, 'sc-hitline'));
 const flowPaths = nodes.filter((n) => n.kind === 'path' && (has(n, 'sc-flow') || has(n, 'sc-rflow')));
+const ties = nodes.filter((n) => n.kind === 'path' && has(n, 'sc-tie'));
 const texts = nodes.filter((n) => n.kind === 'text');
 const hitTargets = allEls.filter((n) => n.el.attrs['data-insp'] !== undefined);
 if (pills.length === 0 || pipePaths.length === 0 || hitTargets.length === 0) {
@@ -907,9 +910,11 @@ for (const p of [...pipePaths, ...hitLines]) {
   }
 }
 // G006: a pill drawn BESIDE a pipe belongs to that pipe — it must sit within the drawing's ~12 px
-// of it AND within its span. A pill floating 40 px away, or hanging past the end of the run it
-// names, attributes a reading to a place no pipe is. Pills NESTED in a component are exempt: they
-// belong to the box, not to a run.
+// of it AND within its span. A pill may sit farther away only when a perpendicular .sc-tie in the
+// SAME hit target visibly joins the pill's run-facing edge to that exact pipe stroke. This is a
+// measurable attribution, not a blanket exemption: a leader that stops short, starts off the pill,
+// leaves the run's span or points at another run still fails. Pills NESTED in a component are exempt:
+// they belong to the box, not to a run.
 function gapToSeg(b, s) {
   if (isH(s)) {
     const [x0, x1] = spanX(s);
@@ -924,6 +929,40 @@ function gapToSeg(b, s) {
     return x < b.x0 ? b.x0 - x : x > b.x1 ? x - b.x1 : 0;
   }
   return null;
+}
+function tieBindsPillToRun(pill, run) {
+  const horizontalRun = isH(run);
+  if (!horizontalRun && !isV(run)) return false;
+  const runCoord = horizontalRun ? run.a[1] : run.a[0];
+  const runSpan = horizontalRun ? spanX(run) : spanY(run);
+  const pillCentre = centre(pill.bbox);
+  const runFacingEdge = horizontalRun
+    ? (runCoord < pillCentre[1] ? pill.bbox.y0 : pill.bbox.y1)
+    : (runCoord < pillCentre[0] ? pill.bbox.x0 : pill.bbox.x1);
+
+  for (const tie of ties) {
+    if (hitKey(tie) !== hitKey(pill) || tie.segs.length !== 1) continue;
+    const seg = tie.segs[0];
+    if ((horizontalRun && !isV(seg)) || (!horizontalRun && !isH(seg))) continue;
+    for (const [atPill, atRun] of [[seg.a, seg.b], [seg.b, seg.a]]) {
+      const alongPill = horizontalRun ? atPill[0] : atPill[1];
+      const acrossPill = horizontalRun ? atPill[1] : atPill[0];
+      const alongRun = horizontalRun ? atRun[0] : atRun[1];
+      const acrossRun = horizontalRun ? atRun[1] : atRun[0];
+      const pillSpan = horizontalRun
+        ? [pill.bbox.x0, pill.bbox.x1]
+        : [pill.bbox.y0, pill.bbox.y1];
+      const startsOnPill = alongPill >= pillSpan[0] - TIE_EDGE_TOL &&
+        alongPill <= pillSpan[1] + TIE_EDGE_TOL &&
+        Math.abs(acrossPill - runFacingEdge) <= TIE_EDGE_TOL;
+      const reachesRun = alongRun >= runSpan[0] - TIE_EDGE_TOL &&
+        alongRun <= runSpan[1] + TIE_EDGE_TOL &&
+        Math.abs(acrossRun - runCoord) <=
+          strokeWidth(run.node) / 2 + strokeWidth(tie) / 2 + TIE_RUN_CLEARANCE;
+      if (startsOnPill && reachesRun) return true;
+    }
+  }
+  return false;
 }
 const freePills = pills.filter((p) => !boxes.some((b) => contains(b.bbox, p.bbox)));
 const pillRun = new Map();
@@ -948,7 +987,7 @@ for (const p of freePills) {
     continue;
   }
   pillRun.set(p, best.s);
-  if (best.g > PILL_GAP_MAX) {
+  if (best.g > PILL_GAP_MAX && !tieBindsPillToRun(p, best.s)) {
     add('G006', hitKey(p), `pill "${hitKey(p)}" floats ${fx(best.g)} px from its pipe (${at(p)})`,
       `the drawing's convention is ~12 px (max ${PILL_GAP_MAX}); pill ${fx(p.bbox.x0)},${fx(p.bbox.y0)}→` +
       `${fx(p.bbox.x1)},${fx(p.bbox.y1)}, run at ${isH(best.s) ? 'y=' + fx(best.s.a[1]) : 'x=' + fx(best.s.a[0])} ` +
