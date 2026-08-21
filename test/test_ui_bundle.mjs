@@ -322,6 +322,76 @@ assert.match(html, /id="circulationModal"[\s\S]*id="circTopic"[\s\S]*id="circPow
   "circulation settings must expose the exact topic, JSON paths, freshness, hysteresis and confirmation");
 assert.match(html, /id="svR2t"[\s\S]*id="svValve2"[\s\S]*id="svFlowSwitch"[\s\S]*id="svR3t"/,
   "R2T, the heating-cooling valve, flow switch and R3T must remain visible in the plant schematic");
+const schematicGroup = (name) => html.match(
+  new RegExp(`<g[^>]*data-insp="${name}"[^>]*>[\\s\\S]*?<\\/g>`))?.[0] || "";
+const schematicRect = (name, className) => {
+  const group = schematicGroup(name);
+  const rect = group.match(new RegExp(
+    `<rect class="${className}" x="([0-9.]+)" y="([0-9.]+)" width="([0-9.]+)" height="([0-9.]+)"`));
+  assert.ok(rect, `${name} must retain its ${className} rectangle`);
+  const [, x, y, width, height] = rect.map(Number);
+  return { x, y, width, height, cx: x + width / 2 };
+};
+const pillRect = (name) => schematicRect(name, "sc-pill");
+const r1tGroup = schematicGroup("lwt");
+const r2tGroup = schematicGroup("r2t");
+const r4tGroup = schematicGroup("rwt");
+const r1tPill = pillRect("lwt");
+const r2tPill = pillRect("r2t");
+assert.match(r1tGroup, /data-i18n="schem\.leaving_water">R1T<\/text>/,
+  "the pre-BUH water-temperature pill must use the R1T sensor name");
+assert.match(r2tGroup, /data-i18n="schem\.r2t">R2T<\/text>/,
+  "the post-BUH water-temperature pill must use the R2T sensor name");
+assert.match(r4tGroup, /data-i18n="schem\.return">R4T<\/text>/,
+  "the return-water temperature pill must use the R4T sensor name");
+assert.equal((app.match(/"schem\.leaving_water": "R1T"/g) || []).length, 2,
+  "R1T must be language-independent in both supported dictionaries");
+assert.equal((app.match(/"schem\.r2t": "R2T"/g) || []).length, 2,
+  "R2T must be language-independent in both supported dictionaries");
+assert.equal((app.match(/"schem\.return": "R4T"/g) || []).length, 2,
+  "R4T must be language-independent in both supported dictionaries");
+assert.equal(r2tPill.y, r1tPill.y,
+  "R2T must share the R1T pill baseline above the supply line");
+assert.match(r2tGroup, /<text class="sc-val" x="[0-9.]+" y="149"[^>]*>[^]*<text class="sc-sub" x="[0-9.]+" y="128"/,
+  "R2T must share the R1T value and name baselines, not only its pill height");
+assert.match(app, /"schem\.flow_switch": "Flow switch"[\s\S]*"schem\.flow_switch": "Strömung"/,
+  "the flow-switch label must use sentence case in English and German");
+const wpPill = pillRect("wp");
+const r4tPill = pillRect("rwt");
+const flowPill = pillRect("flow");
+const flowSwitchPill = pillRect("flow_switch");
+assert.equal(r4tPill.cx, wpPill.cx,
+  "R4T must sit directly below the water-pressure pill");
+assert.ok(flowPill.cx > r4tPill.cx && flowPill.y === r4tPill.y,
+  "flow must sit to the right of R4T on the lower side of the return line");
+assert.ok(flowSwitchPill.cx > wpPill.cx && flowSwitchPill.y === wpPill.y,
+  "the flow-switch state must sit above the return line, right of water pressure");
+const pheBox = schematicRect("phe", "sc-plate");
+const spaceBox = schematicRect("heat", "sc-box");
+const buhBox = schematicRect("buh", "sc-buh");
+const pumpGroup = schematicGroup("pump");
+const pumpCircle = pumpGroup.match(/transform="translate\(([0-9.]+) ([0-9.]+)\)"[^]*<circle class="sc-valve" r="([0-9.]+)"/);
+assert.ok(pumpCircle, "the pump must retain its translated circular body");
+const pumpCx = Number(pumpCircle[1]);
+const pumpRadius = Number(pumpCircle[3]);
+const valveCircle = schematicGroup("valve").match(/<circle class="sc-valve" cx="([0-9.]+)" cy="([0-9.]+)" r="([0-9.]+)"/);
+assert.ok(valveCircle, "the 3-way valve must retain its circular body");
+const valveCx = Number(valveCircle[1]);
+const valveRadius = Number(valveCircle[3]);
+const supplyComponentGaps = [
+  buhBox.x - (pheBox.x + pheBox.width),
+  (pumpCx - pumpRadius) - (buhBox.x + buhBox.width),
+  (valveCx - valveRadius) - (pumpCx + pumpRadius),
+];
+assert.ok(Math.max(...supplyComponentGaps) - Math.min(...supplyComponentGaps) <= 1,
+  "BUH and pump must divide the PHE-to-valve corridor into equal clearances");
+const upperGaps = [
+  wpPill.x - (pheBox.x + pheBox.width),
+  flowSwitchPill.x - (wpPill.x + wpPill.width),
+  spaceBox.x - (flowSwitchPill.x + flowSwitchPill.width),
+];
+assert.ok(Math.max(...upperGaps) - Math.min(...upperGaps) <= 1,
+  "water pressure and flow switch must divide the PHE-to-space gap into equal clearances");
 assert.match(html, /data-insp="ouhx"[\s\S]*id="svOuHx"/,
   "the outdoor heat-exchanger R4T must remain visible inside the outdoor unit");
 assert.match(app, /ouhx:[\s\S]*trend: "outdoor_heat_exchanger"/,

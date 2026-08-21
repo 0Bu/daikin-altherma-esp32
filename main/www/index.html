@@ -320,9 +320,9 @@
                      space circuit +20), a small fitting carries it outside (BUH below its 32 px
                      rect, the pump above its circle). At 88x300 px with four readings drawn in it
                      this is an enclosure, and it was the only one without a heading. Below the
-                     plate the name also landed on the row of sub-labels ("PHE in", flow, flow
-                     switch, all at y=467), where it read as one more measuring-point caption
-                     instead of the name of the component above it. The head band is free down to
+                     plate the name also landed in the return-reading band, where it read as one
+                     more measuring-point caption instead of the name of the component above it.
+                     The head band is free down to
                      the first pill at y=258; only the two channels reach up, and their topmost
                      segments are at y=180. -->
                 <g class="sc-hit" data-insp="phe" role="button" tabindex="0">
@@ -401,18 +401,20 @@
                      diagram in §8 both run: plate exchanger (d) → R1T → backup heater (l) → PUMP (m)
                      → R2T → outlet, and only THEN the field-supplied 3-way valve. So the pump sits
                      here, on the supply side as the last part before the water leaves the unit —
-                     NOT in the return line, where this drawing used to put it. -->
+                     NOT in the return line, where this drawing used to put it. The BUH and pump
+                     divide the free PHE-to-valve corridor into balanced 47/46/47 px clearances:
+                     the two fittings read as one centred sequence rather than drifting left. -->
                 <g class="sc-hit" data-insp="wsup" role="button" tabindex="0">
-                  <path class="sc-pipe" d="M378 180 H 418"/>
-                  <path class="sc-pipe" d="M462 180 H 492"/>
-                  <path class="sc-pipe" d="M526 180 H 596"/>
-                  <path class="sc-hitline" d="M387 180 H 418"/>
-                  <path class="sc-hitline" d="M462 180 H 492"/>
-                  <path class="sc-hitline" d="M526 180 H 596"/>
+                  <path class="sc-pipe" d="M378 180 H 425"/>
+                  <path class="sc-pipe" d="M469 180 H 515"/>
+                  <path class="sc-pipe" d="M549 180 H 596"/>
+                  <path class="sc-hitline" d="M387 180 H 425"/>
+                  <path class="sc-hitline" d="M469 180 H 515"/>
+                  <path class="sc-hitline" d="M549 180 H 596"/>
                 </g>
-                <path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 418"/>
-                <path class="sc-flow water-flow hot" id="fSup2" d="M462 180 H 492"/>
-                <path class="sc-flow water-flow hot" id="fSup3" d="M526 180 H 596"/>
+                <path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 425"/>
+                <path class="sc-flow water-flow hot" id="fSup2" d="M469 180 H 515"/>
+                <path class="sc-flow water-flow hot" id="fSup3" d="M549 180 H 596"/>
                 <!-- R1T, at the exchanger's water outlet and BEFORE the backup heater — which is
                      exactly where it is drawn. It is a "pre-BUH" reading (the inspector name spells
                      this out) because the pill is NOT a downstream emitter temperature: R2T is after
@@ -422,35 +424,35 @@
                      it fires, so an unqualified "leaving water" would over-claim precisely when it
                      matters. R1T is the PHE outlet used for the signed, mode-aware ΔT and capacity
                      estimate (lwt_select.hpp); it can carry residual DHW heat in Cooling standby.
-                     The pill sits just above the supply line, over the BUH end of the 40 px run
-                     between the plate and the BUH, tied DOWN to that run's midpoint (x=398). The run
+                     The pill sits just above the supply line, over the BUH end of the 47 px run
+                     between the plate and the BUH, tied DOWN to that run's midpoint (x=401.5). The run
                      is too short for a 66 px pill to sit within, so the pill overhangs toward the
                      BUH while the tie carries the attribution back to the run's midpoint — the point
                      the reading belongs to. Above the line there is no plate to clear, so the
-                     overhang lands on empty drawing. The pill's name
-                     sub-label is the SHORT form ("PHE-Aus" / "PHE out"); the full name
-                     "PHE-Wasseraustritt · vor BUH · R1T" lives in the inspector (the lwt INSPECT
-                     entry). This is the adjudicated `G006 lwt` in
-                     tools/schematic/audit_exceptions.txt: the pill is directly OVER its run and
-                     visibly tied to it, so "a reading beside nothing" — the case G006 guards —
-                     does not arise. R2T sits directly at its own post-pump run. -->
+                     overhang lands on empty drawing. Its sub-label uses the sensor designator R1T,
+                     matching the R2T and R4T water-temperature pills; the full measuring-point
+                     name "PHE-Wasseraustritt · vor BUH · R1T" lives in the inspector (the lwt
+                     INSPECT entry). G006 verifies that the pill is directly OVER its run and that
+                     its tie reaches the run-facing edge, so "a reading beside nothing" — the case
+                     that rule guards — does not arise. R2T shares this pill height and sits
+                     directly at its own post-pump run. -->
                 <g class="sc-hit" data-insp="lwt" role="button" tabindex="0">
                   <rect class="sc-pill" x="383" y="134" width="66" height="22" rx="11"/>
                   <text class="sc-val" x="416" y="149" text-anchor="middle"><tspan id="svLwt">—</tspan> °C</text>
-                  <text class="sc-sub" x="416" y="128" text-anchor="middle" data-i18n="schem.leaving_water">PHE out</text>
-                  <path class="sc-tie" d="M398 156 V 176"/>
+                  <text class="sc-sub" x="416" y="128" text-anchor="middle" data-i18n="schem.leaving_water">R1T</text>
+                  <path class="sc-tie" d="M401.5 156 V 176"/>
                 </g>
                 <!-- Backup heater -->
                 <g class="sc-hit" data-insp="buh" role="button" tabindex="0">
-                  <rect class="sc-buh" x="418" y="164" width="44" height="32" rx="6"/>
-                  <path class="sc-bolt" d="M442 168 l-8 12 h6 l-4 12 10 -14 h-6 l6 -10z"/>
+                  <rect class="sc-buh" x="425" y="164" width="44" height="32" rx="6"/>
+                  <path class="sc-bolt" d="M449 168 l-8 12 h6 l-4 12 10 -14 h-6 l6 -10z"/>
                 <!-- The active STEP is part of the label ("BUH 1"/"BUH 2"), not just the warn tint:
                      the tint says "on", the digit says how much resistive heat is being paid for. -->
-                  <text class="sc-lbl" x="440" y="212" text-anchor="middle">BUH<tspan id="svBuh"></tspan></text>
+                  <text class="sc-lbl" x="447" y="212" text-anchor="middle">BUH<tspan id="svBuh"></tspan></text>
                 </g>
                 <!-- Circulation pump — last component on the supply side (see the order note above).
                      Label sits BELOW the pump on the BUH label's baseline (y=212): the two hydronic
-                     components on this run both caption below the pipe, and at x=509 that is well
+                     components on this run both caption below the pipe, and at x=532 that is well
                      left of the branch band, so the label clears the risers. -->
                 <!-- IMPELLER, not a triangle. The old symbol was a filled triangle that ROTATED
                      with the pump — but a triangle in a pump circle is the direction mark, so a
@@ -465,7 +467,7 @@
                      Four-fold symmetry is load-bearing here for the same reason as on the fan —
                      see the rotor note in the outdoor unit. -->
                 <g class="sc-hit" data-insp="pump" role="button" tabindex="0">
-                  <g transform="translate(509 180)">
+                  <g transform="translate(532 180)">
                     <circle class="sc-valve" r="17"/>
                     <g id="scPump">
                       <!-- A centrifugal impeller — eight curved vanes round a solid hub — not the
@@ -493,20 +495,19 @@
                       <circle r="3.6" fill="var(--muted)"/>
                     </g>
                   </g>
-                  <text class="sc-lbl" x="509" y="212" text-anchor="middle"><tspan data-i18n="schem.pump">PUMP</tspan> <tspan class="sc-val" id="svPump">—</tspan>%</text>
+                  <text class="sc-lbl" x="532" y="212" text-anchor="middle"><tspan data-i18n="schem.pump">PUMP</tspan> <tspan class="sc-val" id="svPump">—</tspan>%</text>
                 </g>
                 <!-- R2T is the leaving-water sensor after BUH and pump, before the field diverter.
-                     It sits just ABOVE the supply run with a SHORT tie, like the pressure pills: the
-                     pump label moved down to the BUH baseline, which frees the band above the run at
-                     this x, so R2T no longer has to lift over it. The tie lands at the midpoint of the
-                     run between the pump and the 3-way valve, well left of the diverter, so the
-                     drawing does not imply R2T belongs to either field branch. Close to its run
-                     (12 px), it needs no G006 adjudication — the `G006 r2t` ledger line is gone. -->
+                     It shares the exact y positions of R1T, making the paired supply temperatures
+                     one aligned row. Its tie lands at the midpoint of the run between the pump and
+                     the 3-way valve, well left of the diverter, so the drawing does not imply R2T
+                     belongs to either field branch. Like R1T, the deliberately lifted pill stays
+                     unambiguous because the visible tie reaches its actual run. -->
                 <g class="sc-hit" data-insp="r2t" role="button" tabindex="0">
-                  <rect class="sc-pill" x="528" y="146" width="66" height="22" rx="11"/>
-                  <text class="sc-val" x="561" y="161" text-anchor="middle"><tspan id="svR2t">—</tspan> °C</text>
-                  <text class="sc-sub" x="561" y="140" text-anchor="middle" data-i18n="schem.r2t">R2T · post-BUH</text>
-                  <path class="sc-tie" d="M561 168 V 176"/>
+                  <rect class="sc-pill" x="539.5" y="134" width="66" height="22" rx="11"/>
+                  <text class="sc-val" x="572.5" y="149" text-anchor="middle"><tspan id="svR2t">—</tspan> °C</text>
+                  <text class="sc-sub" x="572.5" y="128" text-anchor="middle" data-i18n="schem.r2t">R2T</text>
+                  <path class="sc-tie" d="M572.5 156 V 176"/>
                 </g>
                 <!-- 3-way valve — field-supplied, downstream of the whole indoor unit. Its two
                      outlets are now the two things it chooses between, drawn as such: DOWN to the
@@ -680,15 +681,13 @@
                 <path class="sc-flow water-flow cold" id="fHeatRet" d="M610 398 V 420"/>
                 <path class="sc-flow water-flow cold" id="fRet" d="M610 420 H 378"/>
                 <!-- Return line carries no pump (it is on the supply side — see the order note at
-                     the supply run). What it does carry, in the manufacturer's order seen from the
-                     house: R4T at the inlet, then the dirt filter, the pressure sensor and the flow
-                     sensor, then the exchanger — so the return pill sits right of the flow/pressure
-                     pill, which is upstream-first along a right-to-left flow. -->
+                     the supply run). R4T is paired vertically with the water-pressure reading so
+                     the two inlet facts form one column; flow sits immediately to their right. -->
                 <g class="sc-hit" data-insp="rwt" role="button" tabindex="0">
-                  <rect class="sc-pill" x="474" y="431" width="66" height="22" rx="11"/>
-                  <text class="sc-val" x="507" y="446" text-anchor="middle"><tspan id="svRwt">—</tspan> °C</text>
-                  <text class="sc-sub" x="507" y="467" text-anchor="middle" data-i18n="schem.return">PHE in</text>
-                  <path class="sc-tie" d="M507 431 V 424"/>
+                  <rect class="sc-pill" x="386" y="431" width="66" height="22" rx="11"/>
+                  <text class="sc-val" x="419" y="446" text-anchor="middle"><tspan id="svRwt">—</tspan> °C</text>
+                  <text class="sc-sub" x="419" y="467" text-anchor="middle" data-i18n="schem.return">R4T</text>
+                  <path class="sc-tie" d="M419 431 V 424"/>
                 </g>
                 <!-- The three return sensors sit on the run's COMMON section — left of x=610, where
                      the tank branch joins the heating branch. That is not decoration: R4T is at the
@@ -698,24 +697,22 @@
                      picture answered "which return is this?" with "the heating's" — the wrong one of
                      the two, and a claim no sensor there makes. Same for the flow and pressure
                      sensors: one set, on the common pipe.
-                     Order is the manufacturer's, upstream-first along a right-to-left flow (§16.2):
-                     inlet R4T, then the dirt filter, the pressure sensor, the flow sensor, then the
-                     exchanger. The PRESSURE sits above the pipe; flow, R4T and the flow switch sit
-                     below it — the
-                     same rule as on the two refrigerant runs, so "above the line is a bar figure"
-                     holds on all three; its name sub-label goes above the pill for the same reason
-                     the leaving-water one does, keeping the pipe itself clear. -->
+                     The PRESSURE sits above R4T in the same column. Flow sits to the right of R4T;
+                     the binary flow witness sits above the return line. The two upper pills divide
+                     the full gap between PHE and space-circuit box evenly: equal clearance on the
+                     left, between the pills and on the right. Their labels stay above them, leaving
+                     the pipe itself clear. -->
                 <g class="sc-hit" data-insp="flow" role="button" tabindex="0">
-                  <rect class="sc-pill" x="386" y="431" width="82" height="22" rx="11"/>
-                  <text class="sc-val" x="427" y="446" text-anchor="middle"><tspan id="svFlow">—</tspan> l/min</text>
-                  <text class="sc-sub" x="427" y="467" text-anchor="middle" data-i18n="schem.flow_rate">flow</text>
-                  <path class="sc-tie" d="M427 431 V 424"/>
+                  <rect class="sc-pill" x="466" y="431" width="82" height="22" rx="11"/>
+                  <text class="sc-val" x="507" y="446" text-anchor="middle"><tspan id="svFlow">—</tspan> l/min</text>
+                  <text class="sc-sub" x="507" y="467" text-anchor="middle" data-i18n="schem.flow_rate">flow</text>
+                  <path class="sc-tie" d="M507 431 V 424"/>
                 </g>
                 <g id="gFlowSwitch" class="sc-selector sc-hit" data-insp="flow_switch" role="button" tabindex="0">
-                  <rect class="sc-pill" x="546" y="431" width="46" height="22" rx="11"/>
-                  <text class="sc-val" x="569" y="446" text-anchor="middle" id="svFlowSwitch">—</text>
-                  <text class="sc-sub" x="569" y="467" text-anchor="middle" data-i18n="schem.flow_switch">FLOW SWITCH</text>
-                  <path class="sc-tie" d="M569 431 V424"/>
+                  <rect class="sc-pill" x="461" y="386" width="46" height="22" rx="11"/>
+                  <text class="sc-val" x="484" y="401" text-anchor="middle" id="svFlowSwitch">—</text>
+                  <text class="sc-sub" x="484" y="380" text-anchor="middle" style="font-size:8.5px" data-i18n="schem.flow_switch">Flow switch</text>
+                  <path class="sc-tie" d="M484 408 V 416"/>
                 </g>
                 <!-- NAMED, unlike the two refrigerant pressures: "bar" appears three times in this
                      drawing and only ONE of them is water. Position alone is a weak tell for a
@@ -725,10 +722,10 @@
                      NAME is exactly what §5.3 allows a pill to carry — it is attribution, not the
                      commentary that was taken out of the drawing earlier. -->
                 <g class="sc-hit" data-insp="wp" role="button" tabindex="0">
-                  <rect class="sc-pill" x="397" y="386" width="60" height="22" rx="11"/>
-                  <text class="sc-val" x="427" y="401" text-anchor="middle"><tspan id="svWp">—</tspan> bar</text>
-                  <text class="sc-sub" x="427" y="380" text-anchor="middle" data-i18n="schem.water_press">water pressure</text>
-                  <path class="sc-tie" d="M427 408 V 416"/>
+                  <rect class="sc-pill" x="389" y="386" width="60" height="22" rx="11"/>
+                  <text class="sc-val" x="419" y="401" text-anchor="middle"><tspan id="svWp">—</tspan> bar</text>
+                  <text class="sc-sub" x="419" y="380" text-anchor="middle" style="font-size:8.5px" data-i18n="schem.water_press">water pressure</text>
+                  <path class="sc-tie" d="M419 408 V 416"/>
                 </g>
                 <!-- Room reading: BARE text inside the heating box, like the tank's value in its
                      own box — a reading inside the component that owns it does not need a second

@@ -117,9 +117,10 @@ run_case "counter-clockwise pump is caught" 1 "G012"
 
 echo "== 2. a value pill floating ~40 px above the pipe it names =="
 # The high-pressure pill sits just above the refrigerant run BECAUSE that is where it is measured;
-# drifted up into the white space it names nothing, and the reader is left to guess which run it
-# belongs to. (Seeded on `hp`, not the leaving-water pill: R1T is a DELIBERATE lifted pill, tied to
-# its outlet and adjudicated as `G006 lwt`, so a lift there would be suppressed and seed nothing.)
+# drifted up while its tie stays behind in the pipe band, it names nothing and the reader is left to
+# guess which run it belongs to. Seeded on `hp`, not the leaving-water pill: R1T is deliberately lifted but has a
+# mechanically verified tie to its outlet, so moving that pill together with its tie would remain
+# correctly attributed and seed no defect.
 reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys, re
@@ -127,12 +128,24 @@ p = sys.argv[1]; s = open(p).read()
 i = s.index('data-insp="hp"')
 j = s.index('</g>', i)
 blk = s[i:j]
-new = (blk.replace('y="146"', 'y="106"').replace('y="161"', 'y="121"')
-          .replace('d="M247 168 V 177"', 'd="M247 128 V 177"'))
+new = blk.replace('y="146"', 'y="106"').replace('y="161"', 'y="121"')
 if new == blk: sys.exit(1)
 open(p, 'w').write(s[:i] + new + s[j:])
 PY
 run_case "pill floating off its run is caught" 1 "G006"
+
+echo "== 2b. a lifted supply pill whose tie stops short of its run =="
+# R2T is allowed beyond the ordinary 14 px only because its visible leader reaches the post-pump
+# run. Shortening that leader must restore G006; otherwise `.sc-tie` would be a decorative bypass.
+reset
+patch_file "$WORK/main/www/index.html" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = 'd="M572.5 156 V 176"'
+if old not in s: sys.exit(1)
+open(p, 'w').write(s.replace(old, 'd="M572.5 156 V 164"', 1))
+PY
+run_case "a lifted pill with a leader that stops short is caught" 1 "G006"
 
 echo "== 3. the return-temperature pill past the tank junction =="
 # R4T is at the indoor unit's water INLET, downstream of where the tank return joins the heating
@@ -146,7 +159,7 @@ p = sys.argv[1]; s = open(p).read()
 i = s.index('data-insp="rwt"')
 j = s.index('</g>', i)
 blk = s[i:j]
-new = blk.replace('x="474"', 'x="640"').replace('x="507"', 'x="673"').replace('M507 431', 'M673 431')
+new = blk.replace('x="386"', 'x="640"').replace('x="419"', 'x="673"').replace('M419 431', 'M673 431')
 if new == blk: sys.exit(1)
 open(p, 'w').write(s[:i] + new + s[j:])
 PY
@@ -224,8 +237,8 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if 'M462 180 H 492' not in s: sys.exit(1)
-open(p, 'w').write(s.replace('M462 180 H 492', 'M462 186 H 492'))   # pipe, hit line AND flow overlay
+if 'M469 180 H 515' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('M469 180 H 515', 'M469 186 H 515'))   # pipe, hit line AND flow overlay
 PY
 run_case "off-grid run is caught" 1 "G008"
 
@@ -273,7 +286,7 @@ import sys
 p = sys.argv[1]; s = open(p).read()
 i = s.index('data-insp="rwt"'); j = s.index('</g>', i)
 blk = s[i:j]
-open(p, 'w').write(s[:i] + blk.replace('x="474"', 'x="640"').replace('x="507"', 'x="673"').replace('M507 431', 'M673 431') + s[j:])
+open(p, 'w').write(s[:i] + blk.replace('x="386"', 'x="640"').replace('x="419"', 'x="673"').replace('M419 431', 'M673 431') + s[j:])
 PY
 printf 'E002 rwt\n' >> "$WORK/exc.txt"
 run_case "E002 suppression is refused" 2 "cannot be adjudicated"
@@ -370,8 +383,8 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if 'd="M378 180 H 418"' not in s: sys.exit(1)
-open(p, 'w').write(s.replace('d="M378 180 H 418"', 'd="M378 180 L 418 184"', 1))
+if 'd="M378 180 H 425"' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('d="M378 180 H 425"', 'd="M378 180 L 425 184"', 1))
 PY
 run_case "a skewed pipe is caught" 1 "G005"
 
@@ -392,9 +405,9 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = '<path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 418"/>'
+old = '<path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 425"/>'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '<path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 412"/>', 1))
+open(p, 'w').write(s.replace(old, '<path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 419"/>', 1))
 PY
 run_case "a flow overlay off its pipe is caught" 1 "G010"
 
@@ -442,8 +455,8 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if 'd="M387 180 H 418"' not in s: sys.exit(1)
-open(p, 'w').write(s.replace('d="M387 180 H 418"', 'd="M378 180 H 418"', 1))
+if 'd="M387 180 H 425"' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('d="M387 180 H 425"', 'd="M378 180 H 425"', 1))
 PY
 run_case "…and it measures boxes, not just discs" 1 "G011 wsup|phe"
 
