@@ -34,6 +34,8 @@ so a failure here fails the build anyway.
 ```bash
 scripts/run-mock-tests.sh --coverage # host logic tests + 95% floor + presenter parity
 scripts/run-contract-tests.sh      # do the firmware's SOURCE boundaries still hold?
+scripts/run-esp-idf-matrix-audit.sh # does the ESP-IDF feature matrix match the linked surface?
+tools/esp_idf_matrix/selftest.sh   # can the ESP-IDF matrix audit still go red?
 scripts/run-domain-audit.sh        # is the value catalog physically RIGHT?
 scripts/run-description-audit.sh   # can a user find out what each value IS?
 scripts/run-user-docs-audit.sh     # are English docs clear, current, and actionable?
@@ -78,6 +80,14 @@ the right task, in the right order, or not at all. "No source file can issue a M
 claim about a whole component, and the only way to check it is to read the source text, which is
 what each `test/test_*_contract.mjs` does. The glob is deliberate:
 a new sibling joins the gate with no workflow edit, the same property `test_ui_*.mjs` already had.
+
+`run-esp-idf-matrix-audit.sh` binds [`docs/ESP_IDF_MATRIX.md`](docs/ESP_IDF_MATRIX.md) to the
+application's explicit CMake components, direct managed dependencies, active `sdkconfig.defaults`,
+ESP-IDF-shaped includes and the few reviewed manual/native boundaries. It deliberately does not
+scrape the upstream documentation in CI: the negative feature list is curated, while the actual
+linked surface fails closed. Run `tools/esp_idf_matrix/selftest.sh` after changing the matrix,
+checker or input classification; its throwaway mutations prove missing components, defaults,
+headers, evidence and native-boundary changes are still rejected.
 
 Both globs also carry the **source-absence matrix** — `test_source_absence_contract.mjs` and
 `test_ui_absence_matrix.mjs` — which is why it has no runner of its own. It asks what the other
