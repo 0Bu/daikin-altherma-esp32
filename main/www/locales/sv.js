@@ -1,4 +1,4 @@
-// translation-source: cb974b3df64988a24f2767cde82e46db54cef64910a894328463172448c67675
+// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -390,7 +390,7 @@ I18N.sv = localeValues([
   /* schem.defrost_pill */ "❄ Avfrostning",
   /* schem.outdoor */ "Ute",
   /* insp.close */ "Stäng",
-  /* schem.leaving_water */ "PHE ut",
+  /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "VV-TANK",
   /* schem.set */ "Mål",
   /* schem.bsh_label */ "Tankvärmare",
@@ -398,7 +398,7 @@ I18N.sv = localeValues([
   /* schem.heating */ "Värme",
   /* schem.cooling */ "Kylning",
   /* schem.pump */ "Pump",
-  /* schem.return */ "PHE in",
+  /* schem.return */ "R4T",
   /* schem.room */ "Rum",
   /* schem.flow_rate */ "Vattenflöde",
   /* schem.water_press */ "Vattentryck",

@@ -1,4 +1,4 @@
-// translation-source: cb974b3df64988a24f2767cde82e46db54cef64910a894328463172448c67675
+// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -390,7 +390,7 @@ I18N.fr = localeValues([
   /* schem.defrost_pill */ "❄ dégivrage",
   /* schem.outdoor */ "Extérieur",
   /* insp.close */ "Fermer",
-  /* schem.leaving_water */ "Sortie PHE",
+  /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "BALLON ECS",
   /* schem.set */ "consigne",
   /* schem.bsh_label */ "Résistance",
@@ -398,7 +398,7 @@ I18N.fr = localeValues([
   /* schem.heating */ "CHAUFFAGE",
   /* schem.cooling */ "FROID",
   /* schem.pump */ "POMPE",
-  /* schem.return */ "Entrée PHE",
+  /* schem.return */ "R4T",
   /* schem.room */ "Pièce",
   /* schem.flow_rate */ "débit",
   /* schem.water_press */ "pression",

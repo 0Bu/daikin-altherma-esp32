@@ -1,4 +1,4 @@
-// translation-source: cb974b3df64988a24f2767cde82e46db54cef64910a894328463172448c67675
+// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -395,7 +395,7 @@ I18N.pl = localeValues([
   /* schem.defrost_pill */ "❄ odszran.",
   /* schem.outdoor */ "Zewn.",
   /* insp.close */ "Zamknij",
-  /* schem.leaving_water */ "Wyjście PHE",
+  /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "ZBIORNIK CWU",
   /* schem.set */ "zadana",
   /* schem.bsh_label */ "Grzałka el.",
@@ -403,7 +403,7 @@ I18N.pl = localeValues([
   /* schem.heating */ "OGRZEWANIE",
   /* schem.cooling */ "CHŁODZENIE",
   /* schem.pump */ "POMPA",
-  /* schem.return */ "PHE WE.",
+  /* schem.return */ "R4T",
   /* schem.room */ "Pokój",
   /* schem.flow_rate */ "przepływ",
   /* schem.water_press */ "ciśnienie wody",

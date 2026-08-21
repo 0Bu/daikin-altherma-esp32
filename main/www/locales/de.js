@@ -1,4 +1,4 @@
-// translation-source: cb974b3df64988a24f2767cde82e46db54cef64910a894328463172448c67675
+// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -390,7 +390,7 @@ I18N.de = localeValues([
   /* schem.defrost_pill */ "❄ Abtauen",
   /* schem.outdoor */ "Außen",
   /* insp.close */ "Schließen",
-  /* schem.leaving_water */ "PHE-Aus",
+  /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "WW-SPEICHER",
   /* schem.set */ "Soll",
   /* schem.bsh_label */ "Heizstab",
@@ -398,13 +398,13 @@ I18N.de = localeValues([
   /* schem.heating */ "HEIZUNG",
   /* schem.cooling */ "KÜHLEN",
   /* schem.pump */ "PUMPE",
-  /* schem.return */ "PHE-Ein",
+  /* schem.return */ "R4T",
   /* schem.room */ "Raum",
   /* schem.flow_rate */ "Durchfluss",
   /* schem.water_press */ "Wasserdruck",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
-  /* schem.flow_switch */ "STRÖMUNG",
+  /* schem.flow_switch */ "Strömung",
   /* schem.valve2 */ "2WV",
   /* wifi.title */ "WLAN-Konfiguration",
   /* wifi.ssid */ "WLAN-Netzwerk · SSID",

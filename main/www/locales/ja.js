@@ -1,4 +1,4 @@
-// translation-source: cb974b3df64988a24f2767cde82e46db54cef64910a894328463172448c67675
+// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -390,7 +390,7 @@ I18N.ja = localeValues([
   /* schem.defrost_pill */ "❄ 霜取り",
   /* schem.outdoor */ "外気",
   /* insp.close */ "閉じる",
-  /* schem.leaving_water */ "PHE出口",
+  /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "給湯タンク",
   /* schem.set */ "設定",
   /* schem.bsh_label */ "電気ヒーター",
@@ -398,7 +398,7 @@ I18N.ja = localeValues([
   /* schem.heating */ "暖房",
   /* schem.cooling */ "冷房",
   /* schem.pump */ "ポンプ",
-  /* schem.return */ "PHE入口",
+  /* schem.return */ "R4T",
   /* schem.room */ "室温",
   /* schem.flow_rate */ "流量",
   /* schem.water_press */ "水圧",

@@ -1,4 +1,4 @@
-// translation-source: cb974b3df64988a24f2767cde82e46db54cef64910a894328463172448c67675
+// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -390,7 +390,7 @@ I18N.it = localeValues([
   /* schem.defrost_pill */ "❄ sbrinamento",
   /* schem.outdoor */ "Esterno",
   /* insp.close */ "Chiudi",
-  /* schem.leaving_water */ "Uscita PHE",
+  /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "SERBATOIO ACS",
   /* schem.set */ "obiettivo",
   /* schem.bsh_label */ "Resistenza",
@@ -398,7 +398,7 @@ I18N.it = localeValues([
   /* schem.heating */ "RISCALDAMENTO",
   /* schem.cooling */ "RAFFRESCAMENTO",
   /* schem.pump */ "POMPA",
-  /* schem.return */ "INGR. PHE",
+  /* schem.return */ "R4T",
   /* schem.room */ "Ambiente",
   /* schem.flow_rate */ "portata",
   /* schem.water_press */ "pressione",

@@ -1,4 +1,4 @@
-// translation-source: cb974b3df64988a24f2767cde82e46db54cef64910a894328463172448c67675
+// translation-source: 7ddd2bdc4af2c24576c6d0f192e66a26b1cd1c7d85109329fd9d17a11aa51ee5
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -390,7 +390,7 @@ I18N.zh = localeValues([
   /* schem.defrost_pill */ "❄ 除霜",
   /* schem.outdoor */ "室外",
   /* insp.close */ "关闭",
-  /* schem.leaving_water */ "PHE 出水",
+  /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "热水箱",
   /* schem.set */ "设定",
   /* schem.bsh_label */ "电加热",
@@ -398,7 +398,7 @@ I18N.zh = localeValues([
   /* schem.heating */ "供暖",
   /* schem.cooling */ "制冷",
   /* schem.pump */ "水泵",
-  /* schem.return */ "PHE 入口",
+  /* schem.return */ "R4T",
   /* schem.room */ "室温",
   /* schem.flow_rate */ "流量",
   /* schem.water_press */ "水压",

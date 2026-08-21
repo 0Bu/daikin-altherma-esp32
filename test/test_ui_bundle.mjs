@@ -353,18 +353,29 @@ assert.match(r2tGroup, /data-i18n="schem\.r2t">R2T<\/text>/,
   "the post-BUH water-temperature pill must use the R2T sensor name");
 assert.match(r4tGroup, /data-i18n="schem\.return">R4T<\/text>/,
   "the return-water temperature pill must use the R4T sensor name");
-assert.equal((app.match(/"schem\.leaving_water": "R1T"/g) || []).length, 2,
-  "R1T must be language-independent in both supported dictionaries");
-assert.equal((app.match(/"schem\.r2t": "R2T"/g) || []).length, 2,
-  "R2T must be language-independent in both supported dictionaries");
-assert.equal((app.match(/"schem\.return": "R4T"/g) || []).length, 2,
-  "R4T must be language-independent in both supported dictionaries");
+assert.equal((baseApp.match(/"schem\.leaving_water": "R1T"/g) || []).length, 1,
+  "R1T must remain explicit in the English startup dictionary");
+assert.equal((baseApp.match(/"schem\.r2t": "R2T"/g) || []).length, 1,
+  "R2T must remain explicit in the English startup dictionary");
+assert.equal((baseApp.match(/"schem\.return": "R4T"/g) || []).length, 1,
+  "R4T must remain explicit in the English startup dictionary");
+for (const code of ["de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"]) {
+  const localeSource = readUiLocale(code);
+  assert.match(localeSource, /\/\* schem\.leaving_water \*\/ "R1T"/,
+    `${code} must keep the language-independent R1T sensor name`);
+  assert.match(localeSource, /\/\* schem\.r2t \*\/ "R2T"/,
+    `${code} must keep the language-independent R2T sensor name`);
+  assert.match(localeSource, /\/\* schem\.return \*\/ "R4T"/,
+    `${code} must keep the language-independent R4T sensor name`);
+}
 assert.equal(r2tPill.y, r1tPill.y,
   "R2T must share the R1T pill baseline above the supply line");
 assert.match(r2tGroup, /<text class="sc-val" x="[0-9.]+" y="149"[^>]*>[^]*<text class="sc-sub" x="[0-9.]+" y="128"/,
   "R2T must share the R1T value and name baselines, not only its pill height");
-assert.match(app, /"schem\.flow_switch": "Flow switch"[\s\S]*"schem\.flow_switch": "Strömung"/,
-  "the flow-switch label must use sentence case in English and German");
+assert.match(baseApp, /"schem\.flow_switch": "Flow switch"/,
+  "the English flow-switch label must use sentence case");
+assert.match(deSource, /\/\* schem\.flow_switch \*\/ "Strömung"/,
+  "the German flow-switch label must use sentence case");
 const wpPill = pillRect("wp");
 const r4tPill = pillRect("rwt");
 const flowPill = pillRect("flow");
