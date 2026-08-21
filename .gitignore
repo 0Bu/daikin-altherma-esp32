@@ -51,3 +51,6 @@ ota_signing_key.pem
 # Release artifacts staged by scripts/ci-build-all.sh (the manifest and the .sha256 sidecars are not
 # covered by the global *.bin / *.elf rules above)
 /dist/
+
+# Trusted-build handoff generated from the currently published OTA feed before dist/ is assembled.
+/ota-changelog.json

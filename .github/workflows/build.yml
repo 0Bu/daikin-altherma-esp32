@@ -394,7 +394,7 @@ jobs:
           # vendor/LICENSE into both feeds. A change there must therefore rebuild and republish.
           # production-ota-gate.py also binds local HEAD to manifest.source_sha; publishing its
           # changes without a new artifact would make the corrected gate impossible to execute.
-          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|production-ota-gate)[.]py$|tools/(version|web_asset)/)'
+          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|production-ota-gate)[.]py$|tools/(version|web_asset)/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
@@ -611,6 +611,19 @@ jobs:
           [ "$MODE" != release ] || check_mode=release-resume
           ./scripts/check-publish-version.sh --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"
 
+      # Build notes are public feed metadata, even while the source repository is private.  Generate
+      # them only from explicitly classified user-facing first-parent commit subjects, against the
+      # exact source recorded by the currently published feed. check-publish-version.sh above has fetched gh-pages into
+      # FETCH_HEAD; a same-source release resume reuses its already-published changelog byte-for-byte.
+      - name: Generate public OTA changelog
+        run: >-
+          ./scripts/generate-ota-changelog.py
+          --channel "${{ steps.mode.outputs.mode }}"
+          --version "${{ steps.stamp.outputs.disp }}"
+          --source-sha "${{ github.sha }}"
+          --published-ref FETCH_HEAD
+          --output ota-changelog.json
+
       # Materialize the OTA signing key only inside this trusted-main/read-only-token job. PR code
       # cannot enter this job, and the later contents:write publisher never receives the key.
       - name: Provision OTA signing key
@@ -684,7 +697,7 @@ jobs:
           # bins don't embed makes every device download an "update" that changes nothing, forever.
           # ci-build-all.sh reads the version back out of the built image and fails if the two ever
           # drift apart again.
-          command: ./scripts/ci-build-all.sh --source-sha "${{ github.sha }}" "${{ steps.stamp.outputs.disp }}"
+          command: ./scripts/ci-build-all.sh --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary
         if: always()
@@ -726,6 +739,7 @@ jobs:
             dist/*-size.json
             dist/*-size.md
             dist/manifest.json
+            dist/changelog.json
 
   # Outward mutation boundary. It has contents:write but no signing secret and consumes only the
   # signed artifact produced by trusted_build. A failed publish can be retried without exposing the
@@ -756,10 +770,12 @@ jobs:
           mkdir -p dist
           gh run download "$GITHUB_RUN_ID" --repo "$GH_REPO" --name "$ARTIFACT_NAME" --dir dist
           test -f dist/manifest.json
+          test -f dist/changelog.json
           test -f dist/daikin-altherma-esp32.bin
           ./scripts/check-manifest-provenance.py dist/manifest.json \
             dist/daikin-altherma-esp32.bin "$SOURCE_SHA" "$(./scripts/idf-version.sh)" dependencies.lock
           ./scripts/check-web-installer-plan.py dist/manifest.json partitions.csv
+          ./scripts/generate-ota-changelog.py --validate dist/changelog.json --version "$VERSION"
           check_mode="$MODE"
           [ "$MODE" != release ] || check_mode=release-resume
           ./scripts/check-publish-version.sh --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"

@@ -1189,6 +1189,30 @@
     </div>
   </div>
 
+  <!-- OTA decision. Unlike configuration popups this is intentionally NOT addressable: its
+       version, channel, SHA and changelog belong to one completed /ota/check generation and cannot
+       be reconstructed safely from a bookmarked hash. It stays over whichever screen initiated the
+       check, while reusing the same focus, safe-area, scroll and action treatment as every modal. -->
+  <div class="modal" id="otaModal" hidden>
+    <div class="modal-backdrop" id="otaBackdrop"></div>
+    <div class="modal-card ota-modal-card" role="dialog" aria-modal="true"
+         aria-labelledby="otaModalTitle" aria-describedby="otaHelp" tabindex="-1">
+      <div class="section-label card-title" id="otaModalTitle">Firmware update</div>
+      <div class="ota-offer">
+        <div class="ota-version-line mono" id="otaVersionLine"></div>
+        <span class="ota-channel" id="otaChannel"></span>
+      </div>
+      <div class="section-label ota-changes-title" data-i18n="ota.changes_title">What's new in this build</div>
+      <ul class="ota-changes" id="otaChanges"></ul>
+      <p class="hint ota-no-changes" id="otaNoChanges" data-i18n="ota.no_changes" hidden>No changelog was supplied for this build.</p>
+      <p class="hint ota-help" id="otaHelp"></p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="otaCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn primary" type="button" id="otaInstall">Install update</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toasts" id="toasts"></div>
 </div>
 

@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -396,7 +396,14 @@ I18N.fr = localeValues([
   /* ota.snapshot_value */ "Instantané",
   /* ota.snapshot_help */ "Dernier état reçu avant ce rechargement. Les données en direct peuvent s’interrompre pendant l’installation ; les paramètres restent verrouillés jusqu’au redémarrage.",
   /* ota.reload_hint */ "installée — rechargez la page",
-  /* ota.confirm */ (cur, avail) => `Mise à jour disponible : v${cur} → v${avail}\n\nL’appareil télécharge et installe l’image signée, puis redémarre. Si le nouveau micrologiciel ne parvient pas à se connecter, l’ancienne version est automatiquement restaurée.`,
+  /* ota.dialog_title */ "Mise à jour du micrologiciel",
+  /* ota.switch_title */ "Changer de version du micrologiciel",
+  /* ota.changes_title */ "Nouveautés de cette version",
+  /* ota.no_changes */ "Aucun journal des modifications n’a été fourni pour cette version.",
+  /* ota.install_help */ "L’appareil télécharge et installe l’image signée, puis redémarre. Si le nouveau micrologiciel ne parvient pas à se connecter, l’appareil restaure automatiquement la version actuelle.",
+  /* ota.switch_help */ "Cette version est plus ancienne car un autre canal de mise à jour est sélectionné. Sa signature est vérifiée avant l’installation. Si elle ne parvient pas à se connecter, l’appareil restaure automatiquement la version actuelle.",
+  /* ota.install */ "Installer la mise à jour",
+  /* ota.switch */ "Installer l’ancienne version",
   /* aria.ota */ "Rechercher les mises à jour du micrologiciel",
   /* ota.title_check */ "Touchez pour rechercher les mises à jour du micrologiciel",
   /* ota.title_avail */ (v) => `Mise à jour v${v} disponible — touchez pour installer`,
@@ -859,7 +866,6 @@ I18N.fr = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Langue enregistrée",
-  /* ota.downgrade_confirm */ (cur, avail) => `Revenir à la v${avail} ?\n\nLa version installée v${cur} est plus récente. Cette ancienne version est proposée parce que vous avez sélectionné un autre canal de mise à jour. Sa signature est vérifiée avant l’installation et l’appareil restaure automatiquement la version actuelle si l’ancienne ne parvient pas à se connecter.`,
   /* hist.cop_none */ "Aucune courbe de COP lorsque la puissance électrique provient des pinces CT. Les charges prises en compte dépendent du câblage ; la puissance thermique enregistrée s’arrête avant BUH et n’inclut pas la chaleur directe de BSH, donc une même frontière de bilan n’est pas garantie.",
 ]);
 INSPECT_I18N.fr = inspectValues(

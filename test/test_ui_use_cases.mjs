@@ -27,7 +27,8 @@ class Element {
     this.disabled = false;
     this.hidden = id.endsWith("Modal");
     this.innerHTML = "";
-    this.textContent = "";
+    this._textContent = "";
+    this.children = [];
     this.dataset = {};
     this.classList = new ClassList();
     this.listeners = new Map();
@@ -35,6 +36,8 @@ class Element {
   }
   set value(value) { this._value = String(value ?? ""); }
   get value() { return this._value; }
+  set textContent(value) { this._textContent = String(value ?? ""); this.children = []; }
+  get textContent() { return this._textContent; }
   addEventListener(type, listener) {
     const listeners = this.listeners.get(type) || [];
     listeners.push(listener);
@@ -59,7 +62,7 @@ class Element {
   focus() { this.doc.activeElement = this; }
   blur() { if (this.doc.activeElement === this) this.doc.activeElement = null; }
   setAttribute(name, value) { this[name] = String(value); }
-  appendChild(child) { this.lastChild = child; return child; }
+  appendChild(child) { this.children.push(child); this.lastChild = child; return child; }
   remove() {}
   select() { this.selectionStart = 0; this.selectionEnd = this.value.length; }
   setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
@@ -219,7 +222,8 @@ vm.runInContext(`${source}
   refreshStatus = async () => true;
   collectBugReport = async () => ({ text: "redacted report", failed: false });
   this.__ui = {
-    S, MODALS, POPUP_ROUTES, wire, initNavigation, applyRouteFromLocation, hydrateRoutedPopup,
+    S, MODALS, ROUTED_MODALS, TRANSIENT_MODALS, POPUP_ROUTES, wire, initNavigation,
+    applyRouteFromLocation, hydrateRoutedPopup, askOtaInstall, settleOtaDecision,
     openWifi, openMqtt, openRefTemp, openCirculation, openWeather, openSyslog,
     openNtp, openHomehub, openBoard, openBug,
   };`, context, { filename: "main/www/app.sources" });
@@ -282,10 +286,12 @@ const cases = [
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const htmlModals = [...html.matchAll(/<div class="modal" id="([^"]+Modal)"/g)].map((match) => match[1]).sort();
 assert.deepEqual([...ui.MODALS].sort(), htmlModals, "MODALS must name every modal in the shipped HTML");
-assert.deepEqual(cases.map((item) => item.modal).sort(), htmlModals,
-  "the interaction matrix must cover every shipped modal");
+assert.deepEqual(cases.map((item) => item.modal).sort(), [...ui.ROUTED_MODALS].sort(),
+  "the settings interaction matrix must cover every routed modal");
+assert.deepEqual([...ui.TRANSIENT_MODALS], ["otaModal"],
+  "the checked-generation OTA decision must be the only transient modal");
 const popupRoutes = Object.values(ui.POPUP_ROUTES);
-assert.equal(new Set(popupRoutes).size, ui.MODALS.length, "every popup route must be unique");
+assert.equal(new Set(popupRoutes).size, ui.ROUTED_MODALS.length, "every popup route must be unique");
 assert.ok(popupRoutes.every((route) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(route)),
   "popup routes must remain human-readable stable URL segments");
 
@@ -435,6 +441,128 @@ for (const item of cases) {
   assert.equal(document.body.classList.contains("modal-open"), false,
     `${item.name}: Escape must release body scrolling`);
 }
+
+// OTA is a real modal lifecycle but not a route: one checked generation can start from either screen,
+// and a bookmarked hash could not restore its version/SHA/changelog lease. Exercise every action
+// while proving the initiating dashboard and URL stay in place.
+loadRoute("");
+const otaOffer = {
+  current: "1.2.3-dev.4", available: "1.2.3-dev.5", available_channel: "dev",
+};
+const otaTrigger = document.getElementById("verLink");
+const openOta = () => {
+  otaTrigger.focus();
+  const decision = ui.askOtaInstall(otaOffer, "Add the in-app OTA dialog\nFix <b>unsafe notes</b>", false);
+  assert.equal(document.getElementById("otaModal").hidden, false, "OTA decision must open");
+  assert.equal(ui.S.stage, "dashboard", "OTA decision must retain the initiating screen");
+  assert.equal(location.hash, "", "OTA decision must not invent a restorable route");
+  assert.equal(document.activeElement, document.getElementById("otaModal"),
+    "OTA decision focus must land on its dialog container");
+  assert.equal(document.getElementById("otaChanges").children.length, 2,
+    "each changelog line must render as one list item");
+  assert.equal(document.getElementById("otaChanges").children[1].textContent,
+    "Fix <b>unsafe notes</b>", "changelog markup must stay literal text");
+  assert.equal(document.body.classList.contains("modal-open"), true,
+    "OTA decision must lock background scrolling");
+  return decision;
+};
+
+let otaDecision = openOta();
+await document.getElementById("otaCancel").onclick();
+assert.equal(await otaDecision, false, "OTA Cancel must decline the install");
+assert.equal(document.getElementById("otaModal").hidden, true);
+assert.equal(document.activeElement, otaTrigger,
+  "OTA Cancel must return keyboard focus to the version control that opened it");
+assert.equal(document.body.classList.contains("modal-open"), false,
+  "OTA Cancel must release background scrolling");
+
+otaDecision = openOta();
+await document.getElementById("otaBackdrop").onclick();
+assert.equal(await otaDecision, false, "OTA backdrop must decline the install");
+assert.equal(document.activeElement, otaTrigger, "OTA backdrop must restore initiating focus");
+
+otaDecision = openOta();
+await document.fire("keydown", { key: "Escape" });
+assert.equal(await otaDecision, false, "OTA Escape must decline the install");
+assert.equal(document.activeElement, otaTrigger, "OTA Escape must restore initiating focus");
+
+otaDecision = openOta();
+await document.getElementById("otaInstall").onclick();
+assert.equal(await otaDecision, true, "only the primary OTA action may accept the install");
+assert.equal(document.activeElement, otaTrigger, "OTA Install must restore initiating focus");
+assert.equal(location.hash, "", "accepting OTA must still retain the initiating route");
+
+// The Settings cards are live-rendered and replace their controls. A disconnected initiator must
+// restore focus to the current stable channel control, not drop it onto body behind the modal.
+loadRoute("#settings");
+const replacedSettingsTrigger = new Element("oldSettingsOta", document);
+replacedSettingsTrigger.isConnected = true;
+replacedSettingsTrigger.focus();
+otaDecision = ui.askOtaInstall(otaOffer, "Build note", false,
+  replacedSettingsTrigger, "settings");
+replacedSettingsTrigger.isConnected = false;
+await document.getElementById("otaCancel").onclick();
+assert.equal(await otaDecision, false);
+assert.equal(document.activeElement, document.getElementById("e32Chan"),
+  "OTA dismissal must focus the current Settings control after a live card rebuild");
+
+// Navigation can also finish while /ota/check is still pending, before the modal exists. It opens
+// over the current stage, so dismissal must choose that stage's visible control in both directions.
+ui.S.stage = "settings";
+otaDecision = ui.askOtaInstall(otaOffer, "Build note", false, otaTrigger, "dashboard");
+await document.getElementById("otaCancel").onclick();
+assert.equal(await otaDecision, false);
+assert.equal(document.activeElement, document.getElementById("e32Chan"),
+  "Dashboard-to-Settings navigation during check must restore focus inside Settings");
+ui.S.stage = "dashboard";
+otaDecision = ui.askOtaInstall(otaOffer, "Build note", false,
+  document.getElementById("e32Chan"), "settings");
+await document.getElementById("otaCancel").onclick();
+assert.equal(await otaDecision, false);
+assert.equal(document.activeElement, otaTrigger,
+  "Settings-to-Dashboard navigation during check must restore focus inside Dashboard");
+
+// A check can finish after the user opened a configuration dialog. That dialog owns its draft and
+// route; the late OTA offer must decline rather than replace it behind the user's back.
+loadRoute("#settings/wifi");
+document.getElementById("wfSSID").value = "unsaved network";
+const deferredOta = ui.askOtaInstall(otaOffer, "Late build note", false);
+assert.equal(await deferredOta, false, "a routed settings draft must win over a late OTA offer");
+assert.equal(document.getElementById("wifiModal").hidden, false,
+  "late OTA offer must leave the active settings dialog open");
+assert.equal(document.getElementById("wfSSID").value, "unsaved network",
+  "late OTA offer must not discard the active form draft");
+assert.equal(location.hash, "#settings/wifi",
+  "late OTA offer must preserve the routed settings-dialog URL");
+await document.getElementById("wfCancel").onclick({ preventDefault() {} });
+
+// Conversely, explicit route navigation while the transient decision is visible cancels that
+// decision before the routed popup opens, so two overlays never stack.
+loadRoute("");
+otaDecision = openOta();
+loadRoute("#settings/wifi");
+assert.equal(await otaDecision, false, "route navigation must cancel the transient OTA decision");
+assert.equal(document.getElementById("otaModal").hidden, true);
+assert.equal(document.getElementById("wifiModal").hidden, false);
+assert.equal(location.hash, "#settings/wifi");
+await document.getElementById("wfCancel").onclick({ preventDefault() {} });
+
+// Base-stage navigation has no routed dialog to take focus after the transient modal closes. Apply
+// the destination stage first so cancellation focuses a visible control, in both directions.
+loadRoute("");
+otaDecision = openOta();
+loadRoute("#settings");
+assert.equal(await otaDecision, false, "Dashboard-to-Settings routing must cancel OTA");
+assert.equal(document.activeElement, document.getElementById("e32Chan"),
+  "Dashboard-to-Settings routing must focus a visible Settings control");
+
+const settingsTrigger = document.getElementById("e32Chan");
+settingsTrigger.focus();
+otaDecision = ui.askOtaInstall(otaOffer, "Build note", false, settingsTrigger, "settings");
+loadRoute("");
+assert.equal(await otaDecision, false, "Settings-to-Dashboard routing must cancel OTA");
+assert.equal(document.activeElement, otaTrigger,
+  "Settings-to-Dashboard routing must focus a visible Dashboard control");
 
 const settle = async () => {
   await new Promise((resolve) => setImmediate(resolve));
@@ -871,4 +999,4 @@ assert.equal(typeof document.getElementById("bugCopy").onclick, "function", "pre
 await document.getElementById("bugClose").onclick();
 assert.equal(document.getElementById("bugModal").hidden, true, "bug review Close must dismiss");
 
-console.log(`UI use cases: ${cases.length} modals, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths`);
+console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths`);

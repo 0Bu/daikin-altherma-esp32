@@ -11,7 +11,8 @@
 #   daikin-altherma-esp32<suffix>.elf.sha256   integrity checksum of the ELF *inside* that container
 #   daikin-altherma-esp32<suffix>-size.json    ESP-IDF's machine-readable section/region report
 #   daikin-altherma-esp32<suffix>-size.md      human-readable app/flash/RAM budget summary
-#   manifest.json                              browser-installer builds[] + OTA version field
+#   manifest.json                              browser-installer builds[] + OTA artifact identity
+#   changelog.json                             public, version-bound release/dev build notes
 #
 # Calls idf.py / esptool / espsecure DIRECTLY — it assumes an ESP-IDF environment is already
 # on PATH. In CI that is provided by espressif/esp-idf-ci-action. LOCALLY, run it wrapped:
@@ -23,7 +24,8 @@
 # same reason. NOT scripts/next-version.sh: that is the next RELEASE version, which is deliberately
 # ahead of the version.txt floor once tags exist, i.e. exactly the drift the check rejects.
 #
-# Usage: scripts/ci-build-all.sh [--compile-only] [--source-sha <40-hex>] [version]
+# Usage: scripts/ci-build-all.sh [--compile-only] [--source-sha <40-hex>]
+#                                [--changelog-file <json>] [version]
 #        (version defaults to the version.txt the build embeds)
 #
 # Publishing mode requires OTA_SIGNING_KEY_FILE (or ota_signing_key.pem). --compile-only is the
@@ -34,6 +36,7 @@ cd "$(dirname "$0")/.."
 
 MODE=publish
 SOURCE_SHA=""
+CHANGELOG_FILE=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --compile-only)
@@ -43,13 +46,17 @@ while [ "$#" -gt 0 ]; do
             [ -z "$SOURCE_SHA" ] || { echo "ci-build-all: --source-sha repeated" >&2; exit 2; }
             [ "$#" -ge 2 ] || { echo "ci-build-all: --source-sha requires 40 hex characters" >&2; exit 2; }
             SOURCE_SHA="$2"; shift 2 ;;
+        --changelog-file)
+            [ -z "$CHANGELOG_FILE" ] || { echo "ci-build-all: --changelog-file repeated" >&2; exit 2; }
+            [ "$#" -ge 2 ] || { echo "ci-build-all: --changelog-file requires a path" >&2; exit 2; }
+            CHANGELOG_FILE="$2"; shift 2 ;;
         --) shift; break ;;
         -*) echo "ci-build-all: unknown option '$1'" >&2; exit 2 ;;
         *) break ;;
     esac
 done
 [ "$#" -le 1 ] || {
-    echo "usage: ci-build-all.sh [--compile-only] [--source-sha <40-hex>] [version]" >&2
+    echo "usage: ci-build-all.sh [--compile-only] [--source-sha <40-hex>] [--changelog-file <json>] [version]" >&2
     exit 2
 }
 if [ -n "$SOURCE_SHA" ] && [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
@@ -92,6 +99,14 @@ APP_SIZE_LIMIT=$((0x1e8000))   # slot (0x1f0000) minus 32 KB headroom
     echo "ci-build-all: use --compile-only for an unsigned build that stages diagnostics only" >&2
     exit 1
 }
+[ "$MODE" = compile-only ] || [ -n "$CHANGELOG_FILE" ] || {
+    echo "ci-build-all: publishing mode requires --changelog-file <json>" >&2
+    exit 2
+}
+if [ -n "$CHANGELOG_FILE" ]; then
+    [ -f "$CHANGELOG_FILE" ] || { echo "ci-build-all: changelog file not found: $CHANGELOG_FILE" >&2; exit 2; }
+    scripts/generate-ota-changelog.py --validate "$CHANGELOG_FILE" --version "$VERSION"
+fi
 [ -f dependencies.lock ] || {
     echo "dependencies.lock is missing; resolve it with idf.py update-dependencies" >&2
     exit 1
@@ -304,4 +319,5 @@ EOF
 scripts/check-manifest-provenance.py "$DIST/manifest.json" \
     "$DIST/daikin-altherma-esp32.bin" "$SOURCE_SHA" "$IDF_VERSION" dependencies.lock
 scripts/check-web-installer-plan.py "$DIST/manifest.json" partitions.csv
+cp "$CHANGELOG_FILE" "$DIST/changelog.json"
 echo "staged dist/ for $VERSION"

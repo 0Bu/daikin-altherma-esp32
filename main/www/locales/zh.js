@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -396,7 +396,14 @@ I18N.zh = localeValues([
   /* ota.snapshot_value */ "快照",
   /* ota.snapshot_help */ "这是页面重新加载前最后收到的状态。安装期间实时数据可能中断；重启前设置保持锁定。",
   /* ota.reload_hint */ "已安装 — 请重新加载页面",
-  /* ota.confirm */ (cur, avail) => `有可用更新：v${cur} → v${avail}\n\n设备会下载并安装已签名镜像，然后重启。若新固件无法连接，设备会自动恢复旧固件。`,
+  /* ota.dialog_title */ "固件更新",
+  /* ota.switch_title */ "切换固件版本",
+  /* ota.changes_title */ "此版本的新内容",
+  /* ota.no_changes */ "此版本未提供更新日志。",
+  /* ota.install_help */ "设备会下载并安装已签名镜像，然后重启。若新固件无法联网，设备会自动恢复当前版本。",
+  /* ota.switch_help */ "由于选择了其他更新通道，此版本较旧。安装前会验证其签名；若旧版本无法联网，设备会自动恢复当前版本。",
+  /* ota.install */ "安装更新",
+  /* ota.switch */ "安装旧版本",
   /* aria.ota */ "检查固件更新",
   /* ota.title_check */ "点按检查固件更新",
   /* ota.title_avail */ (v) => `发现 v${v} — 点按安装`,
@@ -859,7 +866,6 @@ I18N.zh = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "语言已保存",
-  /* ota.downgrade_confirm */ (cur, avail) => `降级到 v${avail}？\n\n已安装的 v${cur} 更新。因为你选择了其他更新通道，现提供此旧版本。安装前会验证签名；若旧版本无法连接，设备会自动恢复当前版本。`,
   /* hist.cop_none */ "CT 供电功率时不画 COP：所含负载取决于接线，而热功率止于 BUH 前且不含 BSH，电热边界可能不一致。",
 ]);
 INSPECT_I18N.zh = inspectValues(

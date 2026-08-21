@@ -103,7 +103,7 @@ for (const file of routeDocs) {
     if (!text.includes(route)) throw new Error(`${file} does not document ${route}`);
   }
 }
-if (!fs.readFileSync("docs/ARCHITECTURE.md", "utf8").includes("trusted-LAN route count of 38")) {
+if (!fs.readFileSync("docs/ARCHITECTURE.md", "utf8").includes("trusted-LAN route count of 39")) {
   throw new Error("docs/ARCHITECTURE.md no longer documents the exact trusted-LAN route budget");
 }
 const credentialWrapperPath = "scripts/gh-with-git-credentials.sh";
@@ -205,8 +205,8 @@ if (!credentialWrapperMarkers.every((marker) => credentialWrapper.includes(marke
   throw new Error("canonical GitHub credential wrapper no longer keeps credentials transient");
 }
 const httpServer = fs.readFileSync("main/http_server.cpp", "utf8");
-if (!/current exact total to 38[\s\S]{0,80}cfg\.max_uri_handlers\s*=\s*38;/.test(httpServer)) {
-  throw new Error("http_server.cpp has drifted from the documented 38-handler trusted-LAN surface");
+if (!/exact total 39[\s\S]{0,80}cfg\.max_uri_handlers\s*=\s*39;/.test(httpServer)) {
+  throw new Error("http_server.cpp has drifted from the documented 39-handler trusted-LAN surface");
 }
 
 if (fs.existsSync(".github/FUNDING.yml")) {

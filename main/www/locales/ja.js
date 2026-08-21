@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -396,7 +396,14 @@ I18N.ja = localeValues([
   /* ota.snapshot_value */ "スナップショット",
   /* ota.snapshot_help */ "再読込前の最終受信状態です。インストール中はライブデータが止まる場合があり、再起動まで設定はロックされます。",
   /* ota.reload_hint */ "導入済み — ページを再読込",
-  /* ota.confirm */ (cur, avail) => `更新可能: v${cur} → v${avail}\n\n署名済みイメージを取得・導入して再起動します。新しいファームウェアがオンラインにならない場合は自動で元に戻ります。`,
+  /* ota.dialog_title */ "ファームウェア更新",
+  /* ota.switch_title */ "ファームウェア版を切り替える",
+  /* ota.changes_title */ "このビルドの新機能",
+  /* ota.no_changes */ "このビルドの変更履歴は提供されていません。",
+  /* ota.install_help */ "署名済みイメージを取得・導入して再起動します。新しいファームウェアがオンラインにならない場合、現在のビルドを自動的に復元します。",
+  /* ota.switch_help */ "別の更新チャンネルが選択されているため、このビルドは古い版です。導入前に署名を検証し、オンラインにならない場合は現在のビルドを自動的に復元します。",
+  /* ota.install */ "更新をインストール",
+  /* ota.switch */ "古いビルドをインストール",
   /* aria.ota */ "ファームウェア更新を確認",
   /* ota.title_check */ "タップして更新を確認",
   /* ota.title_avail */ (v) => `v${v}を利用可能 — タップして導入`,
@@ -859,7 +866,6 @@ I18N.ja = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "言語を保存しました",
-  /* ota.downgrade_confirm */ (cur, avail) => `v${avail}へ戻しますか？\n\n現在のv${cur}の方が新しいバージョンです。別の更新チャンネルを選んだため、この旧版が提示されています。インストール前に署名を検証し、旧版がオンラインになれなければ現在版へ自動復元します。`,
   /* hist.cop_none */ "電力入力がCTクランプ由来の場合、COP曲線は表示しません。配線で対象負荷が決まり、蓄熱した熱量はBUH前まででBSHが直接加えた熱を含まないため、収支境界が一致するとは限りません。",
 ]);
 

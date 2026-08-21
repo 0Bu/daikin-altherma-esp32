@@ -42,16 +42,18 @@ const httpStatus = fs.readFileSync(new URL("../main/http_status.cpp", import.met
 const boardPresets = fs.readFileSync(new URL("../main/logic/board_presets.hpp", import.meta.url), "utf8");
 const mqttHa = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 const referenceLogic = fs.readFileSync(new URL("../main/logic/reference_temperature.hpp", import.meta.url), "utf8");
-const dialogs = [...html.matchAll(/<[^>]+class="modal-card"[^>]+role="dialog"[^>]*>/g)].map((m) => m[0]);
-assert.equal(dialogs.length, 10, "every custom popup must remain identifiable as a dialog");
+const dialogs = [...html.matchAll(/<[^>]+class="[^"]*\bmodal-card\b[^"]*"[^>]+role="dialog"[^>]*>/g)].map((m) => m[0]);
+assert.equal(dialogs.length, 11, "every custom popup must remain identifiable as a dialog");
 for (const dialog of dialogs)
   assert.match(dialog, /tabindex="-1"/, "popup focus must land on the dialog container, not an input");
-assert.match(app, /function openPopup\(id\)[\s\S]*modal\.hidden = false;[\s\S]*querySelector\?\.\('\[role="dialog"\]'\)[\s\S]*focus\?\.\(\{ preventScroll: true \}\)/,
-  "opening a popup must focus only its container without scrolling");
+assert.match(app, /function openOverlay\(id\)[\s\S]*modal\.hidden = false;[\s\S]*querySelector\?\.\('\[role="dialog"\]'\)[\s\S]*focus\?\.\(\{ preventScroll: true \}\)/,
+  "opening any overlay must focus only its container without scrolling");
 assert.match(app, /function syncModalScrollLock\(\)[\s\S]*MODALS\.some[\s\S]*document\.documentElement\.classList\.toggle\("modal-open", open\)[\s\S]*document\.body\.classList\.toggle\("modal-open", open\)/,
   "modal lifecycle must lock both possible document scrollers");
-assert.match(app, /function closePopup\(id\)[\s\S]*hidden = true;[\s\S]*syncModalScrollLock\(\)/,
-  "all popup close paths must also release the shared scroll lock");
+assert.match(app, /function closeOverlay\(id\)[\s\S]*hidden = true;[\s\S]*syncModalScrollLock\(\)/,
+  "all overlay close paths must also release the shared scroll lock");
+assert.doesNotMatch(app, /\b(?:confirm|alert)\s*\(/,
+  "the shipped UI must use its accessible in-app decisions instead of native browser dialogs");
 for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openCirculation", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
   assert.match(app, new RegExp(`function ${opener}\\(\\)[\\s\\S]*?openPopup\\(\\"[^\\"]+\\"\\);`),
     `${opener} must use the no-field-autofocus popup path`);

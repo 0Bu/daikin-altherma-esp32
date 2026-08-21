@@ -535,9 +535,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   background: var(--soft); border-radius: 9px; overflow-x: auto; white-space: nowrap;
 }
 .crash-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
-/* The delete confirmation, shown INSIDE the banner in place of the actions row (the OTA confirm() is
-   the only native dialog — DESIGN.md §5.4). Reads as a question, not as another alert: the banner
-   already carries the red border and the icon. */
+/* The delete confirmation stays INSIDE the banner in place of the actions row. It reads as a
+   question, not as another modal/alert: the banner already carries the red border and the icon. */
 .crash-ask { font-size: 13.5px; color: var(--fg); margin-top: 13px; line-height: 1.5; }
 .crash-ask + .crash-actions { margin-top: 9px; }
 /* Recovery (safe) mode + WiFi-rollback banners — warn-accented twins of the crash banner (they reuse
@@ -1250,6 +1249,27 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
    When three of them stop fitting, the row becomes a column (below) — that is the honest answer,
    not three narrow buttons each stacking their own words. */
 .modal-actions .btn { flex: 1; white-space: nowrap; }
+
+/* The OTA decision carries prose rather than fields.  Give the version transition one calm tinted
+   block, keep the feed label visually secondary, and let long release notes wrap inside the modal's
+   existing safe-area/inner-scroll boundary. Changelog text is untrusted feed text inserted only via
+   textContent; these rules therefore handle arbitrary long words without needing HTML markup. */
+.ota-modal-card { max-width: 620px; }
+.ota-offer {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px 14px; flex-wrap: wrap;
+  margin: 2px 0 20px; padding: 14px 16px; border: 1px solid var(--line);
+  border-radius: var(--r-input); background: var(--brand-tint);
+}
+.ota-version-line { min-width: 0; color: var(--fg); font-size: 15px; font-weight: 650;
+  overflow-wrap: anywhere; }
+.ota-channel { flex: none; border: 1px solid var(--brand); border-radius: 999px; padding: 4px 9px;
+  color: var(--brand-strong); font-size: 11px; font-weight: 750; letter-spacing: .45px;
+  text-transform: uppercase; }
+.ota-changes-title { margin-bottom: 8px; }
+.ota-changes { margin: 0; padding-left: 21px; color: var(--fg); font-size: 14px; line-height: 1.5; }
+.ota-changes li { margin: 5px 0; padding-left: 2px; overflow-wrap: anywhere; }
+.ota-no-changes { margin-top: 0; font-style: italic; }
+.ota-help { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 
 /* The bug-report dialog is the one modal whose content is a CODE BLOCK, not label→field rows. The
    settings modals read better narrow; a device report at 420px wraps every JSON line into noise the

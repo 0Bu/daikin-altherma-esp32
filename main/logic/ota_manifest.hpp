@@ -1,5 +1,5 @@
 #pragma once
-// Extract the "version" field from the OTA manifest. IDF-free + host-tested.
+// Extract the OTA manifest version and the optional version-bound changelog. IDF-free + host-tested.
 //
 // This is the ONE place a remote, attacker-influencable byte stream is parsed on this device, so it
 // is pure logic with its own CHECKs rather than a strstr() in the download path. The manifest is
@@ -8,9 +8,10 @@
 // the bytes are hostile: it allocates nothing, never runs past `len`, and reports failure rather
 // than producing a partial answer.
 //
-// Deliberately NOT a general JSON parser. It answers exactly one question — what is the top-level
-// "version" string? — because a DOM parser here would mean a large contiguous allocation on a heap
-// whose binding limit is the largest contiguous free block (docs/ARCHITECTURE.md → Memory).
+// Deliberately NOT a general JSON parser. It answers only the two narrow questions owned by these
+// public OTA documents — the manifest version, and the sibling changelog's version plus text —
+// because a DOM parser here would mean a large contiguous allocation on a heap whose binding limit
+// is the largest contiguous free block (docs/ARCHITECTURE.md → Memory).
 // The manifest it reads is written by scripts/ci-build-all.sh:
 //
 //     { "name": "daikin-altherma-esp32", "version": "1.0.0",
@@ -20,6 +21,12 @@
 #include <cstring>
 
 namespace daik {
+
+// Release notes are a separate sibling document rather than another field in manifest.json.  The
+// installer manifest is already deliberately capped at 1 KiB on the OTA task stack; keeping the
+// optional prose outside it preserves that security/heap boundary.  The firmware stores at most
+// this much decoded UTF-8 text and never truncates a larger document into a plausible partial note.
+constexpr size_t OTA_CHANGELOG_TEXT_MAX = 960;
 
 namespace detail {
 
@@ -42,6 +49,40 @@ inline bool scan_string(const char* json, size_t len, size_t i, size_t& content_
 }
 
 inline bool is_ws(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+// Decode the deliberately small JSON-string subset emitted by generate-ota-changelog.py.  Raw UTF-8
+// bytes are copied unchanged; JSON quotes, slashes, newlines and tabs are unescaped.  \u escapes are
+// rejected instead of growing a second Unicode implementation on the OTA attack surface — the
+// publisher writes UTF-8 directly (`ensure_ascii=False`).
+inline bool decode_text_string(const char* json, size_t len, size_t i,
+                               char* out, size_t outlen, size_t& next) {
+    if (!json || !out || outlen == 0 || i >= len || json[i] != '"') return false;
+    out[0] = '\0';
+    size_t written = 0;
+    ++i;
+    while (i < len && json[i] != '"') {
+        unsigned char c = static_cast<unsigned char>(json[i++]);
+        if (c < 0x20) return false;  // JSON forbids unescaped controls.
+        if (c == '\\') {
+            if (i >= len) return false;
+            const char escaped = json[i++];
+            switch (escaped) {
+                case '"': c = '"'; break;
+                case '\\': c = '\\'; break;
+                case '/': c = '/'; break;
+                case 'n': c = '\n'; break;
+                case 't': c = '\t'; break;
+                default: return false;
+            }
+        }
+        if (written + 1 >= outlen) { out[0] = '\0'; return false; }
+        out[written++] = static_cast<char>(c);
+    }
+    if (i >= len || json[i] != '"') { out[0] = '\0'; return false; }
+    out[written] = '\0';
+    next = i + 1;
+    return written > 0;
+}
 
 }  // namespace detail
 
@@ -200,6 +241,93 @@ inline bool manifest_identity(const char* json, size_t len, OtaManifestIdentity&
         }
     }
     return depth == 0 && have_version && have_provenance && have_sha;
+}
+
+// Parse the optional sibling changelog.json document:
+//
+//     {"version":"1.2.3-dev.4","changelog":"Add …\nFix …"}
+//
+// The version binds the prose to the artifact already accepted from manifest.json.  Notes are not
+// part of the install authorization (generation + channel + version + SHA remain authoritative),
+// but stale notes would still mislead the user at the decision point, so a mismatch fails closed.
+// Missing, malformed, duplicate, escaped-version or oversized fields leave `out` empty and return
+// false; callers then show the localized no-notes fallback without weakening the OTA offer.
+inline bool manifest_changelog(const char* json, size_t len, const char* expected_version,
+                               char* out, size_t outlen) {
+    if (!json || !expected_version || !out || outlen == 0) return false;
+    // Exact in-place decoding lets the OTA task reuse its temporary document slot until TLS is
+    // cleaned up; production then retains only decoded_len+1 bytes. Decoded bytes start before the
+    // value and never catch the input cursor. Do not erase json[0] before it has been scanned; every
+    // failure path below still leaves out empty.
+    if (out != json) out[0] = '\0';
+    char version[32] = {0};
+    bool have_version = false;
+    bool have_changelog = false;
+    int depth = 0;
+    size_t i = 0;
+
+    auto copy_plain_string = [&](size_t& pos, char* target, size_t capacity) -> bool {
+        while (pos < len && detail::is_ws(json[pos])) ++pos;
+        size_t start, end, next;
+        if (!detail::scan_string(json, len, pos, start, end, next)) return false;
+        const size_t value_len = end - start;
+        if (value_len == 0 || value_len >= capacity) return false;
+        for (size_t k = 0; k < value_len; ++k)
+            if (json[start + k] == '\\' || static_cast<unsigned char>(json[start + k]) < 0x20)
+                return false;
+        std::memcpy(target, json + start, value_len);
+        target[value_len] = '\0';
+        pos = next;
+        return true;
+    };
+
+    while (i < len) {
+        const char c = json[i];
+        if (c == '{' || c == '[') { ++depth; ++i; continue; }
+        if (c == '}' || c == ']') {
+            if (depth <= 0) { out[0] = '\0'; return false; }
+            --depth;
+            ++i;
+            continue;
+        }
+        if (c != '"') { ++i; continue; }
+
+        size_t key_start, key_end, next;
+        if (!detail::scan_string(json, len, i, key_start, key_end, next)) {
+            out[0] = '\0';
+            return false;
+        }
+        i = next;
+        size_t colon = i;
+        while (colon < len && detail::is_ws(json[colon])) ++colon;
+        if (colon >= len || json[colon] != ':') continue;
+        i = colon + 1;
+
+        const size_t key_len = key_end - key_start;
+        if (depth == 1 && key_len == 7 &&
+            std::memcmp(json + key_start, "version", 7) == 0) {
+            if (have_version || !copy_plain_string(i, version, sizeof(version))) {
+                out[0] = '\0';
+                return false;
+            }
+            have_version = true;
+        } else if (depth == 1 && key_len == 9 &&
+                   std::memcmp(json + key_start, "changelog", 9) == 0) {
+            if (have_changelog) { out[0] = '\0'; return false; }
+            while (i < len && detail::is_ws(json[i])) ++i;
+            if (!detail::decode_text_string(json, len, i, out, outlen, next)) {
+                out[0] = '\0';
+                return false;
+            }
+            i = next;
+            have_changelog = true;
+        }
+    }
+
+    const bool valid = depth == 0 && have_version && have_changelog &&
+                       std::strcmp(version, expected_version) == 0;
+    if (!valid) out[0] = '\0';
+    return valid;
 }
 
 }  // namespace daik

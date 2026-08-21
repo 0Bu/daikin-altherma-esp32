@@ -44,8 +44,8 @@ const S = {
   live: null,
   inspSig: "",
   // Crash banner. `crashAsk` is the signature of the crash whose delete is awaiting its second tap
-  // (the confirm step lives INSIDE the banner — DESIGN.md §5.4 keeps the OTA confirm() the only
-  // native dialog). `crashDismissed` is the signature the device has just been told to delete: the
+  // (the confirm step lives INSIDE the banner rather than opening a second overlay).
+  // `crashDismissed` is the signature the device has just been told to delete: the
   // banner is hidden on it immediately so a status frame already in flight — carrying the crash the
   // device has since dropped — cannot flash it back for a second. The device's own answer
   // (/status.last_crash going null) is what keeps it gone from then on, across reloads and browsers.
@@ -119,11 +119,16 @@ const POPUP_ROUTES = Object.freeze({
   boardModal: "board-hardware",
   bugModal: "bug-report",
 });
+const ROUTED_MODALS = Object.freeze(Object.keys(POPUP_ROUTES));
+// OTA confirmation is deliberately transient: it belongs to one checked generation lease and can
+// start on either Dashboard or Settings. A bookmarked route could restore neither that lease nor
+// its changelog honestly, so it joins the complete modal lifecycle without joining POPUP_ROUTES.
+const TRANSIENT_MODALS = Object.freeze(["otaModal"]);
 const ROUTE_POPUPS = Object.freeze(Object.fromEntries(
   Object.entries(POPUP_ROUTES).map(([id, route]) => [route, id])));
-// Every overlay that owns the Esc key; deriving it from the route registry makes an unaddressable
-// shipped modal impossible without also breaking the interaction matrix's HTML/registry equality.
-const MODALS = Object.freeze(Object.keys(POPUP_ROUTES));
+// Every overlay that owns scroll lock and Escape. The interaction matrix pins this complete list
+// against shipped HTML, while ROUTED_MODALS separately pins the addressable Settings dialogs.
+const MODALS = Object.freeze([...ROUTED_MODALS, ...TRANSIENT_MODALS]);
 const ROUTE_STATE = "daikinUiRoute";
 let _applyingRoute = false;
 let _routePopupNeedsHydration = null;
@@ -201,21 +206,35 @@ function syncModalScrollLock() {
 // the modal announced to keyboard/screen-reader users, while `preventScroll` avoids moving the page
 // and — most visibly on phones — no text selection or software keyboard appears until the user
 // deliberately chooses a field. Every modal card carries tabindex="-1" for this one purpose.
-function openPopup(id) {
+function closeOverlayForReplacement(id) {
+  if (Object.prototype.hasOwnProperty.call(POPUP_ROUTES, id)) closePopupForRoute(id);
+  else if (id === "otaModal") settleOtaDecision(false);
+}
+
+function openOverlay(id) {
   const modal = $(id);
-  // Only one addressable overlay can own the screen. This is mostly a defensive invariant (the UI
-  // exposes no popup-to-popup action), but it also keeps a manually changed hash deterministic.
+  // Only one overlay can own the screen. This is mostly a defensive invariant (the UI exposes no
+  // popup-to-popup action), but it also keeps a manually changed hash deterministic.
   for (const other of MODALS) {
     if (other === id || $(other).hidden) continue;
     const wasApplyingRoute = _applyingRoute;
     _applyingRoute = true;
-    try { closePopupForRoute(other); }
+    try { closeOverlayForReplacement(other); }
     finally { _applyingRoute = wasApplyingRoute; }
   }
   modal.hidden = false;
   syncModalScrollLock();
   const dialog = modal.querySelector?.('[role="dialog"]');
   dialog?.focus?.({ preventScroll: true });
+}
+
+function closeOverlay(id) {
+  $(id).hidden = true;
+  syncModalScrollLock();
+}
+
+function openPopup(id) {
+  openOverlay(id);
   if (_applyingRoute) return;
 
   if (S.stage !== "settings") showStage("settings");
@@ -228,8 +247,7 @@ function openPopup(id) {
 }
 
 function closePopup(id) {
-  $(id).hidden = true;
-  syncModalScrollLock();
+  closeOverlay(id);
   if (_routePopupNeedsHydration === id) _routePopupNeedsHydration = null;
   if (!_applyingRoute && parseRoute(location.hash).popup === id) returnToRoute("settings");
 }
@@ -289,11 +307,16 @@ function applyRouteFromLocation() {
   _routePopupNeedsHydration = null;
   _applyingRoute = true;
   try {
-    for (const id of MODALS)
+    for (const id of ROUTED_MODALS)
       if (id !== route.popup && !$(id).hidden) closePopupForRoute(id);
     // Do not jump Settings back to the top when browser Back merely closes its popup.
     if (S.stage !== route.stage) showStage(route.stage);
     else renderHeader();
+    // Back/Forward or a manually changed hash while the transient OTA decision is visible cancels
+    // that decision after activating the destination stage. Dismissal can then restore focus to a
+    // visible control on that stage; two overlays still never own the screen at the same time.
+    for (const id of TRANSIENT_MODALS)
+      if (!$(id).hidden) closeOverlayForReplacement(id);
     if (route.popup && $(route.popup).hidden) openPopupForRoute(route.popup);
     // On a reload the route is restored before the first /status arrives. Keep the popup visible,
     // then refill it from that first response unless the user has already started editing.
@@ -662,8 +685,8 @@ function renderRollbackBanner() {
 // crash straight back. The device erases the dump and stops reporting the crash, so it is gone from
 // every browser and from Home Assistant's retained crash entity at once. Deleting is irreversible
 // and takes the one artifact a bug report needs with it (docs/REPORTING.md), so it asks first — a
-// second tap INSIDE the banner, not a native confirm(): DESIGN.md §5.4 keeps the OTA update dialog
-// the only one of those, and this needs no fields.
+// second tap INSIDE the banner, not another modal: this decision is local to the evidence banner
+// and needs no separate context or fields.
 //
 // Those two cases need DIFFERENT wording: last_crash is notable when `fault` OR `coredump` is set,
 // so an orphan dump left in flash from an earlier crash raises the banner on every later boot — even

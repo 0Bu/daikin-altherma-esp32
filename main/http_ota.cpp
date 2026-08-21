@@ -1,4 +1,4 @@
-// /ota/check, /ota/update, /ota/status — thin HTTP layer over ota_update.cpp.
+// /ota/check, /ota/update, /ota/status, /ota/changelog — thin HTTP layer over ota_update.cpp.
 #include "http_handlers.hpp"
 #include "ota_update.hpp"
 #include "logic/json.hpp"        // json_append_quoted — the ONE RFC 8259 encoder every payload uses
@@ -115,12 +115,63 @@ static esp_err_t ota_stat(httpd_req_t* req) {
     return http_send_json(req, j.data());
 }
 
+// Stream the optional build notes separately from /ota/status.  The latter is polled at 1 Hz while
+// TLS and the signed-image verifier own the scarce contiguous heap; carrying 1 KiB of courtesy copy
+// through that hot JSON path would turn presentation into an OTA reliability cost.  The generation
+// lease prevents a delayed browser request from showing notes belonging to a replaced offer.
+static esp_err_t ota_changelog(httpd_req_t* req) {
+    char query[32] = {0};
+    char after_text[16] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "after", after_text, sizeof(after_text)) != ESP_OK) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_send(req, "OTA check generation required", HTTPD_RESP_USE_STRLEN);
+    }
+    char* after_end = nullptr;
+    const unsigned long long after_value = std::strtoull(after_text, &after_end, 10);
+    if (!after_value || after_value > UINT32_MAX || !after_end || *after_end != '\0') {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_send(req, "Invalid OTA check generation", HTTPD_RESP_USE_STRLEN);
+    }
+
+    const uint32_t generation = static_cast<uint32_t>(after_value);
+    size_t total = 0;
+    size_t copied = 0;
+    if (!ota_changelog_chunk(generation, 0, nullptr, 0, total, copied)) {
+        httpd_resp_set_status(req, "409 Conflict");
+        return httpd_resp_send(req, "OTA offer changed", HTTPD_RESP_USE_STRLEN);
+    }
+    // Notes are one-shot courtesy data. Whichever response path follows — success, 204, or a broken
+    // client connection — releases the exact retained text; a static 60 s timer covers clients that
+    // never request it at all. The signed artifact lease itself is independent and remains valid.
+    struct ChangelogLeaseRelease {
+        uint32_t generation;
+        ~ChangelogLeaseRelease() { ota_changelog_release(generation); }
+    } release{generation};
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    if (total == 0) {
+        httpd_resp_set_status(req, "204 No Content");
+        return httpd_resp_send(req, nullptr, 0);
+    }
+
+    char chunk[128];
+    for (size_t offset = 0; offset < total; offset += copied) {
+        if (!ota_changelog_chunk(generation, offset, chunk, sizeof(chunk), total, copied) ||
+            copied == 0)
+            return ESP_FAIL;
+        if (httpd_resp_send_chunk(req, chunk, copied) != ESP_OK) return ESP_FAIL;
+    }
+    return httpd_resp_send_chunk(req, nullptr, 0);
+}
+
 void http_register_ota(httpd_handle_t s, HttpSurface surface) {
     // OTA is trusted-LAN only — never exposed on the open setup AP (F01). http_register_on withholds
-    // all three on the SetupAp surface.
+    // all four on the SetupAp surface.
     http_register_on(s, surface, "/ota/check", HTTP_GET, ota_check);
     http_register_on(s, surface, "/ota/update", HTTP_POST, ota_do);
     http_register_on(s, surface, "/ota/status", HTTP_GET, ota_stat);
+    http_register_on(s, surface, "/ota/changelog", HTTP_GET, ota_changelog);
 }
 
 } // namespace daik
