@@ -2319,7 +2319,11 @@ Structure:
   the following real OTA start remains the authoritative state check, while a USB-installed target
   simply receives the same conservative dwell.
   A fixed three-minute concurrent
-  status/values/diag + OTA-manifest-TLS pressure window follows on the freshly restored target. Only
+  status/values/diag + OTA-manifest-TLS pressure window follows on the freshly restored target. The
+  firmware intentionally stops MQTT while TLS owns the constrained network heap; the gate exempts
+  only that expected interval after first requiring a connected baseline, requires a new connected
+  status sample within 15 seconds after TLS, and treats every later disconnect or a disconnected
+  final status as a failure. Only
   then, with the current version lease
   and an explicit confirmation of the distinct `production` role, it requires `/ota/check` to
   synchronously return a non-zero accepted-operation generation. `/ota/status` must report that same
@@ -2340,7 +2344,7 @@ Structure:
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract and thirty-six mutation canaries make stage
+  contract and thirty-nine mutation canaries make stage
   removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
   rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash
