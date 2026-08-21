@@ -214,18 +214,55 @@ const mqttRecoveryPoll = gate.indexOf('mqtt_recovery_status = request_json(host,
 assert.ok(manifestSet >= 0 && mqttRecoverySet > manifestSet && manifestClear > mqttRecoverySet &&
           mqttRecoveryPoll > manifestClear,
   "the pressure gate must distinguish the intentional TLS pause and observe MQTT recovery afterward");
+const statusLoopStart = gate.indexOf("def status_loop() -> None:");
+const otaExpectedStart = gate.indexOf(
+  "ota_expected_before = mqtt_recovery_expected.is_set()", statusLoopStart);
+const statusRequestStart = gate.indexOf(
+  'status = request_json(host, "/status")', statusLoopStart);
+const recoveryObserveStart = gate.indexOf(
+  "disconnected += mqtt_recovery.observe(", otaExpectedStart);
+const stickyOtaLease = gate.indexOf(
+  "ota_expected=ota_expected_before or mqtt_recovery_expected.is_set()", recoveryObserveStart);
+assert.ok(statusLoopStart >= 0 && otaExpectedStart > statusLoopStart &&
+          statusRequestStart > otaExpectedStart && recoveryObserveStart > statusRequestStart &&
+          stickyOtaLease > recoveryObserveStart,
+  "only a request-local expected OTA pause may suppress MQTT disconnect samples; later outages must still fail");
 assert.match(gate,
-  /elif not mqtt_recovery_expected\.is_set\(\):[\s\S]{0,180}?disconnected \+= 1/,
-  "only the expected OTA pause may suppress MQTT disconnect samples; later outages must still fail");
-assert.match(gate,
-  /if weather\.get\("fetching"\):[\s\S]{0,160}?weather_mqtt_recovery_expected = True[\s\S]{0,160}?weather_mqtt_recovery_deadline = now \+ MQTT_RECOVERY_TIMEOUT_S/,
+  /weather_evidence = weather_fetching or weather_successes > self\.weather_successes_seen[\s\S]{0,700}?self\.weather_expected = True[\s\S]{0,120}?self\.weather_deadline = now \+ MQTT_RECOVERY_TIMEOUT_S/,
   "the deliberate weather-TLS transport pause must arm a bounded MQTT recovery allowance");
 assert.match(gate,
-  /if weather_successes > weather_successes_seen:[\s\S]{0,160}?weather_mqtt_recovery_expected = True[\s\S]{0,160}?weather_mqtt_recovery_deadline = now \+ MQTT_RECOVERY_TIMEOUT_S/,
+  /self\.weather_successes_seen = max\(self\.weather_successes_seen, weather_successes\)/,
   "the completed weather fetch must cover the status-update to asynchronous MQTT-resume gap");
+const weatherEvidenceStart = gate.indexOf("if weather_evidence:");
+const weatherEvidenceEnd = gate.indexOf(
+  "self.weather_successes_seen = max", weatherEvidenceStart);
+const weatherEvidenceBranch = gate.slice(weatherEvidenceStart, weatherEvidenceEnd);
+assert.ok(weatherEvidenceStart >= 0 && weatherEvidenceEnd > weatherEvidenceStart,
+  "the weather-evidence tracker branch must remain identifiable");
+const pendingExpiryStart = gate.indexOf(
+  "if self.pending_disconnects and now > self.pending_deadline:");
+assert.ok(pendingExpiryStart >= 0 && pendingExpiryStart < weatherEvidenceStart,
+  "an expired unexplained disconnect must fail before later weather evidence can clear it");
+assert.match(weatherEvidenceBranch,
+  /self\.pending_disconnects = 0/,
+  "a mixed pre-weather snapshot must remain pending until later weather evidence or its deadline");
+const mqttConnectedStart = gate.indexOf("if mqtt_connected:");
+const mqttConnectedEnd = gate.indexOf("elif not ota_expected:", mqttConnectedStart);
+const mqttConnectedBranch = gate.slice(mqttConnectedStart, mqttConnectedEnd);
+assert.ok(mqttConnectedStart >= 0 && mqttConnectedEnd > mqttConnectedStart,
+  "the connected and disconnected MQTT tracker branches must remain identifiable");
+assert.match(mqttConnectedBranch,
+  /if not weather_evidence or weather_was_expected or pending_was_observed:[\s\S]{0,120}?self\.weather_expected = False/,
+  "a reconnect without weather evidence must not silently discard a pending disconnect");
 assert.match(gate,
-  /if mqtt\.get\("connected"\):[\s\S]{0,500}?weather_mqtt_recovery_expected = False[\s\S]{0,500}?now > weather_mqtt_recovery_deadline/,
+  /elif not ota_expected:[\s\S]{0,160}?if self\.weather_expected:[\s\S]{0,120}?now > self\.weather_deadline[\s\S]{0,500}?now > self\.pending_deadline/,
   "weather recovery must close on reconnect and expire instead of hiding later broker outages");
+assert.match(gate,
+  /def finish\(self\) -> int:[\s\S]{0,160}?failures = self\.pending_disconnects/,
+  "the tracker must return an unexplained deferred disconnect at finish");
+assert.match(gate,
+  /disconnected \+= mqtt_recovery\.finish\(\)/,
+  "an unexplained deferred disconnect must fail when the pressure window ends");
 assert.match(gate,
   /mqtt_recovery_deadline\s*=\s*time\.monotonic\(\) \+ MQTT_RECOVERY_TIMEOUT_S[\s\S]{0,700}?validate_identity\(mqtt_recovery_status[\s\S]{0,220}?mqtt_recovery_status\.get\("mqtt", \{\}\)\.get\("connected"\)[\s\S]{0,100}?mqtt_recovery_expected\.clear\(\)/,
   "MQTT recovery must come from a new identity-checked status request started after TLS released");

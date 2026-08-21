@@ -348,8 +348,13 @@ another OTA write while the running target or release is still `PENDING_VERIFY`.
 the fixed three-minute pressure window with another real OTA-manifest TLS fetch. Firmware deliberately
 stops MQTT while either OTA or Open-Meteo TLS holds the constrained network heap. After requiring a
 connected baseline, the gate gives each observed owner at most 15 seconds to recover; the weather
-allowance is armed only by its live `fetching` state or a newly advanced success counter and closes
-on the first connected sample. Any later disconnect or a disconnected final status still fails.
+allowance is armed only by its live `fetching` state or a newly advanced success counter. A streamed
+status snapshot can see either paused MQTT before its matching weather edge or old connected MQTT
+beside new weather evidence. The first direction remains pending for the same bound until later owner
+evidence; the reverse direction keeps the allowance open until a later connected sample without fresh
+owner evidence. The OTA pause lease is captured before each streamed request and remains valid for
+that response even if another thread releases it meanwhile. Expiry, window completion, any later
+disconnect or a disconnected final status still fails.
 Optional Open-Meteo
 evidence is not a bench prerequisite.
 During OTA, `/status`, the shared `/values` sender, `/history`, `/scan`, `/models?active=1`, redacted
