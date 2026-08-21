@@ -21,9 +21,9 @@ static esp_err_t mcp_transport_error(httpd_req_t* req, const char* status, const
 }
 
 static esp_err_t mcp_post(httpd_req_t* req) {
-    // get_status materialises the full status object inside the JSON-RPC envelope. Refuse the whole
-    // MCP request before parsing/building while OTA owns TLS; get_hp_values already reaches the
-    // shared values gate, but parsing first would still allocate its framing beside X509.
+    // get_status streams the full status object inside the JSON-RPC envelope. Refuse the whole MCP
+    // request before parsing/starting that stream while OTA owns TLS; get_hp_values already reaches
+    // the shared values gate, but parsing first would still allocate its framing beside X509.
     if (ota_download_active()) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         httpd_resp_set_type(req, "text/plain");

@@ -74,9 +74,11 @@ echo "== 3. firmware rule removed =="
 reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
-p = sys.argv[1]; s = open(p).read(); old = '**Firmware rule:**'
-if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '**Unclear rule:**', 1))
+p = sys.argv[1]; s = open(p).read()
+a = s.index('### 1. Unit-reported fault (`fault`)'); b = s.index('### 2. Domestic-hot-water tank heat loss', a)
+block = s[a:b]
+if '**Firmware rule:**' not in block: sys.exit(1)
+open(p, 'w').write(s[:a] + block.replace('**Firmware rule:**', '**Unclear rule:**', 1) + s[b:])
 PY
 run_case "missing firmware rule is caught" 1 "E003 fault"
 
@@ -84,9 +86,11 @@ echo "== 4. unsupported-claim boundary removed =="
 reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
-p = sys.argv[1]; s = open(p).read(); old = '**Not established:**'
-if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '**Open question:**', 1))
+p = sys.argv[1]; s = open(p).read()
+a = s.index('### 1. Unit-reported fault (`fault`)'); b = s.index('### 2. Domestic-hot-water tank heat loss', a)
+block = s[a:b]
+if '**Not established:**' not in block: sys.exit(1)
+open(p, 'w').write(s[:a] + block.replace('**Not established:**', '**Open question:**', 1) + s[b:])
 PY
 run_case "missing claim boundary is caught" 1 "E004 fault"
 
