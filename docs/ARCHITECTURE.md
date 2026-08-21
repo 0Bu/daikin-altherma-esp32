@@ -2325,8 +2325,16 @@ Structure:
   observed owner a separate bounded recovery allowance: the manifest check requires a new connected
   status sample within 15 seconds after release; weather arms the same 15-second bound only while its
   status says `fetching` or when its success counter advances, covering the short status-update to
-  asynchronous MQTT-resume gap. The first recovered sample closes the allowance, so every later
-  disconnect and a disconnected final status remain failures. Only
+  asynchronous MQTT-resume gap. Because `/status` streams subsystem snapshots, one request can
+  straddle that edge and contain either old weather fields beside paused MQTT or old connected MQTT
+  beside new weather evidence. In the first direction the unexplained sample stays pending for the
+  same bound and is forgiven only if a following weather edge proves the owner; in the reverse
+  direction the new allowance stays armed until a later connected sample without fresh owner evidence.
+  The OTA pause lease is likewise sampled before each streamed request and remains sticky while that
+  response is processed, so a concurrent lease release cannot reclassify an in-flight pause. Without
+  owner proof the gap fails at expiry or when the pressure window ends. The first consistent
+  recovered sample closes an armed allowance, so every later disconnect and a disconnected final
+  status remain failures. Only
   then, with the current version lease
   and an explicit confirmation of the distinct `production` role, it requires `/ota/check` to
   synchronously return a non-zero accepted-operation generation. `/ota/status` must report that same
@@ -2347,7 +2355,7 @@ Structure:
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract and forty-three mutation canaries make stage
+  contract and fifty mutation canaries make stage
   removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
   rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash
