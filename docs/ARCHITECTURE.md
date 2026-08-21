@@ -2320,10 +2320,13 @@ Structure:
   simply receives the same conservative dwell.
   A fixed three-minute concurrent
   status/values/diag + OTA-manifest-TLS pressure window follows on the freshly restored target. The
-  firmware intentionally stops MQTT while TLS owns the constrained network heap; the gate exempts
-  only that expected interval after first requiring a connected baseline, requires a new connected
-  status sample within 15 seconds after TLS, and treats every later disconnect or a disconnected
-  final status as a failure. Only
+  firmware intentionally stops MQTT while either the manifest check or a background weather fetch
+  owns the constrained network heap. After first requiring a connected baseline, the gate gives each
+  observed owner a separate bounded recovery allowance: the manifest check requires a new connected
+  status sample within 15 seconds after release; weather arms the same 15-second bound only while its
+  status says `fetching` or when its success counter advances, covering the short status-update to
+  asynchronous MQTT-resume gap. The first recovered sample closes the allowance, so every later
+  disconnect and a disconnected final status remain failures. Only
   then, with the current version lease
   and an explicit confirmation of the distinct `production` role, it requires `/ota/check` to
   synchronously return a non-zero accepted-operation generation. `/ota/status` must report that same
@@ -2344,7 +2347,7 @@ Structure:
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract and thirty-nine mutation canaries make stage
+  contract and forty-three mutation canaries make stage
   removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
   rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash
