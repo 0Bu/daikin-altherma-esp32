@@ -177,6 +177,16 @@ jobs:
       # does. It has already caught one of its own assertions written so that it could never fire.
       - name: Prove the source-absence matrix still catches its defects
         run: ./tools/absence/selftest.sh
+
+      # Keep the source-linked ESP-IDF inventory honest. The checker derives its positive surface
+      # from explicit CMake components, direct managed dependencies, active defaults and actual
+      # IDF-shaped application includes. The evaluated negative list remains curated: CI does not
+      # scrape an upstream web catalog or pretend that network availability proves completeness.
+      - name: Audit the ESP-IDF feature matrix
+        run: ./scripts/run-esp-idf-matrix-audit.sh
+      - name: Verify the ESP-IDF matrix audit still has teeth
+        run: ./tools/esp_idf_matrix/selftest.sh
+
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
       # verify the logic they are handed; they cannot see a well-formed value that is simply
       # false — a wrong converter compiles, passes them all, and publishes -971.5 °C to Home

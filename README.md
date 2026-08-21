@@ -66,6 +66,7 @@ cannot currently stand behind shown as `—` rather than as a number.
 | [docs/WIRING.md](docs/WIRING.md) | Visual wiring diagram + picking RX/TX pins on other boards |
 | [docs/BOARDS.md](docs/BOARDS.md) | Supported boards: what hardware each has and which parts the firmware uses |
 | [docs/FEATURES.md](docs/FEATURES.md) | Catalog of platform features (Secure Boot, OTA, diagnostics, …) |
+| [docs/ESP_IDF_MATRIX.md](docs/ESP_IDF_MATRIX.md) | Source-linked ESP-IDF usage, evaluated alternatives and completeness gate |
 | [docs/PLANT.md](docs/PLANT.md) | Plant-level features: the 24 h checkup, weather forecast, ENV III input, heating-curve diagnosis |
 | [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) | Plain-language guide to every 24 h plant-diagnostics result and the boundary of what it proves |
 | [docs/DIAGNOSTIC_EVIDENCE.md](docs/DIAGNOSTIC_EVIDENCE.md) | Sources, firmware rule, project heuristic and claim boundary for every plant diagnosis |
