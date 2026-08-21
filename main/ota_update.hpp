@@ -14,6 +14,7 @@
 // second binds a lying manifest to the bytes actually served. See docs/SECURITY.md → OTA image
 // signing, docs/ARCHITECTURE.md → OTA, logic/version_cmp.hpp and logic/health_gate.hpp.
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -83,6 +84,17 @@ struct OtaStatus {
     bool        downgrade = false;
 };
 OtaStatus ota_status();
+
+// Read the optional, version-bound release notes belonging to one completed /ota/check generation
+// without allocating or copying the complete text onto the HTTP task stack.  The caller streams
+// repeated fixed-size chunks.  False means the generation no longer owns the offer; true with
+// total=0 means the feed supplied no usable changelog and the UI should use its localized fallback.
+bool ota_changelog_chunk(uint32_t expected_generation, size_t offset, char* out, size_t capacity,
+                         size_t& total, size_t& copied);
+
+// Consume the courtesy-text lease after the HTTP handler finishes (including send failures). The
+// exact signed-artifact offer remains valid; only its optional one-shot notes are discarded.
+bool ota_changelog_release(uint32_t expected_generation);
 
 // Is a check or a download in flight? Separate from ota_status() because the caller is the heap
 // watchdog (heap_guard.cpp), which runs when allocation is failing: even a fixed status snapshot

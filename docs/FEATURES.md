@@ -49,7 +49,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 2 | Refuse-to-flash-unsigned guard | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
 | 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ 🧪 | [`partitions.csv`](../partitions.csv), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** (not an uptime timer) | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
-| 5 | OTA manifest check + signed manual HTTPS stream + **two-point downgrade gate**, dynamic TLS records, clean esp-mqtt transport pause, transport cleanup before both validation passes, phase-specific stable INTERNAL-heap gates, allocation-free fixed OTA status, and bounded MQTT/X10A/HomeHub/Syslog/weather/HTTP/MCP coordination | ✅ 🧪 | [`sdkconfig.defaults`](../sdkconfig.defaults), [`ota_update.cpp`](../main/ota_update.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`http_status.cpp`](../main/http_status.cpp), [`mcp_server.cpp`](../main/mcp_server.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/fixed_text.hpp`](../main/logic/fixed_text.hpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp), [`logic/http_values_wait.hpp`](../main/logic/http_values_wait.hpp) |
+| 5 | OTA manifest check + version-bound **release/dev changelog modal** + signed manual HTTPS stream + **two-point downgrade gate**, dynamic TLS records, clean esp-mqtt transport pause, transport cleanup before both validation passes, phase-specific stable INTERNAL-heap gates, allocation-free fixed OTA status, and bounded MQTT/X10A/HomeHub/Syslog/weather/HTTP/MCP coordination | ✅ 🧪 | [`sdkconfig.defaults`](../sdkconfig.defaults), [`ota_update.cpp`](../main/ota_update.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`www/js/settings.js`](../main/www/js/settings.js), [`http_status.cpp`](../main/http_status.cpp), [`mcp_server.cpp`](../main/mcp_server.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/fixed_text.hpp`](../main/logic/fixed_text.hpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp), [`logic/http_values_wait.hpp`](../main/logic/http_values_wait.hpp) |
 | 6 | Live UI by **polling** bounded-chunk-streamed `/status` + `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation, both snapshots fail fast during OTA, and the model-sized values snapshot waits boundedly behind shorter Weather TLS | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`logic/http_values_wait.hpp`](../main/logic/http_values_wait.hpp), [`test_status_heap_contract.mjs`](../test/test_status_heap_contract.mjs), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
 | 7 | Minified deterministic-gzip UI **embedded in the app image**: startup page under 160 KiB, each device-local locale under 32 KiB | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs) |
 | 8 | HTTP handlers under an **OOM boundary**: `503` before the first response emission; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp) |
@@ -213,6 +213,20 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   merge). Dev builds are stamped `<next release>-dev.<n>` — a semver **pre-release**, so ordering
   alone gets both directions right. The dev URL is *derived* from the release base, never configured
   separately, so the feeds cannot drift onto different hosts.
+- **✅ 🧪 Release/dev changelog modal**: CI publishes a bounded `changelog.json` beside each channel's
+  manifest, derived from explicitly classified user-facing first-parent commit subjects since that
+  feed's previous source. Obvious Git/issue references are rejected because the resulting selected
+  subject text is public feed content even when the repository is private.
+  The firmware fetches it only for a valid offer, requires the document's version to equal the
+  manifest version, decodes at most 960 bytes in place in one transient 1025-byte 8-bit-heap
+  document slot, and after TLS cleanup retains only the exact decoded length. The one-shot text is
+  released after its response, on send failure, after a 60-second static-timer TTL, or before the
+  next OTA task, so no boot-long prose BSS, heap island or PSRAM dependency is added. The optional
+  second TLS request uses the same dynamic TLS-record client and first requires the same four stable
+  56 KiB total-free / 24 KiB largest-INTERNAL-block samples as the manifest and image handshakes.
+  The device-local modal shows the exact current/available versions, channel, literal change list and
+  signed-update/rollback explanation in all shipped languages. Missing notes fall back locally and
+  never weaken or block the signed artifact lease.
 - **✅ 🧪 Manifest check & signed download**: both network operations run on **one on-demand task,
   one at a time** — never the httpd worker, and never twice concurrently (two TLS sessions compete
   for the largest contiguous block). The lock-free OTA heap lease begins before manifest TLS setup,
@@ -840,8 +854,8 @@ Four properties of that core are worth naming because they are not obvious from 
   than redundant.
 - **✅ Releases are manual; merges publish a dev channel.** A push to `main` stamps a dev version and
   republishes `dev/`; a release is an explicit workflow run that tags and republishes the root. The
-  two feeds are identical in shape, so the installer, `esptool-js` and the OTA client work against
-  either without a special case.
+  two feeds are identical in shape (`index.html`, `manifest.json`, `changelog.json`, binaries), so
+  the installer and OTA client work against either without a special case.
 - **✅ Concurrent publishers survive losing the race.** That one branch has two writers and they
   overlap routinely; Actions cannot serialize them without serializing a 5-minute build to protect a
   2-second push. So the publisher refreshes the remote ref immediately before pushing and, on a

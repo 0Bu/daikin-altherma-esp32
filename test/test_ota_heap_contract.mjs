@@ -137,6 +137,22 @@ assert.match(ota,
 assert.match(ota,
   /s_status\.heap_min_free_bytes[\s\S]{0,180}?s_operation_min_free\.load[\s\S]{0,180}?s_status\.heap_min_largest_block_bytes[\s\S]{0,180}?s_operation_min_largest\.load/,
   "OTA status must read both lock-free operation minima");
+const otaStatusStart = otaHeader.indexOf("struct OtaStatus {");
+const otaStatusEnd = otaHeader.indexOf("\n};", otaStatusStart);
+assert.ok(otaStatusStart >= 0 && otaStatusEnd > otaStatusStart,
+  "the OTA status structure must remain identifiable");
+assert.doesNotMatch(otaHeader.slice(otaStatusStart, otaStatusEnd), /changelog/,
+  "optional release notes must stay out of the frequently copied /ota/status snapshot");
+assert.match(ota, /constexpr\s+size_t\s+kChangelogDocumentMax\s*=\s*1025/,
+  "the transient remote-document slot must stay at most 1025 bytes");
+assert.doesNotMatch(ota, /std::array<char,\s*kChangelogDocumentMax>|s_changelog_document|s_changelog_candidate|MALLOC_CAP_SPIRAM/,
+  "release notes must reserve no boot-long document buffer, duplicate candidate or PSRAM dependency");
+assert.match(httpOta,
+  /char\s+chunk\[128\][\s\S]{0,600}?ota_changelog_chunk\([\s\S]{0,300}?httpd_resp_send_chunk\(req,\s*chunk,\s*copied\)/,
+  "GET /ota/changelog must stream retained notes in fixed chunks");
+assert.match(httpOta,
+  /struct\s+ChangelogLeaseRelease[\s\S]{0,220}?~ChangelogLeaseRelease\(\)\s*\{\s*ota_changelog_release\(generation\);\s*\}/,
+  "every accepted changelog response path must consume its one-shot retained-text lease");
 
 // ── The verifier remains mandatory ────────────────────────────────────────────────────────────
 // esp_ota_end() is the ESP-IDF boundary that performs image verification under these Kconfig
@@ -271,6 +287,68 @@ assert.match(manifestFetch, /transport_type\s*=\s*HTTP_TRANSPORT_OVER_SSL/,
   "manifest fetch must force the SSL transport even after the URL policy passes");
 assert.match(manifestFetch, /disable_auto_redirect\s*=\s*true/,
   "manifest fetch must refuse redirects instead of delegating policy to the client");
+
+const changelogStart = ota.indexOf("ChangelogBuffer fetch_changelog(");
+const changelogEnd = ota.indexOf("void run_check(", changelogStart);
+assert.ok(changelogStart >= 0 && changelogEnd > changelogStart,
+  "the optional changelog fetch boundary must remain identifiable");
+const changelogFetch = ota.slice(changelogStart, changelogEnd);
+assert.match(changelogFetch,
+  /char\s+url\[256\][\s\S]{0,180}?ota_manifest_sibling_url\(manifest_url,\s*"changelog\.json",\s*url,\s*sizeof\(url\)\)/,
+  "the sibling changelog URL must use bounded storage instead of a second heap string");
+const changelogHttps = changelogFetch.indexOf("ota_url_is_absolute_https(url)");
+const changelogHeapGate = changelogFetch.indexOf('wait_for_ota_headroom("changelog", OTA_CHANGELOG_HEADROOM');
+const changelogInit = changelogFetch.indexOf("esp_http_client_init(");
+const changelogDeadline = changelogFetch.indexOf(
+  "set_http_timeout_to_deadline(c, changelog_started, kChangelogDeadline", changelogInit);
+const changelogHeaders = changelogFetch.indexOf("esp_http_client_fetch_headers(", changelogInit);
+const changelogDocument = changelogFetch.indexOf("heap_caps_calloc(1, kChangelogDocumentMax, MALLOC_CAP_8BIT)");
+const changelogRead = changelogFetch.indexOf("esp_http_client_read(", changelogDocument);
+const changelogClose = changelogFetch.lastIndexOf("close_http_client(c)");
+const changelogExact = changelogFetch.indexOf(
+  "heap_caps_malloc(decoded_len + 1, MALLOC_CAP_8BIT)", changelogClose);
+assert.ok(changelogHttps >= 0 && changelogHeapGate > changelogHttps &&
+          changelogInit > changelogHeapGate && changelogDeadline > changelogInit &&
+          changelogHeaders > changelogDeadline && changelogDocument > changelogHeaders &&
+          changelogRead > changelogDocument && changelogClose > changelogRead &&
+          changelogExact > changelogClose,
+  "the optional client must pass stable TLS headroom/deadline, use one bounded body slot, fully close TLS, then retain only decoded_len+1 bytes");
+assert.match(changelogFetch, /transport_type\s*=\s*HTTP_TRANSPORT_OVER_SSL/,
+  "changelog fetch must force the SSL transport");
+assert.match(changelogFetch, /disable_auto_redirect\s*=\s*true/,
+  "changelog fetch must not follow unchecked redirects");
+assert.match(changelogFetch,
+  /manifest_changelog\(document\.get\(\),\s*got,\s*expected_version,\s*document\.get\(\),\s*OTA_CHANGELOG_TEXT_MAX\s*\+\s*1\)/,
+  "release notes must be version-bound, decoded in place and capped to the declared text budget");
+assert.match(headroom,
+  /OTA_CHANGELOG_HEADROOM\s*=\s*OTA_TRANSFER_HEADROOM/,
+  "the courtesy TLS client must inherit the measured dynamic-TLS transfer budget without drift");
+assert.match(changelogFetch,
+  /wait_for_ota_headroom\(\s*"changelog"\s*,\s*OTA_CHANGELOG_HEADROOM\s*,\s*kTransferHeadroomMaxAttempts/,
+  "the courtesy TLS client must require the same four stable headroom samples as manifest/image TLS");
+assert.match(changelogFetch,
+  /while\s*\(got\s*<\s*kChangelogDocumentMax\)\s*\{[\s\S]{0,220}?if\s*\(\s*!set_http_timeout_to_deadline\(c,\s*changelog_started,\s*kChangelogDeadline/,
+  "a trickling changelog body must remain inside its absolute operation deadline");
+assert.match(ota,
+  /kChangelogTimerTickTicks\s*=\s*pdMS_TO_TICKS\(1000\)[\s\S]{0,160}?kChangelogLeaseTtlUs\s*=\s*60LL\s*\*\s*1000LL\s*\*\s*1000LL[\s\S]{0,500}?StaticTimer_t\s+s_changelog_timer_storage/,
+  "unused retained notes must have a short TTL and statically allocated retry timer");
+assert.match(ota,
+  /xTimerCreateStatic\("ota_notes",\s*kChangelogTimerTickTicks,\s*pdTRUE,[\s\S]{0,220}?changelog_lease_expired/,
+  "the changelog TTL must not introduce a resident heap-allocated timer");
+assert.doesNotMatch(ota, /xTimerCreate\s*\(/,
+  "the changelog TTL must keep timer control storage out of the heap");
+assert.match(ota,
+  /void\s+changelog_lease_expired\([\s\S]{0,220}?Lock\s+lk\(s_mtx,\s*0\);[\s\S]{0,80}?if\s*\(!lk\)\s*return;/,
+  "the shared timer daemon must try-lock and rely on its auto-reload retry, never block on OTA");
+const startLockedStart = ota.indexOf("uint32_t start_locked(");
+const startLockedEnd = ota.indexOf("uint32_t start_check(", startLockedStart);
+const startLocked = ota.slice(startLockedStart, startLockedEnd);
+assert.match(startLocked,
+  /ensure_changelog_timer_locked\(\)[\s\S]{0,120}?xTimerStop\(s_changelog_timer,\s*0\)[\s\S]{0,120}?clear_changelog_lease_locked\(\)[\s\S]{0,500}?xTaskCreate\(/,
+  "retained courtesy text must be released before any next OTA task, including the update");
+assert.match(ota,
+  /bool\s+ota_changelog_release\([\s\S]{0,500}?clear_changelog_lease_locked\(\)/,
+  "the HTTP handler must be able to release retained notes on success or send failure");
 
 const firmwareHttps = update.indexOf("ota_url_is_absolute_https(url)");
 assert.ok(firmwareHttps >= 0 && init > firmwareHttps,

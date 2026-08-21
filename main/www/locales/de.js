@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -396,7 +396,14 @@ I18N.de = localeValues([
   /* ota.snapshot_value */ "Zwischengespeichert",
   /* ota.snapshot_help */ "Letzter empfangener Stand vor diesem Reload. Live-Daten können während der Installation pausieren; Einstellungen bleiben bis zum Neustart gesperrt.",
   /* ota.reload_hint */ "installiert — Seite neu laden",
-  /* ota.confirm */ (cur, avail) => `Update verfügbar: v${cur} → v${avail}\n\nDas Gerät lädt das signierte Abbild, installiert es und startet neu. Kommt die neue Firmware nicht online, wird automatisch zurückgesetzt.`,
+  /* ota.dialog_title */ "Firmware-Update",
+  /* ota.switch_title */ "Firmware-Version wechseln",
+  /* ota.changes_title */ "Neu in diesem Build",
+  /* ota.no_changes */ "Für diesen Build wurde kein Changelog bereitgestellt.",
+  /* ota.install_help */ "Das Gerät lädt das signierte Abbild, installiert es und startet neu. Kommt die neue Firmware nicht online, stellt das Gerät automatisch den aktuellen Build wieder her.",
+  /* ota.switch_help */ "Dieser Build ist älter, weil ein anderer Update-Kanal ausgewählt ist. Seine Signatur wird vor der Installation geprüft. Kommt der ältere Build nicht online, stellt das Gerät automatisch den aktuellen Build wieder her.",
+  /* ota.install */ "Update installieren",
+  /* ota.switch */ "Älteren Build installieren",
   /* aria.ota */ "Nach Firmware-Updates suchen",
   /* ota.title_check */ "Tippen, um nach Firmware-Updates zu suchen",
   /* ota.title_avail */ (v) => `Update v${v} verfügbar — tippen zum Installieren`,
@@ -859,6 +866,5 @@ I18N.de = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Sprache gespeichert",
-  /* ota.downgrade_confirm */ (cur, avail) => `Zur\u00fcck auf v${avail} wechseln?\n\nDie installierte Version v${cur} ist neuer. Dieser \u00e4ltere Stand wird angeboten, weil du einen anderen Update-Kanal gew\u00e4hlt hast. Seine Signatur wird vor der Installation gepr\u00fcft. Falls er nicht online kommt, stellt das Ger\u00e4t automatisch den aktuellen Stand wieder her.`,
   /* hist.cop_none */ "Kein COP-Verlauf bei einem Stromwert von CT-Klemmen. Welche Lasten sie erfassen, hängt von der Verdrahtung ab; die Wärmeseite endet vor BUH und erfasst keine direkte BSH-Wärme. Die Bilanzgrenzen können daher abweichen.",
 ]);

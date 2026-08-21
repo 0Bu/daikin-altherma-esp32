@@ -32,8 +32,8 @@ void http_start() {
     // diagnostics consent route raised the total to 34; the two destructive GET query flags became
     // explicit POST /diag/clear and POST /coredump/clear routes, which had raised it to 36; POST
     // /hp/query (the free register probe) raised it to 37; the query-selected, device-local UI
-    // locale asset route raises the current exact total to 38.
-    cfg.max_uri_handlers = 38;
+    // locale asset route raised it to 38; the streamed OTA changelog route makes the exact total 39.
+    cfg.max_uri_handlers = 39;
     cfg.lru_purge_enable = true;
     // 16 KB, not the 8 KB this ran on through v1.0.12 — MEASURED, not padded. v1.0.12 panicked and
     // the core dump's task table read `httpd 7728/460`: the task had been 7732 bytes deep at its last

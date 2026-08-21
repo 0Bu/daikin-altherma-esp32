@@ -48,7 +48,9 @@ Visual diagram, the full cable chain, and the wiring worked through on specific 
 ## UI
 
 One screen, live from the bus: what the unit is doing right now, with any reading the firmware
-cannot currently stand behind shown as `—` rather than as a number.
+cannot currently stand behind shown as `—` rather than as a number. When a release or development
+OTA build is available, the device-local confirmation shows its published changelog before install,
+or an explicit no-details fallback when that optional feed document is unavailable.
 
 ![The dashboard through its normal operating states, with smooth transitions between standby, heating, defrost, circulation, hot water and cooling](docs/media/dashboard.gif)
 

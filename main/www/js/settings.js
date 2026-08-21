@@ -614,7 +614,7 @@ async function onChannelPick() {
   } catch { toast(t("toast.unreachable"), "err"); return; }
   toast(t("chan.saved", t(channel === "dev" ? "chan.dev" : "chan.release")), "ok");
   await refreshStatus();
-  checkFirmwareUpdate();
+  checkFirmwareUpdate(sel, "settings");
 }
 
 // The UI language picker (Firmware card). Persisted on the device (POST /set_lang) so the choice
@@ -808,9 +808,9 @@ async function runHpProbe() {
 // Tapping the version in the header meta line checks for an OTA update, and offers to install one:
 // the full /ota/check -> /ota/status -> /ota/update flow is wired below against the device-side
 // implementation in ota_update.cpp (manifest check, two-point downgrade gate, signed install, health
-// gate). What the device can actually FIND depends on a served manifest.json — CI stages one and
-// publishes it to GitHub Pages, gated on the repo being public (docs/FEATURES.md §2); against no feed
-// the check honestly reports "up to date" rather than failing.
+// gate). What the device can actually FIND depends on a served manifest.json — CI publishes the
+// public Pages feed even while the repository itself is private. An absent/unreachable manifest is
+// a check error; only the optional sibling changelog may fall back without invalidating an offer.
 //
 // The whole flow reports INLINE next to that version (#otaStat) rather than through toasts. A
 // download takes tens of seconds and ticks a percentage the entire time, which as toasts meant a
@@ -978,6 +978,14 @@ async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, req
   return null;
 }
 
+// A check may legitimately spend 15 s waiting for manifest TLS headroom plus its 30 s operation
+// deadline, then the same 15 s headroom wait plus 30 s on the optional changelog. The common OTA
+// quiesce path can also spend about 20 s letting an already-running network client unwind, and one
+// allocator-shaped manifest failure receives a bounded retry. Keep the browser's one-second poll
+// budget above that complete device path so presentation-only notes cannot turn a valid signed
+// offer into a client-side timeout.
+const OTA_CHECK_POLL_TRIES = 150;
+
 // Terminal inline failure: show it, let it linger a beat longer than a success, and release the flow.
 function otaFail(text) {
   S.otaInstalling = false;
@@ -988,7 +996,79 @@ function otaFail(text) {
   otaInlineClear(6000);
 }
 
-async function checkFirmwareUpdate() {
+let otaDecisionResolve = null;
+let otaDecisionReturnFocus = null;
+let otaDecisionReturnStage = "dashboard";
+
+// Resolve the transient decision exactly once. Cancel, backdrop, Escape and defensive replacement
+// all share this path, so no dismissal can leave checkFirmwareUpdate() suspended with S.busy held.
+function settleOtaDecision(install) {
+  const resolve = otaDecisionResolve;
+  const returnFocus = otaDecisionReturnFocus;
+  const returnStage = otaDecisionReturnStage;
+  otaDecisionResolve = null;
+  otaDecisionReturnFocus = null;
+  otaDecisionReturnStage = "dashboard";
+  if (!$('otaModal').hidden) closeOverlay("otaModal");
+  // Settings cards are rebuilt from live status. If the initiating version/channel control was
+  // replaced while the modal was open, focus the current stable channel control instead; the
+  // dashboard header link is the equivalent fallback outside Settings.
+  const currentStage = S.stage;
+  const fallback = currentStage === "settings" ? $("e32Chan") : $("verLink");
+  const focusTarget = returnStage === currentStage && returnFocus &&
+    returnFocus.isConnected !== false ? returnFocus : fallback;
+  focusTarget?.focus?.({ preventScroll: true });
+  if (resolve) resolve(install === true);
+}
+
+async function loadOtaChangelog(generation) {
+  try {
+    const response = await fetch(`/ota/changelog?after=${encodeURIComponent(generation)}`);
+    if (response.status === 409) return { replaced: true, text: "" };
+    if (!response.ok || response.status === 204) return { replaced: false, text: "" };
+    return { replaced: false, text: await response.text() };
+  } catch {
+    // Notes are optional presentation metadata. The exact artifact lease remains authoritative and
+    // the modal names the absence explicitly rather than misdiagnosing the signed update as failed.
+    return { replaced: false, text: "" };
+  }
+}
+
+function askOtaInstall(status, changelog, back, returnFocus = document.activeElement,
+                       returnStage = S.stage) {
+  // A manifest check is asynchronous. The user may have opened a configuration dialog while it was
+  // running; never replace that dialog and silently discard its draft when the offer arrives.
+  if (ROUTED_MODALS.some((id) => !$(id).hidden)) return Promise.resolve(false);
+  if (otaDecisionResolve) settleOtaDecision(false);
+  $("otaModalTitle").textContent = t(back ? "ota.switch_title" : "ota.dialog_title");
+  $("otaVersionLine").textContent = `v${status.current} → v${status.available}`;
+  $("otaChannel").textContent = t(status.available_channel === "dev" ? "chan.dev" : "chan.release");
+  $("otaHelp").textContent = t(back ? "ota.switch_help" : "ota.install_help");
+  $("otaInstall").textContent = t(back ? "ota.switch" : "ota.install");
+
+  const list = $("otaChanges");
+  list.textContent = "";
+  const notes = String(changelog || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const note of notes) {
+    const item = document.createElement("li");
+    item.textContent = note;                 // feed text is never interpreted as HTML or Markdown
+    list.appendChild(item);
+  }
+  list.hidden = notes.length === 0;
+  $("otaNoChanges").hidden = notes.length !== 0;
+
+  return new Promise((resolve) => {
+    otaDecisionResolve = resolve;
+    otaDecisionReturnFocus = returnFocus;
+    otaDecisionReturnStage = returnStage;
+    openOverlay("otaModal");                 // no route/stage change: retain the initiating screen
+  });
+}
+
+async function checkFirmwareUpdate(returnFocus = document.activeElement, returnStage = S.stage) {
+  // onclick passes a MouseEvent when used directly; only an actual focusable element is a useful
+  // override. Capture this before any await/render so Settings can later replace its live card.
+  if (!returnFocus?.focus) returnFocus = document.activeElement;
   if (S.otaBusy) return;                                       // a check/download is already running
   if (S.busy) { otaInline(t("ota.busy")); otaInlineClear(); return; }
   S.busy = true; S.otaBusy = true;
@@ -1009,7 +1089,7 @@ async function checkFirmwareUpdate() {
       otaFail(t("ota.check_failed")); return;
     }
 
-    const s = await otaPoll(["checking"], 30, null, checkGeneration, true);
+    const s = await otaPoll(["checking"], OTA_CHECK_POLL_TRIES, null, checkGeneration, true);
     if (!s)                  { otaFail(t("ota.timeout")); return; }
     if (s.state === "error") { otaFail(s.message || t("ota.check_failed")); return; }
     if (!s.available || !s.available_sha256 || !s.available_channel) {
@@ -1027,14 +1107,16 @@ async function checkFirmwareUpdate() {
     const back = !s.update_available && s.downgrade;
 
     // A version is on offer: record it so the version's tooltip says so, and clear the readout while
-    // the modal dialog is up (confirm() blocks, and a stale spinner behind it explains nothing).
+    // the modal is up (a stale spinner behind a decision explains nothing).
     S.otaAvail = s.available || null; renderHeaderMeta();
     otaInline("");
+    const notes = await loadOtaChangelog(checkGeneration);
+    if (notes.replaced) { otaFail(t("ota.replaced")); return; }
     // The device re-fetches the manifest and re-runs the gate before downloading, so this prompt is
     // a courtesy, not the safety check — declining here changes nothing on the device. Going
     // BACKWARDS is the exception: the device refuses that outright unless this flow asks for it
-    // explicitly (?downgrade=1 below), so for that direction the confirm is the whole permission.
-    if (!confirm(t(back ? "ota.downgrade_confirm" : "ota.confirm", s.current, s.available))) {
+    // explicitly (?downgrade=1 below), so for that direction the modal is the whole permission.
+    if (!await askOtaInstall(s, notes.text, back, returnFocus, returnStage)) {
       S.otaBusy = false;
       otaInline(t("ota.cancelled")); otaInlineClear();
       return;

@@ -73,10 +73,10 @@ Browser flasher + captive-portal setup: [../README.md](../README.md). The flashe
 GitHub Pages (ESP Web Tools / Web Serial). **Two feeds are published, and only one of them is cut
 by hand:**
 
-| Feed | Installer | OTA manifest | Published by |
-|------|-----------|--------------|--------------|
-| Release | `…/` | `…/manifest.json` | a **manual** workflow run (Actions → *build* → *Run workflow* → `release: true`) — the only thing that creates a `v*` tag + a [GitHub release](https://github.com/0Bu/daikin-altherma-esp32/releases/latest) |
-| Development | `…/dev/` | `…/dev/manifest.json` | every firmware-relevant push to `main`; no tag, no release |
+| Feed | Installer | OTA manifest | Changelog | Published by |
+|------|-----------|--------------|-----------|--------------|
+| Release | `…/` | `…/manifest.json` | `…/changelog.json` | a **manual** workflow run (Actions → *build* → *Run workflow* → `release: true`) — the only thing that creates a `v*` tag + a [GitHub release](https://github.com/0Bu/daikin-altherma-esp32/releases/latest) |
+| Development | `…/dev/` | `…/dev/manifest.json` | `…/dev/changelog.json` | every firmware-relevant push to `main`; no tag, no release |
 
 A device follows one feed at a time — gear → **Firmware** → *Update channel* (`POST /set_ota`). Dev
 builds are versioned `<next release>-dev.<n>`, a semver pre-release, so a dev board upgrades itself
@@ -89,7 +89,8 @@ comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 > **⚠️ The Pages site is PUBLIC even when the repository is private.** Restricting who can view a
 > Pages site requires an **organization on GitHub Enterprise Cloud**; it is not available to a user
 > account on GitHub Pro. So the signed firmware, the browser-installer parts, the manual merged
-> image and `manifest.json` are downloadable by anyone on the internet while the source stays
+> image, `manifest.json` and the selected normalized commit subjects in `changelog.json` are
+> downloadable by anyone on the internet while the source stays
 > private. Git tags and GitHub Releases are *not* public on a private repo — only accounts with
 > repo read access see those.
 
@@ -665,6 +666,10 @@ GET  /ota/status                   # { state, progress, message, busy, generatio
                                    #   available_sha256, available_channel, update_available,
                                    #   downgrade, channel, current, heap_min_free_bytes,
                                    #   heap_min_largest_block_bytes }
+GET  /ota/changelog?after=<generation>
+                                   # one-shot literal UTF-8 notes for that completed check; 204 =
+                                   # no valid optional notes, 409 = already consumed/expired/replaced;
+                                   # streamed in 128 B chunks and released after the response
 GET  /mcp                          # static, self-contained MCP information + setup page;
                                    #   same trusted-LAN-only URL as the protocol, never SSE
 POST /mcp                          # stateless, read-only Streamable-HTTP MCP server:
@@ -799,9 +804,12 @@ Derived sensors (COP etc.) and a sample dashboard: [HOME_ASSISTANT.md](HOME_ASSI
 ## OTA (self-update)
 
 Pull-based: the device fetches `manifest.json` from `CONFIG_DAIKIN_OTA_MANIFEST_URL` (default GitHub
-Pages), compares its `version` to the running firmware, and on confirmation downloads its image
-`daikin-altherma-esp32.bin` through a fixed-buffer HTTPS stream into the inactive OTA slot, validates
-it and then reboots. Tap the
+Pages), compares its `version` to the running firmware, and for a valid newer or channel-downgrade
+offer fetches the optional sibling `changelog.json`. The device-local confirmation names the exact
+current and offered versions and channel, renders those notes as literal text, and uses a localized
+no-details fallback when that version-bound document is missing, stale or invalid. On confirmation
+the device downloads `daikin-altherma-esp32.bin` through a fixed-buffer HTTPS stream into the
+inactive OTA slot, validates it and then reboots. Tap the
 firmware **version** to check — either the one in the header (next to the IP address) or the
 *Version* row on gear → **Firmware**, which does the same thing and stays where you are. The UI shows
 the download progress inline beside whichever version you tapped, waits for the board to come back
@@ -811,8 +819,8 @@ up and reloads itself onto the new UI. Both the check and the download run on th
 > channel* (`POST /set_ota`, applied live). `release` reads the Pages root, `dev` reads `…/dev/`;
 > both are published by CI (see "Flash prebuilt artifacts" above), and the dev URL is derived from
 > `CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL`, so one setting moves both. Publishing does **not** require
-> the repository to be public; it does require the Pages source to point at `gh-pages`. With nothing
-> served on the selected channel, a check simply reports the device is up to date. Point the two
+> the repository to be public; it does require the Pages source to point at `gh-pages`. An absent,
+> unreachable or invalid manifest is a check error, not an "up to date" result. Point the two
 > `CONFIG_DAIKIN_OTA_*` URLs at any HTTPS host to use your own feed.
 >
 > Switching from `dev` back to `release` installs an **older** build, which the gate below refuses

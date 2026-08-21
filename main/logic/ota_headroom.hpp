@@ -46,8 +46,18 @@ inline unsigned ota_headroom_streak_next(const OtaHeapHeadroom& requirement,
     return current_streak < requirement.stable_samples ? current_streak + 1 : current_streak;
 }
 
+// The optional changelog opens the same fresh HTTPS/X509 client as the authoritative manifest.
+// ESP-IDF's dynamic record buffers change when the allocations occur, not the live measured
+// admission budget, so courtesy prose must never enter TLS on a weaker heap sample than the update
+// it describes. Alias the requirement instead of copying its numbers so the two cannot drift.
+inline constexpr OtaHeapHeadroom OTA_CHANGELOG_HEADROOM = OTA_TRANSFER_HEADROOM;
+
 inline bool ota_verify_headroom_ok(size_t free_bytes, size_t largest_free_block) {
     return ota_headroom_ok(OTA_VALIDATION_HEADROOM, free_bytes, largest_free_block);
+}
+
+inline bool ota_changelog_tls_headroom_ok(size_t free_bytes, size_t largest_free_block) {
+    return ota_headroom_ok(OTA_CHANGELOG_HEADROOM, free_bytes, largest_free_block);
 }
 
 } // namespace daik

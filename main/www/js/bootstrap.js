@@ -32,6 +32,16 @@ function wire() {
   vl.setAttribute("aria-label", t("aria.ota"));
   vl.onclick = checkFirmwareUpdate;
 
+  // The OTA decision is transient rather than routed, but its lifecycle is otherwise identical to
+  // the settings dialogs. Every dismissal resolves the suspended async flow as Cancel; only the
+  // explicit primary action grants the install (and, for dev -> release, downgrade) permission.
+  $("otaCancel").onclick = () => settleOtaDecision(false);
+  $("otaBackdrop").onclick = () => settleOtaDecision(false);
+  $("otaInstall").onclick = () => settleOtaDecision(true);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("otaModal").hidden) settleOtaDecision(false);
+  });
+
   // The dashboard card grid (#valueGroups) is rebuilt on every poll, so its one interactive control
   // is wired by delegation: tapping a value row (that has a description) expands/collapses its
   // explainer accordion.

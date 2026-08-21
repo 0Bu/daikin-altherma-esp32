@@ -351,8 +351,8 @@ Body, ordered:
    browser and from Home Assistant's retained crash entity at once. It used to hide the banner in
    page state alone, which a reload — the first thing anyone does — undid. Because the delete is
    irreversible and takes the one artifact a bug report needs with it, it **asks first**: a second
-   tap *inside the banner*, replacing the actions row (not a native `confirm()` — §5.4 keeps the OTA
-   dialog the only one of those; this needs no fields), and the question names the dump only when one
+   tap *inside the banner*, replacing the actions row (not a separate modal; this compact decision
+   belongs to the evidence it will delete), and the question names the dump only when one
    exists. A failed delete restores the banner rather than hiding it, because the report is still on
    the device. The banner stays keyed to the crash signature (reason/PC/task — *not* the dump state),
    so a *new* crash arriving between the two taps is not what gets deleted. Lives outside the
@@ -1126,8 +1126,12 @@ is exactly what a user would want to see move.
   on the device, so the UI watches a state machine it doesn't drive). This deliberately ignores the
   old idle payload still visible during the task's 1.1-second quiesce lead. While checking, the ring
   spins with no label — there is no number to show yet. Up to date → "up to date", which clears
-  itself after a few seconds. Update available → a confirmation naming both versions; on confirm the
-  UI sends that generation plus `available_channel`, `available`, and `available_sha256` to
+  itself after a few seconds. Update available → the UI fetches the optional, generation-bound
+  `GET /ota/changelog?after=…` text and opens the firmware's own modal. It names current and offered
+  versions, labels Release versus Development, lists the published changes as literal text, and
+  explains signed install, reboot and automatic rollback. Missing or invalid notes do not block a
+  valid signed offer: the modal shows a localized "no details supplied" fallback. On Install the UI
+  sends that generation plus `available_channel`, `available`, and `available_sha256` to
   `POST /ota/update`, requires the immediate successor generation, then polls only that operation
   while rendering `progress` into the ring + "n%",
   and on `done` wait for the board to come back and **reload the page** (below). A busy `503` from
@@ -1184,16 +1188,21 @@ is exactly what a user would want to see move.
   a counter and a delayed clear only fires if nothing has been written since. Tapping the version
   again inside the linger window would otherwise let the *first* run's pending timer wipe the
   *second* run's message a moment after it appeared — a check that looks like it silently did nothing.
-- **The one native dialog in the UI.** The update confirmation is a browser `confirm()`, not the
-  modal overlay pattern every other decision uses (§5.1). Deliberate and deliberately isolated: it
-  is a single yes/no with **no fields**, and the overlay machinery exists to host *inputs* — adding a
-  fourth modal for one boolean would cost more UI surface than it buys. It is the **only**
-  `confirm()`/`alert()` in the device UI fragments; if a second one is ever wanted, that is the signal to build the
-  overlay properly instead of spreading native dialogs.
-- **What "up to date" can also mean.** When no manifest is reachable — none has been published yet,
-  or the two `CONFIG_DAIKIN_OTA_*` URLs point somewhere empty — a check legitimately
-  finds nothing and says so. The UI does not distinguish "no newer version" from "no feed configured";
-  both are honestly "up to date" from the device's point of view.
+- **The confirmation is a transient firmware modal.** It reuses the same `.modal` / `.modal-card`
+  overlay, focus, scroll-lock, backdrop, Escape and stacked mobile actions as the configuration
+  dialogs, but deliberately has no `#popup=…` route: a stale bookmarked install offer must never
+  reopen without a fresh check generation. Cancel, backdrop, Escape and replacement all resolve the
+  pending decision exactly once and never send the update POST. Changelog text is inserted with
+  `textContent`, not interpreted as HTML or Markdown; closing returns keyboard focus to the version
+  control that opened it. If the asynchronous check finishes after a configuration modal was opened,
+  that modal and its unsaved draft win: the OTA decision is declined rather than replacing it.
+  Back/Forward route navigation likewise cancels a visible transient decision before opening another
+  overlay. There are no native `confirm()` or `alert()` calls in the device UI.
+- **"Up to date" requires a valid manifest.** An unreachable, empty or malformed selected feed is
+  shown as a check error; it is never collapsed into "up to date". Only a successfully parsed
+  manifest whose version is not newer produces the short success label. The sibling changelog is
+  deliberately less authoritative: if it alone is missing or invalid, a valid update offer still
+  opens with the localized no-details fallback.
 - The **device log** is not surfaced in the UI (an early Diagnostics screen was dropped). It remains
   available out-of-band at `GET /diag` (verbose/redact via query; clearing is `POST /diag/clear`);
   another card on Settings is where
