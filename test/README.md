@@ -142,12 +142,14 @@ is reachable from the cleanup boundary. Re-enabling before broker delivery cance
 
 `node test/test_ota_heap_contract.mjs` pins the signed-OTA memory boundary that cannot be linked on
 the host: firmware bytes stream through the low-level HTTP/OTA APIs, HTTP/TLS is fully released
-before `esp_ota_end()` performs RSA validation, total-free and largest-contiguous headroom are gated
-both before transfer and immediately before validation, and boot selection remains strictly after a
-successful verifier result. It also requires the allocation-rich X10A poll and MQTT publisher to use
-their bounded quiesce rules, distinguishes intentional holds from OOM skips, and pins the shared
-`/values`/MCP sender's fail-closed four-second wait behind active OTA or Weather TLS owners before
-its model-sized snapshot. The same contract requires check/update HTTP success to carry the
+before `esp_ota_end()` performs RSA validation, dynamic TLS records remain enabled, every manifest
+and image handshake receives a stable 56/24-KiB INTERNAL-heap gate, and both IDF verifier passes
+(`esp_ota_end()` and boot selection) receive their own 24/12-KiB gate. It also requires
+allocation-rich X10A, MQTT, HomeHub and Syslog cycles to claim, recheck, acknowledge and stand aside
+for OTA/Weather, distinguishes
+intentional holds from OOM skips, and pins `/status` plus the shared `/values`/MCP sender's fast
+busy-503 during OTA, MCP's pre-parse fast-503, and the values sender's fail-closed four-second wait behind shorter Weather TLS
+before its model-sized snapshot. The same contract requires check/update HTTP success to carry the
 mutex-assigned operation generation, busy/task-unavailable starts to return 503, `/ota/status` to
 expose the mutex-consistent `busy` plus generation/channel/version/application-SHA handshake used by
 production promotion, and the accepted update task to hash every downloaded byte against that SHA
@@ -157,7 +159,14 @@ claiming a bad signature. Initial feed URLs and every redirect stay on forced HT
 response remains a size-policy refusal rather than masquerading as an interrupted connection.
 `tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently (including
 the fixed task lease, generation rollback and whole-stream SHA comparison) and proves the
-source contract turns red; the IDF-free wait decision itself is exercised by `test/test_logic.cpp`.
+source contract turns red; all eighty-four seeded regressions are required. The allocation-free
+`FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
+
+`node test/test_production_ota_gate_contract.mjs` pins the exact-artifact bench-to-production
+workflow: full signed release-binary pressure, the short completed-verifier state, 105-second
+rollback probation, exact dev restore, and the sole production write. Its paired
+`tools/production_ota/selftest.mjs` requires all thirty-two stage-removal mutations to turn that same
+contract red.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation
@@ -331,9 +340,10 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   threshold (no off-by-one), and which reset reasons count as a crash.
 - `logic/health_gate.hpp` — the OTA commit/wait/give-up verdict across the base window + hard cap,
   incl. an unconfigured (setup-AP) device.
-- `logic/ota_headroom.hpp` — the signed-image verifier's two independent internal-heap floors:
-  exact-threshold success, a plausible aggregate with the live 632-byte fragmented block, sufficient
-  contiguous space with insufficient total working memory, and both dimensions below threshold.
+- `logic/ota_headroom.hpp` — phase-specific TLS-transfer and signed-image-validation internal-heap
+  floors, exact-threshold success, a plausible aggregate with a fragmented block, sufficient
+  contiguous space with insufficient total working memory, and reset/saturation of the required
+  consecutive healthy-sample streak.
 - `logic/ota_transport.hpp` — fail-closed OTA URL policy: initial feeds require absolute HTTPS;
   redirects admit HTTPS or ordinary relative paths only, with HTTP/other schemes, protocol-relative
   authorities, malformed origins, whitespace/control bytes and backslash parser ambiguities refused.

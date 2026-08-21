@@ -932,7 +932,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `diag_printf` interpolating a hostname is otherwise uncovered with no symptom but a correct-looking
   log line containing a real value.
 - `logic/json.hpp` — the RFC 8259 string encoder every JSON payload goes through: `/status`,
-  `/values` and `/scan` (`http_status.cpp`'s `jstr`), `/ota/status` (`json_quote`), as well as the
+  `/values` and `/scan` (`http_status.cpp`'s `jstr`), `/ota/status` (`json_append_quoted` into an
+  overflow-detecting fixed buffer), as well as the
   MQTT state, heartbeat and crash topics. It escapes `"`, `\` and **every** control byte below 0x20 (`\b\f\n\r\t`, else `\u00XX`),
   while passing raw UTF-8 through untouched. Not a detail: the strings it encodes are not all ours —
   an SSID is arbitrary bytes chosen by any AP in radio range, and escaping only `"` and `\` (as this
@@ -2249,8 +2250,11 @@ Structure:
   network operations, beginning before either handshake. Each producer holds its flag for 1.1
   seconds before opening TLS so the once-per-second MQTT publisher can finish its current cycle and
   stand aside; OTA also waits for an in-flight X10A sweep to acknowledge the same request and for an
-  already-open weather client to unwind. New X10A snapshot work and new weather requests then stay
-  out until OTA ends. The shared `logic/ota_quiesce.hpp` budget prevents a stalled flag from
+  already-open weather client to unwind. HomeHub polling and Syslog forwarding also take an
+  allocation-free OTA branch before copying configuration, reserving value vectors, resolving DNS,
+  pinging or creating a UDP socket; OTA diagnostics therefore cannot wake Syslog into allocator
+  competition beside X509. New X10A/HomeHub/Syslog work and new weather requests then stay out until
+  OTA ends. The shared `logic/ota_quiesce.hpp` budget prevents a stalled flag from
   silencing MQTT or X10A indefinitely. The poll cache compounds this by owning only its formatted value:
   immutable labels and units are borrowed from firmware-lifetime catalog tables, shrinking the one
   contiguous allocation every sweep requires and eliminating two per-row string allocations.
@@ -2279,9 +2283,16 @@ Structure:
 - **Production promotion is a staged, one-write transaction.**
   [`scripts/production-ota-gate.py`](../scripts/production-ota-gate.py) binds the official dev
   manifest to the expected source SHA, version, application SHA-256, ESP32-S3 metadata and signature;
-  requires a clean exact local source; runs the host catalog and heap contracts; and applies a fixed
-  three-minute concurrent status/values/diag + OTA-manifest-TLS pressure window to the same signed
-  image on the MAC-bound private-inventory `bench` role. Only then, with the current version lease
+  requires a clean exact local source; runs the host catalog and heap contracts; and makes that
+  target perform a complete official-release firmware download under concurrent
+  status/values/diag/OTA-status pressure on the MAC-bound private-inventory `bench` role. The target
+  must report sampled operation-local heap minima and the completed verifier state, boot the signed
+  release, survive beyond its 90-second
+  rollback-health probation with safe heap and no allocation-failure counters, and only then return
+  through the official dev feed to the exact target version/ELF. This wait is load-bearing: ESP-IDF
+  refuses another OTA write while the release is still `PENDING_VERIFY`. A fixed three-minute concurrent
+  status/values/diag + OTA-manifest-TLS pressure window follows on the freshly restored target. Only
+  then, with the current version lease
   and an explicit confirmation of the distinct `production` role, it requires `/ota/check` to
   synchronously return a non-zero accepted-operation generation. `/ota/status` must report that same
   generation with `busy=false` and the exact idle channel/version/application-SHA offer before the
@@ -2295,9 +2306,13 @@ Structure:
   Reboot observation, the second pressure window and retained-X10A MQTT proof are GET/read-only. The
   bench board need not be physically connected to X10A, so it proves binary and allocation behavior
   rather than plant I/O; expected UART timeouts there are not a plant-link regression. The
-  bench always overlaps real OTA-manifest TLS but does not require the optional weather task when
-  diagnostics consent is off. The production role supplies the real X10A and weather canaries and
-  keeps the bounded timeout delta. The source contract and twenty-one mutation canaries make stage
+  bench covers both the full binary TLS path and a later real OTA-manifest TLS overlap but does not
+  require the optional weather task when
+  diagnostics consent is off. The host's 120-second manifest observer and 480-second install/reboot
+  observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
+  can never continue after its authoritative gate process has timed out. The production role
+  supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
+  contract and thirty-two mutation canaries make stage
   removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
   rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash
@@ -2307,11 +2322,22 @@ Structure:
   2 KiB INTERNAL buffer and closes/frees both that buffer and the complete HTTP/TLS client before
   finishing the PSA SHA-256 stream and calling `esp_ota_end()`. The stream digest must match the
   application SHA captured from the completed check; `esp_ota_end()` remains IDF's mandatory
-  RSA-3072/PSA verifier. Only both checks permit the separate `esp_ota_set_boot_partition()` call.
-  Before opening the image stream and
-  again immediately before validation, a bounded five-second gate requires both 24 KiB total free
-  INTERNAL 8-bit heap and a 12 KiB largest contiguous INTERNAL block. Refusal is retryable and
-  fail-closed. Because `ESP_ERR_OTA_VALIDATE_FAILED` intentionally combines image-structure,
+  RSA-3072/PSA verifier. `esp_ota_set_boot_partition()` performs another IDF image/signature
+  validation, so it gets the same verifier headroom again immediately before boot selection.
+  Only the digest plus both successful IDF validation passes permit that slot to become bootable.
+  ESP-IDF's dynamic TLS-buffer port allocates and right-sizes RX/TX records on demand, then returns
+  them to small cache buffers; `CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA` remains off so reconnecting
+  MQTTS/OTA/weather clients retain the ordinary certificate/key registration contract. Every fresh
+  manifest and firmware handshake uses a bounded 15-second admission gate: **four consecutive
+  250-ms samples at 56 KiB total free INTERNAL heap and a 24 KiB largest block**. A single transient
+  recovery edge can no longer authorize the next X509 peak. After HTTP/TLS cleanup, the different
+  two RSA-3072 verifier passes each receive their own bounded five-second, two-sample
+  **24 KiB / 12 KiB** gate.
+  The documented `HTTP_TLS_DYN_BUF_RX_STATIC` strategy is deliberately not selected on pinned
+  ESP-IDF 6.0.2: Espressif issue #18828 reports a reproducible invalid-free/assert in its TLS-1.2
+  transition. The default dynamic strategy therefore keeps per-I/O record churn, but avoids adding
+  a known direct reboot path until the upstream fix is present in the pinned SDK.
+  Refusal is retryable and fail-closed. Because `ESP_ERR_OTA_VALIDATE_FAILED` intentionally combines image-structure,
   digest/signature and verifier-allocation failures, the user-facing error is the exact generic
   “Update rejected: image validation failed”; `/diag` records before/after heap evidence instead of
   claiming a signature-specific root cause it cannot prove.
@@ -2326,40 +2352,49 @@ Structure:
   skips deliberately: the same missing second, spending none of the block the download needs, and
   counted as `mqtt_quiesced` instead of vanishing into a log ring. Lock-free
   `std::atomic<bool>` flags are armed by RAII guards across each network interval — **not**
-  `ota_status().state`, which copies several `std::string`s out under the mutex the OTA task holds, so
-  asking "is the heap under pressure?" would itself allocate, once a second, on the task the pressure
-  is aimed at. The OTA window has seven exits, which is why its flag is cleared by a destructor
-  rather than by hand at each. The hold-off is **bounded** (`OTA_QUIESCE_MAX_CYCLES`, 300 cycles ≈ 5
-  min at the 1 s cadence): a TLS operation stalled behind a dead connection must not silence the bridge for
-  the rest of the boot, so past the cap the publisher resumes and takes its chances with the OOM guard
-  — the behaviour that shipped before, i.e. the worst case of this fix is the status quo. The
-  watchdog is fed above the check, and esp-mqtt runs keepalive on its own task, so a quiesced minute
-  is a gap in HA rather than an `offline`. X10A applies the same check before its first Config/cache
+  `ota_status().state`: although that public snapshot now uses `FixedText` and allocates nothing,
+  the per-cycle decision must remain a single lock-free atomic load instead of taking the OTA and
+  Config mutexes. The OTA window has multiple exits, which is why its flag is cleared by a destructor
+  rather than by hand at each. The firmware-publisher/poller skip remains bounded by the ten-minute
+  `OTA_QUIESCE_MAX_CYCLES`, which deliberately outlives the complete bounded OTA path and its
+  480-second host observer; the former five-minute cap began before the five-minute body deadline
+  and could therefore re-admit allocations during a valid transfer. The esp-mqtt transport cannot safely resume beside the same dynamic
+  TLS allocator. Instead the network operations themselves have whole-operation deadlines: 30 s
+  for a manifest, five minutes for a firmware stream, and 60 s for Weather. Each read receives only
+  the remaining time, so a peer cannot hold the service pause indefinitely by trickling one byte
+  inside every ordinary socket timeout. The RAII owner then releases the pause on every deadline
+  and error exit. The watchdog is fed above the publisher check. X10A applies the same check before its first Config/cache
   allocation for **both OTA and weather** and exposes a lock-free acknowledgement after any in-flight
   sweep has finished. The MQTT task exposes the equivalent acknowledgement around its complete
-  allocation-capable publish cycle. Its independent esp-mqtt task also claims the gate from the
-  synchronous `MQTT_EVENT_BEFORE_CONNECT` callback through `CONNECTED`/`DISCONNECTED`; a two-phase
-  active-flag recheck prevents a handshake or reconnect from starting behind an already-advertised
-  Weather/OTA owner. If the firmware publish/startup claim won first, `BEFORE_CONNECT` never waits
-  under esp-mqtt's API lock (the publisher may need that lock for `client_stop`); it claims transport
-  immediately and the later network owner waits. Weather waits up to 15 seconds for both acknowledgements before its second OTA
-  check; OTA waits for them before its own network operation. This closes the race in both directions:
-  either the existing network request unwinds first or the new one reaches TLS only while X10A, the
-  firmware MQTT publish cycle and an esp-mqtt handshake/reconnect are quiescent. Like the publisher
-  hold, connect/startup deferral is capped at five minutes rather than trusting a stuck activity bit
-  forever. MQTT startup claims the same acknowledgement before its first Config/topic/client
-  allocation and waits if an OTA request won the interval after HTTP startup.
-- **The model-sized values snapshot yields to those known TLS owners.** A fresh-production canary
+  allocation-capable publish cycle. HomeHub and Syslog likewise claim their complete Config/vector
+  or Config/DNS/ping/socket cycles, recheck the TLS owner after claiming, and publish lock-free
+  acknowledgements; OTA and Weather wait boundedly for those cycles to unwind. Its independent
+  esp-mqtt task marks transport activity in the synchronous `MQTT_EVENT_BEFORE_CONNECT` callback
+  through `CONNECTED`/`DISCONNECTED`. The callback only publishes that lock-free marker and returns:
+  it runs under esp-mqtt's API lock and waiting there would deadlock the publisher's clean
+  `esp_mqtt_client_stop()` against the task watchdog. OTA and Weather instead request a transport
+  pause, then wait up to 15 seconds for the MQTT owner task to stop/join the complete client and
+  acknowledge it before their own TLS open. This also removes keepalive, subscribed-message and
+  MQTTS dynamic-record churn for the whole network-heap interval; the same client resumes only after
+  the owner flag is clear. A TLS broker then needs four stable 56/24-KiB INTERNAL-heap samples
+  before restart, and a direct start failure uses exponential backoff capped at 60 seconds instead
+  of retrying against the freshly fragmented heap every second. Plaintext MQTT does not pay that
+  TLS-only admission delay. MQTT startup claims the same acknowledgement before its first
+  Config/topic/client allocation and waits if an OTA request won the interval after HTTP startup.
+- **Allocation-rich HTTP snapshots yield to known TLS owners.** A fresh-production canary
   measured `min_free_heap=700 B` and one clean `/values` 503 while the board otherwise recovered
   without a restart or allocation-skip counter. Before the model-sized snapshot allocation, the
-  shared `/values`/MCP `get_hp_values` sender now checks the lock-free OTA and Weather activity flags
-  every 250 ms for at most four seconds. The 129-row plant needs a 5,160-byte contiguous
+  shared `/values`/MCP `get_hp_values` sender now fails fast while the long OTA transfer owns TLS and
+  checks the shorter Weather activity flag every 250 ms for at most four seconds. The 129-row plant
+  needs a 5,160-byte contiguous
   `CachedValue` block before the smaller ambiguity vector and 1 KiB response sink; waiting lets the
   observed roughly two-second TLS/parse owner unwind instead of racing that block. A stalled owner
   still produces an explicit bounded busy-503 after four seconds; it cannot park the HTTP server
-  indefinitely. `/status`, `/diag` and `/ota/status` are not themselves gated; once the bounded
-  values request completes, health and update progress remain observable during a long firmware
-  download. No model-sized buffer is retained across requests —
+  indefinitely. `/status` also fails fast before taking its many small snapshots while OTA is
+  active. The same early refusal covers `/history`, `/scan`, `/models?active=1` and only the
+  allocation-rich redacted `/diag` variant. The browser already switches to compact `/ota/status`;
+  static assets, `/models` and the unredacted static `/diag` ring remain readable, so update progress
+  and diagnostics stay observable without recreating the allocator race. No model-sized buffer is retained across requests —
   reintroducing one would recreate the dev.13 fragmentation failure this coordination replaces.
 - **The weather fetch gates on headroom immediately before opening TLS** (`logic/weather_forecast.hpp` →
   `weather_fetch_headroom_ok`, live-10). An Open-Meteo fetch transiently claims ~16 KiB mbedTLS
@@ -2372,7 +2407,9 @@ Structure:
   creates TLS state. HTTP and cJSON owners are unwind-safe, so a later parser allocation failure
   releases the C resources before retry. Below **56 KiB total free / 24 KiB largest
   contiguous internal block** it logs the sample, sets `state=waiting, reason=heap_headroom` and
-  retries after five minutes — the previous valid forecast stays available. The 24 KiB contiguous
+  retries after five minutes — the previous valid forecast stays available. A separate 60-second
+  whole-download deadline releases every peer if a server trickles data without hitting the
+  per-read timeout. The 24 KiB contiguous
   floor rejects the measured 15.9 KiB trough while admitting the same board's healthy 31.7 KiB
   ceiling; a provisional 40 KiB largest-block floor would disable weather permanently there. The
   56 KiB aggregate floor leaves about 16 KiB outside the measured ~40 KiB transient claim.
@@ -3137,7 +3174,9 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   defaulted trend. Sent in CHUNKS (~1.1 kB body): smaller than the model-dependent
                   `/values` body, but still a new allocation on a heap whose largest contiguous block is the real
                   ceiling. Which rows HAVE a trend is /status.history — a row the profile does not
-                  carry is omitted, an absent feature stated by absence rather than an empty chart
+                  carry is omitted, an absent feature stated by absence rather than an empty chart.
+                  During OTA the route returns the common early busy-503 before parsing/snapshot
+                  allocation; the client retries the complete read after the network operation
 (no /events)      There is NO live-push route. The web UI POLLS: GET /values every 2 s and
                   GET /status every 8 s, one chain, backing off to 30 s while the device is
                   unreachable and suspended entirely while the browser tab is hidden. The /events
@@ -3158,12 +3197,14 @@ GET  /models?active=1   lazy X10A-diagnosis feed: streams exact queryable ValueD
                   A resolved profile uses its exact definition with fallback:false; `profile:"auto"`
                   and unknown/stale ids use definition:"generic",fallback:true, so example rows stay
                   available without claiming that generic was detected. The RX/TX dropdown still takes its GPIOs from
-                  /status.pins_avail, NOT from the legacy pin_hint
+                  /status.pins_avail, NOT from the legacy pin_hint. During OTA this dynamic variant
+                  returns the common early busy-503; static GET /models remains reachable
 GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. ?redact=1 scrubs the handful of
                   lines that interpolate a host/IP/SSID (logic/redact.hpp) and switches the response
                   to CHUNKED: a replacement is longer than most values it replaces, so the redacted
                   text can GROW past the static dump buffer, and the alternatives are a second ~8 KB
-                  .bss buffer or a ~6 KB contiguous heap allocation
+                  .bss buffer or a ~6 KB contiguous heap allocation. Plain /diag keeps serving its
+                  static ring during OTA; redact=1 returns the early busy-503 before its string chunk
 POST /diag/clear  clear the in-memory diagnostic ring. Destructive actions are POST-only, so a link,
                   prefetch or crawler cannot erase evidence.
 GET  /status?redact=1   the bug-report form of /status: all 27 reporter-identifying values read
@@ -3188,7 +3229,8 @@ GET  /status?redact=1   the bug-report form of /status: all 27 reporter-identify
                   SSID and the broker, so redaction is opt-in per request, never the default
 GET  /scan        WiFi scan {"networks":[{ssid,rssi}]} — TRUSTED-LAN ONLY and read by NO shipped
                   client: the setup portal takes a TYPED SSID (no dropdown, no fetch), so this is a
-                  humans/scripts diagnostic like /models, not part of the provisioning surface
+                  humans/scripts diagnostic like /models, not part of the provisioning surface.
+                  During OTA it returns the early busy-503 before radio work or list allocation
 GET  /coredump      stream the current-firmware core-dump image (chunked octet-stream; 404 if
                   none or if the only raw image is a proven foreign-build orphan). Decode offline against the matching-version
                   .elf: scripts/decode-coredump.sh coredump.bin (CI archives the .elf per build). The
@@ -3475,9 +3517,12 @@ POST /ota/update?after=<check-generation>&channel=<release|dev>&version=<checked
                   release). Per-request, never stored
 GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, update_available,
                   downgrade, channel, busy, generation, available, available_sha256,
-                  available_channel, current} — `busy` and
-                  `generation` are copied under the same OTA mutex; the UI polls this; all strings go through
-                  json_quote. `downgrade` = the offered build is installable but OLDER (the
+                  available_channel, current, heap_min_free_bytes,
+                  heap_min_largest_block_bytes} — `busy` and `generation` are copied under the same
+                  OTA mutex; the UI polls this. FixedText fields plus `FixedBuffer<2048>` and
+                  `json_append_quoted` keep the whole progress path allocation-free and fail closed
+                  on overflow. The two heap fields are operation-local **sampled** minima, not a
+                  continuous allocator trace. `downgrade` = the offered build is installable but OLDER (the
                   dev -> release direction); the UI needs BOTH flags, since update_available alone
                   makes a release-channel check on a dev board read "up to date" forever
 GET  /mcp         embedded/gzipped static MCP information + setup page; no external assets or

@@ -117,6 +117,13 @@ CONFIG_MBEDTLS_FS_IO=n
 # retains roughly 99% public-root coverage at about half the flash cost of the full Mozilla set;
 # brokers chained only to a rare excluded root need a certificate chain rooted in this subset.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+# Allocate TLS RX/TX records only when needed, size them for the actual record, and return large
+# buffers to small cache buffers after use. ESP-IDF 6.0.2's dynamic-buffer port applies this to OTA,
+# weather and optional MQTTS and removes the connection-long 16 KiB RX + 4 KiB TX reservation.
+# Keep config/key/CA lifetime unchanged: freeing those after a handshake would require every
+# reconnect path to register them again and is a separate, riskier optimisation.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n
 # Silent asserts — keep the abort()/reboot on a failed assertion (so a bad state still
 # reverts via the rollback gate) but drop the assert string tables. ~5 KB.
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y

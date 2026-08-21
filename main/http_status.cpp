@@ -108,10 +108,11 @@ namespace daik {
 
 // GET /values needs one contiguous 40-byte CachedValue slot per live X10A row (5,160 B on the
 // 129-row production profile). Weather/OTA TLS can temporarily leave less than that even though the
-// heap recovers immediately. Wait only on this proven allocation path, before it owns a snapshot or
-// mutex, instead of keeping another boot-long buffer (the dev.13 regression). Status, diagnostics
-// and OTA progress are not themselves gated; this request releases the single HTTP task after the
-// bounded wait if a TLS owner remains active.
+// heap recovers immediately. Weather is a short request, so /values waits boundedly behind it.
+// OTA can own TLS for almost a minute; both /values and the allocation-rich /status snapshot fail
+// fast there, leaving the single HTTP worker available for the compact /ota/status progress route.
+// Diagnostics use a static ring buffer and remain reachable. This is request-time coordination,
+// not another boot-long buffer (the dev.13 regression).
 constexpr TickType_t kValuesTlsWait = pdMS_TO_TICKS(4000);
 constexpr TickType_t kValuesTlsRetry = pdMS_TO_TICKS(250);
 
@@ -120,7 +121,7 @@ static bool wait_for_values_tls_owner() {
     for (;;) {
         const TickType_t elapsed = xTaskGetTickCount() - started;
         const auto decision = logic::http_values_wait_decision(
-            ota_download_active(), weather_fetch_active(),
+            false, weather_fetch_active(),
             static_cast<uint32_t>(elapsed * portTICK_PERIOD_MS),
             static_cast<uint32_t>(kValuesTlsWait * portTICK_PERIOD_MS));
         if (decision == logic::HttpValuesWaitDecision::Ready) return true;
@@ -129,7 +130,7 @@ static bool wait_for_values_tls_owner() {
     }
 }
 
-static esp_err_t values_tls_busy(httpd_req_t* req) {
+static esp_err_t network_tls_busy(httpd_req_t* req) {
     httpd_resp_set_status(req, "503 Service Unavailable");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "network operation in progress");
@@ -1318,6 +1319,11 @@ void http_append_status_json(std::string& j, bool redact) {
 }
 
 static esp_err_t h_status(httpd_req_t* req) {
+    // The browser deliberately switches to the compact /ota/status surface once installation is
+    // accepted. Refuse before Config/status snapshots or JSON temporaries are created: admitting
+    // this large poll after the transfer headroom sample recreated the exact X509-fragmentation
+    // race the admission gate is meant to prevent.
+    if (ota_download_active()) return network_tls_busy(req);
     // ?redact=1 -> the bug-report form of this payload (logic/redact.hpp). Same flag policy as
     // ?clear / ?verbose / ?downgrade: fires on exactly "1", so ?redact=0 is not a near-miss that
     // silently ships the unscrubbed body under a name that promised otherwise.
@@ -1569,7 +1575,10 @@ static void append_values_json(JsonOut& j, const ValuesSnapshot& snapshot) {
 // snapshots before the first byte and stream the same representation through this strict 1 KiB sink.
 esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix,
                                 std::string_view suffix) {
-    if (!wait_for_values_tls_owner()) return values_tls_busy(req);
+    // Do not park the sole HTTP worker for the lifetime of a firmware download. Weather remains a
+    // bounded wait because it is short; OTA progress must stay responsive through /ota/status.
+    if (ota_download_active()) return network_tls_busy(req);
+    if (!wait_for_values_tls_owner()) return network_tls_busy(req);
     ValuesSnapshot snapshot = take_values_snapshot();
     HttpJsonChunks j(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
@@ -1599,6 +1608,9 @@ static bool models_active_requested(httpd_req_t* req) {
 // as a diagnostic example set; `definition` + `fallback` keep that provenance distinct from the
 // installation's `profile` instead of silently pretending generic was detected.
 static esp_err_t h_active_model_values(httpd_req_t* req) {
+    // The static /models catalog remains cheap and reachable, but ?active=1 snapshots Config and
+    // builds a model-sized response. Do not admit that allocation after OTA TLS headroom passed.
+    if (ota_download_active()) return network_tls_busy(req);
     const Config c = config(); // allocate/snapshot before response headers; handle_all maps OOM to 503
     bool fallback = false;
     const def::Profile* profile = probe_catalog_profile(def::profiles, c.profile, fallback);
@@ -1665,6 +1677,9 @@ static esp_err_t h_models(httpd_req_t* req) {
 // Sent in CHUNKS. The body is ~1.5 KB — smaller than the model-dependent /values body — but it is a new allocation on
 // a heap where the largest contiguous block is the binding limit, and chunking costs nothing here.
 static esp_err_t h_history(httpd_req_t* req) {
+    // History is intentionally chunked, yet still owns a growing string and label temporaries.
+    // Keep that churn outside the firmware TLS operation just like /status and /values.
+    if (ota_download_active()) return network_tls_busy(req);
     char q[96] = {0};
     char id[32] = {0};
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
@@ -1798,6 +1813,9 @@ static esp_err_t h_diag(httpd_req_t* req) {
         if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK) diag_set_verbose(query_flag_on(v));
         if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
     }
+    // Plain /diag copies into static storage and is useful while OTA is in flight. Redaction owns
+    // per-line strings and a 1280-byte growable chunk, so only that allocation-rich variant waits.
+    if (redact && ota_download_active()) return network_tls_busy(req);
     static char buf[6144];
     size_t n = diag_dump(buf, sizeof(buf));
     httpd_resp_set_type(req, "text/plain");
@@ -1915,6 +1933,9 @@ static esp_err_t h_crash_dismiss(httpd_req_t* req) {
 }
 
 static esp_err_t h_scan(httpd_req_t* req) {
+    // A scan materializes arbitrary nearby SSIDs and asks the Wi-Fi stack for a concurrent radio
+    // operation. Neither belongs between OTA's admission sample and its TLS/X509 allocations.
+    if (ota_download_active()) return network_tls_busy(req);
     WifiScanEntry e[20];
     int n = wifi_scan(e, 20);
     std::string j = "{\"networks\":[";

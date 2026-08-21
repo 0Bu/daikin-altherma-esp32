@@ -18,6 +18,7 @@ const health = read("main/logic/health_gate.hpp");
 const ota = read("main/ota_update.cpp");
 const httpOta = read("main/http_ota.cpp");
 const mqtt = read("main/mqtt_ha.cpp");
+const quiesce = read("main/logic/ota_quiesce.hpp");
 
 assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/,
   "the bench stage must remain distinct and ordered before production");
@@ -29,11 +30,29 @@ assert.doesNotMatch(gate, /192\.168\.|(?:[0-9A-F]{2}:){5}[0-9A-F]{2}/,
   "the public gate must not publish a private address or real board identifier");
 assert.match(gate, /STRESS_SECONDS\s*=\s*180/,
   "both hardware stages need the fixed three-minute pressure window");
+const otaCheckTimeout = Number(gate.match(/OTA_CHECK_TIMEOUT_S\s*=\s*(\d+)/)?.[1]);
+const otaTimeout = Number(gate.match(/OTA_TIMEOUT_S\s*=\s*(\d+)/)?.[1]);
+const quiesceCycles = Number(quiesce.match(/OTA_QUIESCE_MAX_CYCLES\s*=\s*(\d+)/)?.[1]);
+assert.ok(otaCheckTimeout >= 120,
+  "host check observer must include two setup attempts, headroom waits, and manifest body deadline");
+assert.ok(otaTimeout >= 480,
+  "the sole-write observer must outlive re-manifest, five-minute firmware deadline, verification and reboot");
+assert.ok(quiesceCycles > otaTimeout,
+  "publisher/poller quiescence must strictly outlive the authoritative host observer");
+assert.equal(occurrences(gate, "time.monotonic() + OTA_CHECK_TIMEOUT_S"), 4,
+  "stress, production offer, legacy offer and bench return must share the safe check timeout");
+assert.match(ota, /kManifestDeadline\s*=\s*pdMS_TO_TICKS\(30000\)/,
+  "the host check timeout relation must remain tied to the firmware manifest deadline");
+assert.match(ota, /kFirmwareDeadline\s*=\s*pdMS_TO_TICKS\(5 \* 60 \* 1000\)/,
+  "the host update timeout relation must remain tied to the firmware transfer deadline");
 assert.doesNotMatch(gate, /add_argument\([^\n]*stress|skip[-_]local|skip[-_]test|no[-_]stress/i,
   "the production command must expose no short-duration or skipped-test bypass");
 assert.match(gate,
   /OFFICIAL_MANIFEST_URL\s*=\s*"https:\/\/0bu\.github\.io\/daikin-altherma-esp32\/dev\/manifest\.json"/,
   "only the official dev feed may enter production promotion");
+assert.match(gate,
+  /OFFICIAL_RELEASE_MANIFEST_URL\s*=\s*"https:\/\/0bu\.github\.io\/daikin-altherma-esp32\/manifest\.json"/,
+  "the bench rollback exercise must use only the official stable feed");
 assert.match(gate, /manifest_url\s*!=\s*OFFICIAL_MANIFEST_URL/,
   "foreign and release manifests must fail before download");
 assert.match(gate, /provenance\.get\("source_sha"\)\s*!=\s*expected_source_sha/,
@@ -51,28 +70,75 @@ assert.match(gate, /scripts\/run-mock-tests\.sh/,
 assert.match(gate, /scripts\/run-contract-tests\.sh/,
   "all X10A, OTA, production-promotion and public-readiness contracts must run before hardware promotion");
 
-const testStress = gate.indexOf("test_evidence = stress_board(");
+const fullDownload = gate.indexOf("full_download_evidence = exercise_bench_full_download(");
+const testStress = gate.indexOf("test_evidence = stress_board(", fullDownload);
 const productionConfirmation = gate.indexOf("if args.confirm_production != PRODUCTION_ROLE");
 const offer = gate.indexOf("check_generation = wait_for_ota_offer(", productionConfirmation);
 const post = gate.indexOf("    post_update_once(", offer);
 const returned = gate.indexOf('wait_for_new_firmware(production["host"], args.expected_version, elf)');
 const productionStress = gate.indexOf("production_evidence = stress_board(");
 const retained = gate.indexOf("retained = verify_retained_x10a(final_status)");
-assert.ok(testStress >= 0 && productionConfirmation > testStress && offer > productionConfirmation &&
+assert.ok(fullDownload >= 0 && testStress > fullDownload && productionConfirmation > testStress &&
+          offer > productionConfirmation &&
           post > offer && returned > post && productionStress > returned && retained > productionStress,
-  "bench stress, explicit production confirmation, one update, reboot proof, canary stress and retained X10A must stay ordered");
+  "full bench binary OTA, bench stress, production confirmation, one production update, reboot proof, canary stress and retained X10A must stay ordered");
+const fullHelperStart = gate.indexOf("def exercise_bench_full_download(");
+const fullHelperEnd = gate.indexOf("\ndef self_test(", fullHelperStart);
+assert.ok(fullHelperStart >= 0 && fullHelperEnd > fullHelperStart,
+  "the full bench download helper must remain identifiable");
+const fullHelper = gate.slice(fullHelperStart, fullHelperEnd);
+const releaseOffer = fullHelper.indexOf('expected_channel="release", allow_downgrade=True');
+const releasePost = fullHelper.indexOf("post_update_once(", releaseOffer);
+const releaseBoot = fullHelper.indexOf("release_status = wait_for_new_firmware(", releasePost);
+const releaseProbation = fullHelper.indexOf("release_probation = wait_for_bench_release_probation(", releaseBoot);
+const devChannel = fullHelper.indexOf('set_update_channel(host, "dev")', releaseProbation);
+const targetBoot = fullHelper.indexOf("target_status = wait_for_new_firmware(", devChannel);
+assert.ok(releaseOffer >= 0 && releasePost > releaseOffer && releaseBoot > releasePost &&
+          releaseProbation > releaseBoot && devChannel > releaseProbation && targetBoot > devChannel,
+  "the target must perform a complete release download, survive rollback probation, and return to the exact dev artifact before staging passes");
+assert.match(gate, /BENCH_RELEASE_PROBATION_S\s*=\s*105/,
+  "the old release must survive beyond its 90-second health window");
+const probationStart = gate.indexOf("def wait_for_bench_release_probation(");
+const probationEnd = gate.indexOf("\ndef wait_for_legacy_offer(", probationStart);
+const probationHelper = gate.slice(probationStart, probationEnd);
+assert.ok(probationStart >= 0 && probationEnd > probationStart,
+  "the release probation helper must remain identifiable");
+assert.match(probationHelper,
+  /uptime_s[\s\S]{0,900}?heap_restarts[\s\S]{0,300}?mqtt_skipped[\s\S]{0,300}?poll_skipped[\s\S]{0,900}?MIN_FINAL_FREE_HEAP[\s\S]{0,300}?MIN_FINAL_LARGEST_BLOCK/,
+  "release probation must require the commit window, no allocation failures and safe heap");
+assert.match(gate,
+  /for key in \("status_busy_503", "values_busy_503", "diag_ok", "ota_status_ok"\)[\s\S]{0,300}?target OTA did not expose sampled operation-local heap minima/,
+  "the full binary exercise must prove fast snapshot refusal, live compact surfaces and OTA-local heap telemetry");
 assert.match(gate,
   /test_evidence = stress_board\([\s\S]{0,200}?require_x10a=False, require_weather=False/,
   "the bench must not require intentionally absent X10A or optional weather consent");
 assert.match(gate,
   /production_evidence = stress_board\([\s\S]{0,200}?require_x10a=True, require_weather=True/,
   "the production canary must keep live X10A, timeout-delta and weather-TLS enforcement enabled");
-assert.equal(occurrences(gate, 'method="POST"'), 1,
-  "the entire promotion implementation may contain exactly one production POST");
-assert.match(gate, /Deliberately one un-retried write/,
-  "the sole production write must remain explicitly non-retrying");
+assert.equal(occurrences(gate, 'method="POST"'), 3,
+  "the only POST call sites are channel selection, exact-artifact update and legacy bench restore");
+const productionExecution = gate.slice(productionConfirmation);
+assert.equal(occurrences(productionExecution, "post_update_once("), 1,
+  "the production execution block must invoke exactly one update write");
+assert.doesNotMatch(productionExecution, /set_update_channel|legacy bench|\/ota\/update.*method="POST"/,
+  "bench channel/legacy writes must never be reachable from the production execution block");
+assert.match(gate, /Deliberately one un-retried exact-artifact write per invocation/,
+  "every exact-artifact update invocation must remain explicitly non-retrying");
 assert.match(gate, /OTA_OFFER_POLL_SECONDS\s*=\s*0\.1/,
   "the gate must observe the accepted operation without a long blind polling gap");
+assert.match(gate, /OTA_STATUS_POLL_SECONDS\s*=\s*0\.1/,
+  "the gate must sample the short completed OTA state before reboot");
+const newFirmwareWait = gate.slice(gate.indexOf("def wait_for_new_firmware("),
+  gate.indexOf("\ndef set_update_channel(", gate.indexOf("def wait_for_new_firmware(")));
+assert.match(newFirmwareWait,
+  /ota\.get\("state"\)\s+not\s+in\s+\("checking",\s*"updating",\s*"done"\)[\s\S]{0,160}?request_json\(host,\s*"\/status"\)/,
+  "the reboot waiter must not poll allocation-rich /status while OTA owns TLS");
+assert.match(newFirmwareWait,
+  /except HTTPError as error:[\s\S]{0,100}?error\.code\s*!=\s*503/,
+  "an expected busy-503 must not abort reboot observation");
+assert.match(gate,
+  /target_transfer\.get\("saw_done"\)\s+is\s+not\s+True[\s\S]{0,100}?never exposed its completed validation state/,
+  "bench acceptance must observe the target verifier's completed state, not just recovered heap");
 assert.match(gate,
   /generation\s*=\s*status\.get\("generation"\)[\s\S]{0,180}?generation\s*!=\s*expected_generation[\s\S]{0,120}?operation generation changed/,
   "offer status must stay bound to the synchronously accepted check generation");
@@ -86,15 +152,15 @@ assert.match(gate,
   /lacks or refused the OTA generation handshake[\s\S]{0,160}?signed NVS-preserving USB bootstrap[\s\S]{0,100}?no update POST was sent/,
   "legacy firmware must fail before the write with an explicit physical-bootstrap boundary");
 assert.match(gate,
-  /post_update_once[\s\S]{0,900}?urlencode\([\s\S]{0,300}?"after": check_generation[\s\S]{0,300}?"channel": "dev"[\s\S]{0,300}?"version": expected_version[\s\S]{0,300}?"sha256": expected_app_sha256[\s\S]{0,500}?request_json\(host, f"\/ota\/update\?\{query\}"[\s\S]{0,600}?generation\s*!=\s*expected_generation/,
-  "the sole update POST must bind the checked generation and exact dev artifact, then require its immediate successor");
+  /post_update_once[\s\S]{0,900}?fields\s*=\s*\{[\s\S]{0,300}?"after": check_generation[\s\S]{0,300}?"channel": expected_channel[\s\S]{0,300}?"version": expected_version[\s\S]{0,300}?"sha256": expected_app_sha256[\s\S]{0,500}?request_json\(host, f"\/ota\/update\?\{query\}"[\s\S]{0,600}?generation\s*!=\s*expected_generation/,
+  "each exact update POST must bind the checked generation, channel and artifact, then require its immediate successor");
 assert.match(gate,
   /expected_generation\s*=\s*1 if check_generation == 0xFFFFFFFF else check_generation \+ 1/,
   "the accepted update must be the immediate wrap-safe successor of the checked operation");
 assert.match(gate,
   /status\.get\("available"\)\s*!=\s*expected_version[\s\S]{0,160}?available_sha256[\s\S]{0,160}?expected_app_sha256[\s\S]{0,160}?available_channel[\s\S]{0,160}?expected_channel/,
   "the completed check status must match version, application SHA and channel before the write");
-assert.match(gate, /did not settle on the exact gated dev artifact within 30 seconds/,
+assert.match(gate, /did not settle on the exact gated artifact within \{OTA_CHECK_TIMEOUT_S\} seconds/,
   "a stale or wrong offer must remain bounded and fail closed at the polling deadline");
 assert.equal(occurrences(httpOta, '503 Service Unavailable'), 2,
   "both busy check and busy update requests must return a non-success HTTP status");
@@ -105,7 +171,8 @@ const secondGenerationResponse = httpOta.indexOf('{\\"ok\\":true,\\"generation\\
 assert.ok(checkAccepted >= 0 && firstGenerationResponse > checkAccepted &&
           updateAccepted > firstGenerationResponse && secondGenerationResponse > updateAccepted,
   "accepted check and update requests must each return their authoritative generation");
-assert.match(httpOta, /,\\"busy\\":.*s\.busy[\s\S]{0,180}?,\\"generation\\":.*std::to_string\(s\.generation\)/,
+assert.match(httpOta,
+  /j\s*\+=\s*",\\"busy\\":"[\s\S]{0,100}?s\.busy[\s\S]{0,100}?j\s*\+=\s*",\\"generation\\":"[\s\S]{0,100}?number\(s\.generation\)/,
   "OTA status must expose busy and generation from the same mutex-protected snapshot");
 assert.match(httpOta, /available_sha256[\s\S]{0,180}?available_channel/,
   "OTA status must expose the exact checked artifact identity consumed by host and UI");
@@ -116,6 +183,9 @@ assert.match(gate,
   "an X10A-less bench must not fail on expected bus timeouts while production remains bounded");
 assert.match(gate, /worker\.start\(\)[\s\S]{0,500}?\/ota\/check\?ms=/,
   "real OTA manifest TLS must overlap the concurrent HTTP pressure workers");
+assert.match(gate,
+  /busy_503\["status"\][\s\S]{0,600}?busy_503\["values"\][\s\S]{0,2200}?did not prove fast status\/values refusal/,
+  "the manifest pressure stage must accept only the intentional OTA busy-503 window and require observing both snapshot refusals");
 assert.match(gate, /ota_check\.get\("state"\)\s*!=\s*"idle"[\s\S]{0,100}?ota_check\.get\("available"\)\s*!=\s*version/,
   "the overlapping OTA TLS request must finish against the exact promoted dev artifact");
 assert.match(gate,

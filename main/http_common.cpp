@@ -8,6 +8,7 @@
 #include "http_handlers.hpp"
 #include "diag_log.hpp"   // diag_printf — a route that failed to register must not do so silently
 #include "net.hpp"
+#include "ota_update.hpp"
 #include "provisioning.hpp"
 #include "stack_watch.hpp"
 #include "logic/http_body.hpp"
@@ -81,6 +82,15 @@ static esp_err_t handle_all(httpd_req_t* req) {
     auto fn = reinterpret_cast<esp_err_t (*)(httpd_req_t*)>(req->user_ctx);
     if (!fn) return httpd_resp_send_500(req);
     try {
+        // Once the async OTA task owns TLS, every other POST is either allocation-rich (JSON,
+        // Config, DNS/MQTT probes) or can reboot/change device state underneath the inactive-slot
+        // write. Refuse before Host/body parsing and before any route-specific allocation. The
+        // already accepted /ota/update POST raced this flag while it was still false; any later
+        // update/config/MCP/probe POST is deliberately a small retryable busy response.
+        if (req->method == HTTP_POST && ota_busy())
+            return reject_request(req, "503 Service Unavailable",
+                                  "Network TLS operation in progress; retry shortly");
+
         // The captive portal must answer arbitrary probe Host names so an OS can discover it. On
         // the configured LAN, however, every route — static UI, read API and POST control alike —
         // accepts only this device's mDNS/current-IP identities. This is the global DNS-rebinding

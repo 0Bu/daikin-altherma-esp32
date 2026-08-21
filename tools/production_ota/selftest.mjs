@@ -17,6 +17,7 @@ const files = [
   "main/ota_update.cpp",
   "main/http_ota.cpp",
   "main/mqtt_ha.cpp",
+  "main/logic/ota_quiesce.hpp",
 ];
 const pristine = new Map(files.map(rel => [rel, fs.readFileSync(path.join(root, rel), "utf8")]));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-production-ota-contract-"));
@@ -55,6 +56,42 @@ try {
         'BENCH_ROLE = "production"')],
     ["the pressure window is shortened", () =>
       replaceOnce("scripts/production-ota-gate.py", "STRESS_SECONDS = 180", "STRESS_SECONDS = 60")],
+    ["the manifest observer is shorter than firmware's bounded check path", () =>
+      replaceOnce("scripts/production-ota-gate.py", "OTA_CHECK_TIMEOUT_S = 120",
+        "OTA_CHECK_TIMEOUT_S = 30")],
+    ["the sole-write observer is shorter than firmware's bounded install path", () =>
+      replaceOnce("scripts/production-ota-gate.py", "OTA_TIMEOUT_S = 480", "OTA_TIMEOUT_S = 180")],
+    ["publisher quiescence no longer outlives the authoritative observer", () =>
+      replaceOnce("main/logic/ota_quiesce.hpp", "OTA_QUIESCE_MAX_CYCLES = 600",
+        "OTA_QUIESCE_MAX_CYCLES = 480")],
+    ["the official bench release feed is replaced", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/manifest.json"',
+        'OFFICIAL_RELEASE_MANIFEST_URL = "https://example.test/manifest.json"')],
+    ["the full bench binary exercise is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "full_download_evidence = exercise_bench_full_download(",
+        "full_download_evidence = bench_manifest_only_bypass(")],
+    ["the target is denied its explicit bench downgrade", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'expected_channel="release", allow_downgrade=True',
+        'expected_channel="release", allow_downgrade=False')],
+    ["the bench is not restored to the dev channel", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'set_update_channel(host, "dev")',
+        'set_update_channel(host, "release")')],
+    ["the release probation wait is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "release_probation = wait_for_bench_release_probation(",
+        "release_probation = bypass_release_probation(")],
+    ["full-transfer status busy refusal is no longer required", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'for key in ("status_busy_503", "values_busy_503", "diag_ok", "ota_status_ok"):',
+        'for key in ("values_busy_503", "diag_ok", "ota_status_ok"):')],
+    ["full-transfer heap telemetry is no longer required", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'fail(f"{host} target OTA did not expose sampled operation-local heap minima")',
+        'pass  # heap telemetry bypassed')],
     ["offer polling ignores a replaced operation generation", () =>
       replaceOnce("scripts/production-ota-gate.py", "generation != expected_generation",
         "False")],
@@ -87,6 +124,14 @@ try {
     ["real OTA TLS is removed from the pressure window", () =>
       replaceOnce("scripts/production-ota-gate.py", 'f"/ota/check?ms={int(time.time() * 1000)}"',
         '"/ota/status"')],
+    ["the reboot waiter polls full status while OTA still owns TLS", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if ota.get("state") not in ("checking", "updating", "done"):',
+        'if True:')],
+    ["the target verifier completion is no longer observed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if target_transfer.get("saw_done") is not True:',
+        'if False:')],
     ["the final contiguous-block floor is reduced", () =>
       replaceOnce("scripts/production-ota-gate.py", "MIN_FINAL_LARGEST_BLOCK = 16 * 1024",
         "MIN_FINAL_LARGEST_BLOCK = 8 * 1024")],

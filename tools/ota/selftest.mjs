@@ -14,12 +14,20 @@ const files = [
   "sdkconfig.defaults",
   "main/ota_update.cpp",
   "main/ota_update.hpp",
+  "main/config.cpp",
   "main/http_ota.cpp",
   "main/mqtt_ha.cpp",
   "main/hp_poll.cpp",
+  "main/hp_modbus.cpp",
+  "main/syslog.cpp",
+  "main/weather_forecast.cpp",
+  "main/mcp_server.cpp",
+  "main/http_common.cpp",
   "main/http_status.cpp",
   "main/logic/http_values_wait.hpp",
+  "main/logic/fixed_text.hpp",
   "main/logic/ota_headroom.hpp",
+  "main/logic/ota_quiesce.hpp",
   "main/logic/ota_transport.hpp",
 ];
 const pristine = new Map(files.map((rel) => [rel, fs.readFileSync(path.join(root, rel), "utf8")]));
@@ -57,10 +65,24 @@ try {
     ["signed-on-update is disabled", () =>
       replaceOnce("sdkconfig.defaults", "CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y",
         "CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=n")],
+    ["dynamic TLS buffers are disabled", () =>
+      replaceOnce("sdkconfig.defaults", "CONFIG_MBEDTLS_DYNAMIC_BUFFER=y",
+        "CONFIG_MBEDTLS_DYNAMIC_BUFFER=n")],
+    ["the firmware TLS aggregate floor is weakened to the verifier budget", () =>
+      replaceOnce("main/logic/ota_headroom.hpp",
+        "OTA_TRANSFER_HEADROOM = {56 * 1024, 24 * 1024, 4}",
+        "OTA_TRANSFER_HEADROOM = {24 * 1024, 24 * 1024, 4}")],
+    ["the firmware TLS stable-sample requirement is removed", () =>
+      replaceOnce("main/logic/ota_headroom.hpp",
+        "OTA_TRANSFER_HEADROOM = {56 * 1024, 24 * 1024, 4}",
+        "OTA_TRANSFER_HEADROOM = {56 * 1024, 24 * 1024, 1}")],
+    ["poll and MQTT resume before the bounded OTA path can finish", () =>
+      replaceOnce("main/logic/ota_quiesce.hpp", "OTA_QUIESCE_MAX_CYCLES = 600",
+        "OTA_QUIESCE_MAX_CYCLES = 300")],
     ["the contiguous-block half of the headroom predicate is inverted", () =>
       replaceOnce("main/logic/ota_headroom.hpp",
-        "largest_free_block >= OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES",
-        "largest_free_block <= OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES")],
+        "largest_free_block >= requirement.min_largest_block_bytes",
+        "largest_free_block <= requirement.min_largest_block_bytes")],
     ["an HTTP redirect is admitted as if it were HTTPS", () =>
       replaceOnce("main/logic/ota_transport.hpp",
         "if (ota_url_is_absolute_https(value)) return true;",
@@ -96,21 +118,66 @@ try {
     ["the redirect response is reused without cleanup", () =>
       replaceOnce("main/ota_update.cpp", "esp_http_client_clear_response_buffer(client);",
         "esp_http_client_response_buffer_left_live(client);")],
-    ["one of the two headroom gates is bypassed", () =>
+    ["the firmware-transfer headroom gate is bypassed", () =>
       replaceOnce("main/ota_update.cpp",
-        /wait_for_ota_verify_headroom\(([^;]+)\);/,
-        "ota_headroom_gate_bypassed($1);")],
+        /if\s*\(!wait_for_ota_headroom\(\s*"transfer"([\s\S]{0,180}?)\)\)\s*\{/,
+        "if (ota_transfer_headroom_gate_bypassed($1)) {")],
+    ["the manifest TLS headroom gate is bypassed", () =>
+      replaceOnce("main/ota_update.cpp",
+        /if\s*\(!wait_for_ota_headroom\(\s*"manifest"([\s\S]{0,180}?)\)\)\s*\{/,
+        "if (ota_manifest_headroom_gate_bypassed($1)) {")],
+    ["a trickling manifest can hold the network heap forever", () =>
+      replaceOnce("main/ota_update.cpp",
+        "!set_http_timeout_to_deadline(c, manifest_started, kManifestDeadline)",
+        "false")],
+    ["a trickling image header can hold the network heap forever", () =>
+      replaceOnce("main/ota_update.cpp",
+        "!set_http_timeout_to_deadline(client, transfer_started, kFirmwareDeadline)",
+        "false")],
+    ["a trickling firmware body can hold the network heap forever", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(while \(transfer_ok\) \{[\s\S]{0,180}?)!set_http_timeout_to_deadline\(client, transfer_started, kFirmwareDeadline\)/,
+        "$1false")],
+    ["a trickling weather response can hold the network heap forever", () =>
+      replaceOnce("main/weather_forecast.cpp", "elapsed >= kDownloadDeadline",
+        "false")],
+    ["manifest deadline expiry after a blocking read is mislabeled", () =>
+      replaceOnce("main/ota_update.cpp",
+        "http_deadline_reached(manifest_started, kManifestDeadline)", "false")],
+    ["image-header deadline expiry after a blocking read is mislabeled", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(while \(probe_len < kImageProbeSize\)[\s\S]{0,700}?)http_deadline_reached\(transfer_started, kFirmwareDeadline\)/,
+        "$1false")],
+    ["firmware-body deadline expiry after a blocking read is mislabeled", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(while \(transfer_ok\)[\s\S]{0,700}?)http_deadline_reached\(transfer_started, kFirmwareDeadline\)/,
+        "$1false")],
+    ["weather deadline expiry after a blocking read is mislabeled", () =>
+      replaceOnce("main/weather_forecast.cpp",
+        "xTaskGetTickCount() - download_started >= kDownloadDeadline", "false")],
     ["HTTP cleanup before validation disappears", () =>
       replaceOnce("main/ota_update.cpp", "buffer = nullptr;\n    close_http_client(client);",
         "buffer = nullptr;\n    close_http_client_after_validation(client);")],
     ["the signed-image verifier is bypassed", () =>
       replaceOnce("main/ota_update.cpp", "esp_ota_end(ota_handle)",
         "esp_ota_end_bypassed(ota_handle)")],
+    ["boot selection revalidation loses its heap gate", () =>
+      replaceOnce("main/ota_update.cpp",
+        /if\s*\(!wait_for_ota_headroom\(\s*"boot selection"([\s\S]{0,180}?)\)\)\s*\{/,
+        "if (ota_boot_selection_headroom_gate_bypassed($1)) {")],
     ["validation is again mislabeled as a bad signature", () =>
       replaceOnce("main/ota_update.cpp", "Update rejected: image validation failed",
         "Update rejected: bad signature")],
     ["the memory refusal no longer tells the operator how to retry", () =>
       replaceOnce("main/ota_update.cpp", " — retry after reboot", "")],
+    ["manifest TLS allocation failure is mislabeled as server reachability", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(err\s*=\s*retryable_allocator_failure\s*\n\s*)\? "Not enough memory for update TLS — retry after reboot"/,
+        "$1? \"Can't reach the update server\"")],
+    ["firmware TLS allocation failure is mislabeled as server reachability", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(set_state\("error", allocator_failure\s*\n\s*)\? "Not enough memory for update TLS — retry after reboot"/,
+        "$1? \"Can't reach the update server\"")],
     ["an image-size overrun is mislabeled as a read failure", () =>
       replaceOnce("main/ota_update.cpp",
         "transfer_failure = OtaTransferFailure::Size;",
@@ -123,34 +190,114 @@ try {
       replaceOnce("main/mqtt_ha.cpp",
         "s_publish_network_quiesced.store(true, std::memory_order_release);\n            vTaskDelay",
         "s_publish_network_quiesced.store(false, std::memory_order_release);\n            vTaskDelay")],
+    ["HomeHub keeps allocating during OTA", () =>
+      replaceOnce("main/hp_modbus.cpp", "if (ota_download_active() || weather_fetch_active()) {",
+        "if (false) {")],
+    ["Syslog keeps allocating during OTA", () =>
+      replaceOnce("main/syslog.cpp", "if (ota_download_active() || weather_fetch_active()) {",
+        "if (false) {")],
+    ["HomeHub no longer acknowledges an in-flight allocation cycle", () =>
+      replaceOnce("main/hp_modbus.cpp",
+        "s_network_quiesced.store(false, std::memory_order_release);",
+        "s_network_quiesced.store(true, std::memory_order_release);")],
+    ["Syslog no longer acknowledges an in-flight allocation cycle", () =>
+      replaceOnce("main/syslog.cpp",
+        "s_network_quiesced.store(false, std::memory_order_release);",
+        "s_network_quiesced.store(true, std::memory_order_release);")],
+    ["Weather starts TLS without the HomeHub acknowledgement", () =>
+      replaceOnce("main/weather_forecast.cpp", "!mb_network_quiesced() ||",
+        "false ||")],
+    ["Weather starts TLS without the Syslog acknowledgement", () =>
+      replaceOnce("main/weather_forecast.cpp", "!syslog_network_quiesced()) &&",
+        "false) &&")],
     ["the MQTT acknowledgement ignores an asynchronous TLS reconnect", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "!s_transport_connecting.load(std::memory_order_acquire);",
         "true;")],
-    ["MQTT BEFORE_CONNECT waits against a publisher that needs client_stop", () =>
+    ["MQTT BEFORE_CONNECT no longer marks transport activity", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "if (!s_publish_network_quiesced.load(std::memory_order_acquire)) {",
-        "if (false) {")],
+        /(static void mqtt_transport_before_connect\(\) \{[\s\S]{0,180}?)s_transport_connecting\.store\(true, std::memory_order_release\);/,
+        "$1s_transport_connecting.store(false, std::memory_order_release);")],
     ["MQTT startup allocates beside an OTA that already owns TLS", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "if (!competing_tls_active()) return;",
         "if (true) return;")],
     ["MQTT promotion leaves a stale transport claim after client stop", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "s_transport_connecting.store(false, std::memory_order_release);\n\n    s_connected = false;",
-        "s_transport_connecting.store(true, std::memory_order_release);\n\n    s_connected = false;")],
+        "s_transport_connecting.store(false, std::memory_order_release);\n    s_client_running.store(false, std::memory_order_release);\n\n    s_connected = false;",
+        "s_transport_connecting.store(true, std::memory_order_release);\n    s_client_running.store(false, std::memory_order_release);\n\n    s_connected = false;")],
     ["OTA starts without waiting for the X10A acknowledgement", () =>
       replaceOnce("main/ota_update.cpp", "if (!wait_for_poll_quiesce())",
         "if (false)")],
     ["OTA starts without waiting for the MQTT acknowledgement", () =>
       replaceOnce("main/ota_update.cpp", "else if (!wait_for_mqtt_quiesce())",
         "else if (false)")],
-    ["values snapshots no longer wait behind an OTA TLS owner", () =>
-      replaceOnce("main/http_status.cpp", "ota_download_active(), weather_fetch_active()",
-        "false, weather_fetch_active()")],
+    ["OTA starts without waiting for the stopped MQTT transport", () =>
+      replaceOnce("main/ota_update.cpp", "else if (!wait_for_mqtt_transport_quiesce())",
+        "else if (false)")],
+    ["OTA no longer requests the MQTT transport pause", () =>
+      replaceOnce("main/ota_update.cpp", "mqtt_transport_pause_for_network_heap();",
+        "mqtt_transport_pause_bypassed();")],
+    ["MQTT keepalive transport remains live beside OTA TLS", () =>
+      replaceOnce("main/mqtt_ha.cpp", "esp_mqtt_client_stop(s_client);",
+        "esp_mqtt_client_stop_bypassed(s_client);")],
+    ["MQTT transport pause is never acknowledged", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "s_transport_paused.store(true, std::memory_order_release);",
+        "s_transport_paused.store(false, std::memory_order_release);")],
+    ["MQTT transport is never resumed after network TLS", () =>
+      replaceOnce("main/mqtt_ha.cpp", "const esp_err_t start_rc = start_client_transport();",
+        "const esp_err_t start_rc = ESP_FAIL;")],
+    ["MQTTS resumes without stable contiguous heap", () =>
+      replaceOnce("main/mqtt_ha.cpp", "free_internal < kMqttTlsResumeMinFree",
+        "free_internal < 0")],
+    ["failed MQTT transport resume churns every second", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "transport_resume_wait_s = transport_resume_backoff_s;",
+        "transport_resume_wait_s = 0;")],
+    ["Weather no longer requests the MQTT transport pause", () =>
+      replaceOnce("main/weather_forecast.cpp", "mqtt_transport_pause_for_network_heap();",
+        "mqtt_transport_pause_bypassed();")],
+    ["OTA starts without waiting for the HomeHub acknowledgement", () =>
+      replaceOnce("main/ota_update.cpp", "else if (!wait_for_modbus_quiesce())",
+        "else if (false)")],
+    ["OTA starts without waiting for the Syslog acknowledgement", () =>
+      replaceOnce("main/ota_update.cpp", "else if (!wait_for_syslog_quiesce())",
+        "else if (false)")],
+    ["status snapshots keep allocating during OTA", () =>
+      replaceOnce("main/http_status.cpp",
+        "if (ota_download_active()) return network_tls_busy(req);",
+        "if (false) return network_tls_busy(req);")],
+    ["the active model catalog keeps allocating during OTA", () =>
+      replaceOnce("main/http_status.cpp",
+        /(static esp_err_t h_active_model_values\(httpd_req_t\* req\) \{[\s\S]{0,260}?)if \(ota_download_active\(\)\) return network_tls_busy\(req\);/,
+        "$1if (false) return network_tls_busy(req);")],
+    ["history keeps allocating during OTA", () =>
+      replaceOnce("main/http_status.cpp",
+        /(static esp_err_t h_history\(httpd_req_t\* req\) \{[\s\S]{0,260}?)if \(ota_download_active\(\)\) return network_tls_busy\(req\);/,
+        "$1if (false) return network_tls_busy(req);")],
+    ["redacted diagnostics keep allocating during OTA", () =>
+      replaceOnce("main/http_status.cpp",
+        "if (redact && ota_download_active()) return network_tls_busy(req);",
+        "if (redact && false) return network_tls_busy(req);")],
+    ["Wi-Fi scans remain reachable during OTA", () =>
+      replaceOnce("main/http_status.cpp",
+        /(static esp_err_t h_scan\(httpd_req_t\* req\) \{[\s\S]{0,260}?)if \(ota_download_active\(\)\) return network_tls_busy\(req\);/,
+        "$1if (false) return network_tls_busy(req);")],
+    ["MCP get_status keeps allocating during OTA", () =>
+      replaceOnce("main/mcp_server.cpp", "if (ota_download_active()) {",
+        "if (false) {")],
+    ["mutating POSTs remain reachable during OTA", () =>
+      replaceOnce("main/http_common.cpp",
+        "req->method == HTTP_POST && ota_busy()",
+        "req->method == HTTP_POST && false")],
+    ["values snapshots keep allocating during OTA", () =>
+      replaceOnce("main/http_status.cpp",
+        /(esp_err_t http_send_values_json\([\s\S]{0,420}?)if \(ota_download_active\(\)\) return network_tls_busy\(req\);/,
+        "$1if (false) return network_tls_busy(req);")],
     ["values snapshots no longer wait behind a weather TLS owner", () =>
-      replaceOnce("main/http_status.cpp", "ota_download_active(), weather_fetch_active()",
-        "ota_download_active(), false")],
+      replaceOnce("main/http_status.cpp", "false, weather_fetch_active()",
+        "false, false")],
     ["the values TLS wait exceeds the live request timeout", () =>
       replaceOnce("main/http_status.cpp", "pdMS_TO_TICKS(4000)",
         "pdMS_TO_TICKS(6000)")],
@@ -167,8 +314,8 @@ try {
       replaceOnce("main/http_ota.cpp", '"{\\"ok\\":true,\\"generation\\":%lu}"',
         '"{\\"ok\\":true}"')],
     ["OTA status hides the busy handshake", () =>
-      replaceOnce("main/http_ota.cpp", '",\\"busy\\":" + (s.busy ? "true" : "false") +',
-        '",\\"busy\\":false" +')],
+      replaceOnce("main/http_ota.cpp", 'j += ",\\"busy\\":"; j += s.busy ? "true" : "false";',
+        'j += ",\\"busy\\":false";')],
     ["an update can consume a replaced check generation", () =>
       replaceOnce("main/ota_update.cpp", "s_generation != after_generation",
         "false")],
@@ -190,6 +337,22 @@ try {
     ["OTA status copies allocate a dynamic SHA string during TLS pressure", () =>
       replaceOnce("main/ota_update.hpp", "std::array<char, 65> available_sha256{};",
         "std::string available_sha256;")],
+    ["OTA status copies allocate dynamic message text during TLS pressure", () =>
+      replaceOnce("main/ota_update.hpp", "FixedText<128> message;",
+        "std::string message;")],
+    ["OTA status copies the complete string-owning Config", () =>
+      replaceOnce("main/ota_update.cpp", "ota_channel_name(config_ota_channel())",
+        "ota_channel_name(config().ota_channel)")],
+    ["OTA status response grows a dynamic JSON string during TLS pressure", () =>
+      replaceOnce("main/http_ota.cpp", "FixedBuffer<2048> j;",
+        "std::string j;")],
+    ["OTA status hides the sampled transfer low-water", () =>
+      replaceOnce("main/http_ota.cpp", 'j += ",\\"heap_min_free_bytes\\":";',
+        'j += ",\\"heap_min_free_bytes_hidden\\":";')],
+    ["transfer progress no longer samples heap", () =>
+      replaceOnce("main/ota_update.cpp",
+        "    ota_heap_sample();\n    Lock lk(s_mtx);\n    s_status.progress = pct;",
+        "    Lock lk(s_mtx);\n    s_status.progress = pct;")],
   ];
 
   let caught = 0;
