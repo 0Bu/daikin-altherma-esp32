@@ -129,18 +129,16 @@ const expectedSkills = [
   "domain-review",
   "feature-docs",
   "flash-esp32",
-  "metrics-audit",
   "project-review",
   "renovate-review",
   "schematic-review",
   "ui-gif",
   "ui-use-case-review",
   "user-docs-review",
-  "value-plausibility",
 ].sort();
 const canonicalSkills = directoryNames(".agents/skills");
 if (canonicalSkills.join("\0") !== expectedSkills.join("\0")) {
-  die(1, `canonical skill set must contain exactly the 16 reviewed skills (expected ${expectedSkills.join(", ")}; got ${canonicalSkills.join(", ")})`);
+  die(1, `canonical skill set must contain exactly the ${expectedSkills.length} reviewed repository skills (expected ${expectedSkills.join(", ")}; got ${canonicalSkills.join(", ")})`);
 }
 
 for (const name of expectedSkills) {

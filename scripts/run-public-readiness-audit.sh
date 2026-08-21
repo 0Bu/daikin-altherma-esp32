@@ -209,16 +209,13 @@ if (!/current exact total to 37[\s\S]{0,80}cfg\.max_uri_handlers\s*=\s*37;/.test
   throw new Error("http_server.cpp has drifted from the documented 37-handler trusted-LAN surface");
 }
 
-const funding = fs.readFileSync(".github/FUNDING.yml", "utf8");
-const activeFunding = /^\s*(?:github|patreon|open_collective|ko_fi|tidelift|community_bridge|liberapay|issuehunt|lfx_crowdfunding|polar|buy_me_a_coffee|thanks_dev|custom)\s*:/m.test(funding);
-const fundingMarker = "No funding account is currently configured";
+if (fs.existsSync(".github/FUNDING.yml")) {
+  throw new Error(".github/FUNDING.yml must remain absent");
+}
 for (const file of ["docs/REPORTING.md", ".github/ISSUE_TEMPLATE/bug_report.yml"]) {
   const normalized = fs.readFileSync(file, "utf8").replaceAll("**", "").replace(/\s+/g, " ");
-  if (!activeFunding && !normalized.includes(fundingMarker)) {
-    throw new Error(`${file} claims or implies a Sponsor button while FUNDING.yml is disabled`);
-  }
-  if (activeFunding && normalized.includes(fundingMarker)) {
-    throw new Error(`${file} still says funding is disabled although FUNDING.yml has an active key`);
+  if (/\b(?:funding|sponsor(?:ing|ship|s)?)\b/i.test(normalized)) {
+    throw new Error(`${file} still advertises or discusses repository funding`);
   }
 }
 

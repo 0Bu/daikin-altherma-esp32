@@ -208,12 +208,3 @@ body:
         - label: This is not a security vulnerability (those go to the private advisory form, not here).
           required: true
         - label: I can run a command or read a value off the device if I am asked to.
-
-  - type: markdown
-    attributes:
-      value: |
-        ---
-        This project is free to use and maintained in spare time. **No funding account is currently
-        configured**, so there is no Sponsor button at present. If project funding is enabled later,
-        it will support the project as a whole — there is no way to pay for a particular issue, and
-        none is planned. Every report is read and answered the same way.
