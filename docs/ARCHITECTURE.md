@@ -163,7 +163,7 @@ http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns registe
                       an unauthenticated radio client; with no setup AP, the configured WiFi or
                       Ethernet LAN registers the full API.
                       Boundary = host-tested logic/http_surface.hpp (F01). `cfg.max_uri_handlers` is
-                      sized EXACTLY to the trusted-LAN route count of 37, so adding a route means raising
+                      sized EXACTLY to the trusted-LAN route count of 38, so adding a route means raising
                       it in the same commit: overflowing is silent and hits the WRONG route (the
                       casualty is whatever registers last, deliberately the captive/SPA catch-all, so
                       the symptom would be deep links breaking rather than the new route 404ing).
@@ -174,11 +174,11 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       unwinding through esp_http_server's C frames to std::terminate → reboot.
                       No route is exempt any more: the one that was (/events, raw-registered
                       because is_websocket bypasses the trampoline) no longer exists
-http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
+http_status.cpp     → GET / (web UI), /locale.js, /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. The live /status and /values bodies use one bounded 1 KiB
                       chunk sink instead of a body-sized contiguous allocation;
-                      http_append_status_json() runs on the httpd task ALONE — see "Push vs. poll"
-                      below for why that sentence is load-bearing
+                      http_append_status_json() runs on the httpd task ALONE —
+                      see "Push vs. poll" below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_temp, /set_weather,
                       /test_circulation, /set_circulation,
                       /set_syslog,
@@ -325,10 +325,11 @@ stack_watch.cpp     → the SECOND memory budget, made reportable. Four tasks (h
                      `*_stack_min_free_bytes`, null until sampled. The heap has `/status.sys`, two
                      trend rings and a watchdog — the stack had a core dump's task table, which
                      exists only once the board has died
-www/                → web UI sources: index.html + style.css + app.sources + js/*.js. The manifest
-                     orders the classic-script fragments; inline_assets.cmake splices them into ONE
-                     self-contained page at build time and serves it gzipped. setup.html is the
-                     captive-portal page (gzipped separately)
+www/                → web UI sources: index.html + style.css + app.sources + js/*.js plus the
+                     device-local locales/*.js. The manifest orders the startup classic-script
+                     fragments; inline_assets.cmake splices those into one self-contained gzip page.
+                     CMake builds the twelve non-English catalogs as separate gzip assets served by
+                     /locale.js. setup.html is the captive-portal page (gzipped separately)
 logic/              → IDF-free, host-tested pure logic (see below)
 ```
 
@@ -848,7 +849,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   sampled duration — and it cannot be extended to the rest: a ring costs 576 B, the trend budget is
   exactly full (`TREND_COUNT × 576 == 18432`, its own ceiling), the remaining rows are not on the
   schematic and so are excluded by `history.hpp`'s selection rule, and each would need a hand-written
-  bilingual legend. The whole table is 72 × 16 B = **1152 B** in `.noinit`; the current worst
+  localized legend for every shipped locale. The whole table is 72 × 16 B = **1152 B** in `.noinit`; the current worst
   profile uses 63 slots, leaving nine spare. It is adopted across a
   power-preserving reset under the same seal, verdict vocabulary and union-storage rule as the trends
   and the checkup.
@@ -2081,10 +2082,12 @@ The Home Assistant bridge:
   cadence, but has no Home Assistant Discovery entities. The former flat heartbeat `room_*` and
   `heating_curve_*` keys are removed rather than duplicated; because heartbeat is not retained, no
   broker tombstone is needed. Direct consumers must move to the grouped paths.
-- **TLS default-on with credentials** (mqtts, CA-verified via the mbedTLS certificate bundle). If
-  credentials are set but the URI is not `mqtts://`, the bridge **refuses to connect** and reports
-  the reason in `/status.mqtt` rather than sending them in cleartext — no silent plaintext fallback.
-  A credential-free plaintext broker on the trusted LAN is allowed (nothing secret to leak).
+- **TLS default-on with credentials** (mqtts, CA-verified via ESP-IDF's common-root mbedTLS bundle).
+  ESP-IDF documents approximately 99% public-root coverage for this flash-bounded subset; a broker
+  chained only to a rarer excluded root is rejected. If credentials are set but the URI is not
+  `mqtts://`, the bridge **refuses to connect** and reports the reason in `/status.mqtt` rather than
+  sending them in cleartext — no silent plaintext fallback. A credential-free plaintext broker on
+  the trusted LAN is allowed (nothing secret to leak).
 - **Task-Watchdog-subscribed.** The `mqtt_pub` publish task subscribes to the Task Watchdog and
   feeds it **unconditionally at the top of its 1 s loop** — deliberately *not* gated on `s_connected`
   or an actual publish, because the loop keeps spinning during a broker outage (it just doesn't
@@ -2547,10 +2550,13 @@ minimal state a restart would be trying to reach.
 
 `www/` is split for edit locality: `index.html`, `style.css` and the JavaScript fragments listed in
 `app.sources`. Firmware, tests and audits all consume that one ordered manifest; the fragments share
-one classic-script scope and are spliced into ONE self-contained, pre-gzipped page at build time
-(`inline_assets.cmake`). **Write the comments — and know they ship nowhere:**
-`tools/web_asset/minify_and_gzip.py` strips HTML, CSS and JS comments alike under the 163840-byte
-delivery budget (`UI_GZIP_MAX_BYTES` in `main/CMakeLists.txt`, pinned by
+one classic-script scope and are spliced into ONE self-contained, pre-gzipped **startup page** at
+build time (`inline_assets.cmake`). English is its embedded fallback; a non-English selection adds
+one same-device request for the separately compressed `/locale.js?lang=…` catalog. **Write the
+comments — and know they ship nowhere:**
+`tools/web_asset/minify_and_gzip.py` strips HTML, CSS and JS comments alike and emits deterministic
+gzip under the 163840-byte single-response startup budget (`UI_GZIP_MAX_BYTES` in
+`main/CMakeLists.txt`, pinned by
 `test/test_ui_delivery_contract.mjs`). Markup was the one language it did NOT cover until the
 budget was measured per fragment: `index.html` is spliced in raw, so 39 KB of drawing/layout
 commentary shipped in the image at 14 KB gzipped — 9.5% of the budget — with every gate green,
@@ -2558,7 +2564,10 @@ because a page that is 14 KB too big renders exactly as well as one that is not;
 build-breaking, so the cost arrives as an unrelated feature's CI failure months later. Only
 comments are stripped from markup; HTML indentation stays (whitespace between inline elements is
 significant, and ~1.1 KB is not worth a layout defect that renders correctly on the machine that
-made it). The UI is **two screens**:
+made it). Locale assets use the same JavaScript minifier and a separate 32768-byte gzip cap. gzip is
+used because the trusted-LAN origin is plain HTTP and browsers do not consistently negotiate Brotli
+there. The UI is
+**two screens**:
 the dashboard (the plant — schematic, model, values, no config at all) and **Settings** behind the
 header gear (the Connections tile + three ESP32 board cards — ESP32 board health, Protokoll
 [X10A link + pins +, only while connected, a closed protocol-diagnosis tongue containing the X10A query form] and Firmware
@@ -2674,17 +2683,27 @@ place:
   1.0 W OFF, 120 s age, 60 s confirmation), but remain editable. The board subscribes to the same
   Shelly MQTT message that an external VictoriaMetrics pipeline may store; it does not query
   VictoriaMetrics and does not publish a Shelly command.
-- **Language** → `/set_lang` (Settings **Firmware** card). The UI is bilingual (de/en) and picks its
-  language client-side from `navigator.language` by default — a browser fact, not device state — but
-  the card's picker (**Browser** / English / Deutsch) can force one, which then **persists** in the
+- **Language** → `/set_lang` (Settings **Firmware** card). The UI supports
+  en/de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi and picks its language client-side from `navigator.language`
+  by default — a browser fact, not device state — but the card's picker (**Browser** plus all thirteen languages)
+  can force one, which then **persists** in the
   config blob (v4, `logic/ui_lang.hpp`) and wins over every client's own browser guess. `auto`
   (labelled "Browser" — it *is* the browser's own guess, not a separate mode) is the struct default,
   so a fresh device or one OTA-upgraded from a pre-v4 blob keeps auto-detecting exactly as before.
+  `zh` is Simplified Chinese; Norwegian is persisted canonically as Bokmål `nb`, while a generic
+  browser `no` preference resolves to `nb` before the supported-language check.
   Applied **live**, like the update channel: nothing claims the language at task start, the browser
   re-reads `/status.ui.lang` on its next poll and re-localises (`setLang()` re-runs
   `applyStaticI18n()` + `labelSchematicHits()`), no reload. The heat-pump **value labels** are
   untouched by any of this — they arrive over `/values` as English X10A register names and stay
-  verbatim in both languages (see DESIGN.md §1).
+  verbatim in every language (see DESIGN.md §1). English is embedded in the startup page; the other
+  catalogs are bounded, pre-compressed assets from the signed image, selected by the trusted-LAN
+  `GET /locale.js?lang=…` route. The eleven newer lazy modules also carry concise copy for all 40
+  schematic inspector targets, stable offset-keyed HomeHub row names and all value/model accordion
+  explanations; German retains that established specialist copy inline in the startup tables. X10A
+  register labels remain the unchanged English transport identity. The five latest packs additionally
+  keep their 63 fault-code meanings and two cross-source difference explanations lazy, preventing
+  those new translations from consuming the single-response startup budget.
 - **Firmware / OTA** — tapping the version runs the real update flow. Both places the version is
   printed as a control are the same trigger (`checkFirmwareUpdate`): the header meta line beside the
   IP, and the **Version** row on the Settings **Firmware** card. Neither one navigates — the readout
@@ -2720,9 +2739,11 @@ The complete field-by-field contract of every route. The canonical always-loaded
 [`AGENTS.md`](../AGENTS.md) point editors here for the system architecture and full HTTP fields.
 
 ```
-GET  /            embedded web UI (gzipped into the app binary)
+GET  /            embedded web UI (gzip-compressed in the app binary)
 GET  /favicon.ico inert embedded setup/dashboard icon; also available on the open setup AP
 GET  /heat-pump-icon.png embedded dashboard app icon; trusted-LAN only
+GET  /locale.js?lang=de|es|fr|it|pl|cs|uk|zh|ja|nb|sv|fi   query-selected, pre-compressed UI catalog from the
+                  signed application image; trusted-LAN only, cached with the app-image ETag
 GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity — matches a core dump
                   to its .elf), pins_avail[] (the chip-safe X10A GPIOs for the RX/TX picker, minus the
                   pins the firmware itself drives — the status indicator and the recovery button —
@@ -2899,9 +2920,10 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   selector from /status like every other setting; a device can be SET to a channel it
                   is not yet running a build from, so it is reported rather than inferred from the
                   running version's "-dev.N" suffix,
-                  ui{lang} — "auto"|"de"|"en", the web UI's MANUAL language override (POST /set_lang,
-                  logic/ui_lang.hpp). "auto" (the default) = browser-detected; "de"/"en" force a
-                  language on every client. Reported here so the Firmware card's Sprache selector
+                  ui{lang} — "auto"|"en"|"de"|"es"|"fr"|"it"|"pl"|"cs"|"uk"|"zh"|"ja"|"nb"|"sv"|"fi", the web UI's MANUAL
+                  language override (POST /set_lang, logic/ui_lang.hpp). "auto" (the default) =
+                  browser-detected; a named language forces a
+                  language on every client. Reported here so the Firmware card's Language selector
                   renders from /status like the channel, and the browser applies it over its own
                   navigator.language guess,
                   ntp{server,synced,time} — server is the CONFIGURED address (config().ntp_server:
@@ -3096,7 +3118,7 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   four that are not catalog rows at all — smart_grid_mode (two contact bits),
                   circulation_state (the confirmed external MQTT witness) and the two BOARD trends
                   free_heap and
-                  max_alloc (the ESP32's own memory in KiB — no register, fixed English labels, and
+                  max_alloc (the ESP32's own memory in KiB — no register, localized UI labels, and
                   they resolve no catalog row by construction). The ENV III ids are
                   env3_temperature, env3_humidity and env3_pressure, offered on /status.history
                   .env3_rows only while the sensor is enabled — a disabled accessory is absent rather
@@ -3232,7 +3254,7 @@ POST /set_mqtt    {broker,user,pass,clear_creds,base} -> pre-flight the broker s
                   shared base. Rules
                   are checked BEFORE the broker pre-flight (free and local, versus a DNS lookup + up
                   to ~8 s of the httpd task) and each refusal carries its own machine code beside the
-                  English text — the ENV III pattern, so the bilingual UI translates without the API
+                  English text — the ENV III pattern, so the localized UI translates without the API
                   losing its one wording. The browser deliberately keeps NO second copy of the rules:
                   the load-bearing one is that the base must still slugify to something, since
                   device_node_id() falls back to the constant "daikin" and would put two boards back
@@ -3343,7 +3365,7 @@ POST /set_env3    {enabled,sda,scl} -> validate + PROVE + persist + REBOOT. A st
                   env3_disable_first (two masters must never briefly drive one shared wire), and
                   DISABLING checks nothing at all — it is the recovery path and must not depend on
                   the hardware that may be the problem. Each refusal carries a machine `code` beside
-                  the English `error` so the bilingual UI can translate without the API losing its
+                  the English `error` so the localized UI can translate without the API losing its
                   one wording. Reboots on a real change, unlike /set_hp's live apply: the I2C driver
                   owns the bus for the task's life
 POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id}
@@ -3426,11 +3448,12 @@ POST /set_ota     {channel:"release"|"dev"} -> validate + persist, applied LIVE 
                   it fetches, so the very next check uses the new feed). An unknown name is REJECTED,
                   not defaulted — answering ok to a typo would look like a saved setting. Unchanged
                   -> {"ok":true,"reboot":false} like the other /set_* routes
-POST /set_lang    {lang:"auto"|"de"|"en"} -> validate + persist, applied LIVE (no reboot, like
+POST /set_lang    {lang:"auto"|"en"|"de"|"es"|"fr"|"it"|"pl"|"cs"|"uk"|"zh"|"ja"|"nb"|"sv"|"fi"} -> validate + persist,
+                  applied LIVE (no reboot, like
                   /set_ota: nothing claims the language at task start — the UI reads /status.ui.lang,
                   so the next poll applies it). The web UI's MANUAL language override on top of the
                   browser default (logic/ui_lang.hpp): "auto" hands the choice back to the browser
-                  (navigator.language), "de"/"en" force one on every client that opens the dashboard.
+                  (navigator.language); a named language forces one on every client that opens the dashboard.
                   An unknown name is REJECTED, not defaulted (a typo would look saved). Unchanged
                   -> {"ok":true,"reboot":false} like the other /set_* routes
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the
@@ -3625,22 +3648,18 @@ own — the `/status` route was measured for years while the deeper caller was n
 worst PATH, not the biggest FRAME.** The builder is a 3.5× outlier over the next-largest frame in
 the firmware (`history_record`, 3296, on the poll task) and nothing else is close.
 
-**(2) Most of that frame is a `-Og` artifact, not live data.** The named locals sum to ~2.2 KB
+**(2) Most of that frame was a `-Og` artifact, not live data.** The named locals sum to ~2.2 KB
 (`Config` 656 — `const Config& c = config()` lifetime-extends a by-value temporary across the whole
 function — `CheckupReport` 332, `WeatherForecastStatus` 208, `ReferenceTemperatureStatus` 168,
-`CrashInfo` 164, …). The other ~9 KB is one distinct stack slot per `jstr()`/`std::to_string()`
-temporary, because this project builds at IDF's default **`CONFIG_COMPILER_OPTIMIZATION_DEBUG`
-(`-Og`)**, which barely coalesces slots across a 760-line function full of EH cleanup regions.
-Compiling *only this translation unit* at `-Os` takes the frame **11776 → 3744** and the whole
-`mcp_post` path **14512 → 6480** (~9904 free of 16384), with no source change. **This is APPLIED** —
-`set_source_files_properties(http_status.cpp PROPERTIES COMPILE_OPTIONS "-Os")` in
-`main/CMakeLists.txt`, which carries the full rationale beside the warning contract, and is
-per-source-file rather than a `CONFIG_COMPILER_*` key for that contract's own two reasons (a Kconfig
-key is global and would re-optimise IDF and the managed components; `sdkconfig.defaults` is hashed
-into CI's ccache key). The builder is no longer an outlier at all — 3744 against `history_record`'s
-3296. The COST is real and accepted: `-Og`'s precise backtraces are what diagnosed both overflows,
-and this is the file whose dumps mattered, so a dump from here is now less exact. A frame two thirds
-smaller prevents more dumps than it obscures.
+`CrashInfo` 164, …). In the historical debug-optimized (`CONFIG_COMPILER_OPTIMIZATION_DEBUG`, `-Og`)
+build, the other ~9 KB was one distinct stack slot per `jstr()`/`std::to_string()` temporary across a
+760-line function full of EH cleanup regions. Compiling this translation unit at `-Os` took the frame
+**11776 → 3744** and the whole `mcp_post` path **14512 → 6480** (~9904 free of 16384), with no source
+change. The explicit per-source `-Os` remains in `main/CMakeLists.txt` as the pinned stack contract;
+the current release image now also selects global `CONFIG_COMPILER_OPTIMIZATION_SIZE=y` because the
+signed application must fit the fixed OTA slot with all device-local catalogs. The builder is no
+longer an outlier at all — 3744 against `history_record`'s 3296. The accepted trade-off is less exact
+debug backtraces in return for both measured stack headroom and the required flash-image headroom.
 
 **Verified ON HARDWARE, not just on the ELF.** Both images were built from ONE source base
 (`main` @ 7524b4c), signed and USB-flashed to the XIAO bench board in turn — distinct ELF shas

@@ -3,9 +3,9 @@
 // while structural enum metadata keeps the visual UI readable and true flags remain 0/1 -> ON/OFF.
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
-const SOURCE = readAppFragments(["i18n.js", "history.js"]);
+const SOURCE = readAppFragments(["i18n.js"]) + readUiLocale("de") + readAppFragments(["history.js"]);
 const appStateSource = readAppFragments(["app_state.js"]);
 const schematicSource = readAppFragments(["schematic.js"]);
 

@@ -304,14 +304,15 @@ PY
 run_case "id drift is caught in both directions" 1 "S005 svFlow"
 
 echo "== 9. a data-i18n key with no German =="
-# The static markup is localised at boot from I18N; a key missing on the German side prints the
-# English string, or the raw key. One label in a German drawing, silently.
+# The static markup is localised at boot from I18N; a key missing from one separately shipped locale
+# prints the English fallback. One label in a German drawing, silently.
 reset
-patch_file "$WORK/main/www/js/i18n.js" <<'PY'
+patch_file "$WORK/main/www/locales/de.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if '"schem.space_circuit": "RAUMKREIS"' not in s: sys.exit(1)
-open(p, 'w').write(s.replace('"schem.space_circuit": "RAUMKREIS",', '', 1))
+old = '/* schem.space_circuit */ "RAUMKREIS",'
+if old not in s: sys.exit(1)
+open(p, 'w').write(s.replace(old, '/* schem.space_circuit */ undefined,', 1))
 PY
 run_case "missing German label is caught" 1 "S006 schem.space_circuit/de"
 
@@ -376,6 +377,31 @@ if 'x="522" y="255" width="112"' not in s: sys.exit(1)           # the thermosta
 open(p, 'w').write(s.replace('x="522" y="255" width="112"', 'x="522" y="255" width="34"', 1))
 PY
 run_case "text overflowing its pill is caught" 1 "G004"
+
+# 14bb — the markup/English/German all fit, but a lazy locale does not. The production regression
+# was Ukrainian, and a bilingual-only width sweep stayed green despite loading every locale catalog.
+reset
+patch_file "$WORK/main/www/locales/uk.js" <<'PY'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+new = re.sub(r'/\* schem\.defrost_pill \*/ "[^"]+"',
+             '/* schem.defrost_pill */ "❄ надзвичайно-довге-розморожування"', s, count=1)
+if new == s: sys.exit(1)
+open(p, 'w').write(new)
+PY
+run_case "a non-English locale overflowing its pill is caught" 1 "G004 defrost/uk"
+
+# 14bc — two separate captions can each fit their own component and still run into each other.
+reset
+patch_file "$WORK/main/www/locales/uk.js" <<'PY'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+new = re.sub(r'/\* schem\.return \*/ "[^"]+"',
+             '/* schem.return */ "НАДЗВИЧАЙНО ДОВГИЙ ВХІД ПЛАСТИНЧАТОГО ТЕПЛООБМІННИКА"', s, count=1)
+if new == s: sys.exit(1)
+open(p, 'w').write(new)
+PY
+run_case "neighbouring locale labels overlapping are caught" 1 "G013"
 
 # 14c — a pipe that is not axis-aligned. A 4 px skew over an 80 px run is invisible in review and
 # permanent in the image.

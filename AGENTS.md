@@ -153,6 +153,7 @@ scripts/run-domain-audit.sh
 scripts/run-description-audit.sh
 scripts/run-user-docs-audit.sh
 scripts/run-schematic-audit.sh
+scripts/run-ui-localization-audit.sh
 scripts/run-ui-use-case-tests.sh
 scripts/run-redaction-audit.sh
 scripts/run-ui-gif-audit.sh
@@ -222,11 +223,11 @@ scripts/idf-docker.sh idf.py build
 - Device reports must redact at the source using `main/logic/redact.hpp`. Unset fields stay absent or
   empty according to contract; redaction must not invent a configured source. Treat core dumps as
   private raw memory.
-- Every visible plant diagnosis needs bounded evidence, explicit limitations, bilingual UI copy,
-  English user documentation, and a safe next step. Distinguish manufacturer facts, project rules,
-  and heuristics.
+- Every visible plant diagnosis needs bounded evidence, explicit limitations, complete UI copy in
+  every shipped language, English user documentation, and a safe next step only where the available
+  evidence supports one. Distinguish manufacturer facts, project rules, and heuristics.
 - Visual truth requires rendered inspection. Mechanical SVG/UI checks do not prove that a sensor is
-  drawn on the correct component or that German and English mean the same thing.
+  drawn on the correct component or that every shipped locale means the same thing.
 
 ## PR and merge discipline
 

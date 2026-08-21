@@ -4,9 +4,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
-const source = readAppFragments(["i18n.js", "dashboard.js"]);
+const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + readAppFragments(["dashboard.js"]);
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const context = {
   navigator: { language: "de-DE" },

@@ -43,7 +43,7 @@ inline constexpr size_t MQTT_BASE_MAX_LEN = 64;
 
 // Why a base topic was refused: a stable machine `code` beside the English `message`. Both are string
 // LITERALS — http_config.cpp interpolates them into JSON unescaped, so neither may ever carry user
-// text. The pair exists for the reason env3.hpp's refusals carry one: the UI is bilingual, and a
+// text. The pair exists for the reason env3.hpp's refusals carry one: the UI is localized, and a
 // translatable code beside one canonical English wording lets the browser translate without the API
 // losing its single answer. One code PER RULE, not one for the field, because "too long" and "that
 // would collide in Home Assistant" need different things done about them.

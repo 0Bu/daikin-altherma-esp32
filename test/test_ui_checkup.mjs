@@ -4,9 +4,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
-const i18nSource = readAppFragments(["i18n.js"]);
+const i18nSource = readAppFragments(["i18n.js"]) + readUiLocale("de");
 const dashboardSource = readAppFragments(["dashboard.js"]);
 const explanationSource = readAppFragments(["descriptions.js", "history.js", "schematic.js"]);
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");

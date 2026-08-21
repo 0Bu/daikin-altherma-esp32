@@ -17,9 +17,10 @@
 // test_ui_source_matrix.mjs uses, and for its reason: CI has no browser.
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
-const SOURCE = readAppFragments(["i18n.js", "descriptions.js", "history.js", "schematic.js"]);
+const SOURCE = readAppFragments(["i18n.js"]) + readUiLocale("de") +
+  readAppFragments(["descriptions.js", "history.js", "schematic.js"]);
 
 // A /values row exactly as append_values_array() serves one: a bit flag with its state age. `held`
 // and `dwell_*` are emitted only when they apply, so an omitted key is the normal shape here, not a

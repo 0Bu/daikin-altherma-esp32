@@ -214,7 +214,7 @@ assert.equal(view.series.length, 2);
 assert.deepEqual(Array.from(view.series[0].v), [452, null, 454]);
 assert.deepEqual(Array.from(view.series[1].v), [453, 455, 456]);
 assert.match(h.scrubText(view, 1), /X10A nicht gemessen/);
-assert.match(h.scrubText(view, 1), /Modbus 45\.5 °C/,
+assert.match(h.scrubText(view, 1), /Modbus 45,5 °C/,
   "the same cursor instant reads both instruments and preserves the X10A gap");
 
 const html = h.histHtml("dhw_tank", "°C", "Warmwasserspeichertemperatur");
@@ -224,7 +224,7 @@ assert.doesNotMatch(html, /Neustart/);
 assert.match(html, /vhist-source[^>]*><i><\/i>X10A/);
 assert.match(html, /vhist-source mb[^>]*><i><\/i>HomeHub · Modbus/);
 assert.match(html, /vhist-line mb/);
-assert.match(html, /45\.2 – 45\.6 °C/,
+assert.match(html, /45,2 – 45,6 °C/,
   "both sources share one vertical scale, including the Modbus-only maximum");
 
 // Every numeric chart uses the same light-area/dark-upper-edge grammar. A single series keeps the
@@ -302,7 +302,7 @@ const outdoorHtml = h.histHtml("outdoor_air", "°C", "Außentemperatur");
 assert.doesNotMatch(outdoorHtml, /Messalter unbekannt/,
   "the freshness qualification must not become another static line below the chart");
 assert.match(h.scrubText(outdoorView, 1),
-  /Modbus 20\.5 °C · Register unverändert .* ca\. 15 min · Messalter unbekannt/,
+  /Modbus 20,5 °C · Register unverändert .* ca\. 15 min · Messalter unbekannt/,
   "the popup distinguishes a repeated register value from a proven fresh measurement");
 
 // THE READOUT BESIDE THE SELECTED INSTANT. The bubble must never cover its own crosshair: a sample
@@ -586,7 +586,7 @@ S.hist.set("pump_signal", { at: Date.now(), gen: 1, dt: 300, unit: "", t0: 17687
   held: [], v: [1000, 700, 0] });
 await h.ensureDerived("pump_speed");
 assert.deepEqual(Array.from(S.hist.get("pump_speed").v), [0, 300, 1000]);
-assert.match(h.histHtml("pump_speed", "", "Drehzahl der Umwälzpumpe"), /0\.0 – 100\.0 %/);
+assert.match(h.histHtml("pump_speed", "", "Drehzahl der Umwälzpumpe"), /0,0 – 100,0 %/);
 
 // The diverter is categorical too. Both selected branches are named, its two witnesses keep their
 // independent lanes, and no numeric 0/1 curve is drawn.

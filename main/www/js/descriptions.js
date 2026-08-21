@@ -2,10 +2,11 @@
 // Each heat-pump reading gets a short "what is this / what's normal" note, keyed to the value LABEL
 // by a first-match-wins regex — the same pattern-over-label technique pickValue()/groupOf()/vLwt use,
 // so one entry covers every profile's spelling of a concept (there are ~200 distinct labels but far
-// fewer physical quantities). English only, matching the fixed English labels and the §1 design
-// contract (there is no language selector). ORDER MATTERS: put specific/compound labels before the
-// general ones they contain (e.g. "after BUH" before plain "leaving water", BUH/capacity before the
-// bare "capacity" catch). A row whose label matches nothing here stays a plain, non-expandable row.
+// fewer physical quantities). The baseline is English, matching the fixed English labels; entries
+// also carry German. The eleven newer UI locales register compact positional translations in their
+// lazy locale assets. ORDER MATTERS: put specific/compound labels before the general ones
+// they contain (e.g. "after BUH" before plain "leaving water", BUH/capacity before the bare
+// "capacity" catch). A row whose label matches nothing here stays a plain, non-expandable row.
 // `normal` is optional guidance on typical vs worth-a-look values — deliberately hedged; the exact
 // figures are model- and install-specific.
 // Keep the English column byte-for-byte aligned with logic/error_codes.hpp. That header enriches
@@ -14,69 +15,195 @@
 // the UI. The HomeHub's separate numeric sub-code is intentionally not folded into this lookup: it
 // narrows a main code but is not another main-code vocabulary.
 const DAIKIN_FAULT_CODES = Object.freeze([
-  { code: "7H", en: "Water flow problem", de: "Problem mit dem Wasserdurchfluss" },
-  { code: "80", en: "Return water temperature sensor fault", de: "Fehler am Rücklauftemperaturfühler" },
-  { code: "81", en: "Leaving water temperature sensor fault", de: "Fehler am Vorlauftemperaturfühler" },
-  { code: "89", en: "Heat exchanger frost protection activated", de: "Frostschutz des Wärmetauschers ausgelöst" },
-  { code: "8F", en: "Abnormal DHW outlet water temperature rise", de: "Ungewöhnlicher Temperaturanstieg am Warmwasseraustritt" },
-  { code: "8H", en: "Abnormal leaving water temperature rise", de: "Ungewöhnlicher Anstieg der Vorlauftemperatur" },
-  { code: "A1", en: "Zero-crossing detection failure", de: "Fehler der Nulldurchgangserkennung" },
-  { code: "A5", en: "High-pressure peak-cut / frost protection problem", de: "Problem mit Hochdruckbegrenzung oder Frostschutz" },
-  { code: "AA", en: "Backup heater overheated or not connected", de: "Zusatzheizer überhitzt oder nicht angeschlossen" },
-  { code: "AC", en: "Booster heater overheated", de: "Speicherheizstab überhitzt" },
-  { code: "AH", en: "Tank disinfection (anti-legionella) not completed", de: "Speicherdesinfektion zum Legionellenschutz nicht abgeschlossen" },
-  { code: "AJ", en: "DHW heat-up time exceeded", de: "Aufheizzeit für Warmwasser überschritten" },
-  { code: "C0", en: "Flow sensor fault", de: "Fehler am Volumenstromsensor" },
-  { code: "C4", en: "Heat exchanger temperature sensor fault", de: "Fehler am Temperaturfühler des Wärmetauschers" },
-  { code: "C5", en: "Heat exchanger sensor fault", de: "Fehler an einem Wärmetauscherfühler" },
-  { code: "CJ", en: "Room temperature sensor fault", de: "Fehler am Raumtemperaturfühler" },
-  { code: "E1", en: "Outdoor unit PCB defect", de: "Platine der Außeneinheit defekt" },
-  { code: "E2", en: "Leakage current detection fault", de: "Fehler der Fehlerstromerkennung" },
-  { code: "E3", en: "Outdoor unit high-pressure switch activated", de: "Hochdruckschalter der Außeneinheit ausgelöst" },
-  { code: "E4", en: "Suction pressure fault", de: "Fehler beim Kältemittel-Saugdruck" },
-  { code: "E5", en: "Outdoor unit inverter compressor motor overheat", de: "Inverter-Verdichtermotor der Außeneinheit überhitzt" },
-  { code: "E6", en: "Outdoor unit compressor startup failure", de: "Verdichter der Außeneinheit startet nicht" },
-  { code: "E7", en: "Outdoor unit fan motor fault", de: "Fehler am Lüftermotor der Außeneinheit" },
-  { code: "E8", en: "Outdoor unit input overvoltage", de: "Überspannung am Eingang der Außeneinheit" },
-  { code: "E9", en: "Electronic expansion valve fault", de: "Fehler am elektronischen Expansionsventil" },
-  { code: "EA", en: "Outdoor unit cooling/heating switchover problem", de: "Umschaltproblem zwischen Kühlen und Heizen an der Außeneinheit" },
-  { code: "EC", en: "Abnormal tank temperature rise", de: "Ungewöhnlicher Temperaturanstieg im Speicher" },
-  { code: "F3", en: "Outdoor unit discharge pipe temperature fault", de: "Temperaturfehler an der Heißgasleitung der Außeneinheit" },
-  { code: "F6", en: "Outdoor unit abnormally high pressure during cooling", de: "Ungewöhnlich hoher Druck der Außeneinheit beim Kühlen" },
-  { code: "FA", en: "Outdoor unit abnormally high pressure, high-pressure switch activated", de: "Ungewöhnlich hoher Druck der Außeneinheit; Hochdruckschalter ausgelöst" },
-  { code: "H0", en: "Outdoor unit voltage/current sensor fault", de: "Fehler am Spannungs- oder Stromsensor der Außeneinheit" },
-  { code: "H1", en: "External temperature sensor fault", de: "Fehler an einem externen Temperaturfühler" },
-  { code: "H3", en: "Outdoor unit high-pressure switch fault", de: "Fehler am Hochdruckschalter der Außeneinheit" },
-  { code: "H5", en: "Compressor overload protection fault", de: "Fehler am Überlastschutz des Verdichters" },
-  { code: "H6", en: "Outdoor unit position-detection sensor fault", de: "Fehler am Positionserkennungssensor der Außeneinheit" },
-  { code: "H8", en: "Outdoor unit compressor input (CT) system fault", de: "Fehler am CT-Strommesssystem des Außeneinheit-Verdichters" },
-  { code: "H9", en: "Outdoor unit outside air temperature sensor fault", de: "Fehler am Außentemperaturfühler der Außeneinheit" },
-  { code: "HC", en: "Tank temperature sensor fault", de: "Fehler am Speichertemperaturfühler" },
-  { code: "HJ", en: "Water pressure sensor fault", de: "Fehler am Wasserdrucksensor" },
-  { code: "J3", en: "Outdoor unit discharge pipe sensor fault", de: "Fehler am Heißgasleitungsfühler der Außeneinheit" },
-  { code: "J6", en: "Outdoor unit heat exchanger sensor fault", de: "Fehler am Wärmetauscherfühler der Außeneinheit" },
-  { code: "JA", en: "Outdoor unit high-pressure sensor fault", de: "Fehler am Hochdrucksensor der Außeneinheit" },
-  { code: "L1", en: "Inverter PCB fault", de: "Fehler an der Inverterplatine" },
-  { code: "L3", en: "Outdoor unit control box temperature rise fault", de: "Unzulässiger Temperaturanstieg im Schaltkasten der Außeneinheit" },
-  { code: "L4", en: "Outdoor unit inverter heat sink temperature rise fault", de: "Unzulässiger Temperaturanstieg am Inverter-Kühlkörper der Außeneinheit" },
-  { code: "L5", en: "Outdoor unit inverter overcurrent (DC) detected", de: "Gleichstrom-Überstrom am Inverter der Außeneinheit erkannt" },
-  { code: "L8", en: "Inverter PCB thermal protection tripped", de: "Thermoschutz der Inverterplatine ausgelöst" },
-  { code: "L9", en: "Compressor lock protection", de: "Blockierschutz des Verdichters ausgelöst" },
-  { code: "LC", en: "Outdoor unit communication system fault", de: "Fehler im Kommunikationssystem der Außeneinheit" },
-  { code: "P1", en: "Power supply phase imbalance / open phase", de: "Phasenunsymmetrie oder Phasenausfall der Stromversorgung" },
-  { code: "P3", en: "Abnormal DC detected", de: "Ungewöhnliche Gleichspannung erkannt" },
-  { code: "P4", en: "Outdoor unit heat sink temperature sensor fault", de: "Fehler am Kühlkörper-Temperaturfühler der Außeneinheit" },
-  { code: "PJ", en: "Capacity setting mismatch", de: "Leistungseinstellung passt nicht zur Anlage" },
-  { code: "U0", en: "Outdoor unit refrigerant shortage", de: "Kältemittelmangel an der Außeneinheit" },
-  { code: "U1", en: "Reverse phase / open phase malfunction", de: "Phasenfolgefehler oder Phasenausfall" },
-  { code: "U2", en: "Outdoor unit mains voltage fault", de: "Netzspannungsfehler der Außeneinheit" },
-  { code: "U3", en: "Underfloor heating screed-drying function not completed correctly", de: "Estrichtrocknungsprogramm der Fußbodenheizung nicht korrekt abgeschlossen" },
-  { code: "U4", en: "Indoor/outdoor unit communication problem", de: "Kommunikationsproblem zwischen Innen- und Außeneinheit" },
-  { code: "U5", en: "User interface communication problem", de: "Kommunikationsproblem mit der Bedieneinheit" },
-  { code: "U7", en: "Outdoor unit main CPU / inverter CPU transmission fault", de: "Übertragungsfehler zwischen Haupt-CPU und Inverter-CPU der Außeneinheit" },
-  { code: "U8", en: "External device (LAN adapter / room thermostat / USB) communication problem", de: "Kommunikationsproblem mit LAN-Adapter, Raumthermostat oder USB-Gerät" },
-  { code: "UA", en: "Indoor/outdoor unit combination or compatibility problem", de: "Innen- und Außeneinheit sind falsch kombiniert oder nicht kompatibel" },
-  { code: "UF", en: "Reversed piping or faulty communication wiring detected", de: "Vertauschte Rohrleitungen oder fehlerhafte Kommunikationsverdrahtung erkannt" },
+  { code: "7H", en: "Water flow problem", de: "Problem mit dem Wasserdurchfluss",
+    es: "Problema de caudal de agua", fr: "Problème de débit d’eau", it: "Problema di portata dell’acqua",
+    pl: "Problem z przepływem wody", cs: "Problém s průtokem vody", uk: "Проблема з потоком води" },
+  { code: "80", en: "Return water temperature sensor fault", de: "Fehler am Rücklauftemperaturfühler",
+    es: "Fallo del sensor de temperatura de retorno", fr: "Défaut du capteur de température de retour", it: "Guasto del sensore temperatura di ritorno",
+    pl: "Usterka czujnika temperatury powrotu", cs: "Porucha snímače teploty vratné vody", uk: "Несправність датчика температури зворотної води" },
+  { code: "81", en: "Leaving water temperature sensor fault", de: "Fehler am Vorlauftemperaturfühler",
+    es: "Fallo del sensor de temperatura de impulsión", fr: "Défaut du capteur de température de départ", it: "Guasto del sensore temperatura di mandata",
+    pl: "Usterka czujnika temperatury zasilania", cs: "Porucha snímače teploty výstupní vody", uk: "Несправність датчика температури подавальної води" },
+  { code: "89", en: "Heat exchanger frost protection activated", de: "Frostschutz des Wärmetauschers ausgelöst",
+    es: "Protección antihielo del intercambiador activada", fr: "Protection antigel de l’échangeur activée", it: "Protezione antigelo dello scambiatore attivata",
+    pl: "Włączona ochrona wymiennika przed zamarzaniem", cs: "Aktivována protimrazová ochrana výměníku", uk: "Спрацював захист теплообмінника від замерзання" },
+  { code: "8F", en: "Abnormal DHW outlet water temperature rise", de: "Ungewöhnlicher Temperaturanstieg am Warmwasseraustritt",
+    es: "Subida anómala de temperatura en la salida de ACS", fr: "Hausse anormale de la température de sortie ECS", it: "Aumento anomalo della temperatura in uscita ACS",
+    pl: "Nietypowy wzrost temperatury na wyjściu CWU", cs: "Neobvyklý nárůst teploty na výstupu TUV", uk: "Аномальне зростання температури на виході ГВП" },
+  { code: "8H", en: "Abnormal leaving water temperature rise", de: "Ungewöhnlicher Anstieg der Vorlauftemperatur",
+    es: "Subida anómala de la temperatura de impulsión", fr: "Hausse anormale de la température de départ", it: "Aumento anomalo della temperatura di mandata",
+    pl: "Nietypowy wzrost temperatury zasilania", cs: "Neobvyklý nárůst teploty výstupní vody", uk: "Аномальне зростання температури подавальної води" },
+  { code: "A1", en: "Zero-crossing detection failure", de: "Fehler der Nulldurchgangserkennung",
+    es: "Fallo de detección de cruce por cero", fr: "Défaut de détection du passage par zéro", it: "Guasto del rilevamento del passaggio per lo zero",
+    pl: "Błąd wykrywania przejścia przez zero", cs: "Porucha detekce průchodu nulou", uk: "Збій визначення переходу через нуль" },
+  { code: "A5", en: "High-pressure peak-cut / frost protection problem", de: "Problem mit Hochdruckbegrenzung oder Frostschutz",
+    es: "Problema de limitación de alta presión o protección antihielo", fr: "Problème de limitation haute pression ou de protection antigel", it: "Problema di limitazione alta pressione o protezione antigelo",
+    pl: "Problem z ograniczeniem wysokiego ciśnienia lub ochroną przeciwzamrożeniową", cs: "Problém s omezením vysokého tlaku nebo protimrazovou ochranou", uk: "Проблема обмеження високого тиску або захисту від замерзання" },
+  { code: "AA", en: "Backup heater overheated or not connected", de: "Zusatzheizer überhitzt oder nicht angeschlossen",
+    es: "Calentador auxiliar sobrecalentado o desconectado", fr: "Chauffage d’appoint surchauffé ou non raccordé", it: "Riscaldatore ausiliario surriscaldato o non collegato",
+    pl: "Grzałka wspomagająca przegrzana lub niepodłączona", cs: "Pomocný ohřívač je přehřátý nebo nepřipojený", uk: "Додатковий нагрівач перегрівся або не підключений" },
+  { code: "AC", en: "Booster heater overheated", de: "Speicherheizstab überhitzt",
+    es: "Resistencia del depósito sobrecalentada", fr: "Résistance d’appoint du ballon surchauffée", it: "Resistenza del bollitore surriscaldata",
+    pl: "Grzałka zasobnika przegrzana", cs: "Topné těleso zásobníku je přehřáté", uk: "Нагрівач бака перегрівся" },
+  { code: "AH", en: "Tank disinfection (anti-legionella) not completed", de: "Speicherdesinfektion zum Legionellenschutz nicht abgeschlossen",
+    es: "Desinfección antilegionela del depósito no completada", fr: "Désinfection antillégionelle du ballon non terminée", it: "Disinfezione antilegionella del bollitore non completata",
+    pl: "Dezynfekcja antylegionellowa zasobnika niezakończona", cs: "Dezinfekce zásobníku proti legionelle nebyla dokončena", uk: "Антилегіонельну дезінфекцію бака не завершено" },
+  { code: "AJ", en: "DHW heat-up time exceeded", de: "Aufheizzeit für Warmwasser überschritten",
+    es: "Tiempo de calentamiento de ACS excedido", fr: "Temps de chauffe ECS dépassé", it: "Tempo di riscaldamento ACS superato",
+    pl: "Przekroczony czas nagrzewania CWU", cs: "Překročena doba ohřevu TUV", uk: "Перевищено час нагрівання ГВП" },
+  { code: "C0", en: "Flow sensor fault", de: "Fehler am Volumenstromsensor",
+    es: "Fallo del sensor de caudal", fr: "Défaut du capteur de débit", it: "Guasto del sensore di portata",
+    pl: "Usterka czujnika przepływu", cs: "Porucha snímače průtoku", uk: "Несправність датчика потоку" },
+  { code: "C4", en: "Heat exchanger temperature sensor fault", de: "Fehler am Temperaturfühler des Wärmetauschers",
+    es: "Fallo del sensor de temperatura del intercambiador", fr: "Défaut du capteur de température de l’échangeur", it: "Guasto del sensore temperatura dello scambiatore",
+    pl: "Usterka czujnika temperatury wymiennika", cs: "Porucha snímače teploty výměníku", uk: "Несправність датчика температури теплообмінника" },
+  { code: "C5", en: "Heat exchanger sensor fault", de: "Fehler an einem Wärmetauscherfühler",
+    es: "Fallo de un sensor del intercambiador", fr: "Défaut d’un capteur de l’échangeur", it: "Guasto di un sensore dello scambiatore",
+    pl: "Usterka czujnika wymiennika", cs: "Porucha snímače výměníku", uk: "Несправність датчика теплообмінника" },
+  { code: "CJ", en: "Room temperature sensor fault", de: "Fehler am Raumtemperaturfühler",
+    es: "Fallo del sensor de temperatura ambiente", fr: "Défaut du capteur de température ambiante", it: "Guasto del sensore temperatura ambiente",
+    pl: "Usterka czujnika temperatury pomieszczenia", cs: "Porucha snímače pokojové teploty", uk: "Несправність датчика кімнатної температури" },
+  { code: "E1", en: "Outdoor unit PCB defect", de: "Platine der Außeneinheit defekt",
+    es: "Placa electrónica de la unidad exterior defectuosa", fr: "Carte électronique de l’unité extérieure défectueuse", it: "Scheda elettronica dell’unità esterna guasta",
+    pl: "Usterka płyty elektroniki jednostki zewnętrznej", cs: "Vadná deska elektroniky venkovní jednotky", uk: "Несправна плата зовнішнього блока" },
+  { code: "E2", en: "Leakage current detection fault", de: "Fehler der Fehlerstromerkennung",
+    es: "Fallo de detección de corriente de fuga", fr: "Défaut de détection du courant de fuite", it: "Guasto del rilevamento corrente di dispersione",
+    pl: "Błąd wykrywania prądu upływowego", cs: "Porucha detekce svodového proudu", uk: "Збій виявлення струму витоку" },
+  { code: "E3", en: "Outdoor unit high-pressure switch activated", de: "Hochdruckschalter der Außeneinheit ausgelöst",
+    es: "Presostato de alta de la unidad exterior activado", fr: "Pressostat haute pression de l’unité extérieure déclenché", it: "Pressostato di alta dell’unità esterna intervenuto",
+    pl: "Zadziałał presostat wysokiego ciśnienia jednostki zewnętrznej", cs: "Sepnul vysokotlaký spínač venkovní jednotky", uk: "Спрацював вимикач високого тиску зовнішнього блока" },
+  { code: "E4", en: "Suction pressure fault", de: "Fehler beim Kältemittel-Saugdruck",
+    es: "Fallo de presión de aspiración", fr: "Défaut de pression d’aspiration", it: "Guasto della pressione di aspirazione",
+    pl: "Błąd ciśnienia ssania", cs: "Porucha sacího tlaku", uk: "Несправність тиску всмоктування" },
+  { code: "E5", en: "Outdoor unit inverter compressor motor overheat", de: "Inverter-Verdichtermotor der Außeneinheit überhitzt",
+    es: "Motor del compresor inverter exterior sobrecalentado", fr: "Surchauffe du moteur du compresseur inverter extérieur", it: "Motore del compressore inverter esterno surriscaldato",
+    pl: "Przegrzanie silnika sprężarki inwerterowej jednostki zewnętrznej", cs: "Přehřátý motor invertorového kompresoru venkovní jednotky", uk: "Перегрів двигуна інверторного компресора зовнішнього блока" },
+  { code: "E6", en: "Outdoor unit compressor startup failure", de: "Verdichter der Außeneinheit startet nicht",
+    es: "El compresor exterior no arranca", fr: "Échec du démarrage du compresseur extérieur", it: "Mancato avvio del compressore esterno",
+    pl: "Sprężarka jednostki zewnętrznej nie uruchamia się", cs: "Kompresor venkovní jednotky se nespustil", uk: "Компресор зовнішнього блока не запускається" },
+  { code: "E7", en: "Outdoor unit fan motor fault", de: "Fehler am Lüftermotor der Außeneinheit",
+    es: "Fallo del motor del ventilador exterior", fr: "Défaut du moteur du ventilateur extérieur", it: "Guasto del motore ventilatore esterno",
+    pl: "Usterka silnika wentylatora jednostki zewnętrznej", cs: "Porucha motoru ventilátoru venkovní jednotky", uk: "Несправність двигуна вентилятора зовнішнього блока" },
+  { code: "E8", en: "Outdoor unit input overvoltage", de: "Überspannung am Eingang der Außeneinheit",
+    es: "Sobretensión de entrada en la unidad exterior", fr: "Surtension d’entrée de l’unité extérieure", it: "Sovratensione all’ingresso dell’unità esterna",
+    pl: "Przepięcie na wejściu jednostki zewnętrznej", cs: "Přepětí na vstupu venkovní jednotky", uk: "Перенапруга на вході зовнішнього блока" },
+  { code: "E9", en: "Electronic expansion valve fault", de: "Fehler am elektronischen Expansionsventil",
+    es: "Fallo de la válvula de expansión electrónica", fr: "Défaut du détendeur électronique", it: "Guasto della valvola di espansione elettronica",
+    pl: "Usterka elektronicznego zaworu rozprężnego", cs: "Porucha elektronického expanzního ventilu", uk: "Несправність електронного розширювального клапана" },
+  { code: "EA", en: "Outdoor unit cooling/heating switchover problem", de: "Umschaltproblem zwischen Kühlen und Heizen an der Außeneinheit",
+    es: "Problema de conmutación frío/calor en la unidad exterior", fr: "Problème de commutation froid/chauffage de l’unité extérieure", it: "Problema di commutazione raffrescamento/riscaldamento dell’unità esterna",
+    pl: "Problem przełączania chłodzenie/grzanie w jednostce zewnętrznej", cs: "Problém přepnutí chlazení/topení venkovní jednotky", uk: "Проблема перемикання охолодження/опалення зовнішнього блока" },
+  { code: "EC", en: "Abnormal tank temperature rise", de: "Ungewöhnlicher Temperaturanstieg im Speicher",
+    es: "Subida anómala de temperatura del depósito", fr: "Hausse anormale de la température du ballon", it: "Aumento anomalo della temperatura del bollitore",
+    pl: "Nietypowy wzrost temperatury zasobnika", cs: "Neobvyklý nárůst teploty zásobníku", uk: "Аномальне зростання температури бака" },
+  { code: "F3", en: "Outdoor unit discharge pipe temperature fault", de: "Temperaturfehler an der Heißgasleitung der Außeneinheit",
+    es: "Fallo de temperatura en la tubería de descarga exterior", fr: "Défaut de température du tuyau de refoulement extérieur", it: "Guasto temperatura del tubo di mandata dell’unità esterna",
+    pl: "Błąd temperatury rury tłocznej jednostki zewnętrznej", cs: "Porucha teploty výtlačného potrubí venkovní jednotky", uk: "Помилка температури нагнітальної труби зовнішнього блока" },
+  { code: "F6", en: "Outdoor unit abnormally high pressure during cooling", de: "Ungewöhnlich hoher Druck der Außeneinheit beim Kühlen",
+    es: "Presión exterior anormalmente alta durante refrigeración", fr: "Pression anormalement élevée de l’unité extérieure en refroidissement", it: "Pressione anormalmente alta dell’unità esterna in raffrescamento",
+    pl: "Nietypowo wysokie ciśnienie jednostki zewnętrznej podczas chłodzenia", cs: "Neobvykle vysoký tlak venkovní jednotky při chlazení", uk: "Аномально високий тиск зовнішнього блока під час охолодження" },
+  { code: "FA", en: "Outdoor unit abnormally high pressure, high-pressure switch activated", de: "Ungewöhnlich hoher Druck der Außeneinheit; Hochdruckschalter ausgelöst",
+    es: "Presión exterior anormalmente alta; presostato de alta activado", fr: "Pression extérieure anormalement élevée ; pressostat haute pression déclenché", it: "Pressione esterna anormalmente alta; pressostato di alta intervenuto",
+    pl: "Nietypowo wysokie ciśnienie; zadziałał presostat wysokiego ciśnienia", cs: "Neobvykle vysoký tlak; sepnut vysokotlaký spínač", uk: "Аномально високий тиск; спрацював вимикач високого тиску" },
+  { code: "H0", en: "Outdoor unit voltage/current sensor fault", de: "Fehler am Spannungs- oder Stromsensor der Außeneinheit",
+    es: "Fallo del sensor de tensión o corriente exterior", fr: "Défaut du capteur de tension ou de courant extérieur", it: "Guasto del sensore di tensione o corrente esterno",
+    pl: "Usterka czujnika napięcia lub prądu jednostki zewnętrznej", cs: "Porucha snímače napětí nebo proudu venkovní jednotky", uk: "Несправність датчика напруги або струму зовнішнього блока" },
+  { code: "H1", en: "External temperature sensor fault", de: "Fehler an einem externen Temperaturfühler",
+    es: "Fallo de un sensor de temperatura externo", fr: "Défaut d’un capteur de température externe", it: "Guasto di un sensore temperatura esterno",
+    pl: "Usterka zewnętrznego czujnika temperatury", cs: "Porucha externího snímače teploty", uk: "Несправність зовнішнього датчика температури" },
+  { code: "H3", en: "Outdoor unit high-pressure switch fault", de: "Fehler am Hochdruckschalter der Außeneinheit",
+    es: "Fallo del presostato de alta exterior", fr: "Défaut du pressostat haute pression extérieur", it: "Guasto del pressostato di alta esterno",
+    pl: "Usterka presostatu wysokiego ciśnienia jednostki zewnętrznej", cs: "Porucha vysokotlakého spínače venkovní jednotky", uk: "Несправність вимикача високого тиску зовнішнього блока" },
+  { code: "H5", en: "Compressor overload protection fault", de: "Fehler am Überlastschutz des Verdichters",
+    es: "Fallo de protección contra sobrecarga del compresor", fr: "Défaut de protection contre la surcharge du compresseur", it: "Guasto della protezione da sovraccarico del compressore",
+    pl: "Usterka zabezpieczenia przeciążeniowego sprężarki", cs: "Porucha ochrany kompresoru proti přetížení", uk: "Несправність захисту компресора від перевантаження" },
+  { code: "H6", en: "Outdoor unit position-detection sensor fault", de: "Fehler am Positionserkennungssensor der Außeneinheit",
+    es: "Fallo del sensor de detección de posición exterior", fr: "Défaut du capteur de détection de position extérieur", it: "Guasto del sensore di rilevamento posizione esterno",
+    pl: "Usterka czujnika położenia jednostki zewnętrznej", cs: "Porucha snímače polohy venkovní jednotky", uk: "Несправність датчика положення зовнішнього блока" },
+  { code: "H8", en: "Outdoor unit compressor input (CT) system fault", de: "Fehler am CT-Strommesssystem des Außeneinheit-Verdichters",
+    es: "Fallo del sistema CT de entrada del compresor exterior", fr: "Défaut du système CT d’entrée du compresseur extérieur", it: "Guasto del sistema CT d’ingresso del compressore esterno",
+    pl: "Usterka układu CT prądu wejściowego sprężarki zewnętrznej", cs: "Porucha systému CT vstupního proudu venkovního kompresoru", uk: "Несправність системи CT вхідного струму зовнішнього компресора" },
+  { code: "H9", en: "Outdoor unit outside air temperature sensor fault", de: "Fehler am Außentemperaturfühler der Außeneinheit",
+    es: "Fallo del sensor de aire exterior de la unidad exterior", fr: "Défaut du capteur d’air extérieur de l’unité extérieure", it: "Guasto del sensore aria esterna dell’unità esterna",
+    pl: "Usterka czujnika temperatury zewnętrznej jednostki zewnętrznej", cs: "Porucha snímače venkovní teploty venkovní jednotky", uk: "Несправність датчика зовнішнього повітря зовнішнього блока" },
+  { code: "HC", en: "Tank temperature sensor fault", de: "Fehler am Speichertemperaturfühler",
+    es: "Fallo del sensor de temperatura del depósito", fr: "Défaut du capteur de température du ballon", it: "Guasto del sensore temperatura del bollitore",
+    pl: "Usterka czujnika temperatury zasobnika", cs: "Porucha snímače teploty zásobníku", uk: "Несправність датчика температури бака" },
+  { code: "HJ", en: "Water pressure sensor fault", de: "Fehler am Wasserdrucksensor",
+    es: "Fallo del sensor de presión de agua", fr: "Défaut du capteur de pression d’eau", it: "Guasto del sensore pressione acqua",
+    pl: "Usterka czujnika ciśnienia wody", cs: "Porucha snímače tlaku vody", uk: "Несправність датчика тиску води" },
+  { code: "J3", en: "Outdoor unit discharge pipe sensor fault", de: "Fehler am Heißgasleitungsfühler der Außeneinheit",
+    es: "Fallo del sensor de la tubería de descarga exterior", fr: "Défaut du capteur du tuyau de refoulement extérieur", it: "Guasto del sensore del tubo di mandata esterno",
+    pl: "Usterka czujnika rury tłocznej jednostki zewnętrznej", cs: "Porucha snímače výtlačného potrubí venkovní jednotky", uk: "Несправність датчика нагнітальної труби зовнішнього блока" },
+  { code: "J6", en: "Outdoor unit heat exchanger sensor fault", de: "Fehler am Wärmetauscherfühler der Außeneinheit",
+    es: "Fallo del sensor del intercambiador exterior", fr: "Défaut du capteur de l’échangeur extérieur", it: "Guasto del sensore dello scambiatore esterno",
+    pl: "Usterka czujnika wymiennika jednostki zewnętrznej", cs: "Porucha snímače výměníku venkovní jednotky", uk: "Несправність датчика теплообмінника зовнішнього блока" },
+  { code: "JA", en: "Outdoor unit high-pressure sensor fault", de: "Fehler am Hochdrucksensor der Außeneinheit",
+    es: "Fallo del sensor de alta presión exterior", fr: "Défaut du capteur haute pression extérieur", it: "Guasto del sensore di alta pressione esterno",
+    pl: "Usterka czujnika wysokiego ciśnienia jednostki zewnętrznej", cs: "Porucha snímače vysokého tlaku venkovní jednotky", uk: "Несправність датчика високого тиску зовнішнього блока" },
+  { code: "L1", en: "Inverter PCB fault", de: "Fehler an der Inverterplatine",
+    es: "Fallo de la placa del inverter", fr: "Défaut de la carte inverter", it: "Guasto della scheda inverter",
+    pl: "Usterka płyty inwertera", cs: "Porucha desky invertoru", uk: "Несправність плати інвертора" },
+  { code: "L3", en: "Outdoor unit control box temperature rise fault", de: "Unzulässiger Temperaturanstieg im Schaltkasten der Außeneinheit",
+    es: "Subida anómala de temperatura en la caja de control exterior", fr: "Hausse anormale de température du coffret de commande extérieur", it: "Aumento anomalo della temperatura nel quadro di controllo esterno",
+    pl: "Nietypowy wzrost temperatury w skrzynce sterującej jednostki zewnętrznej", cs: "Neobvyklý nárůst teploty v řídicí skříni venkovní jednotky", uk: "Аномальне зростання температури в блоці керування зовнішнього блока" },
+  { code: "L4", en: "Outdoor unit inverter heat sink temperature rise fault", de: "Unzulässiger Temperaturanstieg am Inverter-Kühlkörper der Außeneinheit",
+    es: "Subida anómala de temperatura del disipador inverter exterior", fr: "Hausse anormale de température du dissipateur inverter extérieur", it: "Aumento anomalo della temperatura del dissipatore inverter esterno",
+    pl: "Nietypowy wzrost temperatury radiatora inwertera jednostki zewnętrznej", cs: "Neobvyklý nárůst teploty chladiče invertoru venkovní jednotky", uk: "Аномальне зростання температури радіатора інвертора зовнішнього блока" },
+  { code: "L5", en: "Outdoor unit inverter overcurrent (DC) detected", de: "Gleichstrom-Überstrom am Inverter der Außeneinheit erkannt",
+    es: "Sobrecorriente DC detectada en el inverter exterior", fr: "Surintensité DC détectée dans l’inverter extérieur", it: "Sovracorrente DC rilevata nell’inverter esterno",
+    pl: "Wykryto przetężenie DC inwertera jednostki zewnętrznej", cs: "Detekován nadproud DC v invertoru venkovní jednotky", uk: "Виявлено перевищення струму DC в інверторі зовнішнього блока" },
+  { code: "L8", en: "Inverter PCB thermal protection tripped", de: "Thermoschutz der Inverterplatine ausgelöst",
+    es: "Protección térmica de la placa inverter activada", fr: "Protection thermique de la carte inverter déclenchée", it: "Protezione termica della scheda inverter intervenuta",
+    pl: "Zadziałało zabezpieczenie termiczne płyty inwertera", cs: "Sepnula tepelná ochrana desky invertoru", uk: "Спрацював тепловий захист плати інвертора" },
+  { code: "L9", en: "Compressor lock protection", de: "Blockierschutz des Verdichters ausgelöst",
+    es: "Protección contra bloqueo del compresor activada", fr: "Protection contre le blocage du compresseur déclenchée", it: "Protezione dal blocco del compressore intervenuta",
+    pl: "Zadziałało zabezpieczenie przed zablokowaniem sprężarki", cs: "Sepnula ochrana proti zablokování kompresoru", uk: "Спрацював захист від блокування компресора" },
+  { code: "LC", en: "Outdoor unit communication system fault", de: "Fehler im Kommunikationssystem der Außeneinheit",
+    es: "Fallo del sistema de comunicación exterior", fr: "Défaut du système de communication extérieur", it: "Guasto del sistema di comunicazione esterno",
+    pl: "Usterka systemu komunikacji jednostki zewnętrznej", cs: "Porucha komunikačního systému venkovní jednotky", uk: "Несправність системи зв’язку зовнішнього блока" },
+  { code: "P1", en: "Power supply phase imbalance / open phase", de: "Phasenunsymmetrie oder Phasenausfall der Stromversorgung",
+    es: "Desequilibrio o pérdida de fase de alimentación", fr: "Déséquilibre ou perte de phase d’alimentation", it: "Squilibrio o perdita di fase dell’alimentazione",
+    pl: "Asymetria lub zanik fazy zasilania", cs: "Nesymetrie nebo výpadek fáze napájení", uk: "Несиметрія або зникнення фази живлення" },
+  { code: "P3", en: "Abnormal DC detected", de: "Ungewöhnliche Gleichspannung erkannt",
+    es: "Tensión DC anómala detectada", fr: "Tension DC anormale détectée", it: "Tensione DC anomala rilevata",
+    pl: "Wykryto nieprawidłowe napięcie DC", cs: "Detekováno neobvyklé stejnosměrné napětí", uk: "Виявлено аномальну напругу DC" },
+  { code: "P4", en: "Outdoor unit heat sink temperature sensor fault", de: "Fehler am Kühlkörper-Temperaturfühler der Außeneinheit",
+    es: "Fallo del sensor de temperatura del disipador exterior", fr: "Défaut du capteur de température du dissipateur extérieur", it: "Guasto del sensore temperatura del dissipatore esterno",
+    pl: "Usterka czujnika temperatury radiatora jednostki zewnętrznej", cs: "Porucha snímače teploty chladiče venkovní jednotky", uk: "Несправність датчика температури радіатора зовнішнього блока" },
+  { code: "PJ", en: "Capacity setting mismatch", de: "Leistungseinstellung passt nicht zur Anlage",
+    es: "Ajuste de capacidad incompatible", fr: "Réglage de puissance incompatible", it: "Impostazione della capacità non compatibile",
+    pl: "Niezgodne ustawienie wydajności", cs: "Nesoulad nastavení výkonu", uk: "Невідповідне налаштування потужності" },
+  { code: "U0", en: "Outdoor unit refrigerant shortage", de: "Kältemittelmangel an der Außeneinheit",
+    es: "Falta de refrigerante en la unidad exterior", fr: "Manque de fluide frigorigène dans l’unité extérieure", it: "Refrigerante insufficiente nell’unità esterna",
+    pl: "Niedobór czynnika chłodniczego w jednostce zewnętrznej", cs: "Nedostatek chladiva ve venkovní jednotce", uk: "Нестача холодоагенту в зовнішньому блоці" },
+  { code: "U1", en: "Reverse phase / open phase malfunction", de: "Phasenfolgefehler oder Phasenausfall",
+    es: "Secuencia de fases invertida o pérdida de fase", fr: "Inversion ou perte de phase", it: "Sequenza fasi invertita o perdita di fase",
+    pl: "Odwrócona kolejność lub zanik fazy", cs: "Obrácený sled nebo výpadek fáze", uk: "Зворотна послідовність або зникнення фази" },
+  { code: "U2", en: "Outdoor unit mains voltage fault", de: "Netzspannungsfehler der Außeneinheit",
+    es: "Fallo de tensión de red de la unidad exterior", fr: "Défaut de tension secteur de l’unité extérieure", it: "Guasto della tensione di rete dell’unità esterna",
+    pl: "Błąd napięcia sieciowego jednostki zewnętrznej", cs: "Porucha síťového napětí venkovní jednotky", uk: "Несправність мережевої напруги зовнішнього блока" },
+  { code: "U3", en: "Underfloor heating screed-drying function not completed correctly", de: "Estrichtrocknungsprogramm der Fußbodenheizung nicht korrekt abgeschlossen",
+    es: "Secado de recrecido del suelo radiante no completado correctamente", fr: "Séchage de chape du plancher chauffant mal terminé", it: "Asciugatura del massetto radiante non completata correttamente",
+    pl: "Program suszenia jastrychu ogrzewania podłogowego nie zakończył się prawidłowo", cs: "Vysoušení potěru podlahového topení nebylo správně dokončeno", uk: "Сушіння стяжки теплої підлоги завершено неправильно" },
+  { code: "U4", en: "Indoor/outdoor unit communication problem", de: "Kommunikationsproblem zwischen Innen- und Außeneinheit",
+    es: "Problema de comunicación entre unidades interior y exterior", fr: "Problème de communication entre unités intérieure et extérieure", it: "Problema di comunicazione tra unità interna ed esterna",
+    pl: "Problem komunikacji jednostki wewnętrznej z zewnętrzną", cs: "Problém komunikace mezi vnitřní a venkovní jednotkou", uk: "Проблема зв’язку між внутрішнім і зовнішнім блоками" },
+  { code: "U5", en: "User interface communication problem", de: "Kommunikationsproblem mit der Bedieneinheit",
+    es: "Problema de comunicación con la interfaz de usuario", fr: "Problème de communication avec l’interface utilisateur", it: "Problema di comunicazione con l’interfaccia utente",
+    pl: "Problem komunikacji z panelem sterowania", cs: "Problém komunikace s uživatelským rozhraním", uk: "Проблема зв’язку з інтерфейсом користувача" },
+  { code: "U7", en: "Outdoor unit main CPU / inverter CPU transmission fault", de: "Übertragungsfehler zwischen Haupt-CPU und Inverter-CPU der Außeneinheit",
+    es: "Fallo de transmisión entre CPU principal e inverter exterior", fr: "Défaut de transmission entre CPU principale et CPU inverter extérieure", it: "Guasto di trasmissione tra CPU principale e CPU inverter esterna",
+    pl: "Błąd transmisji między głównym CPU a CPU inwertera jednostki zewnętrznej", cs: "Porucha přenosu mezi hlavním CPU a CPU invertoru venkovní jednotky", uk: "Збій передавання між головним CPU та CPU інвертора зовнішнього блока" },
+  { code: "U8", en: "External device (LAN adapter / room thermostat / USB) communication problem", de: "Kommunikationsproblem mit LAN-Adapter, Raumthermostat oder USB-Gerät",
+    es: "Problema de comunicación con adaptador LAN, termostato ambiente o USB", fr: "Problème de communication avec adaptateur LAN, thermostat d’ambiance ou USB", it: "Problema di comunicazione con adattatore LAN, termostato ambiente o USB",
+    pl: "Problem komunikacji z adapterem LAN, termostatem pokojowym lub USB", cs: "Problém komunikace s LAN adaptérem, pokojovým termostatem nebo USB", uk: "Проблема зв’язку з LAN-адаптером, кімнатним термостатом або USB" },
+  { code: "UA", en: "Indoor/outdoor unit combination or compatibility problem", de: "Innen- und Außeneinheit sind falsch kombiniert oder nicht kompatibel",
+    es: "Combinación o compatibilidad incorrecta entre unidades", fr: "Combinaison ou compatibilité incorrecte entre unités", it: "Combinazione o compatibilità errata tra unità",
+    pl: "Nieprawidłowe połączenie lub zgodność jednostek", cs: "Nesprávná kombinace nebo kompatibilita jednotek", uk: "Неправильне поєднання або несумісність блоків" },
+  { code: "UF", en: "Reversed piping or faulty communication wiring detected", de: "Vertauschte Rohrleitungen oder fehlerhafte Kommunikationsverdrahtung erkannt",
+    es: "Tuberías invertidas o cableado de comunicación defectuoso", fr: "Tuyauterie inversée ou câblage de communication défectueux", it: "Tubazioni invertite o cablaggio di comunicazione difettoso",
+    pl: "Wykryto zamienione rury lub błędne okablowanie komunikacji", cs: "Detekováno prohozené potrubí nebo vadné komunikační vedení", uk: "Виявлено переплутані труби або несправну проводку зв’язку" },
 ]);
 
 const DESCRIPTIONS = [
@@ -1046,10 +1173,22 @@ const MB_DELTA_WHY = {
   outdoor_air: {
     en: "while the compressor rests X10A holds the last run's value — the independently polled HomeHub register can continue changing, but carries no measurement timestamp",
     de: "bei stehendem Verdichter hält X10A den Wert des letzten Laufs — das unabhängig abgefragte HomeHub-Register kann sich weiter ändern, trägt aber keinen Messzeitstempel",
+    es: "con el compresor parado, X10A conserva el valor del último ciclo; el registro HomeHub se sigue consultando, pero no incluye la hora de medición",
+    fr: "compresseur arrêté, X10A conserve la valeur du dernier cycle ; le registre HomeHub continue d’être lu, mais sans horodatage de mesure",
+    it: "a compressore fermo X10A conserva il valore dell’ultimo ciclo; il registro HomeHub continua a essere letto, ma non ha un orario di misura",
+    pl: "przy zatrzymanej sprężarce X10A zachowuje wartość z ostatniej pracy; rejestr HomeHub jest nadal odczytywany, ale nie ma czasu pomiaru",
+    cs: "při stojícím kompresoru X10A drží hodnotu z posledního běhu; registr HomeHub se dál čte, ale nemá čas měření",
+    uk: "коли компресор зупинено, X10A зберігає значення останньої роботи; регістр HomeHub далі опитується, але не має часу вимірювання",
   },
   room_temp: {
     en: "the two read the room from different controllers",
     de: "die beiden lesen den Raum von unterschiedlichen Reglern",
+    es: "los dos valores proceden de controladores de ambiente distintos",
+    fr: "les deux valeurs proviennent de régulateurs d’ambiance différents",
+    it: "i due valori provengono da regolatori ambiente diversi",
+    pl: "oba odczyty pochodzą z różnych regulatorów pomieszczenia",
+    cs: "obě hodnoty pocházejí z různých prostorových regulátorů",
+    uk: "обидва значення надходять від різних кімнатних регуляторів",
   },
 };
 
@@ -1059,7 +1198,8 @@ const MB_DELTA_WHY = {
 // comparing two numbers wants to know whether they agree, and "1.7 K apart, and here is why" is a
 // different statement from two numbers left side by side to be squinted at.
 function mbDeltaHtml(row, mb) {
-  const why = MB_DELTA_WHY[row.concept] ? tx(MB_DELTA_WHY[row.concept]) : "";
+  const why = MB_DELTA_I18N[LANG]?.[row.concept] ||
+    (MB_DELTA_WHY[row.concept] ? tx(MB_DELTA_WHY[row.concept]) : "");
   // A bit flag has no difference to state. Agreement on a flag is unremarkable and says nothing;
   // a MISMATCH is worth a line, since the two sources are then contradicting each other about a
   // discrete fact rather than differing by a tolerance.
@@ -1080,30 +1220,56 @@ function mbDeltaHtml(row, mb) {
 // Explain only the code the row reports NOW. Keeping all 63 meanings as a lookup is useful; printing
 // all 63 every time the row opens is not. An unavailable HomeHub value (`--`) must not be translated
 // into "no fault" because the neighbouring diagnostic-state register is the authority for that.
+const FAULT_CODE_NONE = Object.freeze({
+  en: "No fault code is currently being transmitted.",
+  de: "Aktuell wird kein Fehlercode übertragen.",
+  es: "No se transmite ningún código de fallo.",
+  fr: "Aucun code de défaut n’est transmis.",
+  it: "Non viene trasmesso alcun codice di guasto.",
+  pl: "Nie jest przesyłany żaden kod błędu.",
+  cs: "Není přenášen žádný chybový kód.",
+  uk: "Код несправності зараз не передається.",
+});
+const FAULT_CODE_UNKNOWN = Object.freeze({
+  en: "No short explanation is stored for this code.",
+  de: "Keine Kurzbeschreibung für diesen Code hinterlegt.",
+  es: "No hay una descripción breve para este código.",
+  fr: "Aucune description courte n’est enregistrée pour ce code.",
+  it: "Non è disponibile una breve descrizione per questo codice.",
+  pl: "Brak krótkiego opisu tego kodu.",
+  cs: "Pro tento kód není uložen stručný popis.",
+  uk: "Для цього коду немає короткого опису.",
+});
 function faultCodeDetailHtml(currentValue) {
   const raw = String(currentValue == null ? "" : currentValue).trim();
   const match = raw.match(/^([0-9A-Z]{2})(?=$|[:\s-])/i);
-  if (!match) {
-    return descParaHtml(esc(LANG === "de"
-      ? "Aktuell wird kein Fehlercode übertragen."
-      : "No fault code is currently being transmitted."));
-  }
+  const localePack = FAULT_CODE_I18N[LANG];
+  if (!match) return descParaHtml(esc(localePack?.none || FAULT_CODE_NONE[LANG] || FAULT_CODE_NONE.en));
   const code = match[1].toUpperCase();
-  const entry = DAIKIN_FAULT_CODES.find((candidate) => candidate.code === code);
-  const meaning = entry
-    ? (LANG === "de" ? entry.de : entry.en)
-    : (LANG === "de" ? "Keine Kurzbeschreibung für diesen Code hinterlegt."
-                     : "No short explanation is stored for this code.");
+  const index = DAIKIN_FAULT_CODES.findIndex((candidate) => candidate.code === code);
+  const entry = index >= 0 ? DAIKIN_FAULT_CODES[index] : null;
+  const meaning = entry ? (localePack?.values[index] || entry[LANG] || entry.en)
+                        : (localePack?.unknown || FAULT_CODE_UNKNOWN[LANG] || FAULT_CODE_UNKNOWN.en);
   return `<div class="fault-code-current"><code>${esc(code)}</code><span>${esc(meaning)}</span></div>`;
 }
 
 // Description body: the plain "what is it" sentence, then optional interpretation and normal-context
 // paragraphs. `currentValue` is optional because most explainers do not need their row value.
-function descBodyHtml(d, currentValue) {
+function descriptionCopy(d) {
+  if (LANG === "en" || LANG === "de") return null;
+  const index = DESCRIPTIONS.indexOf(d);
+  return index < 0 ? null : DESCRIPTION_I18N[LANG]?.[index] || null;
+}
+function modelDescriptionCopy(id) {
+  return LANG === "en" || LANG === "de" ? null : MODEL_DESCRIPTION_I18N[LANG]?.[id] || null;
+}
+function descBodyHtml(d, currentValue, localized = null) {
   const b = (LANG === "de" && d.de) ? d.de : d;   // German copy when present, else the English row
   if (d.faultCode) return faultCodeDetailHtml(currentValue);
-  const intro = descParaHtml(esc(b.what));
+  const whatText = localized ? localized[0] : b.what;
+  const normalText = localized ? localized[1] : b.normal;
+  const intro = descParaHtml(esc(whatText));
   const meaning = b.meaning ? descNoteHtml(t("meaning.label"), b.meaning) : "";
-  const normal = b.normal ? descNoteHtml(t("normal.label"), b.normal) : "";
+  const normal = normalText ? descNoteHtml(t("normal.label"), normalText) : "";
   return intro + meaning + normal;
 }

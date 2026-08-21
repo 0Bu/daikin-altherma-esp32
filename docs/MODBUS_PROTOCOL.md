@@ -73,7 +73,8 @@ advertises on the `_http._tcp.local.` service."* Three consequences shape the im
 
 1. **The advert is the hub's HTTP server on port 80, not a Modbus SRV record.** mDNS yields the
    host/IP only; the client then connects Modbus on the well-known port **502**.
-2. **`_http._tcp` is noisy — and this firmware is one of the responders** (`main/wifi.cpp` registers
+2. **`_http._tcp` is noisy — and this firmware is one of the responders** (`net_mdns_start()` in
+   `main/net.cpp` registers
    its own `_http._tcp` advert). A browse is therefore filtered by the hub's stable hostname prefix
    `homehub-*` (`is_homehub_hostname()`, `logic/modbus.hpp`); without that filter the device could
    try to talk Modbus to itself or to an unrelated HTTP device.

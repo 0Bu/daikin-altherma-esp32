@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 class ClassList {
   constructor() { this.names = new Set(); }
@@ -210,8 +210,9 @@ const context = vm.createContext({
   renderHeader() {},
 });
 
-const source = readAppFragments(["i18n.js", "app_state.js", "settings.js", "bootstrap.js"])
-  .replace(/\nboot\(\);\s*$/, "\n");
+const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
+  readAppFragments(["app_state.js", "settings.js", "bootstrap.js"])
+    .replace(/\nboot\(\);\s*$/, "\n");
 vm.runInContext(`${source}
   toast = () => {};
   renderApp = () => {};

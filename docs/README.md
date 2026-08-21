@@ -264,7 +264,8 @@ the HTTP path and the running firmware version — no board, MAC, serial or conf
 The **poll cadence** stays fixed at 1 s, and
 the **value-catalog labels** (the heat-pump register names) stay **English-only**; the **model**
 (`profile` + the detection fingerprint) is re-detected fresh on every boot and kept in RAM (a swapped
-unit is re-identified). The **UI's own language** is browser-detected the same way by default, but —
+unit is re-identified). The **UI's own language** is browser-detected from the supported
+en/de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi set by default, but —
 unlike the labels above — a manual pick *is* persisted (the `ui_lang` field in the `cfg` row above).
 See [ARCHITECTURE.md](ARCHITECTURE.md) → Auto-detection.
 
@@ -279,7 +280,8 @@ LAN only. Browser requests are pinned to that mDNS name or a current WiFi/Ethern
 Origin/Fetch Metadata), and every POST body is `application/json`; see [SECURITY.md](SECURITY.md).
 
 ```
-GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
+GET  /  (alias /index.html)        # embedded web UI (gzip-compressed in the app binary)
+GET  /locale.js?lang=<code>        # device-local de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi UI catalog (gzip; trusted LAN)
 GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporter-identifying values
                                    #   read "<redacted>" — network/location identifiers, user-typed
                                    #   names/topics and all seven user-typed JSON paths. The exact
@@ -289,8 +291,9 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporte
                                    #   build produced this?" is the first question a frozen report
                                    #   has to answer. Substituted where each value is WRITTEN, never
                                    #   as a pass over the finished string (the httpd stack budget
-                                   #   v1.0.12 overflowed). The WS broadcast is never redacted — it
-                                   #   feeds the dashboard, which legitimately shows the SSID.
+                                   #   v1.0.12 overflowed). The dashboard polls ordinary GET /status
+                                   #   without redact=1, so it legitimately receives fields such as
+                                   #   SSID.
                                    # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
                                    #   board:{led_gpio,led_type,led_inverted,btn_gpio,
                                    #        btn_active_low,pins_local:[..],presets:[..]},
@@ -533,6 +536,10 @@ POST /set_ntp                      # { server } → persist + reboot, no request
                                    #   SNTP client resolves + retries after reboot, same as syslog); an
                                    #   empty server resets to the compile-time default on next boot —
                                    #   SNTP has no disabled state, unlike syslog's empty-means-off.
+POST /set_lang                     # { lang } → persist and apply live without reboot. Accepted values:
+                                   #   auto, en, de, es, fr, it, pl, cs, uk, zh, ja, nb, sv, fi.
+                                   #   auto restores browser
+                                   #   detection; every named locale is served device-locally.
 POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
                                    #     mb_unit_id? } → apply live (no reboot).
                                    #   Every key optional; an omitted one keeps its stored value.
@@ -678,9 +685,11 @@ command topics are subscribed. The bridge runs in its own task, independent of t
 
 - **Enable:** set the broker in the web UI (gear → Connections → MQTT). Stored in NVS `mqtt_uri`.
 - **TLS:** a schemeless entry defaults to plaintext `mqtt://`. Credentials require an explicit
-  `mqtts://` broker URL (CA-verified via the mbedTLS bundle) so the password isn't sniffable — the
-  bridge **refuses** a plaintext broker with credentials rather than silently downgrading or guessing
-  a TLS port. An explicit scheme is always honoured. Reason surfaces in `/status.mqtt`.
+  `mqtts://` broker URL (CA-verified via ESP-IDF's common-root mbedTLS bundle) so the password isn't
+  sniffable — the bridge **refuses** a plaintext broker with credentials rather than silently
+  downgrading or guessing a TLS port. ESP-IDF documents approximately 99% public-root coverage for
+  this size-bounded subset; a broker chained only to a rarer excluded root is rejected. An explicit
+  scheme is always honoured. Reason surfaces in `/status.mqtt`.
 - **Node id:** the slugified base topic (`daikin-altherma-esp32` → `daikin_altherma_esp32`). It
   identifies the *device* in each discovery config's `uniq_id`/`dev.ids`, but is **not** part of the
   message topics — those sit directly under `<base>` (one board per base topic). The base topic is a
