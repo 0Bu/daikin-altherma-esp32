@@ -2497,6 +2497,15 @@ static void test_ota_headroom() {
         streak = ota_headroom_streak_next(OTA_TRANSFER_HEADROOM, streak,
                                           60u * 1024u, 32u * 1024u);
     CHECK(streak == OTA_TRANSFER_HEADROOM.stable_samples);
+
+    // Courtesy notes use the same dynamic-TLS admission budget as the manifest/image client.
+    CHECK(OTA_CHANGELOG_HEADROOM.min_free_bytes == OTA_TRANSFER_HEADROOM.min_free_bytes);
+    CHECK(OTA_CHANGELOG_HEADROOM.min_largest_block_bytes ==
+          OTA_TRANSFER_HEADROOM.min_largest_block_bytes);
+    CHECK(OTA_CHANGELOG_HEADROOM.stable_samples == OTA_TRANSFER_HEADROOM.stable_samples);
+    CHECK(ota_changelog_tls_headroom_ok(56u * 1024u, 24u * 1024u));
+    CHECK(!ota_changelog_tls_headroom_ok(56u * 1024u - 1, 64u * 1024u));
+    CHECK(!ota_changelog_tls_headroom_ok(64u * 1024u, 24u * 1024u - 1));
 }
 
 // The weather fetch's own headroom gate (private issue 10 D) — same predicate shape as the OTA
@@ -5660,6 +5669,19 @@ static void test_ota_channel() {
     // does not enforce it, and "…/pdev/manifest.json" would be a 404 nobody could explain.
     CHECK(ota_channel_manifest_url(mf, "https://x.github.io/p", OtaChannel::Dev) ==
           "https://x.github.io/p/dev/manifest.json");
+    char sibling_url[128] = {};
+    CHECK(ota_manifest_sibling_url(mf, "changelog.json", sibling_url, sizeof(sibling_url)));
+    CHECK(std::string(sibling_url) == "https://x.github.io/p/changelog.json");
+    CHECK(ota_manifest_sibling_url("https://x.github.io/p/dev/manifest.json", "changelog.json",
+                                   sibling_url, sizeof(sibling_url)));
+    CHECK(std::string(sibling_url) == "https://x.github.io/p/dev/changelog.json");
+    CHECK(!ota_manifest_sibling_url("manifest.json", "changelog.json", sibling_url,
+                                    sizeof(sibling_url)) && sibling_url[0] == 0);
+    CHECK(!ota_manifest_sibling_url(mf, "", sibling_url, sizeof(sibling_url)) &&
+          sibling_url[0] == 0);
+    char tiny_sibling_url[8] = {};
+    CHECK(!ota_manifest_sibling_url(mf, "changelog.json", tiny_sibling_url,
+                                    sizeof(tiny_sibling_url)) && tiny_sibling_url[0] == 0);
     CHECK(ota_channel_firmware_url(base, OtaChannel::Release, "daikin-altherma-esp32.bin") ==
           "https://x.github.io/p/daikin-altherma-esp32.bin");
     CHECK(ota_channel_firmware_url(base, OtaChannel::Dev, "daikin-altherma-esp32.bin") ==
@@ -5832,6 +5854,85 @@ static void test_ota_manifest() {
         "{\"version\":\"1.2.3\",\"provenance\":{\"app_sha256\":\"" +
         std::string(64, 'A') + "\"}}";
     CHECK(!manifest_identity(upper_sha.data(), upper_sha.size(), identity));
+
+    // The human-readable notes live in a separate, version-bound document so the security-critical
+    // installer manifest stays under its fixed 1 KiB stack cap.  The parser allocates nothing,
+    // decodes only the publisher's explicit UTF-8 JSON subset and never returns partial prose.
+    char changelog[OTA_CHANGELOG_TEXT_MAX + 1];
+    const char* notes_json =
+        "{\"version\":\"1.2.3-dev.4\",\"changelog\":\"Add German UI\\nFix \\\"OTA\\\" path \\\\ status\\tready\"}";
+    CHECK(manifest_changelog(notes_json, std::strlen(notes_json), "1.2.3-dev.4",
+                              changelog, sizeof(changelog)));
+    CHECK(std::string(changelog) == "Add German UI\nFix \"OTA\" path \\ status\tready");
+    char in_place_notes[256] =
+        "{\"version\":\"1.2.3-dev.4\",\"changelog\":\"In-place line 1\\nIn-place line 2\"}";
+    CHECK(manifest_changelog(in_place_notes, std::strlen(in_place_notes), "1.2.3-dev.4",
+                              in_place_notes, sizeof(in_place_notes)));
+    CHECK(std::string(in_place_notes) == "In-place line 1\nIn-place line 2");
+
+    // Production reuses its one bounded transient body slot. Decoding into the exact same allocation
+    // is safe and must produce the same bounded text without preserving a second candidate.
+    char in_place[] =
+        "{\"version\":\"1.2.3-dev.4\",\"changelog\":\"Add German UI\\nFix \\\"OTA\\\" path\"}";
+    CHECK(manifest_changelog(in_place, std::strlen(in_place), "1.2.3-dev.4",
+                              in_place, sizeof(in_place)));
+    CHECK(std::string(in_place) == "Add German UI\nFix \"OTA\" path");
+
+    const char* slash_json =
+        "{\"changelog\":\"See https:\\/\\/example.test\",\"version\":\"1.2.3\"}";
+    CHECK(manifest_changelog(slash_json, std::strlen(slash_json), "1.2.3",
+                              changelog, sizeof(changelog)));
+    CHECK(std::string(changelog) == "See https://example.test");
+
+    CHECK(!manifest_changelog(notes_json, std::strlen(notes_json), "1.2.3-dev.5",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* no_notes = "{\"version\":\"1.2.3\"}";
+    CHECK(!manifest_changelog(no_notes, std::strlen(no_notes), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* nested_notes =
+        "{\"version\":\"1.2.3\",\"nested\":{\"changelog\":\"Wrong depth\"}}";
+    CHECK(!manifest_changelog(nested_notes, std::strlen(nested_notes), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* duplicate_notes =
+        "{\"version\":\"1.2.3\",\"changelog\":\"One\",\"changelog\":\"Two\"}";
+    CHECK(!manifest_changelog(duplicate_notes, std::strlen(duplicate_notes), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* escaped_unicode =
+        "{\"version\":\"1.2.3\",\"changelog\":\"No \\u0041SCII fork\"}";
+    CHECK(!manifest_changelog(escaped_unicode, std::strlen(escaped_unicode), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* escaped_version =
+        "{\"version\":\"1.2.\\u0033\",\"changelog\":\"Wrong identity\"}";
+    CHECK(!manifest_changelog(escaped_version, std::strlen(escaped_version), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* cut_notes = "{\"version\":\"1.2.3\",\"changelog\":\"unfinished";
+    CHECK(!manifest_changelog(cut_notes, std::strlen(cut_notes), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* mismatched_notes = "{\"version\":\"1.2.3\",\"changelog\":\"Wrong closer\"]";
+    CHECK(!manifest_changelog(mismatched_notes, std::strlen(mismatched_notes), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* missing_comma = "{\"version\":\"1.2.3\" \"changelog\":\"No separator\"}";
+    CHECK(!manifest_changelog(missing_comma, std::strlen(missing_comma), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* trailing_notes =
+        "{\"version\":\"1.2.3\",\"changelog\":\"Trailing\"}garbage";
+    CHECK(!manifest_changelog(trailing_notes, std::strlen(trailing_notes), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+
+    const std::string max_notes(OTA_CHANGELOG_TEXT_MAX, 'x');
+    const std::string max_notes_json =
+        "{\"version\":\"1.2.3\",\"changelog\":\"" + max_notes + "\"}";
+    CHECK(manifest_changelog(max_notes_json.data(), max_notes_json.size(), "1.2.3",
+                              changelog, sizeof(changelog)));
+    CHECK(std::strlen(changelog) == OTA_CHANGELOG_TEXT_MAX);
+    const std::string too_many_notes(OTA_CHANGELOG_TEXT_MAX + 1, 'y');
+    const std::string too_many_notes_json =
+        "{\"version\":\"1.2.3\",\"changelog\":\"" + too_many_notes + "\"}";
+    CHECK(!manifest_changelog(too_many_notes_json.data(), too_many_notes_json.size(), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    char tiny_notes[8];
+    CHECK(!manifest_changelog(notes_json, std::strlen(notes_json), "1.2.3-dev.4",
+                               tiny_notes, sizeof(tiny_notes)) && tiny_notes[0] == 0);
 }
 
 static void test_query_flag() {
@@ -7696,7 +7797,7 @@ static void test_http_surface() {
                           "/diag", "/diag/clear", "/coredump", "/coredump/clear",
                           "/crash/dismiss", "/models", "/set_wifi",
                           "/set_mqtt", "/set_ntp", "/set_weather", "/set_hp", "/detect", "/ota/check",
-                          "/ota/update", "/mcp"}) {
+                          "/ota/update", "/ota/changelog", "/mcp"}) {
         CHECK(http_surface_serves(lan, p, false));
         CHECK(http_surface_serves(lan, p, true));
     }
@@ -7731,6 +7832,7 @@ static void test_http_surface() {
     CHECK(!http_surface_serves(ap, "/detect", true));
     CHECK(!http_surface_serves(ap, "/ota/check", false));
     CHECK(!http_surface_serves(ap, "/ota/update", true));
+    CHECK(!http_surface_serves(ap, "/ota/changelog", false));
     CHECK(!http_surface_serves(ap, "/mcp", false));  // GET dashboard is LAN-only too
     CHECK(!http_surface_serves(ap, "/mcp", true));
 

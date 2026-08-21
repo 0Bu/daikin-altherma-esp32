@@ -20,6 +20,8 @@
 // Pure so the join rules are asserted: a base URL with or without its trailing slash must produce
 // the same URL, and an EMPTY base must produce an empty string rather than a relative path that
 // would be fetched against nothing and reported as an unreachable server.
+#include <cstddef>
+#include <cstring>
 #include <string>
 
 namespace daik {
@@ -72,6 +74,25 @@ inline std::string ota_channel_manifest_url(const std::string& release_manifest_
                                             const std::string& firmware_base_url, OtaChannel c) {
     if (c == OtaChannel::Release) return release_manifest_url;
     return ota_url_join(ota_url_join(firmware_base_url, kOtaDevSubdir), "manifest.json");
+}
+
+// Resolve a file published beside the selected manifest.  Release manifests may be hosted at a
+// custom path independent of CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, so deriving changelog.json from
+// the exact checked URL keeps custom feeds coherent instead of silently jumping back to the
+// default firmware base.  A URL without a directory separator is unusable and fails closed.
+inline bool ota_manifest_sibling_url(const std::string& manifest_url, const char* sibling,
+                                     char* out, size_t outlen) {
+    if (!out || outlen == 0) return false;
+    out[0] = '\0';
+    if (manifest_url.empty() || !sibling || sibling[0] == '\0') return false;
+    const auto slash = manifest_url.rfind('/');
+    if (slash == std::string::npos) return false;
+    const size_t prefix_len = slash + 1;
+    const size_t sibling_len = std::strlen(sibling);
+    if (prefix_len + sibling_len >= outlen) return false;
+    std::memcpy(out, manifest_url.data(), prefix_len);
+    std::memcpy(out + prefix_len, sibling, sibling_len + 1);
+    return true;
 }
 
 // The image to download for THIS channel. `image` is the per-target file name the manifest's feed

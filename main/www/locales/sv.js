@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -396,7 +396,14 @@ I18N.sv = localeValues([
   /* ota.snapshot_value */ "Cachad",
   /* ota.snapshot_help */ "Senast mottagna status före denna sidladdning. Direktdata kan stoppas under installationen; inställningarna är låsta fram till omstart.",
   /* ota.reload_hint */ "installerad — ladda sedan på nytt",
-  /* ota.confirm */ (cur, avail) => `Uppdatering tillgänglig: v${cur} → v${avail}\n\nEnheten laddar ned den signerade avbildningen, installerar den och startar om. Om den nya firmwareversionen inte ansluter till nätet återställs den automatiskt.`,
+  /* ota.dialog_title */ "Firmwareuppdatering",
+  /* ota.switch_title */ "Byt firmwareversion",
+  /* ota.changes_title */ "Nytt i den här versionen",
+  /* ota.no_changes */ "Ingen ändringslogg tillhandahölls för den här versionen.",
+  /* ota.install_help */ "Enheten laddar ned och installerar den signerade avbildningen och startar om. Om den nya firmwareversionen inte ansluter till nätet återställer enheten automatiskt den aktuella versionen.",
+  /* ota.switch_help */ "Den här versionen är äldre eftersom en annan uppdateringskanal har valts. Signaturen verifieras före installationen. Om den äldre versionen inte ansluter till nätet återställer enheten automatiskt den aktuella versionen.",
+  /* ota.install */ "Installera uppdatering",
+  /* ota.switch */ "Installera äldre version",
   /* aria.ota */ "Sök efter firmwareuppdateringar",
   /* ota.title_check */ "Tryck för att söka efter firmwareuppdateringar",
   /* ota.title_avail */ (v) => `Uppdatering v${v} tillgänglig — tryck för att installera`,
@@ -859,7 +866,6 @@ I18N.sv = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Språk sparat",
-  /* ota.downgrade_confirm */ (cur, avail) => `Byta tillbaka till v${avail}?\n\nInstallerad v${cur} är nyare. Den äldre versionen erbjuds eftersom du valt en annan kanal. Signaturen kontrolleras före installation och enheten återställer automatiskt dagens version om den äldre inte ansluter till nätet.`,
   /* hist.cop_none */ "Ingen COP-historik när strömvärdet kommer från CT-klämmor. Kabeldragningen avgör vilka laster de täcker; värmemätningen slutar före BUH och omfattar inte direkt BSH-värme. Systemgränserna kan därför avvika.",
 ]);
 

@@ -34,7 +34,7 @@ touch "$T/artifacts/daikin-altherma-esp32.elf.xz" \
 check_rc "diagnostics-only directory passes" 0 ./scripts/check-nonflashable-artifacts.sh "$T/artifacts"
 
 for forbidden in daikin-altherma-esp32.bin daikin-altherma-esp32-merged.bin \
-                 daikin-altherma-esp32-web-bootloader.bin manifest.json; do
+                 daikin-altherma-esp32-web-bootloader.bin manifest.json changelog.json; do
     touch "$T/artifacts/$forbidden"
     check_rc "$forbidden is refused" 1 ./scripts/check-nonflashable-artifacts.sh "$T/artifacts"
     rm -f "$T/artifacts/$forbidden"
@@ -91,6 +91,8 @@ check_rc "whitespace is not normalized into SemVer" 1 "$T/version/scripts/next-v
 echo "== 4. workflow trust and release ordering =="
 check_rc "manifest provenance validator self-test passes" 0 \
     python3 scripts/check-manifest-provenance.py --self-test
+check_rc "OTA changelog generator self-test passes" 0 \
+    python3 scripts/generate-ota-changelog.py --self-test
 python3 - "$REPO/.github/workflows/build.yml" <<'PY'
 import re
 import sys
@@ -132,14 +134,19 @@ require("--compile-only" not in trusted, "signed build accidentally uses compile
 require('--source-sha "${{ github.sha }}"' in trusted,
         "signed build does not receive source SHA explicitly")
 version_gate = trusted.find("Check the version moves its feed forward")
+changelog = trusted.find("Generate public OTA changelog")
 firmware_build = trusted.find("- name: Build firmware")
-require(0 <= version_gate < firmware_build, "release identity gate does not precede firmware build")
+require(0 <= version_gate < changelog < firmware_build,
+        "release identity/changelog gates do not precede firmware build")
 early_gate = trusted[version_gate:firmware_build]
 require("SOURCE_SHA: ${{ github.sha }}" in early_gate and
         'check-publish-version.sh --source-sha "$SOURCE_SHA"' in early_gate,
         "release resume is not checked against github.sha before the build")
 require('"v${disp}^{commit}"' in trusted and '"$tag_sha" = "$GITHUB_SHA"' in trusted,
         "release resume does not bind an existing tag to this source commit")
+require("generate-ota-changelog.py" in trusted and "--published-ref FETCH_HEAD" in trusted and
+        "--changelog-file ota-changelog.json" in trusted and "dist/changelog.json" in trusted,
+        "trusted build does not generate and retain the version-bound OTA changelog")
 
 publish = jobs["publish"]
 require("needs: [trusted_build]" in publish, "publisher does not depend on signed build")
@@ -150,6 +157,8 @@ require("check-manifest-provenance.py" in publish,
         "publisher does not verify signed artifact provenance")
 require('check-publish-version.sh --source-sha "$SOURCE_SHA"' in publish,
         "publisher does not recheck the feed against artifact source")
+require("generate-ota-changelog.py --validate dist/changelog.json" in publish,
+        "publisher does not validate the handed-off OTA changelog")
 require("target_commitish: ${{ github.sha }}" in publish,
         "new release tag is not explicitly bound to github.sha")
 for notice in ("_site/LICENSE.txt", "_site/THIRD_PARTY_NOTICES.md", "_site/Apache-2.0.txt"):
@@ -197,6 +206,8 @@ require('cp THIRD_PARTY_NOTICES.md "$OUT/THIRD_PARTY_NOTICES.md"' in page_builde
         "Pages builder omits third-party notices")
 require('cp tools/web_asset/vendor/LICENSE "$OUT/Apache-2.0.txt"' in page_builder,
         "Pages builder omits the Apache-2.0 license")
+require('cp dist/changelog.json "$OUT/changelog.json"' in page_builder,
+        "Pages builder omits the OTA changelog beside the selected feed")
 
 repo = workflow_dir.parents[1]
 apache_license = (repo / "tools" / "web_asset" / "vendor" / "LICENSE").read_text(encoding="utf-8")

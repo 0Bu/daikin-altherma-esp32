@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -396,7 +396,14 @@ I18N.es = localeValues([
   /* ota.snapshot_value */ "Instantánea",
   /* ota.snapshot_help */ "Último estado recibido antes de esta recarga. Los datos en directo pueden pausarse durante la instalación; los ajustes permanecen bloqueados hasta el reinicio.",
   /* ota.reload_hint */ "instalada — recarga la página",
-  /* ota.confirm */ (cur, avail) => `Actualización disponible: v${cur} → v${avail}\n\nEl dispositivo descarga e instala la imagen firmada y después se reinicia. Si el nuevo firmware no consigue conectarse, restaura automáticamente el anterior.`,
+  /* ota.dialog_title */ "Actualización de firmware",
+  /* ota.switch_title */ "Cambiar la versión de firmware",
+  /* ota.changes_title */ "Novedades de esta compilación",
+  /* ota.no_changes */ "No se proporcionó un registro de cambios para esta compilación.",
+  /* ota.install_help */ "El dispositivo descarga e instala la imagen firmada y después se reinicia. Si el nuevo firmware no consigue conectarse, el dispositivo restaura automáticamente la compilación actual.",
+  /* ota.switch_help */ "Esta compilación es anterior porque se ha seleccionado otro canal de actualización. Su firma se verifica antes de instalarla. Si no consigue conectarse, el dispositivo restaura automáticamente la compilación actual.",
+  /* ota.install */ "Instalar actualización",
+  /* ota.switch */ "Instalar compilación anterior",
   /* aria.ota */ "Buscar actualizaciones de firmware",
   /* ota.title_check */ "Toca para buscar actualizaciones de firmware",
   /* ota.title_avail */ (v) => `Actualización v${v} disponible — toca para instalar`,
@@ -859,7 +866,6 @@ I18N.es = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Idioma guardado",
-  /* ota.downgrade_confirm */ (cur, avail) => `¿Volver a v${avail}?\n\nLa versión instalada v${cur} es más reciente. Se ofrece esta compilación anterior porque has seleccionado otro canal de actualización. Su firma se verifica antes de instalarla y el dispositivo restaura automáticamente la compilación actual si la anterior no consigue conectarse.`,
   /* hist.cop_none */ "No se muestra la curva de COP cuando la potencia eléctrica procede de las pinzas CT. Las cargas incluidas dependen del cableado; la potencia térmica registrada termina antes de BUH y no incluye el calor directo de BSH, por lo que no se garantiza la misma frontera de balance.",
 ]);
 INSPECT_I18N.es = inspectValues(

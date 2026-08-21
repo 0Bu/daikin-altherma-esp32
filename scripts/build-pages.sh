@@ -4,13 +4,14 @@
 #   _site/*.mjs           local installer behavior modules
 #   _site/heat-pump-icon.png  the same canonical brand mark embedded in the firmware UI
 #   _site/manifest.json   esptool-js installer + OTA manifest
+#   _site/changelog.json  version-bound notes shown by the firmware OTA confirmation
 #   _site/LICENSE.txt + THIRD_PARTY_NOTICES.md + Apache-2.0.txt  redistribution notices
 #   _site/*.bin           sparse installer parts + signed app (OTA) + manual merged image
 #
 # The site hosts TWO independent feeds, because a merge to main no longer cuts a release:
 #   _site/            the RELEASE channel — written only by a manual release run
 #   _site/dev/        the DEV channel     — written by every firmware-relevant merge to main
-# Both have the same shape (index.html + manifest.json + bins), so the installer page and the
+# Both have the same shape (index.html + manifest.json + changelog.json + bins), so the installer page and the
 # device OTA client work identically against either; only the URL differs
 # (main/logic/ota_channel.hpp derives the dev one by appending "dev/").
 #
@@ -35,6 +36,7 @@ case "$ARG" in
 esac
 
 [ -d dist ] || { echo "build-pages: run scripts/ci-build-all.sh first (no dist/)" >&2; exit 1; }
+[ -f dist/changelog.json ] || { echo "build-pages: dist/changelog.json is missing" >&2; exit 1; }
 rm -rf "$OUT"; mkdir -p "$OUT"
 
 cp docs/index.html docs/serial-port-release.mjs docs/web-installer.mjs "$OUT/"
@@ -44,5 +46,6 @@ cp THIRD_PARTY_NOTICES.md "$OUT/THIRD_PARTY_NOTICES.md"
 cp tools/web_asset/vendor/LICENSE "$OUT/Apache-2.0.txt"
 cp dist/*.bin "$OUT/"
 cp dist/manifest.json "$OUT/manifest.json"
+cp dist/changelog.json "$OUT/changelog.json"
 
 echo "built $OUT (installer + manifest + $(ls dist/*.bin | wc -l | tr -d ' ') images)"

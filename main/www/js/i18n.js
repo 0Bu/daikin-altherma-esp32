@@ -39,7 +39,7 @@ const FAULT_CODE_I18N = Object.create(null);
 const MB_DELTA_I18N = Object.create(null);
 // Locale assets store their compact UI translations positionally against the English key order.
 // The comments in those source files retain the readable key mapping, while the shipped scripts
-// omit 861 repeated property names per language. This keeps all twelve external catalogs within the
+// omit 867 repeated property names per language. This keeps all twelve external catalogs within the
 // fixed application partition without weakening the English fallback contract.
 function localeValues(values) {
   const keys = Object.keys(I18N.en);
@@ -480,7 +480,12 @@ const I18N = {
     "ota.snapshot_help": "Last received state before this reload. Live data may pause during installation; settings stay locked until restart.",
     // The install finished; only the automatic page reload gave up waiting for the board.
     "ota.reload_hint": "installed — reload the page",
-    "ota.confirm": (cur, avail) => `Update available: v${cur} → v${avail}\n\nThe device downloads and installs the signed image, then reboots. If the new firmware can't get online it rolls back automatically.`,
+    "ota.dialog_title": "Firmware update", "ota.switch_title": "Switch firmware version",
+    "ota.changes_title": "What's new in this build",
+    "ota.no_changes": "No changelog was supplied for this build.",
+    "ota.install_help": "The device downloads and installs the signed image, then restarts. If the new firmware cannot get online, the device automatically restores the current build.",
+    "ota.switch_help": "This build is older because a different update channel is selected. Its signature is verified before installation, and the device automatically restores the current build if the older one cannot get online.",
+    "ota.install": "Install update", "ota.switch": "Install older build",
     "aria.ota": "Check for firmware updates",
     "ota.title_check": "Tap to check for firmware updates",
     "ota.title_avail": (v) => `Update v${v} available — tap to install`,
@@ -811,7 +816,6 @@ const I18N = {
     "lang.uk": "Українська", "lang.zh": "简体中文", "lang.ja": "日本語",
     "lang.nb": "Norsk", "lang.sv": "Svenska", "lang.fi": "Suomi",
     "lang.saved": "Language saved",
-    "ota.downgrade_confirm": (cur, avail) => `Switch back to v${avail}?\n\nThe installed version v${cur} is newer. This older build is offered because you selected a different update channel. Its signature is verified before installation, and the device restores the current build automatically if the older one cannot get online.`,
     "hist.cop_none": "No COP curve while electrical input comes from CT clamps. Their wiring decides which loads are included; buffered heat ends before BUH and excludes heat added directly by BSH, so the balance boundaries may not match.",
   },
 };

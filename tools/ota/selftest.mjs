@@ -356,6 +356,43 @@ try {
       replaceOnce("main/ota_update.cpp",
         "    ota_heap_sample();\n    Lock lk(s_mtx);\n    s_status.progress = pct;",
         "    Lock lk(s_mtx);\n    s_status.progress = pct;")],
+    ["release notes are copied into the hot OTA status snapshot", () =>
+      replaceOnce("main/ota_update.hpp", "std::array<char, 65> available_sha256{};",
+        "std::array<char, 65> available_sha256{};\n    const char* changelog = nullptr;")],
+    ["the changelog endpoint materialises its response instead of streaming", () =>
+      replaceOnce("main/http_ota.cpp", "httpd_resp_send_chunk(req, chunk, copied)",
+        "httpd_resp_send(req, chunk, copied)")],
+    ["the changelog stream no longer consumes its retained heap lease", () =>
+      replaceOnce("main/http_ota.cpp", "ota_changelog_release(generation);",
+        "ota_changelog_release_bypassed(generation);")],
+    ["the changelog document is no longer bound to the checked version", () =>
+      replaceOnce("main/ota_update.cpp",
+        "manifest_changelog(document.get(), got, expected_version,",
+        "manifest_changelog(document.get(), got, \"ignored-version\",")],
+    ["the optional changelog opens a second TLS client without a heap gate", () =>
+      replaceOnce("main/ota_update.cpp",
+        'wait_for_ota_headroom("changelog", OTA_CHANGELOG_HEADROOM,',
+        'wait_for_ota_headroom_bypassed("changelog", OTA_CHANGELOG_HEADROOM,')],
+    ["the changelog TLS budget drifts below the measured transfer floor", () =>
+      replaceOnce("main/logic/ota_headroom.hpp",
+        "OTA_CHANGELOG_HEADROOM = OTA_TRANSFER_HEADROOM",
+        "OTA_CHANGELOG_HEADROOM = OTA_VALIDATION_HEADROOM")],
+    ["a trickling changelog body can hold the network heap forever", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(while \(got < kChangelogDocumentMax\) \{[\s\S]{0,180}?)!set_http_timeout_to_deadline\(c, changelog_started, kChangelogDeadline,/,
+        "$1false && !set_http_timeout_to_deadline(c, changelog_started, kChangelogDeadline,")],
+    ["the changelog URL is rebuilt on the heap", () =>
+      replaceOnce("main/ota_update.cpp", "char url[256] = {};",
+        "std::string url;")],
+    ["decoded changelog retention grows back to the full document slot", () =>
+      replaceOnce("main/ota_update.cpp", "heap_caps_malloc(decoded_len + 1, MALLOC_CAP_8BIT)",
+        "heap_caps_malloc(kChangelogDocumentMax, MALLOC_CAP_8BIT)")],
+    ["the changelog TTL allocates its timer control block from heap", () =>
+      replaceOnce("main/ota_update.cpp", "xTimerCreateStatic(\"ota_notes\"",
+        "xTimerCreate(\"ota_notes\"")],
+    ["the changelog timer daemon blocks on the OTA mutex", () =>
+      replaceOnce("main/ota_update.cpp", "Lock lk(s_mtx, 0);",
+        "Lock lk(s_mtx);")],
   ];
 
   let caught = 0;

@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -396,7 +396,14 @@ I18N.it = localeValues([
   /* ota.snapshot_value */ "Istantanea",
   /* ota.snapshot_help */ "Ultimo stato ricevuto prima di questo ricaricamento. I dati in tempo reale possono interrompersi durante l'installazione; le impostazioni restano bloccate fino al riavvio.",
   /* ota.reload_hint */ "installato — ricaricare la pagina",
-  /* ota.confirm */ (cur, avail) => `Aggiornamento disponibile: v${cur} → v${avail}\n\nIl dispositivo scarica e installa l'immagine firmata, quindi si riavvia. Se il nuovo firmware non riesce a collegarsi, viene ripristinato automaticamente quello precedente.`,
+  /* ota.dialog_title */ "Aggiornamento firmware",
+  /* ota.switch_title */ "Cambia versione firmware",
+  /* ota.changes_title */ "Novità di questa build",
+  /* ota.no_changes */ "Per questa build non è stato fornito alcun changelog.",
+  /* ota.install_help */ "Il dispositivo scarica e installa l’immagine firmata, quindi si riavvia. Se il nuovo firmware non riesce a collegarsi, il dispositivo ripristina automaticamente la build attuale.",
+  /* ota.switch_help */ "Questa build è precedente perché è selezionato un altro canale di aggiornamento. La firma viene verificata prima dell’installazione. Se non riesce a collegarsi, il dispositivo ripristina automaticamente la build attuale.",
+  /* ota.install */ "Installa aggiornamento",
+  /* ota.switch */ "Installa build precedente",
   /* aria.ota */ "Verifica la disponibilità di aggiornamenti firmware",
   /* ota.title_check */ "Toccare per verificare gli aggiornamenti firmware",
   /* ota.title_avail */ (v) => `Aggiornamento v${v} disponibile — toccare per installare`,
@@ -859,7 +866,6 @@ I18N.it = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Lingua salvata",
-  /* ota.downgrade_confirm */ (cur, avail) => `Tornare alla v${avail}?\n\nLa versione installata v${cur} è più recente. Questa build precedente viene proposta perché è stato selezionato un altro canale di aggiornamento. La firma viene verificata prima dell'installazione e il dispositivo ripristina automaticamente la build attuale se quella precedente non riesce a collegarsi.`,
   /* hist.cop_none */ "Nessuna curva COP quando la potenza elettrica proviene dalle pinze CT. I carichi inclusi dipendono dal cablaggio; la potenza termica registrata termina prima di BUH e non comprende il calore diretto di BSH, quindi non è garantito lo stesso confine di bilancio.",
 ]);
 INSPECT_I18N.it = inspectValues(

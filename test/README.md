@@ -41,10 +41,11 @@ the firmware build.
 `scripts/run-ui-use-case-tests.sh` is the complete hardware-free UI gate. In addition to every
 `test_ui_*.mjs` contract, HomeHub discovery and the MCP page, it runs
 `test/test_ui_use_cases.mjs`: a small deterministic DOM harness executes the production `wire()`
-function and requires every id in the production `MODALS` list to have a case. The matrix drives
+function and requires every routed or transient production modal id to have a case. The matrix drives
 Settings/Back, stable popup URLs, reload restoration, browser Back/Forward, open, Cancel, backdrop,
 Escape, accepted and rejected Save paths, representative invalid input, board-gated ENV III states,
-and both bug-report steps. `tools/ui/selftest.sh`
+both bug-report steps, and the OTA changelog modal's Cancel/backdrop/Escape/Install lifecycle without
+creating a bookmarkable stale-offer route. `tools/ui/selftest.sh`
 re-introduces the historical undefined ENV III close handler and proves the matrix fails on the
 actual click path. The runner-neutral policy canaries simulate exactly
 `scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT
@@ -73,9 +74,11 @@ by a generic red unreachable state when the larger `/status` allocation is tempo
 under OTA TLS heap pressure.
 
 `node test/test_ui_ota_handshake.mjs` executes the normal check/update browser handshake. It proves
-that the UI waits through the pre-state-change busy lead, rejects a replaced generation, labels an
-answered 503 as device-busy rather than unreachable, and carries the checked channel, version,
-application SHA and generation into the sole update POST before following its immediate successor.
+that the UI waits through the pre-state-change busy lead, fetches only the generation-bound
+changelog, renders remote-looking markup as literal list text, cancels without an update POST,
+rejects a replaced generation, labels an answered 503 as device-busy rather than unreachable, and
+carries the checked channel, version, application SHA and generation into the sole update POST
+before following its immediate successor.
 
 The same `gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
 test executes the production banner/inspector render functions from the assembled UI source and verifies
@@ -107,7 +110,7 @@ right-hand value column. The global reduced-motion contract removes that non-ess
 
 `scripts/run-ui-localization-audit.sh` is the named CI gate for complete device-local copy. Its core,
 `node test/test_ui_locale_catalogs.mjs`, evaluates the separately shipped de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi
-modules against the embedded English fallback. All 840 keys, value types and parameter-function
+modules against the embedded English fallback. All 867 keys, value types and parameter-function
 arities must match; browser detection and the Firmware selector must name the same thirteen languages;
 all 125 value and 15 model-description rows must have native copy with no English prose fallback
 (compact locales may fold the normal context into their first field); concurrent loads coalesce onto
@@ -154,12 +157,23 @@ mutex-assigned operation generation, busy/task-unavailable starts to return 503,
 expose the mutex-consistent `busy` plus generation/channel/version/application-SHA handshake used by
 production promotion, and the accepted update task to hash every downloaded byte against that SHA
 before signed validation and boot selection.
+The optional changelog remains outside the hot `OtaStatus` copy/JSON path, uses one transient
+1025-byte document slot allocated only after TLS setup, and after TLS cleanup retains exactly the
+decoded length. The one-shot lease is freed after every accepted HTTP response path, after a
+60-second static-timer TTL when never requested, or before the next OTA operation. The auto-reload
+callback uses a zero-wait OTA try-lock and retries one second later instead of blocking the shared
+timer daemon. It is accepted
+only for the checked version over forced HTTPS after the same four stable 56 KiB free / 24 KiB
+largest-INTERNAL-block samples as manifest/image TLS, using dynamic TLS records, and is served
+through a fixed-chunk generation-bound endpoint. The UI's 150-second check poll budget covers both
+15-second TLS-headroom waits, both 30-second document deadlines, the bounded allocator-shaped
+manifest retry and the common quiesce margin.
 IDF's umbrella image-validation error stays generic rather than falsely
 claiming a bad signature. Initial feed URLs and every redirect stay on forced HTTPS, and an oversized
 response remains a size-policy refusal rather than masquerading as an interrupted connection.
 `tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently (including
 the fixed task lease, generation rollback and whole-stream SHA comparison) and proves the
-source contract turns red; all eighty-five seeded regressions are required. The allocation-free
+source contract turns red; all ninety-six seeded regressions are required. The allocation-free
 `FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
 
 `node test/test_production_ota_gate_contract.mjs` pins the exact-artifact bench-to-production
@@ -369,7 +383,8 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   garbled NVS byte cannot move a board onto the fast feed), and the URL joins — a base URL with or
   without its trailing slash must produce the same dev URL, and an **empty** base must produce an
   empty string rather than a relative path fetched against nothing.
-- `logic/ota_manifest.hpp` — bounded extraction of the manifest's top-level `"version"`, driven with
+- `logic/ota_manifest.hpp` — bounded extraction of the manifest's top-level `"version"` and the
+  sibling changelog's exact-version-bound text, driven with
   hostile input: a `"version"` nested in `builds[]` must not shadow the real one, a crafted value
   must not close its own string and inject a second key, an oversized value is **refused rather than
   truncated** (a truncated `1.10.0` → `1.1` is well-formed and ordered wrong), and the parser must

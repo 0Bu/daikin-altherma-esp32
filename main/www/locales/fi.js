@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -396,7 +396,14 @@ I18N.fi = localeValues([
   /* ota.snapshot_value */ "Tilannekuva",
   /* ota.snapshot_help */ "Viimeksi vastaanotettu tila ennen uudelleenlatausta. Reaaliaikainen data voi keskeytyä asennuksessa; asetukset pysyvät lukittuina uudelleenkäynnistykseen asti.",
   /* ota.reload_hint */ "asennettu — lataa sivu uudelleen",
-  /* ota.confirm */ (cur, avail) => `Päivitys saatavilla: v${cur} → v${avail}\n\nLaite lataa ja asentaa allekirjoitetun levykuvan ja käynnistyy uudelleen. Jos uusi laiteohjelmisto ei pääse verkkoon, edellinen palautetaan automaattisesti.`,
+  /* ota.dialog_title */ "Laiteohjelmistopäivitys",
+  /* ota.switch_title */ "Vaihda laiteohjelmistoversiota",
+  /* ota.changes_title */ "Tämän koontiversion uudistukset",
+  /* ota.no_changes */ "Tälle koontiversiolle ei toimitettu muutoslokia.",
+  /* ota.install_help */ "Laite lataa ja asentaa allekirjoitetun levykuvan ja käynnistyy uudelleen. Jos uusi laiteohjelmisto ei pääse verkkoon, laite palauttaa nykyisen koontiversion automaattisesti.",
+  /* ota.switch_help */ "Tämä koontiversio on vanhempi, koska toinen päivityskanava on valittu. Sen allekirjoitus tarkistetaan ennen asennusta. Jos vanhempi versio ei pääse verkkoon, laite palauttaa nykyisen koontiversion automaattisesti.",
+  /* ota.install */ "Asenna päivitys",
+  /* ota.switch */ "Asenna vanhempi koontiversio",
   /* aria.ota */ "Tarkista laiteohjelmistopäivitykset",
   /* ota.title_check */ "Tarkista päivitykset napauttamalla",
   /* ota.title_avail */ (v) => `Päivitys v${v} saatavilla — asenna napauttamalla`,
@@ -859,7 +866,6 @@ I18N.fi = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Kieli tallennettu",
-  /* ota.downgrade_confirm */ (cur, avail) => `Palataanko versioon v${avail}?\n\nAsennettu v${cur} on uudempi. Vanhempi versio tarjotaan, koska valitsit toisen päivityskanavan. Allekirjoitus tarkistetaan ennen asennusta, ja laite palauttaa nykyisen version automaattisesti, jos vanhempi ei pääse verkkoon.`,
   /* hist.cop_none */ "COP-käyrää ei näytetä, kun sähköteho tulee CT-virtamuuntajilta. Johdotus määrää kuormat; lämpölaskenta päättyy ennen BUH:ta eikä sisällä BSH:n suoraan tankkiin lisäämää lämpöä, joten taserajat eivät välttämättä vastaa toisiaan.",
 ]);
 

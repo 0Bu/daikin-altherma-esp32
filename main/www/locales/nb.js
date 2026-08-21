@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -396,7 +396,14 @@ I18N.nb = localeValues([
   /* ota.snapshot_value */ "Mellomlagret",
   /* ota.snapshot_help */ "Sist mottatte status før denne innlastingen. Direkte data kan stoppe under installasjonen; innstillinger er låst til omstart.",
   /* ota.reload_hint */ "installert — last siden på nytt",
-  /* ota.confirm */ (cur, avail) => `Oppdatering tilgjengelig: v${cur} → v${avail}\n\nEnheten laster ned det signerte avbildet, installerer det og starter på nytt. Hvis ny fastvare ikke kommer på nett, tilbakestilles den automatisk.`,
+  /* ota.dialog_title */ "Fastvareoppdatering",
+  /* ota.switch_title */ "Bytt fastvareversjon",
+  /* ota.changes_title */ "Nytt i denne versjonen",
+  /* ota.no_changes */ "Ingen endringslogg ble levert for denne versjonen.",
+  /* ota.install_help */ "Enheten laster ned og installerer det signerte avbildet og starter på nytt. Hvis den nye fastvaren ikke kommer på nett, gjenoppretter enheten automatisk den gjeldende versjonen.",
+  /* ota.switch_help */ "Denne versjonen er eldre fordi en annen oppdateringskanal er valgt. Signaturen kontrolleres før installasjon. Hvis den eldre versjonen ikke kommer på nett, gjenoppretter enheten automatisk den gjeldende versjonen.",
+  /* ota.install */ "Installer oppdatering",
+  /* ota.switch */ "Installer eldre versjon",
   /* aria.ota */ "Søk etter fastvareoppdateringer",
   /* ota.title_check */ "Trykk for å søke etter fastvareoppdateringer",
   /* ota.title_avail */ (v) => `Oppdatering v${v} tilgjengelig — trykk for å installere`,
@@ -859,7 +866,6 @@ I18N.nb = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Språk lagret",
-  /* ota.downgrade_confirm */ (cur, avail) => `Bytte tilbake til v${avail}?\n\nInstallert v${cur} er nyere. Denne eldre versjonen tilbys fordi du valgte en annen kanal. Signaturen kontrolleres før installasjon, og enheten gjenoppretter automatisk dagens versjon hvis den eldre ikke kommer på nett.`,
   /* hist.cop_none */ "Ingen COP-historikk når strømverdien kommer fra CT-klemmer. Kablingen avgjør hvilke laster de dekker; varmemålingen slutter før BUH og omfatter ikke direkte BSH-varme. Balansegrensene kan derfor avvike.",
 ]);
 

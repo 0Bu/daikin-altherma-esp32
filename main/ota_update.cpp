@@ -42,17 +42,21 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_tls_errors.h"
 #include "freertos/FreeRTOS.h"
 #include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/semphr.h"
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
+#include "freertos/timers.h"
 #include "psa/crypto.h"
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <string>
 
 namespace daik {
@@ -80,6 +84,60 @@ using Lock = SemGuard;
 // both reachable from the network and a double-tap in the UI must not spawn two TLS sessions.
 bool s_busy = false;
 uint32_t s_generation = 0;
+
+// Optional release notes are kept out of OtaStatus: /ota/status is polled once a second during the
+// most heap-constrained part of an update, and copying/JSON-quoting 1 KiB of prose there would make
+// the courtesy text compete with the signed install. One transient 1025-byte document slot is
+// allocated only after its TLS handshake has succeeded and decoded in place. After TLS is fully
+// released, only the exact decoded length is retained for one GET /ota/changelog stream or 60 s,
+// whichever comes first. No release-note allocation can therefore become a boot-long heap island.
+constexpr size_t kChangelogDocumentMax = 1025;
+constexpr TickType_t kChangelogTimerTickTicks = pdMS_TO_TICKS(1000);
+constexpr int64_t kChangelogLeaseTtlUs = 60LL * 1000LL * 1000LL;
+char* s_changelog = nullptr;
+size_t s_changelog_len = 0;
+uint32_t s_changelog_generation = 0;
+int64_t s_changelog_expiry_us = 0;
+StaticTimer_t s_changelog_timer_storage;
+TimerHandle_t s_changelog_timer = nullptr;
+
+void discard_changelog_text_locked() {
+    if (s_changelog) heap_caps_free(s_changelog);
+    s_changelog = nullptr;
+    s_changelog_len = 0;
+    s_changelog_expiry_us = 0;
+}
+
+void clear_changelog_lease_locked() {
+    discard_changelog_text_locked();
+    s_changelog_generation = 0;
+}
+
+void changelog_lease_expired(TimerHandle_t) {
+    // This is the shared FreeRTOS timer daemon: never block every software timer behind the OTA
+    // mutex. The auto-reload tick guarantees another attempt one second later if it is contended.
+    Lock lk(s_mtx, 0);
+    if (!lk) return;
+    if (s_changelog_expiry_us > 0 && esp_timer_get_time() >= s_changelog_expiry_us)
+        clear_changelog_lease_locked();
+    // A response/start path normally stops the timer itself. If its zero-wait queue send failed,
+    // the next auto-reload callback sees the cleared deadline and retries without retained heap.
+    if (s_changelog_expiry_us == 0 && s_changelog_timer)
+        xTimerStop(s_changelog_timer, 0);
+}
+
+void ensure_changelog_timer_locked() {
+    if (!s_changelog_timer) {
+        s_changelog_timer = xTimerCreateStatic("ota_notes", kChangelogTimerTickTicks, pdTRUE,
+                                               nullptr, changelog_lease_expired,
+                                               &s_changelog_timer_storage);
+    }
+}
+
+struct ChangelogBufferDeleter {
+    void operator()(char* p) const { if (p) heap_caps_free(p); }
+};
+using ChangelogBuffer = std::unique_ptr<char, ChangelogBufferDeleter>;
 
 // One OTA task can exist at a time, so one mutex-protected fixed slot is enough to carry an exact
 // update expectation across the asynchronous task boundary.  It is populated before xTaskCreate
@@ -136,6 +194,8 @@ constexpr int  kHttpTimeoutMs = 15000;
 // operation deadline, not merely a per-read timeout.
 constexpr TickType_t kManifestDeadline = pdMS_TO_TICKS(30000);
 constexpr TickType_t kFirmwareDeadline = pdMS_TO_TICKS(5 * 60 * 1000);
+constexpr int  kChangelogHttpTimeoutMs = 6000;
+constexpr TickType_t kChangelogDeadline = pdMS_TO_TICKS(30000);
 constexpr int  kOtaBufSize    = 2048;   // download chunk; deliberately small (contiguous heap)
 constexpr size_t kManifestMax = 1024;   // published installer+provenance manifest stays below 1 KiB
 constexpr unsigned kMaxRedirects = 5;
@@ -171,13 +231,13 @@ const char* ota_transfer_failure_name(OtaTransferFailure failure) {
 }
 
 bool set_http_timeout_to_deadline(esp_http_client_handle_t client, TickType_t started,
-                                  TickType_t deadline) {
+                                  TickType_t deadline, int per_call_timeout_ms = kHttpTimeoutMs) {
     const TickType_t elapsed = xTaskGetTickCount() - started;
     if (elapsed >= deadline) return false;
     const uint64_t remaining_ms =
         static_cast<uint64_t>(deadline - elapsed) * portTICK_PERIOD_MS;
-    const int timeout_ms = remaining_ms < static_cast<uint64_t>(kHttpTimeoutMs)
-                         ? static_cast<int>(remaining_ms) : kHttpTimeoutMs;
+    const int timeout_ms = remaining_ms < static_cast<uint64_t>(per_call_timeout_ms)
+                         ? static_cast<int>(remaining_ms) : per_call_timeout_ms;
     esp_http_client_set_timeout_ms(client, timeout_ms > 0 ? timeout_ms : 1);
     return true;
 }
@@ -508,6 +568,123 @@ bool fetch_manifest_identity(const std::string& url, OtaManifestIdentity& out, c
     return false;
 }
 
+// Fetch the optional changelog.json published beside the selected manifest.  Failure is deliberately
+// non-fatal: a self-hosted or older feed without notes still offers the exact signed artifact, while
+// the UI shows an explicit localized fallback instead of inventing changes.  Unlike manifest.json,
+// this body never lives on the OTA stack and never participates in update authorization.
+ChangelogBuffer fetch_changelog(const std::string& manifest_url, const char* expected_version) {
+    char url[256] = {};
+    if (!ota_manifest_sibling_url(manifest_url, "changelog.json", url, sizeof(url)) ||
+        !ota_url_is_absolute_https(url)) return {};
+
+    // Notes open the same fresh dynamic-record TLS/X509 client as the manifest. Require the same
+    // measured, stable 56/24 KiB admission at the last point before client allocation; courtesy
+    // prose may disappear into the localized fallback, but may never weaken the network-heap race
+    // closure which protects the authoritative update path.
+    OtaHeapSample changelog_heap{};
+    if (!wait_for_ota_headroom("changelog", OTA_CHANGELOG_HEADROOM,
+                               kTransferHeadroomMaxAttempts, changelog_heap)) {
+        diag_printf("ota: skipping changelog on low/unstable heap\n");
+        return {};
+    }
+
+    const HttpClientProbe before = http_client_probe();
+    esp_http_client_config_t cfg = {};
+    cfg.url               = url;
+    cfg.timeout_ms        = kChangelogHttpTimeoutMs;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    cfg.keep_alive_enable = false;
+    cfg.transport_type    = HTTP_TRANSPORT_OVER_SSL;
+    cfg.disable_auto_redirect = true;
+
+    esp_http_client_handle_t c = esp_http_client_init(&cfg);
+    if (!c) {
+        http_client_log_init_failure("ota changelog", before);
+        return {};
+    }
+
+    ChangelogBuffer document;
+    bool ok = false;
+    size_t decoded_len = 0;
+    bool timed_out = false;
+    const TickType_t changelog_started = xTaskGetTickCount();
+    if (!set_http_timeout_to_deadline(c, changelog_started, kChangelogDeadline,
+                                      kChangelogHttpTimeoutMs)) {
+        close_http_client(c);
+        return {};
+    }
+    const esp_err_t opened = esp_http_client_open(c, 0);
+    if (opened == ESP_OK) {
+        int64_t announced = -1;
+        if (set_http_timeout_to_deadline(c, changelog_started, kChangelogDeadline,
+                                         kChangelogHttpTimeoutMs))
+            announced = esp_http_client_fetch_headers(c);
+        else
+            timed_out = true;
+        if (!timed_out && !http_deadline_reached(changelog_started, kChangelogDeadline) &&
+            announced >= 0 && static_cast<uint64_t>(announced) <= kChangelogDocumentMax &&
+            esp_http_client_get_status_code(c) == 200) {
+            // TLS owns its dynamic handshake buffers now, so this bounded courtesy allocation can
+            // no longer steal the contiguous block needed to establish the connection. A refusal
+            // is presentation-only and returns the localized no-notes fallback.
+            document.reset(static_cast<char*>(
+                heap_caps_calloc(1, kChangelogDocumentMax, MALLOC_CAP_8BIT)));
+            if (!document) {
+                close_http_client(c);
+                return {};
+            }
+            size_t got = 0;
+            bool read_error = false;
+            while (got < kChangelogDocumentMax) {
+                if (!set_http_timeout_to_deadline(c, changelog_started, kChangelogDeadline,
+                                                  kChangelogHttpTimeoutMs)) {
+                    timed_out = true;
+                    break;
+                }
+                const int n = esp_http_client_read(
+                    c, document.get() + got,
+                    static_cast<int>(kChangelogDocumentMax - got));
+                if (n <= 0) {
+                    timed_out = http_deadline_reached(changelog_started, kChangelogDeadline);
+                    read_error = n < 0 && !timed_out;
+                    break;
+                }
+                got += static_cast<size_t>(n);
+            }
+            // If the fixed document buffer filled, prove EOF with one byte.  Otherwise a hostile
+            // oversized document whose valid prefix happens to parse could be presented as complete.
+            char extra = 0;
+            int extra_read = 0;
+            if (got == kChangelogDocumentMax) {
+                if (!set_http_timeout_to_deadline(c, changelog_started, kChangelogDeadline,
+                                                  kChangelogHttpTimeoutMs))
+                    timed_out = true;
+                else
+                    extra_read = esp_http_client_read(c, &extra, 1);
+            }
+            if (extra_read < 0) read_error = true;
+            const bool complete = extra_read == 0 && esp_http_client_is_complete_data_received(c);
+            ok = !timed_out && !read_error && complete && got > 0 &&
+                 manifest_changelog(document.get(), got, expected_version, document.get(),
+                                    OTA_CHANGELOG_TEXT_MAX + 1);
+            if (ok) decoded_len = std::strlen(document.get());
+        }
+    } else {
+        http_client_log_open_failure("ota changelog", c, opened, before);
+    }
+    close_http_client(c);
+    if (!ok) return {};
+
+    // The remote-document allocation existed only after the handshake and is still deliberately
+    // temporary. Once every TLS/client allocation has gone, retain exactly the decoded bytes rather
+    // than leaving the 1025-byte body slot as a long-lived island between coalescing TLS blocks.
+    ChangelogBuffer retained(static_cast<char*>(
+        heap_caps_malloc(decoded_len + 1, MALLOC_CAP_8BIT)));
+    if (!retained) return {};
+    std::memcpy(retained.get(), document.get(), decoded_len + 1);
+    return retained;
+}
+
 void run_check() {
     set_state("checking");
     const std::string running = esp_app_get_description()->version;
@@ -534,18 +711,41 @@ void run_check() {
     // Installable but OLDER — the dev -> release direction. Reported so the UI can offer it as a
     // switch back rather than silently calling the release channel "up to date" on a dev board.
     const bool down = !newer && ota_install_allowed(running, offer.version, /*allow_downgrade=*/true);
+    ChangelogBuffer changelog = (newer || down) ? fetch_changelog(url, offer.version)
+                                                : ChangelogBuffer{};
+    const bool have_changelog = static_cast<bool>(changelog);
+    if ((newer || down) && !have_changelog)
+        diag_printf("ota: %s changelog unavailable or invalid for %s\n",
+                    ota_channel_name(ch), offer.version);
     diag_printf("ota: %s manifest %s, running %s -> %s\n", ota_channel_name(ch), offer.version, running.c_str(),
                 newer ? "update available" : down ? "older build offered" : "up to date");
-    Lock lk(s_mtx);
-    s_status.state            = "idle";
-    s_status.message          = "";
-    s_status.available        = offer.version;
-    std::memcpy(s_status.available_sha256.data(), offer.app_sha256,
-                sizeof(s_status.available_sha256));
-    s_status.available_channel = ota_channel_name(ch);
-    s_status.update_available = newer;
-    s_status.downgrade        = down;
-    s_status.channel          = ota_channel_name(ch);
+    bool changelog_timer_unavailable = false;
+    {
+        Lock lk(s_mtx);
+        s_status.state            = "idle";
+        s_status.message          = "";
+        s_status.available        = offer.version;
+        std::memcpy(s_status.available_sha256.data(), offer.app_sha256,
+                    sizeof(s_status.available_sha256));
+        s_status.available_channel = ota_channel_name(ch);
+        s_status.update_available = newer;
+        s_status.downgrade        = down;
+        s_status.channel          = ota_channel_name(ch);
+        s_changelog_len = have_changelog ? std::strlen(changelog.get()) : 0;
+        s_changelog = have_changelog ? changelog.release() : nullptr;
+        s_changelog_generation = s_generation;
+        if (have_changelog) {
+            s_changelog_expiry_us = esp_timer_get_time() + kChangelogLeaseTtlUs;
+            if (!s_changelog_timer || xTimerReset(s_changelog_timer, 0) != pdPASS) {
+                // Timer-queue pressure must not turn optional prose into retained heap. Preserve
+                // the generation as a valid empty-note response so the signed offer reaches the UI.
+                discard_changelog_text_locked();
+                changelog_timer_unavailable = true;
+            }
+        }
+    }
+    if (changelog_timer_unavailable)
+        diag_printf("ota: changelog expiry timer unavailable; using no-notes fallback\n");
 }
 
 void run_update(const OtaTaskArgs& request) {
@@ -1080,6 +1280,9 @@ uint32_t start_locked(const OtaTaskArgs& request, uint32_t previous_generation) 
     s_busy = true;
     s_task_args = request;
     s_generation = next_generation(previous_generation);
+    ensure_changelog_timer_locked();
+    if (s_changelog_timer) xTimerStop(s_changelog_timer, 0);
+    clear_changelog_lease_locked();
     if (xTaskCreate(ota_task, "ota", kTaskStack, &s_task_args, kTaskPrio, nullptr) != pdPASS) {
         s_busy = false;
         s_generation = previous_generation;
@@ -1172,6 +1375,32 @@ OtaStatus ota_status() {
     s_status.heap_min_largest_block_bytes =
         s_operation_min_largest.load(std::memory_order_relaxed);
     return s_status;
+}
+
+bool ota_changelog_chunk(uint32_t expected_generation, size_t offset, char* out, size_t capacity,
+                         size_t& total, size_t& copied) {
+    total = 0;
+    copied = 0;
+    if (!expected_generation || (!out && capacity)) return false;
+    Lock lk(s_mtx);
+    if (s_changelog_expiry_us > 0 && esp_timer_get_time() >= s_changelog_expiry_us)
+        clear_changelog_lease_locked();
+    if (expected_generation != s_changelog_generation) return false;
+    total = s_changelog_len;
+    if (offset >= total || capacity == 0) return true;
+    copied = std::min(capacity, total - offset);
+    if (!s_changelog) return false;
+    std::memcpy(out, s_changelog + offset, copied);
+    return true;
+}
+
+bool ota_changelog_release(uint32_t expected_generation) {
+    if (!expected_generation) return false;
+    Lock lk(s_mtx);
+    if (expected_generation != s_changelog_generation) return false;
+    if (s_changelog_timer) xTimerStop(s_changelog_timer, 0);
+    clear_changelog_lease_locked();
+    return true;
 }
 
 // Keep rollback armed until this OTA image has proven HEALTHY, not merely survived a timer. A normal

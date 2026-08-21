@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -396,7 +396,14 @@ I18N.cs = localeValues([
   /* ota.snapshot_value */ "Snímek",
   /* ota.snapshot_help */ "Poslední přijatý stav před tímto načtením stránky. Živá data mohou být během instalace pozastavena; nastavení zůstane uzamčeno do restartu.",
   /* ota.reload_hint */ "nainstalováno — načtěte stránku znovu",
-  /* ota.confirm */ (cur, avail) => `Je k dispozici aktualizace: v${cur} → v${avail}\n\nZařízení stáhne a nainstaluje podepsaný obraz a poté se restartuje. Pokud se nový firmware nemůže připojit, automaticky se vrátí k předchozí verzi.`,
+  /* ota.dialog_title */ "Aktualizace firmwaru",
+  /* ota.switch_title */ "Přepnout verzi firmwaru",
+  /* ota.changes_title */ "Co je v tomto sestavení nového",
+  /* ota.no_changes */ "Pro toto sestavení nebyl dodán žádný přehled změn.",
+  /* ota.install_help */ "Zařízení stáhne a nainstaluje podepsaný obraz a poté se restartuje. Pokud se nový firmware nepřipojí, zařízení automaticky obnoví aktuální sestavení.",
+  /* ota.switch_help */ "Toto sestavení je starší, protože je vybrán jiný kanál aktualizací. Před instalací se ověří jeho podpis. Pokud se starší sestavení nepřipojí, zařízení automaticky obnoví aktuální sestavení.",
+  /* ota.install */ "Nainstalovat aktualizaci",
+  /* ota.switch */ "Nainstalovat starší sestavení",
   /* aria.ota */ "Zkontrolovat aktualizace firmwaru",
   /* ota.title_check */ "Klepnutím zkontrolujete aktualizace firmwaru",
   /* ota.title_avail */ (v) => `Je k dispozici aktualizace v${v} — klepnutím ji nainstalujete`,
@@ -859,7 +866,6 @@ I18N.cs = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Jazyk uložen",
-  /* ota.downgrade_confirm */ (cur, avail) => `Vrátit se k v${avail}?\n\nNainstalovaná verze v${cur} je novější. Toto starší sestavení se nabízí, protože jste vybrali jiný kanál aktualizací. Před instalací se ověří jeho podpis a pokud se starší verze nemůže připojit, zařízení automaticky obnoví aktuální sestavení.`,
   /* hist.cop_none */ "Graf COP chybí pro příkon z CT: zapojení určuje spotřebiče a teplo před BUH nezahrnuje BSH, takže hranice bilance nemusí souhlasit.",
 ]);
 INSPECT_I18N.cs = inspectValues(

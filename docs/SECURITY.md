@@ -149,7 +149,8 @@ this also prevents reading the config off a stolen board.
 > boot selection, and the downgrade gate).
 > The release and development **feeds are live**; the Pages source points at `gh-pages`.
 > Publishing does not require a public repository, but note that the resulting **Pages site is
-> public regardless** of repo visibility, so the signed images it serves are world-readable (see
+> public regardless** of repo visibility, so the signed images, manifests and bounded changelog
+> text it serves are world-readable (see
 > [`README.md`](README.md)). The trust properties below are runtime behaviour, not intent.
 
 OTA updates are **signed** (Secure Boot v2 RSA-3072 signature scheme *without* hardware Secure
@@ -157,6 +158,16 @@ Boot): the running app streams the download only into the inactive slot, release
 client and its fixed buffer, then lets `esp_ota_end()` validate the complete image before that slot
 can be selected for boot. A compromised update host (or its GitHub Pages source) therefore cannot
 activate unsigned or tampered firmware.
+
+`changelog.json` is deliberately outside the signed manifest lease: it is display-only text, not a
+source of image URLs, versions, hashes or install permission. The firmware accepts it only from the
+selected manifest's HTTPS directory, without redirects, with a 1025-byte document cap and an exact
+top-level version match. CI selects only explicit user-facing conventional commit categories,
+normalizes the subject, rejects obvious hash/`refs`/issue tokens and never adds bodies, authors or
+repository metadata. The selected subject itself is public text, so contributors must not put
+private detail in it. A missing, stale or malformed changelog therefore changes only the modal's
+explanatory copy; the version/channel/SHA/generation checks below remain the sole artifact
+authorization.
 
 - **No eFuses are burned** — this is reversible, has no brick risk, and the browser installer /
   USB flash path keeps working. The bootloader does **not** verify on boot; only the running app

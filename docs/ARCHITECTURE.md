@@ -170,7 +170,7 @@ http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns registe
                       an unauthenticated radio client; with no setup AP, the configured WiFi or
                       Ethernet LAN registers the full API.
                       Boundary = host-tested logic/http_surface.hpp (F01). `cfg.max_uri_handlers` is
-                      sized EXACTLY to the trusted-LAN route count of 38, so adding a route means raising
+                      sized EXACTLY to the trusted-LAN route count of 39, so adding a route means raising
                       it in the same commit: overflowing is silent and hits the WRONG route (the
                       casualty is whatever registers last, deliberately the captive/SPA catch-all, so
                       the symptom would be deep links breaking rather than the new route 404ing).
@@ -234,7 +234,7 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
                       issued anywhere, and no source file can build one (docs/MODBUS_PROTOCOL.md)
 def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
                       def/ profiles; decoded via logic/modbus.hpp's Temp16/Pow16/Int16/Text16 codecs
-http_ota.cpp        → /ota/check|update|status
+http_ota.cpp        → /ota/check|update|status|changelog
 mcp_server.cpp      → /mcp — POST is the stateless Streamable-HTTP MCP device glue. It dispatches
                       only read-only get_status/get_hp_values and reuses http_status.cpp's exact
                       JSON builders; both results stream through the same bounded sink as their
@@ -1079,12 +1079,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
   strictly-newer candidate and **fails closed** on anything it cannot parse. A signature proves a
   build is authentic, not newer, so this is the only thing standing between the update feed and an
   authentically-signed downgrade — hence pure and host-tested rather than an inline comparison.
-- `logic/ota_manifest.hpp` — bounded extraction of the top-level `"version"` from the OTA manifest.
-  The one place a remote, attacker-influencable byte stream is parsed on this device, so it is pure
-  and host-tested: it allocates nothing, never reads past the length it is given, only accepts the
-  key at depth 1 (a nested `"version"` cannot shadow it), honours string escapes (so a crafted value
-  cannot close its own string and inject a second key), and **refuses rather than truncates** an
-  oversized value — a truncated `1.10.0` → `1.1` is a well-formed version that is ordered wrong.
+- `logic/ota_manifest.hpp` — bounded extraction of the OTA manifest's top-level `"version"` and the
+  optional sibling changelog's top-level `"version"` + `"changelog"`. This is where remote,
+  attacker-influencable OTA JSON is parsed, so it is pure and host-tested: it allocates nothing,
+  never reads past the supplied length, accepts owned keys only at depth 1, honours the deliberately
+  small emitted escape set, binds notes to the exact offered version, and **refuses rather than
+  truncates** oversized values.
 - `logic/modbus.hpp` — read-only Modbus TCP framing (MBAP, no CRC; FC03/04 request build plus
   response/exception parse) and the HomeHub `Temp16`/`Pow16`/`Int16`/`Text16` codecs + exact
   `homehub-*` mDNS filter. Host-tested wire core used by the independent HomeHub task in
@@ -2266,6 +2266,29 @@ Structure:
   Switching *back* (dev → the last release) is a downgrade by version, which the gate below refuses
   unless the request explicitly carries `?downgrade=1`; the web UI sends it only after the user
   picks a channel and confirms. Without that the release channel would be a one-way door.
+- **Version-bound release notes.** Each release and dev feed publishes `changelog.json` beside its
+  selected `manifest.json`. CI derives at most twelve explicitly classified user-facing first-parent
+  commit subjects from the previous published source SHA to the exact new source, rejects obvious
+  Git/issue references, and caps decoded text at 960 bytes. During a successful newer/downgrade check, the same OTA
+  task fetches the sibling over absolute HTTPS with redirects disabled and accepts it only when its
+  top-level version equals the manifest offer. Notes are optional presentation, never install
+  authorization: failure leaves the signed offer usable with localized fallback copy. One transient
+  1025-byte 8-bit-heap document slot is allocated only after TLS setup and decoded in place outside
+  `OtaStatus`. After the TLS client is fully destroyed, the task retains only the exact decoded
+  length. That one-shot lease is freed after the first response (including a broken send), after a
+  60-second static-timer TTL when never requested, or before the next OTA task. Its one-second
+  auto-reload callback only try-locks the OTA mutex, so it cannot block the shared timer daemon.
+  Thus the new image
+  carries no boot-long prose BSS and a dismissed offer leaves no boot-long heap island; allocation
+  failure means only no notes, and PSRAM is not required. The courtesy TLS client uses dynamic TLS
+  records and is skipped unless the same four stable 56 KiB free / 24 KiB largest INTERNAL-heap
+  samples as the manifest and image handshake still hold. The browser's 150 one-second check polls
+  cover both 15-second TLS-headroom waits, both 30-second document deadlines, the bounded
+  allocator-shaped manifest retry and the common quiesce margin, so optional-note work cannot turn
+  the later valid signed offer into a UI timeout. Trusted-LAN
+  `GET /ota/changelog?after=<check-generation>` streams 128-byte chunks and returns 409 if no
+  matching completed offer owns notes (already consumed, expired or replaced), so once-per-second
+  `/ota/status` stays small during TLS and validation pressure.
 - **Heap-bounded TLS and validation.** Lock-free flags cover the complete OTA and Open-Meteo
   network operations, beginning before either handshake. Each producer holds its flag for 1.1
   seconds before opening TLS so the once-per-second MQTT publisher can finish its current cycle and
@@ -2296,7 +2319,7 @@ Structure:
   controlled restart while rollback is still armed; merely being online can no longer seal a
   heap-broken image as valid. Both default feeds are live, and
   publishing runs on a private repo too (the Pages site is public either way — see
-  [`README.md`](README.md)); a self-hosted URL with nothing served honestly reports "up to date".
+  [`README.md`](README.md)); an absent or unreachable self-hosted manifest reports a check error.
   The web installer carves prepared sparse parts from the merged
   image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
   as the OTA feed (the `esptool-js` installer and the device load the same file).
@@ -2795,7 +2818,10 @@ place:
   restart the spinner animation every frame. The flow itself:
   `GET /ota/check`, retain its accepted generation, and poll `GET /ota/status` until that same
   generation reports `busy=false` plus a complete channel/version/application-SHA offer. This avoids
-  consuming the old idle status during the task's 1.1-second quiesce lead. After confirmation, the UI
+  consuming the old idle status during the task's 1.1-second quiesce lead. It then requests the
+  optional `GET /ota/changelog?after=<generation>` and opens the route-neutral firmware modal with
+  current/available version, release/dev channel, literal change list (or localized fallback), and
+  the signed-install/reboot/rollback explanation. Cancel, backdrop and Escape never write; Install
   passes the exact check lease to `POST /ota/update`, requires the immediate successor generation,
   then polls only that operation while rendering download progress **inline next to that version**
   (a small ring + "n%", not a toast). On `done` it does **not** use the shared reboot-reconnect poll
@@ -3560,6 +3586,12 @@ POST /detect      re-run auto-detection now (no reboot): reset profile to "auto"
 GET  /ota/check   synchronously claim an async manifest check and return
                   {ok:true,generation}; busy/task-unavailable -> HTTP 503 + ok:false. ?ms= is parsed
                   but gates nothing — TLS date validation is compiled out, so OTA needs no wall clock
+GET  /ota/changelog?after=<check-generation>
+                  optional UTF-8 release/dev notes for the exact completed offer. Streams fixed
+                  chunks as text/plain; 204 means no usable notes (the UI uses localized fallback),
+                  409 means no matching completed offer owns notes (already consumed, expired or
+                  replaced), and malformed/missing `after` is 400. Notes are
+                  presentation only and are never an install lease
 POST /ota/update?after=<check-generation>&channel=<release|dev>&version=<checked-version>
                  &sha256=<64-lowercase-hex>[&downgrade=1]
                   start the async download only while the named check generation and exact retained

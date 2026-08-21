@@ -1,4 +1,4 @@
-// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
+// translation-source: 271d4acd12297e3776de11cec2547c02e536741aeb8de7c7dc2e0a589feebe57
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -401,7 +401,14 @@ I18N.pl = localeValues([
   /* ota.snapshot_value */ "Migawka",
   /* ota.snapshot_help */ "Ostatni stan odebrany przed ponownym załadowaniem. Dane na żywo mogą zostać wstrzymane podczas instalacji; ustawienia pozostają zablokowane do ponownego uruchomienia.",
   /* ota.reload_hint */ "zainstalowano — załaduj stronę ponownie",
-  /* ota.confirm */ (cur, avail) => `Dostępna aktualizacja: v${cur} → v${avail}\n\nUrządzenie pobierze i zainstaluje podpisany obraz, a następnie uruchomi się ponownie. Jeśli nowy firmware nie uzyska połączenia, poprzedni zostanie przywrócony automatycznie.`,
+  /* ota.dialog_title */ "Aktualizacja firmware",
+  /* ota.switch_title */ "Zmień wersję firmware",
+  /* ota.changes_title */ "Nowości w tej kompilacji",
+  /* ota.no_changes */ "Dla tej kompilacji nie dostarczono listy zmian.",
+  /* ota.install_help */ "Urządzenie pobierze i zainstaluje podpisany obraz, a następnie uruchomi się ponownie. Jeśli nowy firmware nie uzyska połączenia, urządzenie automatycznie przywróci bieżącą kompilację.",
+  /* ota.switch_help */ "Ta kompilacja jest starsza, ponieważ wybrano inny kanał aktualizacji. Jej podpis zostanie sprawdzony przed instalacją. Jeśli starsza kompilacja nie uzyska połączenia, urządzenie automatycznie przywróci bieżącą kompilację.",
+  /* ota.install */ "Zainstaluj aktualizację",
+  /* ota.switch */ "Zainstaluj starszą kompilację",
   /* aria.ota */ "Sprawdź aktualizacje firmware",
   /* ota.title_check */ "Dotknij, aby sprawdzić aktualizacje firmware",
   /* ota.title_avail */ (v) => `Dostępna aktualizacja v${v} — dotknij, aby zainstalować`,
@@ -864,7 +871,6 @@ I18N.pl = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Zapisano język",
-  /* ota.downgrade_confirm */ (cur, avail) => `Wrócić do v${avail}?\n\nZainstalowana wersja v${cur} jest nowsza. Ta starsza kompilacja jest oferowana, ponieważ wybrano inny kanał aktualizacji. Jej podpis zostanie zweryfikowany przed instalacją, a urządzenie automatycznie przywróci bieżącą kompilację, jeśli starsza nie uzyska połączenia.`,
   /* hist.cop_none */ "Brak wykresu COP dla CT: okablowanie określa odbiorniki, a ciepło przed BUH pomija BSH.",
 ]);
 INSPECT_I18N.pl = inspectValues(
