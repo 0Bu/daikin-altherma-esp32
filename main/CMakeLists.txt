@@ -54,6 +54,7 @@ idf_component_register(
         app_update
         esp_http_client
         esp-tls
+        mbedtls
         lwip
         esp_driver_uart
         esp_driver_i2c

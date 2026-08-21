@@ -13,6 +13,8 @@ const contract = path.join(root, "test/test_ota_heap_contract.mjs");
 const files = [
   "sdkconfig.defaults",
   "main/ota_update.cpp",
+  "main/ota_update.hpp",
+  "main/http_ota.cpp",
   "main/mqtt_ha.cpp",
   "main/hp_poll.cpp",
   "main/http_status.cpp",
@@ -158,6 +160,36 @@ try {
     ["the X10A poll no longer enters the bounded OTA quiesce", () =>
       replaceOnce("main/hp_poll.cpp", "ota_quiesce_step(network_quiesce, network_active)",
         "ota_quiesce_bypassed(network_quiesce, network_active)")],
+    ["a busy OTA check is acknowledged as HTTP success", () =>
+      replaceOnce("main/http_ota.cpp", 'httpd_resp_set_status(req, "503 Service Unavailable");',
+        'httpd_resp_set_status(req, "200 OK");')],
+    ["accepted OTA operations lose their generation response", () =>
+      replaceOnce("main/http_ota.cpp", '"{\\"ok\\":true,\\"generation\\":%lu}"',
+        '"{\\"ok\\":true}"')],
+    ["OTA status hides the busy handshake", () =>
+      replaceOnce("main/http_ota.cpp", '",\\"busy\\":" + (s.busy ? "true" : "false") +',
+        '",\\"busy\\":false" +')],
+    ["an update can consume a replaced check generation", () =>
+      replaceOnce("main/ota_update.cpp", "s_generation != after_generation",
+        "false")],
+    ["accepted artifact identity is dropped before task creation", () =>
+      replaceOnce("main/ota_update.cpp", "s_task_args = request;",
+        "s_task_args = OtaTaskArgs{};")],
+    ["task-creation failure still advances the public generation", () =>
+      replaceOnce("main/ota_update.cpp", "s_generation = previous_generation;",
+        "s_generation = next_generation(previous_generation);")],
+    ["the downloaded byte stream is no longer hashed", () =>
+      replaceOnce("main/ota_update.cpp", "psa_hash_update(&hash_operation, data, len)",
+        "psa_hash_update_bypassed(&hash_operation, data, len)")],
+    ["the exact downloaded application SHA is ignored", () =>
+      replaceOnce("main/ota_update.cpp", "!ota_sha256_matches(actual_sha256, request.app_sha256)",
+        "false")],
+    ["the update endpoint no longer requires the checked SHA", () =>
+      replaceOnce("main/http_ota.cpp", 'httpd_query_key_value(q, "sha256", app_sha256, sizeof(app_sha256))',
+        'httpd_query_key_value(q, "ignored", app_sha256, sizeof(app_sha256))')],
+    ["OTA status copies allocate a dynamic SHA string during TLS pressure", () =>
+      replaceOnce("main/ota_update.hpp", "std::array<char, 65> available_sha256{};",
+        "std::string available_sha256;")],
   ];
 
   let caught = 0;

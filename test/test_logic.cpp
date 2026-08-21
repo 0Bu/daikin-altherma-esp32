@@ -5715,6 +5715,42 @@ static void test_ota_manifest() {
     // End to end: what the parser yields feeds the gate.
     CHECK(manifest_version(real, std::strlen(real), v, sizeof(v)));
     CHECK(ota_is_upgrade("0.9.0", v) && !ota_is_upgrade("1.0.0", v));
+
+    // Production promotion binds the checked version AND the exact signed application bytes.  The
+    // SHA is accepted only from the top-level provenance object and only in canonical lowercase
+    // form, so a builds[] field or a visually-equivalent alternate spelling cannot replace it.
+    constexpr const char* sha =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const std::string identity_json =
+        std::string("{\"builds\":[{\"app_sha256\":\"") + std::string(64, 'f') +
+        "\"}],\"provenance\":{\"source_sha\":\"abc\",\"app_sha256\":\"" + sha +
+        "\"},\"version\":\"1.2.3-dev.4\"}";
+    OtaManifestIdentity identity;
+    CHECK(manifest_identity(identity_json.data(), identity_json.size(), identity));
+    CHECK(std::string(identity.version) == "1.2.3-dev.4");
+    CHECK(std::string(identity.app_sha256) == sha);
+
+    uint8_t digest[32];
+    for (size_t i = 0; i < sizeof(digest); ++i)
+        digest[i] = static_cast<uint8_t>((((i * 2) % 16) << 4) | ((i * 2 + 1) % 16));
+    CHECK(ota_sha256_matches(digest, sha));
+    digest[31] ^= 1;
+    CHECK(!ota_sha256_matches(digest, sha));
+    CHECK(!ota_sha256_hex_valid(
+        "0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef"));
+
+    const std::string nested_sha =
+        std::string("{\"provenance\":{\"nested\":{\"app_sha256\":\"") + sha +
+        "\"}},\"version\":\"1.2.3\"}";
+    CHECK(!manifest_identity(nested_sha.data(), nested_sha.size(), identity));
+    const std::string duplicate_sha =
+        std::string("{\"version\":\"1.2.3\",\"provenance\":{\"app_sha256\":\"") + sha +
+        "\",\"app_sha256\":\"" + sha + "\"}}";
+    CHECK(!manifest_identity(duplicate_sha.data(), duplicate_sha.size(), identity));
+    const std::string upper_sha =
+        "{\"version\":\"1.2.3\",\"provenance\":{\"app_sha256\":\"" +
+        std::string(64, 'A') + "\"}}";
+    CHECK(!manifest_identity(upper_sha.data(), upper_sha.size(), identity));
 }
 
 static void test_query_flag() {

@@ -4,6 +4,7 @@
 #include "logic/json.hpp"        // json_quote — the ONE RFC 8259 encoder every payload goes through
 #include "logic/query_flag.hpp"  // query_flag_on — a flag fires on "1" and nothing else
 #include "esp_http_server.h"
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -16,11 +17,19 @@ static esp_err_t ota_check(httpd_req_t* req) {
         char v[24];
         if (httpd_query_key_value(q, "ms", v, sizeof(v)) == ESP_OK) ms = strtoll(v, nullptr, 10);
     }
-    ota_check_async(ms);
-    return http_send_json(req, "{\"ok\":true}");
+    const uint32_t generation = ota_check_async(ms);
+    if (!generation) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"ota operation not accepted\"}");
+    }
+    char response[48];
+    snprintf(response, sizeof(response), "{\"ok\":true,\"generation\":%lu}",
+             static_cast<unsigned long>(generation));
+    return http_send_json(req, response);
 }
 
-// POST /ota/update[?downgrade=1] — start the download of the SELECTED channel's build.
+// POST /ota/update?after=...&channel=...&version=...&sha256=...[&downgrade=1] — atomically
+// consume one completed check's exact artifact lease and start its download.
 //
 // ?downgrade=1 is the channel switch, and the only way to install a build that is older than the
 // running one (dev -> the last release). It is a query FLAG rather than a body field on purpose and
@@ -30,14 +39,39 @@ static esp_err_t ota_check(httpd_req_t* req) {
 // (logic/version_cmp.hpp). Evidence deletion is kept out of query flags entirely: /diag/clear and
 // /coredump/clear are explicit POST routes.
 static esp_err_t ota_do(httpd_req_t* req) {
-    char q[48];
+    char q[192];
+    char after_text[16] = {0};
+    char channel[8] = {0};
+    char version[32] = {0};
+    char app_sha256[65] = {0};
+    char downgrade_text[8] = {0};
     bool downgrade = false;
-    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
-        char v[8];
-        if (httpd_query_key_value(q, "downgrade", v, sizeof(v)) == ESP_OK) downgrade = query_flag_on(v);
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
+        httpd_query_key_value(q, "after", after_text, sizeof(after_text)) != ESP_OK ||
+        httpd_query_key_value(q, "channel", channel, sizeof(channel)) != ESP_OK ||
+        httpd_query_key_value(q, "version", version, sizeof(version)) != ESP_OK ||
+        httpd_query_key_value(q, "sha256", app_sha256, sizeof(app_sha256)) != ESP_OK) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"checked OTA artifact identity required\"}");
     }
-    ota_update_async(downgrade);
-    return http_send_json(req, "{\"ok\":true}");
+    if (httpd_query_key_value(q, "downgrade", downgrade_text, sizeof(downgrade_text)) == ESP_OK)
+        downgrade = query_flag_on(downgrade_text);
+    char* after_end = nullptr;
+    const unsigned long long after_value = std::strtoull(after_text, &after_end, 10);
+    if (!after_value || after_value > UINT32_MAX || !after_end || *after_end != '\0') {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"invalid OTA check generation\"}");
+    }
+    const uint32_t generation = ota_update_async(static_cast<uint32_t>(after_value), channel,
+                                                  version, app_sha256, downgrade);
+    if (!generation) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"ota operation not accepted\"}");
+    }
+    char response[48];
+    snprintf(response, sizeof(response), "{\"ok\":true,\"generation\":%lu}",
+             static_cast<unsigned long>(generation));
+    return http_send_json(req, response);
 }
 
 static esp_err_t ota_stat(httpd_req_t* req) {
@@ -46,7 +80,7 @@ static esp_err_t ota_stat(httpd_req_t* req) {
     // `available` ARE network-derived now that the manifest check has landed (a version parsed from
     // a remote manifest, an error string chosen from a fetch failure), and one '"' or control byte
     // there would break JSON.parse in the UI's update flow. `state`/`current` remain internal, but
-    // routing all four through the one encoder is what meant the OTA work did not have to remember.
+    // routing every string through the one encoder is what meant the OTA work did not have to remember.
     // json_quote emits the surrounding quotes.
     std::string j = "{\"state\":" + json_quote(s.state) +
                     ",\"progress\":" + std::to_string(s.progress) +
@@ -57,7 +91,11 @@ static esp_err_t ota_stat(httpd_req_t* req) {
                     // a release-channel check on a dev board read as "up to date" forever.
                     ",\"downgrade\":" + (s.downgrade ? "true" : "false") +
                     ",\"channel\":" + json_quote(s.channel) +
+                    ",\"busy\":" + (s.busy ? "true" : "false") +
+                    ",\"generation\":" + std::to_string(s.generation) +
                     ",\"available\":" + json_quote(s.available) +
+                    ",\"available_sha256\":" + json_quote(s.available_sha256.data()) +
+                    ",\"available_channel\":" + json_quote(s.available_channel) +
                     ",\"current\":" + json_quote(s.current) + "}";
     return http_send_json(req, j.c_str());
 }

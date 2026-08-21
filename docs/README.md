@@ -636,9 +636,14 @@ POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-cho
                                    #   the editable reg/offset/size/conv fields, sent only by the
                                    #   Query button. The button and normal UI polling pause while the
                                    #   single HTTP worker waits up to 3 s for the poll task.
-GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)
-POST /ota/update                   # start the background self-update (downloads, then reboots)
-GET  /ota/status                   # { state, progress, message, available, update_available, current }
+GET  /ota/check[?ms=<epoch>]       # accept a background check -> {ok,generation}; busy -> HTTP 503
+POST /ota/update?after=<generation>&channel=<release|dev>&version=<version>&sha256=<64-hex>
+                                   # atomically consume that exact completed check offer;
+                                   # -> immediate successor {ok,generation}; stale/busy -> 503;
+                                   # optional &downgrade=1 relaxes version order only; then reboot
+GET  /ota/status                   # { state, progress, message, busy, generation, available,
+                                   #   available_sha256, available_channel, update_available,
+                                   #   current }
 GET  /mcp                          # static, self-contained MCP information + setup page;
                                    #   same trusted-LAN-only URL as the protocol, never SSE
 POST /mcp                          # stateless, read-only Streamable-HTTP MCP server:
