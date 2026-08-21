@@ -51,8 +51,8 @@ OTA_CHECK_TIMEOUT_S = 120
 OTA_TIMEOUT_S = 480
 OTA_OFFER_POLL_SECONDS = 0.1
 OTA_STATUS_POLL_SECONDS = 0.1
-BENCH_OTA_PROBATION_S = 105
-BENCH_OTA_PROBATION_TIMEOUT_S = 150
+BENCH_HEALTH_WINDOW_S = 105
+BENCH_HEALTH_WINDOW_TIMEOUT_S = 150
 DEV_MANIFEST_SUFFIX = "/dev/manifest.json"
 OFFICIAL_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json"
 OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/manifest.json"
@@ -642,22 +642,21 @@ def set_update_channel(host: str, channel: str) -> None:
         fail(f"{host} did not persist update channel {channel}")
 
 
-def wait_for_bench_ota_probation(
+def wait_for_bench_health_window(
     host: str, mac: str, version: str, elf: str, *, phase: str,
 ) -> dict[str, Any]:
-    """Wait until a rollback-armed bench image has had time to commit its health proof.
+    """Require one exact bench image to remain healthy beyond the rollback commit window.
 
     ESP-IDF forbids writing the other OTA slot while the running image is still PENDING_VERIFY.
     The bench deliberately has no X10A, so its normal connected/heap/no-allocation-failure proof
-    commits at the 90-second base window.  We cannot read IDF's partition state through an old
-    release API, therefore require both the exact target and the rollback-exercise release to
-    remain healthy beyond a conservative 105-second window before asking either image to replace
-    itself.  The following real OTA start is still authoritative and fails closed if the partition
-    remained unconfirmed.
+    commits at the 90-second base window after an OTA boot.  A USB-installed target is not rollback
+    armed, but receives the same conservative 105-second health dwell.  We cannot read IDF's
+    partition state through an old release API, so the following real OTA start remains the
+    authoritative proof and fails closed if an OTA-installed image remained unconfirmed.
     """
     if phase not in ("target", "release"):
-        fail(f"invalid bench probation phase {phase}")
-    deadline = time.monotonic() + BENCH_OTA_PROBATION_TIMEOUT_S
+        fail(f"invalid bench health-window phase {phase}")
+    deadline = time.monotonic() + BENCH_HEALTH_WINDOW_TIMEOUT_S
     while time.monotonic() < deadline:
         status = request_json(host, "/status")
         validate_identity(
@@ -665,15 +664,15 @@ def wait_for_bench_ota_probation(
         )
         counters = board_counters(status)
         system = status.get("sys", {})
-        if int(status.get("uptime_s", 0)) >= BENCH_OTA_PROBATION_S:
+        if int(status.get("uptime_s", 0)) >= BENCH_HEALTH_WINDOW_S:
             if any(counters[key] != 0 for key in ("heap_restarts", "mqtt_skipped", "poll_skipped")):
-                fail(f"{host} {phase} probation recorded an allocation failure: {counters}")
+                fail(f"{host} {phase} health window recorded an allocation failure: {counters}")
             if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP or \
                int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
-                fail(f"{host} {phase} probation reached the commit window without safe heap")
+                fail(f"{host} {phase} reached the health window without safe heap")
             return status
         time.sleep(1)
-    fail(f"{host} {phase} did not survive the rollback probation window")
+    fail(f"{host} {phase} did not survive the bench health window")
 
 
 def wait_for_legacy_offer(host: str, expected_version: str) -> None:
@@ -773,7 +772,7 @@ def exercise_bench_full_download(
     if target_transfer.get("saw_done") is not True:
         fail(f"{host} target OTA never exposed its completed validation state")
 
-    release_probation = wait_for_bench_ota_probation(
+    release_health_window = wait_for_bench_health_window(
         host, mac, release_version, release_elf, phase="release",
     )
 
@@ -812,7 +811,7 @@ def exercise_bench_full_download(
     return {
         "release_version": release_version,
         "release_elf": release_elf,
-        "release_probation_uptime_s": release_probation.get("uptime_s"),
+        "release_health_window_uptime_s": release_health_window.get("uptime_s"),
         "pressure": counts,
         "target_download_heap": target_transfer,
         "restore_download_heap": restore_transfer,
@@ -948,7 +947,7 @@ def main() -> int:
 
     test_before = request_json(bench["host"], "/status")
     validate_identity(test_before, host=bench["host"], mac=bench["mac"], version=args.expected_version, elf=elf)
-    target_probation = wait_for_bench_ota_probation(
+    target_health_window = wait_for_bench_health_window(
         bench["host"], bench["mac"], args.expected_version, elf, phase="target",
     )
     full_download_evidence = exercise_bench_full_download(
@@ -971,7 +970,7 @@ def main() -> int:
                      "app_sha256": args.expected_app_sha256, "elf": elf, "channel": "dev",
                      "release_created": False},
         "test_board": {"role": BENCH_ROLE, "host": bench["host"], "mac": bench["mac"],
-                       "target_probation_uptime_s": target_probation.get("uptime_s"),
+                       "target_health_window_uptime_s": target_health_window.get("uptime_s"),
                        "full_binary_download": full_download_evidence, **test_evidence},
         "production": {"executed": False},
     }

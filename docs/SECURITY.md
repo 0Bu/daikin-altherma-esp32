@@ -333,8 +333,9 @@ installation identifiers. The exact signed artifact must first run on the MAC-bo
 normally installed by the NVS-preserving signed USB flash workflow. The gate then runs the complete
 host logic/X10A/OTA contracts. A freshly OTA-installed target must first remain healthy beyond the
 90-second rollback probation; otherwise ESP-IDF rejects the immediate release exercise with
-`ESP_ERR_OTA_ROLLBACK_INVALID_STATE`. Before the sustained pressure window, that committed exact
-target switches only the bench to the official release feed and performs a **complete signed firmware download** under
+`ESP_ERR_OTA_ROLLBACK_INVALID_STATE`. A USB-installed target is not rollback-armed but receives the
+same conservative dwell. Before the sustained pressure window, that exact target switches only the
+bench to the official release feed and performs a **complete signed firmware download** under
 concurrent `/status`, `/values`, `/diag` and `/ota/status` pressure. The target must expose sampled
 operation-local free/largest-block minima plus the completed validation state, boot the signed
 release cleanly, and keep it healthy past
@@ -390,8 +391,9 @@ The private inventory shape is:
 ```
 
 Run from the clean, exact `main` source after the dev manifest has published and the exact signed
-application has been installed on the bench board. The gate itself waits for a freshly installed
-target to commit its rollback-health proof before starting the release exercise:
+application has been installed on the bench board. The gate waits through the 105-second health
+window so an OTA-installed target can commit its rollback proof; the following real OTA start remains
+the authoritative state check:
 
 ```bash
 scripts/production-ota-gate.py \

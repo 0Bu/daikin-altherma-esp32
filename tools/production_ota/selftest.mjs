@@ -73,10 +73,10 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         "full_download_evidence = exercise_bench_full_download(",
         "full_download_evidence = bench_manifest_only_bypass(")],
-    ["the freshly installed target skips rollback probation", () =>
+    ["the freshly installed target skips its health window", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        "target_probation = wait_for_bench_ota_probation(",
-        "target_probation = bypass_target_probation(")],
+        "target_health_window = wait_for_bench_health_window(",
+        "target_health_window = bypass_target_health_window(")],
     ["the target is denied its explicit bench downgrade", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'expected_channel="release", allow_downgrade=True',
@@ -85,10 +85,10 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         'set_update_channel(host, "dev")',
         'set_update_channel(host, "release")')],
-    ["the release probation wait is bypassed", () =>
+    ["the release health-window wait is bypassed", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        "release_probation = wait_for_bench_ota_probation(",
-        "release_probation = bypass_release_probation(")],
+        "release_health_window = wait_for_bench_health_window(",
+        "release_health_window = bypass_release_health_window(")],
     ["a gate-only change no longer republishes an exact-source artifact", () =>
       replaceOnce(".github/workflows/build.yml", "|production-ota-gate", "")],
     ["full-transfer status busy refusal is no longer required", () =>

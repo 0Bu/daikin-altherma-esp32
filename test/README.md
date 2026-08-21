@@ -163,8 +163,8 @@ source contract turns red; all eighty-five seeded regressions are required. The 
 `FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
 
 `node test/test_production_ota_gate_contract.mjs` pins the exact-artifact bench-to-production
-workflow: initial target probation, full signed release-binary pressure, the short completed-verifier state,
-105-second release probation, exact dev restore, and the sole production write. Its paired
+workflow: initial target health window, full signed release-binary pressure, the short completed-verifier state,
+105-second release health window, exact dev restore, and the sole production write. Its paired
 `tools/production_ota/selftest.mjs` requires all thirty-five stage-removal mutations to turn that same
 contract red.
 

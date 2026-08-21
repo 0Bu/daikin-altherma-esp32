@@ -2283,15 +2283,17 @@ Structure:
 - **Production promotion is a staged, one-write transaction.**
   [`scripts/production-ota-gate.py`](../scripts/production-ota-gate.py) binds the official dev
   manifest to the expected source SHA, version, application SHA-256, ESP32-S3 metadata and signature;
-  requires a clean exact local source; runs the host catalog and heap contracts; waits for a freshly
-  installed target to survive its own rollback-health probation; and then makes that committed
-  target perform a complete official-release firmware download under concurrent
+  requires a clean exact local source; runs the host catalog and heap contracts; and holds the target
+  through a 105-second healthy dwell before making it perform a complete official-release firmware
+  download under concurrent
   status/values/diag/OTA-status pressure on the MAC-bound private-inventory `bench` role. The target
   must report sampled operation-local heap minima and the completed verifier state, boot the signed
   release, survive beyond its 90-second
   rollback-health probation with safe heap and no allocation-failure counters, and only then return
   through the official dev feed to the exact target version/ELF. This wait is load-bearing: ESP-IDF
-  refuses another OTA write while either the initial target or the release is still `PENDING_VERIFY`.
+  refuses another OTA write while an OTA-installed initial target or the release is still `PENDING_VERIFY`;
+  the following real OTA start remains the authoritative state check, while a USB-installed target
+  simply receives the same conservative dwell.
   A fixed three-minute concurrent
   status/values/diag + OTA-manifest-TLS pressure window follows on the freshly restored target. Only
   then, with the current version lease
