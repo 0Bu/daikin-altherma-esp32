@@ -1092,13 +1092,18 @@ is exactly what a user would want to see move.
   the IP and the version, so they read as a suffix, not as sentences. The readout is an
   `aria-live="polite"` region, and it collapses to nothing when idle, so the line is just
   "IP · version" whenever no update is in flight.
-- **The flow** — `GET /ota/check`, then poll `GET /ota/status` until the check finishes (every OTA
-  phase is asynchronous on the device, so the UI watches a state machine it doesn't drive). While
-  checking, the ring spins with no label — there is no number to show yet. Up to date → "up to date",
-  which clears itself after a few seconds. Update available → a confirmation naming both
-  versions; on confirm `POST /ota/update`, then poll again rendering `progress` into the ring + "n%",
-  and on `done` wait for the board to come back and **reload the page** (below). A `503` from the
-  shared OOM guard is reported as a retryable "device busy", never as a timeout. Errors show in
+- **The flow** — `GET /ota/check` returns the accepted operation generation; the UI then polls
+  `GET /ota/status` until that same generation reports `busy=false` (every OTA phase is asynchronous
+  on the device, so the UI watches a state machine it doesn't drive). This deliberately ignores the
+  old idle payload still visible during the task's 1.1-second quiesce lead. While checking, the ring
+  spins with no label — there is no number to show yet. Up to date → "up to date", which clears
+  itself after a few seconds. Update available → a confirmation naming both versions; on confirm the
+  UI sends that generation plus `available_channel`, `available`, and `available_sha256` to
+  `POST /ota/update`, requires the immediate successor generation, then polls only that operation
+  while rendering `progress` into the ring + "n%",
+  and on `done` wait for the board to come back and **reload the page** (below). A busy `503` from
+  either `/ota/check` or `/ota/update` is reported as retryable "device busy", never as
+  unreachable or as a timeout. A changed generation is shown as "check again". Errors show in
   `--err` and linger longer than a success before clearing.
 - **Which feed it checks is a setting, and it lives in Settings** — the **Update channel** row on
   the Firmware card (§5.6), a two-option select: *Release* (cut by hand) or *Development* (every merge

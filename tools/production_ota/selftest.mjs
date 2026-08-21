@@ -61,6 +61,20 @@ try {
     ["offer polling ignores the authoritative busy claim", () =>
       replaceOnce("scripts/production-ota-gate.py", 'if status.get("busy") is True:',
         "if False:")],
+    ["offer polling ignores the checked application SHA", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'status.get("available_sha256") != expected_app_sha256',
+        "False")],
+    ["the sole update POST omits the checked application SHA", () =>
+      replaceOnce("scripts/production-ota-gate.py", '"sha256": expected_app_sha256',
+        '"ignored": expected_app_sha256')],
+    ["the update may skip over an intervening accepted operation", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "expected_generation = 1 if check_generation == 0xFFFFFFFF else check_generation + 1",
+        "expected_generation = check_generation")],
+    ["legacy firmware is silently allowed into the one-write path", () =>
+      replaceOnce("scripts/production-ota-gate.py", "no update POST was sent",
+        "legacy update may continue")],
     ["a rejected firmware operation is reported as HTTP success", () =>
       replaceOnce("main/http_ota.cpp", 'httpd_resp_set_status(req, "503 Service Unavailable");',
         'httpd_resp_set_status(req, "200 OK");')],

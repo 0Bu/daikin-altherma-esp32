@@ -16,6 +16,7 @@
 //     { "name": "daikin-altherma-esp32", "version": "1.0.0",
 //       "new_install_prompt_erase": true, "builds": [ { "chipFamily": "ESP32-S3", ... } ] }
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 
 namespace daik {
@@ -95,6 +96,110 @@ inline bool manifest_version(const char* json, size_t len, char* out, size_t out
         return true;
     }
     return false;
+}
+
+// The production promotion gate binds one checked manifest to one downloaded application.  The
+// device therefore needs the two manifest fields which identify that artifact, without allocating a
+// JSON DOM on the OTA/TLS heap.  `app_sha256` is deliberately read only from the top-level
+// provenance object; a same-named field in builds[] or another nested object cannot shadow it.
+struct OtaManifestIdentity {
+    char version[32] = {0};
+    char app_sha256[65] = {0};
+};
+
+inline bool ota_sha256_hex_valid(const char* value) {
+    if (!value) return false;
+    for (size_t i = 0; i < 64; ++i) {
+        const char c = value[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    }
+    return value[64] == '\0';
+}
+
+inline bool ota_sha256_matches(const uint8_t actual[32], const char* expected_hex) {
+    if (!actual || !ota_sha256_hex_valid(expected_hex)) return false;
+    uint8_t different = 0;
+    for (size_t i = 0; i < 32; ++i) {
+        const auto nibble = [](char c) -> uint8_t {
+            return c <= '9' ? static_cast<uint8_t>(c - '0')
+                            : static_cast<uint8_t>(c - 'a' + 10);
+        };
+        const uint8_t expected = static_cast<uint8_t>((nibble(expected_hex[i * 2]) << 4) |
+                                                      nibble(expected_hex[i * 2 + 1]));
+        different |= static_cast<uint8_t>(actual[i] ^ expected);
+    }
+    return different == 0;
+}
+
+inline bool manifest_identity(const char* json, size_t len, OtaManifestIdentity& out) {
+    out = {};
+    if (!json) return false;
+
+    int depth = 0;
+    int provenance_depth = -1;
+    bool have_version = false;
+    bool have_provenance = false;
+    bool have_sha = false;
+    size_t i = 0;
+
+    auto copy_plain_string = [&](size_t& pos, char* target, size_t capacity) -> bool {
+        while (pos < len && detail::is_ws(json[pos])) ++pos;
+        size_t start, end, next;
+        if (!detail::scan_string(json, len, pos, start, end, next)) return false;
+        const size_t value_len = end - start;
+        if (value_len == 0 || value_len >= capacity) return false;
+        for (size_t k = 0; k < value_len; ++k)
+            if (json[start + k] == '\\') return false;
+        std::memcpy(target, json + start, value_len);
+        target[value_len] = '\0';
+        pos = next;
+        return true;
+    };
+
+    while (i < len) {
+        const char c = json[i];
+        if (c == '{' || c == '[') { ++depth; ++i; continue; }
+        if (c == '}' || c == ']') {
+            if (depth <= 0) return false;
+            if (depth == provenance_depth) provenance_depth = -1;
+            --depth;
+            ++i;
+            continue;
+        }
+        if (c != '"') { ++i; continue; }
+
+        size_t key_start, key_end, next;
+        if (!detail::scan_string(json, len, i, key_start, key_end, next)) return false;
+        i = next;
+        size_t colon = i;
+        while (colon < len && detail::is_ws(json[colon])) ++colon;
+        if (colon >= len || json[colon] != ':') continue;  // this string was a value
+        i = colon + 1;
+
+        const size_t key_len = key_end - key_start;
+        if (depth == 1 && key_len == 7 &&
+            std::memcmp(json + key_start, "version", 7) == 0) {
+            if (have_version || !copy_plain_string(i, out.version, sizeof(out.version))) return false;
+            have_version = true;
+            continue;
+        }
+        if (depth == 1 && key_len == 10 &&
+            std::memcmp(json + key_start, "provenance", 10) == 0) {
+            if (have_provenance) return false;
+            while (i < len && detail::is_ws(json[i])) ++i;
+            if (i >= len || json[i] != '{') return false;
+            have_provenance = true;
+            provenance_depth = depth + 1;
+            continue;  // leave the opening '{' for the depth tracker
+        }
+        if (depth == provenance_depth && key_len == 10 &&
+            std::memcmp(json + key_start, "app_sha256", 10) == 0) {
+            if (have_sha || !copy_plain_string(i, out.app_sha256, sizeof(out.app_sha256)) ||
+                !ota_sha256_hex_valid(out.app_sha256)) return false;
+            have_sha = true;
+        }
+    }
+    return depth == 0 && have_version && have_provenance && have_sha;
 }
 
 }  // namespace daik

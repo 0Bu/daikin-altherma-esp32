@@ -427,7 +427,8 @@ def run_local_gates() -> None:
 
 
 def ota_offer_ready(
-    status: dict[str, Any], expected_version: str, expected_generation: int,
+    status: dict[str, Any], expected_version: str, expected_app_sha256: str,
+    expected_generation: int, expected_channel: str = "dev",
 ) -> bool:
     """Accept only the completed status of the exact synchronously accepted check task."""
     generation = status.get("generation")
@@ -441,39 +442,54 @@ def ota_offer_ready(
         fail(f"production OTA check failed: {status.get('message', '')}")
     if status.get("state") != "idle" or not status.get("available"):
         return False
-    if status.get("available") != expected_version or not status.get("update_available"):
-        fail("production board did not offer the exact gated dev version")
+    if status.get("available") != expected_version or \
+       status.get("available_sha256") != expected_app_sha256 or \
+       status.get("available_channel") != expected_channel or \
+       not status.get("update_available"):
+        fail("production board did not offer the exact gated dev artifact")
     return True
 
 
-def wait_for_ota_offer(host: str, expected_version: str) -> int:
+def wait_for_ota_offer(host: str, expected_version: str, expected_app_sha256: str) -> int:
     try:
         accepted = request_json(host, f"/ota/check?ms={int(time.time() * 1000)}")
     except HTTPError as error:
         fail(f"production firmware refused OTA check with HTTP {error.code}")
     generation = accepted.get("generation")
     if accepted.get("ok") is not True or not isinstance(generation, int) or generation <= 0:
-        fail("production firmware did not accept OTA check with a generation token")
+        fail(
+            "production firmware lacks or refused the OTA generation handshake; "
+            "use one signed NVS-preserving USB bootstrap — no update POST was sent"
+        )
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         status = request_json(host, "/ota/status")
-        if ota_offer_ready(status, expected_version, generation):
+        if ota_offer_ready(status, expected_version, expected_app_sha256, generation):
             return generation
         time.sleep(OTA_OFFER_POLL_SECONDS)
-    fail("production OTA check did not settle on the exact gated dev version within 30 seconds")
+    fail("production OTA check did not settle on the exact gated dev artifact within 30 seconds")
 
 
-def post_update_once(host: str, check_generation: int) -> int:
+def post_update_once(
+    host: str, check_generation: int, expected_version: str, expected_app_sha256: str,
+) -> int:
     # Deliberately one un-retried write. Every loop after this function is GET-only.
+    query = urlencode({
+        "after": check_generation,
+        "channel": "dev",
+        "version": expected_version,
+        "sha256": expected_app_sha256,
+    })
     try:
-        accepted = request_json(host, "/ota/update", method="POST", timeout=HTTP_TIMEOUT_S)
+        accepted = request_json(host, f"/ota/update?{query}", method="POST", timeout=HTTP_TIMEOUT_S)
     except HTTPError as error:
         fail(f"production firmware refused the sole OTA update write with HTTP {error.code}")
     generation = accepted.get("generation")
     if accepted.get("ok") is not True or not isinstance(generation, int) or generation <= 0:
         fail("production firmware did not accept the sole OTA update write")
-    if generation == check_generation:
-        fail("production OTA update did not receive a fresh operation generation")
+    expected_generation = 1 if check_generation == 0xFFFFFFFF else check_generation + 1
+    if generation != expected_generation:
+        fail("production OTA update did not receive the immediate successor generation")
     return generation
 
 
@@ -527,15 +543,26 @@ def self_test() -> None:
     )
     checking = {"state": "checking", "busy": True, "generation": 7, "available": ""}
     offered = {"state": "idle", "busy": False, "generation": 7,
-               "available": "1.2.3-dev.4", "update_available": True}
-    assert not ota_offer_ready(checking, "1.2.3-dev.4", 7)
-    assert ota_offer_ready(offered, "1.2.3-dev.4", 7)
+               "available": "1.2.3-dev.4", "available_sha256": app,
+               "available_channel": "dev", "update_available": True}
+    assert not ota_offer_ready(checking, "1.2.3-dev.4", app, 7)
+    assert ota_offer_ready(offered, "1.2.3-dev.4", app, 7)
     try:
-        ota_offer_ready({**offered, "generation": 8}, "1.2.3-dev.4", 7)
+        ota_offer_ready({**offered, "generation": 8}, "1.2.3-dev.4", app, 7)
     except GateError:
         pass
     else:
         raise AssertionError("a concurrent OTA generation replaced the accepted check")
+    for changed in (
+        {**offered, "available_sha256": "f" * 64},
+        {**offered, "available_channel": "release"},
+    ):
+        try:
+            ota_offer_ready(changed, "1.2.3-dev.4", app, 7)
+        except GateError:
+            pass
+        else:
+            raise AssertionError("a different OTA artifact identity passed the completed check")
     with tempfile.TemporaryDirectory(prefix="daikin-production-ota-selftest-") as tmp:
         inventory_path = Path(tmp) / "inventory.json"
         inventory_path.write_text(json.dumps({
@@ -628,8 +655,12 @@ def main() -> int:
         fail("production X10A must be live before promotion")
     if not production_before.get("mqtt", {}).get("connected"):
         fail("production MQTT must be connected before promotion")
-    check_generation = wait_for_ota_offer(production["host"], args.expected_version)
-    post_update_once(production["host"], check_generation)
+    check_generation = wait_for_ota_offer(
+        production["host"], args.expected_version, args.expected_app_sha256,
+    )
+    post_update_once(
+        production["host"], check_generation, args.expected_version, args.expected_app_sha256,
+    )
     returned = wait_for_new_firmware(production["host"], args.expected_version, elf)
     validate_identity(returned, host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf)
     production_evidence = stress_board(

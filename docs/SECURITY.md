@@ -175,6 +175,12 @@ activate unsigned or tampered firmware.
      manifest agrees with the image it ships, so in the field a disagreement is a stale cache or an
      attack, and neither is worth installing.
 
+  Exact production promotion adds a third, byte-level binding: the completed check retains
+  `provenance.app_sha256`; update acceptance consumes that version/SHA/channel with the check
+  generation, and the OTA task calculates SHA-256 over every received byte. A same-version signed
+  replacement therefore cannot pass merely because both embedded version strings still agree.
+  The digest must match before `esp_ota_end()` signature validation and boot selection.
+
   Version ordering is numeric, not lexical (`1.10.0 > 1.9.0`) — including inside a pre-release
   identifier (`-dev.12 > -dev.9`), which is what keeps the dev channel moving forward — and **fails
   closed**: an unparseable version on either side refuses the update rather than assuming an ordering.
@@ -182,9 +188,9 @@ activate unsigned or tampered firmware.
   **The one relaxation: an explicit channel switch.** Since releases became manual, a device can
   follow either the `release` or the `dev` feed (`POST /set_ota`). A board on `dev` runs a version
   *ahead* of the last release, so "install the latest release" is a downgrade by version and the
-  gate above refuses it — which would make the release channel a one-way door. `POST
-  /ota/update?downgrade=1` (`ota_install_allowed`, host-tested) relaxes the **ordering only**, and
-  only for the request that carries the flag:
+  gate above refuses it — which would make the release channel a one-way door. The required checked
+  artifact lease on `POST /ota/update?...&downgrade=1` (`ota_install_allowed`, host-tested) relaxes
+  the **ordering only**, and only for the request that carries the flag:
   - it is never inferred from the manifest, so a hostile or stale host still cannot walk a fleet
     backwards on its own say-so — the property this gate exists for is intact;
   - it is never persisted, so a later automatic check cannot inherit it;
@@ -315,9 +321,13 @@ five-second request timeout; expiry is a blocking busy-503, not an accepted retr
 Only after that stage and an explicit `production` confirmation does the command perform exactly
 one un-retried `POST /ota/update`. Before that sole write, `/ota/check` must synchronously return a
 non-zero operation generation and `/ota/status` must return that same generation, `busy=false`, and
-the exact idle dev offer. The update POST must then synchronously return a distinct accepted
-generation. Busy or unavailable operation starts are HTTP 503, so neither a stale status nor a
-concurrent LAN check can turn an ignored write into false success. All subsequent observation is read-only:
+the exact idle dev channel/version/application-SHA offer. The update POST carries that complete
+lease; firmware accepts it only while the mutex still holds the same completed check, copies it to a
+fixed task slot, and returns the immediate successor generation. Busy, replaced or unavailable
+operation starts are HTTP 503, so neither a stale status nor a concurrent LAN check can turn an
+ignored write into false success. The task refetches only the captured channel, requires the same
+manifest version and SHA, and hashes the complete downloaded byte stream against that SHA before
+Secure-Boot validation and boot selection. All subsequent observation is read-only:
 exact version/ELF and
 MAC, rollback/crash/safe-mode state, stable heap/OOM/X10A counters, live X10A values, and the
 retained X10A MQTT payload must pass a second fixed three-minute canary. The command does not create
@@ -329,6 +339,12 @@ timeouts on that intentionally unwired bench do not fail the bench stage; the pr
 the bounded X10A timeout-delta requirement. The bench always overlaps a real OTA-manifest TLS check
 with the pressure workers, but does not require the optional Open-Meteo task when device-wide
 diagnostics consent is off; the production role still requires a successful weather fetch.
+
+A production image which predates the `busy`/generation/artifact handshake cannot enter this path:
+the gate requires the new response fields and fails before its sole POST. Its one-time migration is
+a signed, NVS-preserving USB application flash followed by the ordinary bench-first gate for later
+updates. There is deliberately no timing-based legacy OTA fallback: old firmware can acknowledge an
+ignored busy update with HTTP success, which is the incident this boundary prevents.
 
 The private inventory shape is:
 

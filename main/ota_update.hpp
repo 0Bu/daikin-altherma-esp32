@@ -1,7 +1,8 @@
 #pragma once
-// Pull-based signed OTA (esp_http_client -> esp_ota). Flow: check -> compare the manifest version ->
-// stream daikin-altherma-esp32<suffix>.bin into the inactive slot -> release TLS -> verify signature
-// -> reboot, with a downgrade gate that refuses anything not strictly newer.
+// Pull-based signed OTA (esp_http_client -> esp_ota). Flow: check -> lease manifest channel/version/
+// app SHA -> stream and hash daikin-altherma-esp32<suffix>.bin into the inactive slot -> release TLS
+// -> require exact hash + verify signature -> reboot, with a downgrade gate that refuses anything
+// not strictly newer.
 //
 // Both halves are implemented. The DELIVERY half (ota_check_async / ota_update_async) runs on one
 // on-demand task, never the httpd worker; the ROLLBACK half (ota_health_gate_arm) keeps a fresh
@@ -11,6 +12,7 @@
 // embedded esp_app_desc_t version — because those are separately-controlled artifacts and only the
 // second binds a lying manifest to the bytes actually served. See docs/SECURITY.md → OTA image
 // signing, docs/ARCHITECTURE.md → OTA, logic/version_cmp.hpp and logic/health_gate.hpp.
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -27,7 +29,13 @@ uint32_t ota_check_async(int64_t browser_epoch_ms);   // GET /ota/check
 // after the user picks a channel whose newest build is older than what is running (dev -> release).
 // It relaxes the version ORDER and nothing else: the signature check is untouched, and a manifest
 // can never ask for it. See logic/version_cmp.hpp → ota_install_allowed.
-uint32_t ota_update_async(bool allow_downgrade = false);
+// The update is accepted only while `after_generation` is still the most recently completed check
+// and its exact channel/version/application SHA match that check's retained result.  The fixed-size
+// arguments are copied into the one task slot before the task is created, so neither a later config
+// change nor a replaced feed can redirect an accepted production operation.
+uint32_t ota_update_async(uint32_t after_generation, const char* expected_channel,
+                          const char* expected_version, const char* expected_app_sha256,
+                          bool allow_downgrade = false);
 void ota_health_gate_arm();                        // main.cpp: arm rollback health gate
 
 // Is an OTA network operation in flight RIGHT NOW — manifest TLS check or image download? Read every
@@ -60,9 +68,11 @@ struct OtaStatus {
     int         progress = 0;     // 0..100
     std::string message;
     bool        update_available = false;
-    std::string available;        // manifest version of the SELECTED channel
+    std::string available;        // manifest version returned by the completed check
+    std::array<char, 65> available_sha256{}; // exact signed app bytes; fixed to keep status cheap
+    std::string available_channel; // feed which produced available + available_sha256
     std::string current;          // running version
-    std::string channel;          // "release" | "dev" — the feed `available` was read from
+    std::string channel;          // "release" | "dev" — the currently selected live feed
     bool        busy = false;     // one accepted check/update task still owns the OTA operation
     uint32_t    generation = 0;   // non-zero monotonic accepted-operation identity
     // The offered build is INSTALLABLE but OLDER than what is running (the dev -> release

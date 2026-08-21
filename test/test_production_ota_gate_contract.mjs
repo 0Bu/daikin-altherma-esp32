@@ -53,8 +53,8 @@ assert.match(gate, /scripts\/run-contract-tests\.sh/,
 
 const testStress = gate.indexOf("test_evidence = stress_board(");
 const productionConfirmation = gate.indexOf("if args.confirm_production != PRODUCTION_ROLE");
-const offer = gate.indexOf('wait_for_ota_offer(production["host"], args.expected_version)');
-const post = gate.indexOf('    post_update_once(production["host"], check_generation)', productionConfirmation);
+const offer = gate.indexOf("check_generation = wait_for_ota_offer(", productionConfirmation);
+const post = gate.indexOf("    post_update_once(", offer);
 const returned = gate.indexOf('wait_for_new_firmware(production["host"], args.expected_version, elf)');
 const productionStress = gate.indexOf("production_evidence = stress_board(");
 const retained = gate.indexOf("retained = verify_retained_x10a(final_status)");
@@ -80,17 +80,26 @@ assert.match(gate,
   /status\.get\("busy"\)\s+is\s+True:[\s\S]{0,80}?return False[\s\S]{0,140}?status\.get\("busy"\)\s+is\s+not\s+False[\s\S]{0,140}?required OTA busy handshake/,
   "the exact generation must explicitly release its busy claim before the production write");
 assert.match(gate,
-  /accepted\s*=\s*request_json\(host, f"\/ota\/check[\s\S]{0,240}?generation\s*=\s*accepted\.get\("generation"\)[\s\S]{0,220}?generation token/,
+  /accepted\s*=\s*request_json\(host, f"\/ota\/check[\s\S]{0,240}?generation\s*=\s*accepted\.get\("generation"\)[\s\S]{0,260}?generation handshake/,
   "the manifest check must synchronously return the generation that status polling follows");
 assert.match(gate,
-  /post_update_once[\s\S]{0,700}?request_json\(host, "\/ota\/update", method="POST"[\s\S]{0,700}?generation\s*==\s*check_generation[\s\S]{0,180}?fresh operation generation/,
-  "the sole update POST must be synchronously accepted as a distinct operation generation");
-assert.match(gate, /did not settle on the exact gated dev version within 30 seconds/,
+  /lacks or refused the OTA generation handshake[\s\S]{0,160}?signed NVS-preserving USB bootstrap[\s\S]{0,100}?no update POST was sent/,
+  "legacy firmware must fail before the write with an explicit physical-bootstrap boundary");
+assert.match(gate,
+  /post_update_once[\s\S]{0,900}?urlencode\([\s\S]{0,300}?"after": check_generation[\s\S]{0,300}?"channel": "dev"[\s\S]{0,300}?"version": expected_version[\s\S]{0,300}?"sha256": expected_app_sha256[\s\S]{0,500}?request_json\(host, f"\/ota\/update\?\{query\}"[\s\S]{0,600}?generation\s*!=\s*expected_generation/,
+  "the sole update POST must bind the checked generation and exact dev artifact, then require its immediate successor");
+assert.match(gate,
+  /expected_generation\s*=\s*1 if check_generation == 0xFFFFFFFF else check_generation \+ 1/,
+  "the accepted update must be the immediate wrap-safe successor of the checked operation");
+assert.match(gate,
+  /status\.get\("available"\)\s*!=\s*expected_version[\s\S]{0,160}?available_sha256[\s\S]{0,160}?expected_app_sha256[\s\S]{0,160}?available_channel[\s\S]{0,160}?expected_channel/,
+  "the completed check status must match version, application SHA and channel before the write");
+assert.match(gate, /did not settle on the exact gated dev artifact within 30 seconds/,
   "a stale or wrong offer must remain bounded and fail closed at the polling deadline");
 assert.equal(occurrences(httpOta, '503 Service Unavailable'), 2,
   "both busy check and busy update requests must return a non-success HTTP status");
 const checkAccepted = httpOta.indexOf('ota_check_async(ms)');
-const updateAccepted = httpOta.indexOf('ota_update_async(downgrade)');
+const updateAccepted = httpOta.indexOf('ota_update_async(static_cast<uint32_t>(after_value)');
 const firstGenerationResponse = httpOta.indexOf('{\\"ok\\":true,\\"generation\\":%lu}', checkAccepted);
 const secondGenerationResponse = httpOta.indexOf('{\\"ok\\":true,\\"generation\\":%lu}', updateAccepted);
 assert.ok(checkAccepted >= 0 && firstGenerationResponse > checkAccepted &&
@@ -98,6 +107,8 @@ assert.ok(checkAccepted >= 0 && firstGenerationResponse > checkAccepted &&
   "accepted check and update requests must each return their authoritative generation");
 assert.match(httpOta, /,\\"busy\\":.*s\.busy[\s\S]{0,180}?,\\"generation\\":.*std::to_string\(s\.generation\)/,
   "OTA status must expose busy and generation from the same mutex-protected snapshot");
+assert.match(httpOta, /available_sha256[\s\S]{0,180}?available_channel/,
+  "OTA status must expose the exact checked artifact identity consumed by host and UI");
 assert.match(gate, /for key in \("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"\)/,
   "heap/OOM/X10A failure counters must remain stable through each pressure window");
 assert.match(gate,
