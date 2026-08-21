@@ -149,7 +149,7 @@ assert.ok(quiesceAt >= 0 && pollBarrierAt > quiesceAt &&
           mqttBarrierAt > pollBarrierAt && fetchAt > mqttBarrierAt,
   "weather must wait for both X10A and MQTT allocation paths before entering the gated fetch");
 assert.match(mqtt,
-  /ota_quiesce_step\(network_quiesce, network_busy\)[\s\S]{0,600}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,200}?continue;/,
+  /ota_quiesce_step\(network_quiesce, network_busy\)[\s\S]{0,1800}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,200}?continue;/,
   "the held MQTT cycle must acknowledge weather before sleeping");
 assert.match(mqtt,
   /struct\s+MqttPublishActivity[\s\S]{0,500}?store\(false,\s*std::memory_order_release\)[\s\S]{0,300}?~MqttPublishActivity\(\)[\s\S]{0,200}?store\(true,\s*std::memory_order_release\)/,
@@ -163,11 +163,10 @@ assert.ok(transportGateStart >= 0 && transportGateEnd > transportGateStart,
   "the MQTT transport handshake must remain identifiable");
 const transportGate = mqtt.slice(transportGateStart, transportGateEnd);
 assert.match(transportGate,
-  /if\s*\(!s_publish_network_quiesced\.load\(std::memory_order_acquire\)\)[\s\S]{0,160}?s_transport_connecting\.store\(true,\s*std::memory_order_release\)[\s\S]{0,80}?return;/,
-  "BEFORE_CONNECT must not wait under MQTT_API_LOCK when the firmware publisher already owns heap");
-assert.match(transportGate,
-  /s_transport_connecting\.store\(true,\s*std::memory_order_release\)[\s\S]{0,180}?competing_tls_active\(\)/,
-  "transport must publish its claim and recheck both remote TLS owners before connecting");
+  /s_transport_connecting\.store\(true,\s*std::memory_order_release\)/,
+  "BEFORE_CONNECT must publish the asynchronous transport allocation claim");
+assert.doesNotMatch(transportGate, /vTaskDelay|for\s*\(|while\s*\(/,
+  "BEFORE_CONNECT holds MQTT_API_LOCK and must never wait against the owner task's client_stop");
 assert.match(mqtt,
   /return s_publish_network_quiesced\.load\(std::memory_order_acquire\)\s*&&\s*!s_transport_connecting\.load\(std::memory_order_acquire\);/,
   "weather/OTA acknowledgement must include the asynchronous esp-mqtt handshake/reconnect");

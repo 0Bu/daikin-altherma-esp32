@@ -285,6 +285,8 @@ Origin/Fetch Metadata), and every POST body is `application/json`; see [SECURITY
 GET  /  (alias /index.html)        # embedded web UI (gzip-compressed in the app binary)
 GET  /locale.js?lang=<code>        # device-local de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi UI catalog (gzip; trusted LAN)
 GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporter-identifying values
+                                   #   During OTA TLS this allocation-rich snapshot fails fast with
+                                   #   HTTP 503; use compact GET /ota/status for progress.
                                    #   read "<redacted>" — network/location identifiers, user-typed
                                    #   names/topics and all seven user-typed JSON paths. The exact
                                    #   machine-checked list is in logic/redact.hpp and REPORTING.md.
@@ -429,9 +431,9 @@ GET  /values                       # decoded readings
                                    #   reported (the trend rings need it to tell "held over" from
                                    #   "no reading"), but it is not a current measurement, and the
                                    #   MQTT X10A topic withholds it entirely.
-                                   #   Before allocating the model-sized snapshot, this route waits
-                                   #   up to 4 s behind active firmware OTA/Weather TLS work. If the
-                                   #   owner remains active it returns 503 text/plain
+                                   #   Before allocating the model-sized snapshot, this route fails
+                                   #   fast during OTA and waits up to 4 s behind shorter Weather
+                                   #   TLS work. If the owner remains active it returns 503 text/plain
                                    #   "network operation in progress" before any JSON byte; retry
                                    #   the complete read-only request later.
 GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sample first:
@@ -452,7 +454,8 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
                                    #   shows, plus the electrical rows its estimated-kW pill is
                                    #   computed from — and free_heap plus max_alloc, the BOARD's
                                    #   own memory in KiB, which have no register and are always
-                                   #   present.
+                                   #   present. During OTA this allocation-rich route returns the
+                                   #   same early 503 as /values; retry the complete request later.
                                    #   (a row the detected profile lacks is simply absent from
                                    #   /status.history.rows — ask that, don't guess).
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
@@ -463,12 +466,15 @@ GET  /diag[?verbose=0|1][?redact=1]
                                    #   response to CHUNKED: a replacement is longer than most values
                                    #   it replaces, so the redacted text can grow past the static
                                    #   dump buffer, and the alternatives were a second ~8 KB .bss
-                                   #   buffer or a ~6 KB contiguous heap allocation
+                                   #   buffer or a ~6 KB contiguous heap allocation. During OTA,
+                                   #   plain /diag remains available from static storage; redact=1
+                                   #   returns the early busy-503 before creating its string chunk.
 GET  /scan                         # WiFi scan → {"networks":[{ssid,rssi}]} (name + signal only, no
                                    #   auth field). Trusted-LAN only, and read by no shipped client:
                                    #   the setup portal takes a TYPED SSID and never scans. A
                                    #   diagnostic ("what does the board see, how strong?") for
-                                   #   humans/scripts, like /models
+                                   #   humans/scripts, like /models. Returns the early busy-503
+                                   #   during OTA before starting a scan or building the list.
 POST /diag/clear                   # clear the in-memory diagnostic ring; destructive action is POST
 GET  /coredump                     # stream this firmware's core-dump image (chunked; 404 if none or
                                    #   if raw flash only holds a proven foreign-build orphan). Decode offline with
@@ -605,6 +611,8 @@ GET  /models?active=1              # X10A profile rows for the Settings register
                                    #   Rows stream from the exact resolved main/def view. Auto or a
                                    #   stale id uses definition:"generic",fallback:true, preserving
                                    #   useful examples without claiming that generic was detected.
+                                   #   During OTA this dynamic variant returns the early busy-503;
+                                   #   the static GET /models catalog remains available.
 POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-chosen page and report the
                                    #   raw frame plus every decode the requested slice admits. The only
                                    #   route whose subject is a register the value catalog does not
@@ -655,15 +663,18 @@ POST /ota/update?after=<generation>&channel=<release|dev>&version=<version>&sha2
                                    # optional &downgrade=1 relaxes version order only; then reboot
 GET  /ota/status                   # { state, progress, message, busy, generation, available,
                                    #   available_sha256, available_channel, update_available,
-                                   #   current }
+                                   #   downgrade, channel, current, heap_min_free_bytes,
+                                   #   heap_min_largest_block_bytes }
 GET  /mcp                          # static, self-contained MCP information + setup page;
                                    #   same trusted-LAN-only URL as the protocol, never SSE
 POST /mcp                          # stateless, read-only Streamable-HTTP MCP server:
                                    #   initialize / tools/list / tools/call; exactly get_status and
                                    #   get_hp_values, mirroring GET /status and GET /values.
+                                   #   During OTA TLS the whole POST fails fast with HTTP 503 before
+                                   #   request parsing or either allocation-rich snapshot.
                                    #   JSON-RPC errors -32700/-32600/-32601/-32602; notifications →
                                    #   202 with no body; no SSE/session.
-                                   #   get_hp_values shares GET /values' bounded TLS-owner wait and
+                                   #   get_hp_values shares GET /values' OTA-fast/Weather-bounded gate and
                                    #   may return its transport-level plain-text 503 instead of a
                                    #   JSON-RPC body; see docs/MCP.md.
                                    #   Bounded parser/dispatcher: logic/mcp.hpp; see docs/MCP.md.
@@ -824,9 +835,16 @@ up and reloads itself onto the new UI. Both the check and the download run on th
   a health gate (~90 s), so a boots-but-crashes image reverts.
 - **Signed images:** Secure Boot v2 RSA-3072 signing *without* hardware Secure Boot — the running
   app frees the fixed 2 KiB download buffer and the complete HTTP/TLS client before `esp_ota_end()`
-  validates the image; only then may its inactive slot be selected for boot. OTA requires both
-  24 KiB free INTERNAL heap and a 12 KiB largest INTERNAL block before transfer and again before
-  validation. MQTT publication, X10A polling and weather TLS stand aside on a bounded quiesce path.
+  validates the image; only then may its inactive slot be selected for boot. Every manifest and
+  image TLS handshake requires four stable samples at 56 KiB free INTERNAL heap and a 24 KiB
+  largest INTERNAL block. After transport cleanup, both IDF verification passes — `esp_ota_end()`
+  and the validation inside `esp_ota_set_boot_partition()` — each receive a separate two-sample
+  24/12-KiB gate. MQTT publication, X10A/HomeHub polling, Syslog and weather TLS stand aside through
+  lock-free, bounded acknowledgements; the MQTT owner also cleanly stops the complete esp-mqtt
+  transport for the interval, including MQTTS keepalive/subscription traffic. Whole-operation
+  deadlines (30 s manifest, 5 min firmware, 60 s Weather) also reject a slowly trickling peer and
+  release those services; per-read timeouts alone are not the liveness boundary. MQTTS resumes only
+  after four stable 56/24-KiB heap samples and backs off direct start failures up to 60 seconds.
   A failed IDF validation is reported generically rather than guessed to be a signature failure because
   the same result also covers malformed images, digest errors and verifier allocation failures.
   Signature enforcement remains mandatory (no eFuses; reversible; Web Serial still works), and CI

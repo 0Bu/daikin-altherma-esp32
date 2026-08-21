@@ -139,6 +139,7 @@ static std::atomic<bool>        s_modbus_cleanup_requested{false};
 // after the first X10A proof. Definitions live beside the client builder below; forward declarations
 // keep the publish loop above the configuration/lifecycle glue without duplicating either contract.
 static bool build_client(bool publisher_lwt);
+static esp_err_t start_client_transport();
 static bool start_current_client();
 static bool promote_client_to_publisher();
 
@@ -309,6 +310,9 @@ static std::atomic<bool> s_x10a_publish_required{false};
 static std::atomic<bool> s_x10a_publish_proven{false};
 static std::atomic<bool> s_publish_network_quiesced{true};
 static std::atomic<bool> s_transport_connecting{false};
+static std::atomic<bool> s_transport_pause_requested{false};
+static std::atomic<bool> s_transport_paused{false};
+static std::atomic<bool> s_client_running{false};
 static_assert(std::atomic<bool>::is_always_lock_free,
               "MQTT network quiesce acknowledgement must remain allocation- and lock-free");
 
@@ -326,6 +330,16 @@ struct MqttPublishActivity {
 static bool competing_tls_active() {
     return ota_download_active() || weather_fetch_active();
 }
+
+static bool mqtt_transport_tls_configured() {
+    // mqtt_task owns s_uri after startup; no Config copy or status mutex is needed on this hot path.
+    return s_uri.rfind("mqtts://", 0) == 0 || s_uri.rfind("wss://", 0) == 0;
+}
+
+constexpr size_t kMqttTlsResumeMinFree = 56 * 1024;
+constexpr size_t kMqttTlsResumeMinLargest = 24 * 1024;
+constexpr unsigned kMqttTlsResumeStableSamples = 4;
+constexpr unsigned kMqttResumeBackoffMaxS = 60;
 
 // HTTP/OTA is already reachable when app_main calls mqtt_ha_start(). Claim the publish allocator
 // before the very first Config/topic/client allocation, then either hand ownership to mqtt_task or
@@ -1945,38 +1959,13 @@ static void service_reference_frames(const Config& c) {
 
 // esp-mqtt owns its transport/TLS task, so the firmware publish-cycle acknowledgement alone cannot
 // describe a handshake or reconnect. MQTT_EVENT_BEFORE_CONNECT runs synchronously on that task
-// immediately before esp_transport_connect(). This two-phase handshake either waits behind the
-// already-advertised OTA/weather owner, or marks transport allocation active and rechecks the owner
-// before returning. A network owner that starts in either store/check gap therefore sees
-// s_transport_connecting=true; one that won first keeps MQTT before the TLS call.
-//
-// The wait has the same five-minute cap as the publisher/poll holds. A broken activity flag must not
-// suppress broker reconnects forever; after the cap the pre-fix behavior resumes, while the remote
-// operation's own bounded acknowledgement wait still reports/refuses the collision where possible.
+// immediately before esp_transport_connect(). It must not wait here: the callback owns esp-mqtt's
+// MQTT_API_LOCK, while the publisher task needs that same lock to stop/join the client for an
+// advertised OTA/weather owner. A wait in this callback can deadlock that stop until the publisher's
+// task watchdog fires. Publish the activity and return; the network owner waits for the publisher
+// task to stop the complete client and acknowledge `mqtt_transport_network_quiesced()`.
 static void mqtt_transport_before_connect() {
-    // This callback runs under esp-mqtt's MQTT_API_LOCK. If the firmware publish/startup path
-    // already owns the allocator it may be about to call esp_mqtt_client_stop(), which needs that
-    // same lock. Never wait behind a later OTA/weather claimant in that ordering: claim transport
-    // immediately and let the remote owner wait on the already-false publish acknowledgement.
-    if (!s_publish_network_quiesced.load(std::memory_order_acquire)) {
-        s_transport_connecting.store(true, std::memory_order_release);
-        return;
-    }
-    const TickType_t started = xTaskGetTickCount();
-    const TickType_t max_wait = pdMS_TO_TICKS(OTA_QUIESCE_MAX_CYCLES * 1000u);
-    for (;;) {
-        const bool network_active = competing_tls_active();
-        const bool wait_spent = xTaskGetTickCount() - started >= max_wait;
-        if (network_active && !wait_spent) {
-            s_transport_connecting.store(false, std::memory_order_release);
-            vTaskDelay(pdMS_TO_TICKS(250));
-            continue;
-        }
-        s_transport_connecting.store(true, std::memory_order_release);
-        if (!competing_tls_active() || wait_spent) return;
-        // The owner rose between our first check and publication. Withdraw, let it pass, retry.
-        s_transport_connecting.store(false, std::memory_order_release);
-    }
+    s_transport_connecting.store(true, std::memory_order_release);
 }
 
 static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
@@ -2050,6 +2039,10 @@ static void mqtt_task(void*) {
     OtaQuiesceState network_quiesce;                   // current TLS operation's hold-off budget
     bool network_quiesce_logged     = false;           // one diag line per operation, not per cycle
     bool network_quiesce_cap_logged = false;           // and one if that budget ever runs out
+    unsigned transport_resume_stable = 0;
+    unsigned transport_resume_wait_s = 0;
+    unsigned transport_resume_backoff_s = 1;
+    bool transport_resume_heap_logged = false;
 
     // Broker reachability and inbound observation do not depend on X10A. This first client carries
     // no installation LWT, and the gate below still encloses EVERY explicit publish. It can therefore
@@ -2081,9 +2074,9 @@ static void mqtt_task(void*) {
         // the cycle on purpose costs the same second of data the bad_alloc cost, spends none of the
         // block the download needs, and — unlike the throw — says so in a counter.
         //
-        // The watchdog is fed ABOVE this, so a long download cannot false-trip it. The broker
-        // connection is unaffected: esp-mqtt runs keepalive on its own task, so a publisher that
-        // publishes nothing for a minute stays connected and HA sees a gap, not an `offline`.
+        // The watchdog is fed ABOVE this, so a long download cannot false-trip it. The esp-mqtt
+        // transport is cleanly stopped below as well: that removes MQTTS record churn and yields a
+        // short deliberate broker gap without publishing the LWT, then the same client is resumed.
         // Bounded by logic/ota_quiesce.hpp — an operation that never finishes must not silence the
         // bridge for the rest of the boot.
         const bool ota_busy = ota_download_active();
@@ -2096,12 +2089,84 @@ static void mqtt_task(void*) {
                             ota_busy ? "OTA" : "weather");
                 network_quiesce_logged = true;
             }
+            // esp-mqtt owns a separate task which can still allocate dynamic MQTTS records for
+            // keepalive or subscribed data while firmware publishing is held. Stop it cleanly from
+            // this owning task, then acknowledge only after that transport is gone.
+            if (s_transport_pause_requested.load(std::memory_order_acquire) &&
+                s_client_running.load(std::memory_order_acquire) && s_client) {
+                s_publish_network_quiesced.store(false, std::memory_order_release);
+                const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);
+                if (stop_rc == ESP_OK) {
+                    s_client_running.store(false, std::memory_order_release);
+                    s_transport_connecting.store(false, std::memory_order_release);
+                    s_transport_paused.store(true, std::memory_order_release);
+                    s_connected.store(false, std::memory_order_release);
+                    set_status(false, "paused for network heap");
+                    diag_printf("mqtt: transport paused for network heap\n");
+                } else {
+                    diag_printf("mqtt: transport pause failed (%s)\n", esp_err_to_name(stop_rc));
+                }
+            }
             s_publish_network_quiesced.store(true, std::memory_order_release);
             vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
             continue;
         }
         {
         MqttPublishActivity publish_activity;
+        // The network owner has released its flag and pause request. Recreate esp-mqtt's transport
+        // task before ordinary subscription/publish work resumes. MQTTS gets the same stable
+        // contiguous-heap admission as the other TLS clients; direct start failures back off rather
+        // than churning the just-fragmented heap every second.
+        if (s_transport_paused.load(std::memory_order_acquire) &&
+            !s_transport_pause_requested.load(std::memory_order_acquire) && s_client) {
+            if (transport_resume_wait_s > 0) {
+                --transport_resume_wait_s;
+                vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
+                continue;
+            }
+            if (mqtt_transport_tls_configured()) {
+                const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_8BIT |
+                                                                     MALLOC_CAP_INTERNAL);
+                const size_t largest = heap_largest_internal_block();
+                if (free_internal < kMqttTlsResumeMinFree ||
+                    largest < kMqttTlsResumeMinLargest) {
+                    transport_resume_stable = 0;
+                    if (!transport_resume_heap_logged) {
+                        diag_printf("mqtt: waiting to resume TLS transport (free=%u B largest=%u B)\n",
+                                    static_cast<unsigned>(free_internal),
+                                    static_cast<unsigned>(largest));
+                        transport_resume_heap_logged = true;
+                    }
+                    set_status(false, "waiting for network heap");
+                    vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
+                    continue;
+                }
+                if (++transport_resume_stable < kMqttTlsResumeStableSamples) {
+                    vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
+                    continue;
+                }
+            }
+            const esp_err_t start_rc = start_client_transport();
+            if (start_rc != ESP_OK) {
+                diag_printf("mqtt: transport resume failed (%s) — retry in %u s\n",
+                            esp_err_to_name(start_rc), transport_resume_backoff_s);
+                transport_resume_wait_s = transport_resume_backoff_s;
+                transport_resume_backoff_s = transport_resume_backoff_s < kMqttResumeBackoffMaxS / 2
+                                           ? transport_resume_backoff_s * 2
+                                           : kMqttResumeBackoffMaxS;
+                transport_resume_stable = 0;
+                vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
+                continue;
+            }
+            s_client_running.store(true, std::memory_order_release);
+            s_transport_paused.store(false, std::memory_order_release);
+            transport_resume_stable = 0;
+            transport_resume_wait_s = 0;
+            transport_resume_backoff_s = 1;
+            transport_resume_heap_logged = false;
+            set_status(false, "");
+            diag_printf("mqtt: transport resumed after network heap operation\n");
+        }
         // Not holding off this cycle — either no TLS operation is running, or the budget ran out
         // while one still is. Those two are worth telling apart in the log: the second means the
         // publisher is back to competing with a TLS session for the heap, so a `publish skipped` can
@@ -2416,13 +2481,19 @@ static bool build_client(bool publisher_lwt) {
     return true;
 }
 
+static esp_err_t start_client_transport() {
+    return esp_mqtt_client_start(s_client);
+}
+
 static bool start_current_client() {
     if (!s_client) {
         set_status(false, "mqtt init failed");
         return false;
     }
-    const esp_err_t rc = esp_mqtt_client_start(s_client);
+    const esp_err_t rc = start_client_transport();
     if (rc == ESP_OK) {
+        s_client_running.store(true, std::memory_order_release);
+        s_transport_paused.store(false, std::memory_order_release);
         set_status(false, "");
         return true;
     }
@@ -2430,6 +2501,7 @@ static bool start_current_client() {
     diag_printf("mqtt: client start failed (%s)\n", esp_err_to_name(rc));
     esp_mqtt_client_destroy(s_client);               // start failed: no task/session is running
     s_client = nullptr;
+    s_client_running.store(false, std::memory_order_release);
     return false;
 }
 
@@ -2454,6 +2526,7 @@ static bool promote_client_to_publisher() {
     // BEFORE_CONNECT claim explicitly after the transport task has stopped; MqttPublishActivity
     // still keeps the firmware acknowledgement false throughout this promotion.
     s_transport_connecting.store(false, std::memory_order_release);
+    s_client_running.store(false, std::memory_order_release);
 
     s_connected = false;
     set_status(false, "");
@@ -2571,6 +2644,19 @@ bool mqtt_x10a_publish_required() {
 bool mqtt_publish_network_quiesced() {
     return s_publish_network_quiesced.load(std::memory_order_acquire) &&
            !s_transport_connecting.load(std::memory_order_acquire);
+}
+
+void mqtt_transport_pause_for_network_heap() {
+    s_transport_pause_requested.store(true, std::memory_order_release);
+}
+
+void mqtt_transport_resume_after_network_heap() {
+    s_transport_pause_requested.store(false, std::memory_order_release);
+}
+
+bool mqtt_transport_network_quiesced() {
+    return !s_client_running.load(std::memory_order_acquire) ||
+           s_transport_paused.load(std::memory_order_acquire);
 }
 
 ReferenceTemperatureStatus reference_temperature_status() {

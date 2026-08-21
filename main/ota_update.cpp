@@ -25,11 +25,13 @@
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "heap_guard.hpp"
+#include "hp_modbus.hpp"
 #include "hp_poll.hpp"
 #include "http_client_diag.hpp"
 #include "mqtt_ha.hpp"
 #include "net.hpp"
 #include "provisioning.hpp"
+#include "syslog.hpp"
 #include "weather_forecast.hpp"
 #include "wifi.hpp"
 #include "esp_app_desc.h"
@@ -58,10 +60,9 @@ namespace daik {
 namespace {
 
 // s_status is written by the OTA task and read by the httpd task (GET /ota/status), so it needs a
-// mutex. Readers copy std::strings out under the lock, which CAN throw — so the lock is taken
-// through an RAII guard, never a bare xSemaphoreTake. A raw take that unwinds past the give leaves
-// every later reader blocked on portMAX_DELAY and wedges the device into a watchdog reboot, which
-// is strictly worse than the OOM it came from (AGENTS.md → Memory, concurrency, and HTTP safety).
+// mutex. Every public text field is fixed-capacity: the one status route intentionally left open
+// during TLS must not allocate merely to take its snapshot. Keep the RAII lock anyway; future code
+// must not turn an exception into a permanently held mutex.
 OtaStatus         s_status;
 // Created at STATIC INIT — before app_main, before any task exists to race for it. The obvious
 // alternative, a lazy `if (!s_mtx) s_mtx = xSemaphoreCreateMutex()` on first use, is a real bug
@@ -103,14 +104,24 @@ OtaTaskArgs s_task_args;
 std::atomic<bool> s_network_active{false};
 static_assert(std::atomic<bool>::is_always_lock_free,
               "OTA quiesce signal must remain allocation- and lock-free");
+std::atomic<uint32_t> s_operation_min_free{0};
+std::atomic<uint32_t> s_operation_min_largest{0};
+static_assert(std::atomic<uint32_t>::is_always_lock_free,
+              "OTA heap telemetry must remain allocation- and lock-free");
 
 // Scope guard for that flag. It deliberately covers the manifest TLS handshake too: live evidence
 // proved that the small response is irrelevant to the binding allocation — TLS setup itself failed
 // while the MQTT publisher still competed for the largest contiguous block. The guard lives around
 // the whole task operation so every manifest/download exit and exception clears it in one place.
 struct OtaNetworkFlag {
-    OtaNetworkFlag()  { s_network_active.store(true,  std::memory_order_release); }
-    ~OtaNetworkFlag() { s_network_active.store(false, std::memory_order_release); }
+    OtaNetworkFlag()  {
+        s_network_active.store(true, std::memory_order_release);
+        mqtt_transport_pause_for_network_heap();
+    }
+    ~OtaNetworkFlag() {
+        mqtt_transport_resume_after_network_heap();
+        s_network_active.store(false, std::memory_order_release);
+    }
 };
 
 // A TLS handshake alone wants ~6 KB of stack, and fetch_manifest_version() puts another
@@ -120,6 +131,11 @@ struct OtaNetworkFlag {
 constexpr int  kTaskStack     = 10240;
 constexpr UBaseType_t kTaskPrio = TASK_PRIO_OTA;   // see main/task_config.hpp for the tiers
 constexpr int  kHttpTimeoutMs = 15000;
+// A peer which sends one byte inside every socket timeout is still not allowed to hold MQTT,
+// HomeHub and Syslog quiesced forever. The remaining-time setter below turns this into a real
+// operation deadline, not merely a per-read timeout.
+constexpr TickType_t kManifestDeadline = pdMS_TO_TICKS(30000);
+constexpr TickType_t kFirmwareDeadline = pdMS_TO_TICKS(5 * 60 * 1000);
 constexpr int  kOtaBufSize    = 2048;   // download chunk; deliberately small (contiguous heap)
 constexpr size_t kManifestMax = 1024;   // published installer+provenance manifest stays below 1 KiB
 constexpr unsigned kMaxRedirects = 5;
@@ -127,8 +143,12 @@ constexpr unsigned kMaxRedirects = 5;
 // opening TLS so a publisher which woke just before the OTA task has time to finish and stand aside.
 constexpr TickType_t kNetworkQuiesceLead = pdMS_TO_TICKS(1100);
 constexpr TickType_t kAllocatorRetryDelay = pdMS_TO_TICKS(250);
-constexpr TickType_t kVerifyHeadroomRetryDelay = pdMS_TO_TICKS(250);
-constexpr unsigned   kVerifyHeadroomMaxAttempts = 20;  // 5 s: transient churn may unwind, never wait forever
+constexpr TickType_t kHeadroomRetryDelay = pdMS_TO_TICKS(250);
+// TLS gets a longer bounded recovery window than post-transfer validation. The production gate
+// deliberately polls status while the operation is live, and recently released HTTP/TCP buffers
+// may need several scheduler turns to coalesce. Neither phase may wait forever.
+constexpr unsigned   kTransferHeadroomMaxAttempts = 60;    // 15 s
+constexpr unsigned   kValidationHeadroomMaxAttempts = 20;  // 5 s
 constexpr TickType_t kPollQuiesceWait      = pdMS_TO_TICKS(15000);
 constexpr TickType_t kWeatherWait          = pdMS_TO_TICKS(kHttpTimeoutMs + 5000);
 
@@ -137,7 +157,7 @@ struct OtaHeapSample {
     size_t largest_internal_block;
 };
 
-enum class OtaTransferFailure : uint8_t { None, Read, Write, Size, Hash };
+enum class OtaTransferFailure : uint8_t { None, Read, Write, Size, Hash, Timeout };
 
 const char* ota_transfer_failure_name(OtaTransferFailure failure) {
     switch (failure) {
@@ -145,38 +165,81 @@ const char* ota_transfer_failure_name(OtaTransferFailure failure) {
         case OtaTransferFailure::Write: return "write";
         case OtaTransferFailure::Size:  return "size";
         case OtaTransferFailure::Hash:  return "hash";
+        case OtaTransferFailure::Timeout: return "timeout";
         default:                        return "none";
     }
 }
 
-OtaHeapSample ota_heap_sample() {
-    return {heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
-            heap_largest_internal_block()};
+bool set_http_timeout_to_deadline(esp_http_client_handle_t client, TickType_t started,
+                                  TickType_t deadline) {
+    const TickType_t elapsed = xTaskGetTickCount() - started;
+    if (elapsed >= deadline) return false;
+    const uint64_t remaining_ms =
+        static_cast<uint64_t>(deadline - elapsed) * portTICK_PERIOD_MS;
+    const int timeout_ms = remaining_ms < static_cast<uint64_t>(kHttpTimeoutMs)
+                         ? static_cast<int>(remaining_ms) : kHttpTimeoutMs;
+    esp_http_client_set_timeout_ms(client, timeout_ms > 0 ? timeout_ms : 1);
+    return true;
 }
 
-// Wait a short, bounded interval for an allocation-rich task which was already in flight when the
-// lock-free OTA flag rose to unwind.  This is called twice by run_update(): before the transfer owns
-// an OTA handle, and after HTTP/TLS plus the download buffer have been freed but before esp_ota_end
-// invokes Secure-Boot-v2 validation.  Refusing on low headroom is fail-closed and retryable; lowering
-// the threshold or skipping verification is not.
-bool wait_for_ota_verify_headroom(const char* phase, OtaHeapSample& sample) {
-    for (unsigned attempt = 0; attempt < kVerifyHeadroomMaxAttempts; ++attempt) {
+bool http_deadline_reached(TickType_t started, TickType_t deadline) {
+    return xTaskGetTickCount() - started >= deadline;
+}
+
+void record_operation_min(std::atomic<uint32_t>& target, size_t value) {
+    const uint32_t sample = value > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(value);
+    uint32_t current = target.load(std::memory_order_relaxed);
+    while (sample < current &&
+           !target.compare_exchange_weak(current, sample, std::memory_order_relaxed)) {}
+}
+
+OtaHeapSample ota_heap_sample() {
+    const OtaHeapSample sample{
+        heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+        heap_largest_internal_block()};
+    record_operation_min(s_operation_min_free, sample.free_bytes);
+    record_operation_min(s_operation_min_largest, sample.largest_internal_block);
+    return sample;
+}
+
+void ota_heap_operation_reset() {
+    const OtaHeapSample sample{
+        heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+        heap_largest_internal_block()};
+    s_operation_min_free.store(static_cast<uint32_t>(sample.free_bytes), std::memory_order_relaxed);
+    s_operation_min_largest.store(static_cast<uint32_t>(sample.largest_internal_block),
+                                  std::memory_order_relaxed);
+}
+
+// Wait a bounded interval for an allocation-rich task which was already in flight when the
+// lock-free OTA flag rose to unwind. This protects every fresh manifest/image TLS client and, with
+// the smaller phase-specific requirement, the post-cleanup esp_ota_end Secure-Boot-v2 validation.
+// Refusing on low or unstable headroom is fail-closed and retryable; lowering a threshold or
+// skipping verification is not.
+bool wait_for_ota_headroom(const char* phase, const OtaHeapHeadroom& requirement,
+                           unsigned max_attempts, OtaHeapSample& sample) {
+    unsigned stable = 0;
+    for (unsigned attempt = 0; attempt < max_attempts; ++attempt) {
         sample = ota_heap_sample();
-        if (ota_verify_headroom_ok(sample.free_bytes, sample.largest_internal_block)) {
-            diag_printf("ota: %s heap ready (free=%u B largest=%u B)\n", phase,
+        stable = ota_headroom_streak_next(requirement, stable, sample.free_bytes,
+                                          sample.largest_internal_block);
+        if (stable >= requirement.stable_samples) {
+            diag_printf("ota: %s heap ready (free=%u B largest=%u B stable=%u)\n", phase,
                         static_cast<unsigned>(sample.free_bytes),
-                        static_cast<unsigned>(sample.largest_internal_block));
+                        static_cast<unsigned>(sample.largest_internal_block), stable);
             return true;
         }
-        vTaskDelay(kVerifyHeadroomRetryDelay);
+        vTaskDelay(kHeadroomRetryDelay);
     }
 
     sample = ota_heap_sample();
-    diag_printf("ota: %s blocked by low heap (free=%u B largest=%u B; need %u/%u B)\n",
+    diag_printf("ota: %s blocked by low/unstable heap (free=%u B largest=%u B stable=%u; "
+                "need %u/%u B for %u samples)\n",
                 phase, static_cast<unsigned>(sample.free_bytes),
-                static_cast<unsigned>(sample.largest_internal_block),
-                static_cast<unsigned>(OTA_VERIFY_MIN_FREE_BYTES),
-                static_cast<unsigned>(OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES));
+                static_cast<unsigned>(sample.largest_internal_block), stable,
+                static_cast<unsigned>(requirement.min_free_bytes),
+                static_cast<unsigned>(requirement.min_largest_block_bytes),
+                requirement.stable_samples);
     return false;
 }
 
@@ -230,6 +293,11 @@ void set_state(const char* state, const char* message = "") {
 }
 
 void set_progress(int pct) {
+    // One sample per percentage point records a representative transfer low-water series without
+    // turning every 2 KiB flash write into telemetry work. It cannot see allocations created and
+    // released inside one blocking IDF call, so /ota/status names these sampled minima rather than
+    // claiming a continuous allocator trough.
+    ota_heap_sample();
     Lock lk(s_mtx);
     s_status.progress = pct;
 }
@@ -277,11 +345,54 @@ bool wait_for_mqtt_quiesce() {
     return false;
 }
 
+bool wait_for_mqtt_transport_quiesce() {
+    if (mqtt_transport_network_quiesced()) return true;
+    diag_printf("ota: waiting for the esp-mqtt transport to release heap\n");
+    const TickType_t started = xTaskGetTickCount();
+    while (!mqtt_transport_network_quiesced() &&
+           xTaskGetTickCount() - started < kPollQuiesceWait)
+        vTaskDelay(kAllocatorRetryDelay);
+    if (mqtt_transport_network_quiesced()) return true;
+    const OtaHeapSample sample = ota_heap_sample();
+    diag_printf("ota: esp-mqtt transport did not acknowledge quiesce (free=%u B largest=%u B)\n",
+                static_cast<unsigned>(sample.free_bytes),
+                static_cast<unsigned>(sample.largest_internal_block));
+    return false;
+}
+
+bool wait_for_modbus_quiesce() {
+    if (mb_network_quiesced()) return true;
+    diag_printf("ota: waiting for the in-flight HomeHub cycle to release heap\n");
+    const TickType_t started = xTaskGetTickCount();
+    while (!mb_network_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
+        vTaskDelay(kAllocatorRetryDelay);
+    if (mb_network_quiesced()) return true;
+    const OtaHeapSample sample = ota_heap_sample();
+    diag_printf("ota: HomeHub task did not acknowledge quiesce (free=%u B largest=%u B)\n",
+                static_cast<unsigned>(sample.free_bytes),
+                static_cast<unsigned>(sample.largest_internal_block));
+    return false;
+}
+
+bool wait_for_syslog_quiesce() {
+    if (syslog_network_quiesced()) return true;
+    diag_printf("ota: waiting for the in-flight Syslog cycle to release heap\n");
+    const TickType_t started = xTaskGetTickCount();
+    while (!syslog_network_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
+        vTaskDelay(kAllocatorRetryDelay);
+    if (syslog_network_quiesced()) return true;
+    const OtaHeapSample sample = ota_heap_sample();
+    diag_printf("ota: Syslog task did not acknowledge quiesce (free=%u B largest=%u B)\n",
+                static_cast<unsigned>(sample.free_bytes),
+                static_cast<unsigned>(sample.largest_internal_block));
+    return false;
+}
+
 // The feed this device follows right now (config ota_channel, POST /set_ota). Read fresh on every
 // check/update rather than cached at boot: switching channels applies LIVE, so a user who picks
 // "Development" in the UI and immediately taps check must get the dev manifest, not the one that
 // was configured when the board booted.
-OtaChannel channel_now() { return config().ota_channel; }
+OtaChannel channel_now() { return config_ota_channel(); }
 
 // Fetch the manifest for `url` and extract the exact artifact identity into `out`.
 // `err` receives a short, USER-FACING reason on failure — the UI shows it verbatim, so it must say
@@ -294,6 +405,17 @@ bool fetch_manifest_identity_once(const std::string& url, OtaManifestIdentity& o
     // fail on a relative path and reporting an unreachable server.
     if (url.empty()) { err = "No update URL configured"; return false; }
     if (!ota_url_is_absolute_https(url)) { err = "Update URL must use HTTPS"; return false; }
+
+    // A manifest is small, but its fresh TLS/X509 handshake is not. The previous implementation
+    // admitted this path without any headroom check and used the verifier's much smaller budget
+    // only before the later firmware connection. Apply the measured TLS budget at the last point
+    // before the client allocates, after URL/task/config state already exists.
+    OtaHeapSample manifest_heap{};
+    if (!wait_for_ota_headroom("manifest", OTA_TRANSFER_HEADROOM,
+                               kTransferHeadroomMaxAttempts, manifest_heap)) {
+        err = "Not enough memory to check for updates — retry after reboot";
+        return false;
+    }
 
     const HttpClientProbe before = http_client_probe();
     esp_http_client_config_t cfg = {};
@@ -310,13 +432,15 @@ bool fetch_manifest_identity_once(const std::string& url, OtaManifestIdentity& o
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
     if (!c) {
         http_client_log_init_failure("ota", before);
-        err = "Out of memory";
+        err = "Not enough memory for update TLS — retry after reboot";
         retryable_allocator_failure = true;
         return false;
     }
 
     bool ok = false;
+    const TickType_t manifest_started = xTaskGetTickCount();
     esp_err_t e = esp_http_client_open(c, 0);
+    const OtaHeapSample manifest_open_heap = ota_heap_sample();
     if (e != ESP_OK) {
         const HttpClientOpenFailure failure =
             http_client_log_open_failure("ota", c, e, before);
@@ -325,7 +449,9 @@ bool fetch_manifest_identity_once(const std::string& url, OtaManifestIdentity& o
         // same answer and blur the diagnostic that distinguishes them.
         retryable_allocator_failure =
             e == ESP_ERR_NO_MEM || failure.tls_error == ESP_ERR_MBEDTLS_SSL_SETUP_FAILED;
-        err = "Can't reach the update server";
+        err = retryable_allocator_failure
+            ? "Not enough memory for update TLS — retry after reboot"
+            : "Can't reach the update server";
     } else if (esp_http_client_fetch_headers(c) < 0) {
         err = "No response from the update server";
     } else if (esp_http_client_get_status_code(c) != 200) {
@@ -336,20 +462,38 @@ bool fetch_manifest_identity_once(const std::string& url, OtaManifestIdentity& o
         // and then fail to parse, rather than being believed.
         char   buf[kManifestMax];
         size_t got = 0;
+        bool timed_out = false;
         while (got < sizeof(buf)) {
+            if (!set_http_timeout_to_deadline(c, manifest_started, kManifestDeadline)) {
+                err = "Update manifest download timed out";
+                timed_out = true;
+                break;
+            }
             const int n = esp_http_client_read(c, buf + got, static_cast<int>(sizeof(buf) - got));
-            if (n <= 0) break;
+            if (n <= 0) {
+                if (http_deadline_reached(manifest_started, kManifestDeadline)) {
+                    err = "Update manifest download timed out";
+                    timed_out = true;
+                }
+                break;
+            }
             got += static_cast<size_t>(n);
         }
         // manifest_identity() is bounded by `got`, assumes no NUL terminator and requires both the
         // top-level version and provenance.app_sha256.  A legacy/version-only manifest cannot enter
         // the exact-artifact update path.
-        if (got == 0)                                      err = "Empty manifest";
-        else if (!manifest_identity(buf, got, out))
-            err = "Manifest has no usable artifact identity";
-        else                                               ok = true;
+        if (!timed_out) {
+            if (got == 0)                                  err = "Empty manifest";
+            else if (!manifest_identity(buf, got, out))
+                err = "Manifest has no usable artifact identity";
+            else                                           ok = true;
+        }
     }
+    diag_printf("ota: manifest TLS sample (free=%u B largest=%u B)\n",
+                static_cast<unsigned>(manifest_open_heap.free_bytes),
+                static_cast<unsigned>(manifest_open_heap.largest_internal_block));
     close_http_client(c);
+    ota_heap_sample();
     return ok;
 }
 
@@ -488,8 +632,9 @@ void run_update(const OtaTaskArgs& request) {
     // lets a poll sweep which started just before s_network_active rose finish instead of racing
     // the allocator during esp_ota_begin.
     OtaHeapSample transfer_heap{};
-    if (!wait_for_ota_verify_headroom("transfer", transfer_heap)) {
-        set_state("error", "Not enough memory to verify the update — retry after reboot");
+    if (!wait_for_ota_headroom("transfer", OTA_TRANSFER_HEADROOM,
+                               kTransferHeadroomMaxAttempts, transfer_heap)) {
+        set_state("error", "Not enough memory to start the update download — retry after reboot");
         return;
     }
 
@@ -516,22 +661,31 @@ void run_update(const OtaTaskArgs& request) {
     esp_http_client_handle_t client = esp_http_client_init(&http);
     if (!client) {
         http_client_log_init_failure("ota", before);
-        set_state("error", "Couldn't start the download");
+        set_state("error", "Not enough memory for update TLS — retry after reboot");
         return;
     }
 
+    const TickType_t transfer_started = xTaskGetTickCount();
     int status = 0;
     esp_err_t e = open_firmware_stream(client, redirect_policy, status);
+    const OtaHeapSample transfer_open_heap = ota_heap_sample();
     if (e != ESP_OK) {
         const HttpClientOpenFailure failure =
             http_client_log_open_failure("ota", client, e, before);
         close_http_client(client);
         diag_printf("ota: firmware stream failed (status=%d, err=%s, tls=0x%lx)\n", status,
                     esp_err_to_name(e), static_cast<unsigned long>(failure.tls_error));
-        set_state("error", status == 0 ? "Can't reach the update server"
-                                        : "Update server returned an error");
+        const bool allocator_failure =
+            e == ESP_ERR_NO_MEM || failure.tls_error == ESP_ERR_MBEDTLS_SSL_SETUP_FAILED;
+        set_state("error", allocator_failure
+                           ? "Not enough memory for update TLS — retry after reboot"
+                           : status == 0 ? "Can't reach the update server"
+                                         : "Update server returned an error");
         return;
     }
+    diag_printf("ota: transfer TLS sample (free=%u B largest=%u B)\n",
+                static_cast<unsigned>(transfer_open_heap.free_bytes),
+                static_cast<unsigned>(transfer_open_heap.largest_internal_block));
 
     const int64_t total = esp_http_client_get_content_length(client);
     uint8_t* buffer = static_cast<uint8_t*>(
@@ -542,7 +696,7 @@ void run_update(const OtaTaskArgs& request) {
         diag_printf("ota: download-buffer allocation failed (free=%u B largest=%u B)\n",
                     static_cast<unsigned>(failed.free_bytes),
                     static_cast<unsigned>(failed.largest_internal_block));
-        set_state("error", "Not enough memory to verify the update — retry after reboot");
+        set_state("error", "Not enough memory for the update download — retry after reboot");
         return;
     }
 
@@ -569,7 +723,7 @@ void run_update(const OtaTaskArgs& request) {
         close_http_client(client);
         diag_printf("ota: esp_ota_begin failed (%s)\n", esp_err_to_name(e));
         set_state("error", e == ESP_ERR_NO_MEM
-                           ? "Not enough memory to verify the update — retry after reboot"
+                           ? "Not enough memory for the update download — retry after reboot"
                            : "Couldn't start the download");
         return;
     }
@@ -583,9 +737,18 @@ void run_update(const OtaTaskArgs& request) {
     static_assert(kImageProbeSize <= kOtaBufSize, "OTA probe must fit the fixed download buffer");
     size_t probe_len = 0;
     unsigned read_timeouts = 0;
+    bool header_timed_out = false;
     while (probe_len < kImageProbeSize) {
+        if (!set_http_timeout_to_deadline(client, transfer_started, kFirmwareDeadline)) {
+            header_timed_out = true;
+            break;
+        }
         const int n = esp_http_client_read(client, reinterpret_cast<char*>(buffer + probe_len),
                                            static_cast<int>(kImageProbeSize - probe_len));
+        if (n <= 0 && http_deadline_reached(transfer_started, kFirmwareDeadline)) {
+            header_timed_out = true;
+            break;
+        }
         if (n == -ESP_ERR_HTTP_EAGAIN && read_timeouts++ < 2) continue;
         if (n <= 0) break;
         probe_len += static_cast<size_t>(n);
@@ -597,7 +760,8 @@ void run_update(const OtaTaskArgs& request) {
         close_http_client(client);
         diag_printf("ota: incomplete image header (%u/%u B)\n",
                     static_cast<unsigned>(probe_len), static_cast<unsigned>(kImageProbeSize));
-        set_state("error", "Update image is unreadable");
+        set_state("error", header_timed_out ? "Update download timed out"
+                                            : "Update image is unreadable");
         return;
     }
 
@@ -709,7 +873,19 @@ void run_update(const OtaTaskArgs& request) {
     bool transfer_ok = write_chunk(buffer, probe_len);
     read_timeouts = 0;
     while (transfer_ok) {
+        if (!set_http_timeout_to_deadline(client, transfer_started, kFirmwareDeadline)) {
+            e = ESP_ERR_TIMEOUT;
+            transfer_failure = OtaTransferFailure::Timeout;
+            transfer_ok = false;
+            break;
+        }
         const int n = esp_http_client_read(client, reinterpret_cast<char*>(buffer), kOtaBufSize);
+        if (n <= 0 && http_deadline_reached(transfer_started, kFirmwareDeadline)) {
+            e = ESP_ERR_TIMEOUT;
+            transfer_failure = OtaTransferFailure::Timeout;
+            transfer_ok = false;
+            break;
+        }
         if (n == -ESP_ERR_HTTP_EAGAIN && read_timeouts++ < 2) continue;
         if (n < 0) {
             e = static_cast<esp_err_t>(-n);
@@ -733,6 +909,7 @@ void run_update(const OtaTaskArgs& request) {
     heap_caps_free(buffer);
     buffer = nullptr;
     close_http_client(client);
+    ota_heap_sample();
 
     if (!transfer_ok || !complete) {
         if (hash_active) {
@@ -753,6 +930,8 @@ void run_update(const OtaTaskArgs& request) {
                             ? "Couldn't verify the exact update artifact"
                             : transfer_failure == OtaTransferFailure::Write
                             ? "Couldn't write the update"
+                            : transfer_failure == OtaTransferFailure::Timeout
+                            ? "Update download timed out"
                             : !complete ? "Incomplete download"
                                         : "Download failed — check the connection";
         set_state("error", message);
@@ -775,7 +954,8 @@ void run_update(const OtaTaskArgs& request) {
     }
 
     OtaHeapSample verify_heap{};
-    if (!wait_for_ota_verify_headroom("validation", verify_heap)) {
+    if (!wait_for_ota_headroom("validation", OTA_VALIDATION_HEADROOM,
+                               kValidationHeadroomMaxAttempts, verify_heap)) {
         if (ota_open) { esp_ota_abort(ota_handle); ota_open = false; }
         set_state("error", "Not enough memory to verify the update — retry after reboot");
         return;
@@ -808,8 +988,15 @@ void run_update(const OtaTaskArgs& request) {
         return;
     }
 
-    // Selection is deliberately separate and strictly AFTER successful validation.  IDF validates
-    // once more while setting otadata; any failure still leaves the running slot selected.
+    // Selection is deliberately separate and strictly AFTER successful validation. IDF validates
+    // once more while setting otadata, so protect that second RSA/PSA pass with the same independent
+    // post-TLS budget. A refusal still leaves the running slot selected and is safe to retry.
+    OtaHeapSample selection_heap{};
+    if (!wait_for_ota_headroom("boot selection", OTA_VALIDATION_HEADROOM,
+                               kValidationHeadroomMaxAttempts, selection_heap)) {
+        set_state("error", "Not enough memory to activate the update — retry after reboot");
+        return;
+    }
     e = esp_ota_set_boot_partition(update_partition);
     if (e != ESP_OK) {
         const OtaHeapSample after = ota_heap_sample();
@@ -841,6 +1028,7 @@ void run_update(const OtaTaskArgs& request) {
 void ota_task(void* arg) {
     const OtaTaskArgs request = *static_cast<const OtaTaskArgs*>(arg);
     const bool update = request.mode != OtaTaskMode::Check;
+    ota_heap_operation_reset();
     {
         OtaNetworkFlag active;
         vTaskDelay(kNetworkQuiesceLead);
@@ -852,6 +1040,12 @@ void ota_task(void* arg) {
                 set_state("error", "Heat-pump polling is still using memory — retry shortly");
             } else if (!wait_for_mqtt_quiesce()) {
                 set_state("error", "MQTT publishing is still using memory — retry shortly");
+            } else if (!wait_for_mqtt_transport_quiesce()) {
+                set_state("error", "MQTT transport is still using memory — retry shortly");
+            } else if (!wait_for_modbus_quiesce()) {
+                set_state("error", "HomeHub polling is still using memory — retry shortly");
+            } else if (!wait_for_syslog_quiesce()) {
+                set_state("error", "Syslog is still using memory — retry shortly");
             } else if (!wait_for_weather_quiesce()) {
                 set_state("error", "Another network operation is still using memory — retry shortly");
             } else if (update) {
@@ -954,9 +1148,8 @@ uint32_t ota_update_async(uint32_t after_generation, const char* expected_channe
 }
 
 bool ota_busy() {
-    // Deliberately NOT ota_status().state != "idle": that builder copies several std::strings out and
-    // also takes the CONFIG mutex, and its one caller here is the heap watchdog running on a heap
-    // that is failing. This critical section allocates nothing at all.
+    // Deliberately NOT ota_status().state != "idle": its one caller is the heap watchdog running on
+    // a heap that is failing. Read only the primitive this question needs.
     Lock lk(s_mtx);
     return s_busy;
 }
@@ -964,15 +1157,18 @@ bool ota_busy() {
 OtaStatus ota_status() {
     // The channel is answered from the LIVE config, not from whatever the last check left behind:
     // /ota/status is what the UI reads back after POST /set_ota, and before any check has run there
-    // is nothing in s_status to read. Read BEFORE taking s_mtx — config() takes the config mutex
-    // and copies strings out of it, and nesting one status lock inside another buys a lock-order
-    // rule to remember for a value that is one enum wide.
-    const char* ch = ota_channel_name(config().ota_channel);
+    // is nothing in s_status to read. Read BEFORE taking s_mtx; the narrow Config accessor copies
+    // one enum without copying any of the string-owning service configuration.
+    const char* ch = ota_channel_name(config_ota_channel());
     Lock lk(s_mtx);
     s_status.current = esp_app_get_description()->version;
     s_status.channel = ch;
     s_status.busy = s_busy;
     s_status.generation = s_generation;
+    s_status.heap_min_free_bytes =
+        s_operation_min_free.load(std::memory_order_relaxed);
+    s_status.heap_min_largest_block_bytes =
+        s_operation_min_largest.load(std::memory_order_relaxed);
     return s_status;
 }
 

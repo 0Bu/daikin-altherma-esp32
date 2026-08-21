@@ -21,6 +21,10 @@ struct ConfigLinkSnapshot {
 };
 ConfigLinkSnapshot config_link_snapshot();
 
+// Allocation-free snapshot for the compact OTA status route. Reading one enum must not copy the
+// string-owning Config while OTA/TLS deliberately keeps that route available under heap pressure.
+OtaChannel config_ota_channel();
+
 // Load from NVS, seeding any missing key from its Kconfig default.
 void config_load();
 

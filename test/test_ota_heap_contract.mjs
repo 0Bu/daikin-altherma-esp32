@@ -29,12 +29,36 @@ const otaHeader = code("main/ota_update.hpp");
 const httpOta = code("main/http_ota.cpp");
 const mqtt = code("main/mqtt_ha.cpp");
 const poll = code("main/hp_poll.cpp");
+const modbus = code("main/hp_modbus.cpp");
+const syslog = code("main/syslog.cpp");
+const weather = code("main/weather_forecast.cpp");
+const mcp = code("main/mcp_server.cpp");
+const httpCommon = code("main/http_common.cpp");
+const config = code("main/config.cpp");
 // Keep this source verbatim: it contains the legitimate captive-portal URI string "/*", which a
 // regex comment stripper would mistake for an unterminated block comment and erase most handlers.
 const httpStatus = read("main/http_status.cpp");
 const headroom = code("main/logic/ota_headroom.hpp");
+const quiesceLogic = code("main/logic/ota_quiesce.hpp");
 const transport = code("main/logic/ota_transport.hpp");
+const fixedText = code("main/logic/fixed_text.hpp");
 const sdkconfig = read("sdkconfig.defaults");
+
+assert.match(quiesceLogic, /OTA_QUIESCE_MAX_CYCLES\s*=\s*600/,
+  "poll/MQTT quiescence must outlive the complete bounded OTA path and 480-second host observer");
+
+const allHandlerStart = httpCommon.indexOf("static esp_err_t handle_all(");
+const allHandlerEnd = httpCommon.indexOf("void http_register(", allHandlerStart);
+const allHandler = httpCommon.slice(allHandlerStart, allHandlerEnd);
+const postOtaGate = allHandler.indexOf("req->method == HTTP_POST && ota_busy()");
+const trustedHeaders = allHandler.indexOf("trusted_lan_headers_allowed(req)");
+const jsonPolicy = allHandler.indexOf("json_post_allowed(req)");
+assert.ok(allHandlerStart >= 0 && allHandlerEnd > allHandlerStart && postOtaGate >= 0 &&
+          trustedHeaders > postOtaGate && jsonPolicy > trustedHeaders,
+  "every POST must fail from the synchronously accepted OTA lease before header/body/route allocation");
+assert.match(allHandler.slice(postOtaGate, trustedHeaders),
+  /503 Service Unavailable[\s\S]{0,150}?Network TLS operation in progress/,
+  "the shared OTA POST refusal must be fixed, explicit and retryable");
 
 // ── HTTP acceptance is the authoritative OTA operation boundary ──────────────────────────────
 // An asynchronous check/update request is not successful merely because the HTTP handler ran.
@@ -70,7 +94,7 @@ assert.equal(occurrences(httpOta, '503 Service Unavailable'), 2,
 assert.equal(occurrences(httpOta, '{\\"ok\\":true,\\"generation\\":%lu}'), 2,
   "both accepted operation responses must carry their generation token");
 assert.match(httpOta,
-  /,\\"busy\\":.*s\.busy[\s\S]{0,180}?,\\"generation\\":.*std::to_string\(s\.generation\)/,
+  /j\s*\+=\s*",\\"busy\\":"[\s\S]{0,100}?s\.busy[\s\S]{0,100}?j\s*\+=\s*",\\"generation\\":"[\s\S]{0,100}?number\(s\.generation\)/,
   "status must expose the mutex-consistent busy and generation handshake");
 for (const field of ["after", "channel", "version", "sha256"]) {
   assert.match(httpOta, new RegExp(`httpd_query_key_value\\(q, "${field}"`),
@@ -81,6 +105,38 @@ assert.match(httpOta,
   "HTTP must pass the complete checked identity into the atomic firmware boundary");
 assert.match(otaHeader, /std::array<char,\s*65>\s+available_sha256/,
   "frequent /ota/status copies must keep the 64-byte artifact SHA in fixed storage");
+for (const field of ["state", "message", "available", "available_channel", "current", "channel"]) {
+  assert.match(otaHeader, new RegExp(`FixedText<\\d+>\\s+${field}`),
+    `/ota/status ${field} must remain fixed-capacity under TLS pressure`);
+}
+assert.match(fixedText, /class\s+FixedBuffer[\s\S]{0,900}?overflowed_\s*=\s*true/,
+  "the OTA JSON buffer must fail closed on overflow instead of reallocating or truncating");
+assert.match(httpOta,
+  /FixedBuffer<2048>\s+j[\s\S]{0,1800}?json_append_quoted[\s\S]{0,1800}?if\s*\(!j\.ok\(\)\)/,
+  "compact OTA status must use bounded allocation-free JSON with explicit overflow handling");
+assert.doesNotMatch(httpOta, /std::to_string|json_quote|std::string\s+j/,
+  "compact OTA status must not allocate response strings while TLS owns the heap");
+assert.match(config,
+  /OtaChannel\s+config_ota_channel\(\)[\s\S]{0,120}?Lock lk\(g_mtx\)[\s\S]{0,120}?return g_cfg\.ota_channel/,
+  "OTA status must read one config enum without copying the string-owning Config");
+assert.match(ota,
+  /OtaStatus\s+ota_status\(\)[\s\S]{0,700}?config_ota_channel\(\)/,
+  "the live OTA status snapshot must use the allocation-free channel accessor");
+assert.match(otaHeader,
+  /uint32_t\s+heap_min_free_bytes[\s\S]{0,100}?uint32_t\s+heap_min_largest_block_bytes/,
+  "operation-local OTA heap minima must remain fixed-width status fields");
+assert.match(httpOta,
+  /,\\"heap_min_free_bytes\\":[\s\S]{0,160}?,\\"heap_min_largest_block_bytes\\":/,
+  "compact OTA status must expose both operation-local heap dimensions");
+assert.match(ota,
+  /ota_heap_operation_reset\(\);[\s\S]{0,160}?OtaNetworkFlag active/,
+  "each accepted operation must reset heap telemetry before the network phase");
+assert.match(ota,
+  /void set_progress\([\s\S]{0,220}?ota_heap_sample\(\);[\s\S]{0,120}?s_status\.progress/,
+  "firmware transfer progress must sample heap before publishing each percentage");
+assert.match(ota,
+  /s_status\.heap_min_free_bytes[\s\S]{0,180}?s_operation_min_free\.load[\s\S]{0,180}?s_status\.heap_min_largest_block_bytes[\s\S]{0,180}?s_operation_min_largest\.load/,
+  "OTA status must read both lock-free operation minima");
 
 // ── The verifier remains mandatory ────────────────────────────────────────────────────────────
 // esp_ota_end() is the ESP-IDF boundary that performs image verification under these Kconfig
@@ -104,6 +160,45 @@ const updateEnd = ota.indexOf("uint32_t next_generation(", updateStart);
 assert.ok(updateStart >= 0 && updateEnd > updateStart,
   "the OTA install boundary must remain identifiable");
 const update = ota.slice(updateStart, updateEnd);
+assert.match(ota, /kManifestDeadline\s*=\s*pdMS_TO_TICKS\(30000\)/,
+  "a trickling manifest must have a bounded operation deadline");
+assert.match(ota, /kFirmwareDeadline\s*=\s*pdMS_TO_TICKS\(5 \* 60 \* 1000\)/,
+  "a trickling firmware stream must release quiesced services within five minutes");
+const manifestFetchStart = ota.indexOf("bool fetch_manifest_identity_once(");
+const manifestFetchEnd = ota.indexOf("bool fetch_manifest_identity(", manifestFetchStart);
+const manifestDeadlineFetch = ota.slice(manifestFetchStart, manifestFetchEnd);
+assert.ok(manifestFetchStart >= 0 && manifestFetchEnd > manifestFetchStart,
+  "the manifest transfer must remain identifiable");
+assert.match(manifestDeadlineFetch,
+  /while\s*\(got < sizeof\(buf\)\)[\s\S]{0,220}?!set_http_timeout_to_deadline\(c, manifest_started, kManifestDeadline\)/,
+  "manifest reads must consume the remaining operation deadline rather than only per-read timeouts");
+assert.match(manifestDeadlineFetch,
+  /esp_http_client_read\(c,[\s\S]{0,160}?n <= 0[\s\S]{0,160}?http_deadline_reached\(manifest_started, kManifestDeadline\)[\s\S]{0,160}?timed_out = true/,
+  "a manifest read which consumes its remaining timeout must retain timeout diagnostics");
+const probeLoop = update.slice(update.indexOf("while (probe_len < kImageProbeSize)"),
+                               update.indexOf("if (probe_len != kImageProbeSize)"));
+assert.match(probeLoop,
+  /!set_http_timeout_to_deadline\(client, transfer_started, kFirmwareDeadline\)/,
+  "the image-header read must obey the complete firmware-transfer deadline");
+assert.match(probeLoop,
+  /esp_http_client_read\(client,[\s\S]{0,200}?n <= 0 && http_deadline_reached\(transfer_started, kFirmwareDeadline\)[\s\S]{0,100}?header_timed_out = true/,
+  "an image-header read which consumes its remaining timeout must retain timeout diagnostics");
+const transferLoop = update.slice(update.indexOf("while (transfer_ok)"),
+                                  update.indexOf("const bool complete", update.indexOf("while (transfer_ok)")));
+assert.match(transferLoop,
+  /!set_http_timeout_to_deadline\(client, transfer_started, kFirmwareDeadline\)[\s\S]{0,180}?OtaTransferFailure::Timeout/,
+  "the bulk image read must abort and diagnose expiry of the complete firmware-transfer deadline");
+assert.match(transferLoop,
+  /esp_http_client_read\(client,[\s\S]{0,180}?n <= 0 && http_deadline_reached\(transfer_started, kFirmwareDeadline\)[\s\S]{0,180}?OtaTransferFailure::Timeout/,
+  "a bulk read which consumes its remaining timeout must retain timeout diagnostics");
+assert.match(weather, /kDownloadDeadline\s*=\s*pdMS_TO_TICKS\(60000\)/,
+  "a trickling weather response must have a bounded operation deadline");
+assert.match(weather,
+  /while\s*\(out\.size\(\) <= kPayloadMax\)[\s\S]{0,260}?elapsed >= kDownloadDeadline[\s\S]{0,120}?download_timeout/,
+  "weather reads must release the shared network-heap lease when their total deadline expires");
+assert.match(weather,
+  /esp_http_client_read\(client,[\s\S]{0,180}?n <= 0 && xTaskGetTickCount\(\) - download_started >= kDownloadDeadline[\s\S]{0,100}?download_timeout/,
+  "a weather read which consumes its remaining timeout must retain timeout diagnostics");
 
 const init = update.indexOf("esp_http_client_init(");
 const probeRead = update.indexOf("esp_http_client_read(", init);
@@ -233,20 +328,39 @@ assert.ok(redirectReset >= 0 && redirectVerdict > redirectReset && setRedirect >
 // allocations. The pure rule therefore requires BOTH, and the update path asks it before claiming
 // the transfer resources and again after releasing TLS immediately before RSA validation.
 assert.match(headroom,
-  /return\s+free_bytes\s*>=\s*OTA_VERIFY_MIN_FREE_BYTES\s*&&\s*largest_free_block\s*>=\s*OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES\s*;/,
-  "OTA verification headroom must require both total-free and largest-contiguous thresholds");
-assert.match(headroom, /OTA_VERIFY_MIN_FREE_BYTES\s*=\s*24\s*\*\s*1024/,
-  "the total-free verifier budget must remain the measured 24 KiB floor");
-assert.match(headroom, /OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES\s*=\s*12\s*\*\s*1024/,
-  "the contiguous verifier budget must remain the measured 12 KiB floor");
-assert.equal(occurrences(update, "wait_for_ota_verify_headroom("), 2,
-  "the install path needs one headroom gate before transfer and one before validation");
-const firstHeadroom = update.indexOf("wait_for_ota_verify_headroom(");
-const secondHeadroom = update.indexOf("wait_for_ota_verify_headroom(", firstHeadroom + 1);
-assert.ok(firstHeadroom < init && secondHeadroom > release && secondHeadroom < verify,
-  "headroom gates must enclose the transfer and directly protect post-TLS validation");
+  /return\s+free_bytes\s*>=\s*requirement\.min_free_bytes\s*&&\s*largest_free_block\s*>=\s*requirement\.min_largest_block_bytes\s*;/,
+  "every OTA phase must require both total-free and largest-contiguous thresholds");
+assert.match(headroom,
+  /OTA_TRANSFER_HEADROOM\s*=\s*\{\s*56\s*\*\s*1024\s*,\s*24\s*\*\s*1024\s*,\s*4\s*\}/,
+  "manifest/image TLS needs the measured 56/24 KiB floor for four stable samples");
+assert.match(headroom,
+  /OTA_VALIDATION_HEADROOM\s*=\s*\{\s*24\s*\*\s*1024\s*,\s*12\s*\*\s*1024\s*,\s*2\s*\}/,
+  "post-TLS RSA validation must keep its independent 24/12 KiB floor");
+assert.match(headroom, /if\s*\(!ota_headroom_ok\([^)]*\)\)\s*return\s+0/,
+  "one low sample must reset the consecutive-headroom evidence");
+assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_BUFFER=y$/m,
+  "ESP-IDF's handshake-aware dynamic TLS buffers must remain enabled");
+assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n$/m,
+  "TLS config/key/CA lifetime must not be shortened without reconnect redesign");
+assert.equal(occurrences(update, "wait_for_ota_headroom("), 3,
+  "the install path needs one TLS gate and a separate RSA gate before both IDF validation passes");
+assert.match(ota,
+  /wait_for_ota_headroom\(\s*"manifest"\s*,\s*OTA_TRANSFER_HEADROOM\s*,\s*kTransferHeadroomMaxAttempts/,
+  "every manifest client must pass the TLS headroom rule before it allocates");
+const firstHeadroom = update.indexOf("wait_for_ota_headroom(");
+const secondHeadroom = update.indexOf("wait_for_ota_headroom(", firstHeadroom + 1);
+const thirdHeadroom = update.indexOf("wait_for_ota_headroom(", secondHeadroom + 1);
+assert.ok(firstHeadroom < init && secondHeadroom > release && secondHeadroom < verify &&
+          thirdHeadroom > verify && thirdHeadroom < select,
+  "headroom gates must protect transfer, esp_ota_end validation and boot-selection revalidation");
+assert.match(update.slice(firstHeadroom, init), /OTA_TRANSFER_HEADROOM/,
+  "the pre-download gate must use the TLS budget");
+assert.match(update.slice(secondHeadroom, verify), /OTA_VALIDATION_HEADROOM/,
+  "the post-cleanup esp_ota_end gate must use the RSA-validation budget");
+assert.match(update.slice(thirdHeadroom, select), /OTA_VALIDATION_HEADROOM/,
+  "the boot-selection revalidation gate must use the RSA-validation budget");
 const sampleStart = ota.indexOf("OtaHeapSample ota_heap_sample(");
-const sampleEnd = ota.indexOf("bool wait_for_ota_verify_headroom(", sampleStart);
+const sampleEnd = ota.indexOf("bool wait_for_ota_headroom(", sampleStart);
 assert.ok(sampleStart >= 0 && sampleEnd > sampleStart,
   "the device headroom sampler must remain identifiable");
 const sample = ota.slice(sampleStart, sampleEnd);
@@ -256,21 +370,28 @@ assert.match(sample, /heap_largest_internal_block\(\)/,
   "the device gate must sample internal free heap and the shared internal largest-block metric");
 
 // Bounded retry is deliberate: short-lived allocator churn may clear, but OTA must return control
-// instead of waiting forever. The exact five-second ceiling is pinned by sample count × interval in
-// ota_update.cpp; the pure thresholds above remain independent of scheduler timing.
-assert.match(ota, /kVerifyHeadroomRetryDelay\s*=\s*pdMS_TO_TICKS\(250\)/,
+// instead of waiting forever. Transfer gets 15 seconds; validation gets five seconds.
+assert.match(ota, /kHeadroomRetryDelay\s*=\s*pdMS_TO_TICKS\(250\)/,
   "headroom retries must use the bounded 250 ms sampling cadence");
-assert.match(ota, /kVerifyHeadroomMaxAttempts\s*=\s*20/,
-  "headroom retries must stop after about five seconds");
+assert.match(ota, /kTransferHeadroomMaxAttempts\s*=\s*60/,
+  "TLS headroom retries must stop after about fifteen seconds");
+assert.match(ota, /kValidationHeadroomMaxAttempts\s*=\s*20/,
+  "validation headroom retries must stop after about five seconds");
 assert.match(ota,
-  /for\s*\(\s*unsigned\s+attempt\s*=\s*0\s*;\s*attempt\s*<\s*kVerifyHeadroomMaxAttempts\s*;\s*\+\+attempt\s*\)/,
-  "the retry loop must be bounded by the fixed attempt budget");
-const memoryMessages = [...update.matchAll(/"(Not enough memory to verify the update[^"\n]*)"/g)]
+  /for\s*\(\s*unsigned\s+attempt\s*=\s*0\s*;\s*attempt\s*<\s*max_attempts\s*;\s*\+\+attempt\s*\)/,
+  "the retry loop must be bounded by its phase-specific attempt budget");
+const memoryMessages = [...ota.matchAll(/"(Not enough memory[^"\n]*)"/g)]
   .map((match) => match[1]);
-assert.ok(memoryMessages.length >= 3,
-  "transfer gate, download allocation and validation gate need the same memory diagnosis");
+assert.ok(memoryMessages.length >= 4,
+  "manifest, transfer, download allocation and validation gates need explicit memory diagnoses");
 assert.ok(memoryMessages.every((message) => message.includes("retry after reboot")),
-  "every verifier-memory refusal must be explicitly retryable and actionable");
+  "every OTA-memory refusal must be explicitly retryable and actionable");
+assert.match(ota,
+  /retryable_allocator_failure\s*=\s*e\s*==\s*ESP_ERR_NO_MEM[\s\S]{0,180}?ESP_ERR_MBEDTLS_SSL_SETUP_FAILED[\s\S]{0,180}?err\s*=\s*retryable_allocator_failure[\s\S]{0,160}?Not enough memory for update TLS/,
+  "manifest TLS allocator failure must remain distinct from server reachability after its retry");
+assert.match(ota,
+  /const bool allocator_failure\s*=[\s\S]{0,180}?ESP_ERR_MBEDTLS_SSL_SETUP_FAILED[\s\S]{0,220}?set_state\("error",\s*allocator_failure[\s\S]{0,160}?Not enough memory for update TLS/,
+  "firmware TLS allocator failure must remain distinct from server reachability");
 
 // ESP_ERR_OTA_VALIDATE_FAILED is an umbrella result: it covered allocator failure during RSA on the
 // live board, not only tampering. Do not turn it back into a cryptographic accusation. The actual
@@ -355,25 +476,114 @@ assert.match(mqtt.slice(mqttAckStart, mqttAckEnd),
   /s_publish_network_quiesced\.load\(std::memory_order_acquire\)\s*&&\s*!s_transport_connecting\.load\(std::memory_order_acquire\)/,
   "one authoritative MQTT acknowledgement must cover firmware publishing and esp-mqtt transport TLS");
 assert.match(mqtt,
+  /bool\s+mqtt_transport_network_quiesced\(\)[\s\S]{0,180}?!s_client_running\.load\(std::memory_order_acquire\)[\s\S]{0,120}?s_transport_paused\.load\(std::memory_order_acquire\)/,
+  "a stopped or explicitly paused esp-mqtt transport must have a lock-free acknowledgement");
+assert.match(mqtt,
   /case MQTT_EVENT_BEFORE_CONNECT:[\s\S]{0,120}?mqtt_transport_before_connect\(\)/,
   "every asynchronous esp-mqtt connection attempt must enter the shared heap handshake");
-assert.match(mqtt,
-  /mqtt_transport_before_connect\(\)[\s\S]{0,500}?if\s*\(!s_publish_network_quiesced\.load\(std::memory_order_acquire\)\)[\s\S]{0,160}?s_transport_connecting\.store\(true,\s*std::memory_order_release\)[\s\S]{0,80}?return;/,
-  "BEFORE_CONNECT must give an existing publish owner priority instead of deadlocking client_stop");
+const beforeConnectStart = mqtt.indexOf("static void mqtt_transport_before_connect(");
+const beforeConnectEnd = mqtt.indexOf("static void on_mqtt(", beforeConnectStart);
+const beforeConnect = mqtt.slice(beforeConnectStart, beforeConnectEnd);
+assert.ok(beforeConnectStart >= 0 && beforeConnectEnd > beforeConnectStart,
+  "the synchronous BEFORE_CONNECT callback must remain identifiable");
+assert.match(beforeConnect,
+  /s_transport_connecting\.store\(true,\s*std::memory_order_release\)/,
+  "BEFORE_CONNECT must publish that esp-mqtt transport allocation is active");
+assert.doesNotMatch(beforeConnect, /vTaskDelay|for\s*\(|while\s*\(/,
+  "BEFORE_CONNECT holds MQTT_API_LOCK and must never wait against client_stop");
 const mqttTaskStart = mqtt.indexOf("static void mqtt_task(");
 const mqttTaskEnd = mqtt.indexOf("static bool build_client(", mqttTaskStart);
 assert.ok(mqttTaskStart >= 0 && mqttTaskEnd > mqttTaskStart,
   "the MQTT publish task must remain identifiable");
 const mqttTask = mqtt.slice(mqttTaskStart, mqttTaskEnd);
 assert.match(mqttTask,
-  /ota_quiesce_step\(network_quiesce, network_busy\)[\s\S]{0,600}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,200}?continue;/,
+  /ota_quiesce_step\(network_quiesce, network_busy\)[\s\S]{0,1800}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,200}?continue;/,
   "the held MQTT path must acknowledge that its allocation-rich cycle has ended");
+assert.match(mqttTask,
+  /s_transport_pause_requested\.load\(std::memory_order_acquire\)[\s\S]{0,220}?esp_mqtt_client_stop\(s_client\)[\s\S]{0,260}?s_client_running\.store\(false,\s*std::memory_order_release\)[\s\S]{0,260}?s_transport_paused\.store\(true,\s*std::memory_order_release\)/,
+  "the owning MQTT task must stop and acknowledge esp-mqtt before a competing TLS session starts");
+const resumeAt = mqttTask.indexOf("s_transport_paused.load(std::memory_order_acquire)");
+const tlsResumeAt = mqttTask.indexOf("mqtt_transport_tls_configured()", resumeAt);
+const freeResumeAt = mqttTask.indexOf("free_internal < kMqttTlsResumeMinFree", tlsResumeAt);
+const largestResumeAt = mqttTask.indexOf("largest < kMqttTlsResumeMinLargest", freeResumeAt);
+const stableResumeAt = mqttTask.indexOf("++transport_resume_stable < kMqttTlsResumeStableSamples",
+                                       largestResumeAt);
+const startResumeAt = mqttTask.indexOf("start_client_transport()", stableResumeAt);
+const backoffResumeAt = mqttTask.indexOf(
+  "transport_resume_wait_s = transport_resume_backoff_s", startResumeAt);
+const runningResumeAt = mqttTask.indexOf(
+  "s_client_running.store(true, std::memory_order_release)", startResumeAt);
+assert.ok(resumeAt >= 0 && tlsResumeAt > resumeAt && freeResumeAt > tlsResumeAt &&
+          largestResumeAt > freeResumeAt && stableResumeAt > largestResumeAt &&
+          startResumeAt > stableResumeAt && backoffResumeAt > startResumeAt &&
+          runningResumeAt > backoffResumeAt,
+  "MQTTS resume must pass stable free/largest admission and failed starts must back off before the client is marked running");
+assert.match(mqtt,
+  /kMqttTlsResumeMinFree\s*=\s*56 \* 1024[\s\S]{0,120}?kMqttTlsResumeMinLargest\s*=\s*24 \* 1024[\s\S]{0,120}?kMqttTlsResumeStableSamples\s*=\s*4/,
+  "MQTTS resume must use the same measured stable TLS floor as OTA/Weather");
+assert.match(mqttTask,
+  /transport_resume_backoff_s < kMqttResumeBackoffMaxS \/ 2[\s\S]{0,180}?kMqttResumeBackoffMaxS/,
+  "direct esp-mqtt restart failures must have a bounded exponential retry interval");
 assert.match(mqtt,
   /struct\s+MqttStartupActivity[\s\S]{0,800}?s_publish_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,300}?if\s*\(!competing_tls_active\(\)\)\s*return;[\s\S]{0,200}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
   "MQTT startup must claim/recheck and yield to an OTA that began before mqtt_ha_start");
 assert.match(mqtt,
   /esp_mqtt_client_stop\(s_client\)[\s\S]{0,600}?s_transport_connecting\.store\(false,\s*std::memory_order_release\)[\s\S]{0,600}?esp_mqtt_client_destroy\(s_client\)/,
   "MQTT promotion must clear BEFORE_CONNECT state because client_stop emits no disconnect event");
+
+// The live plant also runs HomeHub and Syslog. Both used to allocate after the OTA flag rose:
+// HomeHub copied the string-owning Config and periodically reserved a fresh values vector; every
+// OTA diagnostic woke Syslog into another Config/DNS/socket cycle. Their OTA branches must happen
+// before those allocations and must yield rather than spin.
+const modbusTaskStart = modbus.indexOf("static void mb_task(");
+const modbusTaskEnd = modbus.indexOf("static void mb_task_start_if_enabled()", modbusTaskStart);
+assert.ok(modbusTaskStart >= 0 && modbusTaskEnd > modbusTaskStart,
+  "the HomeHub poll task must remain identifiable");
+const modbusTask = modbus.slice(modbusTaskStart, modbusTaskEnd);
+const modbusOtaHold = modbusTask.indexOf("ota_download_active()");
+const modbusWeatherHold = modbusTask.indexOf("weather_fetch_active()", modbusOtaHold);
+const modbusClaim = modbusTask.indexOf("MbNetworkActivity network_activity", modbusWeatherHold);
+const modbusRecheck = modbusTask.indexOf("ota_download_active()", modbusClaim);
+const modbusConfig = modbusTask.indexOf("config_modbus_host(config())");
+assert.ok(modbusOtaHold >= 0 && modbusWeatherHold > modbusOtaHold &&
+          modbusClaim > modbusWeatherHold && modbusRecheck > modbusClaim &&
+          modbusConfig > modbusRecheck,
+  "HomeHub must claim/recheck and stand aside before its Config copy and model-sized cycle allocation");
+assert.match(modbusTask.slice(modbusOtaHold, modbusConfig),
+  /vTaskDelay\([\s\S]*?continue;/,
+  "the HomeHub network hold must yield at its ordinary cadence");
+assert.match(modbus,
+  /struct\s+MbNetworkActivity[\s\S]{0,220}?s_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,220}?s_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
+  "HomeHub cycle ownership must withdraw and restore its acknowledgement by RAII");
+assert.match(modbus,
+  /bool\s+mb_network_quiesced\(\)[\s\S]{0,120}?s_network_quiesced\.load\(std::memory_order_acquire\)/,
+  "HomeHub must expose an allocation-free cycle acknowledgement");
+
+const syslogLoopAnchor = syslog.indexOf("const TickType_t check_interval");
+const syslogLoopStart = syslog.indexOf("while (true)", syslogLoopAnchor);
+const syslogConfig = syslog.indexOf("const Config& c = config()", syslogLoopStart);
+assert.ok(syslogLoopAnchor >= 0 && syslogLoopStart > syslogLoopAnchor &&
+          syslogConfig > syslogLoopStart,
+  "the allocating Syslog loop must remain identifiable");
+const syslogOtaHold = syslog.indexOf("ota_download_active()", syslogLoopStart);
+const syslogWeatherHold = syslog.indexOf("weather_fetch_active()", syslogOtaHold);
+const syslogClaim = syslog.indexOf("SyslogNetworkActivity network_activity", syslogWeatherHold);
+const syslogRecheck = syslog.indexOf("ota_download_active()", syslogClaim);
+assert.ok(syslogOtaHold >= 0 && syslogWeatherHold > syslogOtaHold &&
+          syslogClaim > syslogWeatherHold && syslogRecheck > syslogClaim &&
+          syslogRecheck < syslogConfig,
+  "Syslog must claim/recheck and stand aside before Config, DNS, ping and socket allocation");
+assert.match(syslog.slice(syslogOtaHold, syslogConfig), /vTaskDelay\([\s\S]*?continue;/,
+  "the Syslog OTA hold must yield without draining the diagnostic queue");
+assert.match(syslog,
+  /struct\s+SyslogNetworkActivity[\s\S]{0,220}?s_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,300}?s_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
+  "Syslog cycle ownership must withdraw and restore its acknowledgement by RAII");
+assert.match(syslog,
+  /bool\s+syslog_network_quiesced\(\)[\s\S]{0,120}?s_network_quiesced\.load\(std::memory_order_acquire\)/,
+  "Syslog must expose an allocation-free cycle acknowledgement");
+assert.match(weather,
+  /!mb_network_quiesced\(\)[\s\S]{0,100}?!syslog_network_quiesced\(\)[\s\S]{0,500}?modbus_quiesce_failed\s*=\s*!mb_network_quiesced\(\)[\s\S]{0,100}?syslog_quiesce_failed\s*=\s*!syslog_network_quiesced\(\)/,
+  "Weather TLS must wait for HomeHub and Syslog acknowledgements too");
 
 const pollBarrierStart = ota.indexOf("bool wait_for_poll_quiesce(");
 const pollBarrierEnd = ota.indexOf("OtaChannel channel_now()", pollBarrierStart);
@@ -387,45 +597,100 @@ assert.match(pollBarrier,
   "OTA must wait on the acknowledgement only within the bounded window");
 const pollBarrierCall = task.indexOf("wait_for_poll_quiesce()");
 const mqttBarrierCall = task.indexOf("wait_for_mqtt_quiesce()", pollBarrierCall);
-const weatherBarrierCall = task.indexOf("wait_for_weather_quiesce()", mqttBarrierCall);
+const mqttTransportBarrierCall = task.indexOf("wait_for_mqtt_transport_quiesce()", mqttBarrierCall);
+const modbusBarrierCall = task.indexOf("wait_for_modbus_quiesce()", mqttTransportBarrierCall);
+const syslogBarrierCall = task.indexOf("wait_for_syslog_quiesce()", modbusBarrierCall);
+const weatherBarrierCall = task.indexOf("wait_for_weather_quiesce()", syslogBarrierCall);
 const updateCall = task.indexOf("run_update(");
 assert.ok(pollBarrierCall >= 0 && mqttBarrierCall > pollBarrierCall &&
-          weatherBarrierCall > mqttBarrierCall && updateCall > weatherBarrierCall,
-  "OTA must receive poll, MQTT and weather quiescence acknowledgements before entering the install path");
+          mqttTransportBarrierCall > mqttBarrierCall && modbusBarrierCall > mqttTransportBarrierCall &&
+          syslogBarrierCall > modbusBarrierCall &&
+          weatherBarrierCall > syslogBarrierCall && updateCall > weatherBarrierCall,
+  "OTA must receive poll, MQTT publisher/transport, HomeHub, Syslog and weather acknowledgements before entering the install path");
+assert.match(ota,
+  /struct\s+OtaNetworkFlag[\s\S]{0,260}?mqtt_transport_pause_for_network_heap\(\)[\s\S]{0,260}?mqtt_transport_resume_after_network_heap\(\)[\s\S]{0,120}?s_network_active\.store\(false/,
+  "the OTA network lease must pause esp-mqtt and request resume before releasing its own flag");
+assert.match(weather,
+  /struct\s+NetworkActivity[\s\S]{0,260}?mqtt_transport_pause_for_network_heap\(\)[\s\S]{0,260}?mqtt_transport_resume_after_network_heap\(\)[\s\S]{0,120}?s_network_active\.store\(false/,
+  "the Weather network lease must share the same esp-mqtt transport pause lifecycle");
 
-// The model-sized /values snapshot is the remaining HTTP allocator that collided with the fresh-
-// boot OTA/Weather TLS windows on the 129-row plant. It waits before the snapshot, bounded below the
-// live gate's five-second client timeout. Status/diag/OTA status are not themselves gated; only the
-// proven values path (and MCP's shared sender) stands aside.
+// The model-sized /values snapshot and the allocation-rich /status snapshot collided with the
+// fresh-boot OTA/Weather TLS windows on the 129-row plant. OTA is different from the short weather
+// fetch: status and values fail fast before their snapshots, while compact OTA status and the static
+// diagnostic ring remain observable.
 const valuesSendStart = httpStatus.indexOf("esp_err_t http_send_values_json(");
 const valuesSendEnd = httpStatus.indexOf("static esp_err_t h_values(", valuesSendStart);
 assert.ok(valuesSendStart >= 0 && valuesSendEnd > valuesSendStart,
   "the shared /values + MCP sender must remain identifiable");
 const valuesSend = httpStatus.slice(valuesSendStart, valuesSendEnd);
+const valuesOtaGate = valuesSend.indexOf("if (ota_download_active())");
 const valuesWait = valuesSend.indexOf("wait_for_values_tls_owner()");
 const valuesSnapshot = valuesSend.indexOf("take_values_snapshot()", valuesWait);
-assert.ok(valuesWait >= 0 && valuesSnapshot > valuesWait,
-  "/values must finish its bounded TLS-owner wait before allocating the model-sized snapshot");
+assert.ok(valuesOtaGate >= 0 && valuesWait > valuesOtaGate && valuesSnapshot > valuesWait,
+  "/values must refuse OTA and finish its weather wait before allocating the model-sized snapshot");
 assert.match(valuesSend,
-  /if\s*\(!wait_for_values_tls_owner\(\)\)\s*return values_tls_busy\(req\);/,
+  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,160}?if\s*\(!wait_for_values_tls_owner\(\)\)\s*return network_tls_busy\(req\);/,
   "a timed-out TLS-owner wait must fail closed before the values snapshot allocation");
 assert.equal(occurrences(httpStatus, "wait_for_values_tls_owner()"), 2,
   "only the wait helper and the shared values sender may use the values-only gate");
 assert.match(httpStatus,
-  /values_tls_busy\(httpd_req_t\* req\)[\s\S]*?503 Service Unavailable[\s\S]*?text\/plain[\s\S]*?network operation in progress/,
+  /network_tls_busy\(httpd_req_t\* req\)[\s\S]*?503 Service Unavailable[\s\S]*?text\/plain[\s\S]*?network operation in progress/,
   "the bounded refusal must stay a small explicit pre-response busy-503");
 assert.match(httpStatus,
-  /http_values_wait_decision\(\s*ota_download_active\(\),\s*weather_fetch_active\(\)/,
-  "the values wait must observe both lock-free firmware TLS owners independently");
+  /http_values_wait_decision\(\s*false,\s*weather_fetch_active\(\)/,
+  "the bounded values wait is only for short weather TLS after OTA received its fast refusal");
 assert.match(httpStatus, /kValuesTlsWait\s*=\s*pdMS_TO_TICKS\(4000\)/,
   "the values wait must remain below the five-second live-gate request timeout");
 assert.match(httpStatus, /kValuesTlsRetry\s*=\s*pdMS_TO_TICKS\(250\)/,
   "the values wait must yield in bounded 250-ms steps");
 const statusStart = httpStatus.indexOf("static esp_err_t h_status(");
 const statusEnd = httpStatus.indexOf("struct ValuesSnapshot", statusStart);
-assert.ok(statusStart >= 0 && statusEnd > statusStart &&
-          !httpStatus.slice(statusStart, statusEnd).includes("wait_for_values_tls_owner"),
-  "/status must stay outside the values-only TLS wait so health and OTA progress remain observable");
+assert.ok(statusStart >= 0 && statusEnd > statusStart, "/status must remain identifiable");
+const statusHandler = httpStatus.slice(statusStart, statusEnd);
+assert.match(statusHandler,
+  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,700}?HttpJsonChunks/,
+  "/status must refuse before its allocation-rich snapshot while OTA owns TLS");
+assert.ok(!statusHandler.includes("wait_for_values_tls_owner"),
+  "/status must fail fast rather than blocking the sole HTTP worker");
+const activeModelsStart = httpStatus.indexOf("static esp_err_t h_active_model_values(");
+const activeModelsEnd = httpStatus.indexOf("static esp_err_t h_models(", activeModelsStart);
+const activeModels = httpStatus.slice(activeModelsStart, activeModelsEnd);
+assert.ok(activeModelsStart >= 0 && activeModelsEnd > activeModelsStart,
+  "the allocation-rich active model catalog must remain identifiable");
+assert.match(activeModels,
+  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,220}?const Config c = config\(\)/,
+  "the active model catalog must refuse OTA before copying Config or building its response");
+const historyStart = httpStatus.indexOf("static esp_err_t h_history(");
+const historyEnd = httpStatus.indexOf("static esp_err_t h_diag(", historyStart);
+const historyHandler = httpStatus.slice(historyStart, historyEnd);
+assert.ok(historyStart >= 0 && historyEnd > historyStart, "/history must remain identifiable");
+assert.match(historyHandler,
+  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,180}?char q\[/,
+  "/history must refuse OTA before its growing string and label temporaries");
+const diagStart = httpStatus.indexOf("static esp_err_t h_diag(");
+const diagEnd = httpStatus.indexOf("static esp_err_t h_diag_clear(", diagStart);
+const diagHandler = httpStatus.slice(diagStart, diagEnd);
+assert.ok(diagStart >= 0 && diagEnd > diagStart, "/diag must remain identifiable");
+assert.match(diagHandler,
+  /if\s*\(redact\s*&&\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,1200}?chunk\.reserve\(1280\)/,
+  "redacted /diag must refuse OTA before its growable chunk while plain static-ring diagnostics remain available");
+const scanStart = httpStatus.indexOf("static esp_err_t h_scan(");
+const scanEnd = httpStatus.indexOf("void http_register_status(", scanStart);
+const scanHandler = httpStatus.slice(scanStart, scanEnd);
+assert.ok(scanStart >= 0 && scanEnd > scanStart, "/scan must remain identifiable");
+assert.match(scanHandler,
+  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,180}?wifi_scan\(/,
+  "/scan must refuse OTA before Wi-Fi scanning and network-list allocation");
+const mcpPostStart = mcp.indexOf("static esp_err_t mcp_post(");
+const mcpStatusBuild = mcp.indexOf("http_append_status_json(response, false)", mcpPostStart);
+const mcpOtaGate = mcp.indexOf("if (ota_download_active())", mcpPostStart);
+const mcpBody = mcp.indexOf("char body[1024]", mcpPostStart);
+assert.ok(mcpPostStart >= 0 && mcpOtaGate > mcpPostStart && mcpBody > mcpOtaGate &&
+          mcpStatusBuild > mcpBody,
+  "MCP must refuse OTA before parsing or materialising its full get_status snapshot");
+assert.match(mcp.slice(mcpOtaGate, mcpBody),
+  /503 Service Unavailable[\s\S]{0,150}?text\/plain[\s\S]{0,150}?httpd_resp_sendstr/,
+  "MCP's OTA refusal must remain allocation-free and explicit");
 
-console.log("OTA heap: TLS-before-verify release, dual headroom gate, signed validation, bounded " +
-            "poll/MQTT/values quiesce and retryable diagnostics are pinned");
+console.log("OTA heap: dynamic TLS buffers, phase-specific stable headroom, signed validation, " +
+            "poll/MQTT/Modbus/Syslog/HTTP quiesce and retryable diagnostics are pinned");

@@ -31,12 +31,14 @@ HTTP OOM guard. `get_hp_values` stages its X10A/HomeHub snapshots before the fir
 the JSON-RPC envelope and shared `/values` representation through a host-tested 1 KiB chunk sink;
 the complete model-sized response is never one contiguous allocation.
 
-Immediately before that model-sized snapshot, the shared values sender waits in 250 ms steps for
-at most four seconds while a firmware OTA or Weather TLS operation is active. Request parsing and
-the small JSON-RPC envelope strings may already exist at this point. If the TLS owner remains active
-at the cap, the request fails before the snapshot and before the first response byte with HTTP `503`,
-`Content-Type: text/plain`, and `network operation in progress`. This transport-level busy response
-is deliberately not a JSON-RPC error object; clients may retry the complete read-only call later.
+While firmware OTA owns TLS, the shared HTTP boundary rejects every MCP POST before request parsing
+or JSON-RPC envelope allocation; `get_status` otherwise materialises the complete status object.
+Outside OTA, the shared values sender waits behind the shorter Weather TLS operation in 250 ms
+steps for at most four seconds. Either case fails before the snapshot and before the first response
+byte with HTTP `503` and `Content-Type: text/plain`: the global OTA boundary says
+`Network TLS operation in progress; retry shortly`, while an exhausted Weather wait says
+`network operation in progress`. These transport-level busy responses are deliberately not
+JSON-RPC error objects; clients may retry the complete read-only call later.
 
 ## Browser setup page
 

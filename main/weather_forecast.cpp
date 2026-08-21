@@ -3,6 +3,7 @@
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "http_client_diag.hpp"
+#include "hp_modbus.hpp"
 #include "hp_poll.hpp"
 #include "logic/open_meteo.hpp"
 #include "logic/weather_forecast.hpp"
@@ -10,6 +11,7 @@
 #include "net.hpp"
 #include "ota_update.hpp"
 #include "sntp_time.hpp"
+#include "syslog.hpp"
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
@@ -33,6 +35,7 @@ namespace {
 
 constexpr size_t kPayloadMax = 8 * 1024;
 constexpr int kHttpTimeoutMs = 20000;
+constexpr TickType_t kDownloadDeadline = pdMS_TO_TICKS(60000);
 // Longer than the MQTT publisher's one-second cadence. Set the active flag first, give MQTT time to
 // release its snapshot, then wait explicitly for the allocation-rich X10A sweep to acknowledge.
 constexpr int kNetworkQuiesceLeadMs = 1100;
@@ -51,8 +54,14 @@ static_assert(std::atomic<bool>::is_always_lock_free,
               "weather network activity must remain allocation- and lock-free");
 
 struct NetworkActivity {
-    NetworkActivity() { s_network_active.store(true, std::memory_order_release); }
-    ~NetworkActivity() { s_network_active.store(false, std::memory_order_release); }
+    NetworkActivity() {
+        s_network_active.store(true, std::memory_order_release);
+        mqtt_transport_pause_for_network_heap();
+    }
+    ~NetworkActivity() {
+        mqtt_transport_resume_after_network_heap();
+        s_network_active.store(false, std::memory_order_release);
+    }
 };
 
 // C APIs do not participate in C++ unwinding. Keep their cleanup attached to the owning scope so a
@@ -121,6 +130,7 @@ bool download_json(const Config& weather, std::string& out, std::string& error,
     esp_http_client_set_header(client, "Accept", "application/json");
 
     bool ok = false;
+    const TickType_t download_started = xTaskGetTickCount();
     const esp_err_t opened = esp_http_client_open(client, 0);
     if (opened != ESP_OK) {
         http_client_log_open_failure("weather", client, opened, before);
@@ -136,7 +146,21 @@ bool download_json(const Config& weather, std::string& out, std::string& error,
         } else {
             char chunk[1024];
             while (out.size() <= kPayloadMax) {
+                const TickType_t elapsed = xTaskGetTickCount() - download_started;
+                if (elapsed >= kDownloadDeadline) {
+                    error = "download_timeout";
+                    break;
+                }
+                const uint64_t remaining_ms =
+                    static_cast<uint64_t>(kDownloadDeadline - elapsed) * portTICK_PERIOD_MS;
+                const int timeout_ms = remaining_ms < static_cast<uint64_t>(kHttpTimeoutMs)
+                                     ? static_cast<int>(remaining_ms) : kHttpTimeoutMs;
+                esp_http_client_set_timeout_ms(client, timeout_ms > 0 ? timeout_ms : 1);
                 const int n = esp_http_client_read(client, chunk, sizeof(chunk));
+                if (n <= 0 && xTaskGetTickCount() - download_started >= kDownloadDeadline) {
+                    error = "download_timeout";
+                    break;
+                }
                 if (n < 0) { error = "read_failed"; break; }
                 if (n == 0) { ok = !out.empty(); if (!ok) error = "empty_payload"; break; }
                 if (out.size() + static_cast<size_t>(n) > kPayloadMax) {
@@ -318,6 +342,8 @@ void weather_task(void*) {
             bool ota_preempted = false;
             bool poll_quiesce_failed = false;
             bool mqtt_quiesce_failed = false;
+            bool modbus_quiesce_failed = false;
+            bool syslog_quiesce_failed = false;
             bool heap_refused = false;
             HttpClientProbe headroom;
             {
@@ -328,14 +354,21 @@ void weather_task(void*) {
                 // re-check sees OTA and no TLS allocation starts.  There is no interval in which
                 // both clients may legitimately proceed.
                 const TickType_t poll_wait_started = xTaskGetTickCount();
-                while ((!hp_poll_network_quiesced() || !mqtt_publish_network_quiesced()) &&
+                while ((!hp_poll_network_quiesced() || !mqtt_publish_network_quiesced() ||
+                        !mqtt_transport_network_quiesced() ||
+                        !mb_network_quiesced() || !syslog_network_quiesced()) &&
                        xTaskGetTickCount() - poll_wait_started <
                            pdMS_TO_TICKS(kPollQuiesceWaitMs))
                     vTaskDelay(pdMS_TO_TICKS(kAllocatorRetryMs));
                 poll_quiesce_failed = !hp_poll_network_quiesced();
                 mqtt_quiesce_failed = !mqtt_publish_network_quiesced();
+                if (!mqtt_quiesce_failed)
+                    mqtt_quiesce_failed = !mqtt_transport_network_quiesced();
+                modbus_quiesce_failed = !mb_network_quiesced();
+                syslog_quiesce_failed = !syslog_network_quiesced();
                 ota_preempted = ota_download_active();
-                if (!ota_preempted && !poll_quiesce_failed && !mqtt_quiesce_failed)
+                if (!ota_preempted && !poll_quiesce_failed && !mqtt_quiesce_failed &&
+                    !modbus_quiesce_failed && !syslog_quiesce_failed)
                     ok = fetch_forecast(cfg, sample, error, heap_refused, headroom);
             }
             if (ota_preempted) {
@@ -349,14 +382,18 @@ void weather_task(void*) {
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
                 continue;
             }
-            if (poll_quiesce_failed || mqtt_quiesce_failed) {
+            if (poll_quiesce_failed || mqtt_quiesce_failed || modbus_quiesce_failed ||
+                syslog_quiesce_failed) {
                 const HttpClientProbe blocked = http_client_probe();
                 diag_printf("weather: %s did not quiesce (free=%u B largest=%u B)\n",
-                            poll_quiesce_failed ? "X10A poll" : "MQTT publisher",
+                            poll_quiesce_failed ? "X10A poll" : mqtt_quiesce_failed ? "MQTT publisher" :
+                            modbus_quiesce_failed ? "HomeHub poll" : "Syslog",
                             static_cast<unsigned>(blocked.free_internal),
                             static_cast<unsigned>(blocked.largest_internal));
                 { Lock lk(s_mtx); s_status.fetching = false; s_status.state = "waiting";
-                  s_status.reason = poll_quiesce_failed ? "x10a_busy" : "mqtt_busy"; }
+                  s_status.reason = poll_quiesce_failed ? "x10a_busy" :
+                                    mqtt_quiesce_failed ? "mqtt_busy" :
+                                    modbus_quiesce_failed ? "homehub_busy" : "syslog_busy"; }
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u));
                 continue;
             }

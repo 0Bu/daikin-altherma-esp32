@@ -3,8 +3,9 @@
 
 This is the only agent-approved path to POST /ota/update on the production board. It verifies one
 exact signed dev artifact, reruns the X10A/OTA host contracts, proves that exact image on the
-private-inventory bench role under concurrent HTTP/TLS pressure, then performs at most one POST on
-the distinct production role and observes
+private-inventory bench role by making it perform a complete signed release download under
+concurrent HTTP pressure, restores the exact dev target, runs the sustained pressure gate, then
+performs at most one POST on the distinct production role and observes
 the canary read-only. It never creates a release and never retries a write.
 """
 
@@ -44,10 +45,17 @@ MIN_FINAL_FREE_HEAP = 24 * 1024
 MIN_FINAL_LARGEST_BLOCK = 16 * 1024
 MAX_X10A_TIMEOUT_DELTA = 3
 HTTP_TIMEOUT_S = 5
-OTA_TIMEOUT_S = 180
+OTA_CHECK_TIMEOUT_S = 120
+# Firmware permits a 30 s re-manifest plus a five-minute binary deadline after bounded quiesce /
+# headroom waits, two verifier passes and reboot. The observer must outlive the only accepted write.
+OTA_TIMEOUT_S = 480
 OTA_OFFER_POLL_SECONDS = 0.1
+OTA_STATUS_POLL_SECONDS = 0.1
+BENCH_RELEASE_PROBATION_S = 105
+BENCH_RELEASE_PROBATION_TIMEOUT_S = 150
 DEV_MANIFEST_SUFFIX = "/dev/manifest.json"
 OFFICIAL_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json"
+OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/manifest.json"
 
 
 class GateError(RuntimeError):
@@ -97,8 +105,14 @@ def run_checked(argv: list[str], *, capture: bool = False) -> str:
     return result.stdout if capture else ""
 
 
-def request_bytes(url: str, *, method: str = "GET", timeout: int = HTTP_TIMEOUT_S) -> bytes:
-    request = Request(url, method=method, headers={"User-Agent": "daikin-production-ota-gate/1"})
+def request_bytes(
+    url: str, *, method: str = "GET", timeout: int = HTTP_TIMEOUT_S,
+    data: bytes | None = None, content_type: str | None = None,
+) -> bytes:
+    headers = {"User-Agent": "daikin-production-ota-gate/1"}
+    if content_type:
+        headers["Content-Type"] = content_type
+    request = Request(url, method=method, data=data, headers=headers)
     with urlopen(request, timeout=timeout) as response:
         if response.status < 200 or response.status >= 300:
             fail(f"{method} {url} returned HTTP {response.status}")
@@ -107,8 +121,13 @@ def request_bytes(url: str, *, method: str = "GET", timeout: int = HTTP_TIMEOUT_
 
 def request_json(
     host: str, path: str, *, method: str = "GET", timeout: int = HTTP_TIMEOUT_S,
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    raw = request_bytes(f"http://{host}{path}", method=method, timeout=timeout)
+    data = json.dumps(payload, separators=(",", ":")).encode() if payload is not None else None
+    raw = request_bytes(
+        f"http://{host}{path}", method=method, timeout=timeout, data=data,
+        content_type="application/json" if payload is not None else None,
+    )
     value = json.loads(raw)
     if not isinstance(value, dict):
         fail(f"{host}{path} did not return a JSON object")
@@ -161,6 +180,39 @@ def validate_manifest(
     return urljoin(manifest_url, candidates[0])
 
 
+def validate_release_manifest(manifest_url: str, manifest: dict[str, Any]) -> tuple[str, str, str]:
+    """Pin the signed rollback exercise to the one official stable feed."""
+    if manifest_url != OFFICIAL_RELEASE_MANIFEST_URL:
+        fail("bench rollback exercise requires the official release manifest")
+    version = manifest.get("version")
+    provenance = manifest.get("provenance")
+    if not isinstance(version, str) or not version or "-dev." in version:
+        fail("official release manifest does not name a stable version")
+    if not isinstance(provenance, dict):
+        fail("official release manifest provenance is missing")
+    source_sha = provenance.get("source_sha")
+    app_sha256 = provenance.get("app_sha256")
+    if not isinstance(source_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", source_sha):
+        fail("official release source SHA is invalid")
+    if not isinstance(app_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", app_sha256):
+        fail("official release application SHA is invalid")
+    builds = manifest.get("builds")
+    if not isinstance(builds, list):
+        fail("official release builds are missing")
+    candidates: list[str] = []
+    for build in builds:
+        if not isinstance(build, dict) or build.get("chipFamily") != "ESP32-S3":
+            continue
+        for part in build.get("parts", []):
+            if isinstance(part, dict) and part.get("offset") == 0x20000:
+                path = part.get("path")
+                if isinstance(path, str) and path.endswith(".bin"):
+                    candidates.append(path)
+    if len(candidates) != 1:
+        fail("official release manifest must name exactly one ESP32-S3 application")
+    return version, app_sha256, urljoin(manifest_url, candidates[0])
+
+
 def verify_local_source(expected_source_sha: str) -> None:
     head = run_checked(["git", "rev-parse", "HEAD"], capture=True).strip()
     if head != expected_source_sha:
@@ -184,7 +236,8 @@ def verify_image(binary: bytes, expected_version: str, expected_sha256: str) -> 
         info = run_checked([esptool, "image-info", str(image)], capture=True)
     version = re.search(r"^App version:\s*(\S+)", info, re.MULTILINE)
     elf = re.search(r"^ELF file SHA256:\s*([0-9a-f]{64})", info, re.MULTILINE)
-    target = re.search(r"^Detected image type:\s*ESP32-S3$", info, re.MULTILINE)
+    target = re.search(r"^(?:Detected image type:\s*ESP32-S3|ESP32-S3 Image Header)$",
+                       info, re.MULTILINE)
     if not version or version.group(1) != expected_version or not elf or not target:
         fail("signed image metadata does not match expected ESP32-S3 dev build")
     return elf.group(1)[:9]
@@ -235,9 +288,11 @@ def stress_board(
     deadline = time.monotonic() + STRESS_SECONDS
     lock = threading.Lock()
     samples: dict[str, int] = {"status": 0, "values": 0, "diag": 0}
+    busy_503: dict[str, int] = {"status": 0, "values": 0}
     errors: list[str] = []
     uptimes: list[int] = []
     disconnected = 0
+    manifest_active = threading.Event()
 
     def remember(kind: str, error: BaseException) -> None:
         with lock:
@@ -259,6 +314,12 @@ def stress_board(
                 with lock:
                     samples["status"] += 1
                     uptimes.append(int(status.get("uptime_s", -1)))
+            except HTTPError as error:
+                if error.code == 503 and manifest_active.is_set():
+                    with lock:
+                        busy_503["status"] += 1
+                else:
+                    remember("status", error)
             except BaseException as error:  # keep the other probes running and report every failure
                 remember("status", error)
             time.sleep(0.25)
@@ -273,6 +334,12 @@ def stress_board(
                     fail("empty diagnostic response")
                 with lock:
                     samples[kind] += 1
+            except HTTPError as error:
+                if kind == "values" and error.code == 503 and manifest_active.is_set():
+                    with lock:
+                        busy_503["values"] += 1
+                else:
+                    remember(kind, error)
             except BaseException as error:
                 remember(kind, error)
             time.sleep(interval)
@@ -286,13 +353,31 @@ def stress_board(
         worker.start()
     # A read-only check makes the device open real manifest TLS while all three HTTP probes are
     # already active. A previously cached successful weather value alone would not prove overlap.
-    request_json(host, f"/ota/check?ms={int(time.time() * 1000)}")
+    manifest_active.set()
+    accepted = request_json(host, f"/ota/check?ms={int(time.time() * 1000)}")
+    generation = accepted.get("generation")
+    if accepted.get("ok") is not True or not isinstance(generation, int) or generation <= 0:
+        fail(f"{host} pressure check did not return an accepted OTA generation")
+    check_deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
+    ota_check: dict[str, Any] = {}
+    while time.monotonic() < check_deadline:
+        ota_check = request_json(host, "/ota/status")
+        if ota_check.get("generation") != generation:
+            fail(f"{host} pressure check generation changed")
+        if ota_check.get("busy") is False:
+            break
+        time.sleep(OTA_OFFER_POLL_SECONDS)
+    else:
+        fail(f"{host} OTA manifest TLS did not release its busy claim")
+    # s_network_active is destroyed before the mutex-protected busy bit is released. Keeping the
+    # allowance for one scheduler turn closes an HTTP worker already dispatched on the prior bit.
+    time.sleep(0.25)
+    manifest_active.clear()
     for worker in workers:
         worker.join(STRESS_SECONDS + HTTP_TIMEOUT_S + 10)
 
     finished = request_json(host, "/status")
     validate_identity(finished, host=host, mac=mac, version=version, elf=elf)
-    ota_check = request_json(host, "/ota/status")
     if ota_check.get("state") != "idle" or ota_check.get("available") != version:
         fail(f"{host} OTA manifest TLS did not finish cleanly on the exact dev version")
     final = board_counters(finished)
@@ -300,6 +385,8 @@ def stress_board(
         fail(f"{host} live stress had errors: {'; '.join(errors)}")
     if samples["status"] < MIN_STATUS_SAMPLES or samples["values"] < MIN_VALUES_SAMPLES or samples["diag"] < MIN_DIAG_SAMPLES:
         fail(f"{host} live stress produced too few successful samples: {samples}")
+    if busy_503["status"] <= 0 or busy_503["values"] <= 0:
+        fail(f"{host} did not prove fast status/values refusal during OTA TLS: {busy_503}")
     if not uptimes or any(later < earlier for earlier, later in zip(uptimes, uptimes[1:])):
         fail(f"{host} rebooted during live stress")
     if disconnected:
@@ -328,6 +415,7 @@ def stress_board(
             fail(f"{host} weather success counter regressed during live stress")
     return {
         "samples": samples,
+        "ota_busy_503": busy_503,
         "uptime": [uptimes[0], uptimes[-1]],
         "counters_before": baseline,
         "counters_after": final,
@@ -429,6 +517,7 @@ def run_local_gates() -> None:
 def ota_offer_ready(
     status: dict[str, Any], expected_version: str, expected_app_sha256: str,
     expected_generation: int, expected_channel: str = "dev",
+    allow_downgrade: bool = False,
 ) -> bool:
     """Accept only the completed status of the exact synchronously accepted check task."""
     generation = status.get("generation")
@@ -445,12 +534,16 @@ def ota_offer_ready(
     if status.get("available") != expected_version or \
        status.get("available_sha256") != expected_app_sha256 or \
        status.get("available_channel") != expected_channel or \
-       not status.get("update_available"):
-        fail("production board did not offer the exact gated dev artifact")
+       not (status.get("update_available") or
+            (allow_downgrade and status.get("downgrade"))):
+        fail("board did not offer the exact gated artifact")
     return True
 
 
-def wait_for_ota_offer(host: str, expected_version: str, expected_app_sha256: str) -> int:
+def wait_for_ota_offer(
+    host: str, expected_version: str, expected_app_sha256: str,
+    *, expected_channel: str = "dev", allow_downgrade: bool = False,
+) -> int:
     try:
         accepted = request_json(host, f"/ota/check?ms={int(time.time() * 1000)}")
     except HTTPError as error:
@@ -461,25 +554,33 @@ def wait_for_ota_offer(host: str, expected_version: str, expected_app_sha256: st
             "production firmware lacks or refused the OTA generation handshake; "
             "use one signed NVS-preserving USB bootstrap — no update POST was sent"
         )
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
     while time.monotonic() < deadline:
         status = request_json(host, "/ota/status")
-        if ota_offer_ready(status, expected_version, expected_app_sha256, generation):
+        if ota_offer_ready(
+            status, expected_version, expected_app_sha256, generation,
+            expected_channel, allow_downgrade,
+        ):
             return generation
         time.sleep(OTA_OFFER_POLL_SECONDS)
-    fail("production OTA check did not settle on the exact gated dev artifact within 30 seconds")
+    fail(f"OTA check did not settle on the exact gated artifact within {OTA_CHECK_TIMEOUT_S} seconds")
 
 
 def post_update_once(
     host: str, check_generation: int, expected_version: str, expected_app_sha256: str,
+    *, expected_channel: str = "dev", allow_downgrade: bool = False,
 ) -> int:
-    # Deliberately one un-retried write. Every loop after this function is GET-only.
-    query = urlencode({
+    # Deliberately one un-retried exact-artifact write per invocation. Production invokes this once;
+    # the earlier bench rollback exercise uses it only on the inventory-pinned bench role.
+    fields = {
         "after": check_generation,
-        "channel": "dev",
+        "channel": expected_channel,
         "version": expected_version,
         "sha256": expected_app_sha256,
-    })
+    }
+    if allow_downgrade:
+        fields["downgrade"] = "1"
+    query = urlencode(fields)
     try:
         accepted = request_json(host, f"/ota/update?{query}", method="POST", timeout=HTTP_TIMEOUT_S)
     except HTTPError as error:
@@ -493,22 +594,228 @@ def post_update_once(
     return generation
 
 
-def wait_for_new_firmware(host: str, version: str, elf: str) -> dict[str, Any]:
+def wait_for_new_firmware(
+    host: str, version: str, elf: str, ota_evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     deadline = time.monotonic() + OTA_TIMEOUT_S
     saw_done = False
     while time.monotonic() < deadline:
         try:
             ota = request_json(host, "/ota/status")
             if ota.get("state") == "error":
-                fail(f"production OTA failed: {ota.get('message', '')}")
+                fail(f"OTA failed: {ota.get('message', '')}")
             saw_done = saw_done or ota.get("state") == "done"
-            status = request_json(host, "/status")
-            if status.get("version") == version and status.get("app_elf_sha256") == elf:
-                return status
+            if ota_evidence is not None:
+                for source, target in (
+                    ("heap_min_free_bytes", "heap_min_free_bytes"),
+                    ("heap_min_largest_block_bytes", "heap_min_largest_block_bytes"),
+                ):
+                    value = ota.get(source)
+                    if isinstance(value, int) and value > 0:
+                        previous = ota_evidence.get(target)
+                        ota_evidence[target] = value if not isinstance(previous, int) \
+                            else min(previous, value)
+                ota_evidence["saw_done"] = saw_done
+            # The firmware intentionally refuses the allocation-rich /status surface while its
+            # TLS owner is active. Observe progress only through compact /ota/status, and ask for
+            # full identity after the old process has stopped being busy (normally the new boot's
+            # idle status). A 503 is an expected proof of the heap gate, not an OTA failure.
+            if ota.get("state") not in ("checking", "updating", "done"):
+                status = request_json(host, "/status")
+                if status.get("version") == version and status.get("app_elf_sha256") == elf:
+                    return status
+        except HTTPError as error:
+            if error.code != 503:
+                raise
         except (OSError, TimeoutError, json.JSONDecodeError):
             pass  # expected only while the one accepted update reboots; never retried as a write
+        time.sleep(OTA_STATUS_POLL_SECONDS)
+    fail(f"board did not return on {version}/{elf}; OTA done observed={saw_done}")
+
+
+def set_update_channel(host: str, channel: str) -> None:
+    response = request_json(host, "/set_ota", method="POST", payload={"channel": channel})
+    if response.get("ok") is not True:
+        fail(f"{host} refused update channel {channel}")
+    status = request_json(host, "/status")
+    if status.get("ota", {}).get("channel") != channel:
+        fail(f"{host} did not persist update channel {channel}")
+
+
+def wait_for_bench_release_probation(
+    host: str, mac: str, release_version: str, release_elf: str,
+) -> dict[str, Any]:
+    """Wait until the rollback-armed release has had time to commit its health proof.
+
+    ESP-IDF forbids writing the other OTA slot while the running image is still PENDING_VERIFY.
+    The bench deliberately has no X10A, so its normal connected/heap/no-allocation-failure proof
+    commits at the 90-second base window.  We cannot read IDF's partition state through an old
+    release API, therefore require the exact release to remain healthy beyond a conservative
+    105-second window before asking it to restore the dev target.  The following real OTA start is
+    still authoritative and fails closed if the partition remained unconfirmed.
+    """
+    deadline = time.monotonic() + BENCH_RELEASE_PROBATION_TIMEOUT_S
+    while time.monotonic() < deadline:
+        status = request_json(host, "/status")
+        validate_identity(
+            status, host=host, mac=mac, version=release_version, elf=release_elf,
+        )
+        counters = board_counters(status)
+        system = status.get("sys", {})
+        if int(status.get("uptime_s", 0)) >= BENCH_RELEASE_PROBATION_S:
+            if any(counters[key] != 0 for key in ("heap_restarts", "mqtt_skipped", "poll_skipped")):
+                fail(f"{host} release probation recorded an allocation failure: {counters}")
+            if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP or \
+               int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
+                fail(f"{host} release probation reached the commit window without safe heap")
+            return status
         time.sleep(1)
-    fail(f"production board did not return on {version}/{elf}; OTA done observed={saw_done}")
+    fail(f"{host} release did not survive the rollback probation window")
+
+
+def wait_for_legacy_offer(host: str, expected_version: str) -> None:
+    deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
+    while time.monotonic() < deadline:
+        status = request_json(host, "/ota/status")
+        if status.get("state") == "error":
+            fail(f"legacy bench OTA check failed: {status.get('message', '')}")
+        if status.get("state") == "idle" and status.get("available") == expected_version and \
+           status.get("update_available") is True:
+            return
+        time.sleep(OTA_OFFER_POLL_SECONDS)
+    fail("legacy bench OTA check did not settle on the exact dev version")
+
+
+def exercise_bench_full_download(
+    *, host: str, mac: str, target_version: str, target_sha256: str, target_elf: str,
+    release_version: str, release_sha256: str, release_elf: str,
+) -> dict[str, Any]:
+    """Make the target firmware itself perform one complete signed binary TLS transfer.
+
+    The exact target first switches to the official release feed and installs that older signed
+    build under concurrent HTTP pressure. The release then restores the exact official dev target.
+    This happens only on the private-inventory bench role and closes the old manifest-only gap.
+    """
+    if release_version == target_version:
+        fail("bench full-download exercise needs a release distinct from the target")
+    set_update_channel(host, "release")
+    generation = wait_for_ota_offer(
+        host, release_version, release_sha256,
+        expected_channel="release", allow_downgrade=True,
+    )
+
+    stop = threading.Event()
+    lock = threading.Lock()
+    counts: dict[str, int] = {}
+    unexpected: list[str] = []
+
+    def bump(key: str) -> None:
+        with lock:
+            counts[key] = counts.get(key, 0) + 1
+
+    def probe(path: str, kind: str, interval: float) -> None:
+        while not stop.is_set():
+            try:
+                raw = request_bytes(f"http://{host}{path}")
+                if kind in ("status", "values", "ota_status"):
+                    json.loads(raw)
+                elif not raw:
+                    fail("empty diagnostic response during bench binary pressure")
+                bump(f"{kind}_ok")
+            except HTTPError as error:
+                if kind in ("status", "values") and error.code == 503:
+                    bump(f"{kind}_busy_503")
+                else:
+                    with lock:
+                        if len(unexpected) < 20:
+                            unexpected.append(f"{kind}: HTTP {error.code}")
+            except (OSError, TimeoutError, json.JSONDecodeError):
+                # A short disconnect is mandatory when the signed release boots.
+                bump(f"{kind}_reboot_gap")
+            stop.wait(interval)
+
+    workers = [
+        threading.Thread(target=probe, args=("/status", "status", 0.25), daemon=True),
+        threading.Thread(target=probe, args=("/values", "values", 0.50), daemon=True),
+        threading.Thread(target=probe, args=("/diag", "diag", 1.00), daemon=True),
+        threading.Thread(target=probe, args=("/ota/status", "ota_status", 0.20), daemon=True),
+    ]
+    for worker in workers:
+        worker.start()
+    time.sleep(0.5)
+
+    post_update_once(
+        host, generation, release_version, release_sha256,
+        expected_channel="release", allow_downgrade=True,
+    )
+    target_transfer: dict[str, Any] = {}
+    release_status = wait_for_new_firmware(
+        host, release_version, release_elf, target_transfer,
+    )
+    stop.set()
+    for worker in workers:
+        worker.join(HTTP_TIMEOUT_S + 2)
+
+    validate_identity(
+        release_status, host=host, mac=mac, version=release_version, elf=release_elf,
+    )
+    if unexpected:
+        fail(f"{host} bench binary pressure had unexpected HTTP failures: {'; '.join(unexpected)}")
+    for key in ("status_busy_503", "values_busy_503", "diag_ok", "ota_status_ok"):
+        if counts.get(key, 0) <= 0:
+            fail(f"{host} bench binary pressure did not prove {key}: {counts}")
+    if int(target_transfer.get("heap_min_free_bytes", 0)) <= 0 or \
+       int(target_transfer.get("heap_min_largest_block_bytes", 0)) <= 0:
+        fail(f"{host} target OTA did not expose sampled operation-local heap minima")
+    if target_transfer.get("saw_done") is not True:
+        fail(f"{host} target OTA never exposed its completed validation state")
+
+    release_probation = wait_for_bench_release_probation(
+        host, mac, release_version, release_elf,
+    )
+
+    # Restore the exact target from the official dev feed. Current releases use the atomic
+    # generation handshake; an older still-supported release may predate it, so only this BENCH
+    # return leg accepts its legacy one-shot endpoint. Final version+ELF identity remains exact.
+    set_update_channel(host, "dev")
+    accepted = request_json(host, f"/ota/check?ms={int(time.time() * 1000)}")
+    restore_generation = accepted.get("generation")
+    if isinstance(restore_generation, int) and restore_generation > 0:
+        deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
+        while time.monotonic() < deadline:
+            status = request_json(host, "/ota/status")
+            if ota_offer_ready(
+                status, target_version, target_sha256, restore_generation, "dev", False,
+            ):
+                break
+            time.sleep(OTA_OFFER_POLL_SECONDS)
+        else:
+            fail("bench return check did not settle on the exact dev artifact")
+        post_update_once(host, restore_generation, target_version, target_sha256)
+    else:
+        if accepted.get("ok") is not True:
+            fail("legacy bench firmware refused the dev return check")
+        wait_for_legacy_offer(host, target_version)
+        # Exactly one un-retried BENCH restore write; production never uses this legacy endpoint.
+        restored = request_json(host, "/ota/update", method="POST")
+        if restored.get("ok") is not True:
+            fail("legacy bench firmware refused the dev return update")
+
+    restore_transfer: dict[str, Any] = {}
+    target_status = wait_for_new_firmware(host, target_version, target_elf, restore_transfer)
+    validate_identity(
+        target_status, host=host, mac=mac, version=target_version, elf=target_elf,
+    )
+    return {
+        "release_version": release_version,
+        "release_elf": release_elf,
+        "release_probation_uptime_s": release_probation.get("uptime_s"),
+        "pressure": counts,
+        "target_download_heap": target_transfer,
+        "restore_download_heap": restore_transfer,
+        "returned_version": target_status.get("version"),
+        "returned_elf": target_status.get("app_elf_sha256"),
+    }
 
 
 def self_test() -> None:
@@ -520,6 +827,14 @@ def self_test() -> None:
         "builds": [{"chipFamily": "ESP32-S3", "parts": [{"path": "app.bin", "offset": 0x20000}]}],
     }
     assert validate_manifest(OFFICIAL_MANIFEST_URL, fixture, source, "1.2.3-dev.4", app) == "https://0bu.github.io/daikin-altherma-esp32/dev/app.bin"
+    release_fixture = {
+        **fixture,
+        "version": "1.2.3",
+        "provenance": {"source_sha": source, "app_sha256": app},
+    }
+    assert validate_release_manifest(
+        OFFICIAL_RELEASE_MANIFEST_URL, release_fixture,
+    ) == ("1.2.3", app, "https://0bu.github.io/daikin-altherma-esp32/app.bin")
     try:
         validate_manifest("https://example.test/project/manifest.json", fixture, source, "1.2.3-dev.4", app)
     except GateError:
@@ -615,11 +930,27 @@ def main() -> int:
     binary = request_bytes(cache_busted(app_url), timeout=30)
     elf = verify_image(binary, args.expected_version, args.expected_app_sha256)
     run_local_gates()
+    release_manifest = json.loads(request_bytes(cache_busted(OFFICIAL_RELEASE_MANIFEST_URL)))
+    if not isinstance(release_manifest, dict):
+        fail("official release manifest is not a JSON object")
+    release_version, release_sha256, release_url = validate_release_manifest(
+        OFFICIAL_RELEASE_MANIFEST_URL, release_manifest,
+    )
+    release_binary = request_bytes(cache_busted(release_url), timeout=30)
+    release_elf = verify_image(release_binary, release_version, release_sha256)
 
     inventory = load_inventory()
     bench = inventory[BENCH_ROLE]
     production = inventory[PRODUCTION_ROLE]
 
+    test_before = request_json(bench["host"], "/status")
+    validate_identity(test_before, host=bench["host"], mac=bench["mac"], version=args.expected_version, elf=elf)
+    full_download_evidence = exercise_bench_full_download(
+        host=bench["host"], mac=bench["mac"],
+        target_version=args.expected_version, target_sha256=args.expected_app_sha256,
+        target_elf=elf, release_version=release_version, release_sha256=release_sha256,
+        release_elf=release_elf,
+    )
     test_before = request_json(bench["host"], "/status")
     validate_identity(test_before, host=bench["host"], mac=bench["mac"], version=args.expected_version, elf=elf)
     if int(test_before.get("uptime_s", MAX_TEST_START_UPTIME_S + 1)) > MAX_TEST_START_UPTIME_S:
@@ -634,7 +965,7 @@ def main() -> int:
                      "app_sha256": args.expected_app_sha256, "elf": elf, "channel": "dev",
                      "release_created": False},
         "test_board": {"role": BENCH_ROLE, "host": bench["host"], "mac": bench["mac"],
-                       **test_evidence},
+                       "full_binary_download": full_download_evidence, **test_evidence},
         "production": {"executed": False},
     }
     if not args.execute:

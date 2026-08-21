@@ -60,6 +60,7 @@
 #include "logic/ota_quiesce.hpp"
 #include "logic/link_watch.hpp"
 #include "logic/feature_gate.hpp"
+#include "logic/fixed_text.hpp"
 #include "logic/history.hpp"
 #include "logic/checkup_persist.hpp"
 #include "logic/history_persist.hpp"
@@ -1839,6 +1840,22 @@ static void test_json() {
     }));
     CHECK(transport_failed.emission_started() && transport_failed.failed());
     CHECK(failed_emit_attempts == 1);
+
+    // The compact /ota/status route uses only fixed-capacity text and a fixed response buffer while
+    // TLS owns the heap. Assignment always terminates and truncates deterministically; response
+    // overflow is explicit and never emits a silently truncated JSON document.
+    FixedText<5> fixed = "abcdef";
+    CHECK(fixed.size() == 4 && std::string(fixed.data()) == "abcd");
+    fixed = std::string_view("ok");
+    CHECK(fixed == "ok" && !fixed.empty());
+    fixed.clear();
+    CHECK(fixed.empty() && std::string(fixed.data()).empty());
+
+    FixedBuffer<16> bounded;
+    json_append_quoted(bounded, "a\nb");
+    CHECK(bounded.ok() && std::string(bounded.data()) == "\"a\\nb\"");
+    bounded += "0123456789";
+    CHECK(!bounded.ok());
 }
 
 static void test_mqtt_group() {
@@ -2429,6 +2446,7 @@ static void test_ota_quiesce() {
     // The cap must be long enough to cover a real install and short enough to bound the outage. At
     // the 1 s publish cadence: minutes, not seconds, and not the rest of the boot.
     CHECK(OTA_QUIESCE_MAX_CYCLES >= 60);
+    CHECK(OTA_QUIESCE_MAX_CYCLES > 480);  // must outlive the authoritative full-OTA observer
     CHECK(OTA_QUIESCE_MAX_CYCLES <= 900);
 }
 
@@ -2437,9 +2455,18 @@ static void test_ota_quiesce() {
 // leaves RSA/PSA no usable block. Pin every threshold edge independently so changing && to ||, using
 // the total for both inputs, or weakening either comparison is observable on the host.
 static void test_ota_headroom() {
+    CHECK(OTA_TRANSFER_HEADROOM.min_free_bytes == 56u * 1024u);
+    CHECK(OTA_TRANSFER_HEADROOM.min_largest_block_bytes == 24u * 1024u);
+    CHECK(OTA_TRANSFER_HEADROOM.stable_samples == 4u);
+    CHECK(OTA_VALIDATION_HEADROOM.min_free_bytes == 24u * 1024u);
+    CHECK(OTA_VALIDATION_HEADROOM.min_largest_block_bytes == 12u * 1024u);
+    CHECK(OTA_VALIDATION_HEADROOM.stable_samples == 2u);
     CHECK(OTA_VERIFY_MIN_FREE_BYTES == 24u * 1024u);
     CHECK(OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES == 12u * 1024u);
 
+    CHECK(ota_headroom_ok(OTA_TRANSFER_HEADROOM, 56u * 1024u, 24u * 1024u));
+    CHECK(!ota_headroom_ok(OTA_TRANSFER_HEADROOM, 56u * 1024u - 1, 32u * 1024u));
+    CHECK(!ota_headroom_ok(OTA_TRANSFER_HEADROOM, 64u * 1024u, 24u * 1024u - 1));
     CHECK(ota_verify_headroom_ok(OTA_VERIFY_MIN_FREE_BYTES,
                                  OTA_VERIFY_MIN_LARGEST_BLOCK_BYTES));
     CHECK(ota_verify_headroom_ok(OTA_VERIFY_MIN_FREE_BYTES + 1,
@@ -2453,6 +2480,22 @@ static void test_ota_headroom() {
     CHECK(!ota_verify_headroom_ok(OTA_VERIFY_MIN_FREE_BYTES - 1, 32u * 1024u));
     // Neither-short case closes the vacuous path where only one side is really consulted.
     CHECK(!ota_verify_headroom_ok(0, 0));
+
+    unsigned streak = 0;
+    streak = ota_headroom_streak_next(OTA_TRANSFER_HEADROOM, streak,
+                                      60u * 1024u, 32u * 1024u);
+    CHECK(streak == 1u);
+    streak = ota_headroom_streak_next(OTA_TRANSFER_HEADROOM, streak,
+                                      60u * 1024u, 32u * 1024u);
+    CHECK(streak == 2u);
+    // One trough resets the evidence; samples on opposite sides may not be combined.
+    streak = ota_headroom_streak_next(OTA_TRANSFER_HEADROOM, streak,
+                                      55u * 1024u, 32u * 1024u);
+    CHECK(streak == 0u);
+    for (unsigned i = 0; i < 6; ++i)
+        streak = ota_headroom_streak_next(OTA_TRANSFER_HEADROOM, streak,
+                                          60u * 1024u, 32u * 1024u);
+    CHECK(streak == OTA_TRANSFER_HEADROOM.stable_samples);
 }
 
 // The weather fetch's own headroom gate (private issue 10 D) — same predicate shape as the OTA
