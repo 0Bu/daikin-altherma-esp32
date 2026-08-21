@@ -132,7 +132,9 @@ function renderCards() {
   // It remains linked to X10A liveness, as it was when statusCardsHtml() owned the card.
   const checkup = S.status?.diagnostics?.enabled === true && S.status?.hp?.connected
     ? checkupCardHtml() : "";
-  setHtml("valueGroups", checkup + statusCardsHtml() + valueGroupsHtml(S._values || [], S.status?.hp?.connected));
+  const service = refrigerantServiceCardHtml();
+  setHtml("valueGroups", checkup + service + statusCardsHtml() +
+    valueGroupsHtml(S._values || [], S.status?.hp?.connected));
 }
 
 // Hold the rebuild for the duration of one click, and make it IMPOSSIBLE to leave held — the same
@@ -1460,6 +1462,42 @@ function checkupCardHtml() {
   const badge = t("check.summary", status, evaluated, assessable);
   const badgeCls = { warn: "err", ok: "ok", collecting: "dim", unavailable: "dim" }[h.status] || "";
   return vcard(t("card.checkup"), rows, badge, badgeCls);
+}
+
+// A read-only context window for a qualified refrigerant service check.  This is deliberately not a
+// ninth CHECKUP_ROW: it has no verdict, does not affect health counts and makes no browser-side
+// threshold decision.  Older firmware omits the object and therefore gets no empty placeholder.
+function refrigerantServiceCardHtml() {
+  const service = S.status?.refrigerant_service;
+  if (!service || typeof service !== "object" || Array.isArray(service)) return "";
+
+  const states = ["unsupported", "waiting", "observing", "limited", "interrupted"];
+  const state = states.includes(service.state) ? service.state : "unknown";
+  const tones = { unsupported: "dim", waiting: "dim", observing: "", limited: "dim",
+                  interrupted: "err", unknown: "dim" };
+  const reasonSlugs = ["unsupported_profile", "compressor_not_running",
+    "unsupported_or_unknown_mode", "dhw_path", "defrost", "unit_fault",
+    "special_controller_phase", "missing_fresh_signal", "poll_gap"];
+
+  let rows = "";
+  const seconds = Number(service.continuous_s), samples = Number(service.samples);
+  if (Number.isFinite(seconds) && seconds >= 0 && Number.isFinite(samples) && samples >= 0)
+    rows += vrow(t("service.row.window"),
+                 t("service.window", checkupDuration(seconds), Math.floor(samples)));
+  if (typeof service.blocker === "string") {
+    const reasonKey = reasonSlugs.includes(service.blocker)
+      ? `service.reason.${service.blocker}` : "sys.nodata";
+    rows += vrow(t("service.row.reason"), t(reasonKey));
+  }
+  // Unsupported and waiting already carry an exact blocker reason; repeating a generic state hint
+  // would obscure that cause. The active-window states need the extra continuity explanation.
+  const helpKey = ["observing", "limited", "interrupted"].includes(state)
+                ? `service.help.${state}` : null;
+  if (helpKey) rows += `<div class="vdesc-p">${esc(t(helpKey))}</div>`;
+  rows += `<div class="vdesc-p">${esc(t("service.common"))}</div>`;
+  const badge = state === "unsupported" ? t("check.status.unavailable")
+              : state === "unknown" ? t("sys.nodata") : t(`service.state.${state}`);
+  return vcard(t("service.title"), rows, badge, tones[state]);
 }
 
 // ── Connections tile (Settings — WiFi · MQTT · Syslog · NTP · Modbus) ─────────────────────────

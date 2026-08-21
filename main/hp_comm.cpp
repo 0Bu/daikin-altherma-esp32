@@ -89,9 +89,7 @@ HpQueryResult hp_query_detailed(uint8_t reg, Protocol proto, uint8_t* buf, size_
 
     int len = 0;
     const int64_t start = esp_timer_get_time();
-    const int64_t TIMEOUT_US = 300000;   // serial reply timeout (300 ms)
-
-    while (len < replyLen && (esp_timer_get_time() - start) < TIMEOUT_US) {
+    while (len < replyLen && (esp_timer_get_time() - start) < HP_QUERY_TIMEOUT_US) {
         uint8_t ch;
         if (uart_read_bytes(PORT, &ch, 1, pdMS_TO_TICKS(20)) == 1) {
             if (static_cast<size_t>(len) < buflen) buf[len] = ch;

@@ -1,4 +1,4 @@
-// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
+// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -141,6 +141,27 @@ I18N.fi = localeValues([
   /* card.candidates */ "Mahdolliset mallit",
   /* card.oueeprom */ "Ulkoyksikön tunnus",
   /* card.checkup */ "Laitteiston diagnostiikka · 24 h",
+  /* service.title */ "Kylmäainepiirin huoltohavainnointi",
+  /* service.state.waiting */ "ODOTTAA",
+  /* service.state.observing */ "HAVAINNOI",
+  /* service.state.limited */ "RAJOITETTU",
+  /* service.state.interrupted */ "KESKEYTYNYT",
+  /* service.row.window */ "Nykyinen jakso",
+  /* service.row.reason */ "Syy",
+  /* service.reason.unsupported_profile */ "Profiilista puuttuvat vaaditut signaalit.",
+  /* service.reason.compressor_not_running */ "Kompressori pysähtynyt.",
+  /* service.reason.unsupported_or_unknown_mode */ "Ei tilalämmitystä tai tila tuntematon.",
+  /* service.reason.dhw_path */ "Käyttövesi aktiivinen.",
+  /* service.reason.defrost */ "Sulatus aktiivinen.",
+  /* service.reason.unit_fault */ "Yksikkövika aktiivinen.",
+  /* service.reason.special_controller_phase */ "Käynnistys, uudelleenkäynnistys, öljynpalautus tai paineentasaus aktiivinen.",
+  /* service.reason.missing_fresh_signal */ "Vaadittu tuore signaali puuttuu.",
+  /* service.reason.poll_gap */ "X10A-katkos tai tarkoituksellinen tauko.",
+  /* service.window */ (d, n) => `${d} · ${n} tuoretta näytettä`,
+  /* service.help.observing */ "Saman X10A-luennan tuoreet arvot ovat näissä oloissa yhtäjaksoisia.",
+  /* service.help.limited */ "Jakso on yhtäjaksoinen; valinnainen lämpötila-, paine-, ulko- tai vaihekonteksti puuttuu.",
+  /* service.help.interrupted */ "Jakso päättyi; seuraava kelvollinen luenta alkaa nollasta.",
+  /* service.common */ "Vain havainnointi: ei huolto-/täyskuormitustesti; ei näyttöä tasaantumisesta tai kylmäainetäytöstä; ei normaalialueen arviota. EEV-pulssit ovat komentoja, eivät venttiilipalaute.",
   /* check.fault */ "Yksikön vika",
   /* check.dhw_loss */ "Käyttövesisäiliön lämpöhäviö",
   /* check.cycling */ "Kompressorin käynnistykset",
@@ -909,20 +930,20 @@ DESCRIPTION_I18N.fi = descriptionValues([
   ["PHE:n tulo- tai lähtöveden lämpötila kylmäaineen ja veden välisessä lämmönvaihdossa."], // 63
   ["Ulkokennoanturin lämpötila; alle 0 °C lämmityksessä ei ilman kosteustietoa todista huurretta."], // 64
   ["Yksikön läheltä mitattu ulkoilma; aurinko, asennuspaikka ja tuuli voivat erottaa sen säähavainnosta."], // 65
-  ["Kompressorilta lähtevän kuuman korkeapaineisen kaasun lämpö; liika lämpö voi rajoittaa tehoa."], // 66
+  ["Kuuma kaasu kompressorin jälkeen; riippuu paineesta, nopeudesta, tilasta ja kuormasta. Yksi arvo tai toisen sarjan alue ei osoita vikaa tai kylmäainevajetta."], // 66
   ["Kompressorille palaavan viileän matalapaineisen kylmäainekaasun lämpötila."], // 67
   ["Lämmönvaihtimien välisen nestelinjan kylmäainelämpötila."], // 68
   ["Höyrystimen tulo-/lähtökylmäaineen lämpötila lämmön vastaanottokohdassa."], // 69
   ["Kylmäaineen ruiskutuslinjan lämpötila kompressorin ohjausta ja suojausta varten."], // 70
   ["Kaksifaasisessa neste-höyry-kylmäaineessa mitattu sisäinen ohjauslämpö, ei käyttäjän asetus."], // 71
-  ["Ulkokennon jäänpoistoanturin lämpötila, yksi jäätymis- ja sulatuspäätöksen tuloista."], // 72
+  ["Ulkokennon sulatusanturi; sijainti ja ohjaus ovat mallikohtaisia. Yksi piste ei osoita koko kennon jäätä tai sulatuksen päättymistä."], // 72
   ["Kylmäainepaineesta laskettu kyllästymislämpötila, ei erillinen lämpöanturi tai bar-paine."], // 73
-  ["Kylmäaineen yksittäinen korkea- tai matalapaine, ei niiden välinen paine-ero."], // 74
+  ["Korkea-/matalapaine: arvioi saman tilan/mallin vakaa trendi; käynnistys, öljynpalautus ja sulatus muuttavat sitä. Yleistä normaalialuetta ei ole."], // 74
   ["Invertterikompressorin nopeus rps; keskeinen tehonsäätöarvo, ei suora lämpötehomittaus."], // 75
-  ["Elektronisen paisuntaventtiilin komentopaikka askelina/pulsseina, ei avautumisprosentti tai massavirta."], // 76
+  ["EEV-askeleet ovat komento ilman mekaanista palautetta, eivät % tai virtaus. Yksin ne eivät osoita liikettä, jumia tai kylmäainevajetta."], // 76
   ["Ulkopuhaltimen moottoriohjaimen elektroniikan lämpötila."], // 77
   ["Ulkopuhaltimen nopeus portaana tai rpm; voi olla 0 seisokin tai sulatuksen osassa."], // 78
-  ["Höyrystys-/lauhtumislämpötilan sisäinen ohjaustavoite, ei käyttäjän asetus."], // 79
+  ["Mallin/tilan sisäinen tavoite; vertaa vastaavaan paineesta laskettuun kyllästyslämpöön. Ero ei diagnosoi syytä tai täyttöä."], // 79
   ["Kompressorin purkaus-/porttilämpötilan sisäinen suojaustavoite."], // 80
   ["Meno- ja paluuveden tavoite-ΔT; mallista ja tilasta riippuen myös 8/10 K, ei yleinen 5 K."], // 81
   ["Laitteen kylmäaine, kuten R32 tai R410A; määrää paine–lämpötila-kyllästyskäyrän."], // 82
@@ -974,7 +995,7 @@ MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Yksikön ilmoittama vika/varoitus. Nykyinen virhe on varoitus; varoitus, huomautus tai 24 tunnissa poistunut ilmoitus on tieto. Tämä on laitteen ilmoitus, ei päätelmä."], // health_fault
   ["Mittaa tankin jäähtymistä rauhallisen tunnin aikana. ≥0,8 K/h on vertailulaitteiston huomio, ei Daikin-raja; tunnistus ulottuu noin 1,85 K/h:iin, eikä OK todista eristystä tai venttiilejä ehjiksi."], // health_dhw_loss
   ["Laskee kompressorin käynnit ja täydet käyttöajat. Huomio, kun vahvistettuja lämmityskäyntejä on ≥12 ja keskiarvo <10 min. DHW/jäähdytys rajataan pois, mutta runsas luokittelematon aineisto arvioidaan yhdessä. Ei Daikin-raja."], // health_cycling
-  ["Laskee sulatukset ja niiden osuuden kompressoriajasta. Huomio vasta ≥3 sulatuksella ja >15 % osuudella. Ei Daikin-raja; kosteus ja kennon pintalämpö puuttuvat."], // health_defrost
+  ["Sulatus: huomio yli 15 % ja ≥3 kertaa; ei Daikin-raja. R4T on arvioon kuulumaton live-tausta, eikä yksi piste kuvaa koko kennoa."], // health_defrost
   ["Liukuvan ikkunan pienin kelvollinen vesipaine: >1,0 bar vertailu, ≤1,0 bar huomio ja 60 s jatkuessa varoitus. Sallittu alue on mallikohtainen."], // health_pressure
   ["Pienin virtaus, kun sisäinen pumppu on käynyt 60 s. Mittaa osakuorman käyttöä, ei suunnitteluvirtausta; yleistä rajaa ei ole eikä yksi pieni arvo todista vikaa."], // health_flow
   ["BUH:n ja BSH:n havaittu käyttöaika. Käyttö voi olla normaalia pakkasella, hätätilassa, sulatuksessa, DHW:ssa tai ylijäämäohjauksessa; yhteistä OK-/varoitusrajaa ei ole."], // health_heater

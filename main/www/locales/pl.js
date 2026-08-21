@@ -1,4 +1,4 @@
-// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
+// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -146,6 +146,27 @@ I18N.pl = localeValues([
   /* card.candidates */ "Możliwe modele",
   /* card.oueeprom */ "ID jednostki zewnętrznej",
   /* card.checkup */ "Diagnostyka instalacji · 24 h",
+  /* service.title */ "Obserwacja serwisowa obiegu chłodniczego",
+  /* service.state.waiting */ "OCZEKIWANIE",
+  /* service.state.observing */ "OBSERWACJA",
+  /* service.state.limited */ "OGRANICZONA",
+  /* service.state.interrupted */ "PRZERWANA",
+  /* service.row.window */ "Bieżące okno",
+  /* service.row.reason */ "Powód",
+  /* service.reason.unsupported_profile */ "Profil nie udostępnia wymaganych sygnałów.",
+  /* service.reason.compressor_not_running */ "Sprężarka zatrzymana.",
+  /* service.reason.unsupported_or_unknown_mode */ "Brak ogrzewania lub tryb nieznany.",
+  /* service.reason.dhw_path */ "CWU aktywne.",
+  /* service.reason.defrost */ "Aktywne jest odszranianie.",
+  /* service.reason.unit_fault */ "Aktywna usterka jednostki.",
+  /* service.reason.special_controller_phase */ "Aktywny rozruch, restart, powrót oleju lub wyrównanie ciśnienia.",
+  /* service.reason.missing_fresh_signal */ "Brak wymaganego świeżego sygnału.",
+  /* service.reason.poll_gap */ "Luka lub celowa przerwa X10A.",
+  /* service.window */ (d, n) => `${d} · ${n} ${n === 1 ? "świeża próbka" : "świeże próbki"}`,
+  /* service.help.observing */ "Świeże wartości z tego samego odczytu X10A są ciągłe w tych warunkach.",
+  /* service.help.limited */ "Okno ciągłe; brak opcjonalnego kontekstu temperatury, ciśnienia, otoczenia lub fazy.",
+  /* service.help.interrupted */ "Okno zakończone; kolejny właściwy odczyt zaczyna od zera.",
+  /* service.common */ "Tylko obserwacja: bez testu serwisowego/pełnego obciążenia; bez dowodu ustalenia lub ilości czynnika; bez oceny normy. Impulsy EEV to polecenia, nie sprzężenie zaworu.",
   /* check.fault */ "Usterka jednostki",
   /* check.dhw_loss */ "Strata ciepła zbiornika CWU",
   /* check.cycling */ "Uruchomienia sprężarki",
@@ -1062,20 +1083,20 @@ DESCRIPTION_I18N.pl = descriptionValues([
   ["Temperatura wody na wejściu lub wyjściu PHE między czynnikiem a obiegiem wody."], // 63
   ["Temperatura wymiennika zewnętrznego; sama bez wilgotności nie dowodzi oblodzenia."], // 64
   ["Temperatura zewnętrzna przy urządzeniu może różnić się przez słońce i przepływ powietrza."], // 65
-  ["Temperatura gorącego sprężonego gazu chłodniczego opuszczającego sprężarkę."], // 66
+  ["Gorący gaz za sprężarką; zależy od ciśnienia, prędkości, trybu i obciążenia. Jedna wartość lub zakres innej rodziny nie dowodzi usterki ani braku czynnika."], // 66
   ["Temperatura chłodnego gazu czynnika o niskim ciśnieniu wracającego do sprężarki."], // 67
   ["Temperatura czynnika chłodniczego w przewodzie cieczowym między wymiennikami."], // 68
   ["Temperatura czynnika przy wejściu lub wyjściu parownika."], // 69
   ["Temperatura przewodu wtrysku czynnika."], // 70
   ["Temperatura w części obiegu zawierającej ciecz i parę."], // 71
-  ["Temperatura czujnika odladzania wymiennika zewnętrznego."], // 72
+  ["Czujnik odszraniania na wymienniku; położenie i sterowanie zależą od modelu. Jeden punkt nie dowodzi lodu na całej powierzchni ani końca odszraniania."], // 72
   ["Temperatura nasycenia z ciśnienia dla danego czynnika; nie jest czujnikiem ani wartością bar."], // 73
-  ["Ciśnienie czynnika po stronie wysokiej (tłoczenie) lub niskiej (ssanie)."], // 74
+  ["Ciśnienie wysokie/niskie: oceniaj stabilny trend tego samego trybu/modelu; rozruch, powrót oleju i odszranianie je zmieniają. Brak uniwersalnego zakresu."], // 74
   ["Prędkość sprężarki w rps steruje wydajnością, lecz nie mierzy mocy cieplnej."], // 75
-  ["Pozycja zaworu rozprężnego w krokach; nie jest procentem otwarcia ani przepływem masowym."], // 76
+  ["Polecenie EEV w krokach, bez mechanicznego sprzężenia, nie % ani przepływ. Samo nie dowodzi ruchu, zacięcia ani braku czynnika."], // 76
   ["Temperatura elektroniki sterującej silnika wentylatora zewnętrznego."], // 77
   ["Prędkość wentylatora zewnętrznego jest podana jako stopień lub obr./min."], // 78
-  ["Wewnętrzny cel parowania/skraplania nie jest nastawą użytkownika."], // 79
+  ["Cel wewnętrzny zależny od modelu/trybu; porównaj z odpowiadającą temperaturą nasycenia z ciśnienia. Różnica nie diagnozuje przyczyny ani napełnienia."], // 79
   ["Wewnętrzny cel temperatury tłoczenia służy ochronie sprężarki."], // 80
   ["Cel ΔT zależy od modelu i trybu; porównuj z nim, nie z uniwersalnymi 5 K."], // 81
   ["Rodzaj czynnika, np. R32/R410A, wyznacza krzywą ciśnienie–temperatura nasycenia."], // 82
@@ -1127,7 +1148,7 @@ MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Zgłasza własny stan błędu lub ostrzeżenia pompy. Aktywny błąd daje OSTRZEŻENIE; ostrzeżenie albo komunikat pojawiający się i znikający w 24 h daje UWAGĘ. To komunikat urządzenia, nie domysł projektu. Brak bieżącej ani zapamiętanej wiadomości po odczytaniu wszystkich obsługiwanych pól. Zniknięty komunikat może pozostać 24 h; aktywny kod jest pod Stanem pracy."], // 0
   ["Mierzy stygnięcie zasobnika w spokojnych godzinach. Wyklucza ładowanie, spadki jak pobór i grzanie wewnętrzne; opcjonalny licznik pokazuje pompę cyrkulacji. UWAGA od 0,8 K/h to heurystyka instalacji referencyjnej. Objętość i różnica do pomieszczenia zmieniają wynik. Wykrywalne jest ok. do 1,85 K/h; szybsza stała strata może zostać odfiltrowana jak pobór. OK nie dowodzi izolacji ani zaworów."], // 1
   ["Liczy przejścia sprężarki WYŁ.→WŁ. i długość pełnych cykli; jeśli sygnały pozwalają, rozdziela ogrzewanie, CWU i chłodzenie. Mieszane lub nieczytelne pozostają bez klasyfikacji. Potwierdzone cykle ogrzewania mają średnio ≥10 min. Przy co najmniej 12 krótszych pojawia się UWAGA; CWU i chłodzenie są wykluczone. Przy zbyt wielu nieklasyfikowanych oceniane są wszystkie. To nie limit Daikin."], // 2
-  ["Liczy uruchomienia odszraniania i udział czasu sprężarki zużyty na nie. Odszranianie jest normalne w zimnej, wilgotnej pogodzie. Do 15% sparowanego czasu sprężarki. Powyżej, przy co najmniej 3 zdarzeniach, tylko UWAGA. To nie limit Daikin; brak wilgotności i temperatury powierzchni wymiennika."], // 3
+  ["Liczy odszraniania: UWAGA powyżej 15% i przy ≥3 zdarzeniach; to nie limit Daikin. R4T jest kontekstem na żywo poza oceną, a jeden punkt nie opisuje całego wymiennika."], // 3
   ["Najniższe prawidłowe ciśnienie wody w obiegu grzewczym w ruchomym oknie. Powyżej 1,0 bar. Przy ≤1,0 bar natychmiast UWAGA, po 60 s ciągle — OSTRZEŻENIE. Zakres zależy od modelu; porównaj dokładną instrukcję."], // 4
   ["Najniższy przepływ po 60 s ciągłej pracy pompy wewnętrznej; pomija rozruch, postój i luki komunikacji. TYLKO POMIAR: minimum częściowego obciążenia po rozruchu, nie przepływ nominalny ani projektowy. Nie ma uniwersalnej granicy; minimum instrukcji dotyczy tego samego modelu, trybu i warunków. Jedna niska wartość bez błędu niewiele dowodzi."], // 5
   ["Osobno pokazuje czas pracy BUH dla obiegu domu i BSH w zasobniku CWU. TYLKO POMIAR. Mróz, awaria, wsparcie odszraniania, harmonogram CWU lub sterowanie nadwyżką mogą uzasadniać pracę. Nie ma uniwersalnego progu OK/OSTRZEŻENIE."], // 6

@@ -8,7 +8,9 @@
 // claims. Three questions the normal telemetry surface cannot answer, all of them live — this probe
 // is the deliberately separate answer:
 //
-//   • "What does an unmapped model put on this page?" — 44 profiles exist, the fleet has more. A
+//   • "What does an unmapped model put on this page?" — 45 profile definitions ship today
+//     (39 detectable model profiles plus generic and compatibility definitions), and the fleet has
+//     more. A
 //     user whose unit detects as `generic` previously had no way to find out what its pages carry
 //     without editing def/*.hpp, building and flashing; an arbitrary probe can now capture them.
 //   • "Is this row's CONVERTER right?" — logic/conv_override.hpp exists precisely because the
@@ -282,8 +284,8 @@ inline constexpr int PROBE_MAX_DECODES =
 inline constexpr int PROBE_MAX_ALIASES = PROBE_MAX_DECODES - 1;
 
 // The sweep's whole output is ONE stack array in the HTTP handler, on the task with the deepest
-// call chain in the firmware (16 KB, and http_append_status_json already spends ~10.5 KB of it —
-// see http_server.cpp). So the per-row cost is deliberate: `uint16_t` aliases and a bound derived
+// call chain in the firmware (16 KB; the bounded status path remains its largest consumer — see
+// http_server.cpp). So the per-row cost is deliberate: `uint16_t` aliases and a bound derived
 // from the table rather than rounded up. MEASURED at today's table: 23 rows x 88 bytes = 2024 bytes,
 // against ~4.6 KB for the obvious `int alias[PROBE_CANDIDATE_COUNT]` in a hand-picked 24-row array.
 // This is not premature: a stack budget is exactly what killed the httpd task twice (v1.0.12, #318).

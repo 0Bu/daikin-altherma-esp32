@@ -32,7 +32,8 @@ namespace daik {
 // small, bounded bodies and no history here, and a payload field per task would cost every consumer
 // a set of permanently-flat series to rule out — the test that retired "WiFi Quality".
 enum class StackWatch : uint8_t {
-    // The deepest chain in the firmware (mcp_post -> http_append_status_json), 16384. Sampled per
+    // The deepest chain in the firmware (mcp_post -> http_send_status_json -> append_status_json),
+    // 16384. Sampled per
     // REQUEST, so it stays unsampled — and therefore null — on a board nobody has browsed this
     // boot. That is the right answer rather than a gap to close: the deep frame exists only while a
     // request is being served, so an idle httpd task would report the headroom of its select loop,

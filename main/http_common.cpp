@@ -23,7 +23,8 @@ namespace daik {
 // Record the httpd task's stack headroom on EVERY exit from handle_all — the normal return, the
 // 503 and the 500 — because the request that came closest to the limit is exactly the one that
 // threw. A destructor rather than three call sites: it also covers a future early return, and this
-// task carries the deepest call chain in the firmware (mcp_post -> http_append_status_json), which
+// task carries the deepest call chain in the firmware
+// (mcp_post -> http_send_status_json -> append_status_json), which
 // overflowed twice (v1.0.12, #318) and was diagnosed both times from a core dump. Costs one
 // FreeRTOS read per request; the number leaves the board on the MQTT heartbeat (stack_watch.hpp).
 namespace {

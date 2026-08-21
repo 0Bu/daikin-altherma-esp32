@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: f6dbaade8ec23a930984260caa81571de8904e99b214c00aa45267ad526996f9 -->
+<!-- user-docs-contract: fc3f6d773cfe14c42e27bef97d9e2019e463bc273e4c89d4bb3e8bcc8ea60ce4 -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -46,6 +46,11 @@ The saved five-minute trends remain separate. Each interval retains only its fin
 aggregated event state. Those trends cannot reliably reconstruct second-by-second compressor starts,
 the operating mode of a complete run, or an uninterrupted domestic-hot-water hour, so the firmware
 does not reuse them as diagnosis evidence.
+
+The 24-hour card is a passive watch of ordinary operation. It does not command a service mode,
+create a settled full-load operating point, or perform a controlled refrigerant test. A quiet card
+therefore means only that its eight bounded rules found nothing notable in the data they could
+assess; it is not a passed commissioning or refrigerant-circuit test.
 
 ## What is checked?
 
@@ -129,6 +134,10 @@ The optional `X10A min … °C · mean … °C` suffix describes fresh outdoor r
 readable, running-compressor population. It is context only; it neither supplies humidity nor changes
 the defrost share or result.
 
+The separately listed **R4T de-icer** temperature is also live context only. Its installation point
+and the controller's defrost start/end logic are model-specific. The firmware does not pair R4T into
+the 24-hour result, and one local sensor cannot establish the ice state of the whole outdoor coil.
+
 **When does a note appear?** The project heuristic requires at least three assessable defrost events
 and more than 15% defrost time within the paired compressor runtime. This is not a Daikin limit.
 
@@ -177,6 +186,44 @@ cannot prove that the unit never limited itself.
 
 **Evidence and limits:** [Protection-limit counter changes](DIAGNOSTIC_EVIDENCE.md#diagnosis-retries)
 
+## Refrigerant service observation
+
+The separate **Refrigerant service observation** card is technical context, not a ninth plant
+diagnosis. It remains outside `/status.health`, never changes the eight-row summary, and requires no
+Plant diagnostics opt-in. It only watches the ordinary read-only X10A traffic already used for live
+values.
+
+Until this boot has detected an X10A profile and evaluated that profile's signal coverage, including
+while safe mode prevents the poll task from starting, the status object and card are absent. This
+avoids presenting missing source evidence as a claim that the installed profile lacks signals.
+
+The window starts only from fresh values captured in the same poll sweep while all of these facts are
+confirmed: the compressor is running in **space heating**, the three-way valve is not on domestic hot
+water, defrost is off, all available unit-fault rows are readable and normal, no available startup,
+restart, oil-return, or pressure-equalising phase is active, and the required discharge-temperature,
+EEV-command, and refrigerant-pressure readings are present. Cooling is not admitted because the
+pressure-side role used here is established only for the heating context.
+
+| Card state | Meaning |
+|------------|---------|
+| **NOT AVAILABLE** | The detected profile lacks at least one required signal. |
+| **WAITING** | No qualifying fresh heating sweep is available now. |
+| **OBSERVING** | A continuous fresh window is present with the complete optional context. |
+| **LIMITED** | The required window is continuous, but optional temperature, both pressure sides, or outdoor context were unavailable at least once, or the profile does not expose the full set of model-specific controller phases. |
+| **INTERRUPTED** | A required signal or operating condition, a profile-declared phase witness becoming unreadable, or an expected poll sequence ended the previous window. The next qualifying sweep begins again at zero. A source-generation change resets continuity and may immediately start a new zero-duration window. |
+
+The reported duration and min/mean/max figures describe that one uninterrupted window. The allowed
+poll gap scales with the active profile's page count and the X10A transport timeout; the firmware
+does not insert a universal three-second or twenty-minute service rule.
+
+**What it does not establish:** The firmware does not request service mode or full load, prove that
+the refrigeration cycle has settled, assign a universal normal range, or diagnose refrigerant
+charge. The EEV pulse value is the controller's command; X10A supplies no independent mechanical
+feedback that the valve moved or reached that position. A qualified technician must still use the
+exact model's service procedure and suitable instruments for a controlled test.
+
+**Evidence and limits:** [Refrigerant service observation](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation)
+
 ## What the diagnosis cannot do
 
 The card cannot reliably determine:
@@ -186,6 +233,8 @@ The card cannot reliably determine:
 - the cause of every high-energy-use period;
 - seasonal efficiency;
 - the condition of every sensor or valve.
+
+It also cannot turn passive 24-hour history into a controlled stationary full-load service test.
 
 **OK therefore always means:** This one check found nothing notable in the evidence it could assess.
 It never means that the complete heat-pump installation is guaranteed to be fault-free.

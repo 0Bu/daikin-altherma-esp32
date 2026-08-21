@@ -16,11 +16,11 @@ esp_err_t http_send_gzip(httpd_req_t* req, const char* content_type,
 // Read a JSON request body into a bounded buffer; returns bytes or <0.
 int       http_read_body(httpd_req_t* req, char* buf, size_t max);
 
-// Append the owning status snapshot used by MCP get_status. GET /status instantiates the same
-// serializer directly against a bounded HTTP sink in http_status.cpp. The values snapshot is larger
-// than the target's normal largest contiguous block, so its shared sender streams an optional small
-// prefix/suffix around the exact /values object instead of materialising a complete response.
-void http_append_status_json(std::string& out, bool redact = false);
+// Stream an optional small protocol prefix/suffix around the exact /status or /values object. Both
+// device routes and MCP use the same bounded sink; neither materialises a complete response whose
+// capacity growth would require one body-sized contiguous heap block.
+esp_err_t http_send_status_json(httpd_req_t* req, std::string_view prefix = {},
+                                std::string_view suffix = {}, bool redact = false);
 esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix = {},
                                 std::string_view suffix = {});
 

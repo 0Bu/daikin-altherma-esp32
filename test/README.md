@@ -214,6 +214,11 @@ evidence wrapping, old-payload fallbacks, per-row observation clocks, the two-st
 safe handling of future unknown checks and the source-level reset contract (a pending identity reset hides
 the report and drops the in-flight sample).
 
+`node test/test_ui_refrigerant_service.mjs` pins the separate observation card and its
+`/status.refrigerant_service` source contract: older-firmware absence, neutral/passive markup,
+interruption wording, English/German EEV-command limits, rejection of held values, profile-sized
+poll gaps, and explicit `load_proven:false` / `eev_feedback:false` boundaries.
+
 `node test/test_mcp_dashboard.mjs` verifies the embedded GET `/mcp` asset contract: the page explains
 the endpoint and its security boundary, provides client and curl examples for the URL that served it,
 documents both tools, loads no external asset, makes no network request, and is served pre-gzipped
@@ -226,7 +231,8 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/crc.hpp` — checksum, request framing (protocol I/S), reply-length, error reply.
 - `logic/registers.hpp` — little-endian signed/unsigned value reads, bounds.
 - `logic/convert.hpp` — numeric converters + the refrigerant pressure→temperature curve + the
-  HA unit/device_class hints.
+  HA unit/device_class hints, including structural refrigerant-pressure classification shared by
+  publishing and feature coverage.
 - `logic/config_model.hpp` — pin/interval/protocol validation, RX/TX collision, WiFi credential
   rules, the `/set_hp` fingerprint and X10A-observation reset scopes (profile/RX/TX reset it;
   HomeHub-only changes do not), and the field-owned detection patches (`apply_link` /
@@ -277,8 +283,8 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   enforcement, unknown-method/tool and invalid-params errors,
   the exact two-tool catalog, and the `structuredContent` result envelopes. This is the same parser
   the device uses, not a test-only re-derivation of cJSON output.
-- `logic/chunk_sink.hpp` — the production bounded response sink used by `/values` and MCP
-  `get_hp_values`: a single oversized append is split before the buffer can exceed 1 KiB, emitted
+- `logic/chunk_sink.hpp` — the production bounded response sink used by `/status`, `/values` and
+  both MCP results: a single oversized append is split before the buffer can exceed 1 KiB, emitted
   chunks concatenate byte-for-byte to the input, exactly one successful terminator is produced,
   and injected OOM is rethrown before the first emission but converted to a failed stream after
   either a successful or failed first transport attempt.
@@ -390,6 +396,9 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   of the in-flight DHW candidate (with blind downtime), and the evidence-bounded aggregate. Pure observations,
   count-only/zero-denominator defrost and stable experimental counters are reportable but cannot
   support aggregate `ok`; catalog-wide uniqueness pins every locator to the intended row.
+- `logic/refrigerant_service.hpp` — required profile coverage, heating-only fresh-sweep eligibility,
+  EEV-command/pressure/temperature window statistics, special-phase and fault exclusions, latched
+  optional-context limitations, generation/time/poll-gap interruption and stale read-only snapshots.
 
 `logic/value_def.hpp` has no `test_*()` of its own — it is the profile row type, exercised through
 `def/registry.hpp` and the converter tests.

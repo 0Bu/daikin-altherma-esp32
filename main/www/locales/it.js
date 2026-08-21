@@ -1,4 +1,4 @@
-// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
+// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -141,6 +141,27 @@ I18N.it = localeValues([
   /* card.candidates */ "Modelli possibili",
   /* card.oueeprom */ "ID unità esterna",
   /* card.checkup */ "Diagnostica impianto · 24 h",
+  /* service.title */ "Osservazione di servizio del circuito frigorifero",
+  /* service.state.waiting */ "IN ATTESA",
+  /* service.state.observing */ "IN OSSERVAZIONE",
+  /* service.state.limited */ "LIMITATA",
+  /* service.state.interrupted */ "INTERROTTA",
+  /* service.row.window */ "Finestra attuale",
+  /* service.row.reason */ "Motivo",
+  /* service.reason.unsupported_profile */ "Il profilo non offre i segnali richiesti.",
+  /* service.reason.compressor_not_running */ "Compressore fermo.",
+  /* service.reason.unsupported_or_unknown_mode */ "Non in riscaldamento o modo sconosciuto.",
+  /* service.reason.dhw_path */ "ACS attiva.",
+  /* service.reason.defrost */ "Lo sbrinamento è attivo.",
+  /* service.reason.unit_fault */ "Guasto unità attivo.",
+  /* service.reason.special_controller_phase */ "Avvio, riavvio, ritorno olio o equalizzazione pressione attivi.",
+  /* service.reason.missing_fresh_signal */ "Manca un segnale recente richiesto.",
+  /* service.reason.poll_gap */ "Interruzione o pausa intenzionale X10A.",
+  /* service.window */ (d, n) => `${d} · ${n} ${n === 1 ? "campione recente" : "campioni recenti"}`,
+  /* service.help.observing */ "I valori recenti della stessa lettura X10A restano continui in queste condizioni.",
+  /* service.help.limited */ "Finestra continua; manca un contesto opzionale di temperatura, pressione, esterno o fase.",
+  /* service.help.interrupted */ "Finestra terminata; la prossima lettura idonea riparte da zero.",
+  /* service.common */ "Solo osservazione: nessuna prova di servizio/pieno carico; nessuna prova di stabilità o carica; nessun giudizio sui limiti. Gli impulsi EEV sono comandi, non riscontro valvola.",
   /* check.fault */ "Guasto dell'unità",
   /* check.dhw_loss */ "Perdita di calore del serbatoio ACS",
   /* check.cycling */ "Avvii del compressore",
@@ -1052,20 +1073,20 @@ DESCRIPTION_I18N.it = descriptionValues([
   ["Temperatura acqua in ingresso o uscita PHE, che trasferisce calore fra refrigerante e circuito idronico."], // 63
   ["Temperatura di un sensore dello scambiatore esterno; da sola non dimostra ghiaccio sulla batteria."], // 64
   ["Temperatura esterna misurata dall’unità per compensazione climatica e controllo."], // 65
-  ["Temperatura del gas refrigerante caldo e compresso in uscita dal compressore."], // 66
+  ["Gas caldo in uscita dal compressore; dipende da pressione, velocità, modo e carico. Un valore o intervallo di altra famiglia non prova guasto né carenza di refrigerante."], // 66
   ["Temperatura del gas refrigerante freddo a bassa pressione che ritorna al compressore."], // 67
   ["Temperatura del refrigerante nella linea liquido tra gli scambiatori."], // 68
   ["Temperatura del refrigerante all’ingresso/uscita dell’evaporatore."], // 69
   ["Temperatura della linea di iniezione refrigerante usata per controllo e protezione del ciclo."], // 70
   ["Temperatura in una zona bifase, liquido e vapore, del circuito frigorifero; non è un setpoint."], // 71
-  ["Temperatura del sensore di sbrinamento dello scambiatore esterno."], // 72
+  ["Sensore di sbrinamento esterno; posizione e controllo dipendono dal modello. Un punto non prova ghiaccio su tutta la batteria né la fine dello sbrinamento."], // 72
   ["Temperatura di saturazione calcolata dalla pressione; non è un sensore separato né una pressione in bar."], // 73
-  ["Pressione refrigerante sul lato alta/scarico o bassa/aspirazione."], // 74
+  ["Pressione alta/bassa: valutare un andamento stabile con stesso modo/modello; avvio, ritorno olio e sbrinamento la cambiano. Nessun intervallo universale."], // 74
   ["Velocità del compressore inverter in rps; dipende dal modello e non misura direttamente la potenza termica."], // 75
-  ["Posizione comandata della valvola di espansione elettronica in passi/impulsi, non percentuale o portata massica."], // 76
+  ["Comando EEV in passi, senza riscontro meccanico, non % o portata. Da solo non prova movimento, blocco o carenza di refrigerante."], // 76
   ["Temperatura dell’elettronica di comando del motore ventilatore esterno."], // 77
   ["Velocità del ventilatore esterno in stadio o rpm."], // 78
-  ["Obiettivo interno del circuito frigorifero, per esempio temperatura di evaporazione/condensazione."], // 79
+  ["Obiettivo interno per modello/modo; confrontare con la saturazione dalla pressione corrispondente. Lo scarto non diagnostica causa o carica."], // 79
   ["Obiettivo interno di temperatura scarico/porta compressore usato dalle protezioni."], // 80
   ["ΔT obiettivo fra mandata e ritorno; dipende da modello e modo e non segue una regola universale di 5 K."], // 81
   ["Refrigerante caricato nell’unità, per esempio R32 o R410A, base della curva pressione-temperatura."], // 82
@@ -1117,7 +1138,7 @@ MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Stato proprio dell’unità: errore attivo dà AVVISO; avvertimento o messaggio cancellato entro 24 h dà NOTA, non una deduzione del progetto."], // health_fault
   ["Perdita a riposo: soglia di progetto, NOTA ≥0,8 K/h; volume e ΔT incidono, >≈1,85 K/h può filtrarsi come uso e OK non prova isolamento."], // health_dhw_loss
   ["NOTA con ≥12 cicli riscaldamento medi <10 min; esclude ACS/freddo, non è limite Daikin e se troppi restano non classificati li valuta tutti insieme."], // health_cycling
-  ["Conta gli sbrinamenti: NOTA oltre il 15 % del tempo compressore con ≥3 cicli; non è un limite Daikin e mancano umidità e temperatura superficie."], // health_defrost
+  ["Conta gli sbrinamenti: NOTA oltre 15 % con ≥3 cicli; non è un limite Daikin. R4T è contesto live fuori dal verdetto; un punto non descrive tutta la batteria."], // health_defrost
   ["Minima pressione acqua: >1,0 bar; ≤1,0 dà NOTA e dopo 60 s AVVISO, ma il campo dipende dal modello."], // health_pressure
   ["Portata dopo 60 s di pompa: solo tratto misurato; un dato isolato dice poco, confrontare stesso modello, modo e condizioni, senza soglia universale."], // health_flow
   ["Durata osservata di BUH e BSH: freddo, emergenza, sbrinamento, ACS o surplus possono spiegarla; nessun limite universale."], // health_heater

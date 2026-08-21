@@ -274,6 +274,9 @@ assert.match(status,
 assert.match(status, /static esp_err_t h_values\(httpd_req_t\* req\) \{\s*\n\s*return http_send_values_json\(req\);/,
   "GET /values must use the shared bounded sender");
 assert.match(mcp,
+  /mcp_tool_result_begin\(response, "Current device and heat-pump status\."\);[\s\S]{0,400}?mcp_tool_result_end\(suffix\);[\s\S]{0,200}?mcp_result_end\(suffix\);[\s\S]{0,200}?return http_send_status_json\(req, response, suffix, false\);/,
+  "MCP get_status must stream its JSON-RPC prefix and suffix around the shared status object");
+assert.match(mcp,
   /mcp_tool_result_begin\(response, "Current decoded heat-pump readings\."\);[\s\S]{0,400}?mcp_tool_result_end\(suffix\);[\s\S]{0,200}?mcp_result_end\(suffix\);[\s\S]{0,200}?return http_send_values_json\(req, response, suffix\);/,
   "MCP get_hp_values must stream its JSON-RPC prefix and suffix around the shared values object");
 assert.doesNotMatch(mcp, /http_append_values_json\s*\(\s*response\s*\)/,

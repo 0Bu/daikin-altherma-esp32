@@ -1,4 +1,4 @@
-// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
+// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -141,6 +141,27 @@ I18N.sv = localeValues([
   /* card.candidates */ "Möjliga modeller",
   /* card.oueeprom */ "ID för utomhusenhet",
   /* card.checkup */ "Anläggningsdiagnos · 24 t",
+  /* service.title */ "Serviceobservation av köldmediekretsen",
+  /* service.state.waiting */ "VÄNTAR",
+  /* service.state.observing */ "OBSERVERAR",
+  /* service.state.limited */ "BEGRÄNSAD",
+  /* service.state.interrupted */ "AVBRUTEN",
+  /* service.row.window */ "Aktuellt fönster",
+  /* service.row.reason */ "Orsak",
+  /* service.reason.unsupported_profile */ "Profilen saknar nödvändiga signaler.",
+  /* service.reason.compressor_not_running */ "Kompressorn står.",
+  /* service.reason.unsupported_or_unknown_mode */ "Inte rumsuppvärmning, eller okänt läge.",
+  /* service.reason.dhw_path */ "Varmvatten aktivt.",
+  /* service.reason.defrost */ "Avfrostning aktiv.",
+  /* service.reason.unit_fault */ "Enhetsfel aktivt.",
+  /* service.reason.special_controller_phase */ "Start, omstart, oljeretur eller tryckutjämning aktiv.",
+  /* service.reason.missing_fresh_signal */ "Nödvändig aktuell signal saknas.",
+  /* service.reason.poll_gap */ "X10A-avbrott eller avsiktlig paus.",
+  /* service.window */ (d, n) => `${d} · ${n} färska ${n === 1 ? "prov" : "prover"}`,
+  /* service.help.observing */ "Färska värden från samma X10A-avläsning är sammanhängande under dessa villkor.",
+  /* service.help.limited */ "Fönstret är sammanhängande; valfri temperatur-, tryck-, ute- eller faskontext saknas.",
+  /* service.help.interrupted */ "Fönstret avslutat; nästa kvalificerade avläsning startar från noll.",
+  /* service.common */ "Endast observation: inget service-/fullasttest; inget bevis på stabilitet eller köldmediefyllning; ingen normalbedömning. EEV-pulser är kommandon, inte ventilåterkoppling.",
   /* check.fault */ "Anläggningsfel",
   /* check.dhw_loss */ "Värmeförlust från tank",
   /* check.cycling */ "Kompressorstarter",
@@ -1069,20 +1090,20 @@ DESCRIPTION_I18N.sv = descriptionValues([
   ["Vatten vid plattvärmeväxlarens in-/utlopp, där energi överförs mellan köldmedium och vatten."], // 63
   ["Givare på utomhusvärmeväxlaren; <0 °C kan vara normalt och bevisar inte is utan fuktdata."], // 64
   ["Utetemperatur uppmätt av enheten för väderkompensering och driftval."], // 65
-  ["Temperatur på varm komprimerad köldmediegas från kompressorn."], // 66
+  ["Varm gas från kompressorn; beror på tryck, varvtal, läge och last. Ett värde eller intervall från annan serie bevisar inte fel eller köldmediebrist."], // 66
   ["Temperatur på kall lågtrycksgas tillbaka till kompressorn."], // 67
   ["Köldmedietemperatur i vätskeröret mellan värmeväxlarna."], // 68
   ["Köldmedium vid förångarens in-/utlopp, där värme tas upp."], // 69
   ["Köldmediets insprutningstemperatur för intern reglering och skydd."], // 70
   ["Temperatur i köldmediekretsens tvåfasdel med både vätska och ånga."], // 71
-  ["Avfrostningsgivare på utomhusvärmeväxlaren för frostskydd och avfrostningsval."], // 72
+  ["Avfrostningsgivare ute; placering och styrning är modellspecifika. En punkt bevisar inte is på hela batteriet eller avslutad avfrostning."], // 72
   ["Mättnadstemperatur beräknad från tryck; inte en egen givare eller tryck i bar."], // 73
-  ["Köldmedietryck på högtrycks-/utlopps- eller lågtrycks-/sugsidan."], // 74
+  ["Hög-/lågtryck: bedöm stabil trend i samma läge/modell; start, oljeretur och avfrostning ändrar det. Inget allmänt normalområde."], // 74
   ["Kompressorhastighet i rps; högre betyder ofta större behov men mäter inte värme."], // 75
-  ["EEV-kommando i steg; inte öppningsprocent/massflöde och bara jämförbart i samma modell/läge."], // 76
+  ["EEV-steg är kommando utan mekanisk återkoppling, inte % eller flöde. Ensamt bevisar det inte rörelse, fast ventil eller köldmediebrist."], // 76
   ["Temperatur på elektroniken som styr utomhusfläktmotorn."], // 77
   ["Utomhusfläktens hastighet som steg eller rpm."], // 78
-  ["Internt mål i köldmediekretsen, t.ex. önskad förångnings-/kondenseringstemperatur."], // 79
+  ["Internt mål efter modell/läge; jämför med motsvarande mättnadstemperatur från tryck. Avvikelsen diagnostiserar inte orsak eller fyllning."], // 79
   ["Internt mål för kompressorns utlopps-/porttemperatur som används av skyddet."], // 80
   ["Önskad ΔT mellan framledning och retur; modell-/lägesberoende, inte en universell 5 K-regel."], // 81
   ["Köldmediet som enheten fyllts med, t.ex. R32 eller R410A."], // 82
@@ -1134,7 +1155,7 @@ MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["Egen fel-/varningsstatus: aktivt fel ger Varning; varning eller meddelande senaste 24 t ger INFO utan projektslutsats."], // health_fault
   ["Lugn tankförlust: projektregel INFO vid ≥0,8 K/t; volym och ΔT påverkar, >≈1,85 K/t kan filtreras som tappning, och OK bevisar inte isolering."], // health_dhw_loss
   ["INFO vid ≥12 värmekörningar och medel <10 min; varmvatten/kyla utelämnas. Inte Daikin-gräns; vid många oklassificerade bedöms alla gemensamt."], // health_cycling
-  ["Avfrostningsräknare: INFO vid >15 % av kompressortid och ≥3 cykler. Inte Daikin-gräns; fukt/yttemperatur saknas."], // health_defrost
+  ["Avfrostning: INFO över 15 % vid ≥3 cykler; inte Daikin-gräns. R4T är livekontext utanför bedömningen och en punkt beskriver inte hela batteriet."], // health_defrost
   ["Lägsta tryck: >1,0 bar; ≤1,0 ger INFO och efter 60 s Varning, men tillåtet intervall är modellberoende."], // health_pressure
   ["Vattenflöde efter 60 s pumpdrift: endast uppmätt avsnitt; jämför samma modell/läge/villkor, ingen universell gräns."], // health_flow
   ["Observerad BUH-/BSH-tid: kyla, nödläge, avfrostning, varmvatten eller överskott kan förklara; ingen universell gräns."], // health_heater

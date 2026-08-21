@@ -1393,7 +1393,7 @@ inline DhwLossWindow dhw_loss_aggregate(const DhwLossRing& r) {
 // measures: `generic` is the extreme case but not the only one, and an id check would have let a
 // check run blind on a third of the detected catalog.
 struct CheckupCoverage {
-    bool rps      = false;   // the compressor witness (ou_is_rps_witness) — only 27 of 44 profiles
+    bool rps      = false;   // compressor witness — 26 of the 39 detection profiles
     bool defrost  = false;
     bool buh      = false;   // either space-heating backup-heater step
     bool buh1     = false;

@@ -5,7 +5,7 @@ What the firmware **measures, records and infers about the heat-pump installatio
 web server, diagnostics, the build). A feature belongs here when its subject is the plant, the
 building or the weather around them; there when its subject is the board.
 
-Four of the five below are **analysis**, not control, and one is an optional accessory. None of them
+Five of the six below are **analysis**, not control, and one is an optional accessory. None of them
 writes to the heat pump: this firmware has no actuator, no Modbus write path and no MQTT command
 subscription, and that is a property of the code rather than a guard around a dormant capability
 (see [`FEATURES.md`](FEATURES.md) legacy-61 and legacy-68, and [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md)).
@@ -13,6 +13,7 @@ subscription, and that is a property of the code rather than a guard around a do
 | Feature | Status | Anchored in |
 |---------|:------:|-------------|
 | [Rolling plant checkup (up to 24 h)](#rolling-plant-checkup-up-to-24-h) | ✅ 🧪 | [`logic/checkup.hpp`](../main/logic/checkup.hpp), [`checkup.cpp`](../main/checkup.cpp) |
+| [Refrigerant service observation](#refrigerant-service-observation) | ✅ 🧪 | [`logic/refrigerant_service.hpp`](../main/logic/refrigerant_service.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp) |
 | [Open-Meteo forecast on the device](#open-meteo-forecast-on-the-device) | ✅ 🧪 | [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`logic/open_meteo.hpp`](../main/logic/open_meteo.hpp) |
 | [Optional ENV III climate input](#optional-env-iii-climate-input) | ✅ 🧪 | [`env3.cpp`](../main/env3.cpp), [`logic/env3.hpp`](../main/logic/env3.hpp) |
 | [Heating-curve diagnosis](#heating-curve-diagnosis) | ✅ 🧪 | [`logic/heating_curve_diagnosis.hpp`](../main/logic/heating_curve_diagnosis.hpp) |
@@ -227,6 +228,27 @@ a control problem in April, so the mean run length is what knows the load), and 
 "healthy" verdict.
 
 ---
+
+## Refrigerant service observation
+
+This is a separate, passive context window for qualified service work, not a ninth plant-health
+diagnosis. It folds fresh values from one ordinary X10A poll sweep only while the compressor is
+confirmed running in space heating, the DHW path and defrost are off, fault and any profile-provided
+special-phase witnesses are current and inactive, and discharge temperature, EEV command and at
+least one structurally identified refrigerant-pressure side are readable. A transport gap or a
+required signal becoming unavailable ends the window; a profile that lacks optional context reports
+the window as `limited`.
+
+After this boot has detected an X10A profile and the poll task has evaluated that profile's signal
+coverage, the object under `/status.refrigerant_service` reports duration, samples, limitations and
+window min/mean/max values. Until then—including safe mode, where the poll task is not started—the
+object and card are absent rather than assigning a profile reason.
+It deliberately has no health verdict, full-load or settling claim, numeric
+normal range, completion threshold or refrigerant-charge conclusion. The EEV pulse value is the
+controller command, not independent proof that the mechanical valve moved. See
+[`DIAGNOSTICS.md`](DIAGNOSTICS.md#refrigerant-service-observation) for the user-facing limits and
+[`DIAGNOSTIC_EVIDENCE.md`](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation) for the exact
+rule boundary.
 
 ## Open-Meteo forecast on the device
 

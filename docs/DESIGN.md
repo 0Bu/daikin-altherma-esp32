@@ -923,7 +923,7 @@ Body, ordered:
    still use the exact microsecond delta. Event states are sampled once per completed sweep, not at a
    guaranteed 1 Hz, so a pulse entirely between sweeps remains outside the evidence.
    **A check the active profile cannot run says `NOT AVAILABLE`.** That is `unavailable`, not a permissive zero,
-   and does not count as evaluated. Only 27 of 44 profiles carry a compressor-speed witness; defrost
+   and does not count as evaluated. Only 26 of 39 detection profiles carry a compressor-speed witness; defrost
    count remains observable without it, while the compressor-runtime share stays unavailable and
    cannot count as assessed. `paired_count` separately reports transitions with compressor evidence
    at both endpoints; only that count may satisfy the heuristic's three-cycle guard. Even with an RPS
@@ -963,6 +963,17 @@ Body, ordered:
    decrease or possible reset/wrap interval proves neither an event nor the absence of one.
    Hidden entirely while the X10A link is down, like the Model card: a rolling observation presented
    beside a bus that is not answering reads as current when it is not.
+5a. **Refrigerant-service observation card** — a separate neutral card immediately after the
+   24-hour card and before Model/Operation. Older firmware omits it cleanly; current firmware also
+   omits it until this boot has detected an X10A profile and evaluated that profile's signal
+   coverage, including when safe mode never starts the poll task. It is not a
+   `CHECKUP_ROW`, contributes no health count or colour verdict, remains visible as WAITING,
+   LIMITED or INTERRUPTED when its source conditions are not met, and offers no button or action.
+   The compact rows show only the uninterrupted duration/sample count and a blocker when present;
+   `/status.refrigerant_service` retains mode, phase coverage, limitation names and window metrics.
+   Copy in every shipped language states that ordinary polling does not command full load, prove
+   settling or refrigerant charge, assign a universal range, or confirm mechanical EEV motion.
+   `eev_command_pls` is a controller command, never a measured valve position.
 6. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
    detected profile is shown. A value that timed out this cycle shows "—" (not 0). The schematic
    answers "what is happening"; these tables stay as the exact-value reference — both read the same
