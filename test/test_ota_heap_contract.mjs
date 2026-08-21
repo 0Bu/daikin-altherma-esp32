@@ -25,6 +25,8 @@ const code = (rel) => read(rel)
 const occurrences = (text, token) => text.split(token).length - 1;
 
 const ota = code("main/ota_update.cpp");
+const otaHeader = code("main/ota_update.hpp");
+const httpOta = code("main/http_ota.cpp");
 const mqtt = code("main/mqtt_ha.cpp");
 const poll = code("main/hp_poll.cpp");
 // Keep this source verbatim: it contains the legitimate captive-portal URI string "/*", which a
@@ -33,6 +35,52 @@ const httpStatus = read("main/http_status.cpp");
 const headroom = code("main/logic/ota_headroom.hpp");
 const transport = code("main/logic/ota_transport.hpp");
 const sdkconfig = read("sdkconfig.defaults");
+
+// ── HTTP acceptance is the authoritative OTA operation boundary ──────────────────────────────
+// An asynchronous check/update request is not successful merely because the HTTP handler ran.
+// The OTA mutex claim and operation generation are created together; busy/task-creation refusal
+// must be non-2xx, status exposes the same mutex-protected generation+busy snapshot, and an update
+// can only consume the exact completed check generation plus artifact identity.
+const startUpdateAt = ota.indexOf("uint32_t start_update(");
+const startUpdateEnd = ota.indexOf("\n}\n\n}  // namespace", startUpdateAt);
+assert.ok(startUpdateAt >= 0 && startUpdateEnd > startUpdateAt,
+  "the atomic OTA update-acceptance boundary must remain identifiable");
+const startUpdate = ota.slice(startUpdateAt, startUpdateEnd);
+const acceptanceLock = startUpdate.indexOf("Lock lk(s_mtx)");
+const generationLease = startUpdate.indexOf("s_generation != after_generation", acceptanceLock);
+const retainedSha = startUpdate.indexOf("s_status.available_sha256.data()", generationLease);
+const acceptedTask = startUpdate.indexOf("start_locked(request, after_generation)", retainedSha);
+assert.ok(acceptanceLock >= 0 && generationLease > acceptanceLock && retainedSha > generationLease &&
+          acceptedTask > retainedSha,
+  "OTA update acceptance must atomically consume the exact completed check generation and SHA");
+assert.match(ota,
+  /uint32_t\s+ota_check_async[\s\S]{0,300}?return generation;[\s\S]{0,1600}?uint32_t\s+ota_update_async[\s\S]{0,500}?return generation;/,
+  "both asynchronous operations must return their accepted generation to HTTP");
+assert.match(ota,
+  /struct OtaTaskArgs[\s\S]{0,300}?char version\[32\][\s\S]{0,100}?char app_sha256\[65\]/,
+  "the asynchronous task identity must use fixed channel/version/SHA storage");
+assert.match(ota,
+  /uint32_t\s+start_locked[\s\S]{0,300}?s_task_args\s*=\s*request;[\s\S]{0,250}?xTaskCreate\(ota_task/,
+  "accepted channel/version/SHA must cross the task boundary in one fixed task-owned slot");
+assert.match(ota,
+  /xTaskCreate\(ota_task[\s\S]{0,250}?s_generation\s*=\s*previous_generation/,
+  "a task-creation failure must roll back the attempted generation");
+assert.equal(occurrences(httpOta, '503 Service Unavailable'), 2,
+  "busy or unavailable check/update starts must both be HTTP non-success");
+assert.equal(occurrences(httpOta, '{\\"ok\\":true,\\"generation\\":%lu}'), 2,
+  "both accepted operation responses must carry their generation token");
+assert.match(httpOta,
+  /,\\"busy\\":.*s\.busy[\s\S]{0,180}?,\\"generation\\":.*std::to_string\(s\.generation\)/,
+  "status must expose the mutex-consistent busy and generation handshake");
+for (const field of ["after", "channel", "version", "sha256"]) {
+  assert.match(httpOta, new RegExp(`httpd_query_key_value\\(q, "${field}"`),
+    `update acceptance must require checked ${field}`);
+}
+assert.match(httpOta,
+  /ota_update_async\(static_cast<uint32_t>\(after_value\), channel,[\s\S]{0,100}?version, app_sha256, downgrade\)/,
+  "HTTP must pass the complete checked identity into the atomic firmware boundary");
+assert.match(otaHeader, /std::array<char,\s*65>\s+available_sha256/,
+  "frequent /ota/status copies must keep the 64-byte artifact SHA in fixed storage");
 
 // ── The verifier remains mandatory ────────────────────────────────────────────────────────────
 // esp_ota_end() is the ESP-IDF boundary that performs image verification under these Kconfig
@@ -52,7 +100,7 @@ assert.doesNotMatch(ota, /esp_https_ota_(?:begin|perform|finish)\s*\(/,
   "the opaque HTTPS helper cannot release its TLS heap before its built-in validation step");
 
 const updateStart = ota.indexOf("void run_update(");
-const updateEnd = ota.indexOf("const char kUpdateMode", updateStart);
+const updateEnd = ota.indexOf("uint32_t next_generation(", updateStart);
 assert.ok(updateStart >= 0 && updateEnd > updateStart,
   "the OTA install boundary must remain identifiable");
 const update = ota.slice(updateStart, updateEnd);
@@ -65,6 +113,10 @@ const probeWrite = update.indexOf("write_chunk(buffer, probe_len)", writeImage);
 const bulkRead = update.indexOf("esp_http_client_read(", probeWrite);
 const bulkWrite = update.indexOf("write_chunk(buffer,", bulkRead);
 const release = update.lastIndexOf("close_http_client(client)");
+const hashSetup = update.indexOf("psa_hash_setup(");
+const hashUpdate = update.indexOf("psa_hash_update(", hashSetup);
+const hashFinish = update.indexOf("psa_hash_finish(", hashUpdate);
+const exactHash = update.indexOf("ota_sha256_matches(", hashFinish);
 const verify = update.indexOf("esp_ota_end(");
 const select = update.indexOf("esp_ota_set_boot_partition(");
 assert.ok(init >= 0 && begin > init && probeRead > begin && writeImage > probeRead &&
@@ -72,6 +124,12 @@ assert.ok(init >= 0 && begin > init && probeRead > begin && writeImage > probeRe
   "the firmware image must stream from esp_http_client into the inactive OTA partition");
 assert.ok(release > bulkWrite && verify > release && select > verify,
   "HTTP/TLS must be closed and cleaned before signature validation, and boot selection must follow it");
+assert.ok(hashSetup > probeRead && hashUpdate > hashSetup && hashFinish > release &&
+          exactHash > hashFinish && verify > exactHash,
+  "the complete downloaded byte stream must match the checked app SHA before signature validation and boot selection");
+assert.match(update,
+  /fetch_manifest_identity\([\s\S]{0,500}?strcmp\(offer\.version, request\.version\)[\s\S]{0,180}?strcmp\(offer\.app_sha256, request\.app_sha256\)/,
+  "the fresh manifest must still match the accepted checked version and SHA before download");
 const closeHelperStart = ota.indexOf("void close_http_client(");
 const closeHelperEnd = ota.indexOf("esp_err_t open_firmware_stream(", closeHelperStart);
 assert.ok(closeHelperStart >= 0 && closeHelperEnd > closeHelperStart,
@@ -105,8 +163,8 @@ assert.match(transport,
 assert.match(transport, /c\s*<=\s*0x20\s*\|\|\s*c\s*==\s*0x7f\s*\|\|\s*c\s*==\s*'\\\\'/,
   "URL policy must reject whitespace, controls and backslash parser ambiguities");
 
-const manifestStart = ota.indexOf("bool fetch_manifest_version_once(");
-const manifestEnd = ota.indexOf("bool fetch_manifest_version(", manifestStart);
+const manifestStart = ota.indexOf("bool fetch_manifest_identity_once(");
+const manifestEnd = ota.indexOf("bool fetch_manifest_identity(", manifestStart);
 assert.ok(manifestStart >= 0 && manifestEnd > manifestStart,
   "the manifest fetch boundary must remain identifiable");
 const manifestFetch = ota.slice(manifestStart, manifestEnd);
@@ -239,7 +297,7 @@ assert.match(update,
 // Every failure returns through ota_task, whose single epilogue releases s_busy. That is what makes
 // the memory refusal retryable without a power-cycle-only latch.
 const taskStart = ota.indexOf("void ota_task(");
-const taskEnd = ota.indexOf("bool start(", taskStart);
+const taskEnd = ota.indexOf("uint32_t next_generation(", taskStart);
 assert.ok(taskStart >= 0 && taskEnd > taskStart, "the OTA task epilogue must remain identifiable");
 const task = ota.slice(taskStart, taskEnd);
 assert.ok(task.indexOf("run_update(") < task.lastIndexOf("s_busy = false"),

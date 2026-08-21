@@ -2227,8 +2227,9 @@ Structure:
   `dev` (`…/dev/`, republished by every firmware-relevant merge). The URLs are *derived*, not
   configured twice — the dev feed is by construction the `dev/` subdirectory of the configured
   firmware base URL, so the two cannot be pointed at different hosts. The channel is persisted in
-  the config blob (v3) and applied **live**: nothing claims it at task start, `ota_update.cpp` reads
-  it when it fetches, so a check right after the switch already reads the new feed. Dev builds are
+  the config blob (v3) and applied **live**: a check reads the current channel when it fetches, so a
+  check right after the switch already reads the new feed. Once an update is accepted, it pins that
+  checked channel together with the offered version and app SHA-256 for the complete task. Dev builds are
   stamped `<next release>-dev.<n>` — a semver pre-release, so ordering does the work: a dev board
   upgrades to the next release on its own, and a release board never drifts onto a dev build.
   Switching *back* (dev → the last release) is a downgrade by version, which the gate below refuses
@@ -2250,7 +2251,8 @@ Structure:
   `ota_update.cpp` — manifest check, an HTTPS-only `esp_http_client` → `esp_ota` stream into the
   inactive slot, the **two-point downgrade gate** (manifest
   version *and* the image's own embedded `esp_app_desc_t` version, with exact artifact-version
-  equality required, so a lying or stale manifest is refused), signed-image validation and the
+  equality required), a streaming SHA-256 comparison against the manifest's
+  `provenance.app_sha256` (so a same-version replacement is also refused), signed-image validation and the
   **service health gate**. A `PENDING_VERIFY` image commits only after the base window, an active
   IP link, at least 24 KiB free internal heap with a 16 KiB largest block, zero heap/MQTT/poll
   allocation failures, and — when the X10A link is live and MQTT is configured — one accepted
@@ -2270,19 +2272,33 @@ Structure:
   requires a clean exact local source; runs the host catalog and heap contracts; and applies a fixed
   three-minute concurrent status/values/diag + OTA-manifest-TLS pressure window to the same signed
   image on the MAC-bound private-inventory `bench` role. Only then, with the current version lease
-  and an explicit confirmation of the distinct `production` role, it sends one un-retried update POST.
+  and an explicit confirmation of the distinct `production` role, it requires `/ota/check` to
+  synchronously return a non-zero accepted-operation generation. `/ota/status` must report that same
+  generation with `busy=false` and the exact idle channel/version/application-SHA offer before the
+  gate sends one un-retried update POST carrying that check generation and identity. Firmware accepts
+  the POST only while the generation and retained offer still match, copies them into a fixed task
+  slot and returns the immediate successor generation; a concurrent, replaced or unavailable
+  operation is HTTP 503, never a false `ok`. The task refetches the captured channel, requires the
+  same version and SHA, and hashes every downloaded byte before signature validation and boot
+  selection. This mutex-bound handshake closes stale-result, final-GET-to-POST and feed/config
+  replacement races rather than relying on timing.
   Reboot observation, the second pressure window and retained-X10A MQTT proof are GET/read-only. The
   bench board need not be physically connected to X10A, so it proves binary and allocation behavior
   rather than plant I/O; expected UART timeouts there are not a plant-link regression. The
   bench always overlaps real OTA-manifest TLS but does not require the optional weather task when
   diagnostics consent is off. The production role supplies the real X10A and weather canaries and
-  keeps the bounded timeout delta. The source contract and fourteen mutation canaries make stage
+  keeps the bounded timeout delta. The source contract and twenty-one mutation canaries make stage
   removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
-  rollback fail locally and in CI. This workflow creates no release and contains no 48-hour soak gate.
+  rollback fail locally and in CI. A production image which predates this generation/artifact
+  handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash
+  first. The gate fails before its POST and never falls back to the legacy false-success API. This
+  workflow creates no release and contains no 48-hour soak gate.
 - **Validation gets the transport's heap back first.** The firmware downloads through a fixed
   2 KiB INTERNAL buffer and closes/frees both that buffer and the complete HTTP/TLS client before
-  calling `esp_ota_end()`. That call remains IDF's mandatory RSA-3072/PSA verifier; only its success
-  permits the separate `esp_ota_set_boot_partition()` call. Before opening the image stream and
+  finishing the PSA SHA-256 stream and calling `esp_ota_end()`. The stream digest must match the
+  application SHA captured from the completed check; `esp_ota_end()` remains IDF's mandatory
+  RSA-3072/PSA verifier. Only both checks permit the separate `esp_ota_set_boot_partition()` call.
+  Before opening the image stream and
   again immediately before validation, a bounded five-second gate requires both 24 KiB total free
   INTERNAL 8-bit heap and a 12 KiB largest contiguous INTERNAL block. Refusal is retryable and
   fail-closed. Because `ESP_ERR_OTA_VALIDATE_FAILED` intentionally combines image-structure,
@@ -2300,7 +2316,7 @@ Structure:
   skips deliberately: the same missing second, spending none of the block the download needs, and
   counted as `mqtt_quiesced` instead of vanishing into a log ring. Lock-free
   `std::atomic<bool>` flags are armed by RAII guards across each network interval — **not**
-  `ota_status().state`, which copies three `std::string`s out under the mutex the OTA task holds, so
+  `ota_status().state`, which copies several `std::string`s out under the mutex the OTA task holds, so
   asking "is the heap under pressure?" would itself allocate, once a second, on the task the pressure
   is aimed at. The OTA window has seven exits, which is why its flag is cleared by a destructor
   rather than by hand at each. The hold-off is **bounded** (`OTA_QUIESCE_MAX_CYCLES`, 300 cycles ≈ 5
@@ -2671,8 +2687,11 @@ place:
   **all permanent Settings cards** together while `S.otaShown` (they are built and painted as one
   string, `esp32CardHtml()`) — otherwise the once-a-second rebuild would blink the percentage out and
   restart the spinner animation every frame. The flow itself:
-  `GET /ota/check`, poll `GET /ota/status` until the check finishes, confirm, `POST
-  /ota/update`, then poll again rendering the download progress **inline next to that version**
+  `GET /ota/check`, retain its accepted generation, and poll `GET /ota/status` until that same
+  generation reports `busy=false` plus a complete channel/version/application-SHA offer. This avoids
+  consuming the old idle status during the task's 1.1-second quiesce lead. After confirmation, the UI
+  passes the exact check lease to `POST /ota/update`, requires the immediate successor generation,
+  then polls only that operation while rendering download progress **inline next to that version**
   (a small ring + "n%", not a toast). On `done` it does **not** use the shared reboot-reconnect poll
   the config saves use — an OTA replaces the served UI itself, so `otaWaitReboot` waits for the board
   to come back (version changed / `uptime_s` went backwards / seen down→up) and **reloads the page**.
@@ -3409,17 +3428,25 @@ POST /set_lang    {lang:"auto"|"de"|"en"} -> validate + persist, applied LIVE (n
                   -> {"ok":true,"reboot":false} like the other /set_* routes
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the
                   fingerprint (RAM only) -> the next poll cycle sweeps protocol + re-fingerprints
-GET  /ota/check   start an async manifest check (?ms= is parsed but gates nothing — TLS date
-                  validation is compiled out, so OTA needs no wall clock even though SNTP now exists)
-POST /ota/update[?downgrade=1]  start the async download of the SELECTED channel's build.
-                  Re-fetches the manifest and re-runs the downgrade gate
-                  itself rather than trusting what /ota/check left behind: this route is reachable on
-                  its own, so gating only in /ota/check would mean no gate at all for a direct caller.
+GET  /ota/check   synchronously claim an async manifest check and return
+                  {ok:true,generation}; busy/task-unavailable -> HTTP 503 + ok:false. ?ms= is parsed
+                  but gates nothing — TLS date validation is compiled out, so OTA needs no wall clock
+POST /ota/update?after=<check-generation>&channel=<release|dev>&version=<checked-version>
+                 &sha256=<64-lowercase-hex>[&downgrade=1]
+                  start the async download only while the named check generation and exact retained
+                  offer still match under the OTA mutex. Acceptance returns the immediate successor
+                  {ok:true,generation}; missing/malformed identity is HTTP 400 and a busy, replaced
+                  or task-unavailable operation is HTTP 503, never a false success. The task copies
+                  the identity into fixed storage, refetches the captured channel, requires the same
+                  manifest version + application SHA, and hashes the downloaded byte stream before
+                  signature validation and boot selection.
                   ?downgrade=1 (query_flag_on — fires on "1" and nothing else) is the CHANNEL SWITCH:
                   the only way to install a build older than the running one (dev -> the last
                   release). Per-request, never stored
 GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, update_available,
-                  downgrade, channel, available, current} — the UI polls this; all strings go through
+                  downgrade, channel, busy, generation, available, available_sha256,
+                  available_channel, current} — `busy` and
+                  `generation` are copied under the same OTA mutex; the UI polls this; all strings go through
                   json_quote. `downgrade` = the offered build is installable but OLDER (the
                   dev -> release direction); the UI needs BOTH flags, since update_available alone
                   makes a release-channel check on a dev board read "up to date" forever

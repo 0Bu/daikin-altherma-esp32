@@ -72,6 +72,11 @@ a later full status response, and the rule that a successful `/ota/status` must 
 by a generic red unreachable state when the larger `/status` allocation is temporarily refused
 under OTA TLS heap pressure.
 
+`node test/test_ui_ota_handshake.mjs` executes the normal check/update browser handshake. It proves
+that the UI waits through the pre-state-change busy lead, rejects a replaced generation, labels an
+answered 503 as device-busy rather than unreachable, and carries the checked channel, version,
+application SHA and generation into the sole update POST before following its immediate successor.
+
 The same `gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
 test executes the production banner/inspector render functions from the assembled UI source and verifies
 that their DOM-write signatures invalidate when the persisted UI language changes while device state
@@ -124,10 +129,16 @@ both before transfer and immediately before validation, and boot selection remai
 successful verifier result. It also requires the allocation-rich X10A poll and MQTT publisher to use
 their bounded quiesce rules, distinguishes intentional holds from OOM skips, and pins the shared
 `/values`/MCP sender's fail-closed four-second wait behind active OTA or Weather TLS owners before
-its model-sized snapshot. IDF's umbrella image-validation error stays generic rather than falsely
+its model-sized snapshot. The same contract requires check/update HTTP success to carry the
+mutex-assigned operation generation, busy/task-unavailable starts to return 503, `/ota/status` to
+expose the mutex-consistent `busy` plus generation/channel/version/application-SHA handshake used by
+production promotion, and the accepted update task to hash every downloaded byte against that SHA
+before signed validation and boot selection.
+IDF's umbrella image-validation error stays generic rather than falsely
 claiming a bad signature. Initial feed URLs and every redirect stay on forced HTTPS, and an oversized
 response remains a size-policy refusal rather than masquerading as an interrupted connection.
-`tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently and proves the
+`tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently (including
+the fixed task lease, generation rollback and whole-stream SHA comparison) and proves the
 source contract turns red; the IDF-free wait decision itself is exercised by `test/test_logic.cpp`.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named

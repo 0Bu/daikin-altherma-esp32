@@ -956,12 +956,23 @@ function syncOtaSettingsLock() {
 // Poll /ota/status until `state` leaves the set we're waiting on, or we run out of patience.
 // Every OTA phase is asynchronous on the device (the download runs on its own task so the single
 // httpd worker stays free), so the UI's whole job here is to watch a state machine it does not drive.
-async function otaPoll(waitStates, tries, onTick) {
+async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, requireReleased = false) {
   for (let i = 0; i < tries; i++) {
     await new Promise((r) => setTimeout(r, 1000));
     let s;
     try { s = await j("/ota/status"); } catch { continue; }   // a dropped poll is not a failure
     if (onTick) onTick(s);
+    if (expectedGeneration !== null && s.generation !== expectedGeneration)
+      return { state: "error", message: t("ota.replaced") };
+    // A freshly accepted task owns its generation before the 1.1 s quiesce lead changes `state`.
+    // The check flow must therefore wait for the authoritative busy release, not consume the old
+    // idle/error payload that happens to remain visible during that lead.
+    if (expectedGeneration !== null && requireReleased && s.busy) continue;
+    // Update acceptance has the same lead. A terminal `done` is intentionally allowed while busy
+    // because the device reboots from run_update before the task epilogue can clear the flag; an
+    // inherited idle/error payload is not evidence that the new operation finished.
+    if (expectedGeneration !== null && s.busy && !waitStates.includes(s.state) && s.state !== "done")
+      continue;
     if (!waitStates.includes(s.state)) return s;
   }
   return null;
@@ -987,12 +998,23 @@ async function checkFirmwareUpdate() {
   let handedOff = false;
   try {
     otaInline("", { ring: true });                             // checking: spinner only, no label
-    try { await j("/ota/check?ms=" + Date.now()); }
+    let checkResponse;
+    try { checkResponse = await fetch("/ota/check?ms=" + Date.now()); }
     catch { otaFail(t("ota.unreachable")); return; }
+    if (checkResponse.status === 503) { otaFail(t("ota.busy")); return; }
+    if (!checkResponse.ok) { otaFail(await errorOf(checkResponse, t("ota.check_failed"))); return; }
+    const acceptedCheck = await checkResponse.json().catch(() => null);
+    const checkGeneration = acceptedCheck?.generation;
+    if (acceptedCheck?.ok !== true || !Number.isInteger(checkGeneration) || checkGeneration <= 0) {
+      otaFail(t("ota.check_failed")); return;
+    }
 
-    const s = await otaPoll(["checking"], 30);
+    const s = await otaPoll(["checking"], 30, null, checkGeneration, true);
     if (!s)                  { otaFail(t("ota.timeout")); return; }
     if (s.state === "error") { otaFail(s.message || t("ota.check_failed")); return; }
+    if (!s.available || !s.available_sha256 || !s.available_channel) {
+      otaFail(t("ota.check_failed")); return;
+    }
     // `downgrade` is the selected channel offering an OLDER build than the one running — the
     // dev → release direction. Without honouring it here, picking "Release" on a board that has
     // been following dev would report "up to date" forever and the channel would be a one-way door.
@@ -1023,15 +1045,27 @@ async function checkFirmwareUpdate() {
     // perfectly successful promise. Left unchecked it would fall through into the poll below and
     // surface 5 minutes later as "Update timed out" — the wrong diagnosis for a retryable refusal.
     let r;
-    try { r = await post("/ota/update" + (back ? "?downgrade=1" : ""), {}); }
+    const params = new URLSearchParams({
+      after: String(checkGeneration),
+      channel: s.available_channel,
+      version: s.available,
+      sha256: s.available_sha256,
+    });
+    if (back) params.set("downgrade", "1");
+    try { r = await post("/ota/update?" + params.toString(), {}); }
     catch { otaFail(t("ota.failed")); return; }
     if (r.status === 503) { otaFail(t("ota.busy")); return; }
     if (!r.ok) { otaFail(await errorOf(r, t("ota.failed"))); return; }
+    const acceptedUpdate = await r.json().catch(() => null);
+    const expectedUpdateGeneration = checkGeneration === 0xffffffff ? 1 : checkGeneration + 1;
+    if (acceptedUpdate?.ok !== true || acceptedUpdate?.generation !== expectedUpdateGeneration) {
+      otaFail(t("ota.replaced")); return;
+    }
     S.otaInstalling = true;
     otaCacheStore();
     syncOtaSettingsLock();
 
-    const done = await otaWatch();
+    const done = await otaWatch(expectedUpdateGeneration);
     if (!done)                  { otaFail(t("ota.timeout")); return; }
     if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
 
@@ -1049,13 +1083,13 @@ async function checkFirmwareUpdate() {
 // Watch a running download to its end, ticking the percentage into the header. Split out of
 // checkFirmwareUpdate() so resumeOta() can join a download already in flight — e.g. after a page
 // reload mid-update, where otherwise the header would sit silent while the device was busy.
-function otaWatch() {
+function otaWatch(expectedGeneration = null) {
   return otaPoll(["checking", "updating"], 300, (st) => {
     if (st.state === "updating") {
       otaInline(t("ota.pct", st.progress ?? 0), { ring: true, pct: st.progress ?? 0 });
       if (!S.status) renderOtaDashboardStatus();
     }
-  });
+  }, expectedGeneration);
 }
 
 // On page load, adopt an update that is already running on the device (a reload during a download,
@@ -1080,7 +1114,7 @@ async function resumeOta() {
     syncOtaSettingsLock();
     if (s.state === "updating") otaInline(t("ota.pct", s.progress ?? 0), { ring: true, pct: s.progress ?? 0 });
     if (restored || otaOnly) renderOtaDashboardStatus();
-    const done = s.state === "done" ? s : await otaWatch();
+    const done = s.state === "done" ? s : await otaWatch(s.generation ?? null);
     if (!done)                  { otaFail(t("ota.timeout")); return; }
     if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
     otaInline(t("ota.rebooting"), { ring: true, pct: 100 });

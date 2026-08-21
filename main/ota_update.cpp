@@ -46,6 +46,7 @@
 #include "freertos/semphr.h"
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
+#include "psa/crypto.h"
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -77,6 +78,20 @@ using Lock = SemGuard;
 // One OTA operation at a time. Guarded by s_mtx (not a bare bool): /ota/check and /ota/update are
 // both reachable from the network and a double-tap in the UI must not spawn two TLS sessions.
 bool s_busy = false;
+uint32_t s_generation = 0;
+
+// One OTA task can exist at a time, so one mutex-protected fixed slot is enough to carry an exact
+// update expectation across the asynchronous task boundary.  It is populated before xTaskCreate
+// while s_busy owns the slot and is copied by value at task entry; no request string or live config
+// is consulted after acceptance.
+enum class OtaTaskMode : uint8_t { Check, Update, Downgrade };
+struct OtaTaskArgs {
+    OtaTaskMode mode = OtaTaskMode::Check;
+    OtaChannel channel = OtaChannel::Release;
+    char version[32] = {0};
+    char app_sha256[65] = {0};
+};
+OtaTaskArgs s_task_args;
 
 // "An OTA network operation is in flight" — the ONE piece of OTA state read from outside on a
 // per-second cadence
@@ -106,7 +121,7 @@ constexpr int  kTaskStack     = 10240;
 constexpr UBaseType_t kTaskPrio = TASK_PRIO_OTA;   // see main/task_config.hpp for the tiers
 constexpr int  kHttpTimeoutMs = 15000;
 constexpr int  kOtaBufSize    = 2048;   // download chunk; deliberately small (contiguous heap)
-constexpr size_t kManifestMax = 1024;   // the real manifest is ~200 B; anything larger is not ours
+constexpr size_t kManifestMax = 1024;   // published installer+provenance manifest stays below 1 KiB
 constexpr unsigned kMaxRedirects = 5;
 // MQTT publishes once a second. Hold the operation flag for a little longer than one cadence before
 // opening TLS so a publisher which woke just before the OTA task has time to finish and stand aside.
@@ -122,13 +137,14 @@ struct OtaHeapSample {
     size_t largest_internal_block;
 };
 
-enum class OtaTransferFailure : uint8_t { None, Read, Write, Size };
+enum class OtaTransferFailure : uint8_t { None, Read, Write, Size, Hash };
 
 const char* ota_transfer_failure_name(OtaTransferFailure failure) {
     switch (failure) {
         case OtaTransferFailure::Read:  return "read";
         case OtaTransferFailure::Write: return "write";
         case OtaTransferFailure::Size:  return "size";
+        case OtaTransferFailure::Hash:  return "hash";
         default:                        return "none";
     }
 }
@@ -267,11 +283,11 @@ bool wait_for_mqtt_quiesce() {
 // was configured when the board booted.
 OtaChannel channel_now() { return config().ota_channel; }
 
-// Fetch the manifest for `url` and extract its "version" into `out`.
+// Fetch the manifest for `url` and extract the exact artifact identity into `out`.
 // `err` receives a short, USER-FACING reason on failure — the UI shows it verbatim, so it must say
 // what to do about it, not just what failed.
-bool fetch_manifest_version_once(const std::string& url, char* out, size_t outlen,
-                                 const char*& err, bool& retryable_allocator_failure) {
+bool fetch_manifest_identity_once(const std::string& url, OtaManifestIdentity& out,
+                                  const char*& err, bool& retryable_allocator_failure) {
     retryable_allocator_failure = false;
     // An empty URL means this build has no feed configured for the selected channel (an empty
     // firmware base URL — see logic/ota_channel.hpp). Say that, rather than letting the client
@@ -325,19 +341,22 @@ bool fetch_manifest_version_once(const std::string& url, char* out, size_t outle
             if (n <= 0) break;
             got += static_cast<size_t>(n);
         }
-        // manifest_version() is bounded by `got` and never assumes NUL termination.
-        if (got == 0)                                   err = "Empty manifest";
-        else if (!manifest_version(buf, got, out, outlen)) err = "Manifest has no usable version";
-        else                                            ok = true;
+        // manifest_identity() is bounded by `got`, assumes no NUL terminator and requires both the
+        // top-level version and provenance.app_sha256.  A legacy/version-only manifest cannot enter
+        // the exact-artifact update path.
+        if (got == 0)                                      err = "Empty manifest";
+        else if (!manifest_identity(buf, got, out))
+            err = "Manifest has no usable artifact identity";
+        else                                               ok = true;
     }
     close_http_client(c);
     return ok;
 }
 
-bool fetch_manifest_version(const std::string& url, char* out, size_t outlen, const char*& err) {
+bool fetch_manifest_identity(const std::string& url, OtaManifestIdentity& out, const char*& err) {
     for (unsigned attempt = 0; attempt < 2; ++attempt) {
         bool retryable = false;
-        if (fetch_manifest_version_once(url, out, outlen, err, retryable)) return true;
+        if (fetch_manifest_identity_once(url, out, err, retryable)) return true;
         if (!retryable || attempt != 0) return false;
         diag_printf("ota: manifest TLS allocation failed, retrying once after quiesce\n");
         vTaskDelay(kAllocatorRetryDelay);
@@ -352,53 +371,69 @@ void run_check() {
     const std::string url     = ota_channel_manifest_url(CONFIG_DAIKIN_OTA_MANIFEST_URL,
                                                          CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, ch);
 
-    char        avail[32] = {0};
+    OtaManifestIdentity offer{};
     const char* err       = "Update check failed";
-    if (!fetch_manifest_version(url, avail, sizeof(avail), err)) {
+    if (!fetch_manifest_identity(url, offer, err)) {
         diag_printf("ota: check failed (%s channel): %s\n", ota_channel_name(ch), err);
         Lock lk(s_mtx);
         s_status.state            = "error";
         s_status.message          = err;
         s_status.update_available = false;
         s_status.downgrade        = false;
-        s_status.channel          = ota_channel_name(ch);
+        s_status.available.clear();
+        s_status.available_sha256.fill('\0');
+        s_status.available_channel.clear();
         return;
     }
 
-    const bool newer = ota_is_upgrade(running, avail);
+    const bool newer = ota_is_upgrade(running, offer.version);
     // Installable but OLDER — the dev -> release direction. Reported so the UI can offer it as a
     // switch back rather than silently calling the release channel "up to date" on a dev board.
-    const bool down = !newer && ota_install_allowed(running, avail, /*allow_downgrade=*/true);
-    diag_printf("ota: %s manifest %s, running %s -> %s\n", ota_channel_name(ch), avail, running.c_str(),
+    const bool down = !newer && ota_install_allowed(running, offer.version, /*allow_downgrade=*/true);
+    diag_printf("ota: %s manifest %s, running %s -> %s\n", ota_channel_name(ch), offer.version, running.c_str(),
                 newer ? "update available" : down ? "older build offered" : "up to date");
     Lock lk(s_mtx);
     s_status.state            = "idle";
     s_status.message          = "";
-    s_status.available        = avail;
+    s_status.available        = offer.version;
+    std::memcpy(s_status.available_sha256.data(), offer.app_sha256,
+                sizeof(s_status.available_sha256));
+    s_status.available_channel = ota_channel_name(ch);
     s_status.update_available = newer;
     s_status.downgrade        = down;
     s_status.channel          = ota_channel_name(ch);
 }
 
-void run_update(bool allow_downgrade) {
+void run_update(const OtaTaskArgs& request) {
+    const bool allow_downgrade = request.mode == OtaTaskMode::Downgrade;
     const std::string running = esp_app_get_description()->version;
-    const OtaChannel  ch      = channel_now();
+    const OtaChannel  ch      = request.channel;
     set_state("checking", "Verifying the update");
 
-    // Re-fetch the manifest instead of trusting whatever /ota/check left in s_status. Two reasons,
-    // and the second is the one that matters: (a) the manifest can change between check and update,
-    // and (b) POST /ota/update is reachable on its own — without this, a client that skipped
-    // /ota/check would drive the download with a STALE or EMPTY `available`, i.e. with no gate at
-    // all. The gate has to sit on the path that downloads, not on the path that merely informs.
-    char        avail[32] = {0};
+    // Re-fetch the exact channel captured by the accepted /ota/check.  The acceptance boundary has
+    // already refused callers without that generation/version/SHA lease; the fresh fetch proves the
+    // feed still serves the same artifact before any image bytes are requested.
+    OtaManifestIdentity offer{};
     const char* err       = "Update check failed";
-    if (!fetch_manifest_version(ota_channel_manifest_url(CONFIG_DAIKIN_OTA_MANIFEST_URL,
-                                                         CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, ch),
-                                avail, sizeof(avail), err)) {
+    if (!fetch_manifest_identity(ota_channel_manifest_url(CONFIG_DAIKIN_OTA_MANIFEST_URL,
+                                                          CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, ch),
+                                 offer, err)) {
         diag_printf("ota: update aborted, %s manifest fetch failed: %s\n", ota_channel_name(ch), err);
         set_state("error", err);
         return;
     }
+
+    // The accepted request names the exact result of one completed /ota/check.  Re-fetching keeps
+    // direct/UI updates fresh, while this equality gate prevents a feed replacement between check
+    // and POST from redirecting an already accepted production operation.
+    if (std::strcmp(offer.version, request.version) != 0 ||
+        std::strcmp(offer.app_sha256, request.app_sha256) != 0) {
+        diag_printf("ota: update aborted, checked artifact changed (%s channel, expected %s)\n",
+                    ota_channel_name(ch), request.version);
+        set_state("error", "Update offer changed — check again");
+        return;
+    }
+    const char* avail = offer.version;
 
     // THE DOWNGRADE GATE — before a single byte of image is fetched. Gating the install instead of
     // the download would still let a hostile host burn the inactive slot and the bandwidth, and
@@ -625,6 +660,22 @@ void run_update(bool allow_downgrade) {
         return;
     }
 
+    // Hash the exact downloaded byte stream alongside the OTA write.  Secure-Boot verification
+    // proves that the image is authentic; this independent digest proves it is the one bench-tested
+    // application whose SHA the accepted check/request pinned.  PSA is initialized by ESP-IDF at
+    // system start and the operation object is fixed-size task stack state.
+    psa_hash_operation_t hash_operation = PSA_HASH_OPERATION_INIT;
+    psa_status_t hash_status = psa_hash_setup(&hash_operation, PSA_ALG_SHA_256);
+    bool hash_active = hash_status == PSA_SUCCESS;
+    if (!hash_active) {
+        if (ota_open) { esp_ota_abort(ota_handle); ota_open = false; }
+        heap_caps_free(buffer);
+        close_http_client(client);
+        diag_printf("ota: exact-artifact hash setup failed (%ld)\n", static_cast<long>(hash_status));
+        set_state("error", "Couldn't verify the exact update artifact");
+        return;
+    }
+
     size_t written = 0;
     int last = -1;
     OtaTransferFailure transfer_failure = OtaTransferFailure::None;
@@ -633,6 +684,11 @@ void run_update(bool allow_downgrade) {
             written + len > update_partition->size) {
             e = ESP_ERR_INVALID_SIZE;
             transfer_failure = OtaTransferFailure::Size;
+            return false;
+        }
+        hash_status = psa_hash_update(&hash_operation, data, len);
+        if (hash_status != PSA_SUCCESS) {
+            transfer_failure = OtaTransferFailure::Hash;
             return false;
         }
         const esp_err_t write_e = esp_ota_write(ota_handle, data, len);
@@ -679,6 +735,10 @@ void run_update(bool allow_downgrade) {
     close_http_client(client);
 
     if (!transfer_ok || !complete) {
+        if (hash_active) {
+            psa_hash_abort(&hash_operation);
+            hash_active = false;
+        }
         if (ota_open) { esp_ota_abort(ota_handle); ota_open = false; }
         const OtaHeapSample failed = ota_heap_sample();
         diag_printf("ota: download failed (class=%s err=%s, complete=%d, bytes=%u/%lld, "
@@ -689,11 +749,28 @@ void run_update(bool allow_downgrade) {
                     static_cast<unsigned>(failed.largest_internal_block));
         const char* message = transfer_failure == OtaTransferFailure::Size
                             ? "Update rejected: image size is invalid"
+                            : transfer_failure == OtaTransferFailure::Hash
+                            ? "Couldn't verify the exact update artifact"
                             : transfer_failure == OtaTransferFailure::Write
                             ? "Couldn't write the update"
                             : !complete ? "Incomplete download"
                                         : "Download failed — check the connection";
         set_state("error", message);
+        return;
+    }
+
+    uint8_t actual_sha256[32] = {0};
+    size_t actual_sha256_len = 0;
+    hash_status = psa_hash_finish(&hash_operation, actual_sha256, sizeof(actual_sha256),
+                                  &actual_sha256_len);
+    if (hash_status != PSA_SUCCESS) psa_hash_abort(&hash_operation);
+    hash_active = false;
+    if (hash_status != PSA_SUCCESS || actual_sha256_len != sizeof(actual_sha256) ||
+        !ota_sha256_matches(actual_sha256, request.app_sha256)) {
+        if (ota_open) { esp_ota_abort(ota_handle); ota_open = false; }
+        diag_printf("ota: exact-artifact SHA-256 mismatch/status=%ld — running image intact\n",
+                    static_cast<long>(hash_status));
+        set_state("error", "Update rejected: artifact does not match the checked build");
         return;
     }
 
@@ -756,26 +833,14 @@ void run_update(bool allow_downgrade) {
     esp_restart();
 }
 
-// The three modes, carried through xTaskCreate's void* parameter: nullptr = check, otherwise a
-// pointer to one of these static bytes whose VALUE says which install. Static storage, so there is
-// no lifetime question and no allocation; distinct VALUES rather than distinct addresses, because
-// two identical const objects are exactly what a linker doing identical-code/data folding may merge
-// — and a merged pair would silently turn every update into a downgrade-permitted one.
-//
-// A static bool alongside the busy flag would also work, but it would be state that outlives the
-// task and could be read by the NEXT run: "install an older build" must not be inheritable.
-const char kUpdateMode          = 1;
-const char kUpdateDowngradeMode = 2;
-
 // One task body for both operations, so there is exactly one stack and one place the busy flag is
 // cleared. The body self-guards: a task is a C frame boundary like an HTTP handler is, so an
 // escaping std::bad_alloc means std::terminate -> reboot — and rebooting the heat-pump bridge
 // because an update CHECK ran out of memory would be absurd (AGENTS.md → Memory, concurrency, and
 // HTTP safety).
 void ota_task(void* arg) {
-    const char mode      = arg ? *static_cast<const char*>(arg) : 0;
-    const bool update    = mode != 0;
-    const bool downgrade = mode == kUpdateDowngradeMode;
+    const OtaTaskArgs request = *static_cast<const OtaTaskArgs*>(arg);
+    const bool update = request.mode != OtaTaskMode::Check;
     {
         OtaNetworkFlag active;
         vTaskDelay(kNetworkQuiesceLead);
@@ -790,7 +855,7 @@ void ota_task(void* arg) {
             } else if (!wait_for_weather_quiesce()) {
                 set_state("error", "Another network operation is still using memory — retry shortly");
             } else if (update) {
-                run_update(downgrade);
+                run_update(request);
             } else {
                 run_check();
             }
@@ -806,25 +871,59 @@ void ota_task(void* arg) {
     vTaskDelete(nullptr);
 }
 
-// Spawn the single OTA task, refusing if one is already running. Returns false if busy.
-bool start(bool update, bool allow_downgrade = false) {
-    {
-        Lock lk(s_mtx);
-        if (s_busy) return false;
-        s_busy = true;
-    }
-    const char* sentinel = allow_downgrade ? &kUpdateDowngradeMode : &kUpdateMode;
-    void* mode = update ? const_cast<void*>(static_cast<const void*>(sentinel)) : nullptr;
-    if (xTaskCreate(ota_task, "ota", kTaskStack, mode, kTaskPrio, nullptr) != pdPASS) {
-        // Task creation failed (no heap). Clear the flag — otherwise the guard above latches ON for
-        // the rest of the boot and OTA is dead until a reboot, with no way for the user to tell.
-        Lock lk(s_mtx);
-        s_busy         = false;
+uint32_t next_generation(uint32_t current) {
+    ++current;
+    return current == 0 ? 1 : current;
+}
+
+// Spawn while holding the same mutex that owns busy/generation/task arguments.  Publish the complete
+// slot before xTaskCreate; the busy-owned slot stays immutable until the task has copied it, even if
+// the higher-priority task runs immediately.  On task-creation failure the prior generation is
+// restored, so a generation always identifies an operation that actually got a task.
+uint32_t start_locked(const OtaTaskArgs& request, uint32_t previous_generation) {
+    s_busy = true;
+    s_task_args = request;
+    s_generation = next_generation(previous_generation);
+    if (xTaskCreate(ota_task, "ota", kTaskStack, &s_task_args, kTaskPrio, nullptr) != pdPASS) {
+        s_busy = false;
+        s_generation = previous_generation;
         s_status.state = "error";
         s_status.message = "Out of memory — retry in a moment";
-        return false;
+        return 0;
     }
-    return true;
+    return s_generation;
+}
+
+uint32_t start_check() {
+    Lock lk(s_mtx);
+    if (s_busy) return 0;
+    return start_locked(OtaTaskArgs{}, s_generation);
+}
+
+uint32_t start_update(uint32_t after_generation, const char* expected_channel,
+                      const char* expected_version, const char* expected_app_sha256,
+                      bool allow_downgrade) {
+    if (!after_generation || !expected_channel || !expected_version ||
+        !ota_sha256_hex_valid(expected_app_sha256)) return 0;
+    const bool dev = std::strcmp(expected_channel, "dev") == 0;
+    const bool release = std::strcmp(expected_channel, "release") == 0;
+    if (!dev && !release) return 0;
+    if (std::strlen(expected_version) == 0 ||
+        std::strlen(expected_version) >= sizeof(s_task_args.version))
+        return 0;
+
+    Lock lk(s_mtx);
+    if (s_busy || s_generation != after_generation || s_status.state != "idle" ||
+        s_status.available_channel != expected_channel || s_status.available != expected_version ||
+        std::strcmp(s_status.available_sha256.data(), expected_app_sha256) != 0 ||
+        (!s_status.update_available && !(allow_downgrade && s_status.downgrade))) return 0;
+
+    OtaTaskArgs request{};
+    request.mode = allow_downgrade ? OtaTaskMode::Downgrade : OtaTaskMode::Update;
+    request.channel = dev ? OtaChannel::Dev : OtaChannel::Release;
+    std::memcpy(request.version, expected_version, std::strlen(expected_version) + 1);
+    std::memcpy(request.app_sha256, expected_app_sha256, sizeof(request.app_sha256));
+    return start_locked(request, after_generation);
 }
 
 }  // namespace
@@ -835,21 +934,27 @@ const char* ota_img_suffix() {
 
 bool ota_download_active() { return s_network_active.load(std::memory_order_acquire); }
 
-void ota_check_async(int64_t /*browser_epoch_ms*/) {
+uint32_t ota_check_async(int64_t /*browser_epoch_ms*/) {
     // browser_epoch_ms stays plumbed (the route parses ?ms=) but gates nothing: TLS certificate
     // DATE validation is compiled out (MBEDTLS_HAVE_TIME_DATE is not set), so the fetch needs no
     // wall clock. SNTP exists now for syslog timestamps, but making OTA wait on it would strand a
     // board whose NTP server is unreachable — see docs/SECURITY.md.
-    if (!start(/*update=*/false)) ESP_LOGW("ota", "check ignored: an OTA operation is already running");
+    const uint32_t generation = start_check();
+    if (!generation) ESP_LOGW("ota", "check ignored: OTA busy or task unavailable");
+    return generation;
 }
 
-void ota_update_async(bool allow_downgrade) {
-    if (!start(/*update=*/true, allow_downgrade))
-        ESP_LOGW("ota", "update ignored: an OTA operation is already running");
+uint32_t ota_update_async(uint32_t after_generation, const char* expected_channel,
+                          const char* expected_version, const char* expected_app_sha256,
+                          bool allow_downgrade) {
+    const uint32_t generation = start_update(after_generation, expected_channel, expected_version,
+                                             expected_app_sha256, allow_downgrade);
+    if (!generation) ESP_LOGW("ota", "update ignored: OTA busy or task unavailable");
+    return generation;
 }
 
 bool ota_busy() {
-    // Deliberately NOT ota_status().state != "idle": that builder copies four std::strings out and
+    // Deliberately NOT ota_status().state != "idle": that builder copies several std::strings out and
     // also takes the CONFIG mutex, and its one caller here is the heap watchdog running on a heap
     // that is failing. This critical section allocates nothing at all.
     Lock lk(s_mtx);
@@ -866,6 +971,8 @@ OtaStatus ota_status() {
     Lock lk(s_mtx);
     s_status.current = esp_app_get_description()->version;
     s_status.channel = ch;
+    s_status.busy = s_busy;
+    s_status.generation = s_generation;
     return s_status;
 }
 
