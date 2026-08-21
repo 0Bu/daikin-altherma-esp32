@@ -95,7 +95,8 @@ const context = vm.createContext({
 
 vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   this.__ui = { S, t, esp32CardHtml, dynamicControlCardHtml, circulationSettingsCardHtml,
-                connLinks, liveData, histHtml, INSPECT };`, context, { filename: "main/www/app.sources" });
+                refrigerantServiceCardHtml, connLinks, liveData, histHtml, INSPECT };`, context,
+  { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────────────────────
@@ -160,6 +161,9 @@ const HEALTHY = () => ({
     env3_rows: [{ id: "env3_temperature", label: "Outdoor temperature" }] },
   health: { covered_s: 86400, full_span: true, available: 7, assessable: 7, evaluated: 7,
     status: "ok", checks: [] },
+  refrigerant_service: { kind: "observation", state: "waiting", continuous_s: 0, samples: 0,
+    mode: "heating", blocker: "compressor_not_running", special_phases_known: true,
+    load_proven: false, eev_feedback: false, limitations: [], metrics: {} },
   sys: { free_heap: 120000, min_free_heap: 90000, max_alloc: 60000, reset_reason: "power_on",
     safe_mode: false },
   ntp: { server: "pool.ntp.org", synced: true, time: "2026-08-07T10:00:00Z" },
@@ -256,6 +260,7 @@ const REMOVE = {
     s.profile = { id: "auto" };
     s.detect = { ...s.detect, valid: false, capacity_kw: null, capacity_kw_iu: null, ou_eeprom: "",
       candidates: [], families: [], ambiguous: false, model: null };
+    delete s.refrigerant_service;
     // Only the BOARD's own trends survive an unresolved profile — history_record_board() owns them
     // and the poll task calls it before it decides whether to detect or to sweep.
     s.history.rows = s.history.rows.filter((r) => r.id === "free_heap" || r.id === "max_alloc");
@@ -286,6 +291,9 @@ const REMOVE = {
     // heap route reaches the same sys.safe_mode with cause "heap" and opposite advice (#407).
     s.sys = { ...s.sys, safe_mode: true, safe_mode_cause: "crash_loop", reset_reason: "task_wdt" };
     s.hp = { ...s.hp, connected: false, last_ok_s: -1, values: 0 };
+    s.detect = { ...s.detect, valid: false, capacity_kw: null, capacity_kw_iu: null, ou_eeprom: "",
+      candidates: [], families: [], ambiguous: false, model: null };
+    delete s.refrigerant_service;
     // mb_start() is never called, so the stack's own `enabled` flag is false even though an address
     // IS saved — the one place /status reports a task fact where its siblings report a config fact.
     s.modbus = { ...s.modbus, enabled: false, connected: false, plant_gate_known: false,
@@ -342,6 +350,7 @@ const RENDERERS = {
   esp32CardHtml: () => ui.esp32CardHtml(),
   dynamicControlCardHtml: () => ui.dynamicControlCardHtml(),
   circulationSettingsCardHtml: () => ui.circulationSettingsCardHtml(),
+  refrigerantServiceCardHtml: () => ui.refrigerantServiceCardHtml(),
 };
 
 // Copy that tells the reader to CONFIGURE a source. Printing one of these while that very source is
@@ -399,6 +408,15 @@ for (const scenario of SCENARIOS) {
       `${scenario.name}: protocol diagnosis must disappear with the X10A link`);
   }
   checks++;
+
+  // The service object has no truthful state until this boot detects an X10A profile. Safe mode
+  // never starts the poll task and an initially silent bus never resolves one, so both API fixture
+  // shapes omit the object and the browser must omit the card rather than blaming profile coverage.
+  if (!status.detect.valid) {
+    assert.equal(rendered.refrigerantServiceCardHtml, "",
+      `${scenario.name}: no detected X10A profile must render no refrigerant-service card`);
+    checks++;
+  }
 
   // RULE 3b — a pill whose SOURCE depends on which systems exist must never describe one that does
   // not. The Smart-Grid request is the only pill with two possible instruments (the HomeHub register

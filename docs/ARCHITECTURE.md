@@ -124,7 +124,8 @@ hp_poll.cpp +
 logic/refrigerant_service.hpp
                     → a generation-bound, non-persistent REFRIGERANT SERVICE OBSERVATION folded from
                       the same fresh X10A sweep as the live cache. It publishes a separate
-                      /status.refrigerant_service object, never a ninth health check, and contains no
+                      /status.refrigerant_service object after boot-time model detection, never a
+                      ninth health check, and contains no
                       service command, settling threshold, range judgement or charge verdict
 state_dwell.cpp/.hpp → HOW LONG EACH ELIGIBLE SWITCHED ROW HAS READ WHAT IT READS — the value list's other
                       half, since "OFF" describes a plant that finished a charge four seconds ago and
@@ -918,7 +919,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   not provide the full special-phase set or a sweep with incomplete optional context is `Limited`.
   Its gap allowance is derived from the active profile's publishable page count and the shared UART
   timeout. The read-only HTTP snapshot also expires a stalled active window. It reports duration,
-  sample count, limitations and min/mean/max values under `/status.refrigerant_service`; explicit
+  sample count, limitations and min/mean/max values under `/status.refrigerant_service` after this
+  boot has detected a profile (the complete object is omitted before that); explicit
   `load_proven:false` and `eev_feedback:false` prevent the EEV command or passive traffic from being
   mistaken for mechanical feedback, full load, settling, charge or a completed service test.
 - `logic/redact.hpp` — what a diagnostic snapshot must **not** carry when it leaves the device, for
@@ -2996,7 +2998,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   since it is a runtime-configurable network service too, not a static board fact,
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
-                  refrigerant_service{kind:"observation",
+                  [refrigerant_service{kind:"observation",
                   state:"unsupported"|"waiting"|"observing"|"limited"|"interrupted",
                   continuous_s,samples,
                   mode:"unknown"|"heating"|"cooling"|"other",
@@ -3008,7 +3010,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   "pressure_sides_incomplete"|"outdoor_context_incomplete"],
                   metrics{compressor_rps,discharge_c,eev_command_pls,
                   high_pressure_bar,low_pressure_bar}}, where each metric is null without a sample
-                  or {min,mean,max} in the unit named by its key,
+                  or {min,mean,max} in the unit named by its key}], omitted until this boot has
+                  detected an X10A profile,
                   plus
                   modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,
                   values,task_stack_min_free_bytes,plant_gate_known,plant_gate_active

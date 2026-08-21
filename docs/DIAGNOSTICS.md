@@ -193,6 +193,10 @@ diagnosis. It remains outside `/status.health`, never changes the eight-row summ
 Plant diagnostics opt-in. It only watches the ordinary read-only X10A traffic already used for live
 values.
 
+Until this boot has detected an X10A profile, including while safe mode prevents the poll task from
+starting, the status object and card are absent. This avoids presenting missing source evidence as a
+claim that the installed profile lacks signals.
+
 The window starts only from fresh values captured in the same poll sweep while all of these facts are
 confirmed: the compressor is running in **space heating**, the three-way valve is not on domestic hot
 water, defrost is off, all available unit-fault rows are readable and normal, no available startup,

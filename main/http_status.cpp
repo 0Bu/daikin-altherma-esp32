@@ -1132,9 +1132,12 @@ static void append_status_json(JsonOut& j, bool redact) {
     }
 
     // A separate read-only service observation, deliberately OUTSIDE health{}: it never contributes
-    // to the eight diagnosis rows, assessable/evaluated counts or the overall verdict.  Every number
-    // is from one uninterrupted series of fresh same-sweep X10A values.  There is no settling limit,
-    // completed-test state or refrigerant-charge judgement in this contract.
+    // to the eight diagnosis rows, assessable/evaluated counts or the overall verdict.  Before this
+    // boot has detected a profile there is no service source to describe, so omit the complete
+    // object instead of misreporting the tracker's default unsupported_profile state. Every number
+    // below is from one uninterrupted series of fresh same-sweep X10A values. There is no settling
+    // limit, completed-test state or refrigerant-charge judgement in this contract.
+    if (c.fp_valid) {
     j += "\"refrigerant_service\":{\"kind\":\"observation\",\"state\":";
     json_append_quoted(j, logic::refrigerant_service_state_name(refrigerant_service.state));
     j += ",\"continuous_s\":";
@@ -1192,6 +1195,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ","; append_service_metric("high_pressure_bar", refrigerant_service.high_pressure);
     j += ","; append_service_metric("low_pressure_bar", refrigerant_service.low_pressure);
     j += "}},";
+    }
 
     // System health: heap headroom + why the device last booted, so both are visible from the LAN
     // without a serial console (and without a broker — unlike the MQTT heartbeat). free_heap

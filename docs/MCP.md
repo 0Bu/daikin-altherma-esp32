@@ -32,7 +32,7 @@ representation through a host-tested 1 KiB chunk sink; neither complete result i
 allocation. `get_hp_values` additionally stages its X10A/HomeHub snapshots before the first byte.
 
 While firmware OTA owns TLS, the shared HTTP boundary rejects every MCP POST before request parsing
-or JSON-RPC envelope allocation; `get_status` otherwise materialises the complete status object.
+or entering the allocation-bearing streamed `get_status` serializer.
 Outside OTA, the shared values sender waits behind the shorter Weather TLS operation in 250 ms
 steps for at most four seconds. Either case fails before the snapshot and before the first response
 byte with HTTP `503` and `Content-Type: text/plain`: the global OTA boundary says

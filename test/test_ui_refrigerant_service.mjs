@@ -22,6 +22,8 @@ assert.match(normalizedStatus, /"load_proven":false,"eev_feedback":false/,
              "the payload must state both unavailable proof boundaries explicitly");
 assert.match(statusSource, /OUTSIDE health\{\}/,
              "the observation must remain independent of the eight health checks");
+assert.match(statusSource, /if \(c\.fp_valid\) \{\s*j \+= "\\\"refrigerant_service\\\"/s,
+             "the payload must omit service state until this boot has detected a profile");
 assert.doesNotMatch(logicSource, /RefrigerantServiceState::Complete|REFRIGERANT_SERVICE[^\n]*1200/,
                     "the tracker must not invent a completion threshold or diagnosis");
 assert.match(logicSource, /confirm mechanical EEV movement/,
