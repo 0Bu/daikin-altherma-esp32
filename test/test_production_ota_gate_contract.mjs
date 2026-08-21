@@ -140,6 +140,13 @@ assert.match(gate, /OTA_OFFER_POLL_SECONDS\s*=\s*0\.1/,
   "the gate must observe the accepted operation without a long blind polling gap");
 assert.match(gate, /OTA_STATUS_POLL_SECONDS\s*=\s*0\.1/,
   "the gate must sample the short completed OTA state before reboot");
+assert.match(gate, /LEGACY_OFFER_STABLE_SECONDS\s*=\s*3\.0/,
+  "the bench-only legacy return must outwait stale idle status from the accepted check");
+const legacyOfferWait = gate.slice(gate.indexOf("def wait_for_legacy_offer("),
+  gate.indexOf("\ndef exercise_bench_full_download(", gate.indexOf("def wait_for_legacy_offer(")));
+assert.match(legacyOfferWait,
+  /stable_since:\s*float\s*\|\s*None\s*=\s*None[\s\S]{0,500}?now\s*-\s*stable_since\s*>=\s*LEGACY_OFFER_STABLE_SECONDS[\s\S]{0,160}?stable_since\s*=\s*None/,
+  "the legacy offer must remain continuously exact and idle before the one bench restore write");
 const newFirmwareWait = gate.slice(gate.indexOf("def wait_for_new_firmware("),
   gate.indexOf("\ndef set_update_channel(", gate.indexOf("def wait_for_new_firmware(")));
 assert.match(newFirmwareWait,

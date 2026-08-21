@@ -340,7 +340,10 @@ concurrent `/status`, `/values`, `/diag` and `/ota/status` pressure. The target 
 operation-local free/largest-block minima plus the completed validation state, boot the signed
 release cleanly, and keep it healthy past
 the 90-second rollback probation before switching back to the official dev feed and returning to the
-exact target version/ELF. Waiting before both replacements is mandatory because ESP-IDF refuses
+exact target version/ELF. A legacy release can expose its prior `idle` offer before the newly accepted
+check task starts, so only this private bench-return leg requires the exact offer to remain continuously
+idle for three seconds before its one restore POST; a silently ignored write fails the bench stage and
+cannot reach production. Waiting before both replacements is mandatory because ESP-IDF refuses
 another OTA write while the running target or release is still `PENDING_VERIFY`. The freshly restored target then runs
 the fixed three-minute pressure window with another real OTA-manifest TLS fetch. Optional Open-Meteo
 evidence is not a bench prerequisite.
@@ -377,8 +380,8 @@ diagnostics consent is off; the production role still requires a successful weat
 A production image which predates the `busy`/generation/artifact handshake cannot enter this path:
 the gate requires the new response fields and fails before its sole POST. Its one-time migration is
 a signed, NVS-preserving USB application flash followed by the ordinary bench-first gate for later
-updates. There is deliberately no timing-based legacy OTA fallback: old firmware can acknowledge an
-ignored busy update with HTTP success, which is the incident this boundary prevents.
+updates. There is deliberately no timing-based legacy OTA fallback for production: old firmware can
+acknowledge an ignored busy update with HTTP success, which is the incident this boundary prevents.
 
 The private inventory shape is:
 

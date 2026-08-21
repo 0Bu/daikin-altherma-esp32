@@ -85,6 +85,10 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         'set_update_channel(host, "dev")',
         'set_update_channel(host, "release")')],
+    ["the legacy bench restore trusts a stale idle offer", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "LEGACY_OFFER_STABLE_SECONDS = 3.0",
+        "LEGACY_OFFER_STABLE_SECONDS = 0.0")],
     ["the release health-window wait is bypassed", () =>
       replaceOnce("scripts/production-ota-gate.py",
         "release_health_window = wait_for_bench_health_window(",
