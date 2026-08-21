@@ -59,6 +59,13 @@ CONFIG_HTTPD_MAX_URI_LEN=512
 # Lift the cap to match the TCP PCB pools (16) so the background OTA download has room.
 CONFIG_LWIP_MAX_SOCKETS=16
 
+# Give DHCP fingerprinting the same stable product identity as option 12 and mDNS. ESP-IDF 6.0.2
+# uses the netif hostname as option 60 when vendor-class support is enabled, so this needs no
+# lease stop/start or second product string. Pin the matching upstream buffer default explicitly:
+# check-sdkconfig-defaults.py can then prove that a generated config has room for the added option.
+CONFIG_LWIP_DHCP_DISABLE_VENDOR_CLASS_ID=n
+CONFIG_LWIP_DHCP_OPTIONS_LEN=109
+
 # LWIP TCP windows — double the default send/receive windows (8xMSS).  The dashboard has a strict
 # 150 KiB gzip build limit and is normally smaller; reducing the artefact is safer than growing
 # per-socket buffers on a device whose contiguous heap is already the binding resource.
