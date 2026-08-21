@@ -2290,7 +2290,11 @@ Structure:
   must report sampled operation-local heap minima and the completed verifier state, boot the signed
   release, survive beyond its 90-second
   rollback-health probation with safe heap and no allocation-failure counters, and only then return
-  through the official dev feed to the exact target version/ELF. This wait is load-bearing: ESP-IDF
+  through the official dev feed to the exact target version/ELF. A pre-handshake release exposes a
+  stale `idle` result before its newly accepted check task has necessarily started, so this private
+  bench-only return requires the exact offer to remain continuously idle for three seconds before its
+  one restore POST; a silent refusal still fails before production is reachable. This wait is
+  load-bearing: ESP-IDF
   refuses another OTA write while an OTA-installed initial target or the release is still `PENDING_VERIFY`;
   the following real OTA start remains the authoritative state check, while a USB-installed target
   simply receives the same conservative dwell.
@@ -2316,7 +2320,7 @@ Structure:
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract and thirty-five mutation canaries make stage
+  contract and thirty-six mutation canaries make stage
   removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
   rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash

@@ -51,6 +51,7 @@ OTA_CHECK_TIMEOUT_S = 120
 OTA_TIMEOUT_S = 480
 OTA_OFFER_POLL_SECONDS = 0.1
 OTA_STATUS_POLL_SECONDS = 0.1
+LEGACY_OFFER_STABLE_SECONDS = 3.0
 BENCH_HEALTH_WINDOW_S = 105
 BENCH_HEALTH_WINDOW_TIMEOUT_S = 150
 DEV_MANIFEST_SUFFIX = "/dev/manifest.json"
@@ -677,13 +678,20 @@ def wait_for_bench_health_window(
 
 def wait_for_legacy_offer(host: str, expected_version: str) -> None:
     deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
+    stable_since: float | None = None
     while time.monotonic() < deadline:
         status = request_json(host, "/ota/status")
         if status.get("state") == "error":
             fail(f"legacy bench OTA check failed: {status.get('message', '')}")
         if status.get("state") == "idle" and status.get("available") == expected_version and \
            status.get("update_available") is True:
-            return
+            now = time.monotonic()
+            if stable_since is None:
+                stable_since = now
+            elif now - stable_since >= LEGACY_OFFER_STABLE_SECONDS:
+                return
+        else:
+            stable_since = None
         time.sleep(OTA_OFFER_POLL_SECONDS)
     fail("legacy bench OTA check did not settle on the exact dev version")
 
