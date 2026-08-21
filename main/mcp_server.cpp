@@ -21,9 +21,9 @@ static esp_err_t mcp_transport_error(httpd_req_t* req, const char* status, const
 }
 
 static esp_err_t mcp_post(httpd_req_t* req) {
-    // get_status materialises the full status object inside the JSON-RPC envelope. Refuse the whole
-    // MCP request before parsing/building while OTA owns TLS; get_hp_values already reaches the
-    // shared values gate, but parsing first would still allocate its framing beside X509.
+    // get_status streams the full status object inside the JSON-RPC envelope. Refuse the whole MCP
+    // request before parsing/starting that stream while OTA owns TLS; get_hp_values already reaches
+    // the shared values gate, but parsing first would still allocate its framing beside X509.
     if (ota_download_active()) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         httpd_resp_set_type(req, "text/plain");
@@ -75,7 +75,10 @@ static esp_err_t mcp_post(httpd_req_t* req) {
         case McpMethod::ToolsCall:
             if (r.tool == "get_status") {
                 mcp_tool_result_begin(response, "Current device and heat-pump status.");
-                http_append_status_json(response, false);
+                std::string suffix;
+                mcp_tool_result_end(suffix);
+                mcp_result_end(suffix);
+                return http_send_status_json(req, response, suffix, false);
             } else {
                 // The complete reference-profile values object is larger than the target's normal
                 // largest contiguous heap block. Keep only the small JSON-RPC framing strings here;

@@ -270,14 +270,24 @@ inline constexpr double TEMP_MAX_C = 200.0;
 // this must not do. Those rows are no worse off than before this filter existed, and the catalog-wide
 // test pins both the coverage and — the direction that actually matters — that no water-pressure row
 // is ever caught by either signal.
-inline bool is_refrigerant_pressure(const ValueDef& def, const ValueDef* profile, size_t count) {
+// The structural half is shared with feature_gate.hpp.  Keeping the page/twin decision here avoids
+// the future inference gate growing a second, label-based definition of "refrigerant pressure" and
+// accidentally accepting the hydronic Water pressure row merely because both use dataType 2 (bar).
+inline bool is_refrigerant_pressure_structure(const ValueDef& def, bool has_saturation_twin) {
     if (def.type != 2) return false;
     if (def.reg == 0x20 || def.reg == 0x21 || def.reg == 0xA0 || def.reg == 0xA1) return true;
-    if (!profile) return false;
+    return has_saturation_twin;
+}
+
+inline bool is_refrigerant_pressure(const ValueDef& def, const ValueDef* profile, size_t count) {
+    bool has_saturation_twin = false;
+    if (!profile) return is_refrigerant_pressure_structure(def, false);
     for (size_t i = 0; i < count; i++)
-        if (profile[i].conv == 405 && profile[i].reg == def.reg && profile[i].offset == def.offset)
-            return true;
-    return false;
+        if (profile[i].conv == 405 && profile[i].reg == def.reg && profile[i].offset == def.offset) {
+            has_saturation_twin = true;
+            break;
+        }
+    return is_refrigerant_pressure_structure(def, has_saturation_twin);
 }
 
 // Publish-time plausibility filter: is this decoded Reading fit to publish? Drops a °C temperature

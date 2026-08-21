@@ -651,8 +651,8 @@ const statusEnd = httpStatus.indexOf("struct ValuesSnapshot", statusStart);
 assert.ok(statusStart >= 0 && statusEnd > statusStart, "/status must remain identifiable");
 const statusHandler = httpStatus.slice(statusStart, statusEnd);
 assert.match(statusHandler,
-  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,700}?HttpJsonChunks/,
-  "/status must refuse before its allocation-rich snapshot while OTA owns TLS");
+  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,700}?return http_send_status_json\(req, \{\}, \{\}, redact\);/,
+  "/status must refuse before entering the streamed snapshot sender while OTA owns TLS");
 assert.ok(!statusHandler.includes("wait_for_values_tls_owner"),
   "/status must fail fast rather than blocking the sole HTTP worker");
 const activeModelsStart = httpStatus.indexOf("static esp_err_t h_active_model_values(");
@@ -685,12 +685,13 @@ assert.match(scanHandler,
   /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,180}?wifi_scan\(/,
   "/scan must refuse OTA before Wi-Fi scanning and network-list allocation");
 const mcpPostStart = mcp.indexOf("static esp_err_t mcp_post(");
-const mcpStatusBuild = mcp.indexOf("http_append_status_json(response, false)", mcpPostStart);
+const mcpStatusSend = mcp.indexOf(
+  "return http_send_status_json(req, response, suffix, false);", mcpPostStart);
 const mcpOtaGate = mcp.indexOf("if (ota_download_active())", mcpPostStart);
 const mcpBody = mcp.indexOf("char body[1024]", mcpPostStart);
 assert.ok(mcpPostStart >= 0 && mcpOtaGate > mcpPostStart && mcpBody > mcpOtaGate &&
-          mcpStatusBuild > mcpBody,
-  "MCP must refuse OTA before parsing or materialising its full get_status snapshot");
+          mcpStatusSend > mcpBody,
+  "MCP must refuse OTA before parsing or entering its streamed get_status snapshot");
 assert.match(mcp.slice(mcpOtaGate, mcpBody),
   /503 Service Unavailable[\s\S]{0,150}?text\/plain[\s\S]{0,150}?httpd_resp_sendstr/,
   "MCP's OTA refusal must remain allocation-free and explicit");

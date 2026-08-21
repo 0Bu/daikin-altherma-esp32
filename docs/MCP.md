@@ -27,12 +27,12 @@ The implemented subset follows the date-versioned MCP specification:
 
 The request body is bounded to 1 KiB and parsed by the IDF-free, host-tested
 [`logic/mcp.hpp`](../main/logic/mcp.hpp) core. Every route invocation still runs under the shared
-HTTP OOM guard. `get_hp_values` stages its X10A/HomeHub snapshots before the first byte, then emits
-the JSON-RPC envelope and shared `/values` representation through a host-tested 1 KiB chunk sink;
-the complete model-sized response is never one contiguous allocation.
+HTTP OOM guard. Both tools emit their JSON-RPC envelope and the shared `/status` or `/values`
+representation through a host-tested 1 KiB chunk sink; neither complete result is one contiguous
+allocation. `get_hp_values` additionally stages its X10A/HomeHub snapshots before the first byte.
 
 While firmware OTA owns TLS, the shared HTTP boundary rejects every MCP POST before request parsing
-or JSON-RPC envelope allocation; `get_status` otherwise materialises the complete status object.
+or entering the allocation-bearing streamed `get_status` serializer.
 Outside OTA, the shared values sender waits behind the shorter Weather TLS operation in 250 ms
 steps for at most four seconds. Either case fails before the snapshot and before the first response
 byte with HTTP `503` and `Content-Type: text/plain`: the global OTA boundary says

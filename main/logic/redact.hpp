@@ -11,7 +11,7 @@
 // TWO SHAPES, because the two routes leak differently:
 //   * /status leaks by FIELD — named values in a JSON object built field by field, so the
 //     substitution happens where the value is written (http_status.cpp calls redact_or) and never as
-//     a post-processing pass over the finished string. That matters: http_append_status_json() runs
+//     a post-processing pass over the finished string. That matters: append_status_json() runs
 //     on the httpd task whose stack overflow killed v1.0.12, and a second full-size buffer is
 //     exactly what that budget has no room for.
 //   * /diag leaks by LINE — a handful of log statements interpolate a host, an IP or an SSID into

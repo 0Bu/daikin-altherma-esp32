@@ -247,7 +247,7 @@ HomeHub register is the **same physical quantity** as which X10A row. Nothing el
 pairs them.
 
 **The pairing may never be made on the label.** The catalog spells one quantity many ways across the
-43 detectable profiles (four spellings of leaving water, one with a double space) and *reuses* tags
+39 detection profiles (four spellings of leaving water, one with a double space) and *reuses* tags
 across different quantities — `(R1T)` is both the outdoor air sensor on `0x20` and the indoor
 leaving-water sensor. A label match would be incomplete and wrong, which is the mistake
 `lwt_select.hpp` and `ou_stale.hpp` exist to prevent. A wrong pairing is worst in the fallback case

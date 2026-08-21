@@ -71,6 +71,7 @@
 #include "logic/mqtt_base.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/reference_temperature.hpp"
+#include "logic/refrigerant_service.hpp"
 #include "logic/weather_forecast.hpp"
 #include "logic/x10a_snapshot.hpp"
 #include "logic/weather_mqtt.hpp"
@@ -11124,10 +11125,10 @@ static void test_checkup() {
     CHECK(hchecked >= 39);
     // The retry counters reach 39+ profiles via the overlay, while the compressor witness reaches
     // far fewer — which is exactly why the cycling and retries checks gate on coverage instead of
-    // assuming it. 16 of the detectable profiles carry no page 0x30 at all (feature_gate.hpp
-    // measures the same thing from the other side).
-    CHECK(with_retries >= 39);
-    CHECK(with_rps >= 20 && with_rps < 39);
+    // assuming it. Exactly 13 of the 39 detection profiles carry no page 0x30 at all
+    // (feature_gate.hpp measures the same thing from the other side).
+    CHECK(with_retries == 39);
+    CHECK(with_rps == 26);
 }
 
 // ── ValueDef::no_publish — the detect-only row flag ───────────────────────────────────────────
@@ -12425,6 +12426,217 @@ static void test_feature_gate() {
     const auto ghost_cov = feature_coverage(profile_view(ghost, 1, nullptr, 0, 0x10));
     CHECK(!ghost_cov.retry_counters);
     CHECK(!uc5_supported(ghost_cov));
+
+    // A WATER pressure row is not refrigerant-circuit coverage.  Six detected profiles used to pass
+    // this half of inference_supported() solely because type 2 means bar for both circuits.
+    ValueDef water_only[] = {{0x62, 11, 105, 1, 2, "Water pressure"}};
+    const auto water_cov = feature_coverage(profile_view(water_only, 1, nullptr, 0, 0x62));
+    CHECK(!water_cov.refrigerant_pressure);
+
+    int refrigerant_profiles = 0;
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        const auto v = def::resolved(p);
+        const auto c = feature_coverage(v);
+        bool refrigerant = false;
+        for (size_t i = 0; i < v.count(); i++) {
+            if (fg_is_refrigerant_pressure(v, i)) refrigerant = true;
+        }
+        if (refrigerant) refrigerant_profiles++;
+        CHECK(c.refrigerant_pressure == refrigerant);
+    }
+    // All 39 current detection profiles structurally expose an outdoor pressure row.  This catalog
+    // count is not the regression test for the bug — the synthetic water-only profile above is — but
+    // it proves the hardening did not accidentally disable a real current profile.
+    CHECK(refrigerant_profiles == 39);
+
+    ValueDef outdoor_bar[] = {{0x20, 12, 105, 2, 2, "Pressure"}};
+    CHECK(feature_coverage(profile_view(outdoor_bar, 1, nullptr, 0, 0x20)).refrigerant_pressure);
+
+    // The pressure row and its structural saturation twin may live in different ProfileView spans;
+    // flattening the view as base+count would be UB and checking only base would miss this case.
+    ValueDef hydronic_bar[] = {{0x62, 15, 105, 2, 2, "Pressure sensor"}};
+    ValueDef saturation_twin[] = {{0x62, 15, 405, 2, 1, "Pressure sensor(T)"}};
+    const auto cross_span = profile_view(hydronic_bar, 1, saturation_twin, 1, 0x62);
+    CHECK(feature_coverage(cross_span).refrigerant_pressure);
+
+    ValueDef hidden_bar[] = {{0x20, 12, 105, 2, 2, "Pressure", true}};
+    CHECK(!feature_coverage(profile_view(hidden_bar, 1, nullptr, 0, 0x20)).refrigerant_pressure);
+}
+
+static void test_refrigerant_service() {
+    using namespace daik::logic;
+
+    RefrigerantServiceCoverage c;
+    refrigerant_service_cover_row(c, 0x30, 0, 152, false);
+    refrigerant_service_cover_row(c, 0x60, 2, 315, false);
+    refrigerant_service_cover_row(c, 0x60, 12, 306, false);
+    refrigerant_service_cover_row(c, 0x10, 1, 304, false);
+    refrigerant_service_cover_row(c, 0x20, 4, 105, false);
+    refrigerant_service_cover_row(c, 0x20, 6, 105, false);
+    refrigerant_service_cover_row(c, 0x20, 10, 105, false);
+    refrigerant_service_cover_row(c, 0x30, 3, 151, false);
+    refrigerant_service_cover_row(c, 0x62, 15, 105, true);
+    refrigerant_service_cover_row(c, 0x20, 14, 105, true);
+    refrigerant_service_cover_row(c, 0x20, 0, 105, false);
+    refrigerant_service_cover_row(c, 0x20, 2, 105, false);
+    refrigerant_service_cover_row(c, 0x10, 1, 306, false);
+    refrigerant_service_cover_row(c, 0x10, 1, 305, false);
+    refrigerant_service_cover_row(c, 0x10, 1, 303, false);
+    refrigerant_service_cover_row(c, 0x10, 1, 302, false);
+    refrigerant_service_cover_row(c, 0x60, 3, 203, false);
+    CHECK(refrigerant_service_supported(c));
+    CHECK(refrigerant_service_special_phases_known(c));
+    CHECK(c.high_pressure && c.low_pressure && c.fault_rows == 1);
+
+    // Water pressure never becomes either refrigerant side, even though its datatype is also bar.
+    RefrigerantServiceCoverage water;
+    refrigerant_service_cover_row(water, 0x62, 11, 105, false);
+    CHECK(!water.high_pressure && !water.low_pressure);
+    CHECK(!refrigerant_service_supported(water));
+    CHECK(refrigerant_service_mode_from_text("Heating") == RefrigerantServiceMode::Heating);
+    CHECK(refrigerant_service_mode_from_text("Cooling") == RefrigerantServiceMode::Cooling);
+    CHECK(refrigerant_service_mode_from_text("Heating + DHW") == RefrigerantServiceMode::Other);
+    CHECK(refrigerant_service_mode_from_text("DHW") == RefrigerantServiceMode::Other);
+    CHECK(refrigerant_service_mode_from_text("?") == RefrigerantServiceMode::Unknown);
+
+    RefrigerantServiceSample s;
+    s.rps_known = s.rps_running = true; s.rps_tenths = 310;
+    s.mode = RefrigerantServiceMode::Heating;
+    s.valve_known = true;
+    s.defrost_known = true;
+    s.fault_known = true;
+    s.restart_known = s.startup_known = s.oil_return_known =
+        s.pressure_equalizing_known = true;
+    s.discharge_ok = true; s.discharge_tenths = 820;
+    s.suction_ok = true; s.suction_tenths = 20;
+    s.liquid_ok = true; s.liquid_tenths = 310;
+    s.eev_ok = true; s.eev_tenths = 2400;
+    s.high_pressure_ok = true; s.high_pressure_tenths = 153;
+    s.low_pressure_ok = true; s.low_pressure_tenths = 45;
+    s.outdoor_air_ok = true; s.outdoor_air_tenths = 30;
+    s.outdoor_hx_ok = true; s.outdoor_hx_tenths = -20;
+
+    RefrigerantServiceTracker t;
+    CHECK(!refrigerant_service_snapshot(t, 99999999).coverage_evaluated);
+    constexpr int64_t service_gap_us = 5000000;
+    refrigerant_service_record(t, c, s, 100000000, 7, service_gap_us);
+    CHECK(refrigerant_service_snapshot(t, 100000000).coverage_evaluated);
+    CHECK(t.state == RefrigerantServiceState::Observing);
+    CHECK(t.continuous_us == 0 && t.samples == 1);
+    CHECK(t.discharge.min_tenths == 820 && t.discharge.mean_tenths() == 820);
+    s.discharge_tenths = 860; s.rps_tenths = 330;
+    refrigerant_service_record(t, c, s, 101250000, 7, service_gap_us);
+    CHECK(t.continuous_us == 1250000 && t.samples == 2);
+    CHECK(t.discharge.min_tenths == 820 && t.discharge.max_tenths == 860);
+    CHECK(t.discharge.mean_tenths() == 840);
+    const auto snap = refrigerant_service_snapshot(t, 102000000);
+    CHECK(snap.state == RefrigerantServiceState::Observing && snap.samples == 2);
+    CHECK(snap.continuous_s == 1);
+    CHECK(snap.discharge.available && snap.discharge.mean_tenths == 840);
+
+    RefrigerantServiceSample unknown_valve = s;
+    unknown_valve.valve_known = false;
+    CHECK(!refrigerant_service_decide(c, unknown_valve).eligible);
+    RefrigerantServiceSample unknown_fault = s;
+    unknown_fault.fault_known = false;
+    CHECK(!refrigerant_service_decide(c, unknown_fault).eligible);
+    RefrigerantServiceSample unknown_rps = s;
+    unknown_rps.rps_known = false;
+    CHECK(refrigerant_service_decide(c, unknown_rps).blocker ==
+          RefrigerantServiceBlocker::MissingFreshData);
+    RefrigerantServiceSample cooling = s;
+    cooling.mode = RefrigerantServiceMode::Cooling;
+    CHECK(!refrigerant_service_decide(c, cooling).eligible);
+    RefrigerantServiceSample dhw = s;
+    dhw.valve_dhw = true;
+    CHECK(!refrigerant_service_decide(c, dhw).eligible);
+
+    // A profile-provided special-phase witness is mandatory in every sample.  Unknown cannot mean
+    // OFF and a later good sweep must start a new window instead of upgrading blind time.
+    RefrigerantServiceSample blind_phase = s;
+    blind_phase.startup_known = false;
+    CHECK(!refrigerant_service_decide(c, blind_phase).eligible);
+
+    // An observed defrost interrupts instead of being folded into an apparently steady window.
+    s.defrost_on = true;
+    refrigerant_service_record(t, c, s, 102500000, 7, service_gap_us);
+    CHECK(t.state == RefrigerantServiceState::Interrupted);
+    CHECK(t.blocker == RefrigerantServiceBlocker::Defrost);
+    CHECK(t.samples == 0);
+    s.defrost_on = false;
+    refrigerant_service_record(t, c, s, 103500000, 7, service_gap_us);
+    CHECK(t.state == RefrigerantServiceState::Observing && t.samples == 1);
+
+    // A gap is not interpolated.  The next fresh sweep starts a new window only after explicitly
+    // reporting the interruption once.
+    refrigerant_service_record(t, c, s, 110000000, 7, service_gap_us);
+    CHECK(t.state == RefrigerantServiceState::Interrupted);
+    CHECK(t.blocker == RefrigerantServiceBlocker::PollGap);
+    refrigerant_service_record(t, c, s, 111000000, 7, service_gap_us);
+    CHECK(t.state == RefrigerantServiceState::Observing && t.samples == 1);
+
+    // A stalled poll is reflected by the read-only snapshot even before the poll task records its
+    // next sample.  Snapshotting never mutates or extends the retained tracker.
+    const auto stale = refrigerant_service_snapshot(t, 117000001);
+    CHECK(stale.state == RefrigerantServiceState::Interrupted);
+    CHECK(stale.blocker == RefrigerantServiceBlocker::PollGap);
+    CHECK(stale.samples == 0 && t.samples == 1);
+
+    // Deliberate quiescence and exception cycles are an evidence gap, never proof that the
+    // compressor stopped.  An active window is interrupted; an idle tracker keeps waiting.
+    RefrigerantServiceTracker active_gap = t;
+    refrigerant_service_record_poll_gap(active_gap, 111500000, 7);
+    CHECK(active_gap.state == RefrigerantServiceState::Interrupted);
+    CHECK(active_gap.blocker == RefrigerantServiceBlocker::PollGap);
+    CHECK(active_gap.mode == RefrigerantServiceMode::Unknown && active_gap.samples == 0);
+    RefrigerantServiceTracker idle_gap;
+    refrigerant_service_record_poll_gap(idle_gap, 111500000, 7);
+    CHECK(!refrigerant_service_snapshot(idle_gap, 111500000).coverage_evaluated);
+    CHECK(idle_gap.state == RefrigerantServiceState::Waiting);
+    CHECK(idle_gap.blocker == RefrigerantServiceBlocker::PollGap);
+
+    // Cooling cannot inherit a heating window: the established pressure-side role is heating-only.
+    refrigerant_service_record(t, c, cooling, 112000000, 7, service_gap_us);
+    CHECK(t.state == RefrigerantServiceState::Interrupted);
+    CHECK(t.blocker == RefrigerantServiceBlocker::UnknownMode);
+
+    // Without the profile-specific special-phase rows the same raw window is useful but LIMITED.
+    RefrigerantServiceCoverage limited = c;
+    limited.restart_standby = limited.startup = limited.oil_return =
+        limited.pressure_equalizing = false;
+    s.restart_known = s.startup_known = s.oil_return_known =
+        s.pressure_equalizing_known = false;
+    RefrigerantServiceTracker lt;
+    refrigerant_service_record(lt, limited, s, 200000000, 9, service_gap_us);
+    CHECK(lt.state == RefrigerantServiceState::Limited);
+    CHECK(!lt.special_phases_known);
+    CHECK(lt.limitation_mask & RefrigerantServiceSpecialPhases);
+
+    // Optional context missing once limits the whole uninterrupted window even when it returns.
+    s.suction_ok = false;
+    refrigerant_service_record(lt, limited, s, 201000000, 9, service_gap_us);
+    CHECK(lt.state == RefrigerantServiceState::Limited);
+    CHECK(lt.limitation_mask & RefrigerantServiceTemperatures);
+    s.suction_ok = true;
+    refrigerant_service_record(lt, limited, s, 202000000, 9, service_gap_us);
+    CHECK(lt.state == RefrigerantServiceState::Limited);
+
+    // Missing/unknown is never the permissive OFF value, and a source generation change cannot
+    // splice two physical units into one window.
+    s.discharge_ok = false;
+    refrigerant_service_record(lt, limited, s, 203000000, 9, service_gap_us);
+    CHECK(lt.state == RefrigerantServiceState::Interrupted);
+    CHECK(lt.blocker == RefrigerantServiceBlocker::MissingFreshData);
+    s.discharge_ok = true;
+    refrigerant_service_record(lt, limited, s, 204000000, 10, service_gap_us);
+    CHECK(lt.state == RefrigerantServiceState::Limited);
+    CHECK(lt.generation == 10 && lt.samples == 1 && lt.continuous_us == 0);
+
+    // A non-monotonic clock cannot add time to the observation.
+    refrigerant_service_record(lt, limited, s, 203999999, 10, service_gap_us);
+    CHECK(lt.state == RefrigerantServiceState::Interrupted);
+    CHECK(lt.blocker == RefrigerantServiceBlocker::PollGap);
 }
 
 // ── logic/state_dwell.hpp ───────────────────────────────────────────────────────────────────────
@@ -14159,6 +14371,7 @@ int main() {
     test_tie_break_reach();
     test_entity_identity();
     test_feature_gate();
+    test_refrigerant_service();
     test_state_dwell();
     test_checkup_persist();
     test_history_persist();

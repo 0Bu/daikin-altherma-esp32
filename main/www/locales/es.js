@@ -1,4 +1,4 @@
-// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
+// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -141,6 +141,27 @@ I18N.es = localeValues([
   /* card.candidates */ "Modelos posibles",
   /* card.oueeprom */ "ID de la unidad exterior",
   /* card.checkup */ "Diagnóstico de la instalación · 24 h",
+  /* service.title */ "Observación de servicio del circuito frigorífico",
+  /* service.state.waiting */ "ESPERANDO",
+  /* service.state.observing */ "OBSERVANDO",
+  /* service.state.limited */ "LIMITADA",
+  /* service.state.interrupted */ "INTERRUMPIDA",
+  /* service.row.window */ "Ventana actual",
+  /* service.row.reason */ "Motivo",
+  /* service.reason.unsupported_profile */ "El perfil carece de señales requeridas.",
+  /* service.reason.compressor_not_running */ "Compresor parado.",
+  /* service.reason.unsupported_or_unknown_mode */ "No está en calefacción o el modo es desconocido.",
+  /* service.reason.dhw_path */ "ACS activa.",
+  /* service.reason.defrost */ "El desescarche está activo.",
+  /* service.reason.unit_fault */ "Fallo de la unidad activo.",
+  /* service.reason.special_controller_phase */ "Arranque, reinicio, retorno de aceite o igualación de presión activos.",
+  /* service.reason.missing_fresh_signal */ "Falta una señal reciente requerida.",
+  /* service.reason.poll_gap */ "Interrupción o pausa intencionada de X10A.",
+  /* service.window */ (d, n) => `${d} · ${n} ${n === 1 ? "muestra nueva" : "muestras nuevas"}`,
+  /* service.help.observing */ "Los valores nuevos de la misma lectura X10A siguen continuos en esas condiciones.",
+  /* service.help.limited */ "Ventana continua; falta contexto opcional de temperatura, presión, exterior o fase.",
+  /* service.help.interrupted */ "Ventana terminada; la siguiente lectura válida parte de cero.",
+  /* service.common */ "Solo observación: no es prueba de servicio/plena carga; no demuestra estabilización ni carga; no juzga rangos. Los pulsos EEV son órdenes, no respuesta de la válvula.",
   /* check.fault */ "Fallo de la unidad",
   /* check.dhw_loss */ "Pérdida de calor del depósito de ACS",
   /* check.cycling */ "Arranques del compresor",
@@ -1068,20 +1089,20 @@ DESCRIPTION_I18N.es = descriptionValues([
   ["Temperatura del agua en la entrada o salida del intercambiador de placas que transfiere calor entre refrigerante y circuito."], // 63
   ["Sensor del intercambiador exterior; <0 °C puede ser normal y sin humedad no prueba hielo."], // 64
   ["Temperatura exterior medida por la unidad, usada para compensación climática y decisiones de funcionamiento."], // 65
-  ["Temperatura del gas refrigerante caliente y comprimido que sale del compresor."], // 66
+  ["Gas caliente a la salida del compresor; depende de presión, velocidad, modo y carga. Un valor o un rango de otra familia no prueba fallo ni falta de refrigerante."], // 66
   ["Temperatura del gas refrigerante frío y de baja presión que retorna al compresor."], // 67
   ["Temperatura del refrigerante en la línea de líquido entre intercambiadores."], // 68
   ["Temperatura del refrigerante a la entrada/salida del evaporador, el intercambiador que absorbe calor."], // 69
   ["Temperatura de la línea de inyección de refrigerante, usada internamente para controlar la inyección y proteger el ciclo."], // 70
   ["Temperatura medida en una parte bifásica, con líquido y vapor, del circuito frigorífico."], // 71
-  ["Temperatura del sensor de deshielo del intercambiador exterior, usada para decidir la protección antihielo o el desescarche."], // 72
+  ["Sensor de deshielo exterior; posición y control dependen del modelo. Un punto no prueba hielo en toda la batería ni el fin del desescarche."], // 72
   ["Temperatura de saturación calculada desde la presión; no es un sensor separado ni una presión en bar."], // 73
-  ["Presión del refrigerante en el lado de alta/descarga o baja/aspiración."], // 74
+  ["Presión alta o baja: valorar una tendencia estable del mismo modo/modelo; arranque, retorno de aceite y desescarche la cambian. No hay rango universal."], // 74
   ["Velocidad del compresor en rps; depende del modelo, mayor suele pedir más, pero no mide calor."], // 75
-  ["Orden EEV en pasos; no es % de apertura ni caudal másico y solo se compara en igual modelo y modo."], // 76
+  ["Orden EEV en pasos, no realimentación mecánica, % ni caudal. Por sí sola no prueba movimiento, bloqueo o falta de refrigerante."], // 76
   ["Temperatura de la electrónica de control del motor del ventilador exterior."], // 77
   ["Velocidad del ventilador exterior, en etapa o rpm."], // 78
-  ["Objetivo interno hacia el que se regula el circuito frigorífico, por ejemplo temperatura objetivo de evaporación/condensación."], // 79
+  ["Objetivo interno según modelo/modo; comparar con la saturación derivada de la presión correspondiente. La diferencia no diagnostica la causa ni la carga."], // 79
   ["Objetivo interno de temperatura de descarga/puerto del compresor, usado por las protecciones de la unidad."], // 80
   ["ΔT objetivo entre impulsión y retorno; depende de modelo y modo, no de una regla universal de 5 K."], // 81
   ["Refrigerante cargado en la unidad, por ejemplo R32 o R410A."], // 82
@@ -1133,7 +1154,7 @@ MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Estado propio de error/aviso: error activo da AVISO; aviso o mensaje borrado en 24 h da NOTA, sin inferencia del proyecto."], // health_fault
   ["Pérdida tranquila: regla del proyecto, NOTA ≥0,8 K/h; volumen y ΔT influyen, >≈1,85 K/h puede filtrarse como consumo y OK no prueba aislamiento."], // health_dhw_loss
   ["NOTA con ≥12 ciclos de calefacción y media <10 min; excluye ACS/frío, no es límite Daikin y si quedan demasiados sin clasificar evalúa todos juntos."], // health_cycling
-  ["Cuenta desescarches: NOTA con >15 % del tiempo de compresor y ≥3 ciclos; no es límite Daikin y faltan humedad y temperatura superficial."], // health_defrost
+  ["Cuenta desescarches: NOTA con >15 % y ≥3 ciclos; no es límite Daikin. R4T es contexto en vivo, no entra en el veredicto y un punto no representa toda la batería."], // health_defrost
   ["Presión mínima: >1,0 bar; ≤1,0 da NOTA y tras 60 s ADVERTENCIA, pero el intervalo depende del modelo."], // health_pressure
   ["Caudal tras 60 s de bomba: solo tramo medido; un valor aislado dice poco y se compara en igual modelo, modo y condiciones, sin límite universal."], // health_flow
   ["Tiempo observado de BUH/BSH: frío, emergencia, desescarche, ACS o excedentes pueden explicarlo; no hay límite universal."], // health_heater

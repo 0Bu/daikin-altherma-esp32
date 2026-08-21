@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: d8de49f958161e90edf932ea7f9584cee1aad173d3cfd1e1fb08ce1ee5025e20 -->
+<!-- diagnostic-evidence-contract: 716466ed8a33857e11332656ba9faf052c1988dc46d6fa661e33b62691a988e9 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -12,6 +12,10 @@ For every row in the **Plant diagnostics · 24 h** card, this page answers four 
 The whole feature is an explicit opt-in under Settings › Firmware and is off by default. Turning it
 on begins a fresh evidence generation; turning it off stops and clears the diagnosis and its
 additional room, forecast, and circulation sources. None of the results below is a recommendation.
+
+The card observes ordinary operation; it does not command service mode, full load, or a stationary
+refrigerant test. No manufacturer settling duration can therefore be inferred from a complete
+24-hour window, and none of the eight results is a passed commissioning test.
 
 X10A observations are also scoped to the configured target generation. A link, wiring, or detected
 unit change invalidates an in-flight cycle before it can enter this evidence window; the old target's
@@ -36,6 +40,51 @@ The signal addresses come from the [X10A register map](REGISTERS.md), which was 
 protocol analysis and live captures. That is strong project evidence for the **decoding**, but it is
 not an official Daikin guarantee that X10A is a public or cross-generation stable diagnostic
 interface.
+
+<a id="refrigerant-service-observation"></a>
+### Separate refrigerant service observation
+
+This object is deliberately outside the eight-diagnosis evidence matrix and `/status.health`. It is
+an **observation**, not a manufacturer limit, project heuristic, health verdict, or completion test.
+It is always derived from ordinary read-only X10A polling and does not require the default-off Plant
+diagnostics consent because it activates no additional source or controller action.
+
+**Evidence boundary:** No model-specific Altherma primary source in this repository establishes a
+universal hot-gas, pressure, EEV-pulse, or twenty-minute settling range for this feature. The
+implementation therefore transfers no numeric threshold, superheat formula, defrost-end rule,
+refrigerant-shortage pattern, or claim that a valve fault cannot produce an error code.
+
+**Firmware rule:** `/status` omits the complete object until this boot has detected an X10A profile
+and the current source generation has evaluated that resolved profile's structural signal coverage.
+The detection commit resets the coverage witness under the service mutex before `/status` can pair
+it with the new fingerprint; the first committed profile sweep (or the resolved-profile UART-failure
+path after structural coverage is known) establishes it. This prevents an unevaluated or absent
+source from being reported as an `unsupported_profile`; only evaluated coverage may make that claim.
+[`refrigerant_service.hpp`](../main/logic/refrigerant_service.hpp) then accepts only fresh same-sweep
+values during confirmed space heating, with running compressor, non-DHW valve,
+defrost off, all declared fault rows current and normal, and every profile-provided special-phase
+witness current and inactive. A profile which lacks one or more of those optional phase witnesses
+may still produce a `limited` window; a witness declared by the profile but unreadable in one sweep
+is required current evidence and ends an active window. Discharge temperature, EEV command, and at least one structurally
+identified refrigerant-pressure side are mandatory. Cooling is excluded because the available
+pressure-side evidence is heating-specific. Missing required data, a mode/valve/fault/phase change,
+non-monotonic time, or a gap beyond the profile-sized poll allowance ends the window. A source
+generation change resets continuity and may accept the current qualifying sample as the first sample
+of a new zero-duration window. Optional suction/liquid temperature, both pressure sides, or outdoor
+context missing once latches the window to `limited`; lacking the profile-level full special-phase
+set makes every otherwise qualifying window `limited`.
+
+**Project boundary:** The poll allowance is a transport bound: two fixed poll intervals plus
+one 300 ms UART timeout per publishable register page in the active profile. It is not a physical
+settling time. The firmware publishes continuous seconds, sample count, limitations, and min/mean/max
+figures; it has no `complete`, `OK`, `ready`, charge, or full-load state. `/status` explicitly reports
+`load_proven:false` and `eev_feedback:false`.
+
+**Not established:** Hot-gas temperature, pressure, targets, and EEV commands vary with exact model,
+mode, compressor speed, load, and outdoor conditions. A stable-looking window does not establish
+full load, thermodynamic equilibrium, correct refrigerant charge, sensor calibration, mechanical EEV
+movement, or the cause of a difference from a controller target. Official model-specific procedures
+and suitable service instruments remain necessary.
 
 ## Evidence matrix for all eight diagnoses
 
@@ -124,6 +173,9 @@ compressor runtime. `CHECKUP_DEFROST_MIN_COUNT` and `CHECKUP_DEFROST_SHARE_PCT` 
 [`checkup.hpp`](../main/logic/checkup.hpp).
 Fresh X10A outdoor minimum/mean is collected over that same readable, running-compressor population;
 it is explanatory context and changes neither the ratio nor its verdict.
+The separately published live R4T de-icer temperature is not paired into the checkup population or
+verdict. Its sensor position and the unit's defrost start/end logic are model-specific, and one local
+reading cannot establish the whole coil's surface or ice state.
 
 **Project boundary:** The 15% share and three-event requirement are broad **project heuristics**, not
 Daikin limits. The firmware knows neither outdoor humidity nor the outdoor heat exchanger's surface

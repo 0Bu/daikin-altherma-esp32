@@ -19,6 +19,8 @@
 #include "logic/crc.hpp"
 #include "logic/detect.hpp"    // detect_commit_no_match — the rule poll_detect applies to an empty match
 #include "logic/detect_backoff.hpp"
+#include "logic/feature_gate.hpp"
+#include "logic/fault_state.hpp"
 #include "logic/hexdump.hpp"
 #include "logic/history.hpp"   // history_parse_tenths — the SAME parse history.cpp applies to the witness
 #include "logic/history_persist.hpp"  // source identity fingerprint for durable X10A history
@@ -26,6 +28,7 @@
 #include "logic/ou_stale.hpp"
 #include "logic/ota_quiesce.hpp"
 #include "logic/raw_capture.hpp"
+#include "logic/refrigerant_service.hpp"
 #include "logic/x10a_snapshot.hpp"
 #include "http_handlers.hpp"
 #include "ota_update.hpp"
@@ -53,6 +56,14 @@ static uint64_t                 s_cache_identity_fp = 0; // same committed sourc
 static uint32_t                 s_cache_revision = 0; // every cache/reconfigure commit, guarded by s_mtx
 static HpStats               s_stats;
 static int64_t               s_last_ok_us = -1;
+static logic::RefrigerantServiceTracker  s_refrigerant_service;
+static logic::RefrigerantServiceCoverage s_refrigerant_service_coverage;
+// Poll-task-only fixed scratch. Keeping these objects static is deliberate: the live task has
+// historically reached only ~520 B of stack headroom, so an observation feature must not spend
+// another ~100 B in poll_task's inlined poll_once frame every second. No other task reads them.
+static logic::RefrigerantServiceCoverage s_refrigerant_service_cycle_coverage;
+static logic::RefrigerantServiceSample   s_refrigerant_service_cycle_sample;
+static uint8_t                           s_refrigerant_service_seen_registers[32];
 
 // Auto-detect backoff state — poll-task-owned, RAM only (model/detection is never persisted: it is
 // re-derived every boot). s_next_detect_us gates the next silent-bus sweep on the monotonic clock;
@@ -147,6 +158,90 @@ namespace {
 using Lock = SemGuard;
 }  // namespace
 
+static const CachedValue* refrigerant_service_find(const CachedValue* values, size_t count,
+                                                   uint8_t reg, uint8_t off, int conv) {
+    if (!values) return nullptr;
+    for (size_t i = 0; i < count; i++)
+        if (values[i].reg == reg && values[i].off == off && values[i].conv == conv)
+            return &values[i];
+    return nullptr;
+}
+
+static bool refrigerant_service_reading(const CachedValue* values, size_t count,
+                                        uint8_t reg, uint8_t off, int conv, int& tenths) {
+    const CachedValue* v = refrigerant_service_find(values, count, reg, off, conv);
+    return v && !v->held && logic::history_parse_tenths(v->value.c_str(), tenths);
+}
+
+static void refrigerant_service_flag(const CachedValue* values, size_t count,
+                                     uint8_t reg, uint8_t off, int conv,
+                                     bool& known, bool& on) {
+    int value = 0;
+    known = refrigerant_service_reading(values, count, reg, off, conv, value);
+    on = known && value > 0;
+}
+
+static void refrigerant_service_sample(
+    const CachedValue* values, size_t count, bool rps_known, bool rps_running,
+    const logic::RefrigerantServiceCoverage& coverage,
+    logic::RefrigerantServiceSample& s) {
+    s = logic::RefrigerantServiceSample{};
+    int value = 0;
+    s.rps_known = rps_known && refrigerant_service_reading(values, count, 0x30, 0, 152, value);
+    s.rps_running = s.rps_known && rps_running;
+    s.rps_tenths = value;
+
+    const CachedValue* mode = refrigerant_service_find(values, count, 0x60, 2, 315);
+    if (mode && !mode->held)
+        s.mode = logic::refrigerant_service_mode_from_text(mode->value.c_str());
+    refrigerant_service_flag(values, count, 0x60, 12, 306, s.valve_known, s.valve_dhw);
+    refrigerant_service_flag(values, count, 0x10, 1, 304, s.defrost_known, s.defrost_on);
+    refrigerant_service_flag(values, count, 0x10, 1, 306, s.restart_known, s.restart_on);
+    refrigerant_service_flag(values, count, 0x10, 1, 305, s.startup_known, s.startup_on);
+    refrigerant_service_flag(values, count, 0x10, 1, 303, s.oil_return_known, s.oil_return_on);
+    refrigerant_service_flag(values, count, 0x10, 1, 302,
+                             s.pressure_equalizing_known, s.pressure_equalizing_on);
+
+    uint8_t fault_rows_read = 0;
+    for (size_t i = 0; values && i < count; i++) {
+        if (values[i].conv != 203 || values[i].held) continue;
+        const FaultClass fault = fault_class_from_text(values[i].value.c_str());
+        if (fault == FaultClass::Unknown) continue;
+        if (fault_rows_read < UINT8_MAX) fault_rows_read++;
+        if (fault != FaultClass::Normal) s.fault_active = true;
+    }
+    s.fault_known = coverage.fault_rows > 0 && fault_rows_read == coverage.fault_rows;
+
+    s.discharge_ok = refrigerant_service_reading(values, count, 0x20, 4, 105,
+                                                  s.discharge_tenths);
+    s.suction_ok = refrigerant_service_reading(values, count, 0x20, 6, 105,
+                                                s.suction_tenths);
+    s.liquid_ok = refrigerant_service_reading(values, count, 0x20, 10, 105,
+                                               s.liquid_tenths);
+    s.eev_ok = refrigerant_service_reading(values, count, 0x30, 3, 151, s.eev_tenths);
+    // Prefer the always-live hydronic-page refrigerant transducer.  If it is absent/unavailable,
+    // accept the outdoor high-side row from this SAME fresh sweep; Water pressure is at 0x62/11 and
+    // can never reach either branch.
+    s.high_pressure_ok = refrigerant_service_reading(values, count, 0x62, 15, 105,
+                                                      s.high_pressure_tenths) ||
+                         refrigerant_service_reading(values, count, 0x20, 12, 105,
+                                                      s.high_pressure_tenths);
+    s.low_pressure_ok = refrigerant_service_reading(values, count, 0x20, 14, 105,
+                                                     s.low_pressure_tenths);
+    s.outdoor_air_ok = refrigerant_service_reading(values, count, 0x20, 0, 105,
+                                                    s.outdoor_air_tenths);
+    s.outdoor_hx_ok = refrigerant_service_reading(values, count, 0x20, 2, 105,
+                                                   s.outdoor_hx_tenths);
+}
+
+static void refrigerant_service_record_poll_gap(uint32_t generation) {
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    if (s_target_generation.load(std::memory_order_acquire) != generation) return;
+    logic::refrigerant_service_record_poll_gap(s_refrigerant_service, esp_timer_get_time(),
+                                               generation);
+}
+
 static void poll_once() {
     const uint32_t cycle_generation = hp_poll_generation();
     const Config& c    = config();
@@ -161,16 +256,35 @@ static void poll_once() {
     // (see the profile_refrigerant comment below).
     const auto    view = def::resolved(prof);
     logic::CheckupCoverage checkup_coverage;
+    auto& service_coverage = s_refrigerant_service_cycle_coverage;
+    service_coverage = logic::RefrigerantServiceCoverage{};
+    for (uint8_t& value : s_refrigerant_service_seen_registers) value = 0;
+    uint32_t service_register_count = 0;
     for (size_t i = 0; i < view.count(); i++) {
         if (!row_publishable(view[i])) continue;
         const ValueDef row = logic::adjudicated(view[i]);
+        const uint8_t service_register_bit = static_cast<uint8_t>(1U << (row.reg & 7U));
+        if (!(s_refrigerant_service_seen_registers[row.reg >> 3U] & service_register_bit)) {
+            s_refrigerant_service_seen_registers[row.reg >> 3U] |= service_register_bit;
+            service_register_count++;
+        }
         logic::checkup_cover_row(checkup_coverage, row.reg, row.offset, row.conv, row.label);
+        logic::refrigerant_service_cover_row(service_coverage, row.reg, row.offset, row.conv,
+                                              logic::fg_is_refrigerant_pressure(view, i));
     }
+    // A healthy gap is the fixed sleep plus at most one transport timeout per queried page.  A
+    // second poll interval is deliberate scheduling margin; unlike the former universal 3 s rule,
+    // this scales with the actual profile and cannot punish a valid large sweep for having more pages.
+    const int64_t service_max_gap_us =
+        static_cast<int64_t>(2 * POLL_INTERVAL_S) * 1000000LL +
+        static_cast<int64_t>(service_register_count) * HP_QUERY_TIMEOUT_US;
     // If the UART can't be brought up on these pins, do NOT sweep: every hp_query would then read an
     // uninstalled driver and report a missing reply per register. Name the real local cause once and
     // keep the last good cache. (validate()/config_load now reject
     // reserved pins, so this is a belt-and-braces guard rather than the common path.)
     if (!hp_uart_init(c.rx_pin, c.tx_pin)) {
+        checkup_record(nullptr, 0, false, false, checkup_coverage, cycle_generation);
+        dwell_record(nullptr, 0, cycle_generation); // a cycle went by unread: blind, not unchanged
         char eb[48];
         snprintf(eb, sizeof(eb), "UART init failed (rx=%d tx=%d)", c.rx_pin, c.tx_pin);
         std::string err = eb;                              // built before the lock (allocates)
@@ -179,10 +293,15 @@ static void poll_once() {
             if (s_target_generation.load(std::memory_order_acquire) == cycle_generation) {
                 s_stats.connected = false;
                 s_stats.last_error.swap(err);              // noexcept — see the commit below
+                s_refrigerant_service_coverage = service_coverage;
+                s_refrigerant_service.max_gap_us = service_max_gap_us;
+                s_refrigerant_service.coverage_evaluated = true;
+                s_refrigerant_service.special_phases_known =
+                    logic::refrigerant_service_special_phases_known(service_coverage);
+                logic::refrigerant_service_record_poll_gap(
+                    s_refrigerant_service, esp_timer_get_time(), cycle_generation);
             }
         }
-        checkup_record(nullptr, 0, false, false, checkup_coverage, cycle_generation);
-        dwell_record(nullptr, 0, cycle_generation); // a cycle went by unread: blind, not unchanged
         return;
     }
 
@@ -339,6 +458,8 @@ static void poll_once() {
     for (auto& cv : fresh)
         cv.held = logic::ou_reading_held_over(cv.reg, rps_known, rps_running);
     const bool ou_held = rps_known && !rps_running;
+    refrigerant_service_sample(fresh.data(), fresh.size(), rps_known, rps_running,
+                               service_coverage, s_refrigerant_service_cycle_sample);
 
     // ── RAW page bytes WHILE THE COMPRESSOR RUNS (#194 evidence, added by #209) ───────────────────
     // This supplied the wire evidence that separated #194's wrong converter scale from a wrong
@@ -389,6 +510,11 @@ static void poll_once() {
         if (s_target_generation.load(std::memory_order_acquire) != cycle_generation) return;
         s_sat_witness = sat_out;
         s_sat_witness_generation = cycle_generation;
+        s_refrigerant_service_coverage = service_coverage;
+        logic::refrigerant_service_record(s_refrigerant_service, service_coverage,
+                                          s_refrigerant_service_cycle_sample,
+                                          esp_timer_get_time(), cycle_generation,
+                                          service_max_gap_us);
         s_cache            = std::move(fresh);
         s_cache_profile    = prof.id;
         s_cache_identity_fp = c.x10a_identity_fp;
@@ -497,6 +623,15 @@ static bool poll_detect() {                         // false only when an attemp
                 committed = config_commit_detected_model(
                     link_revision, detected_profile, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
                     d.eeprom);
+                if (committed) {
+                    // config.fp_valid becomes visible before the first full profile sweep. Retire
+                    // the unidentified-bus placeholder now so /status cannot call that unevaluated
+                    // interval an unsupported detected profile. poll_once() marks coverage evaluated
+                    // only when it commits the resolved profile's structural coverage below.
+                    s_refrigerant_service = logic::RefrigerantServiceTracker{};
+                    s_refrigerant_service.generation = cycle_generation;
+                    s_refrigerant_service_coverage = logic::RefrigerantServiceCoverage{};
+                }
             }
         }
     }
@@ -617,6 +752,7 @@ static void poll_task(void*) {
         const bool network_active = ota_active || weather_active;
         if (ota_quiesce_step(network_quiesce, network_active)) {
             s_network_quiesced.store(true, std::memory_order_release);
+            refrigerant_service_record_poll_gap(hp_poll_generation());
             esp_task_wdt_reset();  // explicit on the held path; keep this true if code moves above it
             if (!network_quiesce_logged) {
                 diag_printf("poll: holding off X10A sweeps during %s\n",
@@ -667,6 +803,16 @@ static void poll_task(void*) {
                 // Same argument one feature over: a board whose X10A stops answering across a
                 // reboot would otherwise present the FROZEN pre-reboot state ages as current.
                 dwell_record(nullptr, 0, generation);
+                {
+                    Lock lk(s_mtx);
+                    if (s_target_generation.load(std::memory_order_acquire) == generation) {
+                        s_refrigerant_service_coverage = logic::RefrigerantServiceCoverage{};
+                        logic::refrigerant_service_record(
+                            s_refrigerant_service, s_refrigerant_service_coverage,
+                            logic::RefrigerantServiceSample{}, esp_timer_get_time(),
+                            generation);
+                    }
+                }
                 // Silent-bus detect backoff: sweep at the poll floor at first, then stretch toward the
                 // ceiling the longer the bus stays quiet (logic/detect_backoff.hpp). Applied by SKIPPING
                 // sweep ticks — the top-of-loop esp_task_wdt_reset() above still fires every second, so
@@ -693,9 +839,11 @@ static void poll_task(void*) {
             // cycle even when the log line describing it never makes it into the ring (#380: the ring
             // was the ONLY evidence, and a chatty boot overwrites it).
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
+            refrigerant_service_record_poll_gap(hp_poll_generation());
             diag_printf("poll: cycle skipped (%s)\n", e.what());
         } catch (...) {
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
+            refrigerant_service_record_poll_gap(hp_poll_generation());
             diag_printf("poll: cycle skipped (oom?)\n");
         }
         // Serve at most one free probe after the sweep. Its Config access is POD-only and normally
@@ -834,6 +982,12 @@ HpStats hp_stats() {
     return st;
 }
 
+logic::RefrigerantServiceSnapshot refrigerant_service_status() {
+    if (!s_mtx) return {};
+    Lock lk(s_mtx);
+    return logic::refrigerant_service_snapshot(s_refrigerant_service, esp_timer_get_time());
+}
+
 bool hp_link_connected() {
     if (!s_mtx) return false;
     Lock lk(s_mtx);
@@ -940,6 +1094,9 @@ void hp_poll_reconfigure() {
     s_stats.ou_held_over = false;
     s_stats.last_error.clear();
     s_last_ok_us = -1;
+    s_refrigerant_service = logic::RefrigerantServiceTracker{};
+    s_refrigerant_service.generation = next;
+    s_refrigerant_service_coverage = logic::RefrigerantServiceCoverage{};
 }
 
 } // namespace daik

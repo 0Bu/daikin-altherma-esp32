@@ -69,7 +69,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 22 | Traceable build identity (`app_elf_sha256`) matching a dump to its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint controls — release-size optimization plus unused IDF-path trims | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 24 | Status indicator — **runtime-selectable GPIO-LED / WS2812 back-end**, one image per board family | ✅ 🧪 | [`status_led.cpp`](../main/status_led.cpp), [`logic/led_pattern.hpp`](../main/logic/led_pattern.hpp) |
-| 25 | **Read-only MCP server** — stateless Streamable HTTP, exactly `get_status` + bounded-chunk-streamed `get_hp_values`, no SSE/session, plus an embedded static setup page | ✅ 🧪 | [`mcp_server.cpp`](../main/mcp_server.cpp), [`logic/mcp.hpp`](../main/logic/mcp.hpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp), [`MCP.md`](MCP.md) |
+| 25 | **Read-only MCP server** — stateless Streamable HTTP, exactly bounded-chunk-streamed `get_status` + `get_hp_values`, no SSE/session, plus an embedded static setup page | ✅ 🧪 | [`mcp_server.cpp`](../main/mcp_server.cpp), [`logic/mcp.hpp`](../main/logic/mcp.hpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp), [`MCP.md`](MCP.md) |
 | 26 | **MQTT broker save-time pre-flight** (DNS/TCP/connect+auth, fail-closed under heap pressure) before persist | ✅ | [`http_config.cpp`](../main/http_config.cpp) |
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 28 | **`/status.sys`** — always-on heap headroom + last-boot reason, needing no broker | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
@@ -134,6 +134,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 91 | **X10A protocol diagnosis** — connection-gated, closed Settings tongue with an exact-or-labelled-generic `main/def` register catalog plus a bounded `POST /hp/query`: one caller-chosen page, raw/partial frame and every converter the slice admits | ✅ 🧪 | [`logic/hp_probe.hpp`](../main/logic/hp_probe.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`http_config.cpp`](../main/http_config.cpp), [`dashboard.js`](../main/www/js/dashboard.js) |
 | 92 | **Fail-closed production OTA promotion** — the exact signed dev artifact must pass host contracts, a healthy dwell, a complete signed release download under HTTP pressure, release probation, exact dev restore and sustained manifest pressure on the MAC-pinned bench. The bench-only legacy return requires a stable exact offer; production accepts no legacy fallback and atomically consumes the completed check generation plus channel/version/application-SHA. Whole-download SHA-256, completed verification and read-only X10A/weather/heap/MQTT canaries remain mandatory | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`ota_update.cpp`](../main/ota_update.cpp), [`ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`http_ota.cpp`](../main/http_ota.cpp), [`health_gate.hpp`](../main/logic/health_gate.hpp), [`test_production_ota_gate_contract.mjs`](../test/test_production_ota_gate_contract.mjs), [`selftest.mjs`](../tools/production_ota/selftest.mjs), [`require-pr-gates.sh`](../tools/agent-hooks/require-pr-gates.sh) |
 | 94 | **ESP-IDF feature-matrix gate** — explicit components, managed dependencies, active defaults, application IDF headers and reviewed native/manual boundaries must stay represented by source evidence and specific official documentation | ✅ | [`ESP_IDF_MATRIX.md`](ESP_IDF_MATRIX.md), [`check_matrix.py`](../tools/esp_idf_matrix/check_matrix.py), [`selftest.py`](../tools/esp_idf_matrix/selftest.py) |
+| 95 | **Fresh refrigerant service observation** — one non-persistent, generation-bound heating window from same-sweep X10A values, separate from plant health; profile-sized gap handling, latched limitations and explicit no-load/no-EEV-feedback boundaries expose service context without inventing full load, settling, charge, a universal range or a completion verdict | ✅ 🧪 | [`refrigerant_service.hpp`](../main/logic/refrigerant_service.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`DIAGNOSTICS.md`](DIAGNOSTICS.md#refrigerant-service-observation) |
 
 ---
 
@@ -703,7 +704,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | HTTP | `http_body`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `chunk_sink`, `redact` |
 | OTA & boot | `health_gate`, `version_cmp`, `ota_manifest`, `ota_channel`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |
 | Network policy | `wifi_rollback`, `link_watch`, `syslog_policy`, `timestamp` |
-| On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `outdoor_evidence`, `state_dwell`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |
+| On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `outdoor_evidence`, `refrigerant_service`, `state_dwell`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |
 | Local I/O | `led_pattern`, `button` |
 
 Four properties of that core are worth naming because they are not obvious from the list:
@@ -788,13 +789,17 @@ Four properties of that core are worth naming because they are not obvious from 
   Kconfig key would hold ESP-IDF and the managed components to a contract that is not ours to demand,
   and `sdkconfig.defaults` is hashed into the ccache key, so a diagnostic-only change there would
   discard every cached object it cannot invalidate.
-- **✅ A pinned stack contract on the `/status` builder.** The same `main/CMakeLists.txt` compiles
-  `http_status.cpp` at `-Os` while everything else builds at ESP-IDF's default `-Og`, because
-  `http_append_status_json()` has overflowed a task stack twice and at `-Og` its frame reached
+- **✅ A pinned stack contract on the `/status` builder.** `main/CMakeLists.txt` pins
+  `http_status.cpp` at `-Os` independently of the project-wide setting, because
+  the status serializer has overflowed a task stack twice and at `-Og` its frame reached
   **11776 bytes** against ~2.2 KB of actual locals — the rest one stack slot per string temporary in
-  a 760-line function. `-Os` takes it to **3744**, and the deepest httpd path (`POST /mcp`, which
-  reuses the same builder) from 14512 bytes of a 16384 stack to 6480; the stack itself was left at
-  16384. The trade — less exact backtraces in the one file whose core dumps mattered — and the
+  a 760-line function. The original `-Os` change took it to **3744** and the deepest httpd path from
+  14512 to 6480 bytes. The release image now also uses size optimisation globally to fit its
+  embedded catalogs. After
+  the refrigerant-service object and bounded MCP status sender, the 2026-08-21 release ELF measures
+  the sole bounded serializer at **4848** and the conservative full
+  path at **7552** of 16384; the stack itself remains unchanged. The trade — less exact backtraces in
+  the one file whose core dumps mattered — and the
   reproduce command are stated where the pin lives and in
   [`ARCHITECTURE.md`](ARCHITECTURE.md#memory-constraints).
 - **✅ Agent instruction and configuration integrity gate.** [`AGENTS.md`](../AGENTS.md) is the

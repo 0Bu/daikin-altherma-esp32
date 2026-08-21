@@ -40,6 +40,7 @@
 // changes a CHECK rather than changing behaviour silently.
 #include <cstddef>
 
+#include "convert.hpp"
 #include "lwt_select.hpp"
 #include "profile_view.hpp"
 #include "value_def.hpp"
@@ -56,6 +57,24 @@ inline bool fg_is_run_state(const char* l) { return lwt_ci_contains(l, "inv freq
 // profiles that carry page 0x30.
 inline bool fg_is_expansion_valve(const char* l) { return lwt_ci_contains(l, "expansion valve"); }
 
+// Structural refrigerant-pressure identity, over the resolved VIEW.  A plain dataType-2 check is
+// wrong because every detected hydronic profile also carries Water pressure in bar.  The converter's
+// shared structural predicate owns the physical rule; this adapter supplies the same-register
+// conv-405 saturation twin across all view spans without flattening them into a heap allocation.
+inline bool fg_is_refrigerant_pressure(const ProfileView& v, size_t row) {
+    if (row >= v.count()) return false;
+    const ValueDef& d = v[row];
+    bool has_saturation_twin = false;
+    for (size_t i = 0; i < v.count(); i++) {
+        const ValueDef& twin = v[i];
+        if (!twin.no_publish && twin.conv == 405 && twin.reg == d.reg && twin.offset == d.offset) {
+            has_saturation_twin = true;
+            break;
+        }
+    }
+    return is_refrigerant_pressure_structure(d, has_saturation_twin);
+}
+
 // What the active profile can actually supply. Each flag is evidence from the ROWS, never a guess
 // from the model id.
 struct FeatureCoverage {
@@ -63,7 +82,7 @@ struct FeatureCoverage {
     bool run_state            = false;  // "INV frequency (rps)"
     bool retry_counters       = false;  // conv 310 — UC5's core signal (def/overlay.hpp)
     bool expansion_valve      = false;  // "Expansion valve N (pls)"
-    bool refrigerant_pressure = false;  // any bar-typed row (ValueDef::type == 2)
+    bool refrigerant_pressure = false;  // structurally identified refrigerant pressure, never water
 };
 
 // Takes the VIEW, not the raw profile: the retry counters live in the page-0x10 supplement
@@ -81,7 +100,7 @@ inline FeatureCoverage feature_coverage(const ProfileView& v) {
         if (fg_is_run_state(d.label))     c.run_state            = true;
         if (fg_is_expansion_valve(d.label)) c.expansion_valve    = true;
         if (d.conv == 310)                c.retry_counters       = true;
-        if (d.type == 2)                  c.refrigerant_pressure = true;
+        if (fg_is_refrigerant_pressure(v, i)) c.refrigerant_pressure = true;
     }
     return c;
 }

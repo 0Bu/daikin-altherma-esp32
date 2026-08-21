@@ -26,7 +26,7 @@ const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.m
 assert.match(dashboardSource, /const GROUP_ORDER = \["Operation"/s,
              "Operation must remain the first live-value group");
 assert.match(dashboardSource,
-             /const checkup = S\.status\?\.diagnostics\?\.enabled === true && S\.status\?\.hp\?\.connected\s*\? checkupCardHtml\(\) : "";\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+\s*valueGroupsHtml\(/s,
+             /const checkup = S\.status\?\.diagnostics\?\.enabled === true && S\.status\?\.hp\?\.connected\s*\? checkupCardHtml\(\) : "";\s*const service = refrigerantServiceCardHtml\(\);\s*setHtml\("valueGroups",\s*checkup\s*\+\s*service\s*\+\s*statusCardsHtml\(\)\s*\+/s,
              "plant diagnostics must render first in the post-diagram card stream");
 assert.match(dashboardSource,
              /return hp\.connected \? vcard\(t\("card\.model"\), model\) : "";/,
@@ -725,12 +725,13 @@ for (const id of ["fault", "dhw_loss", "cycling", "defrost", "pressure", "flow",
 }
 
 // Technical binary states stay ON/OFF in German explainers instead of switching between translated
-// prose forms. Named manufacturer enums such as Smart Grid "Empfehlung ein" are intentionally
-// outside this binary-state contract.
+// prose forms. The defrost copy may name the same rising edge as an "Abtaustart" without spelling
+// out the states. Named manufacturer enums such as Smart Grid "Empfehlung ein" remain outside this
+// binary-state contract.
 const cyclingCopy = JSON.stringify(descriptionContext.__copy.model.health_cycling);
 const defrostCopy = JSON.stringify(descriptionContext.__copy.model.health_defrost);
 assert.match(cyclingCopy, /von OFF zu ON/);
-assert.match(defrostCopy, /von OFF zu ON/);
+assert.match(defrostCopy, /Abtaustarts/);
 const explanationCopy = JSON.stringify(descriptionContext.__copy);
 for (const [name, pattern] of [
   ["Aus-zu-Ein transition", /von Aus zu Ein/i],
