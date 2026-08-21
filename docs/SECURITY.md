@@ -116,9 +116,11 @@ and the OTA-signing / key lifecycle.
   mDNS hostname or current IP (never merely because it matches `Host`), closing the Streamable-HTTP
   DNS-rebinding path. Never publish the endpoint outside the trusted LAN.
 - **MQTT credentials are never sent in cleartext.** If an MQTT username/password is configured, the
-  bridge requires an `mqtts://` broker URI and verifies the broker against the mbedTLS certificate
-  bundle; a non-TLS URI with credentials is **refused** (the reason shows in `/status.mqtt`) rather
-  than falling back to plaintext. A credential-free broker may be plaintext on the trusted LAN.
+  bridge requires an `mqtts://` broker URI and verifies the broker against ESP-IDF's common-root
+  mbedTLS certificate bundle; a non-TLS URI with credentials is **refused** (the reason shows in
+  `/status.mqtt`) rather than falling back to plaintext. ESP-IDF documents approximately 99% public
+  root coverage for this size-bounded subset; a broker chained only to a rarer excluded root is
+  rejected. A credential-free broker may be plaintext on the trusted LAN.
 - **Syslog forwarding is cleartext, unauthenticated UDP** — opt-in and off by default (empty
   `syslog_host`). When enabled, every diag-log line (WiFi/MQTT/X10A state, timeouts, reset reasons)
   is sent as a plaintext RFC 5424 datagram to the configured host; there is no TLS option, unlike

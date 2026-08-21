@@ -684,9 +684,11 @@ command topics are subscribed. The bridge runs in its own task, independent of t
 
 - **Enable:** set the broker in the web UI (gear → Connections → MQTT). Stored in NVS `mqtt_uri`.
 - **TLS:** a schemeless entry defaults to plaintext `mqtt://`. Credentials require an explicit
-  `mqtts://` broker URL (CA-verified via the mbedTLS bundle) so the password isn't sniffable — the
-  bridge **refuses** a plaintext broker with credentials rather than silently downgrading or guessing
-  a TLS port. An explicit scheme is always honoured. Reason surfaces in `/status.mqtt`.
+  `mqtts://` broker URL (CA-verified via ESP-IDF's common-root mbedTLS bundle) so the password isn't
+  sniffable — the bridge **refuses** a plaintext broker with credentials rather than silently
+  downgrading or guessing a TLS port. ESP-IDF documents approximately 99% public-root coverage for
+  this size-bounded subset; a broker chained only to a rarer excluded root is rejected. An explicit
+  scheme is always honoured. Reason surfaces in `/status.mqtt`.
 - **Node id:** the slugified base topic (`daikin-altherma-esp32` → `daikin_altherma_esp32`). It
   identifies the *device* in each discovery config's `uniq_id`/`dev.ids`, but is **not** part of the
   message topics — those sit directly under `<base>` (one board per base topic). The base topic is a

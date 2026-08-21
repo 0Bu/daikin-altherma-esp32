@@ -2082,10 +2082,12 @@ The Home Assistant bridge:
   cadence, but has no Home Assistant Discovery entities. The former flat heartbeat `room_*` and
   `heating_curve_*` keys are removed rather than duplicated; because heartbeat is not retained, no
   broker tombstone is needed. Direct consumers must move to the grouped paths.
-- **TLS default-on with credentials** (mqtts, CA-verified via the mbedTLS certificate bundle). If
-  credentials are set but the URI is not `mqtts://`, the bridge **refuses to connect** and reports
-  the reason in `/status.mqtt` rather than sending them in cleartext — no silent plaintext fallback.
-  A credential-free plaintext broker on the trusted LAN is allowed (nothing secret to leak).
+- **TLS default-on with credentials** (mqtts, CA-verified via ESP-IDF's common-root mbedTLS bundle).
+  ESP-IDF documents approximately 99% public-root coverage for this flash-bounded subset; a broker
+  chained only to a rarer excluded root is rejected. If credentials are set but the URI is not
+  `mqtts://`, the bridge **refuses to connect** and reports the reason in `/status.mqtt` rather than
+  sending them in cleartext — no silent plaintext fallback. A credential-free plaintext broker on
+  the trusted LAN is allowed (nothing secret to leak).
 - **Task-Watchdog-subscribed.** The `mqtt_pub` publish task subscribes to the Task Watchdog and
   feeds it **unconditionally at the top of its 1 s loop** — deliberately *not* gated on `s_connected`
   or an actual publish, because the loop keeps spinning during a broker outage (it just doesn't

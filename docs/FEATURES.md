@@ -53,7 +53,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 7 | Minified deterministic-gzip UI **embedded in the app image**: startup page under 160 KiB, each device-local locale under 32 KiB | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs) |
 | 8 | HTTP handlers under an **OOM boundary**: `503` before the first response emission; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
-| 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
+| 10 | **MQTTS + verified common-root CA bundle**; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 11 | Core dump to flash + offline symbolication, with a proven **orphan dump** erased so no undecodable download is ever offered | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT and cleared when the boot is unremarkable | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
 | 13 | 22-entity device **heartbeat** diagnostics stream, published independently of profile detection | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
@@ -434,9 +434,10 @@ other.
   `pl_on`/`pl_off` and publishes the JSON **number** `1`/`0` — HA gets a real on/off entity, and a
   metrics consumer (which drops strings *and* bools) finally receives the ~30 binary rows per profile
   that were invisible to it.
-- **✅ TLS with the IDF CA bundle**: credentials present ⇒ `mqtts://` + bundle verification, and
-  credentials are **never** sent over a plaintext broker — the client refuses to start and says so,
-  with no silent fallback.
+- **✅ TLS with ESP-IDF's common-root CA bundle**: credentials present ⇒ `mqtts://` + bundle
+  verification, and credentials are **never** sent over a plaintext broker — the client refuses to
+  start and says so, with no silent fallback. The size-bounded bundle keeps ESP-IDF's documented
+  approximately 99% public-root coverage; a broker chained only to a rarer excluded root is rejected.
 - **✅ Save-time broker pre-flight**: `POST /set_mqtt` verifies before it persists — DNS, a
   non-blocking TCP probe, then a short-lived client that must actually `CONNECT` and authenticate —
   so a wrong host, closed port or bad password is rejected inline at Save. Under heap pressure it
@@ -851,7 +852,7 @@ Four properties of that core are worth naming because they are not obvious from 
 
 [`sdkconfig.defaults`](../sdkconfig.defaults) selects ESP-IDF's size optimization for the release
 image and drops code paths this firmware never exercises. The fixed dual-OTA layout makes flash
-footprint a hard constraint; the unused-path trims remain zero-behaviour-change reductions:
+footprint a hard constraint; the table calls out the one deliberate compatibility bound separately:
 
 | Setting | Drops | Why safe |
 |---------|-------|----------|
@@ -860,6 +861,7 @@ footprint a hard constraint; the unused-path trims remain zero-behaviour-change 
 | `COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y` | ~5 KB | keeps the `abort()` (→ rollback), drops assert strings |
 | `MBEDTLS_*_SSL_SESSION_TICKETS=n` | ~1.8 KB | few, long-lived TLS connections gain nothing from resumption |
 | `MBEDTLS_FS_IO=n` | ~1.2 KB | certs/keys come from the CA bundle + NVS, never a VFS path |
+| `MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y` | 50.8 KB in the 13-locale build | keeps CA verification with ESP-IDF's common roots (~99% coverage); rare excluded public roots are unsupported |
 | `ESP_WIFI_ENABLE_WPA3_OWE_STA=n` | ~0.8 KB | joins a WPA2-PSK home network |
 
 C++ exceptions are kept on (`COMPILER_CXX_EXCEPTIONS=y`) — they *are* the HTTP OOM guard.
