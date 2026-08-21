@@ -15,8 +15,10 @@
 #   changelog.json                             public, version-bound release/dev build notes
 #
 # Calls idf.py / esptool / espsecure DIRECTLY — it assumes an ESP-IDF environment is already
-# on PATH. In CI that is provided by espressif/esp-idf-ci-action. LOCALLY, run it wrapped:
-#   scripts/idf-docker.sh ./scripts/ci-build-all.sh --source-sha "$(git rev-parse HEAD)" 1.0.0
+# on PATH. In CI that is provided by espressif/esp-idf-ci-action. LOCALLY, after generating the
+# version-bound document with generate-ota-changelog.py, run the publishing path wrapped:
+#   scripts/idf-docker.sh ./scripts/ci-build-all.sh --source-sha "$(git rev-parse HEAD)" \
+#     --changelog-file ota-changelog.json 1.0.0
 #
 # The version argument must be the version the build EMBEDS — ESP-IDF takes PROJECT_VER from
 # version.txt, and this script verifies the two agree before writing the manifest (see below).

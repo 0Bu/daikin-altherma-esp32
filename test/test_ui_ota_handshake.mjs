@@ -10,11 +10,16 @@ class Element {
     this.id = id;
     this.className = "";
     this.innerHTML = "";
-    this.textContent = "";
+    this._textContent = "";
     this.dataset = {};
     this.disabled = false;
     this.hidden = id.endsWith("Modal");
     this.children = [];
+  }
+  get textContent() { return this._textContent; }
+  set textContent(value) {
+    this._textContent = String(value ?? "");
+    if (this._textContent === "") this.children = [];
   }
   appendChild(child) { this.children.push(child); }
   querySelectorAll() { return []; }
@@ -41,6 +46,7 @@ const response = (status, body) => ({
   async text() { return typeof body === "string" ? body : JSON.stringify(body); },
 });
 let changelogResponse = response(200, "Add OTA changelog\nKeep <script> literal");
+let changelogFetchFails = false;
 let acceptDecision = true;
 let sandbox;
 const context = {
@@ -71,7 +77,11 @@ const context = {
     assert.ok(statuses.length, "unexpected OTA status poll");
     return statuses.shift();
   },
-  fetch: async url => String(url).startsWith("/ota/changelog") ? changelogResponse : checkResponse,
+  fetch: async url => {
+    if (!String(url).startsWith("/ota/changelog")) return checkResponse;
+    if (changelogFetchFails) throw new Error("test changelog transport failure");
+    return changelogResponse;
+  },
   post: async url => {
     posted = url;
     const after = Number(new URL(url, "http://device.test").searchParams.get("after"));
@@ -106,12 +116,72 @@ checkResponse = response(503, { ok: false, error: "ota operation not accepted" }
 await sandbox.__api.checkFirmwareUpdate();
 assert.equal(S.otaView.text, "ota.busy");
 assert.equal(posted, null);
+const sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+// The browser budget must outlive both 15-second TLS-headroom waits plus the manifest and changelog
+// 30-second deadlines. The old 30-poll budget timed out this valid offer before the localized
+// fallback/modal could appear.
+S.busy = false;
+S.otaBusy = false;
+posted = null;
+acceptDecision = false;
+checkResponse = response(200, { ok: true, generation: 6 });
+statuses = Array.from({ length: 142 }, () => ({ state: "checking", busy: true, generation: 6 }));
+statuses.push({
+  state: "idle", busy: false, generation: 6, current: "1.2.3-dev.2",
+  available: "1.2.3-dev.3", available_sha256: sha,
+  available_channel: "dev", update_available: true, downgrade: false,
+});
+await sandbox.__api.checkFirmwareUpdate();
+assert.equal(S.otaView.text, "ota.cancelled",
+  "bounded optional notes must not turn a completed signed offer into a UI timeout");
+assert.equal(statuses.length, 0);
+
+// Changelog transport and content are presentation-only. 204 and a dropped request both open the
+// same offer with the explicit no-notes fallback; 409 means the generation lease was replaced and
+// must stop before a modal or update POST.
+for (const mode of ["empty", "transport"]) {
+  S.busy = false;
+  S.otaBusy = false;
+  posted = null;
+  acceptDecision = false;
+  changelogResponse = response(204, "");
+  changelogFetchFails = mode === "transport";
+  const generation = mode === "empty" ? 12 : 13;
+  checkResponse = response(200, { ok: true, generation });
+  statuses = [{
+    state: "idle", busy: false, generation, current: "1.2.3-dev.3",
+    available: "1.2.3-dev.4", available_sha256: sha,
+    available_channel: "dev", update_available: true, downgrade: false,
+  }];
+  await sandbox.__api.checkFirmwareUpdate();
+  assert.equal(element("otaChanges").hidden, true);
+  assert.equal(element("otaNoChanges").hidden, false);
+  assert.equal(S.otaView.text, "ota.cancelled");
+  assert.equal(posted, null);
+}
+
+S.busy = false;
+S.otaBusy = false;
+posted = null;
+changelogFetchFails = false;
+changelogResponse = response(409, "");
+checkResponse = response(200, { ok: true, generation: 14 });
+statuses = [{
+  state: "idle", busy: false, generation: 14, current: "1.2.3-dev.3",
+  available: "1.2.3-dev.4", available_sha256: sha,
+  available_channel: "dev", update_available: true, downgrade: false,
+}];
+await sandbox.__api.checkFirmwareUpdate();
+assert.equal(S.otaView.text, "ota.replaced");
+assert.equal(posted, null);
 
 // The successful flow carries the exact checked generation/channel/version/SHA into the sole POST.
 S.busy = false;
 S.otaBusy = false;
 posted = null;
-const sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+acceptDecision = true;
+changelogResponse = response(200, "Add OTA changelog\nKeep <script> literal");
 checkResponse = response(200, { ok: true, generation: 7 });
 statuses = [
   { state: "idle", busy: true, generation: 7, available: "old" },

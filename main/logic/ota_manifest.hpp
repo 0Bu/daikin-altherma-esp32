@@ -263,7 +263,6 @@ inline bool manifest_changelog(const char* json, size_t len, const char* expecte
     char version[32] = {0};
     bool have_version = false;
     bool have_changelog = false;
-    int depth = 0;
     size_t i = 0;
 
     auto copy_plain_string = [&](size_t& pos, char* target, size_t capacity) -> bool {
@@ -281,17 +280,15 @@ inline bool manifest_changelog(const char* json, size_t len, const char* expecte
         return true;
     };
 
-    while (i < len) {
-        const char c = json[i];
-        if (c == '{' || c == '[') { ++depth; ++i; continue; }
-        if (c == '}' || c == ']') {
-            if (depth <= 0) { out[0] = '\0'; return false; }
-            --depth;
-            ++i;
-            continue;
-        }
-        if (c != '"') { ++i; continue; }
-
+    // The publisher emits one flat object with exactly these two string fields. Parse that shape
+    // strictly instead of merely counting any opening/closing bracket as equivalent: accepting
+    // `{... ]`, a missing comma or trailing bytes would contradict the documented malformed-notes
+    // fallback. Unknown fields fail closed as well; they are not part of this tiny public schema.
+    while (i < len && detail::is_ws(json[i])) ++i;
+    if (i >= len || json[i++] != '{') { out[0] = '\0'; return false; }
+    while (true) {
+        while (i < len && detail::is_ws(json[i])) ++i;
+        if (i >= len || json[i] != '"') { out[0] = '\0'; return false; }
         size_t key_start, key_end, next;
         if (!detail::scan_string(json, len, i, key_start, key_end, next)) {
             out[0] = '\0';
@@ -300,19 +297,17 @@ inline bool manifest_changelog(const char* json, size_t len, const char* expecte
         i = next;
         size_t colon = i;
         while (colon < len && detail::is_ws(json[colon])) ++colon;
-        if (colon >= len || json[colon] != ':') continue;
+        if (colon >= len || json[colon] != ':') { out[0] = '\0'; return false; }
         i = colon + 1;
 
         const size_t key_len = key_end - key_start;
-        if (depth == 1 && key_len == 7 &&
-            std::memcmp(json + key_start, "version", 7) == 0) {
+        if (key_len == 7 && std::memcmp(json + key_start, "version", 7) == 0) {
             if (have_version || !copy_plain_string(i, version, sizeof(version))) {
                 out[0] = '\0';
                 return false;
             }
             have_version = true;
-        } else if (depth == 1 && key_len == 9 &&
-                   std::memcmp(json + key_start, "changelog", 9) == 0) {
+        } else if (key_len == 9 && std::memcmp(json + key_start, "changelog", 9) == 0) {
             if (have_changelog) { out[0] = '\0'; return false; }
             while (i < len && detail::is_ws(json[i])) ++i;
             if (!detail::decode_text_string(json, len, i, out, outlen, next)) {
@@ -321,10 +316,17 @@ inline bool manifest_changelog(const char* json, size_t len, const char* expecte
             }
             i = next;
             have_changelog = true;
-        }
+        } else { out[0] = '\0'; return false; }
+
+        while (i < len && detail::is_ws(json[i])) ++i;
+        if (i < len && json[i] == ',') { ++i; continue; }
+        if (i < len && json[i] == '}') { ++i; break; }
+        out[0] = '\0';
+        return false;
     }
 
-    const bool valid = depth == 0 && have_version && have_changelog &&
+    while (i < len && detail::is_ws(json[i])) ++i;
+    const bool valid = i == len && have_version && have_changelog &&
                        std::strcmp(version, expected_version) == 0;
     if (!valid) out[0] = '\0';
     return valid;

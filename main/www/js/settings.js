@@ -978,6 +978,14 @@ async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, req
   return null;
 }
 
+// A check may legitimately spend 15 s waiting for manifest TLS headroom plus its 30 s operation
+// deadline, then the same 15 s headroom wait plus 30 s on the optional changelog. The common OTA
+// quiesce path can also spend about 20 s letting an already-running network client unwind, and one
+// allocator-shaped manifest failure receives a bounded retry. Keep the browser's one-second poll
+// budget above that complete device path so presentation-only notes cannot turn a valid signed
+// offer into a client-side timeout.
+const OTA_CHECK_POLL_TRIES = 150;
+
 // Terminal inline failure: show it, let it linger a beat longer than a success, and release the flow.
 function otaFail(text) {
   S.otaInstalling = false;
@@ -1081,7 +1089,7 @@ async function checkFirmwareUpdate(returnFocus = document.activeElement, returnS
       otaFail(t("ota.check_failed")); return;
     }
 
-    const s = await otaPoll(["checking"], 30, null, checkGeneration, true);
+    const s = await otaPoll(["checking"], OTA_CHECK_POLL_TRIES, null, checkGeneration, true);
     if (!s)                  { otaFail(t("ota.timeout")); return; }
     if (s.state === "error") { otaFail(s.message || t("ota.check_failed")); return; }
     if (!s.available || !s.available_sha256 || !s.available_channel) {

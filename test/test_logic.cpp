@@ -5864,6 +5864,11 @@ static void test_ota_manifest() {
     CHECK(manifest_changelog(notes_json, std::strlen(notes_json), "1.2.3-dev.4",
                               changelog, sizeof(changelog)));
     CHECK(std::string(changelog) == "Add German UI\nFix \"OTA\" path \\ status\tready");
+    char in_place_notes[256] =
+        "{\"version\":\"1.2.3-dev.4\",\"changelog\":\"In-place line 1\\nIn-place line 2\"}";
+    CHECK(manifest_changelog(in_place_notes, std::strlen(in_place_notes), "1.2.3-dev.4",
+                              in_place_notes, sizeof(in_place_notes)));
+    CHECK(std::string(in_place_notes) == "In-place line 1\nIn-place line 2");
 
     // Production reuses its one bounded transient body slot. Decoding into the exact same allocation
     // is safe and must produce the same bounded text without preserving a second candidate.
@@ -5902,6 +5907,16 @@ static void test_ota_manifest() {
                                changelog, sizeof(changelog)) && changelog[0] == 0);
     const char* cut_notes = "{\"version\":\"1.2.3\",\"changelog\":\"unfinished";
     CHECK(!manifest_changelog(cut_notes, std::strlen(cut_notes), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* mismatched_notes = "{\"version\":\"1.2.3\",\"changelog\":\"Wrong closer\"]";
+    CHECK(!manifest_changelog(mismatched_notes, std::strlen(mismatched_notes), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* missing_comma = "{\"version\":\"1.2.3\" \"changelog\":\"No separator\"}";
+    CHECK(!manifest_changelog(missing_comma, std::strlen(missing_comma), "1.2.3",
+                               changelog, sizeof(changelog)) && changelog[0] == 0);
+    const char* trailing_notes =
+        "{\"version\":\"1.2.3\",\"changelog\":\"Trailing\"}garbage";
+    CHECK(!manifest_changelog(trailing_notes, std::strlen(trailing_notes), "1.2.3",
                                changelog, sizeof(changelog)) && changelog[0] == 0);
 
     const std::string max_notes(OTA_CHANGELOG_TEXT_MAX, 'x');

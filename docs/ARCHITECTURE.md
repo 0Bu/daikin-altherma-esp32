@@ -2280,8 +2280,12 @@ Structure:
   auto-reload callback only try-locks the OTA mutex, so it cannot block the shared timer daemon.
   Thus the new image
   carries no boot-long prose BSS and a dismissed offer leaves no boot-long heap island; allocation
-  failure means only no notes, and PSRAM is not required. The courtesy TLS client itself is skipped unless its dedicated
-  32 KiB free / 17 KiB largest-internal-block admission floors still hold. Trusted-LAN
+  failure means only no notes, and PSRAM is not required. The courtesy TLS client uses dynamic TLS
+  records and is skipped unless the same four stable 56 KiB free / 24 KiB largest INTERNAL-heap
+  samples as the manifest and image handshake still hold. The browser's 150 one-second check polls
+  cover both 15-second TLS-headroom waits, both 30-second document deadlines, the bounded
+  allocator-shaped manifest retry and the common quiesce margin, so optional-note work cannot turn
+  the later valid signed offer into a UI timeout. Trusted-LAN
   `GET /ota/changelog?after=<check-generation>` streams 128-byte chunks and returns 409 if no
   matching completed offer owns notes (already consumed, expired or replaced), so once-per-second
   `/ota/status` stays small during TLS and validation pressure.

@@ -110,7 +110,7 @@ right-hand value column. The global reduced-motion contract removes that non-ess
 
 `scripts/run-ui-localization-audit.sh` is the named CI gate for complete device-local copy. Its core,
 `node test/test_ui_locale_catalogs.mjs`, evaluates the separately shipped de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi
-modules against the embedded English fallback. All 846 keys, value types and parameter-function
+modules against the embedded English fallback. All 867 keys, value types and parameter-function
 arities must match; browser detection and the Firmware selector must name the same thirteen languages;
 all 125 value and 15 model-description rows must have native copy with no English prose fallback
 (compact locales may fold the normal context into their first field); concurrent loads coalesce onto
@@ -163,15 +163,17 @@ decoded length. The one-shot lease is freed after every accepted HTTP response p
 60-second static-timer TTL when never requested, or before the next OTA operation. The auto-reload
 callback uses a zero-wait OTA try-lock and retries one second later instead of blocking the shared
 timer daemon. It is accepted
-only for the checked version over forced HTTPS after its dedicated 32 KiB free / 17 KiB largest-block
-gate for the pinned 16 KiB TLS input buffer, and is served through a fixed-chunk generation-bound
-endpoint.
+only for the checked version over forced HTTPS after the same four stable 56 KiB free / 24 KiB
+largest-INTERNAL-block samples as manifest/image TLS, using dynamic TLS records, and is served
+through a fixed-chunk generation-bound endpoint. The UI's 150-second check poll budget covers both
+15-second TLS-headroom waits, both 30-second document deadlines, the bounded allocator-shaped
+manifest retry and the common quiesce margin.
 IDF's umbrella image-validation error stays generic rather than falsely
 claiming a bad signature. Initial feed URLs and every redirect stay on forced HTTPS, and an oversized
 response remains a size-policy refusal rather than masquerading as an interrupted connection.
 `tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently (including
 the fixed task lease, generation rollback and whole-stream SHA comparison) and proves the
-source contract turns red; all eighty-five seeded regressions are required. The allocation-free
+source contract turns red; all ninety-six seeded regressions are required. The allocation-free
 `FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
 
 `node test/test_production_ota_gate_contract.mjs` pins the exact-artifact bench-to-production
