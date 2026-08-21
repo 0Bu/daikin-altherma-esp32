@@ -21,6 +21,11 @@ must consume those canonical sources or dispatch to the runner-neutral hook core
 runner-specific policy or workflow copies. `.mcp.json` remains a shared client descriptor as
 documented in [`MCP.md`](MCP.md), not a second project-policy source.
 
+This layout covers repository-scoped workflows only. Maintainer-specific plant, LAN, observability,
+private-inventory, or Mac workflows are installed in the user's global skill directory and are not
+part of the repository inventory. Do not copy them into `.agents/skills/`; the exact inventory check
+fails closed on both missing and extra project skills.
+
 ## Operating rules
 
 - Invoke project skills as `$skill-name`; discovery is rooted at `.agents/skills/`.
@@ -117,9 +122,9 @@ the project Codex baseline.
 Run these checks after changing agent instructions, skills, reviewers, configuration, or hooks:
 
 1. Confirm `AGENTS.md` stays below the project target of 24 KiB.
-2. Run `scripts/run-agent-instructions-budget.sh`; its repository-native validator checks all 16
-   skill directories, exact `name`/`description` frontmatter, directory-name identity, and non-empty
-   bodies. When the Skill Creator runtime and PyYAML are available, also run its
+2. Run `scripts/run-agent-instructions-budget.sh`; its repository-native validator checks the exact
+   reviewed repository skill inventory, `name`/`description` frontmatter, directory-name identity,
+   and non-empty bodies. When the Skill Creator runtime and PyYAML are available, also run its
    `quick_validate.py` as an upstream compatibility check; do not install an unpinned dependency
    merely to duplicate the binding repository gate.
 3. Parse `.codex/config.toml` and all three `.codex/agents/*.toml` files. Reviewer TOMLs must keep
@@ -139,9 +144,10 @@ Run these checks after changing agent instructions, skills, reviewers, configura
 
 ## Phase 7 cutover and rollback
 
-The cutover is complete when the canonical configuration passes locally and in exact-head CI, all
-16 skills are discoverable, all three focused reviewers remain read-only, the project hooks are
-reviewed at their current hashes, and no required workflow depends on a retired adapter. The final
+The cutover is complete when the canonical configuration passes locally and in exact-head CI, the
+reviewed repository skill inventory is discoverable, all three focused reviewers remain read-only,
+the project hooks are reviewed at their current hashes, and no required workflow depends on a
+retired adapter. The final
 local check uses a fresh Codex task and `/hooks`; an older trusted hash is not evidence for a changed
 hook.
 

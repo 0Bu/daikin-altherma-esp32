@@ -1181,10 +1181,16 @@ fi
 
 prompt_out="$(printf '%s' '{"prompt":"Das Gerät ist offline nach einem reboot"}' \
     | python3 "$hook" prompt-context 2>&1)"
-if printf '%s' "$prompt_out" | grep -qF '<crash-triage-reminder>'; then
+if printf '%s' "$prompt_out" | grep -qF '<crash-triage-reminder>' \
+    && printf '%s' "$prompt_out" | grep -qF 'external syslog collector'; then
     echo "PASS  UserPromptSubmit crash report injects neutral triage context"; pass=$((pass + 1))
 else
     echo "FAIL  UserPromptSubmit crash report missed triage context" >&2; fail=$((fail + 1))
+fi
+if printf '%s' "$prompt_out" | grep -Eq 'VictoriaLogs|mcp__victoria-logs|kubernetes\.container_name'; then
+    echo "FAIL  UserPromptSubmit crash context leaked local observability assumptions" >&2; fail=$((fail + 1))
+else
+    echo "PASS  UserPromptSubmit crash context stays backend-neutral"; pass=$((pass + 1))
 fi
 prompt_out="$(printf '%s' '{"prompt":"Please update one documentation sentence"}' \
     | python3 "$hook" prompt-context 2>&1)"

@@ -47,6 +47,10 @@ Repository skills live under `.agents/skills/` and are invoked as `$skill-name`.
 does not broaden the authorization boundary above. In particular, an implicitly selected review or
 triage skill stays read-only unless the user asked for changes.
 
+Only version-sensitive project workflows belong in that directory. Skills tied to a maintainer's
+plant, LAN, observability stack, private inventory, or Mac tooling are user-global skills and must not
+be copied into the repository; the exact repository inventory gate rejects additions.
+
 Use the narrowest relevant skill. Important review gates are:
 
 - `$project-review` and `$domain-review`: required before every PR merge.
@@ -211,8 +215,8 @@ scripts/idf-docker.sh idf.py build
 - Diagnose from the real persistence, log, device, config, and source path. A UI explanation alone
   is not a root cause.
 - For crashes or unreachable devices, use `$device-triage`: snapshot `/status`, `/values`, and
-  `/diag`, then reconstruct reboot history from VictoriaLogs when available. Current uptime and the
-  RAM log ring cannot prove that no reboot occurred.
+  `/diag`, then use an explicitly available external syslog collector when configured and accessible.
+  Do not assume a backend or deployment; current uptime and the RAM ring cannot prove no reboot.
 - Read `last_crash.fault` and reset reason before calling an event a crash. Verify a claimed coredump
   by fetching it; never clear it before the requested evidence has been preserved and decoded.
 - Device reports must redact at the source using `main/logic/redact.hpp`. Unset fields stay absent or
