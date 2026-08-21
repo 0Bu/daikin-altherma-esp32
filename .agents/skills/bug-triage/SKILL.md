@@ -14,8 +14,8 @@ report analysis, changes, and verification separately.
 
 Triage `<issue number>` — a report from someone whose device you cannot reach.
 
-**This is not device-triage with a different input.** That skill's central technique — reconstructing
-restart history from the syslog stream in VictoriaLogs, because the uptime prefix jumps backwards —
+**This is not device-triage with a different input.** That skill may reconstruct restart history from
+an explicitly available external syslog collector using backwards jumps in the uptime prefix. That
 does not exist here: an external user's device forwards syslog to *their* collector, if any. Its
 `/coredump` 200-vs-404 consistency check does not exist either. Every "verify rather than relay" step
 it makes assumes a live board. Here the report is **frozen**, and the substitutes are provenance

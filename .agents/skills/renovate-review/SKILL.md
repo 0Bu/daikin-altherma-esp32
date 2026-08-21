@@ -49,11 +49,11 @@ flash path** — which is exactly what differs between versions. The inline inst
 These can all keep their TypeScript shape while changing reset or stream-lock behaviour that only
 fails on real hardware. The reference board is native USB-Serial/JTAG, where reset is most fragile.
 
-**There is no PR preview to click.** The per-PR preview installer is retired (each one cost a
-`gh-pages` push and the Pages deployment that follows it), so an esptool-js bump cannot be
-flashed straight from the PR. Two paths remain, and for this dependency they are the whole test:
-build and serve the installer page locally, or **merge to `main` and flash the dev channel**
-(`…/dev/`), which republishes on the merge and is what a dev-channel board would receive anyway.
+**There is no PR preview to click.** The per-PR preview installer is retired, and pull-request CI
+deliberately publishes no flashable artifact. The source/API and Node checks below remain available,
+but there is currently no supported pre-merge browser-flash path that reproduces the production
+sparse plan. Merging to `main` and flashing the republished dev channel is post-merge evidence only;
+it cannot satisfy pre-merge evidence without an explicit risk decision.
 
 ### 2.1 Check the contract against the dependency's own source
 
@@ -61,11 +61,17 @@ Release notes are a claim, not evidence — verify against the code. Compare the
 the npm package's readable `lib/` output:
 
 ```bash
+review_tmp="$(mktemp -d "${TMPDIR:-/tmp}/daikin-renovate-review.XXXXXX")"
 for v in <old> <new>; do
-  mkdir -p "$v" && curl -sSL "https://registry.npmjs.org/esptool-js/-/esptool-js-$v.tgz" | tar xz -C "$v"
+  mkdir -p "$review_tmp/$v"
+  curl -sSL "https://registry.npmjs.org/esptool-js/-/esptool-js-$v.tgz" \
+    | tar xz -C "$review_tmp/$v"
 done
-diff -ru <old>/package/lib <new>/package/lib
+diff -ru "$review_tmp/<old>/package/lib" "$review_tmp/<new>/package/lib"
 ```
+
+Keep extraction outside the repository. Do not delete or replace an existing workspace directory to
+make room for review inputs.
 
 - `Transport` still has to open, read, reset and close the same Web Serial port without leaving a
   lock behind for the on-page Serial Monitor.
@@ -78,101 +84,64 @@ Run `node --test test/web_installer.test.mjs` against the bump. It gates our man
 weighted sparse-part progress and no-Erase boundary. Then inspect the changed dependency source for
 the methods above; do not infer compatibility from an unchanged exported type alone.
 
-### 2.2 Get a bootable image — pull it from CI, don't build it
+### 2.2 Establish the pre-merge flash boundary
 
-Do **not** run `ci-build-all.sh` locally to produce the flash payload. It signs *inside* the ESP-IDF
-container, and the offline key must never enter the repo or the container (it is mounted nowhere;
-a hook blocks commands that name its path). Unsigned is not a fallback — it crash-loops before
-`app_main`.
+Pull-request CI is deliberately **compile-only** and publishes only ELF/size diagnostics. It does
+not receive the offline signing key and does not produce a flashable application, merged image or
+installer manifest. Never request or accept a purported signed PR CI artifact.
 
-The PR's own CI run already built and signed the exact image, because same-repo Renovate branches
-get the secret:
+Pre-merge USB flashing is therefore available only when the user separately authorizes both the
+hardware flash and direct host use of the offline OTA signing key. Use the global
+`$daikin-esp32-premerge-hardware` workflow for that exact-head local build/sign/flash chain. The key
+must never enter Docker or the repository, and the signing command must remain a direct, unchained
+host `espsecure sign-data` invocation. Without that separate authorization and key access, report
+pre-merge hardware flashing as unavailable. A later merge plus dev-channel flash is post-merge
+evidence and cannot be backdated into this review.
 
-```bash
-scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 \
-  pr checks <N>                         # grab the run id
-scripts/gh-with-git-credentials.sh api --hostname github.com --method GET \
-  repos/0Bu/daikin-altherma-esp32/actions/runs/<run-id>/artifacts
-```
+### 2.3 Do not invent a substitute browser-flash plan
 
-The credential wrapper intentionally refuses `run download` and every other local-file download
-surface. Before hardware validation, have an explicitly authorized maintainer provide the named
-artifact in `<dir>` and verify its run id, artifact name and digest against the JSON above; do not
-bypass the wrapper or expose a credential to fetch it.
+A one-part app manifest at fixed `ota_0` offset is not equivalent to production: `otadata` may still
+select `ota_1`, and it omits the bootloader/partition/OTA-data parts whose interaction with
+esptool-js is part of the real installer. Do not manufacture that shortcut or claim a direct host
+flash exercises the browser dependency.
 
-Verify before it goes near the board — the signature, and that the app *inside* the merged image is
-the signed one (`@flash_args` puts the app at `0x20000`; carve it back out and compare):
-
-```bash
-scripts/require-signed.sh <dir>/daikin-altherma-esp32.bin
-dd if=<dir>/daikin-altherma-esp32-merged.bin of=build/merged-app.bin bs=4096 \
-   skip=$((0x20000/4096)) count=$(($(stat -f%z <dir>/daikin-altherma-esp32.bin)/4096)) status=none
-cmp build/merged-app.bin <dir>/daikin-altherma-esp32.bin && echo "merged embeds the signed app"
-```
-
-### 2.3 Serve the installer exactly as it ships
-
-Reuse the real scripts so the test subject isn't a hand-built approximation. Write
-`dist/manifest.json` in the shape `ci-build-all.sh` emits (copy its heredoc; the `version` must match
-what the image embeds), then:
-
-```bash
-scripts/build-pages.sh                       # assembles _site/ from dist/ + docs/index.html
-python3 -m http.server 8765 --bind 127.0.0.1 # localhost IS a secure context -> Web Serial works
-```
-
-Confirm the page itself before involving the user: the pinned `esptool-js` module loads, manifest
-version appears, the native chooser is the only dialog, the connection/progress UI stays in-page,
-the Serial Monitor tongue opens under the USB card, and the console is clean.
-
-### 2.4 The flash needs the user — you cannot do it
-
-`navigator.serial.requestPort()` opens Chrome's **native** port picker. It is not page DOM: the
-in-app browser has Web Serial but no host USB (zero ports; the click does nothing), the Chrome
-extension cannot click browser-chrome dialogs, and computer-use grants browsers read-only. Don't
-burn turns trying.
-
-Set everything up, then hand over a short, specific ask: open the URL in Chrome, click Install, pick
-"USB JTAG_serial debug unit", and report back. Tell them what a failure looks like, since that is the
-whole point of the test:
-
-| Phase | What a new version tends to change | Symptom |
-|---|---|---|
-| Connect | the reset sequence | *"Connection failed"* / chip never becomes suitable |
-| Write | the binary/progress API | write error / abort |
-| Reboot | the same reset path | completes but the board doesn't come back |
-
-Their answer is the test result. Nothing else in this section substitutes for it.
+Until the repository has an audited host-side packager or a trusted exact-head signer that can
+produce the same validated sparse plan as trusted `main` CI, report pre-merge browser hardware
+evidence as unavailable. If that evidence is required, it blocks merge unless the user makes an
+explicit risk decision. A separately authorized dev-channel browser flash after merge may validate
+the production plan, but remains clearly post-merge evidence.
 
 ## 3. espressif/esp-idf — the toolchain
 
 `scripts/idf-docker.sh` reads the version straight from `build.yml`, so the bumped PR builds against
-the new image. The workflow pin and the component graph are two halves of one toolchain update:
-regenerate the committed lock with that new image before compiling, and review every version/hash
-change rather than accepting an implicit resolver rewrite:
+the new image. The workflow pin and the component graph are two halves of one toolchain update.
+Regenerating the lock edits the Renovate branch, so create a dedicated clean worktree and run the
+following block there only after the user explicitly authorizes branch edits. Otherwise inspect the
+existing diff and CI read-only and report a missing new-toolchain lock resolution as a blocker. Do
+not delete or reuse an existing `build/` or `sdkconfig` owned by the user:
 
 ```bash
-rm -rf build sdkconfig
-scripts/idf-docker.sh idf.py update-dependencies
+scripts/idf-docker.sh idf.py -B build-renovate update-dependencies
 git diff -- dependencies.lock main/idf_component.yml
-scripts/idf-docker.sh idf.py build
+scripts/idf-docker.sh idf.py -B build-renovate build
 scripts/run-mock-tests.sh && scripts/run-domain-audit.sh
 ```
 
-Commit the regenerated `dependencies.lock` onto the Renovate branch. `ci-build-all.sh` deliberately
-fails if configuration rewrites the lock, so an IDF pin cannot merge with a graph resolved by the
-old toolchain. If the new IDF falls outside `main/idf_component.yml`'s declared floor/range, update
-that manifest in the same commit and re-resolve once more.
+If the user explicitly authorized branch edits, commit the regenerated `dependencies.lock` onto the
+Renovate branch. Otherwise report the required lockfile update as a blocking finding and leave the
+branch unchanged. `ci-build-all.sh` deliberately fails if configuration rewrites the lock, so an IDF
+pin cannot merge with a graph resolved by the old toolchain. An `idf_component.yml` range update and
+second resolution likewise require explicit branch-edit authorization.
 
 That is a compile check. It says nothing about the behaviour the renovate.json note warns about
 (mbedTLS, component moves, `esp-mqtt` / `esp_https_ota` TLS). On a **major** bump Renovate attaches a
 migration-guide reminder to the PR body — follow it.
 
-Then verify on hardware, because a toolchain bump can compile perfectly and break the radio: use
-[`flash-esp32`](../flash-esp32/SKILL.md) (build in Docker, sign on the **host** — that path works,
-unlike §2.2's, because the key never leaves the host) and then [`device-triage`](../device-triage/SKILL.md)
-to confirm WiFi associates, MQTT connects, X10A decodes real values, and the heap headroom on
-`/status.sys` hasn't regressed.
+Hardware validation needs its own explicit user authorization, including separate authorization for
+host use of the offline signing key. When granted, use [`flash-esp32`](../flash-esp32/SKILL.md) and
+then [`device-triage`](../device-triage/SKILL.md) to confirm WiFi, MQTT, X10A and heap behavior. When
+not granted or unavailable, record the missing hardware evidence; do not perform the flash as an
+implicit part of review.
 
 ## 4. Merging
 
@@ -187,13 +156,14 @@ scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT \
   -f sha=<full-current-head-sha> -f merge_method=squash
 ```
 
-Run each applicable skill, then tick + SHA-stamp its box in the PR body against the PR head
-(`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <N>
---body-file <absolute-physical-temp-path>/review-body.md`; append to Renovate's body,
-don't replace it). `main` stays linear and GPG-signed via GitHub's web-flow key.
+Run each applicable skill. Editing the PR body requires separate explicit authorization; when it is
+not granted, report the completed exact-head reviews without mutating GitHub. When authorized, tick
+and SHA-stamp the applicable boxes by appending to Renovate's body through the credential wrapper.
+The final REST merge itself is allowed only when the user explicitly requested merge and every
+required gate and decision is resolved. `main` stays linear and GPG-signed via GitHub's web-flow key.
 
-Record the hardware result in the PR body. It is the only evidence that the thing CI cannot test was
-tested, and after the squash it is the sole surviving trace.
+When a PR-body edit was separately authorized, record the hardware result there so it survives the
+squash. Otherwise return the result locally and state that GitHub was not mutated.
 
 ## Notes
 - **A red flag worth blocking on:** the bump needs a manifest change (a required new field, a dropped
@@ -203,5 +173,5 @@ tested, and after the squash it is the sole surviving trace.
   if it rebases (your stamps go with it — re-stamp after any new head commit).
 - Clean up after the test: `dist/` is **not** gitignored (only `/_site/` is), so a local build leaves
   untracked output that can be committed by accident.
-- The bench board has no live pump wired, so all-timeout X10A readings there are expected, not a
-  regression.
+- Record whether the validation board was connected to a live X10A source. All-timeout readings on an
+  unconnected board may be expected, but they do not prove X10A compatibility.

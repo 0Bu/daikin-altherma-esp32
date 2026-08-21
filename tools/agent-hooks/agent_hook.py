@@ -1300,10 +1300,11 @@ The prompt looks like a report of a crashed / rebooting / unreachable daikin-alt
 Before concluding anything:
 
 1. Run the `device-triage` skill rather than hand-rolling curl calls.
-2. Read log history, not just `/status` and `/diag`. Check `/status.syslog`, then query VictoriaLogs
-   by stream label (`{hostname="daikin-altherma-esp32"}` or legacy `{hostname="esp32-daikin"}`).
-   Reconstruct boots from backwards jumps in the uptime prefix; absence of a `crash:` line is not
-   evidence of no crash because crash capture runs before Wi-Fi/syslog are available.
+2. Read durable log history when an explicitly configured external syslog collector is available;
+   do not assume a backend, MCP, stream schema, broker deployment, or Kubernetes environment. Check
+   `/status.syslog`, reconstruct boots from backwards jumps in the uptime prefix, and keep absence
+   bounded because crash capture starts before Wi-Fi/syslog delivery is available. Without an
+   accessible collector, state that events preceding the RAM ring cannot be reconstructed.
 3. Read `fault` before calling it a crash. `reason=usb` plus `fault=false` is a normal USB reset, and
    an orphan flash coredump can raise a banner after an unrelated boot.
 4. Verify claims: fetch `/coredump` when status says it exists, and check whether missing current

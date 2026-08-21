@@ -56,7 +56,8 @@ passthrough).
   The step-4 guard exists so this never happens in the first place. Boot-recovery model +
   auto-rollback details: [docs/SECURITY.md](../../../docs/SECURITY.md) → Boot recovery.
 - First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-esp32-setup` portal.
-- A full-erase recovery: `esptool --chip esp32s3 -p <port> erase_flash` then reflash.
+- A full-erase recovery is destructive and outside an ordinary flash. Use `erase_flash` only after
+  separate explicit authorization, a resolved exact target and an NVS backup where applicable.
 - This skill does NOT merge or release — it works on the local tree only. The supported merge path
   is `scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT
   repos/0Bu/daikin-altherma-esp32/pulls/<number>/merge -f sha=<full-current-head-sha> -f

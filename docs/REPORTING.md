@@ -180,18 +180,6 @@ removed from them for you — check them for your network name and your server a
 
 ---
 
-## Supporting the project
-
-This firmware is free to use and maintained in spare time. **No funding account is currently
-configured**, so the repository does not currently present a Sponsor button. If project funding is
-enabled later, it will support the project as a whole.
-
-There is deliberately **no way to pay for a particular issue**, and none is planned — reports are
-worked on by what is wrong and how well it is evidenced, not by who contributed. Sponsoring is
-entirely optional and changes nothing about how your report is handled.
-
----
-
 ## Security problems
 
 Anything exploitable goes to the [private advisory
@@ -211,7 +199,4 @@ See [SECURITY.md](SECURITY.md).
 2. Switch the repository to public.
 3. Enable **private vulnerability reporting** (Settings → Security) — it exists only on public
    repositories, and until it is on, the security link in the issue-template chooser leads nowhere.
-4. Set up whichever funding accounts you want and uncomment them in
-   [`.github/FUNDING.yml`](../.github/FUNDING.yml); the Sponsor button renders on public
-   repositories only.
-5. Walk one real report all the way through: button → issue → `$bug-triage`.
+4. Walk one real report all the way through: button → issue → `$bug-triage`.
