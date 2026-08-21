@@ -135,6 +135,18 @@ try {
     ["real OTA TLS is removed from the pressure window", () =>
       replaceOnce("scripts/production-ota-gate.py", 'f"/ota/check?ms={int(time.time() * 1000)}"',
         '"/ota/status"')],
+    ["an existing MQTT outage is hidden by the OTA pause allowance", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if not started.get("mqtt", {}).get("connected"):',
+        "if False:")],
+    ["the intentional OTA MQTT pause is counted as an outage", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if not mqtt.get("connected") and not mqtt_recovery_expected.is_set():',
+        'if not mqtt.get("connected"):')],
+    ["MQTT recovery after OTA TLS is no longer observed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if mqtt_recovery_status.get("mqtt", {}).get("connected"):',
+        "if True:")],
     ["the reboot waiter polls full status while OTA still owns TLS", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'if ota.get("state") not in ("checking", "updating", "done"):',
