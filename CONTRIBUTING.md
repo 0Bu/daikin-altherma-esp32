@@ -434,14 +434,16 @@ retained X10A payload. The command never cuts a release. See
   notice. The firmware build is the only compile of `main/*.cpp`, so these fire in CI, not in
   `run-mock-tests.sh`. Don't relax a flag to get green: each hit is the defect class it was pinned
   for.
-- **So is the optimisation level of ONE file.** The same `main/CMakeLists.txt` compiles
-  `http_status.cpp` at `-Os` while the rest of the project builds at ESP-IDF's default `-Og`. That is
-  not a tidy-up someone forgot to finish: `http_append_status_json()` has overflowed a task stack
-  twice, and at `-Og` its frame reached 11776 bytes — against ~2.2 KB of actual locals, the rest
-  being one stack slot per string temporary in a 760-line function. `-Os` takes it to 3744 and the
-  deepest httpd path (`POST /mcp`, which reuses the same builder) from 14512 bytes of a 16384 stack
-  to 6480. Deleting that one line silently restores a ~1.8 KB margin. If you touch it, re-measure —
-  the frame is read off the ELF's `entry a1,N`, never off an idle heap reading, and the command is in
+- **So is the optimisation contract of the status serializer.** The release build now selects
+  size optimisation globally, and `main/CMakeLists.txt` also pins `http_status.cpp` to `-Os` so this
+  stack-critical translation unit remains protected if the global setting changes later. The older
+  whole-body `http_append_status_json()` overflowed a task stack twice; historically its `-Og` frame
+  was 11776 bytes and the deepest MCP path was 14512/16384, while the first per-file `-Os` change
+  reduced them to 3744 and 6480. The current bounded, streamed serializer is larger in features but
+  has no owning whole-status instantiation: the release ELF measures its frame at 4848 bytes and the
+  conservative complete MCP path at 7552/16384, leaving about 8.8 KB before ISR and exception-unwind
+  frames. Do not remove the explicit pin without an equivalent invariant. If you touch this path,
+  re-measure it from the ELF's `entry a1,N`, never from an idle heap reading; the command is in
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#memory-constraints).
 - **There is deliberately no clang-tidy or cppcheck gate**, and that was measured rather than
   assumed. Over `main/logic/` + `main/def/`, a blanket config reports ~7000 findings — over half of
