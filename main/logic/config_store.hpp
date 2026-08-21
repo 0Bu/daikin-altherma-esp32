@@ -337,7 +337,7 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     // v3 block: the OTA channel, one byte (there are two feeds, not two billion).
     v.push_back(static_cast<uint8_t>(c.ota_channel & 0xFF));
     // v4 block: the UI language, one byte
-    // (auto/en/de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi, with unknowns defensive).
+    // (auto/de/en/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi, with unknowns defensive).
     v.push_back(static_cast<uint8_t>(c.ui_lang & 0xFF));
     // v5/v6 block: HomeHub transport fields. Bit1 remains populated as a compatibility mirror for
     // the short-lived v6 Auto/Manual/Off build, but current firmware derives it from the address.

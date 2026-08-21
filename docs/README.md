@@ -291,8 +291,9 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporte
                                    #   build produced this?" is the first question a frozen report
                                    #   has to answer. Substituted where each value is WRITTEN, never
                                    #   as a pass over the finished string (the httpd stack budget
-                                   #   v1.0.12 overflowed). The WS broadcast is never redacted — it
-                                   #   feeds the dashboard, which legitimately shows the SSID.
+                                   #   v1.0.12 overflowed). The dashboard polls ordinary GET /status
+                                   #   without redact=1, so it legitimately receives fields such as
+                                   #   SSID.
                                    # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
                                    #   board:{led_gpio,led_type,led_inverted,btn_gpio,
                                    #        btn_active_low,pins_local:[..],presets:[..]},

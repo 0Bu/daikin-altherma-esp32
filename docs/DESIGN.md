@@ -668,10 +668,10 @@ Body, ordered:
    explanation only, never a specially placed value line or a sentence that merely repeats those
    numbers. Component targets without a headline likewise keep their complete member list.
    English/German leaf explainers reuse the **same `DESCRIPTIONS` table** as the value rows (§5.3
-   item 6), resolved through a canonical register label rather than the live spelling. The six lazy
-   locale modules carry a shorter inspector-specific explanation for every target so translated copy
-   stays understandable inside this compact surface; their complete value/model accordion prose is
-   stored separately in compact positional tables in the same locale asset.
+   item 6), resolved through a canonical register label rather than the live spelling. The eleven
+   newer lazy locale modules carry a shorter inspector-specific explanation for every target so
+   translated copy stays understandable inside this compact surface; their complete value/model
+   accordion prose is stored separately in compact positional tables in the same locale asset.
    Component copy (outdoor unit, PHE, ΔT, heat output, heating circuit) likewise lives in the
    inspector table. Both forms are keyed by the stable `data-insp` target; source selection and plant
    logic remain only in `INSPECT`.
