@@ -300,10 +300,10 @@ using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 // broadcaster), and that second runner is what overflowed hp_poll's stack (#241). GET /status now
 // instantiates this serializer with a 1 KiB bounded sink: the live payload is already ~8.7 KiB and a
 // growing whole-body std::string needed a ~15 KiB contiguous reallocation under OTA/weather TLS,
-// making the shared OOM guard return 503. The owning std::string instantiation remains only for the
-// MCP get_status envelope, whose outer protocol still owns one response string. This serializer
-// still takes ordinary small snapshots and formats temporary strings. If one of those allocations
-// fails before the first emission, the shared guard can return 503; once an emission is attempted
+// making the shared OOM guard return 503. MCP get_status now streams its small JSON-RPC prefix and
+// suffix around the same bounded serializer too. This serializer still takes ordinary small
+// snapshots and formats temporary strings. If one of those allocations fails before the first
+// emission, the shared guard can return 503; once an emission is attempted
 // the bounded-stream helper returns ESP_FAIL so httpd closes a possibly-started response instead of
 // attempting a second one or throwing through C.
 template <typename JsonOut>
@@ -311,6 +311,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     const Config& c = config();
     const BoardPreset* selected_board = board_selected_preset(c);
     HpStats     hp  = hp_stats();
+    const logic::RefrigerantServiceSnapshot refrigerant_service = refrigerant_service_status();
     MqttStatus  m   = mqtt_status();
     ReferenceTemperatureStatus rt = reference_temperature_status();
     CirculationSourceStatus circulation = circulation_source_status();
@@ -1130,6 +1131,68 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += "]},";
     }
 
+    // A separate read-only service observation, deliberately OUTSIDE health{}: it never contributes
+    // to the eight diagnosis rows, assessable/evaluated counts or the overall verdict.  Every number
+    // is from one uninterrupted series of fresh same-sweep X10A values.  There is no settling limit,
+    // completed-test state or refrigerant-charge judgement in this contract.
+    j += "\"refrigerant_service\":{\"kind\":\"observation\",\"state\":";
+    json_append_quoted(j, logic::refrigerant_service_state_name(refrigerant_service.state));
+    j += ",\"continuous_s\":";
+    j += std::to_string(refrigerant_service.continuous_s);
+    j += ",\"samples\":";
+    j += std::to_string(refrigerant_service.samples);
+    j += ",\"mode\":";
+    json_append_quoted(j, logic::refrigerant_service_mode_name(refrigerant_service.mode));
+    j += ",\"blocker\":";
+    if (refrigerant_service.blocker == logic::RefrigerantServiceBlocker::None) j += "null";
+    else json_append_quoted(j, logic::refrigerant_service_blocker_name(refrigerant_service.blocker));
+    j += ",\"special_phases_known\":";
+    j += refrigerant_service.special_phases_known ? "true" : "false";
+    // These false fields are part of the truth contract, not future promises: the bridge observes
+    // ordinary traffic and an EEV command.  It neither establishes a settled/full-load condition nor
+    // receives independent mechanical valve feedback.
+    j += ",\"load_proven\":false,\"eev_feedback\":false,\"limitations\":[";
+    bool service_limitation_separator = false;
+    auto append_service_limitation = [&j, &service_limitation_separator](const char* name) {
+        if (service_limitation_separator) j += ",";
+        json_append_quoted(j, name);
+        service_limitation_separator = true;
+    };
+    if (refrigerant_service.limitation_mask & logic::RefrigerantServiceSpecialPhases)
+        append_service_limitation("special_phases_unavailable");
+    if (refrigerant_service.limitation_mask & logic::RefrigerantServiceTemperatures)
+        append_service_limitation("temperature_context_incomplete");
+    if (refrigerant_service.limitation_mask & logic::RefrigerantServicePressureSides)
+        append_service_limitation("pressure_sides_incomplete");
+    if (refrigerant_service.limitation_mask & logic::RefrigerantServiceOutdoorContext)
+        append_service_limitation("outdoor_context_incomplete");
+    j += "]";
+    j += ",\"metrics\":{";
+    auto append_service_metric = [&j](const char* key,
+                                      const logic::RefrigerantServiceMetricSnapshot& metric) {
+        j += "\"";
+        j += key;
+        j += "\":";
+        if (!metric.available) { j += "null"; return; }
+        auto append_tenths = [&j](int value) {
+            if (value < 0) j += "-";
+            const unsigned magnitude = static_cast<unsigned>(value < 0 ? -value : value);
+            j += std::to_string(magnitude / 10);
+            j += ".";
+            j += std::to_string(magnitude % 10);
+        };
+        j += "{\"min\":"; append_tenths(metric.min_tenths);
+        j += ",\"mean\":"; append_tenths(metric.mean_tenths);
+        j += ",\"max\":"; append_tenths(metric.max_tenths);
+        j += "}";
+    };
+    append_service_metric("compressor_rps", refrigerant_service.rps);
+    j += ","; append_service_metric("discharge_c", refrigerant_service.discharge);
+    j += ","; append_service_metric("eev_command_pls", refrigerant_service.eev_command);
+    j += ","; append_service_metric("high_pressure_bar", refrigerant_service.high_pressure);
+    j += ","; append_service_metric("low_pressure_bar", refrigerant_service.low_pressure);
+    j += "}},";
+
     // System health: heap headroom + why the device last booted, so both are visible from the LAN
     // without a serial console (and without a broker — unlike the MQTT heartbeat). free_heap
     // is the current free, min_free_heap the since-boot low-water mark (the leak indicator), max_alloc
@@ -1314,8 +1377,15 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += "}";
 }
 
-void http_append_status_json(std::string& j, bool redact) {
-    append_status_json(j, redact);
+esp_err_t http_send_status_json(httpd_req_t* req, std::string_view prefix,
+                                std::string_view suffix, bool redact) {
+    HttpJsonChunks chunks(HttpChunkEmitter{req});
+    httpd_resp_set_type(req, "application/json");
+    return finish_bounded_stream(chunks, [prefix, suffix, redact](auto& out) {
+        out += prefix;
+        append_status_json(out, redact);
+        out += suffix;
+    }) ? ESP_OK : ESP_FAIL;
 }
 
 static esp_err_t h_status(httpd_req_t* req) {
@@ -1333,11 +1403,7 @@ static esp_err_t h_status(httpd_req_t* req) {
         char v[4];
         if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
     }
-    HttpJsonChunks chunks(HttpChunkEmitter{req});
-    httpd_resp_set_type(req, "application/json");
-    return finish_bounded_stream(chunks, [redact](auto& out) {
-        append_status_json(out, redact);
-    }) ? ESP_OK : ESP_FAIL;
+    return http_send_status_json(req, {}, {}, redact);
 }
 
 struct ValuesSnapshot {

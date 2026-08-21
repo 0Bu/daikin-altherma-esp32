@@ -124,23 +124,26 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
 )
 
 # THE STACK CONTRACT for the /status builder — the one file in this component whose OPTIMISATION
-# LEVEL is a correctness setting rather than a taste. `http_append_status_json()` has overflowed a
+# LEVEL is a correctness setting rather than a taste. The status serializer has overflowed a
 # task stack twice (v1.0.12 on httpd, #318 on httpd again through an OTA that double-faulted and
 # rolled back a fleet), and both times the fix was to raise a stack against a frame nobody had
 # questioned. Measured on 2026-08-07 (main @ 7524b4c), the frame was 0x2e00 = 11776 bytes while the
-# NAMED LOCALS in that function sum to ~2.2 KB. The other ~9 KB is not live data: this project
-# builds at ESP-IDF's default CONFIG_COMPILER_OPTIMIZATION_DEBUG (-Og), which allocates a distinct
+# NAMED LOCALS in that function sum to ~2.2 KB. The other ~9 KB was not live data: the project then
+# built at ESP-IDF's default CONFIG_COMPILER_OPTIMIZATION_DEBUG (-Og), which allocates a distinct
 # stack slot per `jstr()`/`std::to_string()` temporary instead of coalescing them, and a 760-line
 # function dense with EH cleanup regions is the worst case for that. -Os on this ONE translation
-# unit takes the frame to 0xea0 = 3744 (−68%), and the deepest httpd path — `mcp_post`, NOT
-# `h_status`, because MCP's get_status reuses this same builder and pays its frame plus its own —
-# from 14512 bytes of a 16384 stack (~1872 free, before ISR frames and before the ~700-byte
-# _Unwind_RaiseException path a std::bad_alloc costs below the throwing frame) to 6480.
+# unit took that historical frame to 0xea0 = 3744 (−68%), and the deepest httpd path — `mcp_post`,
+# NOT `h_status` — from 14512 bytes of a 16384 stack to 6480. Re-measured from the release ELF on
+# 2026-08-21 after the refrigerant-service object: the one remaining bounded-sink instantiation is
+# 0x1300 = 4864, `mcp_post` is 0x4d0 = 1232 and `http_send_status_json` is 128. The same conservative
+# complete-path sum is 7568, leaving ~8800 before ISR frames and exception unwinding. MCP now streams
+# its prefix/status/suffix too, so the larger body adds no body-sized contiguous allocation.
 #
-# Verified on hardware too, not only on the ELF: both images built from this one base, signed and
-# flashed to the bench board in turn, produced byte-for-byte structurally identical /status,
-# /status?redact=1, /values and MCP get_status payloads (403 JSON paths each; every value delta was
-# live-varying state). That is what rules out latent UB -Og happened to mask.
+# The ORIGINAL -Og/-Os change was verified on hardware too, not only on the ELF: both images built
+# from that one base, signed and flashed to the bench board in turn, produced structurally identical
+# /status and MCP get_status payloads (403 JSON paths each) plus /values (151 paths); every value
+# delta was live-varying state. That rules out latent UB the optimisation could have masked. The
+# newer refrigerant payload and live high-water marks still require their own device validation.
 #
 # Chosen over the two alternatives because both are worse, measured rather than assumed:
 #   raising cfg.stack_size again  — 4 KB of permanent RAM on a board whose binding limit is the
@@ -157,11 +160,11 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
 # and this is the file whose core dumps mattered. Inlining makes a dump from here less exact. That
 # is accepted deliberately — a frame two thirds smaller prevents more dumps than it obscures.
 #
-# Per-SOURCE-FILE, and NOT a CONFIG_COMPILER_* key in sdkconfig.defaults, for the same two reasons
-# the warning contract above is component-PRIVATE: a Kconfig key is global and would re-optimise
-# ESP-IDF and the managed components too, and sdkconfig.defaults is hashed into CI's ccache key
-# (scripts/idf-version.sh), so this would discard every cached object it cannot invalidate. Scoped
-# this way the command line changes for exactly one object.
+# Per-SOURCE-FILE so the status frame stays pinned even if the project-wide optimisation changes.
+# The release image now also selects CONFIG_COMPILER_OPTIMIZATION_SIZE globally to fit all embedded
+# locale catalogs, but that later footprint decision is independent of this stack invariant. The
+# local flag remains the narrow contract which originally changed exactly this one object without
+# re-optimising ESP-IDF and managed components or invalidating their ccache entries.
 #
 # Re-measure after anything that grows this builder (the command is in docs/ARCHITECTURE.md under
 # "Memory constraints"); read the worst PATH, never the biggest FRAME, and never an idle heap

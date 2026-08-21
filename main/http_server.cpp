@@ -43,7 +43,7 @@ void http_start() {
     // later in lwip (`pthread_getspecific` → LoadProhibited on 0x4) with a backtrace pointing at a
     // WebSocket send (a transport that no longer exists) — nowhere near the code that actually
     // corrupted it. Every other task in that dump had >= 1.8 KB free; httpd was the sole outlier,
-    // because http_append_status_json() runs here and is by far the largest thing this task does.
+    // because append_status_json() runs here and is by far the largest thing this task does.
     // 460 bytes of margin was the bug and #163's extra JSON was only the straw. The peak is
     // separately cut in http_status.cpp. This is now the ONLY task that builds /status (#241).
     //

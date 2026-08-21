@@ -8,6 +8,10 @@
 
 namespace daik {
 
+// Upper bound for one register reply.  The poller's observation-gap allowance composes this exact
+// transport bound with the number of pages in the active profile; keep one definition.
+inline constexpr int64_t HP_QUERY_TIMEOUT_US = 300000;
+
 // (Re)initialise UART1 on the given pins. Safe to call again on a pin change.
 bool hp_uart_init(int rx_pin, int tx_pin);
 void hp_uart_deinit();

@@ -120,6 +120,12 @@ checkup.cpp/.hpp    → the 24-hour PLANT CHECKUP behind /status.health: counted
                       history's append journal, so power loss does not reset evidence. NOT a view over the
                       trend rings — TrendRing::fold keeps the LAST reading of a 5-minute bucket, so
                       the short cycling this exists to find leaves no trace in that raster
+hp_poll.cpp +
+logic/refrigerant_service.hpp
+                    → a generation-bound, non-persistent REFRIGERANT SERVICE OBSERVATION folded from
+                      the same fresh X10A sweep as the live cache. It publishes a separate
+                      /status.refrigerant_service object, never a ninth health check, and contains no
+                      service command, settling threshold, range judgement or charge verdict
 state_dwell.cpp/.hpp → HOW LONG EACH ELIGIBLE SWITCHED ROW HAS READ WHAT IT READS — the value list's other
                       half, since "OFF" describes a plant that finished a charge four seconds ago and
                       one that has not charged since Tuesday equally well. Bit flags + the fault
@@ -177,7 +183,7 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
 http_status.cpp     → GET / (web UI), /locale.js, /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. The live /status and /values bodies use one bounded 1 KiB
                       chunk sink instead of a body-sized contiguous allocation;
-                      http_append_status_json() runs on the httpd task ALONE —
+                      append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_temp, /set_weather,
                       /test_circulation, /set_circulation,
@@ -230,8 +236,8 @@ def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus c
 http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — POST is the stateless Streamable-HTTP MCP device glue. It dispatches
                       only read-only get_status/get_hp_values and reuses http_status.cpp's exact
-                      JSON builders; the model-sized values result streams through the same bounded
-                      sink as GET /values rather than one JSON-RPC-sized string. GET serves one
+                      JSON builders; both results stream through the same bounded sink as their
+                      device routes rather than one JSON-RPC-sized string. GET serves one
                       embedded/gzipped, static setup and information page (no network activity/SSE/
                       session/external assets). Parsing/catalog/envelopes live in host-tested
                       logic/mcp.hpp
@@ -669,8 +675,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   gracefully when columns disappear, it just becomes confident about a distribution it never saw.
   Coverage is read off the **rows**, not off `profile == "generic"`: `generic` is the extreme case
   (measured: no leaving-water measurement, only the setpoint `lwt_select` correctly rejects; no INV
-  frequency, expansion valve or pressure row at all) — but sixteen of the 43 **detectable** profiles
-  also lack page `0x30`, and with it the compressor run-state input. An id check would have let
+  frequency, expansion valve or pressure row at all) — but 13 of the 39 detection profiles also lack
+  page `0x30`, and with it the compressor run-state input (16 of all 43 generated profiles lack it).
+  An id check would have let
   inference run without run-state on more than a third of the detected catalog. No firmware caller
   yet (legacy-69 Phase 3 has not landed); pure and host-tested so the policy is asserted rather than
   re-litigated at the future call site.
@@ -904,6 +911,16 @@ host-testable core is unusually large and valuable, because the risky parts are 
   witness is a pulsed load, so a lone spike must not flip the state). Its absence is a first-class
   state — the checkup's DHW-loss attribution treats the witness as OPTIONAL evidence and never
   fabricates a verdict without it.
+- `logic/refrigerant_service.hpp` — the **separate refrigerant service observation** folded directly
+  by `hp_poll.cpp` from one fresh same-sweep population. It accepts confirmed space heating only,
+  rejects held values, DHW, defrost, unit faults, active or unreadable profile-provided special
+  controller phases and transport gaps. A generation change resets continuity; a profile which does
+  not provide the full special-phase set or a sweep with incomplete optional context is `Limited`.
+  Its gap allowance is derived from the active profile's publishable page count and the shared UART
+  timeout. The read-only HTTP snapshot also expires a stalled active window. It reports duration,
+  sample count, limitations and min/mean/max values under `/status.refrigerant_service`; explicit
+  `load_proven:false` and `eev_feedback:false` prevent the EEV command or passive traffic from being
+  mistaken for mechanical feedback, full load, settling, charge or a completed service test.
 - `logic/redact.hpp` — what a diagnostic snapshot must **not** carry when it leaves the device, for
   `GET /status?redact=1` and `GET /diag?redact=1`. A bug report is filed as a *public* GitHub issue
   carrying the device's own status, readings and log ([`REPORTING.md`](REPORTING.md)), which is only
@@ -2131,7 +2148,7 @@ Structure:
     its **summary** (`esp_core_dump_get_summary()` — crashed task, exception PC, backtrace PCs, and
     the crashed build's `app_elf_sha256`) into a cached `CrashInfo`. The pure formatting is
     `logic/crashinfo.hpp` (host-tested); the summary is parsed **once** and cached — never re-read
-    from flash on a request path, which is where `http_append_status_json()` runs (and, until the
+    from flash on a request path, which is where `append_status_json()` runs (and, until the
     WebSocket push was removed, also on the poll task — see "Push vs. poll"). A dump whose parsed
     `app_elf_sha256` does **not** match the running build (`coredump_is_foreign()`, host-tested) is an
     **orphan** — it survived an OTA, or a panic that could not write its own dump left the previous
@@ -2150,7 +2167,7 @@ Structure:
     user has **deleted** (`CrashInfo::dismissed`, below), which is the one other field written after
     boot: a single monotonic `false → true` store, so the readers that copy the struct concurrently
     (HTTP, MQTT) need no lock for it.
-  - **Always-on system health (no fault required).** `http_append_status_json()` also carries a
+  - **Always-on system health (no fault required).** `append_status_json()` also carries a
     compact `sys` block — `free_heap` / `min_free_heap` (since-boot low-water, the leak indicator) /
     `max_alloc` (largest contiguous block, the true OOM ceiling), what that headroom already **cost**
     (`mqtt_skipped` / `mqtt_quiesced` / `poll_skipped` — the legacy-380 counters described under the
@@ -2430,11 +2447,11 @@ Structure:
   fix then kept a second row/group layout alive for the whole boot; dev.13 additionally moved a
   12 KiB payload block into static RAM without removing those duplicate objects. On the 129-row
   plant that left only 7.5–11 KiB contiguous and made `/status` permanently return 503.
-  The live `/status` route now drives its existing serializer through the same bounded 1 KiB HTTP
-  sink as `/values`, instead of growing one body-sized string (the observed 8.7 KiB body otherwise
-  requested roughly 15 KiB on its capacity-growth step). The owning serializer instantiation remains
-  for MCP `get_status`; the HTTP route's response size is no longer a contiguous-allocation demand,
-  while its ordinary snapshot allocations remain covered by the OOM boundary. Before the first
+  The live `/status` route and MCP `get_status` now drive the serializer through the same bounded
+  1 KiB HTTP sink as `/values`, instead of growing one body-sized string (the observed 8.7 KiB body
+  otherwise requested roughly 15 KiB on its capacity-growth step). MCP keeps only its small prefix
+  and suffix strings. Neither response size is now a contiguous-allocation demand, while ordinary
+  snapshot allocations remain covered by the OOM boundary. Before the first
   emission, an allocation failure still becomes 503. Once emission begins HTTP may already have
   sent status/headers even if the first chunk call later reports a socket error; the stream helper
   therefore catches every subsequent failure and makes httpd close the incomplete response, rather
@@ -2979,6 +2996,19 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   since it is a runtime-configurable network service too, not a static board fact,
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
+                  refrigerant_service{kind:"observation",
+                  state:"unsupported"|"waiting"|"observing"|"limited"|"interrupted",
+                  continuous_s,samples,
+                  mode:"unknown"|"heating"|"cooling"|"other",
+                  blocker:null|"unsupported_profile"|"compressor_not_running"|
+                  "unsupported_or_unknown_mode"|"dhw_path"|"defrost"|"unit_fault"|
+                  "special_controller_phase"|"missing_fresh_signal"|"poll_gap",
+                  special_phases_known,load_proven:false,eev_feedback:false,
+                  limitations:["special_phases_unavailable"|"temperature_context_incomplete"|
+                  "pressure_sides_incomplete"|"outdoor_context_incomplete"],
+                  metrics{compressor_rps,discharge_c,eev_command_pls,
+                  high_pressure_bar,low_pressure_bar}}, where each metric is null without a sample
+                  or {min,mean,max} in the unit named by its key,
                   plus
                   modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,
                   values,task_stack_min_free_bytes,plant_gate_known,plant_gate_active
@@ -3536,8 +3566,8 @@ GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, u
 GET  /mcp         embedded/gzipped static MCP information + setup page; no external assets or
                   network requests, CSP connect-src 'none', never SSE
 POST /mcp         stateless read-only MCP: initialize / tools/list / tools/call; get_status +
-                  get_hp_values mirror /status + /values. The model-sized values result is bounded-
-                  chunk streamed, not materialised as one JSON-RPC string. Notifications → 202; no
+                  get_hp_values mirror /status + /values. Both results are bounded-chunk streamed,
+                  not materialised as one JSON-RPC string. Notifications → 202; no
                   SSE/session
 ```
 
@@ -3582,7 +3612,7 @@ try-lock acquire a callback context needs.
 Heap is tight (WiFi + MQTT + TLS dominate; the binding limit is the
 largest *contiguous* free block): keep every HTTP handler under the `handle_all` try/catch (503 on
 OOM before response emission; failed connection after a streamed response starts), stream `/diag`,
-`/status`, `/values`, MCP get_hp_values and MQTT discovery instead of building one big
+`/status`, `/values`, both MCP results and MQTT discovery instead of building one big
 `std::string`, and treat any new large contiguous allocation (big JSON, OTA TLS) as a crash risk to
 size-check. A reboot loop is bad here too — it stops the poll cycle and drops MQTT availability.
 
@@ -3683,7 +3713,7 @@ announcing it — and 160 of them arrived in the two commits merged *during* thi
 prescribed method, off the ELF, never off an idle heap reading:
 
 ```bash
-scripts/idf-docker.sh bash -c 'A=$(xtensa-esp32s3-elf-nm build/daikin-altherma-esp32.elf | grep " T _ZN4daik23http_append_status_json" | cut -d" " -f1); xtensa-esp32s3-elf-objdump -d --start-address=0x$A --stop-address=$((0x$A+8)) build/daikin-altherma-esp32.elf | grep entry'
+scripts/idf-docker.sh bash -c 'xtensa-esp32s3-elf-objdump -d -C build/daikin-altherma-esp32.elf | grep -A1 -E "<void daik::append_status_json<daik::Bounded|<daik::mcp_post|<daik::http_send_status_json"'
 ```
 
 Two corrections came out of it, and both matter more than the frame number:
@@ -3713,6 +3743,15 @@ the current release image now also selects global `CONFIG_COMPILER_OPTIMIZATION_
 signed application must fit the fixed OTA slot with all device-local catalogs. The builder is no
 longer an outlier at all — 3744 against `history_record`'s 3296. The accepted trade-off is less exact
 debug backtraces in return for both measured stack headroom and the required flash-image headroom.
+
+**Re-measured from the release ELF on 2026-08-21 after the refrigerant-service object.** The only
+remaining status instantiation is the bounded sink at **0x1300 = 4864** bytes; the owning-string
+instantiation no longer exists because MCP streams its small JSON-RPC prefix and suffix around the
+same 1 KiB sink. `mcp_post` is **0x4d0 = 1232** and `http_send_status_json` is **128** bytes. Applying
+the same conservative complete-path walk gives **7568 bytes** of the 16384-byte httpd stack, about
+8800 bytes before ISR and exception-unwind frames. This is build evidence; the hardware paragraph
+below proves the original `-Os` change, not this newer payload, whose live high-water mark remains a
+device-validation boundary.
 
 **Verified ON HARDWARE, not just on the ELF.** Both images were built from ONE source base
 (`main` @ 7524b4c), signed and USB-flashed to the XIAO bench board in turn — distinct ELF shas

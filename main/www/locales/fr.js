@@ -1,4 +1,4 @@
-// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
+// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -141,6 +141,27 @@ I18N.fr = localeValues([
   /* card.candidates */ "Modèles possibles",
   /* card.oueeprom */ "ID de l’unité extérieure",
   /* card.checkup */ "Diagnostic de l’installation · 24 h",
+  /* service.title */ "Observation frigorifique de maintenance",
+  /* service.state.waiting */ "EN ATTENTE",
+  /* service.state.observing */ "OBSERVATION",
+  /* service.state.limited */ "LIMITÉE",
+  /* service.state.interrupted */ "INTERROMPUE",
+  /* service.row.window */ "Fenêtre actuelle",
+  /* service.row.reason */ "Raison",
+  /* service.reason.unsupported_profile */ "Le profil ne fournit pas les signaux requis.",
+  /* service.reason.compressor_not_running */ "Compresseur arrêté.",
+  /* service.reason.unsupported_or_unknown_mode */ "Pas en chauffage ou mode inconnu.",
+  /* service.reason.dhw_path */ "ECS active.",
+  /* service.reason.defrost */ "Le dégivrage est actif.",
+  /* service.reason.unit_fault */ "Défaut d’unité actif.",
+  /* service.reason.special_controller_phase */ "Démarrage, redémarrage, retour d’huile ou égalisation de pression actif.",
+  /* service.reason.missing_fresh_signal */ "Signal récent requis manquant.",
+  /* service.reason.poll_gap */ "Interruption ou pause volontaire X10A.",
+  /* service.window */ (d, n) => `${d} · ${n} ${n === 1 ? "échantillon récent" : "échantillons récents"}`,
+  /* service.help.observing */ "Les valeurs récentes du même relevé X10A restent continues dans ces conditions.",
+  /* service.help.limited */ "Fenêtre continue ; contexte facultatif de température, pression, extérieur ou phase manquant.",
+  /* service.help.interrupted */ "Fenêtre terminée ; le prochain relevé admissible repart de zéro.",
+  /* service.common */ "Observation seule : aucun essai de maintenance/pleine charge ; aucune preuve de stabilisation ou de charge ; aucune plage jugée. Les impulsions EEV sont des commandes, pas un retour de vanne.",
   /* check.fault */ "Défaut de l’unité",
   /* check.dhw_loss */ "Perte de chaleur du ballon ECS",
   /* check.cycling */ "Démarrages du compresseur",
@@ -1052,20 +1073,20 @@ DESCRIPTION_I18N.fr = descriptionValues([
   ["Température d’eau à l’entrée ou à la sortie du PHE, qui transfère la chaleur entre frigorigène et circuit hydraulique."], // 63
   ["Capteur de l’échangeur extérieur ; <0 °C peut être normal et sans humidité ne prouve pas le givre."], // 64
   ["Température extérieure mesurée par l’unité, utilisable pour loi d’eau et décisions de fonctionnement."], // 65
-  ["Température du gaz frigorigène chaud et comprimé quittant le compresseur."], // 66
+  ["Gaz chaud en sortie compresseur ; dépend de la pression, vitesse, mode et charge. Une valeur ou plage d’une autre famille ne prouve ni défaut ni manque de fluide."], // 66
   ["Température du gaz frigorigène froid à basse pression revenant au compresseur."], // 67
   ["Température du fluide frigorigène sur la ligne liquide entre les échangeurs."], // 68
   ["Température du frigorigène entrant/sortant de l’évaporateur, l’échangeur qui absorbe la chaleur."], // 69
   ["Température de la ligne d’injection de frigorigène, utilisée en interne pour piloter l’injection et protéger le cycle."], // 70
   ["Température d’une zone diphasique, liquide et vapeur, du circuit frigorifique."], // 71
-  ["Température du capteur de dégivrage de la batterie extérieure, utilisée pour décider antigel et dégivrage."], // 72
+  ["Capteur de dégivrage extérieur ; position et contrôle selon le modèle. Un point ne prouve ni le givre de toute la batterie ni la fin du dégivrage."], // 72
   ["Température de saturation calculée depuis la pression ; ce n’est ni un capteur séparé ni une pression en bar."], // 73
-  ["Pression frigorifique côté haute/refoulement ou basse/aspiration."], // 74
+  ["Pression haute/basse : juger une tendance stable au même mode/modèle ; démarrage, retour d’huile et dégivrage la changent. Pas de plage universelle."], // 74
   ["Vitesse compresseur en rps ; dépend du modèle, une hausse demande souvent plus, sans mesurer la chaleur."], // 75
-  ["Commande EEV en pas ; ni % d’ouverture ni débit massique, à comparer à modèle et mode identiques."], // 76
+  ["Commande EEV en pas, sans retour mécanique, ni % ni débit. Seule, elle ne prouve ni mouvement, blocage ni manque de fluide."], // 76
   ["Température de l’électronique de commande du moteur du ventilateur extérieur."], // 77
   ["Vitesse du ventilateur extérieur, en étage ou tr/min."], // 78
-  ["Cible interne vers laquelle l’unité pilote le circuit frigorifique, par exemple température d’évaporation/condensation."], // 79
+  ["Cible interne selon modèle/mode ; comparer à la saturation issue de la pression correspondante. L’écart ne diagnostique ni cause ni charge."], // 79
   ["Cible interne de température de refoulement/port du compresseur, utilisée par les protections de l’unité."], // 80
   ["ΔT cible entre départ et retour ; il dépend du modèle et du mode, pas d’une règle universelle de 5 K."], // 81
   ["Fluide frigorigène chargé, par exemple R32 ou R410A."], // 82
@@ -1117,7 +1138,7 @@ MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["État propre erreur/avis : erreur active donne AVERTISSEMENT ; avis ou message effacé sous 24 h donne NOTE, sans inférence du projet."], // health_fault
   ["Perte calme : seuil projet, NOTE ≥0,8 K/h ; volume/ΔT influent, >≈1,85 K/h peut être filtré comme usage et OK ne prouve pas l’isolation."], // health_dhw_loss
   ["NOTE : ≥12 cycles chauffage, moyenne <10 min ; ECS/froid exclus, seuil projet non Daikin ; si trop sont non classés, tous jugés ensemble."], // health_cycling
-  ["Compte les dégivrages : NOTE au-delà de 15 % du temps compresseur avec ≥3 cycles ; pas une limite Daikin, humidité et surface manquent."], // health_defrost
+  ["Compte les dégivrages : NOTE au-delà de 15 % avec ≥3 cycles ; pas une limite Daikin. R4T est un contexte en direct hors verdict ; un point ne décrit pas toute la batterie."], // health_defrost
   ["Pression minimale : >1,0 bar ; ≤1,0 donne NOTE puis AVERTISSEMENT après 60 s, mais la plage dépend du modèle."], // health_pressure
   ["Débit après 60 s de pompe : tronçon mesuré, pas débit de calcul ; comparer mêmes modèle/mode/conditions, sans seuil universel."], // health_flow
   ["Durée BUH/BSH observée : froid, secours, dégivrage, ECS ou surplus peuvent l’expliquer ; aucune limite universelle."], // health_heater

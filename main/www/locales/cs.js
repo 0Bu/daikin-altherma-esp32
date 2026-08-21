@@ -1,4 +1,4 @@
-// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
+// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -141,6 +141,27 @@ I18N.cs = localeValues([
   /* card.candidates */ "Možné modely",
   /* card.oueeprom */ "ID venkovní jednotky",
   /* card.checkup */ "Diagnostika soustavy · 24 h",
+  /* service.title */ "Servisní pozorování chladivového okruhu",
+  /* service.state.waiting */ "ČEKÁNÍ",
+  /* service.state.observing */ "POZOROVÁNÍ",
+  /* service.state.limited */ "OMEZENÉ",
+  /* service.state.interrupted */ "PŘERUŠENO",
+  /* service.row.window */ "Aktuální okno",
+  /* service.row.reason */ "Důvod",
+  /* service.reason.unsupported_profile */ "Profil neposkytuje požadované signály.",
+  /* service.reason.compressor_not_running */ "Kompresor stojí.",
+  /* service.reason.unsupported_or_unknown_mode */ "Není vytápění nebo je režim neznámý.",
+  /* service.reason.dhw_path */ "Teplá voda aktivní.",
+  /* service.reason.defrost */ "Odmrazování aktivní.",
+  /* service.reason.unit_fault */ "Porucha jednotky aktivní.",
+  /* service.reason.special_controller_phase */ "Spuštění, restart, návrat oleje nebo vyrovnání tlaku aktivní.",
+  /* service.reason.missing_fresh_signal */ "Chybí požadovaný aktuální signál.",
+  /* service.reason.poll_gap */ "Mezera nebo záměrná pauza X10A.",
+  /* service.window */ (d, n) => `${d} · ${n} čerstvých vzorků`,
+  /* service.help.observing */ "Čerstvé hodnoty stejného odečtu X10A zůstávají za těchto podmínek souvislé.",
+  /* service.help.limited */ "Okno souvislé; chybí volitelný kontext teploty, tlaku, venku nebo fáze.",
+  /* service.help.interrupted */ "Okno skončilo; další vyhovující odečet začne od nuly.",
+  /* service.common */ "Pouze pozorování: bez servisního/plnozátěžového testu; bez důkazu ustálení či náplně; bez hodnocení rozsahu. Impulzy EEV jsou příkazy, ne zpětná vazba ventilu.",
   /* check.fault */ "Porucha jednotky",
   /* check.dhw_loss */ "Tepelná ztráta zásobníku TUV",
   /* check.cycling */ "Starty kompresoru",
@@ -1023,20 +1044,20 @@ DESCRIPTION_I18N.cs = descriptionValues([
   ["Teplota vody na vstupu či výstupu PHE mezi chladivem a vodním okruhem."], // 63
   ["Teplota venkovního výměníku; pod 0 °C bez vlhkosti sama nedokazuje námrazu."], // 64
   ["Venkovní teplota měřená u jednotky pro ekvitermní řízení a provozní rozhodnutí."], // 65
-  ["Teplota horkého stlačeného chladiva za kompresorem."], // 66
+  ["Horký plyn za kompresorem; závisí na tlaku, otáčkách, režimu a zátěži. Jeden údaj či rozsah jiné řady nedokazuje závadu ani nedostatek chladiva."], // 66
   ["Teplota chladného nízkotlakého chladiva vracejícího se do kompresoru."], // 67
   ["Teplota chladiva v kapalinovém potrubí mezi výměníky."], // 68
   ["Teplota chladiva u vstupu či výstupu výparníku, který odebírá teplo."], // 69
   ["Teplota vstřikovacího potrubí chladiva pro řízení vstřiku a ochranu okruhu."], // 70
   ["Teplota dvoufázové směsi chladiva; vnitřní regulační vstup, ne uživatelský cíl."], // 71
-  ["Teplota čidla odmrazování venkovního výměníku, jeden z podkladů pro ochranu a odmrazení."], // 72
+  ["Čidlo odmrazování venkovního výměníku; poloha i řízení závisí na modelu. Jeden bod nedokazuje led na celé ploše ani konec odmrazení."], // 72
   ["Sytostní teplota vypočtená z tlaku pro nastavené chladivo; není z čidla ani tlakem v bar."], // 73
-  ["Tlak chladiva na vysokotlaké nebo nízkotlaké straně; nejde o jejich rozdíl."], // 74
+  ["Vysoký/nízký tlak: hodnoťte stabilní trend stejného režimu/modelu; rozběh, návrat oleje a odmrazení jej mění. Obecný rozsah není."], // 74
   ["Otáčky invertorového kompresoru za sekundu, hlavní regulační veličina výkonu."], // 75
-  ["Povel elektronického expanzního ventilu v krocích/pulsech."], // 76
+  ["Povel EEV v krocích bez mechanické zpětné vazby; není to % ani průtok. Sám nedokazuje pohyb, zadření či nedostatek chladiva."], // 76
   ["Teplota výkonové elektroniky motoru venkovního ventilátoru."], // 77
   ["Rychlost venkovního ventilátoru jako stupeň nebo ot/min."], // 78
-  ["Vnitřní cílová vypařovací/kondenzační teplota, nikoli uživatelské nastavení."], // 79
+  ["Vnitřní cíl dle modelu/režimu; porovnejte s odpovídající saturační teplotou z tlaku. Rozdíl neurčuje příčinu ani náplň."], // 79
   ["Vnitřní cíl teploty výtlaku/portu kompresoru pro ochrannou logiku."], // 80
   ["Cílové ΔT závisí na modelu a režimu; může být 8 či 10 K, obecné pravidlo 5 K neplatí."], // 81
   ["Chladivo jednotky, např. R32/R410A, určující tlakově-teplotní křivku sytosti."], // 82
@@ -1088,7 +1109,7 @@ MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Hlášení chyby či varování samotné jednotky. Aktivní chyba dává VAROVÁNÍ; varování nebo zpráva vzniklá a zaniklá do 24 h dává POZNÁMKU. Není to odhad projektu. Bez aktuální či zapamatované zprávy po načtení všech polí. Zaniklá zpráva může zůstat 24 h; aktivní kód je v Provozu."], // 0
   ["Měří chladnutí zásobníku v klidných hodinách; vyřazuje nabíjení, odběr a vnitřní ohřev, volitelný elektroměr ukáže cirkulační čerpadlo. POZNÁMKA od 0,8 K/h je heuristika referenční instalace. Objem a rozdíl k místnosti mění rychlost. Rozpoznatelné je asi do 1,85 K/h; rychlejší ztráta může vypadnout jako odběr. OK nedokazuje izolaci ani ventily."], // 1
   ["Počítá starty kompresoru a délku úplných běhů, pokud lze zvlášť pro vytápění, TUV a chlazení; nejasné běhy zůstávají nezařazené. Potvrzené topné běhy mají průměr ≥10 min; při nejméně 12 kratších je POZNÁMKA. TUV/chlazení se vyřadí, při mnoha nejasných se hodnotí vše. Není to limit Daikin."], // 2
-  ["Počítá odmrazení a jejich podíl na sledovaném čase kompresoru; v chladu a vlhku jsou normální. Do 15 %. Nad mezí při ≥3 odmrazeních jen POZNÁMKA. Není to limit Daikin; chybí vlhkost a povrchová teplota."], // 3
+  ["Odmrazení: POZNÁMKA nad 15 % při ≥3 dějích; nejde o limit Daikin. R4T je živý kontext mimo verdikt a jeden bod nepopisuje celý výměník."], // 3
   ["Nejnižší platný tlak vody v topném okruhu během klouzavého okna. Nad 1,0 bar. Při ≤1,0 bar ihned POZNÁMKA, po 60 s VAROVÁNÍ. Rozsah závisí na modelu; použijte přesný návod."], // 4
   ["Nejnižší průtok po 60 s souvislého běhu vnitřního čerpadla; vyřazuje rozběh, klid a výpadky. JEN MĚŘENÍ: minimum při částečné zátěži, ne jmenovitý ani návrhový průtok. Obecná mez není; návod platí jen pro stejný model, režim a podmínky. Jeden nízký údaj bez poruchy málo dokazuje."], // 5
   ["Odděleně ukazuje dobu běhu BUH pro dům a BSH v zásobníku. JEN MĚŘENÍ. Mráz, nouze, odmrazování, plán TUV či přebytky mohou běh vysvětlit. Obecná mez OK/VAROVÁNÍ není."], // 6

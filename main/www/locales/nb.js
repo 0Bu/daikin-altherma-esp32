@@ -1,4 +1,4 @@
-// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
+// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -141,6 +141,27 @@ I18N.nb = localeValues([
   /* card.candidates */ "Mulige modeller",
   /* card.oueeprom */ "ID for utedel",
   /* card.checkup */ "Anleggsdiagnose · 24 t",
+  /* service.title */ "Serviceobservasjon av kjølekretsen",
+  /* service.state.waiting */ "VENTER",
+  /* service.state.observing */ "OBSERVERER",
+  /* service.state.limited */ "BEGRENSET",
+  /* service.state.interrupted */ "AVBRUTT",
+  /* service.row.window */ "Gjeldende vindu",
+  /* service.row.reason */ "Årsak",
+  /* service.reason.unsupported_profile */ "Profilen mangler nødvendige signaler.",
+  /* service.reason.compressor_not_running */ "Kompressoren står.",
+  /* service.reason.unsupported_or_unknown_mode */ "Ikke romoppvarming, eller ukjent modus.",
+  /* service.reason.dhw_path */ "Tappevann aktivt.",
+  /* service.reason.defrost */ "Avriming aktiv.",
+  /* service.reason.unit_fault */ "Enhetsfeil aktiv.",
+  /* service.reason.special_controller_phase */ "Oppstart, omstart, oljeretur eller trykkutjevning aktiv.",
+  /* service.reason.missing_fresh_signal */ "Nødvendig ferskt signal mangler.",
+  /* service.reason.poll_gap */ "X10A-avbrudd eller bevisst pause.",
+  /* service.window */ (d, n) => `${d} · ${n} ferske ${n === 1 ? "prøve" : "prøver"}`,
+  /* service.help.observing */ "Ferske verdier fra samme X10A-avlesning er sammenhengende under disse forholdene.",
+  /* service.help.limited */ "Vinduet er sammenhengende; valgfri temperatur-, trykk-, ute- eller fasekontekst mangler.",
+  /* service.help.interrupted */ "Vinduet er avsluttet; neste kvalifiserte avlesning starter på null.",
+  /* service.common */ "Kun observasjon: ingen service-/fullasttest; intet bevis på stabilitet eller kjølemiddelfylling; ingen normalvurdering. EEV-pulser er kommandoer, ikke ventiltilbakemelding.",
   /* check.fault */ "Anleggsfeil",
   /* check.dhw_loss */ "Varmetap fra tank",
   /* check.cycling */ "Kompressorstarter",
@@ -1069,20 +1090,20 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["Vann ved inn-/utløpet av platevarmeveksleren som overfører energi mellom kjølemedium og vannkrets."], // 63
   ["Sensor på uteveksleren; <0 °C kan være normalt og beviser ikke is uten fuktighetsdata."], // 64
   ["Utetemperatur målt av enheten, brukt til værkompensering og driftsvalg."], // 65
-  ["Temperatur på varm, komprimert kjølemediegass ut av kompressoren."], // 66
+  ["Varm gass ut av kompressoren; avhenger av trykk, hastighet, modus og last. Én verdi eller område fra annen serie beviser ikke feil eller lite kjølemedium."], // 66
   ["Temperatur på kald lavtrykksgass tilbake til kompressoren."], // 67
   ["Kjølemedietemperatur i væskerøret mellom varmevekslerne."], // 68
   ["Kjølemedium ved inn-/utløpet av fordamperen, varmeveksleren som tar opp varme."], // 69
   ["Kjølemediets innsprøytningstemperatur, brukt internt til regulering og vern."], // 70
   ["Temperatur i en tofasedel av kjølemediekretsen med både væske og damp."], // 71
-  ["Avisingssensor på uteveksleren, brukt til frostvern-/avrimingsvalg."], // 72
+  ["Avrimingssensor ute; plassering og styring er modellavhengig. Ett punkt beviser ikke is på hele batteriet eller at avriming er ferdig."], // 72
   ["Metningstemperatur beregnet fra trykk; ikke egen sensor eller trykk i bar."], // 73
-  ["Kjølemedietrykk på høytrykks-/utløps- eller lavtrykks-/sugesiden."], // 74
+  ["Høy-/lavtrykk: vurder stabil trend i samme modus/modell; start, oljeretur og avriming endrer det. Intet universelt normalområde."], // 74
   ["Kompressorhastighet i rps; høyere betyr ofte større behov, men måler ikke varme."], // 75
-  ["EEV-kommando i trinn; ikke åpningsprosent eller masseflow, og bare sammenlignbar i samme modell/modus."], // 76
+  ["EEV-trinn er kommando uten mekanisk respons, ikke % eller flow. Alene beviser det ikke bevegelse, fast ventil eller lite kjølemedium."], // 76
   ["Temperatur på elektronikken som styrer uteviftemotoren."], // 77
   ["Uteviftens hastighet som trinn eller rpm."], // 78
-  ["Internt mål i kjølemediekretsen, f.eks. ønsket fordampnings-/kondenseringstemperatur."], // 79
+  ["Internt mål etter modell/modus; sammenlign med tilsvarende metningstemperatur fra trykk. Avviket diagnostiserer ikke årsak eller fylling."], // 79
   ["Internt mål for kompressorens utløps-/porttemperatur, brukt av enhetens vern."], // 80
   ["Ønsket ΔT mellom tur og retur; avhenger av modell/modus, ikke en universell 5 K-regel."], // 81
   ["Kjølemediet som er fylt på enheten, f.eks. R32 eller R410A."], // 82
@@ -1134,7 +1155,7 @@ MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Egen feil-/advarselsstatus: aktiv feil gir ADVARSEL; advarsel eller melding siste 24 t gir INFO, uten prosjektinferens."], // health_fault
   ["Rolig tanktap: prosjektregel INFO ved ≥0,8 K/t; volum og ΔT påvirker, >≈1,85 K/t kan filtreres som tapping, og OK beviser ikke isolasjon."], // health_dhw_loss
   ["INFO ved ≥12 varmekjøringer og snitt <10 min; tappevann/kjøling utelates. Ikke Daikin-grense; ved mye uklassert vurderes alle samlet."], // health_cycling
-  ["Teller avriming; INFO ved >15 % av kompressortid og ≥3 sykluser. Ikke Daikin-grense; fuktighet/overflatetemperatur mangler."], // health_defrost
+  ["Avriming: INFO over 15 % ved ≥3 sykluser; ikke Daikin-grense. R4T er live-kontekst utenfor vurderingen, og ett punkt beskriver ikke hele batteriet."], // health_defrost
   ["Laveste trykk: >1,0 bar; ≤1,0 gir INFO og etter 60 s ADVARSEL, men tillatt område er modellavhengig."], // health_pressure
   ["Vannmengde etter 60 s pumpedrift: bare målt utsnitt; sammenlign samme modell/modus/vilkår, ingen universell grense."], // health_flow
   ["Observert BUH-/BSH-tid: kulde, nød, avriming, tappevann eller overskudd kan forklare; ingen universell grense."], // health_heater

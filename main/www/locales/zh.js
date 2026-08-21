@@ -1,4 +1,4 @@
-// translation-source: 71b2f4e8fef501786c9092a73e6c069ef83ff466da6391c989487a288f412c7b
+// translation-source: 880b8b2cbfd200117fae74020a6ff172c175f8793429a72abee92f49af703b01
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -141,6 +141,27 @@ I18N.zh = localeValues([
   /* card.candidates */ "可能的型号",
   /* card.oueeprom */ "室外机 ID",
   /* card.checkup */ "设备诊断 · 24 小时",
+  /* service.title */ "制冷剂回路检修观察",
+  /* service.state.waiting */ "等待中",
+  /* service.state.observing */ "观察中",
+  /* service.state.limited */ "受限",
+  /* service.state.interrupted */ "已中断",
+  /* service.row.window */ "当前窗口",
+  /* service.row.reason */ "原因",
+  /* service.reason.unsupported_profile */ "配置文件缺少所需信号。",
+  /* service.reason.compressor_not_running */ "压缩机已停止。",
+  /* service.reason.unsupported_or_unknown_mode */ "非空间供暖或模式未知。",
+  /* service.reason.dhw_path */ "生活热水活动。",
+  /* service.reason.defrost */ "除霜活动。",
+  /* service.reason.unit_fault */ "机组故障活动。",
+  /* service.reason.special_controller_phase */ "启动、重启、回油或均压活动。",
+  /* service.reason.missing_fresh_signal */ "缺少所需的新鲜信号。",
+  /* service.reason.poll_gap */ "X10A 轮询中断或有意暂停。",
+  /* service.window */ (d, n) => `${d} · ${n} 个新鲜样本`,
+  /* service.help.observing */ "同一轮 X10A 的新鲜值在这些条件下保持连续。",
+  /* service.help.limited */ "窗口连续；缺少可选的温度、压力、室外或控制阶段信息。",
+  /* service.help.interrupted */ "窗口已结束；下次合格轮询从零开始。",
+  /* service.common */ "仅供观察：不是检修/满负荷测试；不证明稳定状态或冷媒量；不判断正常范围。EEV 脉冲是指令，不是阀门反馈。",
   /* check.fault */ "机组故障",
   /* check.dhw_loss */ "生活热水箱热损失",
   /* check.cycling */ "压缩机启动",
@@ -1052,20 +1073,20 @@ DESCRIPTION_I18N.zh = descriptionValues([
   ["PHE 入口或出口水温；PHE 在制冷剂与水路之间传热。"], // 63
   ["室外换热器温度；低于 0 °C 可正常，单值不证明结冰。"], // 64
   ["机组测得的室外温度，用于气候补偿和运行决策；日照、安装位置和风会使其不同于天气观测值。"], // 65
-  ["压缩机出口高温高压制冷剂气体的温度。"], // 66
+  ["压缩机出口热气；随压力、转速、模式和负荷变化。单值或其他系列的范围不能证明故障或制冷剂不足。"], // 66
   ["返回压缩机的低温低压吸气制冷剂温度。"], // 67
   ["两个换热器之间液管内的制冷剂温度。"], // 68
   ["蒸发器入口或出口的制冷剂温度。"], // 69
   ["制冷剂喷气管温度，供机组控制喷气和保护循环。"], // 70
   ["制冷剂回路气液两相区温度，不是设定值。"], // 71
-  ["室外换热器除霜传感器温度。"], // 72
+  ["室外除霜传感器；位置和控制因型号而异。单点不能证明整盘管结冰或除霜结束。"], // 72
   ["由压力换算的饱和温度；不是独立传感器，也不是 bar 压力。"], // 73
-  ["制冷剂高压/排气侧或低压/吸气侧压力。"], // 74
+  ["高/低压应看同型号同模式的稳定趋势；启动、回油和除霜会改变压力。没有通用正常范围。"], // 74
   ["压缩机转速 rps；范围随型号，不等于热功率。"], // 75
-  ["EEV 命令步数/脉冲；非开度%或质量流量，仅同型号/模式可比。"], // 76
+  ["EEV 步数是命令，无机械反馈，不是开度%或流量；单独不能证明动作、卡滞或制冷剂不足。"], // 76
   ["室外风机电机控制电子器件的温度。"], // 77
   ["室外风机速度，以级别或 rpm 表示。"], // 78
-  ["制冷剂回路内部控制目标，例如蒸发或冷凝目标温度。"], // 79
+  ["内部目标随型号/模式变化；与对应压力换算的饱和温度比较。偏差不能诊断原因或充注量。"], // 79
   ["保护逻辑的压缩机排气/端口目标温度。"], // 80
   ["供回水目标 ΔT 随型号/模式/末端，无统一 5 K。"], // 81
   ["机组所充制冷剂，如 R32 或 R410A；决定压力—温度曲线。"], // 82
@@ -1117,7 +1138,7 @@ MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["机组自身状态：当前错误给出“警告”；当前警示或 24 小时内已清除的消息给出“说明”，不是项目推断。"], // health_fault
   ["静置降温：项目阈值 ≥0.8 K/h 为“说明”；水箱容积和内外温差会影响结果，>≈1.85 K/h 可能被当作用水过滤，“正常”不证明保温良好。"], // health_dhw_loss
   ["≥12 个供暖循环且平均 <10 分钟时给出“说明”；排除生活热水/制冷，不是 Daikin 限值；若过多循环无法分类，则合并评估全部循环。"], // health_cycling
-  ["除霜占压缩机时间 >15% 且 ≥3 次时给出“说明”；不是 Daikin 限值，且缺少湿度和换热器表面温度。"], // health_defrost
+  ["除霜 >15% 且 ≥3 次时提示；不是 Daikin 限值。R4T 仅是实时背景，不参与判定，单点不代表整盘管。"], // health_defrost
   ["最低水压应 >1.0 bar；≤1.0 为“说明”，持续 60 秒为“警告”，但允许范围随型号而异。"], // health_pressure
   ["水泵运行 60 秒后的流量只代表测量支路，不是设计流量；孤立值意义有限，应在相同型号、模式和条件下比较，没有通用限值。"], // health_flow
   ["只观察 BUH/BSH 运行时间；低温、应急、除霜、生活热水或富余电力都可能解释运行，没有通用限值。"], // health_heater

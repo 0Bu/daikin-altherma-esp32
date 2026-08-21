@@ -8,6 +8,7 @@
 #include <string>
 #include "logic/crc.hpp"        // Protocol — the framing a probe reply was read with
 #include "logic/hp_probe.hpp"   // ProbeStatus — the outcomes hp_probe_run() reports
+#include "logic/refrigerant_service.hpp"
 
 namespace daik {
 
@@ -112,6 +113,10 @@ HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t expected_
                                               const char* expected_profile,
                                               uint64_t expected_identity_fp);
 HpStats  hp_stats();
+
+// Current read-only refrigerant-side observation.  This is not part of plant-health and carries no
+// OK/fault/charge verdict; it reports only one contiguous fresh X10A window and its limitations.
+logic::RefrigerantServiceSnapshot refrigerant_service_status();
 
 // Allocation-free link sample for rollback health proof. Unlike hp_stats(), this returns only the
 // primitive guarded field and therefore cannot copy a profile/error std::string while heap is low.

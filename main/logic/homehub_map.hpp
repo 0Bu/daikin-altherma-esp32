@@ -9,7 +9,7 @@
 // that sharing. Nothing else in the firmware pairs a HomeHub register with an X10A row.
 //
 // ── The pairing may NEVER be made on the label ──────────────────────────────────────────────────
-// The catalog spells one quantity many ways across the 43 detectable profiles — "[HPSU] Tv inflow
+// The catalog spells one quantity many ways across the 39 detection profiles — "[HPSU] Tv inflow
 // Temp  (R1T)", "Leaving water temp. before BUH (R1T)", "Outlet Water Heat Exch", four spellings of
 // leaving water alone, one of them with a DOUBLE space — and it also REUSES a tag for different
 // quantities ("(R1T)" is both the outdoor air sensor on 0x20 and the indoor leaving-water sensor).

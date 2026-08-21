@@ -39,7 +39,7 @@ const FAULT_CODE_I18N = Object.create(null);
 const MB_DELTA_I18N = Object.create(null);
 // Locale assets store their compact UI translations positionally against the English key order.
 // The comments in those source files retain the readable key mapping, while the shipped scripts
-// omit 840 repeated property names per language. This keeps all twelve external catalogs within the
+// omit 861 repeated property names per language. This keeps all twelve external catalogs within the
 // fixed application partition without weakening the English fallback contract.
 function localeValues(values) {
   const keys = Object.keys(I18N.en);
@@ -266,6 +266,25 @@ const I18N = {
     // the reader is being shown a rolling aggregate, and "Water pressure" would read as the live figure
     // that is already in the value list further down.
     "card.checkup": "Plant diagnostics · 24 h",
+    "service.title": "Refrigerant service observation",
+    "service.state.waiting": "WAITING",
+    "service.state.observing": "OBSERVING", "service.state.limited": "LIMITED",
+    "service.state.interrupted": "INTERRUPTED",
+    "service.row.window": "Current window", "service.row.reason": "Reason",
+    "service.reason.unsupported_profile": "Profile lacks required signals.",
+    "service.reason.compressor_not_running": "Compressor stopped.",
+    "service.reason.unsupported_or_unknown_mode": "Not space heating, or mode unknown.",
+    "service.reason.dhw_path": "DHW active.",
+    "service.reason.defrost": "Defrost is active.",
+    "service.reason.unit_fault": "Unit fault active.",
+    "service.reason.special_controller_phase": "Startup, restart, oil return or pressure equalisation active.",
+    "service.reason.missing_fresh_signal": "Required fresh signal missing.",
+    "service.reason.poll_gap": "X10A poll gap or intentional pause.",
+    "service.window": (d, n) => `${d} · ${n} fresh ${n === 1 ? "sample" : "samples"}`,
+    "service.help.observing": "Fresh values from the same X10A sweeps have remained continuous under the required heating conditions.",
+    "service.help.limited": "The window is continuous, but at least one optional temperature, pressure, outdoor or controller-phase context is incomplete.",
+    "service.help.interrupted": "The previous window ended. A later eligible sweep starts a new window from zero.",
+    "service.common": "Observation only: the firmware does not command a service or full-load test, prove settling or refrigerant charge, or judge a normal range. EEV pulses are the controller command, not mechanical valve feedback.",
     "check.fault": "Unit fault", "check.dhw_loss": "DHW tank heat loss",
     "check.cycling": "Compressor starts",
     "check.defrost": "Defrost cycles", "check.pressure": "Water pressure, lowest",

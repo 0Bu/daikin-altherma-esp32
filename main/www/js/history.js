@@ -1837,10 +1837,10 @@ const MODEL_DESCRIPTIONS = {
     de: { what: "Zählt jeden Verdichterwechsel von OFF zu ON und die Dauer eines vollständigen Laufs. Wenn die Signale reichen, werden Raumheizung, Warmwasser und Kühlen getrennt. Gemischte oder ungelesene Läufe erscheinen als „ohne Zuordnung“.",
           normal: "Bestätigte Heizläufe dauern im Mittel mindestens 10 min. Bei mindestens 12 Läufen unter 10 min erscheint HINWEIS. Warmwasser und Kühlen zählen nicht mit. Sind zu viele Läufe ungeklärt, werden alle gemeinsam bewertet. Kein Daikin-Grenzwert." } },
   health_defrost: {
-    what: "Counts each defrost change from OFF to ON and the share of observed compressor time spent defrosting. Defrost removes ice from the outdoor heat exchanger and is normal in cold, damp weather.",
-    normal: "Up to 15% of paired compressor time. Above it with at least three observed defrosts gives NOTE only. This is not a Daikin limit: humidity and heat-exchanger surface temperature are unavailable.",
-    de: { what: "Zählt jeden Wechsel der Abtauung von OFF zu ON und ihren Anteil an der beobachteten Verdichterlaufzeit. Abtauen entfernt Eis am Außengerät und ist bei kaltem, feuchtem Wetter normal.",
-          normal: "Bis 15 % der gepaarten Verdichterlaufzeit. Darüber erscheint bei mindestens drei beobachteten Abtauungen nur HINWEIS. Kein Daikin-Grenzwert: Luftfeuchte und Oberflächentemperatur des Wärmetauschers fehlen." } },
+    what: "Counts defrost transitions and their share of readable compressor runtime. Defrost is normal in cold, damp weather. The separate R4T de-icer value is live context, not part of this 24-hour verdict.",
+    normal: "Up to 15%; above it with at least three defrosts gives NOTE only. Not a Daikin limit: humidity and whole-coil surface temperature are unavailable, and one R4T point cannot establish the entire coil's ice state.",
+    de: { what: "Zählt Abtaustarts und ihren Anteil an der lesbaren Verdichterlaufzeit. Abtauen ist bei kaltem, feuchtem Wetter normal. Der separate R4T-Enteiser-Wert ist Live-Kontext und kein Teil dieses 24-Stunden-Urteils.",
+          normal: "Bis 15 %; darüber erscheint bei mindestens drei Abtauungen nur HINWEIS. Kein Daikin-Grenzwert: Luftfeuchte und Temperatur der gesamten Wärmetauscherfläche fehlen; ein R4T-Punkt belegt nicht deren gesamten Vereisungszustand." } },
   health_pressure: {
     what: "Shows the lowest valid water pressure measured in the heating circuit during the rolling window.",
     normal: "Above 1.0 bar. At or below 1.0 bar gives a NOTE immediately and a WARNING after 60 continuous seconds. The permitted range can vary by model, so compare it with the exact unit manual.",
