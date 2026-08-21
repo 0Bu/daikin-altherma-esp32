@@ -141,8 +141,24 @@ try {
         "if False:")],
     ["the intentional OTA MQTT pause is counted as an outage", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        'if not mqtt.get("connected") and not mqtt_recovery_expected.is_set():',
-        'if not mqtt.get("connected"):')],
+        'elif not mqtt_recovery_expected.is_set():',
+        'elif True:')],
+    ["the intentional weather MQTT pause is counted as an outage", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if weather.get("fetching"):',
+        'if False:')],
+    ["the completed weather fetch loses its MQTT resume allowance", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if weather_successes > weather_successes_seen:',
+        'if False:')],
+    ["the weather MQTT allowance survives a successful reconnect", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        /(if mqtt\.get\("connected"\):[\s\S]{0,240}?)weather_mqtt_recovery_expected = False/,
+        "$1weather_mqtt_recovery_expected = True")],
+    ["weather MQTT recovery is no longer time bounded", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'now > weather_mqtt_recovery_deadline',
+        'False')],
     ["MQTT recovery after OTA TLS is no longer observed", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'if mqtt_recovery_status.get("mqtt", {}).get("connected"):',

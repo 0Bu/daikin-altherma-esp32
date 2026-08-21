@@ -215,8 +215,17 @@ assert.ok(manifestSet >= 0 && mqttRecoverySet > manifestSet && manifestClear > m
           mqttRecoveryPoll > manifestClear,
   "the pressure gate must distinguish the intentional TLS pause and observe MQTT recovery afterward");
 assert.match(gate,
-  /if not mqtt\.get\("connected"\) and not mqtt_recovery_expected\.is_set\(\):[\s\S]{0,80}?disconnected \+= 1/,
+  /elif not mqtt_recovery_expected\.is_set\(\):[\s\S]{0,180}?disconnected \+= 1/,
   "only the expected OTA pause may suppress MQTT disconnect samples; later outages must still fail");
+assert.match(gate,
+  /if weather\.get\("fetching"\):[\s\S]{0,160}?weather_mqtt_recovery_expected = True[\s\S]{0,160}?weather_mqtt_recovery_deadline = now \+ MQTT_RECOVERY_TIMEOUT_S/,
+  "the deliberate weather-TLS transport pause must arm a bounded MQTT recovery allowance");
+assert.match(gate,
+  /if weather_successes > weather_successes_seen:[\s\S]{0,160}?weather_mqtt_recovery_expected = True[\s\S]{0,160}?weather_mqtt_recovery_deadline = now \+ MQTT_RECOVERY_TIMEOUT_S/,
+  "the completed weather fetch must cover the status-update to asynchronous MQTT-resume gap");
+assert.match(gate,
+  /if mqtt\.get\("connected"\):[\s\S]{0,500}?weather_mqtt_recovery_expected = False[\s\S]{0,500}?now > weather_mqtt_recovery_deadline/,
+  "weather recovery must close on reconnect and expire instead of hiding later broker outages");
 assert.match(gate,
   /mqtt_recovery_deadline\s*=\s*time\.monotonic\(\) \+ MQTT_RECOVERY_TIMEOUT_S[\s\S]{0,700}?validate_identity\(mqtt_recovery_status[\s\S]{0,220}?mqtt_recovery_status\.get\("mqtt", \{\}\)\.get\("connected"\)[\s\S]{0,100}?mqtt_recovery_expected\.clear\(\)/,
   "MQTT recovery must come from a new identity-checked status request started after TLS released");

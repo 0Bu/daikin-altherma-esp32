@@ -165,9 +165,9 @@ source contract turns red; all eighty-five seeded regressions are required. The 
 `node test/test_production_ota_gate_contract.mjs` pins the exact-artifact bench-to-production
 workflow: initial target health window, full signed release-binary pressure, the short completed-verifier state,
 105-second release health window, a stable exact legacy offer before the bench-only dev restore, and
-bounded MQTT recovery after the intentional OTA-TLS transport pause, and the sole generation-bound
+bounded MQTT recovery after intentional OTA- and weather-TLS transport pauses, and the sole generation-bound
 production write. Its paired
-`tools/production_ota/selftest.mjs` requires all thirty-nine stage-removal mutations to turn that same
+`tools/production_ota/selftest.mjs` requires all forty-three stage-removal mutations to turn that same
 contract red.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named

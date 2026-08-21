@@ -298,6 +298,9 @@ def stress_board(
     disconnected = 0
     manifest_active = threading.Event()
     mqtt_recovery_expected = threading.Event()
+    weather_successes_seen = int(weather_before.get("successes", 0))
+    weather_mqtt_recovery_expected = False
+    weather_mqtt_recovery_deadline = 0.0
 
     def remember(kind: str, error: BaseException) -> None:
         with lock:
@@ -305,17 +308,37 @@ def stress_board(
                 errors.append(f"{kind}: {error}")
 
     def status_loop() -> None:
-        nonlocal disconnected
+        nonlocal disconnected, weather_successes_seen
+        nonlocal weather_mqtt_recovery_expected, weather_mqtt_recovery_deadline
         while time.monotonic() < deadline:
             try:
                 status = request_json(host, "/status")
                 validate_identity(status, host=host, mac=mac, version=version, elf=elf)
                 hp = status.get("hp", {})
                 mqtt = status.get("mqtt", {})
+                weather = status.get("weather_forecast", {})
+                now = time.monotonic()
+                weather_successes = int(weather.get("successes", 0))
+                # Weather owns the same constrained network heap as OTA and deliberately stops
+                # esp-mqtt while its TLS client is live. `fetching` covers the owner interval; the
+                # success edge covers the short status-update -> asynchronous MQTT-resume gap.
+                if weather.get("fetching"):
+                    weather_mqtt_recovery_expected = True
+                    weather_mqtt_recovery_deadline = now + MQTT_RECOVERY_TIMEOUT_S
+                if weather_successes > weather_successes_seen:
+                    weather_mqtt_recovery_expected = True
+                    weather_mqtt_recovery_deadline = now + MQTT_RECOVERY_TIMEOUT_S
+                weather_successes_seen = max(weather_successes_seen, weather_successes)
                 if require_x10a and (not hp.get("connected") or int(hp.get("values", 0)) <= 0):
                     disconnected += 1
-                if not mqtt.get("connected") and not mqtt_recovery_expected.is_set():
-                    disconnected += 1
+                if mqtt.get("connected"):
+                    # Close the weather allowance on the first recovered sample. A later broker
+                    # outage must fail even if it occurs inside the original 15-second window.
+                    weather_mqtt_recovery_expected = False
+                elif not mqtt_recovery_expected.is_set():
+                    if (not weather_mqtt_recovery_expected or
+                            now > weather_mqtt_recovery_deadline):
+                        disconnected += 1
                 with lock:
                     samples["status"] += 1
                     uptimes.append(int(status.get("uptime_s", -1)))
