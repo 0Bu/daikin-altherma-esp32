@@ -392,7 +392,9 @@ jobs:
           # tools/web_asset/ is a BUILD/PUBLICATION INPUT, not tooling: main/CMakeLists.txt runs its
           # minifier over the web UI and embeds the result in the image, while build-pages.sh copies
           # vendor/LICENSE into both feeds. A change there must therefore rebuild and republish.
-          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance)[.]py$|tools/(version|web_asset)/)'
+          # production-ota-gate.py also binds local HEAD to manifest.source_sha; publishing its
+          # changes without a new artifact would make the corrected gate impossible to execute.
+          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|production-ota-gate)[.]py$|tools/(version|web_asset)/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
