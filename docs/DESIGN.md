@@ -503,7 +503,11 @@ Body, ordered:
    The component **order is the manufacturer's** (installer reference §16.2: exchanger → R1T →
    backup heater → pump → R2T → outlet, then the field-supplied 3-way valve), not a drawing
    convenience — the pump is on the **supply** side, and drawing it in the return misplaced a real
-   part. For the same reason the **tank and the space circuit are on one level**, side by side
+   part. BUH and pump divide the free exchanger-to-valve run into equal left, middle and right
+   clearances (within one SVG pixel), so the two fittings form one centred, flush sequence. R1T and
+   R2T use the same pill, value and sub-label baselines above that sequence; their ties retain the
+   exact measuring-point attribution on the runs before the BUH and after the pump. For the same
+   reason the **tank and the space circuit are on one level**, side by side
    below the 3-way valve, in the same box: they are not two stages of a flow but the two loads that
    valve alternates between, and drawing one of them above the supply line put a choice on two
    levels for no physical reason. Each box carries **its own reading and setpoint inside it** — tank
@@ -552,11 +556,14 @@ Body, ordered:
    came from (CT clamps see the whole unit, the inverter current only the compressor — which is why
    an INV-based COP flatters whenever the backup heater is firing) are all in the **inspector**, one
    tap away, where a sentence fits and a caption never did. A sub-label under a pill is therefore
-   only ever the measurement's own NAME ("PHE-Aus" for the pre-BUH leaving water, "return") — that
-   is attribution, without which the number above it is unowned, not commentary on it. A name terse
-   enough to fit the pill may defer its disambiguating qualifier to the inspector: the pill reads
-   "PHE-Aus", while the inspector's full title "PHE-Wasseraustritt · vor BUH · R1T" is what separates
-   it from the post-BUH R2T.
+   only ever the measurement's own NAME — that is attribution, without which the number above it is
+   unowned, not commentary on it. The three hydronic temperature pills consistently use their sensor
+   designators **R1T**, **R2T** and **R4T**; the inspector expands those terse names to the exact
+   measuring point (for example "PHE-Wasseraustritt · vor BUH · R1T"). R1T and R2T share one
+   horizontal pill row above the supply line. On the common return, R4T sits
+   directly below the water pressure, flow is to its right, and the binary **flow-switch state**
+   sits above the return line to the right of the pressure. The two upper return pills divide the
+   horizontal gap between PHE and space circuit into equal left, middle and right clearances.
    The one exception is the **"≈"** on the two derived pills: it is part of the reading rather than a
    note about it, and without it a bare "4.6 kW" reads as measured whenever the inspector is closed.
    Both are *derived*, never measured — thermal from flow × ΔT (≈4.186 kJ/kg·K, assuming water;
@@ -1626,9 +1633,13 @@ enabled/available values are hidden.
   it would be an edge without a seam.
 - **Value pill** — the schematic's unit of reading (§5.3 item 2): `--card` fill, `--line` border,
   tabular value, optional `--muted` sub-label under it — the measurement's NAME, never a note about
-  it: annotations belong in the inspector. Holds ONE reading (§5.3 item 2) — a second figure only
-  when it is the same quantity, i.e. that reading's setpoint (tank, room), stacked on its own line
-  rather than run on after the first — and is hidden outright when its model has no such reading.
+  it: annotations belong in the inspector. Hydronic temperature pills use the manufacturer sensor
+  designators R1T/R2T/R4T rather than a mixture of sensor and hydraulic aliases. The two supply
+  sensors R1T/R2T use identical pill/value/name baselines, while their ties point to the separate
+  pre-BUH and post-pump runs. Holds ONE reading (§5.3 item 2) — a second figure only when it is the
+  same quantity, i.e. that reading's setpoint
+  (tank, room), stacked on its own line rather than run on after the first — and is hidden outright
+  when its model has no such reading.
 - **Connections tile** — `--card` bordered like the value-group cards, full width like every other
   card (§9) — one row per link (WiFi/MQTT/Syslog/NTP), each a label + a single colour-coded value +
   a trailing pencil (§5.6).
