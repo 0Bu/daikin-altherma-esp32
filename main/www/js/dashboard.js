@@ -252,13 +252,15 @@ function channelRow(cur) {
 // choice back to the browser (navigator.language, the default); picking a language forces it on every
 // client that opens the dashboard and persists it in NVS (POST /set_lang). Rendered from
 // /status.ui.lang like every other setting; "auto" reads as "Browser" (it IS what the browser
-// reports, not a separate automatic mode), and de/en are named in their OWN tongue (Deutsch /
-// English), the convention for a language picker.
+// reports, not a separate automatic mode), and each language is named in its OWN tongue, the
+// convention for a language picker.
+const LANGUAGE_CHOICES = Object.freeze(["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"]);
 function langRow(cur) {
   const opt = (v, label) =>
     `<option value="${v}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
   const select = `<select class="input lang-sel" id="e32Lang" aria-label="${esc(t("card.language"))}">` +
-    opt("auto", t("lang.auto")) + opt("en", t("lang.en")) + opt("de", t("lang.de")) + `</select>`;
+    opt("auto", t("lang.auto")) + LANGUAGE_CHOICES.map((lang) => opt(lang, t(`lang.${lang}`))).join("") +
+    `</select>`;
   return settingsInfoRow("firmware:language", "firmware-language-detail", t("card.language"), select,
     `<div class="vdesc-p">${esc(t("card.language_help"))}</div>`);
 }
@@ -511,7 +513,7 @@ function circulationSettingsCardHtml() {
     const source = c.name || "MQTT";
     body = descNoteHtml(t("circ.detail.source"), source);
     if (c.has_value) {
-      const power = Number(c.power_w).toLocaleString(LANG === "de" ? "de-DE" : "en-US",
+      const power = Number(c.power_w).toLocaleString(LANG,
         { maximumFractionDigits: 1 });
       body += descNoteHtml(t("circ.detail.power"), `${power} W`);
     }
@@ -596,7 +598,7 @@ function esp32CardHtml() {
   const fwRows =
     firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
-    langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto") +
+    langRow(uiLangSupported(s.ui?.lang) ? s.ui.lang : "auto") +
     diagnosticsRow(diagnosticsEnabled);
   return vcard("ESP32", esp32Rows) + vcard(t("card.proto_title"), protoRows) +
          vcard(t("card.fw_title"), fwRows) +
@@ -842,11 +844,11 @@ function outdoorAxisRow(d, env) {
   // ("Aktueller Messwert") and the number share one wrapping paragraph — so a plain space still puts
   // "22,2" and "°C" on two lines at a phone width, which reads as a layout fault rather than as a
   // measurement.
-  const fmt = (n) => `${n.toLocaleString(LANG === "de" ? "de-DE" : "en-US",
+  const fmt = (n) => `${n.toLocaleString(LANG,
     { minimumFractionDigits: 1, maximumFractionDigits: 1 })} °C`;
 
   // The sensor's product name, untranslated and inline like "Open-Meteo" one row above: it is what
-  // the hardware is called in both languages, so a translation key would be two spellings of one
+  // the hardware is called in every language, so a translation key would be many spellings of one
   // proper noun waiting to disagree.
   const SENSOR = "ENV III";
   // Precedence states the ACTIONABLE thing: a set-up sensor names itself; an absent one says so;
@@ -904,7 +906,7 @@ function plantOutdoorAxisRow(d, modbus) {
   const sampleSource = typeof d.last_sample_plant_outdoor_source === "string"
     ? d.last_sample_plant_outdoor_source : null;
   const source = liveSource || sampleSource || (modbus.enabled ? "homehub" : null);
-  const fmt = (n) => `${n.toLocaleString(LANG === "de" ? "de-DE" : "en-US",
+  const fmt = (n) => `${n.toLocaleString(LANG,
     { minimumFractionDigits: 1, maximumFractionDigits: 1 })} °C`;
 
   const evaluating = d.armed === true && d.reason !== "sampler_inactive";
@@ -940,9 +942,9 @@ function dynamicControlCardHtml() {
   let temperature = "", setpoint = "", age = "";
   if (r.has_value) {
     temperature = Number(r.temperature_c).toLocaleString(
-      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 2 });
+      LANG, { maximumFractionDigits: 2 });
     if (r.has_setpoint) setpoint = Number(r.setpoint_c).toLocaleString(
-      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 2 });
+      LANG, { maximumFractionDigits: 2 });
     const seconds = Number.isFinite(r.age_s) ? r.age_s : r.received_ago_s;
     age = Number.isFinite(seconds) ? (seconds < 2 ? t("ref.now") : t("ref.ago", seconds))
       : t("ref.age_unknown");
@@ -970,9 +972,9 @@ function dynamicControlCardHtml() {
   let outdoor = "", solar = "";
   if (w.configured && w.has_value) {
     outdoor = Number(w.outdoor_mean_2h_c).toLocaleString(
-      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 1 });
+      LANG, { maximumFractionDigits: 1 });
     solar = Number(w.solar_energy_2h_wh_m2).toLocaleString(
-      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 });
+      LANG, { maximumFractionDigits: 0 });
   }
   if (w.configured && w.fetching) weatherCls = "warn";
   else if (w.configured && w.has_value) {
@@ -1052,7 +1054,8 @@ function memoryRows(sys) {
     const val = esc(fmtKiB(bytes));
     if (!hid && !d) return vrow(label, fmtKiB(bytes), { cls: "mono num" });
     return descAccordion(`board:${id}`, label, val, "mono num",
-                         (d ? descBodyHtml(d) : "") + histHtml(hid, "KiB", label), hid);
+                         (d ? descBodyHtml(d, undefined, modelDescriptionCopy(id)) : "") +
+                         histHtml(hid, "KiB", label), hid);
   };
   return row("free_heap", "card.freeheap", sys.free_heap) +
          row("max_alloc", "card.maxalloc", sys.max_alloc);
@@ -1336,7 +1339,7 @@ function checkupOutdoorContext(c) {
       typeof c.outdoor_min_c !== "number" || !Number.isFinite(c.outdoor_min_c) ||
       typeof c.outdoor_mean_c !== "number" || !Number.isFinite(c.outdoor_mean_c) ||
       !(Number(c.outdoor_samples) > 0)) return "";
-  const fmt = (n) => n.toLocaleString(LANG === "de" ? "de-DE" : "en-US",
+  const fmt = (n) => n.toLocaleString(LANG,
     { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const source = outdoorSourceLabel(c.outdoor_source);
   return c.outdoor_min_c === c.outdoor_mean_c
@@ -1370,7 +1373,7 @@ function checkupMetricValue(c) {
       return t("check.fault_none");
     case "dhw_loss": {
       if (c.max_k_h == null) return c.windows ? t("check.loss_windows", c.windows) : "";
-      const rate = Number(c.max_k_h).toLocaleString(LANG === "de" ? "de-DE" : "en-US",
+      const rate = Number(c.max_k_h).toLocaleString(LANG,
         { maximumFractionDigits: 1 });
       const attribution = c.high_pump_off > 0 ? t("check.loss_pump_off")
         : c.high_with_pump > 0 ? t("check.loss_with_pump")

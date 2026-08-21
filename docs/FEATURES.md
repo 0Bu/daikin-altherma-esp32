@@ -50,10 +50,10 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 4 | OTA rollback + **connectivity-proving health gate** (not an uptime timer) | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
 | 5 | OTA manifest check + signed manual HTTPS stream + **two-point downgrade gate**, transport cleanup before validation, dual INTERNAL-heap gate and bounded MQTT/X10A/weather/`/values` coordination | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`http_status.cpp`](../main/http_status.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp), [`logic/http_values_wait.hpp`](../main/logic/http_values_wait.hpp) |
 | 6 | Live UI by **polling** bounded-chunk-streamed `/status` + `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation, and the model-sized values snapshot waits boundedly behind known firmware TLS owners | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`logic/http_values_wait.hpp`](../main/logic/http_values_wait.hpp), [`test_status_heap_contract.mjs`](../test/test_status_heap_contract.mjs), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
-| 7 | Minified, deterministic-gzip web UI **embedded in the app image**, under a 150 KiB delivery budget | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs) |
+| 7 | Minified deterministic-gzip UI **embedded in the app image**: startup page under 160 KiB, each device-local locale under 32 KiB | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs) |
 | 8 | HTTP handlers under an **OOM boundary**: `503` before the first response emission; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
-| 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
+| 10 | **MQTTS + verified common-root CA bundle**; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 11 | Core dump to flash + offline symbolication, with a proven **orphan dump** erased so no undecodable download is ever offered | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT and cleared when the boot is unremarkable | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
 | 13 | 22-entity device **heartbeat** diagnostics stream, published independently of profile detection | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
@@ -66,7 +66,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 20 | **IDF-free host-tested logic core** (§8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses, read by one shell extractor | ✅ | [`idf-version.sh`](../scripts/idf-version.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matching a dump to its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
-| 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
+| 23 | Firmware-footprint controls — release-size optimization plus unused IDF-path trims | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 24 | Status indicator — **runtime-selectable GPIO-LED / WS2812 back-end**, one image per board family | ✅ 🧪 | [`status_led.cpp`](../main/status_led.cpp), [`logic/led_pattern.hpp`](../main/logic/led_pattern.hpp) |
 | 25 | **Read-only MCP server** — stateless Streamable HTTP, exactly `get_status` + bounded-chunk-streamed `get_hp_values`, no SSE/session, plus an embedded static setup page | ✅ 🧪 | [`mcp_server.cpp`](../main/mcp_server.cpp), [`logic/mcp.hpp`](../main/logic/mcp.hpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp), [`MCP.md`](MCP.md) |
 | 26 | **MQTT broker save-time pre-flight** (DNS/TCP/connect+auth, fail-closed under heap pressure) before persist | ✅ | [`http_config.cpp`](../main/http_config.cpp) |
@@ -102,7 +102,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 57 | **Doc entity-id gate** — resolves the docs' copy-pasteable entity ids through the real slug rule over the real catalog, and only against *detectable* profiles | ✅ | [`entity_id_audit.cpp`](../tools/docs/entity_id_audit.cpp), [`run-doc-entity-audit.sh`](../scripts/run-doc-entity-audit.sh) |
 | 58 | **Deleting a crash report** (`POST /crash/dismiss`) — a device action, not page state: erase first, mark second, so status, MQTT and every browser agree | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
 | 59 | **Pinned warning contract on `main/`** — `-Werror=return-type,format,unused-result` on that component alone, so three constructs written as if a warning were fatal actually are | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt) |
-| 60 | **Manual UI-language override** — a persistent de/en/auto picker overriding the browser guess, applied live | ✅ 🧪 | [`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp), [`www/js/i18n.js`](../main/www/js/i18n.js) |
+| 60 | **Device-local multilingual UI** — browser detection plus a persistent en/de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi override, applied live from bounded signed-image locale assets | ✅ 🧪 | [`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp), [`www/js/i18n.js`](../main/www/js/i18n.js), [`www/locales/`](../main/www/locales/) |
 | 61 | **Second SOURCE: read-only Modbus TCP to a Daikin HomeHub (EKRHH)** — a stack beside X10A, not an alternative; no source file can frame a write; the 31-row map is batched into ten full-cycle requests while two diagnosis gates and one plant-outdoor context batch stay at 1 Hz | ✅ 🧪 | [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`logic/modbus.hpp`](../main/logic/modbus.hpp), [`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
 | 62 | **Configurable MQTT living-room source** — independent exact `topic$json-path` mappings for temperature, an optional source time and an MQTT-backed or fixed target; saving records the mapping even when a path is empty or wrong, but subscription/decoding starts only under the v19 Plant diagnostics master, then the next real MQTT frame supplies runtime decoder evidence; without source time, only live non-retained arrival is accepted | ✅ 🧪 | [`logic/reference_temperature.hpp`](../main/logic/reference_temperature.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 66 | **Complete UI interaction merge gate** — the assembled production UI is *executed* in a deterministic DOM harness, covering every modal in the production registry | ✅ 🧪 | [`test_ui_use_cases.mjs`](../test/test_ui_use_cases.mjs), [`run-ui-use-case-tests.sh`](../scripts/run-ui-use-case-tests.sh) |
@@ -115,6 +115,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 82 | **Reproducible ESP-IDF build inputs** — exact transitive component lock, explicit ESP-IDF/CMake/C++ floors and wall-clock-free app metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 83 | **Kconfig and target contract gate** — `esp32s3` is a project default and every declared default is compared with generated `sdkconfig` before compilation | ✅ 🧪 | [`check-sdkconfig-defaults.py`](../scripts/check-sdkconfig-defaults.py), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 84 | **Firmware-size evidence** — the hard app ceiling is joined by retained ESP-IDF json2 data and an Actions summary for Flash, DIRAM, IRAM and `.bss` | ✅ 🧪 | [`report-firmware-size.py`](../scripts/report-firmware-size.py), [`build.yml`](../.github/workflows/build.yml) |
+| 93 | **Complete localization gate** — key/table parity plus a canonical-copy fingerprint forces all twelve device locale packs to follow every changed English or domain explainer before CI accepts the PR | ✅ 🧪 | [`run-ui-localization-audit.sh`](../scripts/run-ui-localization-audit.sh), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs), [`selftest.mjs`](../tools/ui_localization/selftest.mjs) |
 | 79 | **Reboot-surviving, generation-bound plant checkup** — the default-off 24-hour window rides the same `.noinit` DRAM only after explicit Firmware opt-in, sealed with a consent generation and a layout fingerprint over every row locator and counting threshold; Cycling and Defrost carry separately paired X10A outdoor minimum/mean context without changing a verdict | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`logic/outdoor_evidence.hpp`](../main/logic/outdoor_evidence.hpp), [`checkup.cpp`](../main/checkup.cpp) |
 | 73 | **Heap watchdog** — the escalation every other OOM guard here deliberately lacks: sustained exhaustion of the largest *internal* contiguous block becomes a deliberate restart with a persisted, capped breadcrumb, because a wedge that never recovers is worse than a crash | ✅ 🧪 | [`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp), [`heap_guard.cpp`](../main/heap_guard.cpp) |
 | 74 | **Presenter-parity gate** — the browser's copies of the leaving-water / post-BUH / COP-scope / held-over-page rules are diffed against the C++ headers over the whole catalog, so "host-tested" stops meaning "the copy that does not ship is tested" | ✅ 🧪 | [`presenter_golden_dump.cpp`](../test/presenter_golden_dump.cpp), [`presenter_parity.mjs`](../tools/presenter/presenter_parity.mjs), [`selftest.sh`](../tools/presenter/selftest.sh) |
@@ -317,8 +318,9 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
 - **Modem sleep disabled** (`WIFI_PS_NONE`) — trades idle-power saving for a consistently responsive
   HTTP UI.
 - **LWIP tuned for the workload**: the socket cap is lifted (http server + mDNS + SNTP + MQTT + OTA
-  can otherwise starve the download of a socket) and the TCP windows doubled. A **150 KiB gzip hard
-  limit** on the UI fails the build before asset growth can silently justify more buffers.
+  can otherwise starve the download of a socket) and the TCP windows doubled. A **160 KiB gzip hard
+  limit** on the single startup-page response fails the build before that response can silently
+  justify more buffers; each separately requested locale asset has its own **32 KiB** limit.
 
   The sources keep their load-bearing comments and the artefact carries none: the offline minifier
   ([`minify_and_gzip.py`](../tools/web_asset/minify_and_gzip.py)) strips **HTML, CSS and JS**
@@ -365,8 +367,9 @@ other.
   ([`logic/http_body.hpp`](../main/logic/http_body.hpp)): a POST body is a TCP stream, so the loop
   runs until `content_len` is consumed. A timeout is retried only while progress resets the idle
   count — unbounded patience would let one silent client park the single httpd task.
-- **✅ Gzipped UI embedded in the app image**: the build inlines the page and its fragments,
-  minifies, and pre-gzips deterministically (`EMBED_FILES`), cutting first-paint bytes ~3× over WiFi.
+- **✅ gzip UI embedded in the app image**: the build inlines the page and its fragments,
+  minifies, and pre-compresses them deterministically (`EMBED_FILES`). gzip is deliberate because
+  the trusted-LAN origin is HTTP and browsers do not consistently negotiate Brotli there.
 - **✅ OOM discipline** ([`http_common.cpp`](../main/http_common.cpp)): every route runs under one
   trampoline whose `try/catch` returns **503 instead of crashing** while it still owns the response
   status. A chunked route may have sent status/headers even when its first chunk call reports a
@@ -394,11 +397,12 @@ other.
   unresolved/stale detection uses explicitly labelled `generic` examples. Choosing one fills the
   editable tuple. Both responses use a bounded 1 KiB
   sink, and raw negative/partial replies survive. Trusted-LAN only.
-- **✅ 🧪 Manual UI-language override** ([`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp)): the
-  bilingual UI picks its language from `navigator.language` by default; a persistent picker overrides
-  that per installation and applies **live**, with `auto` a first-class value decoded defensively so
-  an unknown or pre-field blob keeps the browser default. Heat-pump **value labels** stay English in
-  both languages — they are X10A register names.
+- **✅ 🧪 Device-local multilingual UI** ([`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp),
+  [`www/locales/`](../main/www/locales/)): the UI detects en/de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi from
+  `navigator.language`; a persistent picker overrides that per installation and applies **live**.
+  English is the startup fallback, while the other catalogs are separately compressed signed-image
+  assets. Heat-pump **value labels** stay English — they are X10A register names; schematic
+  inspectors, HomeHub row names and value/model accordion explanations are localized.
 
 ---
 
@@ -430,9 +434,10 @@ other.
   `pl_on`/`pl_off` and publishes the JSON **number** `1`/`0` — HA gets a real on/off entity, and a
   metrics consumer (which drops strings *and* bools) finally receives the ~30 binary rows per profile
   that were invisible to it.
-- **✅ TLS with the IDF CA bundle**: credentials present ⇒ `mqtts://` + bundle verification, and
-  credentials are **never** sent over a plaintext broker — the client refuses to start and says so,
-  with no silent fallback.
+- **✅ TLS with ESP-IDF's common-root CA bundle**: credentials present ⇒ `mqtts://` + bundle
+  verification, and credentials are **never** sent over a plaintext broker — the client refuses to
+  start and says so, with no silent fallback. The size-bounded bundle keeps ESP-IDF's documented
+  approximately 99% public-root coverage; a broker chained only to a rarer excluded root is rejected.
 - **✅ Save-time broker pre-flight**: `POST /set_mqtt` verifies before it persists — DNS, a
   non-blocking TCP probe, then a short-lived client that must actually `CONNECT` and authenticate —
   so a wrong host, closed port or bad password is rejected inline at Save. Under heap pressure it
@@ -460,19 +465,20 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   match the **running** build — an orphan that survived an OTA — is erased on **proof**, so
   `coredump` never advertises a download the decoder would reject.
 - **✅ 🧪 The 24-hour plant checkup survives a reboot** ([`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp)).
-  The same `.noinit` mechanism one feature down, for the measurement that tolerates a reboot worst:
-  the window is 24 h and the requirements are hours, so losing it loses the *verdict*. `.noinit`
-  only: the flash journal is separately fingerprinted for trend rings, not a
-  general persistence store. The seal excludes the open hour, the lifecycle is carried as a duration (the
-  monotonic anchors restart), and a **layout fingerprint** over the geometry, every row locator and
-  every counting threshold invalidates the record when an update changes what a stored counter means.
+  `.noinit` preserves the active window across power-preserving resets; the upper-flash append
+  journal additionally records completed enabled diagnosis hours and restores compatible coverage
+  after an ordinary reboot or power loss. The open hour can be missing after an interruption. The
+  lifecycle is carried as a duration (the monotonic anchors restart), and a **layout fingerprint**
+  over the geometry, every row locator and every counting threshold invalidates a record when an
+  update changes what a stored counter means.
   Two refusals stop the window outliving its source: safe mode never adopts, since nothing there would
   age it, and the poll loop keeps the clock running while the bus is unidentified. Cycling and
   Defrost retain separate compact X10A outdoor minimum/mean statistics over their own eligible
   populations; that context is visibly sourced and cannot alter a check's threshold or verdict.
 - **✅ 🧪 English-only maintained documentation** ([`english_docs.mjs`](../tools/user_docs/english_docs.mjs)).
   The user-docs gate scans project Markdown for high-confidence German prose while continuing to
-  require equally bounded English and German copy in the localized web UI.
+  require bounded English/German diagnosis copy. The separate localization gate requires complete,
+  source-current copy in all thirteen device-UI languages.
 - **✅ 🧪 The 24-hour trends survive a reboot** ([`logic/history_persist.hpp`](../main/logic/history_persist.hpp)).
   Rings live in `.noinit` DRAM rather than NVS; the official 8 MB layout appends dense 256-byte
   records to the upper-4-MiB partition. CRC, a last-written commit and rotating sectors fail closed
@@ -844,16 +850,18 @@ Four properties of that core are worth naming because they are not obvious from 
 
 ## 10. Firmware-footprint optimizations
 
-Zero-behaviour-change trims in [`sdkconfig.defaults`](../sdkconfig.defaults) that drop code paths
-this firmware never exercises (~15 KB total), because the binding constraint on this target is the
-largest *contiguous* free heap block:
+[`sdkconfig.defaults`](../sdkconfig.defaults) selects ESP-IDF's size optimization for the release
+image and drops code paths this firmware never exercises. The fixed dual-OTA layout makes flash
+footprint a hard constraint; the table calls out the one deliberate compatibility bound separately:
 
 | Setting | Drops | Why safe |
 |---------|-------|----------|
+| `COMPILER_OPTIMIZATION_SIZE=y` | compiler-dependent | uses ESP-IDF's release-size optimization; host gates and signed hardware acceptance exercise the result |
 | `MBEDTLS_ERROR_STRINGS=n` | ~6 KB | only numeric TLS codes are logged |
 | `COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y` | ~5 KB | keeps the `abort()` (→ rollback), drops assert strings |
 | `MBEDTLS_*_SSL_SESSION_TICKETS=n` | ~1.8 KB | few, long-lived TLS connections gain nothing from resumption |
 | `MBEDTLS_FS_IO=n` | ~1.2 KB | certs/keys come from the CA bundle + NVS, never a VFS path |
+| `MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y` | 50.8 KB in the 13-locale build | keeps CA verification with ESP-IDF's common roots (~99% coverage); rare excluded public roots are unsupported |
 | `ESP_WIFI_ENABLE_WPA3_OWE_STA=n` | ~0.8 KB | joins a WPA2-PSK home network |
 
 C++ exceptions are kept on (`COMPILER_CXX_EXCEPTIONS=y`) — they *are* the HTTP OOM guard.
@@ -919,7 +927,7 @@ in RAM only — there is no manual picker and no NVS key.
 It signs and verifies its own OTA updates with **Secure Boot v2 keys but no burned eFuses** — the
 security of signed firmware with none of the brick risk. It refuses to roll a bad update forward with
 a **connectivity-proving health gate** rather than a naive uptime timer. It ships a **live UI
-embedded and gzipped into the app image** (polled, after a WebSocket push proved it could die
+embedded and pre-compressed into the app image** (polled, after a WebSocket push proved it could die
 silently), an **ICMP watchdog** that recovers WiFi ghost-associations no event reports, and a
 **field-debuggable crash story** — flash core dumps, offline symbolication against an sha-matched
 ELF, a retained MQTT crash topic and a 22-entity heartbeat. The risky parts — decode, CRC, config,

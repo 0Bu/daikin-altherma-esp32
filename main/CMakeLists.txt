@@ -1,3 +1,9 @@
+set(UI_LOCALE_CODES de es fr it pl cs uk zh ja nb sv fi)
+set(UI_LOCALE_GZIP_FILES "")
+foreach(locale IN LISTS UI_LOCALE_CODES)
+    list(APPEND UI_LOCALE_GZIP_FILES "${CMAKE_CURRENT_BINARY_DIR}/locale-${locale}.js.gz")
+endforeach()
+
 idf_component_register(
     SRCS
         "main.cpp"
@@ -41,6 +47,7 @@ idf_component_register(
         "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
         "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz"
         "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
+        ${UI_LOCALE_GZIP_FILES}
         "${CMAKE_CURRENT_SOURCE_DIR}/www/favicon.ico"
         "${CMAKE_CURRENT_SOURCE_DIR}/www/heat_pump_icon.png"
     REQUIRES
@@ -173,11 +180,12 @@ set_source_files_properties(http_status.cpp PROPERTIES COMPILE_OPTIONS "-Os")
 # Symbols: _binary_index_html_gz_{start,end} (see h_index in http_status.cpp).
 set(APP_JS_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/www/app.sources")
 set(UI_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_and_gzip.py")
+set(UI_LOCALE_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_js_and_gzip.py")
 set(UI_MINIFIER_VENDOR
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rjsmin.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rcssmin.py")
-# The default-off X10A diagnosis form/result renderer added 3.3 KiB compressed to the former
-# 150 KiB ceiling. Keep a measured 160 KiB cap rather than disabling the gate or rounding it away.
+# Browsers do not consistently negotiate Brotli on this trusted-LAN HTTP origin. Keep gzip so the
+# payload's Content-Encoding is usable by every supported browser, and gate the measured response.
 set(UI_GZIP_MAX_BYTES 163840)
 idf_build_get_property(PYTHON PYTHON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APP_JS_MANIFEST}")
@@ -218,6 +226,30 @@ add_custom_command(
     VERBATIM)
 add_custom_target(gen_index_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz")
 add_dependencies(${COMPONENT_LIB} gen_index_gz)
+
+# Non-English dashboard catalogs are device-local, separately compressed assets. Keeping them out
+# of index.html preserves the 160 KiB single-response startup contract while /locale.js selects one
+# asset by its query parameter. Each file is still linked into the signed application image; no
+# network service participates in localization. A separate tight cap prevents a catalog from
+# quietly becoming another large response even though it is served straight from flash.
+set(UI_LOCALE_GZIP_MAX_BYTES 32768)
+set(UI_LOCALE_OUTPUTS "")
+foreach(locale IN LISTS UI_LOCALE_CODES)
+    set(locale_src "${CMAKE_CURRENT_SOURCE_DIR}/www/locales/${locale}.js")
+    set(locale_gz "${CMAKE_CURRENT_BINARY_DIR}/locale-${locale}.js.gz")
+    add_custom_command(
+        OUTPUT "${locale_gz}"
+        COMMAND ${PYTHON} "${UI_LOCALE_MINIFIER}"
+                --input "${locale_src}"
+                --output "${locale_gz}"
+                --max-gzip-bytes ${UI_LOCALE_GZIP_MAX_BYTES}
+        DEPENDS "${locale_src}" "${UI_LOCALE_MINIFIER}" "${UI_MINIFIER}" ${UI_MINIFIER_VENDOR}
+        COMMENT "Minifying and gzipping ${locale} UI locale"
+        VERBATIM)
+    list(APPEND UI_LOCALE_OUTPUTS "${locale_gz}")
+endforeach()
+add_custom_target(gen_locale_gz DEPENDS ${UI_LOCALE_OUTPUTS})
+add_dependencies(${COMPONENT_LIB} gen_locale_gz)
 
 # Pre-compress the captive-portal setup page the same way (static source, no asset splicing).
 # Symbols: _binary_setup_html_gz_{start,end} (see form_get in provisioning.cpp).

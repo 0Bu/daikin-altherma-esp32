@@ -2293,7 +2293,7 @@ static void test_mqtt_base() {
 
     // Every refusal must hand back a non-empty code AND message: http_config.cpp interpolates both
     // into JSON unescaped, so an empty one is an error with no text and a null would be a crash.
-    // The CODE is what the bilingual UI keys on, so a blank one silently loses the translation.
+    // The CODE is what the localized UI keys on, so a blank one silently loses the translation.
     for (const char* bad : {"daikin/#", "$SYS/x", "/daikin", "daikin/", "home//daikin", "___",
                             "daikin bench"}) {
         MqttBaseRefusal r;
@@ -5638,20 +5638,57 @@ static void test_ui_lang() {
     CHECK(std::string(ui_lang_name(UiLang::Auto)) == "auto");
     CHECK(std::string(ui_lang_name(UiLang::De)) == "de");
     CHECK(std::string(ui_lang_name(UiLang::En)) == "en");
-    CHECK(ui_lang_valid("auto") && ui_lang_valid("de") && ui_lang_valid("en"));
+    CHECK(std::string(ui_lang_name(UiLang::Es)) == "es");
+    CHECK(std::string(ui_lang_name(UiLang::Fr)) == "fr");
+    CHECK(std::string(ui_lang_name(UiLang::It)) == "it");
+    CHECK(std::string(ui_lang_name(UiLang::Pl)) == "pl");
+    CHECK(std::string(ui_lang_name(UiLang::Cs)) == "cs");
+    CHECK(std::string(ui_lang_name(UiLang::Uk)) == "uk");
+    CHECK(std::string(ui_lang_name(UiLang::Zh)) == "zh");
+    CHECK(std::string(ui_lang_name(UiLang::Ja)) == "ja");
+    CHECK(std::string(ui_lang_name(UiLang::Nb)) == "nb");
+    CHECK(std::string(ui_lang_name(UiLang::Sv)) == "sv");
+    CHECK(std::string(ui_lang_name(UiLang::Fi)) == "fi");
+    for (const char* lang : {"auto", "de", "en", "es", "fr", "it", "pl", "cs", "uk",
+                             "zh", "ja", "nb", "sv", "fi"}) {
+        CHECK(ui_lang_valid(lang));
+    }
     // A typo is REFUSED, not defaulted: /set_lang answering ok to "german" would look like a save.
     CHECK(!ui_lang_valid("") && !ui_lang_valid("De") && !ui_lang_valid("german") && !ui_lang_valid("EN"));
     CHECK(ui_lang_parse("auto") == UiLang::Auto);
     CHECK(ui_lang_parse("de") == UiLang::De);
     CHECK(ui_lang_parse("en") == UiLang::En);
+    CHECK(ui_lang_parse("es") == UiLang::Es);
+    CHECK(ui_lang_parse("fr") == UiLang::Fr);
+    CHECK(ui_lang_parse("it") == UiLang::It);
+    CHECK(ui_lang_parse("pl") == UiLang::Pl);
+    CHECK(ui_lang_parse("cs") == UiLang::Cs);
+    CHECK(ui_lang_parse("uk") == UiLang::Uk);
+    CHECK(ui_lang_parse("zh") == UiLang::Zh);
+    CHECK(ui_lang_parse("ja") == UiLang::Ja);
+    CHECK(ui_lang_parse("nb") == UiLang::Nb);
+    CHECK(ui_lang_parse("sv") == UiLang::Sv);
+    CHECK(ui_lang_parse("fi") == UiLang::Fi);
     CHECK(ui_lang_parse("nonsense") == UiLang::Auto);                 // load-path fallback
     CHECK(ui_lang_parse("nonsense", UiLang::En) == UiLang::En);
     // The on-flash byte. An unknown value decodes to Auto — a garbled NVS byte must fall back to the
     // browser default, never force a language the user never chose. Auto is what every pre-v4 device
     // is already in.
-    CHECK(ui_lang_to_int(UiLang::Auto) == 0 && ui_lang_to_int(UiLang::De) == 1 && ui_lang_to_int(UiLang::En) == 2);
-    CHECK(ui_lang_from_int(0) == UiLang::Auto && ui_lang_from_int(1) == UiLang::De && ui_lang_from_int(2) == UiLang::En);
-    CHECK(ui_lang_from_int(3) == UiLang::Auto && ui_lang_from_int(-1) == UiLang::Auto);
+    CHECK(ui_lang_to_int(UiLang::Auto) == 0 && ui_lang_to_int(UiLang::De) == 1 &&
+          ui_lang_to_int(UiLang::En) == 2 && ui_lang_to_int(UiLang::Es) == 3 &&
+          ui_lang_to_int(UiLang::Fr) == 4 && ui_lang_to_int(UiLang::It) == 5 &&
+          ui_lang_to_int(UiLang::Pl) == 6 && ui_lang_to_int(UiLang::Cs) == 7 &&
+          ui_lang_to_int(UiLang::Uk) == 8 && ui_lang_to_int(UiLang::Zh) == 9 &&
+          ui_lang_to_int(UiLang::Ja) == 10 && ui_lang_to_int(UiLang::Nb) == 11 &&
+          ui_lang_to_int(UiLang::Sv) == 12 && ui_lang_to_int(UiLang::Fi) == 13);
+    CHECK(ui_lang_from_int(0) == UiLang::Auto && ui_lang_from_int(1) == UiLang::De &&
+          ui_lang_from_int(2) == UiLang::En && ui_lang_from_int(3) == UiLang::Es &&
+          ui_lang_from_int(4) == UiLang::Fr && ui_lang_from_int(5) == UiLang::It &&
+          ui_lang_from_int(6) == UiLang::Pl && ui_lang_from_int(7) == UiLang::Cs &&
+          ui_lang_from_int(8) == UiLang::Uk && ui_lang_from_int(9) == UiLang::Zh &&
+          ui_lang_from_int(10) == UiLang::Ja && ui_lang_from_int(11) == UiLang::Nb &&
+          ui_lang_from_int(12) == UiLang::Sv && ui_lang_from_int(13) == UiLang::Fi);
+    CHECK(ui_lang_from_int(14) == UiLang::Auto && ui_lang_from_int(-1) == UiLang::Auto);
 }
 
 // ── OTA manifest parsing (logic/ota_manifest.hpp) ────────────────────────────────────────────
@@ -6180,6 +6217,9 @@ static void test_config_store() {
     ConfigBlob lrt;
     CHECK(config_blob_deserialize(lbv.data(), lbv.size(), lrt));
     CHECK(lrt.has_lang && lrt.ui_lang == 2 && lrt.has_ota && lrt.ota_channel == 1 && lrt.wifi_ssid == "net");
+    lang.ui_lang = 8;                                     // the extended v4 byte carries Ukrainian
+    lbv = config_blob_serialize(lang);
+    CHECK(config_blob_deserialize(lbv.data(), lbv.size(), lrt) && lrt.ui_lang == 8 && lrt.has_lang);
     lang.ui_lang = 0;                                     // auto round-trips as 0 WITH has_lang set
     lbv = config_blob_serialize(lang);
     CHECK(config_blob_deserialize(lbv.data(), lbv.size(), lrt) && lrt.ui_lang == 0 && lrt.has_lang);
@@ -7608,7 +7648,7 @@ static void test_http_surface() {
     const HttpSurface lan = HttpSurface::TrustedLan;
 
     // Trusted LAN exposes the full API — every route, either method.
-    for (const char* p : {"/", "/index.html", "/favicon.ico", "/scan", "/status", "/values",
+    for (const char* p : {"/", "/index.html", "/favicon.ico", "/locale.js", "/scan", "/status", "/values",
                           "/diag", "/diag/clear", "/coredump", "/coredump/clear",
                           "/crash/dismiss", "/models", "/set_wifi",
                           "/set_mqtt", "/set_ntp", "/set_weather", "/set_hp", "/detect", "/ota/check",
@@ -7627,6 +7667,7 @@ static void test_http_surface() {
     // regression: /coredump and /diag can hold WiFi/MQTT credentials, and the config/OTA/MCP routes
     // reprogram the board — none may be reachable from an unauthenticated radio client.
     CHECK(!http_surface_serves(ap, "/status", false));
+    CHECK(!http_surface_serves(ap, "/locale.js", false));
     CHECK(!http_surface_serves(ap, "/values", false));
     CHECK(!http_surface_serves(ap, "/diag", false));
     CHECK(!http_surface_serves(ap, "/diag/clear", true));

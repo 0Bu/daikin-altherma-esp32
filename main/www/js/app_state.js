@@ -354,7 +354,13 @@ function renderHeader() {
   const dash = S.stage === "dashboard";
   $("hdrDash").hidden = !dash;
   $("hdrBack").hidden = dash;
-  if (!dash) $("backTitle").textContent = (TITLE[S.stage] || (() => ""))();
+  // This button is mounted once by index.html rather than rebuilt with the cards. Refresh its
+  // accessible name here as well: a cached first-paint locale can differ from /status.ui.lang.
+  $("verLink").setAttribute("aria-label", t("aria.ota"));
+  if (!dash) {
+    $("btnBack").setAttribute("aria-label", t("nav.back"));
+    $("backTitle").textContent = (TITLE[S.stage] || (() => ""))();
+  }
 }
 
 // ── Toasts ───────────────────────────────────────────────────────────────
@@ -381,7 +387,7 @@ async function refreshStatus(paint = true) {
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
     loadHpProbeCatalog(profile);
   hydrateRoutedPopup();
-  setLangFromStatus(s);   // apply the device's language override (if any) before painting this frame
+  await setLangFromStatus(s);  // load/apply the device language before painting this frame
   if (paint) renderApp();
   return true;
 }

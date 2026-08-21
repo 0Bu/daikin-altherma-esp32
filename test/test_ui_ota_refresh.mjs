@@ -86,6 +86,7 @@ class Element {
   const context = {
     S,
     LANG: "de",
+    uiLangSupported: (lang) => ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"].includes(lang),
     MODEL_DESCRIPTIONS: {},
     sessionStorage,
     document: { activeElement: null, createElement: () => new Element() },
@@ -152,11 +153,11 @@ class Element {
 
   const freshStatus = { version: "fresh-live-frame" };
   S.status = freshStatus;
-  assert.equal(sandbox.__api.otaCacheRestore({ current: "1.4.72-dev.333" }), false,
+  assert.equal(await sandbox.__api.otaCacheRestore({ current: "1.4.72-dev.333" }), false,
     "a normal status response that wins the startup race must never be replaced by cache");
   assert.equal(S.status, freshStatus, "the freshly fetched frame remains authoritative");
   S.status = null;
-  assert.equal(sandbox.__api.otaCacheRestore({ current: "another-version" }), false,
+  assert.equal(await sandbox.__api.otaCacheRestore({ current: "another-version" }), false,
     "a snapshot from another running version must be rejected");
   assert.equal(storage.has(cacheKey), false, "a rejected snapshot is removed");
 }
@@ -181,6 +182,7 @@ function elementsFor(...ids) {
   const context = {
     S,
     LANG: "de",
+    uiLangSupported: (lang) => ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"].includes(lang),
     MODEL_DESCRIPTIONS: {},
     document: {
       activeElement: null,

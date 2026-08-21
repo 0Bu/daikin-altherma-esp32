@@ -49,7 +49,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { readAppSource } from '../ui/read_app_source.mjs';
+import { readAppFragments, readAppSource } from '../ui/read_app_source.mjs';
 
 // ── arguments ────────────────────────────────────────────────────────────────────────────────────
 let HTML = 'main/www/index.html';
@@ -299,12 +299,33 @@ const INSPECT = evalTable('const INSPECT = {', '\n};', '{', 'INSPECT', {
   lwtRow: noop, postBuhRow: noop, vRow: noop, pickValue: noop, PEL_INSPECT,
   OUTDOOR_HX_RE: /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|Outdoor heat exchanger temp\.|R4T-Deicer temp\.)$/i,
 });
-const I18N = evalTable('const I18N = {', '\n};', '{', 'I18N');
+function loadI18n() {
+  if (!APP.endsWith('.sources')) return evalTable('const I18N = {', '\n};', '{', 'I18N');
+  const context = vm.createContext({
+    navigator: { language: 'en' },
+    localStorage: { getItem: () => null, setItem: () => {} },
+    document: { getElementById: () => null },
+  });
+  try {
+    vm.runInContext(readAppFragments(['i18n.js'], APP), context, { filename: 'i18n.js' });
+    const localeDir = path.join(path.dirname(APP), 'locales');
+    for (const file of fs.readdirSync(localeDir).filter((name) => /^[a-z]{2}\.js$/.test(name)).sort()) {
+      vm.runInContext(fs.readFileSync(path.join(localeDir, file), 'utf8'), context,
+        { filename: path.join(localeDir, file) });
+    }
+    vm.runInContext('globalThis.__auditI18n = I18N;', context);
+    return context.__auditI18n;
+  } catch (e) {
+    die(2, `I18N/locale modules do not evaluate: ${e.message}`);
+  }
+}
+const I18N = loadI18n();
 // The same table the value rows use — an INSPECT `sample` is a key into it (renderInspect →
 // descFor), so a sample nothing matches leaves the panel's explainer blank.
 const DESCRIPTIONS = evalTable('const DESCRIPTIONS = [', '\n];', '[', 'DESCRIPTIONS');
 if (!INSPECT || typeof INSPECT !== 'object' || Object.keys(INSPECT).length === 0) die(2, 'INSPECT evaluated empty — refusing to pass vacuously');
-if (!I18N || !I18N.en || !I18N.de) die(2, 'I18N did not evaluate to an {en, de} pair');
+if (!I18N || !I18N.en || !I18N.de) die(2, 'I18N did not evaluate with English and German');
+const I18N_LANGS = Object.keys(I18N).sort();
 
 // Every "svXxx" string literal in the assembled UI: the ids the app WRITES. Nothing else here is
 // named that way, which is what makes the two directions checkable at all.
@@ -529,12 +550,12 @@ function fontOf(el) {
   }
   return { size: size ?? 11, weight };
 }
-// The rendered string of a <text>, in both languages: a data-i18n node takes its text from the
-// dictionary, and German is routinely the longer one — measuring only the markup would clear a
-// label that overflows on exactly the half of the userbase §1.5 renders German for.
+// Every rendered string of a <text>: a data-i18n node takes its text from the selected catalog.
+// Measuring only the markup would miss whichever translation is longest and clear a label that
+// overflows for users of that locale.
 function textVariants(el) {
   const runs = textRuns.get(el.off) || [];
-  const langs = ['en', 'de'];
+  const langs = I18N_LANGS;
   const out = {};
   for (const L of langs) {
     let s = '';
@@ -598,10 +619,12 @@ function walk(el, ctm) {
     const anchor = el.attrs['text-anchor'] || 'start';
     const x = num('x'), y = num('y');
     const p = xf(m, x, y);
-    const wEn = textWidth(v.en, f.size, f.weight), wDe = textWidth(v.de, f.size, f.weight);
-    const w = Math.max(wEn, wDe);
+    const widths = Object.fromEntries(I18N_LANGS.map((lang) =>
+      [lang, textWidth(v[lang], f.size, f.weight)]));
+    const w = Math.max(...Object.values(widths));
     const x0 = anchor === 'middle' ? p[0] - w / 2 : anchor === 'end' ? p[0] - w : p[0];
-    rec.kind = 'text'; rec.font = f; rec.text = v; rec.width = w;
+    rec.kind = 'text'; rec.font = f; rec.text = v; rec.width = w; rec.widths = widths;
+    rec.anchor = anchor; rec.textX = p[0];
     rec.bbox = { x0, x1: x0 + w, y0: p[1] - f.size * 0.8, y1: p[1] + f.size * 0.22 };
   } else if (el.tag === 'defs' || el.tag === 'symbol') {
     for (const c of el.children) defsIds.add(c.attrs.id);
@@ -779,9 +802,9 @@ for (const id of [...appSvIds].sort()) {
 for (const n of allEls) {
   const key = n.el.attrs['data-i18n'];
   if (key === undefined) continue;
-  for (const L of ['en', 'de']) {
+  for (const L of I18N_LANGS) {
     if (I18N[L][key] === undefined) add('S006', `${key}/${L}`, `data-i18n="${key}" has no ${L} entry (${at(n)})`,
-      L === 'de' ? 'a German page prints the English string (or the raw key)' : 'the raw key would be printed');
+      L === 'en' ? 'the raw key would be printed' : `${L} would fall back to English (or the raw key)`);
   }
 }
 // S007/S008: ids are unique document-wide (a duplicate makes getElementById a coin flip) and every
@@ -889,11 +912,34 @@ for (const p of pills) {
     if (t.el.parent !== p.el.parent) continue;                    // the pill's own group only
     if (!overlaps(p.bbox, t.bbox, 0.01)) continue;
     if (t.width <= avail + TEXT_FIT_SLACK) continue;
-    const lang = textWidth(t.text.de, t.font.size, t.font.weight) > textWidth(t.text.en, t.font.size, t.font.weight) ? 'de' : 'en';
+    const lang = I18N_LANGS.reduce((widest, candidate) =>
+      t.widths[candidate] > t.widths[widest] ? candidate : widest, I18N_LANGS[0]);
     add('G004', `${hitKey(p)}/${lang}`,
       `"${t.text[lang]}" does not fit its pill (${at(t)})`,
       `estimated ${fx(t.width)} px of text in ${fx(avail)} px of pill (${fx(t.width - avail)} px over; ` +
       `the estimate is Helvetica-class metrics at ${t.font.size} px, ±5 %, with a "${LIVE_SAMPLE}" reading)`);
+  }
+}
+// G013: neighbouring labels on one baseline must remain separate in every locale. This is the
+// non-pill twin of G004: the return/PHE-in and flow-switch captions each fit their own words but can
+// still collide after translation because their centres are only 62 px apart.
+const textLangBox = (t, lang) => {
+  const w = t.widths[lang];
+  const x0 = t.anchor === 'middle' ? t.textX - w / 2 : t.anchor === 'end' ? t.textX - w : t.textX;
+  return { x0, x1: x0 + w, y0: t.bbox.y0, y1: t.bbox.y1 };
+};
+for (let i = 0; i < texts.length; i++) {
+  for (let j = i + 1; j < texts.length; j++) {
+    const a = texts[i], b = texts[j];
+    if (a.el.parent === b.el.parent) continue; // nested tspans were already joined into one run
+    const sameBaseline = Math.abs((a.bbox.y0 + a.bbox.y1) - (b.bbox.y0 + b.bbox.y1)) <= 1;
+    if (!sameBaseline) continue;
+    for (const lang of I18N_LANGS) {
+      if (!overlaps(textLangBox(a, lang), textLangBox(b, lang), 0.01)) continue;
+      add('G013', `${hitKey(a)}/${hitKey(b)}/${lang}`,
+        `neighbouring labels overlap in ${lang} (${at(a)} and ${at(b)})`,
+        `"${a.text[lang]}" and "${b.text[lang]}" share one baseline; shorten the fixed-face copy or move the labels`);
+    }
   }
 }
 // G005: pipes are axis-aligned. A one-pixel skew is invisible in review and permanent in the image.
@@ -1360,6 +1406,7 @@ console.error(
   '  G010 flow overlay traces no pipe\n' +
   '  G011 a pipe\'s tap area reaches into a fitting drawn earlier (the round line cap overhangs)\n' +
   '  G012 pump rotates counter-clockwise instead of clockwise\n' +
+  '  G013 neighbouring translated labels overlap on one baseline\n' +
   '  E001 repeated unit with no name          E002 pill on the wrong branch\n' +
   '  E003 flow overlay spans a junction — one animation cannot state two branches\' flow states\n' +
   '  E004 hit target spans a junction — one highlight cannot select two branches as one pipe\n' +

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { appSourceFiles, readAppFragments, readAppSource } from "../tools/ui/read_app_source.mjs";
+import { appSourceFiles, readAppFragments, readAppSource, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const files = appSourceFiles();
 assert.ok(files.length > 1, "the UI must remain split into multiple source files");
@@ -16,12 +16,14 @@ for (const file of files) {
     `${file} must remain a complete, independently parseable source fragment`);
 }
 
-const app = readAppSource();
-assert.match(app, /^\/\/ Web UI for daikin-altherma-esp32/);
-assert.match(app, /\n"use strict";/);
-assert.match(app, /\nasync function boot\(\)/);
-assert.match(app, /\nboot\(\);\s*$/);
-assert.doesNotThrow(() => new vm.Script(app, { filename: "main/www/app.sources" }),
+const baseApp = readAppSource();
+const deSource = readUiLocale("de");
+const app = baseApp + deSource;
+assert.match(baseApp, /^\/\/ Web UI for daikin-altherma-esp32/);
+assert.match(baseApp, /\n"use strict";/);
+assert.match(baseApp, /\nasync function boot\(\)/);
+assert.match(baseApp, /\nboot\(\);\s*$/);
+assert.doesNotThrow(() => new vm.Script(baseApp, { filename: "main/www/app.sources" }),
   "the ordered source fragments must parse as one classic script");
 assert.match(app, /async function refreshStatus\(paint = true\)[\s\S]*if \(paint\) renderApp\(\)/,
   "status refresh must allow the poller to defer its full render");
@@ -135,8 +137,8 @@ assert.doesNotMatch(app, /"dyn\.experimental"|section-badge\.experimental/,
 assert.match(app,
   /"dyn\.strategy_help": "[^"]*inner control loop[^"]*D2 clipping share[^"]*zone actually requests heat[^"]*"/,
   "English heating-curve help must name the closed-loop masking caveat and corroborating evidence");
-assert.match(app,
-  /"dyn\.strategy_help": "[^"]*inneren Regelkreis[^"]*D2-Clipping-Anteil[^"]*Zone tatsächlich Wärme anfordert[^"]*"/,
+assert.match(deSource,
+  /\/\* dyn\.strategy_help \*\/ "[^"]*inneren Regelkreis[^"]*D2-Clipping-Anteil[^"]*Zone tatsächlich Wärme anfordert[^"]*"/,
   "German heating-curve help must name the closed-loop masking caveat and corroborating evidence");
 const weatherModalHtml = html.match(/<div class="modal" id="weatherModal"[\s\S]*?<\/form>\s*<\/div>/)?.[0] || "";
 assert.match(weatherModalHtml, /id="wxLatitude"[\s\S]*id="wxLongitude"[\s\S]*href="https:\/\/open-meteo\.com\/"[\s\S]*data-i18n="wx\.attribution"/,
@@ -149,14 +151,18 @@ assert.match(app, /dynamicInfoRow\("weather"[\s\S]*"weather", t\("wx\.title"\)\)
   "the forecast value must open latitude and longitude editing through the firmware config route");
 assert.match(app, /function parseWeatherCoordinatePair\([\s\S]*function pasteWeatherCoordinates\([\s\S]*addEventListener\("paste", pasteWeatherCoordinates\)/,
   "a Google Maps coordinate pair pasted into either field must be split before save");
-const weatherCopyLines = app.split("\n").filter((line) =>
+const weatherCopyLines = baseApp.split("\n").filter((line) =>
   /^\s*"wx\.(?:detail\.source|hint\.(?:configured|setup))"\s*:/.test(line));
-assert.equal(weatherCopyLines.length, 6,
+const germanWeatherCopyLines = deSource.split("\n").filter((line) =>
+  /\/\* wx\.(?:detail\.source|hint\.(?:configured|setup)) \*\//.test(line));
+assert.equal(weatherCopyLines.length, 3,
+  "weather provenance plus configured/setup guidance must exist in English");
+assert.equal(germanWeatherCopyLines.length, 3,
   "weather provenance plus configured/setup guidance must exist in both languages");
-for (const line of weatherCopyLines)
+for (const line of [...weatherCopyLines, ...germanWeatherCopyLines])
   assert.doesNotMatch(line, /experimental|experimentell/i,
     "weather copy must not refer to the controller's experimental Firmware switch");
-const configuredGermanWeatherCopy = weatherCopyLines.find((line) => line.includes("Der ESP32 ruft")) || "";
+const configuredGermanWeatherCopy = germanWeatherCopyLines.find((line) => line.includes("Der ESP32 ruft")) || "";
 assert.equal((configuredGermanWeatherCopy.match(/alle 45 Minuten/g) || []).length, 1,
   "configured German weather guidance must state its refresh interval exactly once");
 assert.doesNotMatch(configuredGermanWeatherCopy, /Google Maps/,
@@ -186,10 +192,12 @@ assert.doesNotMatch(boardModalHtml, /envEnabled|envPreset|env\.hint|temperature 
   "the integrated sensor section must contain no enable checkbox, wiring preset, or technical prose");
 assert.match(app, /"env\.pins_hint": "SDA = data \(yellow Grove wire\); SCL = clock \(white Grove wire\)\.[^"]*saves the working assignment automatically\."/,
   "the English Hardware tongue must explain SDA/SCL and automatic reversal");
-assert.match(app, /"env\.pins_hint": "SDA = Datenleitung \(gelbe Grove-Leitung\), SCL = Taktleitung \(weiße Grove-Leitung\)\.[^"]*funktionierende Zuordnung automatisch\."/,
+assert.match(deSource, /\/\* env\.pins_hint \*\/ "SDA = Datenleitung \(gelbe Grove-Leitung\), SCL = Taktleitung \(weiße Grove-Leitung\)\.[^"]*funktionierende Zuordnung automatisch\."/,
   "the German Hardware tongue must explain SDA/SCL and automatic reversal");
-assert.match(app, /"board\.led_rgb_setup": "Blue, blinking slowly[\s\S]*"board\.led_gpio_wiping": "Solid after very rapid blinking[\s\S]*"board\.led_rgb_setup": "Blau, langsam blinkend[\s\S]*"board\.led_gpio_wiping": "Dauerlicht nach sehr schnellem Blinken/,
-  "both concise status-LED legends must stay bilingual");
+assert.match(baseApp, /"board\.led_rgb_setup": "Blue, blinking slowly[\s\S]*"board\.led_gpio_wiping": "Solid after very rapid blinking/,
+  "the concise English status-LED legends must stay complete");
+assert.match(deSource, /\/\* board\.led_rgb_setup \*\/ "Blau, langsam blinkend[\s\S]*\/\* board\.led_gpio_wiping \*\/ "Dauerlicht nach sehr schnellem Blinken/,
+  "the concise German status-LED legends must stay complete");
 assert.match(style, /\.pin-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*\}[\s\S]*\.pin-grid\[hidden\]\s*\{[^}]*display:\s*none/,
   "board and ENV pin fields must stay in two-column rows without overriding their hidden state");
 assert.match(app, /function boardLedLegend\(b\)[\s\S]*if \(b\.led_gpio == null \|\| b\.led_gpio < 0\) return "";[\s\S]*board\.led_\$\{kind\}_\$\{phase\}[\s\S]*function boardRow\(\)[\s\S]*boardLedLegend\(b\)[\s\S]*t\("board\.hint"\)[\s\S]*t\("env\.pins_hint"\)/,
@@ -303,8 +311,9 @@ assert.match(app, /lastIndexOf\("\$"\)/,
   "topic$path parsing must preserve leading $ system topics by splitting at the last delimiter");
 assert.match(app, /validRefTopic\(topic\) && path\.length <= 128/,
   "room-source paths must remain persistable until a real MQTT frame validates them");
-assert.match(app, /"ref\.delete": "Delete"[^]*"ref\.delete": "Löschen"/,
-  "Delete must remain explicit in both supported languages");
+assert.match(baseApp, /"ref\.delete": "Delete"/);
+assert.match(deSource, /\/\* ref\.delete \*\/ "Löschen"/,
+  "Delete must remain explicit in the English/German baseline catalogs");
 assert.doesNotMatch(httpConfig, /test_ref_temp|mqtt_reference_test/,
   "the room-source API must persist without a probe or proof gate");
 assert.match(mqttHa, /set_reference_error[\s\S]*reference temperature payload rejected[\s\S]*decode_reference_frame/,
@@ -344,18 +353,29 @@ assert.match(r2tGroup, /data-i18n="schem\.r2t">R2T<\/text>/,
   "the post-BUH water-temperature pill must use the R2T sensor name");
 assert.match(r4tGroup, /data-i18n="schem\.return">R4T<\/text>/,
   "the return-water temperature pill must use the R4T sensor name");
-assert.equal((app.match(/"schem\.leaving_water": "R1T"/g) || []).length, 2,
-  "R1T must be language-independent in both supported dictionaries");
-assert.equal((app.match(/"schem\.r2t": "R2T"/g) || []).length, 2,
-  "R2T must be language-independent in both supported dictionaries");
-assert.equal((app.match(/"schem\.return": "R4T"/g) || []).length, 2,
-  "R4T must be language-independent in both supported dictionaries");
+assert.equal((baseApp.match(/"schem\.leaving_water": "R1T"/g) || []).length, 1,
+  "R1T must remain explicit in the English startup dictionary");
+assert.equal((baseApp.match(/"schem\.r2t": "R2T"/g) || []).length, 1,
+  "R2T must remain explicit in the English startup dictionary");
+assert.equal((baseApp.match(/"schem\.return": "R4T"/g) || []).length, 1,
+  "R4T must remain explicit in the English startup dictionary");
+for (const code of ["de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"]) {
+  const localeSource = readUiLocale(code);
+  assert.match(localeSource, /\/\* schem\.leaving_water \*\/ "R1T"/,
+    `${code} must keep the language-independent R1T sensor name`);
+  assert.match(localeSource, /\/\* schem\.r2t \*\/ "R2T"/,
+    `${code} must keep the language-independent R2T sensor name`);
+  assert.match(localeSource, /\/\* schem\.return \*\/ "R4T"/,
+    `${code} must keep the language-independent R4T sensor name`);
+}
 assert.equal(r2tPill.y, r1tPill.y,
   "R2T must share the R1T pill baseline above the supply line");
 assert.match(r2tGroup, /<text class="sc-val" x="[0-9.]+" y="149"[^>]*>[^]*<text class="sc-sub" x="[0-9.]+" y="128"/,
   "R2T must share the R1T value and name baselines, not only its pill height");
-assert.match(app, /"schem\.flow_switch": "Flow switch"[\s\S]*"schem\.flow_switch": "Strömung"/,
-  "the flow-switch label must use sentence case in English and German");
+assert.match(baseApp, /"schem\.flow_switch": "Flow switch"/,
+  "the English flow-switch label must use sentence case");
+assert.match(deSource, /\/\* schem\.flow_switch \*\/ "Strömung"/,
+  "the German flow-switch label must use sentence case");
 const wpPill = pillRect("wp");
 const r4tPill = pillRect("rwt");
 const flowPill = pillRect("flow");
@@ -517,4 +537,4 @@ assert.match(app, /wireModalFieldSelection\(document\)/,
 assert.doesNotMatch(app, /document\.addEventListener\("click", \(e\) => \{\s*selectModalFieldContents\(e\.target\)/,
   "ordinary clicks in an active field must not unconditionally select all again");
 
-console.log(`ui bundle: ${files.length} sources, ${Buffer.byteLength(app)} bytes — valid classic script`);
+console.log(`ui bundle: ${files.length} startup sources, ${Buffer.byteLength(baseApp)} bytes — valid classic script`);

@@ -85,7 +85,7 @@ struct ConfigBlob {
     // Kconfig fallback — the pre-v3 world had exactly one feed, which IS the release channel — but
     // the caller still distinguishes "absent" from "explicitly release" for the diag line.
     bool        has_ota = false;
-    // ── v4: the web-UI language override (logic/ui_lang.hpp; 0 = auto, 1 = de, 2 = en) ────────────
+    // ── v4: web-UI language override (logic/ui_lang.hpp; stable byte mapping 0..13) ───────────────────
     // ONE writer (the httpd task, POST /set_lang), same as the channel and the board block. Auto by
     // default; a pre-v4 blob (no language byte) is read as auto, which is exactly right — the browser
     // kept auto-detecting before this setting existed, so absent means "keep letting the browser
@@ -336,7 +336,8 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     v.push_back(static_cast<uint8_t>((c.led_inverted ? 1 : 0) | (c.btn_active_low ? 2 : 0)));
     // v3 block: the OTA channel, one byte (there are two feeds, not two billion).
     v.push_back(static_cast<uint8_t>(c.ota_channel & 0xFF));
-    // v4 block: the UI language, one byte (auto/de/en, room to grow).
+    // v4 block: the UI language, one byte
+    // (auto/de/en/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi, with unknowns defensive).
     v.push_back(static_cast<uint8_t>(c.ui_lang & 0xFF));
     // v5/v6 block: HomeHub transport fields. Bit1 remains populated as a compatibility mirror for
     // the short-lived v6 Auto/Manual/Off build, but current firmware derives it from the address.

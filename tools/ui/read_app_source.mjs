@@ -5,8 +5,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const ROOT = process.env.DAIKIN_UI_ROOT
+  ? path.resolve(process.env.DAIKIN_UI_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEFAULT_APP_SOURCE = path.join(ROOT, "main/www/app.sources");
+const UI_LOCALE_DIR = path.join(ROOT, "main/www/locales");
 
 function fail(message) {
   throw new Error(`read_app_source: ${message}`);
@@ -70,4 +73,14 @@ export function readAppFragments(names, source = DEFAULT_APP_SOURCE) {
   // Preserve manifest order. This matters whenever multiple classic-script fragments share a
   // lexical scope, and keeps focused tests faithful to the production bundle.
   return files.map((file) => fs.readFileSync(file, "utf8")).join("");
+}
+
+// Locale modules are deliberately outside app.sources so they do not consume the dashboard's
+// 160 KiB single-response startup budget. Focused host tests can still execute the exact separately
+// shipped source rather than copying translations into fixtures.
+export function readUiLocale(code) {
+  if (!/^[a-z]{2}$/.test(code)) fail(`invalid locale code: ${code}`);
+  const file = path.join(UI_LOCALE_DIR, `${code}.js`);
+  if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) fail(`missing UI locale: ${code}`);
+  return fs.readFileSync(file, "utf8");
 }

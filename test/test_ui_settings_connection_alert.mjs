@@ -3,9 +3,9 @@
 // silently stop contributing to the same accessible alert count as Wi-Fi/MQTT/HomeHub.
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
-const source = readAppFragments(["i18n.js", "dashboard.js"]);
+const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + readAppFragments(["dashboard.js"]);
 const elements = {
   settingsDot: { hidden: true },
   btnSettings: {

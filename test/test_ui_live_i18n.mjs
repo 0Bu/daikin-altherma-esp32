@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const appStateSource = readAppFragments(["app_state.js"]);
 const schematicSource = readAppFragments(["schematic.js"]);
@@ -53,6 +53,64 @@ function assertPersistentBannerRepaints(name, status) {
   render();
   assert.equal(target.writes, 2, `${name} must repaint when only LANG changes`);
   assert.notEqual(target.innerHTML, english, `${name} must replace the old-language copy`);
+}
+
+// The Settings title is route-owned rather than data-i18n markup. A live language pick used to
+// repaint every card while leaving this one header in the previous language until the user went
+// Back and opened Settings again. Exercise the real language activation + route header together so
+// a source-only assertion cannot pass while the interaction stays broken.
+{
+  const elements = {
+    hdrDash: { hidden: false },
+    hdrBack: { hidden: true },
+    btnBack: {
+      ariaLabel: "",
+      setAttribute(name, value) { if (name === "aria-label") this.ariaLabel = value; },
+    },
+    verLink: {
+      ariaLabel: "",
+      setAttribute(name, value) { if (name === "aria-label") this.ariaLabel = value; },
+    },
+    backTitle: { textContent: "" },
+  };
+  const schematicAria = ["schem.card_aria", "schem.group_aria"].map((key) => ({
+    dataset: { i18nAria: key },
+    ariaLabel: "",
+    setAttribute(name, value) { if (name === "aria-label") this.ariaLabel = value; },
+  }));
+  const context = {
+    navigator: { language: "en" },
+    localStorage: { getItem: () => null, setItem: () => {} },
+    document: {
+      documentElement: {},
+      getElementById: (id) => elements[id],
+      querySelectorAll: (selector) => selector === "[data-i18n-aria]" ? schematicAria : [],
+    },
+    labelSchematicHits: () => {},
+  };
+  const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + appStateSource;
+  const { api } = productionApi(source, ["S", "activateLang", "applyStaticI18n", "renderHeader"], context);
+  api.S.stage = "settings";
+  api.applyStaticI18n();
+  api.renderHeader();
+  assert.equal(elements.backTitle.textContent, "Settings");
+  assert.equal(elements.btnBack.ariaLabel, "Back");
+  assert.equal(elements.verLink.ariaLabel, "Check for firmware updates");
+  assert.match(schematicAria[0].ariaLabel, /^Live system schematic:/,
+    "the schematic card must receive its English accessible name from the catalog");
+  assert.match(schematicAria[1].ariaLabel, /tap a value or component/,
+    "the schematic group must receive its English interaction hint from the catalog");
+  assert.equal(api.activateLang("de"), true);
+  assert.equal(elements.backTitle.textContent, "Einstellungen",
+    "a live language switch must repaint the active route title without a navigation round-trip");
+  assert.equal(elements.btnBack.ariaLabel, "Zurück",
+    "a live language switch must repaint the active Back control's accessible name");
+  assert.equal(elements.verLink.ariaLabel, "Nach Firmware-Updates suchen",
+    "a live language switch must repaint the persistent update control's accessible name");
+  assert.match(schematicAria[0].ariaLabel, /^Live-Anlagenschema:/,
+    "a live language switch must repaint the schematic card's accessible name");
+  assert.match(schematicAria[1].ariaLabel, /Wert oder Bauteil/,
+    "a live language switch must repaint the schematic group's accessible interaction hint");
 }
 
 {
@@ -171,7 +229,7 @@ assertPersistentBannerRepaints(
 // The dictionary half: both languages carry the new key, and the advice actually differs in the way
 // that matters. A half-translated pair is exactly how one language silently keeps the wrong advice.
 {
-  const i18n = readAppFragments(["i18n.js"]);
+  const i18n = readAppFragments(["i18n.js"]) + readUiLocale("de");
   // i18n.js is a page fragment, so it reaches for browser globals at load time (navigator.language
   // for the auto-detect, localStorage for the stored override). Stub only what loading needs — the
   // dictionaries themselves are plain data and the point of reading the REAL file is that no second
@@ -257,9 +315,38 @@ assertPersistentBannerRepaints(
   assert.equal(target.innerHTML, "de:chart");
 }
 
+// Derived inspector charts used to bypass INSPECT_I18N and expose their English aria name even
+// though the visible inspector title/body were native. Exercise the real chart-name path.
+{
+  const target = element();
+  const context = {
+    LANG: "es",
+    INSPECT_I18N: { es: { pth: { aria: "Potencia térmica estimada" } } },
+    S: { inspHistSig: "", hist: new Map([["pth", { gen: 1 }]]), histPin: new Map() },
+    $: () => target,
+    MB_PAIRS: [],
+    histIdFor: () => "pth",
+    hasHist: () => true,
+    hasModbusHist: () => false,
+    ensureHistPair: () => {},
+    histCacheKey: (id) => id,
+    histHtml: (_id, _unit, name) => name,
+    displayUnit: () => "kW",
+    displayReadingLabel: String,
+    DERIVED: { pth: { unit: "kW" } },
+  };
+  const render = productionApi(schematicSource, ["renderInspectHist"], context).api.renderInspectHist;
+  render({ i18nKey: "pth", aria: { en: "Thermal capacity at the PHE (estimated)",
+                                   de: "Thermische Leistung am PHE (Schätzung)" } },
+         { label: "Thermal capacity", unit: "kW" });
+  assert.equal(target.innerHTML, "Potencia térmica estimada",
+    "a derived chart must use the lazy locale's accessible name");
+}
+
 {
   const context = {
     LANG: "en",
+    INSPECT_I18N: Object.create(null),
     S: { insp: "same", live: null },
     // The second source. Null is the shape a device with no HomeHub sees, which is the right
     // baseline here: this asserts that LANG ALONE still moves the signature, so every other input
