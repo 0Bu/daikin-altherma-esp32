@@ -17,6 +17,7 @@
 #include "sdkconfig.h"
 #include "wifi.hpp"
 
+#include "esp_app_desc.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -46,9 +47,9 @@ namespace daik {
 static const char* TAG = "net";
 
 // ── mDNS ─────────────────────────────────────────────────────────────────────────────────────
-// One owner, called by whichever transport comes up first. mdns_init() is not idempotent (it
-// returns ESP_ERR_INVALID_STATE on a second call and would leave the hostname unset if we ignored
-// the ordering), so the latch is here rather than at the two call sites.
+// One owner, called by whichever transport comes up first. The latch prevents a second caller from
+// trying to add the same service again after mdns_init(); it belongs here rather than at the two
+// transport call sites so WiFi and Ethernet cannot drift into separate responder lifecycles.
 static std::atomic<bool> s_mdns_started{false};
 
 void net_mdns_start() {
@@ -70,7 +71,17 @@ void net_mdns_start() {
     if (err != ESP_OK)
         diag_printf("net: mDNS hostname set failed (%s) — <hostname>.local will not resolve this boot\n",
                     esp_err_to_name(err));
-    err = mdns_service_add(nullptr, "_http", "_tcp", 80, nullptr, 0);
+    // Product first is deliberate: mdns 1.11.3 copies these small values during this call and, if
+    // an unusually late TXT allocation fails, can retain the prefix it already copied. The stable
+    // identity therefore survives ahead of optional routing/version detail. Nothing installation-
+    // specific (MAC, board, IP, SSID or configured service data) is multicast.
+    mdns_txt_item_t http_txt[] = {
+        {"product", CONFIG_DAIKIN_HOSTNAME},
+        {"path", "/"},
+        {"version", esp_app_get_description()->version},
+    };
+    err = mdns_service_add(CONFIG_DAIKIN_HOSTNAME, "_http", "_tcp", 80, http_txt,
+                           sizeof(http_txt) / sizeof(http_txt[0]));
     if (err != ESP_OK)
         diag_printf("net: mDNS _http service add failed (%s) — the device will not be discoverable\n",
                     esp_err_to_name(err));
@@ -397,7 +408,10 @@ bool net_eth_start() {
     }
     // Advertise the hostname over DHCP (option 12) BEFORE the lease is requested, exactly as the
     // station does, so the router registers the same name for either transport.
-    esp_netif_set_hostname(s_eth_netif, CONFIG_DAIKIN_HOSTNAME);
+    const esp_err_t hostname_err = esp_netif_set_hostname(s_eth_netif, CONFIG_DAIKIN_HOSTNAME);
+    if (hostname_err != ESP_OK)
+        diag_printf("net: Ethernet DHCP hostname set failed (%s) — options 12/60 may be absent\n",
+                    esp_err_to_name(hostname_err));
 
     const EthPins pins = net_eth_pins();
     spi_device_interface_config_t devcfg = {};

@@ -288,7 +288,12 @@ bool wifi_start_sta() {
     // Advertise our hostname to the router via DHCP (option 12) BEFORE the DHCP client runs, so the
     // router's client list shows "daikin-altherma-esp32", not the IDF default "espressif". This is
     // the DHCP name; mDNS (start_mdns) sets the matching <hostname>.local name separately.
-    if (s_sta_netif) esp_netif_set_hostname(s_sta_netif, CONFIG_DAIKIN_HOSTNAME);
+    if (s_sta_netif) {
+        const esp_err_t hostname_err = esp_netif_set_hostname(s_sta_netif, CONFIG_DAIKIN_HOSTNAME);
+        if (hostname_err != ESP_OK)
+            diag_printf("wifi: DHCP hostname set failed (%s) — options 12/60 may be absent\n",
+                        esp_err_to_name(hostname_err));
+    }
     wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
     // `daik_cfg` is the sole persistence authority. IDF defaults to WIFI_STORAGE_FLASH, which would

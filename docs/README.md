@@ -258,7 +258,10 @@ hold the configured button for 5 s and the device drops every stored setting and
 setup portal. It is the only config reset that does not require reaching the device over the
 network — the way back in when it has joined a network you can no longer get onto.
 
-Not persisted: the **hostname** is fixed at `daikin-altherma-esp32`, the **poll cadence** at 1 s, and
+Not persisted: the **hostname** is fixed at `daikin-altherma-esp32` and is also advertised as the
+DHCP vendor class (option 60) and mDNS HTTP product identity. The mDNS TXT record adds only `/` as
+the HTTP path and the running firmware version — no board, MAC, serial or configured service data.
+The **poll cadence** stays fixed at 1 s, and
 the **value-catalog labels** (the heat-pump register names) stay **English-only**; the **model**
 (`profile` + the detection fingerprint) is re-detected fresh on every boot and kept in RAM (a swapped
 unit is re-identified). The **UI's own language** is browser-detected the same way by default, but —
