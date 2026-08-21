@@ -1,6 +1,6 @@
 ---
 name: feature-docs
-description: Keep docs/FEATURES.md (this firmware's technical-feature catalog) in sync when a new platform feature lands — a new ESP-IDF component, an sdkconfig capability, an HTTP/OTA/security/network/diagnostic mechanism, a new logic/ header, or a stub becoming real. Use after implementing or changing a technical feature, before opening the PR.
+description: Keep docs/FEATURES.md and docs/ESP_IDF_MATRIX.md in sync when a new platform feature lands — a new ESP-IDF component, an sdkconfig capability, an HTTP/OTA/security/network/diagnostic mechanism, a new logic/ header, or a stub becoming real. Use after implementing or changing a technical feature, before opening the PR.
 ---
 
 # feature-docs
@@ -20,6 +20,11 @@ becomes real — and the catalog still describes the old world. This skill close
 feature-level companion to [`project-review`](../project-review/SKILL.md) (broad pre-merge drift) and
 [`doc_drift_checker`](../../../.codex/agents/doc-drift-checker.toml) (AGENTS.md ↔ deep-dive docs).
 
+[`docs/ESP_IDF_MATRIX.md`](../../../docs/ESP_IDF_MATRIX.md) is the detailed source-linked ESP-IDF
+inventory. Its mechanical gate covers explicit components, managed dependencies, active defaults,
+application IDF headers and reviewed native/manual boundaries. FEATURES stays the short project
+catalog; the matrix owns provider/component detail and official Espressif documentation links.
+
 **FEATURES.md must never overstate the firmware.** Every `✅`/`🧪` claim points at code that backs
 it; anything not fully wired is `🟡`/`🔭` with the TODO named. When in doubt, downgrade the label.
 
@@ -30,11 +35,11 @@ promoted, or corrected:
 
 | Signal (grep the diff) | Catalog impact |
 |------------------------|----------------|
-| new entry in `main/CMakeLists.txt` `REQUIRES` or `main/idf_component.yml` | add a row to the **ESP-IDF component inventory** (§11) + a feature section |
-| a `CONFIG_*` added/flipped in `sdkconfig.defaults` | new capability (§ relevant) or a footprint-trim row (§10) |
+| new entry in `main/CMakeLists.txt` `REQUIRES` / `PRIV_REQUIRES` or `main/idf_component.yml` | add/promote a row in `ESP_IDF_MATRIX.md` + a FEATURES feature section when it changes product behavior |
+| a `CONFIG_*` added/flipped in `sdkconfig.defaults` | update the matrix config contract + the relevant FEATURES capability or footprint-trim row (§10) |
 | new `main/logic/*.hpp` header or new `CHECK`s in `test/test_logic.cpp` | update the logic-core list + the CHECK count (§8) — derive it with `grep -o 'CHECK(' test/test_logic.cpp \| wc -l` minus 1 for the `#define CHECK` line (`-o` not `-c`: `-c` counts lines and would undercount two `CHECK`s on one line) |
 | new `http_register(...)` route | HTTP feature (§4) + the matrix |
-| a `TODO`/stub in `ota_update.cpp` / `mcp_server.cpp` becoming real | promote the status label `🔭`/`🟡` → `✅` (§2, §11, matrix) |
+| a `TODO`/stub in `ota_update.cpp` / `mcp_server.cpp` becoming real | promote the status label `🔭`/`🟡` → `✅` in §2 and the FEATURES matrix; promote the corresponding ESP_IDF_MATRIX.md row when native surface changes |
 | new `partitions.csv` layout, signing/OTA/rollback change | §1/§2 + cross-check [`SECURITY.md`](../../../docs/SECURITY.md) |
 | new MQTT topic / HA entity, heartbeat/crash field | §5/§6 + the entity counts — read them off `HEARTBEAT_SENSOR_COUNT` (`main/logic/heartbeat.hpp`) and `CRASH_SENSOR_COUNT` (`main/logic/crashinfo.hpp`), each a `sizeof` over its sensor table |
 | new WiFi/mDNS/DHCP/watchdog behaviour | §3 |
@@ -45,9 +50,9 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
 
 1. **Diff the surface.** `git diff main...HEAD -- main/ sdkconfig.defaults partitions.csv scripts/ .github/` and
    scan for the signals above. Read the *actual* new code — do not infer a feature from a commit message.
-2. **Locate the catalog entry.** Find the matching section **and** the feature-matrix row at the top
-   of FEATURES.md. Most features appear in both — update both, plus the ESP-IDF inventory (§11) if a
-   component was added.
+2. **Locate both records.** Find the matching section **and** the feature-matrix row at the top of
+   FEATURES.md. Most product features appear in both. If ESP-IDF surface changed, also update the
+   stable row, evidence, official link and active-config appendix in ESP_IDF_MATRIX.md.
 3. **Write the entry code-verified — and SHORT.** State what the feature does in **one line** in the
    matrix and **at most two or three** in its section, point at the file with a repo-relative
    markdown link (targets are relative to `docs/`, e.g. `../main/wifi.cpp`), and label the status
@@ -64,13 +69,15 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
    exists and *where* it lives; every line past that belongs somewhere it can be found on purpose.
    If an entry needs more room, the deep-dive doc is the room.
 4. **Promote, don't just append, when a stub goes real.** If `ota_update.cpp`'s download or
-   `mcp_server.cpp` graduates from TODO, change the label everywhere it appears (matrix + section +
-   inventory) and delete the "planned" wording.
+   `mcp_server.cpp` graduates from TODO, change the label in the FEATURES matrix and section, promote
+   the corresponding ESP_IDF_MATRIX.md row where applicable, and delete the "planned" wording.
 5. **Keep the deep-dive docs authoritative.** FEATURES.md links to [`ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md),
    [`SECURITY.md`](../../../docs/SECURITY.md), etc.; it summarizes, it does not fork their detail. If the
    feature also needs a deep-dive edit, do that there and link — don't duplicate the prose.
 6. **Verify.**
    - Links resolve — every `](../…)` target exists (they're relative to `docs/`).
+   - `scripts/run-esp-idf-matrix-audit.sh` passes; if its checker changed, also run
+     `tools/esp_idf_matrix/selftest.sh`.
    - `scripts/run-mock-tests.sh` still passes if a `logic/` count changed.
    - No `✅`/`🧪` claim is unbacked; no shipped feature left as `🔭`.
 7. **Keep the framing hooks current.** FEATURES.md opens with a status legend and closes with a
@@ -101,8 +108,9 @@ enforces the same current-head evidence. Its feature-docs check, the sibling of 
 it fires only when the PR changes technical-feature surface (`main/`, `test/`, `sdkconfig.defaults`,
 `partitions.csv`, or the CI build workflow). A docs-only / script-only / chore PR is not gated.
 
-When it applies, record the pass — after running this skill and confirming `docs/FEATURES.md` matches
-the code — by TICKING and SHA-STAMPING the PR's `$feature-docs` box with the reviewed commit:
+When it applies, record the pass — after running this skill and confirming `docs/FEATURES.md` and
+`docs/ESP_IDF_MATRIX.md` match the code — by TICKING and SHA-STAMPING the PR's `$feature-docs` box
+with the reviewed commit:
 
 ```
 - [x] `$feature-docs` synced — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD

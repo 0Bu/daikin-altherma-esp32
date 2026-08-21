@@ -11,6 +11,7 @@ docs, the source comments and the issues:
 | Deep dive | Covers |
 |-----------|--------|
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | component map, poll engine, detection, WiFi, MQTT, OTA/partitions, memory |
+| [`ESP_IDF_MATRIX.md`](ESP_IDF_MATRIX.md) | source-linked ESP-IDF usage, evaluated alternatives and the completeness gate |
 | [`SECURITY.md`](SECURITY.md) | trust boundary, credential storage, OTA signing, boot recovery, key lifecycle |
 | [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) | the heat-pump wire protocol (framing, CRC, register pages, detection) |
 | [`REGISTERS.md`](REGISTERS.md) | converter reference + full register/value map |
@@ -132,6 +133,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 90 | **Bounded X10A publish path + weather-fetch headroom gate** — direct size/digest probing of the source-tagged poll cache avoids duplicate cache/group storage and a permanent payload block; changed state uses one exact transient payload with a revision-checked copy and a 12 KiB refusal ceiling. Open-Meteo waits for X10A/MQTT quiescence and retries below 56 KiB free / 24 KiB largest contiguous block | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`logic/x10a_snapshot.hpp`](../main/logic/x10a_snapshot.hpp), [`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp), [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`logic/weather_forecast.hpp`](../main/logic/weather_forecast.hpp), [`test_x10a_publish_heap_contract.mjs`](../test/test_x10a_publish_heap_contract.mjs) |
 | 91 | **X10A protocol diagnosis** — connection-gated, closed Settings tongue with an exact-or-labelled-generic `main/def` register catalog plus a bounded `POST /hp/query`: one caller-chosen page, raw/partial frame and every converter the slice admits | ✅ 🧪 | [`logic/hp_probe.hpp`](../main/logic/hp_probe.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`http_config.cpp`](../main/http_config.cpp), [`dashboard.js`](../main/www/js/dashboard.js) |
 | 92 | **Fail-closed production OTA promotion** — a service-proving rollback gate refuses link-only success; the signed exact dev artifact must pass host contracts and an OTA-TLS bench pressure stage, then one completed check generation plus mutex-consistent `busy=false` channel/version/application-SHA offer is consumed atomically by the sole production write. The fixed task lease, fresh captured-feed comparison, whole-download SHA-256 and immediate successor generation prevent stale, concurrent or same-version feed replacement before the read-only X10A/weather/heap/MQTT canary. Legacy firmware without this handshake requires a signed NVS-preserving USB bootstrap; busy/replaced writes are HTTP 503 and raw OTA writes remain gated | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`ota_update.cpp`](../main/ota_update.cpp), [`ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`http_ota.cpp`](../main/http_ota.cpp), [`health_gate.hpp`](../main/logic/health_gate.hpp), [`test_production_ota_gate_contract.mjs`](../test/test_production_ota_gate_contract.mjs), [`selftest.mjs`](../tools/production_ota/selftest.mjs), [`require-pr-gates.sh`](../tools/agent-hooks/require-pr-gates.sh) |
+| 94 | **ESP-IDF feature-matrix gate** — explicit components, managed dependencies, active defaults, application IDF headers and reviewed native/manual boundaries must stay represented by source evidence and specific official documentation | ✅ | [`ESP_IDF_MATRIX.md`](ESP_IDF_MATRIX.md), [`check_matrix.py`](../tools/esp_idf_matrix/check_matrix.py), [`selftest.py`](../tools/esp_idf_matrix/selftest.py) |
 
 ---
 
@@ -870,35 +872,13 @@ C++ exceptions are kept on (`COMPILER_CXX_EXCEPTIONS=y`) — they *are* the HTTP
 
 ## 11. ESP-IDF component & capability inventory
 
-Every ESP-IDF component this firmware links, and what it powers (from
-[`main/CMakeLists.txt`](../main/CMakeLists.txt) `REQUIRES` +
-[`idf_component.yml`](../main/idf_component.yml)):
-
-| Component | Powers |
-|-----------|--------|
-| `nvs_flash` | runtime config + X10A link cache (`daik_cfg` namespace) |
-| `esp_wifi` | STA (strongest-AP scan, SAE) + SoftAP setup portal |
-| `esp_event` / `esp_netif` | event loop + network interfaces, DHCP hostname/vendor class, SNTP client (`esp_netif_sntp`) |
-| `esp_http_server` | `:80` UI/API server. `CONFIG_HTTPD_WS_SUPPORT=n` — there is no push transport |
-| `app_update` / `esp_app_format` | low-level OTA slot writes, signed-image validation, boot selection/rollback, app descriptor (version, ELF sha) |
-| `esp_http_client` / `esp-tls` | heap-bounded OTA stream, weather-forecast fetch, TLS transport |
-| `bootloader_support` | Secure Boot v2 signature verification on the update path |
-| `mqtt` (managed) | HA MQTT-discovery bridge |
-| `esp_crt_bundle` | CA bundle for MQTTS / OTA / forecast TLS verification |
-| `lwip` (+ `ping/ping_sock`) | BSD sockets (captive DNS, Modbus), ICMP gateway watchdog, SNTP protocol |
-| `esp_driver_uart` | X10A 9600 8E1 link on `UART_NUM_1` |
-| `esp_driver_i2c` | optional ENV III SHT30 + QMP6988 climate sensor |
-| `esp_driver_gpio` | status indicator (GPIO back-end), recovery-button input + pin config |
-| `esp_driver_rmt` | RMT peripheral behind the WS2812 indicator back-end |
-| `esp_driver_spi` | SPI master behind the optional W5500 Ethernet controller |
-| `esp_eth` | MAC/PHY framework for the optional wired transport |
-| `w5500` (managed) | the W5500 MAC/PHY pair — ESP-IDF 6.0 moved the SPI Ethernet drivers out of `esp_eth` |
-| `led_strip` (managed) | WS2812 pixel driver — an addressable LED encodes colour in pulse timings |
-| `esp_timer` | uptime, poll/serial timing |
-| `mdns` (managed) | `<hostname>.local` + product/path/version HTTP discovery, and initial/manual HomeHub browse |
-| `espcoredump` | core dump to flash + `esp_core_dump_get_summary` |
-| `esp_partition` | the upper-flash `history` journal, the `GET /coredump` stream, the OTA running-slot lookup |
-| `cjson` (managed) | POST body parsing (`http_config.cpp`) |
+The canonical detailed inventory is [`ESP_IDF_MATRIX.md`](ESP_IDF_MATRIX.md). It distinguishes
+direct API use, indirect backends and managed components from evaluated-but-unused features, with a
+specific official Espressif documentation link for every row. Its mechanical gate derives the
+current surface from [`main/CMakeLists.txt`](../main/CMakeLists.txt),
+[`idf_component.yml`](../main/idf_component.yml), [`dependencies.lock`](../dependencies.lock),
+[`sdkconfig.defaults`](../sdkconfig.defaults) and the IDF-shaped headers actually included by
+`main/`; this catalog keeps only the project-level summary.
 
 **Compile-time defaults** live in [`main/Kconfig.projbuild`](../main/Kconfig.projbuild). Only some
 are also settable at runtime (web UI → NVS, which then overrides the Kconfig default):

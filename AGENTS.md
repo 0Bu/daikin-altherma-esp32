@@ -80,7 +80,8 @@ Read only the references relevant to the task:
 - X10A protocol: `docs/X10A_PROTOCOL.md`
 - Converter IDs, value evidence, and register map: `docs/REGISTERS.md`
 - HomeHub Modbus contract: `docs/MODBUS_PROTOCOL.md`
-- Platform features and plant features: `docs/FEATURES.md` and `docs/PLANT.md`
+- Platform features, ESP-IDF usage and plant features: `docs/FEATURES.md`,
+  `docs/ESP_IDF_MATRIX.md` and `docs/PLANT.md`
 - Home Assistant and MQTT identity: `docs/HOME_ASSISTANT.md`
 - Read-only firmware MCP surface: `docs/MCP.md`
 - Diagnosis meaning and evidence: `docs/DIAGNOSTICS.md` and `docs/DIAGNOSTIC_EVIDENCE.md`
