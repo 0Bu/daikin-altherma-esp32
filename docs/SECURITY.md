@@ -237,6 +237,15 @@ authorization.
   path and the 480-second host observer, so it cannot expire during a still-valid download. All gates
   refuse on failure and none weakens or skips signature checking.
 
+  One mid-stream read failure after a known-length post-header prefix is validated and committed may
+  reconnect exactly once inside that same deadline. Before cleanup, fixed-format diagnostics preserve
+  the raw read result,
+  socket errno, TLS/MbedTLS state, heap and stack evidence. After cleanup and a fresh 56/24-KiB
+  admission, the original HTTPS URL must return HTTP 206 with one exact `Content-Range` suffix and
+  matching `Content-Length`; 200, 416, chunked, duplicate or inconsistent metadata fails closed.
+  The existing sequential OTA handle and PSA hash continue, so the final manifest SHA and both
+  signed-image validation passes still bind every byte. A second interruption is never retried.
+
   `HTTP_TLS_DYN_BUF_RX_STATIC` would reduce long-transfer record churn, but it is intentionally not
   enabled on pinned ESP-IDF 6.0.2: Espressif issue #18828 reports a reproducible TLS-1.2
   invalid-free/assert in that strategy. Retaining the default dynamic strategy is the safer bounded

@@ -35,6 +35,7 @@ const weather = code("main/weather_forecast.cpp");
 const mcp = code("main/mcp_server.cpp");
 const httpCommon = code("main/http_common.cpp");
 const config = code("main/config.cpp");
+const httpClientDiag = code("main/http_client_diag.cpp");
 // Keep this source verbatim: it contains the legitimate captive-portal URI string "/*", which a
 // regex comment stripper would mistake for an unterminated block comment and erase most handlers.
 const httpStatus = read("main/http_status.cpp");
@@ -224,6 +225,9 @@ const probeWrite = update.indexOf("write_chunk(buffer, probe_len)", writeImage);
 const bulkRead = update.indexOf("esp_http_client_read(", probeWrite);
 const bulkWrite = update.indexOf("write_chunk(buffer,", bulkRead);
 const release = update.lastIndexOf("close_http_client(client)");
+const completeDecision = update.indexOf("const bool complete =", bulkWrite);
+const finalBufferRelease = update.indexOf("heap_caps_free(buffer)", completeDecision);
+const finalTransportRelease = update.indexOf("close_http_client(client)", finalBufferRelease);
 const hashSetup = update.indexOf("psa_hash_setup(");
 const hashUpdate = update.indexOf("psa_hash_update(", hashSetup);
 const hashFinish = update.indexOf("psa_hash_finish(", hashUpdate);
@@ -235,6 +239,9 @@ assert.ok(init >= 0 && begin > init && probeRead > begin && writeImage > probeRe
   "the firmware image must stream from esp_http_client into the inactive OTA partition");
 assert.ok(release > bulkWrite && verify > release && select > verify,
   "HTTP/TLS must be closed and cleaned before signature validation, and boot selection must follow it");
+assert.ok(completeDecision > bulkWrite && finalBufferRelease > completeDecision &&
+          finalTransportRelease > finalBufferRelease && finalTransportRelease < hashFinish,
+  "the final response decision must release its buffer and TLS client before exact-hash finish");
 assert.ok(hashSetup > probeRead && hashUpdate > hashSetup && hashFinish > release &&
           exactHash > hashFinish && verify > exactHash,
   "the complete downloaded byte stream must match the checked app SHA before signature validation and boot selection");
@@ -359,8 +366,8 @@ assert.match(update, /disable_auto_redirect\s*=\s*true/,
   "firmware fetch must disable automatic redirects so only the checked Location path can follow");
 assert.match(update, /event_handler\s*=\s*firmware_http_event/,
   "firmware redirects must be inspected before the client follows them");
-assert.match(update, /user_data\s*=\s*&redirect_policy/,
-  "the HTTP callback must receive the per-operation redirect verdict");
+assert.match(update, /user_data\s*=\s*&response_state/,
+  "the HTTP callback must receive the per-operation redirect and range verdicts");
 
 const eventStart = ota.indexOf("esp_err_t firmware_http_event(");
 const eventEnd = ota.indexOf("esp_err_t open_firmware_stream(", eventStart);
@@ -371,8 +378,12 @@ assert.match(event, /HTTP_EVENT_ON_HEADER/,
   "only received response headers may update redirect policy");
 assert.match(event, /ota_ascii_prefix_ieq\(key,\s*"Location"\)/,
   "Location matching must be ASCII case-insensitive");
-assert.match(event, /ota_redirect_location_observe\(\*policy,\s*event->header_value\)/,
+assert.match(event, /ota_redirect_location_observe\(response->redirect,\s*event->header_value\)/,
   "every redirect Location header must enter the duplicate-aware policy");
+assert.match(event, /ota_ascii_prefix_ieq\(key,\s*"Content-Range"\)[\s\S]{0,120}?ota_content_range_observe\(response->content_range,\s*event->header_value\)/,
+  "every Content-Range header must enter the duplicate-aware allocation-free policy");
+assert.match(event, /firmware_http_event\([^)]*\)\s*noexcept/,
+  "the HTTP parser callback must not unwind through ESP-IDF C frames");
 
 assert.match(transport,
   /if\s*\(state\.location_count\s*<\s*2\)\s*\+\+state\.location_count/,
@@ -390,15 +401,104 @@ assert.ok(streamEnd > streamStart, "the redirect-follow loop must remain identif
 const stream = ota.slice(streamStart, streamEnd);
 assert.match(stream, /redirects\s*<=\s*kMaxRedirects/,
   "redirect following must remain bounded");
-const redirectReset = stream.indexOf("ota_redirect_location_reset(policy)");
-const redirectVerdict = stream.indexOf("!ota_redirect_location_accepted(policy)");
+const streamDeadline = stream.indexOf(
+  "set_http_timeout_to_deadline(client, operation_started, operation_deadline)");
+const redirectReset = stream.indexOf("ota_redirect_location_reset(response.redirect)");
+const rangeReset = stream.indexOf("ota_content_range_reset(response.content_range)");
+const redirectVerdict = stream.indexOf("!ota_redirect_location_accepted(response.redirect)");
 const setRedirect = stream.indexOf("esp_http_client_set_redirection(");
 const redirectClose = stream.indexOf("esp_http_client_close(", setRedirect);
 const clearResponse = stream.indexOf("esp_http_client_clear_response_buffer(", redirectClose);
-assert.ok(redirectReset >= 0 && redirectVerdict > redirectReset && setRedirect > redirectVerdict &&
+const secondStreamDeadline = stream.indexOf(
+  "set_http_timeout_to_deadline(client, operation_started, operation_deadline)",
+  streamDeadline + 1);
+const fetchHeaders = stream.indexOf("esp_http_client_fetch_headers(client)");
+const postHeaderDeadline = stream.indexOf(
+  "http_deadline_reached(operation_started, operation_deadline)", fetchHeaders);
+assert.ok(streamDeadline >= 0 && redirectReset > streamDeadline && rangeReset > redirectReset &&
+          secondStreamDeadline > rangeReset && fetchHeaders > secondStreamDeadline &&
+          postHeaderDeadline > fetchHeaders &&
+          redirectVerdict > postHeaderDeadline &&
+          setRedirect > redirectVerdict &&
           redirectClose > setRedirect &&
           clearResponse > redirectClose,
   "only one unambiguous secure Location may be applied, then the old response/socket must be cleared before reopen");
+
+// ── One exact, fail-closed mid-stream resume ─────────────────────────────────────────────────
+// Dynamic TLS records can lose one allocation or socket read after the OTA slot/hash are already
+// partially advanced. Recovery stays inside the accepted operation: one fresh HTTPS client asks
+// for the exact remaining suffix while the original OTA handle, PSA hash and absolute deadline
+// remain authoritative.
+assert.match(transport, /OTA_TRANSFER_MAX_RESUMES\s*=\s*1/,
+  "a transfer may reconnect exactly once, never loop until a broken network happens to pass");
+assert.match(transport,
+  /resumes\s*<\s*OTA_TRANSFER_MAX_RESUMES[\s\S]{0,160}?total\s*>\s*0[\s\S]{0,120}?written\s*>\s*0[\s\S]{0,80}?written\s*<\s*total/,
+  "resume must require one unused attempt and a non-empty strict prefix of a known-size image");
+assert.match(transport,
+  /state\.header_count\s*==\s*1[\s\S]{0,160}?state\.start\s*==\s*expected_start[\s\S]{0,120}?state\.end\s*==\s*expected_total\s*-\s*1[\s\S]{0,120}?state\.total\s*==\s*expected_total/,
+  "the resumed suffix must carry exactly one complete matching Content-Range");
+assert.match(transport, /numeric_limits<uint64_t>::max\(\)\s*-\s*digit/,
+  "Content-Range decimal parsing must reject uint64 overflow without allocation");
+
+const resumeDecision = update.indexOf("const bool can_resume");
+const resumeIncrement = update.indexOf("++resumes", resumeDecision);
+const resumeDiag = update.indexOf("http_client_log_read_failure(", bulkRead);
+const resumeFree = update.indexOf("heap_caps_free(buffer)", resumeDecision);
+const resumeClose = update.indexOf("close_http_client(client)", resumeFree);
+const resumeHeadroom = update.indexOf('wait_for_ota_headroom_until("transfer resume"', resumeClose);
+const resumeGateDeadline = update.indexOf(
+  "if (http_deadline_reached(transfer_started, kFirmwareDeadline))", resumeHeadroom);
+const resumeInit = update.indexOf("esp_http_client_init(&http)", resumeHeadroom);
+const resumeHeader = update.indexOf('esp_http_client_set_header(client, "Range", range_header)', resumeInit);
+const resumeOpen = update.indexOf(
+  "open_firmware_stream(client, response_state, 206, transfer_started,", resumeHeader);
+const resumeRange = update.indexOf("ota_content_range_matches(", resumeOpen);
+const resumeChunked = update.indexOf("esp_http_client_is_chunked_response(client)", resumeRange);
+const resumeLength = update.indexOf("response_length", resumeChunked);
+const resumeBuffer = update.indexOf("heap_caps_malloc(kOtaBufSize", resumeLength);
+assert.ok(resumeDiag > bulkRead && resumeDecision > resumeDiag &&
+          resumeIncrement > resumeDecision && resumeFree > resumeIncrement &&
+          resumeClose > resumeFree && resumeHeadroom > resumeClose &&
+          resumeGateDeadline > resumeHeadroom && resumeInit > resumeGateDeadline &&
+          resumeHeader > resumeInit && resumeOpen > resumeHeader && resumeRange > resumeOpen &&
+          resumeChunked > resumeRange && resumeLength > resumeChunked && resumeBuffer > resumeLength,
+  "a failed read must be diagnosed, release TLS/buffer, regain headroom, and validate exact 206 range metadata before another write buffer exists");
+assert.match(update.slice(resumeDiag, resumeHeadroom),
+  /http_deadline_reached\(transfer_started, kFirmwareDeadline\)/,
+  "resume admission must use the original firmware deadline rather than start a new budget");
+assert.match(update.slice(resumeClose, resumeInit), /OTA_TRANSFER_HEADROOM/,
+  "the reconnect must reacquire the same stable 56/24-KiB TLS headroom");
+assert.match(update.slice(resumeClose, resumeInit),
+  /kTransferHeadroomMaxAttempts,\s*transfer_started,\s*kFirmwareDeadline,\s*resume_heap/,
+  "the reconnect headroom wait must consume the original absolute transfer deadline");
+assert.match(stream,
+  /set_http_timeout_to_deadline\(client, operation_started, operation_deadline\)[\s\S]{0,320}?esp_http_client_open\(client, 0\)[\s\S]{0,220}?set_http_timeout_to_deadline\(client, operation_started, operation_deadline\)[\s\S]{0,180}?esp_http_client_fetch_headers\(client\)[\s\S]{0,160}?http_deadline_reached\(operation_started, operation_deadline\)/,
+  "every initial or redirected open and header fetch must consume a freshly computed remaining deadline");
+assert.match(stream,
+  /esp_http_client_open\(client, 0\)[\s\S]{0,100}?e\s*!=\s*ESP_OK[\s\S]{0,140}?http_deadline_reached\(operation_started, operation_deadline\)[\s\S]{0,80}?ESP_ERR_TIMEOUT\s*:\s*e/,
+  "a blocking TLS-open failure that exhausts the operation deadline must remain a timeout");
+assert.match(stream,
+  /header_result\s*=\s*esp_http_client_fetch_headers\(client\)[\s\S]{0,100}?header_result\s*<\s*0[\s\S]{0,140}?http_deadline_reached\(operation_started, operation_deadline\)[\s\S]{0,100}?ESP_ERR_TIMEOUT\s*:\s*ESP_FAIL/,
+  "a blocking header failure that exhausts the operation deadline must remain a timeout");
+assert.match(update.slice(resumeInit, resumeOpen), /bytes=%llu-/,
+  "the reconnect must request exactly the suffix beginning at the committed byte count");
+assert.match(update.slice(resumeOpen, resumeBuffer),
+  /response_length\s*<\s*0\s*\|\|[\s\S]{0,120}?static_cast<uint64_t>\(response_length\)\s*!=\s*remaining/,
+  "the 206 response Content-Length must equal the exact remaining image bytes");
+assert.doesNotMatch(update, /esp_ota_resume|esp_ota_write_with_offset/,
+  "range recovery must continue the live sequential OTA/hash contexts, not create offset state");
+assert.equal(occurrences(update, "esp_ota_begin("), 1,
+  "range recovery must not erase/reopen the OTA slot");
+assert.equal(occurrences(update, "psa_hash_setup("), 1,
+  "range recovery must not reset the exact-artifact hash");
+assert.match(update,
+  /const bool complete\s*=\s*transfer_ok\s*&&\s*response_complete[\s\S]{0,120}?written\s*==\s*static_cast<uint64_t>\(total\)/,
+  "final validation must still require a complete final response and the original total byte count");
+const readDiagStart = httpClientDiag.indexOf("HttpClientReadFailure http_client_log_read_failure(");
+assert.ok(readDiagStart >= 0, "the allocation-free mid-stream diagnostic boundary must exist");
+assert.match(httpClientDiag.slice(readDiagStart),
+  /read_result[\s\S]{0,500}?esp_http_client_get_errno\(client\)[\s\S]{0,220}?esp_http_client_get_and_clear_last_tls_error[\s\S]{0,900}?largest_internal/,
+  "mid-stream failure evidence must capture raw read, socket, TLS and contiguous heap before cleanup");
 
 // ── Headroom is a two-dimensional, two-boundary gate ─────────────────────────────────────────
 // Total free bytes alone missed the incident: the failing board still had memory in aggregate but
@@ -473,6 +573,12 @@ assert.match(ota,
 assert.match(update,
   /ESP_ERR_OTA_ROLLBACK_INVALID_STATE[\s\S]{0,140}?Firmware health check is still running — retry in a moment/,
   "a second OTA during rollback probation must report the real retryable state");
+assert.match(update,
+  /allocator_failure[\s\S]{0,240}?e\s*==\s*ESP_ERR_TIMEOUT\s*\?\s*"Update download timed out"[\s\S]{0,180}?status\s*==\s*0/,
+  "an initial firmware open that consumes the deadline must not be mislabeled as reachability");
+assert.match(update.slice(resumeOpen, resumeRange),
+  /e\s*==\s*ESP_ERR_TIMEOUT\s*\?\s*OtaTransferFailure::Timeout\s*:\s*OtaTransferFailure::Read/,
+  "a resumed open that consumes the remaining deadline must retain timeout diagnostics");
 
 // ESP_ERR_OTA_VALIDATE_FAILED is an umbrella result: it covered allocator failure during RSA on the
 // live board, not only tampering. Do not turn it back into a cryptographic accusation. The actual

@@ -62,6 +62,25 @@ assert.match(gate, /hashlib\.sha256\(binary\)\.hexdigest\(\)/,
   "the downloaded image must be matched byte-for-byte to manifest provenance");
 assert.match(gate, /scripts\/require-signed\.sh/,
   "the downloaded application must pass the Secure Boot v2 signature gate");
+const rangeHelperStart = gate.indexOf("def verify_http_range_support(");
+const rangeHelperEnd = gate.indexOf("\ndef cache_busted(", rangeHelperStart);
+assert.ok(rangeHelperStart >= 0 && rangeHelperEnd > rangeHelperStart,
+  "the read-only official-artifact Range preflight must remain identifiable");
+const rangeHelper = gate.slice(rangeHelperStart, rangeHelperEnd);
+assert.match(rangeHelper, /"Range": "bytes=0-0"/,
+  "the host preflight must request the same byte-range mechanism used by firmware resume");
+assert.match(rangeHelper,
+  /response\.status\s*!=\s*206[\s\S]{0,220}?content_range\s*!=\s*\[f"bytes 0-0\/\{len\(binary\)\}"\][\s\S]{0,160}?content_length\s*!=\s*"1"/,
+  "the official host must prove exact 206 Content-Range and Content-Length semantics");
+assert.match(rangeHelper, /body\s*!=\s*binary\[:1\]/,
+  "the ranged byte must match the already signature- and SHA-bound artifact");
+assert.equal(occurrences(gate, "verify_http_range_support("), 3,
+  "the helper definition plus dev and release artifact checks must remain present");
+const appRange = gate.indexOf("verify_http_range_support(app_url, binary)");
+const releaseRange = gate.indexOf("verify_http_range_support(release_url, release_binary)");
+const inventoryLoad = gate.indexOf("inventory = load_inventory()", releaseRange);
+assert.ok(appRange >= 0 && releaseRange > appRange && inventoryLoad > releaseRange,
+  "both official artifacts must prove Range support before any private board is contacted");
 assert.match(gate, /git",\s*"rev-parse",\s*"HEAD"/,
   "local host contracts must run on the manifest's exact main source");
 assert.match(gate, /git",\s*"status",\s*"--porcelain"/,
@@ -102,6 +121,9 @@ const targetBoot = fullHelper.indexOf("target_status = wait_for_new_firmware(", 
 assert.ok(releaseOffer >= 0 && releasePost > releaseOffer && releaseBoot > releasePost &&
   releaseHealthWindow > releaseBoot && devChannel > releaseHealthWindow && targetBoot > devChannel,
   "the target must perform a complete release download, survive rollback probation, and return to the exact dev artifact before staging passes");
+assert.match(fullHelper,
+  /try:[\s\S]{0,500}?post_update_once\([\s\S]{0,500}?wait_for_new_firmware\([\s\S]{0,300}?finally:[\s\S]{0,160}?stop\.set\(\)[\s\S]{0,180}?worker\.join/,
+  "bench pressure workers must always stop and join when the target OTA fails closed");
 assert.match(gate, /BENCH_HEALTH_WINDOW_S\s*=\s*105/,
   "each newly installed bench image must survive beyond its 90-second health window");
 const healthWindowStart = gate.indexOf("def wait_for_bench_health_window(");
