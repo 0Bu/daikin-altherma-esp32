@@ -41,7 +41,7 @@ wifi.cpp/.hpp       → STA bring-up (all-channel scan → strongest AP by RSSI)
                        after 2 checkpoints (~60 s), an absent SSID gets 180 s for a rebooting router) +
                        ICMP gateway watchdog (three-valued probe + host-tested policy in
                        logic/link_watch.hpp: 2 proven-silent periods, or 10 blind ones, re-associate)
-                       + DHCP hostname + mDNS; wifi_info() also reports the AP's
+                       + DHCP hostname/vendor class + mDNS product metadata; wifi_info() also reports the AP's
                        BSSID + PHY standard + this STA's MAC
 net.cpp/.hpp        → the OPTIONAL WIRED TRANSPORT: a W5500 on SPI, in practice an AtomS3 Lite on a
                       PoE base. A second TRANSPORT, not a second source — MQTT/syslog/SNTP/OTA/HTTP
@@ -1630,6 +1630,13 @@ poll engine reads the bus at 1 Hz and whose motion is CSS, neither is perceptibl
 Two transports can carry this device, and exactly one thing above them knows it: `main.cpp`'s boot
 fork. The HTTP server, MQTT, syslog, SNTP, OTA and mDNS all run unchanged over either — an Ethernet
 board is not a variant of the firmware, it is the same firmware with a different cable.
+
+**The product identity is transport-neutral and static.** Before either DHCP client can start, its
+netif hostname is set to `daikin-altherma-esp32`; ESP-IDF's enabled vendor-class hook reuses that
+same value for options 12 and 60 without stopping or mutating a live lease. The shared mDNS owner
+announces one `_http._tcp` instance with `product`, root `path` and running `version` TXT fields.
+It deliberately announces no MAC, serial, board, SSID, IP or configured-service data. These signals
+make the product machine-readable but cannot force a controller's proprietary fingerprint label.
 
 **The wire is optional and DETECTED, not configured.** CI publishes one `esp32s3` image, so the
 W5500 controller (`net.cpp`) cannot be a compile-time board choice. At boot the firmware reads the

@@ -74,6 +74,50 @@ assert.ok(main.indexOf("net_eth_start()") < main.indexOf("wifi_start_sta()"),
   "main.cpp must ask the wire before the radio");
 
 const net = code("main/net.cpp");
+
+// THE LAN IDENTITY. Option 60 deliberately reuses the hostname already installed before either
+// DHCP client starts. A runtime option setter needs a started/stopped DHCP data structure and can
+// leak one initial Discover without the product identity; the IDF hook has no such lifecycle race.
+const defaults = read("sdkconfig.defaults");
+assert.match(defaults, /^CONFIG_LWIP_DHCP_DISABLE_VENDOR_CLASS_ID=n$/m,
+  "the firmware must enable DHCP vendor-class option 60");
+assert.match(defaults, /^CONFIG_LWIP_DHCP_OPTIONS_LEN=109$/m,
+  "the DHCP option buffer must remain large enough for the hostname vendor class");
+
+const wifi = code("main/wifi.cpp");
+const wifiStartBegin = wifi.indexOf("bool wifi_start_sta()");
+const wifiStartEnd = wifi.indexOf("void wifi_stop_sta()", wifiStartBegin);
+const wifiStart = wifi.slice(wifiStartBegin, wifiStartEnd);
+assert.ok(wifiStart.indexOf("esp_netif_set_hostname(") >= 0 &&
+          wifiStart.indexOf("esp_netif_set_hostname(") < wifiStart.indexOf("esp_wifi_start("),
+  "WiFi must install the option-12/60 hostname before its DHCP client can send");
+
+const ethStartBegin = net.indexOf("bool net_eth_start()");
+const ethStartEnd = net.indexOf("EthInfo net_eth_info()", ethStartBegin);
+const ethIdentity = net.slice(ethStartBegin, ethStartEnd);
+assert.ok(ethIdentity.indexOf("esp_netif_set_hostname(") >= 0 &&
+          ethIdentity.indexOf("esp_netif_set_hostname(") < ethIdentity.indexOf("esp_eth_start("),
+  "Ethernet must install the option-12/60 hostname before its DHCP client can send");
+assert.doesNotMatch(`${wifi}\n${net}`, /esp_netif_dhcpc_(?:option|stop|start)\s*\(/,
+  "product identity must not mutate the live DHCP-client lifecycle");
+
+const mdnsStartBegin = net.indexOf("void net_mdns_start()");
+const mdnsStartEnd = net.indexOf("EthPins net_eth_pins()", mdnsStartBegin);
+const mdnsIdentity = net.slice(mdnsStartBegin, mdnsStartEnd);
+for (const field of [
+  '{"product", CONFIG_DAIKIN_HOSTNAME}',
+  '{"path", "/"}',
+  '{"version", esp_app_get_description()->version}',
+]) {
+  assert.ok(mdnsIdentity.includes(field), `mDNS identity must advertise ${field}`);
+}
+assert.match(mdnsIdentity,
+  /mdns_service_add\(CONFIG_DAIKIN_HOSTNAME,\s*"_http",\s*"_tcp",\s*80,\s*http_txt/,
+  "the HTTP service must carry the stable product instance and TXT set");
+assert.doesNotMatch(mdnsIdentity,
+  /\{\s*"(?:manufacturer|board|mac|serial|ssid|ip|mqtt)"\s*,/i,
+  "mDNS TXT must not multicast installation-specific identity or configuration");
+
 assert.ok(/net_eth_probe_allowed\(/.test(net),
   "net.cpp must consult net_eth_probe_allowed() before touching the SPI pads");
 assert.ok(net.indexOf("net_eth_probe_allowed(") < net.indexOf("spi_bus_initialize("),
@@ -182,5 +226,5 @@ assert.ok((status.match(/net_eth_reserved_pins\(\)/g) || []).length >= 4,
 assert.ok((config.match(/net_eth_reserved_pins\(\)/g) || []).length >= 3,
   "the /set_hp, /set_board and ENV III request paths must all refuse an Ethernet pad");
 
-console.log("transport: trust/boot/probe boundaries, Ethernet lease lifecycle and transport-neutral " +
-            "off-link clients are pinned");
+console.log("transport: trust/boot/probe boundaries, stable DHCP/mDNS identity, Ethernet lease " +
+            "lifecycle and transport-neutral off-link clients are pinned");

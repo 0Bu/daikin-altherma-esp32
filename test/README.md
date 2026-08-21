@@ -110,6 +110,11 @@ suite cannot link: fresh firmware runs one persisted search before HTTP, the Mod
 browses mDNS, and an explicitly empty address creates no task or future boot search. The dialog's
 manual endpoint returns a found address to the form but cannot persist it behind Save/Cancel.
 
+`node test/test_transport_contract.mjs` also pins the device's static LAN identity on both
+transports: DHCP options 12 and 60 come from the hostname installed before the client starts, with
+no live DHCP stop/start mutation, while the `_http._tcp` mDNS record exposes only the fixed product,
+root path and running firmware version. Per-device MAC/serial/configuration TXT fields stay absent.
+
 `node test/test_mqtt_x10a_gate_contract.mjs` pins the other IDF-facing ownership boundary: the X10A
 poll task starts before MQTT; `mqtt_ha_start()` builds a no-LWT client; `mqtt_task()` starts it for
 the pre-enable Test subscription and, only in SHADOW, the saved reference subscription even without

@@ -14,6 +14,10 @@ and the OTA-signing / key lifecycle.
   with `Host` set to the device mDNS name/current IP and without an external browser `Origin` or
   cross-site Fetch Metadata. Passing the public proxy Host or `https://` Origin through is rejected
   by the device policy below; merely forwarding port 80 is not supported internet exposure.
+- **LAN discovery publishes product metadata, not installation identity.** DHCP options 12/60 and
+  the mDNS `_http._tcp` instance identify `daikin-altherma-esp32`; mDNS also publishes the root HTTP
+  path and running firmware version. It never publishes a board name, MAC/serial, SSID, IP, broker
+  or other user configuration as TXT metadata.
 - **A browser cannot extend that trust boundary through DNS rebinding or cross-site requests.** On
   the configured LAN, every route accepts `Host` only for the fixed mDNS name or the current
   WiFi/Ethernet IPv4 address. A present `Origin` must independently name one of those identities,

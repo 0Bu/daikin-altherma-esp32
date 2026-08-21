@@ -87,10 +87,10 @@ EthInfo net_eth_info();
 // this boot; harmless to call otherwise.
 void net_eth_fallback_start();
 
-// mDNS (<hostname>.local + the _http._tcp record), started by whichever transport comes up first
-// and idempotent so the second one is a no-op. It used to live inside wifi_start_sta(), which
-// meant a wired board — the one case where the LAN is most likely to be the only way in — silently
-// had no <hostname>.local name at all.
+// mDNS (<hostname>.local + the _http._tcp product/path/version record), started by whichever
+// transport comes up first and idempotent so the second one is a no-op. It used to live inside
+// wifi_start_sta(), which meant a wired board — the one case where the LAN is most likely to be the
+// only way in — silently had no <hostname>.local name at all.
 void net_mdns_start();
 
 } // namespace daik

@@ -60,7 +60,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** (a router reboot never strands the bridge) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** — recovers a ghost association no event reports | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`logic/link_watch.hpp`](../main/logic/link_watch.hpp) |
 | 16 | Captive-portal provisioning (AP-only, typed SSID, UDP:53 catch-all, 302 probe redirect + RFC 8910 option 114) | ✅ 🧪 | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp), [`logic/captive.hpp`](../main/logic/captive.hpp) |
-| 17 | mDNS + DHCP hostname (option 12) | ✅ | [`net.cpp`](../main/net.cpp) (mDNS, either transport), [`wifi.cpp`](../main/wifi.cpp) (DHCP name) |
+| 17 | Stable LAN identity — DHCP options 12/60 + mDNS HTTP product metadata | ✅ 🧪 | [`net.cpp`](../main/net.cpp), [`wifi.cpp`](../main/wifi.cpp), [`test_transport_contract.mjs`](../test/test_transport_contract.mjs) |
 | 18 | In-app WiFi re-config + **reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp) |
 | 19 | X10A auto-detection — sweep → fingerprint → model, with a retried page probe, a second-sweep confirmation before `generic`, and an **order-independent** representative pick | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
 | 20 | **IDF-free host-tested logic core** (§8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
@@ -277,6 +277,9 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   boot from one identity register, so one image serves both — [`net.cpp`](../main/net.cpp). A wired
   board starts no radio and opens no setup portal; the boot fork, the route priority and the
   pulled-cable reboot are host-tested rules in [`logic/net_link.hpp`](../main/logic/net_link.hpp).
+- **✅ 🧪 A stable product identity on both transports.** DHCP options 12/60 and the mDNS HTTP
+  instance use `daikin-altherma-esp32`; mDNS adds product/path/version but no per-installation data.
+  The source contract pins the before-DHCP ordering without mutating a live lease.
 - **Endless reconnect with a first-boot budget.** A boot-time failure spends a bounded budget and
   then opens the setup portal; once ever online, a drop reconnects **forever**, unconditionally on
   the disconnect reason — the reason codes that look like bad credentials are also the transient
@@ -867,7 +870,7 @@ Every ESP-IDF component this firmware links, and what it powers (from
 |-----------|--------|
 | `nvs_flash` | runtime config + X10A link cache (`daik_cfg` namespace) |
 | `esp_wifi` | STA (strongest-AP scan, SAE) + SoftAP setup portal |
-| `esp_event` / `esp_netif` | event loop + network interfaces, DHCP hostname, SNTP client (`esp_netif_sntp`) |
+| `esp_event` / `esp_netif` | event loop + network interfaces, DHCP hostname/vendor class, SNTP client (`esp_netif_sntp`) |
 | `esp_http_server` | `:80` UI/API server. `CONFIG_HTTPD_WS_SUPPORT=n` — there is no push transport |
 | `app_update` / `esp_app_format` | low-level OTA slot writes, signed-image validation, boot selection/rollback, app descriptor (version, ELF sha) |
 | `esp_http_client` / `esp-tls` | heap-bounded OTA stream, weather-forecast fetch, TLS transport |
@@ -884,7 +887,7 @@ Every ESP-IDF component this firmware links, and what it powers (from
 | `w5500` (managed) | the W5500 MAC/PHY pair — ESP-IDF 6.0 moved the SPI Ethernet drivers out of `esp_eth` |
 | `led_strip` (managed) | WS2812 pixel driver — an addressable LED encodes colour in pulse timings |
 | `esp_timer` | uptime, poll/serial timing |
-| `mdns` (managed) | `<hostname>.local` discovery + initial/manual HomeHub browse |
+| `mdns` (managed) | `<hostname>.local` + product/path/version HTTP discovery, and initial/manual HomeHub browse |
 | `espcoredump` | core dump to flash + `esp_core_dump_get_summary` |
 | `esp_partition` | the upper-flash `history` journal, the `GET /coredump` stream, the OTA running-slot lookup |
 | `cjson` (managed) | POST body parsing (`http_config.cpp`) |
