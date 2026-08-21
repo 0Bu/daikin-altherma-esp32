@@ -51,6 +51,7 @@ OTA_CHECK_TIMEOUT_S = 120
 OTA_TIMEOUT_S = 480
 OTA_OFFER_POLL_SECONDS = 0.1
 OTA_STATUS_POLL_SECONDS = 0.1
+MQTT_RECOVERY_TIMEOUT_S = 15
 LEGACY_OFFER_STABLE_SECONDS = 3.0
 BENCH_HEALTH_WINDOW_S = 105
 BENCH_HEALTH_WINDOW_TIMEOUT_S = 150
@@ -282,6 +283,8 @@ def stress_board(
 ) -> dict[str, Any]:
     started = request_json(host, "/status")
     validate_identity(started, host=host, mac=mac, version=version, elf=elf)
+    if not started.get("mqtt", {}).get("connected"):
+        fail(f"{host} MQTT must be connected before the pressure window")
     if int(started.get("uptime_s", MAX_TEST_START_UPTIME_S + 1)) > MAX_TEST_START_UPTIME_S:
         fail(f"{host} must enter the pressure gate within {MAX_TEST_START_UPTIME_S}s of boot")
     baseline = board_counters(started)
@@ -294,6 +297,7 @@ def stress_board(
     uptimes: list[int] = []
     disconnected = 0
     manifest_active = threading.Event()
+    mqtt_recovery_expected = threading.Event()
 
     def remember(kind: str, error: BaseException) -> None:
         with lock:
@@ -310,7 +314,7 @@ def stress_board(
                 mqtt = status.get("mqtt", {})
                 if require_x10a and (not hp.get("connected") or int(hp.get("values", 0)) <= 0):
                     disconnected += 1
-                if not mqtt.get("connected"):
+                if not mqtt.get("connected") and not mqtt_recovery_expected.is_set():
                     disconnected += 1
                 with lock:
                     samples["status"] += 1
@@ -355,6 +359,7 @@ def stress_board(
     # A read-only check makes the device open real manifest TLS while all three HTTP probes are
     # already active. A previously cached successful weather value alone would not prove overlap.
     manifest_active.set()
+    mqtt_recovery_expected.set()
     accepted = request_json(host, f"/ota/check?ms={int(time.time() * 1000)}")
     generation = accepted.get("generation")
     if accepted.get("ok") is not True or not isinstance(generation, int) or generation <= 0:
@@ -374,6 +379,25 @@ def stress_board(
     # allowance for one scheduler turn closes an HTTP worker already dispatched on the prior bit.
     time.sleep(0.25)
     manifest_active.clear()
+    mqtt_recovery_deadline = time.monotonic() + MQTT_RECOVERY_TIMEOUT_S
+    mqtt_recovery_error = "still disconnected"
+    while time.monotonic() < mqtt_recovery_deadline:
+        try:
+            mqtt_recovery_status = request_json(host, "/status", timeout=1)
+        except (OSError, TimeoutError, json.JSONDecodeError) as error:
+            mqtt_recovery_error = str(error)
+            time.sleep(0.1)
+            continue
+        validate_identity(mqtt_recovery_status, host=host, mac=mac, version=version, elf=elf)
+        if mqtt_recovery_status.get("mqtt", {}).get("connected"):
+            mqtt_recovery_expected.clear()
+            break
+        time.sleep(0.1)
+    else:
+        fail(
+            f"{host} MQTT did not recover after OTA TLS within {MQTT_RECOVERY_TIMEOUT_S}s: "
+            f"{mqtt_recovery_error}"
+        )
     for worker in workers:
         worker.join(STRESS_SECONDS + HTTP_TIMEOUT_S + 10)
 
@@ -381,6 +405,8 @@ def stress_board(
     validate_identity(finished, host=host, mac=mac, version=version, elf=elf)
     if ota_check.get("state") != "idle" or ota_check.get("available") != version:
         fail(f"{host} OTA manifest TLS did not finish cleanly on the exact dev version")
+    if not finished.get("mqtt", {}).get("connected"):
+        fail(f"{host} MQTT was not connected after the pressure window")
     final = board_counters(finished)
     if errors:
         fail(f"{host} live stress had errors: {'; '.join(errors)}")

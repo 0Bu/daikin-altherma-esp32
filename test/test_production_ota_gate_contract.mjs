@@ -202,6 +202,27 @@ assert.match(gate,
   "an X10A-less bench must not fail on expected bus timeouts while production remains bounded");
 assert.match(gate, /worker\.start\(\)[\s\S]{0,500}?\/ota\/check\?ms=/,
   "real OTA manifest TLS must overlap the concurrent HTTP pressure workers");
+assert.match(gate, /MQTT_RECOVERY_TIMEOUT_S\s*=\s*15/,
+  "the intentional OTA transport pause must have a bounded MQTT recovery window");
+assert.match(gate,
+  /started\s*=\s*request_json\(host, "\/status"\)[\s\S]{0,220}?started\.get\("mqtt", \{\}\)\.get\("connected"\)[\s\S]{0,100}?MQTT must be connected before the pressure window/,
+  "an existing MQTT outage must fail before the intentional OTA pause is armed");
+const manifestSet = gate.indexOf("manifest_active.set()", gate.indexOf("def stress_board("));
+const mqttRecoverySet = gate.indexOf("mqtt_recovery_expected.set()", manifestSet);
+const manifestClear = gate.indexOf("manifest_active.clear()", mqttRecoverySet);
+const mqttRecoveryPoll = gate.indexOf('mqtt_recovery_status = request_json(host, "/status", timeout=1)', manifestClear);
+assert.ok(manifestSet >= 0 && mqttRecoverySet > manifestSet && manifestClear > mqttRecoverySet &&
+          mqttRecoveryPoll > manifestClear,
+  "the pressure gate must distinguish the intentional TLS pause and observe MQTT recovery afterward");
+assert.match(gate,
+  /if not mqtt\.get\("connected"\) and not mqtt_recovery_expected\.is_set\(\):[\s\S]{0,80}?disconnected \+= 1/,
+  "only the expected OTA pause may suppress MQTT disconnect samples; later outages must still fail");
+assert.match(gate,
+  /mqtt_recovery_deadline\s*=\s*time\.monotonic\(\) \+ MQTT_RECOVERY_TIMEOUT_S[\s\S]{0,700}?validate_identity\(mqtt_recovery_status[\s\S]{0,220}?mqtt_recovery_status\.get\("mqtt", \{\}\)\.get\("connected"\)[\s\S]{0,100}?mqtt_recovery_expected\.clear\(\)/,
+  "MQTT recovery must come from a new identity-checked status request started after TLS released");
+assert.match(gate,
+  /finished\.get\("mqtt", \{\}\)\.get\("connected"\)[\s\S]{0,100}?MQTT was not connected after the pressure window/,
+  "final hardware acceptance must still require a connected MQTT session");
 assert.match(gate,
   /busy_503\["status"\][\s\S]{0,600}?busy_503\["values"\][\s\S]{0,2200}?did not prove fast status\/values refusal/,
   "the manifest pressure stage must accept only the intentional OTA busy-503 window and require observing both snapshot refusals");
