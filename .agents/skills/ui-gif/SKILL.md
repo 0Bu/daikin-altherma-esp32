@@ -1,6 +1,6 @@
 ---
 name: ui-gif
-description: Keep the README's dashboard recording (docs/media/dashboard.gif) current with the web UI. Runs the mechanical gate, re-records every normal operating state with smooth transitions, and judges what the gate cannot — whether the picture honestly shows what the firmware does. Use after any change that reaches the dashboard drawing, its pills, its animations or its copy.
+description: Keep the README's dashboard recording (docs/media/dashboard.gif) current and visibly error-free. Runs the mechanical gate, re-records every normal operating state with smooth transitions, inspects every resulting frame for capture failures, and judges whether the picture honestly shows what the firmware does. Use after any change that reaches the dashboard drawing, its pills, its animations or its copy.
 ---
 
 # ui-gif
@@ -83,7 +83,7 @@ Local only — needs Chrome and ffmpeg. What it films is the **real UI**: `index
 only the *device* stubbed (`tools/uigif/scenes.js`). Nothing about the drawing is re-implemented,
 so what the GIF shows is what `renderLive()` drew.
 
-Three things about it that are easy to break and hard to notice:
+Four things about it that are easy to break and hard to notice:
 
 - **One page load per source image.** A steady frame needs one screenshot; each crossfade frame
   needs the outgoing and incoming states at the same instant and lets ffmpeg blend them. Wall-clock
@@ -105,7 +105,33 @@ Three things about it that are easy to break and hard to notice:
   check. And whatever the script says: after a re-record, confirm the GIF **changed** (`git status`)
   and pull out a frame your edit should have moved — the audit only proves the stamp matches.
 
-## 3. Judge what the gate cannot (the half that needs a brain)
+## 3. Prove the resulting GIF is free of capture errors
+
+**Mandatory after every re-record:** inspect the newly encoded GIF itself. A successful recorder
+exit, a fresh stamp and a green audit are not completion evidence; all three can describe a GIF that
+contains a browser error page, a blank frame, an incomplete render or one broken transition.
+
+- Record with `--keep-frames` whenever practical, but judge the decoded
+  `docs/media/dashboard.gif`, not only the source PNGs. Encoding and frame disposal can introduce a
+  defect after the screenshots were taken.
+- Cover **all 135 encoded frames** in the visual inspection. Contact sheets are acceptable if they
+  remain large enough to expose browser/network error pages, blank or partly painted frames,
+  unexpected browser chrome, clipping and discontinuities. Looking at one frame per scene is not
+  enough: a single failed transition frame still makes the recording defective.
+- Inspect the first frame, the final frame and the complete final-to-first transition separately at
+  readable size. This seam is a required check, not a representative sample. Also inspect at least
+  one short consecutive sequence from an active scene to confirm that fan, pump and flow motion are
+  continuous rather than duplicated stills.
+- Reject the artefact if **any** frame contains `ERR_CONNECTION_REFUSED`, another Chrome error page,
+  an empty/white capture, a partially loaded dashboard, an unintended page section, a broken crop or
+  a transition that does not land cleanly on the next scene. Fix the recording cause and re-record;
+  never hide, delete or replace only the bad frame.
+
+Do not report the GIF as updated until this inspection passes. In the result, state explicitly that
+all frames were covered and that the first frame, last frame and loop seam were checked. If the
+environment cannot render or inspect the finished GIF, the workflow is blocked rather than passed.
+
+## 4. Judge what the gate cannot (the half that needs a brain)
 
 Look at the finished GIF. Then ask:
 
@@ -159,7 +185,7 @@ Look at the finished GIF. Then ask:
    view; if a change pushes it past a couple of megabytes, drop `WIDTH`, `DWELL_FRAMES` or
    `TRANSITION_FRAMES` before dropping the frame rate — motion is the thing being paid for.
 
-## 4. Verify, don't assert
+## 5. Verify, don't assert
 
 ```bash
 scripts/run-ui-gif-audit.sh    # must be clean, and the stamp must be the one you just recorded
@@ -168,10 +194,11 @@ scripts/run-schematic-audit.sh # the drawing the GIF is OF must itself be sound
 node test/test_ui_bundle.mjs   # parses the exact ordered script the harness receives
 ```
 
-Then **look at the GIF**. The gate proves it is current; only you can see that it is a good picture
-of the firmware.
+Then perform the mandatory all-frame and seam inspection in §3. The gate proves the GIF is current;
+only the decoded-frame review can prove that the recording contains no capture failure, and only the
+semantic review in §4 can establish that it is a good picture of the firmware.
 
-## 5. Keep the contract in sync
+## 6. Keep the contract in sync
 
 `README.md` § Web UI is the copy that surrounds the recording — if a scene changes, the sentence
 describing what the dashboard states changes with it. `AGENTS.md` and `CONTRIBUTING.md`
