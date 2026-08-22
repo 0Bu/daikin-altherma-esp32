@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: fc3f6d773cfe14c42e27bef97d9e2019e463bc273e4c89d4bb3e8bcc8ea60ce4 -->
+<!-- user-docs-contract: 4dc660fb6f8056dae32ee32714fe28e9258ee42b3a2ff3091e0793bc7de8a6be -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -186,15 +186,21 @@ cannot prove that the unit never limited itself.
 
 **Evidence and limits:** [Protection-limit counter changes](DIAGNOSTIC_EVIDENCE.md#diagnosis-retries)
 
-## Refrigerant service observation
+<a id="refrigerant-service-observation"></a>
+## Refrigerant circuit during heating
 
-The separate **Refrigerant service observation** card is technical context, not a ninth plant
-diagnosis. It remains outside `/status.health`, never changes the eight-row summary, and requires no
-Plant diagnostics opt-in. It only watches the ordinary read-only X10A traffic already used for live
+The expandable **Refrigerant circuit during heating** row inside the **Plant diagnostics** card is
+technical context, not a ninth plant diagnosis. It starts automatically during an ordinary space-
+heating compressor run. The owner does not need to enable a service mode, change a setpoint or start
+a test, and the firmware does not alter any heat-pump setting. Its collapsed value says whether it is
+waiting, recording, recording with missing comparison data, or paused. Opening the same information
+panel used by the other rows explains the current status, elapsed observation and claim limits. It
+remains outside `/status.health`, never changes the eight-row summary or card badge, and requires no
+Plant diagnostics opt-in. It watches only the ordinary read-only X10A traffic already used for live
 values.
 
 Until this boot has detected an X10A profile and evaluated that profile's signal coverage, including
-while safe mode prevents the poll task from starting, the status object and card are absent. This
+while safe mode prevents the poll task from starting, the status object and row are absent. This
 avoids presenting missing source evidence as a claim that the installed profile lacks signals.
 
 The window starts only from fresh values captured in the same poll sweep while all of these facts are
@@ -204,25 +210,26 @@ restart, oil-return, or pressure-equalising phase is active, and the required di
 EEV-command, and refrigerant-pressure readings are present. Cooling is not admitted because the
 pressure-side role used here is established only for the heating context.
 
-| Card state | Meaning |
+| Row status | Meaning |
 |------------|---------|
 | **NOT AVAILABLE** | The detected profile lacks at least one required signal. |
-| **WAITING** | No qualifying fresh heating sweep is available now. |
-| **OBSERVING** | A continuous fresh window is present with the complete optional context. |
-| **LIMITED** | The required window is continuous, but optional temperature, both pressure sides, or outdoor context were unavailable at least once, or the profile does not expose the full set of model-specific controller phases. |
-| **INTERRUPTED** | A required signal or operating condition, a profile-declared phase witness becoming unreadable, or an expected poll sequence ended the previous window. The next qualifying sweep begins again at zero. A source-generation change resets continuity and may immediately start a new zero-duration window. |
+| **WAITING FOR HEATING RUN** | No suitable ordinary heating run is available now. The reason line names why; recording starts automatically when the conditions next fit. |
+| **RECORDING** | A continuous fresh observation is active with the complete optional comparison context. |
+| **RECORDING · SOME DATA MISSING** | Recording is active, but optional temperature, both pressure sides, outdoor context, or the complete model-specific controller-phase set was unavailable at least once. |
+| **PAUSED** | A required reading or operating condition, a profile-declared phase witness becoming unreadable, or an expected poll sequence ended the previous observation. The next suitable heating run starts a new observation at zero. A source-generation change also resets continuity. |
 
 The reported duration and min/mean/max figures describe that one uninterrupted window. The allowed
 poll gap scales with the active profile's page count and the X10A transport timeout; the firmware
 does not insert a universal three-second or twenty-minute service rule.
 
-**What it does not establish:** The firmware does not request service mode or full load, prove that
-the refrigeration cycle has settled, assign a universal normal range, or diagnose refrigerant
-charge. The EEV pulse value is the controller's command; X10A supplies no independent mechanical
-feedback that the valve moved or reached that position. A qualified technician must still use the
-exact model's service procedure and suitable instruments for a controlled test.
+**What it does not establish:** The observation does not decide whether refrigerant charge or any
+individual reading is normal. It does not prove full load or that the refrigeration cycle has
+settled. The displayed valve value is the controller's command; X10A supplies no independent
+mechanical feedback that the valve moved or reached that position. A qualified technician must
+still use the exact model's service procedure and suitable instruments when a controlled test is
+actually needed.
 
-**Evidence and limits:** [Refrigerant service observation](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation)
+**Evidence and limits:** [Refrigerant circuit observation](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation)
 
 ## What the diagnosis cannot do
 

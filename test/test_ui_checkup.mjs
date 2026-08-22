@@ -26,8 +26,10 @@ const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.m
 assert.match(dashboardSource, /const GROUP_ORDER = \["Operation"/s,
              "Operation must remain the first live-value group");
 assert.match(dashboardSource,
-             /const checkup = S\.status\?\.diagnostics\?\.enabled === true && S\.status\?\.hp\?\.connected\s*\? checkupCardHtml\(\) : "";\s*const service = refrigerantServiceCardHtml\(\);\s*setHtml\("valueGroups",\s*checkup\s*\+\s*service\s*\+\s*statusCardsHtml\(\)\s*\+/s,
+             /const checkup = checkupCardHtml\(\s*S\.status\?\.diagnostics\?\.enabled === true && S\.status\?\.hp\?\.connected\);\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+/s,
              "plant diagnostics must render first in the post-diagram card stream");
+assert.doesNotMatch(dashboardSource, /checkup \+ service \+|refrigerantServiceCardHtml/,
+                    "refrigerant service must not return as a separate dashboard card");
 assert.match(dashboardSource,
              /return hp\.connected \? vcard\(t\("card\.model"\), model\) : "";/,
              "the Model card must follow plant diagnostics and precede Operation without reviving the removed outdoor card");
@@ -96,6 +98,8 @@ const context = {
   localStorage: { getItem: () => "en", setItem: () => {} },
   navigator: { language: "en" },
   descNoteHtml: (lead, text) => `<detail label="${lead}">${text}</detail>`,
+  descAccordion: (key, label, value, cls, body) =>
+    `<row id="${key}" tone="${cls}" label="${label}"><value>${value}</value>${body}</row>`,
   // Keep the renderer's semantic inputs visible in a compact deterministic string; no DOM is needed.
   modelDescRow: (id, label, value, opt = {}) =>
     `<row id="${id}" tone="${opt.cls || ""}" label="${label}"><value>${value}</value>${opt.bodyPrefix || ""}</row>`,
