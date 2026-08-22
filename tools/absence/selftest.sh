@@ -62,7 +62,7 @@
 #    29. HomeHub rows rebuilt as a second complete temporary string
 #    30. MCP's old whole-values append restored beside the bounded sender
 #    31. the fixed UINT64 formatter shortened below its documented 20-digit capacity
-#    32. the refrigerant-service card surviving while no X10A profile/source exists, turning the
+#    32. the refrigerant-service row surviving while no X10A profile/source exists, turning the
 #        tracker's default into a false unsupported-profile explanation in safe mode or at boot
 set -euo pipefail
 
@@ -565,8 +565,8 @@ PY3
 expect_red "the fixed UINT64 formatter shortened below 20 digits" run_contract
 restore
 
-# 32. Keep the healthy service object in the first X10A-absent fixture. The new matrix rule must
-#     reject the resulting card instead of allowing default/old service state to survive beside an
+# 32. Keep the healthy service object in the first X10A-absent fixture. The matrix rule must reject
+#     the resulting row instead of allowing default/old service state to survive beside an
 #     unresolved source.
 python3 - "$TMP/test/test_ui_absence_matrix.mjs" <<'PY3'
 import sys
@@ -576,7 +576,7 @@ seed = s.replace("    delete s.refrigerant_service;\n", "", 1)
 assert seed != s, "seed 32 did not apply — the X10A removal moved"
 open(p, "w").write(seed)
 PY3
-expect_red "a refrigerant-service card surviving without a detected X10A profile" run_ui
+expect_red "a refrigerant-service row surviving without a detected X10A profile" run_ui
 restore
 
 if [ "$fail" -ne 0 ]; then

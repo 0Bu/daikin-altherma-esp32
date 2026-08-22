@@ -961,16 +961,25 @@ Body, ordered:
    counter between continuous, fully comparable samples, including an increase first visible while
    stopped or at a compressor-state boundary. An absolute non-zero value is only a baseline; a
    decrease or possible reset/wrap interval proves neither an event nor the absence of one.
-   Hidden entirely while the X10A link is down, like the Model card: a rolling observation presented
-   beside a bus that is not answering reads as current when it is not.
-5a. **Refrigerant-service observation card** — a separate neutral card immediately after the
-   24-hour card and before Model/Operation. Older firmware omits it cleanly; current firmware also
+   These eight 24-hour rows are hidden while the X10A link is down, like the Model card: a rolling
+   observation presented beside a bus that is not answering reads as current when it is not. The
+   shared card shell may remain for the independent service-observation row described next.
+5a. **Refrigerant-circuit observation row** — the visible title is **Refrigerant circuit during
+   heating**, avoiding any implication that the owner must enable a service mode. It is one neutral
+   expandable row after the eight 24-hour rows in the same Plant diagnostics card, before
+   Model/Operation. Its first explainer sentence says that recording starts automatically during an
+   ordinary heating run and changes no setting. The collapsed value uses owner-facing states:
+   waiting for a heating run, recording, recording with missing comparison data, or paused. The
+   shared information tongue then contains duration/sample count, the exact current reason,
+   continuity context and the observation boundary. Older firmware omits it cleanly;
+   current firmware also
    omits it until this boot has detected an X10A profile and evaluated that profile's signal
    coverage, including when safe mode never starts the poll task. It is not a
-   `CHECKUP_ROW`, contributes no health count or colour verdict, remains visible as WAITING,
-   LIMITED or INTERRUPTED when its source conditions are not met, and offers no button or action.
-   The compact rows show only the uninterrupted duration/sample count and a blocker when present;
-   `/status.refrigerant_service` retains mode, phase coverage, limitation names and window metrics.
+   `CHECKUP_ROW`, contributes no health count, card badge or colour verdict, remains visible while
+   waiting, recording with incomplete comparison data, or paused, and offers no action.
+   When the optional 24-hour diagnoses are disabled, this row alone keeps the Plant diagnostics card
+   visible because its passive collection requires no opt-in. `/status.refrigerant_service` retains
+   mode, phase coverage, limitation names and window metrics.
    Copy in every shipped language states that ordinary polling does not command full load, prove
    settling or refrigerant charge, assign a universal range, or confirm mechanical EEV motion.
    `eev_command_pls` is a controller command, never a measured valve position.

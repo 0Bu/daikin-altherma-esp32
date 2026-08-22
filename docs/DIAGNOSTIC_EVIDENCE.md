@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 716466ed8a33857e11332656ba9faf052c1988dc46d6fa661e33b62691a988e9 -->
+<!-- diagnostic-evidence-contract: d7c555671fa676e4c36294f2eb59b14b19a3cb54e26adefc88508a4f2741f337 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -44,10 +44,12 @@ interface.
 <a id="refrigerant-service-observation"></a>
 ### Separate refrigerant service observation
 
-This object is deliberately outside the eight-diagnosis evidence matrix and `/status.health`. It is
-an **observation**, not a manufacturer limit, project heuristic, health verdict, or completion test.
-It is always derived from ordinary read-only X10A polling and does not require the default-off Plant
-diagnostics consent because it activates no additional source or controller action.
+The UI names this row **Refrigerant circuit during heating** so an owner does not mistake it for a
+controller service mode. This object is deliberately outside the eight-diagnosis evidence matrix
+and `/status.health`. It is an **observation**, not a manufacturer limit, project heuristic, health
+verdict, or completion test. It starts automatically from ordinary read-only X10A polling during a
+suitable normal heating run and does not require the default-off Plant diagnostics consent because
+it activates no additional source or controller action and changes no heat-pump setting.
 
 **Evidence boundary:** No model-specific Altherma primary source in this repository establishes a
 universal hot-gas, pressure, EEV-pulse, or twenty-minute settling range for this feature. The

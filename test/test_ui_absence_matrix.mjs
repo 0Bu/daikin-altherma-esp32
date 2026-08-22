@@ -95,7 +95,7 @@ const context = vm.createContext({
 
 vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   this.__ui = { S, t, esp32CardHtml, dynamicControlCardHtml, circulationSettingsCardHtml,
-                refrigerantServiceCardHtml, connLinks, liveData, histHtml, INSPECT };`, context,
+                refrigerantServiceRowHtml, connLinks, liveData, histHtml, INSPECT };`, context,
   { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -350,7 +350,7 @@ const RENDERERS = {
   esp32CardHtml: () => ui.esp32CardHtml(),
   dynamicControlCardHtml: () => ui.dynamicControlCardHtml(),
   circulationSettingsCardHtml: () => ui.circulationSettingsCardHtml(),
-  refrigerantServiceCardHtml: () => ui.refrigerantServiceCardHtml(),
+  refrigerantServiceRowHtml: () => ui.refrigerantServiceRowHtml(),
 };
 
 // Copy that tells the reader to CONFIGURE a source. Printing one of these while that very source is
@@ -411,10 +411,10 @@ for (const scenario of SCENARIOS) {
 
   // The service object has no truthful state until this boot detects an X10A profile. Safe mode
   // never starts the poll task and an initially silent bus never resolves one, so both API fixture
-  // shapes omit the object and the browser must omit the card rather than blaming profile coverage.
+  // shapes omit the object and the browser must omit the row rather than blaming profile coverage.
   if (!status.detect.valid) {
-    assert.equal(rendered.refrigerantServiceCardHtml, "",
-      `${scenario.name}: no detected X10A profile must render no refrigerant-service card`);
+    assert.equal(rendered.refrigerantServiceRowHtml, "",
+      `${scenario.name}: no detected X10A profile must render no refrigerant-service row`);
     checks++;
   }
 

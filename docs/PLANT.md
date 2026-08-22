@@ -13,7 +13,7 @@ subscription, and that is a property of the code rather than a guard around a do
 | Feature | Status | Anchored in |
 |---------|:------:|-------------|
 | [Rolling plant checkup (up to 24 h)](#rolling-plant-checkup-up-to-24-h) | ✅ 🧪 | [`logic/checkup.hpp`](../main/logic/checkup.hpp), [`checkup.cpp`](../main/checkup.cpp) |
-| [Refrigerant service observation](#refrigerant-service-observation) | ✅ 🧪 | [`logic/refrigerant_service.hpp`](../main/logic/refrigerant_service.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp) |
+| [Refrigerant circuit during heating](#refrigerant-service-observation) | ✅ 🧪 | [`logic/refrigerant_service.hpp`](../main/logic/refrigerant_service.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp) |
 | [Open-Meteo forecast on the device](#open-meteo-forecast-on-the-device) | ✅ 🧪 | [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`logic/open_meteo.hpp`](../main/logic/open_meteo.hpp) |
 | [Optional ENV III climate input](#optional-env-iii-climate-input) | ✅ 🧪 | [`env3.cpp`](../main/env3.cpp), [`logic/env3.hpp`](../main/logic/env3.hpp) |
 | [Heating-curve diagnosis](#heating-curve-diagnosis) | ✅ 🧪 | [`logic/heating_curve_diagnosis.hpp`](../main/logic/heating_curve_diagnosis.hpp) |
@@ -229,20 +229,22 @@ a control problem in April, so the mean run length is what knows the load), and 
 
 ---
 
-## Refrigerant service observation
+<a id="refrigerant-service-observation"></a>
+## Refrigerant circuit during heating
 
-This is a separate, passive context window for qualified service work, not a ninth plant-health
-diagnosis. It folds fresh values from one ordinary X10A poll sweep only while the compressor is
-confirmed running in space heating, the DHW path and defrost are off, fault and any profile-provided
-special-phase witnesses are current and inactive, and discharge temperature, EEV command and at
-least one structurally identified refrigerant-pressure side are readable. A transport gap or a
-required signal becoming unavailable ends the window; a profile that lacks optional context reports
-the window as `limited`.
+This is a separate, passive observation during an ordinary heating run, not a ninth plant-health
+diagnosis. It starts automatically; no service mode, changed setting or owner action is required. It
+folds fresh values from one ordinary X10A poll sweep only while the compressor is confirmed running
+in space heating, the DHW path and defrost are off, fault and any profile-provided special-phase
+witnesses are current and inactive, and discharge temperature, EEV command and at least one
+structurally identified refrigerant-pressure side are readable. A transport gap or a required signal
+becoming unavailable ends the observation; a profile that lacks optional context reports that
+recording is active with some comparison data missing.
 
 After this boot has detected an X10A profile and the poll task has evaluated that profile's signal
 coverage, the object under `/status.refrigerant_service` reports duration, samples, limitations and
 window min/mean/max values. Until then—including safe mode, where the poll task is not started—the
-object and card are absent rather than assigning a profile reason.
+object and row are absent rather than assigning a profile reason.
 It deliberately has no health verdict, full-load or settling claim, numeric
 normal range, completion threshold or refrigerant-charge conclusion. The EEV pulse value is the
 controller command, not independent proof that the mechanical valve moved. See
