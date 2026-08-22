@@ -92,17 +92,39 @@ trap cleanup EXIT
 
 mkdir -p "$WORK/frames" "$WORK/blend" "$WORK/profile" "$(dirname "$GIF")"
 python3 tools/uigif/build_demo.py "$ROOT" "$WORK/demo.html" >/dev/null
+DEMO_URL="http://127.0.0.1:$PORT/demo.html"
+DEMO_SHA="$(shasum -a 256 < "$WORK/demo.html" | cut -d' ' -f1)"
+
+probe_demo_server() {
+    local served_sha
+    served_sha="$(curl --connect-timeout 1 --max-time 2 -fsS "$DEMO_URL" 2>/dev/null \
+        | shasum -a 256 | cut -d' ' -f1)" || return 1
+    [ "$served_sha" = "$DEMO_SHA" ]
+}
+
+require_demo_server() {
+    local where=$1
+    if ! kill -0 "$SRV" 2>/dev/null || ! probe_demo_server; then
+        echo "record-dashboard-gif: demo server unavailable or serving the wrong page $where —" >&2
+        echo "  refusing to accept a Chrome error page as a dashboard frame" >&2
+        if [ -s "$WORK/http-server.log" ]; then
+            echo "  local server log:" >&2
+            sed -n '1,20p' "$WORK/http-server.log" >&2
+        fi
+        return 1
+    fi
+}
 
 # file:// cannot be cache-busted reliably and blocks nothing we need — serve the one file instead.
-(cd "$WORK" && exec python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1) &
+(cd "$WORK" && exec python3 -m http.server "$PORT" --bind 127.0.0.1 \
+    >"$WORK/http-server.log" 2>&1) &
 SRV=$!
 disown "$SRV" 2>/dev/null || true    # else job control prints "Terminated" over the last line
 for _ in $(seq 1 40); do
-    curl -fsS -o /dev/null "http://127.0.0.1:$PORT/demo.html" 2>/dev/null && break
+    probe_demo_server && break
     sleep 0.1
 done
-curl -fsS -o /dev/null "http://127.0.0.1:$PORT/demo.html" || {
-    echo "record-dashboard-gif: local server did not come up on :$PORT" >&2; exit 2; }
+require_demo_server "during startup" || exit 2
 
 # ...and prove it is OUR server. A health check on the URL alone answers "something is listening",
 # which is a different question: another local dev server may already hold $PORT, so a server
@@ -113,16 +135,11 @@ curl -fsS -o /dev/null "http://127.0.0.1:$PORT/demo.html" || {
 # false-current state this whole gate exists to make impossible. Observed on 2026-07-29: a server
 # from 15:29 served a five-hour-old page to a 20:41 recording, byte-for-byte reproducing the GIF it
 # was meant to replace. Compare the bytes rather than trusting the port.
-if [ "$(curl -fsS "http://127.0.0.1:$PORT/demo.html" | shasum -a 256 | cut -d' ' -f1)" \
-     != "$(shasum -a 256 < "$WORK/demo.html" | cut -d' ' -f1)" ]; then
-    echo "record-dashboard-gif: :$PORT is serving a DIFFERENT page than the one just built —" >&2
-    echo "  something else holds the port. Free it, or" >&2
-    echo "  re-run with PORT=<other>. Recording now would film that page, not this tree." >&2
-    exit 2
-fi
+# `require_demo_server` compares the bytes too, so a stale process on this port cannot pass startup.
 
 shoot() {                  # shoot <output-path> <scene> <t-ms>
     local out=$1 scene=$2 t=$3 pid i sz prev
+    require_demo_server "before scene $scene at ${t}ms"
     "$CHROME" --headless=new --disable-gpu --hide-scrollbars ${CHROME_FLAGS:+$CHROME_FLAGS} \
         --force-device-scale-factor="$SCALE" --window-size="$VIEWPORT" \
         --virtual-time-budget=2500 --user-data-dir="$WORK/profile" \
@@ -147,6 +164,13 @@ shoot() {                  # shoot <output-path> <scene> <t-ms>
     done
     kill -9 "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
+    [ -s "$out" ] || {
+        echo "record-dashboard-gif: Chrome produced no frame for scene $scene at ${t}ms" >&2
+        return 1
+    }
+    # Chrome returns a perfectly valid PNG for ERR_CONNECTION_REFUSED. Confirm that the exact demo
+    # page stayed reachable throughout the capture, or fail before that error page reaches the GIF.
+    require_demo_server "after scene $scene at ${t}ms"
 }
 
 echo "recording $TOTAL_FRAMES frames ($SCENES scenes, ${DWELL_FRAMES} steady + ${TRANSITION_FRAMES} transition @ ${STEP_MS}ms)…"
