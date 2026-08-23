@@ -193,6 +193,8 @@ const newFirmwareWait = gate.slice(gate.indexOf("def wait_for_new_firmware("),
 assert.match(newFirmwareWait,
   /request_json\(host, "\/ota\/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S\)/,
   "the compact completed-state observer must use its bounded request timeout");
+assert.match(newFirmwareWait, /time\.sleep\(OTA_STATUS_POLL_SECONDS\)/,
+  "the compact completed-state observer must use its bounded poll interval");
 assert.match(newFirmwareWait,
   /ota\.get\("state"\)\s+not\s+in\s+\("checking",\s*"updating",\s*"done"\)[\s\S]{0,160}?request_json\(host,\s*"\/status"\)/,
   "the reboot waiter must not poll allocation-rich /status while OTA owns TLS");
@@ -202,6 +204,8 @@ assert.match(newFirmwareWait,
 assert.match(gate,
   /target_transfer\.get\("saw_done"\)\s+is\s+not\s+True[\s\S]{0,100}?never exposed its completed validation state/,
   "bench acceptance must observe the target verifier's completed state, not just recovered heap");
+assert.match(ota, /vTaskDelay\(pdMS_TO_TICKS\(kDoneBeforeRebootMs\)\)/,
+  "the reboot handoff must use the completed-state dwell covered by the host timing contract");
 assert.match(gate,
   /generation\s*=\s*status\.get\("generation"\)[\s\S]{0,180}?generation\s*!=\s*expected_generation[\s\S]{0,120}?operation generation changed/,
   "offer status must stay bound to the synchronously accepted check generation");

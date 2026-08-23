@@ -1151,7 +1151,7 @@ async function checkFirmwareUpdate(returnFocus = document.activeElement, returnS
     if (!done)                  { otaFail(t("ota.timeout")); return; }
     if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
 
-    // state === "done": the device reboots ~600 ms after reporting it. Wait for it in the background
+    // state === "done": the device reboots ~3 s after reporting it. Wait for it in the background
     // and RELOAD the page — see otaWaitReboot.
     otaInline(t("ota.rebooting"), { ring: true, pct: 100 });
     otaWaitReboot();
@@ -1229,7 +1229,7 @@ function renderOtaResumeShell(s) {
   return true;
 }
 
-// After "done" the device reboots ~600 ms later — and the page in the browser was served by the OLD
+// After "done" the device reboots ~3 s later — and the page in the browser was served by the OLD
 // image, so the UI itself is stale until it is re-fetched. Wait for the board to come back, then
 // RELOAD. This is why the OTA path does NOT use rebootPoll() like the config saves do: that one
 // re-renders from a fresh /status, which is right when only the DATA changed, and wrong here, where

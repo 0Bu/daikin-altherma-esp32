@@ -100,6 +100,12 @@ try {
     ["the compact OTA request can outlive the completed-state evidence", () =>
       replaceOnce("scripts/production-ota-gate.py", "OTA_STATUS_REQUEST_TIMEOUT_S = 1.0",
         "OTA_STATUS_REQUEST_TIMEOUT_S = 5.0")],
+    ["the reboot bypasses the completed-verifier dwell constant", () =>
+      replaceOnce("main/ota_update.cpp", "pdMS_TO_TICKS(kDoneBeforeRebootMs)",
+        "pdMS_TO_TICKS(600)")],
+    ["the compact observer bypasses its bounded poll constant", () =>
+      replaceOnce("scripts/production-ota-gate.py", "time.sleep(OTA_STATUS_POLL_SECONDS)",
+        "time.sleep(5.0)")],
     ["publisher quiescence no longer outlives the authoritative observer", () =>
       replaceOnce("main/logic/ota_quiesce.hpp", "OTA_QUIESCE_MAX_CYCLES = 600",
         "OTA_QUIESCE_MAX_CYCLES = 480")],
