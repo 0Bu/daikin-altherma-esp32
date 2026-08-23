@@ -75,6 +75,7 @@ assert.doesNotMatch(server, /405 Method Not Allowed|POST only/,
   const nodes = { "endpoint-url": endpoint, "client-json": clientJson, "curl-example": curlExample };
 
   const timers = [];
+  const clipboardWrites = [];
   let nextTimerId = 1;
   const context = {
     document: {
@@ -82,7 +83,9 @@ assert.doesNotMatch(server, /405 Method Not Allowed|POST only/,
       querySelectorAll: () => [copyButton],
     },
     location: { origin: "http://daikin-altherma-esp32.local", pathname: "/mcp" },
-    navigator: { clipboard: { async writeText() {} } },
+    navigator: { clipboard: { writeText(text) {
+      return new Promise((resolve, reject) => clipboardWrites.push({ text, resolve, reject }));
+    } } },
     isSecureContext: true,
     setTimeout(fn, ms) { timers.push({ id: nextTimerId, fn, ms }); return nextTimerId++; },
     clearTimeout(id) {
@@ -98,18 +101,56 @@ assert.doesNotMatch(server, /405 Method Not Allowed|POST only/,
     "the page names the exact URL it is served from");
   assert.ok(copyButton.onClick, "each [data-copy] button gets a click handler");
 
+  const click = () => {
+    const pending = copyButton.onClick();
+    assert.equal(clipboardWrites.length, 1, "a click starts one clipboard write");
+    return { pending, write: clipboardWrites.shift() };
+  };
+  const settle = async (action, error = null) => {
+    if (error) action.write.reject(error);
+    else action.write.resolve();
+    await action.pending;
+  };
+
   const pristine = copyButton.textContent;
-  await sandbox.copyTarget(copyButton);
+  const first = click();
+  await settle(first);
   assert.equal(copyButton.textContent, "Copied", "a copy reports success on the button");
   assert.equal(timers.length, 1, "one restore is owed after one click");
+  assert.equal(timers[0].ms, 1600, "copy feedback uses the promised restore interval");
 
-  await sandbox.copyTarget(copyButton);   // second click, still inside the 1600 ms window
+  const second = click();                 // second click, still inside the 1600 ms window
+  await settle(second);
   assert.equal(timers.length, 1, "a second click replaces the pending restore instead of adding one");
 
   for (const timer of timers.splice(0)) timer.fn();
   assert.equal(copyButton.textContent, pristine,
     "the button returns to its original label, never to a transient one");
   assert.equal(copyButton.classes.has("copied"), false, "the success styling is cleared with it");
+
+  // Browser click handlers do not serialize async clipboard calls. Resolve a newer success before
+  // an older rejection: the stale operation must neither replace the success text nor add a timer.
+  const older = click();
+  const newer = click();
+  await settle(newer);
+  assert.equal(copyButton.textContent, "Copied", "the latest completed click owns the feedback");
+  await settle(older, new Error("stale clipboard rejection"));
+  assert.equal(copyButton.textContent, "Copied", "an older rejection cannot overwrite newer success");
+  assert.equal(copyButton.classes.has("copied"), true, "stale failure cannot clear current success styling");
+  assert.equal(timers.length, 1, "overlapping clipboard operations still owe one restore timer");
+  for (const timer of timers.splice(0)) timer.fn();
+
+  // A current failure replaces a previous success immediately and must not leave green success
+  // styling on manual-copy guidance while the restore timer is pending.
+  const success = click();
+  await settle(success);
+  const failure = click();
+  await settle(failure, new Error("clipboard denied"));
+  assert.equal(copyButton.textContent, "Select and copy manually", "clipboard failure gives manual guidance");
+  assert.equal(copyButton.classes.has("copied"), false, "failure removes stale success styling immediately");
+  assert.equal(timers.length, 1, "failure replaces the previous restore timer");
+  for (const timer of timers.splice(0)) timer.fn();
+  assert.equal(copyButton.textContent, pristine, "failure guidance also restores the pristine label");
 }
 
 console.log("MCP page: local assets, static setup help, GET response and copy-button contract pass");

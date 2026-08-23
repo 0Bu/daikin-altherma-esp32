@@ -1058,9 +1058,10 @@ Body, ordered:
      a click detaches it and **no click is fired at all** — the tap is lost silently and the row does
      not open. This is the failure the shared `setHtml()` write path already existed to prevent, by
      skipping the write when the markup is byte-identical; that check carries `#connTile` and
-     `#settingsCards` on its own, because their rows are stable between pushes. It **cannot** carry
-     the value grid: those rows are live readings, so the markup differs on almost every push and the
-     check degrades to a plain write. Measured loss, sweeping every phase position against the ~1 s
+     `#settingsCards` on its own, because their rows are stable between polls. It **cannot** carry
+     the value grid: those rows are live readings, so the markup differs on almost every `/values`
+     poll and the check degrades to a plain write. Measured loss, sweeping every phase position
+     against the then-~1 s
      period: **~3 %** of taps at a 30 ms trackpad tap, **~12 %** at 120 ms, **~25 %** at 250 ms,
      **~60 %** at 600 ms — so a deliberate press reads as "the first click does nothing, the second or
      third works", while a fast tapper would barely see it.
@@ -1551,13 +1552,15 @@ marked and the mark would stop meaning anything. A **disabled** link is a choice
 raises nothing. The dot is never the only carrier: the button's `aria-label` states the count in
 words (§9).
 
-**Rebuild rule.** The permanent and conditional cards are rebuilt from `/status` on every push. The
-Connections tile is one container; the three ESP32-family cards plus the conditional circulation
-and heating-curve cards are emitted as one string by `esp32CardHtml()`. The write goes through the same
-change-guard the rest of the app uses — and the rebuild is skipped entirely
+**Rebuild rule.** The permanent and conditional cards are recomputed from the latest `/status`
+snapshot on every successful visible poll render: `/values` drives that render every 2 s, while the
+status snapshot itself refreshes every 8 s. The Connections tile is one container; the three
+ESP32-family cards plus the conditional circulation and heating-curve cards are emitted as one string
+by `esp32CardHtml()`. The write goes through the same change-guard the rest of the app uses — and the
+rebuild is skipped entirely
 while an RX/TX dropdown, the update-channel select, the language select **or the diagnostics select** has focus, or the poll
 would collapse it mid-pick. (Any future select on these cards has to join that guard — an open
-native dropdown is destroyed by an `innerHTML` write, and the poll is ~1×/s.)
+native dropdown is destroyed by an `innerHTML` write, and the values poll runs every 2 s.)
 
 ## 6. Dashboard value grouping & order
 
