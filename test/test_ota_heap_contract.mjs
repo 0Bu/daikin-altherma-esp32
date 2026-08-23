@@ -424,16 +424,16 @@ assert.ok(streamDeadline >= 0 && redirectReset > streamDeadline && rangeReset > 
           clearResponse > redirectClose,
   "only one unambiguous secure Location may be applied, then the old response/socket must be cleared before reopen");
 
-// ── One exact, fail-closed mid-stream resume ─────────────────────────────────────────────────
-// Dynamic TLS records can lose one allocation or socket read after the OTA slot/hash are already
-// partially advanced. Recovery stays inside the accepted operation: one fresh HTTPS client asks
-// for the exact remaining suffix while the original OTA handle, PSA hash and absolute deadline
-// remain authoritative.
-assert.match(transport, /OTA_TRANSFER_MAX_RESUMES\s*=\s*1/,
-  "a transfer may reconnect exactly once, never loop until a broken network happens to pass");
+// ── Two exact, fail-closed mid-stream resumes ────────────────────────────────────────────────
+// Dynamic TLS records can lose allocations or socket reads after the OTA slot/hash are already
+// partially advanced. Recovery stays inside the accepted operation: at most two fresh HTTPS
+// clients ask for the exact remaining suffix while the original OTA handle, PSA hash and absolute
+// deadline remain authoritative. Every resumed stream must advance before another reconnect.
+assert.match(transport, /OTA_TRANSFER_MAX_RESUMES\s*=\s*2/,
+  "a transfer may reconnect at most twice, never loop until a broken network happens to pass");
 assert.match(transport,
-  /resumes\s*<\s*OTA_TRANSFER_MAX_RESUMES[\s\S]{0,160}?total\s*>\s*0[\s\S]{0,120}?written\s*>\s*0[\s\S]{0,80}?written\s*<\s*total/,
-  "resume must require one unused attempt and a non-empty strict prefix of a known-size image");
+  /resumes\s*<\s*OTA_TRANSFER_MAX_RESUMES[\s\S]{0,160}?total\s*>\s*0[\s\S]{0,120}?stream_started_at\s*<\s*written[\s\S]{0,80}?written\s*<\s*total/,
+  "resume must require unused budget and progress in the current known-size image stream");
 assert.match(transport,
   /state\.header_count\s*==\s*1[\s\S]{0,160}?state\.start\s*==\s*expected_start[\s\S]{0,120}?state\.end\s*==\s*expected_total\s*-\s*1[\s\S]{0,120}?state\.total\s*==\s*expected_total/,
   "the resumed suffix must carry exactly one complete matching Content-Range");
@@ -456,13 +456,15 @@ const resumeRange = update.indexOf("ota_content_range_matches(", resumeOpen);
 const resumeChunked = update.indexOf("esp_http_client_is_chunked_response(client)", resumeRange);
 const resumeLength = update.indexOf("response_length", resumeChunked);
 const resumeBuffer = update.indexOf("heap_caps_malloc(kOtaBufSize", resumeLength);
+const resumeProgressOrigin = update.indexOf("stream_started_at = resume_at", resumeBuffer);
 assert.ok(resumeDiag > bulkRead && resumeDecision > resumeDiag &&
           resumeIncrement > resumeDecision && resumeFree > resumeIncrement &&
           resumeClose > resumeFree && resumeHeadroom > resumeClose &&
           resumeGateDeadline > resumeHeadroom && resumeInit > resumeGateDeadline &&
           resumeHeader > resumeInit && resumeOpen > resumeHeader && resumeRange > resumeOpen &&
-          resumeChunked > resumeRange && resumeLength > resumeChunked && resumeBuffer > resumeLength,
-  "a failed read must be diagnosed, release TLS/buffer, regain headroom, and validate exact 206 range metadata before another write buffer exists");
+          resumeChunked > resumeRange && resumeLength > resumeChunked && resumeBuffer > resumeLength &&
+          resumeProgressOrigin > resumeBuffer,
+  "a failed read must release TLS/buffer, regain headroom, validate exact 206 range metadata, and remember the accepted suffix origin");
 assert.match(update.slice(resumeDiag, resumeHeadroom),
   /http_deadline_reached\(transfer_started, kFirmwareDeadline\)/,
   "resume admission must use the original firmware deadline rather than start a new budget");

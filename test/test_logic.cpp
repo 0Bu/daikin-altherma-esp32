@@ -2629,12 +2629,14 @@ static void test_ota_transport() {
     ota_content_range_observe(range, "bytes 797696-1839102/1839104");
     CHECK(!ota_content_range_matches(range, 797696, 1839104)); // suffix must reach total - 1
 
-    CHECK(ota_transfer_resume_allowed(0, 797696, 1839104, false));
-    CHECK(!ota_transfer_resume_allowed(1, 797696, 1839104, false));
-    CHECK(!ota_transfer_resume_allowed(0, 0, 1839104, false));
-    CHECK(!ota_transfer_resume_allowed(0, 1839104, 1839104, false));
-    CHECK(!ota_transfer_resume_allowed(0, 797696, 0, false));
-    CHECK(!ota_transfer_resume_allowed(0, 797696, 1839104, true));
+    CHECK(ota_transfer_resume_allowed(0, 0, 797696, 1839104, false));
+    CHECK(ota_transfer_resume_allowed(1, 797696, 1190912, 1839104, false));
+    CHECK(!ota_transfer_resume_allowed(2, 1190912, 1453056, 1839104, false));
+    CHECK(!ota_transfer_resume_allowed(1, 797696, 797696, 1839104, false));
+    CHECK(!ota_transfer_resume_allowed(0, 0, 0, 1839104, false));
+    CHECK(!ota_transfer_resume_allowed(0, 0, 1839104, 1839104, false));
+    CHECK(!ota_transfer_resume_allowed(0, 0, 797696, 0, false));
+    CHECK(!ota_transfer_resume_allowed(0, 0, 797696, 1839104, true));
 }
 
 static void test_heartbeat() {

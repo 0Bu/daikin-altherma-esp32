@@ -200,6 +200,7 @@ constexpr TickType_t kChangelogDeadline = pdMS_TO_TICKS(30000);
 constexpr int  kOtaBufSize    = 2048;   // download chunk; deliberately small (contiguous heap)
 constexpr size_t kManifestMax = 1024;   // published installer+provenance manifest stays below 1 KiB
 constexpr unsigned kMaxRedirects = 5;
+constexpr int kDoneBeforeRebootMs = 3000;
 // MQTT publishes once a second. Hold the operation flag for a little longer than one cadence before
 // opening TLS so a publisher which woke just before the OTA task has time to finish and stand aside.
 constexpr TickType_t kNetworkQuiesceLead = pdMS_TO_TICKS(1100);
@@ -1125,6 +1126,7 @@ void run_update(const OtaTaskArgs& request) {
     bool transfer_ok = write_chunk(buffer, probe_len);
     bool response_complete = false;
     unsigned resumes = 0;
+    size_t stream_started_at = 0;
     read_timeouts = 0;
     while (transfer_ok) {
         if (!set_http_timeout_to_deadline(client, transfer_started, kFirmwareDeadline)) {
@@ -1159,7 +1161,7 @@ void run_update(const OtaTaskArgs& request) {
 
         const bool deadline_reached = http_deadline_reached(transfer_started, kFirmwareDeadline);
         const bool can_resume = total > 0 && ota_transfer_resume_allowed(
-            resumes, written, static_cast<uint64_t>(total), deadline_reached);
+            resumes, stream_started_at, written, static_cast<uint64_t>(total), deadline_reached);
         if (!can_resume) {
             e = deadline_reached ? ESP_ERR_TIMEOUT
                 : n == -ESP_ERR_HTTP_EAGAIN ? ESP_ERR_HTTP_EAGAIN : ESP_FAIL;
@@ -1278,6 +1280,7 @@ void run_update(const OtaTaskArgs& request) {
                     static_cast<unsigned>(resume_at),
                     static_cast<unsigned>(resume_open_heap.free_bytes),
                     static_cast<unsigned>(resume_open_heap.largest_internal_block));
+        stream_started_at = resume_at;
         e = ESP_OK;
         transfer_failure = OtaTransferFailure::None;
         read_timeouts = 0;
@@ -1401,7 +1404,9 @@ void run_update(const OtaTaskArgs& request) {
         s_status.progress = 100;
         s_status.message  = "Rebooting into the new firmware";
     }
-    vTaskDelay(pdMS_TO_TICKS(600));   // let the UI poll /ota/status once more before the link drops
+    // Outlive both the 1 Hz browser and the gate's 2 Hz connection-churn-bounded observer, with
+    // enough LAN/HTTPD scheduling margin for either to retain completed-verifier evidence.
+    vTaskDelay(pdMS_TO_TICKS(kDoneBeforeRebootMs));
     esp_restart();
 }
 

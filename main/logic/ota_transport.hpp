@@ -148,12 +148,13 @@ inline bool ota_content_range_matches(const OtaContentRangeState& state,
            state.total == expected_total;
 }
 
-constexpr unsigned OTA_TRANSFER_MAX_RESUMES = 1;
+constexpr unsigned OTA_TRANSFER_MAX_RESUMES = 2;
 
-inline bool ota_transfer_resume_allowed(unsigned resumes, uint64_t written, uint64_t total,
+inline bool ota_transfer_resume_allowed(unsigned resumes, uint64_t stream_started_at,
+                                        uint64_t written, uint64_t total,
                                         bool deadline_reached) noexcept {
     return resumes < OTA_TRANSFER_MAX_RESUMES && !deadline_reached && total > 0 &&
-           written > 0 && written < total;
+           stream_started_at < written && written < total;
 }
 
 } // namespace daik

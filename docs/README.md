@@ -853,11 +853,12 @@ up and reloads itself onto the new UI. Both the check and the download run on th
   deadlines (30 s manifest, 5 min firmware, 60 s Weather) also reject a slowly trickling peer and
   release those services; per-read timeouts alone are not the liveness boundary. MQTTS resumes only
   after four stable 56/24-KiB heap samples and backs off direct start failures up to 60 seconds.
-  If one known-size firmware stream ends after its validated header/app-description prefix is
+  If a known-size firmware stream ends after its validated header/app-description prefix is
   committed, the device releases TLS, reacquires the same stable headroom and resumes that exact
-  suffix once with a verified HTTP 206
-  `Content-Range`; the original SHA-256, sequential OTA handle and five-minute deadline continue.
-  Missing or inconsistent range support, chunked fallback or another interruption aborts safely.
+  suffix at most twice with a verified HTTP 206; every resumed stream must commit new bytes before
+  another reconnect. Every suffix response needs one exact `Content-Range`; the original SHA-256,
+  sequential OTA handle and five-minute deadline continue.
+  Missing or inconsistent range support, chunked fallback or a third interruption aborts safely.
   A failed IDF validation is reported generically rather than guessed to be a signature failure because
   the same result also covers malformed images, digest errors and verifier allocation failures.
   Signature enforcement remains mandatory (no eFuses; reversible; Web Serial still works), and CI

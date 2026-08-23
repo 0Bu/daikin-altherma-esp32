@@ -30,6 +30,13 @@ assert.equal(abbreviatedOption.status, 2,
   "an abbreviated gate option must be rejected before any preflight or device contact");
 assert.match(abbreviatedOption.stderr, /unrecognized arguments: --manifest/,
   "argparse must reject abbreviations instead of silently mapping them onto canonical options");
+if (!process.env.PRODUCTION_OTA_CONTRACT_ROOT) {
+  const gateSelfTest = spawnSync("python3", [
+    path.join(root, "scripts/production-ota-gate.py"), "--self-test",
+  ], { encoding: "utf8" });
+  assert.equal(gateSelfTest.status, 0,
+    `the gate slow-drip/deadline self-test must pass: ${gateSelfTest.stderr}`);
+}
 
 assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/,
   "the bench stage must remain distinct and ordered before production");
@@ -43,11 +50,18 @@ assert.match(gate, /STRESS_SECONDS\s*=\s*180/,
   "both hardware stages need the fixed three-minute pressure window");
 const otaCheckTimeout = Number(gate.match(/OTA_CHECK_TIMEOUT_S\s*=\s*(\d+)/)?.[1]);
 const otaTimeout = Number(gate.match(/OTA_TIMEOUT_S\s*=\s*(\d+)/)?.[1]);
+const otaStatusPollSeconds = Number(gate.match(/OTA_STATUS_POLL_SECONDS\s*=\s*([\d.]+)/)?.[1]);
+const otaStatusRequestTimeoutSeconds = Number(
+  gate.match(/OTA_STATUS_REQUEST_TIMEOUT_S\s*=\s*([\d.]+)/)?.[1]);
+const otaDoneDwellMs = Number(ota.match(/kDoneBeforeRebootMs\s*=\s*(\d+)/)?.[1]);
 const quiesceCycles = Number(quiesce.match(/OTA_QUIESCE_MAX_CYCLES\s*=\s*(\d+)/)?.[1]);
 assert.ok(otaCheckTimeout >= 120,
   "host check observer must include two setup attempts, headroom waits, and manifest body deadline");
 assert.ok(otaTimeout >= 480,
   "the sole-write observer must outlive re-manifest, five-minute firmware deadline, verification and reboot");
+assert.ok(otaDoneDwellMs >=
+    (2 * otaStatusRequestTimeoutSeconds + otaStatusPollSeconds) * 1000 + 500,
+  "the completed state must outlive a prior request, poll sleep, next request and scheduling margin");
 assert.ok(quiesceCycles > otaTimeout,
   "publisher/poller quiescence must strictly outlive the authoritative host observer");
 assert.equal(occurrences(gate, "time.monotonic() + OTA_CHECK_TIMEOUT_S"), 4,
@@ -109,14 +123,15 @@ const targetHealthWindow = gate.indexOf("target_health_window = wait_for_bench_h
 const fullDownload = gate.indexOf("full_download_evidence = exercise_bench_full_download(");
 const testStress = gate.indexOf("test_evidence = stress_board(", fullDownload);
 const productionConfirmation = gate.indexOf("if args.confirm_production != PRODUCTION_ROLE");
+const productionResolve = gate.indexOf("production_status_endpoint = resolve_http_endpoint(", productionConfirmation);
 const offer = gate.indexOf("check_generation = wait_for_ota_offer(", productionConfirmation);
 const post = gate.indexOf("    post_update_once(", offer);
-const returned = gate.indexOf('wait_for_new_firmware(production["host"], args.expected_version, elf)');
+const returned = gate.indexOf("returned = wait_for_new_firmware(", post);
 const productionStress = gate.indexOf("production_evidence = stress_board(");
 const retained = gate.indexOf("retained = verify_retained_x10a(final_status)");
 assert.ok(targetHealthWindow >= 0 && fullDownload > targetHealthWindow && testStress > fullDownload &&
           productionConfirmation > testStress &&
-          offer > productionConfirmation &&
+          productionResolve > productionConfirmation && offer > productionResolve &&
           post > offer && returned > post && productionStress > returned && retained > productionStress,
   "full bench binary OTA, bench stress, production confirmation, one production update, reboot proof, canary stress and retained X10A must stay ordered");
 const fullHelperStart = gate.indexOf("def exercise_bench_full_download(");
@@ -124,13 +139,14 @@ const fullHelperEnd = gate.indexOf("\ndef require_ota_transfer_evidence(", fullH
 assert.ok(fullHelperStart >= 0 && fullHelperEnd > fullHelperStart,
   "the full bench download helper must remain identifiable");
 const fullHelper = gate.slice(fullHelperStart, fullHelperEnd);
+const fullResolve = fullHelper.indexOf("status_endpoint = resolve_http_endpoint(host)");
 const releaseOffer = fullHelper.indexOf('expected_channel="release", allow_downgrade=True');
 const releasePost = fullHelper.indexOf("post_update_once(", releaseOffer);
 const releaseBoot = fullHelper.indexOf("release_status = wait_for_new_firmware(", releasePost);
 const releaseHealthWindow = fullHelper.indexOf("release_health_window = wait_for_bench_health_window(", releaseBoot);
 const devChannel = fullHelper.indexOf('set_update_channel(host, "dev")', releaseHealthWindow);
 const targetBoot = fullHelper.indexOf("target_status = wait_for_new_firmware(", devChannel);
-assert.ok(releaseOffer >= 0 && releasePost > releaseOffer && releaseBoot > releasePost &&
+assert.ok(fullResolve >= 0 && releaseOffer > fullResolve && releasePost > releaseOffer && releaseBoot > releasePost &&
   releaseHealthWindow > releaseBoot && devChannel > releaseHealthWindow && targetBoot > devChannel,
   "the target must perform a complete release download, survive rollback probation, and return to the exact dev artifact before staging passes");
 assert.match(fullHelper,
@@ -172,8 +188,8 @@ assert.match(gate, /Deliberately one un-retried exact-artifact write per invocat
   "every exact-artifact update invocation must remain explicitly non-retrying");
 assert.match(gate, /OTA_OFFER_POLL_SECONDS\s*=\s*0\.1/,
   "the gate must observe the accepted operation without a long blind polling gap");
-assert.match(gate, /OTA_STATUS_POLL_SECONDS\s*=\s*0\.1/,
-  "the gate must sample the short completed OTA state before reboot");
+assert.match(gate, /OTA_STATUS_POLL_SECONDS\s*=\s*0\.5/,
+  "the gate must sample completed OTA state without connection-close heap churn");
 assert.match(gate, /LEGACY_OFFER_STABLE_SECONDS\s*=\s*3\.0/,
   "the bench-only legacy return must outwait stale idle status from the accepted check");
 const legacyOfferWait = gate.slice(gate.indexOf("def wait_for_legacy_offer("),
@@ -184,6 +200,11 @@ assert.match(legacyOfferWait,
 const newFirmwareWait = gate.slice(gate.indexOf("def wait_for_new_firmware("),
   gate.indexOf("\ndef set_update_channel(", gate.indexOf("def wait_for_new_firmware(")));
 assert.match(newFirmwareWait,
+  /request_json_deadline\([\s\S]{0,100}?status_endpoint, "\/ota\/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S/,
+  "the compact completed-state observer must use its whole-request deadline reader");
+assert.match(newFirmwareWait, /time\.sleep\(OTA_STATUS_POLL_SECONDS\)/,
+  "the compact completed-state observer must use its bounded poll interval");
+assert.match(newFirmwareWait,
   /ota\.get\("state"\)\s+not\s+in\s+\("checking",\s*"updating",\s*"done"\)[\s\S]{0,160}?request_json\(host,\s*"\/status"\)/,
   "the reboot waiter must not poll allocation-rich /status while OTA owns TLS");
 assert.match(newFirmwareWait,
@@ -192,6 +213,41 @@ assert.match(newFirmwareWait,
 assert.match(gate,
   /target_transfer\.get\("saw_done"\)\s+is\s+not\s+True[\s\S]{0,100}?never exposed its completed validation state/,
   "bench acceptance must observe the target verifier's completed state, not just recovered heap");
+assert.match(ota, /vTaskDelay\(pdMS_TO_TICKS\(kDoneBeforeRebootMs\)\)/,
+  "the reboot handoff must use the completed-state dwell covered by the host timing contract");
+const compactReaderStart = gate.indexOf("def read_compact_json_response(");
+const compactRequestStart = gate.indexOf("def request_json_deadline(", compactReaderStart);
+const compactReader = gate.slice(compactReaderStart, compactRequestStart);
+const compactRequest = gate.slice(compactRequestStart,
+  gate.indexOf("\ndef verify_http_range_support(", compactRequestStart));
+assert.match(compactRequest,
+  /deadline\s*=\s*time\.monotonic\(\)\s*\+\s*timeout\s*\n[\s\S]{0,1600}?read_compact_json_response\([\s\S]{0,120}?deadline/,
+  "connect, request send and response read must share one monotonic deadline");
+assert.match(compactReader,
+  /remaining\s*=\s*deadline\s*-\s*time\.monotonic\(\)[\s\S]{0,160}?remaining\s*<=\s*0[\s\S]{0,160}?connection\.settimeout\(remaining\)/,
+  "every compact response receive must consume the same absolute deadline and fixed body bound");
+assert.match(compactReader, /while\s+b"\\r\\n\\r\\n"\s+not\s+in\s+response/,
+  "compact headers must be read incrementally under the absolute deadline");
+assert.match(compactReader, /while\s+len\(body\)\s*<\s*content_length/,
+  "the fixed-size compact body must be read incrementally under the absolute deadline");
+assert.match(compactReader,
+  /if not chunk:\s+raise CompactTransportError\("compact HTTP response ended before its headers"\)/,
+  "a reboot EOF before compact response headers must remain retryable");
+assert.match(compactReader,
+  /if not chunk:\s+raise CompactTransportError\("compact HTTP response ended before its declared body"\)/,
+  "a reboot EOF during the compact response body must remain retryable");
+assert.match(compactReader,
+  /except json\.JSONDecodeError as error:\s+raise GateError\("compact HTTP response has malformed JSON"\) from error/,
+  "a complete malformed JSON response must remain a hard gate failure");
+assert.match(newFirmwareWait,
+  /except \(CompactTransportError, OSError, TimeoutError\):/,
+  "the reboot observer must retry compact transport EOF without retrying the update write");
+assert.doesNotMatch(newFirmwareWait, /JSONDecodeError/,
+  "the reboot observer must not forgive a complete malformed compact response");
+assert.equal(occurrences(compactReader, "apply_remaining_timeout()"), 4,
+  "the compact reader must apply the deadline to headers, body and final completion");
+assert.equal(occurrences(gate, "resolve_http_endpoint("), 4,
+  "bench delivery, bench full-download and production must pre-resolve exactly one status endpoint");
 assert.match(gate,
   /generation\s*=\s*status\.get\("generation"\)[\s\S]{0,180}?generation\s*!=\s*expected_generation[\s\S]{0,120}?operation generation changed/,
   "offer status must stay bound to the synchronously accepted check generation");
@@ -321,6 +377,7 @@ const benchHelperEnd = gate.indexOf("\ndef self_test(", benchHelperStart);
 assert.ok(benchHelperStart >= 0 && benchHelperEnd > benchHelperStart,
   "the ordinary bench-install helper must remain independently identifiable");
 const benchHelper = gate.slice(benchHelperStart, benchHelperEnd);
+const benchResolve = benchHelper.indexOf("status_endpoint = resolve_http_endpoint(host)");
 const benchIdentity = benchHelper.indexOf("validate_identity(");
 const benchOffer = benchHelper.indexOf("check_generation = wait_for_ota_offer(");
 const benchPost = benchHelper.indexOf("update_generation = post_update_once(", benchOffer);
@@ -328,7 +385,7 @@ const benchReturn = benchHelper.indexOf("returned = wait_for_new_firmware(", ben
 const benchTransfer = benchHelper.indexOf("require_ota_transfer_evidence(", benchReturn);
 const benchHealth = benchHelper.indexOf("health_window = wait_for_bench_health_window(", benchTransfer);
 const benchStress = benchHelper.indexOf("stress = stress_board(", benchHealth);
-assert.ok(benchIdentity >= 0 && benchOffer > benchIdentity && benchPost > benchOffer &&
+assert.ok(benchResolve >= 0 && benchIdentity > benchResolve && benchOffer > benchIdentity && benchPost > benchOffer &&
           benchReturn > benchPost && benchTransfer > benchReturn && benchHealth > benchTransfer &&
           benchStress > benchHealth,
   "bench install must bind identity, lease one offer/write, observe verification, pass probation and then stress");

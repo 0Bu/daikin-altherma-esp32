@@ -105,9 +105,18 @@ try {
       replaceOnce("main/ota_update.cpp",
         "ota_content_range_observe(response->content_range, event->header_value);",
         "response->content_range.valid = true;")],
-    ["the resume budget permits a second reconnect", () =>
-      replaceOnce("main/logic/ota_transport.hpp", "OTA_TRANSFER_MAX_RESUMES = 1",
-        "OTA_TRANSFER_MAX_RESUMES = 2")],
+    ["the resume budget loses the second bounded reconnect", () =>
+      replaceOnce("main/logic/ota_transport.hpp", "OTA_TRANSFER_MAX_RESUMES = 2",
+        "OTA_TRANSFER_MAX_RESUMES = 1")],
+    ["the resume budget permits a third reconnect", () =>
+      replaceOnce("main/logic/ota_transport.hpp", "OTA_TRANSFER_MAX_RESUMES = 2",
+        "OTA_TRANSFER_MAX_RESUMES = 3")],
+    ["a resumed stream may fail again without making progress", () =>
+      replaceOnce("main/logic/ota_transport.hpp", "stream_started_at < written",
+        "stream_started_at <= written")],
+    ["the accepted resumed stream forgets its progress origin", () =>
+      replaceOnce("main/ota_update.cpp", "stream_started_at = resume_at;",
+        "stream_started_at = 0;")],
     ["the consumed resume attempt is never recorded", () =>
       replaceOnce("main/ota_update.cpp", "++resumes;", "resumes += 0;")],
     ["the HTTP header callback may unwind through C frames", () =>
