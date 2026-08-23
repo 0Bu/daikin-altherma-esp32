@@ -100,12 +100,14 @@ fails closed on both missing and extra project skills.
   and cannot prove the intent of arbitrarily generated interpreter code or dynamically computed
   commands and paths. Treat an unrecognized or blocked form as a request to use a simpler,
   statically inspectable command; never treat hook silence as authorization.
-- The hook blocks direct `/ota/update` writes, including interpreter and quote-split forms. A
-  production update is admitted only as the direct, unchained canonical
-  `scripts/production-ota-gate.py` command with the official dev manifest, exact artifact/source
-  identity, explicit `production`-role confirmation and current-version lease. The script owns the
-  private-inventory `bench` stage, sole un-retried write and read-only canary; copying or chaining it
-  is not equivalent.
+- The hook blocks direct `/ota/update` writes, including interpreter, alternate HTTP-client and
+  quote-split forms. It admits two direct, unchained canonical `scripts/production-ota-gate.py`
+  shapes with the official dev manifest and exact artifact/source/current-version lease. Ordinary
+  bench delivery requires `--confirm-bench bench --install-bench`, owns one un-retried write only to
+  the private-inventory `bench`, and returns before production. Production promotion separately
+  requires `--confirm-production production --execute`, owns its bench-first staging and one
+  production write, then observes the canary read-only. Copying, wrapping, chaining or a raw POST is
+  not equivalent; production staging without `--execute` still mutates the bench.
 - Heap-sensitive changed-file paths make the SHA-stamped `$heap-safety-review` PR record mandatory.
   That record comes from the independent read-only `heap_safety_reviewer`; project and domain
   reviews remain independently required on every merge.

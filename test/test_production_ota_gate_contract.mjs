@@ -1,7 +1,7 @@
-// Source-boundary contract for the bench -> production OTA promotion gate. Hardware cannot run
-// in CI, but CI can keep every fail-closed boundary reachable: exact board/artifact identity,
-// signed dev-only provenance, bounded live pressure, a single un-retried production POST, retained
-// X10A proof, and firmware rollback refusing a merely-online but heap-broken image.
+// Source-boundary contract for role-pinned bench OTA delivery and bench -> production promotion.
+// Hardware cannot run in CI, but CI can keep every fail-closed boundary reachable: exact
+// board/artifact identity, signed dev-only provenance, bounded live pressure, single un-retried
+// writes, retained production X10A proof, and rollback refusing a merely-online heap-broken image.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -78,9 +78,11 @@ assert.equal(occurrences(gate, "verify_http_range_support("), 3,
   "the helper definition plus dev and release artifact checks must remain present");
 const appRange = gate.indexOf("verify_http_range_support(app_url, binary)");
 const releaseRange = gate.indexOf("verify_http_range_support(release_url, release_binary)");
-const inventoryLoad = gate.indexOf("inventory = load_inventory()", releaseRange);
-assert.ok(appRange >= 0 && releaseRange > appRange && inventoryLoad > releaseRange,
-  "both official artifacts must prove Range support before any private board is contacted");
+const inventoryLoad = gate.indexOf("inventory = load_inventory()", appRange);
+const productionBenchContact = gate.indexOf('test_before = request_json(bench["host"], "/status")', releaseRange);
+assert.ok(appRange >= 0 && inventoryLoad > appRange && releaseRange > inventoryLoad &&
+          productionBenchContact > releaseRange,
+  "dev Range must precede inventory use, and production staging must prove release Range before board contact");
 assert.match(gate, /git",\s*"rev-parse",\s*"HEAD"/,
   "local host contracts must run on the manifest's exact main source");
 assert.match(gate, /git",\s*"status",\s*"--porcelain"/,
@@ -108,7 +110,7 @@ assert.ok(targetHealthWindow >= 0 && fullDownload > targetHealthWindow && testSt
           post > offer && returned > post && productionStress > returned && retained > productionStress,
   "full bench binary OTA, bench stress, production confirmation, one production update, reboot proof, canary stress and retained X10A must stay ordered");
 const fullHelperStart = gate.indexOf("def exercise_bench_full_download(");
-const fullHelperEnd = gate.indexOf("\ndef self_test(", fullHelperStart);
+const fullHelperEnd = gate.indexOf("\ndef require_ota_transfer_evidence(", fullHelperStart);
 assert.ok(fullHelperStart >= 0 && fullHelperEnd > fullHelperStart,
   "the full bench download helper must remain identifiable");
 const fullHelper = gate.slice(fullHelperStart, fullHelperEnd);
@@ -301,13 +303,63 @@ assert.match(gate,
   "the production role must carry successful real weather TLS evidence from its fresh boot");
 assert.match(gate, /MIN_FINAL_LARGEST_BLOCK\s*=\s*16\s*\*\s*1024/,
   "hardware acceptance must recover a 16 KiB contiguous block");
-assert.match(gate, /release_created": False/,
-  "the production OTA gate must state and preserve its no-release boundary");
+assert.equal(occurrences(gate, '"release_created": False'), 2,
+  "both bench delivery and production promotion must state and preserve the no-release boundary");
+
+const benchHelperStart = gate.indexOf("def install_bench_target(");
+const benchHelperEnd = gate.indexOf("\ndef self_test(", benchHelperStart);
+assert.ok(benchHelperStart >= 0 && benchHelperEnd > benchHelperStart,
+  "the ordinary bench-install helper must remain independently identifiable");
+const benchHelper = gate.slice(benchHelperStart, benchHelperEnd);
+const benchIdentity = benchHelper.indexOf("validate_identity(");
+const benchOffer = benchHelper.indexOf("check_generation = wait_for_ota_offer(");
+const benchPost = benchHelper.indexOf("update_generation = post_update_once(", benchOffer);
+const benchReturn = benchHelper.indexOf("returned = wait_for_new_firmware(", benchPost);
+const benchTransfer = benchHelper.indexOf("require_ota_transfer_evidence(", benchReturn);
+const benchHealth = benchHelper.indexOf("health_window = wait_for_bench_health_window(", benchTransfer);
+const benchStress = benchHelper.indexOf("stress = stress_board(", benchHealth);
+assert.ok(benchIdentity >= 0 && benchOffer > benchIdentity && benchPost > benchOffer &&
+          benchReturn > benchPost && benchTransfer > benchReturn && benchHealth > benchTransfer &&
+          benchStress > benchHealth,
+  "bench install must bind identity, lease one offer/write, observe verification, pass probation and then stress");
+assert.equal(occurrences(benchHelper, "post_update_once("), 1,
+  "ordinary bench delivery must invoke exactly one un-retried update write");
+assert.match(benchHelper,
+  /current_version == target_version[\s\S]{0,450}?ota[\s\S]{0,120}?channel[\s\S]{0,100}?!= "dev"[\s\S]{0,250}?MQTT must be connected/,
+  "bench delivery must reject redundant versions, non-dev channels and missing MQTT before its write");
+assert.match(benchHelper,
+  /heap_restarts[\s\S]{0,180}?mqtt_skipped[\s\S]{0,180}?poll_skipped[\s\S]{0,500}?MIN_FINAL_FREE_HEAP[\s\S]{0,180}?MIN_FINAL_LARGEST_BLOCK/,
+  "bench delivery must refuse existing allocation failures or unsafe pre-update heap");
+assert.match(benchHelper,
+  /reset_reason"\) != "sw"[\s\S]{0,500}?require_x10a=False, require_weather=False/,
+  "bench acceptance must prove the OTA reboot and keep absent plant/weather sources optional");
+assert.doesNotMatch(benchHelper,
+  /PRODUCTION_ROLE|production\[|OFFICIAL_RELEASE_MANIFEST_URL|set_update_channel|wait_for_legacy_offer|allow_downgrade/,
+  "the ordinary bench helper must not contain a production, release, channel-write or legacy path");
+
+const benchAction = gate.indexOf("if args.install_bench or args.confirm_bench is not None:");
+const benchInstall = gate.indexOf("bench_evidence = install_bench_target(", benchAction);
+const benchActionReturn = gate.indexOf("        return 0", benchInstall);
+const releaseManifestLoad = gate.indexOf("release_manifest = json.loads", benchActionReturn);
+const productionTarget = gate.indexOf("production = inventory[PRODUCTION_ROLE]", releaseManifestLoad);
+assert.ok(benchAction >= 0 && benchInstall > benchAction && benchActionReturn > benchInstall &&
+          releaseManifestLoad > benchActionReturn && productionTarget > releaseManifestLoad,
+  "bench action must return before release validation or production target construction");
+assert.match(gate,
+  /add_argument\("--install-bench", action="store_true"\)[\s\S]{0,1800}?args\.install_bench[\s\S]{0,240}?args\.execute[\s\S]{0,240}?args\.confirm_bench != BENCH_ROLE[\s\S]{0,240}?args\.confirm_production is not None/,
+  "bench action must be explicit and mutually exclusive with production execution");
 
 assert.match(hook, /direct OTA writes are forbidden; run scripts\/production-ota-gate\.py/,
-  "agent shell writes must be routed through the canonical production gate");
+  "agent shell writes must be routed through the canonical role-pinned gate");
 assert.match(hook, /canonical_production_ota_command/,
   "only the canonical direct gate command may bypass the raw OTA-write guard");
+assert.match(hook, /"--install-bench"[\s\S]{0,220}?"--confirm-bench"\]\s*=\s*"bench"/,
+  "the shell hook must admit only the explicit literal bench action and role");
+assert.match(hook, /Path\(os\.path\.abspath\(executable\)\) != canonical/,
+  "a foreign symlink alias must not impersonate the canonical gate path");
+assert.match(hook,
+  /def direct_ota_update_write[\s\S]{0,1800}?executable == "curl"[\s\S]{0,1200}?executable in \{"http", "xh"\}[\s\S]{0,400}?executable == "wget"/,
+  "raw OTA write detection must cover ordinary curl, HTTPie/xh and wget shapes");
 
 assert.match(health, /OTA_HEALTH_MIN_FREE_BYTES\s*=\s*24u\s*\*\s*1024u/,
   "rollback commit needs the measured total internal-heap floor");
@@ -327,4 +379,4 @@ assert.match(ota,
 assert.doesNotMatch(gate, /48\s*\*\s*60\s*\*\s*60|48[- ]?hour|48[- ]?stunden/i,
   "an arbitrary 48-hour soak must not replace targeted staging and canary evidence");
 
-console.log("production OTA gate: signed bench staging, one-shot production canary and rollback service proof pinned");
+console.log("OTA gate: signed bench delivery, production promotion and rollback service proof pinned");

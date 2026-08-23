@@ -55,6 +55,31 @@ try {
     ["the test-board role is redirected to production", () =>
       replaceOnce("scripts/production-ota-gate.py", 'BENCH_ROLE = "bench"',
         'BENCH_ROLE = "production"')],
+    ["the explicit ordinary bench-install action is removed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'parser.add_argument("--install-bench", action="store_true")',
+        'parser.add_argument("--install-bench-bypassed", action="store_true")')],
+    ["the ordinary bench current-version lease is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "if current_version == target_version:", "if False:")],
+    ["the ordinary bench update write is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "update_generation = post_update_once(", "update_generation = update_write_bypassed(")],
+    ["the ordinary bench verifier evidence is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'require_ota_transfer_evidence(host, transfer, phase="bench target")',
+        "pass  # bench verifier evidence bypassed")],
+    ["the ordinary bench rollback-health dwell is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "health_window = wait_for_bench_health_window(",
+        "health_window = bypass_bench_health_window(")],
+    ["the ordinary bench pressure stage is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "stress = stress_board(", "stress = bypass_bench_stress(")],
+    ["the ordinary bench action falls through into release and production", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '        print(json.dumps(result, indent=2, sort_keys=True))\n        return 0\n\n    release_manifest',
+        '        print(json.dumps(result, indent=2, sort_keys=True))\n        bench_return_bypassed()\n\n    release_manifest')],
     ["the pressure window is shortened", () =>
       replaceOnce("scripts/production-ota-gate.py", "STRESS_SECONDS = 180", "STRESS_SECONDS = 60")],
     ["the manifest observer is shorter than firmware's bounded check path", () =>
@@ -234,6 +259,17 @@ try {
     ["raw OTA writes are no longer routed through the gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py", "direct OTA writes are forbidden; run scripts/production-ota-gate.py",
         "direct OTA writes are allowed")],
+    ["the hook no longer pins the literal bench role", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'exact_values["--confirm-bench"] = "bench"',
+        'exact_values["--confirm-bench"] = "production"')],
+    ["the hook accepts a symlink alias as canonical", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "Path(os.path.abspath(executable)) != canonical",
+        "executable.resolve(strict=False) != canonical")],
+    ["the raw OTA guard drops HTTPie and xh", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'executable in {"http", "xh"}', 'executable == "ignored-http-client"')],
     ["a merely connected image can bypass allocation failure evidence", () =>
       replaceOnce("main/logic/health_gate.hpp", "!service.allocation_failures && x10a_ready",
         "x10a_ready")],

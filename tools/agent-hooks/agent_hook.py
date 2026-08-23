@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 from typing import Any, Iterable
+from urllib.parse import unquote
 
 from merge_payload import find_merge as classify_github_action
 
@@ -868,7 +869,7 @@ def is_exact_espsecure_sign(command: str) -> bool:
 
 
 def canonical_production_ota_command(payload: dict[str, Any], command: str) -> bool:
-    """Only the reviewed one-shot bench-to-production gate may own a production OTA write."""
+    """Only an exact reviewed gate shape may own a bench or production OTA write."""
     if "\n" in command or re.search(r"[;&|`<>]|\$\(", command):
         return False
     try:
@@ -883,35 +884,99 @@ def canonical_production_ota_command(payload: dict[str, Any], command: str) -> b
     executable = Path(tokens[0]).expanduser()
     if not executable.is_absolute():
         executable = effective_cwd / executable
-    canonical = (HOOK_ROOT / "scripts/production-ota-gate.py").resolve()
-    if executable.resolve(strict=False) != canonical:
+    canonical = HOOK_ROOT / "scripts/production-ota-gate.py"
+    # Normalize dot components without resolving a foreign symlink onto the canonical file.
+    if Path(os.path.abspath(executable)) != canonical:
         return False
     if tokens[1:] == ["--self-test"]:
         return True
-    if "--execute" not in tokens:
-        return True  # read-only staging/preflight still validates its own required arguments
-    required = {
+    exact_values = {
         "--manifest-url": "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json",
-        "--confirm-production": "production",
     }
-    for option, expected in required.items():
-        if tokens.count(option) != 1:
-            return False
-        index = tokens.index(option)
-        if index + 1 >= len(tokens) or tokens[index + 1] != expected:
-            return False
-    for option, pattern in {
+    patterns = {
         "--expected-source-sha": r"[0-9a-f]{40}",
         "--expected-version": r"[0-9A-Za-z._+-]+-dev\.[0-9]+",
         "--expected-app-sha256": r"[0-9a-f]{64}",
-        "--expected-current-version": r"[0-9A-Za-z._+-]+",
-    }.items():
-        if tokens.count(option) != 1:
+    }
+    flags: set[str] = set()
+    if "--install-bench" in tokens:
+        flags = {"--install-bench"}
+        exact_values["--confirm-bench"] = "bench"
+        patterns["--expected-current-version"] = r"[0-9A-Za-z._+-]+"
+    elif "--execute" in tokens:
+        flags = {"--execute"}
+        exact_values["--confirm-production"] = "production"
+        patterns["--expected-current-version"] = r"[0-9A-Za-z._+-]+"
+    else:
+        return False  # production staging without execution already performs bench writes
+
+    expected_options = set(exact_values) | set(patterns)
+    seen_options: dict[str, str] = {}
+    seen_flags: set[str] = set()
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in flags and token not in seen_flags:
+            seen_flags.add(token)
+            index += 1
+            continue
+        if token not in expected_options or token in seen_options or index + 1 >= len(tokens):
             return False
-        index = tokens.index(option)
-        if index + 1 >= len(tokens) or re.fullmatch(pattern, tokens[index + 1]) is None:
-            return False
-    return tokens.count("--execute") == 1
+        seen_options[token] = tokens[index + 1]
+        index += 2
+    if set(seen_options) != expected_options or seen_flags != flags:
+        return False
+    if any(seen_options[option] != expected for option, expected in exact_values.items()):
+        return False
+    if seen_options.get("--expected-current-version") == seen_options["--expected-version"]:
+        return False
+    return all(
+        re.fullmatch(pattern, seen_options[option]) is not None
+        for option, pattern in patterns.items()
+    )
+
+
+def direct_ota_update_write(command: str) -> bool:
+    """Recognize ordinary shell/client write shapes aimed at the OTA update route."""
+    decoded = unquote(unquote(command))
+    compact = re.sub(r"[\s'\"+\\]", "", decoded.lower())
+    if "/ota/update" not in compact and "ota/update" not in compact:
+        return False
+    if any(marker in compact for marker in (
+        ".post(", ".request(post,", "method=post", "method:post",
+    )):
+        return True
+    for tokens, _ in shell_token_sets(decoded):
+        if not tokens:
+            continue
+        executable = Path(tokens[0]).name.lower()
+        raw_arguments = tokens[1:]
+        arguments = [token.lower() for token in raw_arguments]
+        if executable == "curl":
+            for index, argument in enumerate(arguments):
+                if argument in {"-x", "--request"} and index + 1 < len(arguments) and \
+                   arguments[index + 1] == "post":
+                    return True
+                if argument in {
+                    "-d", "--data", "--data-ascii", "--data-binary", "--data-raw", "--json",
+                    "--form", "--form-string", "--upload-file",
+                } or raw_arguments[index] in {"-F", "-T"} or \
+                   raw_arguments[index].startswith(("-F", "-T")) or \
+                   re.match(r"^(?:-xpost|-d.+|--request=post|--(?:data|form|json)=)", argument):
+                    return True
+        elif executable in {"http", "xh"}:
+            if any(argument == "post" for argument in arguments[:2]):
+                return True
+        elif executable == "wget":
+            for index, argument in enumerate(arguments):
+                if argument in {"--post-data", "--post-file"} or \
+                   argument.startswith(("--post-data=", "--post-file=")):
+                    return True
+                if argument == "--method" and index + 1 < len(arguments) and arguments[index + 1] == "post":
+                    return True
+                if argument == "--method=post":
+                    return True
+    return False
 
 
 def production_ota_violation(payload: dict[str, Any]) -> str | None:
@@ -922,24 +987,25 @@ def production_ota_violation(payload: dict[str, Any]) -> str | None:
         return None
     if canonical_production_ota_command(payload, command):
         return None
-    compact = re.sub(r"[\s'\"+\\]", "", command.lower())
-    compact = compact.replace("%2f", "/").replace("%75", "u")
+    compact = re.sub(r"[\s'\"+\\]", "", unquote(unquote(command)).lower())
     names_gate = "production-ota-gate.py" in compact
-    names_update = "/ota/update" in compact or "ota/update" in compact
-    write_markers = (
-        "-xpost", "--requestpost", "--request=post", ".post(", "method=post",
-        "method:post", "--data", "--form", "data=",
+    executes_gate = any(
+        bool(tokens) and (
+            Path(tokens[0]).name == "production-ota-gate.py" or
+            (
+                Path(tokens[0]).name in {"python", "python3", "bash", "dash", "sh", "zsh"} and
+                any(Path(token).name == "production-ota-gate.py" for token in tokens[1:])
+            )
+        )
+        for tokens, _ in shell_token_sets(command)
     )
-    update_write = names_update and (
-        any(marker in compact for marker in write_markers) or
-        re.search(r"(?:^|[;&|])(?:curl|http|xh)[^;&|]*\s-d(?:\s|$)", command.lower()) is not None
-    )
-    if names_gate and "--execute" in compact:
-        return "the production OTA gate is not the canonical direct, unchained, argument-bound command"
-    if update_write:
+    if names_gate and executes_gate:
+        return "the OTA gate is not a canonical direct, unchained, role- and artifact-bound command"
+    if direct_ota_update_write(command):
         return (
             "direct OTA writes are forbidden; run scripts/production-ota-gate.py so the exact signed "
-            "artifact passes bench staging, heap stress, one-shot production promotion and read-only canary proof"
+            "artifact targets either the inventory-pinned bench-only gate or the distinct bench-first "
+            "production promotion gate"
         )
     return None
 
@@ -1193,7 +1259,7 @@ def guard_production_ota(payload: dict[str, Any]) -> bool:
     reason = production_ota_violation(payload)
     if not reason:
         return False
-    emit_permission("deny", "Blocked by the production OTA gate: " + reason + ".")
+    emit_permission("deny", "Blocked by the role-pinned OTA gate: " + reason + ".")
     return True
 
 

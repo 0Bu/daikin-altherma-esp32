@@ -28,6 +28,14 @@ logic regression or an untested production path fails in seconds instead of afte
 build. `tools/coverage/selftest.sh` separately proves that an empty report and coverage below the
 floor fail closed.
 
+`node test/test_production_ota_gate_contract.mjs` pins both canonical maintainer OTA modes without
+contacting hardware. The ordinary `bench` action must consume one exact dev offer/write, observe
+verifier and operation-local heap evidence, survive probation and stress, and return before any
+release or production path. The separate promotion path retains its bench-first release exercise,
+one production write and read-only canaries. `tools/production_ota/selftest.mjs` seeds removals of
+those boundaries, while `tools/agent-hooks/selftest.sh` proves raw client POSTs and noncanonical gate
+commands are denied.
+
 `node --test test/serial_port_release.test.mjs` rides the same command and exercises the Pages
 installer's serial-permission lifecycle: no control or chooser without an existing grant, direct
 release of one closed port, chooser disambiguation for multiple grants, refusal while a flash still

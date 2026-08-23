@@ -230,6 +230,24 @@ guard_case "direct production OTA POST is denied" \
     "$(payload exec_command command "curl -fsS -X POST http://production.invalid/ota/update")" deny
 guard_case "direct test-board OTA POST is denied too" \
     "$(payload exec_command command "curl -fsS --request POST http://bench.invalid/ota/update")" deny
+guard_case "HTTPie direct test-board OTA POST is denied" \
+    "$(payload exec_command command "http POST http://bench.invalid/ota/update")" deny
+guard_case "xh direct test-board OTA POST is denied" \
+    "$(payload exec_command command "xh post http://bench.invalid/ota/update")" deny
+guard_case "absolute curl implicit-data OTA POST is denied" \
+    "$(payload exec_command command "/usr/bin/curl -d x http://bench.invalid/ota/update")" deny
+guard_case "curl JSON OTA POST is denied" \
+    "$(payload exec_command command "curl --json '{}' http://bench.invalid/ota/update")" deny
+guard_case "curl multipart OTA POST is denied" \
+    "$(payload exec_command command "curl -F x=y http://bench.invalid/ota/update")" deny
+guard_case "generic requests direct OTA POST is denied" \
+    "$(payload exec_command command "python3 -c 'import requests; requests.request(\"POST\", \"http://bench.invalid/ota/update\")'")" deny
+guard_case "wget direct OTA POST is denied" \
+    "$(payload exec_command command "wget --post-data=x http://bench.invalid/ota/update")" deny
+guard_case "percent-encoded direct OTA POST is denied" \
+    "$(payload exec_command command "curl -X POST http://bench.invalid/ota%2Fupdate")" deny
+guard_case "read-only OTA update GET remains allowed" \
+    "$(payload exec_command command "curl -fsS http://bench.invalid/ota/update")" ""
 guard_case "read-only source search may mention the OTA route" \
     "$(payload exec_command command "rg -n '/ota/update' main/http_ota.cpp")" ""
 guard_case "read-only source inspection may name the production gate" \
@@ -241,8 +259,34 @@ guard_case "foreign production gate copy is denied" \
 canonical_ota_gate="$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3 --confirm-production production --execute"
 guard_case "canonical argument-bound production OTA gate is allowed" \
     "$(payload exec_command command "$canonical_ota_gate")" ""
+canonical_bench_ota_gate="$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3-dev.3 --confirm-bench bench --install-bench"
+guard_case "canonical argument-bound bench-only OTA gate is allowed" \
+    "$(payload exec_command command "$canonical_bench_ota_gate")" ""
+guard_case "canonical bench gate cannot be chained into a watcher" \
+    "$(payload exec_command command "$canonical_bench_ota_gate; curl -sS http://bench.invalid/status")" deny
+guard_case "bench gate cannot name the production confirmation too" \
+    "$(payload exec_command command "$canonical_bench_ota_gate --confirm-production production")" deny
+guard_case "bench gate requires the exact private-inventory role name" \
+    "$(payload exec_command command "$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3-dev.3 --confirm-bench production --install-bench")" deny
+guard_case "bench gate rejects a duplicate action" \
+    "$(payload exec_command command "$canonical_bench_ota_gate --install-bench")" deny
+guard_case "bench gate rejects an arbitrary host override" \
+    "$(payload exec_command command "$canonical_bench_ota_gate --host bench.invalid")" deny
+guard_case "bench gate rejects a test bypass" \
+    "$(payload exec_command command "$canonical_bench_ota_gate --skip-tests")" deny
+guard_case "bench gate rejects production execution" \
+    "$(payload exec_command command "$canonical_bench_ota_gate --execute")" deny
+guard_case "bench gate rejects a redundant current-version lease" \
+    "$(payload exec_command command "$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3-dev.4 --confirm-bench bench --install-bench")" deny
+guard_case "bench gate rejects an interpreter wrapper" \
+    "$(payload exec_command command "python3 $canonical_bench_ota_gate")" deny
+ln -s "$root/scripts/production-ota-gate.py" "$tmp/production-ota-gate.py"
+guard_case "bench gate rejects a symlink alias" \
+    "$(payload exec_command command "$tmp/production-ota-gate.py ${canonical_bench_ota_gate#*production-ota-gate.py }")" deny
 guard_case "canonical production gate cannot be chained into a watcher" \
     "$(payload exec_command command "$canonical_ota_gate; curl -X POST http://production.invalid/ota/update")" deny
+guard_case "production staging without execution is not an admitted agent shape" \
+    "$(payload exec_command command "$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")" deny
 guard_case "production gate requires explicit current version" \
     "$(payload exec_command command "$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --confirm-production production --execute")" deny
 guard_case "dynamic curl executable cannot perform a GitHub REST write" \
