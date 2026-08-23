@@ -252,6 +252,14 @@ guard_case "xh implicit-data OTA POST is denied" \
     "$(payload exec_command command "xh http://bench.invalid/ota/update after=7")" deny
 guard_case "HTTPie POST after global options is denied" \
     "$(payload exec_command command "http --verify=no --timeout=5 POST http://bench.invalid/ota/update")" deny
+guard_case "HTTPie raw-body inferred OTA POST is denied" \
+    "$(payload exec_command command "http --raw={} http://bench.invalid/ota/update")" deny
+guard_case "xh equals-form raw-body inferred OTA POST is denied" \
+    "$(payload exec_command command "xh --raw={} http://bench.invalid/ota/update")" deny
+guard_case "HTTPie redirected-stdin inferred OTA POST is denied" \
+    "$(payload exec_command command "http http://bench.invalid/ota/update Content-Type:application/json < /tmp/body.json")" deny
+guard_case "HTTPie piped-stdin inferred OTA POST is denied" \
+    "$(payload exec_command command "printf '{}' | http http://bench.invalid/ota/update Content-Type:application/json")" deny
 guard_case "generic requests direct OTA POST is denied" \
     "$(payload exec_command command "python3 -c 'import requests; requests.request(\"POST\", \"http://bench.invalid/ota/update\")'")" deny
 guard_case "urllib inferred direct OTA POST is denied" \
@@ -262,8 +270,16 @@ guard_case "wget direct OTA POST is denied" \
     "$(payload exec_command command "wget --post-data=x http://bench.invalid/ota/update")" deny
 guard_case "percent-encoded direct OTA POST is denied" \
     "$(payload exec_command command "curl -X POST http://bench.invalid/ota%2Fupdate")" deny
+guard_case "dynamic-variable direct OTA POST is denied" \
+    "$(payload exec_command command 'part=/ota; curl -X POST http://bench.invalid${part}/update')" deny
+guard_case "dynamic-substitution direct OTA POST is denied" \
+    "$(payload exec_command command 'curl -X POST http://bench.invalid/$(printf ota)/update')" deny
 guard_case "read-only OTA update GET remains allowed" \
     "$(payload exec_command command "curl -fsS http://bench.invalid/ota/update")" ""
+guard_case "read-only OTA GET with metadata query remains allowed" \
+    "$(payload exec_command command "curl -fsS http://bench.invalid/ota/update?metadata=x")" ""
+guard_case "read-only OTA GET with json query remains allowed" \
+    "$(payload exec_command command "curl -fsS http://bench.invalid/ota/update?json=x")" ""
 guard_case "read-only source search may mention the OTA route" \
     "$(payload exec_command command "rg -n '/ota/update' main/http_ota.cpp")" ""
 guard_case "read-only source inspection may name the production gate" \
@@ -298,12 +314,21 @@ guard_case "bench gate rejects an interpreter wrapper" \
     "$(payload exec_command command "python3 $canonical_bench_ota_gate")" deny
 guard_case "bench gate rejects an env split-string wrapper" \
     "$(payload exec_command command "env -S '$canonical_bench_ota_gate'")" deny
+guard_case "git shell alias cannot wrap the bench gate" \
+    "$(payload exec_command command "git -c alias.ota='!$canonical_bench_ota_gate' ota")" deny
 ln -s "$root/scripts/production-ota-gate.py" "$tmp/production-ota-gate.py"
 guard_case "bench gate rejects a symlink alias" \
     "$(payload exec_command command "$tmp/production-ota-gate.py ${canonical_bench_ota_gate#*production-ota-gate.py }")" deny
 ln -s "$root/scripts/production-ota-gate.py" "$tmp/run-ota"
 guard_case "bench gate rejects a differently named symlink alias" \
     "$(payload exec_command command "$tmp/run-ota ${canonical_bench_ota_gate#*production-ota-gate.py }")" deny
+guard_case "env split-string cannot wrap a differently named symlink alias" \
+    "$(payload exec_command command "env -S '$tmp/run-ota ${canonical_bench_ota_gate#*production-ota-gate.py }'")" deny
+guard_case "xargs cannot wrap a differently named symlink alias" \
+    "$(payload exec_command command "printf x | xargs $tmp/run-ota")" deny
+cp "$root/scripts/production-ota-gate.py" "$tmp/copied-ota"
+guard_case "bench gate rejects a differently named exact copy" \
+    "$(payload exec_command command "$tmp/copied-ota ${canonical_bench_ota_gate#*production-ota-gate.py }")" deny
 guard_case "canonical production gate cannot be chained into a watcher" \
     "$(payload exec_command command "$canonical_ota_gate; curl -X POST http://production.invalid/ota/update")" deny
 guard_case "production staging without execution is not an admitted agent shape" \

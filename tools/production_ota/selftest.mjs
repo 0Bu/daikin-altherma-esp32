@@ -279,15 +279,29 @@ try {
         '":=" in argument or', 'False or')],
     ["the raw OTA guard drops PowerShell posts", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        '"method=post", "method:post", "-methodpost", "data=", "json=",',
-        '"method=post", "method:post", "-ignored-method-post", "data=", "json=",')],
+        '"method=post", "method:post", "-methodpost",',
+        '"method=post", "method:post", "-ignored-method-post",')],
+    ["the raw OTA guard drops HTTPie raw bodies", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'argument == "--raw" or argument.startswith("--raw=")',
+        'argument == "--ignored-raw" or argument.startswith("--ignored-raw=")')],
+    ["shell-built OTA update routes bypass the raw guard", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '"/update" in compact', '"/ignored-update" in compact')],
+    ["a Git shell alias can wrap the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'args[0] not in {"diff", "grep", "log", "show", "status"}',
+        'args[0] not in {"diff", "grep", "log", "show", "status", "-c"}')],
     ["a renamed symlink can impersonate the canonical OTA gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        "if os.path.samefile(lexical, canonical):", "if False:")],
+        "os.path.samefile(lexical, canonical)", "False")],
+    ["a renamed exact copy can impersonate the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "filecmp.cmp(lexical, canonical, shallow=False)", "False")],
     ["an env split-string wrapper can invoke the canonical OTA gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        "(names_gate and not read_only_gate_inspection(command))",
-        "(False and not read_only_gate_inspection(command))")],
+        "results.extend(shell_token_sets(resolved_segment[index + 1], depth + 1))",
+        "results.extend([])")],
     ["a merely connected image can bypass allocation failure evidence", () =>
       replaceOnce("main/logic/health_gate.hpp", "!service.allocation_failures && x10a_ready",
         "x10a_ready")],

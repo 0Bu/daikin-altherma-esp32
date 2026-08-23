@@ -358,22 +358,34 @@ assert.match(hook, /"--install-bench"[\s\S]{0,220}?"--confirm-bench"\]\s*=\s*"be
 assert.match(hook, /Path\(os\.path\.abspath\(executable\)\) != canonical/,
   "a foreign symlink alias must not impersonate the canonical gate path");
 assert.match(hook,
-  /def direct_ota_update_write[\s\S]{0,3000}?executable == "curl"[\s\S]{0,1800}?executable in \{"http", "xh"\}[\s\S]{0,800}?executable == "wget"/,
+  /def direct_ota_update_write[\s\S]{0,4200}?executable == "curl"[\s\S]{0,2600}?executable in \{"http", "xh"\}[\s\S]{0,1800}?executable == "wget"/,
   "raw OTA write detection must cover ordinary curl, HTTPie/xh and wget shapes");
 assert.match(hook,
   /argument\.startswith\(\("--data", "--form", "--json=", "--upload-file="\)\)/,
   "all curl data/form long options, including equals forms, must imply an OTA write");
 assert.match(hook,
-  /executable in \{"http", "xh"\}[\s\S]{0,500}?argument == "post"[\s\S]{0,500}?":=" in argument[\s\S]{0,300}?"=" in argument and "==" not in argument/,
+  /executable in \{"http", "xh"\}[\s\S]{0,1200}?"post"[\s\S]{0,900}?":=" in argument[\s\S]{0,300}?"=" in argument and "==" not in argument/,
   "HTTPie/xh must detect a method after options and implicit body-field POSTs");
 assert.match(hook,
-  /"-methodpost"[\s\S]{0,80}?"data="[\s\S]{0,80}?"json="/,
+  /"-methodpost"[\s\S]{0,240}?"request\(" in compact and \("data=" in compact or "json=" in compact\)/,
   "PowerShell and inferred interpreter body writes must remain visible to the raw classifier");
 assert.match(hook,
-  /def aliases_canonical_ota_gate[\s\S]{0,1000}?os\.path\.samefile\(lexical, canonical\)/,
-  "renamed symlink and hardlink aliases must not execute the canonical OTA gate");
+  /def possible_ota_update_route[\s\S]{0,500}?"\/update" in compact[\s\S]{0,120}?re\.search\(r"\[\$`\]", decoded\)/,
+  "shell-built OTA update routes must remain in the raw-write classifier");
 assert.match(hook,
-  /aliases_canonical_ota_gate\(payload, command\)[\s\S]{0,120}?names_gate and not read_only_gate_inspection\(command\)/,
+  /body_from_stdin[\s\S]{0,700}?argument == "--raw"[\s\S]{0,800}?has_body/,
+  "HTTPie/xh raw bodies and stdin must imply a write when no safe method is proven");
+assert.match(hook,
+  /def read_only_gate_inspection[\s\S]{0,500}?args\[0\] not in \{"diff", "grep", "log", "show", "status"\}/,
+  "a Git shell alias must never hide inside the source-inspection exception");
+assert.match(hook,
+  /def aliases_canonical_ota_gate[\s\S]{0,1400}?for token in tokens[\s\S]{0,700}?os\.path\.samefile\(lexical, canonical\)[\s\S]{0,100}?filecmp\.cmp\(lexical, canonical, shallow=False\)/,
+  "renamed symlink, hardlink and exact-copy aliases must not execute the canonical OTA gate");
+assert.match(hook,
+  /token in \{"-S", "--split-string"\}[\s\S]{0,120}?shell_token_sets\(resolved_segment\[index \+ 1\], depth \+ 1\)/,
+  "env split strings must be recursively classified");
+assert.match(hook,
+  /aliases_canonical_ota_gate\(payload, command\) and not read_only_inspection[\s\S]{0,120}?names_gate and not read_only_inspection/,
   "wrappers naming the gate must fail unless they are an explicit read-only source inspection");
 
 assert.match(health, /OTA_HEALTH_MIN_FREE_BYTES\s*=\s*24u\s*\*\s*1024u/,

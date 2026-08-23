@@ -2404,7 +2404,7 @@ Structure:
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract, one hundred twenty-one OTA mutation canaries and seventy delivery/promotion canaries make stage
+  contract, one hundred twenty-one OTA mutation canaries and seventy-four delivery/promotion canaries make stage
   removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
   rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash

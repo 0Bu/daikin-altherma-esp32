@@ -9,6 +9,7 @@ formatting actions stay anchored to the versioned hook core's own worktree.
 from __future__ import annotations
 
 import argparse
+import filecmp
 import fnmatch
 import json
 import os
@@ -534,6 +535,10 @@ def shell_token_sets(command: str, depth: int = 0) -> list[tuple[list[str], bool
         resolved_segment = [
             resolve_static_shell_token(token, persistent_assignments)[0] for token in segment_tokens
         ]
+        if resolved_segment and Path(resolved_segment[0]).name == "env":
+            for index, token in enumerate(resolved_segment[:-1]):
+                if token in {"-S", "--split-string"}:
+                    results.extend(shell_token_sets(resolved_segment[index + 1], depth + 1))
         tokens, env_without_command = effective_shell_tokens(shlex.join(resolved_segment))
         results.append((tokens, env_without_command))
         if not tokens:
@@ -936,17 +941,32 @@ def canonical_production_ota_command(payload: dict[str, Any], command: str) -> b
     )
 
 
+def possible_ota_update_route(command: str) -> bool:
+    """Recognize literal OTA routes and common shell-built equivalents."""
+    decoded = unquote(unquote(command))
+    compact = re.sub(r"[\s'\"+\\]", "", decoded.lower())
+    if "/ota/update" in compact or "ota/update" in compact:
+        return True
+    return (
+        "/update" in compact
+        and "ota" in compact
+        and re.search(r"[$`]", decoded) is not None
+    )
+
+
 def direct_ota_update_write(command: str) -> bool:
     """Recognize ordinary shell/client write shapes aimed at the OTA update route."""
     decoded = unquote(unquote(command))
     compact = re.sub(r"[\s'\"+\\]", "", decoded.lower())
-    if "/ota/update" not in compact and "ota/update" not in compact:
+    if not possible_ota_update_route(command):
         return False
     if any(marker in compact for marker in (
         "-xpost", "--requestpost", "--request=post", "--data", "--json", "--form",
         "--upload-file", "--post-data", "--post-file", ".post(", ".request(post,",
-        "method=post", "method:post", "-methodpost", "data=", "json=",
+        "method=post", "method:post", "-methodpost",
     )):
+        return True
+    if "request(" in compact and ("data=" in compact or "json=" in compact):
         return True
     for tokens, _ in shell_token_sets(decoded):
         if not tokens:
@@ -968,7 +988,17 @@ def direct_ota_update_write(command: str) -> bool:
                    re.match(r"^(?:-xpost|-d.+|--request=post)", argument):
                     return True
         elif executable in {"http", "xh"}:
-            if any(argument == "post" for argument in arguments) or any(
+            explicit_methods = {
+                argument for argument in arguments
+                if argument in {"delete", "get", "head", "options", "patch", "post", "put"}
+            }
+            body_from_stdin = (
+                re.search(rf"[|][^|;&]*\b(?:[^\s]*/)?{executable}(?:\s|$)", decoded) is not None
+                or re.search(rf"(?:^|[;&])[^;&|]*\b(?:[^\s]*/)?{executable}\b[^;&|]*<{{1,3}}(?!<)", decoded) is not None
+            )
+            has_body = body_from_stdin or any(
+                argument == "--raw" or argument.startswith("--raw=") or
+                argument in {"--form", "--multipart"} or
                 not argument.startswith("-") and (
                     ":=" in argument or
                     ("=" in argument and "==" not in argument) or
@@ -976,7 +1006,8 @@ def direct_ota_update_write(command: str) -> bool:
                 )
                 for argument in arguments
                 if "://" not in argument
-            ):
+            )
+            if (explicit_methods and explicit_methods != {"get"} and explicit_methods != {"head"}) or has_body:
                 return True
         elif executable == "wget":
             for index, argument in enumerate(arguments):
@@ -993,14 +1024,40 @@ def direct_ota_update_write(command: str) -> bool:
 def read_only_gate_inspection(command: str) -> bool:
     """Allow source inspection to name the gate without allowing an execution wrapper."""
     token_sets = [tokens for tokens, _ in shell_token_sets(command) if tokens]
-    return bool(token_sets) and all(
-        Path(tokens[0]).name in {"cat", "diff", "git", "grep", "head", "less", "rg", "sed", "tail"}
-        for tokens in token_sets
-    )
+    if not token_sets:
+        return False
+    for tokens in token_sets:
+        executable = Path(tokens[0]).name
+        args = tokens[1:]
+        if executable == "git":
+            if not args or args[0] not in {"diff", "grep", "log", "show", "status"}:
+                return False
+            if any(
+                arg in {"--output", "--ext-diff", "--textconv"} or arg.startswith("--output=")
+                for arg in args[1:]
+            ):
+                return False
+            continue
+        if executable not in {"cat", "diff", "grep", "head", "rg", "sed", "tail"}:
+            return False
+        if executable == "diff" and any(
+            arg == "--output" or arg.startswith("--output=") for arg in args
+        ):
+            return False
+        if executable == "rg" and any(
+            arg == "--pre" or arg.startswith("--pre=") for arg in args
+        ):
+            return False
+        if executable == "sed" and any(
+            arg == "-i" or arg.startswith("-i") or arg == "--in-place" or arg.startswith("--in-place=")
+            for arg in args
+        ):
+            return False
+    return True
 
 
 def aliases_canonical_ota_gate(payload: dict[str, Any], command: str) -> bool:
-    """Reject an existing symlink or hardlink under a different executable path."""
+    """Reject renamed aliases or exact copies, including launcher arguments."""
     effective_cwd, cwd_error = effective_shell_cwd(payload)
     if cwd_error:
         return False
@@ -1008,17 +1065,18 @@ def aliases_canonical_ota_gate(payload: dict[str, Any], command: str) -> bool:
     for tokens, _ in shell_token_sets(command):
         if not tokens:
             continue
-        executable = Path(tokens[0]).expanduser()
-        if not executable.is_absolute():
-            executable = effective_cwd / executable
-        lexical = Path(os.path.abspath(executable))
-        if lexical == canonical:
-            continue
-        try:
-            if os.path.samefile(lexical, canonical):
-                return True
-        except OSError:
-            pass
+        for token in tokens:
+            candidate = Path(token).expanduser()
+            if not candidate.is_absolute():
+                candidate = effective_cwd / candidate
+            lexical = Path(os.path.abspath(candidate))
+            if lexical == canonical or not lexical.is_file():
+                continue
+            try:
+                if os.path.samefile(lexical, canonical) or filecmp.cmp(lexical, canonical, shallow=False):
+                    return True
+            except OSError:
+                pass
     return False
 
 
@@ -1032,8 +1090,9 @@ def production_ota_violation(payload: dict[str, Any]) -> str | None:
         return None
     compact = re.sub(r"[\s'\"+\\]", "", unquote(unquote(command)).lower())
     names_gate = "production-ota-gate.py" in compact
-    if aliases_canonical_ota_gate(payload, command) or \
-       (names_gate and not read_only_gate_inspection(command)):
+    read_only_inspection = read_only_gate_inspection(command)
+    if (aliases_canonical_ota_gate(payload, command) and not read_only_inspection) or \
+       (names_gate and not read_only_inspection):
         return "the OTA gate is not a canonical direct, unchained, role- and artifact-bound command"
     if direct_ota_update_write(command):
         return (
