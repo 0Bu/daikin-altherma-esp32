@@ -287,11 +287,12 @@ try {
         'argument == "--ignored-raw" or argument.startswith("--ignored-raw=")')],
     ["shell-built OTA update routes bypass the raw guard", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        '"/update" in compact', '"/ignored-update" in compact')],
+        're.search(r"https?://[^\'\\";&|]*[$`][\\s\\S]{0,160}/update", decoded, re.IGNORECASE)',
+        're.search(r"ignored-dynamic-route", decoded, re.IGNORECASE)')],
     ["a Git shell alias can wrap the canonical OTA gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        'args[0] not in {"diff", "grep", "log", "show", "status"}',
-        'args[0] not in {"diff", "grep", "log", "show", "status", "-c"}')],
+        'args = tokens[1:]\n        if executable not in',
+        'args = tokens[1:]\n        if executable == "git":\n            continue\n        if executable not in')],
     ["a renamed symlink can impersonate the canonical OTA gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "os.path.samefile(lexical, canonical)", "False")],
@@ -302,6 +303,36 @@ try {
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "results.extend(shell_token_sets(resolved_segment[index + 1], depth + 1))",
         "results.extend([])")],
+    ["wrapped network clients are no longer inspected", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "for client_index, token in enumerate(tokens):",
+        "for client_index, token in enumerate(tokens[:1]):")],
+    ["HTTPie stdin bodies are no longer recognized", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "shell_client_receives_stdin(decoded, executable)", "False")],
+    ["raw HTTP request lines bypass the OTA guard", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'r"(?:^|[\\s\'\\"=])post(?:$|[\\s\'\\";&|])"',
+        'r"ignored-raw-http-post"')],
+    ["curl URL globs can reach the OTA route", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        /(def possible_ota_update_route[\s\S]{0,1200}?)for expanded in expand_static_braces\(token\):/,
+        "$1for expanded in [token]:")],
+    ["shell globs can execute the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'token_may_name_command(token, "production-ota-gate.py")', "False")],
+    ["urllib inferred POST bodies bypass the OTA guard", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '"urlopen(" in compact and "data=" in compact', "False")],
+    ["attached env split strings can wrap a renamed gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'token.startswith("-S") and token != "-S"', "False")],
+    ["equals-form env split strings can wrap a renamed gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'token.startswith("--split-string=")', "False")],
+    ["Git helper strings can execute a renamed gate alias", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "nested_tokens.extend(shell_token_sets(nested))", "nested_tokens.extend([])")],
     ["a merely connected image can bypass allocation failure evidence", () =>
       replaceOnce("main/logic/health_gate.hpp", "!service.allocation_failures && x10a_ready",
         "x10a_ready")],
