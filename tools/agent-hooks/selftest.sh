@@ -298,9 +298,19 @@ guard_case "brace argument can build a raw netcat HTTP OTA POST" \
     "$(payload exec_command command "$brace_format_raw_ota_command")" deny
 guard_case "default-expansion argument can build a raw netcat HTTP OTA POST" \
     "$(payload exec_command command "printf '%s $ota_lease_path HTTP/1.1\\r\\n\\r\\n' \${x:-POST} | nc bench.invalid 80")" deny
+guard_case "printf fields can assemble a raw netcat HTTP OTA POST" \
+    "$(payload exec_command command "printf '%s%s $ota_lease_path HTTP/1.1\\r\\nHost: bench.invalid\\r\\nContent-Length: 0\\r\\n\\r\\n' PO ST | nc bench.invalid 80")" deny
+guard_case "printf hex escape can assemble a raw netcat HTTP OTA POST" \
+    "$(payload exec_command command "printf '\\x50OST $ota_lease_path HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
+guard_case "printf percent-b hex escape can assemble a raw netcat HTTP OTA POST" \
+    "$(payload exec_command command "printf '%b' '\\x50OST $ota_lease_path HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
 dev_tcp_raw_ota_command="bash -c 'printf \"POST $ota_lease_path HTTP/1.1\\r\\nHost: bench.invalid\\r\\n\\r\\n\" > /dev/tcp/bench.invalid/80'"
 guard_case "Bash dev-tcp raw HTTP OTA POST is denied" \
     "$(payload exec_command command "$dev_tcp_raw_ota_command")" deny
+guard_case "printf fields cannot assemble a dev-tcp HTTP OTA POST" \
+    "$(payload exec_command command "bash -c 'printf \"%s%s $ota_lease_path HTTP/1.1\\r\\nHost: bench.invalid\\r\\nContent-Length: 0\\r\\n\\r\\n\" PO ST > /dev/tcp/bench.invalid/80'")" deny
+guard_case "printf raw HTTP OTA POST over telnet is denied" \
+    "$(payload exec_command command "(printf 'POST $ota_lease_path HTTP/1.1\\r\\nContent-Length: 1\\r\\n\\r\\n'; printf x) | telnet bench.invalid 80")" deny
 guard_case "generic requests direct OTA POST is denied" \
     "$(payload exec_command command "python3 -c 'import requests; requests.request(\"POST\", \"http://bench.invalid/ota/update\")'")" deny
 guard_case "urllib inferred direct OTA POST is denied" \
@@ -353,6 +363,10 @@ guard_case "curl next transfer cannot mask an earlier dynamic OTA POST" \
     "$(payload exec_command command "a=PO; b=ST; curl -X \$a\$b \"$ota_lease_url\" --next -X GET http://example.invalid/health")" deny
 guard_case "curl next HEAD transfer cannot mask an earlier default OTA POST" \
     "$(payload exec_command command "curl -X P\${x:-OST} \"$ota_lease_url\" --next -X HEAD http://example.invalid/health")" deny
+guard_case "curl short next transfer cannot mask an earlier dynamic OTA POST" \
+    "$(payload exec_command command "a=PO; b=ST; curl -X \$a\$b \"$ota_lease_url\" -: -X GET http://example.invalid/health")" deny
+guard_case "clustered curl short next cannot mask an earlier dynamic OTA POST" \
+    "$(payload exec_command command "a=PO; b=ST; curl -X \$a\$b \"$ota_lease_url\" -s: -X HEAD http://example.invalid/health")" deny
 guard_case "split-variable HTTPie OTA method is denied" \
     "$(payload exec_command command 'a=PO; b=ST; http $a$b http://bench.invalid/ota/update')" deny
 guard_case "split-variable wget OTA method is denied" \
@@ -361,6 +375,10 @@ guard_case "earlier wget GET cannot mask later dynamic OTA method" \
     "$(payload exec_command command "a=PO; b=ST; wget --method=GET --method=\$a\$b \"$ota_lease_url\"")" deny
 guard_case "separated wget GET cannot mask later substituted OTA method" \
     "$(payload exec_command command "wget --method GET --method=\"\$(printf P%sT OS)\" \"$ota_lease_url\"")" deny
+guard_case "wget execute post-file OTA POST is denied" \
+    "$(payload exec_command command "wget --execute='post_file=/tmp/app.bin' \"$ota_lease_url\"")" deny
+guard_case "wget short execute post-file OTA POST is denied" \
+    "$(payload exec_command command "wget -e 'post_file=/tmp/app.bin' \"$ota_lease_url\"")" deny
 guard_case "brace-expanded curl OTA method is denied" \
     "$(payload exec_command command 'curl -X P{OST,UT} http://bench.invalid/ota/update')" deny
 guard_case "equals brace-expanded curl OTA method is denied" \

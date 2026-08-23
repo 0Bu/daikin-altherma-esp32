@@ -384,10 +384,12 @@ assert.match(hook,
   /executable == "curl"[\s\S]{0,3600}?dynamic_client_arguments and not forces_get/,
   "dynamic curl method/body arguments must fail unless GET or HEAD is literal");
 assert.match(hook,
-  /def curl_short_option_effects[\s\S]{0,900}?option == "X"[\s\S]{0,300}?option in \{"d", "F", "T"\}/,
-  "clustered curl X/data/form/upload short options must be decoded");
-assert.ok(hook.includes("method, cluster_get, cluster_body, cluster_ambiguous = curl_short_option_effects("),
+  /def curl_short_option_effects[\s\S]{0,900}?option == ":"[\s\S]{0,300}?option == "X"[\s\S]{0,300}?option in \{"d", "F", "T"\}/,
+  "clustered curl next/X/data/form/upload short options must be decoded");
+assert.ok(hook.includes("method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = curl_short_option_effects("),
   "curl short-option effects must feed the write classifier");
+assert.match(hook, /if cluster_next:\s*return True/,
+  "curl's short -: transfer boundary must fail closed like --next");
 assert.match(hook,
   /if "--next" in arguments:\s*return True/,
   "curl multi-transfer commands aimed at the OTA route must fail closed per transfer group");
@@ -397,6 +399,9 @@ assert.match(hook,
 assert.match(hook,
   /executable == "wget"[\s\S]{0,900}?dynamic_client_arguments and not literal_safe_method/,
   "dynamic wget method/body arguments must fail unless GET or HEAD is literal");
+assert.match(hook,
+  /executable == "wget"[\s\S]{0,500}?argument in \{"-e", "--execute"\}[\s\S]{0,240}?argument\.startswith\("--execute="\)/,
+  "wget startup commands must not synthesize an OTA POST outside the gate");
 assert.match(hook,
   /forces_get[\s\S]{0,1800}?not forces_get and/,
   "explicit curl GET shapes must not be mislabeled as OTA writes merely for carrying query data");
@@ -431,8 +436,8 @@ assert.match(hook,
   /def shell_argument_may_be_raw_post[\s\S]{0,240}?expand_static_braces\(argument\)[\s\S]{0,300}?re\.match\(r"\^\\s\*post\\s\+\/"[\s\S]{0,240}?re\.search\(r"\[\$`\]"/,
   "brace-, quote-, ANSI-C- and dynamically built raw HTTP POST methods must fail closed");
 assert.match(hook,
-  /raw_tokens\s*=\s*shell_syntax_tokens\(decoded\)[\s\S]{0,400}?\{"nc", "ncat", "netcat", "openssl", "socat"\}[\s\S]{0,180}?\/dev\/\(\?:tcp\|udp\)\/[\s\S]{0,180}?has_printf[\s\S]{0,700}?shell_argument_may_be_raw_post\(argument\)[\s\S]{0,400}?for candidate in \(decoded, normalized_shell\)[\s\S]{0,300}?has_printf and/,
-  "raw request-line classification must cover raw clients, dev-tcp and printf assembly");
+  /raw_tokens\s*=\s*shell_syntax_tokens\(decoded\)[\s\S]{0,400}?\{"nc", "ncat", "netcat", "openssl", "socat", "telnet"\}[\s\S]{0,180}?\/dev\/\(\?:tcp\|udp\)\/[\s\S]{0,180}?has_printf[\s\S]{0,500}?has_raw_network_client and \(\s*has_printf[\s\S]{0,500}?shell_argument_may_be_raw_post\(argument\)/,
+  "every printf-fed raw OTA route must fail closed, including nc, telnet and dev-tcp assembly");
 assert.match(hook,
   /def shell_argument_may_be_post[\s\S]{0,700}?expand_static_braces\(argument\.lower\(\)\)[\s\S]{0,500}?--method=post/,
   "brace- and glob-expanded client method arguments must remain write-shaped");

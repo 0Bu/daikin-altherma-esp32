@@ -317,11 +317,14 @@ try {
         "dynamic_client_arguments = False")],
     ["clustered curl short options bypass the OTA method parser", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        "method, cluster_get, cluster_body, cluster_ambiguous = curl_short_option_effects(",
-        "method, cluster_get, cluster_body, cluster_ambiguous = ignored_curl_short_options(")],
+        "method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = curl_short_option_effects(",
+        "method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = ignored_curl_short_options(")],
     ["curl next transfers can hide an earlier OTA write", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'if "--next" in arguments:', "if False:")],
+    ["curl short next transfers can hide an earlier OTA write", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "if cluster_next:", "if False:")],
     ["curl GET flags can mask a dynamic explicit POST", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         `not explicit_method and (
@@ -334,6 +337,9 @@ try {
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'literal_safe_method = effective_method in {"get", "head"}',
         'literal_safe_method = any(argument in {"--method=get", "--method=head"} for argument in arguments)')],
+    ["wget startup commands can synthesize an OTA POST", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'argument in {"-e", "--execute"}', "False")],
     ["HTTPie stdin bodies are no longer recognized", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "shell_client_receives_stdin(decoded, executable)", "False")],
@@ -353,11 +359,15 @@ try {
         "return False")],
     ["printf can assemble an OTA request line across arguments", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        "or has_printf and (", "or False and (")],
+        "has_raw_network_client and (\n        has_printf",
+        "has_raw_network_client and (\n        False")],
     ["shell dev-tcp can carry a raw OTA request", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         're.search(r"/dev/(?:tcp|udp)/", decoded, re.IGNORECASE)',
         're.search(r"ignored-dev-tcp", decoded, re.IGNORECASE)')],
+    ["telnet can carry a raw OTA request", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '"socat", "telnet"', '"socat"')],
     ["brace-expanded client methods bypass the OTA guard", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "for expanded in expand_static_braces(argument.lower()):",

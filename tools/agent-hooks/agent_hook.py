@@ -1026,10 +1026,10 @@ def shell_argument_may_be_raw_post(argument: str) -> bool:
     return re.search(r"[$`]", method.group(1)) is not None if method else False
 
 
-def curl_short_option_effects(argument: str, following: str = "") -> tuple[str, bool, bool, bool]:
-    """Return (method, GET flag, body, ambiguous write) for one curl short-option cluster."""
+def curl_short_option_effects(argument: str, following: str = "") -> tuple[str, bool, bool, bool, bool]:
+    """Return (method, GET flag, body, next transfer, ambiguous write) for a curl short cluster."""
     if not argument.startswith("-") or argument.startswith("--") or argument == "-":
-        return "", False, False, False
+        return "", False, False, False, False
     consumes_value = set("AbcCDeEFHKmoPQrTtuUwXxyz")
     no_value = set("012346aBfgGhIiJkLlMnNOpqRsSvVZ#")
     cluster = argument[1:]
@@ -1039,15 +1039,17 @@ def curl_short_option_effects(argument: str, following: str = "") -> tuple[str, 
         if option == "G":
             saw_get = True
             continue
+        if option == ":":
+            return "", saw_get, False, True, False
         if option == "X":
-            return remainder or following, saw_get, False, False
+            return remainder or following, saw_get, False, False, False
         if option in {"d", "F", "T"}:
-            return "", saw_get, True, False
+            return "", saw_get, True, False, False
         if option in consumes_value:
-            return "", saw_get, False, False
+            return "", saw_get, False, False, False
         if option not in no_value:
-            return "", saw_get, False, any(candidate in remainder for candidate in "XdFT")
-    return "", saw_get, False, False
+            return "", saw_get, False, False, any(candidate in remainder for candidate in "XdFT:")
+    return "", saw_get, False, False, False
 
 
 def direct_ota_update_write(command: str) -> bool:
@@ -1058,13 +1060,15 @@ def direct_ota_update_write(command: str) -> bool:
         return False
     raw_tokens = shell_syntax_tokens(decoded)
     has_raw_network_client = any(
-        Path(argument).name.lower() in {"nc", "ncat", "netcat", "openssl", "socat"}
+        Path(argument).name.lower() in {"nc", "ncat", "netcat", "openssl", "socat", "telnet"}
         for argument in raw_tokens
     ) or re.search(r"/dev/(?:tcp|udp)/", decoded, re.IGNORECASE) is not None
-    has_printf = any(Path(argument).name.lower() == "printf" for argument in raw_tokens)
+    has_printf = any(Path(argument).name.lower() == "printf" for argument in raw_tokens) or \
+        re.search(r"(?:^|[\s'\";&|])printf(?:[\s'\";&|]|$)", decoded, re.IGNORECASE) is not None
     normalized_shell = " ".join(raw_tokens)
     if has_raw_network_client and (
-        any(shell_argument_may_be_raw_post(argument) for argument in raw_tokens)
+        has_printf
+        or any(shell_argument_may_be_raw_post(argument) for argument in raw_tokens)
         or any(
             argument.lower() == "post" and index + 1 < len(raw_tokens)
             and raw_tokens[index + 1].startswith("/")
@@ -1073,10 +1077,6 @@ def direct_ota_update_write(command: str) -> bool:
         or any(
             re.search(r"(?:^|[\s'\"=])post(?:$|[\s'\";&|])", candidate, re.IGNORECASE)
             for candidate in (decoded, normalized_shell)
-        )
-        or has_printf and (
-            any(shell_argument_may_be_post(argument) for argument in raw_tokens)
-            or any(re.search(r"[$`]", argument) for argument in raw_tokens)
         )
     ):
         return True
@@ -1119,11 +1119,13 @@ def direct_ota_update_write(command: str) -> bool:
                         explicit_method = re.sub(r"^(?:-x|--request=)", "", argument)
                         if shell_argument_may_be_post(argument):
                             return True
-                    method, cluster_get, cluster_body, cluster_ambiguous = curl_short_option_effects(
+                    method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = curl_short_option_effects(
                         raw_arguments[index], raw_arguments[index + 1] if index + 1 < len(raw_arguments) else "",
                     )
                     has_get_flag = has_get_flag or cluster_get
                     has_body = has_body or cluster_body
+                    if cluster_next:
+                        return True
                     if cluster_ambiguous:
                         return True
                     if method:
@@ -1177,6 +1179,13 @@ def direct_ota_update_write(command: str) -> bool:
                     return True
             elif executable == "wget":
                 if any(shell_argument_may_be_post(argument) for argument in arguments):
+                    return True
+                if any(
+                    argument in {"-e", "--execute"}
+                    or argument.startswith("--execute=")
+                    or argument.startswith("-e") and not argument.startswith("--")
+                    for argument in arguments
+                ):
                     return True
                 effective_method = ""
                 for index, argument in enumerate(arguments):
