@@ -193,11 +193,12 @@ source contract turns red; all one hundred twenty-four seeded regressions are re
 exact-artifact bench-to-production workflow: one bench install write and early return, initial target
 health window, full signed release-binary pressure, the short completed-verifier state,
 105-second release health window, a stable exact legacy offer before the bench-only dev restore, and
-the compact transfer observer's 2 Hz connection-churn ceiling, plus bounded MQTT recovery after
-intentional OTA- and weather-TLS transport pauses, including either
+the compact transfer observer's 2 Hz connection-churn ceiling and one-second request timeout, the
+firmware's three-second completed-verifier dwell, plus bounded MQTT recovery after intentional OTA-
+and weather-TLS transport pauses, including either
 ordering of paused MQTT and matching weather evidence in a streamed status snapshot, and the sole generation-bound
 production write, with the OTA pause lease held for every in-flight status response. Its paired
-`tools/production_ota/selftest.mjs` requires all ninety-eight bench-delivery and production-promotion
+`tools/production_ota/selftest.mjs` requires all one hundred bench-delivery and production-promotion
 stage-removal mutations to turn that same contract red.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named

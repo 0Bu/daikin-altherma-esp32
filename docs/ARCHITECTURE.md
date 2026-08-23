@@ -2343,7 +2343,10 @@ Structure:
   consumes one exact check generation in one un-retried update POST, and observes the immediate
   successor generation, completed verifier and operation-local heap minima. Its urllib observer
   closes each response connection, so compact `/ota/status` sampling is capped at 2 Hz during the
-  transfer instead of creating 10 new sessions per second beside firmware TLS. The exact target then
+  transfer instead of creating 10 new sessions per second beside firmware TLS. Firmware retains the
+  completed state for three seconds before reboot. The compact request has a one-second socket bound;
+  the dwell therefore outlives a prior request, the 0.5-second sleep, the next request and another
+  0.5 seconds of scheduling margin. The exact target then
   survives the 105-second rollback-health window and three minutes of status/values/diag plus real
   manifest-TLS pressure with MQTT recovery. It returns before release staging or production target
   construction; failure causes no retry or compensating write. The unwired bench does not require
@@ -2407,7 +2410,7 @@ Structure:
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract, one hundred twenty-four OTA mutation canaries and ninety-eight delivery/promotion
+  contract, one hundred twenty-four OTA mutation canaries and one hundred delivery/promotion
   canaries make stage removal, shortened stress, signature bypass, weaker heap floors, raw OTA
   writes and disabled rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash

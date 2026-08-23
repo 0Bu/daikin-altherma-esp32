@@ -200,6 +200,7 @@ constexpr TickType_t kChangelogDeadline = pdMS_TO_TICKS(30000);
 constexpr int  kOtaBufSize    = 2048;   // download chunk; deliberately small (contiguous heap)
 constexpr size_t kManifestMax = 1024;   // published installer+provenance manifest stays below 1 KiB
 constexpr unsigned kMaxRedirects = 5;
+constexpr int kDoneBeforeRebootMs = 3000;
 // MQTT publishes once a second. Hold the operation flag for a little longer than one cadence before
 // opening TLS so a publisher which woke just before the OTA task has time to finish and stand aside.
 constexpr TickType_t kNetworkQuiesceLead = pdMS_TO_TICKS(1100);
@@ -1403,7 +1404,9 @@ void run_update(const OtaTaskArgs& request) {
         s_status.progress = 100;
         s_status.message  = "Rebooting into the new firmware";
     }
-    vTaskDelay(pdMS_TO_TICKS(600));   // let the UI poll /ota/status once more before the link drops
+    // Outlive both the 1 Hz browser and the gate's 2 Hz connection-churn-bounded observer, with
+    // enough LAN/HTTPD scheduling margin for either to retain completed-verifier evidence.
+    vTaskDelay(pdMS_TO_TICKS(kDoneBeforeRebootMs));
     esp_restart();
 }
 

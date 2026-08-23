@@ -55,8 +55,9 @@ OTA_CHECK_TIMEOUT_S = 120
 OTA_TIMEOUT_S = 480
 OTA_OFFER_POLL_SECONDS = 0.1
 # urllib closes each response connection. Keep the compact in-transfer observer below allocator-
-# churning load while still sampling the firmware's 600 ms completed-state dwell before reboot.
+# churning load and bound each compact request so the firmware's completed-state dwell is observable.
 OTA_STATUS_POLL_SECONDS = 0.5
+OTA_STATUS_REQUEST_TIMEOUT_S = 1.0
 MQTT_RECOVERY_TIMEOUT_S = 15
 LEGACY_OFFER_STABLE_SECONDS = 3.0
 BENCH_HEALTH_WINDOW_S = 105
@@ -734,7 +735,7 @@ def wait_for_new_firmware(
     saw_done = False
     while time.monotonic() < deadline:
         try:
-            ota = request_json(host, "/ota/status")
+            ota = request_json(host, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S)
             if ota.get("state") == "error":
                 fail(f"OTA failed: {ota.get('message', '')}")
             saw_done = saw_done or ota.get("state") == "done"

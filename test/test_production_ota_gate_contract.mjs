@@ -43,11 +43,18 @@ assert.match(gate, /STRESS_SECONDS\s*=\s*180/,
   "both hardware stages need the fixed three-minute pressure window");
 const otaCheckTimeout = Number(gate.match(/OTA_CHECK_TIMEOUT_S\s*=\s*(\d+)/)?.[1]);
 const otaTimeout = Number(gate.match(/OTA_TIMEOUT_S\s*=\s*(\d+)/)?.[1]);
+const otaStatusPollSeconds = Number(gate.match(/OTA_STATUS_POLL_SECONDS\s*=\s*([\d.]+)/)?.[1]);
+const otaStatusRequestTimeoutSeconds = Number(
+  gate.match(/OTA_STATUS_REQUEST_TIMEOUT_S\s*=\s*([\d.]+)/)?.[1]);
+const otaDoneDwellMs = Number(ota.match(/kDoneBeforeRebootMs\s*=\s*(\d+)/)?.[1]);
 const quiesceCycles = Number(quiesce.match(/OTA_QUIESCE_MAX_CYCLES\s*=\s*(\d+)/)?.[1]);
 assert.ok(otaCheckTimeout >= 120,
   "host check observer must include two setup attempts, headroom waits, and manifest body deadline");
 assert.ok(otaTimeout >= 480,
   "the sole-write observer must outlive re-manifest, five-minute firmware deadline, verification and reboot");
+assert.ok(otaDoneDwellMs >=
+    (2 * otaStatusRequestTimeoutSeconds + otaStatusPollSeconds) * 1000 + 500,
+  "the completed state must outlive a prior request, poll sleep, next request and scheduling margin");
 assert.ok(quiesceCycles > otaTimeout,
   "publisher/poller quiescence must strictly outlive the authoritative host observer");
 assert.equal(occurrences(gate, "time.monotonic() + OTA_CHECK_TIMEOUT_S"), 4,
@@ -183,6 +190,9 @@ assert.match(legacyOfferWait,
   "the legacy offer must remain continuously exact and idle before the one bench restore write");
 const newFirmwareWait = gate.slice(gate.indexOf("def wait_for_new_firmware("),
   gate.indexOf("\ndef set_update_channel(", gate.indexOf("def wait_for_new_firmware(")));
+assert.match(newFirmwareWait,
+  /request_json\(host, "\/ota\/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S\)/,
+  "the compact completed-state observer must use its bounded request timeout");
 assert.match(newFirmwareWait,
   /ota\.get\("state"\)\s+not\s+in\s+\("checking",\s*"updating",\s*"done"\)[\s\S]{0,160}?request_json\(host,\s*"\/status"\)/,
   "the reboot waiter must not poll allocation-rich /status while OTA owns TLS");
