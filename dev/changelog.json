@@ -1,1 +1,1 @@
-{"version":"1.0.3-dev.3","changelog":"Maintenance and reliability improvements."}
+{"version":"1.0.3-dev.4","changelog":"Recover boundedly from repeated TLS interruptions"}
