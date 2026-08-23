@@ -340,22 +340,46 @@ The decision is the host-tested `daik::health_gate_decide()` in `main/logic/heal
 (covered by `test/test_logic.cpp`). A USB/`@flash_args` image is `UNDEFINED`, never `PENDING_VERIFY`,
 so the gate is a no-op for it and can never strand a fresh board.
 
-### Production OTA promotion gate
+### Role-pinned maintainer OTA gates
 
-The private-inventory `production` role is updated only through the direct, unchained
-`scripts/production-ota-gate.py` command. The command accepts only the official **dev** manifest,
-binds the expected source SHA, version, application SHA-256, ESP32-S3 image metadata and Secure Boot
-v2 signature, and refuses a dirty or different local source tree. Device hosts and MACs live only
-in the untracked schema-versioned local inventory
+Every agent-run OTA write uses the direct, unchained `scripts/production-ota-gate.py` command. Both
+modes accept only the official **dev** manifest, bind the expected source SHA, version, application
+SHA-256, ESP32-S3 image metadata and Secure Boot v2 signature, refuse a dirty or different local
+source tree, prove exact HTTP Range behavior and run the complete host logic/X10A/OTA contracts.
+Device hosts and MACs live only in the untracked schema-versioned local inventory
 `$XDG_CONFIG_HOME/daikin-altherma-esp32/production-ota.json` (or the same path below `~/.config`),
 whose distinct `bench` and `production` roles prevent a swapped target without publishing private
-installation identifiers. The exact signed artifact must first run on the MAC-bound `bench` role,
-normally installed by the NVS-preserving signed USB flash workflow. The gate then runs the complete
-host logic/X10A/OTA contracts. A freshly OTA-installed target must first remain healthy beyond the
-90-second rollback probation; otherwise ESP-IDF rejects the immediate release exercise with
-`ESP_ERR_OTA_ROLLBACK_INVALID_STATE`. A USB-installed target is not rollback-armed but receives the
-same conservative dwell. Before the sustained pressure window, that exact target switches only the
-bench to the official release feed and performs a **complete signed firmware download** under
+installation identifiers.
+
+#### Ordinary bench OTA delivery
+
+`--confirm-bench bench --install-bench` is the only ordinary update path for the private-inventory
+test board. It accepts no host/MAC argument and returns before the release manifest or production
+target is constructed. Before writing, the gate requires the inventory MAC, explicit different
+current-version lease, current ELF, connected non-rollback WiFi, dev channel, MQTT, no safe mode or
+fault crash, no allocation-failure counters and safe internal heap. It then accepts one exact
+generation-bound dev offer and performs exactly one un-retried `POST /ota/update`. The returned
+generation must be the immediate successor; the observer must see completed validation and positive
+operation-local free/largest-block minima before the reboot returns on the exact target version,
+ELF and MAC with the expected software-reset reason. The target must then survive the 105-second
+rollback-health window and a fixed three-minute status/values/diag plus real-manifest-TLS pressure
+test with stable counters, recovered heap and MQTT. X10A and optional weather are intentionally not
+required on the unwired bench.
+
+No compensating write or automatic retry follows a failed acceptance check. Ordinary bench updates
+must use this OTA mode, not USB. Signed, NVS-preserving USB remains only a bootstrap path for firmware
+that predates the generation/artifact handshake or a recovery path when OTA cannot run. The current
+HTTP API does not expose ESP-IDF's running-partition state directly: the healthy 105-second dwell
+proves the documented commit conditions, while the next accepted OTA start remains the authoritative
+proof that a prior image did not stay `PENDING_VERIFY`.
+
+#### Production OTA promotion
+
+The distinct `--confirm-production production --execute` transaction requires the exact signed
+artifact already running on the MAC-bound bench. A freshly OTA-installed target must first remain
+healthy beyond the 90-second rollback probation; otherwise ESP-IDF rejects the immediate release
+exercise with `ESP_ERR_OTA_ROLLBACK_INVALID_STATE`. Before the sustained pressure window, that exact
+target switches only the bench to the official release feed and performs a **complete signed firmware download** under
 concurrent `/status`, `/values`, `/diag` and `/ota/status` pressure. The target must expose sampled
 operation-local free/largest-block minima plus the completed validation state, boot the signed
 release cleanly, and keep it healthy past
@@ -423,10 +447,20 @@ The private inventory shape is:
 }
 ```
 
-Run from the clean, exact `main` source after the dev manifest has published and the exact signed
-application has been installed on the bench board. The gate waits through the 105-second health
-window so an OTA-installed target can commit its rollback proof; the following real OTA start remains
-the authoritative state check:
+Run ordinary bench delivery from the clean, exact `main` source after the dev manifest has published:
+
+```bash
+scripts/production-ota-gate.py \
+  --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json \
+  --expected-source-sha <40-lowercase-hex-main-sha> \
+  --expected-version <dev-version> \
+  --expected-app-sha256 <64-lowercase-hex-app-sha256> \
+  --expected-current-version <bench-current-version> \
+  --confirm-bench bench --install-bench
+```
+
+After that exact artifact is healthy on the bench (normally through the ordinary mode above; signed
+USB only for bootstrap/recovery), the separate production promotion command is:
 
 ```bash
 scripts/production-ota-gate.py \
@@ -438,7 +472,9 @@ scripts/production-ota-gate.py \
   --confirm-production production --execute
 ```
 
-Do not wrap, chain, shorten, or retry this command; the agent hook admits only this canonical shape.
+Do not wrap, chain, shorten or retry either command; the agent hook admits only these canonical
+role-pinned shapes. A production staging invocation without `--execute` still mutates the bench while
+performing its release round trip; it is neither a read-only preflight nor an agent-admitted shape.
 
 > **Manual updates and rollback:** only the OTA path (`esp_ota_*`, which writes the *inactive* slot
 > and arms `PENDING_VERIFY`) is auto-rollback-protected. A host `esptool` flash overwrites the running

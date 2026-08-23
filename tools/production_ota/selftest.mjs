@@ -55,6 +55,35 @@ try {
     ["the test-board role is redirected to production", () =>
       replaceOnce("scripts/production-ota-gate.py", 'BENCH_ROLE = "bench"',
         'BENCH_ROLE = "production"')],
+    ["the explicit ordinary bench-install action is removed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'parser.add_argument("--install-bench", action="store_true")',
+        'parser.add_argument("--install-bench-bypassed", action="store_true")')],
+    ["the ordinary bench current-version lease is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "if current_version == target_version:", "if False:")],
+    ["the ordinary bench update write is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "update_generation = post_update_once(", "update_generation = update_write_bypassed(")],
+    ["the ordinary bench verifier evidence is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'require_ota_transfer_evidence(host, transfer, phase="bench target")',
+        "pass  # bench verifier evidence bypassed")],
+    ["the ordinary bench rollback-health dwell is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "health_window = wait_for_bench_health_window(",
+        "health_window = bypass_bench_health_window(")],
+    ["the ordinary bench pressure stage is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "stress = stress_board(", "stress = bypass_bench_stress(")],
+    ["the ordinary bench action falls through into release and production", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '        print(json.dumps(result, indent=2, sort_keys=True))\n        return 0\n\n    release_manifest',
+        '        print(json.dumps(result, indent=2, sort_keys=True))\n        bench_return_bypassed()\n\n    release_manifest')],
+    ["the runtime accepts abbreviated noncanonical gate options", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "ArgumentParser(description=__doc__, allow_abbrev=False)",
+        "ArgumentParser(description=__doc__)")],
     ["the pressure window is shortened", () =>
       replaceOnce("scripts/production-ota-gate.py", "STRESS_SECONDS = 180", "STRESS_SECONDS = 60")],
     ["the manifest observer is shorter than firmware's bounded check path", () =>
@@ -234,6 +263,130 @@ try {
     ["raw OTA writes are no longer routed through the gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py", "direct OTA writes are forbidden; run scripts/production-ota-gate.py",
         "direct OTA writes are allowed")],
+    ["the hook no longer pins the literal bench role", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'exact_values["--confirm-bench"] = "bench"',
+        'exact_values["--confirm-bench"] = "production"')],
+    ["the hook accepts a symlink alias as canonical", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "Path(os.path.abspath(executable)) != canonical",
+        "executable.resolve(strict=False) != canonical")],
+    ["the raw OTA guard drops HTTPie and xh", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'executable in {"http", "xh"}', 'executable == "ignored-http-client"')],
+    ["the raw OTA guard drops curl equals-form data options", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'argument.startswith(("--data", "--form", "--json=", "--upload-file="))',
+        'argument.startswith(("--ignored-data", "--form", "--json=", "--upload-file="))')],
+    ["the raw OTA guard drops HTTPie inferred body posts", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '":=" in argument or', 'False or')],
+    ["the raw OTA guard drops PowerShell posts", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '"-methodpost",',
+        '"-ignored-method-post",')],
+    ["the raw OTA guard drops HTTPie raw bodies", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'argument == "--raw" or argument.startswith("--raw=")',
+        'argument == "--ignored-raw" or argument.startswith("--ignored-raw=")')],
+    ["shell-built OTA update routes bypass the raw guard", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        're.search(r"https?://[^\'\\";&|]*[$`][\\s\\S]{0,160}/update", decoded, re.IGNORECASE)',
+        're.search(r"ignored-dynamic-route", decoded, re.IGNORECASE)')],
+    ["a Git shell alias can wrap the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'args = tokens[1:]\n        if executable not in',
+        'args = tokens[1:]\n        if executable == "git":\n            continue\n        if executable not in')],
+    ["a renamed symlink can impersonate the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "os.path.samefile(lexical, canonical)", "False")],
+    ["a renamed exact copy can impersonate the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "filecmp.cmp(lexical, canonical, shallow=False)", "False")],
+    ["an env split-string wrapper can invoke the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "results.extend(shell_token_sets(resolved_segment[index + 1], depth + 1))",
+        "results.extend([])")],
+    ["wrapped network clients are no longer inspected", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "for client_index, token in enumerate(tokens):",
+        "for client_index, token in enumerate(tokens[:1]):")],
+    ["dynamic OTA client methods are accepted", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)',
+        "dynamic_client_arguments = False")],
+    ["clustered curl short options bypass the OTA method parser", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = curl_short_option_effects(",
+        "method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = ignored_curl_short_options(")],
+    ["curl next transfers can hide an earlier OTA write", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'if "--next" in arguments:', "if False:")],
+    ["curl short next transfers can hide an earlier OTA write", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "if cluster_next:", "if False:")],
+    ["curl GET flags can mask a dynamic explicit POST", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        `not explicit_method and (
+                        has_get_flag or any(argument in {"-g", "--get"} for argument in arguments)
+                    )`,
+        `explicit_method != "post" and (
+                        has_get_flag or any(argument in {"-g", "--get"} for argument in arguments)
+                    )`)],
+    ["an earlier wget GET can mask a later dynamic method", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'literal_safe_method = effective_method in {"get", "head"}',
+        'literal_safe_method = any(argument in {"--method=get", "--method=head"} for argument in arguments)')],
+    ["GNU Wget option syntax can synthesize an OTA POST", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "if any(wget_argument_may_write(argument) for argument in raw_arguments):", "if False:")],
+    ["Wget startup configuration can synthesize an OTA POST", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "if shell_sets_wgetrc(decoded, raw_tokens):", "if False:")],
+    ["HTTPie stdin bodies are no longer recognized", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "shell_client_receives_stdin(decoded, executable)", "False")],
+    ["raw network clients can carry an OTA request", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "if has_raw_network_client:\n        return True",
+        "if False:\n        return True")],
+    ["shell dev-tcp can carry a raw OTA request", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        're.search(r"/dev/(?:tcp|udp)/", decoded, re.IGNORECASE)',
+        're.search(r"ignored-dev-tcp", decoded, re.IGNORECASE)')],
+    ["telnet can carry a raw OTA request", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '"socat", "telnet"', '"socat"')],
+    ["brace-expanded client methods bypass the OTA guard", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "for expanded in expand_static_braces(argument.lower()):",
+        "for expanded in [argument.lower()]:")],
+    ["curl URL globs can reach the OTA route", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        /(def possible_ota_update_route[\s\S]{0,1200}?)for expanded in expand_static_braces\(token\):/,
+        "$1for expanded in [token]:")],
+    ["shell globs can execute the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'token_may_name_command(token, "production-ota-gate.py")', "False")],
+    ["dynamic script paths can execute the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '("production-ota-" in compact and "gate.py" in compact)', "False")],
+    ["split dynamic paths can execute a gate carrying canonical artifact options", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '"--manifest-url", "--expected-source-sha", "--expected-version",',
+        '"--ignored-manifest", "--ignored-source", "--ignored-version",')],
+    ["urllib inferred POST bodies bypass the OTA guard", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '"urlopen(" in compact and "data=" in compact', "False")],
+    ["attached env split strings can wrap a renamed gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'token.startswith("-S") and token != "-S"', "False")],
+    ["equals-form env split strings can wrap a renamed gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'token.startswith("--split-string=")', "False")],
+    ["Git helper strings can execute a renamed gate alias", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "nested_tokens.extend(shell_token_sets(nested))", "nested_tokens.extend([])")],
     ["a merely connected image can bypass allocation failure evidence", () =>
       replaceOnce("main/logic/health_gate.hpp", "!service.allocation_failures && x10a_ready",
         "x10a_ready")],

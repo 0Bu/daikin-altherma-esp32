@@ -2333,6 +2333,20 @@ Structure:
   The web installer carves prepared sparse parts from the merged
   image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
   as the OTA feed (the `esptool-js` installer and the device load the same file).
+- **Ordinary bench delivery is a role-pinned, one-write OTA transaction.** The canonical
+  `scripts/production-ota-gate.py ... --confirm-bench bench --install-bench` mode verifies the exact
+  signed official-dev artifact, clean source, HTTP Range behavior and host contracts before reading
+  the private inventory. It accepts no network target argument: the MAC/host come only from `bench`,
+  and the helper has no production target. The gate leases the explicit current version and current
+  ELF, requires connected dev-channel WiFi/MQTT, safe heap and zero allocation-failure counters,
+  consumes one exact check generation in one un-retried update POST, and observes the immediate
+  successor generation, completed verifier and operation-local heap minima. The exact target then
+  survives the 105-second rollback-health window and three minutes of status/values/diag plus real
+  manifest-TLS pressure with MQTT recovery. It returns before release staging or production target
+  construction; failure causes no retry or compensating write. The unwired bench does not require
+  X10A or optional weather. Ordinary updates use OTA; signed NVS-preserving USB remains
+  bootstrap/recovery only. HTTP does not expose the running ESP-IDF partition state directly, so the
+  dwell proves the documented commit conditions rather than the validation API return value itself.
 - **Production promotion is a staged, one-write transaction.**
   [`scripts/production-ota-gate.py`](../scripts/production-ota-gate.py) binds the official dev
   manifest to the expected source SHA, version, application SHA-256, ESP32-S3 metadata and signature;
@@ -2390,7 +2404,7 @@ Structure:
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract, one hundred twenty-one OTA mutation canaries and fifty-five promotion canaries make stage
+  contract, one hundred twenty-one OTA mutation canaries and ninety-seven delivery/promotion canaries make stage
   removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
   rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash

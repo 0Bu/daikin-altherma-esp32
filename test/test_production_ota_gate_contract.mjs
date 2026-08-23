@@ -1,8 +1,9 @@
-// Source-boundary contract for the bench -> production OTA promotion gate. Hardware cannot run
-// in CI, but CI can keep every fail-closed boundary reachable: exact board/artifact identity,
-// signed dev-only provenance, bounded live pressure, a single un-retried production POST, retained
-// X10A proof, and firmware rollback refusing a merely-online but heap-broken image.
+// Source-boundary contract for role-pinned bench OTA delivery and bench -> production promotion.
+// Hardware cannot run in CI, but CI can keep every fail-closed boundary reachable: exact
+// board/artifact identity, signed dev-only provenance, bounded live pressure, single un-retried
+// writes, retained production X10A proof, and rollback refusing a merely-online heap-broken image.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,15 @@ const httpOta = read("main/http_ota.cpp");
 const mqtt = read("main/mqtt_ha.cpp");
 const quiesce = read("main/logic/ota_quiesce.hpp");
 const workflow = read(".github/workflows/build.yml");
+
+const abbreviatedOption = spawnSync("python3", [
+  path.join(root, "scripts/production-ota-gate.py"),
+  "--manifest", "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json",
+], { encoding: "utf8" });
+assert.equal(abbreviatedOption.status, 2,
+  "an abbreviated gate option must be rejected before any preflight or device contact");
+assert.match(abbreviatedOption.stderr, /unrecognized arguments: --manifest/,
+  "argparse must reject abbreviations instead of silently mapping them onto canonical options");
 
 assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/,
   "the bench stage must remain distinct and ordered before production");
@@ -78,9 +88,11 @@ assert.equal(occurrences(gate, "verify_http_range_support("), 3,
   "the helper definition plus dev and release artifact checks must remain present");
 const appRange = gate.indexOf("verify_http_range_support(app_url, binary)");
 const releaseRange = gate.indexOf("verify_http_range_support(release_url, release_binary)");
-const inventoryLoad = gate.indexOf("inventory = load_inventory()", releaseRange);
-assert.ok(appRange >= 0 && releaseRange > appRange && inventoryLoad > releaseRange,
-  "both official artifacts must prove Range support before any private board is contacted");
+const inventoryLoad = gate.indexOf("inventory = load_inventory()", appRange);
+const productionBenchContact = gate.indexOf('test_before = request_json(bench["host"], "/status")', releaseRange);
+assert.ok(appRange >= 0 && inventoryLoad > appRange && releaseRange > inventoryLoad &&
+          productionBenchContact > releaseRange,
+  "dev Range must precede inventory use, and production staging must prove release Range before board contact");
 assert.match(gate, /git",\s*"rev-parse",\s*"HEAD"/,
   "local host contracts must run on the manifest's exact main source");
 assert.match(gate, /git",\s*"status",\s*"--porcelain"/,
@@ -108,7 +120,7 @@ assert.ok(targetHealthWindow >= 0 && fullDownload > targetHealthWindow && testSt
           post > offer && returned > post && productionStress > returned && retained > productionStress,
   "full bench binary OTA, bench stress, production confirmation, one production update, reboot proof, canary stress and retained X10A must stay ordered");
 const fullHelperStart = gate.indexOf("def exercise_bench_full_download(");
-const fullHelperEnd = gate.indexOf("\ndef self_test(", fullHelperStart);
+const fullHelperEnd = gate.indexOf("\ndef require_ota_transfer_evidence(", fullHelperStart);
 assert.ok(fullHelperStart >= 0 && fullHelperEnd > fullHelperStart,
   "the full bench download helper must remain identifiable");
 const fullHelper = gate.slice(fullHelperStart, fullHelperEnd);
@@ -301,13 +313,167 @@ assert.match(gate,
   "the production role must carry successful real weather TLS evidence from its fresh boot");
 assert.match(gate, /MIN_FINAL_LARGEST_BLOCK\s*=\s*16\s*\*\s*1024/,
   "hardware acceptance must recover a 16 KiB contiguous block");
-assert.match(gate, /release_created": False/,
-  "the production OTA gate must state and preserve its no-release boundary");
+assert.equal(occurrences(gate, '"release_created": False'), 2,
+  "both bench delivery and production promotion must state and preserve the no-release boundary");
+
+const benchHelperStart = gate.indexOf("def install_bench_target(");
+const benchHelperEnd = gate.indexOf("\ndef self_test(", benchHelperStart);
+assert.ok(benchHelperStart >= 0 && benchHelperEnd > benchHelperStart,
+  "the ordinary bench-install helper must remain independently identifiable");
+const benchHelper = gate.slice(benchHelperStart, benchHelperEnd);
+const benchIdentity = benchHelper.indexOf("validate_identity(");
+const benchOffer = benchHelper.indexOf("check_generation = wait_for_ota_offer(");
+const benchPost = benchHelper.indexOf("update_generation = post_update_once(", benchOffer);
+const benchReturn = benchHelper.indexOf("returned = wait_for_new_firmware(", benchPost);
+const benchTransfer = benchHelper.indexOf("require_ota_transfer_evidence(", benchReturn);
+const benchHealth = benchHelper.indexOf("health_window = wait_for_bench_health_window(", benchTransfer);
+const benchStress = benchHelper.indexOf("stress = stress_board(", benchHealth);
+assert.ok(benchIdentity >= 0 && benchOffer > benchIdentity && benchPost > benchOffer &&
+          benchReturn > benchPost && benchTransfer > benchReturn && benchHealth > benchTransfer &&
+          benchStress > benchHealth,
+  "bench install must bind identity, lease one offer/write, observe verification, pass probation and then stress");
+assert.equal(occurrences(benchHelper, "post_update_once("), 1,
+  "ordinary bench delivery must invoke exactly one un-retried update write");
+assert.match(benchHelper,
+  /current_version == target_version[\s\S]{0,450}?ota[\s\S]{0,120}?channel[\s\S]{0,100}?!= "dev"[\s\S]{0,250}?MQTT must be connected/,
+  "bench delivery must reject redundant versions, non-dev channels and missing MQTT before its write");
+assert.match(benchHelper,
+  /heap_restarts[\s\S]{0,180}?mqtt_skipped[\s\S]{0,180}?poll_skipped[\s\S]{0,500}?MIN_FINAL_FREE_HEAP[\s\S]{0,180}?MIN_FINAL_LARGEST_BLOCK/,
+  "bench delivery must refuse existing allocation failures or unsafe pre-update heap");
+assert.match(benchHelper,
+  /reset_reason"\) != "sw"[\s\S]{0,500}?require_x10a=False, require_weather=False/,
+  "bench acceptance must prove the OTA reboot and keep absent plant/weather sources optional");
+assert.doesNotMatch(benchHelper,
+  /PRODUCTION_ROLE|production\[|OFFICIAL_RELEASE_MANIFEST_URL|set_update_channel|wait_for_legacy_offer|allow_downgrade/,
+  "the ordinary bench helper must not contain a production, release, channel-write or legacy path");
+
+const benchAction = gate.indexOf("if args.install_bench or args.confirm_bench is not None:");
+const benchInstall = gate.indexOf("bench_evidence = install_bench_target(", benchAction);
+const benchActionReturn = gate.indexOf("        return 0", benchInstall);
+const releaseManifestLoad = gate.indexOf("release_manifest = json.loads", benchActionReturn);
+const productionTarget = gate.indexOf("production = inventory[PRODUCTION_ROLE]", releaseManifestLoad);
+assert.ok(benchAction >= 0 && benchInstall > benchAction && benchActionReturn > benchInstall &&
+          releaseManifestLoad > benchActionReturn && productionTarget > releaseManifestLoad,
+  "bench action must return before release validation or production target construction");
+assert.match(gate,
+  /add_argument\("--install-bench", action="store_true"\)[\s\S]{0,1800}?args\.install_bench[\s\S]{0,240}?args\.execute[\s\S]{0,240}?args\.confirm_bench != BENCH_ROLE[\s\S]{0,240}?args\.confirm_production is not None/,
+  "bench action must be explicit and mutually exclusive with production execution");
+assert.match(gate, /ArgumentParser\(description=__doc__, allow_abbrev=False\)/,
+  "the runtime parser must reject every abbreviation that the canonical hook grammar rejects");
 
 assert.match(hook, /direct OTA writes are forbidden; run scripts\/production-ota-gate\.py/,
-  "agent shell writes must be routed through the canonical production gate");
+  "agent shell writes must be routed through the canonical role-pinned gate");
 assert.match(hook, /canonical_production_ota_command/,
   "only the canonical direct gate command may bypass the raw OTA-write guard");
+assert.match(hook, /"--install-bench"[\s\S]{0,220}?"--confirm-bench"\]\s*=\s*"bench"/,
+  "the shell hook must admit only the explicit literal bench action and role");
+assert.match(hook, /Path\(os\.path\.abspath\(executable\)\) != canonical/,
+  "a foreign symlink alias must not impersonate the canonical gate path");
+assert.match(hook,
+  /def direct_ota_update_write[\s\S]{0,5200}?executable == "curl"[\s\S]{0,3200}?executable in \{"http", "xh"\}[\s\S]{0,2200}?executable == "wget"/,
+  "raw OTA write detection must cover ordinary curl, HTTPie/xh and wget shapes");
+assert.match(hook,
+  /argument\.startswith\(\("--data", "--form", "--json=", "--upload-file="\)\)/,
+  "all curl data/form long options, including equals forms, must imply an OTA write");
+assert.match(hook,
+  /for client_index, token in enumerate\(tokens\)/,
+  "launcher-wrapped network clients must be inspected at every token position");
+assert.ok(hook.includes('dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)'),
+  "dynamic shell arguments must remain visible to every OTA client classifier");
+assert.match(hook,
+  /executable == "curl"[\s\S]{0,3600}?dynamic_client_arguments and not forces_get/,
+  "dynamic curl method/body arguments must fail unless GET or HEAD is literal");
+assert.match(hook,
+  /def curl_short_option_effects[\s\S]{0,900}?option == ":"[\s\S]{0,300}?option == "X"[\s\S]{0,300}?option in \{"d", "F", "T"\}/,
+  "clustered curl next/X/data/form/upload short options must be decoded");
+assert.ok(hook.includes("method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = curl_short_option_effects("),
+  "curl short-option effects must feed the write classifier");
+assert.match(hook, /if cluster_next:\s*return True/,
+  "curl's short -: transfer boundary must fail closed like --next");
+assert.match(hook,
+  /if "--next" in arguments:\s*return True/,
+  "curl multi-transfer commands aimed at the OTA route must fail closed per transfer group");
+assert.match(hook,
+  /executable in \{"http", "xh"\}[\s\S]{0,900}?dynamic_client_arguments and explicit_methods not in \(\{"get"\}, \{"head"\}\)/,
+  "dynamic HTTPie/xh method/body arguments must fail unless GET or HEAD is literal");
+assert.match(hook,
+  /executable == "wget"[\s\S]{0,900}?dynamic_client_arguments and not literal_safe_method/,
+  "dynamic wget method/body arguments must fail unless GET or HEAD is literal");
+assert.match(hook,
+  /def wget_argument_may_write[\s\S]{0,900}?\("config", "execute", "post-file", "post-data"\)[\s\S]{0,300}?"method"\.startswith\(name\)[\s\S]{0,400}?aABDiIloOPQRtTUwX[\s\S]{0,200}?option == "e"/,
+  "GNU Wget write controls must cover clustered short options and unique long abbreviations");
+assert.match(hook,
+  /def shell_sets_wgetrc[\s\S]{0,500}?\^wgetrc\(\?:\\\+\)\?=/,
+  "quote-normalized tokens must expose explicit and appended Wget startup configuration");
+assert.match(hook,
+  /executable == "wget"[\s\S]{0,500}?shell_sets_wgetrc\(decoded, raw_tokens\)[\s\S]{0,200}?wget_argument_may_write\(argument\) for argument in raw_arguments/,
+  "explicit Wget startup configuration and parsed write controls must fail closed");
+assert.match(hook,
+  /forces_get[\s\S]{0,1800}?not forces_get and/,
+  "explicit curl GET shapes must not be mislabeled as OTA writes merely for carrying query data");
+assert.match(hook,
+  /forces_get\s*=\s*explicit_method in \{"get", "head"\} or \([\s\S]{0,160}?not explicit_method and \([\s\S]{0,120}?has_get_flag or any\(argument in \{"-g", "--get"\}/,
+  "curl -G must prove GET only when no explicit method can override it");
+assert.match(hook,
+  /effective_method\s*=\s*""[\s\S]{0,500}?effective_method = arguments\[index \+ 1\][\s\S]{0,300}?literal_safe_method = effective_method in \{"get", "head"\}/,
+  "only wget's final effective method may prove a literal GET or HEAD");
+assert.match(hook,
+  /executable in \{"http", "xh"\}[\s\S]{0,1200}?"post"[\s\S]{0,900}?":=" in argument[\s\S]{0,300}?"=" in argument and "==" not in argument/,
+  "HTTPie/xh must detect a method after options and implicit body-field POSTs");
+assert.match(hook,
+  /"-methodpost"[\s\S]{0,240}?"request\(" in compact and \("data=" in compact or "json=" in compact\)/,
+  "PowerShell and inferred interpreter body writes must remain visible to the raw classifier");
+assert.match(hook,
+  /"urlopen\(" in compact and "data=" in compact[\s\S]{0,140}?\(\?:request\|urlopen\)\\\(\[\^,\]\+,\[\^\)\]\+/,
+  "urllib keyword and positional bodies must remain write-shaped");
+assert.match(hook,
+  /def possible_ota_update_route[\s\S]{0,1400}?expand_static_braces\(token\)[\s\S]{0,500}?fnmatch\.fnmatchcase\("ota", route\)[\s\S]{0,100}?fnmatch\.fnmatchcase\("update", action\)/,
+  "shell variables and URL globs must remain in the raw-write classifier");
+assert.match(hook,
+  /https\?:\/\/\[\^'\\";&\|\]\*\[\$`\]\[\\s\\S\]\{0,160\}\/update/,
+  "a dynamic URL segment immediately upstream of /update must fail closed");
+assert.match(hook,
+  /def shell_client_receives_stdin[\s\S]{0,800}?previous_control[\s\S]{0,500}?re\.fullmatch\(r"<\{1,3\}"/,
+  "HTTPie/xh raw bodies and stdin must imply a write when no safe method is proven");
+assert.match(hook,
+  /shell_client_receives_stdin\(decoded, executable\)[\s\S]{0,600}?argument == "--raw"/,
+  "the quote-aware stdin result and explicit raw-body flags must feed HTTPie write classification");
+assert.match(hook,
+  /raw_tokens\s*=\s*shell_syntax_tokens\(decoded\)[\s\S]{0,400}?\{"nc", "ncat", "netcat", "openssl", "socat", "telnet"\}[\s\S]{0,180}?\/dev\/\(\?:tcp\|udp\)\/[\s\S]{0,120}?if has_raw_network_client:\s*return True/,
+  "every raw network client naming the OTA route must fail closed before method interpretation");
+assert.match(hook,
+  /def shell_argument_may_be_post[\s\S]{0,700}?expand_static_braces\(argument\.lower\(\)\)[\s\S]{0,500}?--method=post/,
+  "brace- and glob-expanded client method arguments must remain write-shaped");
+assert.doesNotMatch(hook,
+  /def read_only_gate_inspection[\s\S]{0,1600}?executable == "git"/,
+  "Git helpers, pagers, aliases and external diffs must not enter the inspection exception");
+assert.match(hook,
+  /def aliases_canonical_ota_gate[\s\S]{0,900}?shell_syntax_tokens\(command\)[\s\S]{0,900}?nested_tokens[\s\S]{0,900}?os\.path\.samefile\(lexical, canonical\)[\s\S]{0,100}?filecmp\.cmp\(lexical, canonical, shallow=False\)/,
+  "renamed symlink, hardlink and exact-copy aliases must not execute the canonical OTA gate");
+assert.match(hook,
+  /token in \{"-S", "--split-string"\}[\s\S]{0,500}?token\.startswith\("-S"\)[\s\S]{0,300}?token\.startswith\("--split-string="\)/,
+  "separate, attached and equals-form env split strings must be recursively classified");
+assert.match(hook,
+  /token in \{"-S", "--split-string"\}[\s\S]{0,160}?results\.extend\(shell_token_sets\(resolved_segment\[index \+ 1\], depth \+ 1\)\)/,
+  "separate env split-string payloads must actually recurse");
+assert.match(hook,
+  /token\.startswith\("-S"\)[\s\S]{0,180}?shell_token_sets\(token\[2:\], depth \+ 1\)[\s\S]{0,220}?shell_token_sets\(token\.split\("=", 1\)\[1\], depth \+ 1\)/,
+  "attached env split-string payloads must actually recurse");
+assert.match(hook,
+  /token_may_name_command\(token, "production-ota-gate\.py"\)/,
+  "shell globs that resolve to the canonical gate must fail before execution");
+assert.match(hook,
+  /"production-ota-" in compact and "gate\.py" in compact[\s\S]{0,500}?"--manifest-url"[\s\S]{0,240}?"--expected-app-sha256"/,
+  "dynamic gate executables carrying the canonical artifact option set must fail closed");
+assert.match(hook,
+  /re\.search\(r"\[\$`\]", token\) is not None and "\/scripts\/" in f"\/\{token\}"/,
+  "embedded/default dynamic construction under scripts must fail closed");
+assert.match(hook,
+  /nested_tokens\.extend\(shell_token_sets\(nested\)\)/,
+  "Git helper and pager strings must be recursively searched for renamed aliases");
+assert.match(hook,
+  /aliases_canonical_ota_gate\(payload, command\) and not read_only_inspection[\s\S]{0,120}?names_gate and not read_only_inspection/,
+  "wrappers naming the gate must fail unless they are an explicit read-only source inspection");
 
 assert.match(health, /OTA_HEALTH_MIN_FREE_BYTES\s*=\s*24u\s*\*\s*1024u/,
   "rollback commit needs the measured total internal-heap floor");
@@ -327,4 +493,4 @@ assert.match(ota,
 assert.doesNotMatch(gate, /48\s*\*\s*60\s*\*\s*60|48[- ]?hour|48[- ]?stunden/i,
   "an arbitrary 48-hour soak must not replace targeted staging and canary evidence");
 
-console.log("production OTA gate: signed bench staging, one-shot production canary and rollback service proof pinned");
+console.log("OTA gate: signed bench delivery, production promotion and rollback service proof pinned");

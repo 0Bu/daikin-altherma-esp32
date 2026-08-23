@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Fail-closed bench -> production OTA promotion gate.
+"""Fail-closed role-pinned OTA delivery gate.
 
-This is the only agent-approved path to POST /ota/update on the production board. It verifies one
-exact signed dev artifact, reruns the X10A/OTA host contracts, proves that exact image on the
-private-inventory bench role by making it perform a complete signed release download under
-concurrent HTTP pressure, restores the exact dev target, runs the sustained pressure gate, then
-performs at most one POST on the distinct production role and observes
-the canary read-only. It never creates a release and never retries a write.
+The bench mode is the only agent-approved path to install an ordinary update on the private-inventory
+test board. It verifies one exact signed dev artifact, performs at most one POST on the bench role,
+waits through rollback probation and then runs the sustained pressure gate. It cannot contact the
+production role.
+
+The production mode additionally proves that exact image on the bench role by making it perform a
+complete signed release download under concurrent HTTP pressure, restores the exact dev target,
+runs the sustained pressure gate, then performs at most one POST on the distinct production role and
+observes the canary read-only. Neither mode creates a release or retries a write.
 """
 
 from __future__ import annotations
@@ -650,13 +653,13 @@ def ota_offer_ready(
     """Accept only the completed status of the exact synchronously accepted check task."""
     generation = status.get("generation")
     if not isinstance(generation, int) or generation != expected_generation:
-        fail("production OTA operation generation changed during offer check")
+        fail("OTA operation generation changed during offer check")
     if status.get("busy") is True:
         return False
     if status.get("busy") is not False:
-        fail("production firmware does not expose the required OTA busy handshake")
+        fail("firmware does not expose the required OTA busy handshake")
     if status.get("state") == "error":
-        fail(f"production OTA check failed: {status.get('message', '')}")
+        fail(f"OTA check failed: {status.get('message', '')}")
     if status.get("state") != "idle" or not status.get("available"):
         return False
     if status.get("available") != expected_version or \
@@ -675,11 +678,11 @@ def wait_for_ota_offer(
     try:
         accepted = request_json(host, f"/ota/check?ms={int(time.time() * 1000)}")
     except HTTPError as error:
-        fail(f"production firmware refused OTA check with HTTP {error.code}")
+        fail(f"firmware refused OTA check with HTTP {error.code}")
     generation = accepted.get("generation")
     if accepted.get("ok") is not True or not isinstance(generation, int) or generation <= 0:
         fail(
-            "production firmware lacks or refused the OTA generation handshake; "
+            "firmware lacks or refused the OTA generation handshake; "
             "use one signed NVS-preserving USB bootstrap — no update POST was sent"
         )
     deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
@@ -698,8 +701,8 @@ def post_update_once(
     host: str, check_generation: int, expected_version: str, expected_app_sha256: str,
     *, expected_channel: str = "dev", allow_downgrade: bool = False,
 ) -> int:
-    # Deliberately one un-retried exact-artifact write per invocation. Production invokes this once;
-    # the earlier bench rollback exercise uses it only on the inventory-pinned bench role.
+    # Deliberately one un-retried exact-artifact write per invocation. A bench install invokes this
+    # once; production promotion additionally uses it only inside its inventory-pinned stages.
     fields = {
         "after": check_generation,
         "channel": expected_channel,
@@ -712,13 +715,13 @@ def post_update_once(
     try:
         accepted = request_json(host, f"/ota/update?{query}", method="POST", timeout=HTTP_TIMEOUT_S)
     except HTTPError as error:
-        fail(f"production firmware refused the sole OTA update write with HTTP {error.code}")
+        fail(f"firmware refused the sole OTA update write with HTTP {error.code}")
     generation = accepted.get("generation")
     if accepted.get("ok") is not True or not isinstance(generation, int) or generation <= 0:
-        fail("production firmware did not accept the sole OTA update write")
+        fail("firmware did not accept the sole OTA update write")
     expected_generation = 1 if check_generation == 0xFFFFFFFF else check_generation + 1
     if generation != expected_generation:
-        fail("production OTA update did not receive the immediate successor generation")
+        fail("OTA update did not receive the immediate successor generation")
     return generation
 
 
@@ -957,6 +960,76 @@ def exercise_bench_full_download(
     }
 
 
+def require_ota_transfer_evidence(host: str, evidence: dict[str, Any], *, phase: str) -> None:
+    """Require the completed verifier and operation-local heap minima from one OTA write."""
+    if int(evidence.get("heap_min_free_bytes", 0)) <= 0 or \
+       int(evidence.get("heap_min_largest_block_bytes", 0)) <= 0:
+        fail(f"{host} {phase} OTA did not expose sampled operation-local heap minima")
+    if evidence.get("saw_done") is not True:
+        fail(f"{host} {phase} OTA never exposed its completed validation state")
+
+
+def install_bench_target(
+    *, host: str, mac: str, current_version: str, target_version: str,
+    target_sha256: str, target_elf: str,
+) -> dict[str, Any]:
+    """Install exactly one signed dev artifact on the inventory-pinned bench role.
+
+    This function has no production-board argument by construction. It owns one un-retried update
+    write, then all remaining acceptance is read-only.
+    """
+    before = request_json(host, "/status")
+    current_elf = str(before.get("app_elf_sha256", ""))
+    if re.fullmatch(r"[0-9a-f]{9}", current_elf) is None:
+        fail("bench does not expose a valid current ELF identity")
+    validate_identity(
+        before, host=host, mac=mac, version=current_version, elf=current_elf,
+    )
+    if current_version == target_version:
+        fail("bench already names the target version; refusing a redundant update write")
+    if before.get("ota", {}).get("channel") != "dev":
+        fail("bench must already follow the official dev channel")
+    if not before.get("mqtt", {}).get("connected"):
+        fail("bench MQTT must be connected before OTA")
+    counters = board_counters(before)
+    if any(counters[key] != 0 for key in ("heap_restarts", "mqtt_skipped", "poll_skipped")):
+        fail(f"bench already reports an allocation failure before OTA: {counters}")
+    system = before.get("sys", {})
+    if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP or \
+       int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
+        fail("bench does not have safe heap before OTA")
+
+    check_generation = wait_for_ota_offer(host, target_version, target_sha256)
+    update_generation = post_update_once(
+        host, check_generation, target_version, target_sha256,
+    )
+    transfer: dict[str, Any] = {}
+    returned = wait_for_new_firmware(host, target_version, target_elf, transfer)
+    validate_identity(
+        returned, host=host, mac=mac, version=target_version, elf=target_elf,
+    )
+    if returned.get("sys", {}).get("reset_reason") != "sw":
+        fail("bench target did not return from the expected software OTA reboot")
+    require_ota_transfer_evidence(host, transfer, phase="bench target")
+    health_window = wait_for_bench_health_window(
+        host, mac, target_version, target_elf, phase="target",
+    )
+    stress = stress_board(
+        host=host, mac=mac, version=target_version, elf=target_elf,
+        require_x10a=False, require_weather=False,
+    )
+    return {
+        "role": BENCH_ROLE,
+        "executed": True,
+        "previous_version": current_version,
+        "check_generation": check_generation,
+        "update_generation": update_generation,
+        "ota_download_heap": transfer,
+        "target_health_window_uptime_s": health_window.get("uptime_s"),
+        "stress": stress,
+    }
+
+
 def self_test() -> None:
     source = "a" * 40
     app = "b" * 64
@@ -1103,13 +1176,15 @@ def self_test() -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--manifest-url")
     parser.add_argument("--expected-source-sha")
     parser.add_argument("--expected-version")
     parser.add_argument("--expected-app-sha256")
     parser.add_argument("--expected-current-version")
+    parser.add_argument("--confirm-bench")
     parser.add_argument("--confirm-production")
+    parser.add_argument("--install-bench", action="store_true")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
@@ -1141,6 +1216,38 @@ def main() -> int:
     elf = verify_image(binary, args.expected_version, args.expected_app_sha256)
     verify_http_range_support(app_url, binary)
     run_local_gates()
+
+    inventory = load_inventory()
+    bench = inventory[BENCH_ROLE]
+    if args.install_bench or args.confirm_bench is not None:
+        if not args.install_bench or args.execute or args.confirm_bench != BENCH_ROLE or \
+           args.confirm_production is not None or not args.expected_current_version:
+            fail(
+                "bench delivery requires --install-bench, --confirm-bench bench and "
+                "--expected-current-version, without --execute or --confirm-production"
+            )
+        bench_evidence = install_bench_target(
+            host=bench["host"], mac=bench["mac"],
+            current_version=args.expected_current_version,
+            target_version=args.expected_version,
+            target_sha256=args.expected_app_sha256,
+            target_elf=elf,
+        )
+        result = {
+            "artifact": {
+                "version": args.expected_version,
+                "source_sha": args.expected_source_sha,
+                "app_sha256": args.expected_app_sha256,
+                "elf": elf,
+                "channel": "dev",
+                "release_created": False,
+            },
+            "test_board": {"host": bench["host"], "mac": bench["mac"], **bench_evidence},
+            "production": {"executed": False},
+        }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
     release_manifest = json.loads(request_bytes(cache_busted(OFFICIAL_RELEASE_MANIFEST_URL)))
     if not isinstance(release_manifest, dict):
         fail("official release manifest is not a JSON object")
@@ -1151,8 +1258,6 @@ def main() -> int:
     release_elf = verify_image(release_binary, release_version, release_sha256)
     verify_http_range_support(release_url, release_binary)
 
-    inventory = load_inventory()
-    bench = inventory[BENCH_ROLE]
     production = inventory[PRODUCTION_ROLE]
 
     test_before = request_json(bench["host"], "/status")
