@@ -367,7 +367,7 @@ function initNavigation() { applyRouteFromLocation(); }
 //      was held (DESIGN.md §6 carries the measurements).
 //
 // The cache is deliberately NOT updated when a write is skipped for reason 2 — recording markup that
-// was never written would make the next identical push skip a write the DOM still needs.
+// was never written would make the next identical render skip a write the DOM still needs.
 const _html = {};
 function setHtml(id, html) {
   if (S.clickHold) return;
@@ -513,9 +513,9 @@ function renderApp() {
 // fact; the version moved up out of the ESP32 card, so the one line the user reads first answers
 // both "which box is this" and "which firmware is on it" (DESIGN.md §5.4).
 //
-// This runs on EVERY status frame (~1/s), so it writes only the two fields it owns — #otaStat
+// This runs on EVERY 2 s values-poll render, so it writes only the two fields it owns — #otaStat
 // belongs to the OTA flow below and must survive a re-render mid-download, or the percentage would
-// blink out once a second.
+// blink out on each render.
 function renderHeaderMeta() {
   const w = S.status?.wifi || {};
   $("hdrIp").textContent = w.ip || location.hostname;
@@ -793,11 +793,11 @@ async function copyDiagnostics() {
 // browser and for Home Assistant's retained crash entity — which is the whole point of the button
 // over the page-local hide it replaced.
 //
-// The banner is hidden on the local signature the moment the device confirms, because the live status
-// push builds its frames ~1×/4 s and one composed before the delete landed would draw the crash again
-// for a beat. A FAILED delete restores the banner instead: the report is still on the device, and a
-// page that hid it anyway would be lying about flash — the same fail-closed direction the firmware
-// takes when it refuses to mark a crash dismissed after a failed erase.
+// The banner is hidden on the local signature the moment the device confirms, because a `/status`
+// response already in flight may have been composed before the delete landed and would otherwise
+// draw the crash again for a beat. A FAILED delete restores the banner instead: the report is still
+// on the device, and a page that hid it anyway would be lying about flash — the same fail-closed
+// direction the firmware takes when it refuses to mark a crash dismissed after a failed erase.
 async function deleteCrashReport(sig) {
   S.crashAsk = "";
   let ok = false;

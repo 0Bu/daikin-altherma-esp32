@@ -1631,7 +1631,7 @@ function renderInspectHist(e, row) {
   const mh = id && trendSource !== "x10a" ? S.hist.get(histCacheKey(id, "modbus")) : null;
   const pin = id ? S.histPin.get(id) : null;
   // Categorical histories append a display-only live sample. Include only that derived state in the
-  // chart signature, so an actual change repaints the current cap while unchanged one-second polls
+  // chart signature, so an actual change repaints the current cap while unchanged values polls
   // still leave a tooltip/crosshair DOM completely alone.
   const liveGen = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
     ? historyView(id, trendSource)?.gen || "" : "";

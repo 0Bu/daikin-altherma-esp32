@@ -1033,7 +1033,8 @@ const uptimeRow = (s) => vrow(t("card.uptime"), fmtUptime(s), { cls: "mono num" 
 
 // Bytes as whole KiB — the same unit the firmware's own trend stores (logic/history.hpp), so the row
 // and the chart under it cannot disagree about what the number is. Whole KiB rather than a decimal:
-// the row is rebuilt on every poll, and a tenth of a KiB ticking once a second is noise, not news.
+// the row is rebuilt on every poll, and a tenth of a KiB ticking on each `/status` refresh is noise,
+// not news.
 const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 
 // The board's own memory: free heap and the largest CONTIGUOUS free block. These two are back on the
@@ -1092,7 +1093,7 @@ function boardHardwareSection(kind, title, detail, help = "") {
 // The board's own onboard parts — status indicator + recovery button — as ONE summary row with TWO
 // explicit actions. "Hardware" on the left expands the explanation tongue; the selected board name
 // on the right opens the editor. Keeping those actions in separate buttons avoids one
-// tap both explaining and editing, while S.descOpen preserves the tongue across status-poll rebuilds.
+// tap both explaining and editing, while S.descOpen preserves the tongue across values-poll renders.
 function boardRow() {
   const b = S.status?.board || {};
   const env = S.status?.env3 || {};
@@ -1730,7 +1731,7 @@ function renderSettings() {
     setHtml("connTile", connectionsHtml());
   }
   // otaShown normally freezes an ALREADY-RENDERED card so direct progress DOM writes survive the
-  // once-per-status rebuild. A reload reverses that order: resumeOta learns about the download first
+  // 2 s values-poll rebuild. A reload reverses that order: resumeOta learns about the download first
   // and can set otaShown before /status has ever produced the full cards. Permit exactly that first
   // status-backed render, then repaint the retained OTA view into the newly-created #otaStatSet.
   const firstStatusRender = !S.settingsHydrated;
