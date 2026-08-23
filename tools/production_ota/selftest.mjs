@@ -337,30 +337,19 @@ try {
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'literal_safe_method = effective_method in {"get", "head"}',
         'literal_safe_method = any(argument in {"--method=get", "--method=head"} for argument in arguments)')],
-    ["wget startup commands can synthesize an OTA POST", () =>
+    ["GNU Wget option syntax can synthesize an OTA POST", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        'argument in {"-e", "--execute"}', "False")],
+        "if any(wget_argument_may_write(argument) for argument in arguments):", "if False:")],
+    ["Wget startup configuration can synthesize an OTA POST", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'if re.search(r"(?:^|[\\s;&|])wgetrc\\s*=", decoded, re.IGNORECASE):', "if False:")],
     ["HTTPie stdin bodies are no longer recognized", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "shell_client_receives_stdin(decoded, executable)", "False")],
-    ["raw HTTP request lines bypass the OTA guard", () =>
+    ["raw network clients can carry an OTA request", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        'if re.match(r"^\\s*post\\s+/", expanded, re.IGNORECASE):',
-        "if False:")],
-    ["quote-normalized raw HTTP methods bypass the OTA guard", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "raw_tokens = shell_syntax_tokens(decoded)", "raw_tokens = []")],
-    ["brace-expanded raw HTTP methods bypass the OTA guard", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "for expanded in expand_static_braces(argument):", "for expanded in [argument]:")],
-    ["dynamic raw HTTP methods bypass the OTA guard", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'return re.search(r"[$`]", method.group(1)) is not None if method else False',
-        "return False")],
-    ["printf can assemble an OTA request line across arguments", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "has_raw_network_client and (\n        has_printf",
-        "has_raw_network_client and (\n        False")],
+        "if has_raw_network_client:\n        return True",
+        "if False:\n        return True")],
     ["shell dev-tcp can carry a raw OTA request", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         're.search(r"/dev/(?:tcp|udp)/", decoded, re.IGNORECASE)',

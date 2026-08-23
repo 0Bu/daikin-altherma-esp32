@@ -1015,17 +1015,6 @@ def shell_argument_may_be_post(argument: str) -> bool:
     return False
 
 
-def shell_argument_may_be_raw_post(argument: str) -> bool:
-    """Recognize a raw HTTP request-line method before its origin-form path."""
-    for expanded in expand_static_braces(argument):
-        if expanded == "__AGENT_AMBIGUOUS_BRACE__":
-            return re.match(r"^\s*\S+\s+/", argument) is not None
-        if re.match(r"^\s*post\s+/", expanded, re.IGNORECASE):
-            return True
-    method = re.match(r"^\s*(\S+)\s+/", argument)
-    return re.search(r"[$`]", method.group(1)) is not None if method else False
-
-
 def curl_short_option_effects(argument: str, following: str = "") -> tuple[str, bool, bool, bool, bool]:
     """Return (method, GET flag, body, next transfer, ambiguous write) for a curl short cluster."""
     if not argument.startswith("-") or argument.startswith("--") or argument == "-":
@@ -1052,6 +1041,26 @@ def curl_short_option_effects(argument: str, following: str = "") -> tuple[str, 
     return "", saw_get, False, False, False
 
 
+def wget_argument_may_write(argument: str) -> bool:
+    """Recognize GNU Wget write controls, including clusters and unique long abbreviations."""
+    if argument.startswith("--"):
+        name = argument[2:].split("=", 1)[0]
+        if not name:
+            return False
+        if any(target.startswith(name) for target in ("execute", "post-file", "post-data")):
+            return True
+        return name != "method" and "method".startswith(name)
+    if not argument.startswith("-") or argument == "-":
+        return False
+    value_options = set("aAiIoOpPtTU")
+    for option in argument[1:]:
+        if option == "e":
+            return True
+        if option in value_options:
+            return False
+    return False
+
+
 def direct_ota_update_write(command: str) -> bool:
     """Recognize ordinary shell/client write shapes aimed at the OTA update route."""
     decoded = unquote(unquote(command))
@@ -1063,22 +1072,7 @@ def direct_ota_update_write(command: str) -> bool:
         Path(argument).name.lower() in {"nc", "ncat", "netcat", "openssl", "socat", "telnet"}
         for argument in raw_tokens
     ) or re.search(r"/dev/(?:tcp|udp)/", decoded, re.IGNORECASE) is not None
-    has_printf = any(Path(argument).name.lower() == "printf" for argument in raw_tokens) or \
-        re.search(r"(?:^|[\s'\";&|])printf(?:[\s'\";&|]|$)", decoded, re.IGNORECASE) is not None
-    normalized_shell = " ".join(raw_tokens)
-    if has_raw_network_client and (
-        has_printf
-        or any(shell_argument_may_be_raw_post(argument) for argument in raw_tokens)
-        or any(
-            argument.lower() == "post" and index + 1 < len(raw_tokens)
-            and raw_tokens[index + 1].startswith("/")
-            for index, argument in enumerate(raw_tokens)
-        )
-        or any(
-            re.search(r"(?:^|[\s'\"=])post(?:$|[\s'\";&|])", candidate, re.IGNORECASE)
-            for candidate in (decoded, normalized_shell)
-        )
-    ):
+    if has_raw_network_client:
         return True
     if any(marker in compact for marker in (
         "-xpost", "--requestpost", "--request=post", ".post(", ".request(post,",
@@ -1180,12 +1174,9 @@ def direct_ota_update_write(command: str) -> bool:
             elif executable == "wget":
                 if any(shell_argument_may_be_post(argument) for argument in arguments):
                     return True
-                if any(
-                    argument in {"-e", "--execute"}
-                    or argument.startswith("--execute=")
-                    or argument.startswith("-e") and not argument.startswith("--")
-                    for argument in arguments
-                ):
+                if re.search(r"(?:^|[\s;&|])wgetrc\s*=", decoded, re.IGNORECASE):
+                    return True
+                if any(wget_argument_may_write(argument) for argument in arguments):
                     return True
                 effective_method = ""
                 for index, argument in enumerate(arguments):

@@ -400,8 +400,11 @@ assert.match(hook,
   /executable == "wget"[\s\S]{0,900}?dynamic_client_arguments and not literal_safe_method/,
   "dynamic wget method/body arguments must fail unless GET or HEAD is literal");
 assert.match(hook,
-  /executable == "wget"[\s\S]{0,500}?argument in \{"-e", "--execute"\}[\s\S]{0,240}?argument\.startswith\("--execute="\)/,
-  "wget startup commands must not synthesize an OTA POST outside the gate");
+  /def wget_argument_may_write[\s\S]{0,900}?\("execute", "post-file", "post-data"\)[\s\S]{0,300}?"method"\.startswith\(name\)[\s\S]{0,400}?option == "e"/,
+  "GNU Wget write controls must cover clustered short options and unique long abbreviations");
+assert.match(hook,
+  /executable == "wget"[\s\S]{0,500}?wgetrc\\s\*=.*re\.IGNORECASE[\s\S]{0,200}?wget_argument_may_write\(argument\)/,
+  "explicit Wget startup configuration and parsed write controls must fail closed");
 assert.match(hook,
   /forces_get[\s\S]{0,1800}?not forces_get and/,
   "explicit curl GET shapes must not be mislabeled as OTA writes merely for carrying query data");
@@ -433,11 +436,8 @@ assert.match(hook,
   /shell_client_receives_stdin\(decoded, executable\)[\s\S]{0,600}?argument == "--raw"/,
   "the quote-aware stdin result and explicit raw-body flags must feed HTTPie write classification");
 assert.match(hook,
-  /def shell_argument_may_be_raw_post[\s\S]{0,240}?expand_static_braces\(argument\)[\s\S]{0,300}?re\.match\(r"\^\\s\*post\\s\+\/"[\s\S]{0,240}?re\.search\(r"\[\$`\]"/,
-  "brace-, quote-, ANSI-C- and dynamically built raw HTTP POST methods must fail closed");
-assert.match(hook,
-  /raw_tokens\s*=\s*shell_syntax_tokens\(decoded\)[\s\S]{0,400}?\{"nc", "ncat", "netcat", "openssl", "socat", "telnet"\}[\s\S]{0,180}?\/dev\/\(\?:tcp\|udp\)\/[\s\S]{0,180}?has_printf[\s\S]{0,500}?has_raw_network_client and \(\s*has_printf[\s\S]{0,500}?shell_argument_may_be_raw_post\(argument\)/,
-  "every printf-fed raw OTA route must fail closed, including nc, telnet and dev-tcp assembly");
+  /raw_tokens\s*=\s*shell_syntax_tokens\(decoded\)[\s\S]{0,400}?\{"nc", "ncat", "netcat", "openssl", "socat", "telnet"\}[\s\S]{0,180}?\/dev\/\(\?:tcp\|udp\)\/[\s\S]{0,120}?if has_raw_network_client:\s*return True/,
+  "every raw network client naming the OTA route must fail closed before method interpretation");
 assert.match(hook,
   /def shell_argument_may_be_post[\s\S]{0,700}?expand_static_braces\(argument\.lower\(\)\)[\s\S]{0,500}?--method=post/,
   "brace- and glob-expanded client method arguments must remain write-shaped");

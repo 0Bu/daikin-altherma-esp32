@@ -304,6 +304,12 @@ guard_case "printf hex escape can assemble a raw netcat HTTP OTA POST" \
     "$(payload exec_command command "printf '\\x50OST $ota_lease_path HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
 guard_case "printf percent-b hex escape can assemble a raw netcat HTTP OTA POST" \
     "$(payload exec_command command "printf '%b' '\\x50OST $ota_lease_path HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
+guard_case "printf octal escape can assemble a raw netcat HTTP OTA POST" \
+    "$(payload exec_command command "printf '\\120OST $ota_lease_path HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
+guard_case "echo escape can assemble a raw netcat HTTP OTA POST" \
+    "$(payload exec_command command "echo -e '\\x50OST $ota_lease_path HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
+guard_case "arbitrary raw OTA request over netcat is fail-closed" \
+    "$(payload exec_command command "awk 'BEGIN { print \"GET $ota_lease_path HTTP/1.1\\r\\n\\r\\n\" }' | nc bench.invalid 80")" deny
 dev_tcp_raw_ota_command="bash -c 'printf \"POST $ota_lease_path HTTP/1.1\\r\\nHost: bench.invalid\\r\\n\\r\\n\" > /dev/tcp/bench.invalid/80'"
 guard_case "Bash dev-tcp raw HTTP OTA POST is denied" \
     "$(payload exec_command command "$dev_tcp_raw_ota_command")" deny
@@ -379,6 +385,20 @@ guard_case "wget execute post-file OTA POST is denied" \
     "$(payload exec_command command "wget --execute='post_file=/tmp/app.bin' \"$ota_lease_url\"")" deny
 guard_case "wget short execute post-file OTA POST is denied" \
     "$(payload exec_command command "wget -e 'post_file=/tmp/app.bin' \"$ota_lease_url\"")" deny
+guard_case "wget clustered execute post-file OTA POST is denied" \
+    "$(payload exec_command command "wget -qe 'post_file=/tmp/app.bin' \"$ota_lease_url\"")" deny
+guard_case "wget attached clustered execute OTA POST is denied" \
+    "$(payload exec_command command "wget -qepost_file=/tmp/app.bin \"$ota_lease_url\"")" deny
+guard_case "wget abbreviated execute OTA POST is denied" \
+    "$(payload exec_command command "wget --exec=post_file=/tmp/app.bin \"$ota_lease_url\"")" deny
+guard_case "wget abbreviated post-file OTA POST is denied" \
+    "$(payload exec_command command "wget --post-f=/tmp/app.bin \"$ota_lease_url\"")" deny
+guard_case "wget abbreviated post-data OTA POST is denied" \
+    "$(payload exec_command command "wget --post-d=x \"$ota_lease_url\"")" deny
+guard_case "wget abbreviated method OTA POST is denied" \
+    "$(payload exec_command command "wget --meth=POST \"$ota_lease_url\"")" deny
+guard_case "explicit WGETRC cannot synthesize an OTA POST" \
+    "$(payload exec_command command "WGETRC=/tmp/ota-wgetrc wget \"$ota_lease_url\"")" deny
 guard_case "brace-expanded curl OTA method is denied" \
     "$(payload exec_command command 'curl -X P{OST,UT} http://bench.invalid/ota/update')" deny
 guard_case "equals brace-expanded curl OTA method is denied" \
