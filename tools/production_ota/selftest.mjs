@@ -307,6 +307,10 @@ try {
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "for client_index, token in enumerate(tokens):",
         "for client_index, token in enumerate(tokens[:1]):")],
+    ["dynamic OTA client methods are accepted", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)',
+        "dynamic_client_arguments = False")],
     ["HTTPie stdin bodies are no longer recognized", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "shell_client_receives_stdin(decoded, executable)", "False")],
@@ -314,6 +318,13 @@ try {
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'r"(?:^|[\\s\'\\"=])post(?:$|[\\s\'\\";&|])"',
         'r"ignored-raw-http-post"')],
+    ["quote-normalized raw HTTP methods bypass the OTA guard", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'for candidate in (decoded, normalized_shell)', 'for candidate in (decoded,)')],
+    ["brace-expanded client methods bypass the OTA guard", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "for expanded in expand_static_braces(argument.lower()):",
+        "for expanded in [argument.lower()]:")],
     ["curl URL globs can reach the OTA route", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         /(def possible_ota_update_route[\s\S]{0,1200}?)for expanded in expand_static_braces\(token\):/,
@@ -321,6 +332,9 @@ try {
     ["shell globs can execute the canonical OTA gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'token_may_name_command(token, "production-ota-gate.py")', "False")],
+    ["dynamic script paths can execute the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '("production-ota-" in compact and "gate.py" in compact)', "False")],
     ["urllib inferred POST bodies bypass the OTA guard", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         '"urlopen(" in compact and "data=" in compact', "False")],

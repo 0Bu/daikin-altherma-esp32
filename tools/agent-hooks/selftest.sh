@@ -277,6 +277,10 @@ guard_case "find-exec HTTPie OTA POST is denied" \
     "$(payload exec_command command "find /tmp -maxdepth 0 -exec http POST \"$ota_lease_url\" {} +")" deny
 guard_case "raw netcat HTTP OTA POST is denied" \
     "$(payload exec_command command "printf 'POST /ota/update?after=7 HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
+guard_case "quote-split raw netcat HTTP OTA POST is denied" \
+    "$(payload exec_command command "printf 'PO''ST /ota/update?after=7 HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
+guard_case "ANSI-C raw netcat HTTP OTA POST is denied" \
+    "$(payload exec_command command "printf \\$'\\x50OST /ota/update?after=7 HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
 guard_case "generic requests direct OTA POST is denied" \
     "$(payload exec_command command "python3 -c 'import requests; requests.request(\"POST\", \"http://bench.invalid/ota/update\")'")" deny
 guard_case "urllib inferred direct OTA POST is denied" \
@@ -301,6 +305,18 @@ guard_case "split-variable direct OTA POST is denied" \
     "$(payload exec_command command 'a=ot; b=a; curl -X POST http://bench.invalid/$a$b/update')" deny
 guard_case "default-expansion direct OTA POST is denied" \
     "$(payload exec_command command 'curl -X POST http://bench.invalid/o${x:-ta}/update')" deny
+guard_case "split-variable curl OTA method is denied" \
+    "$(payload exec_command command 'a=PO; b=ST; curl -X $a$b http://bench.invalid/ota/update')" deny
+guard_case "default-expansion curl OTA method is denied" \
+    "$(payload exec_command command 'curl -X P${x:-OST} http://bench.invalid/ota/update')" deny
+guard_case "split-variable HTTPie OTA method is denied" \
+    "$(payload exec_command command 'a=PO; b=ST; http $a$b http://bench.invalid/ota/update')" deny
+guard_case "split-variable wget OTA method is denied" \
+    "$(payload exec_command command 'a=PO; b=ST; wget --method=$a$b http://bench.invalid/ota/update')" deny
+guard_case "brace-expanded curl OTA method is denied" \
+    "$(payload exec_command command 'curl -X P{OST,UT} http://bench.invalid/ota/update')" deny
+guard_case "equals brace-expanded curl OTA method is denied" \
+    "$(payload exec_command command 'curl --request=P{UT,OST} http://bench.invalid/ota/update')" deny
 guard_case "read-only OTA update GET remains allowed" \
     "$(payload exec_command command "curl -fsS http://bench.invalid/ota/update")" ""
 guard_case "read-only OTA GET with metadata query remains allowed" \
@@ -311,6 +327,10 @@ guard_case "curl GET override with data remains allowed" \
     "$(payload exec_command command "curl -G --data after=7 http://bench.invalid/ota/update")" ""
 guard_case "curl explicit GET with data remains allowed" \
     "$(payload exec_command command "curl --request GET --data after=7 http://bench.invalid/ota/update")" ""
+guard_case "curl explicit GET with dynamic header remains allowed" \
+    "$(payload exec_command command 'curl --request GET -H "X-Test: $value" http://bench.invalid/ota/update')" ""
+guard_case "HTTPie explicit GET with dynamic header remains allowed" \
+    "$(payload exec_command command 'http GET http://bench.invalid/ota/update "X-Test:$value"')" ""
 guard_case "unrelated literal update write with another dynamic token remains allowed" \
     "$(payload exec_command command 'token=$X curl -X POST http://example.invalid/update -d quota=1')" ""
 guard_case "read-only source search may mention the OTA route" \
@@ -360,6 +380,10 @@ guard_case "shell bracket-glob cannot execute the canonical bench gate" \
     "$(payload exec_command command "$root/scripts/production-ota-gate.p[y] $glob_bench_args")" deny
 guard_case "copy-then-execute cannot create a renamed gate alias" \
     "$(payload exec_command command "cp $root/scripts/production-ota-gate.?y $tmp/run-ota-new; $tmp/run-ota-new $glob_bench_args")" deny
+guard_case "split-variable canonical gate executable is denied" \
+    "$(payload exec_command command "a=production-ota-; b=gate.py; scripts/\$a\$b $glob_bench_args")" deny
+guard_case "default-expansion canonical gate executable is denied" \
+    "$(payload exec_command command "scripts/production-ota-\${x:-gate.py} $glob_bench_args")" deny
 ln -s "$root/scripts/production-ota-gate.py" "$tmp/production-ota-gate.py"
 guard_case "bench gate rejects a symlink alias" \
     "$(payload exec_command command "$tmp/production-ota-gate.py ${canonical_bench_ota_gate#*production-ota-gate.py }")" deny

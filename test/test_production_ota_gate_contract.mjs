@@ -366,6 +366,17 @@ assert.match(hook,
 assert.match(hook,
   /for client_index, token in enumerate\(tokens\)/,
   "launcher-wrapped network clients must be inspected at every token position");
+assert.ok(hook.includes('dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)'),
+  "dynamic shell arguments must remain visible to every OTA client classifier");
+assert.match(hook,
+  /executable == "curl"[\s\S]{0,1400}?dynamic_client_arguments and not forces_get/,
+  "dynamic curl method/body arguments must fail unless GET or HEAD is literal");
+assert.match(hook,
+  /executable in \{"http", "xh"\}[\s\S]{0,900}?dynamic_client_arguments and explicit_methods not in \(\{"get"\}, \{"head"\}\)/,
+  "dynamic HTTPie/xh method/body arguments must fail unless GET or HEAD is literal");
+assert.match(hook,
+  /executable == "wget"[\s\S]{0,900}?dynamic_client_arguments and not literal_safe_method/,
+  "dynamic wget method/body arguments must fail unless GET or HEAD is literal");
 assert.match(hook,
   /forces_get[\s\S]{0,1800}?not forces_get and/,
   "explicit curl GET shapes must not be mislabeled as OTA writes merely for carrying query data");
@@ -393,6 +404,12 @@ assert.match(hook,
 assert.match(hook,
   /re\.search\(r"\(\?:\^\|\[\\s'\\"=\]\)post[\s\S]{0,100}?re\.IGNORECASE\)/,
   "raw HTTP request lines and launcher-hidden methods must remain write-shaped");
+assert.match(hook,
+  /normalized_shell\s*=\s*" "\.join\(shell_syntax_tokens\(decoded\)\)[\s\S]{0,300}?for candidate in \(decoded, normalized_shell\)/,
+  "quote-split and ANSI-C raw HTTP methods must be normalized before classification");
+assert.match(hook,
+  /def shell_argument_may_be_post[\s\S]{0,700}?expand_static_braces\(argument\.lower\(\)\)[\s\S]{0,500}?--method=post/,
+  "brace- and glob-expanded client method arguments must remain write-shaped");
 assert.doesNotMatch(hook,
   /def read_only_gate_inspection[\s\S]{0,1600}?executable == "git"/,
   "Git helpers, pagers, aliases and external diffs must not enter the inspection exception");
@@ -411,6 +428,9 @@ assert.match(hook,
 assert.match(hook,
   /token_may_name_command\(token, "production-ota-gate\.py"\)/,
   "shell globs that resolve to the canonical gate must fail before execution");
+assert.match(hook,
+  /"production-ota-" in compact and "gate\.py" in compact[\s\S]{0,300}?"\/scripts\/" in f"\/\{token\}"/,
+  "embedded/default dynamic construction of the canonical scripts executable must fail closed");
 assert.match(hook,
   /nested_tokens\.extend\(shell_token_sets\(nested\)\)/,
   "Git helper and pager strings must be recursively searched for renamed aliases");
