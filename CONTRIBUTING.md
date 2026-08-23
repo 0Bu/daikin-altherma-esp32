@@ -391,17 +391,19 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
 > [`docs/SECURITY.md`](docs/SECURITY.md). For a contributor the practical path is: build to check it
 > compiles, and let the maintainer test on hardware — or generate your own key for your own board.
 
-Production OTA is a separate maintainer-only promotion gate. Do not call `/ota/update` directly.
-The direct, unchained `scripts/production-ota-gate.py` command binds the exact signed official dev
-artifact, requires a clean matching source tree, runs host contracts, verifies the artifact and a
-complete signed release-binary download under HTTP pressure on the MAC-bound private-inventory
-`bench` role, observes the completed verifier state, boots that release past its rollback probation,
-returns to the exact dev version/ELF, and runs a fixed manifest-pressure window. Only then does it
-permit one un-retried
-update of the distinct `production` role and completes a read-only heap/X10A/MQTT canary. The bench
-board need not have a physical X10A connection; the production canary must therefore prove the real
-retained X10A payload. The command never cuts a release. See
-[`docs/SECURITY.md`](docs/SECURITY.md) for the complete evidence boundary.
+Maintainer OTA writes use the direct, unchained `scripts/production-ota-gate.py`; never call
+`/ota/update` directly. For an ordinary private-inventory `bench` update, use the exact signed
+official dev artifact with `--confirm-bench bench --install-bench`. This mode requires a clean
+matching source tree, host contracts, a generation-bound one-shot write, verifier/heap evidence,
+rollback probation and fixed live pressure. It cannot contact `production`; ordinary bench delivery
+is OTA-only, with signed NVS-preserving USB reserved for bootstrap or recovery.
+
+Production promotion is the separate `--confirm-production production --execute` transaction. It
+first exercises a complete signed release download under pressure on the MAC-bound bench, restores
+the exact dev artifact, then permits one un-retried update of the distinct production role and a
+read-only heap/X10A/MQTT canary. The bench need not have physical X10A; production must prove the
+real retained X10A payload. Neither mode cuts a release. See
+[`docs/SECURITY.md`](docs/SECURITY.md) for the complete commands and evidence boundaries.
 
 ## Where code goes
 

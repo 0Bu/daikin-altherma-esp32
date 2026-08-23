@@ -140,11 +140,14 @@ documentation.
 - Never claim flash, OTA, persistence, or rollback success from a build artifact alone. After an
   authorized device update, verify version/signature, reboot reason, rollback/safe-mode state, heap
   and stack health, X10A/Modbus link state, connectivity, and the requested user-visible behavior.
-- Production OTA promotion must use the direct, unchained
-  `scripts/production-ota-gate.py` command. It binds the exact signed dev artifact, stages and
-  stresses it on the private-inventory `bench` role, performs one un-retried POST to the distinct
-  `production` role, then uses read-only canary and retained-X10A checks. Direct `/ota/update` writes
-  and release creation are outside that gate.
+- Every agent-run OTA write must use the direct, unchained `scripts/production-ota-gate.py` command.
+  Ordinary private-inventory `bench` delivery uses `--confirm-bench bench --install-bench`; it binds
+  the exact signed dev artifact, performs one un-retried POST only to `bench`, survives rollback
+  probation and stress, and cannot contact `production`. Use OTA, not USB, for ordinary bench
+  updates; signed USB is bootstrap/recovery only.
+- Production promotion remains a distinct `--confirm-production production --execute` transaction:
+  bench staging and stress precede one production POST plus read-only canary and retained-X10A
+  checks. Direct `/ota/update` writes and release creation remain outside both modes.
 
 ## Build and deterministic gates
 

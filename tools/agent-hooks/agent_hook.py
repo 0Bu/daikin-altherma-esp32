@@ -9,6 +9,7 @@ formatting actions stay anchored to the versioned hook core's own worktree.
 from __future__ import annotations
 
 import argparse
+import filecmp
 import fnmatch
 import json
 import os
@@ -20,6 +21,7 @@ import shutil
 import subprocess
 import sys
 from typing import Any, Iterable
+from urllib.parse import unquote
 
 from merge_payload import find_merge as classify_github_action
 
@@ -533,6 +535,15 @@ def shell_token_sets(command: str, depth: int = 0) -> list[tuple[list[str], bool
         resolved_segment = [
             resolve_static_shell_token(token, persistent_assignments)[0] for token in segment_tokens
         ]
+        if resolved_segment and Path(resolved_segment[0]).name == "env":
+            for index, token in enumerate(resolved_segment[:-1]):
+                if token in {"-S", "--split-string"}:
+                    results.extend(shell_token_sets(resolved_segment[index + 1], depth + 1))
+            for token in resolved_segment[1:]:
+                if token.startswith("-S") and token != "-S":
+                    results.extend(shell_token_sets(token[2:], depth + 1))
+                elif token.startswith("--split-string="):
+                    results.extend(shell_token_sets(token.split("=", 1)[1], depth + 1))
         tokens, env_without_command = effective_shell_tokens(shlex.join(resolved_segment))
         results.append((tokens, env_without_command))
         if not tokens:
@@ -868,7 +879,7 @@ def is_exact_espsecure_sign(command: str) -> bool:
 
 
 def canonical_production_ota_command(payload: dict[str, Any], command: str) -> bool:
-    """Only the reviewed one-shot bench-to-production gate may own a production OTA write."""
+    """Only an exact reviewed gate shape may own a bench or production OTA write."""
     if "\n" in command or re.search(r"[;&|`<>]|\$\(", command):
         return False
     try:
@@ -883,35 +894,375 @@ def canonical_production_ota_command(payload: dict[str, Any], command: str) -> b
     executable = Path(tokens[0]).expanduser()
     if not executable.is_absolute():
         executable = effective_cwd / executable
-    canonical = (HOOK_ROOT / "scripts/production-ota-gate.py").resolve()
-    if executable.resolve(strict=False) != canonical:
+    canonical = HOOK_ROOT / "scripts/production-ota-gate.py"
+    # Normalize dot components without resolving a foreign symlink onto the canonical file.
+    if Path(os.path.abspath(executable)) != canonical:
         return False
     if tokens[1:] == ["--self-test"]:
         return True
-    if "--execute" not in tokens:
-        return True  # read-only staging/preflight still validates its own required arguments
-    required = {
+    exact_values = {
         "--manifest-url": "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json",
-        "--confirm-production": "production",
     }
-    for option, expected in required.items():
-        if tokens.count(option) != 1:
-            return False
-        index = tokens.index(option)
-        if index + 1 >= len(tokens) or tokens[index + 1] != expected:
-            return False
-    for option, pattern in {
+    patterns = {
         "--expected-source-sha": r"[0-9a-f]{40}",
         "--expected-version": r"[0-9A-Za-z._+-]+-dev\.[0-9]+",
         "--expected-app-sha256": r"[0-9a-f]{64}",
-        "--expected-current-version": r"[0-9A-Za-z._+-]+",
-    }.items():
-        if tokens.count(option) != 1:
+    }
+    flags: set[str] = set()
+    if "--install-bench" in tokens:
+        flags = {"--install-bench"}
+        exact_values["--confirm-bench"] = "bench"
+        patterns["--expected-current-version"] = r"[0-9A-Za-z._+-]+"
+    elif "--execute" in tokens:
+        flags = {"--execute"}
+        exact_values["--confirm-production"] = "production"
+        patterns["--expected-current-version"] = r"[0-9A-Za-z._+-]+"
+    else:
+        return False  # production staging without execution already performs bench writes
+
+    expected_options = set(exact_values) | set(patterns)
+    seen_options: dict[str, str] = {}
+    seen_flags: set[str] = set()
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in flags and token not in seen_flags:
+            seen_flags.add(token)
+            index += 1
+            continue
+        if token not in expected_options or token in seen_options or index + 1 >= len(tokens):
             return False
-        index = tokens.index(option)
-        if index + 1 >= len(tokens) or re.fullmatch(pattern, tokens[index + 1]) is None:
+        seen_options[token] = tokens[index + 1]
+        index += 2
+    if set(seen_options) != expected_options or seen_flags != flags:
+        return False
+    if any(seen_options[option] != expected for option, expected in exact_values.items()):
+        return False
+    if seen_options.get("--expected-current-version") == seen_options["--expected-version"]:
+        return False
+    return all(
+        re.fullmatch(pattern, seen_options[option]) is not None
+        for option, pattern in patterns.items()
+    )
+
+
+def possible_ota_update_route(command: str) -> bool:
+    """Recognize literal OTA routes and common shell-built equivalents."""
+    decoded = unquote(unquote(command))
+    compact = re.sub(r"[\s'\"+\\]", "", decoded.lower())
+    if "/ota/update" in compact or "ota/update" in compact:
+        return True
+    if re.search(r"https?://[^'\";&|]*[$`][\s\S]{0,160}/update", decoded, re.IGNORECASE):
+        return True
+    for token in shell_syntax_tokens(decoded):
+        if "/update" in token.lower() and re.search(r"[$`]", token):
+            return True
+        for expanded in expand_static_braces(token):
+            if expanded == "__AGENT_AMBIGUOUS_BRACE__":
+                return "ota" in token.lower() and "update" in token.lower()
+            candidate = unquote(unquote(expanded)).lower()
+            segments = candidate.split("/")
+            for index in range(len(segments) - 1):
+                route = segments[index]
+                action = re.split(r"[?#]", segments[index + 1], maxsplit=1)[0]
+                if fnmatch.fnmatchcase("ota", route) and fnmatch.fnmatchcase("update", action):
+                    return True
+    return False
+
+
+def shell_syntax_tokens(command: str) -> list[str]:
+    """Return quote-aware shell tokens while retaining control and redirection operators."""
+    try:
+        lexer = shlex.shlex(
+            normalize_ansi_c_quotes(command).replace("\n", " ; "),
+            posix=True,
+            punctuation_chars=";&|()!<>",
+        )
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        return list(lexer)
+    except ValueError:
+        return []
+
+
+def shell_client_receives_stdin(command: str, client: str) -> bool:
+    """Recognize an upstream pipe or input redirection for a named client token."""
+    tokens = shell_syntax_tokens(command)
+    for index, token in enumerate(tokens):
+        if Path(token).name.lower() != client:
+            continue
+        previous_control = next(
+            (candidate for candidate in reversed(tokens[:index]) if re.fullmatch(r"[;&|()!<>]+", candidate)),
+            "",
+        )
+        if "|" in previous_control:
+            return True
+        for candidate in tokens[index + 1 :]:
+            if re.fullmatch(r"[;&|()!]+", candidate):
+                break
+            if re.fullmatch(r"<{1,3}", candidate):
+                return True
+    return False
+
+
+def shell_argument_may_be_post(argument: str) -> bool:
+    """Recognize literal, brace-expanded or glob-shaped POST method arguments."""
+    for expanded in expand_static_braces(argument.lower()):
+        if expanded == "__AGENT_AMBIGUOUS_BRACE__":
+            return True
+        if any(fnmatch.fnmatchcase(target, expanded) for target in ("post", "-xpost", "--request=post", "--method=post")):
+            return True
+    return False
+
+
+def curl_short_option_effects(argument: str, following: str = "") -> tuple[str, bool, bool, bool, bool]:
+    """Return (method, GET flag, body, next transfer, ambiguous write) for a curl short cluster."""
+    if not argument.startswith("-") or argument.startswith("--") or argument == "-":
+        return "", False, False, False, False
+    consumes_value = set("AbcCDeEFHKmoPQrTtuUwXxyz")
+    no_value = set("012346aBfgGhIiJkLlMnNOpqRsSvVZ#")
+    cluster = argument[1:]
+    saw_get = False
+    for index, option in enumerate(cluster):
+        remainder = cluster[index + 1 :]
+        if option == "G":
+            saw_get = True
+            continue
+        if option == ":":
+            return "", saw_get, False, True, False
+        if option == "X":
+            return remainder or following, saw_get, False, False, False
+        if option in {"d", "F", "T"}:
+            return "", saw_get, True, False, False
+        if option in consumes_value:
+            return "", saw_get, False, False, False
+        if option not in no_value:
+            return "", saw_get, False, False, any(candidate in remainder for candidate in "XdFT:")
+    return "", saw_get, False, False, False
+
+
+def wget_argument_may_write(argument: str) -> bool:
+    """Recognize GNU Wget write controls, including clusters and unique long abbreviations."""
+    if argument.startswith("--"):
+        name = argument[2:].split("=", 1)[0].lower()
+        if not name:
             return False
-    return tokens.count("--execute") == 1
+        if any(target.startswith(name) for target in ("config", "execute", "post-file", "post-data")):
+            return True
+        return name != "method" and "method".startswith(name)
+    if not argument.startswith("-") or argument == "-":
+        return False
+    value_options = set("aABDiIloOPQRtTUwX")
+    for option in argument[1:]:
+        if option == "e":
+            return True
+        if option in value_options:
+            return False
+    return False
+
+
+def shell_sets_wgetrc(command: str, tokens: list[str]) -> bool:
+    """Recognize explicit WGETRC assignment before or inside ordinary shell launchers."""
+    return re.search(r"(?:^|[\s;&|])wgetrc(?:\+)?\s*=", command, re.IGNORECASE) is not None or any(
+        re.match(r"^wgetrc(?:\+)?=", token, re.IGNORECASE) is not None for token in tokens
+    )
+
+
+def direct_ota_update_write(command: str) -> bool:
+    """Recognize ordinary shell/client write shapes aimed at the OTA update route."""
+    decoded = unquote(unquote(command))
+    compact = re.sub(r"[\s'\"+\\]", "", decoded.lower())
+    if not possible_ota_update_route(command):
+        return False
+    raw_tokens = shell_syntax_tokens(decoded)
+    has_raw_network_client = any(
+        Path(argument).name.lower() in {"nc", "ncat", "netcat", "openssl", "socat", "telnet"}
+        for argument in raw_tokens
+    ) or re.search(r"/dev/(?:tcp|udp)/", decoded, re.IGNORECASE) is not None
+    if has_raw_network_client:
+        return True
+    if any(marker in compact for marker in (
+        "-xpost", "--requestpost", "--request=post", ".post(", ".request(post,",
+        "-methodpost",
+    )):
+        return True
+    if re.search(r",method=post(?:[,)]|$)", compact) or \
+       re.search(r"(?:^|[,{])method:post(?:[,}]|$)", compact):
+        return True
+    if "request(" in compact and ("data=" in compact or "json=" in compact):
+        return True
+    if "urlopen(" in compact and "data=" in compact:
+        return True
+    if re.search(r"(?:request|urlopen)\([^,]+,[^)]+", compact):
+        return True
+    for tokens, _ in shell_token_sets(decoded):
+        if not tokens:
+            continue
+        for client_index, token in enumerate(tokens):
+            executable = Path(token).name.lower()
+            if executable not in {"curl", "http", "xh", "wget"}:
+                continue
+            raw_arguments = tokens[client_index + 1 :]
+            arguments = [argument.lower() for argument in raw_arguments]
+            dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)
+            if executable == "curl":
+                if "--next" in arguments:
+                    return True
+                explicit_method = ""
+                has_get_flag = False
+                has_body = False
+                for index, argument in enumerate(arguments):
+                    if argument in {"-x", "--request"} and index + 1 < len(arguments):
+                        explicit_method = arguments[index + 1]
+                        if shell_argument_may_be_post(arguments[index + 1]):
+                            return True
+                    elif re.match(r"^(?:-x|--request=).+", argument):
+                        explicit_method = re.sub(r"^(?:-x|--request=)", "", argument)
+                        if shell_argument_may_be_post(argument):
+                            return True
+                    method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = curl_short_option_effects(
+                        raw_arguments[index], raw_arguments[index + 1] if index + 1 < len(raw_arguments) else "",
+                    )
+                    has_get_flag = has_get_flag or cluster_get
+                    has_body = has_body or cluster_body
+                    if cluster_next:
+                        return True
+                    if cluster_ambiguous:
+                        return True
+                    if method:
+                        explicit_method = method.lower()
+                        if shell_argument_may_be_post(method):
+                            return True
+                forces_get = explicit_method in {"get", "head"} or (
+                    not explicit_method and (
+                        has_get_flag or any(argument in {"-g", "--get"} for argument in arguments)
+                    )
+                )
+                if dynamic_client_arguments and not forces_get:
+                    return True
+                if has_body and not forces_get:
+                    return True
+                for index, argument in enumerate(arguments):
+                    if argument in {"-x", "--request"} and index + 1 < len(arguments) and \
+                       arguments[index + 1] == "post":
+                        return True
+                    if not forces_get and (argument in {
+                        "-d", "--data", "--data-ascii", "--data-binary", "--data-raw", "--json",
+                        "--data-urlencode", "--form", "--form-string", "--upload-file",
+                    } or raw_arguments[index] in {"-F", "-T"} or \
+                       raw_arguments[index].startswith(("-F", "-T")) or \
+                       argument.startswith(("--data", "--form", "--json=", "--upload-file=")) or \
+                       re.match(r"^(?:-xpost|-d.+|--request=post)", argument)):
+                        return True
+            elif executable in {"http", "xh"}:
+                explicit_methods = {
+                    argument for argument in arguments
+                    if argument in {"delete", "get", "head", "options", "patch", "post", "put"}
+                }
+                if any(shell_argument_may_be_post(argument) for argument in arguments):
+                    return True
+                if dynamic_client_arguments and explicit_methods not in ({"get"}, {"head"}):
+                    return True
+                has_body = shell_client_receives_stdin(decoded, executable) or any(
+                    argument == "--raw" or argument.startswith("--raw=") or
+                    argument in {"--form", "--multipart"} or
+                    not argument.startswith("-") and (
+                        ":=" in argument or
+                        ("=" in argument and "==" not in argument) or
+                        "@" in argument
+                    )
+                    for argument in arguments
+                    if "://" not in argument
+                )
+                if explicit_methods in ({"get"}, {"head"}):
+                    continue
+                if explicit_methods or has_body:
+                    return True
+            elif executable == "wget":
+                if any(shell_argument_may_be_post(argument) for argument in arguments):
+                    return True
+                if shell_sets_wgetrc(decoded, raw_tokens):
+                    return True
+                if any(wget_argument_may_write(argument) for argument in raw_arguments):
+                    return True
+                effective_method = ""
+                for index, argument in enumerate(arguments):
+                    if argument == "--method" and index + 1 < len(arguments):
+                        effective_method = arguments[index + 1]
+                    elif argument.startswith("--method="):
+                        effective_method = argument.split("=", 1)[1]
+                literal_safe_method = effective_method in {"get", "head"}
+                if dynamic_client_arguments and not literal_safe_method:
+                    return True
+                for index, argument in enumerate(arguments):
+                    if argument in {"--post-data", "--post-file"} or \
+                       argument.startswith(("--post-data=", "--post-file=")):
+                        return True
+                    if argument == "--method" and index + 1 < len(arguments) and arguments[index + 1] == "post":
+                        return True
+                    if argument == "--method=post":
+                        return True
+    return False
+
+
+def read_only_gate_inspection(command: str) -> bool:
+    """Allow source inspection to name the gate without allowing an execution wrapper."""
+    token_sets = [tokens for tokens, _ in shell_token_sets(command) if tokens]
+    if not token_sets:
+        return False
+    for tokens in token_sets:
+        executable = Path(tokens[0]).name
+        args = tokens[1:]
+        if executable not in {"cat", "diff", "grep", "head", "rg", "sed", "tail"}:
+            return False
+        if executable == "diff" and any(
+            arg == "--output" or arg.startswith("--output=") for arg in args
+        ):
+            return False
+        if executable == "rg" and any(
+            arg == "--pre" or arg.startswith("--pre=") for arg in args
+        ):
+            return False
+        if executable == "sed" and any(
+            arg == "-i" or arg.startswith("-i") or arg == "--in-place" or arg.startswith("--in-place=")
+            for arg in args
+        ):
+            return False
+    return True
+
+
+def aliases_canonical_ota_gate(payload: dict[str, Any], command: str) -> bool:
+    """Reject renamed aliases or exact copies, including launcher arguments."""
+    effective_cwd, cwd_error = effective_shell_cwd(payload)
+    if cwd_error:
+        return False
+    canonical = HOOK_ROOT / "scripts/production-ota-gate.py"
+    token_sets = shell_token_sets(command)
+    raw_tokens = shell_syntax_tokens(command)
+    if raw_tokens:
+        token_sets.append((raw_tokens, False))
+    nested_tokens = []
+    for tokens, _ in token_sets:
+        for token in tokens:
+            if any(character.isspace() for character in token):
+                nested = token.split("=", 1)[1] if "=" in token else token
+                nested_tokens.extend(shell_token_sets(nested))
+    for tokens, _ in [*token_sets, *nested_tokens]:
+        if not tokens:
+            continue
+        for token in tokens:
+            candidate = Path(token).expanduser()
+            if not candidate.is_absolute():
+                candidate = effective_cwd / candidate
+            lexical = Path(os.path.abspath(candidate))
+            if lexical == canonical or not lexical.is_file():
+                continue
+            try:
+                if os.path.samefile(lexical, canonical) or filecmp.cmp(lexical, canonical, shallow=False):
+                    return True
+            except OSError:
+                pass
+    return False
 
 
 def production_ota_violation(payload: dict[str, Any]) -> str | None:
@@ -922,24 +1273,39 @@ def production_ota_violation(payload: dict[str, Any]) -> str | None:
         return None
     if canonical_production_ota_command(payload, command):
         return None
-    compact = re.sub(r"[\s'\"+\\]", "", command.lower())
-    compact = compact.replace("%2f", "/").replace("%75", "u")
-    names_gate = "production-ota-gate.py" in compact
-    names_update = "/ota/update" in compact or "ota/update" in compact
-    write_markers = (
-        "-xpost", "--requestpost", "--request=post", ".post(", "method=post",
-        "method:post", "--data", "--form", "data=",
+    compact = re.sub(r"[\s'\"+\\]", "", unquote(unquote(command)).lower())
+    names_gate = "production-ota-gate.py" in compact or any(
+        token_may_name_command(token, "production-ota-gate.py")
+        for tokens, _ in shell_token_sets(command)
+        for token in tokens
     )
-    update_write = names_update and (
-        any(marker in compact for marker in write_markers) or
-        re.search(r"(?:^|[;&|])(?:curl|http|xh)[^;&|]*\s-d(?:\s|$)", command.lower()) is not None
+    names_gate = names_gate or (
+        re.search(r"[$`]", command) is not None
+        and (
+            ("production-ota-" in compact and "gate.py" in compact)
+            or all(
+                option in compact
+                for option in (
+                    "--manifest-url", "--expected-source-sha", "--expected-version",
+                    "--expected-app-sha256",
+                )
+            )
+            or any(
+                re.search(r"[$`]", token) is not None and "/scripts/" in f"/{token}"
+                for tokens, _ in shell_token_sets(command)
+                for token in tokens
+            )
+        )
     )
-    if names_gate and "--execute" in compact:
-        return "the production OTA gate is not the canonical direct, unchained, argument-bound command"
-    if update_write:
+    read_only_inspection = read_only_gate_inspection(command)
+    if (aliases_canonical_ota_gate(payload, command) and not read_only_inspection) or \
+       (names_gate and not read_only_inspection):
+        return "the OTA gate is not a canonical direct, unchained, role- and artifact-bound command"
+    if direct_ota_update_write(command):
         return (
             "direct OTA writes are forbidden; run scripts/production-ota-gate.py so the exact signed "
-            "artifact passes bench staging, heap stress, one-shot production promotion and read-only canary proof"
+            "artifact targets either the inventory-pinned bench-only gate or the distinct bench-first "
+            "production promotion gate"
         )
     return None
 
@@ -1193,7 +1559,7 @@ def guard_production_ota(payload: dict[str, Any]) -> bool:
     reason = production_ota_violation(payload)
     if not reason:
         return False
-    emit_permission("deny", "Blocked by the production OTA gate: " + reason + ".")
+    emit_permission("deny", "Blocked by the role-pinned OTA gate: " + reason + ".")
     return True
 
 
