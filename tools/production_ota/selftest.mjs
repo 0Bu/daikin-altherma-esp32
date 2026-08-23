@@ -342,7 +342,7 @@ try {
         "if any(wget_argument_may_write(argument) for argument in raw_arguments):", "if False:")],
     ["Wget startup configuration can synthesize an OTA POST", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        'if re.search(r"(?:^|[\\s;&|])wgetrc\\s*=", decoded, re.IGNORECASE):', "if False:")],
+        "if shell_sets_wgetrc(decoded, raw_tokens):", "if False:")],
     ["HTTPie stdin bodies are no longer recognized", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "shell_client_receives_stdin(decoded, executable)", "False")],

@@ -1061,6 +1061,13 @@ def wget_argument_may_write(argument: str) -> bool:
     return False
 
 
+def shell_sets_wgetrc(command: str, tokens: list[str]) -> bool:
+    """Recognize explicit WGETRC assignment before or inside ordinary shell launchers."""
+    return re.search(r"(?:^|[\s;&|])wgetrc\s*=", command, re.IGNORECASE) is not None or any(
+        re.match(r"^wgetrc=", token, re.IGNORECASE) is not None for token in tokens
+    )
+
+
 def direct_ota_update_write(command: str) -> bool:
     """Recognize ordinary shell/client write shapes aimed at the OTA update route."""
     decoded = unquote(unquote(command))
@@ -1174,7 +1181,7 @@ def direct_ota_update_write(command: str) -> bool:
             elif executable == "wget":
                 if any(shell_argument_may_be_post(argument) for argument in arguments):
                     return True
-                if re.search(r"(?:^|[\s;&|])wgetrc\s*=", decoded, re.IGNORECASE):
+                if shell_sets_wgetrc(decoded, raw_tokens):
                     return True
                 if any(wget_argument_may_write(argument) for argument in raw_arguments):
                     return True

@@ -403,6 +403,14 @@ guard_case "wget abbreviated method OTA POST is denied" \
     "$(payload exec_command command "wget --meth=POST \"$ota_lease_url\"")" deny
 guard_case "explicit WGETRC cannot synthesize an OTA POST" \
     "$(payload exec_command command "WGETRC=/tmp/ota-wgetrc wget \"$ota_lease_url\"")" deny
+guard_case "quote-split WGETRC cannot synthesize an OTA POST" \
+    "$(payload exec_command command "W'GETRC'=/tmp/ota-wgetrc wget \"$ota_lease_url\"")" deny
+guard_case "backslash-split WGETRC cannot synthesize an OTA POST" \
+    "$(payload exec_command command "WGE\\TRC=/tmp/ota-wgetrc wget \"$ota_lease_url\"")" deny
+guard_case "env quote-split WGETRC cannot synthesize an OTA POST" \
+    "$(payload exec_command command "env W'GETRC'=/tmp/ota-wgetrc wget \"$ota_lease_url\"")" deny
+guard_case "export quote-split WGETRC cannot synthesize an OTA POST" \
+    "$(payload exec_command command "export W'GETRC'=/tmp/ota-wgetrc; wget \"$ota_lease_url\"")" deny
 guard_case "wget config file cannot synthesize an OTA POST" \
     "$(payload exec_command command "wget --config=/tmp/ota-wgetrc \"$ota_lease_url\"")" deny
 guard_case "wget separated config file cannot synthesize an OTA POST" \

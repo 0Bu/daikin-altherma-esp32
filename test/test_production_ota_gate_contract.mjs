@@ -403,7 +403,10 @@ assert.match(hook,
   /def wget_argument_may_write[\s\S]{0,900}?\("config", "execute", "post-file", "post-data"\)[\s\S]{0,300}?"method"\.startswith\(name\)[\s\S]{0,400}?aABDiIloOPQRtTUwX[\s\S]{0,200}?option == "e"/,
   "GNU Wget write controls must cover clustered short options and unique long abbreviations");
 assert.match(hook,
-  /executable == "wget"[\s\S]{0,500}?wgetrc\\s\*=.*re\.IGNORECASE[\s\S]{0,200}?wget_argument_may_write\(argument\) for argument in raw_arguments/,
+  /def shell_sets_wgetrc[\s\S]{0,500}?\^wgetrc=/,
+  "quote-normalized tokens must expose explicit Wget startup configuration");
+assert.match(hook,
+  /executable == "wget"[\s\S]{0,500}?shell_sets_wgetrc\(decoded, raw_tokens\)[\s\S]{0,200}?wget_argument_may_write\(argument\) for argument in raw_arguments/,
   "explicit Wget startup configuration and parsed write controls must fail closed");
 assert.match(hook,
   /forces_get[\s\S]{0,1800}?not forces_get and/,
