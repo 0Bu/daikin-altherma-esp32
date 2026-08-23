@@ -389,6 +389,10 @@ guard_case "wget clustered execute post-file OTA POST is denied" \
     "$(payload exec_command command "wget -qe 'post_file=/tmp/app.bin' \"$ota_lease_url\"")" deny
 guard_case "wget attached clustered execute OTA POST is denied" \
     "$(payload exec_command command "wget -qepost_file=/tmp/app.bin \"$ota_lease_url\"")" deny
+guard_case "wget page-requisites cluster cannot mask execute OTA POST" \
+    "$(payload exec_command command "wget -pe 'post_file=/tmp/app.bin' \"$ota_lease_url\"")" deny
+guard_case "wget attached page-requisites cluster cannot mask execute OTA POST" \
+    "$(payload exec_command command "wget -pepost_file=/tmp/app.bin \"$ota_lease_url\"")" deny
 guard_case "wget abbreviated execute OTA POST is denied" \
     "$(payload exec_command command "wget --exec=post_file=/tmp/app.bin \"$ota_lease_url\"")" deny
 guard_case "wget abbreviated post-file OTA POST is denied" \

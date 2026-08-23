@@ -1052,7 +1052,7 @@ def wget_argument_may_write(argument: str) -> bool:
         return name != "method" and "method".startswith(name)
     if not argument.startswith("-") or argument == "-":
         return False
-    value_options = set("aAiIoOpPtTU")
+    value_options = set("aAiIoOPtTU")
     for option in argument[1:]:
         if option == "e":
             return True
