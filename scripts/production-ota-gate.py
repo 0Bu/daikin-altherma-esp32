@@ -54,8 +54,8 @@ OTA_CHECK_TIMEOUT_S = 120
 # headroom waits, two verifier passes and reboot. The observer must outlive the only accepted write.
 OTA_TIMEOUT_S = 480
 OTA_OFFER_POLL_SECONDS = 0.1
-# urllib closes each response connection. Keep the compact in-transfer observer below allocator-
-# churning load and bound each compact request so the firmware's completed-state dwell is observable.
+# The raw-socket observer explicitly closes each response connection. Keep its in-transfer cadence
+# below allocator-churning load and bound every request so completed-state evidence is observable.
 OTA_STATUS_POLL_SECONDS = 0.5
 OTA_STATUS_REQUEST_TIMEOUT_S = 1.0
 OTA_STATUS_MAX_BYTES = 4096
@@ -70,6 +70,10 @@ OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/man
 
 class GateError(RuntimeError):
     pass
+
+
+class CompactTransportError(RuntimeError):
+    """A retryable compact-observer disconnect while the board may be rebooting."""
 
 
 @dataclass(frozen=True)
@@ -242,7 +246,7 @@ def read_compact_json_response(
         apply_remaining_timeout()
         chunk = connection.recv(1024)
         if not chunk:
-            fail("compact HTTP response ended before its headers")
+            raise CompactTransportError("compact HTTP response ended before its headers")
         response.extend(chunk)
         if len(response) > OTA_STATUS_MAX_BYTES:
             fail("compact HTTP response headers exceed their fixed bound")
@@ -277,7 +281,7 @@ def read_compact_json_response(
         apply_remaining_timeout()
         chunk = connection.recv(min(1024, content_length - len(body)))
         if not chunk:
-            fail("compact HTTP response ended before its declared body")
+            raise CompactTransportError("compact HTTP response ended before its declared body")
         body.extend(chunk)
     apply_remaining_timeout()
     value = json.loads(body)
@@ -879,7 +883,7 @@ def wait_for_new_firmware(
         except HTTPError as error:
             if error.code != 503:
                 raise
-        except (OSError, TimeoutError, json.JSONDecodeError):
+        except (CompactTransportError, OSError, TimeoutError, json.JSONDecodeError):
             pass  # expected only while the one accepted update reboots; never retried as a write
         time.sleep(OTA_STATUS_POLL_SECONDS)
     fail(f"board did not return on {version}/{elf}; OTA done observed={saw_done}")
@@ -1326,6 +1330,28 @@ def self_test() -> None:
     drip_elapsed = time.monotonic() - drip_started
     drip_thread.join(1.0)
     assert drip_elapsed < 0.7
+
+    # A board can close the compact observer immediately before or during its response while the
+    # successful OTA reboots. Those transport EOFs are retryable; complete malformed responses are
+    # still hard GateError failures in the parser above.
+    for partial_response in (
+        b"",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n{}",
+    ):
+        eof_client, eof_server = socket.socketpair()
+        with eof_server:
+            if partial_response:
+                eof_server.sendall(partial_response)
+        try:
+            read_compact_json_response(
+                eof_client, "fixture.invalid", "/ota/status", time.monotonic() + 0.25,
+            )
+        except CompactTransportError:
+            pass
+        else:
+            raise AssertionError("compact status EOF was not classified as retryable")
+        finally:
+            eof_client.close()
 
     with tempfile.TemporaryDirectory(prefix="daikin-production-ota-selftest-") as tmp:
         inventory_path = Path(tmp) / "inventory.json"

@@ -230,6 +230,15 @@ assert.match(compactReader, /while\s+b"\\r\\n\\r\\n"\s+not\s+in\s+response/,
   "compact headers must be read incrementally under the absolute deadline");
 assert.match(compactReader, /while\s+len\(body\)\s*<\s*content_length/,
   "the fixed-size compact body must be read incrementally under the absolute deadline");
+assert.match(compactReader,
+  /if not chunk:\s+raise CompactTransportError\("compact HTTP response ended before its headers"\)/,
+  "a reboot EOF before compact response headers must remain retryable");
+assert.match(compactReader,
+  /if not chunk:\s+raise CompactTransportError\("compact HTTP response ended before its declared body"\)/,
+  "a reboot EOF during the compact response body must remain retryable");
+assert.match(newFirmwareWait,
+  /except \(CompactTransportError, OSError, TimeoutError, json\.JSONDecodeError\):/,
+  "the reboot observer must retry compact transport EOF without retrying the update write");
 assert.equal(occurrences(compactReader, "apply_remaining_timeout()"), 4,
   "the compact reader must apply the deadline to headers, body and final completion");
 assert.equal(occurrences(gate, "resolve_http_endpoint("), 4,

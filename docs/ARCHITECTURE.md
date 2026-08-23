@@ -2341,8 +2341,8 @@ Structure:
   and the helper has no production target. The gate leases the explicit current version and current
   ELF, requires connected dev-channel WiFi/MQTT, safe heap and zero allocation-failure counters,
   consumes one exact check generation in one un-retried update POST, and observes the immediate
-  successor generation, completed verifier and operation-local heap minima. Its urllib observer
-  closes each response connection, so compact `/ota/status` sampling is capped at 2 Hz during the
+  successor generation, completed verifier and operation-local heap minima. Its compact raw-socket
+  observer explicitly closes each response, so `/ota/status` sampling is capped at 2 Hz during the
   transfer instead of creating 10 new sessions per second beside firmware TLS. Firmware retains the
   completed state for three seconds before reboot. The board endpoint is resolved before the sole
   write, then a fixed-size reader applies one monotonic one-second deadline across connect, request,
@@ -2411,7 +2411,7 @@ Structure:
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract, one hundred twenty-four OTA mutation canaries and one hundred four delivery/promotion
+  contract, one hundred twenty-four OTA mutation canaries and one hundred seven delivery/promotion
   canaries make stage removal, shortened stress, signature bypass, weaker heap floors, raw OTA
   writes and disabled rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash

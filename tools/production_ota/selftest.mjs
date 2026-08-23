@@ -113,6 +113,18 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         'ota = request_json_deadline(\n                status_endpoint, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S,\n            )',
         'ota = request_json(host, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S)')],
+    ["a pre-header reboot EOF becomes a hard gate failure", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'raise CompactTransportError("compact HTTP response ended before its headers")',
+        'fail("compact HTTP response ended before its headers")')],
+    ["a mid-body reboot EOF becomes a hard gate failure", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'raise CompactTransportError("compact HTTP response ended before its declared body")',
+        'fail("compact HTTP response ended before its declared body")')],
+    ["the reboot observer stops retrying compact transport EOF", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "except (CompactTransportError, OSError, TimeoutError, json.JSONDecodeError):",
+        "except (OSError, TimeoutError, json.JSONDecodeError):")],
     ["publisher quiescence no longer outlives the authoritative observer", () =>
       replaceOnce("main/logic/ota_quiesce.hpp", "OTA_QUIESCE_MAX_CYCLES = 600",
         "OTA_QUIESCE_MAX_CYCLES = 480")],

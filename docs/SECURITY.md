@@ -362,8 +362,8 @@ fault crash, no allocation-failure counters and safe internal heap. It then acce
 generation-bound dev offer and performs exactly one un-retried `POST /ota/update`. The returned
 generation must be the immediate successor; the observer must see completed validation and positive
 operation-local free/largest-block minima before the reboot returns on the exact target version.
-Because each urllib observation closes its HTTP connection, the compact transfer-status cadence is
-bounded to 2 Hz instead of creating 10 new sessions per second beside firmware TLS. Its compact
+Because the compact raw-socket observer explicitly closes each HTTP connection, the transfer-status
+cadence is bounded to 2 Hz instead of creating 10 new sessions per second beside firmware TLS. Its
 board endpoint is resolved before the sole write; a fixed-size reader then applies one monotonic
 one-second deadline across connect, request, headers and body. Firmware retains the completed state
 for three seconds, outliving a prior request, the poll sleep, the next request and another 0.5 seconds
