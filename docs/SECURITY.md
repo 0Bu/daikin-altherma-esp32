@@ -361,8 +361,10 @@ current-version lease, current ELF, connected non-rollback WiFi, dev channel, MQ
 fault crash, no allocation-failure counters and safe internal heap. It then accepts one exact
 generation-bound dev offer and performs exactly one un-retried `POST /ota/update`. The returned
 generation must be the immediate successor; the observer must see completed validation and positive
-operation-local free/largest-block minima before the reboot returns on the exact target version,
-ELF and MAC with the expected software-reset reason. The target must then survive the 105-second
+operation-local free/largest-block minima before the reboot returns on the exact target version.
+Because each urllib observation closes its HTTP connection, the compact transfer-status cadence is
+bounded to 2 Hz instead of creating 10 new sessions per second beside firmware TLS. ELF and MAC must
+then match with the expected software-reset reason. The target must survive the 105-second
 rollback-health window and a fixed three-minute status/values/diag plus real-manifest-TLS pressure
 test with stable counters, recovered heap and MQTT. X10A and optional weather are intentionally not
 required on the unwired bench.

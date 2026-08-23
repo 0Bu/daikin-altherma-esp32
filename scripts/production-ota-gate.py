@@ -54,7 +54,9 @@ OTA_CHECK_TIMEOUT_S = 120
 # headroom waits, two verifier passes and reboot. The observer must outlive the only accepted write.
 OTA_TIMEOUT_S = 480
 OTA_OFFER_POLL_SECONDS = 0.1
-OTA_STATUS_POLL_SECONDS = 0.1
+# urllib closes each response connection. Keep the compact in-transfer observer below allocator-
+# churning load while still sampling the firmware's 600 ms completed-state dwell before reboot.
+OTA_STATUS_POLL_SECONDS = 0.5
 MQTT_RECOVERY_TIMEOUT_S = 15
 LEGACY_OFFER_STABLE_SECONDS = 3.0
 BENCH_HEALTH_WINDOW_S = 105

@@ -172,8 +172,8 @@ assert.match(gate, /Deliberately one un-retried exact-artifact write per invocat
   "every exact-artifact update invocation must remain explicitly non-retrying");
 assert.match(gate, /OTA_OFFER_POLL_SECONDS\s*=\s*0\.1/,
   "the gate must observe the accepted operation without a long blind polling gap");
-assert.match(gate, /OTA_STATUS_POLL_SECONDS\s*=\s*0\.1/,
-  "the gate must sample the short completed OTA state before reboot");
+assert.match(gate, /OTA_STATUS_POLL_SECONDS\s*=\s*0\.5/,
+  "the gate must sample completed OTA state without connection-close heap churn");
 assert.match(gate, /LEGACY_OFFER_STABLE_SECONDS\s*=\s*3\.0/,
   "the bench-only legacy return must outwait stale idle status from the accepted check");
 const legacyOfferWait = gate.slice(gate.indexOf("def wait_for_legacy_offer("),

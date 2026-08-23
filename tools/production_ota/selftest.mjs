@@ -91,6 +91,9 @@ try {
         "OTA_CHECK_TIMEOUT_S = 30")],
     ["the sole-write observer is shorter than firmware's bounded install path", () =>
       replaceOnce("scripts/production-ota-gate.py", "OTA_TIMEOUT_S = 480", "OTA_TIMEOUT_S = 180")],
+    ["the compact OTA observer restores connection-close heap churn", () =>
+      replaceOnce("scripts/production-ota-gate.py", "OTA_STATUS_POLL_SECONDS = 0.5",
+        "OTA_STATUS_POLL_SECONDS = 0.1")],
     ["publisher quiescence no longer outlives the authoritative observer", () =>
       replaceOnce("main/logic/ota_quiesce.hpp", "OTA_QUIESCE_MAX_CYCLES = 600",
         "OTA_QUIESCE_MAX_CYCLES = 480")],
