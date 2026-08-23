@@ -2306,13 +2306,14 @@ Structure:
   HTTP and payload failures remain single-attempt failures with their original diagnostic class.
   A mid-stream firmware read failure captures its raw result, socket errno, TLS/MbedTLS state,
   heap and OTA-stack reserve before cleanup. One known-length prefix committed after header and
-  app-description validation may then reconnect once inside the same accepted generation and original
-  five-minute deadline. The old TLS client and
+  app-description validation may then reconnect at most twice inside the same accepted generation
+  and original five-minute deadline. The old TLS client and
   2 KiB buffer are freed, the same stable 56/24-KiB admission is reacquired, and the original HTTPS
   URL must answer `Range: bytes=<written>-` with HTTP 206, exactly one matching `Content-Range` and
   the exact remaining `Content-Length`. The live sequential OTA handle and PSA hash continue; 200,
-  chunked, duplicate/missing/mismatched range metadata or a second interruption aborts without boot
-  selection. This recovers one transient dynamic-record/socket loss without turning a persistent
+  chunked or duplicate/missing/mismatched range metadata aborts without boot selection. A resumed
+  stream must commit new bytes before another reconnect, and a third interruption aborts. This
+  recovers two transient dynamic-record/socket losses without turning a persistent
   server or network failure into an unbounded retry loop.
 - **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): fully implemented in
   `ota_update.cpp` — manifest check, an HTTPS-only `esp_http_client` → `esp_ota` stream into the
@@ -2404,9 +2405,9 @@ Structure:
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract, one hundred twenty-one OTA mutation canaries and ninety-seven delivery/promotion canaries make stage
-  removal, shortened stress, signature bypass, weaker heap floors, raw OTA writes and disabled
-  rollback fail locally and in CI. A production image which predates this generation/artifact
+  contract, one hundred twenty-four OTA mutation canaries and ninety-seven delivery/promotion
+  canaries make stage removal, shortened stress, signature bypass, weaker heap floors, raw OTA
+  writes and disabled rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash
   first. The gate fails before its POST and never falls back to the legacy false-success API. This
   workflow creates no release and contains no 48-hour soak gate.

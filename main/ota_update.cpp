@@ -1125,6 +1125,7 @@ void run_update(const OtaTaskArgs& request) {
     bool transfer_ok = write_chunk(buffer, probe_len);
     bool response_complete = false;
     unsigned resumes = 0;
+    size_t stream_started_at = 0;
     read_timeouts = 0;
     while (transfer_ok) {
         if (!set_http_timeout_to_deadline(client, transfer_started, kFirmwareDeadline)) {
@@ -1159,7 +1160,7 @@ void run_update(const OtaTaskArgs& request) {
 
         const bool deadline_reached = http_deadline_reached(transfer_started, kFirmwareDeadline);
         const bool can_resume = total > 0 && ota_transfer_resume_allowed(
-            resumes, written, static_cast<uint64_t>(total), deadline_reached);
+            resumes, stream_started_at, written, static_cast<uint64_t>(total), deadline_reached);
         if (!can_resume) {
             e = deadline_reached ? ESP_ERR_TIMEOUT
                 : n == -ESP_ERR_HTTP_EAGAIN ? ESP_ERR_HTTP_EAGAIN : ESP_FAIL;
@@ -1278,6 +1279,7 @@ void run_update(const OtaTaskArgs& request) {
                     static_cast<unsigned>(resume_at),
                     static_cast<unsigned>(resume_open_heap.free_bytes),
                     static_cast<unsigned>(resume_open_heap.largest_internal_block));
+        stream_started_at = resume_at;
         e = ESP_OK;
         transfer_failure = OtaTransferFailure::None;
         read_timeouts = 0;
