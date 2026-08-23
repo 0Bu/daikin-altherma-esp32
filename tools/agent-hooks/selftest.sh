@@ -403,6 +403,12 @@ guard_case "wget abbreviated method OTA POST is denied" \
     "$(payload exec_command command "wget --meth=POST \"$ota_lease_url\"")" deny
 guard_case "explicit WGETRC cannot synthesize an OTA POST" \
     "$(payload exec_command command "WGETRC=/tmp/ota-wgetrc wget \"$ota_lease_url\"")" deny
+guard_case "wget config file cannot synthesize an OTA POST" \
+    "$(payload exec_command command "wget --config=/tmp/ota-wgetrc \"$ota_lease_url\"")" deny
+guard_case "wget separated config file cannot synthesize an OTA POST" \
+    "$(payload exec_command command "wget --config /tmp/ota-wgetrc \"$ota_lease_url\"")" deny
+guard_case "wget abbreviated config file cannot synthesize an OTA POST" \
+    "$(payload exec_command command "wget --conf=/tmp/ota-wgetrc \"$ota_lease_url\"")" deny
 guard_case "brace-expanded curl OTA method is denied" \
     "$(payload exec_command command 'curl -X P{OST,UT} http://bench.invalid/ota/update')" deny
 guard_case "equals brace-expanded curl OTA method is denied" \
@@ -425,6 +431,10 @@ guard_case "HTTPie explicit GET with dynamic header remains allowed" \
     "$(payload exec_command command 'http GET http://bench.invalid/ota/update "X-Test:$value"')" ""
 guard_case "later literal wget GET overrides an earlier dynamic method" \
     "$(payload exec_command command 'a=PO; b=ST; wget --method=$a$b --method=GET http://bench.invalid/ota/update')" ""
+guard_case "wget domains option value containing e remains a GET" \
+    "$(payload exec_command command "wget -Dbench.invalid --method=GET \"$ota_lease_url\"")" ""
+guard_case "wget reject extension value containing e remains a GET" \
+    "$(payload exec_command command "wget -Rexe --method=GET \"$ota_lease_url\"")" ""
 guard_case "curl HEAD with data remains a read-only method" \
     "$(payload exec_command command "curl -X HEAD --data x http://bench.invalid/ota/update")" ""
 guard_case "curl GET query containing post remains allowed" \

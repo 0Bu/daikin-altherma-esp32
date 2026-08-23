@@ -1044,15 +1044,15 @@ def curl_short_option_effects(argument: str, following: str = "") -> tuple[str, 
 def wget_argument_may_write(argument: str) -> bool:
     """Recognize GNU Wget write controls, including clusters and unique long abbreviations."""
     if argument.startswith("--"):
-        name = argument[2:].split("=", 1)[0]
+        name = argument[2:].split("=", 1)[0].lower()
         if not name:
             return False
-        if any(target.startswith(name) for target in ("execute", "post-file", "post-data")):
+        if any(target.startswith(name) for target in ("config", "execute", "post-file", "post-data")):
             return True
         return name != "method" and "method".startswith(name)
     if not argument.startswith("-") or argument == "-":
         return False
-    value_options = set("aAiIoOPtTU")
+    value_options = set("aABDiIloOPQRtTUwX")
     for option in argument[1:]:
         if option == "e":
             return True
@@ -1176,7 +1176,7 @@ def direct_ota_update_write(command: str) -> bool:
                     return True
                 if re.search(r"(?:^|[\s;&|])wgetrc\s*=", decoded, re.IGNORECASE):
                     return True
-                if any(wget_argument_may_write(argument) for argument in arguments):
+                if any(wget_argument_may_write(argument) for argument in raw_arguments):
                     return True
                 effective_method = ""
                 for index, argument in enumerate(arguments):

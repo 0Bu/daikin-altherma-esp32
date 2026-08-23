@@ -400,10 +400,10 @@ assert.match(hook,
   /executable == "wget"[\s\S]{0,900}?dynamic_client_arguments and not literal_safe_method/,
   "dynamic wget method/body arguments must fail unless GET or HEAD is literal");
 assert.match(hook,
-  /def wget_argument_may_write[\s\S]{0,900}?\("execute", "post-file", "post-data"\)[\s\S]{0,300}?"method"\.startswith\(name\)[\s\S]{0,400}?option == "e"/,
+  /def wget_argument_may_write[\s\S]{0,900}?\("config", "execute", "post-file", "post-data"\)[\s\S]{0,300}?"method"\.startswith\(name\)[\s\S]{0,400}?aABDiIloOPQRtTUwX[\s\S]{0,200}?option == "e"/,
   "GNU Wget write controls must cover clustered short options and unique long abbreviations");
 assert.match(hook,
-  /executable == "wget"[\s\S]{0,500}?wgetrc\\s\*=.*re\.IGNORECASE[\s\S]{0,200}?wget_argument_may_write\(argument\)/,
+  /executable == "wget"[\s\S]{0,500}?wgetrc\\s\*=.*re\.IGNORECASE[\s\S]{0,200}?wget_argument_may_write\(argument\) for argument in raw_arguments/,
   "explicit Wget startup configuration and parsed write controls must fail closed");
 assert.match(hook,
   /forces_get[\s\S]{0,1800}?not forces_get and/,

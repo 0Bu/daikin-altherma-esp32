@@ -339,7 +339,7 @@ try {
         'literal_safe_method = any(argument in {"--method=get", "--method=head"} for argument in arguments)')],
     ["GNU Wget option syntax can synthesize an OTA POST", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        "if any(wget_argument_may_write(argument) for argument in arguments):", "if False:")],
+        "if any(wget_argument_may_write(argument) for argument in raw_arguments):", "if False:")],
     ["Wget startup configuration can synthesize an OTA POST", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'if re.search(r"(?:^|[\\s;&|])wgetrc\\s*=", decoded, re.IGNORECASE):', "if False:")],
