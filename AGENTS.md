@@ -51,11 +51,13 @@ Only version-sensitive project workflows belong in that directory. Skills tied t
 plant, LAN, observability stack, private inventory, or Mac tooling are user-global skills and must not
 be copied into the repository; the exact repository inventory gate rejects additions.
 
-Use the narrowest relevant skill. Important review gates are:
+Use the narrowest relevant skill. The merge gates below are recorded as `$name` PR checkboxes; each
+names a skill in that directory except `$heap-safety-review`, which is a gate record only — no such
+skill exists, and its evidence comes from the independent read-only `heap_safety_reviewer`.
 
 - `$project-review` and `$domain-review`: required before every PR merge.
 - `$heap-safety-review`: required before merge when HTTP, MQTT, OTA, TLS, JSON, X10A publishing,
-  polling, or heap-allocation paths change; use the independent read-only `heap_safety_reviewer`.
+  polling, or heap-allocation paths change.
 - `$feature-docs`: required when technical feature surface changes.
 - `$schematic-review`: required when the dashboard schematic, its contract, or audit changes.
 - `$ui-use-case-review`: required when user-visible UI behavior or its test/audit surface changes.

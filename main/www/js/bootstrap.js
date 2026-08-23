@@ -841,6 +841,9 @@ let _pollTimer = null;
 let _pollFails = 0;
 let _pollBusy  = false;
 let _statusDue = 0;        // performance.now() instant the next /status is due (0 = right now)
+// Bumped by every pollNow(). A tick that started earlier compares this against the value it
+// captured and stops writing _statusDue when they differ — see pollTick().
+let _pollGen   = 0;
 
 // An abort signal that fires after `ms`, or undefined where AbortController is missing (then the
 // browser's default bound applies — the same fallback the OTA reboot-watcher takes). The bound is a
@@ -873,6 +876,10 @@ async function pollTick() {
   _pollBusy = true;
   let ok = true;
   let deferredPaint = false;
+  // The generation this tick belongs to. A pollNow() landing while the request below is in flight
+  // wants the NEXT tick to fetch /status; without this the resumed tick would overwrite its
+  // _statusDue = 0 and silently drop that refresh (see the guard at the assignment).
+  const gen = _pollGen;
   try {
     const now = performance.now();
     if (now >= _statusDue) {
@@ -882,7 +889,12 @@ async function pollTick() {
       // status frame is still painted below; only unreachable status skips it via its own banner.
       ok = await refreshStatus(false);
       deferredPaint = ok;
-      if (ok) _statusDue = now + POLL_STATUS_MS;
+      // `now` is the REQUEST START on purpose: the status cadence is start-to-start, so a slow
+      // answer does not stretch it. What must not survive the await is the assignment itself when
+      // pollNow() has since demanded a fresh /status — a tab left and re-entered while this
+      // request was in flight would otherwise show a status frame up to POLL_STATUS_MS old, which
+      // is exactly what returning to the tab is supposed to rule out.
+      if (ok && gen === _pollGen) _statusDue = now + POLL_STATUS_MS;
     }
     // /status just failed => the device is unreachable; a second doomed request per tick only
     // doubles the wait for the timeout that decides the backoff.
@@ -904,6 +916,10 @@ async function pollTick() {
 function pollNow() {
   _statusDue = 0;
   _pollFails = 0;
+  // Invalidate any tick already awaiting a response, so its own bookkeeping cannot undo the
+  // _statusDue reset above. The backoff is deliberately NOT protected the same way: a request that
+  // really did fail while this ran should still count, and the next tick fetches /status anyway.
+  _pollGen++;
   pollSchedule(0);
 }
 
