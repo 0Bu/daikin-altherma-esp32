@@ -1063,8 +1063,8 @@ def wget_argument_may_write(argument: str) -> bool:
 
 def shell_sets_wgetrc(command: str, tokens: list[str]) -> bool:
     """Recognize explicit WGETRC assignment before or inside ordinary shell launchers."""
-    return re.search(r"(?:^|[\s;&|])wgetrc\s*=", command, re.IGNORECASE) is not None or any(
-        re.match(r"^wgetrc=", token, re.IGNORECASE) is not None for token in tokens
+    return re.search(r"(?:^|[\s;&|])wgetrc(?:\+)?\s*=", command, re.IGNORECASE) is not None or any(
+        re.match(r"^wgetrc(?:\+)?=", token, re.IGNORECASE) is not None for token in tokens
     )
 
 

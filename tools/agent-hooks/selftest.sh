@@ -411,6 +411,12 @@ guard_case "env quote-split WGETRC cannot synthesize an OTA POST" \
     "$(payload exec_command command "env W'GETRC'=/tmp/ota-wgetrc wget \"$ota_lease_url\"")" deny
 guard_case "export quote-split WGETRC cannot synthesize an OTA POST" \
     "$(payload exec_command command "export W'GETRC'=/tmp/ota-wgetrc; wget \"$ota_lease_url\"")" deny
+guard_case "appended WGETRC cannot synthesize an OTA POST" \
+    "$(payload exec_command command "WGETRC+=/tmp/ota-wgetrc wget \"$ota_lease_url\"")" deny
+guard_case "quote-split appended WGETRC cannot synthesize an OTA POST" \
+    "$(payload exec_command command "W'GETRC'+=/tmp/ota-wgetrc wget \"$ota_lease_url\"")" deny
+guard_case "exported appended WGETRC cannot synthesize an OTA POST" \
+    "$(payload exec_command command "export WGETRC+=/tmp/ota-wgetrc; wget \"$ota_lease_url\"")" deny
 guard_case "wget config file cannot synthesize an OTA POST" \
     "$(payload exec_command command "wget --config=/tmp/ota-wgetrc \"$ota_lease_url\"")" deny
 guard_case "wget separated config file cannot synthesize an OTA POST" \
