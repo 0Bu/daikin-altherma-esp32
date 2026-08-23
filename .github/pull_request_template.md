@@ -5,7 +5,7 @@ anything that couldn't be (a remote session may have no Docker daemon or USB —
 
 FIRST-TIME CONTRIBUTOR? Read CONTRIBUTING.md. Short version: run the scripts under
 "Verification", say honestly what you could not test, and leave the "Maintainer gates" section
-alone — those are repository-maintainer skills and are not yours to run.
+alone — those are repository-maintainer reviews and gate records, and are not yours to run.
 -->
 
 ## Summary

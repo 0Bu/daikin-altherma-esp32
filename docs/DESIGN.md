@@ -1050,7 +1050,7 @@ Body, ordered:
      an age under a "—" restates the very reading the row above just refused.
      The open state lives in app state
      (`S.descOpen`), not the DOM, so the per-poll rebuild of `#valueGroups` re-emits an expanded row
-     open instead of collapsing it every second; the click toggles the live element so the slide
+     open instead of collapsing it on the next 2 s values poll; the click toggles the live element so the slide
      animates, and updates the set for the next rebuild.
      Re-emitting an open state is not enough on its own, though, because **a click is not one
      event**: the browser fires it only if the node the pointer went *down* on is still in the tree
