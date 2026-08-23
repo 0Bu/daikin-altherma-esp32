@@ -237,14 +237,15 @@ authorization.
   path and the 480-second host observer, so it cannot expire during a still-valid download. All gates
   refuse on failure and none weakens or skips signature checking.
 
-  One mid-stream read failure after a known-length post-header prefix is validated and committed may
-  reconnect exactly once inside that same deadline. Before cleanup, fixed-format diagnostics preserve
+  A mid-stream read failure after a known-length post-header prefix is validated and committed may
+  reconnect at most twice inside that same deadline. Each resumed stream must commit new bytes before
+  it may consume the next bounded reconnect. Before cleanup, fixed-format diagnostics preserve
   the raw read result,
   socket errno, TLS/MbedTLS state, heap and stack evidence. After cleanup and a fresh 56/24-KiB
   admission, the original HTTPS URL must return HTTP 206 with one exact `Content-Range` suffix and
   matching `Content-Length`; 200, 416, chunked, duplicate or inconsistent metadata fails closed.
   The existing sequential OTA handle and PSA hash continue, so the final manifest SHA and both
-  signed-image validation passes still bind every byte. A second interruption is never retried.
+  signed-image validation passes still bind every byte. A third interruption is never retried.
 
   `HTTP_TLS_DYN_BUF_RX_STATIC` would reduce long-transfer record churn, but it is intentionally not
   enabled on pinned ESP-IDF 6.0.2: Espressif issue #18828 reports a reproducible TLS-1.2
@@ -360,13 +361,19 @@ current-version lease, current ELF, connected non-rollback WiFi, dev channel, MQ
 fault crash, no allocation-failure counters and safe internal heap. It then accepts one exact
 generation-bound dev offer and performs exactly one un-retried `POST /ota/update`. The returned
 generation must be the immediate successor; the observer must see completed validation and positive
-operation-local free/largest-block minima before the reboot returns on the exact target version,
-ELF and MAC with the expected software-reset reason. The target must then survive the 105-second
-rollback-health window and a fixed three-minute status/values/diag plus real-manifest-TLS pressure
-test with stable counters, recovered heap and MQTT. X10A and optional weather are intentionally not
-required on the unwired bench.
+operation-local free/largest-block minima before the reboot returns on the exact target version.
+Because the compact raw-socket observer explicitly closes each HTTP connection, the transfer-status
+cadence is bounded to 2 Hz instead of creating 10 new sessions per second beside firmware TLS. Its
+board endpoint is resolved before the sole write; a fixed-size reader then applies one monotonic
+one-second deadline across connect, request, headers and body. Firmware retains the completed state
+for three seconds, outliving a prior request, the poll sleep, the next request and another 0.5 seconds
+of scheduling margin before reboot. ELF and MAC must then match with the expected software-reset reason.
+The target must then survive the 105-second rollback-health window and a fixed three-minute
+status/values/diag plus real-manifest-TLS pressure test with stable counters, recovered heap and
+MQTT. X10A and optional weather are intentionally not required on the unwired bench.
 
-No compensating write or automatic retry follows a failed acceptance check. Ordinary bench updates
+Only read-only observer GETs interrupted by reboot are sampled again; a complete malformed response
+fails hard. No compensating write or update-POST retry follows a failed acceptance check. Ordinary bench updates
 must use this OTA mode, not USB. Signed, NVS-preserving USB remains only a bootstrap path for firmware
 that predates the generation/artifact handshake or a recovery path when OTA cannot run. The current
 HTTP API does not expose ESP-IDF's running-partition state directly: the healthy 105-second dwell

@@ -91,6 +91,48 @@ try {
         "OTA_CHECK_TIMEOUT_S = 30")],
     ["the sole-write observer is shorter than firmware's bounded install path", () =>
       replaceOnce("scripts/production-ota-gate.py", "OTA_TIMEOUT_S = 480", "OTA_TIMEOUT_S = 180")],
+    ["the compact OTA observer restores connection-close heap churn", () =>
+      replaceOnce("scripts/production-ota-gate.py", "OTA_STATUS_POLL_SECONDS = 0.5",
+        "OTA_STATUS_POLL_SECONDS = 0.1")],
+    ["the completed-verifier dwell is too short for the bounded observer", () =>
+      replaceOnce("main/ota_update.cpp", "kDoneBeforeRebootMs = 3000",
+        "kDoneBeforeRebootMs = 600")],
+    ["the compact OTA request can outlive the completed-state evidence", () =>
+      replaceOnce("scripts/production-ota-gate.py", "OTA_STATUS_REQUEST_TIMEOUT_S = 1.0",
+        "OTA_STATUS_REQUEST_TIMEOUT_S = 5.0")],
+    ["the reboot bypasses the completed-verifier dwell constant", () =>
+      replaceOnce("main/ota_update.cpp", "pdMS_TO_TICKS(kDoneBeforeRebootMs)",
+        "pdMS_TO_TICKS(600)")],
+    ["the compact observer bypasses its bounded poll constant", () =>
+      replaceOnce("scripts/production-ota-gate.py", "time.sleep(OTA_STATUS_POLL_SECONDS)",
+        "time.sleep(5.0)")],
+    ["the compact whole-request deadline is silently expanded", () =>
+      replaceOnce("scripts/production-ota-gate.py", "deadline = time.monotonic() + timeout",
+        "deadline = time.monotonic() + timeout * 10")],
+    ["the reboot observer falls back to per-operation urllib timeouts", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'ota = request_json_deadline(\n                status_endpoint, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S,\n            )',
+        'ota = request_json(host, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S)')],
+    ["a pre-header reboot EOF becomes a hard gate failure", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'raise CompactTransportError("compact HTTP response ended before its headers")',
+        'fail("compact HTTP response ended before its headers")')],
+    ["a mid-body reboot EOF becomes a hard gate failure", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'raise CompactTransportError("compact HTTP response ended before its declared body")',
+        'fail("compact HTTP response ended before its declared body")')],
+    ["the reboot observer stops retrying compact transport EOF", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "except (CompactTransportError, OSError, TimeoutError):",
+        "except (OSError, TimeoutError, json.JSONDecodeError):")],
+    ["complete malformed compact JSON becomes retryable", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'raise GateError("compact HTTP response has malformed JSON") from error',
+        "raise error")],
+    ["the reboot observer forgives complete malformed compact JSON", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "except (CompactTransportError, OSError, TimeoutError):",
+        "except (CompactTransportError, OSError, TimeoutError, json.JSONDecodeError):")],
     ["publisher quiescence no longer outlives the authoritative observer", () =>
       replaceOnce("main/logic/ota_quiesce.hpp", "OTA_QUIESCE_MAX_CYCLES = 600",
         "OTA_QUIESCE_MAX_CYCLES = 480")],
