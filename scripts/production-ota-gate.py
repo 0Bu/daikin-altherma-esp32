@@ -284,7 +284,10 @@ def read_compact_json_response(
             raise CompactTransportError("compact HTTP response ended before its declared body")
         body.extend(chunk)
     apply_remaining_timeout()
-    value = json.loads(body)
+    try:
+        value = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise GateError("compact HTTP response has malformed JSON") from error
     if not isinstance(value, dict):
         fail("compact HTTP response is not a JSON object")
     return value
@@ -883,7 +886,7 @@ def wait_for_new_firmware(
         except HTTPError as error:
             if error.code != 503:
                 raise
-        except (CompactTransportError, OSError, TimeoutError, json.JSONDecodeError):
+        except (CompactTransportError, OSError, TimeoutError):
             pass  # expected only while the one accepted update reboots; never retried as a write
         time.sleep(OTA_STATUS_POLL_SECONDS)
     fail(f"board did not return on {version}/{elf}; OTA done observed={saw_done}")
@@ -1352,6 +1355,24 @@ def self_test() -> None:
             raise AssertionError("compact status EOF was not classified as retryable")
         finally:
             eof_client.close()
+
+    for malformed_response in (
+        b"HTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{",
+    ):
+        malformed_client, malformed_server = socket.socketpair()
+        with malformed_server:
+            malformed_server.sendall(malformed_response)
+        try:
+            read_compact_json_response(
+                malformed_client, "fixture.invalid", "/ota/status", time.monotonic() + 0.25,
+            )
+        except GateError:
+            pass
+        else:
+            raise AssertionError("complete malformed compact status was not rejected")
+        finally:
+            malformed_client.close()
 
     with tempfile.TemporaryDirectory(prefix="daikin-production-ota-selftest-") as tmp:
         inventory_path = Path(tmp) / "inventory.json"

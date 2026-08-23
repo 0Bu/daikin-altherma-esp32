@@ -123,8 +123,16 @@ try {
         'fail("compact HTTP response ended before its declared body")')],
     ["the reboot observer stops retrying compact transport EOF", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        "except (CompactTransportError, OSError, TimeoutError, json.JSONDecodeError):",
+        "except (CompactTransportError, OSError, TimeoutError):",
         "except (OSError, TimeoutError, json.JSONDecodeError):")],
+    ["complete malformed compact JSON becomes retryable", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'raise GateError("compact HTTP response has malformed JSON") from error',
+        "raise error")],
+    ["the reboot observer forgives complete malformed compact JSON", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "except (CompactTransportError, OSError, TimeoutError):",
+        "except (CompactTransportError, OSError, TimeoutError, json.JSONDecodeError):")],
     ["publisher quiescence no longer outlives the authoritative observer", () =>
       replaceOnce("main/logic/ota_quiesce.hpp", "OTA_QUIESCE_MAX_CYCLES = 600",
         "OTA_QUIESCE_MAX_CYCLES = 480")],

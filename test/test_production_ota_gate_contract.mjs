@@ -236,9 +236,14 @@ assert.match(compactReader,
 assert.match(compactReader,
   /if not chunk:\s+raise CompactTransportError\("compact HTTP response ended before its declared body"\)/,
   "a reboot EOF during the compact response body must remain retryable");
+assert.match(compactReader,
+  /except json\.JSONDecodeError as error:\s+raise GateError\("compact HTTP response has malformed JSON"\) from error/,
+  "a complete malformed JSON response must remain a hard gate failure");
 assert.match(newFirmwareWait,
-  /except \(CompactTransportError, OSError, TimeoutError, json\.JSONDecodeError\):/,
+  /except \(CompactTransportError, OSError, TimeoutError\):/,
   "the reboot observer must retry compact transport EOF without retrying the update write");
+assert.doesNotMatch(newFirmwareWait, /JSONDecodeError/,
+  "the reboot observer must not forgive a complete malformed compact response");
 assert.equal(occurrences(compactReader, "apply_remaining_timeout()"), 4,
   "the compact reader must apply the deadline to headers, body and final completion");
 assert.equal(occurrences(gate, "resolve_http_endpoint("), 4,

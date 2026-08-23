@@ -372,7 +372,8 @@ The target must then survive the 105-second rollback-health window and a fixed t
 status/values/diag plus real-manifest-TLS pressure test with stable counters, recovered heap and
 MQTT. X10A and optional weather are intentionally not required on the unwired bench.
 
-No compensating write or automatic retry follows a failed acceptance check. Ordinary bench updates
+Only read-only observer GETs interrupted by reboot are sampled again; a complete malformed response
+fails hard. No compensating write or update-POST retry follows a failed acceptance check. Ordinary bench updates
 must use this OTA mode, not USB. Signed, NVS-preserving USB remains only a bootstrap path for firmware
 that predates the generation/artifact handshake or a recovery path when OTA cannot run. The current
 HTTP API does not expose ESP-IDF's running-partition state directly: the healthy 105-second dwell

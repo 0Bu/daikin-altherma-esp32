@@ -199,7 +199,7 @@ firmware's three-second completed-verifier dwell, plus bounded MQTT recovery aft
 and weather-TLS transport pauses, including either
 ordering of paused MQTT and matching weather evidence in a streamed status snapshot, and the sole generation-bound
 production write, with the OTA pause lease held for every in-flight status response. Its paired
-`tools/production_ota/selftest.mjs` requires all one hundred seven bench-delivery and production-promotion
+`tools/production_ota/selftest.mjs` requires all one hundred nine bench-delivery and production-promotion
 stage-removal mutations to turn that same contract red.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
