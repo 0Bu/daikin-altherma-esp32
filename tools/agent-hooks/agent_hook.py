@@ -1026,6 +1026,30 @@ def shell_argument_may_be_raw_post(argument: str) -> bool:
     return re.search(r"[$`]", method.group(1)) is not None if method else False
 
 
+def curl_short_option_effects(argument: str, following: str = "") -> tuple[str, bool, bool, bool]:
+    """Return (method, GET flag, body, ambiguous write) for one curl short-option cluster."""
+    if not argument.startswith("-") or argument.startswith("--") or argument == "-":
+        return "", False, False, False
+    consumes_value = set("AbcCDeEFHKmoPQrTtuUwXxyz")
+    no_value = set("012346aBfgGhIiJkLlMnNOpqRsSvVZ#")
+    cluster = argument[1:]
+    saw_get = False
+    for index, option in enumerate(cluster):
+        remainder = cluster[index + 1 :]
+        if option == "G":
+            saw_get = True
+            continue
+        if option == "X":
+            return remainder or following, saw_get, False, False
+        if option in {"d", "F", "T"}:
+            return "", saw_get, True, False
+        if option in consumes_value:
+            return "", saw_get, False, False
+        if option not in no_value:
+            return "", saw_get, False, any(candidate in remainder for candidate in "XdFT")
+    return "", saw_get, False, False
+
+
 def direct_ota_update_write(command: str) -> bool:
     """Recognize ordinary shell/client write shapes aimed at the OTA update route."""
     decoded = unquote(unquote(command))
@@ -1036,13 +1060,23 @@ def direct_ota_update_write(command: str) -> bool:
     has_raw_network_client = any(
         Path(argument).name.lower() in {"nc", "ncat", "netcat", "openssl", "socat"}
         for argument in raw_tokens
-    )
+    ) or re.search(r"/dev/(?:tcp|udp)/", decoded, re.IGNORECASE) is not None
+    has_printf = any(Path(argument).name.lower() == "printf" for argument in raw_tokens)
+    normalized_shell = " ".join(raw_tokens)
     if has_raw_network_client and (
         any(shell_argument_may_be_raw_post(argument) for argument in raw_tokens)
         or any(
             argument.lower() == "post" and index + 1 < len(raw_tokens)
             and raw_tokens[index + 1].startswith("/")
             for index, argument in enumerate(raw_tokens)
+        )
+        or any(
+            re.search(r"(?:^|[\s'\"=])post(?:$|[\s'\";&|])", candidate, re.IGNORECASE)
+            for candidate in (decoded, normalized_shell)
+        )
+        or has_printf and (
+            any(shell_argument_may_be_post(argument) for argument in raw_tokens)
+            or any(re.search(r"[$`]", argument) for argument in raw_tokens)
         )
     ):
         return True
@@ -1071,7 +1105,11 @@ def direct_ota_update_write(command: str) -> bool:
             arguments = [argument.lower() for argument in raw_arguments]
             dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)
             if executable == "curl":
+                if "--next" in arguments:
+                    return True
                 explicit_method = ""
+                has_get_flag = False
+                has_body = False
                 for index, argument in enumerate(arguments):
                     if argument in {"-x", "--request"} and index + 1 < len(arguments):
                         explicit_method = arguments[index + 1]
@@ -1081,10 +1119,25 @@ def direct_ota_update_write(command: str) -> bool:
                         explicit_method = re.sub(r"^(?:-x|--request=)", "", argument)
                         if shell_argument_may_be_post(argument):
                             return True
+                    method, cluster_get, cluster_body, cluster_ambiguous = curl_short_option_effects(
+                        raw_arguments[index], raw_arguments[index + 1] if index + 1 < len(raw_arguments) else "",
+                    )
+                    has_get_flag = has_get_flag or cluster_get
+                    has_body = has_body or cluster_body
+                    if cluster_ambiguous:
+                        return True
+                    if method:
+                        explicit_method = method.lower()
+                        if shell_argument_may_be_post(method):
+                            return True
                 forces_get = explicit_method in {"get", "head"} or (
-                    not explicit_method and any(argument in {"-g", "--get"} for argument in arguments)
+                    not explicit_method and (
+                        has_get_flag or any(argument in {"-g", "--get"} for argument in arguments)
+                    )
                 )
                 if dynamic_client_arguments and not forces_get:
+                    return True
+                if has_body and not forces_get:
                     return True
                 for index, argument in enumerate(arguments):
                     if argument in {"-x", "--request"} and index + 1 < len(arguments) and \

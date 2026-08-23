@@ -1176,7 +1176,7 @@ def self_test() -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--manifest-url")
     parser.add_argument("--expected-source-sha")
     parser.add_argument("--expected-version")

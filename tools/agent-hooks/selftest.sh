@@ -255,6 +255,7 @@ guard_case "xh implicit-data OTA POST is denied" \
 guard_case "HTTPie POST after global options is denied" \
     "$(payload exec_command command "http --verify=no --timeout=5 POST http://bench.invalid/ota/update")" deny
 ota_lease_url="http://bench.invalid/ota/update?after=7&channel=dev&version=1.2.3-dev.4&sha256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+ota_lease_path="/ota/update?after=7&channel=dev&version=1.2.3-dev.4&sha256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 guard_case "HTTPie raw-body inferred OTA POST is denied" \
     "$(payload exec_command command "http --raw={} http://bench.invalid/ota/update")" deny
 guard_case "xh equals-form raw-body inferred OTA POST is denied" \
@@ -289,6 +290,17 @@ guard_case "default-expansion raw netcat HTTP OTA POST is denied" \
     "$(payload exec_command command "printf \${x:-POST}' /ota/update?after=7 HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
 guard_case "split-variable raw netcat HTTP OTA POST is denied" \
     "$(payload exec_command command "a=PO; b=ST; printf \$a\$b' /ota/update?after=7 HTTP/1.1\\r\\n\\r\\n' | nc bench.invalid 80")" deny
+assigned_raw_ota_command="req='POST $ota_lease_path HTTP/1.1\\r\\n\\r\\n'; printf %b \"\$req\" | nc bench.invalid 80"
+guard_case "assigned raw netcat HTTP OTA POST is denied" \
+    "$(payload exec_command command "$assigned_raw_ota_command")" deny
+brace_format_raw_ota_command="printf '%s $ota_lease_path HTTP/1.1\\r\\n\\r\\n' P{OST,UT} | nc bench.invalid 80"
+guard_case "brace argument can build a raw netcat HTTP OTA POST" \
+    "$(payload exec_command command "$brace_format_raw_ota_command")" deny
+guard_case "default-expansion argument can build a raw netcat HTTP OTA POST" \
+    "$(payload exec_command command "printf '%s $ota_lease_path HTTP/1.1\\r\\n\\r\\n' \${x:-POST} | nc bench.invalid 80")" deny
+dev_tcp_raw_ota_command="bash -c 'printf \"POST $ota_lease_path HTTP/1.1\\r\\nHost: bench.invalid\\r\\n\\r\\n\" > /dev/tcp/bench.invalid/80'"
+guard_case "Bash dev-tcp raw HTTP OTA POST is denied" \
+    "$(payload exec_command command "$dev_tcp_raw_ota_command")" deny
 guard_case "generic requests direct OTA POST is denied" \
     "$(payload exec_command command "python3 -c 'import requests; requests.request(\"POST\", \"http://bench.invalid/ota/update\")'")" deny
 guard_case "urllib inferred direct OTA POST is denied" \
@@ -317,6 +329,16 @@ guard_case "split-variable curl OTA method is denied" \
     "$(payload exec_command command 'a=PO; b=ST; curl -X $a$b http://bench.invalid/ota/update')" deny
 guard_case "default-expansion curl OTA method is denied" \
     "$(payload exec_command command 'curl -X P${x:-OST} http://bench.invalid/ota/update')" deny
+guard_case "clustered curl XPOST OTA method is denied" \
+    "$(payload exec_command command "curl -sXPOST \"$ota_lease_url\"")" deny
+guard_case "clustered curl X with following POST is denied" \
+    "$(payload exec_command command "curl -sX POST \"$ota_lease_url\"")" deny
+guard_case "long clustered curl XPOST OTA method is denied" \
+    "$(payload exec_command command "curl -fsSXPOST \"$ota_lease_url\"")" deny
+guard_case "clustered curl data OTA POST is denied" \
+    "$(payload exec_command command "curl -sd '{}' -H Content-Type:application/json \"$ota_lease_url\"")" deny
+guard_case "clustered curl form OTA POST is denied" \
+    "$(payload exec_command command "curl -sF x=y -H Content-Type:application/json \"$ota_lease_url\"")" deny
 guard_case "curl GET flag cannot mask split-variable OTA method" \
     "$(payload exec_command command "a=PO; b=ST; curl -G -X \$a\$b \"$ota_lease_url\"")" deny
 guard_case "curl GET flag cannot mask default-expansion OTA method" \
@@ -327,6 +349,10 @@ guard_case "curl GET flag cannot mask substituted OTA method" \
     "$(payload exec_command command "curl -G -X \"\$(printf P%sT OS)\" \"$ota_lease_url\"")" deny
 guard_case "curl long GET flag cannot mask substituted OTA method" \
     "$(payload exec_command command "curl --get --request=\"\$(printf P%sT OS)\" \"$ota_lease_url\"")" deny
+guard_case "curl next transfer cannot mask an earlier dynamic OTA POST" \
+    "$(payload exec_command command "a=PO; b=ST; curl -X \$a\$b \"$ota_lease_url\" --next -X GET http://example.invalid/health")" deny
+guard_case "curl next HEAD transfer cannot mask an earlier default OTA POST" \
+    "$(payload exec_command command "curl -X P\${x:-OST} \"$ota_lease_url\" --next -X HEAD http://example.invalid/health")" deny
 guard_case "split-variable HTTPie OTA method is denied" \
     "$(payload exec_command command 'a=PO; b=ST; http $a$b http://bench.invalid/ota/update')" deny
 guard_case "split-variable wget OTA method is denied" \
@@ -347,6 +373,8 @@ guard_case "read-only OTA GET with json query remains allowed" \
     "$(payload exec_command command "curl -fsS http://bench.invalid/ota/update?json=x")" ""
 guard_case "curl GET override with data remains allowed" \
     "$(payload exec_command command "curl -G --data after=7 http://bench.invalid/ota/update")" ""
+guard_case "clustered curl GET with data remains allowed" \
+    "$(payload exec_command command "curl -sGd after=7 http://bench.invalid/ota/update")" ""
 guard_case "curl explicit GET with data remains allowed" \
     "$(payload exec_command command "curl --request GET --data after=7 http://bench.invalid/ota/update")" ""
 guard_case "curl explicit GET with dynamic header remains allowed" \

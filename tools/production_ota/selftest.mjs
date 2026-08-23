@@ -80,6 +80,10 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         '        print(json.dumps(result, indent=2, sort_keys=True))\n        return 0\n\n    release_manifest',
         '        print(json.dumps(result, indent=2, sort_keys=True))\n        bench_return_bypassed()\n\n    release_manifest')],
+    ["the runtime accepts abbreviated noncanonical gate options", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "ArgumentParser(description=__doc__, allow_abbrev=False)",
+        "ArgumentParser(description=__doc__)")],
     ["the pressure window is shortened", () =>
       replaceOnce("scripts/production-ota-gate.py", "STRESS_SECONDS = 180", "STRESS_SECONDS = 60")],
     ["the manifest observer is shorter than firmware's bounded check path", () =>
@@ -311,10 +315,21 @@ try {
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)',
         "dynamic_client_arguments = False")],
+    ["clustered curl short options bypass the OTA method parser", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "method, cluster_get, cluster_body, cluster_ambiguous = curl_short_option_effects(",
+        "method, cluster_get, cluster_body, cluster_ambiguous = ignored_curl_short_options(")],
+    ["curl next transfers can hide an earlier OTA write", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'if "--next" in arguments:', "if False:")],
     ["curl GET flags can mask a dynamic explicit POST", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        'not explicit_method and any(argument in {"-g", "--get"} for argument in arguments)',
-        'explicit_method != "post" and any(argument in {"-g", "--get"} for argument in arguments)')],
+        `not explicit_method and (
+                        has_get_flag or any(argument in {"-g", "--get"} for argument in arguments)
+                    )`,
+        `explicit_method != "post" and (
+                        has_get_flag or any(argument in {"-g", "--get"} for argument in arguments)
+                    )`)],
     ["an earlier wget GET can mask a later dynamic method", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'literal_safe_method = effective_method in {"get", "head"}',
@@ -336,6 +351,13 @@ try {
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'return re.search(r"[$`]", method.group(1)) is not None if method else False',
         "return False")],
+    ["printf can assemble an OTA request line across arguments", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "or has_printf and (", "or False and (")],
+    ["shell dev-tcp can carry a raw OTA request", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        're.search(r"/dev/(?:tcp|udp)/", decoded, re.IGNORECASE)',
+        're.search(r"ignored-dev-tcp", decoded, re.IGNORECASE)')],
     ["brace-expanded client methods bypass the OTA guard", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "for expanded in expand_static_braces(argument.lower()):",

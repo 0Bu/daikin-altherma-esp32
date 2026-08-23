@@ -3,6 +3,7 @@
 // board/artifact identity, signed dev-only provenance, bounded live pressure, single un-retried
 // writes, retained production X10A proof, and rollback refusing a merely-online heap-broken image.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,15 @@ const httpOta = read("main/http_ota.cpp");
 const mqtt = read("main/mqtt_ha.cpp");
 const quiesce = read("main/logic/ota_quiesce.hpp");
 const workflow = read(".github/workflows/build.yml");
+
+const abbreviatedOption = spawnSync("python3", [
+  path.join(root, "scripts/production-ota-gate.py"),
+  "--manifest", "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json",
+], { encoding: "utf8" });
+assert.equal(abbreviatedOption.status, 2,
+  "an abbreviated gate option must be rejected before any preflight or device contact");
+assert.match(abbreviatedOption.stderr, /unrecognized arguments: --manifest/,
+  "argparse must reject abbreviations instead of silently mapping them onto canonical options");
 
 assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/,
   "the bench stage must remain distinct and ordered before production");
@@ -348,6 +358,8 @@ assert.ok(benchAction >= 0 && benchInstall > benchAction && benchActionReturn > 
 assert.match(gate,
   /add_argument\("--install-bench", action="store_true"\)[\s\S]{0,1800}?args\.install_bench[\s\S]{0,240}?args\.execute[\s\S]{0,240}?args\.confirm_bench != BENCH_ROLE[\s\S]{0,240}?args\.confirm_production is not None/,
   "bench action must be explicit and mutually exclusive with production execution");
+assert.match(gate, /ArgumentParser\(description=__doc__, allow_abbrev=False\)/,
+  "the runtime parser must reject every abbreviation that the canonical hook grammar rejects");
 
 assert.match(hook, /direct OTA writes are forbidden; run scripts\/production-ota-gate\.py/,
   "agent shell writes must be routed through the canonical role-pinned gate");
@@ -369,8 +381,16 @@ assert.match(hook,
 assert.ok(hook.includes('dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)'),
   "dynamic shell arguments must remain visible to every OTA client classifier");
 assert.match(hook,
-  /executable == "curl"[\s\S]{0,1400}?dynamic_client_arguments and not forces_get/,
+  /executable == "curl"[\s\S]{0,3600}?dynamic_client_arguments and not forces_get/,
   "dynamic curl method/body arguments must fail unless GET or HEAD is literal");
+assert.match(hook,
+  /def curl_short_option_effects[\s\S]{0,900}?option == "X"[\s\S]{0,300}?option in \{"d", "F", "T"\}/,
+  "clustered curl X/data/form/upload short options must be decoded");
+assert.ok(hook.includes("method, cluster_get, cluster_body, cluster_ambiguous = curl_short_option_effects("),
+  "curl short-option effects must feed the write classifier");
+assert.match(hook,
+  /if "--next" in arguments:\s*return True/,
+  "curl multi-transfer commands aimed at the OTA route must fail closed per transfer group");
 assert.match(hook,
   /executable in \{"http", "xh"\}[\s\S]{0,900}?dynamic_client_arguments and explicit_methods not in \(\{"get"\}, \{"head"\}\)/,
   "dynamic HTTPie/xh method/body arguments must fail unless GET or HEAD is literal");
@@ -381,7 +401,7 @@ assert.match(hook,
   /forces_get[\s\S]{0,1800}?not forces_get and/,
   "explicit curl GET shapes must not be mislabeled as OTA writes merely for carrying query data");
 assert.match(hook,
-  /forces_get\s*=\s*explicit_method in \{"get", "head"\} or \([\s\S]{0,120}?not explicit_method and any\(argument in \{"-g", "--get"\}/,
+  /forces_get\s*=\s*explicit_method in \{"get", "head"\} or \([\s\S]{0,160}?not explicit_method and \([\s\S]{0,120}?has_get_flag or any\(argument in \{"-g", "--get"\}/,
   "curl -G must prove GET only when no explicit method can override it");
 assert.match(hook,
   /effective_method\s*=\s*""[\s\S]{0,500}?effective_method = arguments\[index \+ 1\][\s\S]{0,300}?literal_safe_method = effective_method in \{"get", "head"\}/,
@@ -411,11 +431,8 @@ assert.match(hook,
   /def shell_argument_may_be_raw_post[\s\S]{0,240}?expand_static_braces\(argument\)[\s\S]{0,300}?re\.match\(r"\^\\s\*post\\s\+\/"[\s\S]{0,240}?re\.search\(r"\[\$`\]"/,
   "brace-, quote-, ANSI-C- and dynamically built raw HTTP POST methods must fail closed");
 assert.match(hook,
-  /raw_tokens\s*=\s*shell_syntax_tokens\(decoded\)[\s\S]{0,400}?\{"nc", "ncat", "netcat", "openssl", "socat"\}[\s\S]{0,500}?shell_argument_may_be_raw_post\(argument\)[\s\S]{0,300}?argument\.lower\(\) == "post"/,
-  "raw request-line classification must consume quote-aware tokens only for raw network clients");
-assert.doesNotMatch(hook,
-  /re\.search\(r"\(\?:\^\|\[\\s'\\"=\]\)post/,
-  "POST text outside a client method slot or raw request-line prefix must remain read-only");
+  /raw_tokens\s*=\s*shell_syntax_tokens\(decoded\)[\s\S]{0,400}?\{"nc", "ncat", "netcat", "openssl", "socat"\}[\s\S]{0,180}?\/dev\/\(\?:tcp\|udp\)\/[\s\S]{0,180}?has_printf[\s\S]{0,700}?shell_argument_may_be_raw_post\(argument\)[\s\S]{0,400}?for candidate in \(decoded, normalized_shell\)[\s\S]{0,300}?has_printf and/,
+  "raw request-line classification must cover raw clients, dev-tcp and printf assembly");
 assert.match(hook,
   /def shell_argument_may_be_post[\s\S]{0,700}?expand_static_braces\(argument\.lower\(\)\)[\s\S]{0,500}?--method=post/,
   "brace- and glob-expanded client method arguments must remain write-shaped");
