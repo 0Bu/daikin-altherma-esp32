@@ -447,6 +447,16 @@ real retained X10A payload. Neither mode cuts a release. See
   frames. Do not remove the explicit pin without an equivalent invariant. If you touch this path,
   re-measure it from the ELF's `entry a1,N`, never from an idle heap reading; the command is in
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#memory-constraints).
+- **MQTT publishing has its own source-local frame contract.** ESP-IDF 6.0.2 with the required
+  release-wide `-Os` once folded called-once reference/circulation helpers into `mqtt_task`, growing
+  its fixed frame from 1040 to 2304 bytes. `main/CMakeLists.txt` now compiles `mqtt_ha.cpp` with
+  `-fno-inline-functions-called-once` and `-Werror=frame-larger-than=2048`; the measured task frame is
+  1120 bytes, the object's current largest frame is 1584 bytes, and the task allocation stays 6144
+  bytes. Do not weaken either option or merely raise the task stack to make a build pass. If this
+  translation unit or its helper boundaries change, remeasure the task and complete call path from
+  the CI-pinned ELF and verify the live MQTT high-water mark under OTA/weather TLS pressure. A fixed
+  frame below 2 KiB does not by itself prove the full task path or the contiguous internal-heap
+  budget, and the dev.13+ direct cache/digest and MQTTS/OTA headroom protections must remain intact.
 - **There is deliberately no clang-tidy or cppcheck gate**, and that was measured rather than
   assumed. Over `main/logic/` + `main/def/`, a blanket config reports ~7000 findings — over half of
   them this project's own `CHECK` macro — and a curated bug-finding set reports ~50 with **zero** real

@@ -110,7 +110,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 68 | **Source-boundary contract gate** — source-text assertions about `main/*.cpp` the host suite structurally cannot make (task, order, and which file is entitled) | ✅ | [`run-contract-tests.sh`](../scripts/run-contract-tests.sh), [`test_heating_curve_diagnosis_contract.mjs`](../test/test_heating_curve_diagnosis_contract.mjs) |
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
 | 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
-| 71 | **Pinned stack contract on the `/status` builder** — `-Os` on that one translation unit, because ~9 KB of its 11.8 KB frame was a `-Og` slot-allocation artefact, not live data | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp) |
+| 71 | **Pinned stack compiler contracts on `/status` and MQTT publishing** — `http_status.cpp` stays at `-Os`, while `mqtt_ha.cpp` keeps called-once helper boundaries and a fatal 2 KiB per-function frame ceiling so size optimisation cannot silently fold transient publish state back into the fixed MQTT task frame | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 81 | **Stack-headroom telemetry** — the second memory budget, made reportable: four tasks record their own FreeRTOS high-water mark and the heartbeat carries all four, so a growing call frame is a falling line rather than a core dump nobody has yet | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp) |
 | 72 | **Power-loss-surviving 24-hour trends and opt-in plant checkup** — `.noinit` DRAM covers power-preserving resets; the upper-4-MiB append journal stores dense five-minute X10A/HomeHub/ENV III records, daily semantic-id manifests that preserve unchanged series across catalog edits, and enabled hourly diagnosis records. CRC, last-written commit and rotating sectors fail closed on torn writes; the build guards 72-hour capacity. The official 8 MB table is required; browser storage is not a measurement source | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
 | 82 | **Reproducible ESP-IDF build inputs** — exact transitive component lock, explicit ESP-IDF/CMake/C++ floors and wall-clock-free app metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -816,6 +816,15 @@ Four properties of that core are worth naming because they are not obvious from 
   path at **7552** of 16384; the stack itself remains unchanged. The trade — less exact backtraces in
   the one file whose core dumps mattered — and the
   reproduce command are stated where the pin lives and in
+  [`ARCHITECTURE.md`](ARCHITECTURE.md#memory-constraints).
+- **✅ A pinned stack contract on MQTT publishing.** The release-wide `-Os` called-once inliner
+  folded reference/circulation helpers into `mqtt_task` on ESP-IDF 6.0.2 and grew that fixed frame
+  from the historical 1040 bytes to 2304 bytes. `mqtt_ha.cpp` therefore retains natural helper call
+  boundaries with `-fno-inline-functions-called-once` and makes any per-function frame above 2048
+  bytes a build error. The measured task frame is 1120 bytes and the largest current frame in that
+  object is 1584 bytes; the FreeRTOS task remains 6144 bytes. This ceiling guards fixed frames only:
+  changes must still remeasure the complete ELF call path and the live MQTT high-water mark, while
+  preserving the dev.13+ scalar/cache and contiguous-heap protections described in
   [`ARCHITECTURE.md`](ARCHITECTURE.md#memory-constraints).
 - **✅ Agent instruction and configuration integrity gate.** [`AGENTS.md`](../AGENTS.md) is the
   runner-neutral always-loaded contract and stays below 24 KiB.

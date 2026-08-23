@@ -148,9 +148,24 @@ const mqttBarrierAt = weather.indexOf("mqtt_publish_network_quiesced()", pollBar
 assert.ok(quiesceAt >= 0 && pollBarrierAt > quiesceAt &&
           mqttBarrierAt > pollBarrierAt && fetchAt > mqttBarrierAt,
   "weather must wait for both X10A and MQTT allocation paths before entering the gated fetch");
-assert.match(mqtt,
-  /ota_quiesce_step\(network_quiesce, network_busy\)[\s\S]{0,1800}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,200}?continue;/,
+const mqttHoldStart = mqtt.indexOf(
+  "static __attribute__((noinline)) bool mqtt_network_hold_step(");
+const mqttHoldEnd = mqtt.indexOf(
+  "static __attribute__((noinline)) bool mqtt_transport_resume_step(", mqttHoldStart);
+assert.ok(mqttHoldStart >= 0 && mqttHoldEnd > mqttHoldStart,
+  "the MQTT network-hold helper must remain an explicit stack boundary");
+const mqttHold = mqtt.slice(mqttHoldStart, mqttHoldEnd);
+assert.match(mqttHold,
+  /ota_quiesce_step\(quiesce, network_busy\)[\s\S]{0,700}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,120}?vTaskDelay\([\s\S]{0,100}?return true;/,
   "the held MQTT cycle must acknowledge weather before sleeping");
+const mqttTaskStart = mqtt.indexOf("static void mqtt_task(");
+const mqttTaskEnd = mqtt.indexOf("static bool build_client(", mqttTaskStart);
+const mqttTask = mqtt.slice(mqttTaskStart, mqttTaskEnd);
+const mqttHoldCall = mqttTask.indexOf("mqtt_network_hold_step(");
+const mqttPublishActivity = mqttTask.indexOf("MqttPublishActivity publish_activity", mqttHoldCall);
+assert.ok(mqttTaskStart >= 0 && mqttTaskEnd > mqttTaskStart && mqttHoldCall >= 0 &&
+          mqttPublishActivity > mqttHoldCall,
+  "the publish task must leave through the hold helper before constructing allocation-rich state");
 assert.match(mqtt,
   /struct\s+MqttPublishActivity[\s\S]{0,500}?store\(false,\s*std::memory_order_release\)[\s\S]{0,300}?~MqttPublishActivity\(\)[\s\S]{0,200}?store\(true,\s*std::memory_order_release\)/,
   "an in-flight MQTT cycle must withdraw and unwind-safely restore the acknowledgement");

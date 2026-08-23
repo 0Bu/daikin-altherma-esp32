@@ -185,8 +185,9 @@ and a third interruption aborts. IDF's umbrella image-validation error stays gen
 claiming a bad signature. Initial feed URLs and every redirect stay on forced HTTPS, and an oversized
 response remains a size-policy refusal rather than masquerading as an interrupted connection.
 `tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently (including
-the fixed task lease, generation rollback and whole-stream SHA comparison) and proves the
-source contract turns red; all one hundred twenty-four seeded regressions are required. The allocation-free
+the fixed task lease, generation rollback, whole-stream SHA comparison and the MQTT task's
+size-build call-boundary and fixed-frame-ceiling contracts) and proves the source contract turns red;
+all one hundred twenty-six seeded regressions are required. The allocation-free
 `FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
 
 `node test/test_production_ota_gate_contract.mjs` pins ordinary role-bound bench delivery plus the

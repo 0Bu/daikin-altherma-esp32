@@ -44,6 +44,7 @@ const quiesceLogic = code("main/logic/ota_quiesce.hpp");
 const transport = code("main/logic/ota_transport.hpp");
 const fixedText = code("main/logic/fixed_text.hpp");
 const sdkconfig = read("sdkconfig.defaults");
+const mainCmake = code("main/CMakeLists.txt");
 
 assert.match(quiesceLogic, /OTA_QUIESCE_MAX_CYCLES\s*=\s*600/,
   "poll/MQTT quiescence must outlive the complete bounded OTA path and 480-second host observer");
@@ -680,27 +681,46 @@ assert.match(beforeConnect,
   "BEFORE_CONNECT must publish that esp-mqtt transport allocation is active");
 assert.doesNotMatch(beforeConnect, /vTaskDelay|for\s*\(|while\s*\(/,
   "BEFORE_CONNECT holds MQTT_API_LOCK and must never wait against client_stop");
+const pauseStart = mqtt.indexOf(
+  "static __attribute__((noinline)) void mqtt_transport_pause_if_requested(");
+const holdStart = mqtt.indexOf(
+  "static __attribute__((noinline)) bool mqtt_network_hold_step(", pauseStart);
+const resumeStart = mqtt.indexOf(
+  "static __attribute__((noinline)) bool mqtt_transport_resume_step(", holdStart);
+const resumeEnd = mqtt.indexOf("static std::string board_id(", resumeStart);
+assert.ok(pauseStart >= 0 && holdStart > pauseStart && resumeStart > holdStart &&
+          resumeEnd > resumeStart,
+  "the stack-bounded MQTT pause/hold/resume helpers must remain explicit call boundaries");
+const pauseStep = mqtt.slice(pauseStart, holdStart);
+const holdStep = mqtt.slice(holdStart, resumeStart);
+const resumeStep = mqtt.slice(resumeStart, resumeEnd);
+assert.match(pauseStep,
+  /s_transport_pause_requested\.load\(std::memory_order_acquire\)[\s\S]{0,220}?esp_mqtt_client_stop\(s_client\)[\s\S]{0,260}?s_client_running\.store\(false,\s*std::memory_order_release\)[\s\S]{0,260}?s_transport_paused\.store\(true,\s*std::memory_order_release\)/,
+  "the MQTT owner must stop and acknowledge esp-mqtt before a competing TLS session starts");
+assert.match(holdStep,
+  /ota_quiesce_step\(quiesce, network_busy\)[\s\S]{0,600}?mqtt_transport_pause_if_requested\(\)[\s\S]{0,180}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,120}?vTaskDelay\([\s\S]{0,100}?return true;/,
+  "the held MQTT helper must stop transport, acknowledge quiescence and leave before allocation");
 const mqttTaskStart = mqtt.indexOf("static void mqtt_task(");
 const mqttTaskEnd = mqtt.indexOf("static bool build_client(", mqttTaskStart);
 assert.ok(mqttTaskStart >= 0 && mqttTaskEnd > mqttTaskStart,
   "the MQTT publish task must remain identifiable");
 const mqttTask = mqtt.slice(mqttTaskStart, mqttTaskEnd);
-assert.match(mqttTask,
-  /ota_quiesce_step\(network_quiesce, network_busy\)[\s\S]{0,1800}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,200}?continue;/,
-  "the held MQTT path must acknowledge that its allocation-rich cycle has ended");
-assert.match(mqttTask,
-  /s_transport_pause_requested\.load\(std::memory_order_acquire\)[\s\S]{0,220}?esp_mqtt_client_stop\(s_client\)[\s\S]{0,260}?s_client_running\.store\(false,\s*std::memory_order_release\)[\s\S]{0,260}?s_transport_paused\.store\(true,\s*std::memory_order_release\)/,
-  "the owning MQTT task must stop and acknowledge esp-mqtt before a competing TLS session starts");
-const resumeAt = mqttTask.indexOf("s_transport_paused.load(std::memory_order_acquire)");
-const tlsResumeAt = mqttTask.indexOf("mqtt_transport_tls_configured()", resumeAt);
-const freeResumeAt = mqttTask.indexOf("free_internal < kMqttTlsResumeMinFree", tlsResumeAt);
-const largestResumeAt = mqttTask.indexOf("largest < kMqttTlsResumeMinLargest", freeResumeAt);
-const stableResumeAt = mqttTask.indexOf("++transport_resume_stable < kMqttTlsResumeStableSamples",
-                                       largestResumeAt);
-const startResumeAt = mqttTask.indexOf("start_client_transport()", stableResumeAt);
-const backoffResumeAt = mqttTask.indexOf(
-  "transport_resume_wait_s = transport_resume_backoff_s", startResumeAt);
-const runningResumeAt = mqttTask.indexOf(
+const heldCallAt = mqttTask.indexOf("mqtt_network_hold_step(");
+const heldContinueAt = mqttTask.indexOf("continue;", heldCallAt);
+const activityAt = mqttTask.indexOf("MqttPublishActivity publish_activity", heldContinueAt);
+const resumeCallAt = mqttTask.indexOf("mqtt_transport_resume_step(", activityAt);
+assert.ok(heldCallAt >= 0 && heldContinueAt > heldCallAt && activityAt > heldContinueAt &&
+          resumeCallAt > activityAt,
+  "mqtt_task must leave a held cycle before constructing publish state and resume via its helper");
+const resumeAt = resumeStep.indexOf("s_transport_paused.load(std::memory_order_acquire)");
+const tlsResumeAt = resumeStep.indexOf("mqtt_transport_tls_configured()", resumeAt);
+const freeResumeAt = resumeStep.indexOf("free_internal < kMqttTlsResumeMinFree", tlsResumeAt);
+const largestResumeAt = resumeStep.indexOf("largest < kMqttTlsResumeMinLargest", freeResumeAt);
+const stableResumeAt = resumeStep.indexOf("++state.stable_samples < kMqttTlsResumeStableSamples",
+                                         largestResumeAt);
+const startResumeAt = resumeStep.indexOf("start_client_transport()", stableResumeAt);
+const backoffResumeAt = resumeStep.indexOf("state.wait_s = state.backoff_s", startResumeAt);
+const runningResumeAt = resumeStep.indexOf(
   "s_client_running.store(true, std::memory_order_release)", startResumeAt);
 assert.ok(resumeAt >= 0 && tlsResumeAt > resumeAt && freeResumeAt > tlsResumeAt &&
           largestResumeAt > freeResumeAt && stableResumeAt > largestResumeAt &&
@@ -710,9 +730,12 @@ assert.ok(resumeAt >= 0 && tlsResumeAt > resumeAt && freeResumeAt > tlsResumeAt 
 assert.match(mqtt,
   /kMqttTlsResumeMinFree\s*=\s*56 \* 1024[\s\S]{0,120}?kMqttTlsResumeMinLargest\s*=\s*24 \* 1024[\s\S]{0,120}?kMqttTlsResumeStableSamples\s*=\s*4/,
   "MQTTS resume must use the same measured stable TLS floor as OTA/Weather");
-assert.match(mqttTask,
-  /transport_resume_backoff_s < kMqttResumeBackoffMaxS \/ 2[\s\S]{0,180}?kMqttResumeBackoffMaxS/,
+assert.match(resumeStep,
+  /state\.backoff_s < kMqttResumeBackoffMaxS \/ 2[\s\S]{0,180}?kMqttResumeBackoffMaxS/,
   "direct esp-mqtt restart failures must have a bounded exponential retry interval");
+assert.match(mainCmake,
+  /set_source_files_properties\(mqtt_ha\.cpp PROPERTIES COMPILE_OPTIONS\s*"-fno-inline-functions-called-once;-Werror=frame-larger-than=2048"\)/,
+  "the size-optimised MQTT object must retain helper boundaries and fail above its measured fixed-frame ceiling");
 assert.match(mqtt,
   /struct\s+MqttStartupActivity[\s\S]{0,800}?s_publish_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,300}?if\s*\(!competing_tls_active\(\)\)\s*return;[\s\S]{0,200}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
   "MQTT startup must claim/recheck and yield to an OTA that began before mqtt_ha_start");
