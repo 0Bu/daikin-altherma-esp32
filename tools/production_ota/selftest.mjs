@@ -270,6 +270,24 @@ try {
     ["the raw OTA guard drops HTTPie and xh", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'executable in {"http", "xh"}', 'executable == "ignored-http-client"')],
+    ["the raw OTA guard drops curl equals-form data options", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'argument.startswith(("--data", "--form", "--json=", "--upload-file="))',
+        'argument.startswith(("--ignored-data", "--form", "--json=", "--upload-file="))')],
+    ["the raw OTA guard drops HTTPie inferred body posts", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '":=" in argument or', 'False or')],
+    ["the raw OTA guard drops PowerShell posts", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '"method=post", "method:post", "-methodpost", "data=", "json=",',
+        '"method=post", "method:post", "-ignored-method-post", "data=", "json=",')],
+    ["a renamed symlink can impersonate the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "if os.path.samefile(lexical, canonical):", "if False:")],
+    ["an env split-string wrapper can invoke the canonical OTA gate", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "(names_gate and not read_only_gate_inspection(command))",
+        "(False and not read_only_gate_inspection(command))")],
     ["a merely connected image can bypass allocation failure evidence", () =>
       replaceOnce("main/logic/health_gate.hpp", "!service.allocation_failures && x10a_ready",
         "x10a_ready")],

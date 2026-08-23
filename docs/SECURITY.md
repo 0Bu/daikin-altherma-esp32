@@ -459,7 +459,8 @@ scripts/production-ota-gate.py \
   --confirm-bench bench --install-bench
 ```
 
-After that exact artifact is healthy on the bench, the separate production promotion command is:
+After that exact artifact is healthy on the bench (normally through the ordinary mode above; signed
+USB only for bootstrap/recovery), the separate production promotion command is:
 
 ```bash
 scripts/production-ota-gate.py \

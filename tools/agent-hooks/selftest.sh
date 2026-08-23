@@ -240,8 +240,24 @@ guard_case "curl JSON OTA POST is denied" \
     "$(payload exec_command command "curl --json '{}' http://bench.invalid/ota/update")" deny
 guard_case "curl multipart OTA POST is denied" \
     "$(payload exec_command command "curl -F x=y http://bench.invalid/ota/update")" deny
+guard_case "curl data-urlencode OTA POST is denied" \
+    "$(payload exec_command command "curl --data-urlencode x=y http://bench.invalid/ota/update")" deny
+for curl_data_option in data-raw data-binary data-ascii form-string; do
+    guard_case "curl equals-form $curl_data_option OTA POST is denied" \
+        "$(payload exec_command command "curl --$curl_data_option={} http://bench.invalid/ota/update")" deny
+done
+guard_case "HTTPie implicit-data OTA POST is denied" \
+    "$(payload exec_command command "http http://bench.invalid/ota/update after=7")" deny
+guard_case "xh implicit-data OTA POST is denied" \
+    "$(payload exec_command command "xh http://bench.invalid/ota/update after=7")" deny
+guard_case "HTTPie POST after global options is denied" \
+    "$(payload exec_command command "http --verify=no --timeout=5 POST http://bench.invalid/ota/update")" deny
 guard_case "generic requests direct OTA POST is denied" \
     "$(payload exec_command command "python3 -c 'import requests; requests.request(\"POST\", \"http://bench.invalid/ota/update\")'")" deny
+guard_case "urllib inferred direct OTA POST is denied" \
+    "$(payload exec_command command "python3 -c 'import urllib.request as u; u.urlopen(u.Request(\"http://bench.invalid/ota/update\",data=b\"x\"))'")" deny
+guard_case "PowerShell direct OTA POST is denied" \
+    "$(payload exec_command command "pwsh -Command 'Invoke-WebRequest http://bench.invalid/ota/update -Method POST'")" deny
 guard_case "wget direct OTA POST is denied" \
     "$(payload exec_command command "wget --post-data=x http://bench.invalid/ota/update")" deny
 guard_case "percent-encoded direct OTA POST is denied" \
@@ -280,9 +296,14 @@ guard_case "bench gate rejects a redundant current-version lease" \
     "$(payload exec_command command "$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3-dev.4 --confirm-bench bench --install-bench")" deny
 guard_case "bench gate rejects an interpreter wrapper" \
     "$(payload exec_command command "python3 $canonical_bench_ota_gate")" deny
+guard_case "bench gate rejects an env split-string wrapper" \
+    "$(payload exec_command command "env -S '$canonical_bench_ota_gate'")" deny
 ln -s "$root/scripts/production-ota-gate.py" "$tmp/production-ota-gate.py"
 guard_case "bench gate rejects a symlink alias" \
     "$(payload exec_command command "$tmp/production-ota-gate.py ${canonical_bench_ota_gate#*production-ota-gate.py }")" deny
+ln -s "$root/scripts/production-ota-gate.py" "$tmp/run-ota"
+guard_case "bench gate rejects a differently named symlink alias" \
+    "$(payload exec_command command "$tmp/run-ota ${canonical_bench_ota_gate#*production-ota-gate.py }")" deny
 guard_case "canonical production gate cannot be chained into a watcher" \
     "$(payload exec_command command "$canonical_ota_gate; curl -X POST http://production.invalid/ota/update")" deny
 guard_case "production staging without execution is not an admitted agent shape" \

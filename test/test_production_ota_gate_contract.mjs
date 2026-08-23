@@ -358,8 +358,23 @@ assert.match(hook, /"--install-bench"[\s\S]{0,220}?"--confirm-bench"\]\s*=\s*"be
 assert.match(hook, /Path\(os\.path\.abspath\(executable\)\) != canonical/,
   "a foreign symlink alias must not impersonate the canonical gate path");
 assert.match(hook,
-  /def direct_ota_update_write[\s\S]{0,1800}?executable == "curl"[\s\S]{0,1200}?executable in \{"http", "xh"\}[\s\S]{0,400}?executable == "wget"/,
+  /def direct_ota_update_write[\s\S]{0,3000}?executable == "curl"[\s\S]{0,1800}?executable in \{"http", "xh"\}[\s\S]{0,800}?executable == "wget"/,
   "raw OTA write detection must cover ordinary curl, HTTPie/xh and wget shapes");
+assert.match(hook,
+  /argument\.startswith\(\("--data", "--form", "--json=", "--upload-file="\)\)/,
+  "all curl data/form long options, including equals forms, must imply an OTA write");
+assert.match(hook,
+  /executable in \{"http", "xh"\}[\s\S]{0,500}?argument == "post"[\s\S]{0,500}?":=" in argument[\s\S]{0,300}?"=" in argument and "==" not in argument/,
+  "HTTPie/xh must detect a method after options and implicit body-field POSTs");
+assert.match(hook,
+  /"-methodpost"[\s\S]{0,80}?"data="[\s\S]{0,80}?"json="/,
+  "PowerShell and inferred interpreter body writes must remain visible to the raw classifier");
+assert.match(hook,
+  /def aliases_canonical_ota_gate[\s\S]{0,1000}?os\.path\.samefile\(lexical, canonical\)/,
+  "renamed symlink and hardlink aliases must not execute the canonical OTA gate");
+assert.match(hook,
+  /aliases_canonical_ota_gate\(payload, command\)[\s\S]{0,120}?names_gate and not read_only_gate_inspection\(command\)/,
+  "wrappers naming the gate must fail unless they are an explicit read-only source inspection");
 
 assert.match(health, /OTA_HEALTH_MIN_FREE_BYTES\s*=\s*24u\s*\*\s*1024u/,
   "rollback commit needs the measured total internal-heap floor");

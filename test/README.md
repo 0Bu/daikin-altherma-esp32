@@ -188,14 +188,15 @@ the fixed task lease, generation rollback and whole-stream SHA comparison) and p
 source contract turns red; all one hundred twenty-one seeded regressions are required. The allocation-free
 `FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
 
-`node test/test_production_ota_gate_contract.mjs` pins the exact-artifact bench-to-production
-workflow: initial target health window, full signed release-binary pressure, the short completed-verifier state,
+`node test/test_production_ota_gate_contract.mjs` pins ordinary role-bound bench delivery plus the
+exact-artifact bench-to-production workflow: one bench install write and early return, initial target
+health window, full signed release-binary pressure, the short completed-verifier state,
 105-second release health window, a stable exact legacy offer before the bench-only dev restore, and
 bounded MQTT recovery after intentional OTA- and weather-TLS transport pauses, including either
 ordering of paused MQTT and matching weather evidence in a streamed status snapshot, and the sole generation-bound
 production write, with the OTA pause lease held for every in-flight status response. Its paired
-`tools/production_ota/selftest.mjs` requires all fifty-five stage-removal mutations to turn that same
-contract red.
+`tools/production_ota/selftest.mjs` requires all seventy bench-delivery and production-promotion
+stage-removal mutations to turn that same contract red.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation
