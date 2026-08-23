@@ -8,8 +8,9 @@ const S = {
   busy: false,
   // Labels of value rows whose description accordion is currently expanded. Kept in app state (not
   // the DOM) because #valueGroups is rebuilt on every poll (renderCards) — a purely-DOM open state
-  // would collapse ~1×/s. valueGroupsHtml re-emits the `open` class from this set, so an expanded
-  // row survives the rebuild; the click handler only toggles the live element (so the CSS slide
+  // would collapse on each 2 s values-poll render. valueGroupsHtml re-emits the `open` class from
+  // this set, so an expanded row survives the rebuild; the click handler only toggles the live
+  // element (so the CSS slide
   // animates) and updates this set for the next rebuild to honour.
   descOpen: new Set(),
   // Set while a click is in flight in #valueGroups; suspends the per-poll rebuild so it cannot
@@ -19,7 +20,8 @@ const S = {
   // 24-hour trend per historied concept: id -> {at, dt, unit, b0, v[]} for X10A, `modbus:<id>`
   // for HomeHub, and `env3:<id>` for the independent outdoor sensor (or {err:true}). Cached in app
   // state for the same reason descOpen is — #valueGroups is rebuilt on every poll, and re-fetching
-  // (or re-deriving) the sparkline 1×/s would both hammer the device and restart the panel's slide.
+  // (or re-deriving) the sparkline on every values-poll render would both hammer the device and
+  // restart the panel's slide.
   // A missing entry means "not fetched yet", which is what makes the panel show its loading line.
   // Reboot/OTA continuity comes from the device's full-resolution flash journal; browser state is
   // never a second authority for measurements.
@@ -28,12 +30,14 @@ const S = {
   // A PINNED trend readout per concept: id -> {t} (the pinned sample's unix instant) or {i, gen} when
   // the device has no wall clock to anchor to. In app state, not the DOM, for the same reason
   // descOpen is: the panel is re-emitted on every poll, and a crosshair written imperatively would
-  // vanish ~1×/s. Anchored to the INSTANT so the ring rolling under it re-resolves to the same
-  // measurement instead of to whatever now occupies that slot (logic/history.hpp's history_pin_index).
+  // vanish on each values-poll render. Anchored to the INSTANT so the ring rolling under it
+  // re-resolves to the same measurement instead of to whatever now occupies that slot
+  // (logic/history.hpp's history_pin_index).
   histPin: new Map(),
   // The label of the row whose trend is being scrubbed right now (mouse hover or finger down), or
   // null. It FREEZES the #valueGroups rebuild — see renderCards. Without that the innerHTML is
-  // replaced ~1×/s under the pointer: the captured element dies mid-drag and the readout flickers.
+  // replaced on each values-poll render under the pointer: the captured element dies mid-drag and
+  // the readout flickers.
   // Same trade the OTA readout takes with the Settings rebuild (S.otaShown), and for the same
   // reason: a live-updating grid must not fight an interaction the user is in the middle of.
   scrub: null,
@@ -52,7 +56,8 @@ const S = {
   crashAsk: "",
   crashDismissed: "",
   // The inspector's trend is diffed separately from the rest of the card: it changes on a fetch or a
-  // pin, not on a live value, and re-emitting a plot every second would fight the cursor on it.
+  // pin, not on a live value, and re-emitting a plot on every values-poll render would fight the
+  // cursor on it.
   inspHistSig: "",
   // OTA: the version a check found (drives the header version's tooltip), and whether a check or
   // download is running. Separate from S.busy — S.busy is the "a config write is landing" lock the
@@ -353,16 +358,16 @@ function initNavigation() { applyRouteFromLocation(); }
 //
 //   1. Markup unchanged → don't write. Enough on its own for #connTile, whose rows are stable
 //      between polls. NOT enough for #settingsCards any more: the ESP32 card carries the two
-//      board-memory rows again, and free heap moves every second, so this check degrades to a plain
-//      write there exactly as it does for the value grid — which is why guard 2 below is armed on
-//      all three containers and not only on the one that obviously needed it.
+//      board-memory rows again, and free heap moves on each `/status` refresh, so this check degrades
+//      to a plain write there exactly as it does for the value grid — which is why guard 2 below is
+//      armed on all three containers and not only on the one that obviously needed it.
 //   2. A click is in flight → don't write. Needed because #valueGroups carries LIVE readings: its
-//      markup differs on almost every push, so check 1 degrades to a plain write there and cannot
-//      help. Without this the value rows lost 3–60 % of taps depending on how long the button was
-//      held (DESIGN.md §6 carries the measurements).
+//      markup differs on almost every `/values` poll, so check 1 degrades to a plain write there and
+//      cannot help. Without this the value rows lost 3–60 % of taps depending on how long the button
+//      was held (DESIGN.md §6 carries the measurements).
 //
 // The cache is deliberately NOT updated when a write is skipped for reason 2 — recording markup that
-// was never written would make the next identical push skip a write the DOM still needs.
+// was never written would make the next identical render skip a write the DOM still needs.
 const _html = {};
 function setHtml(id, html) {
   if (S.clickHold) return;
@@ -508,9 +513,9 @@ function renderApp() {
 // fact; the version moved up out of the ESP32 card, so the one line the user reads first answers
 // both "which box is this" and "which firmware is on it" (DESIGN.md §5.4).
 //
-// This runs on EVERY status frame (~1/s), so it writes only the two fields it owns — #otaStat
+// This runs on EVERY 2 s values-poll render, so it writes only the two fields it owns — #otaStat
 // belongs to the OTA flow below and must survive a re-render mid-download, or the percentage would
-// blink out once a second.
+// blink out on each render.
 function renderHeaderMeta() {
   const w = S.status?.wifi || {};
   $("hdrIp").textContent = w.ip || location.hostname;
@@ -788,11 +793,11 @@ async function copyDiagnostics() {
 // browser and for Home Assistant's retained crash entity — which is the whole point of the button
 // over the page-local hide it replaced.
 //
-// The banner is hidden on the local signature the moment the device confirms, because the live status
-// push builds its frames ~1×/4 s and one composed before the delete landed would draw the crash again
-// for a beat. A FAILED delete restores the banner instead: the report is still on the device, and a
-// page that hid it anyway would be lying about flash — the same fail-closed direction the firmware
-// takes when it refuses to mark a crash dismissed after a failed erase.
+// The banner is hidden on the local signature the moment the device confirms, because a `/status`
+// response already in flight may have been composed before the delete landed and would otherwise
+// draw the crash again for a beat. A FAILED delete restores the banner instead: the report is still
+// on the device, and a page that hid it anyway would be lying about flash — the same fail-closed
+// direction the firmware takes when it refuses to mark a crash dismissed after a failed erase.
 async function deleteCrashReport(sig) {
   S.crashAsk = "";
   let ok = false;

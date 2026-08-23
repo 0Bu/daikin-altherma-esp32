@@ -119,14 +119,15 @@ async function refreshValues(paint = true) {
 // WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
 function renderCards() {
   // Frozen while a trend is being scrubbed (S.scrub): rebuilding innerHTML under an active pointer
-  // drops pointer capture and restarts the accordion, so the gesture would break ~1×/s. The rows
+  // drops pointer capture and restarts the accordion, so the gesture would break on each values-poll
+  // render. The rows
   // stop updating for the few seconds the finger is down and catch up on release — the same
   // deliberate stall renderSettings takes for the OTA readout.
   if (S.scrub) return;
   // Through setHtml like the other two per-poll containers, rather than writing innerHTML directly:
   // that is where the click-in-flight and unchanged-markup guards live, and this grid was the one
   // container bypassing both. The unchanged-markup half earns its keep here too — an idle plant or a
-  // dropped X10A link produces identical markup, so those pushes stop writing at all.
+  // dropped X10A link produces identical markup, so those polls stop writing at all.
   // Keep plant diagnostics first in the card stream: #valueGroups immediately follows #hpLive in
   // the document.  The 24-hour rows still require the explicit diagnostics opt-in and a live X10A
   // link.  The passive refrigerant-service row does not; checkupCardHtml() keeps the shared card
@@ -153,7 +154,7 @@ function renderCards() {
 //     mid-slide — the 220 ms open animation was cut a third of the way through, so even a click that
 //     DID register looked like one that had not. Releasing on `click` would leave that uncovered.
 //
-// Deliberately not a rebuild-on-release either: the next poll frame (≤1 s) redraws anyway.
+// Deliberately not a rebuild-on-release either: the next values-poll render redraws anyway.
 const CLICK_HOLD_DOWN_MS = 1200;   // press → covers a long press, the click, and the fetch behind it
 const CLICK_HOLD_UP_MS   = 600;    // release → covers the click, the slide and that same fetch
 let clickHoldTimer = 0;
@@ -1032,7 +1033,8 @@ const uptimeRow = (s) => vrow(t("card.uptime"), fmtUptime(s), { cls: "mono num" 
 
 // Bytes as whole KiB — the same unit the firmware's own trend stores (logic/history.hpp), so the row
 // and the chart under it cannot disagree about what the number is. Whole KiB rather than a decimal:
-// the row is rebuilt on every poll, and a tenth of a KiB ticking once a second is noise, not news.
+// the row is rebuilt on every poll, and a tenth of a KiB ticking on each `/status` refresh is noise,
+// not news.
 const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 
 // The board's own memory: free heap and the largest CONTIGUOUS free block. These two are back on the
@@ -1091,7 +1093,7 @@ function boardHardwareSection(kind, title, detail, help = "") {
 // The board's own onboard parts — status indicator + recovery button — as ONE summary row with TWO
 // explicit actions. "Hardware" on the left expands the explanation tongue; the selected board name
 // on the right opens the editor. Keeping those actions in separate buttons avoids one
-// tap both explaining and editing, while S.descOpen preserves the tongue across status-poll rebuilds.
+// tap both explaining and editing, while S.descOpen preserves the tongue across values-poll renders.
 function boardRow() {
   const b = S.status?.board || {};
   const env = S.status?.env3 || {};
@@ -1705,10 +1707,11 @@ function renderSettings() {
   //
   // The OTA readout in the Firmware row is the second reason to hold still, and it is not a
   // cosmetic one: that readout is painted straight into the DOM by otaInline (it is not built from
-  // S, so a rebuild does not re-emit it), and a download reports for tens of seconds. Rebuilt once
-  // a second, the percentage would blink out and the checking spinner would restart its animation
-  // from zero on every frame — the header's own #otaStat is exempt from re-render for exactly this
-  // reason, and this slot needs the same protection by a different means. So the card freezes while
+  // S, so a rebuild does not re-emit it), and a download reports for tens of seconds. Rebuilt on
+  // each 2 s values-poll render, the percentage would blink out and the checking spinner would
+  // restart its animation from zero on every frame — the header's own #otaStat is exempt from
+  // re-render for exactly this reason, and this slot needs the same protection by a different means.
+  // So the card freezes while
   // the readout has anything to say — S.otaShown covers the terminal messages too, which are
   // written after the flow released and would otherwise be wiped a fraction of a second into their
   // linger. What freezes is a card of static facts, for the seconds an
@@ -1728,7 +1731,7 @@ function renderSettings() {
     setHtml("connTile", connectionsHtml());
   }
   // otaShown normally freezes an ALREADY-RENDERED card so direct progress DOM writes survive the
-  // once-per-status rebuild. A reload reverses that order: resumeOta learns about the download first
+  // 2 s values-poll rebuild. A reload reverses that order: resumeOta learns about the download first
   // and can set otaShown before /status has ever produced the full cards. Permit exactly that first
   // status-backed render, then repaint the retained OTA view into the newly-created #otaStatSet.
   const firstStatusRender = !S.settingsHydrated;

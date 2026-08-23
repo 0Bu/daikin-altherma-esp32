@@ -713,8 +713,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 
 /* ── Expandable value description (tap a heat-pump value row → its explainer slides down) ─────
    The row itself is a full-width button; the .vitem wrapper carries the divider so the header and
-   the panel below it read as one item. Open state is re-emitted from S.descOpen on every poll
-   rebuild (app.js), so the panel doesn't flicker shut ~1×/s. */
+   the panel below it read as one item. Open state is re-emitted from S.descOpen on every values-poll
+   render (app.js), so the panel doesn't flicker shut every 2 s. */
 .vitem { border-top: 1px solid var(--line); }
 .vitem .vrow { border-top: 0; }          /* the wrapper draws the divider now, not the row */
 .vrow-desc {

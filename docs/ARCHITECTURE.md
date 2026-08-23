@@ -2826,8 +2826,8 @@ place:
   whichever screen started it (only one is ever visible; the other screen is `display:none`). The
   Settings slot is painted into the DOM rather than rebuilt from state, so `renderSettings` freezes
   **all permanent Settings cards** together while `S.otaShown` (they are built and painted as one
-  string, `esp32CardHtml()`) — otherwise the once-a-second rebuild would blink the percentage out and
-  restart the spinner animation every frame. The flow itself:
+  string, `esp32CardHtml()`) — otherwise each 2 s values-poll rebuild would blink the percentage
+  out and restart the spinner animation every frame. The flow itself:
   `GET /ota/check`, retain its accepted generation, and poll `GET /ota/status` until that same
   generation reports `busy=false` plus a complete channel/version/application-SHA offer. This avoids
   consuming the old idle status during the task's 1.1-second quiesce lead. It then requests the

@@ -971,7 +971,8 @@ function histHtml(id, unit, name, source = "") {
   // `data-hist` is what the delegated pointer handlers match on, and it carries the sample count so
   // the geometry the handler needs comes from the same render that drew the path.
   // A PINNED readout is emitted as part of the markup, not written onto the DOM afterwards — that is
-  // the whole reason it survives the ~1×/s rebuild that made the old hold-to-read behaviour necessary.
+  // the whole reason it survives each values-poll rebuild that made the old hold-to-read behaviour
+  // necessary.
   // Its instant is re-resolved here on every render, so the pin follows its measurement as the ring
   // rolls and disappears once that measurement has left the day.
   const pi = histPinIndex(id, view);

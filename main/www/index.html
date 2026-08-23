@@ -82,7 +82,8 @@
              the component it describes — mode/health in the status block, normal space operation
              on the room-circuit riser, the BUH step in its label, low-noise on the outdoor unit.
              Static DOM updated in place by renderLive() — deliberately NOT rebuilt per poll like
-             #valueGroups: an innerHTML rebuild would restart the CSS flow animations every second.
+             #valueGroups: an innerHTML rebuild would restart the CSS flow animations on every
+             2 s values-poll render.
              The schematic never hides: when a source cannot state a reading it blanks that pill to
              "—"; a live HomeHub may supply structurally paired readings in petrol instead. The card
              itself holds the status block that says why. -->
@@ -811,8 +812,9 @@
              the evidence half of a report (see #bugModal below). .verlink is the header version
              button's affordance: nothing until hover/focus, then the brand tint (DESIGN.md §5.6).
              THE VERSION KEEPS ITS OWN SPAN because renderSettings() rewrites its textContent every
-             poll — a button inside it would be destroyed and rebuilt ~1x/s, losing focus and any
-             click in flight. Here it is static markup that is never re-rendered. -->
+             values-poll render — a button inside it would be destroyed and rebuilt every 2 s,
+             losing focus and any click in flight. Here it is static markup that is never
+             re-rendered. -->
         <p class="footer-ver">
           <span id="settingsVer">daikin-altherma-esp32</span><span class="foot-act"><span aria-hidden="true"> · </span><button class="verlink mono" type="button" id="footBug" data-i18n="bug.row">Report a bug</button></span>
         </p>

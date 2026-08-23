@@ -420,7 +420,7 @@ retained X10A payload. The command never cuts a release. See
   handlers must stay under the shared OOM try/catch; every allocating task loop must self-guard; never
   allocate while holding a mutex. The rules and the reasoning are in
   [`AGENTS.md`](AGENTS.md) → "Memory, concurrency, and HTTP safety".
-- A PR touching HTTP, MQTT, OTA, TLS, JSON, X10A publishing, polling or heap allocation also needs a
+- A PR touching HTTP, MQTT, OTA, TLS, JSON, X10A publishing, firmware polling or heap allocation also needs a
   current-head `$heap-safety-review` record from the independent read-only `heap_safety_reviewer`;
   the aggregate PR gate enforces applicability and freshness.
 - C/C++ formatting is [`.clang-format`](.clang-format). Match the surrounding comment density —
