@@ -12,6 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const contract = path.join(root, "test/test_ota_heap_contract.mjs");
 const files = [
   "sdkconfig.defaults",
+  "main/CMakeLists.txt",
   "main/ota_update.cpp",
   "main/ota_update.hpp",
   "main/config.cpp",
@@ -69,6 +70,12 @@ try {
     ["dynamic TLS buffers are disabled", () =>
       replaceOnce("sdkconfig.defaults", "CONFIG_MBEDTLS_DYNAMIC_BUFFER=y",
         "CONFIG_MBEDTLS_DYNAMIC_BUFFER=n")],
+    ["the size build folds MQTT helpers back into the fixed task frame", () =>
+      replaceOnce("main/CMakeLists.txt", "-fno-inline-functions-called-once",
+        "-finline-functions-called-once")],
+    ["the MQTT fixed-frame build ceiling is weakened above the regressed task", () =>
+      replaceOnce("main/CMakeLists.txt", "-Werror=frame-larger-than=2048",
+        "-Werror=frame-larger-than=4096")],
     ["the firmware TLS aggregate floor is weakened to the verifier budget", () =>
       replaceOnce("main/logic/ota_headroom.hpp",
         "OTA_TRANSFER_HEADROOM = {56 * 1024, 24 * 1024, 4}",
@@ -291,8 +298,8 @@ try {
         "s_network_quiesced.store(false, std::memory_order_release);")],
     ["the held MQTT task no longer acknowledges quiescence", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "s_publish_network_quiesced.store(true, std::memory_order_release);\n            vTaskDelay",
-        "s_publish_network_quiesced.store(false, std::memory_order_release);\n            vTaskDelay")],
+        "s_publish_network_quiesced.store(true, std::memory_order_release);\n    vTaskDelay",
+        "s_publish_network_quiesced.store(false, std::memory_order_release);\n    vTaskDelay")],
     ["HomeHub keeps allocating during OTA", () =>
       replaceOnce("main/hp_modbus.cpp", "if (ota_download_active() || weather_fetch_active()) {",
         "if (false) {")],
@@ -356,8 +363,8 @@ try {
         "free_internal < 0")],
     ["failed MQTT transport resume churns every second", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "transport_resume_wait_s = transport_resume_backoff_s;",
-        "transport_resume_wait_s = 0;")],
+        "state.wait_s = state.backoff_s;",
+        "state.wait_s = 0;")],
     ["Weather no longer requests the MQTT transport pause", () =>
       replaceOnce("main/weather_forecast.cpp", "mqtt_transport_pause_for_network_heap();",
         "mqtt_transport_pause_bypassed();")],

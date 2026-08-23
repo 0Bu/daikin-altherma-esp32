@@ -379,9 +379,25 @@ assert.ok(weatherActivity >= 0 && weatherLead > weatherActivity &&
           weatherOtaRecheck > weatherMqttBarrier &&
           weatherFetch > weatherOtaRecheck,
   "weather must advertise its heap interval, wait for X10A and MQTT, re-check OTA and only then fetch");
-assert.match(mqtt,
-  /ota_download_active\(\)[\s\S]{0,160}?weather_fetch_active\(\)[\s\S]{0,160}?ota_busy \|\| weather_busy[\s\S]{0,160}?ota_quiesce_step\(network_quiesce, network_busy\)/,
-  "MQTT must apply the bounded TLS hold-off to both OTA and weather network activity");
+const mqttTaskStart = mqtt.indexOf("static void mqtt_task(");
+const mqttTaskEnd = mqtt.indexOf("static bool build_client(", mqttTaskStart);
+const mqttTask = mqtt.slice(mqttTaskStart, mqttTaskEnd);
+const mqttOtaBusy = mqttTask.indexOf("ota_download_active()");
+const mqttWeatherBusy = mqttTask.indexOf("weather_fetch_active()", mqttOtaBusy);
+const mqttNetworkBusy = mqttTask.indexOf("ota_busy || weather_busy", mqttWeatherBusy);
+const mqttHoldCall = mqttTask.indexOf("mqtt_network_hold_step(network_quiesce, network_busy",
+                                         mqttNetworkBusy);
+const mqttHoldStart = mqtt.indexOf(
+  "static __attribute__((noinline)) bool mqtt_network_hold_step(");
+const mqttHoldEnd = mqtt.indexOf(
+  "static __attribute__((noinline)) bool mqtt_transport_resume_step(", mqttHoldStart);
+const mqttHold = mqtt.slice(mqttHoldStart, mqttHoldEnd);
+assert.ok(mqttTaskStart >= 0 && mqttTaskEnd > mqttTaskStart && mqttOtaBusy >= 0 &&
+          mqttWeatherBusy > mqttOtaBusy && mqttNetworkBusy > mqttWeatherBusy &&
+          mqttHoldCall > mqttNetworkBusy && mqttHoldStart >= 0 && mqttHoldEnd > mqttHoldStart,
+  "MQTT must combine OTA and weather activity before entering its stack-bounded hold helper");
+assert.match(mqttHold, /ota_quiesce_step\(quiesce, network_busy\)/,
+  "the MQTT helper must apply the bounded TLS hold-off to the combined network activity");
 assert.match(poll,
   /ota_download_active\(\)[\s\S]{0,200}?weather_fetch_active\(\)[\s\S]{0,200}?ota_active \|\| weather_active[\s\S]{0,200}?ota_quiesce_step\(network_quiesce, network_active\)/,
   "X10A polling must apply the same bounded hold-off to both OTA and weather TLS activity");

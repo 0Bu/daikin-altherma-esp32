@@ -2412,7 +2412,7 @@ Structure:
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract, one hundred twenty-four OTA mutation canaries and one hundred nine delivery/promotion
+  contract, one hundred twenty-six OTA mutation canaries and one hundred nine delivery/promotion
   canaries make stage removal, shortened stress, signature bypass, weaker heap floors, raw OTA
   writes and disabled rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash
@@ -2479,8 +2479,18 @@ Structure:
   the owner flag is clear. A TLS broker then needs four stable 56/24-KiB INTERNAL-heap samples
   before restart, and a direct start failure uses exponential backoff capped at 60 seconds instead
   of retrying against the freshly fragmented heap every second. Plaintext MQTT does not pay that
-  TLS-only admission delay. MQTT startup claims the same acknowledgement before its first
-  Config/topic/client allocation and waits if an OTA request won the interval after HTTP startup.
+  TLS-only admission delay. The owner task remains on its existing 6144-byte stack: under the
+  project-wide size build, GCC's called-once inliner had folded the reference/circulation paths into
+  `mqtt_task` and raised its ESP-IDF 6.0.2 fixed frame from the historical 1040 bytes (`-Og`) to
+  2304 bytes (`-Os`). A `mqtt_ha.cpp`-local `-fno-inline-functions-called-once` contract plus explicit
+  scalar-only pause/resume helpers retains `-Os` and measures 1120 bytes in the size-optimised
+  ELF. This avoids spending another permanently allocated kilobyte from the same INTERNAL heap protected by
+  the 56/24-KiB TLS gates. A translation-unit-local 2048-byte frame warning is fatal: that ceiling is
+  above the current largest MQTT-object frame (1584 bytes) but below the regressed task frame. The
+  source contract and mutation canaries pin both compiler boundaries, while complete-path ELF review
+  and live task high-water remain the acceptance evidence. MQTT startup claims the same
+  acknowledgement before its first Config/topic/client allocation and waits if an OTA request won
+  the interval after HTTP startup.
 - **Allocation-rich HTTP snapshots yield to known TLS owners.** A fresh-production canary
   measured `min_free_heap=700 B` and one clean `/values` 503 while the board otherwise recovered
   without a restart or allocation-skip counter. Before the model-sized snapshot allocation, the
