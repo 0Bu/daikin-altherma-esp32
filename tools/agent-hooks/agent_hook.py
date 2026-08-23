@@ -1009,10 +1009,21 @@ def shell_argument_may_be_post(argument: str) -> bool:
     """Recognize literal, brace-expanded or glob-shaped POST method arguments."""
     for expanded in expand_static_braces(argument.lower()):
         if expanded == "__AGENT_AMBIGUOUS_BRACE__":
-            return "post" in argument.lower()
+            return True
         if any(fnmatch.fnmatchcase(target, expanded) for target in ("post", "-xpost", "--request=post", "--method=post")):
             return True
     return False
+
+
+def shell_argument_may_be_raw_post(argument: str) -> bool:
+    """Recognize a raw HTTP request-line method before its origin-form path."""
+    for expanded in expand_static_braces(argument):
+        if expanded == "__AGENT_AMBIGUOUS_BRACE__":
+            return re.match(r"^\s*\S+\s+/", argument) is not None
+        if re.match(r"^\s*post\s+/", expanded, re.IGNORECASE):
+            return True
+    method = re.match(r"^\s*(\S+)\s+/", argument)
+    return re.search(r"[$`]", method.group(1)) is not None if method else False
 
 
 def direct_ota_update_write(command: str) -> bool:
@@ -1021,16 +1032,27 @@ def direct_ota_update_write(command: str) -> bool:
     compact = re.sub(r"[\s'\"+\\]", "", decoded.lower())
     if not possible_ota_update_route(command):
         return False
-    normalized_shell = " ".join(shell_syntax_tokens(decoded))
-    if any(
-        re.search(r"(?:^|[\s'\"=])post(?:$|[\s'\";&|])", candidate, re.IGNORECASE)
-        for candidate in (decoded, normalized_shell)
+    raw_tokens = shell_syntax_tokens(decoded)
+    has_raw_network_client = any(
+        Path(argument).name.lower() in {"nc", "ncat", "netcat", "openssl", "socat"}
+        for argument in raw_tokens
+    )
+    if has_raw_network_client and (
+        any(shell_argument_may_be_raw_post(argument) for argument in raw_tokens)
+        or any(
+            argument.lower() == "post" and index + 1 < len(raw_tokens)
+            and raw_tokens[index + 1].startswith("/")
+            for index, argument in enumerate(raw_tokens)
+        )
     ):
         return True
     if any(marker in compact for marker in (
         "-xpost", "--requestpost", "--request=post", ".post(", ".request(post,",
-        "method=post", "method:post", "-methodpost",
+        "-methodpost",
     )):
+        return True
+    if re.search(r",method=post(?:[,)]|$)", compact) or \
+       re.search(r"(?:^|[,{])method:post(?:[,}]|$)", compact):
         return True
     if "request(" in compact and ("data=" in compact or "json=" in compact):
         return True
@@ -1059,10 +1081,10 @@ def direct_ota_update_write(command: str) -> bool:
                         explicit_method = re.sub(r"^(?:-x|--request=)", "", argument)
                         if shell_argument_may_be_post(argument):
                             return True
-                forces_get = explicit_method == "get" or (
-                    explicit_method != "post" and any(argument in {"-g", "--get"} for argument in arguments)
+                forces_get = explicit_method in {"get", "head"} or (
+                    not explicit_method and any(argument in {"-g", "--get"} for argument in arguments)
                 )
-                if dynamic_client_arguments and not forces_get and explicit_method != "head":
+                if dynamic_client_arguments and not forces_get:
                     return True
                 for index, argument in enumerate(arguments):
                     if argument in {"-x", "--request"} and index + 1 < len(arguments) and \
@@ -1103,11 +1125,13 @@ def direct_ota_update_write(command: str) -> bool:
             elif executable == "wget":
                 if any(shell_argument_may_be_post(argument) for argument in arguments):
                     return True
-                literal_safe_method = any(
-                    argument in {"--method=get", "--method=head"} or
-                    argument == "--method" and index + 1 < len(arguments) and arguments[index + 1] in {"get", "head"}
-                    for index, argument in enumerate(arguments)
-                )
+                effective_method = ""
+                for index, argument in enumerate(arguments):
+                    if argument == "--method" and index + 1 < len(arguments):
+                        effective_method = arguments[index + 1]
+                    elif argument.startswith("--method="):
+                        effective_method = argument.split("=", 1)[1]
+                literal_safe_method = effective_method in {"get", "head"}
                 if dynamic_client_arguments and not literal_safe_method:
                     return True
                 for index, argument in enumerate(arguments):
@@ -1199,6 +1223,13 @@ def production_ota_violation(payload: dict[str, Any]) -> str | None:
         re.search(r"[$`]", command) is not None
         and (
             ("production-ota-" in compact and "gate.py" in compact)
+            or all(
+                option in compact
+                for option in (
+                    "--manifest-url", "--expected-source-sha", "--expected-version",
+                    "--expected-app-sha256",
+                )
+            )
             or any(
                 re.search(r"[$`]", token) is not None and "/scripts/" in f"/{token}"
                 for tokens, _ in shell_token_sets(command)

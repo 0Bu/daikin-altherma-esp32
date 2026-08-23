@@ -279,8 +279,8 @@ try {
         '":=" in argument or', 'False or')],
     ["the raw OTA guard drops PowerShell posts", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        '"method=post", "method:post", "-methodpost",',
-        '"method=post", "method:post", "-ignored-method-post",')],
+        '"-methodpost",',
+        '"-ignored-method-post",')],
     ["the raw OTA guard drops HTTPie raw bodies", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'argument == "--raw" or argument.startswith("--raw=")',
@@ -311,16 +311,31 @@ try {
       replaceOnce("tools/agent-hooks/agent_hook.py",
         'dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)',
         "dynamic_client_arguments = False")],
+    ["curl GET flags can mask a dynamic explicit POST", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'not explicit_method and any(argument in {"-g", "--get"} for argument in arguments)',
+        'explicit_method != "post" and any(argument in {"-g", "--get"} for argument in arguments)')],
+    ["an earlier wget GET can mask a later dynamic method", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'literal_safe_method = effective_method in {"get", "head"}',
+        'literal_safe_method = any(argument in {"--method=get", "--method=head"} for argument in arguments)')],
     ["HTTPie stdin bodies are no longer recognized", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "shell_client_receives_stdin(decoded, executable)", "False")],
     ["raw HTTP request lines bypass the OTA guard", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        'r"(?:^|[\\s\'\\"=])post(?:$|[\\s\'\\";&|])"',
-        'r"ignored-raw-http-post"')],
+        'if re.match(r"^\\s*post\\s+/", expanded, re.IGNORECASE):',
+        "if False:")],
     ["quote-normalized raw HTTP methods bypass the OTA guard", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
-        'for candidate in (decoded, normalized_shell)', 'for candidate in (decoded,)')],
+        "raw_tokens = shell_syntax_tokens(decoded)", "raw_tokens = []")],
+    ["brace-expanded raw HTTP methods bypass the OTA guard", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        "for expanded in expand_static_braces(argument):", "for expanded in [argument]:")],
+    ["dynamic raw HTTP methods bypass the OTA guard", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        'return re.search(r"[$`]", method.group(1)) is not None if method else False',
+        "return False")],
     ["brace-expanded client methods bypass the OTA guard", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         "for expanded in expand_static_braces(argument.lower()):",
@@ -335,6 +350,10 @@ try {
     ["dynamic script paths can execute the canonical OTA gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         '("production-ota-" in compact and "gate.py" in compact)', "False")],
+    ["split dynamic paths can execute a gate carrying canonical artifact options", () =>
+      replaceOnce("tools/agent-hooks/agent_hook.py",
+        '"--manifest-url", "--expected-source-sha", "--expected-version",',
+        '"--ignored-manifest", "--ignored-source", "--ignored-version",')],
     ["urllib inferred POST bodies bypass the OTA guard", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py",
         '"urlopen(" in compact and "data=" in compact', "False")],

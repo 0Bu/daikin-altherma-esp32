@@ -381,6 +381,12 @@ assert.match(hook,
   /forces_get[\s\S]{0,1800}?not forces_get and/,
   "explicit curl GET shapes must not be mislabeled as OTA writes merely for carrying query data");
 assert.match(hook,
+  /forces_get\s*=\s*explicit_method in \{"get", "head"\} or \([\s\S]{0,120}?not explicit_method and any\(argument in \{"-g", "--get"\}/,
+  "curl -G must prove GET only when no explicit method can override it");
+assert.match(hook,
+  /effective_method\s*=\s*""[\s\S]{0,500}?effective_method = arguments\[index \+ 1\][\s\S]{0,300}?literal_safe_method = effective_method in \{"get", "head"\}/,
+  "only wget's final effective method may prove a literal GET or HEAD");
+assert.match(hook,
   /executable in \{"http", "xh"\}[\s\S]{0,1200}?"post"[\s\S]{0,900}?":=" in argument[\s\S]{0,300}?"=" in argument and "==" not in argument/,
   "HTTPie/xh must detect a method after options and implicit body-field POSTs");
 assert.match(hook,
@@ -402,11 +408,14 @@ assert.match(hook,
   /shell_client_receives_stdin\(decoded, executable\)[\s\S]{0,600}?argument == "--raw"/,
   "the quote-aware stdin result and explicit raw-body flags must feed HTTPie write classification");
 assert.match(hook,
-  /re\.search\(r"\(\?:\^\|\[\\s'\\"=\]\)post[\s\S]{0,100}?re\.IGNORECASE\)/,
-  "raw HTTP request lines and launcher-hidden methods must remain write-shaped");
+  /def shell_argument_may_be_raw_post[\s\S]{0,240}?expand_static_braces\(argument\)[\s\S]{0,300}?re\.match\(r"\^\\s\*post\\s\+\/"[\s\S]{0,240}?re\.search\(r"\[\$`\]"/,
+  "brace-, quote-, ANSI-C- and dynamically built raw HTTP POST methods must fail closed");
 assert.match(hook,
-  /normalized_shell\s*=\s*" "\.join\(shell_syntax_tokens\(decoded\)\)[\s\S]{0,300}?for candidate in \(decoded, normalized_shell\)/,
-  "quote-split and ANSI-C raw HTTP methods must be normalized before classification");
+  /raw_tokens\s*=\s*shell_syntax_tokens\(decoded\)[\s\S]{0,400}?\{"nc", "ncat", "netcat", "openssl", "socat"\}[\s\S]{0,500}?shell_argument_may_be_raw_post\(argument\)[\s\S]{0,300}?argument\.lower\(\) == "post"/,
+  "raw request-line classification must consume quote-aware tokens only for raw network clients");
+assert.doesNotMatch(hook,
+  /re\.search\(r"\(\?:\^\|\[\\s'\\"=\]\)post/,
+  "POST text outside a client method slot or raw request-line prefix must remain read-only");
 assert.match(hook,
   /def shell_argument_may_be_post[\s\S]{0,700}?expand_static_braces\(argument\.lower\(\)\)[\s\S]{0,500}?--method=post/,
   "brace- and glob-expanded client method arguments must remain write-shaped");
@@ -429,8 +438,11 @@ assert.match(hook,
   /token_may_name_command\(token, "production-ota-gate\.py"\)/,
   "shell globs that resolve to the canonical gate must fail before execution");
 assert.match(hook,
-  /"production-ota-" in compact and "gate\.py" in compact[\s\S]{0,300}?"\/scripts\/" in f"\/\{token\}"/,
-  "embedded/default dynamic construction of the canonical scripts executable must fail closed");
+  /"production-ota-" in compact and "gate\.py" in compact[\s\S]{0,500}?"--manifest-url"[\s\S]{0,240}?"--expected-app-sha256"/,
+  "dynamic gate executables carrying the canonical artifact option set must fail closed");
+assert.match(hook,
+  /re\.search\(r"\[\$`\]", token\) is not None and "\/scripts\/" in f"\/\{token\}"/,
+  "embedded/default dynamic construction under scripts must fail closed");
 assert.match(hook,
   /nested_tokens\.extend\(shell_token_sets\(nested\)\)/,
   "Git helper and pager strings must be recursively searched for renamed aliases");
