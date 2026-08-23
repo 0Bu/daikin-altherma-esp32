@@ -58,6 +58,7 @@ OTA_OFFER_POLL_SECONDS = 0.1
 # churning load and bound each compact request so the firmware's completed-state dwell is observable.
 OTA_STATUS_POLL_SECONDS = 0.5
 OTA_STATUS_REQUEST_TIMEOUT_S = 1.0
+OTA_STATUS_MAX_BYTES = 4096
 MQTT_RECOVERY_TIMEOUT_S = 15
 LEGACY_OFFER_STABLE_SECONDS = 3.0
 BENCH_HEALTH_WINDOW_S = 105
@@ -69,6 +70,15 @@ OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/man
 
 class GateError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class ResolvedHttpEndpoint:
+    family: int
+    socktype: int
+    proto: int
+    sockaddr: tuple[Any, ...]
+    host_header: str
 
 
 @dataclass
@@ -203,6 +213,111 @@ def request_json(
     if not isinstance(value, dict):
         fail(f"{host}{path} did not return a JSON object")
     return value
+
+
+def resolve_http_endpoint(host: str) -> ResolvedHttpEndpoint:
+    """Resolve the board before the sole write so DNS cannot consume completed-state evidence."""
+    try:
+        addresses = socket.getaddrinfo(host, 80, type=socket.SOCK_STREAM)
+    except OSError as error:
+        fail(f"could not resolve board host {host}: {error}")
+    for family, socktype, proto, _canonical, sockaddr in addresses:
+        if family in (socket.AF_INET, socket.AF_INET6):
+            return ResolvedHttpEndpoint(family, socktype, proto, sockaddr, host)
+    fail(f"board host {host} has no TCP address")
+
+
+def read_compact_json_response(
+    connection: socket.socket, host_header: str, path: str, deadline: float,
+) -> dict[str, Any]:
+    """Read a fixed-size HTTP response while every receive consumes one absolute deadline."""
+    def apply_remaining_timeout() -> None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("compact HTTP request exceeded its whole-request deadline")
+        connection.settimeout(remaining)
+
+    response = bytearray()
+    while b"\r\n\r\n" not in response:
+        apply_remaining_timeout()
+        chunk = connection.recv(1024)
+        if not chunk:
+            fail("compact HTTP response ended before its headers")
+        response.extend(chunk)
+        if len(response) > OTA_STATUS_MAX_BYTES:
+            fail("compact HTTP response headers exceed their fixed bound")
+
+    raw_headers, raw_body = bytes(response).split(b"\r\n\r\n", 1)
+    lines = raw_headers.split(b"\r\n")
+    status_parts = lines[0].split(b" ", 2)
+    if len(status_parts) < 2 or status_parts[0] != b"HTTP/1.1" or \
+       not status_parts[1].isdigit():
+        fail("compact HTTP response has an invalid status line")
+    status = int(status_parts[1])
+    content_lengths: list[bytes] = []
+    for line in lines[1:]:
+        name, separator, value = line.partition(b":")
+        if not separator:
+            fail("compact HTTP response has a malformed header")
+        if name.strip().lower() == b"content-length":
+            content_lengths.append(value.strip())
+    if status < 200 or status >= 300:
+        raise HTTPError(
+            f"http://{host_header}{path}", status,
+            "compact HTTP request failed", None, None,
+        )
+    if len(content_lengths) != 1 or not content_lengths[0].isdigit():
+        fail("compact HTTP response needs one numeric Content-Length")
+    content_length = int(content_lengths[0])
+    if content_length > OTA_STATUS_MAX_BYTES or len(raw_body) > content_length:
+        fail("compact HTTP response body exceeds its fixed bound")
+
+    body = bytearray(raw_body)
+    while len(body) < content_length:
+        apply_remaining_timeout()
+        chunk = connection.recv(min(1024, content_length - len(body)))
+        if not chunk:
+            fail("compact HTTP response ended before its declared body")
+        body.extend(chunk)
+    apply_remaining_timeout()
+    value = json.loads(body)
+    if not isinstance(value, dict):
+        fail("compact HTTP response is not a JSON object")
+    return value
+
+
+def request_json_deadline(
+    endpoint: ResolvedHttpEndpoint, path: str, *, timeout: float,
+) -> dict[str, Any]:
+    """Read one compact HTTP/1.1 JSON response under a monotonic whole-request deadline."""
+    if timeout <= 0 or not path.startswith("/") or any(c in path for c in "\r\n "):
+        fail("compact HTTP request arguments are invalid")
+    deadline = time.monotonic() + timeout
+    connection = socket.socket(endpoint.family, endpoint.socktype, endpoint.proto)
+
+    def apply_remaining_timeout() -> None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("compact HTTP request exceeded its whole-request deadline")
+        connection.settimeout(remaining)
+
+    try:
+        apply_remaining_timeout()
+        connection.connect(endpoint.sockaddr)
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {endpoint.host_header}\r\n"
+            "User-Agent: daikin-production-ota-gate/1\r\n"
+            "Accept: application/json\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii")
+        apply_remaining_timeout()
+        connection.sendall(request)
+        return read_compact_json_response(
+            connection, endpoint.host_header, path, deadline,
+        )
+    finally:
+        connection.close()
 
 
 def verify_http_range_support(url: str, binary: bytes) -> None:
@@ -729,13 +844,16 @@ def post_update_once(
 
 
 def wait_for_new_firmware(
-    host: str, version: str, elf: str, ota_evidence: dict[str, Any] | None = None,
+    host: str, version: str, elf: str, status_endpoint: ResolvedHttpEndpoint,
+    ota_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + OTA_TIMEOUT_S
     saw_done = False
     while time.monotonic() < deadline:
         try:
-            ota = request_json(host, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S)
+            ota = request_json_deadline(
+                status_endpoint, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S,
+            )
             if ota.get("state") == "error":
                 fail(f"OTA failed: {ota.get('message', '')}")
             saw_done = saw_done or ota.get("state") == "done"
@@ -841,6 +959,7 @@ def exercise_bench_full_download(
     """
     if release_version == target_version:
         fail("bench full-download exercise needs a release distinct from the target")
+    status_endpoint = resolve_http_endpoint(host)
     set_update_channel(host, "release")
     generation = wait_for_ota_offer(
         host, release_version, release_sha256,
@@ -894,7 +1013,7 @@ def exercise_bench_full_download(
             expected_channel="release", allow_downgrade=True,
         )
         release_status = wait_for_new_firmware(
-            host, release_version, release_elf, target_transfer,
+            host, release_version, release_elf, status_endpoint, target_transfer,
         )
     finally:
         stop.set()
@@ -947,7 +1066,9 @@ def exercise_bench_full_download(
             fail("legacy bench firmware refused the dev return update")
 
     restore_transfer: dict[str, Any] = {}
-    target_status = wait_for_new_firmware(host, target_version, target_elf, restore_transfer)
+    target_status = wait_for_new_firmware(
+        host, target_version, target_elf, status_endpoint, restore_transfer,
+    )
     validate_identity(
         target_status, host=host, mac=mac, version=target_version, elf=target_elf,
     )
@@ -981,6 +1102,7 @@ def install_bench_target(
     This function has no production-board argument by construction. It owns one un-retried update
     write, then all remaining acceptance is read-only.
     """
+    status_endpoint = resolve_http_endpoint(host)
     before = request_json(host, "/status")
     current_elf = str(before.get("app_elf_sha256", ""))
     if re.fullmatch(r"[0-9a-f]{9}", current_elf) is None:
@@ -1007,7 +1129,9 @@ def install_bench_target(
         host, check_generation, target_version, target_sha256,
     )
     transfer: dict[str, Any] = {}
-    returned = wait_for_new_firmware(host, target_version, target_elf, transfer)
+    returned = wait_for_new_firmware(
+        host, target_version, target_elf, status_endpoint, transfer,
+    )
     validate_identity(
         returned, host=host, mac=mac, version=target_version, elf=target_elf,
     )
@@ -1164,6 +1288,45 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError("a different OTA artifact identity passed the completed check")
+
+    # Each response fragment arrives inside the socket timeout, but the complete response does not.
+    # This deterministically distinguishes the monotonic whole-request deadline from urllib's
+    # per-socket-operation timeout semantics without contacting a board or external service.
+    drip_client, drip_server = socket.socketpair()
+
+    def slow_drip() -> None:
+        try:
+            with drip_server:
+                drip_server.recv(4096)
+                for part in (
+                    b"HTTP/1.1 200 OK\r\n",
+                    b"Content-Type: application/json\r\nContent-Length: 2\r\n",
+                    b"\r\n",
+                    b"{}",
+                ):
+                    time.sleep(0.12)
+                    drip_server.sendall(part)
+        except OSError:
+            pass  # the deadline closes the socket while the fixture is still dripping
+
+    drip_thread = threading.Thread(target=slow_drip, daemon=True)
+    drip_thread.start()
+    drip_started = time.monotonic()
+    try:
+        drip_client.sendall(b"GET /ota/status HTTP/1.1\r\n\r\n")
+        read_compact_json_response(
+            drip_client, "fixture.invalid", "/ota/status", drip_started + 0.25,
+        )
+    except TimeoutError:
+        pass
+    else:
+        raise AssertionError("compact status slow-drip exceeded its whole-request deadline")
+    finally:
+        drip_client.close()
+    drip_elapsed = time.monotonic() - drip_started
+    drip_thread.join(1.0)
+    assert drip_elapsed < 0.7
+
     with tempfile.TemporaryDirectory(prefix="daikin-production-ota-selftest-") as tmp:
         inventory_path = Path(tmp) / "inventory.json"
         inventory_path.write_text(json.dumps({
@@ -1300,6 +1463,7 @@ def main() -> int:
     if args.expected_current_version == args.expected_version:
         fail("production already names the target version; refusing a redundant update write")
 
+    production_status_endpoint = resolve_http_endpoint(production["host"])
     production_before = request_json(production["host"], "/status")
     validate_identity(
         production_before, host=production["host"], mac=production["mac"],
@@ -1316,7 +1480,9 @@ def main() -> int:
     post_update_once(
         production["host"], check_generation, args.expected_version, args.expected_app_sha256,
     )
-    returned = wait_for_new_firmware(production["host"], args.expected_version, elf)
+    returned = wait_for_new_firmware(
+        production["host"], args.expected_version, elf, production_status_endpoint,
+    )
     validate_identity(returned, host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf)
     production_evidence = stress_board(
         host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf,

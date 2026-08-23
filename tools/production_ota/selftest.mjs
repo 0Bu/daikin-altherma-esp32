@@ -106,6 +106,13 @@ try {
     ["the compact observer bypasses its bounded poll constant", () =>
       replaceOnce("scripts/production-ota-gate.py", "time.sleep(OTA_STATUS_POLL_SECONDS)",
         "time.sleep(5.0)")],
+    ["the compact whole-request deadline is silently expanded", () =>
+      replaceOnce("scripts/production-ota-gate.py", "deadline = time.monotonic() + timeout",
+        "deadline = time.monotonic() + timeout * 10")],
+    ["the reboot observer falls back to per-operation urllib timeouts", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'ota = request_json_deadline(\n                status_endpoint, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S,\n            )',
+        'ota = request_json(host, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S)')],
     ["publisher quiescence no longer outlives the authoritative observer", () =>
       replaceOnce("main/logic/ota_quiesce.hpp", "OTA_QUIESCE_MAX_CYCLES = 600",
         "OTA_QUIESCE_MAX_CYCLES = 480")],
