@@ -1115,9 +1115,9 @@ costs them their place. **Nothing in the OTA flow navigates** — the only scree
 Because that slot is painted straight into the DOM rather than rebuilt from state, **all three
 ESP32-family cards freeze together** while the readout has anything to say (`S.otaShown`, which
 covers the terminal messages' linger too) — they are one `esp32CardHtml()` string, so there is no
-freezing the Firmware card alone. Otherwise the once-a-second rebuild would blink the percentage out
-and restart the spinner's animation on every frame — the same hazard the header's `#otaStat` is exempt
-from re-render for. What holds still is three cards of static facts, for the seconds
+freezing the Firmware card alone. Otherwise each 2 s values-poll rebuild would blink the percentage
+out and restart the spinner's animation on every frame — the same hazard the header's `#otaStat` is
+exempt from re-render. What holds still is three cards of static facts, for the seconds
 an update takes; the Connections tile beside it keeps updating, since a link dropping mid-download
 is exactly what a user would want to see move.
 

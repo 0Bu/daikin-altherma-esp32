@@ -1587,9 +1587,9 @@ function inspectSig(e) {
 // still chart only their own derived series — never one of their inputs.
 //
 // Written on its OWN signature, not the inspector's: the card re-renders whenever a live value
-// changes (~1×/s), and re-emitting the plot that often would tear down a crosshair mid-read and
-// restart the CSS transition. Only a new series (`gen`), a changed categorical live cap or a moved
-// pin actually changes the markup.
+// changes on each values-poll render, and re-emitting the plot that often would tear down a crosshair
+// mid-read and restart the CSS transition. Only a new series (`gen`), a changed categorical live cap
+// or a moved pin actually changes the markup.
 function renderInspectHist(e, row) {
   if (e && e.env3) {
     const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
