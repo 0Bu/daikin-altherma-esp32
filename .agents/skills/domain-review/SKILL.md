@@ -1,6 +1,6 @@
 ---
 name: domain-review
-description: Pre-merge domain-correctness review — are the published values physically right, sensible and authentic? Runs the catalog audit (converters, spec conformance, HA semantics, byte layout) and judges what the audit cannot. Required before EVERY PR merge; a PR that cannot change what a value means clears in seconds, but a person has to say so.
+description: Pre-merge domain-correctness review — are the published values physically right, sensible and authentic? Runs the catalog audit (converters, spec conformance, HA semantics, byte layout) and judges what the audit cannot. Required before every ordinary PR merge; the sole exception is CI-attested Renovate Action-pin-line-only platform automerge.
 ---
 
 # domain-review
@@ -24,7 +24,7 @@ found by a slow manual review — none by a gate, because no gate was asking "**
 
 This review asks that. Nothing here is about style or structure.
 
-**It runs before EVERY merge** — there is no "this PR doesn't need it". That is deliberate. Deciding
+**It runs before every ordinary merge** — there is no "this PR doesn't need it". That is deliberate. Deciding
 in advance which files can change a value's meaning is a guess, and it is the same guess that let
 #35–#39 ship: a valve position reached Home Assistant as a 12800 °C temperature sensor through the
 ordinary discovery path, not through anything that announced itself as risky. So "nothing here can
@@ -32,6 +32,12 @@ change what a value means" is a **finding you state**, not an assumption made fo
 
 Most PRs clear in under a minute — see §0. The cost is small; the thing it prevents is a wrong
 number in someone's house, forever, silently.
+
+The sole exception is not a path guess made by an agent: authoritative CI may waive human records
+only after protected-base policy proves immutable patches for the exact same-repository, one-commit
+Renovate head contain nothing but the fully pinned Renovate runner replacement in `renovate.yaml`.
+The exception is unavailable to local/manual merge paths and fails closed for missing metadata or
+any mixed edit.
 
 ## 0. If the PR has no value surface
 
@@ -131,7 +137,7 @@ that lacks one.
 ## Recording the pass (merge gate — no file marker)
 
 The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) refuses
-supported PR merge paths until this review is recorded in the PR body as a ticked,
+ordinary supported PR merge paths until this review is recorded in the PR body as a ticked,
 SHA-stamped checkbox whose stamp still matches the PR head. When the review passes with **no
 blocking findings**, tick + stamp it with the reviewed commit:
 

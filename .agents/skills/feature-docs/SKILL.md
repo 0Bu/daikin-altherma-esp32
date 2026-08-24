@@ -106,7 +106,10 @@ documented synchronous, repository-, PR- and head-bound REST CAS merge path; CI 
 enforces the same current-head evidence. Its feature-docs check, the sibling of the `$project-review` gate, is
 **conditional**:
 it fires only when the PR changes technical-feature surface (`main/`, `test/`, `sdkconfig.defaults`,
-`partitions.csv`, or the CI build workflow). A docs-only / script-only / chore PR is not gated.
+`partitions.csv`, or the CI build/policy workflows). A docs-only / script-only / chore PR is not gated.
+The authoritative-CI-attested Renovate runner-pin-only class lives in `renovate.yaml`, outside this
+skill's technical-feature relevance set. Its protected-base, immutable-head attestation therefore
+does not suppress a `$feature-docs` record that would otherwise apply.
 
 When it applies, record the pass — after running this skill and confirming `docs/FEATURES.md` and
 `docs/ESP_IDF_MATRIX.md` match the code — by TICKING and SHA-STAMPING the PR's `$feature-docs` box
