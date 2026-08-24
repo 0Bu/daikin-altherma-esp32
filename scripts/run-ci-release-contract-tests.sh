@@ -99,6 +99,8 @@ import sys
 from pathlib import Path
 
 text = Path(sys.argv[1]).read_text(encoding="utf-8")
+workflow_dir = Path(sys.argv[1]).parent
+policy_text = (workflow_dir / "pr-policy.yml").read_text(encoding="utf-8")
 matches = list(re.finditer(r"(?m)^  ([a-z][a-z0-9_]*):\n", text))
 jobs = {}
 for index, match in enumerate(matches):
@@ -115,10 +117,18 @@ for name in ("build", "trusted_build", "publish"):
 untrusted = jobs["build"]
 require("contents: read" in untrusted, "untrusted build is not contents:read")
 require("--compile-only" in untrusted, "untrusted build does not use --compile-only")
-require('--source-sha "${{ github.sha }}"' in untrusted,
+require('--source-sha "${{ github.event.pull_request.head.sha }}"' in untrusted,
         "untrusted build does not receive source SHA explicitly")
+require("if: always() && github.event_name == 'pull_request'" in untrusted,
+        "untrusted build is not restricted to ordinary pull_request")
+require("needs: [mechanical_gates]" in untrusted and '"$MECHANICAL_RESULT" = success' in untrusted,
+        "required build check does not propagate mechanical gate failure")
+require("persist-credentials: false" in untrusted and "allow-unsafe-pr-checkout" not in untrusted,
+        "untrusted build checkout is not using the safe pull_request boundary")
 require("check-nonflashable-artifacts.sh" in untrusted, "untrusted build lacks artifact guard")
 require("OTA_SIGNING_KEY" not in untrusted, "untrusted build can see the signing key")
+require("secrets." not in untrusted and "github.token" not in untrusted,
+        "untrusted build gained a secret or token expression")
 require("contents: write" not in untrusted, "untrusted build has contents:write")
 require("dist/*.bin" not in untrusted and "dist/manifest.json" not in untrusted,
         "untrusted upload includes flashable files")
@@ -182,7 +192,16 @@ require(re.search(relevant.group(1), "tools/web_asset/vendor/LICENSE") is not No
 require("release_version:" in text and "release-resume" in text,
         "explicit/idempotent release resume contract is missing")
 
-workflow_dir = Path(sys.argv[1]).parent
+require("  pull_request:\n" in text and "  pull_request_target:\n" not in text,
+        "build workflow does not isolate PR execution under pull_request")
+require("  pull_request_target:\n" in policy_text and "\n  gates:\n" in policy_text,
+        "separate trusted policy workflow is missing")
+require("working-directory: .trusted-policy" in policy_text and
+        "ref: ${{ github.event.pull_request.base.sha }}" in policy_text,
+        "policy workflow does not execute the protected-base verifier")
+require("refs/pull/" not in policy_text and "allow-unsafe-pr-checkout" not in policy_text and
+        "secrets." not in policy_text,
+        "policy workflow can load PR code or secrets")
 for workflow in workflow_dir.glob("*.y*ml"):
     workflow_text = workflow.read_text(encoding="utf-8")
     require("ubuntu-latest" not in workflow_text, f"floating runner remains in {workflow.name}")
@@ -217,11 +236,13 @@ third_party = (repo / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
 require("Apache-2.0.txt" in third_party,
         "third-party notice does not name the distributed Apache license")
 
-for line in text.splitlines():
-    if "uses:" not in line:
-        continue
-    ref = line.split("uses:", 1)[1].split("#", 1)[0].strip()
-    require(re.search(r"@[0-9a-f]{40}$", ref) is not None, f"Action is not SHA-pinned: {ref}")
+for workflow in workflow_dir.glob("*.y*ml"):
+    for line in workflow.read_text(encoding="utf-8").splitlines():
+        if "uses:" not in line:
+            continue
+        ref = line.split("uses:", 1)[1].split("#", 1)[0].strip()
+        require(re.search(r"@[0-9a-f]{40}$", ref) is not None,
+                f"Action is not SHA-pinned in {workflow.name}: {ref}")
 print("workflow contract: trust split, artifact boundary and release ordering OK")
 PY
 if [ "$?" -eq 0 ]; then ok "workflow structure is fail-closed"; else bad "workflow structure contract failed"; fi

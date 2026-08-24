@@ -12,8 +12,11 @@ files, update GitHub state, merge, flash, deploy, clear evidence, or mutate a li
 because this skill activated. When a mutation is explicitly requested, keep it within that scope and
 report analysis, changes, and verification separately.
 
-Most Renovate PRs here self-merge. The two that don't are the point of this skill: a green build
-proves the firmware **compiles**, which is not the question either of these bumps raises.
+Only the `renovatebot/github-action` dependency is configured for GitHub-native automerge, and CI
+admits that path **without human review records** only for the exact runner-pin-line class below.
+Other Action updates remain manual and retain ordinary records. The two firmware dependency PRs are
+the point of this skill: a green build proves the firmware **compiles**, which is not the question
+either bump raises.
 
 [`.github/renovate.json`](../../../.github/renovate.json) says it plainly — a green build
 
@@ -36,10 +39,26 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 p
 |---|---|---|
 | `docs/index.html` | `esptool-js` | §2 — a real Web Serial flash |
 | `.github/workflows/build.yml` (`esp_idf_version:`) | `espressif/esp-idf` | §3 — a real build + a running board |
-| action pins in `.github/workflows/*` | GitHub Action digests | nothing — Renovate self-merges these |
+| the Renovate runner pin in `.github/workflows/renovate.yaml` | `renovatebot/github-action` | protected-base CI attests the exact pin-line-only patch, then GitHub-native automerge may complete it without human records |
+| other action pins | other GitHub Actions | ordinary human review records and an explicit manual merge |
 
-The authority is `matchDepNames` in `.github/renovate.json`, not this table. If a bump is listed
-there, a human merges it; read the file if a new dep ever joins the list.
+The authority is `.github/renovate.json`, not this table: the combined
+`matchManagers: ["github-actions"]` + `matchDepNames: ["renovatebot/github-action"]` rule is the
+sole positive automerge rule, while the negative `matchDepNames` rule keeps the tracked firmware
+dependencies manual. This intentionally includes semantic runner version upgrades such as #45, not only Renovate's
+`digest` update type; safety comes from the exact pin-line patch classifier. Read the file if either
+set changes.
+
+Action updates receive no blanket bypass. The data-only protected-base `pr-policy.yml` workflow must
+bind the current same-repository PR,
+its one Renovate-authored commit and complete immutable file patches from that exact head, then prove
+the sole changed line in `.github/workflows/renovate.yaml` is a like-for-like replacement of the
+fully pinned Renovate runner digest, with only Renovate's validated trailing version comment allowed
+to move with it. Missing/unreadable files or a partial three-file authoritative context hard-fail;
+malformed complete context rejects the exception. Context containing tags, renamed actions, mixed
+edits, forks, extra commits or an identity mismatch is likewise ineligible and follows the human
+review path. The current PAT makes bot identity a bounded operational signal rather than
+cryptographic proof; moving Renovate to a GitHub App would strengthen it.
 
 ## 2. esptool-js — the browser installer
 
@@ -156,9 +175,11 @@ scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT \
   -f sha=<full-current-head-sha> -f merge_method=squash
 ```
 
-Run each applicable skill. Editing the PR body requires separate explicit authorization; when it is
-not granted, report the completed exact-head reviews without mutating GitHub. When authorized, tick
-and SHA-stamp the applicable boxes by appending to Renovate's body through the credential wrapper.
+For the CI-attested Renovate-runner pin-line-only class, platform automerge needs no human review records and a
+local/manual merge must not be substituted. For every other Renovate PR, run each applicable skill.
+Editing the PR body requires separate explicit authorization; when it is not granted, report the
+completed exact-head reviews without mutating GitHub. When authorized, tick and SHA-stamp the
+applicable boxes by appending to Renovate's body through the credential wrapper.
 The final REST merge itself is allowed only when the user explicitly requested merge and every
 required gate and decision is resolved. `main` stays linear and GPG-signed via GitHub's web-flow key.
 

@@ -95,6 +95,21 @@ fails closed on both missing and extra project skills.
 - PR checkbox parsing proves an exact, applicable record stamped for the current head; it does not
   authenticate the PR-body editor. Maintainer review and GitHub merge authorization remain the actor
   trust boundary.
+- Authoritative CI has one record-free platform-automerge exception. It binds current PR metadata
+  to complete immutable GitHub commit-file pages for the exact one-commit head. The data-only
+  protected-base `pr-policy.yml` workflow, which never loads PR code, accepts only a same-repository
+  Renovate branch whose sole edit is the
+  like-for-like 40-hex Renovate runner replacement in `.github/workflows/renovate.yaml`, with only
+  the validated trailing version comment allowed to move with the digest.
+  Missing/unreadable files or a partial three-file authoritative context hard-fail; malformed or
+  ineligible complete input rejects the exception and follows the ordinary review records. Local
+  CAS merges never receive this exception.
+- GitHub evaluates a `pull_request_target` workflow from the default branch. Introducing or renaming
+  this boundary therefore requires a two-stage reviewed migration: first land the data-only policy
+  workflow under a temporary unique check name while the existing required check remains available,
+  then require that check before switching the ordinary PR workflow/ruleset to the final `gates` +
+  `build` pair. Never bridge that bootstrap by executing PR code under `pull_request_target` or by
+  weakening the ruleset.
 - Project hooks are lexical, defense-in-depth guardrails for ordinary tool payloads. They do not
   replace `AGENTS.md`, the sandbox, repository permissions, branch protection, or maintainer review,
   and cannot prove the intent of arbitrarily generated interpreter code or dynamically computed
@@ -110,7 +125,8 @@ fails closed on both missing and extra project skills.
   not equivalent; production staging without `--execute` still mutates the bench.
 - Heap-sensitive changed-file paths make the SHA-stamped `$heap-safety-review` PR record mandatory.
   That record comes from the independent read-only `heap_safety_reviewer`; project and domain
-  reviews remain independently required on every merge.
+  reviews remain independently required on every local/manual merge and every PR outside the narrow
+  CI-attested Renovate Action-pin-line class.
 
 Upstream behavior is pinned to the official Codex documentation for
 [`AGENTS.md`](https://learn.chatgpt.com/docs/agent-configuration/agents-md),

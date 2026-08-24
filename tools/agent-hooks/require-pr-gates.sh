@@ -6,6 +6,10 @@
 #   AGENT_PR_BODY_FILE=/path/to/body.md
 #   AGENT_PR_HEAD_SHA=<7..40 hex>
 #   AGENT_CHANGED_FILES_FILE=/path/to/files.txt
+# Optional authoritative-CI context for the narrow Renovate Action-pin-line exception:
+#   AGENT_PR_METADATA_FILE=/path/to/pr.json
+#   AGENT_PR_HEAD_COMMIT_FILE=/path/to/head-commit.json
+#   AGENT_PR_HEAD_COMMIT_PAGES_FILE=/path/to/head-commit-pages.json
 # Optional local discovery: --pr <number-or-url>, or a merge-tool JSON payload on stdin.
 # Exit 0 = pass/not a merge; exit 2 = policy/input/discovery failure.
 set -u
@@ -18,6 +22,9 @@ canonical_root="$(cd "$here/../.." && pwd)"
 body_file="${AGENT_PR_BODY_FILE:-}"
 head_sha="${AGENT_PR_HEAD_SHA:-}"
 files_file="${AGENT_CHANGED_FILES_FILE:-}"
+pr_metadata_file="${AGENT_PR_METADATA_FILE:-}"
+head_commit_file="${AGENT_PR_HEAD_COMMIT_FILE:-}"
+head_commit_pages_file="${AGENT_PR_HEAD_COMMIT_PAGES_FILE:-}"
 selector="${AGENT_PR_SELECTOR:-}"
 requested_root="${AGENT_PROJECT_DIR:-${PROJECT_DIR:-$canonical_root}}"
 payload_file=""
@@ -90,7 +97,8 @@ if [ -n "$payload" ]; then
     force_check=1
 fi
 
-[ -n "$body_file$head_sha$files_file" ] && force_check=1
+[ -n "$body_file$head_sha$files_file$pr_metadata_file$head_commit_file$head_commit_pages_file" ] \
+    && force_check=1
 [ "$force_check" = "1" ] || exit 0
 
 root="$(agent_gate_project_root "${requested_root:-$payload_cwd}")"
@@ -115,11 +123,26 @@ fi
 tmp="$(mktemp -d)" || exit 2
 trap 'rm -rf "$tmp"' EXIT
 
-if [ -n "$body_file$head_sha$files_file" ]; then
+if [ -n "$body_file$head_sha$files_file$pr_metadata_file$head_commit_file$head_commit_pages_file" ]; then
     # Any explicit/CI override disables network discovery. Partial input is a policy error.
     [ -n "$body_file" ] && [ -f "$body_file" ] && [ -r "$body_file" ] || { echo "agent PR gates: AGENT_PR_BODY_FILE is missing or unreadable" >&2; exit 2; }
     [ -n "$files_file" ] && [ -f "$files_file" ] && [ -r "$files_file" ] || { echo "agent PR gates: AGENT_CHANGED_FILES_FILE is missing or unreadable" >&2; exit 2; }
     printf '%s' "$head_sha" | grep -Eq '^[0-9a-fA-F]{7,40}$' || { echo "agent PR gates: AGENT_PR_HEAD_SHA must be 7..40 hexadecimal characters" >&2; exit 2; }
+
+    renovate_context_count=0
+    [ -z "$pr_metadata_file" ] || renovate_context_count=$((renovate_context_count + 1))
+    [ -z "$head_commit_file" ] || renovate_context_count=$((renovate_context_count + 1))
+    [ -z "$head_commit_pages_file" ] || renovate_context_count=$((renovate_context_count + 1))
+    [ "$renovate_context_count" -eq 0 ] || [ "$renovate_context_count" -eq 3 ] \
+        || { echo "agent PR gates: all three authoritative Renovate context files must be provided together" >&2; exit 2; }
+    if [ "$renovate_context_count" -eq 3 ]; then
+        [ "${AGENT_POLICY_CI:-0}" = "1" ] \
+            || { echo "agent PR gates: Renovate context is accepted only in authoritative CI" >&2; exit 2; }
+        for context_file in "$pr_metadata_file" "$head_commit_file" "$head_commit_pages_file"; do
+            [ -f "$context_file" ] && [ -r "$context_file" ] \
+                || { echo "agent PR gates: authoritative Renovate context is missing or unreadable" >&2; exit 2; }
+        done
+    fi
 else
     [ "$allow_discovery" -eq 1 ] || { echo "agent PR gates: inputs absent and discovery disabled" >&2; exit 2; }
     body_file="$tmp/body.md"; files_file="$tmp/files.txt"
@@ -164,22 +187,35 @@ check_gate() {
 
 ui_suite_relevant=0
 absence_suite_relevant=0
-check_gate "project-review" "project review"
-check_gate "domain-review" "domain correctness review"
-check_gate "heap-safety-review" "independent heap safety review" \
-    '^(main/(mqtt_ha|ota_update|weather_forecast|http_status|http_config|hp_poll|heap_guard)\.(cpp|hpp)$|main/logic/(json|mqtt_group|x10a_snapshot|ota_headroom|health_gate|heap_watchdog)\.hpp$|test/test_(x10a_publish_heap_contract|ota_heap_contract|production_ota_gate_contract)\.mjs$|scripts/production-ota-gate\.py$|tools/(ota|production_ota|agent-hooks)/|\.codex/agents/heap-safety-reviewer\.toml$|docs/(ARCHITECTURE|SECURITY|FEATURES)\.md$)'
-check_gate "feature-docs" "feature documentation sync" \
-    '^(main/|test/|sdkconfig\.defaults$|partitions\.csv$|\.github/workflows/build\.yml$)'
-check_gate "schematic-review" "schematic review" \
-    '^(main/www/|docs/DESIGN\.md$|tools/schematic/|\.agents/skills/schematic-review/)'
-check_gate "ui-use-case-review" "complete UI use-case review" \
-    '^(main/www/|test/test_ui_|test/test_homehub_discovery_contract\.mjs$|test/test_mcp_dashboard\.mjs$|scripts/run-ui-use-case-tests\.sh$|tools/ui/|\.agents/skills/ui-use-case-review/|tools/agent-hooks/|\.codex/hooks\.json$|\.github/(pull_request_template\.md|workflows/build\.yml)$|docs/DESIGN\.md$)' \
-    ui_suite_relevant
-check_gate "absence-review" "source-absence review" \
-    '^(main/(http_status|http_config|history|mqtt_ha|hp_modbus|hp_poll|env3|weather_forecast|safe_mode|main)\.cpp$|main/logic/(redact|heating_curve_diagnosis|circulation_source|history|env3)\.hpp$|main/www/js/|test/test_(ui_absence_matrix|source_absence_contract)\.mjs$|tools/absence/|\.agents/skills/absence-review/)' \
-    absence_suite_relevant
-check_gate "ui-gif" "dashboard recording review" \
-    '^(docs/media/dashboard\.gif$|tools/uigif/gif_stamp\.txt$)'
+verified_renovate_actions=0
+if [ -z "$action" ] && [ "${renovate_context_count:-0}" -eq 3 ]; then
+    renovate_classifier="$root/tools/agent-policy/renovate_action_pr.py"
+    repo_slug="$(agent_gate_repo_slug "$root")"
+    if [ -n "$repo_slug" ] && [ -f "$renovate_classifier" ] && [ -r "$renovate_classifier" ] \
+        && python3 "$renovate_classifier" "$pr_metadata_file" "$head_commit_file" \
+            "$head_commit_pages_file" "$repo_slug" "$head_sha" >/dev/null 2>&1; then
+        verified_renovate_actions=1
+    fi
+fi
+
+if [ "$verified_renovate_actions" -eq 0 ]; then
+    check_gate "project-review" "project review"
+    check_gate "domain-review" "domain correctness review"
+    check_gate "heap-safety-review" "independent heap safety review" \
+        '^(main/(mqtt_ha|ota_update|weather_forecast|http_status|http_config|hp_poll|heap_guard)\.(cpp|hpp)$|main/logic/(json|mqtt_group|x10a_snapshot|ota_headroom|health_gate|heap_watchdog)\.hpp$|test/test_(x10a_publish_heap_contract|ota_heap_contract|production_ota_gate_contract)\.mjs$|scripts/production-ota-gate\.py$|tools/(ota|production_ota|agent-hooks)/|\.codex/agents/heap-safety-reviewer\.toml$|docs/(ARCHITECTURE|SECURITY|FEATURES)\.md$)'
+    check_gate "feature-docs" "feature documentation sync" \
+        '^(main/|test/|sdkconfig\.defaults$|partitions\.csv$|\.github/workflows/(build|pr-policy)\.yml$)'
+    check_gate "schematic-review" "schematic review" \
+        '^(main/www/|docs/DESIGN\.md$|tools/schematic/|\.agents/skills/schematic-review/)'
+    check_gate "ui-use-case-review" "complete UI use-case review" \
+        '^(main/www/|test/test_ui_|test/test_homehub_discovery_contract\.mjs$|test/test_mcp_dashboard\.mjs$|scripts/run-ui-use-case-tests\.sh$|tools/ui/|\.agents/skills/ui-use-case-review/|tools/agent-hooks/|\.codex/hooks\.json$|\.github/(pull_request_template\.md|workflows/build\.yml)$|docs/DESIGN\.md$)' \
+        ui_suite_relevant
+    check_gate "absence-review" "source-absence review" \
+        '^(main/(http_status|http_config|history|mqtt_ha|hp_modbus|hp_poll|env3|weather_forecast|safe_mode|main)\.cpp$|main/logic/(redact|heating_curve_diagnosis|circulation_source|history|env3)\.hpp$|main/www/js/|test/test_(ui_absence_matrix|source_absence_contract)\.mjs$|tools/absence/|\.agents/skills/absence-review/)' \
+        absence_suite_relevant
+    check_gate "ui-gif" "dashboard recording review" \
+        '^(docs/media/dashboard\.gif$|tools/uigif/gif_stamp\.txt$)'
+fi
 
 if [ -n "$failures" ]; then
     echo "BLOCKED: PR policy evidence is missing, unchecked, unstamped, or stale for head $head_sha:" >&2
@@ -196,8 +232,8 @@ fi
 # check has proved the current head. The UI-GIF audit is unconditional for a merge: a human review
 # record must never override the mechanical fact that the recording is stale or unreadable. The
 # record itself is conditional above and is required only when the PR carries a new GIF or stamp.
-# Authoritative CI supplies its own inputs and has no action, so it keeps running these checks in
-# their dedicated gates-job steps exactly once.
+# Authoritative CI supplies its own inputs and has no action; the separate `mechanical_gates` job
+# already runs these deterministic checks exactly once.
 if [ -n "$action" ]; then
     ui_gif_audit_out="$(agent_gate_run_bounded "${AGENT_GATE_SUITE_TIMEOUT:-120}" \
         "$root/scripts/run-ui-gif-audit.sh" 2>&1)"
@@ -222,5 +258,9 @@ if [ -n "$action" ] && [ "$absence_suite_relevant" -eq 1 ]; then
     fi
 fi
 
-echo "agent PR gates: all applicable review records match $head_sha"
+if [ "$verified_renovate_actions" -eq 1 ]; then
+    echo "agent PR gates: verified Renovate Action-pin-line-only PR at $head_sha; human review records are not applicable"
+else
+    echo "agent PR gates: all applicable review records match $head_sha"
+fi
 exit 0

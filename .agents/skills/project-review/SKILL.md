@@ -34,9 +34,12 @@ Report findings grouped by the above; block on doc drift and untested logic.
 ## Recording the pass (merge gate — no file marker)
 
 The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) refuses
-supported PR merge paths until this review is recorded in the PR body as a ticked,
-SHA-stamped checkbox whose stamp still matches the PR head. So when the review passes with **no
-blocking findings**, tick + stamp the PR's `$project-review` box with the reviewed commit:
+supported local/manual PR merge paths until this review is recorded in the PR body as a ticked,
+SHA-stamped checkbox whose stamp still matches the PR head. The sole record-free path is
+GitHub-native automerge after protected-base CI proves a same-repository, one-commit Renovate PR has
+only the immutable, head-bound, fully pinned Renovate runner replacement in `renovate.yaml`. So when
+the ordinary review passes with **no blocking findings**, tick + stamp the PR's `$project-review`
+box with the reviewed commit:
 
 ```
 - [x] `$project-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD

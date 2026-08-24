@@ -344,7 +344,9 @@ logic/              → IDF-free, host-tested pure logic (see below)
 
 Everything that is pure computation lives in IDF-free headers under
 `main/logic/`, so `scripts/run-mock-tests.sh` compiles + runs it with plain g++/clang++ (no
-ESP-IDF, no board) and CI gates the firmware build on it (first step of the `gates` job). For this project the
+ESP-IDF, no board) and CI gates the firmware build on it (first step of the `mechanical_gates` job,
+whose result is propagated by the required `build` check). The independent protected-base `gates`
+check is supplied by the data-only `pr-policy.yml` workflow. For this project the
 host-testable core is unusually large and valuable, because the risky parts are all pure decoding:
 
 - `logic/crc.hpp` — the X10A checksum for protocol I and S. Golden-vector tested against frames

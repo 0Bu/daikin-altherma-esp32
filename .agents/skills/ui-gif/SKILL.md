@@ -24,7 +24,7 @@ That is why the gate is a **stamp**, not a re-render: CI has no browser. And it 
 only ever prove the recording is *current* — never that it is *right*. The second half is this
 skill's.
 
-**This is a merge gate** (`tools/agent-hooks/require-pr-gates.sh`) and the audit is a CI `gates`
+**This is a merge gate** (`tools/agent-hooks/require-pr-gates.sh`) and the audit is a CI `mechanical_gates`
 step. Neither was true before: the audit was kept out of CI because a gate whose remedy is
 unavailable where it fires gets the *stamp* rewritten rather than the recording re-made. That
 escape is closed — `check_ui_gif.mjs` refuses to write a stamp whose `ui` moved while `gif` stayed

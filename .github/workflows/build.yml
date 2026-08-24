@@ -44,12 +44,14 @@ name: build
 # CI BUDGET — this pipeline runs on a metered minute allowance, so every job is shaped by it
 #
 # Actions bills each JOB rounded UP to the next whole minute, on top of the wall-clock time it
-# actually spends. Three 15-second gate jobs therefore cost the same three minutes as three
-# one-minute ones, which is why the fast hardware-free gates below are ONE job (`gates`) and not
-# one job each. The rules that follow from that, all applied here:
+# actually spends. Three 15-second test jobs therefore cost the same three minutes as three
+# one-minute ones, which is why the fast hardware-free tests remain ONE `mechanical_gates` job.
+# The separate `pr-policy.yml` workflow supplies the required protected-base `gates` check without
+# ever loading PR code. The rules that follow from that, all applied here:
 #
-#   • one `gates` job, not three          — 3 billed minutes -> 1
-#   • the ~5 min firmware build is SKIPPED when nothing it consumes changed (`gates.firmware`),
+#   • one mechanical job, not three       — 3 billed minutes -> 1
+#   • one isolated PR policy job          — explicit cost in pr-policy.yml for a trusted exception
+#   • the ~5 min firmware build is SKIPPED when nothing it consumes changed (the gate output),
 #     on pull requests as well as on pushes — a docs-only PR used to pay a full build to prove
 #     that prose still compiles
 #   • ccache across runs (restored everywhere, saved from main) — the compile is ~3 of the build
@@ -63,15 +65,20 @@ name: build
 #   • `timeout-minutes` on every job — a wedged runner must not be able to spend six hours of the
 #     monthly allowance before anyone notices
 #
-# A skipped JOB (an `if:` that evaluates false) still reports its check as skipped, which branch
-# protection accepts — that is why the build is gated per-job rather than with a workflow-level
-# `paths-ignore:`, which would leave a required check pending forever on a docs-only PR.
+# The required PR `build` job always carries the mechanical result and conditions only its compile
+# steps. Do not replace that with workflow-level `paths-ignore:`, which would leave a required check
+# pending forever on a docs-only PR. Trusted main builds may still skip as whole jobs.
 
 on:
   push:
     branches: [main]
+  # Fork pull-request code is executed only under this event, so GitHub withholds repository secrets
+  # and downgrades its token. Same-repository branch authors remain trusted CI actors: they can edit
+  # this workflow and request repository secrets before any merge gate runs. The separate
+  # pr-policy.yml workflow alone uses pull_request_target and never checks out PR code.
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       release:
@@ -93,15 +100,15 @@ on:
 # A release dispatch and a push to main share this group deliberately: they both derive a version
 # from the tag list, and a release must never be computed against a tag another run is creating.
 concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
-  # ALL the fast, hardware-free gates in ONE job, ahead of the slow esp32s3 firmware build, so a
+  # ALL fast, hardware-free mechanical gates stay in ONE job ahead of the slow firmware build, so a
   # decode/config/discovery/publish regression fails in seconds. They were three jobs (logic-test,
   # domain-audit, pages-publish-test) and are three STEPS now — a step boundary reports a failure
   # just as precisely as a job boundary does, while a job boundary also costs a rounded-up billed
@@ -109,15 +116,31 @@ jobs:
   #
   # NOTE for branch protection: the required checks are now `gates` and `build`, not the three
   # old job names.
-  gates:
+  mechanical_gates:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       firmware: ${{ steps.changes.outputs.firmware }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Check out tested source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          fetch-depth: 0   # the change detection below diffs against the base commit
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bind tested merge tree to the reviewed head
+        if: github.event_name == 'pull_request'
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          tested_base="$(git rev-parse HEAD^1)"
+          tested_head="$(git rev-parse HEAD^2)"
+          [ "$tested_base" = "$EVENT_BASE_SHA" ] \
+            || { echo "tested merge tree uses base $tested_base, expected $EVENT_BASE_SHA" >&2; exit 2; }
+          [ "$tested_head" = "$EVENT_HEAD_SHA" ] \
+            || { echo "tested merge tree uses $tested_head, expected $EVENT_HEAD_SHA" >&2; exit 2; }
 
       # Host-side pure-logic tests (main/logic/) plus an aggregate executable-line floor. This is
       # deliberately coverage of the production headers only: counting the 6k-line test driver
@@ -331,50 +354,16 @@ jobs:
         run: ./tools/agent-hooks/selftest.sh
 
       # Review evidence is PR state, not a file marker. The canaries prove missing inputs, missing or
-      # stale stamps and conditional relevance fail CLOSED for canonical `$name` records. The live
-      # PR step then fetches the CURRENT
-      # body/head/file list instead of trusting the event payload snapshot: editing the body and
-      # re-running this job can satisfy the gate, while a run for an old head cannot.
+      # stale stamps and conditional relevance fail CLOSED for canonical `$name` records. Live
+      # enforcement runs separately in the required data-only `pr-policy.yml` workflow.
       - name: Verify the PR evidence policy still has teeth
         run: ./tools/agent-policy/selftest.sh
-      - name: Enforce current PR review evidence
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          case "$PR_NUMBER" in ''|*[!0-9]*) echo "agent policy: missing PR number" >&2; exit 2 ;; esac
-          printf '%s' "$EVENT_HEAD_SHA" | grep -Eq '^[0-9a-fA-F]{40}$' \
-            || { echo "agent policy: missing or malformed event head SHA" >&2; exit 2; }
-
-          policy_tmp="$(mktemp -d)"
-          trap 'rm -rf "$policy_tmp"' EXIT
-          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > "$policy_tmp/pr.json"
-          current_head="$(jq -r '.head.sha // empty' "$policy_tmp/pr.json")"
-          printf '%s' "$current_head" | grep -Eq '^[0-9a-fA-F]{40}$' \
-            || { echo "agent policy: GitHub returned no current PR head SHA" >&2; exit 2; }
-          [ "$current_head" = "$EVENT_HEAD_SHA" ] \
-            || { echo "agent policy: workflow head $EVENT_HEAD_SHA is stale; current PR head is $current_head" >&2; exit 2; }
-
-          jq -r '.body // ""' "$policy_tmp/pr.json" > "$policy_tmp/body.md"
-          changed_files="$(jq -r '.changed_files // empty' "$policy_tmp/pr.json")"
-          case "$changed_files" in ''|*[!0-9]*) echo "agent policy: missing changed_files metadata" >&2; exit 2 ;; esac
-          gh api --paginate --slurp \
-            "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" \
-            > "$policy_tmp/file-pages.json"
-          python3 tools/agent-policy/extract_changed_files.py \
-            "$changed_files" "$policy_tmp/file-pages.json" > "$policy_tmp/files.txt"
-          AGENT_PR_BODY_FILE="$policy_tmp/body.md" \
-          AGENT_PR_HEAD_SHA="$current_head" \
-          AGENT_CHANGED_FILES_FILE="$policy_tmp/files.txt" \
-            ./scripts/run-agent-policy.sh
 
       # Does this change reach anything the FIRMWARE BUILD or the PUBLISHED SITE is made of? If
-      # not, the ~5-minute build job below is skipped entirely — on a pull request as much as on a
-      # push. Docs, skills and the review tooling cannot change a byte of the image, and CI proving
-      # that once per README edit was the single largest avoidable cost in this pipeline.
+      # not, the ~5-minute PR compile steps or trusted-main build are skipped. The required PR
+      # `build` job still reports the mechanical result. Docs, skills and review tooling cannot
+      # change a byte of the image, and proving that by compiling every README edit was the single
+      # largest avoidable cost in this pipeline.
       #
       # The list is deliberately WIDER than "sources": scripts/build-pages.sh, the browser-installer
       # files under docs/, scripts/publish-pages-branch.sh and its GraphQL payload helper produce or
@@ -430,40 +419,59 @@ jobs:
           echo "firmware=$changed" >> "$GITHUB_OUTPUT"
           echo "build-relevant changes: $changed"
 
-  # Untrusted source boundary. Pull requests and non-main manual dispatches compile without any
-  # signing material and can retain only non-flashable diagnostics. Keep this job named `build`:
-  # it is the required PR check, and a skipped build still satisfies docs-only changes.
+  # Required untrusted-source check. It always reflects mechanical_gates, while the expensive
+  # compile steps run only when the diff reaches firmware or published-site inputs. This job stays
+  # named `build` because branch protection requires it; docs-only PRs pass it without compiling.
   build:
-    needs: [gates]
-    if: needs.gates.outputs.firmware == 'yes' && github.ref != 'refs/heads/main'
+    needs: [mechanical_gates]
+    if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
     steps:
+      - name: Require the mechanical gates
+        env:
+          MECHANICAL_RESULT: ${{ needs.mechanical_gates.result }}
+        run: |
+          [ "$MECHANICAL_RESULT" = success ] \
+            || { echo "mechanical gates finished as $MECHANICAL_RESULT" >&2; exit 2; }
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bind compiled merge tree to the reviewed head
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          compiled_base="$(git rev-parse HEAD^1)"
+          compiled_head="$(git rev-parse HEAD^2)"
+          [ "$compiled_base" = "$EVENT_BASE_SHA" ] \
+            || { echo "compiled merge tree uses base $compiled_base, expected $EVENT_BASE_SHA" >&2; exit 2; }
+          [ "$compiled_head" = "$EVENT_HEAD_SHA" ] \
+            || { echo "compiled merge tree uses $compiled_head, expected $EVENT_HEAD_SHA" >&2; exit 2; }
 
       - name: Stamp compile-only firmware version
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         id: stamp
         env:
-          EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          git fetch --tags --force
-          if [ "$EVENT_NAME" = pull_request ]; then
-            [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "invalid PR number: $PR_NUMBER" >&2; exit 2; }
-            disp="$(./scripts/next-version.sh)-PR-${PR_NUMBER}"
-          else
-            disp="$(./scripts/next-version.sh --dev)"
-          fi
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "invalid PR number: $PR_NUMBER" >&2; exit 2; }
+          disp="$(./scripts/next-version.sh)-PR-${PR_NUMBER}"
           echo "$disp" > version.txt
           echo "disp=$disp" >> "$GITHUB_OUTPUT"
           echo "stamping compile-only build $disp"
 
       - name: Derive the ccache key
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         id: cckey
         run: |
           set -euo pipefail
@@ -472,6 +480,7 @@ jobs:
           echo "hash=$h" >> "$GITHUB_OUTPUT"
 
       - name: Restore ccache
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
         with:
           path: .ccache
@@ -480,27 +489,30 @@ jobs:
             ccache-esp32s3-${{ steps.cckey.outputs.hash }}-
 
       - name: Compile firmware without flashable artifacts
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
         with:
           esp_idf_version: v6.0.2
           target: esp32s3
-          command: ./scripts/ci-build-all.sh --compile-only --source-sha "${{ github.sha }}" "${{ steps.stamp.outputs.disp }}"
+          command: ./scripts/ci-build-all.sh --compile-only --source-sha "${{ github.event.pull_request.head.sha }}" "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary
-        if: always()
+        if: always() && needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         run: |
           if [ -f dist/daikin-altherma-esp32-size.md ]; then
             cat dist/daikin-altherma-esp32-size.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Hand the ccache tree back to the runner
-        if: always()
+        if: always() && needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         run: sudo chown -R "$(id -u):$(id -g)" .ccache || true
 
       - name: Enforce non-flashable PR artifact boundary
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         run: ./scripts/check-nonflashable-artifacts.sh dist
 
       - name: Upload compile diagnostics
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: daikin-altherma-esp32-${{ steps.stamp.outputs.disp }}
@@ -515,11 +527,11 @@ jobs:
   # Trusted main build. This job can read the signing key but its token remains read-only; the
   # separate publisher below owns contents:write and never receives the private key.
   trusted_build:
-    needs: [gates]
+    needs: [mechanical_gates]
     # Skipped — not failed — when nothing the image or the site is made of changed. A skipped job
     # still reports its check, so this stays compatible with `build` as a required check.
     if: >-
-      needs.gates.outputs.firmware == 'yes' &&
+      needs.mechanical_gates.outputs.firmware == 'yes' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04

@@ -23,7 +23,8 @@ line coverage across `main/logic/`. It intentionally excludes this test driver, 
 and system headers: none of those can prove that another production branch ran. GCC uses `gcov`;
 Clang uses `llvm-cov gcov` (via `xcrun` on macOS).
 
-CI runs the coverage form as the first step of the `gates` job, gating the esp32s3 firmware build — a
+CI runs the coverage form as the first step of `mechanical_gates`; the required `build` job consumes
+that result before conditionally compiling the esp32s3 firmware — a
 logic regression or an untested production path fails in seconds instead of after a full ESP-IDF
 build. `tools/coverage/selftest.sh` separately proves that an empty report and coverage below the
 floor fail closed.
@@ -88,7 +89,7 @@ rejects a replaced generation, labels an answered 503 as device-busy rather than
 carries the checked channel, version, application SHA and generation into the sole update POST
 before following its immediate successor.
 
-The same `gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
+The same `mechanical_gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
 test executes the production banner/inspector render functions from the assembled UI source and verifies
 that their DOM-write signatures invalidate when the persisted UI language changes while device state
 stays identical.
