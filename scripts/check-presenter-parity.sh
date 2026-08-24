@@ -17,7 +17,7 @@
 # and it has been paid once: a looser leaving-water pattern matched the bizone kit's MIXED row,
 # putting a correct number on the wrong sensor in ΔT, heat output and COP at once.
 #
-# Needs a C++17 compiler + node — both present in CI's `gates` job. Run directly, or automatically at
+# Needs a C++17 compiler + node — both present in CI's `mechanical_gates` job. Run directly, or automatically at
 # the end of scripts/run-mock-tests.sh.
 set -euo pipefail
 

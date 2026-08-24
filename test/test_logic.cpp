@@ -1,6 +1,6 @@
 // Host logic tests for the IDF-free pure headers in main/logic/. One translation unit; run via
-// scripts/run-mock-tests.sh (cmake+ctest, or a direct g++/clang++ compile). CI's gates job runs it
-// with coverage and gates the firmware build on this. Add a CHECK here whenever you touch a
+// scripts/run-mock-tests.sh (cmake+ctest, or a direct g++/clang++ compile). CI's mechanical_gates
+// job runs it with coverage and gates the firmware build on this. Add a CHECK here whenever you touch a
 // converter / CRC / the config model / a discovery payload — the riskiest, silently-wrong parts.
 #include <algorithm>
 #include <cctype>

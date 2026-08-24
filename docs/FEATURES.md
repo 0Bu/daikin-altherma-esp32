@@ -84,11 +84,11 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 37 | **Physical recovery button** — a 5 s hold erases the config; the only reset needing no network access | ✅ 🧪 | [`recovery_button.cpp`](../main/recovery_button.cpp), [`logic/button.hpp`](../main/logic/button.hpp) |
 | 38 | **Explicit board identity + runtime hardware config** — a stable preset id persisted with indicator/button pins, never inferred from matching GPIOs | ✅ 🧪 | [`logic/board_presets.hpp`](../main/logic/board_presets.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 39 | **Stack-overflow watchpoint** — the *first* write past a stack limit panics at the offending instruction | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults), [`http_server.cpp`](../main/http_server.cpp) |
-| 40 | **Cost-shaped CI** — fast gates as steps of one job, a skipped (not failed) build when nothing relevant changed, carried ccache, no per-PR publish | ✅ | [`build.yml`](../.github/workflows/build.yml) |
+| 40 | **Cost-shaped CI** — fast mechanical gates as steps of one job, skipped compile steps when nothing relevant changed, carried ccache, no per-PR publish | ✅ | [`build.yml`](../.github/workflows/build.yml) |
 | 41 | **Audited X10A telemetry supplements** — 11 outdoor protection/retry entities for all profiles plus 27 reference-monobloc control, safety and actuator fields, without new page queries | ✅ 🧪 | [`def/overlay.hpp`](../main/def/overlay.hpp), [`logic/profile_view.hpp`](../main/logic/profile_view.hpp), [`X10A_COVERAGE.md`](X10A_COVERAGE.md) |
 | 42 | **24-hour trend rings** — fixed-cadence `int16` rings in static storage, addressed structurally by (page, offset, unit), distinguishing *no reading* from *held over* | ✅ 🧪 | [`logic/history.hpp`](../main/logic/history.hpp), [`history.cpp`](../main/history.cpp) |
 | 43 | **Value-description coverage gate** — every catalog label the UI can show must have an explainer, asserted against the real table in a JS engine | ✅ | [`check_descriptions.mjs`](../tools/descriptions/check_descriptions.mjs), [`run-description-audit.sh`](../scripts/run-description-audit.sh) |
-| 44 | **Digest-pinned CI supply chain** — every third-party Action pinned to a commit SHA, with Renovate keeping the digest moving | ✅ | [`build.yml`](../.github/workflows/build.yml), [`renovate.json`](../.github/renovate.json) |
+| 44 | **Digest-pinned CI supply chain** — every third-party Action is SHA-pinned; only the Renovate runner pin may omit human records after protected-base policy proves its immutable one-line head patch | ✅ 🧪 | [`pr-policy.yml`](../.github/workflows/pr-policy.yml), [`renovate_action_pr.py`](../tools/agent-policy/renovate_action_pr.py) |
 | 45 | **Dashboard-schematic audit** — parses the real SVG and evaluates the real bindings to catch a correct value drawn on the wrong pipe | ✅ | [`check_schematic.mjs`](../tools/schematic/check_schematic.mjs), [`run-schematic-audit.sh`](../scripts/run-schematic-audit.sh) |
 | 46 | **On-device redaction of a diagnostic snapshot** — so a bug report can be a *public* issue; in the firmware, so the UI and a manual `curl` cannot become two privacy rules | ✅ 🧪 | [`logic/redact.hpp`](../main/logic/redact.hpp), [`REPORTING.md`](REPORTING.md) |
 | 47 | **Redaction-coverage gate** — the only gate whose subject is the *user's data*: flags a diag line carrying a config or identity value with no matching rule | ✅ | [`check_diag_coverage.py`](../tools/redact/check_diag_coverage.py), [`run-redaction-audit.sh`](../scripts/run-redaction-audit.sh) |
@@ -760,7 +760,8 @@ Four properties of that core are worth naming because they are not obvious from 
   windows and one wire field described by two physical units — each with a decode witness. Its
   [`selftest.sh`](../tools/domain/selftest.sh) re-introduces every defect the gate was built for, so
   a checker that has quietly stopped checking cannot pass as clean. The judgement half is the
-  [`domain-review`](../.agents/skills/domain-review/SKILL.md) skill, a PR-merge gate on every merge.
+  [`domain-review`](../.agents/skills/domain-review/SKILL.md) skill, a PR-merge gate on every ordinary
+  or local/manual merge; only the mechanically attested Renovate Action-pin-line class is exempt.
 - **✅ Diagnostic claims keep their evidence.**
   [`run-diagnostic-evidence-audit.sh`](../scripts/run-diagnostic-evidence-audit.sh) binds every visible
   plant-diagnostic row to its primary external source, the exact implemented rule and a claim
@@ -845,15 +846,20 @@ Four properties of that core are worth naming because they are not obvious from 
   an inert config reads like a guarantee while doing nothing.
 - **✅ Digest-pinned actions — the CI supply chain.** Every third-party Action is referenced by full
   commit SHA with the readable version as a trailing comment. A tag is a movable pointer, and that
-  matters more here than in most repos: the build job materializes the **offline OTA signing key**
+  matters more here than in most repos: the trusted-main `trusted_build` job materializes the **offline OTA signing key**
   from a secret, so an action swapped underneath the pipeline is positioned to exfiltrate the key
   that makes an image trusted by every deployed board. Renovate both enforces the pin on anything
-  newly added and raises PRs to move the digest forward.
-- **✅ CI gate order**: one fast, hardware-free `gates` job runs first and the firmware build
-  `needs` it, so a decode regression, a physically false value or a reading the UI cannot explain
-  fails in seconds rather than minutes. They are **steps of one job, never a job each** — Actions
-  bills every job rounded up to a whole minute, while a step boundary names the failure just as
-  precisely. (The list is deliberately not counted here: read the job.)
+  newly added and raises PRs to move the digest forward. GitHub-native automerge is enabled only for
+  the Renovate runner Action; protected-base CI waives human review records only when current same-repository
+  metadata and every complete immutable file patch for the one-commit head prove the sole edit is the
+  like-for-like Renovate runner pin in `renovate.yaml`. Missing/unreadable files or a partial
+  three-file context hard-fail; malformed or ineligible complete context follows ordinary review.
+- **✅ CI event and trust split**: one fast, hardware-free `mechanical_gates` job runs deterministic
+  checks under the ordinary `pull_request` event, and the required `build` job propagates its result
+  before conditionally compiling. Independently, the data-only `pr-policy.yml` workflow supplies the
+  required `gates` check under `pull_request_target`, using only the protected-base verifier and
+  never loading PR code. Branch protection requires both checks. Mechanical checks are **steps of
+  one job, never a job each**; the additional policy job is an intentional isolation boundary.
 - **✅ Crash-decodable and size-auditable.** CI archives the unstripped `.elf` (xz-wrapped, + the
   sha256 of the ELF inside) and the json2/Markdown size reports per version/PR. A release's copy is
   a Release asset and does not expire; a dev build's artifact lives 3 days, while an open PR's lives
@@ -878,9 +884,10 @@ Four properties of that core are worth naming because they are not obvious from 
   access-controlled outside an organization, so the published firmware and manifest are
   world-readable while the source stays private; and the release step is the only thing that creates
   a version tag, without which the derived version would pin the feed forever.
-- **✅ CI runs inside a metered minute budget** — the fast gates are one job; the firmware build is
-  **skipped** (not failed) when the diff touches nothing the image or the site is made of, which is
-  why the gate is a per-job `if:` and never a workflow-level `paths-ignore:` (a filtered workflow
+- **✅ CI runs inside a metered minute budget** — the fast mechanical gates are one job; firmware
+  compile steps are **skipped** when the diff touches nothing the image or the site is made of, while
+  the required `build` job still reports the mechanical result. This uses step conditions rather
+  than a workflow-level `paths-ignore:` (a filtered workflow
   leaves a required check pending forever); ccache is carried across runs, keyed on the toolchain +
   `sdkconfig.defaults` + `dependencies.lock` rather than a hash of the workflow file; a PR publishes
   nothing; and every job carries a timeout.

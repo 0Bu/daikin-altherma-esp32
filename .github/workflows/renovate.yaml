@@ -47,10 +47,12 @@ jobs:
       #   does not recognize the last commit author and assumes somebody else may have edited the PR.
       #
       # That is why an open dependency PR sat behind `main` unrebased. `disabled` puts the commits
-      # back under Renovate's `gitAuthor`, so it maintains its own PRs again (rebase when behind,
-      # automerge when green) — and costs nothing, because the API path's one advantage, signing,
+      # back under Renovate's `gitAuthor`, so it maintains its own PRs again (including rebases) —
+      # and costs nothing, because the API path's one advantage, signing,
       # was never available to a PAT. An EXISTING branch still carries an owner-stamped commit and
-      # stays unrecognised until someone ticks its rebase/retry box once.
+      # stays unrecognised until someone ticks its rebase/retry box once. GitHub-native automerge is
+      # configured only for the Renovate runner Action, and the gates admit it without human records
+      # only for the bounded runner-pin-line class; every other dependency PR remains manual.
       #
       # To get signing back, the token has to change: an App identity
       # (actions/create-github-app-token -> `x-access-token:`, after which the `auto` default signs
@@ -65,7 +67,6 @@ jobs:
           RENOVATE_AUTODISCOVER: true
           RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository }}
           RENOVATE_CONFIG_MIGRATION: true
-          RENOVATE_AUTOMERGE: true
           RENOVATE_IGNORE_TESTS: false
           RENOVATE_REBASE_WHEN: auto
           RENOVATE_SEMANTIC_COMMITS: disabled

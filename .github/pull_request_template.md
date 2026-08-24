@@ -18,13 +18,13 @@ alone — those are repository-maintainer reviews and gate records, and are not 
 
 ## Verification
 
-- [ ] `scripts/run-mock-tests.sh` passes (host-side logic tests — a CI `gates` step)
-- [ ] `scripts/run-domain-audit.sh` clean (value-catalog domain correctness — a CI `gates` step)
+- [ ] `scripts/run-mock-tests.sh` passes (host-side logic tests — a CI `mechanical_gates` step)
+- [ ] `scripts/run-domain-audit.sh` clean (value-catalog domain correctness — a CI `mechanical_gates` step)
 - [ ] `scripts/run-description-audit.sh` clean (every visible reading has an explainer)
 - [ ] `scripts/run-schematic-audit.sh` clean (the dashboard drawing — only if the web UI changed)
 - [ ] `scripts/run-ui-localization-audit.sh` passes (all shipped locales follow canonical UI copy)
-- [ ] `scripts/run-ui-use-case-tests.sh` passes (all UI actions and modal lifecycles — a CI `gates` step)
-- [ ] `tools/absence/selftest.sh` passes (the source-absence matrix can still go red — a CI `gates` step; the matrix itself rides the contract + UI suites)
+- [ ] `scripts/run-ui-use-case-tests.sh` passes (all UI actions and modal lifecycles — a CI `mechanical_gates` step)
+- [ ] `tools/absence/selftest.sh` passes (the source-absence matrix can still go red — a CI `mechanical_gates` step; the matrix itself rides the contract + UI suites)
 - [ ] `scripts/run-agent-instructions-budget.sh` passes (agent policy, configuration and instruction budget)
 - [ ] Firmware built (`scripts/idf-docker.sh idf.py build`, or relied on CI) — N/A in a cloud session (no Docker daemon / no USB)
 - [ ] Exercised against a real heat pump / device where relevant (or noted why not)
@@ -41,12 +41,16 @@ alone — those are repository-maintainer reviews and gate records, and are not 
 
 <!-- Not runnable by outside contributors — leave unchecked, the maintainer fills these in.
      CI validates exact `$name` syntax and current-head freshness, not the identity of the body editor;
-     maintainer review plus GitHub merge authorization is the actor trust boundary. -->
+     maintainer review plus GitHub merge authorization is the actor trust boundary. The only PRs
+     without these records are authoritative-CI-attested Renovate updates whose immutable,
+     head-bound commit patches contain solely the fully pinned Renovate runner replacement in
+     `.github/workflows/renovate.yaml`; the data-only trusted-base `pr-policy.yml` workflow never
+     loads PR code. -->
 
-- [ ] `$project-review` clean — merge gate @ <short-sha> (required on every merge: doc drift, memory safety, tests and target/build implications)
+- [ ] `$project-review` clean — merge gate @ <short-sha> (required on every ordinary or local/manual merge: doc drift, memory safety, tests and target/build implications)
 - [ ] `$heap-safety-review` clean — merge gate @ <short-sha> (required for HTTP, MQTT, OTA, TLS, JSON, X10A-publisher, firmware-polling or heap-allocation changes; an independent read-only `heap_safety_reviewer` must find no blocker)
 - [ ] `$feature-docs` synced — merge gate @ <short-sha> (required if a technical feature changed: `docs/FEATURES.md` and `docs/ESP_IDF_MATRIX.md` match the code)
-- [ ] `$domain-review` clean — merge gate @ <short-sha> (required on every merge: values verified physically right, sensible and authentic; a PR that cannot reach a value clears quickly, but say what you checked)
+- [ ] `$domain-review` clean — merge gate @ <short-sha> (required on every ordinary or local/manual merge: values verified physically right, sensible and authentic; a PR that cannot reach a value clears quickly, but say what you checked)
 - [ ] `$schematic-review` clean — merge gate @ <short-sha> (required if the dashboard schematic changed: the drawing still tells the truth about the plant, and every reading is on the part that measures it)
 - [ ] `$ui-use-case-review` clean — merge gate @ <short-sha> (required if UI behavior changed)
 - [ ] `$absence-review` clean — merge gate @ <short-sha> (required if an OPTIONAL SOURCE changed: the broker, the room source, the circulation witness, the HomeHub, ENV III, the weather location, the X10A bus, safe mode, or anything that reports one)

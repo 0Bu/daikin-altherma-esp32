@@ -77,6 +77,8 @@ unrepresented new use case, live UI assertion failure, or visual/accessibility r
 
 The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) hook
 reruns the complete suite at merge time and requires a current PR record for UI-relevant changes.
+The record-free Renovate runner-pin class changes only `renovate.yaml`, so it never suppresses an
+otherwise applicable UI review.
 After every blocking finding is fixed, stamp the reviewed head in the PR body:
 
 ```text

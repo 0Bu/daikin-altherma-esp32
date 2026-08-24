@@ -56,7 +56,14 @@ that directory except `$heap-safety-review`, which is a gate record only — no 
 its evidence comes from the independent read-only `heap_safety_reviewer`. Other entries below are
 conditional workflows and are not necessarily PR checkbox gates.
 
-- `$project-review` and `$domain-review`: required before every PR merge.
+- `$project-review` and `$domain-review`: required before every PR merge except GitHub-native
+  automerge of an authoritative-CI-attested, same-repository, one-commit Renovate PR whose immutable,
+  head-bound commit patches change only the fully pinned Renovate runner line in
+  `.github/workflows/renovate.yaml`. The decision runs in the separate protected-base
+  `pr-policy.yml` workflow, which never loads PR code; mechanical PR execution remains under the
+  ordinary `pull_request` event in `build.yml`. Local/manual merges never use that
+  exception;
+  `tools/agent-policy/renovate_action_pr.py` is its fail-closed definition.
 - `$heap-safety-review`: required before merge when HTTP, MQTT, OTA, TLS, JSON, X10A publishing,
   firmware polling, or heap-allocation paths change.
 - `$feature-docs`: required when technical feature surface changes.
@@ -177,8 +184,10 @@ scripts/idf-docker.sh idf.py build
   pipeline. Do not hand-edit those generated tables; put deliberate corrections in the supported
   override/adjudication layer and test stable identifiers and labels. `overlay.hpp` is the explicit
   hand-written overlay, while `homehub.hpp` is the curated HomeHub definition source.
-- Do not add separate always-on CI jobs casually. Fast gates are steps of the shared `gates` job;
-  GitHub Actions bills per job. Preserve required-check behavior when changing path filters.
+- Do not add separate always-on CI jobs casually. Fast deterministic checks are steps of the shared
+  `mechanical_gates` job in `build.yml`; the required `gates` job lives in the deliberately separate
+  protected-base `pr-policy.yml` workflow. GitHub Actions bills per job. Preserve required-check
+  behavior when changing path filters.
 - When waiting for GitHub Actions, use a bounded watcher such as
   `scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 run watch
   <run-id> --exit-status`; do not sleep-poll.
@@ -239,8 +248,10 @@ scripts/idf-docker.sh idf.py build
 ## PR and merge discipline
 
 - Review the actual diff and current head SHA. A checked box from an older commit is stale.
-- Before every merge, run `$project-review` and `$domain-review`; run conditional skills according to
-  the affected paths and behavior. Record only completed reviews against the exact head commit.
+- Before every local/manual merge, run `$project-review` and `$domain-review`; run conditional skills
+  according to the affected paths and behavior. Record only completed reviews against the exact head
+  commit. The sole GitHub-native automerge exception is the mechanically attested Renovate
+  Action-pin-line-only class defined above; it never applies to firmware dependencies or mixed diffs.
 - A PR checkbox is evidence, not authorization. Use only the repository-bound, expected-head REST
   merge path documented in `docs/AGENT_MIGRATION.md`. `gh pr merge`, every other REST merge or
   mutation shape, GraphQL mutations, and all MCP merge, auto-merge, or queue-activation forms are

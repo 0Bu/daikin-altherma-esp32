@@ -28,8 +28,9 @@ likely to be declined — the comment density and the "why" notes in this codeba
 ## The local loop — no board or ESP-IDF required
 
 These run on a plain system toolchain (cmake + g++/clang++ for the first, node for the rest) in
-seconds. **Run them all before opening a PR.** They are also the first steps of CI's `gates` job,
-so a failure here fails the build anyway.
+seconds. **Run them all before opening a PR.** They are also the first steps of CI's
+`mechanical_gates` job, whose result the required `build` check consumes, so a failure here fails
+the PR anyway.
 
 ```bash
 scripts/run-mock-tests.sh --coverage # host logic tests + 95% floor + presenter parity
@@ -185,7 +186,7 @@ matrix must name every production modal and drives Settings/Back, open, Cancel, 
 accepted and rejected Save paths, representative invalid input, board-dependent ENV III states and
 the two-step bug-report dialog. It also runs every existing `test_ui_*.mjs` contract and a selftest
 that re-introduces the historical ENV III failure where visible Cancel and Save buttons called an
-undefined close function. CI runs the same command in the required `gates` job. For UI-relevant
+undefined close function. CI runs the same command in `mechanical_gates`. For UI-relevant
 changes, the maintainer's `$ui-use-case-review` adds real narrow/desktop click-through and records a
 SHA-stamped result. The runner-neutral aggregate PR gate requires that current record and reruns the
 deterministic suite immediately before a command-line merge.
@@ -305,18 +306,31 @@ mutation canaries are:
 Run `tools/agent-config/selftest.sh` after changing agent instructions, skills, subagent definitions,
 hook mappings, or the checker itself.
 
-The same `gates` job runs `tools/agent-policy/selftest.sh` and, on a pull request, invokes
-`scripts/run-agent-policy.sh` with the current PR body, head SHA and complete changed-file list from
-GitHub. Missing/partial inputs, an event SHA that is no longer the PR head, an unchecked or missing
-required review, and a stamp for an older commit all exit 2. A current `$name` record passes;
-other spellings are rejected. Editing the PR body does not start a workflow, so after the maintainer
-records the reviews, re-run the existing `gates` job; it fetches the live body rather than the old
-event snapshot. Any later commit invalidates every prior stamp.
+The mechanical job runs `tools/agent-policy/selftest.sh`; the separate `pr-policy.yml` workflow
+provides the required `gates` check and invokes protected-base `scripts/run-agent-policy.sh` with the
+current PR body, head SHA and complete changed-file list from GitHub. Missing/partial inputs, an event SHA that is no longer
+the PR head, an unchecked or missing required review, and a stamp for an older commit all exit 2. A
+current `$name` record passes; other spellings are rejected. Editing the PR body starts a fresh
+`pull_request_target` run, so a corrected stamp is evaluated automatically. Any later commit
+invalidates every prior stamp.
 
 This CI parser proves exact record syntax, applicability, completeness and head freshness; it cannot
 prove who last edited a PR body. An outside contributor must still leave the section alone, and a
 maintainer must inspect/record the reviews before using their GitHub merge permission. Repository
 merge authorization and the branch ruleset are the actor trust boundary, not a checked Markdown box.
+
+There is one fail-closed CI-only exception: GitHub-native automerge may omit human review records for
+a same-repository, one-commit Renovate PR only when the current REST metadata and complete immutable
+file patches for that exact head prove that the sole edit is a like-for-like replacement of the fully
+pinned Renovate runner digest in `.github/workflows/renovate.yaml`; only the validated trailing
+version comment may move with that digest. The decision uses the data-only protected-base
+`pr-policy.yml` workflow, which never checks out PR-controlled code; mechanical execution remains
+under the ordinary `pull_request` event in `build.yml`.
+Missing or unreadable context files, or providing only part of the three-file authoritative context,
+hard-fails. Malformed or ineligible complete context rejects the exception and follows the ordinary
+human gates. Ineligible context includes a fork, another actor/branch shape, a tag pin, an
+action-coordinate change or any mixed edit. The exception never applies to a local/manual merge,
+ESP-IDF, esptool-js, or another dependency class.
 
 Four more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
 need them locally — run them if you touch
@@ -362,11 +376,12 @@ The fourth pins the workflow's trust and delivery contract: untrusted PRs expose
 flashable artifact, a release resume must match the published manifest's exact source SHA, and the
 license/notices, Pages feed and GitHub Release stay in their fail-closed order.
 
-Every one of their test suites is a **step of one `gates` job**, not a job each (the production
-version gate runs in `trusted_build`, where the stamped version exists). Actions bills every
+Every one of their test suites is a **step of one `mechanical_gates` job**, not a job each (the
+required `gates` policy uses its own clean PR runner, and the production version gate runs in
+`trusted_build`, where the stamped version exists). Actions bills every
 job rounded up to the next whole minute, so a fleet of ~15-second jobs costs a billed minute each
 for under a minute of work; a step boundary names the failure just as precisely. For the current
-list, read the `gates` job in `.github/workflows/build.yml` rather than a count written here.
+list, read the `mechanical_gates` job in `.github/workflows/build.yml` rather than a count written here.
 
 ## Building the firmware
 
@@ -488,7 +503,8 @@ Fill in [the template](.github/pull_request_template.md). Seven checkboxes on it
 `$ui-use-case-review`, `$absence-review`, `$ui-gif`) are **maintainer-only** repository skills under
 `.agents/skills/`. They are not something an outside contributor can run. Leave them unchecked; the
 maintainer runs them before merge. Your equivalents are the scripts above plus an honest note about
-hardware.
+hardware. Renovate's mechanically attested Action-pin-line-only PR class is generated without the
+template and is the sole exception; any ineligible Renovate PR returns to this ordinary review path.
 
 `main` is kept **strictly linear**, so PRs land as **squash merges** — enforced by a branch ruleset
 on `main` (require a pull request, require linear history, and the `gates` / `build` checks green),
@@ -496,6 +512,9 @@ not left to convention. Nobody is exempt: the ruleset carries no bypass actors, 
 holds for the maintainer too — `main` takes no direct pushes at all. Practical consequences:
 
 - Everything lands through a PR, including a one-line docs fix. There is no push-to-`main` path.
+- GitHub-native automerge is enabled only for `renovatebot/github-action`. Protected-base CI waives
+  human records only for its live, one-commit, same-repository pin in `renovate.yaml`; every other
+  Action update and both firmware dependency PRs remain manual.
 - Rebase onto `main` rather than merging `main` into your branch. Merge commits can't be accepted.
 - Sign your commits (`git commit -S`, or let GitHub sign a web merge). Signing is **asked for, not
   enforced**: the ruleset used to carry *require signed commits*, and it was dropped because the
@@ -512,14 +531,22 @@ holds for the maintainer too — `main` takes no direct pushes at all. Practical
 - `main` moves under open PRs — expect to rebase before merge.
 - A red CI job blocks the merge, including on a docs-only PR — the fast gates are cheap and
   hardware-free precisely so this is never a burden.
-- A docs-only PR runs the `gates` job and **skips** the firmware build: prose cannot change the
-  image, and a skipped job still reports its check, so the ruleset is satisfied. What counts as
+- A docs-only PR runs both required checks and **skips the firmware compile steps**: prose cannot
+  change the image, while the `build` job still carries the mechanical result and reports success
+  for the ruleset. What counts as
   build-relevant is the path list in the *Detect build-relevant changes* step of
   [`build.yml`](.github/workflows/build.yml) — add to it if you introduce a file the image or the
   published site is made of.
 
-Fork and same-repository PRs build and run all gates as untrusted source, but get no signing key:
-they compile- and size-check only. Their seven-day Actions artifact contains the compressed ELF,
+For fork PRs, `build.yml` executes the exact PR merge tree only under the ordinary `pull_request`
+event; GitHub withholds repository secrets and downgrades the token, and checkout does not persist
+credentials. A same-repository branch author is instead a trusted CI actor: its PR-editable workflow
+can request repository secrets before merge policy runs, so `gates` prevents an unauthorized merge
+but is not a pre-execution secret sandbox. Independently, `pr-policy.yml` supplies the required
+`gates` check under `pull_request_target`, loads its verifier exclusively from the protected base
+tree, and never checks out PR code. Branch protection requires both `gates` and `build`; the latter fails when
+`mechanical_gates` fails and runs compile steps only for build-relevant changes. PRs compile- and
+size-check only and receive no signing key from the checked-in workflow. Their seven-day Actions artifact contains the compressed ELF,
 its checksum and size reports for diagnostics, but no flashable `.bin`, merged image, Web Serial
 parts or installer manifest. That is deliberate, not a failure.
 
@@ -528,7 +555,8 @@ parts or installer manifest. That is deliberate, not a failure.
 build. To flash a build in a browser, use the **dev channel** (`…/dev/`), republished by every
 firmware-relevant merge. The PR run retains only the non-flashable diagnostic artifact described
 above for seven days. Actions minutes are a metered monthly resource on this account — the same
-reason the fast gates share one job and the firmware build is skipped when it cannot matter.
+reason the fast mechanical gates share one job and firmware compile steps are skipped when they
+cannot matter.
 
 ## Releases (a merge does not cut one)
 
