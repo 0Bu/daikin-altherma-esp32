@@ -78,7 +78,9 @@ on:
   # pr-policy.yml workflow alone uses pull_request_target and never checks out PR code.
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `edited` is required because title/body changes do not move the head SHA, but the hygiene gate
+    # below must replace the prior green check with a result for the current PR text.
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   workflow_dispatch:
     inputs:
       release:
@@ -144,15 +146,18 @@ jobs:
 
       # Contributor-authored text: does the commit range this PR carries, or its title/description,
       # hold personal information (an email outside GitHub's own noreply/example patterns, a phone
-      # number, a GPS coordinate pair, a pasted key or credential) or non-English prose? Runs here,
-      # right after the merge-tree binding above, because it reads HEAD^1/HEAD^2 rather than file
-      # content — every other gate below needs only the checked-out tree and stays unconditional.
+      # number, a GPS coordinate pair, a pasted key or credential) or high-confidence German prose?
+      # Runs here, right after the merge-tree binding above, and receives those exact event SHAs;
+      # every other gate below needs only the checked-out tree and stays unconditional.
       # Diff/firmware content is deliberately NOT in scope; tools/pr_hygiene/personal_info.mjs
       # explains why a value-shaped heuristic cannot safely run over this codebase's diffs. PR-only:
       # a push to main has already passed this as a PR, and there is no title/description to re-check.
       - name: Audit commit and PR-text privacy and language
         if: github.event_name == 'pull_request'
-        run: ./scripts/run-pr-hygiene-audit.sh
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: ./scripts/run-pr-hygiene-audit.sh --base "$EVENT_BASE_SHA" --head "$EVENT_HEAD_SHA"
       - name: Verify the PR-hygiene audit still has teeth
         run: ./tools/pr_hygiene/selftest.sh
 

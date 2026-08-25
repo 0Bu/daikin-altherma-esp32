@@ -19,8 +19,8 @@ const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A
 const EMAIL_ALLOWED = [
   /@users\.noreply\.github\.com$/iu,
   /^noreply@github\.com$/iu,
-  /@(?:example|test|invalid|localhost)(?:\.[a-z]{2,})?$/iu,
-  /^(?:you|your-?name|user|name|email|foo|bar)@/iu,
+  /@example\.(?:com|net|org)$/iu,
+  /@(?:[a-z0-9-]+\.)+(?:example|test|invalid|localhost)$/iu,
 ];
 
 // RFC 5322 local-part max is 64 octets and a bare `%40` etc. never decodes here, so this is safe to
@@ -33,9 +33,10 @@ const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/u;
 
 // A small, high-confidence set of credential-token shapes. Not a secret-scanner replacement (see
 // module comment above) — just the handful of shapes that cannot plausibly be anything else.
-const CREDENTIAL_TOKEN = /\b(?:ghp_[A-Za-z0-9]{36}\b|gh[oprsu]_[A-Za-z0-9]{36,251}\b|AKIA[0-9A-Z]{16}\b|xox[baprs]-[0-9A-Za-z-]{10,})/u;
+const CREDENTIAL_TOKEN = /\b(?:github_pat_[A-Za-z0-9_]{20,255}\b|ghp_[A-Za-z0-9]{36}\b|gh[oprsu]_[A-Za-z0-9]{36,251}\b|AKIA[0-9A-Z]{16}\b|xox[baprs]-[0-9A-Za-z-]{10,})/u;
 
 const INTL_PHONE = /\+\d{1,3}[ .-]?\(?\d{1,4}\)?(?:[ .-]?\d{2,4}){2,5}/gu;
+const NANP_PHONE = /\(\d{3}\)[ .-]?\d{3}[ .-]?\d{4}/gu;
 // German-style local numbers: a trunk-prefixed area code, a separator, then the subscriber number.
 const LOCAL_PHONE = /\b0\d{2,5}[ ./-]\d{3,}(?:[ ./-]\d{2,})*\b/gu;
 
@@ -82,6 +83,9 @@ export function findPersonalInfo(text) {
   }
   if (PRIVATE_KEY.test(text) || CREDENTIAL_TOKEN.test(text)) codes.add("P003");
   for (const match of text.matchAll(INTL_PHONE)) {
+    if (isPlausiblePhone(match[0])) codes.add("P002");
+  }
+  for (const match of text.matchAll(NANP_PHONE)) {
     if (isPlausiblePhone(match[0])) codes.add("P002");
   }
   for (const match of text.matchAll(LOCAL_PHONE)) {

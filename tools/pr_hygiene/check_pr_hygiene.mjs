@@ -11,9 +11,9 @@
 // Usage: node tools/pr_hygiene/check_pr_hygiene.mjs [--repo-root DIR] [--base REF --head REF]
 //        [--event-file FILE] [--exceptions-file FILE]
 //   --repo-root         defaults to the current directory
-//   --base / --head     default to HEAD^1/HEAD^2 (a merge-commit checkout, i.e. CI's `pull_request`
-//                        event) and fall back to origin/main..HEAD for a local dry run; if neither
-//                        resolves, the commit-range check is skipped rather than failing the run
+//   --base / --head     default to origin/main..HEAD for a local dry run; CI passes the event's
+//                        exact, already merge-tree-bound base/head SHAs explicitly. If origin/main
+//                        is unavailable locally, the commit-range check is skipped.
 //   --event-file        defaults to $GITHUB_EVENT_PATH; without it, the PR title/description check
 //                        is skipped — there is no PR yet on a local pre-push dry run
 //   --exceptions-file    defaults to tools/pr_hygiene/audit_exceptions.txt next to this script
@@ -57,6 +57,7 @@ function git(args) {
   try {
     return execFileSync("git", ["-C", repoRoot, ...args], {
       encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
@@ -75,20 +76,14 @@ function resolveSha(ref) {
 
 const notes = [];
 if (!(base && head)) {
-  const mergeHead = resolveSha("HEAD^2");
-  if (mergeHead) {
-    base = resolveSha("HEAD^1");
-    head = mergeHead;
-  } else {
-    const originMain = resolveSha("origin/main");
-    const headSha = resolveSha("HEAD");
-    if (originMain && headSha) {
-      base = originMain;
-      head = headSha;
-    }
+  const originMain = resolveSha("origin/main");
+  const headSha = resolveSha("HEAD");
+  if (originMain && headSha) {
+    base = originMain;
+    head = headSha;
   }
   if (!(base && head)) {
-    notes.push("no comparison base resolved (not a merge-commit checkout and no origin/main); skipping the commit-range check");
+    notes.push("no comparison base resolved (origin/main is unavailable); skipping the commit-range check");
   }
 }
 
@@ -107,22 +102,47 @@ function fingerprint(text) {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-const TRAILER = /^(?:Co-authored-by|Signed-off-by|Reviewed-by|Reported-by|Helped-by|Acked-by|Tested-by|Change-Id):/iu;
+// Attribution email addresses are expected Git metadata, but the prefix alone must not become an
+// escape hatch for arbitrary prose. Only a complete `Token: Name <email>` line gets the exception;
+// its name is still checked for shaped personal information, while its natural-language signature
+// is not (a contributor's proper name is not English prose). Any suffix or malformed trailer is
+// checked as an ordinary line.
+const ATTRIBUTION_TRAILER = /^(Co-authored-by|Signed-off-by|Reviewed-by|Reported-by|Helped-by|Acked-by|Tested-by):\s*(.*?)\s*<[^<>\s@]+@[^<>\s@]+>\s*$/iu;
+const TRAILER_LINE = /^[A-Za-z0-9-]+:\s+\S.*$/u;
 
 const findings = [];
-function checkText(subjectLabel, text) {
+function terminalAttributionTrailers(lines) {
+  const indices = new Set();
+  let started = false;
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index].trim();
+    if (!line) {
+      if (started) break;
+      continue;
+    }
+    if (!TRAILER_LINE.test(line)) break;
+    started = true;
+    if (ATTRIBUTION_TRAILER.test(line)) indices.add(index);
+  }
+  return indices;
+}
+
+function checkText(subjectLabel, text, { allowTerminalTrailers = false } = {}) {
   if (!text) return;
   const lines = text.split(/\r?\n/);
+  const trailerIndices = allowTerminalTrailers ? terminalAttributionTrailers(lines) : new Set();
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index].trim();
-    if (!line || TRAILER.test(line)) continue;
+    if (!line) continue;
     const location = lines.length === 1 ? subjectLabel : `${subjectLabel}:${index + 1}`;
     const print = fingerprint(line);
     if (exceptions.has(print)) continue;
-    for (const { code, message } of findPersonalInfo(line)) {
+    const trailer = trailerIndices.has(index) ? line.match(ATTRIBUTION_TRAILER) : null;
+    const personalInfoText = trailer ? `${trailer[1]}: ${trailer[2]}` : line;
+    for (const { code, message } of findPersonalInfo(personalInfoText)) {
       findings.push({ code, subject: location, message, fingerprint: print });
     }
-    if (isLikelyGerman(line)) {
+    if (!trailer && isLikelyGerman(line)) {
       findings.push({ code: "L001", subject: location, message: "must be written in English", fingerprint: print });
     }
   }
@@ -132,7 +152,7 @@ let commitCount = 0;
 if (base && head) {
   const log = git(["log", "--format=%H%x1f%s%x1f%b%x1e", `${base}..${head}`]);
   if (log === null) {
-    notes.push(`could not read commit range ${base}..${head}`);
+    die(2, `could not read commit range ${base}..${head}`);
   } else {
     for (const record of log.split("\x1e\n")) {
       if (record.trim() === "") continue;
@@ -141,7 +161,7 @@ if (base && head) {
       commitCount++;
       const shortSha = hash.trim().slice(0, 12);
       checkText(`commit ${shortSha} (subject)`, subject);
-      checkText(`commit ${shortSha} (body)`, body);
+      checkText(`commit ${shortSha} (body)`, body, { allowTerminalTrailers: true });
     }
   }
 }
@@ -162,10 +182,10 @@ if (eventFile && fs.existsSync(eventFile)) {
     checkText("PR description", typeof body === "string" ? body : "");
     prBodyChecked = true;
   } else {
-    notes.push("event payload has no pull_request object; skipping the PR title/description check");
+    die(2, "event payload has no pull_request object");
   }
 } else if (eventFile) {
-  notes.push(`event file not found: ${eventFile}; skipping the PR title/description check`);
+  die(2, `event file not found: ${eventFile}`);
 } else {
   notes.push("no --event-file and GITHUB_EVENT_PATH is unset; skipping the PR title/description check");
 }

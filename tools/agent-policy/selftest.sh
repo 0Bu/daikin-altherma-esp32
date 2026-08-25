@@ -18,6 +18,7 @@ write_body() {
   local stamp="$1"
   cat > "$WORK/body.md" <<EOF
 - [x] \`\$project-review\` clean — merge gate @ $stamp
+- [x] \`\$pr-hygiene-review\` clean — merge gate @ $stamp
 - [x] \`\$domain-review\` clean — merge gate @ $stamp
 EOF
 }
@@ -105,6 +106,8 @@ build = Path(sys.argv[3]).read_text(encoding="utf-8")
 policy = Path(sys.argv[4]).read_text(encoding="utf-8")
 if "  pull_request:\n" not in build or "  pull_request_target:\n" in build:
     raise SystemExit("mechanical/build workflow must use only the ordinary pull_request event")
+if "types: [opened, synchronize, reopened, edited, ready_for_review]" not in build:
+    raise SystemExit("ordinary pull_request workflow must rerun current-PR-text gates on edited")
 if "  pull_request_target:\n" not in policy or re.search(r"^  pull_request:\s*$", policy, re.MULTILINE):
     raise SystemExit("trusted policy workflow must use only pull_request_target")
 mechanical_start = build.find("\n  mechanical_gates:\n")
@@ -181,11 +184,19 @@ expect_block "stale review stamps" "checked deadbee"
 
 cat > "$WORK/body.md" <<EOF
 - [x] \`\$project-review\` clean — merge gate @ $HEAD_SHA
+- [x] \`\$pr-hygiene-review\` clean — merge gate @ $HEAD_SHA
 EOF
 expect_block "missing unconditional review" "domain-review"
 
 cat > "$WORK/body.md" <<EOF
 - [x] \`\$project-review\` clean — merge gate @ $HEAD_SHA
+- [x] \`\$domain-review\` clean — merge gate @ $HEAD_SHA
+EOF
+expect_block "missing PR hygiene review" "pr-hygiene-review"
+
+cat > "$WORK/body.md" <<EOF
+- [x] \`\$project-review\` clean — merge gate @ $HEAD_SHA
+- [x] \`\$pr-hygiene-review\` clean — merge gate @ $HEAD_SHA
 - [ ] \`\$domain-review\` clean — merge gate @ $HEAD_SHA
 EOF
 expect_block "unchecked review" "unchecked"

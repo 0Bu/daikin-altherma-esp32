@@ -45,7 +45,7 @@ scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
 scripts/run-ui-localization-audit.sh # did every shipped locale follow changed canonical UI copy?
 scripts/run-ui-use-case-tests.sh   # do all visible UI actions actually work?
 scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data?
-scripts/run-pr-hygiene-audit.sh    # personal info or non-English text in commits/PR text?
+scripts/run-pr-hygiene-audit.sh    # personal info or high-confidence German in commits/PR text?
 tools/absence/selftest.sh          # can the source-absence matrix still go red?
 scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
 scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
@@ -233,8 +233,9 @@ the flagged text itself; adjudicate a false positive in
 with a reason — the ledger must never come to hold the personal data the gate exists to keep out.
 `tools/pr_hygiene/selftest.sh` re-seeds one case per shape it exists to catch, and a few it exists NOT
 to flag (a Renovate version bump, a bench IP, a MAC address, that same trailer). What it cannot see is
-the [`$pr-hygiene-review`](.agents/skills/pr-hygiene-review/SKILL.md) skill's job: a real name or
-address spelled out in prose, or a secret pasted into the diff itself rather than a commit message.
+the [`$pr-hygiene-review`](.agents/skills/pr-hygiene-review/SKILL.md) skill's job and mandatory
+head-stamped merge record: other non-English languages, a real name or address spelled out in prose,
+or a secret pasted into the diff itself rather than a commit message.
 
 `run-ui-gif-audit.sh` guards the README's **recording** of that drawing,
 [`docs/media/dashboard.gif`](docs/media/dashboard.gif) — the animated dashboard a new reader sees
@@ -519,13 +520,15 @@ silence a *new* finding on code your PR touches — that is the gate working.
 
 ## Pull requests
 
-Fill in [the template](.github/pull_request_template.md). Seven checkboxes on it
-(`$project-review`, `$feature-docs`, `$domain-review`, `$schematic-review`,
+Fill in [the template](.github/pull_request_template.md). Eight checkboxes on it
+(`$project-review`, `$pr-hygiene-review`, `$feature-docs`, `$domain-review`, `$schematic-review`,
 `$ui-use-case-review`, `$absence-review`, `$ui-gif`) are **maintainer-only** repository skills under
-`.agents/skills/`. They are not something an outside contributor can run. Leave them unchecked; the
-maintainer runs them before merge. Your equivalents are the scripts above plus an honest note about
-hardware. Renovate's mechanically attested Action-pin-line-only PR class is generated without the
-template and is the sole exception; any ineligible Renovate PR returns to this ordinary review path.
+`.agents/skills/`; the separate `$heap-safety-review` checkbox records the independent focused
+reviewer when its allocation-sensitive paths apply. They are not something an outside contributor
+can run. Leave them unchecked; the maintainer runs them before merge. Your equivalents are the
+scripts above plus an honest note about hardware. Renovate's mechanically attested
+Action-pin-line-only PR class is generated without the template and is the sole exception; any
+ineligible Renovate PR returns to this ordinary review path.
 
 `main` is kept **strictly linear**, so PRs land as **squash merges** — enforced by a branch ruleset
 on `main` (require a pull request, require linear history, and the `gates` / `build` checks green),

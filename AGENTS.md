@@ -75,8 +75,8 @@ conditional workflows and are not necessarily PR checkbox gates.
 - `$ui-gif`: the mechanical recording audit is a hard merge block when stale or unverifiable; a
   PR that changes the GIF or its stamp also needs the current-head review. Re-record only locally.
 - `$flash-esp32`: use for an explicitly requested signed build-and-flash workflow.
-- `$pr-hygiene-review`: use before opening a PR and before merge, to check the commit range and PR
-  title/description for personal information or non-English prose beyond what
+- `$pr-hygiene-review`: required before opening a PR and before every ordinary PR merge, to check
+  the commit range and PR title/description for personal information or non-English prose beyond what
   `scripts/run-pr-hygiene-audit.sh` catches by shape alone.
 
 Phase 7 of the agent migration is complete. `AGENTS.md`, `.agents/skills/`, `.codex/agents/`,

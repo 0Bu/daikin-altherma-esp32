@@ -15,9 +15,10 @@ report analysis, changes, and verification separately.
 `scripts/run-pr-hygiene-audit.sh` (`tools/pr_hygiene/`) mechanically catches what has a reliable
 SHAPE in a commit message or the PR title/description: an email outside GitHub's own
 noreply/example patterns, a phone number, a GPS coordinate pair, a pasted private key or
-credential-shaped token, and non-English prose (reusing the same German-detection predicate
-`tools/user_docs/english_docs.mjs` applies to maintained documentation). It cannot see a real name in
-running text, a street address spelled out in words, a WiFi SSID/password pasted as plain text
+credential-shaped token, and high-confidence German prose (reusing the same German-detection
+predicate `tools/user_docs/english_docs.mjs` applies to maintained documentation). It cannot
+reliably see other languages, a real name in running text, a street address spelled out in words,
+a WiFi SSID/password pasted as plain text
 instead of through this project's own redacted report flow, or a phrase too short or too mixed to
 trip the language heuristic. This skill is that second pass — for the same reason `$user-docs-review`
 exists beside its own mechanical English check.
@@ -32,6 +33,8 @@ exists beside its own mechanical English check.
    text rather than through this project's documented redacted report flow
    (`main/logic/redact.hpp`, `docs/REPORTING.md`) — a report pasted by hand instead of through that
    flow is the recurring way this happens.
+   Also read every prose line for English: French, Spanish, Italian and other non-English text is a
+   human-review finding even when it does not match the deliberately narrow German signature.
 3. Distinguish a git-trailer email (`Co-authored-by:`, `Signed-off-by:`) from one in running prose.
    Trailers are expected attribution and the mechanical gate already excludes them; do not re-flag
    one here.
@@ -67,3 +70,11 @@ and if it already landed in a pushed commit, rewrite that commit instead.
 Do not weaken the email allowlist, the phone/coordinate confidence thresholds, or the English-only
 requirement to clear a finding. A gate that has been loosened to pass stops meaning anything the next
 time it is green.
+
+## Record the merge review
+
+After both the mechanical audit and the human pass are clean at the exact PR head, record the result
+in the PR's maintainer-gates section as `$pr-hygiene-review` with the bare current head SHA. A later
+commit invalidates the record; rerun both halves and update the stamp. Never stamp only the
+mechanical result: the required record exists specifically for the personal information, diff
+content and non-English prose the shape checks cannot recognize.

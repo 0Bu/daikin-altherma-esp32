@@ -1557,6 +1557,7 @@ fi
 head_sha="abcdef1234567890abcdef1234567890abcdef12"
 cat >"$tmp/all-gates.md" <<EOF
 - [x] \$project-review clean — merge gate @ $head_sha
+- [x] \$pr-hygiene-review clean — merge gate @ $head_sha
 - [x] \$domain-review clean — merge gate @ $head_sha
 - [x] \$heap-safety-review clean — merge gate @ $head_sha
 - [x] \$feature-docs synced — merge gate @ $head_sha
@@ -1582,6 +1583,7 @@ pr_case() {
 pr_case "CI all applicable gates pass" 0 "$tmp/all-gates.md" "$tmp/all-files.txt"
 cat >"$tmp/docs-gates.md" <<EOF
 - [x] \$project-review clean — merge gate @ $head_sha
+- [x] \$pr-hygiene-review clean — merge gate @ $head_sha
 - [x] \$domain-review clean — merge gate @ $head_sha
 EOF
 printf '%s\n' 'docs/README.md' >"$tmp/docs-files.txt"
@@ -1826,6 +1828,7 @@ import json
 head = "abcdef1234567890abcdef1234567890abcdef12"
 body = "\n".join([
     f"- [x] $project-review clean — merge gate @ {head}",
+    f"- [x] $pr-hygiene-review clean — merge gate @ {head}",
     f"- [x] $domain-review clean — merge gate @ {head}",
     f"- [x] $feature-docs synced — merge gate @ {head}",
     f"- [x] $schematic-review clean — merge gate @ {head}",

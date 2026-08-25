@@ -2,8 +2,9 @@
 # Contributor-authored-text privacy and language gate: the commit range and, under a `pull_request`
 # event, the PR title/description — does either carry personal information (an email outside GitHub's
 # own noreply/example patterns, a phone number, a GPS coordinate pair, a pasted key or credential) or
-# non-English prose? See tools/pr_hygiene/check_pr_hygiene.mjs and personal_info.mjs for the exact
-# shapes and why diff content is deliberately out of scope.
+# high-confidence German prose? See tools/pr_hygiene/check_pr_hygiene.mjs and personal_info.mjs for
+# the exact shapes and why diff content is deliberately out of scope; other non-English prose stays
+# in the required human $pr-hygiene-review.
 #
 # Usage: scripts/run-pr-hygiene-audit.sh [extra args forwarded to check_pr_hygiene.mjs]
 # Exit: 0 = clean/nothing to check, 1 = findings, 2 = usage/runtime error. Requires node >=18.
