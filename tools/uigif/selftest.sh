@@ -209,6 +209,7 @@ PY
 )"
 base_reviews="$(printf '%s\n' \
     "- [x] \`\$project-review\` clean - merge gate @ $ui_gif_head" \
+    "- [x] \`\$pr-hygiene-review\` clean - merge gate @ $ui_gif_head" \
     "- [x] \`\$domain-review\` clean - merge gate @ $ui_gif_head")"
 review_stamp="$base_reviews
 - [x] \`\$ui-gif\` clean - merge gate @ $ui_gif_head"

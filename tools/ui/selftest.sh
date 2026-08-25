@@ -103,9 +103,10 @@ tpl_body="$(printf '%s' "$tpl_line" | sed 's/\[ \]/[x]/; s/<short-sha>/abcdef123
 ui_head=abcdef1234567890abcdef1234567890abcdef12
 
 # This fixture changes main/www/js/settings.js, so all four conditional reviews apply beside the
-# two unconditional ones. The UI line comes from the real template above.
+# three unconditional ones. The UI line comes from the real template above.
 cat > "$hook_tmp/body.md" <<EOF
 - [x] \`\$project-review\` clean — merge gate @ abcdef123456
+- [x] \`\$pr-hygiene-review\` clean — merge gate @ abcdef123456
 - [x] \`\$domain-review\` clean — merge gate @ abcdef123456
 - [x] \`\$feature-docs\` synced — merge gate @ abcdef123456
 - [x] \`\$schematic-review\` clean — merge gate @ abcdef123456
@@ -210,8 +211,7 @@ set -e
 
 # The end-to-end check above covers exactly ONE line, and the template teaches a stamp per merge
 # gate. Name the complete expected set explicitly: selecting only lines which already contain
-# "merge gate @" makes a regressed prose-only line disappear from both the input and the count, so
-# the selftest used to announce "all 5 readable" after one of the six gates was deliberately broken.
+# "merge gate @" makes a regressed prose-only line disappear from both the input and the count.
 # Put every expected key through the SHARED matcher, and reject missing or surprise gate entries.
 # shellcheck source=/dev/null
 . "$proj/tools/agent-hooks/pr-gate-lib.sh"
@@ -219,7 +219,7 @@ set -e
 # a gate means adding it here in the
 # same commit, which is the point: a gate whose template line nobody checks is a gate whose stamp
 # nobody can be sure is readable.
-expected_gate_keys=(project-review heap-safety-review feature-docs domain-review schematic-review ui-use-case-review absence-review ui-gif)
+expected_gate_keys=(project-review pr-hygiene-review heap-safety-review feature-docs domain-review schematic-review ui-use-case-review absence-review ui-gif)
 tpl_content="$(cat "$proj/.github/pull_request_template.md")"
 tpl_lines="$(printf '%s\n' "$tpl_content" | agent_gate_task_lines | grep -iE 'gate')"
 tpl_n=0
