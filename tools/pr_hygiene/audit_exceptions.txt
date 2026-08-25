@@ -1,0 +1,12 @@
+# Adjudicated findings from check_pr_hygiene.mjs. One entry per line: the SHA-256 fingerprint the
+# tool prints for the flagged line, never the flagged text itself — this ledger must never come to
+# contain the personal information the gate exists to keep out of the repository.
+#
+#   <64-hex-char fingerprint>  # why this specific line is not actually sensitive/non-English
+#
+# An entry is a DECISION, not a snooze. If the honest answer is "it is personal information but
+# nobody will look", that is not an exception — fix the text (and, if it already landed in a pushed
+# commit, rewrite that commit) instead. A fingerprint is over one exact line of one exact commit
+# subject/body or PR title/description line, so an edited line needs a fresh decision.
+#
+# Empty right now.

@@ -45,6 +45,7 @@ scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
 scripts/run-ui-localization-audit.sh # did every shipped locale follow changed canonical UI copy?
 scripts/run-ui-use-case-tests.sh   # do all visible UI actions actually work?
 scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data?
+scripts/run-pr-hygiene-audit.sh    # personal info or non-English text in commits/PR text?
 tools/absence/selftest.sh          # can the source-absence matrix still go red?
 scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
 scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
@@ -214,6 +215,26 @@ redacting three sections above. Adjudications go in
 [`tools/redact/audit_exceptions.txt`](tools/redact/audit_exceptions.txt); `tools/redact/selftest.sh`
 re-seeds every defect it was built for. Neither half can see the direction that needs a human: a new
 identifying field nobody wrapped at all never reaches the redactor, so it never reaches the count.
+
+`run-pr-hygiene-audit.sh` is the other gate whose subject is not the firmware but the
+**contributor's own text** — the commit range this PR carries, and its title/description. Nothing
+else here looks there: `run-redaction-audit.sh` above protects a *device's* bug report, never a
+human's own commit message or PR description. It runs two checks: an email/phone/GPS-coordinate/
+credential shape scan, deliberately never run over diff content (this project's MACs, register bytes
+and bench IPs would drown a value-shaped heuristic exactly the way the redaction gate solves it by
+identifier NAME instead — prose has no identifier names to key on), and the same German-detection
+heuristic `run-user-docs-audit.sh` applies to maintained documentation, reused rather than duplicated
+(`tools/user_docs/english_docs.mjs`'s `isLikelyGerman`). A `Co-authored-by:`/`Signed-off-by:` trailer
+is excluded on purpose — that is expected attribution, not a leak. Locally, before a PR exists, it
+checks only the commit range; in CI it also reads the live PR title/description from the
+`pull_request` event payload. A finding names a SHA-256 fingerprint of the exact flagged line, never
+the flagged text itself; adjudicate a false positive in
+[`tools/pr_hygiene/audit_exceptions.txt`](tools/pr_hygiene/audit_exceptions.txt) by that fingerprint,
+with a reason — the ledger must never come to hold the personal data the gate exists to keep out.
+`tools/pr_hygiene/selftest.sh` re-seeds one case per shape it exists to catch, and a few it exists NOT
+to flag (a Renovate version bump, a bench IP, a MAC address, that same trailer). What it cannot see is
+the [`$pr-hygiene-review`](.agents/skills/pr-hygiene-review/SKILL.md) skill's job: a real name or
+address spelled out in prose, or a secret pasted into the diff itself rather than a commit message.
 
 `run-ui-gif-audit.sh` guards the README's **recording** of that drawing,
 [`docs/media/dashboard.gif`](docs/media/dashboard.gif) — the animated dashboard a new reader sees

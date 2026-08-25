@@ -23,6 +23,14 @@ const DOC_TREES = [
   { path: ".codex", extensions: [".md", ".toml"] },
 ];
 
+// Shared with tools/pr_hygiene/, which applies the same shape to PR titles/descriptions and commit
+// messages instead of doc files. One predicate, so a threshold tuned here cannot quietly diverge
+// from what the PR-text gate enforces.
+export function isLikelyGerman(line) {
+  const functionWords = [...line.matchAll(GERMAN_FUNCTION_WORDS)].length;
+  return GERMAN_CHARACTERS.test(line) || HIGH_CONFIDENCE_GERMAN.test(line) || functionWords >= 2;
+}
+
 function documentationTreeFiles(directory, extensions) {
   if (!fs.existsSync(directory)) return [];
   const files = [];
@@ -49,8 +57,7 @@ export function auditEnglishDocumentation(root) {
     const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
     for (let index = 0; index < lines.length; index++) {
       const line = lines[index];
-      const functionWords = [...line.matchAll(GERMAN_FUNCTION_WORDS)].length;
-      if (!GERMAN_CHARACTERS.test(line) && !HIGH_CONFIDENCE_GERMAN.test(line) && functionWords < 2) continue;
+      if (!isLikelyGerman(line)) continue;
       findings.push({
         code: "U014",
         subject: `${relative}:${index + 1}`,

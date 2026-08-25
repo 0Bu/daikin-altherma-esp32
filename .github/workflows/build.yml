@@ -142,6 +142,20 @@ jobs:
           [ "$tested_head" = "$EVENT_HEAD_SHA" ] \
             || { echo "tested merge tree uses $tested_head, expected $EVENT_HEAD_SHA" >&2; exit 2; }
 
+      # Contributor-authored text: does the commit range this PR carries, or its title/description,
+      # hold personal information (an email outside GitHub's own noreply/example patterns, a phone
+      # number, a GPS coordinate pair, a pasted key or credential) or non-English prose? Runs here,
+      # right after the merge-tree binding above, because it reads HEAD^1/HEAD^2 rather than file
+      # content — every other gate below needs only the checked-out tree and stays unconditional.
+      # Diff/firmware content is deliberately NOT in scope; tools/pr_hygiene/personal_info.mjs
+      # explains why a value-shaped heuristic cannot safely run over this codebase's diffs. PR-only:
+      # a push to main has already passed this as a PR, and there is no title/description to re-check.
+      - name: Audit commit and PR-text privacy and language
+        if: github.event_name == 'pull_request'
+        run: ./scripts/run-pr-hygiene-audit.sh
+      - name: Verify the PR-hygiene audit still has teeth
+        run: ./tools/pr_hygiene/selftest.sh
+
       # Host-side pure-logic tests (main/logic/) plus an aggregate executable-line floor. This is
       # deliberately coverage of the production headers only: counting the 6k-line test driver
       # would let new assertions make the percentage greener without exercising another branch.
