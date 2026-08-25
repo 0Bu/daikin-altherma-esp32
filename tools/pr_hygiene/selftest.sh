@@ -71,7 +71,11 @@ read -r base head <<< "$(seed_commit "fix: bench retest" "Called it in on +49 15
 run_case "phone number in body is caught" 1 "P002 commit" "$base" "$head"
 
 echo "== 3. private key material in commit body =="
-read -r base head <<< "$(seed_commit "fix: rotate signing key" "-----BEGIN RSA PRIVATE KEY-----")"
+# Built at runtime, not written as one contiguous literal: this repo's own
+# scripts/run-public-readiness-audit.sh git-greps every tracked file for the complete BEGIN-PRIVATE-KEY
+# marker so no real one ever ships, and a literal fixture here would trip that same check on itself.
+key_marker="$(printf -- '-----BEGIN %s PRIVATE KEY-----' RSA)"
+read -r base head <<< "$(seed_commit "fix: rotate signing key" "$key_marker")"
 run_case "private key block is caught" 1 "P003 commit" "$base" "$head"
 
 echo "== 4. GPS coordinate pair in commit body =="
@@ -95,7 +99,11 @@ read -r base head <<< "$(seed_commit "fix: cite report contact" "See the report 
 run_case "allowlisted email domains stay clean" 0 "pr hygiene audit: clean" "$base" "$head"
 
 echo "== 9. version numbers, hex offsets, IPs and MACs are NOT flagged as phone numbers =="
-read -r base head <<< "$(seed_commit "fix: bump dependency to v46.2.4" "Bench reachable at 192.168.1.42, register 0x60 offset 6, MAC 3C:71:BF:AA:12:34.")"
+# 203.0.113.0/24 is the IANA TEST-NET-3 documentation range (RFC 5737), and 02: is a
+# locally-administered unicast MAC prefix — both required by this repo's own
+# scripts/run-public-readiness-audit.sh, which rejects RFC1918-shaped IPs and non-synthetic MACs in
+# any test/tools fixture, this file included.
+read -r base head <<< "$(seed_commit "fix: bump dependency to v46.2.4" "Bench reachable at 203.0.113.42, register 0x60 offset 6, MAC 02:71:BF:AA:12:34.")"
 run_case "numeric-shaped false positives stay clean" 0 "pr hygiene audit: clean" "$base" "$head"
 
 echo "== 10. PR title carries personal information =="
