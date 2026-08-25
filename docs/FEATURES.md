@@ -126,6 +126,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 78 | **Transport-independent HTTP trust surface** — the restricted provisioning route set follows the OPEN setup AP's existence rather than the WiFi mode, so a wired board is not locked out of its own API and a live AP cannot be widened by a cable | ✅ 🧪 | [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_server.cpp`](../main/http_server.cpp) |
 | 80 | **Per-row state age** — how long every binary row (including neutral observation-only flags) has read what it reads, published as three separate facts (the seconds, whether the transition was *witnessed*, and how much of the run the bus did not answer for) so a consumer cannot state a stronger claim than the board made | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
 | 89 | **Agent instruction and configuration integrity gate** — canonical `AGENTS.md` is byte-bounded; skill identity and OpenAI metadata, reviewer sandboxing, hook dispatch, the credential-safe GitHub CLI wrapper and explicit safety invariants fail closed on drift | ✅ | [`run-agent-instructions-budget.sh`](../scripts/run-agent-instructions-budget.sh), [`gh-with-git-credentials.sh`](../scripts/gh-with-git-credentials.sh), [`selftest.sh`](../tools/agent-config/selftest.sh) |
+| 97 | **PR-text hygiene gate** — exact-range commit messages and current PR text are checked mechanically, while every ordinary merge requires a current-head human privacy/language review | ✅ 🧪 | [`check_pr_hygiene.mjs`](../tools/pr_hygiene/check_pr_hygiene.mjs), [`pr-hygiene-review`](../.agents/skills/pr-hygiene-review/SKILL.md), [`require-pr-gates.sh`](../tools/agent-hooks/require-pr-gates.sh) |
 | 85 | **Browser serial-permission release** — the Pages installer exposes a granted, closed port's `forget()` action without opening a chooser when nothing can be revoked or interrupting an active flash | ✅ 🧪 | [`serial-port-release.mjs`](serial-port-release.mjs), [`serial_port_release.test.mjs`](../test/serial_port_release.test.mjs) |
 | 86 | **Inline Web Serial installer + monitor** — only the native port chooser leaves the branded Pages UI; ESP32-S3 probing, NVS-preserving sparse flash, cross-part progress, reset and a real 115200-baud monitor run in-page | ✅ 🧪 | [`web-installer.mjs`](web-installer.mjs), [`web_installer.test.mjs`](../test/web_installer.test.mjs) |
 | 87 | **Diagnostic-evidence contract gate** — every visible plant diagnosis stays bound to an external basis, its implemented rule and an explicit claim limit | ✅ | [`check_diagnostic_evidence.mjs`](../tools/diagnostic_evidence/check_diagnostic_evidence.mjs), [`run-diagnostic-evidence-audit.sh`](../scripts/run-diagnostic-evidence-audit.sh) |
@@ -836,6 +837,11 @@ Four properties of that core are worth naming because they are not obvious from 
   explicit safety invariants. The fix for a budget failure is moving narrative to `docs/`, never
   trimming a rule or raising the limit;
   [`tools/agent-config/selftest.sh`](../tools/agent-config/selftest.sh) proves each check fails closed.
+- **✅ 🧪 PR-text hygiene gate.** [`check_pr_hygiene.mjs`](../tools/pr_hygiene/check_pr_hygiene.mjs)
+  checks the exact PR commit range and current title/description for shaped personal information and
+  high-confidence German prose. Every ordinary merge also requires a current-head
+  [`pr-hygiene-review`](../.agents/skills/pr-hygiene-review/SKILL.md) of the diff and the privacy or
+  non-English cases a shape check cannot recognize.
 - **🔭 No generic static-analyser gate — measured, not assumed.** Recorded here so it is not
   re-litigated: clang-tidy over the pure headers reports thousands of findings on a blanket config
   (over half of them this project's own `CHECK` macro) and, curated to bug-finding checks, roughly
