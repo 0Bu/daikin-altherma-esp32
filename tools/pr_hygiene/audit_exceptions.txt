@@ -9,4 +9,9 @@
 # commit, rewrite that commit) instead. A fingerprint is over one exact line of one exact commit
 # subject/body or PR title/description line, so an edited line needs a fresh decision.
 #
-# Empty right now.
+df453bb1e322a91210cc815cf9f69a84ee9fdb5ae0288ea6fdcdcc6c7eb9b066  # commit 6b4c32a's own body names the
+# bare PEM RSA-private-key header line (not spelled out here either, for the same reason) while
+# describing the selftest fixture it was removed from (see that commit). No base64 key material
+# follows it anywhere in this repository's history; the marker alone discloses nothing. Caught by
+# this same gate on its own introducing PR — see .agents/skills/pr-hygiene-review/SKILL.md for when
+# NOT to do this instead.
