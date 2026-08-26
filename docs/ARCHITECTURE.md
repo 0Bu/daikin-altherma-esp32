@@ -1168,7 +1168,7 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
   the generator input; the maintainer performs regeneration and includes the resulting diff.
 - **One hand-written supplement file exists, and it is temporary: `def/overlay.hpp`.** Every generated
   profile carries six rows for page `0x10` where [`REGISTERS.md`](REGISTERS.md) §5 documents
-  twenty-six — uniformly, all 43 tables agreeing row-for-row, so it is the generator's page-`0x10`
+  twenty-five — uniformly, all 43 tables agreeing row-for-row, so it is the generator's page-`0x10`
   input that is narrow, not a per-model absence. Among the missing rows are the **protection-retry
   counters** (offsets 10–12, converters 303/307/310/311), the input signal for the "silent protection
   retries" early warning (issue legacy-69 UC5 / legacy-110). Converter 310 has been implemented since PR legacy-111 but

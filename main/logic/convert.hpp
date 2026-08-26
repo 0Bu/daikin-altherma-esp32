@@ -54,16 +54,17 @@ inline double press2temp(double d, int rtype = 802) {
 //     running   raw 0x10 [01 00 ...], [01 20 ...] x2 (three captures, one run)
 // Byte 0 steps 0x00 -> 0x01 exactly at the transition and index 1 already decoded correctly as
 // "Heating", which is what makes this a relabel of ONE entry rather than a shifted table: the
-// evidence bounds indices 0 and 1 and says nothing about the rest. The remaining entries stay as
-// the recovered split vocabulary spells them — several ("Ventilation", "Dry", the storage modes)
-// cannot occur on a hydronic unit either, but "probably also wrong" is the guess this project
-// refuses, and none of them is reachable to measure. docs/REGISTERS.md §4.1 carries the same table
-// and moves with this one: it is the domain audit's authority, so the two may never disagree.
+// evidence bounds indices 0 and 1 and says nothing about the rest. Indices 2..19 are reference-
+// derived and unmeasured: 5/6 retain their independently adjudicated order, while 19 retains the
+// catalog-only second "Aux.". Several ("Ventilation", "Dry", the storage modes) cannot occur on a
+// hydronic unit either, but "probably also wrong" is the guess this project refuses. The table in
+// docs/REGISTERS.md §4.1 moves with this one; the domain audit makes disagreement a hard error.
 inline constexpr const char* OP_MODE[] = {                          // conv 217 (data[0])
     "Stop", "Heating", "Cooling", "Auto", "Ventilation", "Auto Cool", "Auto Heat", "Dry",
     "Aux.", "Cooling Storage", "Heating Storage", "UseStrdThrm(cl)1", "UseStrdThrm(cl)2",
     "UseStrdThrm(cl)3", "UseStrdThrm(cl)4", "UseStrdThrm(ht)1", "UseStrdThrm(ht)2",
     "UseStrdThrm(ht)3", "UseStrdThrm(ht)4", "Aux."};
+inline constexpr int OP_MODE_COUNT = static_cast<int>(sizeof(OP_MODE) / sizeof(OP_MODE[0]));
 inline constexpr const char* IU_MODE[]  = {                         // conv 315 (high nibble)
     "Stop", "Heating", "Cooling", "", "DHW", "Heating + DHW", "Cooling + DHW"};
 inline constexpr const char* ERR_TYPE[] = {"Normal", "Error", "Warning", "Caution"};  // conv 203
@@ -139,7 +140,7 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
 
         // ── Enum labels ──
         case 217: { int v = data[0];                                          // operation mode
-                    set_text(r, v < 20 ? OP_MODE[v] : "?"); break; }
+                    set_text(r, v < OP_MODE_COUNT ? OP_MODE[v] : "?"); break; }
         case 315: { int v = (data[0] >> 4) & 0x0F;                            // indoor mode (hi nibble)
                     set_text(r, (v < 7 && IU_MODE[v][0]) ? IU_MODE[v] : "?"); break; }
         case 203: { int v = data[0];                                          // error class

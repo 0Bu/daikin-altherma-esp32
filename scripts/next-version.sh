@@ -11,7 +11,7 @@
 # build instead, so `main` moves without the version number moving with it.
 #
 # version.txt is the FLOOR: bump it to force a specific next version. Otherwise the level argument
-# decides which segment moves above the most recent v* tag.
+# decides which segment moves above the highest strict-SemVer v* tag reachable from HEAD.
 #
 #   no tags yet                 -> version.txt verbatim              (e.g. 1.0.0)
 #   latest tag v1.0.3, patch    -> max(version.txt, 1.0.4)
@@ -29,7 +29,7 @@
 #   • the "-dev." identifier is what the device and the installer page label a dev build by
 #     (logic/ota_channel.hpp → ota_version_is_dev).
 #
-# Requires tags to be fetched (git fetch --tags) before calling in CI.
+# Requires full history and tags to be fetched before calling in CI.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -84,6 +84,10 @@ fi
                                   # whatever the next release turns out to be, and patch is lowest
 
 latest=""
+# A local checkout may retain tags from an abandoned or rewritten history. Such tags cannot name a
+# release in HEAD's lineage and must not inflate the next version (or make it fail on a malformed
+# orphan tag). Reachable malformed v* tags still fail closed because they are part of the history
+# being versioned.
 while IFS= read -r tag; do
     version_tag="${tag#v}"
     is_semver "$version_tag" || {
@@ -93,7 +97,7 @@ while IFS= read -r tag; do
     if [ -z "$latest" ] || [ "$(printf '%s\n%s\n' "$latest" "$version_tag" | sort -V | tail -n1)" = "$version_tag" ]; then
         latest="$version_tag"
     fi
-done < <(git -C "$repo_root" tag -l 'v*')
+done < <(git -C "$repo_root" tag -l 'v*' --merged=HEAD)
 
 # The release version: the bumped tag, floored by version.txt.
 if [[ -z "$latest" ]]; then

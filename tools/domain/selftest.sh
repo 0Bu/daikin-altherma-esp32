@@ -4,9 +4,9 @@
 # A checker that has quietly stopped checking is worse than no checker — it converts "the audit is
 # clean" from evidence into a lie, and this gate exists precisely because plausible-but-wrong
 # passes unnoticed. So every defect this gate was built to catch — the four decode bugs that actually
-# shipped on main (issues #35-#38) and the mislabelled fan step of #230 — is re-introduced here, one
-# at a time, into a THROWAWAY COPY of the catalog. Each must be caught. The working tree is never
-# touched.
+# shipped on main (issues #35-#38), the mislabelled fan step of #230, and enum-table drift — is
+# re-introduced here, one at a time, into a THROWAWAY COPY. Each must be caught. The working tree is
+# never touched.
 #
 # This is the audit's own regression test — the same argument test/test_logic.cpp makes for the
 # converters, applied to the checker itself. Run it whenever a check in catalog_audit.cpp changes:
@@ -48,6 +48,79 @@ run_case() {
     local out rc
     out="$("$WORK/audit" docs/REGISTERS.md tools/domain/audit_exceptions.txt 2>&1)"; rc=$?
     cp "main/def/$file" "$WORK/main/def/$file"                     # restore for the next case
+
+    if [ "$rc" -eq 0 ]; then
+        echo "  MISSED: $name — audit reported CLEAN on the re-introduced bug"
+        fail=$((fail + 1)); return
+    fi
+    if ! printf '%s' "$out" | grep -q "$code"; then
+        echo "  MISSED: $name — audit flagged something, but no $code finding"
+        fail=$((fail + 1)); return
+    fi
+    if ! printf '%s' "$out" | grep -qF "$needle"; then
+        echo "  MISSED: $name — $code fired but not on \"$needle\""
+        fail=$((fail + 1)); return
+    fi
+    echo "  caught: $name  [$code]"
+    pass=$((pass + 1))
+}
+
+# run_doc_case <name> <expect-code> <expect-needle> <python-patch> [attempted-exception-key]
+# Mutates the copied register reference instead of a profile and proves the code↔docs enum contract.
+run_doc_case() {
+    local name="$1" code="$2" needle="$3" patch="$4" exception_key="${5:-}"
+    local exceptions="tools/domain/audit_exceptions.txt"
+    cp docs/REGISTERS.md "$WORK/REGISTERS.md"
+    if ! FILE="$WORK/REGISTERS.md" python3 -c "$patch"; then
+        echo "  MISCONFIGURED: $name — docs patch did not apply (did §4.1 change upstream?)"
+        fail=$((fail + 1)); return
+    fi
+    if ! "$CXX" -std=c++17 -I"$WORK/main" -o "$WORK/audit" tools/domain/catalog_audit.cpp 2>"$WORK/cc.log"; then
+        echo "  MISCONFIGURED: $name — audit failed to compile"
+        sed -n '1,5p' "$WORK/cc.log"
+        fail=$((fail + 1)); return
+    fi
+    if [ -n "$exception_key" ]; then
+        cp tools/domain/audit_exceptions.txt "$WORK/audit_exceptions.txt"
+        printf '\n%s\n' "$exception_key" >> "$WORK/audit_exceptions.txt"
+        exceptions="$WORK/audit_exceptions.txt"
+    fi
+    local out rc
+    out="$("$WORK/audit" "$WORK/REGISTERS.md" "$exceptions" 2>&1)"; rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        echo "  MISSED: $name — audit reported CLEAN on the re-introduced drift"
+        fail=$((fail + 1)); return
+    fi
+    if ! printf '%s' "$out" | grep -q "$code"; then
+        echo "  MISSED: $name — audit flagged something, but no $code finding"
+        fail=$((fail + 1)); return
+    fi
+    if ! printf '%s' "$out" | grep -qF "$needle"; then
+        echo "  MISSED: $name — $code fired but not on \"$needle\""
+        fail=$((fail + 1)); return
+    fi
+    echo "  caught: $name  [$code]"
+    pass=$((pass + 1))
+}
+
+# run_logic_case <name> <file> <expect-code> <expect-needle> <python-patch>
+# Re-introduces a converter-table defect while leaving the documented contract authoritative.
+run_logic_case() {
+    local name="$1" file="$2" code="$3" needle="$4" patch="$5"
+    cp "main/logic/$file" "$WORK/main/logic/$file"
+    if ! FILE="$WORK/main/logic/$file" python3 -c "$patch"; then
+        echo "  MISCONFIGURED: $name — logic patch did not apply (did the table change upstream?)"
+        fail=$((fail + 1)); return
+    fi
+    if ! "$CXX" -std=c++17 -I"$WORK/main" -o "$WORK/audit" tools/domain/catalog_audit.cpp 2>"$WORK/cc.log"; then
+        echo "  MISCONFIGURED: $name — audit failed to compile against the patched converter"
+        sed -n '1,5p' "$WORK/cc.log"
+        fail=$((fail + 1)); return
+    fi
+    local out rc
+    out="$("$WORK/audit" docs/REGISTERS.md tools/domain/audit_exceptions.txt 2>&1)"; rc=$?
+    cp "main/logic/$file" "$WORK/main/logic/$file"
 
     if [ "$rc" -eq 0 ]; then
         echo "  MISSED: $name — audit reported CLEAN on the re-introduced bug"
@@ -124,6 +197,37 @@ p=os.environ["FILE"]; s=open(p).read()
 old="{0x30, 2, 211, 1, -1, \"Fan 2 (step)\"}"
 assert old in s, "row not found"
 open(p,"w").write(s.replace(old,"{0x30, 2, 211, 1, -1, \"Fan 2 (rps)\"}"))
+'
+
+# The visible conv-217 labels are a code↔evidence contract. A prose-only docs change must not silently
+# disagree with what /values, WebSocket and MQTT publish.
+run_doc_case "conv-217 label drifts from firmware" "ENUM-CONTRACT" "operation mode index 18" '
+import os
+p=os.environ["FILE"]; s=open(p).read()
+old="| 18 | UseStrdThrm(ht)4 |"
+assert old in s, "enum row not found"
+open(p,"w").write(s.replace(old,"| 18 | Wrong label |"))
+'
+
+# Global code↔docs identity is not a model deviation. Even an attempted ledger entry must not turn
+# an enum mismatch green.
+run_doc_case "conv-217 drift cannot be suppressed" "ENUM-CONTRACT" "operation mode index 18" '
+import os
+p=os.environ["FILE"]; s=open(p).read()
+old="| 18 | UseStrdThrm(ht)4 |"
+assert old in s, "enum row not found"
+open(p,"w").write(s.replace(old,"| 18 | Wrong label |"))
+' "ENUM-CONTRACT:conv217:18"
+
+# An entry beyond the catalog's 0..19 range must not silently become a new published mode. Seed an
+# unsupported tail in the firmware table and require the contract to identify its exact index.
+run_logic_case "conv-217 unsupported index 20 returns" "convert.hpp" \
+    "ENUM-CONTRACT" "operation mode index 20" '
+import os
+p=os.environ["FILE"]; s=open(p).read()
+old="\"UseStrdThrm(ht)3\", \"UseStrdThrm(ht)4\", \"Aux.\"};"
+assert old in s, "OP_MODE tail not found"
+open(p,"w").write(s.replace(old,"\"UseStrdThrm(ht)3\", \"UseStrdThrm(ht)4\", \"Aux.\", \"Unsupported\"};",1))
 '
 
 echo

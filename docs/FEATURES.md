@@ -946,7 +946,8 @@ are also settable at runtime (web UI → NVS, which then overrides the Kconfig d
 | `DAIKIN_RX_PIN` / `DAIKIN_TX_PIN` | ✅ auto-detected; `POST /set_hp` pins them → NVS |
 | `DAIKIN_PROTOCOL` | ⚙️ auto-detected from the bus — deliberately **not** settable |
 | `DAIKIN_HOSTNAME` | ❌ compile-time only |
-| `DAIKIN_MQTT_DISCOVERY_PREFIX` / `_BASE_TOPIC` | ❌ compile-time only |
+| `DAIKIN_MQTT_DISCOVERY_PREFIX` | ❌ compile-time only |
+| `DAIKIN_MQTT_BASE_TOPIC` | ✅ `POST /set_mqtt` → NVS (empty resets to the compiled default) |
 | `DAIKIN_OTA_MANIFEST_URL` / `_FIRMWARE_BASE_URL` | ❌ compile-time only |
 | `DAIKIN_STATUS_LED_*` | ✅ `POST /set_board` → NVS (Kconfig is only the first-boot seed) |
 | `DAIKIN_BUTTON_GPIO` / `_ACTIVE_LOW` | ✅ `POST /set_board` → NVS; defaults to `-1` (**disabled**), since a floating input reading "pressed" would factory-reset an untouched board |

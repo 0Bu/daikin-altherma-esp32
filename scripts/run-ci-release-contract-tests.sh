@@ -73,15 +73,32 @@ printf 'seed\n' > "$T/version/README"
 git -C "$T/version" add -A
 git -C "$T/version" commit -qm seed
 check_out "no tags uses the floor" 1.0.0 "$T/version/scripts/next-version.sh"
+check_out "no-tag dev build counts the whole reachable history" 1.0.0-dev.1 \
+    "$T/version/scripts/next-version.sh" --dev
 git -C "$T/version" tag v1.2.9
 git -C "$T/version" tag v1.10.0
-check_out "highest valid tag bumps numerically" 1.10.1 "$T/version/scripts/next-version.sh"
+check_out "highest reachable valid tag bumps numerically" 1.10.1 "$T/version/scripts/next-version.sh"
 check_out "minor bump is strict" 1.11.0 "$T/version/scripts/next-version.sh" minor
 check_out "exact release version is echoed" 2.3.4 "$T/version/scripts/next-version.sh" --exact 2.3.4
 check_rc "pre-release exact version is refused" 1 "$T/version/scripts/next-version.sh" --exact 2.3.4-rc.1
 check_rc "leading-zero exact version is refused" 1 "$T/version/scripts/next-version.sh" --exact 02.3.4
+printf 'next\n' >> "$T/version/README"
+git -C "$T/version" add README
+git -C "$T/version" commit -qm next
+check_out "dev counter starts after the highest reachable tag" 1.10.1-dev.1 \
+    "$T/version/scripts/next-version.sh" --dev
+
+# High and malformed tags on a disconnected history are local debris, not release history for HEAD.
+orphan="$(printf 'orphan\n' | git -C "$T/version" commit-tree "$(git -C "$T/version" rev-parse HEAD^{tree})")"
+git -C "$T/version" tag v99.0.0 "$orphan"
+git -C "$T/version" tag v99.latest "$orphan"
+check_rc "divergent fixture is unreachable" 1 \
+    git -C "$T/version" merge-base --is-ancestor "$orphan" HEAD
+check_out "unreachable high tag is ignored" 1.10.1 "$T/version/scripts/next-version.sh"
+check_out "unreachable malformed tag is ignored by dev versioning" 1.10.1-dev.1 \
+    "$T/version/scripts/next-version.sh" --dev
 git -C "$T/version" tag v1.2.latest
-check_rc "malformed v-tag fails closed" 1 "$T/version/scripts/next-version.sh"
+check_rc "reachable malformed v-tag fails closed" 1 "$T/version/scripts/next-version.sh"
 git -C "$T/version" tag -d v1.2.latest >/dev/null
 printf '1.2\n' > "$T/version/version.txt"
 check_rc "malformed version floor fails closed" 1 "$T/version/scripts/next-version.sh"

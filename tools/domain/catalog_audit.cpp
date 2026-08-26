@@ -12,9 +12,10 @@
 //
 // It runs the REAL converter (logic/convert.hpp) over the REAL catalog (def/registry.hpp) — the
 // same source of truth the firmware uses, so there is no second implementation to drift — and
-// cross-checks both against the authoritative spec tables in docs/REGISTERS.md §5.
+// cross-checks both against the authoritative enum/spec tables in docs/REGISTERS.md §4.1 and §5.
 //
 // Checks (see check_* below):
+//   ENUM-CONTRACT conv 217's published label table must exactly match documented indices 0..N-1.
 //   SPEC-CONV    a row whose label the spec knows must decode the way the spec says.
 //   SPEC-LAYOUT  a row on a SHARED page must match some spec entry at its (reg, offset).
 //   CONSENSUS    a row that contradicts the same-named row in the rest of the catalog.
@@ -25,9 +26,10 @@
 // Findings carry a DECODE WITNESS: concrete wire bytes, what the spec/majority decodes them to,
 // and what this row decodes them to — the same evidence the manual review produced by hand.
 //
-// A finding is a question, not a verdict: a model may genuinely differ from the representative
-// table (docs/REGISTERS.md:196-200). Adjudicated deviations go in tools/domain/audit_exceptions.txt
-// with a reason, and stay listed as "suppressed" — never silently dropped.
+// A model-specific catalog finding is a question, not a verdict: a model may genuinely differ from
+// the representative table. Adjudicated deviations go in tools/domain/audit_exceptions.txt with a
+// reason and stay listed as "suppressed". ENUM-CONTRACT is global code↔docs identity and can never
+// be suppressed as a model deviation.
 //
 // Build/run: scripts/run-domain-audit.sh   (exit 0 = clean, 1 = findings, 2 = usage/parse error)
 #include <algorithm>
@@ -112,6 +114,11 @@ Envelope envelope_for(int type) {
 struct SpecRow {
     int         reg = 0, off = 0, len = 0, conv = 0, type = -1, line = 0;
     std::string label, nlabel;
+};
+
+struct EnumRow {
+    int         value = 0, line = 0;
+    std::string label;
 };
 
 // Pages the spec table describes for EVERY family. docs/REGISTERS.md:196-200: the table is a
@@ -233,6 +240,48 @@ std::vector<SpecRow> parse_spec(const std::string& path, std::string& err) {
     return out;
 }
 
+// Parse the explicit two-column conv-217 table in docs/REGISTERS.md §4.1. Its deliberately simple
+// shape is a contract surface: compressed ranges or prose aliases cannot prove that all array
+// indices, including the recovered catalog-only tail, still match the firmware.
+std::vector<EnumRow> parse_op_modes(const std::string& path, std::string& err) {
+    std::vector<EnumRow> out;
+    std::ifstream        in(path);
+    if (!in) {
+        err = "cannot open " + path;
+        return out;
+    }
+    std::set<int> seen;
+    std::string   line;
+    int           lineno = 0;
+    bool          in_section = false, found_section = false;
+    while (std::getline(in, line)) {
+        lineno++;
+        if (line == "### 4.1 Operation mode (conv 217)") {
+            in_section    = true;
+            found_section = true;
+            continue;
+        }
+        if (in_section && line.rfind("### ", 0) == 0) break;
+        if (!in_section || line.empty() || line[0] != '|') continue;
+        auto f = split_row(line);
+        // "| Val | Mode |" -> 4 fields (leading+trailing empty).
+        if (f.size() < 4 || !all_digits(f[1])) continue;
+        EnumRow r;
+        r.value = std::stoi(f[1]);
+        r.label = f[2];
+        r.line  = lineno;
+        if (!seen.insert(r.value).second) {
+            err = "duplicate conv-217 index " + std::to_string(r.value) + " at " + path + ":" +
+                  std::to_string(lineno);
+            return {};
+        }
+        out.push_back(r);
+    }
+    if (!found_section) err = "missing conv-217 section in " + path;
+    else if (out.empty()) err = "parsed 0 conv-217 rows from " + path + " (format changed?)";
+    return out;
+}
+
 // ── Catalog model ─────────────────────────────────────────────────────────────────────────────
 struct Row {
     std::string profile;
@@ -263,6 +312,43 @@ struct Finding {
 std::string finding_key(const std::string& code, const std::string& profile, int reg, int off,
                         const std::string& nlabel) {
     return code + ":" + profile + ":" + hex2(reg) + ":" + std::to_string(off) + ":" + nlabel;
+}
+
+// ── Check 0: ENUM-CONTRACT — published conv-217 text and its documented evidence must agree ───
+void check_op_mode_contract(const std::vector<EnumRow>& documented, std::vector<Finding>& out) {
+    std::map<int, const EnumRow*> by_value;
+    for (const auto& row : documented) by_value.emplace(row.value, &row);
+
+    for (int i = 0; i < OP_MODE_COUNT; i++) {
+        auto it = by_value.find(i);
+        if (it != by_value.end() && it->second->label == OP_MODE[i]) continue;
+        Finding f;
+        f.code = "ENUM-CONTRACT";
+        f.sev  = "HIGH";
+        f.key  = "ENUM-CONTRACT:conv217:" + std::to_string(i);
+        f.head = "conv 217 operation mode index " + std::to_string(i);
+        f.detail.push_back("firmware: OP_MODE[" + std::to_string(i) + "] = \"" + OP_MODE[i] + "\"");
+        if (it == by_value.end()) {
+            f.detail.push_back("docs:     index is missing from docs/REGISTERS.md §4.1");
+        } else {
+            f.detail.push_back("docs:     \"" + it->second->label + "\"  (docs/REGISTERS.md:" +
+                               std::to_string(it->second->line) + ")");
+        }
+        out.push_back(f);
+    }
+    for (const auto& row : documented) {
+        if (row.value >= 0 && row.value < OP_MODE_COUNT) continue;
+        Finding f;
+        f.code = "ENUM-CONTRACT";
+        f.sev  = "HIGH";
+        f.key  = "ENUM-CONTRACT:conv217:" + std::to_string(row.value);
+        f.head = "conv 217 operation mode index " + std::to_string(row.value);
+        f.detail.push_back("docs:     \"" + row.label + "\"  (docs/REGISTERS.md:" +
+                           std::to_string(row.line) + ")");
+        f.detail.push_back("firmware: index is outside OP_MODE[0.." +
+                           std::to_string(OP_MODE_COUNT - 1) + "]");
+        out.push_back(f);
+    }
 }
 
 // ── Converter equivalence, proven by execution ────────────────────────────────────────────────
@@ -756,6 +842,11 @@ int main(int argc, char** argv) {
         std::cerr << "domain-audit: " << err << "\n";
         return 2;
     }
+    std::vector<EnumRow> op_modes = parse_op_modes(spec_path, err);
+    if (!err.empty()) {
+        std::cerr << "domain-audit: " << err << "\n";
+        return 2;
+    }
 
     // The RESOLVED row set, not the raw generated tables: def/overlay.hpp supplies all applicable
     // hand-written blocks, including the page-0x10 protection words the offline generator does not
@@ -785,6 +876,7 @@ int main(int argc, char** argv) {
     }
 
     std::vector<Finding> f;
+    check_op_mode_contract(op_modes, f);
     check_spec_conv(rows, spec, f);
     check_spec_layout(rows, spec, f);
     check_consensus(rows, f);
@@ -794,10 +886,14 @@ int main(int argc, char** argv) {
 
     std::set<std::string> exc = load_exceptions(exc_path);
     std::vector<Finding>  live, muted;
-    for (auto& x : f) (exc.count(x.key) ? muted : live).push_back(x);
+    for (auto& x : f) {
+        const bool suppressible = x.code != "ENUM-CONTRACT";
+        (suppressible && exc.count(x.key) ? muted : live).push_back(x);
+    }
 
     std::cout << "domain audit — value-catalog correctness\n"
-              << "  spec:    " << spec_path << " (" << spec.size() << " rows)\n"
+              << "  spec:    " << spec_path << " (" << op_modes.size() << " enum rows, "
+              << spec.size() << " register rows)\n"
               << "  catalog: " << (sizeof(def::profiles) / sizeof(def::profiles[0])) << " profiles, "
               << rows.size() << " rows\n\n";
 
@@ -822,8 +918,8 @@ int main(int argc, char** argv) {
         std::cout << "clean — no domain findings.\n";
         return 0;
     }
-    std::cout << live.size() << " finding(s). Each is a question, not a verdict: confirm against\n"
-              << "docs/REGISTERS.md and a real unit. A deviation that is genuinely correct for a\n"
-              << "model goes in " << exc_path << " with a reason.\n";
+    std::cout << live.size() << " finding(s). Confirm catalog findings against docs/REGISTERS.md\n"
+              << "and a real unit. A model deviation that is genuinely correct goes in " << exc_path
+              << " with a reason; global ENUM-CONTRACT findings cannot be suppressed.\n";
     return 1;
 }

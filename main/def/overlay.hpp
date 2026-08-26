@@ -5,7 +5,7 @@
 //
 // ── Why this file exists at all ───────────────────────────────────────────────────────────────────
 // Every generated profile carries exactly SIX rows for page 0x10 (offsets 0, 1, 4, 5, 6, 8) while
-// docs/REGISTERS.md §5 documents TWENTY-SIX. The omission is uniform — all 43 generated tables agree
+// docs/REGISTERS.md §5 documents TWENTY-FIVE. The omission is uniform — all 43 generated tables agree
 // row-for-row — so it is not a per-model absence but the offline generator's page-0x10 input being
 // narrower than the in-repo spec. Among the missing rows are the protection-retry counters, which are
 // the input signal for the "silent protection retries" early warning (issue #69 UC5, spun off as

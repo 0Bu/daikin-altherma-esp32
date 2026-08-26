@@ -296,8 +296,19 @@ static void test_convert() {
     CHECK(std::string(convert(om, m1).text) == "Heating");
     const uint8_t m5[] = {0x05};
     const uint8_t m6[] = {0x06};
+    const uint8_t m18[]  = {0x12};
+    const uint8_t m19[]  = {0x13};
+    const uint8_t m20[]  = {0x14};
+    const uint8_t m255[] = {0xFF};
     CHECK(std::string(convert(om, m5).text) == "Auto Cool");   // mode index 5 = Auto Cool
     CHECK(std::string(convert(om, m6).text) == "Auto Heat");   // mode index 6 = Auto Heat
+    // Index 19 is catalog-only and unmeasured on a live hydronic unit. Pin its recovered spelling
+    // without claiming the mode is physically available; the next index must fail closed.
+    CHECK(OP_MODE_COUNT == 20);
+    CHECK(std::string(convert(om, m18).text) == "UseStrdThrm(ht)4");
+    CHECK(std::string(convert(om, m19).text) == "Aux.");
+    CHECK(std::string(convert(om, m20).text) == "?");
+    CHECK(std::string(convert(om, m255).text) == "?");
 
     // Index 0 is the IDLE state and reads "Stop" — NOT the split-air-conditioner table's "Fan
     // Only", a mode a hydronic Altherma does not have (#216). Pinned as a PAIR against the wire
