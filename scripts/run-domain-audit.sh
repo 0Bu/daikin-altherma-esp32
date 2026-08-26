@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Domain-correctness audit of the value catalog — the mechanical half of the $domain-review
 # merge gate. Compiles tools/domain/catalog_audit.cpp against the REAL catalog (main/def) and the
-# REAL converters (main/logic/convert.hpp) and cross-checks both against docs/REGISTERS.md §5.
+# REAL converters (main/logic/convert.hpp) and cross-checks both against docs/REGISTERS.md §4.1/§5.
 #
 # Answers the question the other gates cannot: are the published values physically RIGHT?
 # A wrong converter still compiles, still passes every host test, and publishes -971.5 °C to Home

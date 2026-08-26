@@ -175,18 +175,34 @@ It selects the pressure→saturation-temperature curve for `conv 405/406`.
 
 ### 4.1 Operation mode (conv 217)
 
-| Val | Mode | Val | Mode |
-|----:|------|----:|------|
-| 0 | Stop | 6 | Auto Heat |
-| 1 | Heating | 7 | Dry |
-| 2 | Cooling | 8 | Aux. |
-| 3 | Auto | 9 | Cooling Storage |
-| 4 | Ventilation | 10 | Heating Storage |
-| 5 | Auto Cool | 11–18 | Use-stored-thermostat (cool 1–4 / heat 1–4) |
+| Val | Mode |
+|----:|------|
+| 0 | Stop |
+| 1 | Heating |
+| 2 | Cooling |
+| 3 | Auto |
+| 4 | Ventilation |
+| 5 | Auto Cool |
+| 6 | Auto Heat |
+| 7 | Dry |
+| 8 | Aux. |
+| 9 | Cooling Storage |
+| 10 | Heating Storage |
+| 11 | UseStrdThrm(cl)1 |
+| 12 | UseStrdThrm(cl)2 |
+| 13 | UseStrdThrm(cl)3 |
+| 14 | UseStrdThrm(cl)4 |
+| 15 | UseStrdThrm(ht)1 |
+| 16 | UseStrdThrm(ht)2 |
+| 17 | UseStrdThrm(ht)3 |
+| 18 | UseStrdThrm(ht)4 |
+| 19 | Aux. |
 
-Indices **0 and 1 are measured**; the rest are the recovered split-air-conditioner vocabulary and are
-**unverified on a hydronic unit**. Index 0 read `Fan Only` until legacy-216 — a mode an Altherma does not
-have, and the value an idle outdoor unit reports, so it was the entry a user saw most of the day.
+Indices **0 and 1 are measured**; indices **2–19** are reference-derived and **unverified on a
+hydronic unit**. Indices 5/6 retain their independently adjudicated order; the second `Aux.` at index
+19 is catalog-only. Their presence in this table does not establish that the corresponding modes are
+physically available. Index 0 read `Fan Only` until legacy-216 — a mode an Altherma does not have,
+and the value an idle outdoor unit reports, so it was the entry a user saw most of the day.
 Corrected against a live Altherma 3 R W (`1.0.0-dev.211`), page `0x10` captured across the
 stopped→running edge by `logic/raw_capture.hpp`:
 
@@ -198,8 +214,9 @@ stopped→running edge by `logic/raw_capture.hpp`:
 Byte 0 steps `0x00`→`0x01` exactly at the transition, and index 1 was already correct — which is what
 makes this a relabel of one entry rather than a table shifted by one. Several remaining entries
 (`Ventilation`, `Dry`, the storage modes) cannot occur on a hydronic unit either, but none is
-reachable to measure, so they are left as recovered rather than guessed at. Keep this table and
-`OP_MODE` in `main/logic/convert.hpp` in step — this section is the domain audit's authority.
+reachable to measure, so they are left as recovered rather than guessed at. The domain audit
+mechanically keeps every numeric label in this table identical to `OP_MODE` in
+`main/logic/convert.hpp`.
 
 ### 4.2 Indoor/hydronic operation mode (conv 315)
 
