@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -398,8 +398,8 @@ I18N.it = localeValues([
   /* ota.reload_hint */ "installato — ricaricare la pagina",
   /* ota.dialog_title */ "Aggiornamento firmware",
   /* ota.switch_title */ "Cambia versione firmware",
-  /* ota.changes_title */ "Novità di questa build",
-  /* ota.no_changes */ "Per questa build non è stato fornito alcun changelog.",
+  /* ota.changes_title */ "Modifiche in questo aggiornamento",
+  /* ota.no_changes */ "Per questo aggiornamento non è stato fornito alcun changelog.",
   /* ota.install_help */ "Il dispositivo scarica e installa l’immagine firmata, quindi si riavvia. Se il nuovo firmware non riesce a collegarsi, il dispositivo ripristina automaticamente la build attuale.",
   /* ota.switch_help */ "Questa build è precedente perché è selezionato un altro canale di aggiornamento. La firma viene verificata prima dell’installazione. Se non riesce a collegarsi, il dispositivo ripristina automaticamente la build attuale.",
   /* ota.install */ "Installa aggiornamento",

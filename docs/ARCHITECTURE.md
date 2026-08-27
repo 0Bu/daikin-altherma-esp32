@@ -2336,21 +2336,35 @@ Structure:
   the config blob (v3) and applied **live**: a check reads the current channel when it fetches, so a
   check right after the switch already reads the new feed. Once an update is accepted, it pins that
   checked channel together with the offered version and app SHA-256 for the complete task. Dev builds are
-  stamped `<next release>-dev.<n>` — a semver pre-release, so ordering does the work: a dev board
-  upgrades to the next release on its own, and a release board never drifts onto a dev build.
-  Switching *back* (dev → the last release) is a downgrade by version, which the gate below refuses
+  stamped `<next release>-dev.<n>` — a semver pre-release, so the future stable version orders above
+  it, but the independent release feed offers that version only after an explicit channel switch.
+  A release board never drifts onto a dev build. While the release feed still serves the preceding
+  stable version, switching *back* (dev → release) is a downgrade, which the gate below refuses
   unless the request explicitly carries `?downgrade=1`; the web UI sends it only after the user
-  picks a channel and confirms. Without that the release channel would be a one-way door.
+  picks a channel and confirms. Without that explicit path the release channel would be a one-way door.
 - **Version-bound release notes.** Each release and dev feed publishes `changelog.json` beside its
   selected `manifest.json`. CI derives at most twelve explicitly classified user-facing first-parent
   commit subjects from the previous published source SHA to the exact new source, rejects obvious
-  Git/issue references, and caps decoded text at 960 bytes. During a successful newer/downgrade check, the same OTA
+  Git/issue references, and caps decoded text at 960 bytes. Dev publications carry the preceding
+  validated version-prefixed lines forward inside the same two-field JSON document. The first such
+  document uses a reviewed version/source-bound migration seed; an unversioned dev predecessor with
+  any other identity fails publication rather than inventing history. This keeps old clients able to
+  show the complete cumulative same-core list while `logic/ota_changelog_range.hpp` removes entries
+  through the running version in place for current clients. When the dev core changes, the publisher requires
+  the preceding core's stable release as an ancestry-bound baseline and resets the retained history
+  and commit range there. A missing per-channel manifest is allowed only as the explicit first
+  publication; a present manifest with missing/malformed provenance or a transition without that
+  release fails closed. The history must fit the existing legacy budget; overflow stops publication instead
+  of silently losing skipped-build notes. During a successful newer/downgrade check, the same OTA
   task fetches the sibling over absolute HTTPS with redirects disabled and accepts it only when its
   top-level version equals the manifest offer. Notes are optional presentation, never install
   authorization: failure leaves the signed offer usable with localized fallback copy. One transient
   1025-byte 8-bit-heap document slot is allocated only after TLS setup and decoded in place outside
   `OtaStatus`. After the TLS client is fully destroyed, the task retains only the exact decoded
-  length. That one-shot lease is freed after the first response (including a broken send), after a
+  length. Range selection happens only after TLS cleanup, allocates nothing and leaves target-only
+  legacy release notes unchanged unless their first line uses the reserved compact
+  `v<version> — ` cumulative prefix; a versioned document for an equal or older target is discarded
+  rather than misrepresenting old cumulative history as new changes. That one-shot lease is freed after the first response (including a broken send), after a
   60-second static-timer TTL when never requested, or before the next OTA task. Its one-second
   auto-reload callback only try-locks the OTA mutex, so it cannot block the shared timer daemon.
   Thus the new image
@@ -2990,7 +3004,7 @@ place:
   generation reports `busy=false` plus a complete channel/version/application-SHA offer. This avoids
   consuming the old idle status during the task's 1.1-second quiesce lead. It then requests the
   optional `GET /ota/changelog?after=<generation>` and opens the route-neutral firmware modal with
-  current/available version, release/dev channel, literal change list (or localized fallback), and
+  current/available version, release/dev channel, the literal changes in that update range (or localized fallback), and
   the signed-install/reboot/rollback explanation. Cancel, backdrop and Escape never write; Install
   passes the exact check lease to `POST /ota/update`, requires the immediate successor generation,
   then polls only that operation while rendering download progress **inline next to that version**

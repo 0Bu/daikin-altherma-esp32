@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -398,8 +398,8 @@ I18N.es = localeValues([
   /* ota.reload_hint */ "instalada — recarga la página",
   /* ota.dialog_title */ "Actualización de firmware",
   /* ota.switch_title */ "Cambiar la versión de firmware",
-  /* ota.changes_title */ "Novedades de esta compilación",
-  /* ota.no_changes */ "No se proporcionó un registro de cambios para esta compilación.",
+  /* ota.changes_title */ "Cambios en esta actualización",
+  /* ota.no_changes */ "No se proporcionó un registro de cambios para esta actualización.",
   /* ota.install_help */ "El dispositivo descarga e instala la imagen firmada y después se reinicia. Si el nuevo firmware no consigue conectarse, el dispositivo restaura automáticamente la compilación actual.",
   /* ota.switch_help */ "Esta compilación es anterior porque se ha seleccionado otro canal de actualización. Su firma se verifica antes de instalarla. Si no consigue conectarse, el dispositivo restaura automáticamente la compilación actual.",
   /* ota.install */ "Instalar actualización",

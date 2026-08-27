@@ -49,7 +49,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 2 | Refuse-to-flash-untrusted guard (structure, CRC, image digest, RSA-PSS and pinned key) | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
 | 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ 🧪 | [`partitions.csv`](../partitions.csv), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** (not an uptime timer) | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
-| 5 | OTA manifest check + version-bound **release/dev changelog modal** + signed manual HTTPS stream with **at most two exact fail-closed Range resumes** and two-point downgrade gate; dynamic TLS records, a boot-created absolute header/body socket watchdog, clean MQTT pause, transport cleanup, phase-specific INTERNAL-heap admission, fixed status and bounded peer coordination | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`http_client_diag.cpp`](../main/http_client_diag.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`www/js/settings.js`](../main/www/js/settings.js), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/http_deadline.hpp`](../main/logic/http_deadline.hpp), [`logic/ota_transport.hpp`](../main/logic/ota_transport.hpp), [`logic/fixed_text.hpp`](../main/logic/fixed_text.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
+| 5 | OTA manifest check + version-bound **release/dev changelog modal** with cumulative skipped-dev-build notes + signed manual HTTPS stream with **at most two exact fail-closed Range resumes** and two-point downgrade gate; dynamic TLS records, a boot-created absolute header/body socket watchdog, clean MQTT pause, transport cleanup, phase-specific INTERNAL-heap admission, fixed status and bounded peer coordination | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`http_client_diag.cpp`](../main/http_client_diag.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`www/js/settings.js`](../main/www/js/settings.js), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/http_deadline.hpp`](../main/logic/http_deadline.hpp), [`logic/ota_transport.hpp`](../main/logic/ota_transport.hpp), [`logic/fixed_text.hpp`](../main/logic/fixed_text.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_changelog_range.hpp`](../main/logic/ota_changelog_range.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
 | 6 | Live UI by **polling** bounded-chunk-streamed `/status` + `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation, both snapshots fail fast during OTA, and the model-sized values snapshot waits boundedly behind shorter Weather TLS | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`logic/http_values_wait.hpp`](../main/logic/http_values_wait.hpp), [`test_status_heap_contract.mjs`](../test/test_status_heap_contract.mjs), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
 | 7 | Minified deterministic-gzip UI **embedded in the app image**: startup page under 160 KiB, each device-local locale under 32 KiB | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs) |
 | 8 | HTTP handlers under an **OOM boundary**: `503` before the first response emission; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp) |
@@ -226,8 +226,18 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   separately, so the feeds cannot drift onto different hosts.
 - **✅ 🧪 Release/dev changelog modal**: CI publishes a bounded `changelog.json` beside each channel's
   manifest, derived from explicitly classified user-facing first-parent commit subjects since that
-  feed's previous source. Obvious Git/issue references are rejected because the resulting selected
-  subject text is public feed content even when the repository is private.
+  feed's previous source. The development feed carries validated, ordered, version-prefixed notes
+  forward within one development core, so an older client can render every same-core published
+  build it skipped; current firmware filters the same text in place after the running build and
+  through the exact offered build. The outer JSON
+  stays compatible with older firmware and the reviewed migration seed is bound to the exact last
+  target-only dev source. A new development core starts only from the published release for the
+  preceding core, then resets both the retained history and commit range. A genuinely absent
+  per-channel manifest is the explicit first-publication case; once present, malformed or
+  incomplete published provenance fails generation instead of being mistaken for an empty feed. Obvious
+  Git/issue references are rejected because the resulting selected subject text is public feed
+  content even when the repository is private. The reviewed migration literals are the sole
+  source-bound exception to commit-subject normalization.
   The firmware fetches it only for a valid offer, requires the document's version to equal the
   manifest version, decodes at most 960 bytes in place in one transient 1025-byte 8-bit-heap
   document slot, and after TLS cleanup retains only the exact decoded length. The one-shot text is
@@ -236,7 +246,7 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   second TLS request uses the same dynamic TLS-record client and first requires the same four stable
   56 KiB total-free / 24 KiB largest-INTERNAL-block samples as the manifest and image handshakes. Its
   header and body share the same 30-second socket watchdog as the manifest.
-  The device-local modal shows the exact current/available versions, channel, literal change list and
+  The device-local modal shows the exact current/available versions, channel, literal update-range change list and
   signed-update/rollback explanation in all shipped languages. Missing notes fall back locally and
   never weaken or block the signed artifact lease.
 - **✅ 🧪 Manifest check & signed download**: both network operations run on **one on-demand task,
@@ -786,7 +796,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | Config & board | `config_model`, `config_store`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
 | MQTT / HA | `discovery`, `ha_device`, `mqtt_base`, `mqtt_cleanup`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus`, `weather_mqtt` |
 | HTTP | `http_body`, `payload_complete`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `chunk_sink`, `redact` |
-| OTA & boot | `health_gate`, `http_deadline`, `version_cmp`, `ota_manifest`, `ota_hil_feed`, `ota_channel`, `ota_transport`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |
+| OTA & boot | `health_gate`, `http_deadline`, `version_cmp`, `ota_manifest`, `ota_changelog_range`, `ota_hil_feed`, `ota_channel`, `ota_transport`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |
 | Network policy | `wifi_rollback`, `link_watch`, `syslog_policy`, `timestamp` |
 | On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `outdoor_evidence`, `refrigerant_service`, `state_dwell`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |
 | Local I/O | `led_pattern`, `button` |

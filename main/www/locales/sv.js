@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -398,8 +398,8 @@ I18N.sv = localeValues([
   /* ota.reload_hint */ "installerad — ladda sedan på nytt",
   /* ota.dialog_title */ "Firmwareuppdatering",
   /* ota.switch_title */ "Byt firmwareversion",
-  /* ota.changes_title */ "Nytt i den här versionen",
-  /* ota.no_changes */ "Ingen ändringslogg tillhandahölls för den här versionen.",
+  /* ota.changes_title */ "Ändringar i den här uppdateringen",
+  /* ota.no_changes */ "Ingen ändringslogg tillhandahölls för den här uppdateringen.",
   /* ota.install_help */ "Enheten laddar ned och installerar den signerade avbildningen och startar om. Om den nya firmwareversionen inte ansluter till nätet återställer enheten automatiskt den aktuella versionen.",
   /* ota.switch_help */ "Den här versionen är äldre eftersom en annan uppdateringskanal har valts. Signaturen verifieras före installationen. Om den äldre versionen inte ansluter till nätet återställer enheten automatiskt den aktuella versionen.",
   /* ota.install */ "Installera uppdatering",

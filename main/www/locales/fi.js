@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -398,8 +398,8 @@ I18N.fi = localeValues([
   /* ota.reload_hint */ "asennettu — lataa sivu uudelleen",
   /* ota.dialog_title */ "Laiteohjelmistopäivitys",
   /* ota.switch_title */ "Vaihda laiteohjelmistoversiota",
-  /* ota.changes_title */ "Tämän koontiversion uudistukset",
-  /* ota.no_changes */ "Tälle koontiversiolle ei toimitettu muutoslokia.",
+  /* ota.changes_title */ "Tämän päivityksen muutokset",
+  /* ota.no_changes */ "Tälle päivitykselle ei toimitettu muutoslokia.",
   /* ota.install_help */ "Laite lataa ja asentaa allekirjoitetun levykuvan ja käynnistyy uudelleen. Jos uusi laiteohjelmisto ei pääse verkkoon, laite palauttaa nykyisen koontiversion automaattisesti.",
   /* ota.switch_help */ "Tämä koontiversio on vanhempi, koska toinen päivityskanava on valittu. Sen allekirjoitus tarkistetaan ennen asennusta. Jos vanhempi versio ei pääse verkkoon, laite palauttaa nykyisen koontiversion automaattisesti.",
   /* ota.install */ "Asenna päivitys",

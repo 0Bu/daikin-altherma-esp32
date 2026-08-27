@@ -482,8 +482,8 @@ const I18N = {
     // The install finished; only the automatic page reload gave up waiting for the board.
     "ota.reload_hint": "installed — reload the page",
     "ota.dialog_title": "Firmware update", "ota.switch_title": "Switch firmware version",
-    "ota.changes_title": "What's new in this build",
-    "ota.no_changes": "No changelog was supplied for this build.",
+    "ota.changes_title": "Changes in this update",
+    "ota.no_changes": "No changelog was supplied for this update.",
     "ota.install_help": "The device downloads and installs the signed image, then restarts. If the new firmware cannot get online, the device automatically restores the current build.",
     "ota.switch_help": "This build is older because a different update channel is selected. Its signature is verified before installation, and the device automatically restores the current build if the older one cannot get online.",
     "ota.install": "Install update", "ota.switch": "Install older build",

@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -398,8 +398,8 @@ I18N.nb = localeValues([
   /* ota.reload_hint */ "installert — last siden på nytt",
   /* ota.dialog_title */ "Fastvareoppdatering",
   /* ota.switch_title */ "Bytt fastvareversjon",
-  /* ota.changes_title */ "Nytt i denne versjonen",
-  /* ota.no_changes */ "Ingen endringslogg ble levert for denne versjonen.",
+  /* ota.changes_title */ "Endringer i denne oppdateringen",
+  /* ota.no_changes */ "Ingen endringslogg ble levert for denne oppdateringen.",
   /* ota.install_help */ "Enheten laster ned og installerer det signerte avbildet og starter på nytt. Hvis den nye fastvaren ikke kommer på nett, gjenoppretter enheten automatisk den gjeldende versjonen.",
   /* ota.switch_help */ "Denne versjonen er eldre fordi en annen oppdateringskanal er valgt. Signaturen kontrolleres før installasjon. Hvis den eldre versjonen ikke kommer på nett, gjenoppretter enheten automatisk den gjeldende versjonen.",
   /* ota.install */ "Installer oppdatering",

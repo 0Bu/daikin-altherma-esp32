@@ -399,8 +399,10 @@ need them locally — run them if you touch
 [`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh),
 [`scripts/build-pages.sh`](scripts/build-pages.sh),
 [`scripts/check-web-installer-plan.py`](scripts/check-web-installer-plan.py),
-[`scripts/check-publish-version.sh`](scripts/check-publish-version.sh) or
-[`scripts/next-version.sh`](scripts/next-version.sh), or when changing the CI trust/release split:
+[`scripts/check-publish-version.sh`](scripts/check-publish-version.sh),
+[`scripts/next-version.sh`](scripts/next-version.sh),
+[`scripts/generate-ota-changelog.py`](scripts/generate-ota-changelog.py), or when changing the CI
+trust/release split:
 
 ```bash
 scripts/run-pages-publish-tests.sh         # needs only git, no toolchain
