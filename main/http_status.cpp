@@ -125,9 +125,8 @@ static bool wait_for_values_tls_owner() {
         // snapshot by taking one side of the transition from each owner.
         const bool weather_active = weather_fetch_active();
         const bool ota_active     = ota_download_active();
-        const auto decision = logic::http_values_wait_decision(
-            ota_active, weather_active,
-            static_cast<uint32_t>(elapsed * portTICK_PERIOD_MS),
+        const auto decision       = logic::http_values_wait_decision(
+            ota_active, weather_active, static_cast<uint32_t>(elapsed * portTICK_PERIOD_MS),
             static_cast<uint32_t>(kValuesTlsWait * portTICK_PERIOD_MS));
         if (decision == logic::HttpValuesWaitDecision::Ready) return true;
         if (decision == logic::HttpValuesWaitDecision::Refuse) return false;

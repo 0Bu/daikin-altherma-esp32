@@ -2700,8 +2700,7 @@ static void test_weather_fetch_headroom() {
 static void test_http_values_wait() {
     using logic::HttpValuesWaitDecision;
     CHECK(logic::http_values_wait_decision(false, false, 0, 4000) == HttpValuesWaitDecision::Ready);
-    CHECK(logic::http_values_wait_decision(true, false, 0, 4000) ==
-          HttpValuesWaitDecision::Refuse);
+    CHECK(logic::http_values_wait_decision(true, false, 0, 4000) == HttpValuesWaitDecision::Refuse);
     CHECK(logic::http_values_wait_decision(false, true, 3999, 4000) ==
           HttpValuesWaitDecision::Wait);
     CHECK(logic::http_values_wait_decision(true, true, 3999, 4000) ==

@@ -20,8 +20,7 @@ inline HttpValuesWaitDecision http_values_wait_decision(bool ota_active, bool we
     // compact progress/status requests that deliberately use a one-second live-gate deadline.
     if (ota_active) return HttpValuesWaitDecision::Refuse;
     if (!weather_active) return HttpValuesWaitDecision::Ready;
-    return elapsed_ms >= timeout_ms ? HttpValuesWaitDecision::Refuse
-                                    : HttpValuesWaitDecision::Wait;
+    return elapsed_ms >= timeout_ms ? HttpValuesWaitDecision::Refuse : HttpValuesWaitDecision::Wait;
 }
 
 }  // namespace daik::logic
