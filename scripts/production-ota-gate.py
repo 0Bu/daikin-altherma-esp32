@@ -104,6 +104,8 @@ LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES = 1024
 LEGACY_RELEASE_VERSION = "1.0.2"
 LEGACY_RELEASE_SOURCE_SHA = "cc29e8c6e593570140e6446b07520216251939ed"
 LEGACY_RELEASE_APP_SHA256 = "c8437cb546175fa9591dcce9e137c35ec6ea3028c64678b08e029392cb9ea4ce"
+# /status exposes the first nine characters of this signed release image's ELF SHA-256.
+LEGACY_RELEASE_ELF_ID = "123d9f795"
 
 
 class GateError(RuntimeError):
@@ -1743,6 +1745,37 @@ def post_update_once(
     return generation
 
 
+def record_ota_transfer_evidence(ota: dict[str, Any], evidence: dict[str, Any]) -> None:
+    """Retain writer-side minima and distinguish a missing legacy field from invalid evidence."""
+    state = ota.get("state")
+    # Once the writer reported done, later responses may come from the new boot, whose operation-
+    # local counters are intentionally reset. They are identity observations, not writer evidence.
+    if evidence.get("saw_done") is True and state != "done":
+        return
+    for source, target in (
+        ("heap_min_free_bytes", "heap_min_free_bytes"),
+        ("heap_min_largest_block_bytes", "heap_min_largest_block_bytes"),
+        ("ota_stack_min_free_bytes", "ota_stack_min_free_bytes"),
+    ):
+        if source not in ota:
+            continue
+        value = ota[source]
+        if isinstance(value, int) and not isinstance(value, bool):
+            previous = evidence.get(target)
+            evidence[target] = value if not isinstance(previous, int) \
+                else min(previous, value)
+        else:
+            evidence[f"{target}_invalid"] = True
+    if state == "done":
+        evidence["ota_stack_done_samples"] = \
+            int(evidence.get("ota_stack_done_samples", 0)) + 1
+        if "ota_stack_min_free_bytes" in ota:
+            evidence["ota_stack_present_at_done"] = True
+        else:
+            evidence["ota_stack_absent_at_done"] = True
+    evidence["saw_done"] = evidence.get("saw_done") is True or state == "done"
+
+
 def wait_for_new_firmware(
     host: str, version: str, elf: str, status_endpoint: ResolvedHttpEndpoint,
     ota_evidence: dict[str, Any] | None = None,
@@ -1758,17 +1791,7 @@ def wait_for_new_firmware(
                 fail(f"OTA failed: {ota.get('message', '')}")
             saw_done = saw_done or ota.get("state") == "done"
             if ota_evidence is not None:
-                for source, target in (
-                    ("heap_min_free_bytes", "heap_min_free_bytes"),
-                    ("heap_min_largest_block_bytes", "heap_min_largest_block_bytes"),
-                    ("ota_stack_min_free_bytes", "ota_stack_min_free_bytes"),
-                ):
-                    value = ota.get(source)
-                    if isinstance(value, int) and value > 0:
-                        previous = ota_evidence.get(target)
-                        ota_evidence[target] = value if not isinstance(previous, int) \
-                            else min(previous, value)
-                ota_evidence["saw_done"] = saw_done
+                record_ota_transfer_evidence(ota, ota_evidence)
             # The firmware intentionally refuses the allocation-rich /status surface while its
             # TLS owner is active. Observe progress only through compact /ota/status, and ask for
             # full identity after the old process has stopped being busy (normally the new boot's
@@ -2029,15 +2052,31 @@ def exercise_bench_full_download(
     }
 
 
-def require_ota_transfer_evidence(host: str, evidence: dict[str, Any], *, phase: str) -> None:
+def require_ota_transfer_evidence(
+    host: str, evidence: dict[str, Any], *, phase: str,
+    writer_version: str, writer_elf: str,
+) -> None:
     """Require completed validation plus operation-local heap and OTA-task stack minima."""
-    if int(evidence.get("heap_min_free_bytes", 0)) <= 0 or \
+    if evidence.get("heap_min_free_bytes_invalid") is True or \
+       evidence.get("heap_min_largest_block_bytes_invalid") is True or \
+       int(evidence.get("heap_min_free_bytes", 0)) <= 0 or \
        int(evidence.get("heap_min_largest_block_bytes", 0)) <= 0:
         fail(f"{host} {phase} OTA did not expose sampled operation-local heap minima")
     if evidence.get("saw_done") is not True:
         fail(f"{host} {phase} OTA never exposed its completed validation state")
     ota_stack = evidence.get("ota_stack_min_free_bytes")
-    if not isinstance(ota_stack, int) or ota_stack < 1024:
+    stack_invalid = evidence.get("ota_stack_min_free_bytes_invalid") is True
+    stack_present_at_done = evidence.get("ota_stack_present_at_done") is True
+    stack_absent_at_done = evidence.get("ota_stack_absent_at_done") is True
+    legacy_writer_without_stack = phase == "bench target" and not stack_invalid and \
+        not stack_present_at_done and stack_absent_at_done and ota_stack is None and (
+        writer_version, writer_elf,
+    ) == (
+        LEGACY_RELEASE_VERSION, LEGACY_RELEASE_ELF_ID,
+    )
+    if (stack_invalid or stack_absent_at_done or not stack_present_at_done or \
+        not isinstance(ota_stack, int) or isinstance(ota_stack, bool) or ota_stack < 1024) and \
+       not legacy_writer_without_stack:
         fail(
             f"{host} {phase} OTA task stack headroom {ota_stack!r} is below 1024 bytes"
         )
@@ -2087,7 +2126,10 @@ def install_bench_target(
     )
     if returned.get("sys", {}).get("reset_reason") != "sw":
         fail("bench target did not return from the expected software OTA reboot")
-    require_ota_transfer_evidence(host, transfer, phase="bench target")
+    require_ota_transfer_evidence(
+        host, transfer, phase="bench target",
+        writer_version=current_version, writer_elf=current_elf,
+    )
     health_window = wait_for_bench_health_window(
         host, mac, target_version, target_elf, phase="target",
     )
@@ -2757,7 +2799,10 @@ def release_hil_install_once(
         "image_state": pending.get("image_state"),
         "rollback_pending": pending.get("rollback_pending"),
     }
-    require_ota_transfer_evidence(host, transfer, phase="release-HIL")
+    require_ota_transfer_evidence(
+        host, transfer, phase="release-HIL",
+        writer_version=current_version, writer_elf=current_elf,
+    )
     return post_witness_status, transfer
 
 
@@ -3800,24 +3845,97 @@ def self_test() -> None:
         assert require_stack_evidence(
             status_fixture, hil["required_stack_tasks"], hil["min_stack_free_bytes"],
         )["weather"] == 1408
-        transfer_fixture = {
-            "heap_min_free_bytes": 32768,
+        transfer_fixture: dict[str, Any] = {}
+        record_ota_transfer_evidence({
+            "state": "done", "heap_min_free_bytes": 32768,
             "heap_min_largest_block_bytes": 24576,
             "ota_stack_min_free_bytes": 1536,
-            "saw_done": True,
-        }
+        }, transfer_fixture)
         require_ota_transfer_evidence(
             "hil.invalid", transfer_fixture, phase="self-test",
+            writer_version="2.0.0", writer_elf="candidate",
         )
-        transfer_fixture["ota_stack_min_free_bytes"] = 1023
+        low_stack_fixture: dict[str, Any] = {}
+        record_ota_transfer_evidence({
+            "state": "done", "heap_min_free_bytes": 32768,
+            "heap_min_largest_block_bytes": 24576,
+            "ota_stack_min_free_bytes": 1023,
+        }, low_stack_fixture)
         try:
             require_ota_transfer_evidence(
-                "hil.invalid", transfer_fixture, phase="self-test",
+                "hil.invalid", low_stack_fixture, phase="self-test",
+                writer_version="2.0.0", writer_elf="candidate",
             )
         except GateError:
             pass
         else:
             raise AssertionError("release-HIL accepted inadequate OTA task stack evidence")
+        try:
+            require_ota_transfer_evidence(
+                "hil.invalid", low_stack_fixture, phase="bench target",
+                writer_version=LEGACY_RELEASE_VERSION, writer_elf=LEGACY_RELEASE_ELF_ID,
+            )
+        except GateError:
+            pass
+        else:
+            raise AssertionError("legacy writer accepted a numeric OTA stack below the floor")
+        legacy_transfer_fixture: dict[str, Any] = {}
+        record_ota_transfer_evidence({
+            "state": "done", "heap_min_free_bytes": 32768,
+            "heap_min_largest_block_bytes": 24576,
+        }, legacy_transfer_fixture)
+        # The returned target's idle counters are reset and must not turn the writer's genuinely
+        # absent field into an invalid field after completed validation was already observed.
+        record_ota_transfer_evidence({
+            "state": "", "heap_min_free_bytes": 0,
+            "heap_min_largest_block_bytes": 0, "ota_stack_min_free_bytes": None,
+        }, legacy_transfer_fixture)
+        require_ota_transfer_evidence(
+            "hil.invalid", legacy_transfer_fixture, phase="bench target",
+            writer_version=LEGACY_RELEASE_VERSION, writer_elf=LEGACY_RELEASE_ELF_ID,
+        )
+        for invalid_stack in (0, -1, None, "invalid", True):
+            invalid_fixture: dict[str, Any] = {}
+            record_ota_transfer_evidence({
+                "state": "done", "heap_min_free_bytes": 32768,
+                "heap_min_largest_block_bytes": 24576,
+                "ota_stack_min_free_bytes": invalid_stack,
+            }, invalid_fixture)
+            try:
+                require_ota_transfer_evidence(
+                    "hil.invalid", invalid_fixture, phase="bench target",
+                    writer_version=LEGACY_RELEASE_VERSION, writer_elf=LEGACY_RELEASE_ELF_ID,
+                )
+            except GateError:
+                pass
+            else:
+                raise AssertionError(
+                    f"legacy writer accepted present invalid OTA stack evidence {invalid_stack!r}"
+                )
+        for writer_version, writer_elf in (
+            ("1.0.2-dev.1", LEGACY_RELEASE_ELF_ID),
+            (LEGACY_RELEASE_VERSION, "deadbeef0"),
+        ):
+            try:
+                require_ota_transfer_evidence(
+                    "hil.invalid", legacy_transfer_fixture, phase="bench target",
+                    writer_version=writer_version, writer_elf=writer_elf,
+                )
+            except GateError:
+                pass
+            else:
+                raise AssertionError(
+                    "ordinary bench accepted missing OTA stack evidence from a non-legacy writer"
+                )
+        try:
+            require_ota_transfer_evidence(
+                "hil.invalid", legacy_transfer_fixture, phase="release-HIL",
+                writer_version=LEGACY_RELEASE_VERSION, writer_elf=LEGACY_RELEASE_ELF_ID,
+            )
+        except GateError:
+            pass
+        else:
+            raise AssertionError("release-HIL reused the ordinary bench legacy exception")
         status_fixture["sys"]["stack_min_free_bytes"]["mqtt"] = 512
         try:
             require_stack_evidence(
@@ -4090,12 +4208,11 @@ def self_test() -> None:
         ) -> dict[str, Any]:
             assert host == "hil.invalid" and version == "2.0.0" and elf == "candidate"
             assert endpoint == fixture_endpoint and evidence is not None
-            evidence.update({
-                "heap_min_free_bytes": 32768,
+            record_ota_transfer_evidence({
+                "state": "done", "heap_min_free_bytes": 32768,
                 "heap_min_largest_block_bytes": 24576,
                 "ota_stack_min_free_bytes": 1536,
-                "saw_done": True,
-            })
+            }, evidence)
             return stale_candidate
 
         globals()["resolve_http_endpoint"] = lambda host: fixture_endpoint

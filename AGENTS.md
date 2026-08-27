@@ -155,6 +155,10 @@ documentation.
   the exact signed dev artifact, performs one un-retried POST only to `bench`, survives rollback
   probation and stress, and cannot contact `production`. Use OTA, not USB, for ordinary bench
   updates; signed USB is bootstrap/recovery only.
+- The exact historical `1.0.2` bench writer predates `ota_stack_min_free_bytes`. Only its reported
+  version plus shortened ELF identity may leave that one pre-reboot measurement unknown; a present
+  invalid or below-limit value, every other writer and release HIL still fail closed. Completed
+  validation, positive heap minima, target probation and stress remain mandatory.
 - Production promotion remains a distinct `--confirm-production production --execute` transaction:
   bench staging and stress precede one production POST plus read-only canary and retained-X10A
   checks. Direct `/ota/update` writes and release creation remain outside both modes.

@@ -117,8 +117,17 @@ const supplementalContract = () => {
   assert.match(limitedRemoteDocument,
     /threading\.Thread\([\s\S]{0,140}?daemon=True\)\.start\(\)/);
   assert.match(limitedRemoteDocument, /if not completed\.wait\(timeout\):/);
+  const transferObserver = section(
+    gate, "def record_ota_transfer_evidence(", "\ndef wait_for_new_firmware(",
+  );
+  assert.match(transferObserver, /\("ota_stack_min_free_bytes",\s*"ota_stack_min_free_bytes"\)/);
+  assert.match(transferObserver, /ota_stack_present_at_done/);
+  assert.match(transferObserver, /ota_stack_absent_at_done/);
+  assert.match(transferObserver, /not isinstance\(value, bool\)/);
+  assert.doesNotMatch(transferObserver,
+    /if False and evidence\.get\("saw_done"\) is True and state != "done"/);
   const rebootWait = section(gate, "def wait_for_new_firmware(", "\ndef wait_for_bench_health_window(");
-  assert.match(rebootWait, /\("ota_stack_min_free_bytes",\s*"ota_stack_min_free_bytes"\)/);
+  assert.match(rebootWait, /record_ota_transfer_evidence\(ota, ota_evidence\)/);
   const identityWait = section(
     gate, "def wait_for_identity(", "\ndef wait_for_ota_image_state(",
   );
@@ -535,6 +544,14 @@ try {
       )],
     ["the OTA task stack sample is dropped before reboot", () =>
       replaceOnce("scripts/production-ota-gate.py", '("ota_stack_min_free_bytes", "ota_stack_min_free_bytes"),', '("ignored_ota_stack", "ignored_ota_stack"),')],
+    ["invalid numeric OTA evidence is mistaken for an absent legacy field", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "if isinstance(value, int) and not isinstance(value, bool):",
+        "if isinstance(value, int) and not isinstance(value, bool) and value > 0:")],
+    ["new-boot reset counters overwrite completed writer evidence", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if evidence.get("saw_done") is True and state != "done":',
+        'if False and evidence.get("saw_done") is True and state != "done":')],
     ["the OTA task stack floor is bypassed", () =>
       replaceOnce("scripts/production-ota-gate.py", "ota_stack < 1024", "ota_stack < 0")],
     ["controller requests lose their whole-operation deadline", () =>
@@ -575,6 +592,22 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         "LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES = 1024",
         "LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES = 2048")],
+    ["the missing OTA-stack exception accepts another legacy ELF", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'LEGACY_RELEASE_ELF_ID = "123d9f795"',
+        'LEGACY_RELEASE_ELF_ID = "deadbeef0"')],
+    ["the missing OTA-stack exception accepts every 1.0.2-labelled writer", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "writer_version, writer_elf,\n    ) == (\n        LEGACY_RELEASE_VERSION, LEGACY_RELEASE_ELF_ID,",
+        "writer_version, LEGACY_RELEASE_ELF_ID,\n    ) == (\n        LEGACY_RELEASE_VERSION, LEGACY_RELEASE_ELF_ID,")],
+    ["the legacy exception accepts a reported stack below the floor", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'legacy_writer_without_stack = phase == "bench target" and not stack_invalid and \\\n        not stack_present_at_done and stack_absent_at_done and ota_stack is None and (',
+        'legacy_writer_without_stack = phase == "bench target" and (')],
+    ["release HIL reuses the ordinary bench legacy stack exception", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'legacy_writer_without_stack = phase == "bench target" and not stack_invalid and \\\n        not stack_present_at_done and stack_absent_at_done and ota_stack is None and (',
+        'legacy_writer_without_stack = phase in ("bench target", "release-HIL") and \\\n        not stack_invalid and not stack_present_at_done and stack_absent_at_done and \\\n        ota_stack is None and (')],
     ["the official dev manifest fetch is no longer host-memory bounded", () =>
       replaceOnce("scripts/production-ota-gate.py",
         "manifest_bytes = request_limited_bytes(",
