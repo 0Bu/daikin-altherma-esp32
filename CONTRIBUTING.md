@@ -34,6 +34,9 @@ the PR anyway.
 
 ```bash
 scripts/run-mock-tests.sh --coverage # host logic tests + 95% floor + presenter parity
+scripts/run-sanitizer-fuzz-tests.sh # deterministic hostile-input properties under sanitizers
+scripts/run-runtime-integration-tests.sh # pure parsers/serializers through simulated adapters
+CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh # portable + pinned changed-hunk checks
 scripts/run-contract-tests.sh      # do the firmware's SOURCE boundaries still hold?
 scripts/run-esp-idf-matrix-audit.sh # does the ESP-IDF feature matrix match the linked surface?
 tools/esp_idf_matrix/selftest.sh   # can the ESP-IDF matrix audit still go red?
@@ -44,6 +47,7 @@ scripts/run-diagnostic-evidence-audit.sh # is each diagnosis still tied to its c
 scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
 scripts/run-ui-localization-audit.sh # did every shipped locale follow changed canonical UI copy?
 scripts/run-ui-use-case-tests.sh   # do all visible UI actions actually work?
+scripts/run-browser-render-tests.sh # does real Chrome render and expose the UI accessibly?
 scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data?
 scripts/run-pr-hygiene-audit.sh    # personal info or high-confidence German in commits/PR text?
 tools/absence/selftest.sh          # can the source-absence matrix still go red?
@@ -59,6 +63,40 @@ aggregate executable-line coverage in those production headers. The test driver 
 profiles do not count toward the percentage. Details in [`test/README.md`](test/README.md). If you
 touch the coverage tooling itself, run `tools/coverage/selftest.sh` — the same argument as every
 other selftest here: a floor that has stopped failing turns a percentage into decoration.
+
+Coverage is two-dimensional: the aggregate executable-line floor remains 95%, while
+`tools/coverage/branch_baseline.json` ratchets each branch-bearing production logic header's
+aggregated gcov `taken/total` branch-edge counts for the selected compiler family and major. A later
+change may improve a header's ratio but may not silently reduce it. Equal counts do not prove that
+the same branch edges ran; this is a count ratchet, not branch-identity evidence. The
+sanitizer/property runner drives deterministic malformed frames, JSON, URLs and boundary values
+through the same pure logic. It first probes ASan+UBSan as a runtime capability; CI requires both,
+while a local host falls back to UBSan only when its ASan compile/runtime probe fails.
+
+`run-runtime-integration-tests.sh` calls selected production parsers and serializers through
+host-only fake clock, storage, serial, TCP, broker and HTTP adapters. Its ten deterministic
+scenarios comprise eight adapter/body cases for failed saves/reconstruction, allocation failure,
+scheduling, fragmented X10A and Modbus, MQTT lifecycle and bounded body/chunk handling, plus two
+slow-peer cases. Those slow-header and slow-body scenarios use
+real POSIX `socketpair`/`recv` traffic and prove the absolute watchdog's `shutdown(SHUT_RDWR)` abort
+and join boundary without hardware. It does not execute ESP-IDF target glue, real NVS or the
+production MCP/HTTP/MQTT stacks, and it does not replace a real board; the firmware build and release
+HIL remain distinct evidence layers. `run-browser-render-tests.sh` likewise
+complements the DOM harness by driving the assembled production UI in real Chrome at mobile and
+desktop widths, across every locale, with
+keyboard, accessibility-tree, reduced-motion, overflow and console-error checks.
+
+`run-format-check.sh` always enforces portable whole-tree invariants. CI additionally installs exact
+clang-format 18.1.3 and checks every new file and changed C/C++ hunk; it does not reformat legacy
+lines outside the diff. A local run may skip that layer when the pinned executable is unavailable,
+but `CI=true` requires the pinned executable and fails closed on another version. The canonical full
+gate, including maintained C/C++ under `tools/`, is
+`CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh`.
+
+Before changed-line discovery, the gate binds the exact reviewed `.clang-format` bytes. An
+intentional style change must be reviewed as policy and update `EXPECTED_SHA256` in
+`tools/format/check_style_config.py` in the same commit; a `.clang-format`-only change therefore
+cannot silently turn formatting off.
 
 It **ends with the presenter-parity gate**
 ([`scripts/check-presenter-parity.sh`](scripts/check-presenter-parity.sh), runnable on its own).
@@ -423,8 +461,9 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
 
 > **Flashing needs a signed image.** This config uses the Secure Boot v2 *signature scheme* without
 > hardware Secure Boot, so an **unsigned** app crash-loops before `app_main` (no eFuses are burned,
-> so this is a crash-loop, not a brick — reflash to recover). `scripts/require-signed.sh` refuses to
-> flash one. Signing needs an offline key that is not in this repo; see
+> so this is a crash-loop, not a brick — reflash to recover). `scripts/require-signed.sh` refuses an
+> unsigned, corrupt or wrong-key image by verifying its signature and pinned public-key digest.
+> Signing needs an offline key that is not in this repo; see
 > [`docs/SECURITY.md`](docs/SECURITY.md). For a contributor the practical path is: build to check it
 > compiles, and let the maintainer test on hardware — or generate your own key for your own board.
 
@@ -479,9 +518,10 @@ real retained X10A payload. Neither mode cuts a release. See
   whole-body `http_append_status_json()` overflowed a task stack twice; historically its `-Og` frame
   was 11776 bytes and the deepest MCP path was 14512/16384, while the first per-file `-Os` change
   reduced them to 3744 and 6480. The current bounded, streamed serializer is larger in features but
-  has no owning whole-status instantiation: the release ELF measures its frame at 4848 bytes and the
-  conservative complete MCP path at 7552/16384, leaving about 8.8 KB before ISR and exception-unwind
-  frames. Do not remove the explicit pin without an equivalent invariant. If you touch this path,
+  has no owning whole-status instantiation: the release ELF measures its frame at 4896 bytes. The
+  historical manual call-path walk measured MCP at 7552 bytes; the automated conservative gate sums
+  7664/16384 bytes, leaving 8720 bytes before ISR and exception-unwind frames. Do not remove the
+  explicit pin without an equivalent invariant. If you touch this path,
   re-measure it from the ELF's `entry a1,N`, never from an idle heap reading; the command is in
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#memory-constraints).
 - **MQTT publishing has its own source-local frame contract.** ESP-IDF 6.0.2 with the required
@@ -520,13 +560,14 @@ silence a *new* finding on code your PR touches — that is the gate working.
 
 ## Pull requests
 
-Fill in [the template](.github/pull_request_template.md). Eight checkboxes on it
-(`$project-review`, `$pr-hygiene-review`, `$feature-docs`, `$domain-review`, `$schematic-review`,
-`$ui-use-case-review`, `$absence-review`, `$ui-gif`) are **maintainer-only** repository skills under
-`.agents/skills/`; the separate `$heap-safety-review` checkbox records the independent focused
-reviewer when its allocation-sensitive paths apply. They are not something an outside contributor
-can run. Leave them unchecked; the maintainer runs them before merge. Your equivalents are the
-scripts above plus an honest note about hardware. Renovate's mechanically attested
+Fill in [the template](.github/pull_request_template.md). Its `$project-review`,
+`$pr-hygiene-review`, `$feature-docs`, `$domain-review`, `$schematic-review`,
+`$ui-use-case-review`, `$absence-review`, `$diagnostic-evidence-review`, `$user-docs-review` and
+`$ui-gif` records are **maintainer-only** repository skills under `.agents/skills/`; the separate
+`$heap-safety-review` record comes from the independent focused reviewer when allocation-sensitive
+paths apply. They are not something an outside contributor can run. Leave them unchecked; the
+maintainer runs them before merge. Your equivalents are the scripts above plus an honest note about
+hardware. Renovate's mechanically attested
 Action-pin-line-only PR class is generated without the template and is the sole exception; any
 ineligible Renovate PR returns to this ordinary review path.
 
@@ -598,6 +639,14 @@ pre-release, so they sort *above* the release they followed and *below* the rele
 A device picks its feed in the web UI (gear → **ESP32** → *Update channel*); nothing about a PR
 changes that, so a contributor never has to think about which feed their change lands in. It lands
 in dev, and a maintainer decides when a release is cut from it.
+
+The manual release path also performs a second clean unsigned build and requires byte identity,
+pins and verifies the Secure Boot v2 public-key digest, and blocks publication on the isolated
+`release-hil` runner until the exact candidate has proved rollback, committed cold restore, its own
+OTA writer through a rollback-safe signed-bootstrap install, and combined runtime stress. After
+publication, CI reads the manifest and app back from Pages and the
+release binaries back from GitHub before declaring the run successful. These are release gates;
+they are not claims that a PR build or an ordinary dev publish exercised hardware.
 
 ## License
 

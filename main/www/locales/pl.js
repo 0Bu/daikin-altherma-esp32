@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -714,7 +714,7 @@ I18N.pl = localeValues([
   /* board.led_rgb_bus_down */ "Czerwona, podwójny błysk — X10A rozłączone.",
   /* board.led_rgb_mqtt_down */ "Pomarańczowa, miga — X10A połączone, MQTT rozłączone.",
   /* board.led_rgb_wipe_armed */ "Czerwona, bardzo szybko miga — kasowanie uzbrojone; zwolnij, aby anulować.",
-  /* board.led_rgb_wiping */ "Biała, świeci stale — kasowanie ustawień; nie odłączaj zasilania.",
+  /* board.led_rgb_wiping */ "Biała, świeci stale — reset/kasowanie danych; nie odłączaj zasilania.",
   /* board.led_gpio_off */ "Wyłączona — brak aktywnego trybu Wi-Fi.",
   /* board.led_gpio_setup */ "Wolno miga — portal konfiguracji aktywny.",
   /* board.led_gpio_connecting */ "Szybko miga — łączenie z Wi-Fi.",
@@ -722,10 +722,10 @@ I18N.pl = localeValues([
   /* board.led_gpio_bus_down */ "Podwójny błysk — X10A rozłączone.",
   /* board.led_gpio_mqtt_down */ "Miga ze średnią szybkością — X10A połączone, MQTT rozłączone.",
   /* board.led_gpio_wipe_armed */ "Bardzo szybko miga — kasowanie uzbrojone; zwolnij, aby anulować.",
-  /* board.led_gpio_wiping */ "Świeci stale po bardzo szybkim miganiu — kasowanie ustawień; nie odłączaj zasilania.",
+  /* board.led_gpio_wiping */ "Świeci stale po szybkim miganiu — reset/kasowanie danych; nie odłączaj zasilania.",
   /* board.ledinv */ "Aktywny stan niski (dioda świeci, gdy pin jest ustawiony na LOW)",
   /* board.btninv */ "Aktywny stan niski (przycisk zwiera pin do GND)",
-  /* board.hint */ "Przytrzymaj przycisk reset przez 5 sekund, aby skasować wszystkie ustawienia i otworzyć portal konfiguracji. Wybierz „Brak”, jeśli przycisk nie jest podłączony.",
+  /* board.hint */ "Reset fabryczny: przytrzymaj 5 s. Trwale kasuje Wi-Fi/wszystkie ustawienia, historię/trendy, czasy stanów i surowy zrzut po awarii. Portal otworzy się tylko po pełnym sukcesie. Jeśli nie, zwolnij i przytrzymaj ponownie 5 s. Bez przycisku wybierz „Brak”.",
   /* card.hardware */ "Sprzęt",
   /* card.hw_off */ "Brak",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

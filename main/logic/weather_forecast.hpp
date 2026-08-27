@@ -1,8 +1,9 @@
 #pragma once
 // Open-Meteo forecast contract shared by the on-device HTTPS/JSON fetcher and host tests. A saved
-// location is the explicit collection/privacy boundary: the firmware requests it every 45 minutes,
-// derives two bounded comparison features and never stores the provider response or writes heat-pump
-// controls. Clearing the location sends no request. Forecast is optional for local room-error samples.
+// location is the source-specific collection/privacy boundary; a request additionally requires the
+// device-wide diagnostics consent and ordinary non-safe-mode operation. An active source fetches
+// every 45 minutes, derives bounded comparison features and never stores the provider response or
+// writes heat-pump controls. Clearing the location sends no request. Forecast is optional.
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -26,6 +27,39 @@ inline constexpr double WEATHER_PRESSURE_MAX_HPA = 1200.0;
 inline constexpr size_t WEATHER_HOURLY_CAP = 6;
 // Two hours of global irradiance. The generous physical bound catches unit errors (not weather).
 inline constexpr double WEATHER_SOLAR_MAX_WH_M2 = 3000.0;
+
+// Boot-latched availability of the task which owns the optional Weather source. A source/consent
+// mutation may clear source-bound observations, but it must not erase the fact that no worker can
+// service the newly configured source during this boot.
+enum class WeatherTaskStartState : uint8_t {
+    NotStarted,
+    Available,
+    DeadlineUnavailable,
+    TaskStartFailed,
+};
+
+struct WeatherTaskFailure {
+    const char* reason = nullptr;
+    const char* error  = nullptr;
+
+    constexpr explicit operator bool() const noexcept { return reason != nullptr; }
+};
+
+inline constexpr WeatherTaskFailure weather_task_failure(bool configured, bool diagnostics_enabled,
+                                                         WeatherTaskStartState state) noexcept {
+    if (!configured || !diagnostics_enabled) return {};
+    switch (state) {
+    case WeatherTaskStartState::Available:
+        return {};
+    case WeatherTaskStartState::DeadlineUnavailable:
+        return {"deadline_unavailable", "deadline_unavailable"};
+    case WeatherTaskStartState::TaskStartFailed:
+        return {"task_start_failed", "out_of_memory"};
+    case WeatherTaskStartState::NotStarted:
+        return {"task_unavailable", "task_unavailable"};
+    }
+    return {"task_unavailable", "task_unavailable"};
+}
 
 inline constexpr int32_t WEATHER_LATITUDE_MIN_E6 = -90 * 1000000;
 inline constexpr int32_t WEATHER_LATITUDE_MAX_E6 =  90 * 1000000;
@@ -111,6 +145,32 @@ inline std::string weather_coordinate_format_e6(int32_t value) {
 inline bool weather_reason_valid(std::string_view reason) {
     return reason == "fetch_failed" || reason == "payload_invalid" ||
            reason == "incomplete_horizon";
+}
+
+// Causal state machine for the non-persistent refresh witness. Completion is final: a source-change
+// cancellation and the old network attempt may race after the value commit, but only the first
+// completion is allowed to decide whether this exact token succeeded.
+inline uint64_t weather_refresh_claim(uint64_t requested_token, uint64_t completed_token,
+                                      uint64_t& started_token) {
+    if (requested_token == completed_token) return 0;
+    started_token = requested_token;
+    return requested_token;
+}
+
+inline bool weather_refresh_complete(uint64_t requested_token, uint64_t started_token,
+                                     uint64_t token, bool success, uint64_t& completed_token,
+                                     uint64_t& success_token) {
+    if (token == 0 || requested_token != token || started_token != token ||
+        completed_token == token)
+        return false;
+    if (success) success_token = token;
+    completed_token = token;
+    return true;
+}
+
+inline void weather_refresh_cancel_outstanding(uint64_t  requested_token,
+                                               uint64_t& completed_token) {
+    if (requested_token != completed_token) completed_token = requested_token;
 }
 
 // ── Fetch headroom gate ──────────────────────────────────────────────────────────────────────────

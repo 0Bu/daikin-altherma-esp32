@@ -79,9 +79,11 @@ env3.cpp/.hpp       → OPTIONAL local climate sensor (the M5Stack ENV III: SHT3
                       the bus for the task's life. Deliberately NOT in /values or the checkup: those
                       describe the heat pump, and an accessory on the board is not a plant reading
 weather_forecast.cpp/.hpp
-                    → optional direct Open-Meteo client. A configured latitude/longitude starts one
-                      task that waits for WiFi + synchronized time and requests six hourly DWD ICON
-                      Seamless values over CA-verified HTTPS every 45 minutes (5-minute retry). The
+                    → optional direct Open-Meteo client. Every ordinary non-safe boot starts one
+                      task; without both a configured latitude/longitude and diagnostics consent it
+                      remains dormant. An active source waits for WiFi + synchronized time and
+                      requests six hourly DWD ICON Seamless values over CA-verified HTTPS every
+                      45 minutes (5-minute retry). The
                       bounded JSON response supplies temperature_2m and shortwave_radiation; the
                       next two complete hours become a mean °C value and summed Wh/m². /status keeps
                       fetch/decision provenance and freshness explicit; the provider does not expose
@@ -151,7 +153,10 @@ config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi
                       credential/service fields as ONE CRC-checked atomic blob (logic/config_store.hpp,
                       host-tested) — a single nvs_set_blob, so that blob is all-or-nothing across a
                       write failure AND a power cut; on failure the old blob is intact, config_save
-                      returns false and publishes nothing. The separately-owned RX/TX/proto/identity
+                      returns false and publishes nothing. Both blob serializers and the exact RAM
+                      successor are fully staged before the first NVS write; after that boundary only
+                      checked writes and a statically noexcept move remain, so allocation failure
+                      cannot report failure after a service change is already durable. The separately-owned RX/TX/proto/identity
                       cache is also ONE CRC-checked atomic `link` blob, so a failed pin swap leaves the
                       previous complete link intact. A link-blob failure after a successful service
                       blob is logged but does not falsely fail an unrelated service save; /set_hp
@@ -199,8 +204,15 @@ http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_te
                       evidence, never a reason to refuse the operator's mapping.
                       /test_circulation and /set_circulation retain their proof boundary for a
                       read-only active-power mapping; neither route can switch the configured plug.
-                      /set_weather strictly validates the latitude/longitude pair, persists it and
-                      only wakes the weather task; no DNS/TLS request runs on the httpd worker.
+                      /set_weather strictly validates the latitude/longitude pair. An ordinary
+                      save persists it and wakes the weather task; `refresh:true` is accepted only
+                      for the unchanged enabled location, writes no NVS, and asks the already-owned
+                      weather task for one deterministic refresh. Success returns its non-zero
+                      monotonic `refresh_token`; only one explicit token may be outstanding. A changed/disabled location or
+                      disabled diagnostics master is 409; a missing task (including safe mode) is 503.
+                      A source/consent save which cannot acquire the running request within four
+                      seconds is 503 and leaves persisted/runtime state unchanged for a safe retry.
+                      No DNS/TLS request runs on the httpd worker in either case.
                       /set_diagnostics is the default-off device-wide consent boundary. It starts a
                       fresh generation when toggled and stops/clears the checkup plus room, weather,
                       and circulation collection when disabled. Each source save still owns its
@@ -235,6 +247,14 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
 def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
                       def/ profiles; decoded via logic/modbus.hpp's Temp16/Pow16/Int16/Text16 codecs
 http_ota.cpp        → /ota/check|update|status|changelog
+http_deadline.cpp/.hpp
+                    → one boot-created esp_timer plus a boot-static priority-6 watchdog task shared
+                      by mutually exclusive OTA/Open-Meteo HTTPS owners. Boot primes and validates
+                      the task's lwIP thread semaphore. After open, the owner publishes the socket;
+                      the allocation-free timer callback only latches expiry and notifies the task,
+                      which applies shutdown(SHUT_RDWR) and acknowledges completion. The owner stops
+                      the timer or joins that acknowledgement before fd close/reuse. No callback
+                      enters the socket API, touches an HTTP client or creates a failure-time task.
 mcp_server.cpp      → /mcp — POST is the stateless Streamable-HTTP MCP device glue. It dispatches
                       only read-only get_status/get_hp_values and reuses http_status.cpp's exact
                       JSON builders; both results stream through the same bounded sink as their
@@ -311,8 +331,10 @@ status_led.cpp/.hpp → onboard status-indicator task with TWO back-ends behind 
                       std::strings out, so a tick can throw under memory pressure, and a task entry
                       is a C frame boundary — an escape would reboot the board over a cosmetic LED
 recovery_button.cpp/.hpp → physical factory-reset button (btn_gpio/btn_active_low, DISABLED by
-                      default). Held 5 s (BUTTON_FIRE_MS) it erases the whole daik_cfg NVS namespace
-                      and reboots into the setup portal — the only config reset that does not need
+                      default). Held 5 s (BUTTON_FIRE_MS) it erases the whole daik_cfg NVS namespace,
+                      legacy WiFi flash credentials, the history journal plus trend/dwell RAM, and
+                      the raw coredump. It reboots into the setup portal only after every privacy
+                      erase succeeds — the only config reset that does not need
                       network access to the device, i.e. the cure for "it joined a network I can no
                       longer reach" (which the credential rollback cannot cover: that handles a
                       REJECTED password, not a wrong-but-accepted LAN). Classification is the pure
@@ -326,12 +348,15 @@ recovery_button.cpp/.hpp → physical factory-reset button (btn_gpio/btn_active_
                       merely bracketed the flash write would be invisible. A FAILED erase does NOT
                       reboot (coming back up on the config it just claimed to delete is worse than
                       staying up and logging why). Started even in safe mode
-stack_watch.cpp     → the SECOND memory budget, made reportable. Four tasks (httpd, hp_poll,
-                     mqtt_pub, the HomeHub link) record their own FreeRTOS stack high-water mark
-                     from their own loop; the MQTT heartbeat publishes all four as
-                     `*_stack_min_free_bytes`, null until sampled. The heap has `/status.sys`, two
-                     trend rings and a watchdog — the stack had a core dump's task table, which
-                     exists only once the board has died
+stack_watch.cpp     → the SECOND memory budget, made reportable. Five long-lived tasks (httpd,
+                     hp_poll, mqtt_pub, the HomeHub link and Weather) record their own FreeRTOS
+                     stack high-water mark; the MQTT heartbeat publishes those five as
+                     `*_stack_min_free_bytes`, null until sampled. Weather samples again after its
+                     TLS/HTTP/JSON interval. The short-lived OTA task records
+                     through the same allocation-free sampler, but its boot-local minimum appears
+                     only on compact `/ota/status` so a delivery gate can retain it before reboot.
+                     The heap has `/status.sys`, two trend rings and a watchdog — the stack had a
+                     core dump's task table, which exists only once the board has died
 www/                → web UI sources: index.html + style.css + app.sources + js/*.js plus the
                      device-local locales/*.js. The manifest orders the startup classic-script
                      fragments; inline_assets.cmake splices those into one self-contained gzip page.
@@ -1249,17 +1274,19 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    the WiFi credentials — but "not in NVS" no longer means "gone on every restart". Two media,
    each covering exactly what the other structurally cannot:
 
-   * **`.noinit` DRAM.** The ring arrays are simply no longer zeroed at startup, so any reset that
-     kept power (a `/set_*` save, an OTA install, a panic, the task watchdog, the recovery button)
-     keeps the readings. It costs no flash write and no extra RAM — it is the *same* memory the
-     route serves, not a shadow copy — and the flash image shrank by ~26.5 KB, because `.data` no
-     longer carries an initialiser for rings that are about to be overwritten anyway. It needs no
+   * **`.noinit` DRAM.** The ring arrays are simply no longer zeroed at startup, so a compatible
+     power-preserving reset (for example a `/set_*` save, panic or task watchdog) can keep the
+     readings. It costs no flash write and no extra RAM — it is the *same* memory the
+     route serves, not a shadow copy — and `.data` no longer carries a duplicate initialiser image
+     for rings that are about to be overwritten anyway. It needs no
      clock, and that is a property of the medium rather than an assumption: if the bytes survived,
      power was never lost, so the downtime is bounded to about a second. The one seam is the bucket
      that was open when the device went down — it is dropped, so the restored series can be up to
-     one `HISTORY_DT_S` adrift on the axis. It cannot survive an OTA: the new image's sections move.
+     one `HISTORY_DT_S` adrift on the axis. It is not an OTA guarantee: a new image may move the
+     sections, and the seal then rejects the bytes. The flash journal is the guaranteed OTA path.
    * **The upper-4-MiB `history` partition.** Each trend source appends one dense record when it
-     closes a five-minute bucket: currently 32 X10A/board, 13 HomeHub or 3 ENV III `int16` values in
+     closes a five-minute bucket: currently 32 default-source rings (29 X10A-derived, two board
+     memory and the external MQTT circulation witness), 13 HomeHub or 3 ENV III `int16` values in
      one 256-byte slot. The plant checkup uses the same journal for one exact hourly diagnostic
      record; it is not reconstructed from lossy trend samples. Sixteen slots share a 4 KiB erase
      sector and all 1024 sectors rotate before one is reused. The body is CRC-protected and a
@@ -1274,16 +1301,18 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
      deliver the partition table, an old-layout board needs one USB/Web-Serial re-flash to install
      the official 8 MB table without moving NVS, coredump or either OTA slot.
 
-   **A sudden power loss loses at most the open bucket and a just-closed record still waiting for
-   the next poll tick.** Normal persistence runs continuously; the `esp_restart` shutdown handler is
-   only a bounded final drain for the OTA/reconfiguration race. `/status.history.persist`
-   independently reports what happened to RAM.
+   **After the journal scan has succeeded, wall time is synchronized and at least one record has
+   committed, a sudden power loss loses at most the open bucket and a just-closed record still
+   waiting for the next poll tick.** Before that first eligible commit, flash has no record from
+   which to restore RAM-only samples. Normal persistence then runs continuously; the `esp_restart`
+   shutdown handler is only a bounded final drain for the OTA/reconfiguration race.
+   `/status.history.persist` independently reports only what happened to `.noinit` RAM.
 
    The flash path is **spliced in behind** the live samples at the absolute wall-clock bucket each
    sample was taken in, never appended — appending would slide a day-old curve onto today. It waits
    only for SNTP and can seed an empty live ring immediately; elapsed buckets after the stored anchor
    become explicit gaps. The boot scan indexes only the final 24-hour source windows; restore reads
-   each indexed record once per four-ring batch, so no second 26 KB matrix or one unbounded
+   each indexed record once per four-ring batch, so no second ~30 KB matrix or one unbounded
    flash/UART stall is introduced. The oldest and newest indexed record buckets define the restored
    span; sample values do not. That distinction preserves an all-`NO_READING` register's raster
    instead of mistaking its recorded absences for unwritten leading scratch.
@@ -1821,9 +1850,28 @@ The Home Assistant bridge:
   speak for the installation. Before the first valid X10A reply, the client connects without the
   shared `<base>/status` last will and services only configured reference-temperature and
   circulation-power subscriptions/tests. All ordinary discovery, state, heartbeat, crash, weather and Modbus publication
-  remains blocked. The only outbound exception is explicit Settings cleanup: clearing an enabled
-  Weather or HomeHub configuration queues that source's retained empty tombstone after the disabled
-  config was persisted. When `HpStats` first records a valid bus reply, the task cleanly stops and
+  remains blocked. The only outbound exception is retained-source deletion: persisted Weather
+  source/consent and HomeHub identity changes queue QoS-1 tombstones, while every new broker session
+  reconstructs Weather and HomeHub state plus permanently retired discovery cleanup, and ENV III
+  state cleanup. A persistently disabled ENV III source also retracts its three discovery configs;
+  an enabled source keeps those source-independent configs while deleting predecessor state. Thus
+  reset cannot lose a pending delete and a silent X10A bus cannot preserve superseded evidence or
+  retired entities. Cleanup is an ACK-driven state machine: at most one of its empty retained QoS-1
+  messages is in flight, the exact matching PUBACK advances it, and pending/active sources stay
+  suppressed through the completion cycle. Queue admission uses esp-mqtt's asynchronous enqueue API,
+  so a failed synchronous socket write cannot hide an already-queued duplicate. A missing PUBACK
+  produces no second item while the outbox still owns the first; `MQTT_EVENT_DELETED` retries the
+  exact expired step, and a joined OTA/Weather transport stop releases the item which esp-mqtt
+  deleted silently. Loss of fixed-ring delivery evidence forces the same stop/clear/retry boundary
+  after joining the producer instead of guessing. ESP-MQTT uses incremental packet IDs so this
+  client-epoch/id evidence cannot alias concurrent subscription or QoS-1 traffic during the bounded
+  outbox lifetime. A replacement client epoch reconstructs the durable plan, while an ordinary
+  same-client reconnect preserves esp-mqtt's in-flight delivery. The esp-mqtt outbox is additionally
+  capped at 8 KiB so unrelated QoS-1 traffic cannot create an unbounded heap backlog. This boundary
+  can only publish empty retained payloads; allocation, rejected enqueue or proven outbox loss
+  retries without advancing it.
+  Current state/discovery may replace those
+  tombstones only after the ordinary X10A gate opens. When `HpStats` first records a valid bus reply, the task cleanly stops and
   destroys that no-LWT session, then creates one ordinary client whose CONNECT carries the shared
   installation LWT; the two MQTT/TLS sessions never coexist. Once activated, an X10A loss sustained
   for 15 seconds publishes one retained `offline` transition and pauses every other publish while
@@ -1847,9 +1895,10 @@ The Home Assistant bridge:
   points at the X10A topic and subscripts its value out with a `value_template`
   (`value_json['<group>']['<object_id>']` — bracket notation, so a digit-leading slug like
   `2way_valve…` stays valid). `<base>/env3` is a separate flat retained numeric observation payload:
-  `{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75}`. Every new fresh 10 s
-  sample is published, including an unchanged reading; error or staleness changes the retained
-  payload to `{}` — except the pair of I2C bus-health counters, `samples` and `errors`, which BOTH
+  `{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75,"samples":N,"errors":M}`.
+  Every new fresh 10 s sample is published, including an unchanged reading; error or staleness
+  removes the three reading keys and retains only the pair of I2C bus-health counters, `samples` and
+  `errors`, which BOTH
   shapes keep: they describe the LINK rather than the air, and are most informative exactly when no
   reading came, so carried only on the healthy document they would go dark at the instant they
   became the answer (a consumer could not tell a failing SHT30 from a disabled accessory, a
@@ -1858,10 +1907,15 @@ The Home Assistant bridge:
   numerator away — and no HA entity, since link health is a metrics-stream question. The error
   shape stays `{"samples":N,"errors":M}` rather than `{}`, which changes nothing for HA: the
   availability template asks whether each READING key `is number`, so the three entities still go
-  unavailable and no retained value survives. Three retained HA discovery configs expose ENV III temperature, humidity and air
+  unavailable and no retained reading survives. Three retained HA discovery configs expose ENV III temperature, humidity and air
   pressure as measurement sensors. Their availability is `all`: both the device LWT must be online
-  and the corresponding JSON key must exist, so `{}` makes only the ENV III entities unavailable.
-  Disabling the sensor retracts both the state topic and all three discovery configs. ENV III is
+  and the corresponding JSON key must exist, so the counter-only error document makes only the ENV
+  III entities unavailable.
+  Disabling the sensor retracts both the state topic and all three discovery configs. On every broker
+  connect, a persistently disabled config reconstructs all four tombstones outside the X10A gate; an
+  enabled current source (including after re-enable on new pins) deletes only predecessor state and
+  preserves its three stable, source-independent discovery configs. Current state can return only through the ordinary publish
+  path. ENV III is
   never folded into X10A or HomeHub state. Its ONE consumer inside the firmware is the heating-curve
   diagnosis above, which records the temperature as optional context with each event — never as a
   condition for one. Note the firmware cannot know WHERE the sensor is mounted: beside the indoor
@@ -1873,24 +1927,36 @@ The Home Assistant bridge:
   for an enabled HomeHub stack and intentionally not referenced by HA discovery. Int16 enum values
   retain the raw numeric Modbus constant; `/values` carries separate semantic metadata so the browser
   can name them without putting prose on MQTT. A disconnected HomeHub publishes `{}` rather than
-  preserving a previous TCP session's values; clearing the HomeHub address queues one QoS-1 retained
-  empty tombstone after the disabled config was persisted, retracting the Modbus data topic even if
-  X10A is unavailable.
+  preserving a previous TCP session's values; disabling or changing an enabled HomeHub queues one
+  QoS-1 retained empty tombstone after persistence and synchronous generation/cache cutover. Every
+  broker connect repeats that idempotent delete before the X10A gate, so reset and X10A absence
+  cannot preserve a predecessor. The durable target intent, rather than a retiring Modbus task's
+  status, decides whether ordinary publication is enabled. A source cleanup attempt suppresses that
+  source for the remainder of the same MQTT cycle, so Off cannot delete and immediately recreate
+  retained `{}`; an enabled A-to-B cutover may publish B's initially empty state from the following
+  cycle.
   The former retained `<base>/modbus/status` duplicate is retired because link state, receive count
   and failures already live in `<base>/heartbeat`. The
   27 discovery configs emitted by builds through `v1.0.0-dev.257` are permanent cleanup targets:
-  connect-time and five-minute retirement passes tombstone them and no replacement config exists. On
+  connect-time and five-minute delete-only retirement passes tombstone them outside X10A
+  publication authority, so HA returning during a silent bus still converges; no replacement config
+  exists. On
   upgrade, bounded exact-topic subscriptions probe for obsolete retained `<base>/state` and
   `<base>/modbus/status` values; only a non-empty retained response triggers each tombstone, so later
   reconnects do not publish either empty retired topic.
 - **Forecast evidence topic.** `<base>/weather/openmeteo/forecast` is an independent retained JSON snapshot,
-  published on change only while Open-Meteo is configured. A disabled source publishes no synthetic
-  state document; clearing both location fields directly sends one QoS-1 retained empty tombstone,
-  so the broker definitively removes an older payload even if X10A is unavailable.
+  published on change only while an Open-Meteo location is saved and diagnostics consent is
+  enabled. A disabled source publishes no synthetic state document. Source/consent changes queue a
+  QoS-1 tombstone, and every broker connect first
+  reconstructs that delete outside the X10A gate. If current evidence is still authoritative it is
+  republished only after the ordinary gate opens and never in the MQTT cycle that attempted the
+  predecessor cleanup; otherwise reset or silent X10A leaves no old retain. ENV III follows the
+  same same-cycle suppression rule for its state and, when disabled, discovery tombstones.
   Values and their Open-Meteo/ICON provenance,
   fetch time, forecast horizon start, validity limit, runtime error and numeric `available`/`fresh`
   flags travel atomically. A failed refresh may retain the last figures for forensic comparison, but
-  `available: 0` prevents them from looking decision-ready; `fetched_unix_s` and
+  `available: 0`, `fresh: 0` and the current failure reason prevent them from looking decision-ready
+  even before their age limit expires; `fetched_unix_s` and
   `valid_until_unix_s` let a historian independently verify age even after the board is offline.
   Exact latitude/longitude is intentionally omitted. Weather intentionally has no HA Discovery:
   MQTT archives firmware evidence but is not a dependency of forecast acquisition or future
@@ -1994,8 +2060,9 @@ The Home Assistant bridge:
     exactly the ambiguity this resolves. `measurement`, not `total_increasing`: the value is the
     count this *boot* inherited and returns to `0` on the next healthy boot, so a monotonic state
     class would make HA read every recovery as a counter reset.
-  - **`*_stack_min_free_bytes`**: the **second memory budget** — `httpd_`, `poll_`, `mqtt_` and
-    `modbus_`, in **bytes** — the unit ESP-IDF's `uxTaskGetStackHighWaterMark` answers in, so the
+  - **`*_stack_min_free_bytes`**: the **second memory budget** — `httpd_`, `poll_`, `mqtt_`,
+    `modbus_` and `weather_`, in **bytes** — the unit ESP-IDF's
+    `uxTaskGetStackHighWaterMark` answers in, so the
     number compares directly against a core dump's task table and against the size passed to
     `xTaskCreate`. Vanilla FreeRTOS returns *words* here and ESP-IDF deliberately does not, which is
     why the unit is spelled out in the field name: it becomes a VictoriaMetrics series suffix, where
@@ -2005,21 +2072,27 @@ The Home Assistant bridge:
     that exists only once the board has already died. Three overflows shipped that way (v1.0.12 on
     httpd, legacy-241 on `hp_poll`, legacy-318 on httpd through OTA) and legacy-318's 1200 bytes of frame growth
     accumulated across releases with no single change announcing it — an idle board looks identical
-    at every stack size. Each task records its own mark from its own loop (`main/stack_watch.hpp`);
-    the mark is retrospective, so the top of a loop is enough and no branch can skip it.
+    at every stack size. Each task records its own mark (`main/stack_watch.hpp`); the mark is
+    retrospective, so the common loop boundary covers ordinary cycles. Weather samples a second
+    time immediately after its TLS/HTTP/JSON interval, before an explicit refresh token can complete,
+    so release HIL cannot accept pre-fetch headroom as evidence for the path it exercised.
     **`0` means never sampled and is published as `null`** — a task that has not run is not a task
     with no stack left, and the Modbus slot stays unsampled forever on a board with no HomeHub,
-    where `0` would read as one word from death (a metrics consumer drops a null field and records
+    where `0` would read as one byte from death (a metrics consumer drops a null field and records
     no sample, which is the honest outcome). **Payload-only — deliberately no HA entity:** the value
-    is a trend a maintainer reads across firmware versions, and four permanently-flat diagnostic
-    entities are four more things a device owner has to rule out. The minimum is tracked inside
+    is a trend a maintainer reads across firmware versions, and five permanently-flat diagnostic
+    entities are five more things a device owner has to rule out. The minimum is tracked inside
     `stack_watch` rather than left to FreeRTOS for exactly one task's sake: the HomeHub task
     retires and is recreated when the address is cleared and re-saved, and a fresh task starts
-    with a fresh mark — without it one slot would mean "since the last reconfigure" while three
+    with a fresh mark — without it one slot would mean "since the last reconfigure" while the others
     meant "since boot". The httpd slot samples per REQUEST and stays null on a board nobody has
     browsed this boot — the right answer, not a gap: the deep frame exists only while a request is
     served, so an idle httpd task would report its select loop's headroom, a large uninteresting
     number reading as enormous margin on the one path that has never been exercised.
+    The OTA slot is different again: every allocation checkpoint samples it, including after the
+    manifest/TLS path and after `esp_ota_set_boot_partition`, and compact `/ota/status` publishes
+    `ota_stack_min_free_bytes`. It is deliberately boot-local, so HIL retains the minimum during the
+    three-second completed window before the new application restarts it to `null`.
   - **`wifi_*`**: `wifi_connected`, `wifi_rssi`, `wifi_reconnects` (cumulative RE-connects
     since boot, `wifi_reconnect_count()` in `wifi.cpp`, excludes the first-ever connect), `wifi_mac`
     (this STA's own MAC, always present) and `wifi_bssid` (the associated AP's MAC, null while offline)
@@ -2053,7 +2126,7 @@ The Home Assistant bridge:
     change is a dashboard line that always reads zero. Neither was ever an HA entity.
   - **`modbus_*`**: link state and read counters. There are
     no write counters — the link issues no Modbus write at all. (The HomeHub task's stack high-water
-    evidence moved to the shared `modbus_stack_min_free_bytes` above when all four watched stacks
+    evidence moved to the shared `modbus_stack_min_free_bytes` above when the watched stacks
     were given one sampler; `/status.modbus.task_stack_min_free_bytes` reads from the same place, so
     the two surfaces cannot answer one question with two numbers.)
     **Payload-only — deliberately no HA entity.**
@@ -2303,6 +2376,23 @@ Structure:
   silencing MQTT or X10A indefinitely. The poll cache compounds this by owning only its formatted value:
   immutable labels and units are borrowed from firmware-lifetime catalog tables, shrinking the one
   contiguous allocation every sweep requires and eliminating two per-row string allocations.
+  `http_deadline.cpp` closes the remaining trickle gap in ESP-IDF v6.0.2: both
+  `esp_http_client_fetch_headers()` and `esp_http_client_read()` can repeat transport reads inside
+  one public call, resetting a per-read timeout whenever another byte arrives. One timer allocated
+  before networking is armed only after a successful open exposes the public socket and remains
+  armed across headers and body for the remainder of the original monotonic budget. Its callback
+  only latches expiry and wakes one boot-static priority-6 watchdog task. That task has a boot-primed
+  lwIP thread semaphore, performs `shutdown(SHUT_RDWR)`, and posts the static completion semaphore;
+  the owning HTTP task joins it before close, redirect or Range-resume reuse. No task or lwIP state is
+  allocated at expiry. Timer/task/prime failure disables OTA/Weather downloads for that boot instead
+  of allocating beside TLS. While Weather remains configured and diagnostics consent remains on,
+  that boot-latched failure survives later source/consent saves as an explicit `error`; a save must
+  never relabel a missing worker as `waiting`. All three start-failure paths update only a fixed
+  atomic latch and the diagnostic ring; they do not assign `std::string` status after an OOM or touch
+  shared status without the mutex. HTTP/MQTT snapshots materialise the fixed reason later inside
+  their established exception boundaries. DNS/TCP/TLS/request setup inside `open()` is not
+  interrupted by this socket watchdog: OTA manifest/firmware use IDF's 15-second open timeout,
+  changelog uses six seconds, and Weather uses 20 seconds, each followed by a budget post-check.
   `http_client_diag.cpp` returns the TLS evidence it logs, so an init OOM or
   `ESP_ERR_MBEDTLS_SSL_SETUP_FAILED` is cleaned up and retried exactly once. DNS, TCP, certificate,
   HTTP and payload failures remain single-attempt failures with their original diagnostic class.
@@ -2333,6 +2423,18 @@ Structure:
   heap-broken image as valid. Both default feeds are live, and
   publishing runs on a private repo too (the Pages site is public either way — see
   [`README.md`](README.md)); an absent or unreachable self-hosted manifest reports a check error.
+  The release-lab uses the byte-identical binary through a transient trusted-LAN header pair on
+  `/ota/check`, never a HIL-specific compile. Both bounded HTTPS URLs become part of the completed
+  generation/channel/version/SHA offer lease shown by `/ota/status`; `/ota/update` atomically copies
+  that lease before re-reading the manifest and image, so a later request or config change cannot
+  mix feeds. The same compact status exposes a boot-latched `image_state` and
+  `rollback_pending` without reading otadata flash on the HTTP task.
+  Release HIL first uses the pinned bootstrap writer to prove candidate rollback and then candidate
+  commit/cold restore. It subsequently exercises the valid candidate's own writer by installing the
+  separately root-pinned signed bootstrap through a distinct transient feed, capturing the
+  candidate-origin heap and OTA-stack minima before reboot, observing the bootstrap pending, and
+  hard-cycling back to the already-valid candidate. This final rollback is what turns a successful
+  bootstrap-to-candidate delivery into evidence that the candidate can safely deliver its successor.
   The web installer carves prepared sparse parts from the merged
   image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
   as the OTA feed (the `esptool-js` installer and the device load the same file).
@@ -2355,8 +2457,9 @@ Structure:
   construction. Only read-only observer GETs interrupted by reboot are sampled again; a complete
   malformed response fails hard, and the update POST has no retry or compensating write. The unwired bench does not require
   X10A or optional weather. Ordinary updates use OTA; signed NVS-preserving USB remains
-  bootstrap/recovery only. HTTP does not expose the running ESP-IDF partition state directly, so the
-  dwell proves the documented commit conditions rather than the validation API return value itself.
+  bootstrap/recovery only. Current firmware exposes its boot-latched pending/valid state through
+  compact `/ota/status`; the ordinary bench dwell still proves the documented service conditions and
+  remains compatible with the older stable image used during its rollback exercise.
 - **Production promotion is a staged, one-write transaction.**
   [`scripts/production-ota-gate.py`](../scripts/production-ota-gate.py) binds the official dev
   manifest to the expected source SHA, version, application SHA-256, ESP32-S3 metadata and signature;
@@ -2382,13 +2485,16 @@ Structure:
   firmware intentionally stops MQTT while either the manifest check or a background weather fetch
   owns the constrained network heap. After first requiring a connected baseline, the gate gives each
   observed owner a separate bounded recovery allowance: the manifest check requires a new connected
-  status sample within 15 seconds after release; weather arms the same 15-second bound only while its
-  status says `fetching` or when its success counter advances, covering the short status-update to
-  asynchronous MQTT-resume gap. Because `/status` streams subsystem snapshots, one request can
+  status sample within 15 seconds after release. Weather first returns one non-zero refresh token;
+  requested, started, completed and success must all equal that exact token and the success counter
+  must advance. The task claims and drains the matching notification atomically, so a natural/retry
+  fetch cannot satisfy the request or leave a second unobserved TLS cycle queued. This token-bound
+  proof also covers the short status-update to asynchronous MQTT-resume gap. Because `/status` streams subsystem snapshots, one request can
   straddle that edge and contain either old weather fields beside paused MQTT or old connected MQTT
   beside new weather evidence. In the first direction the unexplained sample stays pending for the
-  same bound and is forgiven only if a following weather edge proves the owner; in the reverse
-  direction the new allowance stays armed until a later connected sample without fresh owner evidence.
+  same bound and is forgiven only if a following sample proves that exact weather owner; in the
+  reverse direction the token-bound allowance stays armed until a later connected sample without
+  fresh owner evidence.
   The OTA pause lease is likewise sampled before each streamed request and remains sticky while that
   response is processed, so a concurrent lease release cannot reclassify an in-flight pause. Without
   owner proof the gap fails at expiry or when the pressure window ends. The first consistent
@@ -2409,12 +2515,12 @@ Structure:
   bench board need not be physically connected to X10A, so it proves binary and allocation behavior
   rather than plant I/O; expected UART timeouts there are not a plant-link regression. The
   bench covers both the full binary TLS path and a later real OTA-manifest TLS overlap but does not
-  require the optional weather task when
-  diagnostics consent is off. The host's 120-second manifest observer and 480-second install/reboot
+  require an active Weather source when diagnostics consent is off. The host's 120-second manifest
+  observer and 480-second install/reboot
   observer deliberately outlive the firmware's own bounded deadlines, so the sole accepted write
   can never continue after its authoritative gate process has timed out. The production role
   supplies the real X10A and weather canaries and keeps the bounded timeout delta. The source
-  contract, one hundred twenty-six OTA mutation canaries and one hundred nine delivery/promotion
+  contract, the complete seeded OTA mutation set and the delivery/HIL/promotion
   canaries make stage removal, shortened stress, signature bypass, weaker heap floors, raw OTA
   writes and disabled rollback fail locally and in CI. A production image which predates this generation/artifact
   handshake cannot be safely bootstrapped by the gate; it needs one signed, NVS-preserving USB flash
@@ -2461,10 +2567,13 @@ Structure:
   `OTA_QUIESCE_MAX_CYCLES`, which deliberately outlives the complete bounded OTA path and its
   480-second host observer; the former five-minute cap began before the five-minute body deadline
   and could therefore re-admit allocations during a valid transfer. The esp-mqtt transport cannot safely resume beside the same dynamic
-  TLS allocator. Instead the network operations themselves have whole-operation deadlines: 30 s
-  for a manifest, five minutes for a firmware stream, and 60 s for Weather. Each read receives only
-  the remaining time, so a peer cannot hold the service pause indefinitely by trickling one byte
-  inside every ordinary socket timeout. The RAII owner then releases the pause on every deadline
+  TLS allocator. Instead each operation starts a monotonic budget before HTTP open: 30 s for a
+  manifest/changelog, five minutes for a firmware stream, and 60 s for Weather. The pre-socket
+  DNS/TCP/TLS/request phase retains the path-specific IDF client timeout: six seconds for changelog,
+  15 seconds for manifest/firmware, and 20 seconds for Weather. After open, the independent socket
+  watchdog uses only the original budget's remainder across both headers and body, so a peer
+  cannot hold the service pause indefinitely by trickling one byte inside every ordinary transport
+  timeout. The RAII owner then releases the pause on every deadline
   and error exit. The watchdog is fed above the publisher check. X10A applies the same check before its first Config/cache
   allocation for **both OTA and weather** and exposes a lock-free acknowledgement after any in-flight
   sweep has finished. The MQTT task exposes the equivalent acknowledgement around its complete
@@ -2520,8 +2629,10 @@ Structure:
   releases the C resources before retry. Below **56 KiB total free / 24 KiB largest
   contiguous internal block** it logs the sample, sets `state=waiting, reason=heap_headroom` and
   retries after five minutes — the previous valid forecast stays available. A separate 60-second
-  whole-download deadline releases every peer if a server trickles data without hitting the
-  per-read timeout. The 24 KiB contiguous
+  monotonic budget is armed as a socket watchdog after successful open and interrupts both the
+  blocking header parser and body read if a server trickles data without hitting the per-read
+  timeout. DNS/TCP/TLS/request setup remains bounded by the HTTP client's own 20-second timeout,
+  not by a cross-task client close. The 24 KiB contiguous
   floor rejects the measured 15.9 KiB trough while admitting the same board's healthy 31.7 KiB
   ceiling; a provisional 40 KiB largest-block floor would disable weather permanently there. The
   56 KiB aggregate floor leaves about 16 KiB outside the measured ~40 KiB transient claim.
@@ -2990,16 +3101,37 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   (a typed name, a topic embedding a device id),
                   weather_forecast{configured,provider,model,fetch_interval_s,max_age_s,fetching,
                   available,has_value,latitude,longitude,state,outdoor_mean_2h_c,
-                  solar_energy_2h_wh_m2,issued_at,fetched_at,valid_for_decision_at,last_attempt_at,
-                  age_s,fresh,freshness_reason,successes,errors[,reason][,error]} — the Open-Meteo
-                  ICON forecast (weather_forecast.cpp). `available` is the three-way AND of
-                  configured, the task's own availability and freshness, so a consumer never has to
-                  combine them itself; a FAILED refresh keeps has_value plus the last two numbers for
+                  solar_energy_2h_wh_m2,
+                  hourly[{time_unix_s,temperature_c,humidity_pct,pressure_hpa},…],
+                  issued_at,fetched_at,valid_for_decision_at,last_attempt_at,
+                  age_s,fresh,freshness_reason,successes,errors,refresh_requested_token,
+                  refresh_started_token,refresh_completed_token,refresh_success_token,
+                  task_stack_min_free_bytes
+                  [,reason][,error]} — `hourly` uses Unix seconds, °C, %, and hPa and is empty when
+                  `has_value` is false. The Open-Meteo
+                  ICON forecast (weather_forecast.cpp). `available` requires an active source
+                  (saved location + diagnostics consent + non-safe-mode operation), the task's own
+                  availability and freshness, so a consumer never has to combine them itself; a
+                  FAILED refresh keeps `has_value` plus the last forecast values and hourly evidence for
                   diagnosis while available/fresh go false, which is the distinction between "no data"
                   and "data that must not be acted on". FETCHING requires both the SAVED LOCATION and
                   the device-wide diagnostics opt-in. Saving coordinates is still the specific consent
                   to disclose them, but the stored location remains deliberately dormant while the
-                  master is off.
+                  master is off. If the shared deadline owner or Weather task could not start, an
+                  active configured source stays in its boot-latched error state across later
+                  location/consent saves rather than claiming that a nonexistent worker is waiting.
+                  Four uint64 causal witnesses follow the counters:
+                  `refresh_requested_token`, `refresh_started_token`,
+                  `refresh_completed_token`, `refresh_success_token` (zero means no such event).
+                  Requested is the last accepted explicit trigger; started is claimed by the task;
+                  completed covers success, failure or source cancellation; success advances only
+                  when that exact token's fresh snapshot commits. Completion is final and first-wins:
+                  once a source transaction cancels a token, a late result from the superseded fetch
+                  cannot rewrite that cancellation as success. Thus an unrelated scheduled or retry
+                  fetch cannot satisfy a release-HIL request merely by advancing `successes`.
+                  `task_stack_min_free_bytes` is the Weather task's boot-local high-water evidence;
+                  it is sampled again after the real TLS/HTTP/JSON interval and is null before any
+                  task sample.
                   `issued_at` is ALWAYS null — the endpoint does
                   not expose the model-run instant and fetch time is not a substitute for it.
                   latitude/longitude are null when unconfigured and "<redacted>" under ?redact=1,
@@ -3106,7 +3238,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   [,error,error_code,error_detail,error_register]}
                   — the HomeHub link diagnostics. READ-ONLY: there is no actuator object and no
                   actuation flag — the link is read-only. task_stack_min_free_bytes comes from the
-                  one sampler all four watched stacks report through (main/stack_watch.hpp), not
+                  one sampler all five watched stacks report through (main/stack_watch.hpp), not
                   from ModbusStatus, so this surface and the MQTT heartbeat cannot answer the same
                   question with two numbers; it is NULL rather than 0 when the task has never run,
                   which on a board with no HomeHub is always. The PLANT GATE pair is input register 53,
@@ -3119,14 +3251,14 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   diagnosis, never as a writable entity: there is no actuator here to mirror,
                   sys{free_heap,min_free_heap,max_alloc,heap_restarts,mqtt_skipped,mqtt_quiesced,
                   poll_skipped,reset_reason,safe_mode,safe_mode_cause,
-                  stack_min_free_bytes{httpd,poll,mqtt,modbus}} — heap
+                  stack_min_free_bytes{httpd,poll,mqtt,modbus,weather}} — heap
                   headroom (free / since-boot low-water / largest-contiguous INTERNAL, via
                   heap_guard.hpp's one sampler) + how many consecutive heap-watchdog restarts preceded
                   this boot (0 on an ordinary one; the restart is an esp_restart, so reset_reason
                   reads the same "sw" a config save produces and without this field a board
                   restarting itself every five minutes is indistinguishable from one somebody kept
                   saving settings on) + the SECOND memory budget, per watched task in BYTES and null
-                  until that task has been sampled (main/stack_watch.hpp). Those four are here as
+                  until that task has been sampled (main/stack_watch.hpp). Those five are here as
                   well as on the heartbeat for the reason this whole block exists: every ordinary
                   MQTT publish sits behind the X10A publish gate, and safe mode never starts the
                   publish task at all, so a board with a silent bus or a latched safe mode — exactly
@@ -3144,10 +3276,12 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   on `fault` — an orphan dump alone is NOT "restarted after a crash"),
                   history{dt,persist,dwell_persist,rows[{id,label}],modbus_rows[{id,label}],
                   env3_rows[{id,label}]}
-                  — `persist` is how THIS boot's rings came to be: "accept" (adopted from .noinit
-                  DRAM across a reset that kept power) or the named reason they started empty
+                  — `persist` is the `.noinit`-RAM adoption verdict for THIS boot: "accept" (adopted
+                  across a compatible reset that kept power) or the named reason RAM started empty
                   ("power_cycle", "wrong_catalog" after an update moved the trend set, "bad_crc",
-                  "wrong_version", "no_record"). `dwell_persist` answers the same question in the
+                  "wrong_version", "no_record"). It does not report the independent flash result:
+                  after a successful journal scan and clock sync, compatible flash records may still
+                  splice buckets into those empty rings. `dwell_persist` answers the RAM-only question in the
                   same vocabulary for the per-row STATE AGES (state_dwell.cpp), which ride the same
                   .noinit medium under the same rules and therefore reset for the same reasons; it
                   rides this block rather than one of its own because every byte added to /status is
@@ -3264,11 +3398,15 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   only absence says "no current reading"
 GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour series, oldest sample
                   first;
-                  X10A is the backwards-compatible default, Modbus is accepted only for the eleven
-                  paired concepts (logic/homehub_map.hpp) plus the unpaired Smart-Grid timeline, and
-                  env3 only for the three accessory rings. Payload:
-                  {id,source,label,dt,unit,t0,b0,v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
-                  from the cached value — never a hardcoded "°C": the thirty-one X10A trends mix °C,
+                  The `source=x10a` query selects the backwards-compatible default catalog of 32
+                  rings: 29 X10A-derived histories, two board-memory histories and the independent
+                  external MQTT circulation witness. Default-catalog payloads identify themselves as
+                  `source:"x10a"` except that witness, which truthfully returns `source:"mqtt"`;
+                  `mqtt` is not a separate query value. Modbus accepts thirteen histories: the eleven paired
+                  concepts (logic/homehub_map.hpp), Smart Grid, and its Modbus-only disinfection
+                  state. `env3` accepts only the three accessory rings. Payload:
+                  {id,source,label,dt,unit[,t0][,b0],v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
+                  from the cached value — never a hardcoded "°C": the default-source trends mix °C,
                   bar, KiB
                   and unitless rows, and the browser prints this string into the range readout and the
                   crosshair, so a bar row labelled °C would be the legacy-35–39 shape. A catalog test pins
@@ -3280,7 +3418,8 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   circuit_pressure, comp_rps, eev, outdoor_air, outdoor_heat_exchanger, discharge,
                   room_temp, inv_current,
                   ct_l1, ct_l2, ct_l3; component-STATE timelines defrost_state, quiet_state,
-                  bsh_state, buh_step1, buh_step2, valve_dhw, valve_heat, water_flow_switch; and the
+                  bsh_state, tank_preheat_state, buh_step1, buh_step2, valve_dhw, valve_heat,
+                  water_flow_switch; and the
                   four that are not catalog rows at all — smart_grid_mode (two contact bits),
                   circulation_state (the confirmed external MQTT witness) and the two BOARD trends
                   free_heap and
@@ -3293,8 +3432,9 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   way in — the browser scales by 10) or null. `held` run-length-marks WHICH nulls
                   were the outdoor unit RESTING rather than a failure to measure: `v` stays a plain
                   number-or-null array any consumer can read, and the reason rides alongside instead
-                  of inside it (Modbus has no held-over state, so its array is empty). `b0` is the
-                  monotonic 5-minute bucket of sample zero and aligns the two instruments exactly;
+                  of inside it. Only eligible X10A outdoor rows carry that sentinel; Modbus, ENV III,
+                  board and MQTT-witness arrays leave `held` empty. `b0`, when a raster anchor exists,
+                  is the monotonic 5-minute bucket of sample zero and aligns all source rasters exactly;
                   `t0` is the wall-clock instant of sample 0, derived at SERVE time
                   from the current clock and the sample count (the ring advances on the MONOTONIC
                   clock, so it survives SNTP setting the time mid-boot) and OMITTED when the clock
@@ -3498,8 +3638,13 @@ POST /set_circulation   {name,topic,power_path,timestamp_path,max_age_s,on_thres
                   binds the seven BEHAVIOURAL fields (not the cosmetic name). An unchanged mapping
                   short-circuits to {ok:true,saved:false,reboot:false}; only a change to those seven
                   reconfigures the subscription, so renaming the source does not retire its evidence
-POST /set_weather {latitude,longitude} -> validate + persist + notify the weather task (no reboot,
-                  and no DNS/TLS/JSON on the request path). SAVING THE LOCATION is the specific
+POST /set_weather {latitude,longitude[,refresh:true]} -> validate; an ordinary request persists +
+                  notifies the weather task (no reboot, and no DNS/TLS/JSON on the request path).
+                  `refresh:true` is a non-persistent HIL/test trigger for the exact already-enabled,
+                  unchanged location: it returns {ok:true,reboot:false,saved:false,
+                  refresh_requested:true,refresh_token:N}; a changed/disabled location or disabled diagnostics
+                  master returns 409, and a missing task (including safe mode) returns 503, instead of
+                  turning a test request into a configuration write. SAVING THE LOCATION is the specific
                   consent to hand these coordinates — and this device's public source IP — to a
                   third party; the task additionally requires the device-wide diagnostics opt-in.
                   A saved location remains dormant while that master is off. Both are
@@ -3508,8 +3653,17 @@ POST /set_weather {latitude,longitude} -> validate + persist + notify the weathe
                   a coordinate that silently becomes a different one is a request the user cannot
                   see failing). BOTH EMPTY is the explicit disabled state; exactly one empty is 400
                   "latitude and longitude are both required" — half a location is never a location.
-                  Disabling also requests the retained MQTT topic's cleanup, so a stopped forecast
-                  leaves no last-known values on the broker
+                  A changed source first owns allocation-free admission, persists the new Config,
+                  then advances the source generation and synchronously installs a cleared runtime
+                  snapshot before success. A failed save releases admission without invalidating the
+                  still-authoritative source or changing its generation.
+                  If an active request cannot hand over ownership within four seconds, the save is
+                  rejected with 503 and no config/status generation changes. Source changes request
+                  retained MQTT cleanup; reconnect reconstructs it after reset, so a stopped or
+                  replaced forecast leaves no last-known predecessor on the broker. The returned
+                  non-zero N is causal evidence, not a queue acknowledgement: HIL accepts success
+                  only when `/status.weather_forecast` shows requested=started=completed=success=N
+                  and the success counter advanced after the trigger.
 (no /set_dynamic_lwt)  RETIRED in legacy-357. There is no controller mode to POST: the heating-curve
                   diagnosis arms itself while diagnostics, the timestamped MQTT room mapping and HomeHub are configured
                   (`heating_curve_diagnosis_armed`). Forecast/location is optional comparison evidence;
@@ -3557,9 +3711,10 @@ POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id}
                   so a saved over-long address discarded the entire configuration on the next boot.
                   A refusal is 400 "mb_host is too long"; config_save refuses independently. The three
                   HomeHub fields (host, port, unit, discovery-done latch) persist in the atomic blob
-                  and apply live: the
-                  httpd route calls mb_reconfigure(), while the Modbus task remains the sole socket
-                  owner and retires/restarts itself as needed. `actuation_enabled` is NOT accepted —
+                  and apply live. Before the durable write, httpd stages the target fingerprint and
+                  enabled bit; after success it calls the allocation-free
+                  `mb_reconfigure(bool enabled) noexcept`, while the Modbus task remains the sole
+                  socket owner and retires/restarts itself as needed. `actuation_enabled` is NOT accepted —
                   the Modbus link is read-only, and an accepted-but-inert field would read like a
                   capability that still exists. rx/tx
                   PERSIST (the physical
@@ -3631,7 +3786,12 @@ POST /detect      re-run auto-detection now (no reboot): reset profile to "auto"
                   fingerprint (RAM only) -> the next poll cycle sweeps protocol + re-fingerprints
 GET  /ota/check   synchronously claim an async manifest check and return
                   {ok:true,generation}; busy/task-unavailable -> HTTP 503 + ok:false. ?ms= is parsed
-                  but gates nothing — TLS date validation is compiled out, so OTA needs no wall clock
+                  but gates nothing — TLS date validation is compiled out, so OTA needs no wall clock.
+                  On the trusted operational LAN only, release HIL may supply the bounded HTTPS pair
+                  `X-Daikin-HIL-Manifest-URL` + `X-Daikin-HIL-Firmware-Base-URL`; one without the other,
+                  an invalid URL or either value beyond 255 bytes is 400. The pair is transient,
+                  generation-bound and unavailable on the open setup AP; it relaxes neither digest nor
+                  signed-image verification
 GET  /ota/changelog?after=<check-generation>
                   optional UTF-8 release/dev notes for the exact completed offer. Streams fixed
                   chunks as text/plain; 204 means no usable notes (the UI uses localized fallback),
@@ -3653,11 +3813,19 @@ POST /ota/update?after=<check-generation>&channel=<release|dev>&version=<checked
 GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, update_available,
                   downgrade, channel, busy, generation, available, available_sha256,
                   available_channel, current, heap_min_free_bytes,
-                  heap_min_largest_block_bytes} — `busy` and `generation` are copied under the same
-                  OTA mutex; the UI polls this. FixedText fields plus `FixedBuffer<2048>` and
+                  heap_min_largest_block_bytes, ota_stack_min_free_bytes,
+                  effective_manifest_url, effective_firmware_base_url, image_state,
+                  rollback_pending} — `busy`, `generation` and the effective feed are copied under the same
+                  OTA mutex; the UI polls this. FixedText fields plus `FixedBuffer<4096>` and
                   `json_append_quoted` keep the whole progress path allocation-free and fail closed
-                  on overflow. The two heap fields are operation-local **sampled** minima, not a
-                  continuous allocator trace. `downgrade` = the offered build is installable but OLDER (the
+                  on overflow. The two heap fields are operation-local minima; the OTA-task stack
+                  field is a boot-local retained minimum across task incarnations. All three are
+                  checkpoint samples, not continuous traces; the stack value is null until sampled
+                  and must be captured before the OTA reboot resets it. `image_state` and
+                  `rollback_pending` are boot-latched ESP-IDF image evidence; `rollback_pending` is
+                  null while `image_state=unknown`, because a failed or unfinished image-state read
+                  cannot prove rollback is absent. `downgrade` = the
+                  offered build is installable but OLDER (the
                   dev -> release direction); the UI needs BOTH flags, since update_available alone
                   makes a release-channel check on a dev board read "up to date" forever
 GET  /mcp         embedded/gzipped static MCP information + setup page; no external assets or
@@ -3680,6 +3848,7 @@ for why a shared table of sizes would be the wrong shape.
 
 | Prio | Task | Owner | Why this tier |
 |:----:|------|-------|---------------|
+| 6 | `http_abs_dl` | `http_deadline.cpp` | Boot-static socket-deadline worker. It wakes only at expiry and must preempt the task blocked on that peer. |
 | 5 | `hp_poll` | `hp_poll.cpp` | Owns the X10A UART and is Task-Watchdog-subscribed: a delayed cycle is a step toward a watchdog reboot. |
 | 5 | `captive_dns` | `captive_dns.cpp` | Must answer a joining phone's connectivity probe inside that probe's own timeout, or the captive portal never pops. Setup mode only. |
 | 4 | `mqtt_pub` | `mqtt_ha.cpp` | The HA bridge publisher, and the inbound room / circulation sources that ride the same client. |
@@ -3689,14 +3858,15 @@ for why a shared table of sizes would be the wrong shape.
 | 4 | `eth_fb` | `net.cpp` | Watches for the cable being pulled from a board that came up WIRED, and decides a reboot — so it must not sit behind a long publish. Exists only on such a board. |
 | 4 | `ota` / `ota_health` | `ota_update.cpp` | Transient. The download holds a TLS peer that will time out. |
 | 3 | `syslog_task` | `syslog.cpp` | Best-effort UDP; a late datagram costs nothing. Opt-in. |
-| 3 | `weather` | `weather_forecast.cpp` | A 45-minute fetch cadence. Opt-in. |
+| 3 | `weather` | `weather_forecast.cpp` | Created on every ordinary non-safe boot; dormant until the opt-in location and diagnostics consent are both active. |
 | 3 | `recovery_btn` | `recovery_button.cpp` | Debounced sampling of a human-scale action. Opt-in (`btn_gpio` defaults to -1). |
 | 2 | `status_led` | `status_led.cpp` | Cosmetic, below everything: a dropped tick costs nothing, since the next recomputes the pattern from scratch. |
 
 The `esp_http_server` task and esp-mqtt's own event task are created by ESP-IDF with their own
-Kconfig-set priorities and are not in this table. Seven of the twelve above are optional and simply
-do not exist when their feature is unconfigured — which is why the source-absence matrix
-(`test/test_source_absence_contract.mjs`) treats absence as a state rather than an error.
+Kconfig-set priorities and are not in this table. Optional and transient tasks above generally do
+not exist when their feature is unconfigured or inactive; Weather is the explicit exception and
+keeps an idle worker on ordinary non-safe boots. The source-absence matrix
+(`test/test_source_absence_contract.mjs`) treats both lifecycle shapes as explicit states.
 
 Every one of them that allocates also self-guards: an escaping `std::bad_alloc` at a task boundary
 reaches `std::terminate` and reboots the board. And every mutex any of them takes goes through the
@@ -3760,15 +3930,16 @@ firmware no longer has). Two rules follow:
   EXACT figure is visible, and a task can sit one frame from death while every heap number looks
   perfect. Anything under ~1 KB free wants raising — `cfg.stack_size` in http_server.cpp,
   `xTaskCreate` for the rest.
-- **…but the trend no longer waits for a crash** (`main/stack_watch.hpp`). Four tasks — httpd,
-  hp_poll, mqtt_pub and the HomeHub link — record their own FreeRTOS high-water mark from their own
-  loop, and the MQTT heartbeat carries all four as `*_stack_min_free_bytes`. That is the half a core
+- **…but the trend no longer waits for a crash** (`main/stack_watch.hpp`). Five deep tasks — httpd,
+  hp_poll, mqtt_pub, the HomeHub link and Weather — record their own FreeRTOS high-water mark, and
+  the MQTT heartbeat carries all five as `*_stack_min_free_bytes`. Weather samples again immediately
+  after its TLS/HTTP/JSON interval. That is the half a core
   dump structurally cannot supply: a dump exists only once the board has died, so the 1200 bytes of
   frame growth measured across legacy-318 accumulated over releases with nothing to see it. A falling
-  line in the store is now that warning. It does NOT replace the dump — the sampler reports WORDS
+  line in the store is now that warning. It does NOT replace the dump — the sampler reports BYTES
   FREE per task and says nothing about which frame took them — and `0` means NEVER SAMPLED, rendered
-  as JSON null at every reporting site (a board with no HomeHub has no such task, and "0 words free"
-  would read as one word from death).
+  as JSON null at every reporting site (a board with no HomeHub has no such task, and "0 bytes free"
+  would read as one byte from death).
 `CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y` (sdkconfig.defaults) now makes the *first* write past a
 limit panic at the offending instruction. IDF's default canary is only compared at a context switch
 and a sparsely-writing frame can skip over it — which is exactly what happened here (TLS[1], the
@@ -3830,7 +4001,7 @@ the firmware (`history_record`, 3296, on the poll task) and nothing else is clos
 
 **(2) Most of that frame was a `-Og` artifact, not live data.** The named locals sum to ~2.2 KB
 (`Config` 656 — `const Config& c = config()` lifetime-extends a by-value temporary across the whole
-function — `CheckupReport` 332, `WeatherForecastStatus` 208, `ReferenceTemperatureStatus` 168,
+function — `CheckupReport` 332, `WeatherForecastStatus` 240, `ReferenceTemperatureStatus` 168,
 `CrashInfo` 164, …). In the historical debug-optimized (`CONFIG_COMPILER_OPTIMIZATION_DEBUG`, `-Og`)
 build, the other ~9 KB was one distinct stack slot per `jstr()`/`std::to_string()` temporary across a
 760-line function full of EH cleanup regions. Compiling this translation unit at `-Os` took the frame
@@ -3841,14 +4012,48 @@ signed application must fit the fixed OTA slot with all device-local catalogs. T
 longer an outlier at all — 3744 against `history_record`'s 3296. The accepted trade-off is less exact
 debug backtraces in return for both measured stack headroom and the required flash-image headroom.
 
-**Re-measured from the release ELF on 2026-08-21 after the refrigerant-service object.** The only
-remaining status instantiation is the bounded sink at **0x12f0 = 4848** bytes; the owning-string
+**Re-measured from the release ELF on 2026-08-27 after the release-gate expansion.** The only
+remaining status instantiation is the bounded sink at **0x1320 = 4896** bytes; the owning-string
 instantiation no longer exists because MCP streams its small JSON-RPC prefix and suffix around the
-same 1 KiB sink. `mcp_post` is **0x4d0 = 1232** and `http_send_status_json` is **128** bytes. Applying
-the same conservative complete-path walk gives **7552 bytes** of the 16384-byte httpd stack, about
-8800 bytes before ISR and exception-unwind frames. This is build evidence; the hardware paragraph
+same 1 KiB sink. `mcp_post` is **0x4d0 = 1232** and `http_send_status_json` is **128** bytes. The
+historical hand walk gave **7552 bytes** of the 16384-byte httpd stack. The executable gate
+deliberately uses the more conservative direct sum `1536 + 1232 + 4896 = 7664` bytes, leaving
+**8720 bytes** before ISR and exception-unwind frames. This is build evidence; the hardware paragraph
 below proves the original `-Os` change, not this newer payload, whose live high-water mark remains a
 device-validation boundary.
+
+**That ELF measurement is now an executable build gate.**
+[`scripts/check-stack-budget.py`](../scripts/check-stack-budget.py) parses the demangled ESP32-S3
+disassembly's `entry a1,N` frames after every canonical firmware build. It fails closed when a
+required symbol disappears and enforces the committed ceilings for the bounded status serializer,
+`mcp_post`, `http_send_status_json`, `mqtt_task`, Weather download/parse, both OTA tasks and the
+compact OTA HTTP handlers; it also performs conservative MCP, direct-status, OTA-status,
+OTA manifest-fetch, OTA-check and both Weather task path
+sums plus a reviewed 1536-byte allowance for surrounding/nested HTTP frames. The manifest path
+multiplies its recursive JSON skipper by all nine possible simultaneous frames (root plus the
+accepted depth of eight), and a separate path budgets the static deadline watchdog. After the
+generation-bound HIL URL and stack-evidence fields landed, ESP-IDF 6.0.2 measured `ota_task` at
+**2624 bytes** plus a **48-byte** wrapper and the parser's bounded recursive frames (complete
+measured path: **4656 bytes**, ratcheted ceiling: **6144 bytes**) on the 10752-byte task stack,
+leaving at least 1 KiB even at the ceiling. The rollback-critical `ota_health` task has a separate
+fail-closed symbol/path gate: its current inlined production frame is **80 bytes**, plus a reviewed
+**2048-byte** allowance for IDF/logging, exception-unwind and external callees, for **2128 / 3072
+bytes** on its 4096-byte stack. That path likewise cannot consume the final 1 KiB.
+The 12288-byte Weather task has separate download and parse path sums, each with a reviewed
+2048-byte TLS/IDF/cJSON/exception allowance and an **11264-byte** ceiling, so neither static branch
+may consume the final 1 KiB. Runtime HIL then performs the real refresh and requires the sampled
+Weather reserve to meet the same 1 KiB floor.
+`ota_stat` is **5104 bytes**, for a **6640 /
+7168-byte** HTTP
+path. `ota_check` is **1152 bytes** and allocation-free `start_check` is **688 bytes**, for a
+**3376 / 3840-byte** HTTP path. The individual ceilings and path ratchets live in
+`tools/stack/budgets.json`, so raising one is a visible review decision rather than a checker edit.
+This proves fixed frames in the exact CI ELF. It cannot see ISR nesting, exception paths beyond the
+reviewed allowances, FreeRTOS scheduling or runtime high-water behavior, which is why release HIL
+also captures the delivery OTA task's compact pre-reboot high-water mark and the Weather task's
+post-refresh mark, requiring at least 1 KiB of observed reserve for each. `ota_health` is too
+short-lived and post-reboot for that delivery sample, so
+its separate conservative ELF path is mandatory; a decoded core dump remains authoritative after a fault.
 
 **Verified ON HARDWARE, not just on the ELF.** Both images were built from ONE source base
 (`main` @ 7524b4c), signed and USB-flashed to the XIAO bench board in turn — distinct ELF shas

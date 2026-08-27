@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -709,7 +709,7 @@ I18N.es = localeValues([
   /* board.led_rgb_bus_down */ "Rojo, doble destello — X10A desconectado.",
   /* board.led_rgb_mqtt_down */ "Naranja, parpadeando — X10A conectado, MQTT desconectado.",
   /* board.led_rgb_wipe_armed */ "Rojo, parpadeo muy rápido — borrado preparado; suelta para cancelar.",
-  /* board.led_rgb_wiping */ "Blanco fijo — borrando ajustes; no desconectes la alimentación.",
+  /* board.led_rgb_wiping */ "Blanco fijo — restablecimiento/borrado en curso; no desconectes la alimentación.",
   /* board.led_gpio_off */ "Apagado — no hay ningún modo Wi-Fi activo.",
   /* board.led_gpio_setup */ "Parpadeo lento — portal de configuración activo.",
   /* board.led_gpio_connecting */ "Parpadeo rápido — conectando a Wi-Fi.",
@@ -717,10 +717,10 @@ I18N.es = localeValues([
   /* board.led_gpio_bus_down */ "Doble destello — X10A desconectado.",
   /* board.led_gpio_mqtt_down */ "Parpadeo a velocidad media — X10A conectado, MQTT desconectado.",
   /* board.led_gpio_wipe_armed */ "Parpadeo muy rápido — borrado preparado; suelta para cancelar.",
-  /* board.led_gpio_wiping */ "Fijo tras un parpadeo muy rápido — borrando ajustes; no desconectes la alimentación.",
+  /* board.led_gpio_wiping */ "Fijo tras parpadeo muy rápido — restablecimiento/borrado en curso; no desconectes la alimentación.",
   /* board.ledinv */ "Activo en nivel bajo (el LED se enciende cuando el pin está en LOW)",
   /* board.btninv */ "Activo en nivel bajo (el botón conecta el pin a GND)",
-  /* board.hint */ "Mantén pulsado el botón de reinicio durante 5 segundos para borrar todos los ajustes y abrir el portal de configuración. Selecciona «Ninguno» si no hay ningún botón conectado.",
+  /* board.hint */ "Restablecimiento de fábrica: mantén pulsado 5 s. Borra permanentemente Wi-Fi/todos los ajustes, historial/tendencias, duraciones de estado y volcado de memoria sin procesar. El portal solo se abre si todo se borra correctamente. Si no, suelta y mantén otros 5 s. Elige «Ninguno» sin botón.",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Ninguno",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

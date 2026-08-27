@@ -148,6 +148,9 @@ stay excluded from both.
 
 Leave the button on **None** unless one is really wired. An unconnected input pin floats, and a
 floating pin that happens to read "pressed" for five seconds would factory-reset a board nobody
-touched. When one *is* configured, holding it erases every stored setting (WiFi, MQTT, Syslog/NTP,
-the X10A pin cache) and reboots into the setup portal — the LED flashes red once the reset is armed
-(release to abort), then goes solid white while erasing.
+touched. When one *is* configured, holding it performs a fail-closed privacy wipe: serialized
+settings (WiFi, MQTT, Syslog/NTP and the X10A pin cache), legacy WiFi credentials,
+history/trend/dwell state and the raw coredump are erased. The board reboots into the setup portal
+only after every erase succeeds; an incomplete wipe remains on the current boot and must be
+retried. The LED flashes red once the reset is armed (release to abort), then goes solid white while
+erasing.

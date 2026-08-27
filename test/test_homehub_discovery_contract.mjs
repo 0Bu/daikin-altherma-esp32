@@ -19,15 +19,25 @@ assert.doesNotMatch(task, /discover_homehub\s*\(|mdns_query_(?:ptr|a)\s*\(|confi
   "the steady-state poll task must never perform HomeHub discovery");
 // Clearing the address retires the task outright. There is no restore step any more: the write path
 // was removed with dynamic LWT actuation (#294), so the stack owns nothing on the hub to put back.
-assert.match(task, /if \(config_modbus_host\(config\(\)\)\.empty\(\)\) break;/,
-  "clearing the address must retire the task without a fallback search");
+const disabledIntent = task.indexOf("if (!s_target_enabled.load(std::memory_order_acquire)) break;");
+const tlsDelay = task.indexOf("if (ota_download_active() || weather_fetch_active())");
+assert.ok(disabledIntent >= 0 && tlsDelay > disabledIntent,
+  "clearing the address must retire the task before TLS delays or allocating Config snapshots");
+assert.doesNotMatch(task, /config_modbus_host\(config\(\)\)\.empty\(\)/,
+  "HomeHub disable must not depend on a fallible Config copy");
 assert.doesNotMatch(task, /request_restore\(|mb_process_actuator\(/,
   "the retired actuator must leave no restore step in the task loop");
 
 const startStart = modbus.indexOf("static void mb_task_start_if_enabled()", taskEnd);
 const startEnd = modbus.indexOf("void mb_start()", startStart);
-assert.match(modbus.slice(startStart, startEnd), /if \(!config_modbus_enabled\(c\)\) return;/,
+assert.match(modbus.slice(startStart, startEnd),
+  /if \(!s_target_enabled\.load\(std::memory_order_acquire\)\) return;/,
   "after the one-shot decision, an empty address must create no HomeHub task");
+assert.doesNotMatch(modbus.slice(startStart, startEnd), /\bconfig\s*\(/,
+  "post-save task admission must not copy the string-owning Config");
+assert.match(modbus.slice(startEnd),
+  /void mb_start\(\)[\s\S]*?const Config c = config\(\);[\s\S]*?s_target_enabled\.store\(config_modbus_enabled\(c\)/,
+  "boot must seed task admission from the post-discovery persisted config");
 
 const autoStart = modbus.indexOf("void mb_autodiscover_initial()");
 const autoEnd = modbus.indexOf("// Non-blocking connect", autoStart);

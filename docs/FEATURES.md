@@ -46,10 +46,10 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | # | Feature | Status | Anchored in |
 |---|---------|:------:|-------------|
 | 1 | Secure Boot v2 **signed images without hardware Secure Boot** (RSA-3072) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
-| 2 | Refuse-to-flash-unsigned guard | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
+| 2 | Refuse-to-flash-untrusted guard (structure, CRC, image digest, RSA-PSS and pinned key) | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
 | 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ 🧪 | [`partitions.csv`](../partitions.csv), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** (not an uptime timer) | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
-| 5 | OTA manifest check + version-bound **release/dev changelog modal** + signed manual HTTPS stream with **at most two exact fail-closed Range resumes** and two-point downgrade gate; dynamic TLS records, clean MQTT pause, transport cleanup, phase-specific INTERNAL-heap admission, fixed status and bounded peer coordination | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`http_client_diag.cpp`](../main/http_client_diag.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`www/js/settings.js`](../main/www/js/settings.js), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/ota_transport.hpp`](../main/logic/ota_transport.hpp), [`logic/fixed_text.hpp`](../main/logic/fixed_text.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
+| 5 | OTA manifest check + version-bound **release/dev changelog modal** + signed manual HTTPS stream with **at most two exact fail-closed Range resumes** and two-point downgrade gate; dynamic TLS records, a boot-created absolute header/body socket watchdog, clean MQTT pause, transport cleanup, phase-specific INTERNAL-heap admission, fixed status and bounded peer coordination | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`http_client_diag.cpp`](../main/http_client_diag.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`www/js/settings.js`](../main/www/js/settings.js), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/http_deadline.hpp`](../main/logic/http_deadline.hpp), [`logic/ota_transport.hpp`](../main/logic/ota_transport.hpp), [`logic/fixed_text.hpp`](../main/logic/fixed_text.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
 | 6 | Live UI by **polling** bounded-chunk-streamed `/status` + `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation, both snapshots fail fast during OTA, and the model-sized values snapshot waits boundedly behind shorter Weather TLS | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`logic/http_values_wait.hpp`](../main/logic/http_values_wait.hpp), [`test_status_heap_contract.mjs`](../test/test_status_heap_contract.mjs), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
 | 7 | Minified deterministic-gzip UI **embedded in the app image**: startup page under 160 KiB, each device-local locale under 32 KiB | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs) |
 | 8 | HTTP handlers under an **OOM boundary**: `503` before the first response emission; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp) |
@@ -81,7 +81,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 34 | **HTTP trust-surface split** — the open setup AP registers only provisioning routes; diagnostics and the config/OTA/MCP surface are trusted-LAN only | ✅ 🧪 | [`http_server.cpp`](../main/http_server.cpp), [`logic/http_surface.hpp`](../main/logic/http_surface.hpp) |
 | 35 | **Publish-time plausibility filter** — an out-of-envelope reading reaches HA as *unavailable*, never as a false value; refrigerant-vs-water decided structurally, never by label | ✅ 🧪 | [`logic/convert.hpp`](../main/logic/convert.hpp), [`hp_convert.cpp`](../main/hp_convert.cpp) |
 | 36 | **Raw page dump on `/diag`** — the wire bytes behind a decoded value, on a detect pass and as a bounded run-time series | ✅ 🧪 | [`logic/hexdump.hpp`](../main/logic/hexdump.hpp), [`logic/raw_capture.hpp`](../main/logic/raw_capture.hpp) |
-| 37 | **Physical recovery button** — a 5 s hold erases the config; the only reset needing no network access | ✅ 🧪 | [`recovery_button.cpp`](../main/recovery_button.cpp), [`logic/button.hpp`](../main/logic/button.hpp) |
+| 37 | **Physical recovery button** — a 5 s hold erases config, legacy WiFi storage, history/dwell evidence and any coredump, and reboots only after the complete privacy reset; the only reset needing no network access | ✅ 🧪 | [`recovery_button.cpp`](../main/recovery_button.cpp), [`logic/button.hpp`](../main/logic/button.hpp) |
 | 38 | **Explicit board identity + runtime hardware config** — a stable preset id persisted with indicator/button pins, never inferred from matching GPIOs | ✅ 🧪 | [`logic/board_presets.hpp`](../main/logic/board_presets.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 39 | **Stack-overflow watchpoint** — the *first* write past a stack limit panics at the offending instruction | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults), [`http_server.cpp`](../main/http_server.cpp) |
 | 40 | **Cost-shaped CI** — fast mechanical gates as steps of one job, skipped compile steps when nothing relevant changed, carried ccache, no per-PR publish | ✅ | [`build.yml`](../.github/workflows/build.yml) |
@@ -104,14 +104,14 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 58 | **Deleting a crash report** (`POST /crash/dismiss`) — a device action, not page state: erase first, mark second, so status, MQTT and every browser agree | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
 | 59 | **Pinned warning contract on `main/`** — `-Werror=return-type,format,unused-result` on that component alone, so three constructs written as if a warning were fatal actually are | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt) |
 | 60 | **Device-local multilingual UI** — browser detection plus a persistent en/de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi override, applied live from bounded signed-image locale assets | ✅ 🧪 | [`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp), [`www/js/i18n.js`](../main/www/js/i18n.js), [`www/locales/`](../main/www/locales/) |
-| 61 | **Second SOURCE: read-only Modbus TCP to a Daikin HomeHub (EKRHH)** — a stack beside X10A, not an alternative; no source file can frame a write; the 31-row map is batched into ten full-cycle requests while two diagnosis gates and one plant-outdoor context batch stay at 1 Hz | ✅ 🧪 | [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`logic/modbus.hpp`](../main/logic/modbus.hpp), [`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
+| 61 | **Second SOURCE: read-only Modbus TCP to a Daikin HomeHub (EKRHH)** — a stack beside X10A, not an alternative; no source file can frame a write; the 32-row map is batched into ten full-cycle requests while two diagnosis gates and one plant-outdoor context batch stay at 1 Hz | ✅ 🧪 | [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`logic/modbus.hpp`](../main/logic/modbus.hpp), [`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
 | 62 | **Configurable MQTT living-room source** — independent exact `topic$json-path` mappings for temperature, an optional source time and an MQTT-backed or fixed target; saving records the mapping even when a path is empty or wrong, but subscription/decoding starts only under the v19 Plant diagnostics master, then the next real MQTT frame supplies runtime decoder evidence; without source time, only live non-retained arrival is accepted | ✅ 🧪 | [`logic/reference_temperature.hpp`](../main/logic/reference_temperature.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 66 | **Complete UI interaction merge gate** — the assembled production UI is *executed* in a deterministic DOM harness, covering every modal in the production registry | ✅ 🧪 | [`test_ui_use_cases.mjs`](../test/test_ui_use_cases.mjs), [`run-ui-use-case-tests.sh`](../scripts/run-ui-use-case-tests.sh) |
 | 68 | **Source-boundary contract gate** — source-text assertions about `main/*.cpp` the host suite structurally cannot make (task, order, and which file is entitled) | ✅ | [`run-contract-tests.sh`](../scripts/run-contract-tests.sh), [`test_heating_curve_diagnosis_contract.mjs`](../test/test_heating_curve_diagnosis_contract.mjs) |
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
 | 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 71 | **Pinned stack compiler contracts on `/status` and MQTT publishing** — `http_status.cpp` stays at `-Os`, while `mqtt_ha.cpp` keeps called-once helper boundaries and a fatal 2 KiB per-function frame ceiling so size optimisation cannot silently fold transient publish state back into the fixed MQTT task frame | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
-| 81 | **Stack-headroom telemetry** — the second memory budget, made reportable: four tasks record their own FreeRTOS high-water mark and the heartbeat carries all four, so a growing call frame is a falling line rather than a core dump nobody has yet | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp) |
+| 81 | **Stack-headroom telemetry** — the second memory budget, made reportable: five deep tasks record their own FreeRTOS high-water mark and the heartbeat carries all five, so a growing call frame is a falling line rather than a core dump nobody has yet | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp) |
 | 72 | **Power-loss-surviving 24-hour trends and opt-in plant checkup** — `.noinit` DRAM covers power-preserving resets; the upper-4-MiB append journal stores dense five-minute X10A/HomeHub/ENV III records, daily semantic-id manifests that preserve unchanged series across catalog edits, and enabled hourly diagnosis records. CRC, last-written commit and rotating sectors fail closed on torn writes; the build guards 72-hour capacity. The official 8 MB table is required; browser storage is not a measurement source | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
 | 82 | **Reproducible ESP-IDF build inputs** — exact transitive component lock, explicit ESP-IDF/CMake/C++ floors and wall-clock-free app metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 83 | **Kconfig and target contract gate** — `esp32s3` is a project default and every declared default is compared with generated `sdkconfig` before compilation | ✅ 🧪 | [`check-sdkconfig-defaults.py`](../scripts/check-sdkconfig-defaults.py), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
@@ -131,12 +131,19 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 86 | **Inline Web Serial installer + monitor** — only the native port chooser leaves the branded Pages UI; ESP32-S3 probing, NVS-preserving sparse flash, cross-part progress, reset and a real 115200-baud monitor run in-page | ✅ 🧪 | [`web-installer.mjs`](web-installer.mjs), [`web_installer.test.mjs`](../test/web_installer.test.mjs) |
 | 87 | **Diagnostic-evidence contract gate** — every visible plant diagnosis stays bound to an external basis, its implemented rule and an explicit claim limit | ✅ | [`check_diagnostic_evidence.mjs`](../tools/diagnostic_evidence/check_diagnostic_evidence.mjs), [`run-diagnostic-evidence-audit.sh`](../scripts/run-diagnostic-evidence-audit.sh) |
 | 88 | **English-only documentation contract** — maintained Markdown stays English while localized UI copy remains independently complete and equally bounded | ✅ 🧪 | [`english_docs.mjs`](../tools/user_docs/english_docs.mjs), [`run-user-docs-audit.sh`](../scripts/run-user-docs-audit.sh) |
-| 90 | **Bounded X10A publish path + weather-fetch headroom gate** — direct size/digest probing of the source-tagged poll cache avoids duplicate cache/group storage and a permanent payload block; changed state uses one exact transient payload with a revision-checked copy and a 12 KiB refusal ceiling. Open-Meteo waits for X10A/MQTT quiescence and retries below 56 KiB free / 24 KiB largest contiguous block | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`logic/x10a_snapshot.hpp`](../main/logic/x10a_snapshot.hpp), [`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp), [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`logic/weather_forecast.hpp`](../main/logic/weather_forecast.hpp), [`test_x10a_publish_heap_contract.mjs`](../test/test_x10a_publish_heap_contract.mjs) |
+| 90 | **Bounded X10A publish path + weather-fetch headroom/deadline gate** — direct size/digest probing of the source-tagged poll cache avoids duplicate cache/group storage and a permanent payload block; changed state uses one exact transient payload with a revision-checked copy and a 12 KiB refusal ceiling. Open-Meteo waits for X10A/MQTT quiescence, retries below 56 KiB free / 24 KiB largest contiguous block, and shares the absolute header/body socket watchdog | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`logic/x10a_snapshot.hpp`](../main/logic/x10a_snapshot.hpp), [`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp), [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`logic/weather_forecast.hpp`](../main/logic/weather_forecast.hpp), [`test_x10a_publish_heap_contract.mjs`](../test/test_x10a_publish_heap_contract.mjs) |
 | 91 | **X10A protocol diagnosis** — connection-gated, closed Settings tongue with an exact-or-labelled-generic `main/def` register catalog plus a bounded `POST /hp/query`: one caller-chosen page, raw/partial frame and every converter the slice admits | ✅ 🧪 | [`logic/hp_probe.hpp`](../main/logic/hp_probe.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`http_config.cpp`](../main/http_config.cpp), [`dashboard.js`](../main/www/js/dashboard.js) |
-| 96 | **Fail-closed signed bench OTA delivery** — the private-inventory `bench` role is the only target of the canonical ordinary-update mode: exact official dev source/version/application-SHA, signature, ESP32-S3 metadata, current-version/MAC lease and safe preflight precede one generation-bound un-retried write; a connection-churn-bounded compact observer, verifier/operation-heap evidence, rollback probation and fixed HTTP/TLS/MQTT pressure follow. The mode cannot contact production; ordinary bench delivery is OTA-only, with USB reserved for bootstrap/recovery | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`agent_hook.py`](../tools/agent-hooks/agent_hook.py), [`test_production_ota_gate_contract.mjs`](../test/test_production_ota_gate_contract.mjs), [`selftest.mjs`](../tools/production_ota/selftest.mjs) |
-| 92 | **Fail-closed production OTA promotion** — after the exact signed dev artifact is healthy on the bench (normally through feature 96; signed USB only for bootstrap/recovery), host contracts, a healthy dwell, a complete signed release download under HTTP pressure, release probation, exact dev restore and sustained manifest pressure run on the MAC-pinned bench. The bench-only legacy return requires a stable exact offer; production accepts no legacy fallback and atomically consumes the completed check generation plus channel/version/application-SHA. Whole-download SHA-256, completed verification and read-only X10A/weather/heap/MQTT canaries remain mandatory | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`ota_update.cpp`](../main/ota_update.cpp), [`ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`http_ota.cpp`](../main/http_ota.cpp), [`health_gate.hpp`](../main/logic/health_gate.hpp), [`test_production_ota_gate_contract.mjs`](../test/test_production_ota_gate_contract.mjs), [`selftest.mjs`](../tools/production_ota/selftest.mjs), [`require-pr-gates.sh`](../tools/agent-hooks/require-pr-gates.sh) |
+| 96 | **Fail-closed signed bench OTA delivery** — the private-inventory `bench` role is the only target of the canonical ordinary-update mode: exact official dev source/version/application-SHA, signature, ESP32-S3 metadata, current-version/MAC lease and safe preflight precede one generation-bound un-retried write; a connection-churn-bounded compact observer, verifier/operation-heap evidence, at least 1 KiB observed OTA-task stack reserve, rollback probation and fixed HTTP/TLS/MQTT pressure follow. The mode cannot contact production; ordinary bench delivery is OTA-only, with USB reserved for bootstrap/recovery | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`agent_hook.py`](../tools/agent-hooks/agent_hook.py), [`test_production_ota_gate_contract.mjs`](../test/test_production_ota_gate_contract.mjs), [`selftest.mjs`](../tools/production_ota/selftest.mjs) |
+| 92 | **Fail-closed production OTA promotion** — after the exact signed dev artifact is healthy on the bench (normally through feature 96; signed USB only for bootstrap/recovery), host contracts, a healthy dwell, a complete signed release download under HTTP pressure, release probation, exact dev restore and sustained manifest pressure run on the MAC-pinned bench. The bench-only legacy return requires a stable exact offer; production accepts no legacy fallback and atomically consumes the completed check generation plus channel/version/application-SHA. Whole-download SHA-256, completed verification and read-only X10A/weather/heap/MQTT canaries remain mandatory; the Weather canary is bound to the exact refresh token returned by its trigger, not an unrelated success-counter edge | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`ota_update.cpp`](../main/ota_update.cpp), [`ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`http_ota.cpp`](../main/http_ota.cpp), [`health_gate.hpp`](../main/logic/health_gate.hpp), [`test_production_ota_gate_contract.mjs`](../test/test_production_ota_gate_contract.mjs), [`selftest.mjs`](../tools/production_ota/selftest.mjs), [`require-pr-gates.sh`](../tools/agent-hooks/require-pr-gates.sh) |
 | 94 | **ESP-IDF feature-matrix gate** — explicit components, managed dependencies, active defaults, application IDF headers and reviewed native/manual boundaries must stay represented by source evidence and specific official documentation | ✅ | [`ESP_IDF_MATRIX.md`](ESP_IDF_MATRIX.md), [`check_matrix.py`](../tools/esp_idf_matrix/check_matrix.py), [`selftest.py`](../tools/esp_idf_matrix/selftest.py) |
 | 95 | **Fresh refrigerant service observation** — one non-persistent, generation-bound heating window from same-sweep X10A values, separate from plant health; profile-sized gap handling, latched limitations and explicit no-load/no-EEV-feedback boundaries expose service context without inventing full load, settling, charge, a universal range or a completion verdict | ✅ 🧪 | [`refrigerant_service.hpp`](../main/logic/refrigerant_service.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`DIAGNOSTICS.md`](DIAGNOSTICS.md#refrigerant-service-observation) |
+| 98 | **Per-header branch-count coverage ratchet** — the 95% aggregate line floor is joined by compiler-major-specific aggregate gcov `taken/total` branch-edge floors; it does not claim branch identity | ✅ 🧪 | [`branch_baseline.json`](../tools/coverage/branch_baseline.json), [`check_gcov_report.py`](../tools/coverage/check_gcov_report.py) |
+| 99 | **Sanitized hostile-input property gate** — deterministic malformed frames, JSON, URLs and boundary values use a capability-probed sanitizer runtime; CI requires ASan+UBSan and a local host falls back to UBSan only when ASan is unavailable | ✅ 🧪 | [`logic_property_tests.cpp`](../tools/fuzz/logic_property_tests.cpp), [`run-sanitizer-fuzz-tests.sh`](../scripts/run-sanitizer-fuzz-tests.sh) |
+| 100 | **Ratcheted source-format gate** — whole-tree UTF-8/LF/exactly-one-final-newline/whitespace invariants plus exact clang-format 18.1.3 on new files and changed C/C++ hunks | ✅ 🧪 | [`check_format.py`](../tools/format/check_format.py), [`run-format-check.sh`](../scripts/run-format-check.sh) |
+| 101 | **Host runtime-scenario harness** — eight scenarios run selected production parsers and serializers through simulated clock/storage/transport/broker adapters; two real POSIX socket scenarios prove joined absolute deadline aborts for trickling headers and bodies. It remains hardware-free and does not execute target glue, NVS or MCP | ✅ 🧪 | [`runtime_integration_tests.cpp`](../test/runtime/runtime_integration_tests.cpp), [`run-runtime-integration-tests.sh`](../scripts/run-runtime-integration-tests.sh) |
+| 102 | **Real-browser rendering and accessibility gate** — the assembled production UI runs in Chrome across all locales and mobile/desktop widths, including native accessibility, keyboard, overflow, reduced-motion and console contracts | ✅ 🧪 | [`test_browser_render.mjs`](../test/test_browser_render.mjs), [`run-browser-render-tests.sh`](../scripts/run-browser-render-tests.sh) |
+| 103 | **End-to-end release artifact trust chain** — clean rebuild identity, pinned signing-key continuity, manifest provenance, Pages byte readback and GitHub Release asset readback all bind the published artifact to the trusted build | ✅ 🧪 | [`check-reproducible-build.py`](../scripts/check-reproducible-build.py), [`check-signing-key-continuity.py`](../scripts/check-signing-key-continuity.py), [`verify-published-artifacts.py`](../scripts/verify-published-artifacts.py) |
+| 104 | **Isolated release hardware gate** — the byte-identical candidate uses a transient generation-bound HTTPS feed override and must explicitly prove pending rollback, at least 1 KiB pre-reboot OTA-task stack reserve, a pre-commit controller approval under a non-renewable watchdog, committed-valid reinstall and cold restoration. The valid candidate then proves its own complete OTA writer by installing the separately pinned signed bootstrap as pending and hard-cycling back to the candidate before live stack minima and combined stress on a non-production lab can permit release publication | ✅ 🧪 | [`ota_hil_feed.hpp`](../main/logic/ota_hil_feed.hpp), [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`build.yml`](../.github/workflows/build.yml) |
 
 ---
 
@@ -173,7 +180,8 @@ Because the app must carry a valid signature to run, an **unsigned image crash-l
 `app_main` with no app-level recovery. Three guards contain that:
 
 - [`require-signed.sh`](../scripts/require-signed.sh) exits non-zero **with the exact signing
-  command** if a `.bin` has no signature block; the
+  command** unless the `.bin` carries a structurally valid Secure Boot v2 block whose CRC, image
+  digest, RSA-PSS signature and pinned RSA-3072 public-key digest all verify; the
   [`flash-esp32`](../.agents/skills/flash-esp32/SKILL.md) skill runs it before every flash.
 - CI hard-errors on a `main` build with no signing key; fork PRs downgrade to an unsigned
   *compile-only* build that publishes nothing.
@@ -208,8 +216,9 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
 - **✅ 🧪 Health gate, not a timer** ([`logic/health_gate.hpp`](../main/logic/health_gate.hpp)): an
   image is sealed in only after a base window **and** proven connectivity (STA online, or the setup
   portal when it has no credentials). A boots-but-broken update — a WiFi regression that can never
-  get back online to be re-flashed — rolls back instead of sealing the break in. USB images boot
-  `UNDEFINED`, so the gate can never strand a fresh board.
+  get back online to be re-flashed — rolls back instead of sealing the break in. Blank/no-record
+  USB images make IDF's state read fail and are reported `unknown`/`rollback_pending:null`, never
+  `PENDING_VERIFY`, so the gate can never strand a fresh board or invent a safe rollback state.
 - **✅ 🧪 Two update channels** ([`logic/ota_channel.hpp`](../main/logic/ota_channel.hpp)):
   `release` (the gh-pages root, cut by a manual workflow run) and `dev` (every firmware-relevant
   merge). Dev builds are stamped `<next release>-dev.<n>` — a semver **pre-release**, so ordering
@@ -225,7 +234,8 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   released after its response, on send failure, after a 60-second static-timer TTL, or before the
   next OTA task, so no boot-long prose BSS, heap island or PSRAM dependency is added. The optional
   second TLS request uses the same dynamic TLS-record client and first requires the same four stable
-  56 KiB total-free / 24 KiB largest-INTERNAL-block samples as the manifest and image handshakes.
+  56 KiB total-free / 24 KiB largest-INTERNAL-block samples as the manifest and image handshakes. Its
+  header and body share the same 30-second socket watchdog as the manifest.
   The device-local modal shows the exact current/available versions, channel, literal change list and
   signed-update/rollback explanation in all shipped languages. Missing notes fall back locally and
   never weaken or block the signed artifact lease.
@@ -234,8 +244,19 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   for the largest contiguous block). The lock-free OTA heap lease begins before manifest TLS setup,
   gives the once-per-second MQTT publisher and X10A poller one cycle to stand aside, prevents a new
   weather request and waits a bounded interval for an existing one, and stays active through image
-  validation. A 30-second whole-manifest deadline and five-minute whole-firmware deadline prevent a
-  slowly trickling peer from holding the coordinated services indefinitely. An init-OOM or
+  validation. The monotonic budget starts before each open. Once `esp_http_client_open()` exposes the
+  public socket, one boot-created `esp_timer` is armed for only the remaining 30-second manifest or
+  five-minute firmware budget and stays armed across `fetch_headers()` and every body read. Its
+  allocation-free callback only latches expiry and notifies one boot-static priority-6 watchdog
+  task. That task owns a boot-primed lwIP thread semaphore, calls `shutdown(SHUT_RDWR)`, and signals
+  completion; the owning OTA task joins that acknowledgement before close, redirect or Range-resume
+  reuse. The watchdog task is created before networking, never at failure time, and the callback
+  never enters the socket API. An unavailable timer/task/prime disables OTA and Weather for the boot;
+  later location or diagnostics saves preserve that error for an active source instead of replacing
+  it with a false `waiting` state.
+  DNS/TCP/TLS/request setup inside `open()` is governed separately by the IDF client's 15-second
+  timeout and a post-open deadline check; the application socket watchdog cannot interrupt that
+  pre-socket phase. An init-OOM or
   `ESP_ERR_MBEDTLS_SSL_SETUP_FAILED` during the manifest handshake is
   retried exactly once after cleanup; DNS, TCP, certificate and HTTP failures are not relabelled or
   retried. The manifest parser
@@ -330,7 +351,8 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   it *snapshotted*. Writers now commit only the fields they **own**, via non-allocating host-tested
   patches, so a detection sweep cannot revert a credential change the user was already told
   succeeded. An NVS write failure **reaches the user** (`500`, no reboot) instead of reading as
-  saved.
+  saved. The service blob, link blob and exact RAM successor are fully allocated/serialized before
+  the first NVS write; after that boundary only checked writes and a noexcept move remain.
 - **✅ 🧪 ICMP gateway watchdog.** A missed deauth leaves a ghost association — IP held, TCP timing
   out, no disconnect event ever. A background task probes the gateway and re-associates only for the
   proven ghost case. The probe is **three-valued**
@@ -457,6 +479,13 @@ other.
   forever. Retired entities are listed, their configs **actively deleted** under both the current and
   the legacy node id, and their `uniq_id`s **burned** so no live entity can inherit a dead registry
   entry.
+- **✅ 🧪 Retained-source cleanup is ACK-bounded.** Weather, HomeHub, ENV III and retired-discovery
+  tombstones run through one IDF-free scheduler with at most one cleanup QoS-1 message in flight.
+  Only its exact PUBACK advances the sequence; explicit outbox-expiry evidence, a joined transport
+  stop or fixed-ring evidence loss retries the same step without a second queued item. Pending
+  sources stay suppressed, client replacement reconstructs the durable plan, and an 8 KiB esp-mqtt
+  outbox cap bounds unrelated QoS-1 backlog. Incremental MQTT packet IDs prevent delivery evidence
+  from aliasing concurrent subscription or QoS-1 traffic during that bounded lifetime.
 - **✅ 🧪 Detect-only rows are never announced — and are actively retracted.** A row flagged
   `no_publish` is skipped by the cache and its discovery topic zero-lengthed. The row is **kept**
   rather than deleted because a profile's detection signature is the set of pages its rows reference:
@@ -513,7 +542,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
 - **✅ 🧪 The 24-hour trends survive a reboot** ([`logic/history_persist.hpp`](../main/logic/history_persist.hpp)).
   Rings live in `.noinit` DRAM rather than NVS; the official 8 MB layout appends dense 256-byte
   records to the upper-4-MiB partition. CRC, a last-written commit and rotating sectors fail closed
-  on torn writes; a power cut loses at most the open or just-closed bucket. Restore waits for SNTP,
+  on torn writes. After a successful scan, SNTP sync and first eligible commit, a power cut loses at
+  most the open or just-closed bucket; before that commit flash has no RAM-only samples to restore.
+  Restore waits for SNTP,
   batches four rings per poll tick and derives spans from journal buckets. Browser `sessionStorage`
   is not a history medium, and there is no fallback for the former 8 KB partition.
   `.noinit` is sealed by the order-sensitive catalog fingerprint. Flash precedes each generation
@@ -584,12 +615,17 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   as lines in a `/diag` ring the next chatty boot overwrites. `heap_restarts` — the 22nd entity —
   attributes the one reboot nothing else can: the heap watchdog restarts with `esp_restart()`, so
   every other field reports the same `sw` a settings save produces.
-- **✅ Stack-headroom telemetry** ([`stack_watch.hpp`](../main/stack_watch.hpp)): four tasks (httpd,
-  poll, MQTT, HomeHub) record their own FreeRTOS high-water mark from their own loop and the
-  heartbeat publishes all four as `*_stack_min_free_bytes`. The heap has `/status.sys`, two trend
+- **✅ Stack-headroom telemetry** ([`stack_watch.hpp`](../main/stack_watch.hpp)): five deep tasks
+  (httpd, poll, MQTT, HomeHub and Weather) record their own FreeRTOS high-water mark and the
+  heartbeat publishes all five as `*_stack_min_free_bytes`. Weather samples again immediately after
+  its TLS/HTTP/JSON interval, before the causal refresh token can complete. The heap has `/status.sys`, two trend
   rings and a watchdog; the stack had a core dump's task table, which exists only once the board has
   died — and this firmware has shipped three stack overflows. `null` means never sampled, never zero
-  headroom. Payload-only: the audience for a headroom trend is whoever upgrades the firmware.
+  headroom. The OTA delivery task uses an allocation-free sampler/status path; its boot-local result
+  appears only as `ota_stack_min_free_bytes` on compact `/ota/status`, so the delivery gate must capture it
+  before the task reboots into the candidate. Release HIL also requires at least 1 KiB of Weather
+  headroom after its mandatory real refresh. Payload-only: the audience for a headroom trend is
+  whoever upgrades the firmware.
 - **✅ 🧪 Always-on system health**: `/status.sys` carries heap headroom, the since-boot low-water
   mark, the largest contiguous block, the heap-watchdog restart count, per-task stack headroom
   (`stack_min_free_bytes`), the three legacy-380 cycle-loss counters, the reset-reason slug and the
@@ -613,9 +649,10 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   publishes a single image for boards that disagree about their onboard parts. Because a monochrome
   LED sees no colour, every phase stays distinguishable by blink *shape* alone.
 - **✅ 🧪 Physical recovery button** ([`logic/button.hpp`](../main/logic/button.hpp)): a 5 s hold
-  erases the config namespace and reboots into the portal — the only reset that does not go through
-  the network, which is exactly the failure the other paths cannot reach (the device joined a network
-  the user can no longer get onto). An **arm checkpoint** lights the warning while there is still
+  erases config, legacy WiFi storage, the history journal plus trend/dwell RAM, and any raw coredump;
+  it reboots into the portal only when every privacy erase succeeds. This is the only reset that does
+  not go through the network, which is exactly the failure the other paths cannot reach (the device
+  joined a network the user can no longer get onto). An **arm checkpoint** lights the warning while there is still
   time to let go, and a debounced release means one bounced sample can neither cancel a hold nor
   restart its clock. **Disabled by default**, since a floating pin reading "pressed" would wipe an
   untouched board.
@@ -702,11 +739,32 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 
 - **The fast loop** — [`run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles and runs the suite
   with the plain system toolchain. CI adds gcov and enforces a **95% executable-line floor** over
-  `main/logic/` itself, with a selftest proving an empty or below-floor report fails closed. This is
-  the real "run it and see" loop even in an environment that cannot build firmware or USB-flash.
+  `main/logic/` itself. Within each compiler-family/major profile, a per-header ratchet compares
+  aggregate gcov **taken/total branch-edge counts**, preventing a large header from hiding a count
+  regression in a small one. Equal counts can represent different edges, so this is not branch-
+  identity evidence. Selftests prove empty, malformed, missing-baseline and below-floor reports fail
+  closed. This is the real "run it and see" loop even in an environment that cannot build firmware
+  or USB-flash.
 - **The rule** — new decode/config/discovery logic goes in `main/logic/` with a `CHECK`, never buried
   in a device-only `.cpp`. The [`add-logic-test`](../.agents/skills/add-logic-test/SKILL.md) skill
   and the [`x10a-decode-reviewer`](../.codex/agents/x10a-decode-reviewer.toml) agent enforce it.
+- **The hostile-input loop** — [`run-sanitizer-fuzz-tests.sh`](../scripts/run-sanitizer-fuzz-tests.sh)
+  drives deterministic malformed frames, strings, URLs and numerical boundaries through production
+  logic. The runner probes ASan+UBSan as a capability; CI fails unless both compile and run, while a
+  local host falls back to UBSan only after the ASan probe fails. Its fixed corpus makes a failure
+  reproducible; it is not a claim of open-ended fuzzing.
+- **The host runtime scenarios** — [`run-runtime-integration-tests.sh`](../scripts/run-runtime-integration-tests.sh)
+  call selected production config serializers, X10A/Modbus parsers, MQTT publish gating and bounded
+  body/chunk logic through host-only fake time, storage, serial, TCP, broker and HTTP adapters. Eight
+  scenarios model failed persistence, reconstruction, allocation failure, interleavings,
+  fragmentation and reconnects. Two more use real POSIX `socketpair`/`recv` traffic to prove that
+  `shutdown(SHUT_RDWR)` aborts trickling headers and bodies at an absolute deadline and is joined
+  before descriptor reuse. These ten scenarios do not execute ESP-IDF target glue, real NVS or the
+  production MCP/HTTP/MQTT stacks. Target compilation and hardware evidence remain separate gates.
+- **The browser loop** — the deterministic DOM suite covers interaction contracts, while
+  [`run-browser-render-tests.sh`](../scripts/run-browser-render-tests.sh) opens the assembled UI in a
+  real Chrome engine for all shipped locales at mobile and desktop widths. It checks actual layout,
+  the native accessibility tree, keyboard/Escape behavior, reduced motion and console errors.
 
 **🧪 What's covered.** Each header states its own reasoning; this is the map, not a re-derivation:
 
@@ -716,9 +774,9 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | Value adjudication | `availability`, `conv_override`, `label_override`, `fault_state`, `ou_stale`, `lwt_select`, `cop_scope`, `feature_gate`, `profile_view` |
 | Detection | `detect`, `detect_backoff`, `uart_plan` |
 | Config & board | `config_model`, `config_store`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
-| MQTT / HA | `discovery`, `ha_device`, `mqtt_base`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus` |
-| HTTP | `http_body`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `chunk_sink`, `redact` |
-| OTA & boot | `health_gate`, `version_cmp`, `ota_manifest`, `ota_channel`, `ota_transport`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |
+| MQTT / HA | `discovery`, `ha_device`, `mqtt_base`, `mqtt_cleanup`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus`, `weather_mqtt` |
+| HTTP | `http_body`, `payload_complete`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `chunk_sink`, `redact` |
+| OTA & boot | `health_gate`, `http_deadline`, `version_cmp`, `ota_manifest`, `ota_hil_feed`, `ota_channel`, `ota_transport`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |
 | Network policy | `wifi_rollback`, `link_watch`, `syslog_policy`, `timestamp` |
 | On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `outdoor_evidence`, `refrigerant_service`, `state_dwell`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |
 | Local I/O | `led_pattern`, `button` |
@@ -782,7 +840,9 @@ Four properties of that core are worth naming because they are not obvious from 
   empty version: a second copy of the grep would fail silently in the worst direction. The project
   records its real floors too: ESP-IDF 6.0 (W5500 2.x needs that `esp_eth` API), CMake 3.22 and
   GNU++17 for `main`, matching the host logic suite instead of inheriting ESP-IDF's changing app
-  dialect. `CONFIG_APP_REPRODUCIBLE_BUILD=y` removes wall-clock metadata from the application image.
+  dialect. `CONFIG_APP_REPRODUCIBLE_BUILD=y` removes wall-clock metadata from the application image;
+  a manual release additionally builds the unsigned app again in a clean build directory and
+  requires byte-for-byte identity before signing.
 - **✅ Locked managed-component graph.** [`dependencies.lock`](../dependencies.lock) commits the
   exact direct and transitive versions plus registry content hashes resolved by ESP-IDF 6.0.2.
   Dependency changes therefore occur as reviewable diffs: change a range in
@@ -813,12 +873,22 @@ Four properties of that core are worth naming because they are not obvious from 
   a 760-line function. The original `-Os` change took it to **3744** and the deepest httpd path from
   14512 to 6480 bytes. The release image now also uses size optimisation globally to fit its
   embedded catalogs. After
-  the refrigerant-service object and bounded MCP status sender, the 2026-08-21 release ELF measures
-  the sole bounded serializer at **4848** and the conservative full
-  path at **7552** of 16384; the stack itself remains unchanged. The trade — less exact backtraces in
+  the refrigerant-service object and bounded MCP status sender, the 2026-08-27 release ELF measures
+  the sole bounded serializer at **4896**. The historical manual call-path walk measured **7552**
+  bytes, while the automated conservative MCP gate sums **7664** of 16384 and leaves **8720 bytes**;
+  the stack itself remains unchanged. The trade — less exact backtraces in
   the one file whose core dumps mattered — and the
   reproduce command are stated where the pin lives and in
   [`ARCHITECTURE.md`](ARCHITECTURE.md#memory-constraints).
+  [`check-stack-budget.py`](../scripts/check-stack-budget.py) now performs that conservative call-path
+  calculation on every CI-pinned ELF and fails when a required symbol disappears or a frame/path
+  exceeds its committed budget. The ratchets include nested OTA manifest fetch, compact OTA status,
+  the HIL-aware `/ota/check` acceptance path, the rollback-critical `ota_health` task, and both
+  Weather task branches (download and JSON parse). All three task families' path ceilings leave at
+  least 1 KiB of their configured stacks; the health path carries a
+  separate reviewed 2048-byte IDF/logging/exception allowance. Live FreeRTOS high-water marks remain
+  separate hardware evidence; release HIL captures the short-lived delivery task before reboot and
+  rejects missing or sub-1-KiB Weather evidence after the deterministic live refresh.
 - **✅ A pinned stack contract on MQTT publishing.** The release-wide `-Os` called-once inliner
   folded reference/circulation helpers into `mqtt_task` on ESP-IDF 6.0.2 and grew that fixed frame
   from the historical 1040 bytes to 2304 bytes. `mqtt_ha.cpp` therefore retains natural helper call
@@ -828,6 +898,13 @@ Four properties of that core are worth naming because they are not obvious from 
   changes must still remeasure the complete ELF call path and the live MQTT high-water mark, while
   preserving the dev.13+ scalar/cache and contiguous-heap protections described in
   [`ARCHITECTURE.md`](ARCHITECTURE.md#memory-constraints).
+- **✅ Ratcheted format invariants.** [`run-format-check.sh`](../scripts/run-format-check.sh) rejects
+  non-UTF-8 text, CRLF, missing or duplicate final newlines, tabs and trailing whitespace in the
+  maintained C/C++ surface while excluding generated profile tables. CI then requires exact
+  clang-format 18.1.3 for every new file and changed hunk, so existing hand-formatted drift is not a
+  prerequisite rewrite and a runner's incidental formatter version cannot change the result. The
+  canonical full-tree invocation, including maintained tooling sources, is
+  `CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh`.
 - **✅ Agent instruction and configuration integrity gate.** [`AGENTS.md`](../AGENTS.md) is the
   runner-neutral always-loaded contract and stays below 24 KiB.
   [`run-agent-instructions-budget.sh`](../scripts/run-agent-instructions-budget.sh) also validates
@@ -874,6 +951,31 @@ Four properties of that core are worth naming because they are not obvious from 
   is what lets the release root and the `dev/` channel be published independently — an atomic
   whole-site Actions deployment cannot — so the `deploy-pages` path is deliberately absent rather
   than redundant.
+- **✅ Signed artifact continuity and external readback.** The trusted build parses the Secure Boot
+  v2 signature sector itself, checks its CRC and image digest, verifies RSA-PSS with exponent 65537,
+  and requires the public-key digest committed in `tools/release/ota_signing_key_digest.txt`. That
+  digest also enters manifest provenance. The write-capable publisher receives no private key,
+  repeats the signature/provenance checks after artifact handoff, then cache-busted reads the exact
+  manifest and app bytes back from Pages. Release binaries are downloaded from the created GitHub
+  Release and byte-compared too.
+- **✅ Hardware-gated manual releases.** A release (not an ordinary dev publish) must pass the
+  isolated self-hosted `release-hil` job before the publisher can run. The CI-only canonical mode
+  leases the exact verified candidate on a private HTTPS feed and proves it is served byte-for-byte.
+  The ordinary release binary receives that URL pair transiently on `/ota/check`; its offer binds
+  URLs, generation, channel, version and SHA, and `/ota/update` consumes the same snapshot. The gate
+  installs once and requires explicit `pending_verify` plus operation-local heap and OTA-task stack
+  evidence before a controller-owned fail-safe power cycle, then verifies return to the distinct
+  bootstrap with configuration intact. The second install must reach the same bounded pre-commit
+  evidence by 45 seconds of uptime before its non-renewable 80-second watchdog is explicitly
+  released. It then survives health probation, reports explicit `valid`, is cold-cycled separately,
+  and retains configuration/history. Finally, that valid candidate — not merely the bootstrap —
+  downloads, hashes, signature-verifies and selects the separately root-pinned bootstrap through a
+  distinct static feed. The gate captures the candidate writer's heap/OTA-stack minima, observes the
+  bootstrap pending, hard-cycles it back to the valid candidate, rechecks persistence, and only then
+  runs live stack plus combined HTTP/MQTT/X10A/weather stress; because Weather is mandatory, its
+  post-refresh high-water mark is a mandatory stack task in the private inventory. Root policy, inventory, both artifact
+  identities/feeds and the feed/power controllers are distinct and deny production; the job receives
+  no signing key.
 - **✅ Releases are manual; merges publish a dev channel.** A push to `main` stamps a dev version and
   republishes `dev/`; a release is an explicit workflow run that tags and republishes the root. The
   two feeds are identical in shape (`index.html`, `manifest.json`, `changelog.json`, binaries), so

@@ -87,9 +87,17 @@ inline void weather_mqtt_append_timestamp(std::string& out, const char* key, int
     out += value >= 0 ? std::to_string(value) : "null";
 }
 
+// Age alone is not current availability. A failed fetch invalidates decision readiness immediately,
+// even while the retained historical value is younger than WEATHER_MAX_AGE_S. The returned reason
+// points either at static storage or at s.reason and therefore remains valid while s is alive.
+inline WeatherFreshness weather_mqtt_freshness(const WeatherMqttSnapshot& s, int64_t now_unix_s) {
+    if (!s.configured) return {false, false, 0, "not_configured"};
+    if (!s.available) return {false, false, 0, s.reason.empty() ? "unavailable" : s.reason.c_str()};
+    return weather_freshness(s.has_value, s.fetched_unix_s, now_unix_s);
+}
+
 inline std::string build_weather_mqtt_json(const WeatherMqttSnapshot& s, int64_t now_unix_s) {
-    const WeatherFreshness freshness = weather_freshness(
-        s.has_value, s.fetched_unix_s, now_unix_s);
+    const WeatherFreshness freshness = weather_mqtt_freshness(s, now_unix_s);
     // `available` means usable for a decision now, not merely that an older diagnostic value exists.
     const bool available = s.configured && s.available && freshness.fresh;
     int64_t valid_until_unix_s = -1;

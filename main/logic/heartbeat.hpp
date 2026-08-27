@@ -37,20 +37,21 @@ struct HeartbeatFields {
     // boot inherited and heap_guard_begin() clears the breadcrumb, so it reads 2 for the whole life
     // of the third boot in a ladder and 0 for the whole life of the next healthy one.
     uint8_t     heap_restarts = 0;
-    // THE OTHER MEMORY BUDGET (stack_watch.hpp). Words free at the worst point since boot, per
+    // THE OTHER MEMORY BUDGET (stack_watch.hpp). Bytes free at the worst point since boot, per
     // watched task; 0 = never sampled and is rendered as JSON null, never as a number — a task that
     // has not run is not a task with no stack left, and the Modbus slot stays 0 forever on the
     // majority of boards that have no HomeHub.
     //
     // Payload-only, no HA entity, like the modbus_* block below and for the same reason: this is a
-    // developer/fleet diagnostic whose value is the TREND across firmware versions, and four more
-    // diagnostic entities in HA would be four more things a reader has to rule out. The trend is
+    // developer/fleet diagnostic whose value is the TREND across firmware versions, and five more
+    // diagnostic entities in HA would be five more things a reader has to rule out. The trend is
     // what nothing could see before — every one of the three shipped overflows was read off a core
     // dump's task table AFTER the board died, and #318's 1200 bytes of frame growth accumulated
     // across releases with no single change announcing it.
     uint32_t    httpd_stack_min_free_bytes  = 0;
     uint32_t    poll_stack_min_free_bytes   = 0;
     uint32_t    mqtt_stack_min_free_bytes   = 0;
+    uint32_t    weather_stack_min_free_bytes = 0;
     std::string reset_reason;         // reset_reason_name() slug — why the device last booted
     // The SAME answer as a NUMBER. The slug above is the readable one and stays, but a metrics
     // consumer never sees it: Telegraf's json parser takes numeric fields only, so `reset_reason` is
@@ -151,21 +152,22 @@ struct HeartbeatFields {
     bool        modbus_connected = false;
     uint32_t    modbus_rx        = 0;   // successful HomeHub register reads since boot
     uint32_t    modbus_fails     = 0;   // failed reads since boot
-    // The fourth watched stack — same source and same 0-means-never-sampled rule as the three
-    // above (stack_watch.hpp). It USED to be published as a bare 0 on every board without a
-    // HomeHub, i.e. as "0 words of stack free" on the majority of the fleet: a plausible-looking
-    // number for a task that does not exist. It is null now, like its three new siblings.
+    // The HomeHub watched stack — same source and same 0-means-never-sampled rule as the other four
+    // slots (stack_watch.hpp). It USED to be published as a bare 0 on every board without a
+    // HomeHub, i.e. as "0 bytes of stack free" on the majority of the fleet: a plausible-looking
+    // number for a task that does not exist. It is null now, like its four siblings.
     uint32_t    modbus_stack_min_free_bytes = 0;
 };
 
-// Words free -> JSON, with the shared never-sampled rule in ONE place rather than at four call
+// Bytes free -> JSON, with the shared never-sampled rule in ONE place rather than at five call
 // sites. Absence is a first-class answer here: a metrics consumer drops a null field and records no
 // sample, which is exactly right, where a 0 would draw a line at the bottom of the chart and read
-// as a board one word from death.
-template <typename JsonOut>
-inline void append_stack_bytes(JsonOut& j, uint32_t words) {
-    if (words == 0) j += "null";
-    else            j += std::to_string(words);
+// as a board one byte from death.
+template <typename JsonOut> inline void append_stack_bytes(JsonOut& j, uint32_t bytes) {
+    if (bytes == 0)
+        j += "null";
+    else
+        j += std::to_string(bytes);
 }
 
 // Heartbeat topic: <base>/heartbeat — separate from the source value topics so a Telegraf/HA consumer
@@ -219,6 +221,9 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += "\"httpd_stack_min_free_bytes\":"; append_stack_bytes(j, f.httpd_stack_min_free_bytes); j += ",";
     j += "\"poll_stack_min_free_bytes\":";  append_stack_bytes(j, f.poll_stack_min_free_bytes);  j += ",";
     j += "\"mqtt_stack_min_free_bytes\":";  append_stack_bytes(j, f.mqtt_stack_min_free_bytes);  j += ",";
+    j += "\"weather_stack_min_free_bytes\":";
+    append_stack_bytes(j, f.weather_stack_min_free_bytes);
+    j += ",";
     j += "\"reset_reason\":\""; json_append_escaped(j, f.reset_reason); j += "\",";
     // Numeric twin of the slug above — see HeartbeatFields. A string never reaches a metrics store.
     j += "\"reset_reason_code\":"; j += std::to_string(f.reset_reason_code); j += ",";
@@ -303,19 +308,20 @@ struct HeartbeatSensor {
 };
 
 inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
-    {"sensor",        "wifi_signal",      "WiFi Signal",         "wifi_rssi",        "dBm", "signal_strength", "measurement"},
-    {"sensor",        "wifi_reconnects",  "WiFi Reconnects",     "wifi_reconnects",  "",    "",                 "total_increasing"},
-    // MAC (this STA) + BSSID (the associated AP) as text diagnostics — which physical board, and which
-    // AP it roamed onto. No unit/device_class/state_class; bssid reads HA-"unknown" while offline (null).
-    {"sensor",        "wifi_mac",         "WiFi MAC",            "wifi_mac",         "",    "",                 ""},
-    {"sensor",        "wifi_bssid",       "WiFi BSSID",          "wifi_bssid",       "",    "",                 ""},
-    {"sensor",        "free_heap",        "Free Heap",           "free_heap",        "B",   "",                 "measurement"},
-    // Heap low-water mark + largest contiguous free block: both already ride the payload, exposed as
-    // their own diagnostic sensors so a slow leak (min_free_heap creeping down) or fragmentation
+    {"sensor", "wifi_signal", "WiFi Signal", "wifi_rssi", "dBm", "signal_strength", "measurement"},
+    {"sensor", "wifi_reconnects", "WiFi Reconnects", "wifi_reconnects", "", "", "total_increasing"},
+    // MAC (this STA) + BSSID (the associated AP) as text diagnostics — which physical board, and
+    // which AP it roamed onto. No unit/device_class/state_class; bssid reads HA-"unknown" while
+    // offline (null).
+    {"sensor", "wifi_mac", "WiFi MAC", "wifi_mac", "", "", ""},
+    {"sensor", "wifi_bssid", "WiFi BSSID", "wifi_bssid", "", "", ""},
+    {"sensor", "free_heap", "Free Heap", "free_heap", "B", "", "measurement"},
+    // Heap low-water mark + largest contiguous free block: both already ride the payload, exposed
+    // as their own diagnostic sensors so a slow leak (min_free_heap creeping down) or fragmentation
     // (max_alloc — the binding OOM limit on this firmware) is graphable/alertable in HA.
-    {"sensor",        "min_free_heap",    "Min Free Heap",       "min_free_heap",    "B",   "",                 "measurement"},
-    {"sensor",        "max_alloc",        "Largest Free Block",  "max_alloc",        "B",   "",                 "measurement"},
-    // An ENTITY, unlike the four stack watermarks beside it in the payload, and the difference is
+    {"sensor", "min_free_heap", "Min Free Heap", "min_free_heap", "B", "", "measurement"},
+    {"sensor", "max_alloc", "Largest Free Block", "max_alloc", "B", "", "measurement"},
+    // An ENTITY, unlike the five stack watermarks beside it in the payload, and the difference is
     // who acts on it: a stack low-water mark is a trend a maintainer reads across releases, this is
     // a fact the OWNER of the board needs to know today — "your device restarted itself because it
     // ran out of memory" — and it is the one thing that separates a heap give-up from the "sw"
@@ -325,29 +331,32 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     // `measurement`, NOT `total_increasing`: the value is the count this BOOT inherited and it
     // returns to 0 on the next healthy boot, so a monotonic state class would make HA's long-term
     // statistics read every recovery as a counter reset and every ladder as an unrelated new total.
-    {"sensor",        "heap_restarts",    "Heap Watchdog Restarts", "heap_restarts", "",    "",                 "measurement"},
-    {"sensor",        "uptime",           "Uptime",              "uptime_s",         "s",   "duration",         "measurement"},
-    {"sensor",        "reset_reason",     "Reset Reason",        "reset_reason",     "",    "",                 ""},
-    {"binary_sensor", "bus_status",       "X10A Bus",            "bus_connected",    "",    "connectivity",     ""},
+    {"sensor", "heap_restarts", "Heap Watchdog Restarts", "heap_restarts", "", "", "measurement"},
+    {"sensor", "uptime", "Uptime", "uptime_s", "s", "duration", "measurement"},
+    {"sensor", "reset_reason", "Reset Reason", "reset_reason", "", "", ""},
+    {"binary_sensor", "bus_status", "X10A Bus", "bus_connected", "", "connectivity", ""},
     // Source freshness, not link health — deliberately NOT device_class "connectivity"/"problem":
     // an outdoor unit resting is the normal state of a heat pump for most of the day, and typing it
     // as a fault would turn every quiet afternoon into an alert.
-    {"binary_sensor", "ou_held_over",     "Outdoor Data Held Over", "bus_ou_held_over", "", "",         ""},
-    {"sensor",        "bus_crc_err",      "X10A CRC Errors",     "bus_crc_err",      "",    "",                 "total_increasing"},
-    {"sensor",        "bus_timeout_err",  "X10A Timeout Errors", "bus_timeout_err",  "",    "",                 "total_increasing"},
-    {"sensor",        "bus_rx_received",  "X10A RX Received",    "bus_rx_received",  "",    "",                 "total_increasing"},
-    {"sensor",        "bus_rx_fails",     "X10A RX Fails",       "bus_rx_fails",     "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_count",       "MQTT Publishes",      "mqtt_count",       "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_fails",       "MQTT Publish Fails",  "mqtt_fails",       "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_reconnects",  "MQTT Reconnects",     "mqtt_reconnects",  "",    "",                 "total_increasing"},
+    {"binary_sensor", "ou_held_over", "Outdoor Data Held Over", "bus_ou_held_over", "", "", ""},
+    {"sensor", "bus_crc_err", "X10A CRC Errors", "bus_crc_err", "", "", "total_increasing"},
+    {"sensor", "bus_timeout_err", "X10A Timeout Errors", "bus_timeout_err", "", "",
+     "total_increasing"},
+    {"sensor", "bus_rx_received", "X10A RX Received", "bus_rx_received", "", "",
+     "total_increasing"},
+    {"sensor", "bus_rx_fails", "X10A RX Fails", "bus_rx_fails", "", "", "total_increasing"},
+    {"sensor", "mqtt_count", "MQTT Publishes", "mqtt_count", "", "", "total_increasing"},
+    {"sensor", "mqtt_fails", "MQTT Publish Fails", "mqtt_fails", "", "", "total_increasing"},
+    {"sensor", "mqtt_reconnects", "MQTT Reconnects", "mqtt_reconnects", "", "", "total_increasing"},
     // The three #380 loss counters. Entities, not payload-only like the modbus_* block, because the
-    // whole point of the issue is that this loss had no consumer: it is the thing to ALERT on, and a
-    // number nobody can put on a dashboard is how it stayed invisible for 337 dropped publishes.
-    // `total_increasing` so HA's long-term statistics read a reboot as a counter reset rather than a
-    // cliff — and a reboot is exactly what ends every episode these count.
-    {"sensor",        "mqtt_skipped",     "MQTT Cycles Skipped", "mqtt_skipped",     "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_quiesced",    "MQTT Cycles Held (TLS)", "mqtt_quiesced", "",    "",                 "total_increasing"},
-    {"sensor",        "poll_skipped",     "X10A Cycles Skipped", "poll_skipped",     "",    "",                 "total_increasing"},
+    // whole point of the issue is that this loss had no consumer: it is the thing to ALERT on, and
+    // a number nobody can put on a dashboard is how it stayed invisible for 337 dropped publishes.
+    // `total_increasing` so HA's long-term statistics read a reboot as a counter reset rather than
+    // a cliff — and a reboot is exactly what ends every episode these count.
+    {"sensor", "mqtt_skipped", "MQTT Cycles Skipped", "mqtt_skipped", "", "", "total_increasing"},
+    {"sensor", "mqtt_quiesced", "MQTT Cycles Held (TLS)", "mqtt_quiesced", "", "",
+     "total_increasing"},
+    {"sensor", "poll_skipped", "X10A Cycles Skipped", "poll_skipped", "", "", "total_increasing"},
 };
 inline constexpr int HEARTBEAT_SENSOR_COUNT =
     sizeof(HEARTBEAT_SENSORS) / sizeof(HEARTBEAT_SENSORS[0]);

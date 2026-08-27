@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -709,7 +709,7 @@ I18N.zh = localeValues([
   /* board.led_rgb_bus_down */ "红色双闪 — X10A 已断开。",
   /* board.led_rgb_mqtt_down */ "橙色闪烁 — X10A 已连接，MQTT 已断开。",
   /* board.led_rgb_wipe_armed */ "红色极速闪烁 — 已准备清除；松开可取消。",
-  /* board.led_rgb_wiping */ "白色常亮 — 正在清除设置；请勿断电。",
+  /* board.led_rgb_wiping */ "白色常亮 — 正在恢复出厂设置/清除数据；请勿断电。",
   /* board.led_gpio_off */ "熄灭 — 未启用 Wi-Fi 模式。",
   /* board.led_gpio_setup */ "慢闪 — 配置门户已启动。",
   /* board.led_gpio_connecting */ "快闪 — 正在连接 Wi-Fi。",
@@ -717,10 +717,10 @@ I18N.zh = localeValues([
   /* board.led_gpio_bus_down */ "双闪 — X10A 已断开。",
   /* board.led_gpio_mqtt_down */ "中速闪烁 — X10A 已连接，MQTT 已断开。",
   /* board.led_gpio_wipe_armed */ "极速闪烁 — 已准备清除；松开可取消。",
-  /* board.led_gpio_wiping */ "极速闪烁后常亮 — 正在清除设置；请勿断电。",
+  /* board.led_gpio_wiping */ "极速闪烁后常亮 — 正在恢复出厂设置/清除数据；请勿断电。",
   /* board.ledinv */ "低电平有效（引脚为 LOW 时 LED 点亮）",
   /* board.btninv */ "低电平有效（按钮将引脚接到 GND）",
-  /* board.hint */ "按住复位按钮 5 秒可清除所有设置并打开配置门户。未接按钮时请选择“无”。",
+  /* board.hint */ "恢复出厂设置：按住 5 秒，永久清除 Wi-Fi/全部设置、历史/趋势、状态持续时间和原始核心转储。全部清除成功后才打开配置门户；否则松开后再按 5 秒重试。未接按钮请选择“无”。",
   /* card.hardware */ "硬件",
   /* card.hw_off */ "无",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

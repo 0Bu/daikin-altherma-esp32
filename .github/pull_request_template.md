@@ -19,11 +19,15 @@ alone — those are repository-maintainer reviews and gate records, and are not 
 ## Verification
 
 - [ ] `scripts/run-mock-tests.sh` passes (host-side logic tests — a CI `mechanical_gates` step)
+- [ ] `scripts/run-sanitizer-fuzz-tests.sh` passes (deterministic ASan/UBSan hostile-input properties)
+- [ ] `scripts/run-runtime-integration-tests.sh` passes (fake-clock/failpoint transport and persistence harness)
+- [ ] `scripts/run-format-check.sh` passes (read-only portable source-format invariants)
 - [ ] `scripts/run-domain-audit.sh` clean (value-catalog domain correctness — a CI `mechanical_gates` step)
 - [ ] `scripts/run-description-audit.sh` clean (every visible reading has an explainer)
 - [ ] `scripts/run-schematic-audit.sh` clean (the dashboard drawing — only if the web UI changed)
 - [ ] `scripts/run-ui-localization-audit.sh` passes (all shipped locales follow canonical UI copy)
 - [ ] `scripts/run-ui-use-case-tests.sh` passes (all UI actions and modal lifecycles — a CI `mechanical_gates` step)
+- [ ] `scripts/run-browser-render-tests.sh` passes (real Chrome at 320/1200 px in all 13 locales: Dashboard/Settings/all routed modals get DOM/layout/native-AX plus keyboard focus/Tab/Escape coverage; reduced motion covers Dashboard/Settings/WiFi/progress/disclosures)
 - [ ] `tools/absence/selftest.sh` passes (the source-absence matrix can still go red — a CI `mechanical_gates` step; the matrix itself rides the contract + UI suites)
 - [ ] `scripts/run-pr-hygiene-audit.sh` passes (commit messages and, in CI, current PR text)
 - [ ] `scripts/run-agent-instructions-budget.sh` passes (agent policy, configuration and instruction budget)
@@ -56,6 +60,8 @@ alone — those are repository-maintainer reviews and gate records, and are not 
 - [ ] `$schematic-review` clean — merge gate @ <short-sha> (required if the dashboard schematic changed: the drawing still tells the truth about the plant, and every reading is on the part that measures it)
 - [ ] `$ui-use-case-review` clean — merge gate @ <short-sha> (required if UI behavior changed)
 - [ ] `$absence-review` clean — merge gate @ <short-sha> (required if an OPTIONAL SOURCE changed: the broker, the room source, the circulation witness, the HomeHub, ENV III, the weather location, the X10A bus, safe mode, or anything that reports one)
+- [ ] `$diagnostic-evidence-review` clean — merge gate @ <short-sha> (required when diagnostic inputs, persistence, thresholds, conclusions or cited evidence change)
+- [ ] `$user-docs-review` clean — merge gate @ <short-sha> (required when an owner-visible status, diagnosis, action or help surface changes)
 - [ ] `$ui-gif` clean — merge gate @ <short-sha> (required when this PR re-made `docs/media/dashboard.gif` or its stamp; a red `scripts/run-ui-gif-audit.sh` is a hard block that only a real re-record can clear)
 <!-- The stamp must be a BARE sha after the `@` — the gate matches `@[[:space:]]*[0-9a-f]{7,40}`
      (`tools/agent-hooks/pr-gate-lib.sh`), so wrapping it in backticks parses as no stamp at all and the

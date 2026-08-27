@@ -73,7 +73,7 @@ void factory_reset() {
         status_led_signal(LedSignal::None);
         return;
     }
-    diag_printf("button: config erased — rebooting into the setup portal\n");
+    diag_printf("button: factory reset complete — rebooting into the setup portal\n");
     esp_restart();
 }
 

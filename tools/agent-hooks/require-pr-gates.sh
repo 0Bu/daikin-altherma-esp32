@@ -203,17 +203,21 @@ if [ "$verified_renovate_actions" -eq 0 ]; then
     check_gate "pr-hygiene-review" "PR hygiene review"
     check_gate "domain-review" "domain correctness review"
     check_gate "heap-safety-review" "independent heap safety review" \
-        '^(main/(mqtt_ha|ota_update|weather_forecast|http_status|http_config|hp_poll|heap_guard)\.(cpp|hpp)$|main/logic/(json|mqtt_group|x10a_snapshot|ota_headroom|health_gate|heap_watchdog)\.hpp$|test/test_(x10a_publish_heap_contract|ota_heap_contract|production_ota_gate_contract)\.mjs$|scripts/production-ota-gate\.py$|tools/(ota|production_ota|agent-hooks)/|\.codex/agents/heap-safety-reviewer\.toml$|docs/(ARCHITECTURE|SECURITY|FEATURES)\.md$)'
+        '^(main/(http_.*|mcp_server|mqtt_ha|ota_update|weather_forecast|hp_poll|hp_modbus|hp_comm|heap_guard|net|syslog|history|config|nvs_storage)\.(cpp|hpp)$|main/logic/[^/]*(json|http|mqtt|ota|tls|heap|chunk|fixed_text|config_store|history_persist|modbus|x10a)[^/]*\.hpp$|test/(runtime/|test_(x10a_publish_heap_contract|ota_heap_contract|production_ota_gate_contract).*\.mjs$)|scripts/(production-ota-gate\.py|run-runtime-integration-tests\.sh|run-sanitizer-fuzz-tests\.sh)$|tools/(runtime|fuzz|ota|production_ota|agent-hooks)/|\.codex/agents/heap-safety-reviewer\.toml$|docs/(ARCHITECTURE|SECURITY|FEATURES)\.md$)'
     check_gate "feature-docs" "feature documentation sync" \
-        '^(main/|test/|sdkconfig\.defaults$|partitions\.csv$|\.github/workflows/(build|pr-policy)\.yml$)'
+        '^(main/|test/|CMakeLists\.txt$|sdkconfig\.defaults$|dependencies\.lock$|partitions\.csv$|\.github/workflows/(build|pr-policy)\.yml$|scripts/(ci-build-all|require-signed|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate|run-runtime-integration-tests|run-sanitizer-fuzz-tests|run-browser-render-tests)\.(sh|py)$|tools/(release|stack|runtime|fuzz|browser)/)'
     check_gate "schematic-review" "schematic review" \
         '^(main/www/|docs/DESIGN\.md$|tools/schematic/|\.agents/skills/schematic-review/)'
     check_gate "ui-use-case-review" "complete UI use-case review" \
         '^(main/www/|test/test_ui_|test/test_homehub_discovery_contract\.mjs$|test/test_mcp_dashboard\.mjs$|scripts/run-ui-use-case-tests\.sh$|tools/ui/|\.agents/skills/ui-use-case-review/|tools/agent-hooks/|\.codex/hooks\.json$|\.github/(pull_request_template\.md|workflows/build\.yml)$|docs/DESIGN\.md$)' \
         ui_suite_relevant
     check_gate "absence-review" "source-absence review" \
-        '^(main/(http_status|http_config|history|mqtt_ha|hp_modbus|hp_poll|env3|weather_forecast|safe_mode|main)\.cpp$|main/logic/(redact|heating_curve_diagnosis|circulation_source|history|env3)\.hpp$|main/www/js/|test/test_(ui_absence_matrix|source_absence_contract)\.mjs$|tools/absence/|\.agents/skills/absence-review/)' \
+        '^(main/(http_status|http_config|history|mqtt_ha|hp_modbus|hp_poll|env3|weather_forecast|safe_mode|main)\.(cpp|hpp)$|main/logic/(redact|heating_curve_diagnosis|circulation_source|history|env3|mqtt_publish_gate|health_gate|ota_channel)\.hpp$|main/www/|test/(runtime/|test_(ui_absence_matrix|source_absence_contract).*\.mjs$)|tools/(absence|browser)/|scripts/run-browser-render-tests\.sh$|\.agents/skills/absence-review/)' \
         absence_suite_relevant
+    check_gate "diagnostic-evidence-review" "diagnostic evidence review" \
+        '^(main/(http_status|history|hp_poll|hp_comm|hp_modbus|weather_forecast|mqtt_ha|diag_crash|stack_watch)\.(cpp|hpp)$|main/logic/(checkup|diagnosis|health_gate|heartbeat|history|history_persist|hp_query_log|ou_stale|retry)[^/]*\.hpp$|docs/(REGISTERS|DIAGNOSTICS|DIAGNOSTIC_EVIDENCE)\.md$|test/(test_logic\.cpp$|test_.*diagnostic.*\.mjs$)|scripts/run-diagnostic-evidence-audit\.sh$|tools/diagnostic_evidence/|\.agents/skills/diagnostic-evidence-review/)'
+    check_gate "user-docs-review" "user-facing documentation review" \
+        '^(main/(http_status|http_config|history|ota_update)\.(cpp|hpp)$|main/logic/(checkup|diagnosis|health_gate|history)[^/]*\.hpp$|main/www/|docs/(DIAGNOSTICS|FEATURES|SECURITY|DESIGN)\.md$|test/(test_logic\.cpp|test_ui_.*\.mjs)$|scripts/run-user-docs-audit\.sh$|tools/(user_docs|browser)/|\.agents/skills/user-docs-review/)'
     check_gate "ui-gif" "dashboard recording review" \
         '^(docs/media/dashboard\.gif$|tools/uigif/gif_stamp\.txt$)'
 fi

@@ -14,20 +14,62 @@ build firmware or flash a board, but it *can* run these in seconds and verify a 
 ```bash
 scripts/run-mock-tests.sh
 scripts/run-mock-tests.sh --coverage
+scripts/run-sanitizer-fuzz-tests.sh
+scripts/run-runtime-integration-tests.sh
+CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh
+scripts/run-browser-render-tests.sh
 ```
 
 Uses `cmake` + `ctest` when present, else a direct `g++`/`clang++` compile of the single
 translation unit ([`test_logic.cpp`](test_logic.cpp)) with `-std=c++17 -Wall -Wextra -Werror`.
 `--coverage` uses the compiler's gcov instrumentation and enforces at least 95% aggregate executable
-line coverage across `main/logic/`. It intentionally excludes this test driver, generated profiles
-and system headers: none of those can prove that another production branch ran. GCC uses `gcov`;
-Clang uses `llvm-cov gcov` (via `xcrun` on macOS).
+line coverage across `main/logic/`. For each compiler-family/major profile, it also compares every
+branch-bearing header's aggregated gcov `taken/total` branch-edge counts with the committed
+`tools/coverage/branch_baseline.json` ratchet: a header may raise its ratio but may not regress it
+silently. These totals do not identify individual edges, so equal counts are not proof that the same
+branches ran. It intentionally excludes this test driver, generated profiles and system headers:
+none of those can prove that another production branch ran. GCC uses `gcov`; Clang uses `llvm-cov
+gcov` (via `xcrun` on macOS).
 
 CI runs the coverage form as the first step of `mechanical_gates`; the required `build` job consumes
 that result before conditionally compiling the esp32s3 firmware — a
 logic regression or an untested production path fails in seconds instead of after a full ESP-IDF
-build. `tools/coverage/selftest.sh` separately proves that an empty report and coverage below the
-floor fail closed.
+build. `tools/coverage/selftest.sh` separately proves that an empty report, coverage below the
+floor, a missing baseline and regressed branch-edge counts fail closed.
+
+`scripts/run-sanitizer-fuzz-tests.sh` compiles deterministic property tests over malformed and
+boundary-heavy logic inputs and probes the ASan+UBSan compile/runtime capability rather than the OS
+name. CI fails unless both sanitizers work; a local host falls back to UBSan only when the ASan probe
+fails. This is a bounded, reproducible hostile-input corpus, not an unbounded random fuzzer.
+
+`scripts/run-runtime-integration-tests.sh` runs the IDF-free runtime harness in `test/runtime/`. Ten
+scenarios call selected production config serializers, X10A/Modbus parsers, MQTT publish gating and
+bounded body/chunk logic through simulated clock, storage, serial, TCP, broker and HTTP adapters.
+Eight model failed saves and reconstruction, allocation failure, task interleavings, fragmentation,
+reconnect/retain/LWT behavior and incomplete HTTP framing. Two deadline scenarios use real POSIX `socketpair`/`recv`
+traffic: a writer trickles an incomplete header or body beyond the absolute deadline, while the
+watchdog applies `shutdown(SHUT_RDWR)` and is joined before the descriptors are closed. Mutations
+independently disable the header and body watchdog. The harness remains hardware-free and does not
+execute ESP-IDF target glue, real NVS or the production MCP/HTTP/MQTT stacks; the target build and
+hardware release gate remain separate proof layers.
+
+`scripts/run-format-check.sh` always supplies the dependency-free baseline format gate: UTF-8, LF
+endings, one final newline, no tabs or trailing whitespace on maintained `main/`, `test/` and
+`tools/` C/C++ sources, while excluding generated `main/def/` tables. CI additionally installs exact
+clang-format 18.1.3 and rejects formatter changes on every new file and changed hunk. A local run may
+omit that second layer when the pinned executable is unavailable; `CI=true` fails closed without the
+pinned executable or on a different version. Run the complete local gate, including `tools/`, as
+`CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh`.
+
+Before either layer, the runner verifies the SHA-256 binding of the reviewed repository
+`.clang-format`. Its mutation selftest proves that a formatter-disabling style-file-only change
+fails even when changed-line discovery would otherwise select no C/C++ files.
+
+`scripts/run-browser-render-tests.sh` assembles the production UI and drives a real Chromium-family
+browser at 320 and 1200 px for all shipped locales. It checks Dashboard, Settings and every modal
+for overflow and console failures, inspects the native accessibility tree, exercises keyboard and
+Escape behavior, and repeats animation-sensitive checks under reduced motion. It is still a local
+fixture server, not device HTTP or physical sensor evidence.
 
 `node test/test_production_ota_gate_contract.mjs` pins both canonical maintainer OTA modes without
 contacting hardware. The ordinary `bench` action must consume one exact dev offer/write, observe
@@ -36,6 +78,18 @@ release or production path. The separate promotion path retains its bench-first 
 one production write and read-only canaries. `tools/production_ota/selftest.mjs` seeds removals of
 those boundaries, while `tools/agent-hooks/selftest.sh` proves raw client POSTs and noncanonical gate
 commands are denied.
+
+The same source contract also pins the release-only HIL seam: the schema-3 bootstrap identity and
+controller denylists, the complete transient HIL header pair, generation/channel/version/SHA plus
+effective-URL offer binding, a non-renewable controller-owned deadline around every pending-image
+install, explicit
+`pending_verify` plus the pre-reboot OTA-task stack floor before rollback or pre-commit approval, and
+`valid` before the separate committed cold cycle. It additionally pins the candidate-writer proof:
+the valid candidate downgrades through the distinct root-pinned bootstrap feed, the bootstrap must be
+pending before a hard cycle, and rollback must return to the valid candidate with the candidate's own
+transfer/stack evidence and unchanged persistence. It also pins canonical controller paths,
+whole-operation response deadlines and exact feed acknowledgements. These are deterministic boundary
+tests; only the isolated `release_hil` job supplies physical power-cycle and bus evidence.
 
 `node --test test/serial_port_release.test.mjs` rides the same command and exercises the Pages
 installer's serial-permission lifecycle: no control or chooser without an existing grant, direct
@@ -89,7 +143,7 @@ rejects a replaced generation, labels an answered 503 as device-busy rather than
 carries the checked channel, version, application SHA and generation into the sole update POST
 before following its immediate successor.
 
-The same `mechanical_gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
+The same `test_ui_*.mjs` sweep includes `node test/test_ui_live_i18n.mjs`. That browser-free regression
 test executes the production banner/inspector render functions from the assembled UI source and verifies
 that their DOM-write signatures invalidate when the persisted UI language changes while device state
 stays identical.
@@ -124,7 +178,8 @@ arities must match; browser detection and the Firmware selector must name the sa
 all 125 value and 15 model-description rows must have native copy with no English prose fallback
 (compact locales may fold the normal context into their first field); concurrent loads coalesce onto
 `/locale.js`; every deterministic gzip asset stays within its 32 KiB response budget; and all locale
-assets together stay within a 272 KiB aggregate-growth guard. The separate firmware-size gate binds
+assets together stay within a 273 KiB aggregate-growth guard. The one-KiB rebase accommodates the
+complete localized factory-reset warning; the separate firmware-size gate binds
 the actual signed application image and its slot headroom. A fingerprint over the canonical
 English/domain copy makes every locale stale when a source sentence changes without its translation;
 `node tools/ui_localization/selftest.mjs` proves that stale source copy, missing specialist/domain
@@ -146,11 +201,23 @@ the pre-enable Test subscription and, only in SHADOW, the saved reference subscr
 X10A; and the first bus proof cleanly replaces it
 with the LWT-bearing publisher. All ordinary publications remain behind the X10A gate.
 
-`node test/test_mqtt_source_cleanup_contract.mjs` pins the deliberately narrow exception: clearing
-an enabled Weather or HomeHub configuration first persists the disabled state, then requests one
-QoS-1 retained empty tombstone for its source topic. That explicit deletion is serviced on the
-subscriber-only broker connection even without X10A, while no discovery/state/heartbeat publisher
-is reachable from the cleanup boundary. Re-enabling before broker delivery cancels the request.
+`node test/test_mqtt_source_cleanup_contract.mjs` pins the deliberately narrow exception: a Weather
+source/consent change or HomeHub identity change first persists, then requests QoS-1 retained
+deletion. Every broker connection reconstructs Weather/HomeHub state plus retired-discovery cleanup
+and ENV III state cleanup, so a reset between durable save and task service cannot resurrect
+superseded evidence or retired entities. A persistently disabled ENV III source also deletes its
+three discovery configs; an enabled source preserves those stable configs. The deletions are
+serviced on the subscriber-only connection even without X10A; only the ordinary X10A publish gate
+can replace them with current documents or discovery, and no other publisher is reachable from the
+cleanup boundary. Allocation, partial discovery deletion or broker failure rearms the request.
+The IDF-free cleanup scheduler is exercised directly: only one QoS-1 tombstone may be in flight,
+only its exact client-epoch/message-id PUBACK advances the sequence, pending sources remain
+suppressed through completion, a same-client reconnect cannot duplicate a missing-PUBACK publish,
+and replacement-client reconstruction cannot lose a repeated request. Exact ESP-MQTT outbox-expiry
+evidence retries the same step, as does a joined transport stop after it silently clears the outbox;
+fixed-ring evidence loss first stops and clears the producer before retry. The source contract pins
+the asynchronous enqueue API, deleted-message reporting, incremental packet IDs and the explicit
+8 KiB esp-mqtt outbox limit.
 
 `node test/test_ota_heap_contract.mjs` pins the signed-OTA memory boundary that cannot be linked on
 the host: firmware bytes stream through the low-level HTTP/OTA APIs, HTTP/TLS is fully released
@@ -186,9 +253,10 @@ and a third interruption aborts. IDF's umbrella image-validation error stays gen
 claiming a bad signature. Initial feed URLs and every redirect stay on forced HTTPS, and an oversized
 response remains a size-policy refusal rather than masquerading as an interrupted connection.
 `tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently (including
-the fixed task lease, generation rollback, whole-stream SHA comparison and the MQTT task's
-size-build call-boundary and fixed-frame-ceiling contracts) and proves the source contract turns red;
-all one hundred twenty-six seeded regressions are required. The allocation-free
+the fixed task lease, generation rollback, whole-stream SHA comparison, fail-closed IDF image-state
+mapping, both OTA task-path stack reserves and the MQTT task's size-build call-boundary and
+fixed-frame-ceiling contracts) and proves the source contract turns red;
+every seeded regression is required. The allocation-free
 `FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
 
 `node test/test_production_ota_gate_contract.mjs` pins ordinary role-bound bench delivery plus the
@@ -201,8 +269,8 @@ firmware's three-second completed-verifier dwell, plus bounded MQTT recovery aft
 and weather-TLS transport pauses, including either
 ordering of paused MQTT and matching weather evidence in a streamed status snapshot, and the sole generation-bound
 production write, with the OTA pause lease held for every in-flight status response. Its paired
-`tools/production_ota/selftest.mjs` requires all one hundred nine bench-delivery and production-promotion
-stage-removal mutations to turn that same contract red.
+`tools/production_ota/selftest.mjs` requires every bench-delivery, release-HIL and
+production-promotion stage-removal mutation to turn that same contract red.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation
@@ -338,8 +406,8 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   guard, encode round-trip + range/sentinel rejects) and the `homehub-*` mDNS filter.
 - `logic/heartbeat.hpp` — uptime formatting, the flat heartbeat JSON (each
   field prefixed by its block name — `wifi_rssi`/`wifi_mac`/`bus_rx_received` — with rssi/bssid null
-  while offline, and the four `*_stack_min_free_bytes` rendered `null` until their task has been
-  sampled, since `0` would read as a task one word from death rather than as one that never ran)
+  while offline, and the five `*_stack_min_free_bytes` rendered `null` until their task has been
+  sampled, since `0` would read as a task one byte from death rather than as one that never ran)
   + the 22 diagnostic HA discovery configs (incl. the WiFi MAC/BSSID and `heap_restarts`, whose
   `measurement` state class is pinned — it is a per-boot constant, not a counter), and the two
   RETIRED ones — "Device Time" and "WiFi Quality" — pinned absent from the payload AND from the live

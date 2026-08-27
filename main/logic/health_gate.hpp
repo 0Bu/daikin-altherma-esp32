@@ -4,10 +4,12 @@
 // OTA). Such an image stays rollback-armed until it calls esp_ota_mark_app_valid_cancel_rollback();
 // if it reboots before that, the bootloader reverts to the previous slot. This header decides WHEN
 // to make that call, so a boots-but-broken update (e.g. a network regression that never gets online
-// and so can never be re-flashed OTA) is left un-committed and reverts on the next reboot, instead of
-// being sealed in as "valid" the moment it merely survives a timer. See docs/SECURITY.md → Boot
-// recovery. USB/@flash_args images boot in UNDEFINED state (blank otadata), never PENDING_VERIFY, so
-// none of this runs for them — the gate cannot strand a fresh board (which has no previous slot).
+// and so can never be re-flashed OTA) is left un-committed and reverts on the next reboot, instead
+// of being sealed in as "valid" the moment it merely survives a timer. See docs/SECURITY.md → Boot
+// recovery. Blank/no-record otadata (the ordinary USB bootstrap case) is reported by IDF as a state
+// read error, never PENDING_VERIFY; ota_update.cpp latches that as Unknown and does not run this
+// verdict. The gate therefore cannot strand a fresh board (which has no previous slot), while the
+// public status also avoids inventing a known-safe rollback state.
 #include <cstddef>
 #include <cstdint>
 

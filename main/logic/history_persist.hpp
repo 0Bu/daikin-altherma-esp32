@@ -1,25 +1,29 @@
 #pragma once
-// Making the 24-hour trend rings survive a reboot — WHEN a persisted ring may be believed, and where
-// its samples belong on the time axis once it is.
+// Making the 24-hour trend rings survive a reboot — WHEN a persisted ring may be believed, and
+// where its samples belong on the time axis once it is.
 //
 // history.hpp decides what is recorded; this decides what may be RE-ADOPTED. The two questions are
-// not the same shape at all: recording is about one reading at a time, while a restore adopts ~28 KB
-// of prior state in one act and every field in it is a claim about a moment that has already passed.
-// Get it wrong and the chart is not empty — it is confidently wrong, which is strictly worse than
-// the blank axis this firmware shipped with (the #35-#39 shape, drawn as a day of history).
+// not the same shape at all: recording is about one reading at a time, while a restore adopts ~30
+// KB of prior state in one act and every field in it is a claim about a moment that has already
+// passed. Get it wrong and the chart is not empty — it is confidently wrong, which is strictly
+// worse than the blank axis this firmware shipped with (the #35-#39 shape, drawn as a day of
+// history).
 //
 // ── Two media, ONE question each ────────────────────────────────────────────────────────────────
 // The firmware persists the rings two ways, because neither alone covers the reboots that actually
 // happen:
 //
-//   .noinit DRAM   — survives every reset that KEEPS POWER (esp_restart from a /set_* save, a panic,
-//                    a task watchdog, the recovery button). Costs no flash write and no extra RAM:
-//                    the live arrays simply stop being initialised at startup. Cannot survive a
-//                    power cycle, and cannot survive an OTA either — the new image's section layout
-//                    moves, so the bytes are not where the new build looks. Fails closed both times.
+//   .noinit DRAM   — may survive a compatible reset that KEEPS POWER (esp_restart from a /set_*
+//   save,
+//                    a panic or a task watchdog). Costs no flash write and no extra RAM: the live
+//                    arrays simply stop being initialised at startup. A power cycle cannot preserve
+//                    it; an OTA may move the section, so only a matching seal can adopt it and
+//                    flash remains the guaranteed OTA path. Factory reset explicitly wipes this RAM
+//                    too.
 //   history        — an append-only flash journal: one compact record per source and completed
-//                    five-minute bucket. Covers OTA, ordinary reboot and sudden power loss; only the
-//                    bucket which was still open can be lost. It exists only in the official 8 MB
+//                    five-minute bucket. After a successful scan and wall-clock sync enable
+//                    commits, it covers OTA, ordinary reboot and later power loss; only the
+//                    open/just-closed bucket can be lost. It exists only in the official 8 MB
 //                    table; there is no coarse/old-table fallback.
 //
 // ── Why the RAM path needs no clock and the flash one does ─────────────────────────────────────
@@ -27,17 +31,18 @@
 // MONOTONIC clock (history.hpp), which restarts at zero every boot. So a restore has to re-anchor.
 //
 // For .noinit the answer is free, and it is a property of the medium rather than an assumption: if
-// the bytes are still there, power was never lost, and a reset that keeps power completes in about a
-// second. The downtime is therefore bounded by construction to well under one bucket, and the rings
-// are adopted in place with no re-anchoring at all. The residual error is that the bucket which was
-// open when the device died is lost — which is what a gap means, so nothing is claimed that was not
-// measured. The seam is at most one HISTORY_DT_S wide and is documented rather than hidden.
+// the bytes are still there, power was never lost, and a reset that keeps power completes in about
+// a second. The downtime is therefore bounded by construction to well under one bucket, and the
+// rings are adopted in place with no re-anchoring at all. The residual error is that the bucket
+// which was open when the device died is lost — which is what a gap means, so nothing is claimed
+// that was not measured. The seam is at most one HISTORY_DT_S wide and is documented rather than
+// hidden.
 //
 // For the flash path the downtime is UNBOUNDED (a board can sit powered off for a week), so every
 // record carries its absolute wall-clock bucket and the last 24 hours are SPLICED behind whatever
-// the current boot has already recorded — see history_splice below. A record whose anchor is missing
-// is never written: there is no defensible place to put it, and putting it at "now" would slide a
-// week-old curve onto today.
+// the current boot has already recorded — see history_splice below. A record whose anchor is
+// missing is never written: there is no defensible place to put it, and putting it at "now" would
+// slide a week-old curve onto today.
 //
 // ── Why catalog manifests, not just a CRC ───────────────────────────────────────────────────────
 // A dense record addresses rings by INDEX. Insert a trend or reorder two and index 12 stops meaning
@@ -391,25 +396,25 @@ static_assert(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS +
 // occur, and it is listed as refused rather than left to the default so the reasoning is on record.
 inline constexpr bool history_reset_preserves_ram(uint32_t reason) {
     switch (static_cast<CrashReason>(reason)) {
-        case CrashReason::SW:         // esp_restart() — a /set_* save, an OTA install, a rollback
-        case CrashReason::PANIC:      // the crash we most want the preceding hours for
-        case CrashReason::INT_WDT:
-        case CrashReason::TASK_WDT:
-        case CrashReason::OTHER_WDT:
-        case CrashReason::CPU_LOCKUP:
-        case CrashReason::EXT:        // reset pin — the board stayed powered
-        case CrashReason::USB:
-        case CrashReason::JTAG:
-        case CrashReason::SDIO:
-            return true;
-        case CrashReason::POWERON:
-        case CrashReason::BROWNOUT:
-        case CrashReason::PWR_GLITCH:
-        case CrashReason::DEEPSLEEP:
-        case CrashReason::EFUSE:
-        case CrashReason::UNKNOWN:
-        default:
-            return false;
+    case CrashReason::SW:    // esp_restart(); the later seal decides build compatibility
+    case CrashReason::PANIC: // the crash we most want the preceding hours for
+    case CrashReason::INT_WDT:
+    case CrashReason::TASK_WDT:
+    case CrashReason::OTHER_WDT:
+    case CrashReason::CPU_LOCKUP:
+    case CrashReason::EXT: // reset pin — the board stayed powered
+    case CrashReason::USB:
+    case CrashReason::JTAG:
+    case CrashReason::SDIO:
+        return true;
+    case CrashReason::POWERON:
+    case CrashReason::BROWNOUT:
+    case CrashReason::PWR_GLITCH:
+    case CrashReason::DEEPSLEEP:
+    case CrashReason::EFUSE:
+    case CrashReason::UNKNOWN:
+    default:
+        return false;
     }
 }
 

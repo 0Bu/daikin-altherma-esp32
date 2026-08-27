@@ -744,13 +744,27 @@ static void append_status_json(JsonOut& j, bool redact) {
     // expose model-run issue time, so issued_at remains null instead of being fabricated. Failed
     // refreshes retain the last numbers for diagnosis but set available/fresh false.
     const bool weather_configured = c.weather_enabled;
-    const bool weather_has_value = weather_configured && wf.has_value;
+    const bool weather_safe_mode  = safe_mode_active();
+    const bool weather_source_active =
+        weather_configured && c.diagnostics_enabled && !weather_safe_mode;
+    const bool       weather_has_value = weather_source_active && wf.has_value;
     WeatherFreshness weather = weather_freshness(
         weather_has_value, wf.fetched_unix_s, now_unix_s, WEATHER_MAX_AGE_S);
-    if (!wf.available) { weather.fresh = false; weather.reason = wf.reason.empty() ? "unavailable" : wf.reason.c_str(); }
-    if (!weather_configured) { weather.fresh = false; weather.reason = "not_configured"; }
-    const bool weather_available = weather_configured && wf.available && weather.fresh;
-    const bool weather_fetching = weather_configured && wf.fetching;
+    if (!weather_configured) {
+        weather.fresh  = false;
+        weather.reason = "not_configured";
+    } else if (weather_safe_mode) {
+        weather.fresh  = false;
+        weather.reason = "safe_mode";
+    } else if (!c.diagnostics_enabled) {
+        weather.fresh  = false;
+        weather.reason = "diagnostics_disabled";
+    } else if (!wf.available) {
+        weather.fresh  = false;
+        weather.reason = wf.reason.empty() ? "unavailable" : wf.reason.c_str();
+    }
+    const bool        weather_available   = weather_source_active && wf.available && weather.fresh;
+    const bool        weather_fetching    = weather_source_active && wf.fetching;
     const std::string weather_latitude = weather_configured
             ? weather_coordinate_format_e6(c.weather_latitude_e6) : std::string();
     const std::string weather_longitude = weather_configured
@@ -772,7 +786,10 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ",\"latitude\":"; j += weather_latitude.empty() ? "null" : jstr_r(weather_latitude, redact);
     j += ",\"longitude\":"; j += weather_longitude.empty() ? "null" : jstr_r(weather_longitude, redact);
     j += ",\"state\":";
-    j += jstr(!weather_configured ? "disabled" : (safe_mode_active() ? "waiting" : wf.state));
+    j += jstr(!weather_configured      ? "disabled"
+              : weather_safe_mode      ? "waiting"
+              : !c.diagnostics_enabled ? "disabled"
+                                       : wf.state);
     j += ",\"outdoor_mean_2h_c\":"; j += weather_has_value ? weather_outdoor : "null";
     j += ",\"solar_energy_2h_wh_m2\":"; j += weather_has_value ? weather_solar : "null";
     j += ",\"hourly\":[";
@@ -805,10 +822,30 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ",\"freshness_reason\":"; j += jstr(weather.reason);
     j += ",\"successes\":"; j += std::to_string(wf.successes);
     j += ",\"errors\":"; j += std::to_string(wf.errors);
-    if (!weather_configured) { j += ",\"reason\":\"not_configured\""; }
-    else if (safe_mode_active()) { j += ",\"reason\":\"safe_mode\""; }
-    else if (!wf.reason.empty()) { j += ",\"reason\":"; j += jstr(wf.reason); }
-    if (!wf.error.empty()) { j += ",\"error\":"; j += jstr(wf.error); }
+    j += ",\"refresh_requested_token\":";
+    j += std::to_string(wf.refresh_requested_token);
+    j += ",\"refresh_started_token\":";
+    j += std::to_string(wf.refresh_started_token);
+    j += ",\"refresh_completed_token\":";
+    j += std::to_string(wf.refresh_completed_token);
+    j += ",\"refresh_success_token\":";
+    j += std::to_string(wf.refresh_success_token);
+    j += ",\"task_stack_min_free_bytes\":";
+    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Weather));
+    if (!weather_configured) {
+        j += ",\"reason\":\"not_configured\"";
+    } else if (weather_safe_mode) {
+        j += ",\"reason\":\"safe_mode\"";
+    } else if (!c.diagnostics_enabled) {
+        j += ",\"reason\":\"diagnostics_disabled\"";
+    } else if (!wf.reason.empty()) {
+        j += ",\"reason\":";
+        j += jstr(wf.reason);
+    }
+    if (weather_source_active && !wf.error.empty()) {
+        j += ",\"error\":";
+        j += jstr(wf.error);
+    }
     j += "},";
     SyslogStatus sy = syslog_status();
     j += "\"syslog\":{\"configured\":" + std::string(sy.configured ? "true" : "false") +
@@ -848,14 +885,17 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ",\"rx\":";                   j += std::to_string(mb.rx_ok);
     j += ",\"fails\":";                j += std::to_string(mb.rx_fail);
     j += ",\"values\":";               j += std::to_string(mb.values);
-    // The Modbus task's stack headroom, from the one sampler all four watched stacks report
+    // The Modbus task's stack headroom, from the one sampler all five watched stacks report
     // through (stack_watch.hpp) rather than from ModbusStatus, so this surface and the MQTT
     // heartbeat cannot answer the same question with two numbers. Null, not 0, when the task has
-    // never run: a board with no HomeHub has no such stack, and "0 words free" is a reading.
+    // never run: a board with no HomeHub has no such stack, and "0 bytes free" is a reading.
     j += ",\"task_stack_min_free_bytes\":";
     {
-        const uint32_t words = stack_watch_min_free_bytes(StackWatch::Modbus);
-        if (words == 0) j += "null"; else j += std::to_string(words);
+        const uint32_t bytes = stack_watch_min_free_bytes(StackWatch::Modbus);
+        if (bytes == 0)
+            j += "null";
+        else
+            j += std::to_string(bytes);
     }
     // The PLANT GATE (input register 53) is the one HomeHub fact the shadow controller consumes, so
     // it is reported here beside the link it comes from. `known` false means the register did not
@@ -887,10 +927,10 @@ static void append_status_json(JsonOut& j, bool redact) {
     // intermediate at once, all live in one frame on the httpd task's stack (AGENTS.md → Memory,
     // concurrency, and HTTP safety; the v1.0.12 stack overflow happened on THIS task).
     j += "\"history\":{\"dt\":" + std::to_string(logic::HISTORY_DT_S);
-    // How this boot's rings came to be. "accept" = adopted across a reset that kept power; anything
-    // else NAMES why they started empty. Reported because a chart that emptied itself otherwise
-    // reads as a defect: "wrong_catalog" after an update and "power_cycle" after a power failure are
-    // both correct behaviour, and only the device can tell which one happened.
+    // The .noinit-RAM adoption verdict for this boot. "accept" means a compatible reset kept the
+    // sealed bytes; every other value names why RAM started empty. This is deliberately independent
+    // of flash: after a successful journal scan and clock sync, compatible records may still splice
+    // buckets into those rings without changing this field.
     j += ",\"persist\":";
     j += jstr(history_persist_state());
     // The same question for the per-row STATE AGES (logic/state_dwell.hpp), which ride the same
@@ -1236,7 +1276,7 @@ static void append_status_json(JsonOut& j, bool redact) {
          // is already correct. null whenever safe_mode is false.
          ",\"safe_mode_cause\":" + (safe_mode_cause() ? jstr(safe_mode_cause()) : "null");
     // THE OTHER MEMORY BUDGET, on the surface that needs no broker. The MQTT heartbeat carries the
-    // same four figures, but every ordinary publish — the heartbeat included — sits behind the
+    // same five figures, but every ordinary publish — the heartbeat included — sits behind the
     // X10A publish gate (logic/mqtt_publish_gate.hpp): a board whose bus never answers publishes
     // nothing at all, and safe mode never starts the publish task in the first place. Those are
     // exactly the boards whose stack headroom someone wants, so a metric reachable only over MQTT
@@ -1246,7 +1286,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     //
     // Appended with successive += rather than extended onto the chain above: this builder is the
     // one whose frame overflowed the httpd stack twice, and a chain materialises every intermediate
-    // std::string in one frame (AGENTS.md → Memory, concurrency, and HTTP safety). Four integers,
+    // std::string in one frame (AGENTS.md → Memory, concurrency, and HTTP safety). Five integers,
     // one at a time.
     j += ",\"stack_min_free_bytes\":{\"httpd\":";
     append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Httpd));
@@ -1256,6 +1296,8 @@ static void append_status_json(JsonOut& j, bool redact) {
     append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Mqtt));
     j += ",\"modbus\":";
     append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Modbus));
+    j += ",\"weather\":";
+    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Weather));
     j += "}},";
 
     // NTP: its own top-level block (not folded into sys), mirroring syslog{} — it is a runtime-
@@ -1725,19 +1767,20 @@ static esp_err_t h_models(httpd_req_t* req) {
     return http_send_json(req, def::MODELS_JSON);
 }
 
-// GET /history?row=<trend id>[&source=modbus|env3] — one 24-hour series, oldest sample first. X10A
-// is the backwards-compatible default; the external circulation witness identifies itself as MQTT,
-// Modbus carries paired HomeHub measurements/state timelines, and ENV III owns three independent
-// outdoor-climate rings.
+// GET /history?row=<trend id>[&source=x10a|modbus|env3] — one 24-hour series, oldest sample first.
+// X10A is the backwards-compatible default; the external circulation witness identifies itself as
+// MQTT, Modbus carries paired HomeHub measurements/state timelines, and ENV III owns three
+// independent outdoor-climate rings.
 //
 //   {"id":"outdoor_air","source":"x10a","label":"R1T-Outdoor air temp.","dt":300,
 //    "unit":"°C","t0":1784926349,"b0":5931421,"v":[131,null,…],
 //    "held":[[0,42],[55,180]]}
 //
 // `v` holds tenths of the unit (the resolution the converters produce, so a sample is exact rather
-// than rounded on the way in) or null. `held` run-length-marks WHICH of those nulls were the outdoor
-// unit resting rather than a failure to measure — a plain number-or-null array stays readable by any
-// consumer, and the reason for the nulls rides alongside instead of inside it (logic/history.hpp).
+// than rounded on the way in) or null. `held` run-length-marks WHICH of those nulls were the
+// outdoor unit resting rather than a failure to measure — a plain number-or-null array stays
+// readable by any consumer, and the reason for the nulls rides alongside instead of inside it
+// (logic/history.hpp).
 //
 // `t0` is the wall-clock instant of sample 0, derived HERE from the newest committed sample's
 // monotonic age — the ring itself advances on the monotonic clock, so it survives SNTP setting the
@@ -1745,8 +1788,9 @@ static esp_err_t h_models(httpd_req_t* req) {
 // which is the same refusal-to-fabricate logic/timestamp.hpp already makes for syslog timestamps.
 // `b0` is sample zero's monotonic bucket and aligns every source exactly even without wall time.
 //
-// Sent in CHUNKS. The body is ~1.5 KB — smaller than the model-dependent /values body — but it is a new allocation on
-// a heap where the largest contiguous block is the binding limit, and chunking costs nothing here.
+// Sent in CHUNKS. The body is ~1.5 KB — smaller than the model-dependent /values body — but it is a
+// new allocation on a heap where the largest contiguous block is the binding limit, and chunking
+// costs nothing here.
 static esp_err_t h_history(httpd_req_t* req) {
     // History is intentionally chunked, yet still owns a growing string and label temporaries.
     // Keep that churn outside the firmware TLS operation just like /status and /values.
@@ -1773,8 +1817,10 @@ static esp_err_t h_history(httpd_req_t* req) {
     if (def_) { while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++; }
     const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
     const int env_t = env3_source ? env3_history_index(id) : -1;
+    const Config& active_config = config();
+    const bool env3_configured  = active_config.env3_enabled && env3_board_supported(active_config);
     const bool x10a_unknown = !modbus && !env3_source && (!def_ || t >= logic::TREND_COUNT);
-    if (x10a_unknown || (modbus && mb_t < 0) || (env3_source && env_t < 0)) {
+    if (x10a_unknown || (modbus && mb_t < 0) || (env3_source && (!env3_configured || env_t < 0))) {
         httpd_resp_set_status(req, "404 Not Found");
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
     }

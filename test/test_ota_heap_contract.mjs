@@ -36,6 +36,11 @@ const mcp = code("main/mcp_server.cpp");
 const httpCommon = code("main/http_common.cpp");
 const config = code("main/config.cpp");
 const httpClientDiag = code("main/http_client_diag.cpp");
+const httpDeadline = code("main/http_deadline.cpp");
+const httpDeadlineHeader = code("main/http_deadline.hpp");
+const httpDeadlineLogic = code("main/logic/http_deadline.hpp");
+const manifestLogic = code("main/logic/ota_manifest.hpp");
+const appMain = code("main/main.cpp");
 // Keep this source verbatim: it contains the legitimate captive-portal URI string "/*", which a
 // regex comment stripper would mistake for an unterminated block comment and erase most handlers.
 const httpStatus = read("main/http_status.cpp");
@@ -43,8 +48,14 @@ const headroom = code("main/logic/ota_headroom.hpp");
 const quiesceLogic = code("main/logic/ota_quiesce.hpp");
 const transport = code("main/logic/ota_transport.hpp");
 const fixedText = code("main/logic/fixed_text.hpp");
+const hilFeed = code("main/logic/ota_hil_feed.hpp");
+const stackWatch = code("main/stack_watch.hpp");
 const sdkconfig = read("sdkconfig.defaults");
 const mainCmake = code("main/CMakeLists.txt");
+const stackBudgets = JSON.parse(read("tools/stack/budgets.json"));
+const securityDocs = read("docs/SECURITY.md");
+const featureDocs = read("docs/FEATURES.md");
+const healthGateHeaderDocs = read("main/logic/health_gate.hpp");
 
 assert.match(quiesceLogic, /OTA_QUIESCE_MAX_CYCLES\s*=\s*600/,
   "poll/MQTT quiescence must outlive the complete bounded OTA path and 480-second host observer");
@@ -68,7 +79,9 @@ assert.match(allHandler.slice(postOtaGate, trustedHeaders),
 // must be non-2xx, status exposes the same mutex-protected generation+busy snapshot, and an update
 // can only consume the exact completed check generation plus artifact identity.
 const startUpdateAt = ota.indexOf("uint32_t start_update(");
-const startUpdateEnd = ota.indexOf("\n}\n\n}  // namespace", startUpdateAt);
+const startUpdateTail = ota.slice(startUpdateAt);
+const startUpdateEndMatch = startUpdateTail.match(/\n}\n\n}\s*\/\/ namespace/);
+const startUpdateEnd = startUpdateEndMatch ? startUpdateAt + startUpdateEndMatch.index : -1;
 assert.ok(startUpdateAt >= 0 && startUpdateEnd > startUpdateAt,
   "the atomic OTA update-acceptance boundary must remain identifiable");
 const startUpdate = ota.slice(startUpdateAt, startUpdateEnd);
@@ -83,10 +96,13 @@ assert.match(ota,
   /uint32_t\s+ota_check_async[\s\S]{0,300}?return generation;[\s\S]{0,1600}?uint32_t\s+ota_update_async[\s\S]{0,500}?return generation;/,
   "both asynchronous operations must return their accepted generation to HTTP");
 assert.match(ota,
-  /struct OtaTaskArgs[\s\S]{0,300}?char version\[32\][\s\S]{0,100}?char app_sha256\[65\]/,
-  "the asynchronous task identity must use fixed channel/version/SHA storage");
+  /struct OtaTaskArgs[\s\S]{0,300}?uint32_t\s+generation[\s\S]{0,500}?OtaOfferBinding\s+offer\{\}[\s\S]{0,180}?static_assert\(sizeof\(OtaTaskArgs\)\s*<=\s*656/,
+  "the asynchronous task identity must use one size-ratcheted fixed offer slot");
+assert.match(hilFeed,
+  /struct OtaOfferBinding[\s\S]{0,300}?std::array<char,\s*8>\s+channel[\s\S]{0,100}?std::array<char,\s*32>\s+version[\s\S]{0,100}?std::array<char,\s*65>\s+app_sha256[\s\S]{0,100}?OtaFeedUrls\s+feed/,
+  "the task offer must keep channel/version/SHA/feed in fixed-capacity storage");
 assert.match(ota,
-  /uint32_t\s+start_locked[\s\S]{0,300}?s_task_args\s*=\s*request;[\s\S]{0,250}?xTaskCreate\(ota_task/,
+  /uint32_t\s+start_locked[\s\S]{0,300}?s_task_args\s*=\s*request;[\s\S]{0,500}?xTaskCreate\(ota_task/,
   "accepted channel/version/SHA must cross the task boundary in one fixed task-owned slot");
 assert.match(ota,
   /xTaskCreate\(ota_task[\s\S]{0,250}?s_generation\s*=\s*previous_generation/,
@@ -107,14 +123,24 @@ assert.match(httpOta,
   "HTTP must pass the complete checked identity into the atomic firmware boundary");
 assert.match(otaHeader, /std::array<char,\s*65>\s+available_sha256/,
   "frequent /ota/status copies must keep the 64-byte artifact SHA in fixed storage");
-for (const field of ["state", "message", "available", "available_channel", "current", "channel"]) {
+for (const field of ["state", "message", "available", "available_channel", "current", "channel",
+  "image_state"]) {
   assert.match(otaHeader, new RegExp(`FixedText<\\d+>\\s+${field}`),
     `/ota/status ${field} must remain fixed-capacity under TLS pressure`);
 }
+assert.match(hilFeed, /OTA_FEED_URL_MAX\s*=\s*255/,
+  "transient HIL feed URLs must have an explicit fixed maximum");
+assert.match(hilFeed, /OTA_FEED_URL_CAPACITY\s*=\s*OTA_FEED_URL_MAX\s*\+\s*1/,
+  "transient HIL feed URL storage must include one bounded terminator byte");
+assert.match(otaHeader, /OtaStatus ota_status\(OtaFeedUrls\* effective_feed\s*=\s*nullptr\)/,
+  "the compact status API must copy its fixed effective-feed pair in the same snapshot");
+assert.match(httpOta,
+  /OtaFeedUrls\s+effective_feed\{\}[\s\S]{0,100}?ota_status\(&effective_feed\)[\s\S]{0,1800}?effective_feed\.manifest\.data\(\)[\s\S]{0,300}?effective_feed\.firmware_base\.data\(\)/,
+  "compact OTA JSON must use the fixed effective-feed snapshot without string allocation");
 assert.match(fixedText, /class\s+FixedBuffer[\s\S]{0,900}?overflowed_\s*=\s*true/,
   "the OTA JSON buffer must fail closed on overflow instead of reallocating or truncating");
 assert.match(httpOta,
-  /FixedBuffer<2048>\s+j[\s\S]{0,1800}?json_append_quoted[\s\S]{0,1800}?if\s*\(!j\.ok\(\)\)/,
+  /FixedBuffer<4096>\s+j[\s\S]{0,2600}?json_append_quoted[\s\S]{0,2600}?if\s*\(!j\.ok\(\)\)/,
   "compact OTA status must use bounded allocation-free JSON with explicit overflow handling");
 assert.doesNotMatch(httpOta, /std::to_string|json_quote|std::string\s+j/,
   "compact OTA status must not allocate response strings while TLS owns the heap");
@@ -122,14 +148,127 @@ assert.match(config,
   /OtaChannel\s+config_ota_channel\(\)[\s\S]{0,120}?Lock lk\(g_mtx\)[\s\S]{0,120}?return g_cfg\.ota_channel/,
   "OTA status must read one config enum without copying the string-owning Config");
 assert.match(ota,
-  /OtaStatus\s+ota_status\(\)[\s\S]{0,700}?config_ota_channel\(\)/,
+  /OtaStatus\s+ota_status\(OtaFeedUrls\* effective_feed\)[\s\S]{0,700}?config_ota_channel\(\)/,
   "the live OTA status snapshot must use the allocation-free channel accessor");
 assert.match(otaHeader,
-  /uint32_t\s+heap_min_free_bytes[\s\S]{0,100}?uint32_t\s+heap_min_largest_block_bytes/,
-  "operation-local OTA heap minima must remain fixed-width status fields");
+  /uint32_t\s+heap_min_free_bytes[\s\S]{0,100}?uint32_t\s+heap_min_largest_block_bytes[\s\S]{0,240}?uint32_t\s+ota_stack_min_free_bytes/,
+  "operation-local OTA heap minima and OTA stack watermark must remain fixed-width status fields");
+assert.match(otaHeader,
+  /bool\s+rollback_pending_known\s*=\s*false[\s\S]{0,100}?bool\s+rollback_pending\s*=\s*false/,
+  "rollback state must retain an explicit unknown state instead of inventing false");
+assert.match(ota,
+  /rollback_pending_known\s*=\s*image_state\s*!=\s*OtaRuntimeImageState::Unknown[\s\S]{0,160}?rollback_pending\s*=\s*image_state\s*==\s*OtaRuntimeImageState::PendingVerify/,
+  "the boot-latched image-state observation must drive both tri-state fields");
+const healthGateAt = ota.indexOf("static void health_gate_task(void*)");
+const healthGateEnd = ota.indexOf("void ota_health_gate_arm()", healthGateAt);
+assert.ok(healthGateAt >= 0 && healthGateEnd > healthGateAt,
+  "the rollback-critical health-gate task must remain independently identifiable");
+const healthGate = ota.slice(healthGateAt, healthGateEnd);
+const imageStateRead = healthGate.indexOf("esp_ota_get_state_partition(running, &st)");
+const unknownState = healthGate.indexOf("OtaRuntimeImageState::Unknown", imageStateRead);
+const nonPendingBranch = healthGate.indexOf("if (st != ESP_OTA_IMG_PENDING_VERIFY)", unknownState);
+const validMapping = healthGate.indexOf(
+  "st == ESP_OTA_IMG_VALID ? OtaRuntimeImageState::Valid : OtaRuntimeImageState::Unarmed",
+  nonPendingBranch);
+const pendingState = healthGate.indexOf("OtaRuntimeImageState::PendingVerify", validMapping);
+const markValid = healthGate.indexOf("esp_ota_mark_app_valid_cancel_rollback()", pendingState);
+const successfulMark = healthGate.indexOf("if (e == ESP_OK)", markValid);
+const committedValid = healthGate.indexOf("OtaRuntimeImageState::Valid", successfulMark);
+assert.ok(imageStateRead >= 0 && unknownState > imageStateRead &&
+  nonPendingBranch > unknownState && validMapping > nonPendingBranch &&
+  pendingState > validMapping && markValid > pendingState && successfulMark > markValid &&
+  committedValid > successfulMark,
+"ESP-IDF image-state evidence must flow Unknown/Pending/Valid/Unarmed without optimistic ordering");
+const readFailureEnd = healthGate.indexOf("if (st != ESP_OTA_IMG_PENDING_VERIFY)", unknownState);
+assert.match(healthGate.slice(imageStateRead, readFailureEnd),
+  /!= ESP_OK\)[\s\S]*?OtaRuntimeImageState::Unknown[\s\S]*?vTaskDelete\(nullptr\)[\s\S]*?return;/,
+  "an unreadable otadata state must latch Unknown and stop rather than inventing rollback safety");
+assert.match(healthGate.slice(nonPendingBranch, pendingState),
+  /st == ESP_OTA_IMG_VALID \? OtaRuntimeImageState::Valid : OtaRuntimeImageState::Unarmed[\s\S]*?s_runtime_image_state\.store[\s\S]*?vTaskDelete\([\s\S]*?return;/,
+  "only IDF VALID maps to Valid; every other non-pending state must map to Unarmed");
+const markBranchEnd = healthGate.indexOf("break;", successfulMark);
+assert.match(healthGate.slice(markValid, markBranchEnd),
+  /esp_ota_mark_app_valid_cancel_rollback\(\)[\s\S]*?if \(e == ESP_OK\) \{[\s\S]*?OtaRuntimeImageState::Valid[\s\S]*?\} else \{[\s\S]*?marking the image valid failed/,
+  "a Pending image may become Valid only after ESP-IDF confirms the rollback commit");
+for (const [name, document] of [
+  ["OTA header", read("main/ota_update.hpp")],
+  ["health-gate header", healthGateHeaderDocs],
+  ["security documentation", securityDocs],
+  ["feature documentation", featureDocs],
+]) {
+  assert.doesNotMatch(document, /USB[\s\S]{0,180}(?:boots?|is)\s+`?UNDEFINED/i,
+    `${name} must not claim that blank USB otadata produced a successful UNDEFINED state read`);
+}
+assert.match(securityDocs, /esp_ota_get_state_partition\(\)/,
+  "security docs must name the authoritative IDF state API");
+assert.match(securityDocs, /returns `ESP_ERR_NOT_FOUND` \(not `PENDING_VERIFY`\)/,
+  "security docs must preserve the blank/no-record IDF result");
+assert.match(securityDocs,
+  /`image_state:"unknown"`[\s\S]{0,100}?`rollback_pending:null`/,
+  "security docs must preserve the fail-closed blank-otadata Unknown/null contract");
+assert.doesNotMatch(ota, /exact signed artifact/,
+  "device status identity must not claim a full cryptographic readback of running flash");
+const otaTaskStackMatch = ota.match(/constexpr int\s+kTaskStack\s*=\s*(\d+)/);
+const healthTaskStackMatch = ota.match(/constexpr int\s+kHealthTaskStack\s*=\s*(\d+)/);
+const weatherTaskStackMatch = weather.match(/constexpr int\s+kTaskStack\s*=\s*(\d+)/);
+assert.ok(otaTaskStackMatch && healthTaskStackMatch,
+  "both transient OTA task stack sizes must remain machine-readable");
+assert.ok(weatherTaskStackMatch,
+  "the Weather TLS task stack size must remain machine-readable");
+const minimumStackReserve = 1024;
+assert.ok(stackBudgets.paths.ota_task_manifest_fetch.max_bytes <=
+  Number(otaTaskStackMatch[1]) - minimumStackReserve,
+"the complete OTA manifest path ELF ceiling must leave at least 1 KiB on its task stack");
+assert.ok(stackBudgets.paths.ota_health_gate.max_bytes <=
+  Number(healthTaskStackMatch[1]) - minimumStackReserve,
+"the rollback-critical health-gate ELF ceiling must leave at least 1 KiB on its task stack");
+for (const pathName of ["weather_task_download", "weather_task_parse"]) {
+  assert.ok(stackBudgets.paths[pathName].max_bytes <=
+    Number(weatherTaskStackMatch[1]) - minimumStackReserve,
+  `${pathName} must leave at least 1 KiB on the Weather task stack`);
+}
+assert.deepEqual(stackBudgets.paths.weather_task_download.symbols,
+  ["weather_task", "weather_fetch", "weather_download"]);
+assert.deepEqual(stackBudgets.paths.weather_task_parse.symbols,
+  ["weather_task", "weather_fetch", "weather_parse"]);
+assert.equal(stackBudgets.paths.weather_task_download.base_bytes, 2048,
+  "Weather download must retain its reviewed TLS/IDF/exception allowance");
+assert.equal(stackBudgets.paths.weather_task_parse.base_bytes, 2048,
+  "Weather parse must retain its reviewed cJSON/exception allowance");
+assert.deepEqual(stackBudgets.paths.ota_health_gate.symbols, ["ota_health_task"]);
+assert.equal(stackBudgets.paths.ota_health_gate.base_bytes, 2048,
+  "the health-gate path must retain its reviewed IDF/logging/exception allowance");
+assert.match(stackBudgets.symbols.ota_health_task.pattern, /health_gate_task/,
+  "the health-gate budget must fail closed if its production symbol disappears");
 assert.match(httpOta,
-  /,\\"heap_min_free_bytes\\":[\s\S]{0,160}?,\\"heap_min_largest_block_bytes\\":/,
-  "compact OTA status must expose both operation-local heap dimensions");
+  /if\s*\(s\.rollback_pending_known\)[\s\S]{0,100}?s\.rollback_pending\s*\?\s*"true"\s*:\s*"false"[\s\S]{0,100}?j\s*\+=\s*"null"/,
+  "unknown image state must render rollback_pending as JSON null");
+assert.match(httpOta,
+  /,\\"heap_min_free_bytes\\":[\s\S]{0,160}?,\\"heap_min_largest_block_bytes\\":[\s\S]{0,240}?,\\"ota_stack_min_free_bytes\\":[\s\S]{0,180}?null/,
+  "compact OTA status must expose heap dimensions and null-before-sample OTA stack evidence");
+assert.match(stackWatch, /Modbus[\s\S]{0,120}?Weather[\s\S]{0,120}?Ota[\s\S]{0,120}?COUNT/,
+  "the shared allocation-free stack watcher must retain Weather and transient OTA minima");
+assert.ok(occurrences(weather, "stack_watch_sample(StackWatch::Weather)") >= 2,
+  "Weather must sample after the real TLS/HTTP/JSON interval before HIL accepts it");
+assert.match(httpStatus,
+  /weather_forecast[\s\S]*?task_stack_min_free_bytes[\s\S]*?StackWatch::Weather/,
+  "Weather status must expose path-local stack evidence");
+assert.match(httpStatus,
+  /stack_min_free_bytes[\s\S]*?j \+= ",\\"weather\\":";[\s\S]*?StackWatch::Weather/,
+  "always-on status must expose Weather stack evidence to release HIL");
+assert.match(ota,
+  /OtaHeapSample\s+ota_heap_sample\(\)[\s\S]{0,180}?stack_watch_sample\(StackWatch::Ota\)/,
+  "every existing OTA heap checkpoint must also sample the task's retrospective stack watermark");
+assert.match(ota,
+  /esp_ota_set_boot_partition\(update_partition\)[\s\S]{0,800}?stack_watch_sample\(StackWatch::Ota\)[\s\S]{0,500}?esp_restart\(\)/,
+  "the successful install path must sample after the second verifier and before reboot");
+const otaStatusAt = ota.indexOf("OtaStatus ota_status(");
+const otaStatusEndAt = ota.indexOf("\n}\n\nbool ota_changelog_chunk", otaStatusAt);
+const otaStatusBody = ota.slice(otaStatusAt, otaStatusEndAt);
+assert.match(otaStatusBody, /stack_watch_min_free_bytes\(StackWatch::Ota\)/,
+  "compact OTA status must read the allocation-free boot-retained OTA watermark");
+assert.doesNotMatch(otaStatusBody, /uxTaskGetStackHighWaterMark|esp_ota_get_state_partition|esp_partition_read/,
+  "the compact status path must neither sample another task nor read image-state flash");
 assert.match(ota,
   /ota_heap_operation_reset\(\);[\s\S]{0,160}?OtaNetworkFlag active/,
   "each accepted operation must reset heap telemetry before the network phase");
@@ -139,6 +278,25 @@ assert.match(ota,
 assert.match(ota,
   /s_status\.heap_min_free_bytes[\s\S]{0,180}?s_operation_min_free\.load[\s\S]{0,180}?s_status\.heap_min_largest_block_bytes[\s\S]{0,180}?s_operation_min_largest\.load/,
   "OTA status must read both lock-free operation minima");
+const defaultFeedAt = hilFeed.indexOf("bool ota_default_feed_urls(");
+const defaultFeedEnd = hilFeed.indexOf("\n}\n\ninline bool ota_feed_urls_valid", defaultFeedAt);
+assert.ok(defaultFeedAt >= 0 && defaultFeedEnd > defaultFeedAt,
+  "the fixed default-feed resolver must remain identifiable");
+const defaultFeed = hilFeed.slice(defaultFeedAt, defaultFeedEnd);
+assert.doesNotMatch(defaultFeed, /std::string\s|ota_url_join|ota_channel_manifest_url/,
+  "default feed resolution must not construct temporary strings");
+assert.match(defaultFeed, /ota_fixed_text_append/,
+  "default feed resolution must use bounded fixed-buffer appends");
+const startCheckAt = ota.indexOf("uint32_t start_check(");
+const startCheckEnd = ota.indexOf("\n}\n\nuint32_t start_update", startCheckAt);
+const startCheck = ota.slice(startCheckAt, startCheckEnd);
+const busyPreflight = startCheck.indexOf("if (s_busy) return 0");
+const checkConfigRead = startCheck.indexOf("config_ota_channel()", busyPreflight);
+const defaultResolution = startCheck.indexOf("ota_default_feed_urls(", checkConfigRead);
+const checkAcceptanceLock = startCheck.lastIndexOf("Lock lk(s_mtx)");
+assert.ok(busyPreflight >= 0 && checkConfigRead > busyPreflight &&
+  defaultResolution > checkConfigRead && checkAcceptanceLock > defaultResolution,
+  "a busy check must refuse before config/default-feed derivation, then close the acceptance race");
 const otaStatusStart = otaHeader.indexOf("struct OtaStatus {");
 const otaStatusEnd = otaHeader.indexOf("\n};", otaStatusStart);
 assert.ok(otaStatusStart >= 0 && otaStatusEnd > otaStatusStart,
@@ -182,41 +340,189 @@ assert.match(ota, /kManifestDeadline\s*=\s*pdMS_TO_TICKS\(30000\)/,
   "a trickling manifest must have a bounded operation deadline");
 assert.match(ota, /kFirmwareDeadline\s*=\s*pdMS_TO_TICKS\(5 \* 60 \* 1000\)/,
   "a trickling firmware stream must release quiesced services within five minutes");
+
+// ESP-IDF v6.0.2 loops inside both fetch_headers() and read(), so changing timeout_ms only between
+// public calls is not an absolute bound. One boot-created timer interrupts only the exposed socket;
+// the owner task joins that callback before close/cleanup or range-resume fd reuse.
+assert.match(mainCmake, /"http_deadline\.cpp"/,
+  "the shared socket-deadline implementation must be linked into the firmware");
+const deadlineInit = appMain.indexOf("http_deadline_init()");
+const firstNetworkStart = appMain.indexOf("net_eth_start()");
+assert.ok(deadlineInit >= 0 && firstNetworkStart > deadlineInit,
+  "the one HTTP deadline timer must be allocated before networking and TLS pressure");
+assert.match(httpDeadlineHeader,
+  /class\s+HttpSocketDeadline[\s\S]{0,800}?arm\(esp_http_client_handle_t[\s\S]{0,300}?disarm\(\)\s*noexcept/,
+  "OTA and Weather must share one explicit arm/expiry/disarm socket guard");
+assert.match(httpDeadlineLogic,
+  /now\s*-\s*started[\s\S]{0,180}?elapsed\s*>=\s*duration/,
+  "absolute-deadline arithmetic must remain unsigned and tick-wrap safe");
+assert.match(httpDeadline,
+  /xSemaphoreCreateBinaryStatic[\s\S]{0,400}?xSemaphoreCreateMutexStatic[\s\S]{0,700}?xTaskCreateStatic[\s\S]{0,900}?esp_timer_create/,
+  "the guard must use static synchronization, one static watchdog task and one boot-created timer");
+assert.match(httpDeadline,
+  /static_assert\(std::atomic<int>::is_always_lock_free[\s\S]{0,220}?static_assert\(std::atomic<bool>::is_always_lock_free/,
+  "timer-task socket and verdict publication must never hide allocator-backed atomic locks");
+assert.match(httpDeadline, /StackType_t\s+watchdog_stack\[kWatchdogStackBytes\]/,
+  "the deadline watchdog stack must be static rather than another failure-time heap allocation");
+assert.doesNotMatch(httpDeadline, /\bxTaskCreate\s*\(|esp_http_client_cancel_request/,
+  "the deadline must not dynamically create a task or mutate esp_http_client from another task");
+const watchdogTaskStart = httpDeadline.indexOf("void socket_deadline_watchdog_task(");
+const watchdogTaskEnd = httpDeadline.indexOf("\n}\n\nvoid socket_deadline_expired", watchdogTaskStart);
+assert.ok(watchdogTaskStart >= 0 && watchdogTaskEnd > watchdogTaskStart,
+  "the static socket-deadline watchdog task must remain identifiable");
+const watchdogTask = httpDeadline.slice(watchdogTaskStart, watchdogTaskEnd);
+const watchdogPrime = watchdogTask.indexOf("sys_thread_sem_get()");
+const watchdogPrimeCheck = watchdogTask.indexOf("thread_sem != nullptr", watchdogPrime);
+const watchdogInitAck = watchdogTask.indexOf("xSemaphoreGive(s_deadline.init_completion)",
+  watchdogPrimeCheck);
+const watchdogShutdown = watchdogTask.indexOf("shutdown(socket, SHUT_RDWR)", watchdogInitAck);
+const watchdogFailure = watchdogTask.indexOf("shutdown_result != 0", watchdogShutdown);
+const watchdogAbort = watchdogTask.indexOf("deadline_fail_closed()", watchdogFailure);
+const watchdogAck = watchdogTask.indexOf("xSemaphoreGive(s_deadline.completion)", watchdogAbort);
+assert.ok(watchdogPrime >= 0 && watchdogPrimeCheck > watchdogPrime &&
+  watchdogInitAck > watchdogPrimeCheck && watchdogShutdown > watchdogInitAck &&
+  watchdogFailure > watchdogShutdown && watchdogAbort > watchdogFailure &&
+  watchdogAck > watchdogAbort,
+  "the static watchdog must require a successful lwIP prime at boot and fail closed on shutdown before ack");
+const deadlineCallbackStart = httpDeadline.indexOf("void socket_deadline_expired(");
+const deadlineCallbackEnd = httpDeadline.indexOf("}\n\n}", deadlineCallbackStart);
+assert.ok(deadlineCallbackStart >= 0 && deadlineCallbackEnd > deadlineCallbackStart,
+  "the socket-deadline callback must remain identifiable");
+const deadlineCallback = httpDeadline.slice(deadlineCallbackStart, deadlineCallbackEnd);
+assert.match(deadlineCallback,
+  /fired\.store\(true[\s\S]{0,180}?xTaskNotifyGive\(s_deadline\.watchdog_task\)/,
+  "the timer callback may only latch expiry and notify the pre-primed static task");
+assert.doesNotMatch(deadlineCallback,
+  /esp_http_client_|\bclose\s*\(|\bshutdown\s*\(|esp_timer_stop|owner|xSemaphoreGive/,
+  "the timer task must never touch a socket/client, close an fd or acknowledge work it did not do");
+assert.match(httpDeadline,
+  /bool http_deadline_ready\(\)[\s\S]{0,140}?ready\.load\(std::memory_order_acquire\)/,
+  "the boot result must have an allocation-free readiness latch");
+assert.match(startCheck,
+  /if \(!http_deadline_ready\(\)\) return 0;[\s\S]{0,500}?config_ota_channel\(\)[\s\S]{0,900}?start_locked/,
+  "OTA checks must refuse before feed derivation and task creation when the watchdog is unavailable");
+assert.match(weather,
+  /void weather_forecast_start\(\)[\s\S]{0,500}?!http_deadline_ready\(\)[\s\S]{0,500}?xTaskCreate\(weather_task/,
+  "Weather must refuse task creation when its boot-owned deadline watchdog is unavailable");
+assert.match(weather,
+  /bool download_json\([\s\S]{0,220}?!http_deadline_ready\(\)[\s\S]{0,220}?out\.reserve\(kPayloadMax\)[\s\S]{0,600}?esp_http_client_init/,
+  "Weather must recheck readiness before payload and HTTP/TLS allocation");
+const deadlineArmStart = httpDeadline.indexOf("esp_err_t HttpSocketDeadline::arm(");
+const deadlineDisarmStart = httpDeadline.indexOf("bool HttpSocketDeadline::disarm(");
+const deadlineArm = httpDeadline.slice(deadlineArmStart, deadlineDisarmStart);
+const deadlineDisarm = httpDeadline.slice(deadlineDisarmStart);
+assert.match(deadlineArm,
+  /http_deadline_remaining_ticks\(started,\s*now,\s*duration\)[\s\S]{0,700}?esp_http_client_get_socket\(client\)[\s\S]{0,700}?esp_timer_start_once/,
+  "arming must bind the public socket to the remainder of the original caller deadline");
+assert.match(deadlineArm,
+  /while\s*\(xSemaphoreTake\(s_deadline\.completion,\s*0\)\s*==\s*pdTRUE\)/,
+  "a stale completion acknowledgement must be drained before fd publication/re-arm");
+const stopDeadline = deadlineDisarm.indexOf("esp_timer_stop(s_deadline.timer)");
+const joinDeadline = deadlineDisarm.indexOf(
+  "xSemaphoreTake(s_deadline.completion, portMAX_DELAY)", stopDeadline);
+const clearDeadlineSocket = deadlineDisarm.indexOf("s_deadline.socket.store(-1", joinDeadline);
+const clearDeadlineOwner = deadlineDisarm.indexOf("s_deadline.owner = nullptr", clearDeadlineSocket);
+assert.ok(stopDeadline >= 0 && joinDeadline > stopDeadline &&
+          clearDeadlineSocket > joinDeadline && clearDeadlineOwner > clearDeadlineSocket,
+  "disarm must stop or join callback completion before clearing fd/owner for reuse");
+assert.match(deadlineDisarm,
+  /owner\s*!=\s*this[\s\S]{0,300}?std::abort\(\)[\s\S]{0,900}?stop_err\s*!=\s*ESP_OK[\s\S]{0,300}?std::abort\(\)/,
+  "unprovable owner/stop exclusion must abort rather than continue into unsafe fd reuse");
+
 const manifestFetchStart = ota.indexOf("bool fetch_manifest_identity_once(");
 const manifestFetchEnd = ota.indexOf("bool fetch_manifest_identity(", manifestFetchStart);
 const manifestDeadlineFetch = ota.slice(manifestFetchStart, manifestFetchEnd);
 assert.ok(manifestFetchStart >= 0 && manifestFetchEnd > manifestFetchStart,
   "the manifest transfer must remain identifiable");
 assert.match(manifestDeadlineFetch,
-  /while\s*\(got < sizeof\(buf\)\)[\s\S]{0,220}?!set_http_timeout_to_deadline\(c, manifest_started, kManifestDeadline\)/,
+  /while\s*\(!body_too_big && got < sizeof\(buf\)\)[\s\S]{0,220}?!set_http_timeout_to_deadline\(c, manifest_started, kManifestDeadline\)/,
   "manifest reads must consume the remaining operation deadline rather than only per-read timeouts");
 assert.match(manifestDeadlineFetch,
-  /esp_http_client_read\(c,[\s\S]{0,160}?n <= 0[\s\S]{0,160}?http_deadline_reached\(manifest_started, kManifestDeadline\)[\s\S]{0,160}?timed_out = true/,
-  "a manifest read which consumes its remaining timeout must retain timeout diagnostics");
+  /socket_deadline\.arm\(c,\s*manifest_started,\s*kManifestDeadline\)[\s\S]{0,700}?esp_http_client_fetch_headers\(c\)[\s\S]{0,220}?socket_deadline\.expired\(\)/,
+  "manifest header fetch must be interrupted and classified by the absolute socket guard");
+const manifestBodyLoopStart = manifestDeadlineFetch.indexOf(
+  "while (!body_too_big && got < sizeof(buf))");
+const manifestBodyLoopEnd = manifestDeadlineFetch.indexOf(
+  "if (!timed_out && !read_failed && !body_too_big && got == sizeof(buf))",
+  manifestBodyLoopStart);
+const manifestBodyLoop = manifestDeadlineFetch.slice(manifestBodyLoopStart, manifestBodyLoopEnd);
+assert.match(manifestBodyLoop,
+  /esp_http_client_read\(c,[\s\S]{0,220}?socket_deadline\.expired\(\)[\s\S]{0,180}?timed_out\s*=\s*true/,
+  "a partial body return after manifest socket shutdown must still be classified as timeout");
+assert.match(manifestDeadlineFetch,
+  /socket_deadline\.disarm\(\)[\s\S]{0,900}?close_http_client\(c,\s*socket_deadline\)/,
+  "manifest must join its header/body watchdog before parsing and before client cleanup");
+assert.match(manifestDeadlineFetch,
+  /esp_http_client_get_content_length\(c\)[\s\S]{0,2500}?esp_http_client_read\(c,\s*&extra,\s*1\)[\s\S]{0,1500}?http_body_complete\([\s\S]{0,180}?esp_http_client_is_complete_data_received\(c\)/,
+  "manifest must reject claimed truncation, unknown-length overflow and incomplete HTTP framing");
+assert.match(manifestLogic,
+  /skip_json_value\([\s\S]{0,420}?MAX_JSON_DEPTH\s*=\s*8[\s\S]{0,1800}?json\[pos\]\s*==\s*','[\s\S]{0,300}?json\[pos\]\s*==\s*'\}'[\s\S]{0,900}?json\[pos\]\s*==\s*'\]'/,
+  "unknown manifest values must use a depth-bounded strict JSON grammar");
+const identityStart = manifestLogic.search(/bool\s+manifest_identity\s*\(/);
+const identityEnd = manifestLogic.indexOf("// Parse the optional sibling changelog", identityStart);
+const identity = manifestLogic.slice(identityStart, identityEnd);
+const provenanceStart = identity.indexOf("auto parse_provenance");
+const rootStart = identity.indexOf("detail::skip_ws(json, len, i);", provenanceStart);
+const provenance = identity.slice(provenanceStart, rootStart);
+const provenanceComma = provenance.indexOf("json[pos] == ','");
+const provenanceClose = provenance.indexOf("json[pos] == '}'", provenanceComma);
+const provenanceReject = provenance.indexOf("return false", provenanceClose);
+assert.ok(provenanceStart >= 0 && rootStart > provenanceStart && provenanceComma >= 0 &&
+  provenanceClose > provenanceComma && provenanceReject > provenanceClose,
+  "manifest provenance must require commas, its matching object closer and reject other bytes");
+assert.equal(occurrences(provenance, "json[pos] == '}'"), 2,
+  "both empty and populated provenance objects must require their matching object closer");
+const identityRoot = identity.slice(rootStart);
+const rootOpen = identityRoot.indexOf("json[i++] != '{'");
+const rootComma = identityRoot.indexOf("json[i] == ','", rootOpen);
+const rootClose = identityRoot.indexOf("json[i] == '}'", rootComma);
+const rootReject = identityRoot.indexOf("return false", rootClose);
+const rootExact = identityRoot.indexOf(
+  "return i == len && have_version && have_provenance && have_sha", rootReject);
+assert.ok(rootOpen >= 0 && rootComma > rootOpen && rootClose > rootComma &&
+  rootReject > rootClose && rootExact > rootReject,
+  "manifest identity must require root member commas, its matching closer and exactly one root");
 const probeLoop = update.slice(update.indexOf("while (probe_len < kImageProbeSize)"),
                                update.indexOf("if (probe_len != kImageProbeSize)"));
 assert.match(probeLoop,
   /!set_http_timeout_to_deadline\(client, transfer_started, kFirmwareDeadline\)/,
   "the image-header read must obey the complete firmware-transfer deadline");
 assert.match(probeLoop,
-  /esp_http_client_read\(client,[\s\S]{0,200}?n <= 0 && http_deadline_reached\(transfer_started, kFirmwareDeadline\)[\s\S]{0,100}?header_timed_out = true/,
-  "an image-header read which consumes its remaining timeout must retain timeout diagnostics");
+  /esp_http_client_read\(client,[\s\S]{0,220}?socket_deadline\.expired\(\)[\s\S]{0,180}?header_timed_out\s*=\s*true/,
+  "a partial image-header return after socket shutdown must retain timeout diagnostics");
 const transferLoop = update.slice(update.indexOf("while (transfer_ok)"),
                                   update.indexOf("const bool complete", update.indexOf("while (transfer_ok)")));
 assert.match(transferLoop,
   /!set_http_timeout_to_deadline\(client, transfer_started, kFirmwareDeadline\)[\s\S]{0,180}?OtaTransferFailure::Timeout/,
   "the bulk image read must abort and diagnose expiry of the complete firmware-transfer deadline");
 assert.match(transferLoop,
-  /esp_http_client_read\(client,[\s\S]{0,180}?n <= 0 && http_deadline_reached\(transfer_started, kFirmwareDeadline\)[\s\S]{0,180}?OtaTransferFailure::Timeout/,
-  "a bulk read which consumes its remaining timeout must retain timeout diagnostics");
+  /esp_http_client_read\(client,[\s\S]{0,220}?socket_deadline\.expired\(\)[\s\S]{0,180}?OtaTransferFailure::Timeout/,
+  "a partial firmware-body return after socket shutdown must retain timeout diagnostics");
 assert.match(weather, /kDownloadDeadline\s*=\s*pdMS_TO_TICKS\(60000\)/,
   "a trickling weather response must have a bounded operation deadline");
 assert.match(weather,
-  /while\s*\(out\.size\(\) <= kPayloadMax\)[\s\S]{0,260}?elapsed >= kDownloadDeadline[\s\S]{0,120}?download_timeout/,
-  "weather reads must release the shared network-heap lease when their total deadline expires");
+  /socket_deadline\.arm\(client,\s*download_started,\s*kDownloadDeadline\)[\s\S]{0,260}?esp_http_client_fetch_headers\(client\)[\s\S]{0,160}?socket_deadline\.expired\(\)/,
+  "Weather headers must share the absolute socket watchdog");
 assert.match(weather,
-  /esp_http_client_read\(client,[\s\S]{0,180}?n <= 0 && xTaskGetTickCount\(\) - download_started >= kDownloadDeadline[\s\S]{0,100}?download_timeout/,
-  "a weather read which consumes its remaining timeout must retain timeout diagnostics");
+  /esp_http_client_read\(client,[\s\S]{0,180}?socket_deadline\.expired\(\)[\s\S]{0,120}?download_timeout/,
+  "a partial Weather body return after socket shutdown must retain timeout diagnostics");
+assert.match(weather,
+  /n\s*==\s*0[\s\S]{0,260}?http_body_complete\([\s\S]{0,180}?esp_http_client_is_complete_data_received\(client\)[\s\S]{0,180}?incomplete_payload[\s\S]{0,180}?ok\s*=\s*!out\.empty\(\)/,
+  "Weather must reject premature EOF before parsing a non-empty response prefix as fresh data");
+const weatherParseStart = weather.indexOf("bool parse_forecast(");
+const weatherParseEnd = weather.indexOf("\n}\n\nbool fetch_forecast", weatherParseStart);
+const weatherParse = weather.slice(weatherParseStart, weatherParseEnd);
+const cjsonParse = weatherParse.indexOf("cJSON_ParseWithLengthOpts(");
+const parseEndCheck = weatherParse.indexOf("json_suffix_is_whitespace(", cjsonParse);
+const trailingError = weatherParse.indexOf('error = "json_trailing_data"', parseEndCheck);
+assert.ok(cjsonParse >= 0 && parseEndCheck > cjsonParse && trailingError > parseEndCheck,
+  "Weather must reject non-whitespace bytes after the parsed JSON root");
+assert.match(weatherParse,
+  /if \(!parse_end[\s\S]{0,220}?\|\|\s*!json_suffix_is_whitespace\(/,
+  "the trailing-root check must participate directly in Weather's rejection condition");
+assert.match(weather,
+  /~HttpClientCleanup\(\)[\s\S]{0,260}?deadline\.disarm\(\)[\s\S]{0,180}?esp_http_client_close\(handle\)[\s\S]{0,120}?esp_http_client_cleanup\(handle\)/,
+  "Weather exception cleanup must join the watchdog before releasing the client/fd");
 
 const init = update.indexOf("esp_http_client_init(");
 const probeRead = update.indexOf("esp_http_client_read(", init);
@@ -225,10 +531,11 @@ const writeImage = update.indexOf("esp_ota_write(", begin);
 const probeWrite = update.indexOf("write_chunk(buffer, probe_len)", writeImage);
 const bulkRead = update.indexOf("esp_http_client_read(", probeWrite);
 const bulkWrite = update.indexOf("write_chunk(buffer,", bulkRead);
-const release = update.lastIndexOf("close_http_client(client)");
+const release = update.lastIndexOf("close_http_client(client, socket_deadline)");
 const completeDecision = update.indexOf("const bool complete =", bulkWrite);
 const finalBufferRelease = update.indexOf("heap_caps_free(buffer)", completeDecision);
-const finalTransportRelease = update.indexOf("close_http_client(client)", finalBufferRelease);
+const finalTransportRelease = update.indexOf(
+  "close_http_client(client, socket_deadline)", finalBufferRelease);
 const hashSetup = update.indexOf("psa_hash_setup(");
 const hashUpdate = update.indexOf("psa_hash_update(", hashSetup);
 const hashFinish = update.indexOf("psa_hash_finish(", hashUpdate);
@@ -247,13 +554,17 @@ assert.ok(hashSetup > probeRead && hashUpdate > hashSetup && hashFinish > releas
           exactHash > hashFinish && verify > exactHash,
   "the complete downloaded byte stream must match the checked app SHA before signature validation and boot selection");
 assert.match(update,
-  /fetch_manifest_identity\([\s\S]{0,500}?strcmp\(offer\.version, request\.version\)[\s\S]{0,180}?strcmp\(offer\.app_sha256, request\.app_sha256\)/,
+  /fetch_manifest_identity\([\s\S]{0,500}?strcmp\(offer\.version, request\.offer\.version\.data\(\)\)[\s\S]{0,180}?strcmp\(offer\.app_sha256, request\.offer\.app_sha256\.data\(\)\)/,
   "the fresh manifest must still match the accepted checked version and SHA before download");
 const closeHelperStart = ota.indexOf("void close_http_client(");
 const closeHelperEnd = ota.indexOf("esp_err_t open_firmware_stream(", closeHelperStart);
 assert.ok(closeHelperStart >= 0 && closeHelperEnd > closeHelperStart,
   "the HTTP/TLS release helper must remain identifiable");
 const closeHelper = ota.slice(closeHelperStart, closeHelperEnd);
+const closeHelperDisarm = closeHelper.indexOf("deadline.disarm()");
+const closeHelperClose = closeHelper.indexOf("esp_http_client_close(");
+assert.ok(closeHelperDisarm >= 0 && closeHelperClose > closeHelperDisarm,
+  "the owner must stop or join socket shutdown before close can recycle the fd");
 assert.ok(closeHelper.indexOf("esp_http_client_close(") <
           closeHelper.indexOf("esp_http_client_cleanup("),
   "the image-client release must close the connection before destroying its TLS/client state");
@@ -309,18 +620,22 @@ const changelogHeapGate = changelogFetch.indexOf('wait_for_ota_headroom("changel
 const changelogInit = changelogFetch.indexOf("esp_http_client_init(");
 const changelogDeadline = changelogFetch.indexOf(
   "set_http_timeout_to_deadline(c, changelog_started, kChangelogDeadline", changelogInit);
+const changelogArm = changelogFetch.indexOf(
+  "socket_deadline.arm(c, changelog_started, kChangelogDeadline)", changelogDeadline);
 const changelogHeaders = changelogFetch.indexOf("esp_http_client_fetch_headers(", changelogInit);
 const changelogDocument = changelogFetch.indexOf("heap_caps_calloc(1, kChangelogDocumentMax, MALLOC_CAP_8BIT)");
 const changelogRead = changelogFetch.indexOf("esp_http_client_read(", changelogDocument);
-const changelogClose = changelogFetch.lastIndexOf("close_http_client(c)");
+const changelogDisarm = changelogFetch.indexOf("socket_deadline.disarm()", changelogRead);
+const changelogClose = changelogFetch.lastIndexOf("close_http_client(c, socket_deadline)");
 const changelogExact = changelogFetch.indexOf(
   "heap_caps_malloc(decoded_len + 1, MALLOC_CAP_8BIT)", changelogClose);
 assert.ok(changelogHttps >= 0 && changelogHeapGate > changelogHttps &&
           changelogInit > changelogHeapGate && changelogDeadline > changelogInit &&
-          changelogHeaders > changelogDeadline && changelogDocument > changelogHeaders &&
-          changelogRead > changelogDocument && changelogClose > changelogRead &&
+          changelogArm > changelogDeadline && changelogHeaders > changelogArm &&
+          changelogDocument > changelogHeaders && changelogRead > changelogDocument &&
+          changelogDisarm > changelogRead && changelogClose > changelogDisarm &&
           changelogExact > changelogClose,
-  "the optional client must pass stable TLS headroom/deadline, use one bounded body slot, fully close TLS, then retain only decoded_len+1 bytes");
+  "the optional client must arm across headers/body, join, close TLS, then retain decoded_len+1 bytes");
 assert.match(changelogFetch, /transport_type\s*=\s*HTTP_TRANSPORT_OVER_SSL/,
   "changelog fetch must force the SSL transport");
 assert.match(changelogFetch, /disable_auto_redirect\s*=\s*true/,
@@ -337,6 +652,12 @@ assert.match(changelogFetch,
 assert.match(changelogFetch,
   /while\s*\(got\s*<\s*kChangelogDocumentMax\)\s*\{[\s\S]{0,220}?if\s*\(\s*!set_http_timeout_to_deadline\(c,\s*changelog_started,\s*kChangelogDeadline/,
   "a trickling changelog body must remain inside its absolute operation deadline");
+assert.match(changelogFetch,
+  /esp_http_client_fetch_headers\(c\)[\s\S]{0,120}?socket_deadline\.expired\(\)/,
+  "a trickling changelog header must be interrupted by the socket watchdog");
+assert.match(changelogFetch,
+  /esp_http_client_read\(c,[\s\S]{0,180}?socket_deadline\.expired\(\)[\s\S]{0,160}?timed_out\s*=\s*true/,
+  "a partial changelog body return after socket shutdown must remain a timeout");
 assert.match(ota,
   /kChangelogTimerTickTicks\s*=\s*pdMS_TO_TICKS\(1000\)[\s\S]{0,160}?kChangelogLeaseTtlUs\s*=\s*60LL\s*\*\s*1000LL\s*\*\s*1000LL[\s\S]{0,500}?StaticTimer_t\s+s_changelog_timer_storage/,
   "unused retained notes must have a short TTL and statically allocated retry timer");
@@ -413,17 +734,21 @@ const clearResponse = stream.indexOf("esp_http_client_clear_response_buffer(", r
 const secondStreamDeadline = stream.indexOf(
   "set_http_timeout_to_deadline(client, operation_started, operation_deadline)",
   streamDeadline + 1);
+const armSocketDeadline = stream.indexOf(
+  "socket_deadline.arm(client, operation_started, operation_deadline)", secondStreamDeadline);
 const fetchHeaders = stream.indexOf("esp_http_client_fetch_headers(client)");
 const postHeaderDeadline = stream.indexOf(
-  "http_deadline_reached(operation_started, operation_deadline)", fetchHeaders);
+  "socket_deadline.expired()", fetchHeaders);
+const redirectDisarm = stream.indexOf("socket_deadline.disarm()", setRedirect);
 assert.ok(streamDeadline >= 0 && redirectReset > streamDeadline && rangeReset > redirectReset &&
-          secondStreamDeadline > rangeReset && fetchHeaders > secondStreamDeadline &&
+          secondStreamDeadline > rangeReset && armSocketDeadline > secondStreamDeadline &&
+          fetchHeaders > armSocketDeadline &&
           postHeaderDeadline > fetchHeaders &&
           redirectVerdict > postHeaderDeadline &&
           setRedirect > redirectVerdict &&
-          redirectClose > setRedirect &&
+          redirectDisarm > setRedirect && redirectClose > redirectDisarm &&
           clearResponse > redirectClose,
-  "only one unambiguous secure Location may be applied, then the old response/socket must be cleared before reopen");
+  "each stream must arm before headers, then join before a redirected socket is cleared/reopened");
 
 // ── Two exact, fail-closed mid-stream resumes ────────────────────────────────────────────────
 // Dynamic TLS records can lose allocations or socket reads after the OTA slot/hash are already
@@ -445,14 +770,15 @@ const resumeDecision = update.indexOf("const bool can_resume");
 const resumeIncrement = update.indexOf("++resumes", resumeDecision);
 const resumeDiag = update.indexOf("http_client_log_read_failure(", bulkRead);
 const resumeFree = update.indexOf("heap_caps_free(buffer)", resumeDecision);
-const resumeClose = update.indexOf("close_http_client(client)", resumeFree);
+const resumeClose = update.indexOf("close_http_client(client, socket_deadline)", resumeFree);
 const resumeHeadroom = update.indexOf('wait_for_ota_headroom_until("transfer resume"', resumeClose);
 const resumeGateDeadline = update.indexOf(
   "if (http_deadline_reached(transfer_started, kFirmwareDeadline))", resumeHeadroom);
 const resumeInit = update.indexOf("esp_http_client_init(&http)", resumeHeadroom);
 const resumeHeader = update.indexOf('esp_http_client_set_header(client, "Range", range_header)', resumeInit);
 const resumeOpen = update.indexOf(
-  "open_firmware_stream(client, response_state, 206, transfer_started,", resumeHeader);
+  "open_firmware_stream(client, response_state, socket_deadline, 206, transfer_started,",
+  resumeHeader);
 const resumeRange = update.indexOf("ota_content_range_matches(", resumeOpen);
 const resumeChunked = update.indexOf("esp_http_client_is_chunked_response(client)", resumeRange);
 const resumeLength = update.indexOf("response_length", resumeChunked);
@@ -475,14 +801,14 @@ assert.match(update.slice(resumeClose, resumeInit),
   /kTransferHeadroomMaxAttempts,\s*transfer_started,\s*kFirmwareDeadline,\s*resume_heap/,
   "the reconnect headroom wait must consume the original absolute transfer deadline");
 assert.match(stream,
-  /set_http_timeout_to_deadline\(client, operation_started, operation_deadline\)[\s\S]{0,320}?esp_http_client_open\(client, 0\)[\s\S]{0,220}?set_http_timeout_to_deadline\(client, operation_started, operation_deadline\)[\s\S]{0,180}?esp_http_client_fetch_headers\(client\)[\s\S]{0,160}?http_deadline_reached\(operation_started, operation_deadline\)/,
-  "every initial or redirected open and header fetch must consume a freshly computed remaining deadline");
+  /set_http_timeout_to_deadline\(client, operation_started, operation_deadline\)[\s\S]{0,500}?esp_http_client_open\(client, 0\)[\s\S]{0,500}?set_http_timeout_to_deadline\(client, operation_started, operation_deadline\)[\s\S]{0,300}?socket_deadline\.arm\(client, operation_started, operation_deadline\)[\s\S]{0,300}?esp_http_client_fetch_headers\(client\)[\s\S]{0,180}?socket_deadline\.expired\(\)/,
+  "open consumes the IDF timeout, then every header/body socket phase uses the original absolute deadline");
 assert.match(stream,
-  /esp_http_client_open\(client, 0\)[\s\S]{0,100}?e\s*!=\s*ESP_OK[\s\S]{0,140}?http_deadline_reached\(operation_started, operation_deadline\)[\s\S]{0,80}?ESP_ERR_TIMEOUT\s*:\s*e/,
+  /esp_http_client_open\(client, 0\)[\s\S]{0,180}?e\s*!=\s*ESP_OK[\s\S]{0,300}?http_deadline_reached\(operation_started, operation_deadline\)[\s\S]{0,180}?ESP_ERR_TIMEOUT\s*:\s*e/,
   "a blocking TLS-open failure that exhausts the operation deadline must remain a timeout");
 assert.match(stream,
-  /header_result\s*=\s*esp_http_client_fetch_headers\(client\)[\s\S]{0,100}?header_result\s*<\s*0[\s\S]{0,140}?http_deadline_reached\(operation_started, operation_deadline\)[\s\S]{0,100}?ESP_ERR_TIMEOUT\s*:\s*ESP_FAIL/,
-  "a blocking header failure that exhausts the operation deadline must remain a timeout");
+  /header_result\s*=\s*esp_http_client_fetch_headers\(client\)[\s\S]{0,120}?socket_deadline\.expired\(\)[\s\S]{0,100}?ESP_ERR_TIMEOUT[\s\S]{0,180}?header_result\s*<\s*0/,
+  "socket-shutdown header failures must be classified as timeout before generic response failure");
 assert.match(update.slice(resumeInit, resumeOpen), /bytes=%llu-/,
   "the reconnect must request exactly the suffix beginning at the committed byte count");
 assert.match(update.slice(resumeOpen, resumeBuffer),
@@ -739,8 +1065,15 @@ assert.match(mainCmake,
 assert.match(mqtt,
   /struct\s+MqttStartupActivity[\s\S]{0,800}?s_publish_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,300}?if\s*\(!competing_tls_active\(\)\)\s*return;[\s\S]{0,200}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
   "MQTT startup must claim/recheck and yield to an OTA that began before mqtt_ha_start");
-assert.match(mqtt,
-  /esp_mqtt_client_stop\(s_client\)[\s\S]{0,600}?s_transport_connecting\.store\(false,\s*std::memory_order_release\)[\s\S]{0,600}?esp_mqtt_client_destroy\(s_client\)/,
+const promoteStart = mqtt.indexOf("static bool promote_client_to_publisher() {");
+const promoteEnd = mqtt.indexOf("\n}\n\nvoid mqtt_ha_start()", promoteStart);
+const promote = mqtt.slice(promoteStart, promoteEnd);
+const promoteStop = promote.indexOf("esp_mqtt_client_stop(s_client)");
+const promoteTransportClear = promote.indexOf(
+  "s_transport_connecting.store(false, std::memory_order_release)", promoteStop);
+const promoteDestroy = promote.indexOf("esp_mqtt_client_destroy(s_client)", promoteTransportClear);
+assert.ok(promoteStart >= 0 && promoteEnd > promoteStart && promoteStop >= 0 &&
+          promoteTransportClear > promoteStop && promoteDestroy > promoteTransportClear,
   "MQTT promotion must clear BEFORE_CONNECT state because client_stop emits no disconnect event");
 
 // The live plant also runs HomeHub and Syslog. Both used to allocate after the OTA flag rose:
@@ -756,14 +1089,19 @@ const modbusOtaHold = modbusTask.indexOf("ota_download_active()");
 const modbusWeatherHold = modbusTask.indexOf("weather_fetch_active()", modbusOtaHold);
 const modbusClaim = modbusTask.indexOf("MbNetworkActivity network_activity", modbusWeatherHold);
 const modbusRecheck = modbusTask.indexOf("ota_download_active()", modbusClaim);
-const modbusConfig = modbusTask.indexOf("config_modbus_host(config())");
+const modbusPollCall = modbusTask.indexOf("mb_poll_once()", modbusRecheck);
+const modbusPollStart = modbus.indexOf("static void mb_poll_once()");
+const modbusPollEnd = modbus.indexOf("static void mb_task_start_if_enabled()", modbusPollStart);
+const modbusPoll = modbus.slice(modbusPollStart, modbusPollEnd);
 assert.ok(modbusOtaHold >= 0 && modbusWeatherHold > modbusOtaHold &&
           modbusClaim > modbusWeatherHold && modbusRecheck > modbusClaim &&
-          modbusConfig > modbusRecheck,
+          modbusPollCall > modbusRecheck,
   "HomeHub must claim/recheck and stand aside before its Config copy and model-sized cycle allocation");
-assert.match(modbusTask.slice(modbusOtaHold, modbusConfig),
+assert.match(modbusTask.slice(modbusOtaHold, modbusPollCall),
   /vTaskDelay\([\s\S]*?continue;/,
   "the HomeHub network hold must yield at its ordinary cadence");
+assert.match(modbusPoll, /const Config& c = config\(\);[\s\S]*?std::vector/,
+  "the allocation-rich HomeHub cycle must still own the Config snapshot and model-sized values");
 assert.match(modbus,
   /struct\s+MbNetworkActivity[\s\S]{0,220}?s_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,220}?s_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
   "HomeHub cycle ownership must withdraw and restore its acknowledgement by RAII");
@@ -793,12 +1131,22 @@ assert.match(syslog,
 assert.match(syslog,
   /bool\s+syslog_network_quiesced\(\)[\s\S]{0,120}?s_network_quiesced\.load\(std::memory_order_acquire\)/,
   "Syslog must expose an allocation-free cycle acknowledgement");
-assert.match(weather,
-  /!mb_network_quiesced\(\)[\s\S]{0,100}?!syslog_network_quiesced\(\)[\s\S]{0,500}?modbus_quiesce_failed\s*=\s*!mb_network_quiesced\(\)[\s\S]{0,100}?syslog_quiesce_failed\s*=\s*!syslog_network_quiesced\(\)/,
+const weatherNetworkStart = weather.indexOf("NetworkActivity activity(source_generation)");
+const weatherNetworkEnd = weather.indexOf("ok = fetch_forecast(", weatherNetworkStart);
+const weatherNetwork = weather.slice(weatherNetworkStart, weatherNetworkEnd);
+const weatherModbusWait = weatherNetwork.indexOf("!mb_network_quiesced()");
+const weatherSyslogWait = weatherNetwork.indexOf("!syslog_network_quiesced()", weatherModbusWait);
+const weatherModbusVerdict = weatherNetwork.indexOf(
+  "modbus_quiesce_failed = !mb_network_quiesced()", weatherSyslogWait);
+const weatherSyslogVerdict = weatherNetwork.indexOf(
+  "syslog_quiesce_failed = !syslog_network_quiesced()", weatherModbusVerdict);
+assert.ok(weatherNetworkStart >= 0 && weatherNetworkEnd > weatherNetworkStart &&
+  weatherModbusWait >= 0 && weatherSyslogWait > weatherModbusWait &&
+  weatherModbusVerdict > weatherSyslogWait && weatherSyslogVerdict > weatherModbusVerdict,
   "Weather TLS must wait for HomeHub and Syslog acknowledgements too");
 
 const pollBarrierStart = ota.indexOf("bool wait_for_poll_quiesce(");
-const pollBarrierEnd = ota.indexOf("OtaChannel channel_now()", pollBarrierStart);
+const pollBarrierEnd = ota.indexOf("bool wait_for_mqtt_quiesce(", pollBarrierStart);
 assert.ok(pollBarrierStart >= 0 && pollBarrierEnd > pollBarrierStart,
   "the pre-transfer X10A barrier must remain identifiable");
 const pollBarrier = ota.slice(pollBarrierStart, pollBarrierEnd);
@@ -822,9 +1170,20 @@ assert.ok(pollBarrierCall >= 0 && mqttBarrierCall > pollBarrierCall &&
 assert.match(ota,
   /struct\s+OtaNetworkFlag[\s\S]{0,260}?mqtt_transport_pause_for_network_heap\(\)[\s\S]{0,260}?mqtt_transport_resume_after_network_heap\(\)[\s\S]{0,120}?s_network_active\.store\(false/,
   "the OTA network lease must pause esp-mqtt and request resume before releasing its own flag");
-assert.match(weather,
-  /struct\s+NetworkActivity[\s\S]{0,260}?mqtt_transport_pause_for_network_heap\(\)[\s\S]{0,260}?mqtt_transport_resume_after_network_heap\(\)[\s\S]{0,120}?s_network_active\.store\(false/,
-  "the Weather network lease must share the same esp-mqtt transport pause lifecycle");
+const weatherLeaseStart = weather.indexOf("struct NetworkActivity {");
+const weatherLeaseEnd = weather.indexOf("\n};", weatherLeaseStart);
+const weatherLease = weather.slice(weatherLeaseStart, weatherLeaseEnd);
+const weatherPause = weatherLease.indexOf("mqtt_transport_pause_for_network_heap()");
+const weatherResume = weatherLease.indexOf("mqtt_transport_resume_after_network_heap()",
+                                           weatherPause);
+const weatherRelease = weatherLease.indexOf("release_admission()", weatherResume);
+const weatherPendingHandoff = weatherLease.indexOf("SourceAdmission::SourceChangePending",
+                                                    weatherRelease);
+const weatherIdleRelease = weatherLease.indexOf("SourceAdmission::Idle", weatherPendingHandoff);
+assert.ok(weatherLeaseStart >= 0 && weatherLeaseEnd > weatherLeaseStart && weatherPause >= 0 &&
+  weatherResume > weatherPause && weatherRelease > weatherResume &&
+  weatherPendingHandoff > weatherRelease && weatherIdleRelease > weatherPendingHandoff,
+  "the Weather network lease must pause/resume MQTT and then hand off or release admission");
 
 // The model-sized /values snapshot and the allocation-rich /status snapshot collided with the
 // fresh-boot OTA/Weather TLS windows on the 129-row plant. OTA is different from the short weather

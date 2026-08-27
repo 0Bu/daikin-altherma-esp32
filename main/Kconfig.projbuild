@@ -164,9 +164,10 @@ menu "Daikin Altherma Configuration"
         default -1
         help
             GPIO of a momentary button that FACTORY-RESETS the device when held for 5 seconds:
-            the whole stored config (WiFi, MQTT, syslog/NTP, X10A pin cache) is erased and the
-            device reboots into the setup portal. It is the only config reset that does not need
-            network access to the device — the cure for "it joined a network I can't reach".
+            stored config and WiFi credentials, trend/dwell history, the history journal and any
+            raw coredump are erased. The device reboots into the setup portal only after every
+            privacy erase succeeds. It is the only config reset that does not need network access
+            to the device — the cure for "it joined a network I can't reach".
 
             DEFAULT -1 (disabled) ON PURPOSE. An unconfigured input pin floats, and a floating
             pin that happens to read "pressed" for five seconds would erase the config of a board

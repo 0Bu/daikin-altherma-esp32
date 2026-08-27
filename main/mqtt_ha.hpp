@@ -113,10 +113,10 @@ bool mqtt_circulation_test_proof_valid(uint32_t proof,
                                        const CirculationSourceTestConfig& candidate);
 void mqtt_circulation_reconfigure();
 
-// Explicit Settings disables own these two retained-topic tombstones. They are the only outbound
+// Explicit source/consent changes own these retained-topic tombstones. They are the only outbound
 // MQTT operations allowed before X10A proves installation publication authority; ordinary state,
-// discovery, diagnostics and automatic cleanup remain gated. Requests stay pending while the
-// broker is disconnected and are discarded if the corresponding source is re-enabled first.
+// discovery and diagnostics remain gated. Requests stay pending across broker outages and are
+// reconstructed on reconnect; Weather and HomeHub cleanup also cover enabled identity changes.
 void mqtt_request_weather_cleanup();
 void mqtt_request_modbus_cleanup();
 

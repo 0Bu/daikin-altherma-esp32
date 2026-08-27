@@ -68,7 +68,7 @@ assert.match(httpConfig, /reset_checkup && c\.profile != "auto"[\s\S]*?history_x
 const modbus = code("main/hp_modbus.cpp");
 const mbPoll = modbus.slice(modbus.indexOf("static void mb_poll_once()"),
                             modbus.indexOf("void mb_start()"));
-assert.ok(mbPoll.indexOf("history_modbus_reset()") <
+assert.ok(mbPoll.indexOf("history_modbus_reset(logic::history_homehub_target_fingerprint(") <
           mbPoll.indexOf("history_generation = history_modbus_generation()"),
   "the first cycle for a corrected HomeHub target must capture the post-reset history generation");
 

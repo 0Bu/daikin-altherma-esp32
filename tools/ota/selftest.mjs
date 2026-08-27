@@ -13,6 +13,9 @@ const contract = path.join(root, "test/test_ota_heap_contract.mjs");
 const files = [
   "sdkconfig.defaults",
   "main/CMakeLists.txt",
+  "main/main.cpp",
+  "main/http_deadline.cpp",
+  "main/http_deadline.hpp",
   "main/ota_update.cpp",
   "main/ota_update.hpp",
   "main/config.cpp",
@@ -27,10 +30,19 @@ const files = [
   "main/http_common.cpp",
   "main/http_status.cpp",
   "main/logic/http_values_wait.hpp",
+  "main/logic/http_deadline.hpp",
+  "main/logic/health_gate.hpp",
+  "main/logic/ota_manifest.hpp",
+  "main/logic/payload_complete.hpp",
   "main/logic/fixed_text.hpp",
+  "main/logic/ota_hil_feed.hpp",
   "main/logic/ota_headroom.hpp",
   "main/logic/ota_quiesce.hpp",
   "main/logic/ota_transport.hpp",
+  "main/stack_watch.hpp",
+  "tools/stack/budgets.json",
+  "docs/SECURITY.md",
+  "docs/FEATURES.md",
 ];
 const pristine = new Map(files.map((rel) => [rel, fs.readFileSync(path.join(root, rel), "utf8")]));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-ota-contract-"));
@@ -67,6 +79,41 @@ try {
     ["signed-on-update is disabled", () =>
       replaceOnce("sdkconfig.defaults", "CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y",
         "CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=n")],
+    ["an unreadable otadata state is reported as unarmed", () =>
+      replaceOnce("main/ota_update.cpp",
+        "s_runtime_image_state.store(static_cast<uint8_t>(OtaRuntimeImageState::Unknown),",
+        "s_runtime_image_state.store(static_cast<uint8_t>(OtaRuntimeImageState::Unarmed),")],
+    ["the pending-verify branch is inverted", () =>
+      replaceOnce("main/ota_update.cpp", "if (st != ESP_OTA_IMG_PENDING_VERIFY)",
+        "if (st == ESP_OTA_IMG_PENDING_VERIFY)")],
+    ["an arbitrary non-pending image is reported as valid", () =>
+      replaceOnce("main/ota_update.cpp",
+        "st == ESP_OTA_IMG_VALID ? OtaRuntimeImageState::Valid : OtaRuntimeImageState::Unarmed",
+        "st == ESP_OTA_IMG_VALID ? OtaRuntimeImageState::Unarmed : OtaRuntimeImageState::Valid")],
+    ["a failed rollback commit is reported as valid", () =>
+      replaceOnce("main/ota_update.cpp", "if (e == ESP_OK) {", "if (true) {")],
+    ["the OTA manifest path may consume the final 1 KiB reserve", () =>
+      replaceOnce("tools/stack/budgets.json",
+        '"ota_task_manifest_fetch": {\n      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],\n      "multipliers": {"ota_manifest_skip_value": 9},\n      "base_bytes": 0,\n      "max_bytes": 6144',
+        '"ota_task_manifest_fetch": {\n      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],\n      "multipliers": {"ota_manifest_skip_value": 9},\n      "base_bytes": 0,\n      "max_bytes": 10752')],
+    ["the rollback health gate may consume the final 1 KiB reserve", () =>
+      replaceOnce("tools/stack/budgets.json",
+        '"ota_health_gate": {\n      "symbols": ["ota_health_task"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 3072',
+        '"ota_health_gate": {\n      "symbols": ["ota_health_task"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 4096')],
+    ["the Weather download path may consume the final 1 KiB reserve", () =>
+      replaceOnce("tools/stack/budgets.json",
+        '"weather_task_download": {\n      "symbols": ["weather_task", "weather_fetch", "weather_download"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11264',
+        '"weather_task_download": {\n      "symbols": ["weather_task", "weather_fetch", "weather_download"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11265')],
+    ["the Weather parse path may consume the final 1 KiB reserve", () =>
+      replaceOnce("tools/stack/budgets.json",
+        '"weather_task_parse": {\n      "symbols": ["weather_task", "weather_fetch", "weather_parse"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11264',
+        '"weather_task_parse": {\n      "symbols": ["weather_task", "weather_fetch", "weather_parse"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11265')],
+    ["the Weather TLS path is no longer sampled before HIL completion", () =>
+      replaceOnce("main/weather_forecast.cpp",
+        "            stack_watch_sample(StackWatch::Weather);\n            // A location/consent save",
+        "            // Weather stack sample bypassed\n            // A location/consent save")],
+    ["blank USB otadata is documented as a known unarmed state", () =>
+      replaceOnce("docs/SECURITY.md", 'is latched as `unknown`', 'boots `UNDEFINED`')],
     ["dynamic TLS buffers are disabled", () =>
       replaceOnce("sdkconfig.defaults", "CONFIG_MBEDTLS_DYNAMIC_BUFFER=y",
         "CONFIG_MBEDTLS_DYNAMIC_BUFFER=n")],
@@ -76,6 +123,51 @@ try {
     ["the MQTT fixed-frame build ceiling is weakened above the regressed task", () =>
       replaceOnce("main/CMakeLists.txt", "-Werror=frame-larger-than=2048",
         "-Werror=frame-larger-than=4096")],
+    ["the boot no longer pre-allocates the shared HTTP deadline timer", () =>
+      replaceOnce("main/main.cpp", "if (!daik::http_deadline_init())",
+        "if (!daik::http_deadline_init_bypassed())")],
+    ["the socket watchdog no longer binds the public HTTP socket", () =>
+      replaceOnce("main/http_deadline.cpp", "esp_http_client_get_socket(client)",
+        "esp_http_client_get_socket_bypassed(client)")],
+    ["the static watchdog no longer interrupts the blocking socket", () =>
+      replaceOnce("main/http_deadline.cpp", "shutdown(socket, SHUT_RDWR)",
+        "shutdown_bypassed(socket, SHUT_RDWR)")],
+    ["the static watchdog no longer acknowledges completion", () =>
+      replaceOnce("main/http_deadline.cpp", "xSemaphoreGive(s_deadline.completion)",
+        "xSemaphoreGive_bypassed(s_deadline.completion)")],
+    ["the deadline watchdog task becomes dynamically allocated", () =>
+      replaceOnce("main/http_deadline.cpp", "xTaskCreateStatic(", "xTaskCreate(")],
+    ["the deadline watchdog skips its boot-time lwIP prime", () =>
+      replaceOnce("main/http_deadline.cpp", "sys_thread_sem_get()", "nullptr")],
+    ["the deadline watchdog accepts a failed lwIP semaphore prime", () =>
+      replaceOnce("main/http_deadline.cpp", "thread_sem != nullptr", "true")],
+    ["a failed deadline shutdown is acknowledged as success", () =>
+      replaceOnce("main/http_deadline.cpp", "shutdown_result != 0 && shutdown_errno != ENOTCONN",
+        "false")],
+    ["deadline disarm no longer joins an already dispatched callback", () =>
+      replaceOnce("main/http_deadline.cpp",
+        "xSemaphoreTake(s_deadline.completion, portMAX_DELAY)",
+        "xSemaphoreTake(s_deadline.completion, 0)")],
+    ["deadline re-arm can consume a stale completion acknowledgement", () =>
+      replaceOnce("main/http_deadline.cpp",
+        "while (xSemaphoreTake(s_deadline.completion, 0) == pdTRUE) {}",
+        "while (false) {}")],
+    ["HTTP cleanup can recycle the fd before watchdog disarm", () =>
+      replaceOnce("main/ota_update.cpp", "(void)deadline.disarm();",
+        "(void)deadline.disarm_bypassed();")],
+    ["the timer callback performs socket work itself", () =>
+      replaceOnce("main/http_deadline.cpp", "xTaskNotifyGive(s_deadline.watchdog_task);",
+        "(void)shutdown(socket, SHUT_RDWR);")],
+    ["OTA task creation ignores an unavailable deadline watchdog", () =>
+      replaceOnce("main/ota_update.cpp", "if (!http_deadline_ready()) return 0;", "if (false) return 0;")],
+    ["Weather payload allocation ignores an unavailable deadline watchdog", () =>
+      replaceOnce("main/weather_forecast.cpp",
+        /(bool download_json\([\s\S]{0,220}?)if \(!http_deadline_ready\(\)\)/,
+        "$1if (false)")],
+    ["Weather task creation ignores an unavailable deadline watchdog", () =>
+      replaceOnce("main/weather_forecast.cpp",
+        /(void weather_forecast_start\(\)[\s\S]{0,500}?)if \(!http_deadline_ready\(\)\)/,
+        "$1if (false)")],
     ["the firmware TLS aggregate floor is weakened to the verifier budget", () =>
       replaceOnce("main/logic/ota_headroom.hpp",
         "OTA_TRANSFER_HEADROOM = {56 * 1024, 24 * 1024, 4}",
@@ -99,8 +191,8 @@ try {
       replaceOnce("main/ota_update.cpp", "if (!ota_url_is_absolute_https(url))",
         "if (!ota_url_is_https_or_relative(url))")],
     ["one OTA client no longer forces the SSL transport", () =>
-      replaceOnce("main/ota_update.cpp", "transport_type    = HTTP_TRANSPORT_OVER_SSL",
-        "transport_type    = HTTP_TRANSPORT_UNKNOWN")],
+      replaceOnce("main/ota_update.cpp", /transport_type\s*=\s*HTTP_TRANSPORT_OVER_SSL/,
+        "transport_type = HTTP_TRANSPORT_UNKNOWN")],
     ["the firmware client silently re-enables automatic redirects", () =>
       replaceOnce("main/ota_update.cpp", "http.disable_auto_redirect = true;",
         "http.disable_auto_redirect = false;")],
@@ -164,11 +256,11 @@ try {
         "failure.socket_errno = 0;")],
     ["range resume skips transport-buffer cleanup", () =>
       replaceOnce("main/ota_update.cpp",
-        "heap_caps_free(buffer);\n        buffer = nullptr;\n        close_http_client(client);",
-        "buffer = nullptr;\n        close_http_client(client);")],
+        "heap_caps_free(buffer);\n        buffer = nullptr;\n        close_http_client(client, socket_deadline);",
+        "buffer = nullptr;\n        close_http_client(client, socket_deadline);")],
     ["range resume leaves the failed TLS client alive", () =>
       replaceOnce("main/ota_update.cpp",
-        "buffer = nullptr;\n        close_http_client(client);\n        ota_heap_sample();",
+        "buffer = nullptr;\n        close_http_client(client, socket_deadline);\n        ota_heap_sample();",
         "buffer = nullptr;\n        client = nullptr;\n        ota_heap_sample();")],
     ["range resume skips the stable TLS headroom gate", () =>
       replaceOnce("main/ota_update.cpp",
@@ -188,36 +280,32 @@ try {
         "false")],
     ["firmware header fetches reuse the pre-handshake timeout", () =>
       replaceOnce("main/ota_update.cpp",
-        /(esp_http_client_open\(client, 0\);[\s\S]{0,180}?)!set_http_timeout_to_deadline\(client, operation_started, operation_deadline\)/,
+        /(esp_http_client_open\(client, 0\);[\s\S]{0,500}?)!set_http_timeout_to_deadline\(client, operation_started, operation_deadline\)/,
         "$1false")],
     ["firmware header fetches can cross the operation deadline", () =>
       replaceOnce("main/ota_update.cpp",
-        /(esp_http_client_fetch_headers\(client\)[\s\S]{0,180}?)http_deadline_reached\(operation_started, operation_deadline\)/,
+        /(esp_http_client_fetch_headers\(client\)[\s\S]{0,220}?)socket_deadline\.expired\(\)/,
         "$1false")],
     ["a failed TLS open hides an exhausted operation deadline", () =>
       replaceOnce("main/ota_update.cpp",
-        /(if \(e != ESP_OK\) \{\n)            return http_deadline_reached\(operation_started, operation_deadline\)\n                 \? ESP_ERR_TIMEOUT : e;/,
-        "$1            return e;")],
-    ["a failed header fetch hides an exhausted operation deadline", () =>
-      replaceOnce("main/ota_update.cpp",
-        /(if \(header_result < 0\) \{\n)            return http_deadline_reached\(operation_started, operation_deadline\)\n                 \? ESP_ERR_TIMEOUT : ESP_FAIL;/,
-        "$1            return ESP_FAIL;")],
+        /if \(e != ESP_OK\) \{\s*return http_deadline_reached\(operation_started, operation_deadline\) \? ESP_ERR_TIMEOUT\s*: e;/,
+        "if (e != ESP_OK) {\n            return e;")],
     ["initial firmware-open timeout is mislabeled as reachability", () =>
       replaceOnce("main/ota_update.cpp",
-        'e == ESP_ERR_TIMEOUT ? "Update download timed out"',
+        /e\s*==\s*ESP_ERR_TIMEOUT\s*\?\s*"Update download timed out"/,
         'false ? "Update download timed out"')],
     ["range-resume open timeout is mislabeled as a read failure", () =>
       replaceOnce("main/ota_update.cpp",
-        /(diag_printf\("ota: range resume open failed[\s\S]{0,260}?)transfer_failure = e == ESP_ERR_TIMEOUT \? OtaTransferFailure::Timeout\n                                                    : OtaTransferFailure::Read;/,
+        /(diag_printf\("ota: range resume open failed[\s\S]{0,400}?)transfer_failure\s*=\s*e == ESP_ERR_TIMEOUT \? OtaTransferFailure::Timeout\s*: OtaTransferFailure::Read;/,
         "$1transfer_failure = OtaTransferFailure::Read;")],
     ["range resume asks for the image from byte zero", () =>
       replaceOnce("main/ota_update.cpp", "\"bytes=%llu-\"", "\"bytes=0-\"")],
     ["range resume accepts a full 200 response", () =>
       replaceOnce("main/ota_update.cpp",
-        "open_firmware_stream(client, response_state, 206, transfer_started,",
-        "open_firmware_stream(client, response_state, 200, transfer_started,")],
+        "open_firmware_stream(client, response_state, socket_deadline, 206, transfer_started,",
+        "open_firmware_stream(client, response_state, socket_deadline, 200, transfer_started,")],
     ["range resume ignores the exact Content-Range", () =>
-      replaceOnce("main/ota_update.cpp", "const bool range_ok = ota_content_range_matches(",
+      replaceOnce("main/ota_update.cpp", /const bool\s+range_ok\s*=\s*ota_content_range_matches\(/,
         "const bool range_ok = ota_content_range_matches_bypassed(")],
     ["range resume accepts a chunked suffix", () =>
       replaceOnce("main/ota_update.cpp", "esp_http_client_is_chunked_response(client)", "false")],
@@ -234,8 +322,16 @@ try {
         "if (ota_manifest_headroom_gate_bypassed($1)) {")],
     ["a trickling manifest can hold the network heap forever", () =>
       replaceOnce("main/ota_update.cpp",
-        "!set_http_timeout_to_deadline(c, manifest_started, kManifestDeadline)",
-        "false")],
+        "socket_deadline.arm(c, manifest_started, kManifestDeadline)",
+        "socket_deadline.arm_bypassed(c, manifest_started, kManifestDeadline)")],
+    ["manifest header shutdown is ignored", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(esp_http_client_fetch_headers\(c\);[\s\S]{0,120}?)socket_deadline\.expired\(\)/,
+        "$1false")],
+    ["firmware streams no longer arm the absolute socket watchdog", () =>
+      replaceOnce("main/ota_update.cpp",
+        "socket_deadline.arm(client, operation_started, operation_deadline)",
+        "socket_deadline.arm_bypassed(client, operation_started, operation_deadline)")],
     ["a trickling image header can hold the network heap forever", () =>
       replaceOnce("main/ota_update.cpp",
         "!set_http_timeout_to_deadline(client, transfer_started, kFirmwareDeadline)",
@@ -245,26 +341,58 @@ try {
         /(while \(transfer_ok\) \{[\s\S]{0,180}?)!set_http_timeout_to_deadline\(client, transfer_started, kFirmwareDeadline\)/,
         "$1false")],
     ["a trickling weather response can hold the network heap forever", () =>
-      replaceOnce("main/weather_forecast.cpp", "elapsed >= kDownloadDeadline",
-        "false")],
+      replaceOnce("main/weather_forecast.cpp",
+        "socket_deadline.arm(client, download_started, kDownloadDeadline)",
+        "socket_deadline.arm_bypassed(client, download_started, kDownloadDeadline)")],
     ["manifest deadline expiry after a blocking read is mislabeled", () =>
       replaceOnce("main/ota_update.cpp",
-        "http_deadline_reached(manifest_started, kManifestDeadline)", "false")],
+        /(esp_http_client_read\(c,[\s\S]{0,220}?)socket_deadline\.expired\(\)/,
+        "$1false")],
+    ["a truncated manifest body is accepted", () =>
+      replaceOnce("main/ota_update.cpp",
+        /http_body_complete\(claimed,\s*got,\s*esp_http_client_is_complete_data_received\(c\)\)/,
+        "true")],
+    ["an oversized unknown-length manifest hides behind its first kilobyte", () =>
+      replaceOnce("main/ota_update.cpp", "esp_http_client_read(c, &extra, 1)",
+        "esp_http_client_read(c, &extra, 0)")],
+    ["manifest identity accepts garbage after the root", () =>
+      replaceOnce("main/logic/ota_manifest.hpp",
+        "return i == len && have_version && have_provenance && have_sha;",
+        "return have_version && have_provenance && have_sha;")],
+    ["manifest identity no longer requires strict root member separators", () =>
+      replaceOnce("main/logic/ota_manifest.hpp",
+        /(if \(i < len && json\[i\] == '\}'\) \{\n\s*\+\+i;\n\s*break;\n\s*\}\n\s*)return false;/,
+        "$1continue;")],
+    ["manifest provenance no longer requires its matching object closer", () =>
+      replaceOnce("main/logic/ota_manifest.hpp",
+        /(auto parse_provenance[\s\S]{0,1800}?if \(pos < len && json\[pos\] == )'\}'/,
+        "$1']'")],
     ["image-header deadline expiry after a blocking read is mislabeled", () =>
       replaceOnce("main/ota_update.cpp",
-        /(while \(probe_len < kImageProbeSize\)[\s\S]{0,700}?)http_deadline_reached\(transfer_started, kFirmwareDeadline\)/,
+        /(while \(probe_len < kImageProbeSize\)[\s\S]{0,700}?)socket_deadline\.expired\(\)/,
         "$1false")],
     ["firmware-body deadline expiry after a blocking read is mislabeled", () =>
       replaceOnce("main/ota_update.cpp",
-        /(while \(transfer_ok\)[\s\S]{0,700}?)http_deadline_reached\(transfer_started, kFirmwareDeadline\)/,
+        /(while \(transfer_ok\)[\s\S]{0,700}?)socket_deadline\.expired\(\)/,
         "$1false")],
     ["weather deadline expiry after a blocking read is mislabeled", () =>
       replaceOnce("main/weather_forecast.cpp",
-        "xTaskGetTickCount() - download_started >= kDownloadDeadline", "false")],
+        /(esp_http_client_read\(client, chunk, sizeof\(chunk\)\);[\s\S]{0,160}?)socket_deadline\.expired\(\)/,
+        "$1false")],
+    ["a truncated Weather body is accepted as fresh", () =>
+      replaceOnce("main/weather_forecast.cpp",
+        /http_body_complete\(\s*claimed,\s*out\.size\(\),\s*esp_http_client_is_complete_data_received\(client\)\)/,
+        "true")],
+    ["Weather accepts garbage after a valid JSON root", () =>
+      replaceOnce("main/weather_forecast.cpp", "!json_suffix_is_whitespace(",
+        "false && !json_suffix_is_whitespace(")],
+    ["Weather cleanup closes before joining the socket watchdog", () =>
+      replaceOnce("main/weather_forecast.cpp", "(void)deadline.disarm();",
+        "(void)deadline.disarm_bypassed();")],
     ["HTTP cleanup before validation disappears", () =>
       replaceOnce("main/ota_update.cpp",
-        /(\/\/ CRITICAL ORDERING:[\s\S]{0,900}?buffer = nullptr;\n    )close_http_client\(client\);/,
-        "$1close_http_client_after_validation(client);")],
+        /(\/\/ CRITICAL ORDERING:[\s\S]{0,900}?buffer = nullptr;\n    )close_http_client\(client, socket_deadline\);/,
+        "$1close_http_client_after_validation(client, socket_deadline);")],
     ["the signed-image verifier is bypassed", () =>
       replaceOnce("main/ota_update.cpp", "esp_ota_end(ota_handle)",
         "esp_ota_end_bypassed(ota_handle)")],
@@ -279,11 +407,11 @@ try {
       replaceOnce("main/ota_update.cpp", " — retry after reboot", "")],
     ["manifest TLS allocation failure is mislabeled as server reachability", () =>
       replaceOnce("main/ota_update.cpp",
-        /(err\s*=\s*retryable_allocator_failure\s*\n\s*)\? "Not enough memory for update TLS — retry after reboot"/,
+        /(err\s*=\s*retryable_allocator_failure\s*)\? "Not enough memory for update TLS — retry after reboot"/,
         "$1? \"Can't reach the update server\"")],
     ["firmware TLS allocation failure is mislabeled as server reachability", () =>
       replaceOnce("main/ota_update.cpp",
-        /(set_state\("error", allocator_failure\s*\n\s*)\? "Not enough memory for update TLS — retry after reboot"/,
+        /(set_state\("error", allocator_failure\s*)\? "Not enough memory for update TLS — retry after reboot"/,
         "$1? \"Can't reach the update server\"")],
     ["rollback probation is mislabeled as an unknown download failure", () =>
       replaceOnce("main/ota_update.cpp", "e == ESP_ERR_OTA_ROLLBACK_INVALID_STATE",
@@ -298,8 +426,8 @@ try {
         "s_network_quiesced.store(false, std::memory_order_release);")],
     ["the held MQTT task no longer acknowledges quiescence", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "s_publish_network_quiesced.store(true, std::memory_order_release);\n    vTaskDelay",
-        "s_publish_network_quiesced.store(false, std::memory_order_release);\n    vTaskDelay")],
+        "mqtt_transport_pause_if_requested();\n    s_publish_network_quiesced.store(true, std::memory_order_release);\n    vTaskDelay",
+        "mqtt_transport_pause_if_requested();\n    s_publish_network_quiesced.store(false, std::memory_order_release);\n    vTaskDelay")],
     ["HomeHub keeps allocating during OTA", () =>
       replaceOnce("main/hp_modbus.cpp", "if (ota_download_active() || weather_fetch_active()) {",
         "if (false) {")],
@@ -424,22 +552,22 @@ try {
       replaceOnce("main/http_ota.cpp", '"{\\"ok\\":true,\\"generation\\":%lu}"',
         '"{\\"ok\\":true}"')],
     ["OTA status hides the busy handshake", () =>
-      replaceOnce("main/http_ota.cpp", 'j += ",\\"busy\\":"; j += s.busy ? "true" : "false";',
+      replaceOnce("main/http_ota.cpp", /j \+= ",\\"busy\\":";\s*j \+= s\.busy \? "true" : "false";/,
         'j += ",\\"busy\\":false";')],
     ["an update can consume a replaced check generation", () =>
       replaceOnce("main/ota_update.cpp", "s_generation != after_generation",
         "false")],
     ["accepted artifact identity is dropped before task creation", () =>
-      replaceOnce("main/ota_update.cpp", "s_task_args = request;",
+      replaceOnce("main/ota_update.cpp", /s_task_args\s*=\s*request;/,
         "s_task_args = OtaTaskArgs{};")],
     ["task-creation failure still advances the public generation", () =>
-      replaceOnce("main/ota_update.cpp", "s_generation = previous_generation;",
+      replaceOnce("main/ota_update.cpp", /s_generation\s*=\s*previous_generation;/,
         "s_generation = next_generation(previous_generation);")],
     ["the downloaded byte stream is no longer hashed", () =>
       replaceOnce("main/ota_update.cpp", "psa_hash_update(&hash_operation, data, len)",
         "psa_hash_update_bypassed(&hash_operation, data, len)")],
     ["the exact downloaded application SHA is ignored", () =>
-      replaceOnce("main/ota_update.cpp", "!ota_sha256_matches(actual_sha256, request.app_sha256)",
+      replaceOnce("main/ota_update.cpp", "!ota_sha256_matches(actual_sha256, request.offer.app_sha256.data())",
         "false")],
     ["the update endpoint no longer requires the checked SHA", () =>
       replaceOnce("main/http_ota.cpp", 'httpd_query_key_value(q, "sha256", app_sha256, sizeof(app_sha256))',
@@ -448,17 +576,35 @@ try {
       replaceOnce("main/ota_update.hpp", "std::array<char, 65> available_sha256{};",
         "std::string available_sha256;")],
     ["OTA status copies allocate dynamic message text during TLS pressure", () =>
-      replaceOnce("main/ota_update.hpp", "FixedText<128> message;",
+      replaceOnce("main/ota_update.hpp", /FixedText<128>\s+message;/,
         "std::string message;")],
     ["OTA status copies the complete string-owning Config", () =>
       replaceOnce("main/ota_update.cpp", "ota_channel_name(config_ota_channel())",
         "ota_channel_name(config().ota_channel)")],
     ["OTA status response grows a dynamic JSON string during TLS pressure", () =>
-      replaceOnce("main/http_ota.cpp", "FixedBuffer<2048> j;",
+      replaceOnce("main/http_ota.cpp", "FixedBuffer<4096> j;",
         "std::string j;")],
     ["OTA status hides the sampled transfer low-water", () =>
       replaceOnce("main/http_ota.cpp", 'j += ",\\"heap_min_free_bytes\\":";',
         'j += ",\\"heap_min_free_bytes_hidden\\":";')],
+    ["OTA status hides the pre-reboot task-stack watermark", () =>
+      replaceOnce("main/http_ota.cpp", 'j += ",\\"ota_stack_min_free_bytes\\":";',
+        'j += ",\\"ota_stack_min_free_bytes_hidden\\":";')],
+    ["OTA heap checkpoints stop sampling the task stack", () =>
+      replaceOnce("main/ota_update.cpp", "stack_watch_sample(StackWatch::Ota);",
+        "stack_watch_sample_bypassed(StackWatch::Ota);")],
+    ["successful boot selection stops sampling the task stack", () =>
+      replaceOnce("main/ota_update.cpp",
+        '    stack_watch_sample(StackWatch::Ota);\n\n    diag_printf("ota: installed',
+        '    stack_watch_sample_bypassed(StackWatch::Ota);\n\n    diag_printf("ota: installed')],
+    ["busy OTA checks derive the default feed before refusing", () =>
+      replaceOnce("main/ota_update.cpp",
+        "        if (s_busy) return 0;\n    }\n    const OtaChannel channel = config_ota_channel();",
+        "        if (false) return 0;\n    }\n    const OtaChannel channel = config_ota_channel();")],
+    ["default OTA feed resolution reintroduces dynamic strings", () =>
+      replaceOnce("main/logic/ota_hil_feed.hpp",
+        "    OtaFeedUrls candidate{};\n    if (channel == OtaChannel::Release)",
+        "    OtaFeedUrls candidate{};\n    std::string dynamic_feed;\n    if (channel == OtaChannel::Release)")],
     ["transfer progress no longer samples heap", () =>
       replaceOnce("main/ota_update.cpp",
         "    ota_heap_sample();\n    Lock lk(s_mtx);\n    s_status.progress = pct;",
@@ -488,6 +634,14 @@ try {
       replaceOnce("main/ota_update.cpp",
         /(while \(got < kChangelogDocumentMax\) \{[\s\S]{0,180}?)!set_http_timeout_to_deadline\(c, changelog_started, kChangelogDeadline,/,
         "$1false && !set_http_timeout_to_deadline(c, changelog_started, kChangelogDeadline,")],
+    ["changelog headers no longer arm the absolute socket watchdog", () =>
+      replaceOnce("main/ota_update.cpp",
+        "socket_deadline.arm(c, changelog_started, kChangelogDeadline)",
+        "socket_deadline.arm_bypassed(c, changelog_started, kChangelogDeadline)")],
+    ["changelog body shutdown is ignored", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(esp_http_client_read\(c, document\.get\(\) \+ got,[\s\S]{0,220}?)socket_deadline\.expired\(\)/,
+        "$1false")],
     ["the changelog URL is rebuilt on the heap", () =>
       replaceOnce("main/ota_update.cpp", "char url[256] = {};",
         "std::string url;")],
