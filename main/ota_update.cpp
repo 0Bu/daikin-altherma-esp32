@@ -232,7 +232,7 @@ constexpr int        kOtaBufSize = 2048; // download chunk; deliberately small (
 // The shared Web Serial/OTA manifest currently needs about 1.5 KiB for its complete provenance,
 // artifact index and installer plan. check-manifest-provenance.py reads this exact constant and
 // refuses a larger publish payload, so the producer and the fixed firmware frame cannot drift.
-constexpr size_t kManifestMax = 2048;
+constexpr size_t   kManifestMax        = 2048;
 constexpr unsigned kMaxRedirects       = 5;
 constexpr int      kDoneBeforeRebootMs = 3000;
 // MQTT publishes once a second. Hold the operation flag for a little longer than one cadence before
