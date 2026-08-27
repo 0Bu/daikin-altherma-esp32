@@ -6414,7 +6414,7 @@ static void test_ota_manifest() {
     CHECK(!manifest_identity(upper_sha.data(), upper_sha.size(), identity));
 
     // The human-readable notes live in a separate, version-bound document so the security-critical
-    // installer manifest stays under its fixed 1 KiB stack cap.  The parser allocates nothing,
+    // installer manifest stays under its fixed 2 KiB stack cap.  The parser allocates nothing,
     // decodes only the publisher's explicit UTF-8 JSON subset and never returns partial prose.
     char        changelog[OTA_CHANGELOG_TEXT_MAX + 1];
     const char* notes_json = "{\"version\":\"1.2.3-dev.4\",\"changelog\":\"Add German UI\\nFix "

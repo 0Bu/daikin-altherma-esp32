@@ -256,7 +256,8 @@ and a third interruption aborts. IDF's umbrella image-validation error stays gen
 claiming a bad signature. Initial feed URLs and every redirect stay on forced HTTPS, and an oversized
 response remains a size-policy refusal rather than masquerading as an interrupted connection.
 `tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently (including
-the fixed task lease, generation rollback, whole-stream SHA comparison, fail-closed IDF image-state
+the fixed task lease, the publisher-to-firmware manifest-size contract, generation rollback,
+whole-stream SHA comparison, fail-closed IDF image-state
 mapping, both OTA task-path stack reserves and the MQTT task's size-build call-boundary and
 fixed-frame-ceiling contracts) and proves the source contract turns red;
 every seeded regression is required. The allocation-free

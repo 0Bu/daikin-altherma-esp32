@@ -241,7 +241,11 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   never weaken or block the signed artifact lease.
 - **✅ 🧪 Manifest check & signed download**: both network operations run on **one on-demand task,
   one at a time** — never the httpd worker, and never twice concurrently (two TLS sessions compete
-  for the largest contiguous block). The lock-free OTA heap lease begins before manifest TLS setup,
+  for the largest contiguous block). The complete shared Web Serial/OTA manifest is bounded by one
+  fixed 2 KiB body buffer inside the measured OTA function frame. The trusted packager reads that
+  same machine-readable firmware constant
+  and refuses an oversized manifest before publishing can hand the device an artifact it cannot
+  parse. The lock-free OTA heap lease begins before manifest TLS setup,
   gives the once-per-second MQTT publisher and X10A poller one cycle to stand aside, prevents a new
   weather request and waits a bounded interval for an existing one, and stays active through image
   validation. The monotonic budget starts before each open. Once `esp_http_client_open()` exposes the

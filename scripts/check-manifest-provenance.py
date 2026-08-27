@@ -15,8 +15,13 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 IDF_RE = re.compile(r"^v[0-9]+\.[0-9]+(?:\.[0-9]+)?$")
 ARTIFACT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.bin$")
+OTA_MANIFEST_LIMIT_RE = re.compile(
+    r"constexpr\s+size_t\s+kManifestMax\s*=\s*([0-9]+)\s*;"
+)
+ROOT = Path(__file__).resolve().parents[1]
+OTA_SOURCE = ROOT / "main/ota_update.cpp"
 PINNED_SIGNING_DIGEST = (
-    Path(__file__).resolve().parents[1] / "tools/release/ota_signing_key_digest.txt"
+    ROOT / "tools/release/ota_signing_key_digest.txt"
 )
 
 
@@ -36,6 +41,20 @@ def pinned_signing_digest() -> str:
     if not SHA256_RE.fullmatch(value):
         fail(f"pinned signing-key digest is not lowercase SHA-256: {value!r}")
     return value
+
+
+def ota_manifest_limit() -> int:
+    try:
+        source = OTA_SOURCE.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        fail(f"cannot read firmware manifest limit: {exc}")
+    matches = OTA_MANIFEST_LIMIT_RE.findall(source)
+    if len(matches) != 1:
+        fail("firmware manifest limit must be one machine-readable kManifestMax constant")
+    limit = int(matches[0])
+    if limit <= 0:
+        fail("firmware manifest limit must be positive")
+    return limit
 
 
 def artifact_index(directory: Path) -> list[dict[str, object]]:
@@ -68,9 +87,17 @@ def check(
     if not IDF_RE.fullmatch(idf_version):
         fail(f"expected IDF version is invalid: {idf_version!r}")
     try:
-        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_bytes = manifest_path.read_bytes()
+        manifest_text = manifest_bytes.decode("utf-8")
+        document = json.loads(manifest_text)
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         fail(f"cannot read {manifest_path}: {exc}")
+    manifest_limit = ota_manifest_limit()
+    if len(manifest_bytes) > manifest_limit:
+        fail(
+            f"manifest is {len(manifest_bytes)} bytes but firmware accepts at most "
+            f"{manifest_limit} bytes"
+        )
     if not isinstance(document, dict) or not isinstance(document.get("provenance"), dict):
         fail("manifest has no provenance object")
 
@@ -97,7 +124,8 @@ def check(
     print(
         "manifest provenance: OK "
         f"(source {source_sha}, IDF {idf_version}, app {expected['app_sha256']}, "
-        f"signing key {expected['signing_key_sha256']})"
+        f"signing key {expected['signing_key_sha256']}, "
+        f"manifest {len(manifest_bytes)}/{manifest_limit} bytes)"
     )
 
 
@@ -153,6 +181,17 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError("self-test accepted an artifact-index mismatch")
+        write()
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        document["oversized_test_padding"] = "x" * ota_manifest_limit()
+        manifest.write_text(json.dumps(document), encoding="utf-8")
+        try:
+            check(manifest, app, source, idf, lock)
+        except SystemExit as exc:
+            if "firmware accepts at most" not in str(exc):
+                raise
+        else:
+            raise AssertionError("self-test accepted a manifest above the firmware limit")
     print("manifest provenance self-test: PASS")
 
 
