@@ -60,4 +60,15 @@ const output = `${result.stdout || ""}\n${result.stderr || ""}`;
 assert.notEqual(result.status, 0, "layout mutation must make the browser gate fail");
 assert.match(output, /selftest\/root-overflow: horizontal viewport overflow/,
   "selftest must fail for the deliberately introduced root overflow, not for an unrelated reason");
-console.log("browser render selftest passed: injected root overflow was rejected");
+
+const delayedFocus = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, DAIKIN_BROWSER_MUTATION: "modal-focus-delay" },
+});
+const delayedFocusOutput = `${delayedFocus.stdout || ""}\n${delayedFocus.stderr || ""}`;
+assert.equal(delayedFocus.status, 0,
+  `modal-focus delay selftest must pass after awaiting the complete open state\n${delayedFocusOutput}`);
+assert.match(delayedFocusOutput, /browser modal-focus selftest passed/,
+  "modal-focus delay selftest must execute the delayed dialog-focus path");
+console.log("browser render selftest passed: injected overflow was rejected and delayed modal focus awaited");
