@@ -34,7 +34,8 @@ touch "$T/artifacts/daikin-altherma-esp32.elf.xz" \
 check_rc "diagnostics-only directory passes" 0 ./scripts/check-nonflashable-artifacts.sh "$T/artifacts"
 
 for forbidden in daikin-altherma-esp32.bin daikin-altherma-esp32-merged.bin \
-                 daikin-altherma-esp32-web-bootloader.bin manifest.json changelog.json; do
+                 daikin-altherma-esp32-web-bootloader.bin manifest.json artifacts.json \
+                 changelog.json; do
     touch "$T/artifacts/$forbidden"
     check_rc "$forbidden is refused" 1 ./scripts/check-nonflashable-artifacts.sh "$T/artifacts"
     rm -f "$T/artifacts/$forbidden"
@@ -138,6 +139,15 @@ def require(condition: bool, message: str) -> None:
     if not condition:
         raise SystemExit(message)
 
+build_all = (workflow_dir.parents[1] / "scripts/ci-build-all.sh").read_text(encoding="utf-8")
+build_pages = (workflow_dir.parents[1] / "scripts/build-pages.sh").read_text(encoding="utf-8")
+manifest_check = (
+    workflow_dir.parents[1] / "scripts/check-manifest-provenance.py"
+).read_text(encoding="utf-8")
+production_gate = (
+    workflow_dir.parents[1] / "scripts/production-ota-gate.py"
+).read_text(encoding="utf-8")
+
 for name in ("build", "trusted_build", "release_hil", "publish"):
     require(name in jobs, f"missing {name!r} job")
 
@@ -157,7 +167,8 @@ require("OTA_SIGNING_KEY" not in untrusted, "untrusted build can see the signing
 require("secrets." not in untrusted and "github.token" not in untrusted,
         "untrusted build gained a secret or token expression")
 require("contents: write" not in untrusted, "untrusted build has contents:write")
-require("dist/*.bin" not in untrusted and "dist/manifest.json" not in untrusted,
+require("dist/*.bin" not in untrusted and "dist/manifest.json" not in untrusted and
+        "dist/artifacts.json" not in untrusted,
         "untrusted upload includes flashable files")
 
 trusted = jobs["trusted_build"]
@@ -184,6 +195,8 @@ require('"v${disp}^{commit}"' in trusted and '"$tag_sha" = "$GITHUB_SHA"' in tru
 require("generate-ota-changelog.py" in trusted and "--published-ref FETCH_HEAD" in trusted and
         "--changelog-file ota-changelog.json" in trusted and "dist/changelog.json" in trusted,
         "trusted build does not generate and retain the version-bound OTA changelog")
+require("dist/artifacts.json" in trusted,
+        "trusted build does not retain the manifest-bound artifact index")
 require("--verify-reproducible" in trusted and "steps.mode.outputs.mode == 'release'" in trusted,
         "release build does not require a clean reproducibility rebuild")
 
@@ -444,6 +457,8 @@ for name, block in (("trusted build", trusted), ("publisher", publish)):
             f"{name} does not keep first-attempt dev publishes strictly forward-only")
 require("generate-ota-changelog.py --validate dist/changelog.json" in publish,
         "publisher does not validate the handed-off OTA changelog")
+require(publish.count("dist/artifacts.json") >= 3,
+        "publisher does not validate, publish and read back artifacts.json")
 require("target_commitish: ${{ github.sha }}" in publish,
         "new release tag is not explicitly bound to github.sha")
 for notice in ("_site/LICENSE.txt", "_site/THIRD_PARTY_NOTICES.md", "_site/Apache-2.0.txt"):
@@ -487,6 +502,43 @@ require(re.search(relevant.group(1), "tools/web_asset/vendor/LICENSE") is not No
         "the Apache license source is missing from the Pages build trigger")
 require("release_version:" in text and "release-resume" in text and "dev-resume" in text,
         "explicit/idempotent feed resume contract is missing")
+
+publish_limit = re.search(
+    r"LEGACY_RESTORE_MANIFEST_MAX_BYTES\s*=\s*([0-9]+)", manifest_check,
+)
+gate_limit = re.search(
+    r"LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES\s*=\s*([0-9]+)", production_gate,
+)
+require(publish_limit is not None and gate_limit is not None and
+        publish_limit.group(1) == gate_limit.group(1) == "1024",
+        "publish and production gates do not share the supported 1024-byte restore ceiling")
+require('cat > "$DIST/artifacts.json"' in build_all and
+        '"manifest_sha256": "$manifest_sha256"' in build_all and
+        '"artifacts": [$artifacts_json]' not in build_all.split(
+            'cat > "$DIST/manifest.json"', 1,
+        )[1].split("EOF", 1)[0] and
+        'cp dist/artifacts.json "$OUT/artifacts.json"' in build_pages,
+        "artifact inventory is not split from the firmware manifest and retained on Pages")
+main_body = production_gate[production_gate.index("def main("):]
+limited_manifest_fetch = main_body.find("manifest_bytes = request_limited_bytes(")
+restore_preflight = main_body.find("require_legacy_bench_restore_manifest(manifest_bytes, manifest)")
+inventory_load = main_body.find("inventory = load_inventory()")
+bench_exercise = main_body.find("exercise_bench_full_download(")
+bench_contact = main_body.find('request_json(bench["host"], "/status")')
+release_source_binding = main_body.find(
+    "verify_release_source_binding(release_version, release_source_sha, release_sha256)"
+)
+require(0 <= limited_manifest_fetch < restore_preflight < inventory_load < bench_exercise,
+        "legacy restore compatibility is not checked before any board path")
+require(0 <= inventory_load < release_source_binding < bench_contact < bench_exercise,
+        "release source binding, bench contact or downgrade is ordered unsafely")
+for exact_release_identity in (
+    'LEGACY_RELEASE_VERSION = "1.0.2"',
+    'LEGACY_RELEASE_SOURCE_SHA = "cc29e8c6e593570140e6446b07520216251939ed"',
+    'LEGACY_RELEASE_APP_SHA256 = "c8437cb546175fa9591dcce9e137c35ec6ea3028c64678b08e029392cb9ea4ce"',
+):
+    require(exact_release_identity in production_gate,
+            "historical restore release adjudication is not exact")
 
 require("  pull_request:\n" in text and "  pull_request_target:\n" not in text,
         "build workflow does not isolate PR execution under pull_request")

@@ -80,6 +80,7 @@ BENCH_HEALTH_WINDOW_TIMEOUT_S = 150
 DEV_MANIFEST_SUFFIX = "/dev/manifest.json"
 OFFICIAL_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json"
 OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/manifest.json"
+OFFICIAL_RELEASE_FIRMWARE_BASE_URL = "https://0bu.github.io/daikin-altherma-esp32/"
 CONTROL_RESPONSE_MAX_BYTES = 4096
 FEED_LEASE_TTL_S = 120
 FEED_LEASE_RENEW_S = 30
@@ -92,6 +93,17 @@ HIL_FEED_HEADERS = frozenset((HIL_MANIFEST_HEADER, HIL_FIRMWARE_BASE_HEADER))
 HIL_FEED_URL_MAX_BYTES = 255
 RELEASE_HIL_MANIFEST_MAX_BYTES = 1024
 RELEASE_HIL_APP_MAX_BYTES = 0x1F0000
+# The oldest supported signed release used by the ordinary bench full-download cycle reads one
+# fixed 1024-byte manifest frame. Any larger dev manifest must fail before the gate contacts a
+# board, otherwise the release could be installed successfully and then be unable to restore dev.
+LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES = 1024
+# Historical root-feed adjudication: this exact signed 1.0.2 artifact was republished from a later
+# source commit while the immutable v1.0.2 tag remained at its original commit. Future stable feeds
+# must match their tag; only this complete version/source/app tuple is accepted as the known legacy
+# restore writer.
+LEGACY_RELEASE_VERSION = "1.0.2"
+LEGACY_RELEASE_SOURCE_SHA = "cc29e8c6e593570140e6446b07520216251939ed"
+LEGACY_RELEASE_APP_SHA256 = "c8437cb546175fa9591dcce9e137c35ec6ea3028c64678b08e029392cb9ea4ce"
 
 
 class GateError(RuntimeError):
@@ -620,6 +632,52 @@ def request_bytes(
         return response.read()
 
 
+def request_limited_bytes(
+    url: str, label: str, max_bytes: int, *, timeout: float = HTTP_TIMEOUT_S,
+) -> bytes:
+    """Read a small remote document with a whole-operation deadline and fixed memory bound."""
+    if max_bytes <= 0:
+        fail(f"{label} limit is invalid")
+    if timeout <= 0:
+        fail(f"{label} deadline is invalid")
+    completed = threading.Event()
+    outcome: list[bytes | BaseException] = []
+
+    def fetch() -> None:
+        try:
+            request = Request(url, headers={"User-Agent": "daikin-production-ota-gate/1"})
+            with urlopen(request, timeout=timeout) as response:
+                if response.status < 200 or response.status >= 300:
+                    fail(f"GET {url} returned HTTP {response.status}")
+                declared = response.headers.get("Content-Length")
+                if declared is not None:
+                    try:
+                        declared_size = int(declared)
+                    except ValueError:
+                        fail(f"{label} has an invalid Content-Length")
+                    if declared_size < 0 or declared_size > max_bytes:
+                        fail(f"{label} exceeds the {max_bytes}-byte limit")
+                payload = response.read(max_bytes + 1)
+            if len(payload) > max_bytes:
+                fail(f"{label} exceeds the {max_bytes}-byte limit")
+            outcome.append(payload)
+        except BaseException as error:
+            outcome.append(error)
+        finally:
+            completed.set()
+
+    # urllib's timeout is an inactivity timeout. The daemon boundary makes the public contract a
+    # whole-operation deadline as well: a peer cannot keep this pre-device gate alive by trickling
+    # one byte per socket timeout, and the bounded worker cannot grow host memory while it exits.
+    threading.Thread(target=fetch, name="manifest-fetch", daemon=True).start()
+    if not completed.wait(timeout):
+        fail(f"{label} exceeded its {timeout:g}-second deadline")
+    result = outcome[0]
+    if isinstance(result, BaseException):
+        raise result
+    return result
+
+
 def request_json(
     host: str, path: str, *, method: str = "GET", timeout: int = HTTP_TIMEOUT_S,
     payload: dict[str, Any] | None = None,
@@ -969,7 +1027,49 @@ def validate_manifest(
     return urljoin(manifest_url, candidates[0])
 
 
-def validate_release_manifest(manifest_url: str, manifest: dict[str, Any]) -> tuple[str, str, str]:
+def require_legacy_bench_restore_manifest(
+    manifest_bytes: bytes, manifest: dict[str, Any],
+) -> None:
+    """Reject a dev feed that the supported release cannot consume on the return leg."""
+    if len(manifest_bytes) > LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES:
+        fail(
+            "official dev manifest exceeds the 1024-byte legacy bench restore limit; "
+            "refusing before any board access"
+        )
+    if "artifacts" in manifest:
+        fail("official dev manifest must keep its artifact inventory in artifacts.json")
+    try:
+        manifest_bytes.decode("ascii")
+    except UnicodeDecodeError:
+        fail("official dev manifest is not ASCII-compatible with the legacy bench parser")
+    if b"\\" in manifest_bytes:
+        fail("official dev manifest uses escapes rejected by the legacy bench parser")
+
+
+def require_official_dev_manifest_snapshot(
+    expected_manifest_sha256: str, expected_source_sha: str,
+    expected_version: str, expected_app_sha256: str,
+) -> None:
+    """Rebind the mutable dev feed immediately before the bench release write."""
+    manifest_bytes = request_limited_bytes(
+        cache_busted(OFFICIAL_MANIFEST_URL), "official dev manifest rebind",
+        LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES,
+    )
+    if hashlib.sha256(manifest_bytes).hexdigest() != expected_manifest_sha256:
+        fail("official dev manifest changed after initial validation")
+    manifest = strict_json(manifest_bytes, "official dev manifest rebind")
+    if not isinstance(manifest, dict):
+        fail("official dev manifest rebind is not a JSON object")
+    validate_manifest(
+        OFFICIAL_MANIFEST_URL, manifest, expected_source_sha, expected_version,
+        expected_app_sha256,
+    )
+    require_legacy_bench_restore_manifest(manifest_bytes, manifest)
+
+
+def validate_release_manifest(
+    manifest_url: str, manifest: dict[str, Any],
+) -> tuple[str, str, str, str]:
     """Pin the signed rollback exercise to the one official stable feed."""
     if manifest_url != OFFICIAL_RELEASE_MANIFEST_URL:
         fail("bench rollback exercise requires the official release manifest")
@@ -999,7 +1099,30 @@ def validate_release_manifest(manifest_url: str, manifest: dict[str, Any]) -> tu
                     candidates.append(path)
     if len(candidates) != 1:
         fail("official release manifest must name exactly one ESP32-S3 application")
-    return version, app_sha256, urljoin(manifest_url, candidates[0])
+    return version, app_sha256, urljoin(manifest_url, candidates[0]), source_sha
+
+
+def require_release_source_binding(
+    version: str, source_sha: str, app_sha256: str, tagged_source: str,
+) -> None:
+    """Bind future releases to their tag while narrowly adjudicating the historical 1.0.2 feed."""
+    if source_sha == tagged_source:
+        return
+    if (version, source_sha, app_sha256) == (
+        LEGACY_RELEASE_VERSION, LEGACY_RELEASE_SOURCE_SHA, LEGACY_RELEASE_APP_SHA256,
+    ):
+        return
+    fail(
+        f"official release provenance {source_sha} does not match "
+        f"v{version} source {tagged_source}"
+    )
+
+
+def verify_release_source_binding(version: str, source_sha: str, app_sha256: str) -> None:
+    tagged_source = run_checked(
+        ["git", "rev-parse", f"v{version}^{{commit}}"], capture=True,
+    ).strip()
+    require_release_source_binding(version, source_sha, app_sha256, tagged_source)
 
 
 def verify_local_source(expected_source_sha: str) -> None:
@@ -1665,18 +1788,6 @@ def wait_for_new_firmware(
     fail(f"board did not return on {version}/{elf}; OTA done observed={saw_done}")
 
 
-def set_update_channel(endpoint: ResolvedHttpEndpoint, channel: str) -> None:
-    response = request_json_deadline(
-        endpoint, "/set_ota", method="POST", payload={"channel": channel},
-        timeout=HTTP_TIMEOUT_S,
-    )
-    if response.get("ok") is not True:
-        fail(f"{endpoint.host_header} refused update channel {channel}")
-    status = request_status_deadline(endpoint, timeout=HTTP_TIMEOUT_S)
-    if status.get("ota", {}).get("channel") != channel:
-        fail(f"{endpoint.host_header} did not persist update channel {channel}")
-
-
 def wait_for_bench_health_window(
     host: str, mac: str, version: str, elf: str, *, phase: str,
 ) -> dict[str, Any]:
@@ -1752,14 +1863,16 @@ def record_bench_pressure_failure(
 
 
 def exercise_bench_full_download(
-    *, host: str, mac: str, target_version: str, target_sha256: str, target_elf: str,
+    *, host: str, mac: str, target_source_sha: str, target_version: str,
+    target_sha256: str, target_manifest_sha256: str, target_elf: str,
     release_version: str, release_sha256: str, release_elf: str,
 ) -> dict[str, Any]:
     """Make the target firmware itself perform one complete signed binary TLS transfer.
 
-    The exact target first switches to the official release feed and installs that older signed
-    build under concurrent HTTP pressure. The release then restores the exact official dev target.
-    This happens only on the private-inventory bench role and closes the old manifest-only gap.
+    The exact target first binds one check generation to the official release feed without changing
+    its configured dev channel, then installs that older signed build under concurrent HTTP pressure.
+    The release restores through that configured official dev feed. This happens only on the
+    private-inventory bench role and closes the old manifest-only gap.
     """
     if release_version == target_version:
         fail("bench full-download exercise needs a release distinct from the target")
@@ -1768,10 +1881,17 @@ def exercise_bench_full_download(
     validate_identity(
         pinned_before, host=host, mac=mac, version=target_version, elf=target_elf,
     )
-    set_update_channel(status_endpoint, "release")
+    require_official_dev_manifest_snapshot(
+        target_manifest_sha256, target_source_sha, target_version, target_sha256,
+    )
+    # The current target supports one non-persistent feed binding on /ota/check. Use it for the
+    # release leg so the configured channel remains dev even if a later pre-write check fails, and
+    # so the checked release URL survives unchanged through its exact update generation.
     generation = wait_for_ota_offer(
         status_endpoint, release_version, release_sha256,
-        expected_channel="release", allow_downgrade=True,
+        expected_channel="dev", allow_downgrade=True,
+        hil_manifest_url=OFFICIAL_RELEASE_MANIFEST_URL,
+        hil_firmware_base_url=OFFICIAL_RELEASE_FIRMWARE_BASE_URL,
     )
 
     stop = threading.Event()
@@ -1817,9 +1937,12 @@ def exercise_bench_full_download(
 
     target_transfer: dict[str, Any] = {}
     try:
+        require_official_dev_manifest_snapshot(
+            target_manifest_sha256, target_source_sha, target_version, target_sha256,
+        )
         post_update_once(
             status_endpoint, generation, release_version, release_sha256,
-            expected_channel="release", allow_downgrade=True,
+            expected_channel="dev", allow_downgrade=True,
         )
         release_status = wait_for_new_firmware(
             host, release_version, release_elf, status_endpoint, target_transfer,
@@ -1858,7 +1981,6 @@ def exercise_bench_full_download(
     validate_identity(
         pinned_release, host=host, mac=mac, version=release_version, elf=release_elf,
     )
-    set_update_channel(status_endpoint, "dev")
     accepted = request_json_deadline(
         status_endpoint, f"/ota/check?ms={int(time.time() * 1000)}", timeout=HTTP_TIMEOUT_S,
     )
@@ -2848,6 +2970,59 @@ def self_test() -> None:
     global HTTP_TIMEOUT_S
     source = "a" * 40
     app = "b" * 64
+    class LimitedResponse:
+        status = 200
+
+        def __init__(self, body: bytes, declared: str | None = None) -> None:
+            self.body = body
+            self.headers = {} if declared is None else {"Content-Length": declared}
+
+        def __enter__(self) -> "LimitedResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self, limit: int) -> bytes:
+            return self.body[:limit]
+
+    class SlowLimitedResponse(LimitedResponse):
+        def read(self, limit: int) -> bytes:
+            time.sleep(0.20)
+            return super().read(limit)
+
+    original_urlopen = globals()["urlopen"]
+    try:
+        globals()["urlopen"] = lambda *_args, **_kwargs: LimitedResponse(b"x" * 1025)
+        try:
+            request_limited_bytes("https://feed.invalid/manifest.json", "fixture", 1024)
+        except GateError:
+            pass
+        else:
+            raise AssertionError("bounded remote document reader accepted an oversized body")
+        globals()["urlopen"] = lambda *_args, **_kwargs: LimitedResponse(
+            b"x", declared="1025",
+        )
+        try:
+            request_limited_bytes("https://feed.invalid/manifest.json", "fixture", 1024)
+        except GateError:
+            pass
+        else:
+            raise AssertionError("bounded remote document reader trusted oversized Content-Length")
+        globals()["urlopen"] = lambda *_args, **_kwargs: SlowLimitedResponse(b"x")
+        started = time.monotonic()
+        try:
+            request_limited_bytes(
+                "https://feed.invalid/manifest.json", "fixture", 1024, timeout=0.02,
+            )
+        except GateError:
+            pass
+        else:
+            raise AssertionError("bounded remote document reader accepted a slow trickle")
+        if time.monotonic() - started > 0.15:
+            raise AssertionError("bounded remote document reader exceeded its absolute deadline")
+    finally:
+        globals()["urlopen"] = original_urlopen
     for ambiguous in (
         '{"controller_id":"hil-feed-controller","controller_id":"production-controller"}',
         '{"lease_id":"fixture-lease-0123456789","ttl_s":NaN}',
@@ -2864,6 +3039,46 @@ def self_test() -> None:
         "builds": [{"chipFamily": "ESP32-S3", "parts": [{"path": "app.bin", "offset": 0x20000}]}],
     }
     assert validate_manifest(OFFICIAL_MANIFEST_URL, fixture, source, "1.2.3-dev.4", app) == "https://0bu.github.io/daikin-altherma-esp32/dev/app.bin"
+    compact_manifest = json.dumps(fixture, separators=(",", ":")).encode()
+    require_legacy_bench_restore_manifest(compact_manifest, fixture)
+    original_limited_request = globals()["request_limited_bytes"]
+    try:
+        globals()["request_limited_bytes"] = lambda *_args, **_kwargs: compact_manifest
+        require_official_dev_manifest_snapshot(
+            hashlib.sha256(compact_manifest).hexdigest(), source, "1.2.3-dev.4", app,
+        )
+        try:
+            require_official_dev_manifest_snapshot("0" * 64, source, "1.2.3-dev.4", app)
+        except GateError:
+            pass
+        else:
+            raise AssertionError("dev manifest rebind accepted replaced bytes")
+    finally:
+        globals()["request_limited_bytes"] = original_limited_request
+    try:
+        require_legacy_bench_restore_manifest(
+            b"x" * (LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES + 1), fixture,
+        )
+    except GateError:
+        pass
+    else:
+        raise AssertionError("legacy bench restore preflight accepted an oversized manifest")
+    embedded_artifacts = {**fixture, "artifacts": []}
+    try:
+        require_legacy_bench_restore_manifest(compact_manifest, embedded_artifacts)
+    except GateError:
+        pass
+    else:
+        raise AssertionError("legacy bench restore preflight accepted an embedded artifact index")
+    escaped_manifest = compact_manifest.replace(b"dev.4", b"dev.\\u0034")
+    escaped_fixture = strict_json(escaped_manifest, "escaped legacy fixture")
+    assert escaped_fixture == fixture
+    try:
+        require_legacy_bench_restore_manifest(escaped_manifest, escaped_fixture)
+    except GateError:
+        pass
+    else:
+        raise AssertionError("legacy bench restore preflight accepted an escaped identity")
     release_fixture = {
         **fixture,
         "version": "1.2.3",
@@ -2871,7 +3086,18 @@ def self_test() -> None:
     }
     assert validate_release_manifest(
         OFFICIAL_RELEASE_MANIFEST_URL, release_fixture,
-    ) == ("1.2.3", app, "https://0bu.github.io/daikin-altherma-esp32/app.bin")
+    ) == ("1.2.3", app, "https://0bu.github.io/daikin-altherma-esp32/app.bin", source)
+    require_release_source_binding("1.2.3", source, app, source)
+    require_release_source_binding(
+        LEGACY_RELEASE_VERSION, LEGACY_RELEASE_SOURCE_SHA, LEGACY_RELEASE_APP_SHA256,
+        "c" * 40,
+    )
+    try:
+        require_release_source_binding("1.2.3", source, app, "c" * 40)
+    except GateError:
+        pass
+    else:
+        raise AssertionError("release source binding accepted an unadjudicated tag mismatch")
     try:
         validate_manifest("https://example.test/project/manifest.json", fixture, source, "1.2.3-dev.4", app)
     except GateError:
@@ -4075,15 +4301,19 @@ def main() -> int:
     missing = [name for name, value in required.items() if not value]
     if missing:
         fail(f"missing required arguments: {', '.join(missing)}")
-    manifest = strict_json(
-        request_bytes(cache_busted(args.manifest_url)), "official dev manifest",
+    manifest_bytes = request_limited_bytes(
+        cache_busted(args.manifest_url), "official dev manifest",
+        LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES,
     )
+    manifest = strict_json(manifest_bytes, "official dev manifest")
     if not isinstance(manifest, dict):
         fail("manifest is not a JSON object")
     app_url = validate_manifest(
         args.manifest_url, manifest, args.expected_source_sha, args.expected_version,
         args.expected_app_sha256,
     )
+    require_legacy_bench_restore_manifest(manifest_bytes, manifest)
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
     verify_local_source(args.expected_source_sha)
     binary = request_bytes(cache_busted(app_url), timeout=30)
     elf = verify_image(binary, args.expected_version, args.expected_app_sha256)
@@ -4121,14 +4351,17 @@ def main() -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
-    release_manifest = strict_json(
-        request_bytes(cache_busted(OFFICIAL_RELEASE_MANIFEST_URL)), "official release manifest",
+    release_manifest_bytes = request_limited_bytes(
+        cache_busted(OFFICIAL_RELEASE_MANIFEST_URL), "official release manifest",
+        LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES,
     )
+    release_manifest = strict_json(release_manifest_bytes, "official release manifest")
     if not isinstance(release_manifest, dict):
         fail("official release manifest is not a JSON object")
-    release_version, release_sha256, release_url = validate_release_manifest(
+    release_version, release_sha256, release_url, release_source_sha = validate_release_manifest(
         OFFICIAL_RELEASE_MANIFEST_URL, release_manifest,
     )
+    verify_release_source_binding(release_version, release_source_sha, release_sha256)
     release_binary = request_bytes(cache_busted(release_url), timeout=30)
     release_elf = verify_image(release_binary, release_version, release_sha256)
     verify_http_range_support(release_url, release_binary)
@@ -4142,7 +4375,8 @@ def main() -> int:
     )
     full_download_evidence = exercise_bench_full_download(
         host=bench["host"], mac=bench["mac"],
-        target_version=args.expected_version, target_sha256=args.expected_app_sha256,
+        target_source_sha=args.expected_source_sha, target_version=args.expected_version,
+        target_sha256=args.expected_app_sha256, target_manifest_sha256=manifest_sha256,
         target_elf=elf, release_version=release_version, release_sha256=release_sha256,
         release_elf=release_elf,
     )

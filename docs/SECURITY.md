@@ -470,13 +470,24 @@ release HIL additionally requires explicit `pending_verify` and `valid` observat
 The distinct `--confirm-production production --execute` transaction requires the exact signed
 artifact already running on the MAC-bound bench. A freshly OTA-installed target must first remain
 healthy beyond the 90-second rollback probation; otherwise ESP-IDF rejects the immediate release
-exercise with `ESP_ERR_OTA_ROLLBACK_INVALID_STATE`. Before the sustained pressure window, that exact
-target switches only the bench to the official release feed and performs a **complete signed firmware download** under
+exercise with `ESP_ERR_OTA_ROLLBACK_INVALID_STATE`. Before any board access, the gate requires the
+raw official dev manifest to fit the oldest supported restore writer's 1024-byte frame, remain ASCII
+without JSON escapes and omit the artifact inventory that the CI publisher binds in sibling
+`artifacts.json`. The official
+stable source must match its immutable version tag; the sole historical exception is the exact
+published and signed `1.0.2` version/source/application-SHA tuple recorded in the gate. Before the
+sustained pressure window, that exact target keeps its configured dev channel and binds only its
+accepted check generation to the official release manifest and firmware base. The gate re-fetches
+and exactly rebinds the raw dev manifest hash, source, version and application SHA before release
+selection and immediately before the one release write. It then performs a **complete signed firmware download** under
 concurrent `/status`, `/values`, `/diag` and `/ota/status` pressure. The target must expose sampled
 operation-local free/largest-block minima plus the completed validation state, boot the signed
 release cleanly, and keep it healthy past
-the 90-second rollback probation before switching back to the official dev feed and returning to the
-exact target version/ELF. A legacy release can expose its prior `idle` offer before the newly accepted
+the 90-second rollback probation before returning through its still-configured official dev feed to
+the exact target version/ELF. The historical release predates transient HIL feed headers; its return
+therefore still depends on the mutable dev path not changing after the release write. Do not publish
+dev during this transaction. Drift, an incompatible manifest or a failed exact return strands only
+the bench and fails before production is contacted. A legacy release can expose its prior `idle` offer before the newly accepted
 check task starts, so only this private bench-return leg requires the exact offer to remain continuously
 idle for three seconds before its one restore POST; a silently ignored write fails the bench stage and
 cannot reach production. Waiting before both replacements is mandatory because ESP-IDF refuses

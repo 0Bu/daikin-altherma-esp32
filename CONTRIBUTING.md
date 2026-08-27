@@ -482,7 +482,11 @@ Production promotion is the separate `--confirm-production production --execute`
 first exercises a complete signed release download under pressure on the MAC-bound bench, restores
 the exact dev artifact, then permits one un-retried update of the distinct production role and a
 read-only heap/X10A/MQTT canary. The bench need not have physical X10A; production must prove the
-real retained X10A payload. Neither mode cuts a release. See
+real retained X10A payload. The current target keeps its configured dev channel and binds only the
+release check generation to the stable feed. The historical release cannot consume that transient
+binding, so its return still reads the mutable official dev path: do not publish dev while a
+production-promotion transaction is in progress. Any changed or incompatible return manifest stops
+the transaction before production is contacted. Neither mode cuts a release. See
 [`docs/SECURITY.md`](docs/SECURITY.md) for the complete commands and evidence boundaries.
 
 ## Where code goes
@@ -636,6 +640,13 @@ at different rates:
 |------|-----|--------|
 | **Release** | [`…/manifest.json`](https://0bu.github.io/daikin-altherma-esp32/manifest.json) | a **manual** run: Actions → **build** → *Run workflow* → `release: true` (+ `bump`) |
 | **Development** | `…/dev/manifest.json` | every firmware-relevant push to `main` |
+
+Every slice published by the current workflow also contains `artifacts.json`. `manifest.json` stays
+below the 1024-byte reader limit of the oldest supported signed restore release and contains only
+installer/OTA data; the sibling index binds the exact manifest hash plus every published `.bin` hash
+and size for CI readback. The production promotion gate checks that restore grammar before it
+contacts the bench. A historical root slice keeps its old shape until the next manual release; a dev
+publish does not rewrite it.
 
 A release run is the only thing that creates a `v*` tag and a GitHub Release; a merge creates
 neither. Dev builds are versioned `<next release>-dev.<commits since the tag>` — a semver

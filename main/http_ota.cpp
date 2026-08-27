@@ -69,12 +69,12 @@ static esp_err_t ota_check(httpd_req_t* req) {
         return http_send_json(req, "{\"ok\":false,\"error\":\"invalid release HIL feed headers\"}");
     }
 
-    // SECURITY / SSRF BOUNDARY: these headers intentionally let the isolated release-HIL runner
-    // select an arbitrary HTTPS origin for one check+install lease.  This is not a public API or an
-    // authentication mechanism: the routes are withheld from the open setup AP and the common HTTP
-    // guard admits only trusted-LAN requests.  Authenticity still comes solely from the manifest
-    // SHA plus Secure-Boot-v2 image signature; the override never persists and never relaxes
-    // either.
+    // SECURITY / SSRF BOUNDARY: these headers intentionally let the isolated release-HIL runner or
+    // the inventory-pinned production-promotion bench release leg select an arbitrary HTTPS origin
+    // for one check+install lease.  This is not a public API or an authentication mechanism: the
+    // routes are withheld from the open setup AP and the common HTTP guard admits only trusted-LAN
+    // requests.  Authenticity still comes solely from the manifest SHA plus Secure-Boot-v2 image
+    // signature; the override never persists and never relaxes either.
     const OtaFeedUrls* override_feed =
         feed_result == OtaHilFeedHeaderResult::OverrideFeed ? &hil_feed : nullptr;
     const uint32_t generation = ota_check_async(ms, override_feed);

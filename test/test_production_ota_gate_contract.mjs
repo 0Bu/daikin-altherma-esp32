@@ -56,11 +56,66 @@ assert.ok(Number(gate.match(/OTA_CHECK_TIMEOUT_S\s*=\s*(\d+)/)?.[1]) >= 120);
 assert.ok(Number(gate.match(/OTA_TIMEOUT_S\s*=\s*(\d+)/)?.[1]) >= 480);
 assert.match(gate, /OFFICIAL_MANIFEST_URL\s*=\s*"https:\/\/0bu\.github\.io\/daikin-altherma-esp32\/dev\/manifest\.json"/);
 assert.match(gate, /OFFICIAL_RELEASE_MANIFEST_URL\s*=\s*"https:\/\/0bu\.github\.io\/daikin-altherma-esp32\/manifest\.json"/);
+assert.match(gate, /LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES\s*=\s*1024/);
+assert.match(gate, /LEGACY_RELEASE_VERSION\s*=\s*"1\.0\.2"/);
+assert.match(gate, /LEGACY_RELEASE_SOURCE_SHA\s*=\s*"cc29e8c6e593570140e6446b07520216251939ed"/);
+assert.match(gate, /LEGACY_RELEASE_APP_SHA256\s*=\s*"c8437cb546175fa9591dcce9e137c35ec6ea3028c64678b08e029392cb9ea4ce"/);
 assert.match(gate, /hashlib\.sha256\(binary\)\.hexdigest\(\)/);
 assert.match(gate, /scripts\/require-signed\.sh/);
 assert.match(gate, /"Range": "bytes=0-0"/);
 assert.doesNotMatch(gate, /add_argument\([^\n]*(?:skip|short|no[-_]stress)/i,
   "hardware acceptance must expose no skip/short bypass");
+
+const restoreCompatibility = section(
+  gate, "def require_legacy_bench_restore_manifest(", "\ndef validate_release_manifest(",
+);
+assert.match(restoreCompatibility,
+  /len\(manifest_bytes\)\s*>\s*LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES/);
+assert.match(restoreCompatibility, /"artifacts" in manifest/);
+assert.match(restoreCompatibility, /manifest_bytes\.decode\("ascii"\)/);
+assert.match(restoreCompatibility, /if b"\\\\" in manifest_bytes:/);
+const releaseSourceBinding = section(
+  gate, "def require_release_source_binding(", "\ndef verify_release_source_binding(",
+);
+assert.match(releaseSourceBinding,
+  /\(version, source_sha, app_sha256\)\s*==\s*\([\s\S]*?LEGACY_RELEASE_VERSION,[\s\S]*?LEGACY_RELEASE_SOURCE_SHA,[\s\S]*?LEGACY_RELEASE_APP_SHA256/);
+assert.match(releaseSourceBinding, /if source_sha == tagged_source:/);
+const limitedRemoteDocument = section(
+  gate, "def request_limited_bytes(", "\ndef request_json(",
+);
+assert.match(limitedRemoteDocument, /declared_size\s*>\s*max_bytes/);
+assert.match(limitedRemoteDocument, /response\.read\(max_bytes \+ 1\)/);
+assert.match(limitedRemoteDocument, /len\(payload\)\s*>\s*max_bytes/);
+assert.match(limitedRemoteDocument, /threading\.Thread\([\s\S]{0,140}?daemon=True\)\.start\(\)/);
+assert.match(limitedRemoteDocument, /if not completed\.wait\(timeout\):/,
+  "bounded manifest fetches must have a whole-operation deadline, not only socket inactivity timeouts");
+const devManifestSnapshot = section(
+  gate, "def require_official_dev_manifest_snapshot(", "\ndef validate_release_manifest(",
+);
+assert.match(devManifestSnapshot,
+  /manifest_bytes\s*=\s*request_limited_bytes\([\s\S]{0,220}?LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES/,
+  "every official dev-feed rebind must remain bounded to the legacy parser ceiling");
+const ordinaryMain = gate.slice(gate.indexOf("def main()"));
+const rawDevManifest = ordinaryMain.indexOf("manifest_bytes = request_limited_bytes(");
+const restorePreflight = ordinaryMain.indexOf(
+  "require_legacy_bench_restore_manifest(manifest_bytes, manifest)", rawDevManifest,
+);
+const inventoryRead = ordinaryMain.indexOf("inventory = load_inventory()", restorePreflight);
+const releaseSourceCheck = ordinaryMain.indexOf(
+  "verify_release_source_binding(release_version, release_source_sha, release_sha256)",
+  inventoryRead,
+);
+const limitedReleaseManifest = ordinaryMain.indexOf(
+  "release_manifest_bytes = request_limited_bytes(", inventoryRead,
+);
+const benchContact = ordinaryMain.indexOf('request_json(bench["host"], "/status")', releaseSourceCheck);
+const benchDowngrade = ordinaryMain.indexOf("exercise_bench_full_download(", benchContact);
+assert.ok(rawDevManifest >= 0 && restorePreflight > rawDevManifest &&
+  inventoryRead > restorePreflight && limitedReleaseManifest > inventoryRead &&
+  releaseSourceCheck > limitedReleaseManifest &&
+  benchContact > releaseSourceCheck &&
+  benchDowngrade > benchContact,
+  "restore compatibility and release source binding must precede all bench mutation");
 
 // One resolved identity owns every pre-write and pressure request.
 const boundedTransport = section(gate, "def read_bounded_http_response(", "\ndef verify_http_range_support(");
@@ -130,11 +185,20 @@ for (const helper of ["request_status_deadline", "request_values_deadline", "req
     `bench binary pressure must use pinned ${helper}`);
 }
 assert.match(fullDownload,
-  /pinned_release\s*=\s*request_status_deadline\(status_endpoint[\s\S]{0,240}?validate_identity\([\s\S]{0,220}?set_update_channel\(status_endpoint, "dev"\)/,
+  /pinned_release\s*=\s*request_status_deadline\(status_endpoint[\s\S]{0,240}?validate_identity\([\s\S]{0,300}?request_json_deadline\([\s\S]{0,120}?"\/ota\/check/,
   "the endpoint must be revalidated after the hostname-only health dwell and before restore");
+assert.equal(occurrences(fullDownload, "require_official_dev_manifest_snapshot("), 2,
+  "the mutable dev feed must be rebound before release selection and immediately before its write");
+assert.match(fullDownload,
+  /wait_for_ota_offer\([\s\S]{0,260}?expected_channel="dev"[\s\S]{0,220}?hil_manifest_url=OFFICIAL_RELEASE_MANIFEST_URL[\s\S]{0,160}?hil_firmware_base_url=OFFICIAL_RELEASE_FIRMWARE_BASE_URL/);
+assert.match(fullDownload,
+  /post_update_once\([\s\S]{0,180}?expected_channel="dev"[\s\S]{0,80}?allow_downgrade=True/,
+  "the release write must consume the accepted transient HIL generation without persisting a channel switch");
+assert.doesNotMatch(fullDownload, /set_update_channel/,
+  "the bench release exercise must not persist a channel change before its sole write");
 assert.match(fullDownload, /finally:[\s\S]{0,180}?stop\.set\(\)[\s\S]{0,180}?worker\.join/);
 
-const rebootWait = section(gate, "def wait_for_new_firmware(", "\ndef set_update_channel(");
+const rebootWait = section(gate, "def wait_for_new_firmware(", "\ndef wait_for_bench_health_window(");
 assert.match(rebootWait, /request_json_deadline\([\s\S]{0,100}?"\/ota\/status"/);
 assert.match(rebootWait, /request_status_deadline\([\s\S]{0,100}?status_endpoint/);
 assert.doesNotMatch(rebootWait, /request_json\(host,\s*"\/status"\)/,

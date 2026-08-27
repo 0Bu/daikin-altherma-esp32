@@ -104,6 +104,14 @@ try {
       replaceOnce("scripts/check-manifest-provenance.py",
         'OTA_SOURCE = ROOT / "main/ota_update.cpp"',
         'OTA_SOURCE = ROOT / "main/main.cpp"')],
+    ["the publisher drops the oldest supported release restore limit", () =>
+      replaceOnce("scripts/check-manifest-provenance.py",
+        "LEGACY_RESTORE_MANIFEST_MAX_BYTES = 1024",
+        "LEGACY_RESTORE_MANIFEST_MAX_BYTES = 2048")],
+    ["the publisher admits escaped identities rejected by the restore parser", () =>
+      replaceOnce("scripts/check-manifest-provenance.py",
+        'if b"\\\\" in manifest_bytes:',
+        'if False and b"\\\\" in manifest_bytes:')],
     ["the rollback health gate may consume the final 1 KiB reserve", () =>
       replaceOnce("tools/stack/budgets.json",
         '"ota_health_gate": {\n      "symbols": ["ota_health_task"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 3072',

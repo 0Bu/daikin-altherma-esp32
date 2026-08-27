@@ -105,7 +105,19 @@ const supplementalContract = () => {
   assert.match(fullDownload, /record_bench_pressure_failure\(kind, error, counts, unexpected, lock\)/);
   assert.match(fullDownload, /worker\.join[\s\S]*?worker\.is_alive\(\)/);
   assert.match(fullDownload, /if unexpected:[\s\S]*?fail\(/);
-  const rebootWait = section(gate, "def wait_for_new_firmware(", "\ndef set_update_channel(");
+  assert.equal((fullDownload.match(/require_official_dev_manifest_snapshot\(/g) || []).length, 2);
+  assert.match(fullDownload,
+    /wait_for_ota_offer\([\s\S]{0,260}?expected_channel="dev"[\s\S]{0,220}?hil_manifest_url=OFFICIAL_RELEASE_MANIFEST_URL[\s\S]{0,160}?hil_firmware_base_url=OFFICIAL_RELEASE_FIRMWARE_BASE_URL/);
+  assert.match(fullDownload,
+    /post_update_once\([\s\S]{0,180}?expected_channel="dev"[\s\S]{0,80}?allow_downgrade=True/);
+  assert.doesNotMatch(fullDownload, /set_update_channel/);
+  const limitedRemoteDocument = section(
+    gate, "def request_limited_bytes(", "\ndef request_json(",
+  );
+  assert.match(limitedRemoteDocument,
+    /threading\.Thread\([\s\S]{0,140}?daemon=True\)\.start\(\)/);
+  assert.match(limitedRemoteDocument, /if not completed\.wait\(timeout\):/);
+  const rebootWait = section(gate, "def wait_for_new_firmware(", "\ndef wait_for_bench_health_window(");
   assert.match(rebootWait, /\("ota_stack_min_free_bytes",\s*"ota_stack_min_free_bytes"\)/);
   const identityWait = section(
     gate, "def wait_for_identity(", "\ndef wait_for_ota_image_state(",
@@ -559,6 +571,62 @@ try {
       )],
     ["the signature verifier is bypassed", () =>
       replaceOnce("scripts/production-ota-gate.py", 'ROOT / "scripts/require-signed.sh"', 'ROOT / "scripts/signature-check-bypassed.sh"')],
+    ["the legacy bench restore manifest ceiling is weakened", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES = 1024",
+        "LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES = 2048")],
+    ["the official dev manifest fetch is no longer host-memory bounded", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "manifest_bytes = request_limited_bytes(",
+        "manifest_bytes = request_bytes(")],
+    ["the first official dev snapshot rebind is bypassed", () =>
+      replaceNth("scripts/production-ota-gate.py",
+        "require_official_dev_manifest_snapshot(\n        target_manifest_sha256, target_source_sha, target_version, target_sha256,\n    )",
+        "official_dev_manifest_snapshot_bypassed(\n        target_manifest_sha256, target_source_sha, target_version, target_sha256,\n    )", 1)],
+    ["the final official dev snapshot rebind is bypassed", () =>
+      replaceNth("scripts/production-ota-gate.py",
+        "require_official_dev_manifest_snapshot(\n            target_manifest_sha256, target_source_sha, target_version, target_sha256,\n        )",
+        "official_dev_manifest_snapshot_bypassed(\n            target_manifest_sha256, target_source_sha, target_version, target_sha256,\n        )", 1)],
+    ["the ordinary release leg drops its transient manifest binding", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "hil_manifest_url=OFFICIAL_RELEASE_MANIFEST_URL,",
+        "hil_manifest_url=None,")],
+    ["the ordinary release write expects a persisted release channel", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "expected_channel=\"dev\", allow_downgrade=True,\n        )\n        release_status = wait_for_new_firmware(",
+        "expected_channel=\"release\", allow_downgrade=True,\n        )\n        release_status = wait_for_new_firmware(")],
+    ["the official release manifest fetch is no longer host-memory bounded", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "release_manifest_bytes = request_limited_bytes(",
+        "release_manifest_bytes = request_bytes(")],
+    ["the bounded remote reader grows to the entire response", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "payload = response.read(max_bytes + 1)",
+        "payload = response.read()")],
+    ["the bounded remote reader loses its whole-operation deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "if not completed.wait(timeout):",
+        "if False and not completed.wait(timeout):")],
+    ["the legacy restore preflight is bypassed before bench access", () =>
+      replaceNth("scripts/production-ota-gate.py",
+        "require_legacy_bench_restore_manifest(manifest_bytes, manifest)",
+        "legacy_bench_restore_preflight_bypassed(manifest_bytes, manifest)", 2)],
+    ["the legacy restore preflight accepts escaped identities", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if b"\\\\" in manifest_bytes:',
+        'if False and b"\\\\" in manifest_bytes:')],
+    ["future releases are no longer bound to their version tag", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "if source_sha == tagged_source:",
+        "if True:")],
+    ["the historical restore release app identity is ignored", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "if (version, source_sha, app_sha256) == (",
+        "if (version, source_sha, LEGACY_RELEASE_APP_SHA256) == (")],
+    ["the official release source binding is bypassed before bench access", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "verify_release_source_binding(release_version, release_source_sha, release_sha256)",
+        "release_source_binding_bypassed(release_version, release_source_sha, release_sha256)")],
     ["the official release feed is replaced", () =>
       replaceOnce("scripts/production-ota-gate.py", 'OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/manifest.json"', 'OFFICIAL_RELEASE_MANIFEST_URL = "https://example.invalid/manifest.json"')],
     ["the production canary disables X10A", () =>

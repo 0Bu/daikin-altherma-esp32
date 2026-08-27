@@ -89,7 +89,8 @@ comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 > **⚠️ The Pages site is PUBLIC even when the repository is private.** Restricting who can view a
 > Pages site requires an **organization on GitHub Enterprise Cloud**; it is not available to a user
 > account on GitHub Pro. So the signed firmware, the browser-installer parts, the manual merged
-> image, `manifest.json` and the selected normalized commit subjects in `changelog.json` are
+> image, `manifest.json`, its exact public-byte inventory in `artifacts.json` after that channel's
+> next publish, and the selected normalized commit subjects in `changelog.json` are
 > downloadable by anyone on the internet while the source stays
 > private. Git tags and GitHub Releases are *not* public on a private repo — only accounts with
 > repo read access see those.
@@ -120,11 +121,6 @@ If Chrome or Edge still marks a port **paired** after the installer dialog is cl
 **Release serial port** below the install action. It appears only when this site already has a
 granted port, refuses to interrupt an active flash, and removes the site's permission with the
 browser's `SerialPort.forget()` API.
-
-> **Deployment note:** the currently published `1.0.13` release manifest predates the sparse-part
-> plan and still flashes one merged image at offset 0. Do not use that release installer when the
-> existing configuration must survive. The development feed is already sparse; remove this warning
-> after publishing the next release.
 
 For a manual factory-reset flash (needs `brew install esptool`), use the **merged** image — it bakes
 in the correct bootloader offset, so one command flashes the whole esp32s3 image. Its `0xff` gap
@@ -852,6 +848,12 @@ firmware **version** to check — either the one in the header (next to the IP a
 *Version* row on gear → **Firmware**, which does the same thing and stays where you are. The UI shows
 the download progress inline beside whichever version you tapped, waits for the board to come back
 up and reloads itself onto the new UI. Both the check and the download run on their own task, never on the HTTP worker.
+
+The device does not fetch `artifacts.json`; after a channel is next published by the current
+workflow, that sibling file binds its exact compact manifest and every public `.bin` for CI readback.
+Keeping the inventory separate leaves `manifest.json` within the 1024-byte limit of the oldest
+supported signed restore release. A historical release slice retains its old layout until another
+manual release is cut.
 
 > **Which feed it checks:** the device follows one channel at a time — gear → **Firmware** → *Update
 > channel* (`POST /set_ota`, applied live). `release` reads the Pages root, `dev` reads `…/dev/`;

@@ -2435,9 +2435,11 @@ Structure:
   candidate-origin heap and OTA-stack minima before reboot, observing the bootstrap pending, and
   hard-cycling back to the already-valid candidate. This final rollback is what turns a successful
   bootstrap-to-candidate delivery into evidence that the candidate can safely deliver its successor.
-  The web installer carves prepared sparse parts from the merged
-  image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
-  as the OTA feed (the `esptool-js` installer and the device load the same file).
+  The web installer carves prepared sparse parts from the merged image so a no-Erase flash skips
+  NVS; compact `manifest.json` lists those parts and also doubles as the OTA feed (the `esptool-js`
+  installer and the device load the same file). CI keeps the complete binary hash/size inventory in
+  sibling `artifacts.json`, bound to the exact manifest SHA-256, so public-byte readback remains
+  complete without exceeding the 1024-byte reader in the oldest supported signed restore release.
 - **Ordinary bench delivery is a role-pinned, one-write OTA transaction.** The canonical
   `scripts/production-ota-gate.py ... --confirm-bench bench --install-bench` mode verifies the exact
   signed official-dev artifact, clean source, HTTP Range behavior and host contracts before reading
@@ -2463,16 +2465,27 @@ Structure:
 - **Production promotion is a staged, one-write transaction.**
   [`scripts/production-ota-gate.py`](../scripts/production-ota-gate.py) binds the official dev
   manifest to the expected source SHA, version, application SHA-256, ESP32-S3 metadata and signature;
-  requires a clean exact local source; proves both official dev and release artifact hosts return an
-  exact one-byte HTTP 206 range before contacting either private board; runs the host catalog and
-  heap contracts; and holds the target
+  requires a clean exact local source; requires the raw dev manifest to fit the 1024-byte restore
+  reader and its unescaped ASCII identity grammar before any board access; proves both official dev
+  and release artifact hosts return an exact one-byte HTTP
+  206 range before contacting either private board; runs the host catalog and heap contracts; and
+  holds the target
   through a 105-second healthy dwell before making it perform a complete official-release firmware
   download under concurrent
   status/values/diag/OTA-status pressure on the MAC-bound private-inventory `bench` role. The target
-  must report sampled operation-local heap minima and the completed verifier state, boot the signed
+  keeps its configured `dev` channel: only the accepted release check generation receives the
+  transient official-release manifest and firmware-base headers. The host re-fetches the exact raw
+  dev manifest and rebinds its manifest hash, source, version and application SHA before release
+  selection and again immediately before the one release POST. This prevents a failed pre-write
+  check from leaving a persistent release channel behind. The target must report sampled
+  operation-local heap minima and the completed verifier state, boot the signed
   release, survive beyond its 90-second
   rollback-health probation with safe heap and no allocation-failure counters, and only then return
-  through the official dev feed to the exact target version/ELF. A pre-handshake release exposes a
+  through the configured official dev feed to the exact target version/ELF. That historical release
+  predates transient HIL feed headers, so its return still depends on the mutable dev path remaining
+  unchanged after the release write. Maintainers must not publish dev during the transaction; any
+  drift or incompatible manifest strands only the bench and fails before the production role is
+  contacted. A pre-handshake release exposes a
   stale `idle` result before its newly accepted check task has necessarily started, so this private
   bench-only return requires the exact offer to remain continuously idle for three seconds before its
   one restore POST; a silent refusal still fails before production is reachable. This wait is
@@ -3787,7 +3800,8 @@ POST /detect      re-run auto-detection now (no reboot): reset profile to "auto"
 GET  /ota/check   synchronously claim an async manifest check and return
                   {ok:true,generation}; busy/task-unavailable -> HTTP 503 + ok:false. ?ms= is parsed
                   but gates nothing — TLS date validation is compiled out, so OTA needs no wall clock.
-                  On the trusted operational LAN only, release HIL may supply the bounded HTTPS pair
+                  On the trusted operational LAN only, release HIL or the inventory-pinned
+                  production-promotion bench release leg may supply the bounded HTTPS pair
                   `X-Daikin-HIL-Manifest-URL` + `X-Daikin-HIL-Firmware-Base-URL`; one without the other,
                   an invalid URL or either value beyond 255 bytes is 400. The pair is transient,
                   generation-bound and unavailable on the open setup AP; it relaxes neither digest nor
