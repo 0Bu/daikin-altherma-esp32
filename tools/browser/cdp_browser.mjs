@@ -212,6 +212,55 @@ async function devToolsEndpoint(child) {
   });
 }
 
+function childExited(child) {
+  return child.exitCode != null || child.signalCode != null;
+}
+
+async function waitForChildExit(child, timeoutMs) {
+  if (childExited(child)) return true;
+  return new Promise((resolve) => {
+    let timer;
+    const finish = (exited) => {
+      if (timer) clearTimeout(timer);
+      child.off("exit", onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    child.once("exit", onExit);
+    timer = setTimeout(() => finish(false), timeoutMs);
+    // Do not miss an exit between the initial check and listener registration.
+    if (childExited(child)) finish(true);
+  });
+}
+
+export async function stopBrowser(child, { termTimeoutMs = 3000, killTimeoutMs = 3000 } = {}) {
+  if (!childExited(child)) child.kill("SIGTERM");
+  if (await waitForChildExit(child, termTimeoutMs)) return;
+  if (!childExited(child)) child.kill("SIGKILL");
+  if (!await waitForChildExit(child, killTimeoutMs)) {
+    throw new Error("Chrome did not exit after SIGKILL");
+  }
+}
+
+const RETRYABLE_PROFILE_ERRORS = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
+
+export async function removeBrowserProfile(profile, {
+  remove = fs.rmSync,
+  pause = delay,
+  maxRetries = 20,
+  retryDelayMs = 50,
+} = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      remove(profile, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!RETRYABLE_PROFILE_ERRORS.has(error?.code) || attempt >= maxRetries) throw error;
+      await pause(retryDelayMs);
+    }
+  }
+}
+
 export async function launchBrowser() {
   const executable = findBrowser();
   if (!executable) throw new Error("no executable Chrome or Chromium browser found");
@@ -260,18 +309,19 @@ export async function launchBrowser() {
       product: version.Browser || "Chrome/Chromium",
       async close() {
         try { socket.close(); } catch { /* already closed */ }
-        if (child.exitCode == null) child.kill("SIGTERM");
-        await Promise.race([
-          new Promise((resolve) => child.once("exit", resolve)),
-          delay(3000).then(() => { if (child.exitCode == null) child.kill("SIGKILL"); }),
-        ]);
-        fs.rmSync(profile, { recursive: true, force: true });
+        await stopBrowser(child);
+        await removeBrowserProfile(profile);
       },
     };
   } catch (error) {
     try { socket?.close(); } catch { /* best effort */ }
-    if (child.exitCode == null) child.kill("SIGKILL");
-    fs.rmSync(profile, { recursive: true, force: true });
+    try {
+      await stopBrowser(child);
+      await removeBrowserProfile(profile);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError],
+        "Browser launch failed and its temporary profile could not be cleaned up");
+    }
     throw error;
   }
 }
