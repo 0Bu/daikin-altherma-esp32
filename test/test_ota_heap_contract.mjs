@@ -53,6 +53,7 @@ const stackWatch = code("main/stack_watch.hpp");
 const sdkconfig = read("sdkconfig.defaults");
 const mainCmake = code("main/CMakeLists.txt");
 const stackBudgets = JSON.parse(read("tools/stack/budgets.json"));
+const manifestProvenance = code("scripts/check-manifest-provenance.py");
 const securityDocs = read("docs/SECURITY.md");
 const featureDocs = read("docs/FEATURES.md");
 const healthGateHeaderDocs = read("main/logic/health_gate.hpp");
@@ -209,10 +210,16 @@ assert.match(securityDocs,
 assert.doesNotMatch(ota, /exact signed artifact/,
   "device status identity must not claim a full cryptographic readback of running flash");
 const otaTaskStackMatch = ota.match(/constexpr int\s+kTaskStack\s*=\s*(\d+)/);
+const otaManifestMaxMatch = ota.match(/constexpr size_t\s+kManifestMax\s*=\s*(\d+)/);
 const healthTaskStackMatch = ota.match(/constexpr int\s+kHealthTaskStack\s*=\s*(\d+)/);
 const weatherTaskStackMatch = weather.match(/constexpr int\s+kTaskStack\s*=\s*(\d+)/);
 assert.ok(otaTaskStackMatch && healthTaskStackMatch,
   "both transient OTA task stack sizes must remain machine-readable");
+assert.equal(Number(otaManifestMaxMatch?.[1]), 2048,
+  "the complete shared installer manifest must fit the reviewed 2 KiB OTA frame");
+assert.match(manifestProvenance,
+  /OTA_SOURCE\s*=\s*ROOT\s*\/\s*"main\/ota_update\.cpp"[\s\S]*?OTA_MANIFEST_LIMIT_RE[\s\S]*?kManifestMax[\s\S]*?len\(manifest_bytes\) > manifest_limit/,
+  "the publisher must fail closed when its manifest exceeds the firmware frame");
 assert.ok(weatherTaskStackMatch,
   "the Weather TLS task stack size must remain machine-readable");
 const minimumStackReserve = 1024;

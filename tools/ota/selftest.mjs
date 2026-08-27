@@ -40,6 +40,7 @@ const files = [
   "main/logic/ota_quiesce.hpp",
   "main/logic/ota_transport.hpp",
   "main/stack_watch.hpp",
+  "scripts/check-manifest-provenance.py",
   "tools/stack/budgets.json",
   "docs/SECURITY.md",
   "docs/FEATURES.md",
@@ -95,7 +96,14 @@ try {
     ["the OTA manifest path may consume the final 1 KiB reserve", () =>
       replaceOnce("tools/stack/budgets.json",
         '"ota_task_manifest_fetch": {\n      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],\n      "multipliers": {"ota_manifest_skip_value": 9},\n      "base_bytes": 0,\n      "max_bytes": 6144',
-        '"ota_task_manifest_fetch": {\n      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],\n      "multipliers": {"ota_manifest_skip_value": 9},\n      "base_bytes": 0,\n      "max_bytes": 10752')],
+        '"ota_task_manifest_fetch": {\n      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],\n      "multipliers": {"ota_manifest_skip_value": 9},\n      "base_bytes": 0,\n      "max_bytes": 11776')],
+    ["the firmware manifest frame shrinks below the publisher contract", () =>
+      replaceOnce("main/ota_update.cpp", "constexpr size_t   kManifestMax = 2048;",
+        "constexpr size_t   kManifestMax = 1024;")],
+    ["the publisher stops reading the firmware manifest limit", () =>
+      replaceOnce("scripts/check-manifest-provenance.py",
+        'OTA_SOURCE = ROOT / "main/ota_update.cpp"',
+        'OTA_SOURCE = ROOT / "main/main.cpp"')],
     ["the rollback health gate may consume the final 1 KiB reserve", () =>
       replaceOnce("tools/stack/budgets.json",
         '"ota_health_gate": {\n      "symbols": ["ota_health_task"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 3072',
@@ -352,7 +360,7 @@ try {
       replaceOnce("main/ota_update.cpp",
         /http_body_complete\(claimed,\s*got,\s*esp_http_client_is_complete_data_received\(c\)\)/,
         "true")],
-    ["an oversized unknown-length manifest hides behind its first kilobyte", () =>
+    ["an oversized unknown-length manifest hides behind its first 2 KiB", () =>
       replaceOnce("main/ota_update.cpp", "esp_http_client_read(c, &extra, 1)",
         "esp_http_client_read(c, &extra, 0)")],
     ["manifest identity accepts garbage after the root", () =>

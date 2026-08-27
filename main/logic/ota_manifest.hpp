@@ -25,7 +25,7 @@
 namespace daik {
 
 // Release notes are a separate sibling document rather than another field in manifest.json.  The
-// installer manifest is already deliberately capped at 1 KiB on the OTA task stack; keeping the
+// installer manifest is already deliberately capped at 2 KiB on the OTA task stack; keeping the
 // optional prose outside it preserves that security/heap boundary.  The firmware stores at most
 // this much decoded UTF-8 text and never truncates a larger document into a plausible partial note.
 constexpr size_t OTA_CHANGELOG_TEXT_MAX = 960;
@@ -112,7 +112,7 @@ inline bool skip_json_number(const char* json, size_t len, size_t& pos) {
 }
 
 // Validate and skip one arbitrary JSON value without allocating. The firmware manifest is capped at
-// 1 KiB, but an attacker can still spend those bytes on nesting; cap recursion before it can spend
+// 2 KiB, but an attacker can still spend those bytes on nesting; cap recursion before it can spend
 // the OTA task's stack. Eight levels are far beyond the publisher's two-level document and are
 // included explicitly in the target-ELF stack budget.
 static __attribute__((noinline)) bool skip_json_value(const char* json, size_t len, size_t& pos,

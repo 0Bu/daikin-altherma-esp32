@@ -211,13 +211,13 @@ struct OtaNetworkFlag {
     }
 };
 
-// A TLS handshake alone wants ~6 KB of stack, and fetch_manifest_version() puts another
-// kManifestMax (1 KB) frame on top of it — 8192 (what the IDF OTA examples use, with no such local)
+// A TLS handshake alone wants ~6 KB of stack, and fetch_manifest_identity_once() puts another
+// kManifestMax (2 KB) frame on top of it — 8192 (what the IDF OTA examples use, with no such local)
 // would leave almost nothing spare.  The fixed release-HIL feed pair grows OtaTaskArgs from roughly
-// 100 B to 624 B (confirmed from the ESP32-S3 ELF); add the same 512 B to preserve the reviewed
-// headroom. The task is transient and only ever exists one at a time, so this is borrowed, not
-// resident.
-constexpr int         kTaskStack     = 10752;
+// 100 B to 624 B (confirmed from the ESP32-S3 ELF). The task gained another 1 KiB when the manifest
+// contract was raised from 1 KiB to 2 KiB, so its transient stack grew by the same amount to retain
+// the reviewed headroom. The task only ever exists one at a time, so this is borrowed, not resident.
+constexpr int         kTaskStack     = 11776;
 constexpr UBaseType_t kTaskPrio      = TASK_PRIO_OTA; // see main/task_config.hpp for the tiers
 constexpr int         kHttpTimeoutMs = 15000;
 // A peer which sends one byte inside every socket timeout is still not allowed to hold MQTT,
@@ -228,7 +228,10 @@ constexpr TickType_t kFirmwareDeadline       = pdMS_TO_TICKS(5 * 60 * 1000);
 constexpr int        kChangelogHttpTimeoutMs = 6000;
 constexpr TickType_t kChangelogDeadline      = pdMS_TO_TICKS(30000);
 constexpr int        kOtaBufSize = 2048; // download chunk; deliberately small (contiguous heap)
-constexpr size_t   kManifestMax = 1024; // published installer+provenance manifest stays below 1 KiB
+// The shared Web Serial/OTA manifest currently needs about 1.5 KiB for its complete provenance,
+// artifact index and installer plan. check-manifest-provenance.py reads this exact constant and
+// refuses a larger publish payload, so the producer and the fixed firmware frame cannot drift.
+constexpr size_t   kManifestMax = 2048;
 constexpr unsigned kMaxRedirects       = 5;
 constexpr int      kDoneBeforeRebootMs = 3000;
 // MQTT publishes once a second. Hold the operation flag for a little longer than one cadence before
@@ -668,7 +671,7 @@ bool fetch_manifest_identity_once(const std::string& url, OtaManifestIdentity& o
                 }
                 // A full fixed buffer is valid only when it was exactly the whole HTTP message.
                 // Probe one byte so an unknown-length/chunked oversized document cannot hide a
-                // parseable 1-KiB prefix.
+                // parseable 2-KiB prefix.
                 if (!timed_out && !read_failed && !body_too_big && got == sizeof(buf)) {
                     if (!set_http_timeout_to_deadline(c, manifest_started, kManifestDeadline)) {
                         err       = "Update manifest download timed out";
