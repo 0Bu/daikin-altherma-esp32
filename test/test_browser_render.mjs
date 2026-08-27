@@ -122,7 +122,7 @@ async function assertAccessibility(page, context, { nativeTree = false } = {}) {
   assert.deepEqual(unnamedAx, [], `${context}: browser accessibility tree contains unnamed controls`);
 }
 
-async function assertModalKeyboard(page, modalId, context) {
+async function assertModalKeyboard(page, modalId, context, { route = true } = {}) {
   assert.deepEqual(await page.evaluate(`(() => {
     const modal = document.getElementById(${JSON.stringify(modalId)});
     return {
@@ -138,9 +138,18 @@ async function assertModalKeyboard(page, modalId, context) {
     "#" + CSS.escape(${JSON.stringify(modalId)})) !== null`), true,
   `${context}: Tab must enter the open modal`);
 
+  if (route) {
+    await page.evaluate(`(() => {
+      window.__browserPopstateSettled = false;
+      window.addEventListener("popstate", () => {
+        window.__browserPopstateSettled = true;
+      }, { once: true });
+      return true;
+    })()`);
+  }
   await page.key("Escape", { code: "Escape", keyCode: 27 });
   await page.waitFor(`document.getElementById(${JSON.stringify(modalId)}).hidden &&
-    location.hash === "#settings"`);
+    location.hash === "#settings" && ${route ? "window.__browserPopstateSettled === true" : "true"}`);
   assert.equal(await page.evaluate("document.documentElement.classList.contains('modal-open')"), false,
     `${context}: Escape must close the modal and release scroll lock`);
 }
@@ -350,7 +359,8 @@ try {
           `${viewport.name}/${locale}/${modalId}`, { route: exerciseRoute });
         assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/${modalId}`);
         await assertAccessibility(page, `${viewport.name}/${locale}/${modalId}`, { nativeTree: true });
-        await assertModalKeyboard(page, modalId, `${viewport.name}/${locale}/${modalId}`);
+        await assertModalKeyboard(page, modalId, `${viewport.name}/${locale}/${modalId}`,
+          { route: exerciseRoute });
       }
 
       // The OTA decision is deliberately transient rather than routed. Render the real skipped-dev
