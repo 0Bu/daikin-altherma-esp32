@@ -575,6 +575,22 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         "LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES = 1024",
         "LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES = 2048")],
+    ["the missing OTA-stack exception accepts another legacy ELF", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'LEGACY_RELEASE_ELF_ID = "123d9f795"',
+        'LEGACY_RELEASE_ELF_ID = "deadbeef0"')],
+    ["the missing OTA-stack exception accepts every 1.0.2-labelled writer", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "writer_version, writer_elf,\n    ) == (\n        LEGACY_RELEASE_VERSION, LEGACY_RELEASE_ELF_ID,",
+        "writer_version, LEGACY_RELEASE_ELF_ID,\n    ) == (\n        LEGACY_RELEASE_VERSION, LEGACY_RELEASE_ELF_ID,")],
+    ["the legacy exception accepts a reported stack below the floor", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'legacy_writer_without_stack = phase == "bench target" and ota_stack is None and (',
+        "legacy_writer_without_stack = (")],
+    ["release HIL reuses the ordinary bench legacy stack exception", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'legacy_writer_without_stack = phase == "bench target" and ota_stack is None and (',
+        "legacy_writer_without_stack = ota_stack is None and (")],
     ["the official dev manifest fetch is no longer host-memory bounded", () =>
       replaceOnce("scripts/production-ota-gate.py",
         "manifest_bytes = request_limited_bytes(",

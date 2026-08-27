@@ -60,6 +60,7 @@ assert.match(gate, /LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES\s*=\s*1024/);
 assert.match(gate, /LEGACY_RELEASE_VERSION\s*=\s*"1\.0\.2"/);
 assert.match(gate, /LEGACY_RELEASE_SOURCE_SHA\s*=\s*"cc29e8c6e593570140e6446b07520216251939ed"/);
 assert.match(gate, /LEGACY_RELEASE_APP_SHA256\s*=\s*"c8437cb546175fa9591dcce9e137c35ec6ea3028c64678b08e029392cb9ea4ce"/);
+assert.match(gate, /LEGACY_RELEASE_ELF_ID\s*=\s*"123d9f795"/);
 assert.match(gate, /hashlib\.sha256\(binary\)\.hexdigest\(\)/);
 assert.match(gate, /scripts\/require-signed\.sh/);
 assert.match(gate, /"Range": "bytes=0-0"/);
@@ -231,6 +232,12 @@ const transferEvidence = section(
 assert.match(transferEvidence, /ota_stack_min_free_bytes/);
 assert.match(transferEvidence, /ota_stack\s*<\s*1024/,
   "every accepted current-image OTA must retain at least 1 KiB task stack");
+assert.match(transferEvidence,
+  /phase == "bench target"[\s\S]{0,100}?ota_stack is None[\s\S]{0,220}?writer_version, writer_elf[\s\S]{0,220}?LEGACY_RELEASE_VERSION, LEGACY_RELEASE_ELF_ID/,
+  "only the exact historical writer may omit an OTA-task stack field");
+assert.match(transferEvidence,
+  /and\s+\\[\s\S]{0,80}?not legacy_writer_without_stack/,
+  "a numeric legacy stack measurement below the floor must still fail");
 
 // Exact offer/write and production ordering.
 assert.match(gate,

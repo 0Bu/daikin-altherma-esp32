@@ -443,7 +443,13 @@ fault crash, no allocation-failure counters and safe internal heap. It then acce
 generation-bound dev offer and performs exactly one un-retried `POST /ota/update`. The returned
 generation must be the immediate successor; the observer must see completed validation, positive
 operation-local free/largest-block minima and at least 1 KiB of OTA-task stack reserve before the
-reboot returns on the exact target version.
+reboot returns on the exact target version. The sole ordinary-bench compatibility exception is an
+absent (never a numeric-below-limit) OTA-task stack field from the historical `1.0.2` writer, bound
+by its reported version and shortened ELF identity. That writer predates the field; it must still expose completed
+validation and positive operation-local heap minima, and the returned current target must still pass
+the complete rollback-health and pressure gates. No other writer or missing transfer evidence is
+accepted; release HIL cannot use this exception. As with every running-image identity check, this
+version/ELF pair is not a cryptographic readback of the board's complete flash contents.
 Because the compact raw-socket observer explicitly closes each HTTP connection, the transfer-status
 cadence is bounded to 2 Hz instead of creating 10 new sessions per second beside firmware TLS. Its
 board endpoint is resolved before the sole write; a fixed-size reader then applies one monotonic
