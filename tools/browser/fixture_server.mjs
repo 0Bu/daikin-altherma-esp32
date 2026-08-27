@@ -8,7 +8,7 @@ const STATUS = Object.freeze({
   version: "browser-gate",
   uptime_s: 86400,
   ui: { lang: "auto" },
-  wifi: { connected: true, ssid: "Browser fixture", ip: "192.0.2.10", rssi: -54, std: "Wi-Fi 6" },
+  wifi: { connected: true, ssid: "ExampleNet", ip: "192.0.2.10", rssi: -54, std: "Wi-Fi 6" },
   mqtt: { configured: true, connected: true, broker: "mqtts://fixture.invalid:8883", has_creds: true,
     base: "daikin-altherma-esp32", base_custom: false },
   syslog: { configured: false },

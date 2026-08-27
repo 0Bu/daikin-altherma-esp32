@@ -132,7 +132,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-cp -R "$ROOT/main" "$ROOT/tools" "$ROOT/test" "$TMP/"
+cp -R "$ROOT/main" "$ROOT/tools" "$ROOT/test" "$ROOT/sdkconfig.defaults" "$TMP/"
 fail=0
 
 run_contract() {
@@ -788,9 +788,11 @@ python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import re, sys
 p = sys.argv[1]
 s = open(p).read()
-pattern = (r'(const bool\s+state_deleted\s*=\s*)'
-           r'mqtt_publish\(s_weather, "", 0, 1, 1\);')
-seed, count = re.subn(pattern, r'\1!c.weather_enabled && mqtt_publish(s_weather, "", 0, 1, 1);',
+pattern = (r'if \(s_weather_cleanup_requested\.exchange'
+           r'\(false, std::memory_order_acq_rel\)\)')
+seed, count = re.subn(pattern,
+                      'if (!c.weather_enabled && '
+                      's_weather_cleanup_requested.exchange(false, std::memory_order_acq_rel))',
                       s, count=1)
 assert count == 1, "seed 41 did not apply — Weather tombstone branch moved"
 open(p, "w").write(seed)
@@ -886,9 +888,12 @@ python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed = s.replace("            s_last_weather_json.clear();\n", "", 1)
-assert seed != s, "seed 47 did not apply — Weather cache clear moved"
-open(p, "w").write(seed)
+start = s.index("static void apply_source_cleanup_completion(")
+end = s.index("static void service_source_cleanup_evidence", start)
+body = s[start:end]
+mutated = body.replace("        s_last_weather_json.clear();\n", "", 1)
+assert mutated != body, "seed 47 did not apply — Weather cache clear moved"
+open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
 expect_red "a Weather tombstone retaining the old dedup cache" run_contract
 restore
@@ -906,37 +911,29 @@ PY4
 expect_red "a failed age-young Weather value still advertised as fresh over MQTT" run_contract
 restore
 
-# 49. Drop the reconnect reconstruction. A reset between the durable source/consent save and the
-#     RAM request being serviced would then resurrect the superseded retained payload indefinitely
-#     on a silent X10A bus.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
+# 49. Drop Weather from clean-client reconstruction. A reset between the durable source/consent
+#     save and RAM request service would then resurrect superseded retained payload indefinitely.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("case MQTT_EVENT_CONNECTED:")
-end = s.index("case MQTT_EVENT_DISCONNECTED:", start)
-body = s[start:end]
-mutated = body.replace(
-    "        s_weather_cleanup_requested.store(true, std::memory_order_release);\n", "", 1)
-assert mutated != body, "seed 49 did not apply — broker-session cleanup reconstruction moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
+old = "    static_cast<uint8_t>(MqttCleanupSource::Weather) |\n"
+seed = s.replace(old, "", 1)
+assert seed != s, "seed 49 did not apply — broker-session cleanup reconstruction moved"
+open(p, "w").write(seed)
 PY4
 expect_red "reset losing the pending retained Weather cleanup" run_contract
 restore
 
-# 50. The same reset window exists for HomeHub: its disable was durable but the old retained flat
-#     document survives forever when a silent X10A bus prevents ordinary publication.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
+# 50. The same clean-client reconstruction requirement exists for HomeHub.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("case MQTT_EVENT_CONNECTED:")
-end = s.index("case MQTT_EVENT_DISCONNECTED:", start)
-body = s[start:end]
-mutated = body.replace(
-    "        s_modbus_cleanup_requested.store(true, std::memory_order_release);\n", "", 1)
-assert mutated != body, "seed 50 did not apply — HomeHub reconnect cleanup moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
+old = "    static_cast<uint8_t>(MqttCleanupSource::Modbus) |\n"
+seed = s.replace(old, "", 1)
+assert seed != s, "seed 50 did not apply — HomeHub reconnect cleanup moved"
+open(p, "w").write(seed)
 PY4
 expect_red "reset losing the pending HomeHub cleanup" run_contract
 restore
@@ -957,53 +954,45 @@ PY4
 expect_red "an enabled HomeHub source change retaining predecessor evidence" run_contract
 restore
 
-# 52. ENV III disable applies by reboot, so reconnect is the only deterministic opportunity to
-#     delete its retained value and three discovery configs before any X10A proof.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
+# 52. ENV III disable applies by reboot, so clean-client reconstruction must include it before X10A.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("case MQTT_EVENT_CONNECTED:")
-end = s.index("case MQTT_EVENT_DISCONNECTED:", start)
-body = s[start:end]
-mutated = body.replace(
-    "        s_env3_cleanup_requested.store(true, std::memory_order_release);\n", "", 1)
-assert mutated != body, "seed 52 did not apply — ENV III reconnect cleanup moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
+old = "    static_cast<uint8_t>(MqttCleanupSource::Env3);\n"
+seed = s.replace(old, "    0;\n", 1)
+assert seed != s, "seed 52 did not apply — ENV III reconnect cleanup moved"
+open(p, "w").write(seed)
 PY4
 expect_red "reset losing disabled ENV III retained cleanup" run_contract
 restore
 
-# 53. Keep the reconnect request but drop the service branch. The flag then exists only as a claim;
-#     the old data topic and HA discovery still survive a silent-bus reboot.
+# 53. Keep the request flag but drop its admission into the shared scheduler.
 python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("    if (s_env3_cleanup_requested.exchange(false)) {")
-end = s.index("\n    }\n    return attempted;", start) + len("\n    }")
-seed = s[:start] + s[end:]
+old = ("    if (s_env3_cleanup_requested.exchange(false, std::memory_order_acq_rel))\n"
+       "        s_source_cleanup.request(MqttCleanupSource::Env3);\n")
+seed = s.replace(old, "", 1)
 assert seed != s, "seed 53 did not apply — ENV III cleanup branch moved"
 open(p, "w").write(seed)
 PY4
 expect_red "ENV III reconnect cleanup flag with no tombstone service" run_contract
 restore
 
-# 54. Consume the atomic request without an unwind guard. `retract_env3_discovery()` allocates topic
-#     strings; a bad_alloc would escape to mqtt_task's cycle catch after the intent was cleared.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
+# 54. Turn rejected enqueue into a fake in-flight item. Topic allocation/queue failure would then
+#     strand the scheduler instead of retrying the same active step on the next cycle.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("struct RetainedCleanupRearm {")
-end = s.index("\n};\n\nstruct RetainedCleanupCycle", start) + len("\n};")
-seed = s[:start] + s[end:]
-seed = seed.replace("        RetainedCleanupRearm rearm{s_weather_cleanup_requested};\n", "", 1)
-seed = seed.replace("        RetainedCleanupRearm rearm{s_modbus_cleanup_requested};\n", "", 1)
-seed = seed.replace("        RetainedCleanupRearm rearm{s_env3_cleanup_requested};\n", "", 1)
-seed = seed.replace("            rearm.completed = true;\n", "", 3)
-assert seed != s, "seed 54 did not apply — cleanup unwind guard moved"
-open(p, "w").write(seed)
+start = s.index("    bool publish_queued(")
+end = s.index("    bool acknowledge(", start)
+body = s[start:end]
+mutated = body.replace("            return false;\n", "            { in_flight_id_ = 0; return false; }\n", 1)
+assert mutated != body, "seed 54 did not apply — rejected-enqueue retry moved"
+open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
 expect_red "an ENV III cleanup allocation exception losing its intent" run_contract
 restore
@@ -1146,37 +1135,27 @@ PY4
 expect_red "ENV III discovery announced after partial failure" run_contract
 restore
 
-# 64. Leave retired HomeHub discovery cleanup on the ordinary X10A-admitted periodic path only.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
-import re
+# 64. Leave HomeHub retired discovery out of the clean-client scheduler.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed, count = re.subn(
-    r"(const bool\s+retired_discovery_deleted\s*=\s*)retract_modbus_discovery\(1\);",
-    r"\1true;",
-    s,
-    count=1,
-)
-assert count == 1, "seed 64 did not apply — HomeHub retired cleanup moved"
+seed = s.replace("MQTT_MODBUS_CLEANUP_DISCOVERY_COUNT  = 27",
+                 "MQTT_MODBUS_CLEANUP_DISCOVERY_COUNT  = 0", 1)
+assert seed != s, "seed 64 did not apply — HomeHub retired cleanup moved"
 open(p, "w").write(seed)
 PY4
 expect_red "retired HomeHub discovery gated on X10A" run_contract
 restore
 
-# 65. Leave retired Weather discovery cleanup on the ordinary X10A-admitted path only.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
-import re
+# 65. Leave retired Weather discovery out of the clean-client scheduler.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed, count = re.subn(
-    r"(const bool\s+retired_discovery_deleted\s*=\s*)retract_weather_discovery\(1\);",
-    r"\1true;",
-    s,
-    count=1,
-)
-assert count == 1, "seed 65 did not apply — Weather retired cleanup moved"
+seed = s.replace("MQTT_WEATHER_CLEANUP_DISCOVERY_COUNT = 4",
+                 "MQTT_WEATHER_CLEANUP_DISCOVERY_COUNT = 0", 1)
+assert seed != s, "seed 65 did not apply — Weather retired cleanup moved"
 open(p, "w").write(seed)
 PY4
 expect_red "retired Weather discovery gated on X10A" run_contract
@@ -1200,104 +1179,99 @@ PY4
 expect_red "HomeHub disable blocked by Config OOM and TLS delay" run_contract
 restore
 
-# 67. Hide a partial retired HomeHub discovery failure from the reconnect cleanup transaction.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
+# 67. Let a foreign PUBACK advance the active cleanup item.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("static bool retract_modbus_discovery(int qos = 0)")
-end = s.index("\n}\n\nstatic bool publish_env3_discovery", start) + 2
+start = s.index("    bool acknowledge(")
+end = s.index("    bool retry_deleted(", start)
 body = s[start:end]
-mutated = body.replace("    return ok;", "    return true;", 1)
-assert mutated != body, "seed 67 did not apply — retired HomeHub result moved"
+mutated = body.replace(" || evidence.msg_id != in_flight_id_", "", 1)
+assert mutated != body, "seed 67 did not apply — exact PUBACK identity moved"
 open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
-expect_red "partial retired HomeHub cleanup acknowledged" run_contract
+expect_red "foreign PUBACK advancing retained cleanup" run_contract
 restore
 
-# 68. Hide a partial retired Weather discovery failure from the reconnect cleanup transaction.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
+# 68. Treat explicit outbox-deletion evidence as a PUBACK and skip the lost tombstone.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("static bool retract_weather_discovery(int qos = 0)")
-end = s.index("\n}\n\n// Build + publish", start) + 2
+start = s.index("    bool acknowledge(")
+end = s.index("    bool retry_deleted(", start)
 body = s[start:end]
-mutated = body.replace("    return ok;", "    return true;", 1)
-assert mutated != body, "seed 68 did not apply — retired Weather result moved"
+mutated = body.replace(
+    "evidence.outcome != MqttCleanupDeliveryOutcome::Published || ", "", 1)
+assert mutated != body, "seed 68 did not apply — delivery outcome gate moved"
 open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
-expect_red "partial retired Weather cleanup acknowledged" run_contract
+expect_red "expired outbox item acknowledged as published" run_contract
 restore
 
-# 69. A Weather state tombstone succeeds but one retired discovery tombstone fails. Consuming the
-#     request anyway leaves a ghost entity forever on a stable broker connection.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
+# 69. Complete Weather after its state tombstone, before the four discovery acknowledgements.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = '        if (state_deleted && retired_discovery_deleted) {\n'
-seed = s.replace(old, '        if (state_deleted) {\n', 1)
-assert seed != s, "seed 69 did not apply — Weather cleanup condition moved"
+seed = s.replace("            return 1 + MQTT_WEATHER_CLEANUP_DISCOVERY_COUNT;",
+                 "            return 1;", 1)
+assert seed != s, "seed 69 did not apply — Weather completion count moved"
 open(p, "w").write(seed)
 PY4
 expect_red "Weather cleanup ignoring a retired-discovery failure" run_contract
 restore
 
-# 70. The corresponding HomeHub partial-success defect must be caught in its own branch, not by a
-#     regex that happens to find Weather's condition later in the same function.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
+# 70. Complete HomeHub after its state tombstone, before 27 discovery acknowledgements.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("s_modbus_cleanup_requested.exchange(false)")
-end = s.index("s_env3_cleanup_requested.exchange(false)", start)
-body = s[start:end]
-mutated = body.replace('if (state_deleted && retired_discovery_deleted)', 'if (state_deleted)', 1)
-assert mutated != body, "seed 70 did not apply — HomeHub cleanup condition moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
+seed = s.replace("            return 1 + MQTT_MODBUS_CLEANUP_DISCOVERY_COUNT;",
+                 "            return 1;", 1)
+assert seed != s, "seed 70 did not apply — HomeHub completion count moved"
+open(p, "w").write(seed)
 PY4
 expect_red "HomeHub cleanup ignoring a retired-discovery failure" run_contract
 restore
 
-# 71. ENV III state and discovery are one cleanup transaction when disabled.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
+# 71. Complete disabled ENV III after its state tombstone, before discovery acknowledgements.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("s_env3_cleanup_requested.exchange(false)")
-end = s.index("\n}\n\nstatic void publish_weather_state", start)
-body = s[start:end]
-mutated = body.replace('if (state_deleted && discovery_deleted)', 'if (state_deleted)', 1)
-assert mutated != body, "seed 71 did not apply — ENV III cleanup condition moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
+old = "            return active_env3_enabled_ ? 1 : 1 + MQTT_ENV3_CLEANUP_DISCOVERY_COUNT;"
+seed = s.replace(old, "            return 1;", 1)
+assert seed != s, "seed 71 did not apply — ENV III completion count moved"
+open(p, "w").write(seed)
 PY4
 expect_red "ENV III cleanup ignoring a discovery failure" run_contract
 restore
 
-# 72. A partial ENV III discovery retraction must flow back to the transaction above.
+# 72. Drop the per-index bound so corrupt scheduler state can address an invented ENV III topic.
 python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("static bool retract_env3_discovery(int qos = 0)")
-end = s.index("\n}\n\n// Builds up to", start) + 2
+start = s.index("static std::string source_cleanup_topic(")
+end = s.index("static void apply_source_cleanup_completion", start)
 body = s[start:end]
-mutated = body.replace("    return ok;", "    return true;", 1)
-assert mutated != body, "seed 72 did not apply — ENV III aggregate result moved"
+mutated = body.replace("action.index < ENV3_HA_SENSOR_COUNT", "true", 1)
+assert mutated != body, "seed 72 did not apply — ENV III topic bound moved"
 open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
-expect_red "partial ENV III discovery retraction acknowledged" run_contract
+expect_red "unbounded ENV III discovery cleanup index" run_contract
 restore
 
-# 73. An enabled ENV III source change invalidates state but not its source-independent entity
-#     identities. Dropping this short-circuit makes the settings save delete live HA entities.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
+# 73. An enabled ENV III source change invalidates state but must retain its source-independent
+#     discovery identities.
+python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = '        const bool discovery_deleted = env3_enabled || retract_env3_discovery(1);\n'
-new = '        const bool discovery_deleted = retract_env3_discovery(1);\n'
+old = "            return active_env3_enabled_ ? 1 : 1 + MQTT_ENV3_CLEANUP_DISCOVERY_COUNT;"
+new = "            return 1 + MQTT_ENV3_CLEANUP_DISCOVERY_COUNT;"
 seed = s.replace(old, new, 1)
 assert seed != s, "seed 73 did not apply — ENV III enabled-source condition moved"
 open(p, "w").write(seed)
@@ -1334,10 +1308,10 @@ python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("s_modbus_cleanup_requested.exchange(false)")
-end = s.index("s_env3_cleanup_requested.exchange(false)", start)
+start = s.index("static void apply_source_cleanup_completion(")
+end = s.index("static void service_source_cleanup_evidence", start)
 body = s[start:end]
-mutated = body.replace("            s_last_modbus_json.clear();\n", "", 1)
+mutated = body.replace("        s_last_modbus_json.clear();\n", "", 1)
 assert mutated != body, "seed 75 did not apply — HomeHub cache clear moved"
 open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
@@ -1349,10 +1323,10 @@ python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("s_env3_cleanup_requested.exchange(false)")
-end = s.index("\n}\n\nstatic void publish_weather_state", start)
+start = s.index("static void apply_source_cleanup_completion(")
+end = s.index("static void service_source_cleanup_evidence", start)
 body = s[start:end]
-mutated = body.replace("            s_last_env3_json.clear();\n", "", 1)
+mutated = body.replace("        s_last_env3_json.clear();\n", "", 1)
 assert mutated != body, "seed 76 did not apply — ENV III cache clear moved"
 open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
@@ -1366,8 +1340,8 @@ import re
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("s_env3_cleanup_requested.exchange(false)")
-end = s.index("\n}\n\nstatic void publish_weather_state", start)
+start = s.index("static void apply_source_cleanup_completion(")
+end = s.index("static void service_source_cleanup_evidence", start)
 body = s[start:end]
 mutated, count = re.subn(r"^\s*s_last_env3_samples\s*=\s*0;\n", "", body,
                          count=1, flags=re.MULTILINE)
