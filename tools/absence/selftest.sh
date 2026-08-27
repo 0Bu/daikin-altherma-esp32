@@ -917,7 +917,7 @@ python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "    static_cast<uint8_t>(MqttCleanupSource::Weather) |\n"
+old = "static_cast<uint8_t>(MqttCleanupSource::Weather) |"
 seed = s.replace(old, "", 1)
 assert seed != s, "seed 49 did not apply — broker-session cleanup reconstruction moved"
 open(p, "w").write(seed)
@@ -930,7 +930,7 @@ python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "    static_cast<uint8_t>(MqttCleanupSource::Modbus) |\n"
+old = "static_cast<uint8_t>(MqttCleanupSource::Modbus) |"
 seed = s.replace(old, "", 1)
 assert seed != s, "seed 50 did not apply — HomeHub reconnect cleanup moved"
 open(p, "w").write(seed)
@@ -959,8 +959,8 @@ python3 - "$TMP/main/logic/mqtt_cleanup.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "    static_cast<uint8_t>(MqttCleanupSource::Env3);\n"
-seed = s.replace(old, "    0;\n", 1)
+old = "static_cast<uint8_t>(MqttCleanupSource::Env3)"
+seed = s.replace(old, "0", 1)
 assert seed != s, "seed 52 did not apply — ENV III reconnect cleanup moved"
 open(p, "w").write(seed)
 PY4
