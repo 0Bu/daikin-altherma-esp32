@@ -434,6 +434,14 @@ require("check-signing-key-continuity.py" in publish,
         "publisher does not reverify signing-key continuity")
 require('check-publish-version.sh --source-sha "$SOURCE_SHA"' in publish,
         "publisher does not recheck the feed against artifact source")
+dev_resume_guard = re.compile(
+    r'elif \[ "\$MODE" = dev \] && \[ "\$RUN_ATTEMPT" -gt 1 \]; then\s+'
+    r'check_mode=dev-resume'
+)
+for name, block in (("trusted build", trusted), ("publisher", publish)):
+    require('RUN_ATTEMPT: ${{ github.run_attempt }}' in block and
+            dev_resume_guard.search(block) is not None,
+            f"{name} does not keep first-attempt dev publishes strictly forward-only")
 require("generate-ota-changelog.py --validate dist/changelog.json" in publish,
         "publisher does not validate the handed-off OTA changelog")
 require("target_commitish: ${{ github.sha }}" in publish,
@@ -452,6 +460,7 @@ require(root_publish < public_readback < release_create < release_readback,
         "public Pages or GitHub Release bytes are not read back in safe order")
 require("verify-published-artifacts.py" in publish and "gh release download" in publish and
         '--pages-commit "$pages_commit"' in publish and '--pages-prefix "$PAGES_PREFIX"' in publish and
+        "--attempts 30" in publish and
         'cmp -- "$expected_names" "$actual_names"' in publish and
         'cmp -- "$expected" "$readback/$name"' in publish,
         "published artifact readback does not compare exact public bytes")
@@ -476,8 +485,8 @@ require("LICENSE$" in relevant.group(1) and "THIRD_PARTY_NOTICES[.]md$" in relev
         "redistribution notices are missing from the Pages build trigger")
 require(re.search(relevant.group(1), "tools/web_asset/vendor/LICENSE") is not None,
         "the Apache license source is missing from the Pages build trigger")
-require("release_version:" in text and "release-resume" in text,
-        "explicit/idempotent release resume contract is missing")
+require("release_version:" in text and "release-resume" in text and "dev-resume" in text,
+        "explicit/idempotent feed resume contract is missing")
 
 require("  pull_request:\n" in text and "  pull_request_target:\n" not in text,
         "build workflow does not isolate PR execution under pull_request")
