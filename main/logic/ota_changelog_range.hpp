@@ -27,28 +27,28 @@ enum class OtaChangelogRangeResult {
 };
 
 inline OtaChangelogRangeResult ota_changelog_select_range(char* text, const char* running,
-                                                           const char* target) {
+                                                          const char* target) {
     if (!text || !running || !target || !version_valid(running) || !version_valid(target)) {
         if (text) text[0] = '\0';
         return OtaChangelogRangeResult::Invalid;
     }
 
-    constexpr char separator[] = " — ";
+    constexpr char   separator[]   = " — ";
     constexpr size_t separator_len = sizeof(separator) - 1;
-    const size_t text_len = std::strlen(text);
+    const size_t     text_len      = std::strlen(text);
     if (text_len == 0) return OtaChangelogRangeResult::Legacy;
 
     size_t selected_offset = 0;
-    bool running_seen = false;
-    bool versioned = false;
-    char previous[32] = {};
-    char last[32] = {};
+    bool   running_seen    = false;
+    bool   versioned       = false;
+    char   previous[32]    = {};
+    char   last[32]        = {};
 
     for (size_t offset = 0; offset < text_len;) {
         const size_t line_start = offset;
         while (offset < text_len && text[offset] != '\n') ++offset;
         const size_t line_end = offset;
-        const size_t next = offset < text_len ? offset + 1 : offset;
+        const size_t next     = offset < text_len ? offset + 1 : offset;
         if (line_end == line_start) {
             text[0] = '\0';
             return OtaChangelogRangeResult::Invalid;
@@ -60,8 +60,8 @@ inline OtaChangelogRangeResult ota_changelog_select_range(char* text, const char
         while (split + separator_len <= line_end &&
                std::memcmp(text + split, separator, separator_len) != 0)
             ++split;
-        const bool has_separator = split + separator_len <= line_end;
-        bool compact_prefix = looks_versioned && has_separator;
+        const bool has_separator  = split + separator_len <= line_end;
+        bool       compact_prefix = looks_versioned && has_separator;
         if (compact_prefix) {
             for (size_t i = line_start + 1; i < split; ++i) {
                 if (static_cast<unsigned char>(text[i]) <= 0x20) {
@@ -75,8 +75,7 @@ inline OtaChangelogRangeResult ota_changelog_select_range(char* text, const char
             // "v2 compatibility — improved transport" must not become invalid merely because it
             // begins with a lower-case v and a digit. Only a compact, complete publisher prefix
             // selects the versioned grammar; once selected, every later line must use it.
-            if (!versioned && line_start == 0)
-                return OtaChangelogRangeResult::Legacy;
+            if (!versioned && line_start == 0) return OtaChangelogRangeResult::Legacy;
             text[0] = '\0';
             return OtaChangelogRangeResult::Invalid;
         }
@@ -91,8 +90,7 @@ inline OtaChangelogRangeResult ota_changelog_select_range(char* text, const char
         }
 
         const size_t version_len = split - (line_start + 1);
-        if (version_len == 0 || version_len >= sizeof(last) ||
-            split + separator_len == line_end) {
+        if (version_len == 0 || version_len >= sizeof(last) || split + separator_len == line_end) {
             text[0] = '\0';
             return OtaChangelogRangeResult::Invalid;
         }
@@ -106,7 +104,7 @@ inline OtaChangelogRangeResult ota_changelog_select_range(char* text, const char
         // One build may publish several user-facing lines. Advance after every matching line so a
         // device already on that build never repeats one of its notes.
         if (std::strcmp(last, running) == 0) {
-            running_seen = true;
+            running_seen    = true;
             selected_offset = next;
         }
         std::memcpy(previous, last, sizeof(previous));
@@ -123,4 +121,4 @@ inline OtaChangelogRangeResult ota_changelog_select_range(char* text, const char
     return OtaChangelogRangeResult::Selected;
 }
 
-}  // namespace daik
+} // namespace daik

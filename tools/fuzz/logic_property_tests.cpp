@@ -168,17 +168,15 @@ void exercise_changelog_range_input(const std::string& input) {
 }
 
 void test_changelog_range_properties() {
-    g_target = "ota-changelog-range";
-    const std::string valid =
-        "v1.0.3-dev.15 — Hard-reset ESP32-S3 after serial flash\n"
-        "v1.0.3-dev.17 — Fix OTA stress HTTP handoff\n"
-        "v1.0.3-dev.18 — Maintenance and reliability improvements.\n"
-        "v1.0.3-dev.19 — Preserve legacy bench restore compatibility\n"
-        "v1.0.3-dev.20 — Accept exact legacy writer evidence";
-    const std::string expected =
-        "v1.0.3-dev.18 — Maintenance and reliability improvements.\n"
-        "v1.0.3-dev.19 — Preserve legacy bench restore compatibility\n"
-        "v1.0.3-dev.20 — Accept exact legacy writer evidence";
+    g_target                   = "ota-changelog-range";
+    const std::string valid    = "v1.0.3-dev.15 — Hard-reset ESP32-S3 after serial flash\n"
+                                 "v1.0.3-dev.17 — Fix OTA stress HTTP handoff\n"
+                                 "v1.0.3-dev.18 — Maintenance and reliability improvements.\n"
+                                 "v1.0.3-dev.19 — Preserve legacy bench restore compatibility\n"
+                                 "v1.0.3-dev.20 — Accept exact legacy writer evidence";
+    const std::string expected = "v1.0.3-dev.18 — Maintenance and reliability improvements.\n"
+                                 "v1.0.3-dev.19 — Preserve legacy bench restore compatibility\n"
+                                 "v1.0.3-dev.20 — Accept exact legacy writer evidence";
     std::vector<char> selected(valid.begin(), valid.end());
     selected.push_back('\0');
     REQUIRE(ota_changelog_select_range(selected.data(), "1.0.3-dev.17", "1.0.3-dev.20") ==

@@ -922,9 +922,8 @@ void run_check(const OtaTaskArgs& request) {
     // switch back rather than silently calling the release channel "up to date" on a dev board.
     const bool down =
         !newer && ota_install_allowed(running, offer.version, /*allow_downgrade=*/true);
-    ChangelogBuffer changelog = (newer || down)
-                                    ? fetch_changelog(url, running.c_str(), offer.version)
-                                    : ChangelogBuffer{};
+    ChangelogBuffer changelog =
+        (newer || down) ? fetch_changelog(url, running.c_str(), offer.version) : ChangelogBuffer{};
     const bool have_changelog = static_cast<bool>(changelog);
     if ((newer || down) && !have_changelog)
         diag_printf("ota: %s changelog unavailable or invalid for %s\n", ota_channel_name(ch),

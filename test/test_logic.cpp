@@ -2976,7 +2976,7 @@ static void test_heartbeat() {
         HeartbeatFields sf;
         sf.httpd_stack_min_free_bytes   = 1; // one byte: real, and the closest to the boundary
         sf.weather_stack_min_free_bytes = 1024;
-        sf.modbus_stack_min_free_bytes = 731;
+        sf.modbus_stack_min_free_bytes  = 731;
         const std::string sj            = build_heartbeat_json(sf);
         CHECK(sj.find("\"httpd_stack_min_free_bytes\":1,") != std::string::npos);
         CHECK(sj.find("\"weather_stack_min_free_bytes\":1024,") != std::string::npos);
@@ -6522,8 +6522,7 @@ static void test_ota_changelog_range() {
 
     char legacy_v_prefix_separator[] =
         "v2 compatibility — improved transport\nKeep target-only release notes";
-    CHECK(ota_changelog_select_range(legacy_v_prefix_separator, "1.0.3-dev.19",
-                                     "1.0.3-dev.20") ==
+    CHECK(ota_changelog_select_range(legacy_v_prefix_separator, "1.0.3-dev.19", "1.0.3-dev.20") ==
           OtaChangelogRangeResult::Legacy);
     CHECK(std::string(legacy_v_prefix_separator) ==
           "v2 compatibility — improved transport\nKeep target-only release notes");
@@ -6545,29 +6544,25 @@ static void test_ota_changelog_range() {
     std::strcpy(from_dev17, cumulative);
     CHECK(ota_changelog_select_range(from_dev17, "1.0.3-dev.17", "1.0.3-dev.20") ==
           OtaChangelogRangeResult::Selected);
-    CHECK(std::string(from_dev17) ==
-          "v1.0.3-dev.18 — Maintenance and reliability improvements.\n"
-          "v1.0.3-dev.19 — Preserve legacy bench restore compatibility\n"
-          "v1.0.3-dev.20 — Accept exact legacy writer evidence");
+    CHECK(std::string(from_dev17) == "v1.0.3-dev.18 — Maintenance and reliability improvements.\n"
+                                     "v1.0.3-dev.19 — Preserve legacy bench restore compatibility\n"
+                                     "v1.0.3-dev.20 — Accept exact legacy writer evidence");
 
     char from_dev19[512];
     std::strcpy(from_dev19, cumulative);
     CHECK(ota_changelog_select_range(from_dev19, "1.0.3-dev.19", "1.0.3-dev.20") ==
           OtaChangelogRangeResult::Selected);
-    CHECK(std::string(from_dev19) ==
-          "v1.0.3-dev.20 — Accept exact legacy writer evidence");
+    CHECK(std::string(from_dev19) == "v1.0.3-dev.20 — Accept exact legacy writer evidence");
 
-    char same_build_lines[] =
-        "v1.0.3-dev.19 — First dev.19 note\n"
-        "v1.0.3-dev.19 — Second dev.19 note\n"
-        "v1.0.3-dev.20 — Target note";
+    char same_build_lines[] = "v1.0.3-dev.19 — First dev.19 note\n"
+                              "v1.0.3-dev.19 — Second dev.19 note\n"
+                              "v1.0.3-dev.20 — Target note";
     CHECK(ota_changelog_select_range(same_build_lines, "1.0.3-dev.19", "1.0.3-dev.20") ==
           OtaChangelogRangeResult::Selected);
     CHECK(std::string(same_build_lines) == "v1.0.3-dev.20 — Target note");
 
-    char downgrade[] =
-        "v1.0.3-dev.19 — Earlier\n"
-        "v1.0.3-dev.20 — Target";
+    char downgrade[] = "v1.0.3-dev.19 — Earlier\n"
+                       "v1.0.3-dev.20 — Target";
     CHECK(ota_changelog_select_range(downgrade, "1.0.3-dev.21", "1.0.3-dev.20") ==
           OtaChangelogRangeResult::Invalid);
     CHECK(downgrade[0] == 0);
@@ -6582,23 +6577,20 @@ static void test_ota_changelog_range() {
           OtaChangelogRangeResult::Legacy);
     CHECK(std::string(legacy_downgrade) == "Target-only release downgrade note");
 
-    char wrong_target[] =
-        "v1.0.3-dev.19 — Earlier\n"
-        "v1.0.3-dev.20 — Target";
+    char wrong_target[] = "v1.0.3-dev.19 — Earlier\n"
+                          "v1.0.3-dev.20 — Target";
     CHECK(ota_changelog_select_range(wrong_target, "1.0.3-dev.18", "1.0.3-dev.21") ==
           OtaChangelogRangeResult::Invalid);
     CHECK(wrong_target[0] == 0);
 
-    char out_of_order[] =
-        "v1.0.3-dev.20 — Later\n"
-        "v1.0.3-dev.19 — Earlier";
+    char out_of_order[] = "v1.0.3-dev.20 — Later\n"
+                          "v1.0.3-dev.19 — Earlier";
     CHECK(ota_changelog_select_range(out_of_order, "1.0.3-dev.18", "1.0.3-dev.19") ==
           OtaChangelogRangeResult::Invalid);
     CHECK(out_of_order[0] == 0);
 
-    char malformed[] =
-        "v1.0.3-dev.19 — Valid\n"
-        "v1.0.3-dev.20 - wrong separator";
+    char malformed[] = "v1.0.3-dev.19 — Valid\n"
+                       "v1.0.3-dev.20 - wrong separator";
     CHECK(ota_changelog_select_range(malformed, "1.0.3-dev.18", "1.0.3-dev.20") ==
           OtaChangelogRangeResult::Invalid);
     CHECK(malformed[0] == 0);
