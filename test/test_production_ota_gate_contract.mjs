@@ -199,15 +199,30 @@ assert.doesNotMatch(fullDownload, /set_update_channel/,
   "the bench release exercise must not persist a channel change before its sole write");
 assert.match(fullDownload, /finally:[\s\S]{0,180}?stop\.set\(\)[\s\S]{0,180}?worker\.join/);
 
+const transferObserver = section(
+  gate, "def record_ota_transfer_evidence(", "\ndef wait_for_new_firmware(",
+);
+assert.match(transferObserver,
+  /evidence\.get\("saw_done"\) is True and state != "done"/,
+  "new-boot reset counters must not overwrite completed writer evidence");
+assert.doesNotMatch(transferObserver,
+  /if False and evidence\.get\("saw_done"\) is True and state != "done"/);
+assert.match(transferObserver,
+  /\("ota_stack_min_free_bytes",\s*"ota_stack_min_free_bytes"\)/,
+  "the compact writer observer must retain OTA task evidence");
+assert.match(transferObserver, /if isinstance\(value, int\) and not isinstance\(value, bool\):/,
+  "numeric transfer evidence, including zero and negatives, must reach the verifier");
+assert.match(transferObserver, /evidence\[f"\{target\}_invalid"\] = True/,
+  "null, booleans and malformed transfer evidence must be retained as invalid");
+assert.match(transferObserver, /ota_stack_present_at_done/);
+assert.match(transferObserver, /ota_stack_absent_at_done/);
 const rebootWait = section(gate, "def wait_for_new_firmware(", "\ndef wait_for_bench_health_window(");
 assert.match(rebootWait, /request_json_deadline\([\s\S]{0,100}?"\/ota\/status"/);
 assert.match(rebootWait, /request_status_deadline\([\s\S]{0,100}?status_endpoint/);
 assert.doesNotMatch(rebootWait, /request_json\(host,\s*"\/status"\)/,
   "post-write identity must remain on the prevalidated endpoint");
 assert.match(rebootWait, /except \(CompactTransportError, OSError, TimeoutError\):/);
-assert.match(rebootWait,
-  /\("ota_stack_min_free_bytes",\s*"ota_stack_min_free_bytes"\)/,
-  "the pre-reboot compact status must retain the OTA task high-water evidence");
+assert.match(rebootWait, /record_ota_transfer_evidence\(ota, ota_evidence\)/);
 assert.doesNotMatch(rebootWait, /JSONDecodeError/,
   "complete malformed JSON must remain a hard failure");
 const identityWait = section(gate, "def wait_for_identity(", "\ndef wait_for_ota_image_state(");
@@ -233,7 +248,7 @@ assert.match(transferEvidence, /ota_stack_min_free_bytes/);
 assert.match(transferEvidence, /ota_stack\s*<\s*1024/,
   "every accepted current-image OTA must retain at least 1 KiB task stack");
 assert.match(transferEvidence,
-  /phase == "bench target"[\s\S]{0,100}?ota_stack is None[\s\S]{0,220}?writer_version, writer_elf[\s\S]{0,220}?LEGACY_RELEASE_VERSION, LEGACY_RELEASE_ELF_ID/,
+  /phase == "bench target"[\s\S]{0,300}?not stack_present_at_done[\s\S]{0,160}?stack_absent_at_done[\s\S]{0,160}?ota_stack is None[\s\S]{0,220}?writer_version, writer_elf[\s\S]{0,220}?LEGACY_RELEASE_VERSION, LEGACY_RELEASE_ELF_ID/,
   "only the exact historical writer may omit an OTA-task stack field");
 assert.match(transferEvidence,
   /and\s+\\[\s\S]{0,80}?not legacy_writer_without_stack/,
