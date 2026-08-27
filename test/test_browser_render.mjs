@@ -11,7 +11,8 @@ if (!pageFile || !fs.statSync(pageFile, { throwIfNoEntry: false })?.isFile())
   throw new Error("DAIKIN_BROWSER_PAGE must name the production-marker-assembled dashboard page");
 
 const mutation = process.env.DAIKIN_BROWSER_MUTATION || "";
-if (mutation && mutation !== "root-overflow") throw new Error(`unknown browser selftest mutation: ${mutation}`);
+if (mutation && !["root-overflow", "modal-focus-delay"].includes(mutation))
+  throw new Error(`unknown browser selftest mutation: ${mutation}`);
 
 const layoutAudit = `(() => {
   const shown = (el) => {
@@ -156,7 +157,12 @@ async function openModalWithKeyboard(page, modalId, selector, context) {
   assert.deepEqual(trigger, { found: true, focused: true, disabled: false, visible: true },
     `${context}: the visible Settings entry must be keyboard-focusable`);
   await page.key("Enter", { code: "Enter", keyCode: 13 });
-  await page.waitFor(`!document.getElementById(${JSON.stringify(modalId)}).hidden`);
+  await page.waitFor(`(() => {
+    const modal = document.getElementById(${JSON.stringify(modalId)});
+    const active = document.activeElement;
+    return !modal.hidden && document.documentElement.classList.contains("modal-open") &&
+      active?.getAttribute("role") === "dialog" && active.closest("#" + CSS.escape(modal.id));
+  })()`);
 }
 
 async function assertReducedMotion(page, context, { modal = false } = {}) {
@@ -257,6 +263,28 @@ try {
     throw new Error("root-overflow mutation unexpectedly survived the layout gate");
   }
 
+  if (mutation === "modal-focus-delay") {
+    await page.viewport(viewports[1].width, viewports[1].height);
+    await activateLocale(page, "pl");
+    await page.evaluate(`(() => {
+      showStage("settings");
+      writeRoute("settings", null, { replace: true, parent: null });
+      openOverlay = (id) => {
+        const modal = document.getElementById(id);
+        modal.hidden = false;
+        setTimeout(() => {
+          syncModalScrollLock();
+          modal.querySelector('[role="dialog"]')?.focus?.({ preventScroll: true });
+        }, 75);
+      };
+      return true;
+    })()`);
+    await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
+      "selftest/desktop/pl/refTempModal");
+    await assertModalKeyboard(page, "refTempModal", "selftest/desktop/pl/refTempModal");
+    console.log("browser modal-focus selftest passed: delayed focus and scroll lock were awaited");
+  } else {
+
   // Full semantic matrix: every shipped locale, both supported viewport classes, both views and
   // every routed modal receive DOM naming/colour checks and a native Chrome AX-tree inspection.
   // The same matrix dispatches real keyboard events for navigation plus dialog focus, Tab and Esc.
@@ -311,6 +339,7 @@ try {
   console.log(`browser render gate passed: ${browser.product}; ${browserLocales.length} locales; ` +
     `${viewports.length} viewports; native AX + keyboard on dashboard/settings/all routed modals; ` +
     "reduced motion on dashboard/settings/WiFi/progress/disclosures");
+  }
 } finally {
   await browser.close();
   await server.close();
