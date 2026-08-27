@@ -124,7 +124,12 @@ function fakeEsptool(chipFamily = "ESP32-S3") {
       calls.push("write");
       options.reportProgress(0, options.fileArray[0].data.length, options.fileArray[0].data.length);
     }
-    async after(mode) { calls.push(`reset:${mode}`); }
+    async after(mode) {
+      calls.push(`reset:${mode}`);
+      if (mode !== "hard_reset") {
+        throw new Error("Soft resetting is currently only supported on ESP8266");
+      }
+    }
   }
   return { calls, Transport, Loader };
 }
@@ -140,7 +145,40 @@ test("device probing validates the manifest and always resets and closes the por
   });
 
   assert.equal(result.chipFamily, "ESP32-S3");
-  assert.deepEqual(fake.calls, ["transport", "loader", "main", "flashId", "reset:soft_reset", "disconnect"]);
+  assert.deepEqual(fake.calls, ["transport", "loader", "main", "flashId", "reset:hard_reset", "disconnect"]);
+});
+
+test("device probing resets when loader startup fails after the flasher stub starts", async () => {
+  const calls = [];
+  const startupError = new Error("Flash ID validation failed after stub startup");
+  class Transport {
+    constructor() { calls.push("transport"); }
+    async disconnect() { calls.push("disconnect"); }
+  }
+  class Loader {
+    constructor() { calls.push("loader"); }
+    async main() {
+      calls.push("main:stub-running");
+      this.chip = { CHIP_NAME: "ESP32-S3" };
+      throw startupError;
+    }
+    async after(mode) { calls.push(`reset:${mode}`); }
+  }
+
+  await assert.rejects(probeDevice({
+    port: { getInfo() { return { usbVendorId: 0x303a, usbProductId: 0x1001 }; } },
+    manifest,
+    TransportCtor: Transport,
+    ESPLoaderCtor: Loader
+  }), (error) => error === startupError);
+
+  assert.deepEqual(calls, [
+    "transport",
+    "loader",
+    "main:stub-running",
+    "reset:hard_reset",
+    "disconnect"
+  ]);
 });
 
 test("device probing times out and releases an unresponsive serial device", async () => {
@@ -221,9 +259,64 @@ test("flash writes the sparse manifest parts and only erases when explicitly sel
 
   assert.equal(result.chipFamily, "ESP32-S3");
   assert.equal(fake.calls.includes("erase"), false);
-  assert.deepEqual(fake.calls.slice(-3), ["write", "reset:soft_reset", "disconnect"]);
+  assert.deepEqual(fake.calls.slice(-3), ["write", "reset:hard_reset", "disconnect"]);
   assert.equal(states.at(-1).percentage, 100);
   assert.equal(states.at(-1).message, "Starting firmware");
+});
+
+test("a flash write failure is preserved after hard-reset cleanup closes the port", async () => {
+  const fake = fakeEsptool();
+  const writeError = new Error("write failed");
+  fake.Loader.prototype.writeFlash = async function writeFlash() {
+    fake.calls.push("write");
+    throw writeError;
+  };
+
+  await assert.rejects(flashDevice({
+    port: { getInfo() { return { usbVendorId: 0x303a, usbProductId: 0x1001 }; } },
+    manifest,
+    manifestUrl: "https://example.test/manifest.json",
+    eraseFirst: false,
+    TransportCtor: fake.Transport,
+    ESPLoaderCtor: fake.Loader,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async arrayBuffer() { return Uint8Array.from([1, 2, 3, 4]).buffer; }
+    })
+  }), (error) => error === writeError);
+
+  assert.deepEqual(fake.calls.slice(-3), ["write", "reset:hard_reset", "disconnect"]);
+});
+
+test("a post-write reset failure is preserved while cleanup still disconnects", async () => {
+  const fake = fakeEsptool();
+  const resetError = new Error("reset failed");
+  fake.Loader.prototype.after = async function after(mode) {
+    fake.calls.push(`reset:${mode}`);
+    throw resetError;
+  };
+
+  await assert.rejects(flashDevice({
+    port: { getInfo() { return { usbVendorId: 0x303a, usbProductId: 0x1001 }; } },
+    manifest,
+    manifestUrl: "https://example.test/manifest.json",
+    eraseFirst: false,
+    TransportCtor: fake.Transport,
+    ESPLoaderCtor: fake.Loader,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async arrayBuffer() { return Uint8Array.from([1, 2, 3, 4]).buffer; }
+    })
+  }), (error) => error === resetError);
+
+  assert.deepEqual(fake.calls.slice(-4), [
+    "write",
+    "reset:hard_reset",
+    "reset:hard_reset",
+    "disconnect"
+  ]);
 });
 
 test("serial monitor resets into user firmware with IO0 high before reading logs", async () => {
