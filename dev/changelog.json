@@ -1,1 +1,1 @@
-{"version":"1.0.3-dev.20","changelog":"Accept exact legacy writer evidence"}
+{"version":"1.0.3-dev.22","changelog":"v1.0.3-dev.15 — Hard-reset ESP32-S3 after serial flash\nv1.0.3-dev.17 — Fix OTA stress HTTP handoff\nv1.0.3-dev.18 — Maintenance and reliability improvements.\nv1.0.3-dev.19 — Preserve legacy bench restore compatibility\nv1.0.3-dev.20 — Accept exact legacy writer evidence\nv1.0.3-dev.22 — Maintenance and reliability improvements."}
