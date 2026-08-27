@@ -14,6 +14,7 @@ from pathlib import Path
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 IDF_RE = re.compile(r"^v[0-9]+\.[0-9]+(?:\.[0-9]+)?$")
+VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-dev\.[0-9]+)?$")
 ARTIFACT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.bin$")
 OTA_MANIFEST_LIMIT_RE = re.compile(
     r"constexpr\s+size_t\s+kManifestMax\s*=\s*([0-9]+)\s*;"
@@ -23,6 +24,11 @@ OTA_SOURCE = ROOT / "main/ota_update.cpp"
 PINNED_SIGNING_DIGEST = (
     ROOT / "tools/release/ota_signing_key_digest.txt"
 )
+ARTIFACT_INDEX_NAME = "artifacts.json"
+# The signed 1.0.2 release used by the ordinary bench full-download exercise has a fixed 1024-byte
+# manifest reader. Keep every newly published feed restorable by that release until the supported
+# release floor is deliberately advanced together with the production gate.
+LEGACY_RESTORE_MANIFEST_MAX_BYTES = 1024
 
 
 def digest(path: Path) -> str:
@@ -88,18 +94,24 @@ def check(
         fail(f"expected IDF version is invalid: {idf_version!r}")
     try:
         manifest_bytes = manifest_path.read_bytes()
-        manifest_text = manifest_bytes.decode("utf-8")
+        manifest_text = manifest_bytes.decode("ascii")
         document = json.loads(manifest_text)
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         fail(f"cannot read {manifest_path}: {exc}")
-    manifest_limit = ota_manifest_limit()
+    if b"\\" in manifest_bytes:
+        fail("manifest uses escapes rejected by the oldest supported restore parser")
+    manifest_limit = min(ota_manifest_limit(), LEGACY_RESTORE_MANIFEST_MAX_BYTES)
     if len(manifest_bytes) > manifest_limit:
         fail(
-            f"manifest is {len(manifest_bytes)} bytes but firmware accepts at most "
+            f"manifest is {len(manifest_bytes)} bytes but the supported restore path accepts at most "
             f"{manifest_limit} bytes"
         )
     if not isinstance(document, dict) or not isinstance(document.get("provenance"), dict):
         fail("manifest has no provenance object")
+    if not isinstance(document.get("version"), str) or not VERSION_RE.fullmatch(document["version"]):
+        fail("manifest has no supported version")
+    if "artifacts" in document:
+        fail(f"manifest embeds artifacts; use the sibling {ARTIFACT_INDEX_NAME}")
 
     provenance = document["provenance"]
     expected = {
@@ -116,10 +128,20 @@ def check(
         if field.endswith("_sha256") and not SHA256_RE.fullmatch(actual):
             fail(f"{field} is not lowercase SHA-256")
     expected_artifacts = artifact_index(manifest_path.parent)
-    if document.get("artifacts") != expected_artifacts:
+    artifact_index_path = manifest_path.parent / ARTIFACT_INDEX_NAME
+    try:
+        index_document = json.loads(artifact_index_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        fail(f"cannot read {artifact_index_path}: {exc}")
+    expected_index = {
+        "schema_version": 1,
+        "manifest_sha256": digest(manifest_path),
+        "artifacts": expected_artifacts,
+    }
+    if index_document != expected_index:
         fail(
-            "artifacts index does not exactly bind every sibling .bin file: "
-            f"expected {expected_artifacts!r}, got {document.get('artifacts')!r}"
+            f"{ARTIFACT_INDEX_NAME} does not bind the exact manifest and every sibling .bin file: "
+            f"expected {expected_index!r}, got {index_document!r}"
         )
     print(
         "manifest provenance: OK "
@@ -135,6 +157,7 @@ def self_test() -> None:
         app = root / "app.bin"
         lock = root / "dependencies.lock"
         manifest = root / "manifest.json"
+        artifacts = root / ARTIFACT_INDEX_NAME
         app.write_bytes(b"signed-app")
         (root / "merged.bin").write_bytes(b"merged-image")
         lock.write_bytes(b"locked-components\n")
@@ -151,7 +174,12 @@ def self_test() -> None:
             }
             provenance.update(overrides)
             manifest.write_text(json.dumps({
+                "version": "1.2.3-dev.4",
                 "provenance": provenance,
+            }), encoding="utf-8")
+            artifacts.write_text(json.dumps({
+                "schema_version": 1,
+                "manifest_sha256": digest(manifest),
                 "artifacts": artifact_index(root),
             }), encoding="utf-8")
 
@@ -172,9 +200,9 @@ def self_test() -> None:
                 continue
             raise AssertionError(f"self-test failed to reject wrong {field}")
         write()
-        document = json.loads(manifest.read_text(encoding="utf-8"))
-        document["artifacts"][0]["sha256"] = "0" * 64
-        manifest.write_text(json.dumps(document), encoding="utf-8")
+        index_document = json.loads(artifacts.read_text(encoding="utf-8"))
+        index_document["artifacts"][0]["sha256"] = "0" * 64
+        artifacts.write_text(json.dumps(index_document), encoding="utf-8")
         try:
             check(manifest, app, source, idf, lock)
         except SystemExit:
@@ -182,13 +210,30 @@ def self_test() -> None:
         else:
             raise AssertionError("self-test accepted an artifact-index mismatch")
         write()
+        manifest.write_text(
+            manifest.read_text(encoding="ascii").replace("dev.4", r"dev.\u0034"),
+            encoding="ascii",
+        )
+        artifacts.write_text(json.dumps({
+            "schema_version": 1,
+            "manifest_sha256": digest(manifest),
+            "artifacts": artifact_index(root),
+        }), encoding="utf-8")
+        try:
+            check(manifest, app, source, idf, lock)
+        except SystemExit as exc:
+            if "uses escapes" not in str(exc):
+                raise
+        else:
+            raise AssertionError("self-test accepted an escaped legacy identity")
+        write()
         document = json.loads(manifest.read_text(encoding="utf-8"))
         document["oversized_test_padding"] = "x" * ota_manifest_limit()
         manifest.write_text(json.dumps(document), encoding="utf-8")
         try:
             check(manifest, app, source, idf, lock)
         except SystemExit as exc:
-            if "firmware accepts at most" not in str(exc):
+            if "restore path accepts at most" not in str(exc):
                 raise
         else:
             raise AssertionError("self-test accepted a manifest above the firmware limit")

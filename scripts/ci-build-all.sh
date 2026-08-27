@@ -12,6 +12,7 @@
 #   daikin-altherma-esp32<suffix>-size.json    ESP-IDF's machine-readable section/region report
 #   daikin-altherma-esp32<suffix>-size.md      human-readable app/flash/RAM budget summary
 #   manifest.json                              browser-installer builds[] + OTA artifact identity
+#   artifacts.json                             exact manifest-bound hash/size index of every .bin
 #   changelog.json                             public, version-bound release/dev build notes
 #
 # Calls idf.py / esptool / espsecure DIRECTLY — it assumes an ESP-IDF environment is already
@@ -466,9 +467,11 @@ fi
 [ -n "$FINAL_APP_SHA256" ] || { echo "ci-build-all: final signed app hash is missing" >&2; exit 1; }
 [ -n "$SIGNING_KEY_SHA256" ] || { echo "ci-build-all: signing-key identity is missing" >&2; exit 1; }
 
-# Bind every public flashable byte sequence, not only the OTA app. The same manifest is the
-# declarative artifact index used by the Pages readback, so a missing/stale bootloader, partition,
-# sparse Web Serial part or merged image cannot hide behind a healthy main application.
+# Bind every public flashable byte sequence, not only the OTA app. The sibling artifacts.json is
+# the declarative artifact index used by the Pages readback, so a missing/stale bootloader,
+# partition, sparse Web Serial part or merged image cannot hide behind a healthy main application.
+# Keeping this inventory out of manifest.json preserves the 1024-byte restore contract of the
+# oldest supported signed release while retaining exact public-byte verification.
 artifacts_json=""
 artifact_count=0
 for artifact in "$DIST"/*.bin; do
@@ -485,8 +488,9 @@ for artifact in "$DIST"/*.bin; do
 done
 [ "$artifact_count" -gt 0 ] || { echo "ci-build-all: no publishable binary artifacts" >&2; exit 1; }
 
-# One manifest serves both the installer (builds[]) and OTA (version). The browser installer reads
-# builds[]/chipFamily; the device OTA reads .version and pulls daikin-altherma-esp32<suffix>.bin.
+# One compact manifest serves both the installer (builds[]) and OTA (version). The browser installer
+# reads builds[]/chipFamily; the device OTA reads .version and pulls
+# daikin-altherma-esp32<suffix>.bin. The larger publisher/readback artifact inventory is emitted separately.
 cat > "$DIST/manifest.json" <<EOF
 {
   "name": "daikin-altherma-esp32",
@@ -498,9 +502,16 @@ cat > "$DIST/manifest.json" <<EOF
     "app_sha256": "$FINAL_APP_SHA256",
     "signing_key_sha256": "$SIGNING_KEY_SHA256"
   },
-  "artifacts": [$artifacts_json],
   "new_install_prompt_erase": true,
   "builds": [$builds_json]
+}
+EOF
+manifest_sha256="$(sha256sum "$DIST/manifest.json" | cut -d ' ' -f1)"
+cat > "$DIST/artifacts.json" <<EOF
+{
+  "schema_version": 1,
+  "manifest_sha256": "$manifest_sha256",
+  "artifacts": [$artifacts_json]
 }
 EOF
 scripts/check-manifest-provenance.py "$DIST/manifest.json" \
