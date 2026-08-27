@@ -2514,8 +2514,10 @@ Structure:
   observed owner a separate bounded recovery allowance: the manifest check requires a new connected
   status sample within 15 seconds after release. Weather first returns one non-zero refresh token;
   requested, started, completed and success must all equal that exact token and the success counter
-  must advance. The task claims and drains the matching notification atomically, so a natural/retry
-  fetch cannot satisfy the request or leave a second unobserved TLS cycle queued. This token-bound
+  must advance. The task claims and drains the matching notification atomically, so an unbound
+  natural/retry fetch cannot satisfy the request or leave a second unobserved TLS cycle queued. An
+  OTA-preempted attempt instead releases only its local claim, allowing a later cycle to reclaim the
+  same exact token. This token-bound
   proof also covers the short status-update to asynchronous MQTT-resume gap. Because `/status` streams subsystem snapshots, one request can
   straddle that edge and contain either old weather fields beside paused MQTT or old connected MQTT
   beside new weather evidence. In the first direction the unexplained sample stays pending for the
@@ -3152,7 +3154,9 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity â€
                   `refresh_completed_token`, `refresh_success_token` (zero means no such event).
                   Requested is the last accepted explicit trigger; started is claimed by the task;
                   completed covers success, failure or source cancellation; success advances only
-                  when that exact token's fresh snapshot commits. Completion is final and first-wins:
+                  when that exact token's fresh snapshot commits. OTA serialization before TLS
+                  releases only the current attempt, so the same outstanding token is reclaimed
+                  after OTA becomes idle. Completion remains final and first-wins:
                   once a source transaction cancels a token, a late result from the superseded fetch
                   cannot rewrite that cancellation as success. Thus an unrelated scheduled or retry
                   fetch cannot satisfy a release-HIL request merely by advancing `successes`.

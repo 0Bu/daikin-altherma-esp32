@@ -318,6 +318,20 @@ try {
       "selftest/desktop/pl/refTempModal");
     await assertModalKeyboard(page, "refTempModal", "selftest/desktop/pl/refTempModal");
     console.log("browser modal-focus selftest passed: delayed focus and scroll lock were awaited");
+  } else if (mutation === "route-isolation-bypass") {
+    // Keep this mutation focused on the exact route-isolation boundary. Running the complete
+    // locale/viewport matrix would exercise unrelated transient dialogs before reaching the first
+    // isolated modal, so a timing failure there could hide whether this mutation still has teeth.
+    await page.viewport(viewports[1].width, viewports[1].height);
+    await activateLocale(page, "de");
+    await page.evaluate(`(() => {
+      showStage("settings");
+      writeRoute("settings", null, { replace: true, parent: null });
+      return true;
+    })()`);
+    await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
+      "selftest/desktop/de/refTempModal", { route: false });
+    throw new Error("route-isolation-bypass mutation unexpectedly survived the route gate");
   } else {
 
   // Full semantic matrix: every shipped locale, both supported viewport classes, both views and

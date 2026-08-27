@@ -93,10 +93,18 @@ void complete_refresh_request(uint64_t token, bool success) noexcept {
                                    success, s_refresh_completed_token, s_refresh_success_token);
 }
 
+bool defer_refresh_request(uint64_t token) noexcept {
+    if (token == 0 || !s_mtx) return false;
+    SemGuard lk(s_mtx);
+    return weather_refresh_defer(s_refresh_requested_token, s_refresh_started_token, token,
+                                 s_refresh_completed_token);
+}
+
 // Defaults to fail-closed completion on every return/continue/exception after a request token has
 // been claimed. finish() runs explicitly before long sleeps, so /status never waits 45 minutes to
 // learn the result of an already-finished explicit attempt. Only the real forecast commit succeeds;
-// OTA/quiesce/headroom deferrals are completed as failed and can never inherit a later retry edge.
+// quiesce/headroom deferrals are completed as failed and can never inherit a later retry edge. OTA
+// is the sole exception: serialization releases the local claim while the same token stays pending.
 struct RefreshRequestAttempt {
     uint64_t token = 0;
 
@@ -106,6 +114,10 @@ struct RefreshRequestAttempt {
         if (token == 0) return;
         complete_refresh_request(token, success);
         token = 0;
+    }
+
+    void defer() noexcept {
+        if (defer_refresh_request(token)) token = 0;
     }
 };
 
@@ -664,7 +676,9 @@ void weather_task(void*) {
                     s_status.reason = "ota_active";
                     s_status.error.clear();
                 }
-                refresh_attempt.finish(false);
+                // OTA is a peer serialization owner, not a Weather result. Keep the exact explicit
+                // token outstanding so this task reclaims it after OTA releases the shared heap.
+                refresh_attempt.defer();
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
                 continue;
             }

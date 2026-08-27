@@ -507,8 +507,9 @@ the fixed three-minute pressure window with another real OTA-manifest TLS fetch.
 stops MQTT while either OTA or Open-Meteo TLS holds the constrained network heap. After requiring a
 connected baseline, the gate gives each observed owner at most 15 seconds to recover. Weather HIL
 first receives a non-zero refresh token, then accepts only that exact requested/started/completed/
-success token plus a success-counter increment. A scheduled/retry success cannot borrow the
-allowance. A streamed
+success token plus a success-counter increment. If OTA wins after Weather claimed the token, the
+attempt releases only its local claim and the same outstanding token is reclaimed after OTA; an
+unbound scheduled/retry success cannot borrow the allowance. A streamed
 status snapshot can see either paused MQTT before its matching weather edge or old connected MQTT
 beside new weather evidence. The first direction remains pending for the same bound until later owner
 evidence; the reverse direction keeps the allowance open until a later connected sample without fresh

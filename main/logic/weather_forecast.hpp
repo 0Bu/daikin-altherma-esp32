@@ -149,7 +149,8 @@ inline bool weather_reason_valid(std::string_view reason) {
 
 // Causal state machine for the non-persistent refresh witness. Completion is final: a source-change
 // cancellation and the old network attempt may race after the value commit, but only the first
-// completion is allowed to decide whether this exact token succeeded.
+// completion is allowed to decide whether this exact token succeeded. OTA serialization is not a
+// completion: the same outstanding token may be released and claimed again after OTA becomes idle.
 inline uint64_t weather_refresh_claim(uint64_t requested_token, uint64_t completed_token,
                                       uint64_t& started_token) {
     if (requested_token == completed_token) return 0;
@@ -166,6 +167,12 @@ inline bool weather_refresh_complete(uint64_t requested_token, uint64_t started_
     if (success) success_token = token;
     completed_token = token;
     return true;
+}
+
+inline bool weather_refresh_defer(uint64_t requested_token, uint64_t started_token, uint64_t token,
+                                  uint64_t completed_token) {
+    return token != 0 && requested_token == token && started_token == token &&
+           completed_token != token;
 }
 
 inline void weather_refresh_cancel_outstanding(uint64_t  requested_token,

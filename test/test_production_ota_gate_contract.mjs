@@ -453,13 +453,21 @@ const refreshClaim = section(weatherSource, "uint64_t claim_refresh_request_lock
 assert.match(refreshClaim,
   /weather_refresh_claim\(s_refresh_requested_token, s_refresh_completed_token,[\s\S]*?s_refresh_started_token\)/);
 const refreshComplete = section(weatherSource, "void complete_refresh_request(",
-  "\n}\n\n// Defaults to fail-closed completion");
+  "\n}\n\nbool defer_refresh_request");
 assert.match(refreshComplete,
   /weather_refresh_complete\(s_refresh_requested_token, s_refresh_started_token, token,[\s\S]*?success, s_refresh_completed_token, s_refresh_success_token\)/,
   "firmware refresh completion must use the tested first-wins state transition");
 assert.match(weatherLogic,
   /weather_refresh_complete\([\s\S]*?completed_token == token[\s\S]*?return false;[\s\S]*?if \(success\) success_token = token;[\s\S]*?completed_token = token/,
   "a source-change cancellation must be final against the old attempt's late success finish");
+const refreshDefer = section(weatherSource, "bool defer_refresh_request(",
+  "\n}\n\n// Defaults to fail-closed completion");
+assert.match(refreshDefer,
+  /weather_refresh_defer\(s_refresh_requested_token, s_refresh_started_token, token,[\s\S]*?s_refresh_completed_token\)/,
+  "firmware OTA deferral must use the tested exact-token state transition");
+assert.match(weatherLogic,
+  /weather_refresh_defer\([\s\S]*?token != 0[\s\S]*?requested_token == token[\s\S]*?started_token == token[\s\S]*?completed_token != token/,
+  "OTA deferral must accept only the still-outstanding exact refresh token");
 const weatherTask = section(weatherSource, "void weather_task(void*)", "\n}\n\n}  // namespace");
 const fetchAdmission = section(weatherTask, "time_now(now, ms);", "WeatherForecastSample sample;");
 const admissionLock = fetchAdmission.indexOf("Lock lk(s_mtx)");
@@ -477,7 +485,14 @@ assert.match(weatherTask,
   "only the real forecast update commit may complete an explicit refresh successfully");
 assert.match(weatherSource,
   /~RefreshRequestAttempt\(\) noexcept \{ finish\(false\); \}/,
-  "every exceptional or early-exit request path must fail-complete its exact token");
+  "the attempt guard must fail-complete every path that was not explicitly deferred");
+const otaPreempted = section(weatherTask, "if (ota_preempted) {",
+  "\n            if (poll_quiesce_failed");
+assert.match(otaPreempted,
+  /refresh_attempt\.defer\(\)[\s\S]*?ulTaskNotifyTake\(pdTRUE, pdMS_TO_TICKS\(1000\)\)[\s\S]*?continue;/,
+  "OTA serialization must leave the exact refresh token pending for reclaim");
+assert.doesNotMatch(otaPreempted, /refresh_attempt\.finish\(false\)/,
+  "OTA serialization must not fail-complete the causal refresh token");
 assert.match(weatherSource,
   /WeatherSourceChange::commit\(\) noexcept[\s\S]*?weather_refresh_cancel_outstanding\(s_refresh_requested_token,[\s\S]*?s_refresh_completed_token\)/,
   "a source or consent replacement must cancel an unclaimed refresh token");

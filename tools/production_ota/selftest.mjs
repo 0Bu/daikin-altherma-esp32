@@ -362,6 +362,9 @@ try {
     ["Weather HIL success is not tied to the real update commit", () =>
       replaceOnce("main/weather_forecast.cpp", "refresh_attempt.finish(updated);",
         "refresh_attempt.finish(ok);")],
+    ["OTA preemption fail-completes the exact Weather refresh token", () =>
+      replaceOnce("main/weather_forecast.cpp", "refresh_attempt.defer();",
+        "refresh_attempt.finish(false);")],
     ["Weather TLS completion is not stack-sampled", () =>
       replaceNth("main/weather_forecast.cpp", "stack_watch_sample(StackWatch::Weather);",
         "stack_watch_sample_bypassed(StackWatch::Weather);", 2)],
