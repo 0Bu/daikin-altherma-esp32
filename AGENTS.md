@@ -158,6 +158,10 @@ documentation.
 - Production promotion remains a distinct `--confirm-production production --execute` transaction:
   bench staging and stress precede one production POST plus read-only canary and retained-X10A
   checks. Direct `/ota/update` writes and release creation remain outside both modes.
+- A manual release publishes only after the isolated `release-hil` runner has exercised the exact
+  signed candidate through armed rollback, a second committed install, cold power-cycle restore,
+  and a candidate-writer downgrade to the pinned bootstrap followed by rollback to the valid
+  candidate, before stack evidence and combined stress. This CI-only mode accepts no production role.
 
 ## Build and deterministic gates
 
@@ -165,6 +169,9 @@ Use the repository entry points rather than ad hoc substitutes:
 
 ```bash
 scripts/run-mock-tests.sh --coverage
+scripts/run-sanitizer-fuzz-tests.sh
+scripts/run-runtime-integration-tests.sh
+scripts/run-format-check.sh
 scripts/run-contract-tests.sh
 scripts/run-domain-audit.sh
 scripts/run-description-audit.sh
@@ -172,6 +179,7 @@ scripts/run-user-docs-audit.sh
 scripts/run-schematic-audit.sh
 scripts/run-ui-localization-audit.sh
 scripts/run-ui-use-case-tests.sh
+scripts/run-browser-render-tests.sh
 scripts/run-redaction-audit.sh
 scripts/run-pr-hygiene-audit.sh
 scripts/run-ui-gif-audit.sh

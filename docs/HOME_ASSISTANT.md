@@ -34,11 +34,13 @@ by the object id alone — see below for why.
 <base>/status                                      online | offline   (LWT, retained)
 <base>/x10a                                        {<group>: {<object_id>: value, …}, …}  (retained JSON)
 <base>/modbus                                      {<object_id>: value, …}  (retained JSON; enabled HomeHub only)
-<base>/env3                                        {temperature_c, humidity_pct, pressure_hpa}  (retained
-                                                   JSON; optional M5Stack ENV III sensor only)
+<base>/env3                                        {samples, errors, [temperature_c, humidity_pct,
+                                                   pressure_hpa]}  (retained JSON; reading keys exist only
+                                                   while the optional M5Stack ENV III sample is fresh)
 <base>/weather/openmeteo/forecast                  outdoor/solar forecast evidence (retained JSON; only
-                                                   while a location is saved. No HA entities — a
-                                                   forecast is not a state of this device)
+                                                   while a location is saved and diagnostics consent is
+                                                   enabled. No HA entities — a forecast is not a state of
+                                                   this device)
 <base>/heartbeat                                   board/link diagnostics (flat JSON, 10 s cadence)
 <base>/heating_curve                               grouped room-source + diagnosis evidence (10 s cadence)
 <base>/crash                                       crash report, retained — ONLY while a fault/dump is pending
@@ -76,11 +78,23 @@ shared topic and pulls its value out with a `value_template`:
 
 When the HomeHub stack is enabled, its available register values are published independently as a
 flat retained object on `<base>/modbus`; a disconnected HomeHub produces `{}` and disabling the
-source removes that data topic. This stream intentionally has **no Home
+source removes that data topic. The saved target intent, not a retiring poll task's lagging status,
+decides whether it may publish. A cleanup attempt suppresses the source for that entire MQTT cycle,
+so the tombstone cannot be followed immediately by stale `{}`; an enabled A-to-B cutover may publish
+the new source's empty pre-first-sample state on the following cycle. Weather and ENV III cleanup use
+the same same-cycle suppression. These cleanup messages are serialized: only one empty retained
+QoS-1 message is outstanding, and only its matching PUBACK advances the cleanup. Pending sources
+remain suppressed. A missing PUBACK causes no duplicate while the outbox owns the item; an explicit
+outbox-expiry event or a joined OTA/Weather transport stop retries that same step, and evidence-ring
+overflow first clears the stopped outbox rather than guessing. A replacement client reconstructs
+the durable cleanup plan, an ordinary same-client reconnect preserves its in-flight item, and the
+MQTT outbox is capped at 8 KiB. Incremental packet IDs keep this client-epoch/id correlation
+distinct from concurrent subscriptions and QoS-1 traffic. This stream intentionally has **no Home
 Assistant discovery configs**: HA exposes X10A values, board/link diagnostics and — where the
 optional M5Stack ENV III sensor is fitted — its three readings. Builds up to
-`v1.0.0-dev.257` did announce 27 Modbus entities; connect-time and five-minute retained tombstones
-to those exact retired discovery topics remove them from existing HA installations
+`v1.0.0-dev.257` did announce 27 Modbus entities; their component/object-id pairs are an immutable
+literal retirement ledger, deliberately independent of today's 32-row HomeHub catalog. Connect-time
+QoS-1 tombstones and five-minute delete-only retirement passes outside the X10A gate remove those exact topics from existing HA installations
 without affecting `<base>/modbus`. Named HomeHub selectors keep their raw numeric constants in that
 MQTT state topic (`smart_grid_operation_mode: 2`); readable names remain a web-UI concern. The
 redundant retained `<base>/modbus/status` emitted by those builds is probed and deleted when present;
@@ -120,8 +134,9 @@ this resolves). Its state class is `measurement`, not `total_increasing`: the va
 this *boot* inherited and returns to `0` on the next healthy boot, so a monotonic class would make
 HA read every recovery as a counter reset. Anything above `0` is worth an automation.
 
-`httpd_stack_min_free_bytes`, `poll_stack_min_free_bytes`, `mqtt_stack_min_free_bytes` and
-`modbus_stack_min_free_bytes` are the **second memory budget**: the worst stack headroom each task
+`httpd_stack_min_free_bytes`, `poll_stack_min_free_bytes`, `mqtt_stack_min_free_bytes`,
+`modbus_stack_min_free_bytes` and `weather_stack_min_free_bytes` are the **second memory budget**:
+the worst stack headroom each task
 has had since boot, in **bytes** (ESP-IDF's `uxTaskGetStackHighWaterMark` answers in bytes, unlike
 vanilla FreeRTOS, which is why the unit is in the field name). Every heap figure above is already reported
 and charted; the stack was visible only in a core dump's task table, which exists only once the
@@ -130,7 +145,8 @@ trend across firmware versions rather than as an absolute: a steadily falling li
 call frame, which is what nothing could see before. **`null` means never sampled, not zero
 headroom** — `modbus_` stays null on a board with no HomeHub, and `httpd_` stays null until the
 board serves its first HTTP request, since the deep frame only exists while one is being served.
-They are payload-only, with no HA entity: four permanently-flat diagnostics are four more things to
+Weather samples immediately after its TLS/HTTP/JSON interval as well as at its loop boundary. They
+are payload-only, with no HA entity: five permanently-flat diagnostics are five more things to
 rule out, and the audience for a headroom trend is whoever is upgrading the firmware.
 
 Room-source and heating-curve evidence lives separately on `<base>/heating_curve` (not retained),
@@ -279,8 +295,8 @@ rather than discovering later.
 > is connected, for the reason the swap note below gives. Do **not** run either against a base a board
 > is still publishing under — it will simply republish, and you will have deleted nothing.
 The retired Modbus discovery topics keep their `_modbus` namespace only as cleanup targets. They are
-deleted on every broker connection and never republished, while `<base>/modbus` remains available to
-ordinary MQTT consumers.
+deleted on every broker connection even while X10A is silent, and never republished, while
+`<base>/modbus` remains available to ordinary MQTT consumers.
 
 The board's own id `daikin_<mac3>` (low three bytes of the WiFi STA MAC) still exists, but only
 where the *hardware* is what's being identified: as the **MQTT client id** — which has to be unique

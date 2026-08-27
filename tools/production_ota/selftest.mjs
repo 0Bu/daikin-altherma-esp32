@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Prove the production OTA source contract still detects removal of its load-bearing boundaries.
-// Every mutation runs in an isolated throwaway tree; hardware is never contacted.
+// Mutation-test the production OTA source contracts in an isolated throwaway tree.  The board,
+// controller, network and signing key are never contacted.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -9,15 +9,23 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const contract = path.join(root, "test/test_production_ota_gate_contract.mjs");
+const centralContract = path.join(root, "test/test_production_ota_gate_contract.mjs");
 const files = [
   "scripts/production-ota-gate.py",
   "tools/agent-hooks/agent_hook.py",
   "main/logic/health_gate.hpp",
+  "main/logic/ota_hil_feed.hpp",
+  "main/logic/ota_quiesce.hpp",
   "main/ota_update.cpp",
   "main/http_ota.cpp",
+  "main/http_config.cpp",
+  "main/http_status.cpp",
+  "main/weather_forecast.cpp",
+  "main/weather_forecast.hpp",
+  "main/logic/weather_forecast.hpp",
+  "main/stack_watch.hpp",
+  "main/logic/heartbeat.hpp",
   "main/mqtt_ha.cpp",
-  "main/logic/ota_quiesce.hpp",
   ".github/workflows/build.yml",
 ];
 const pristine = new Map(files.map(rel => [rel, fs.readFileSync(path.join(root, rel), "utf8")]));
@@ -30,6 +38,7 @@ const restore = () => {
     fs.writeFileSync(target, contents);
   }
 };
+
 const replaceOnce = (rel, before, after) => {
   const target = path.join(tmp, rel);
   const old = fs.readFileSync(target, "utf8");
@@ -37,416 +46,531 @@ const replaceOnce = (rel, before, after) => {
   assert.notEqual(changed, old, `mutation no longer reaches ${rel}: ${String(before)}`);
   fs.writeFileSync(target, changed);
 };
-const run = () => spawnSync(process.execPath, [contract], {
+
+const replaceNth = (rel, before, after, wanted) => {
+  assert.ok(typeof before === "string" && before.length > 0);
+  const target = path.join(tmp, rel);
+  const old = fs.readFileSync(target, "utf8");
+  let offset = 0;
+  let found = -1;
+  for (let current = 1; current <= wanted; current++) {
+    found = old.indexOf(before, offset);
+    assert.ok(found >= 0, `mutation no longer reaches occurrence ${wanted} in ${rel}: ${before}`);
+    offset = found + before.length;
+  }
+  const changed = old.slice(0, found) + after + old.slice(found + before.length);
+  fs.writeFileSync(target, changed);
+};
+
+const readTmp = rel => fs.readFileSync(path.join(tmp, rel), "utf8");
+const section = (text, start, end) => {
+  const first = text.indexOf(start);
+  const last = text.indexOf(end, first + start.length);
+  assert.ok(first >= 0 && last > first, `missing source section ${start}`);
+  return text.slice(first, last);
+};
+
+// These assertions supplement the central contract with narrow implementation boundaries whose
+// removal used to pass shape-only review.  Every seeded mutation below must fail at least one
+// executable contract.
+const supplementalContract = () => {
+  const gate = readTmp("scripts/production-ota-gate.py");
+  const httpOta = readTmp("main/http_ota.cpp");
+  const feed = readTmp("main/logic/ota_hil_feed.hpp");
+
+  const transport = section(gate, "def read_bounded_http_response(", "\ndef verify_http_range_support(");
+  assert.match(transport, /transfer_encodings\[0\]\s*!=\s*b"chunked"/);
+  assert.match(transport, /re\.fullmatch\(rb"\[0-9A-Fa-f\]\+", size_text\)/);
+  assert.match(transport, /chunk_size\s*>\s*max_body_bytes\s*-\s*len\(body\)/);
+  assert.match(transport, /trailers or bytes after its terminator/);
+  assert.match(transport, /if status < 200 or status >= 300:\s*\n\s*raise HTTPError/);
+  assert.ok(
+    transport.indexOf("if status < 200 or status >= 300:") >
+      transport.indexOf("chunked HTTP response has trailers or bytes after its terminator"),
+    "HTTP 503 may be classified only after complete strict framing",
+  );
+
+  const pressureFailure = section(
+    gate, "def record_bench_pressure_failure(", "\ndef exercise_bench_full_download(",
+  );
+  assert.match(pressureFailure, /isinstance\(error, HTTPError\)[\s\S]*?error\.code == 503/);
+  assert.match(pressureFailure, /isinstance\(error, \(CompactTransportError, OSError, TimeoutError\)\)/);
+  assert.match(pressureFailure, /unexpected\.append/);
+  const fullDownload = section(
+    gate, "def exercise_bench_full_download(", "\ndef require_ota_transfer_evidence(",
+  );
+  assert.match(fullDownload, /except BaseException as error:/);
+  assert.match(fullDownload, /if kind == "status":\s*\n\s*request_status_deadline\(status_endpoint/);
+  assert.match(fullDownload, /elif kind == "values":\s*\n\s*request_values_deadline\(status_endpoint/);
+  assert.match(fullDownload, /record_bench_pressure_failure\(kind, error, counts, unexpected, lock\)/);
+  assert.match(fullDownload, /worker\.join[\s\S]*?worker\.is_alive\(\)/);
+  assert.match(fullDownload, /if unexpected:[\s\S]*?fail\(/);
+  const rebootWait = section(gate, "def wait_for_new_firmware(", "\ndef set_update_channel(");
+  assert.match(rebootWait, /\("ota_stack_min_free_bytes",\s*"ota_stack_min_free_bytes"\)/);
+  const identityWait = section(
+    gate, "def wait_for_identity(", "\ndef wait_for_ota_image_state(",
+  );
+  assert.match(identityWait, /endpoint\s*=\s*resolve_http_endpoint\(host\)/);
+  assert.match(identityWait,
+    /request_status_deadline\([\s\S]{0,120}?timeout=min\(remaining, HTTP_TIMEOUT_S\)/);
+  assert.doesNotMatch(identityWait, /request_json\(|request_bytes\(/);
+  const healthWait = section(
+    gate, "def wait_for_bench_health_window(", "\ndef wait_for_legacy_offer(",
+  );
+  assert.match(healthWait, /request_status_deadline\([\s\S]{0,140}?timeout=min\(remaining, HTTP_TIMEOUT_S\)/);
+  assert.doesNotMatch(healthWait, /request_json\(|request_bytes\(/);
+  const transferEvidence = section(
+    gate, "def require_ota_transfer_evidence(", "\ndef install_bench_target(",
+  );
+  assert.match(transferEvidence, /ota_stack\s*<\s*1024/);
+
+  const controller = section(gate, "def control_json(", "\ndef validate_feed_lease(");
+  assert.match(controller, /method not in \("GET", "POST", "DELETE"\)/);
+  assert.match(controller, /if method == "GET" and payload is not None:/);
+  assert.match(controller, /if method != "GET" and not isinstance\(payload, dict\):/);
+  assert.match(controller,
+    /if method != "GET":[\s\S]{0,220}?Content-Type: application\/json[\s\S]{0,120}?Content-Length:/);
+  assert.match(controller, /deadline\s*=\s*time\.monotonic\(\) \+ HTTP_TIMEOUT_S/);
+  assert.match(controller, /def remaining\(\)/);
+  assert.match(controller, /resolution_done\.wait\(remaining\(\)\)/);
+  assert.match(controller, /candidate\.settimeout\(remaining\(\)\)[\s\S]*?candidate\.connect\(sockaddr\)/);
+  assert.match(controller, /wrap_socket\([\s\S]*?server_hostname=parsed\.hostname,[\s\S]*?do_handshake_on_connect=False/);
+  assert.match(controller, /tls_socket\.settimeout\(remaining\(\)\)\s*\n\s*tls_socket\.do_handshake\(\)/);
+  assert.match(controller, /read_bounded_http_response\([\s\S]*?deadline,[\s\S]*?allow_chunked=True/);
+
+  const canonical = section(gate, "def canonical_https_url(", "\ndef load_release_hil_policy(");
+  for (const guard of [
+    "parsed.port is not None", '"%" in parsed.path', '"//" in parsed.path',
+    'any(segment in (".", "..") for segment in parsed.path.split("/"))',
+    "parsed.query", "parsed.fragment",
+  ]) assert.ok(canonical.includes(guard), `canonical HTTPS URL guard missing: ${guard}`);
+  assert.match(canonical, /not parsed\.path\.startswith\(base\.path\)/);
+
+  assert.match(gate, /release-HIL root policy must be schema_version 3/);
+  assert.match(gate, /release-HIL inventory must be a schema_version 3 object/);
+  const policyLoader = section(
+    gate, "def load_release_hil_policy(", "\ndef load_release_hil_inventory(",
+  );
+  const policyFields = section(policyLoader, "fields = {", "\n    }");
+  for (const field of [
+    "bootstrap_version", "bootstrap_elf", "bootstrap_app_sha256",
+    "bootstrap_manifest_url", "bootstrap_firmware_base_url",
+  ]) assert.match(policyFields, new RegExp(`"${field}"`));
+
+  const hilHeaders = section(gate, "def release_hil_request_headers(", "\ndef load_release_hil_policy(");
+  assert.match(hilHeaders, /HIL_MANIFEST_HEADER:\s*manifest_url/);
+  assert.match(hilHeaders, /HIL_FIRMWARE_BASE_HEADER:\s*firmware_base_url/);
+  const boundedRequest = section(gate, "def request_bytes_deadline(", "\ndef request_json_deadline(");
+  assert.match(boundedRequest, /set\(extra_headers\)\s*!=\s*HIL_FEED_HEADERS/);
+  assert.match(boundedRequest, /method\s*!=\s*"GET"/);
+  assert.match(boundedRequest, /not path\.startswith\("\/ota\/check\?"\)/);
+  const offer = section(gate, "def ota_offer_ready(", "\ndef post_update_once(");
+  assert.match(offer, /extra_headers=hil_headers/);
+  assert.match(offer, /status\.get\("effective_manifest_url"\)\s*!=\s*expected_manifest_url/);
+  assert.match(offer, /status\.get\("effective_firmware_base_url"\)\s*!=\s*expected_firmware_base_url/);
+  assert.match(offer, /status\.get\("available_sha256"\)\s*!=\s*expected_app_sha256/);
+  assert.match(offer, /status\.get\("available_channel"\)\s*!=\s*expected_channel/);
+  assert.match(offer, /generation\s*!=\s*expected_generation/);
+  const stress = section(gate, "def stress_board(", "\ndef verify_retained_x10a(");
+  assert.match(stress, /request_json_deadline\([\s\S]{0,260}?"\/ota\/check\?ms=[\s\S]{0,220}?extra_headers=hil_headers/);
+  assert.match(stress, /require_stress_ota_offer\([\s\S]{0,260}?manifest_url=hil_manifest_url[\s\S]{0,120}?firmware_base_url=hil_firmware_base_url/);
+  const feedLease = section(gate, "def validate_feed_lease(", "\n@contextmanager\ndef leased_release_hil_feed(");
+  assert.match(feedLease, /result\.get\("manifest_url"\)\s*!=\s*manifest_url/);
+  assert.match(feedLease, /result\.get\("firmware_base_url"\)\s*!=\s*firmware_base_url/);
+  const bootstrapVerifier = section(
+    gate, "def verify_release_hil_bootstrap_artifact(", "\ndef require_release_hil_channel(",
+  );
+  assert.match(bootstrapVerifier, /bootstrap_app_sha256/);
+  assert.match(bootstrapVerifier, /hashlib\.sha256\(app\)\.hexdigest\(\)/);
+  assert.match(bootstrapVerifier, /verify_image\(app,/);
+  assert.match(bootstrapVerifier, /verify_http_range_support\(app_url, app\)/);
+
+  assert.match(httpOta, /X-Daikin-HIL-Manifest-URL/);
+  assert.match(httpOta, /X-Daikin-HIL-Firmware-Base-URL/);
+  assert.match(httpOta, /OtaHilFeedHeaderResult::PartialPair/);
+  assert.match(httpOta, /OtaHilFeedHeaderResult::InvalidUrl/);
+  assert.match(httpOta, /ota_check_async\(ms, override_feed\)/);
+  assert.match(httpOta, /effective_manifest_url/);
+  assert.match(httpOta, /effective_firmware_base_url/);
+  assert.ok(httpOta.includes('j += ",\\"image_state\\":"'));
+  assert.ok(httpOta.includes('j += ",\\"rollback_pending\\":"'));
+  assert.match(feed, /binding\.generation != generation/);
+  assert.match(feed, /bound_channel != channel/);
+  assert.match(feed, /bound_version != version/);
+  assert.match(feed, /std::memcmp\(binding\.app_sha256/);
+  assert.match(feed, /out\s*=\s*binding\.feed/);
+
+  const hil = section(gate, "def run_release_hil(", "\ndef self_test(");
+  assert.match(hil, /bootstrap_artifact\s*=\s*verify_release_hil_bootstrap_artifact\(lab\)/);
+  assert.equal((hil.match(/with pending_image_power_watchdog\(/g) || []).length, 3,
+    "both candidate installs and the candidate-writer rollback need hard watchdogs");
+  assert.doesNotMatch(hil, /request_json\(host,\s*"\/status"\)/);
+  assert.match(hil, /before\s*=\s*request_status_deadline\(initial_endpoint/);
+  assert.match(hil, /final\s*=\s*request_status_deadline\(final_endpoint/);
+  const firstWatchdog = hil.indexOf("with pending_image_power_watchdog(");
+  const firstInstall = hil.indexOf("release_hil_install_once(", firstWatchdog);
+  const rollbackTrigger = hil.indexOf("trigger_watchdog_cycle()", firstInstall);
+  const secondWatchdog = hil.indexOf("with pending_image_power_watchdog(", firstWatchdog + 1);
+  const secondInstall = hil.indexOf("release_hil_install_once(", secondWatchdog);
+  const approval = hil.indexOf("approve_commit_candidate()", secondInstall);
+  const health = hil.indexOf("wait_for_bench_health_window(", approval);
+  const coldTrigger = hil.indexOf("release_hil_power_cycle(lab, power_token)", health);
+  assert.ok(firstWatchdog >= 0 && firstInstall > firstWatchdog && rollbackTrigger > firstInstall);
+  assert.ok(secondWatchdog > rollbackTrigger && secondInstall > secondWatchdog &&
+    approval > secondInstall && health > approval && coldTrigger > health);
+  const thirdWatchdog = hil.indexOf("with pending_image_power_watchdog(", secondWatchdog + 1);
+  const writerInstall = hil.indexOf("candidate_writer_transfer = release_hil_install_once(", thirdWatchdog);
+  const writerCallEnd = hil.indexOf("\n            )", writerInstall);
+  const writerCall = hil.slice(writerInstall, writerCallEnd);
+  assert.match(writerCall,
+    /host=host,\s*mac=mac,\s*current_version=version,\s*current_elf=elf/);
+  assert.match(writerCall, /version=lab\["bootstrap_version"\]/);
+  assert.match(writerCall,
+    /app_sha256=lab\["bootstrap_app_sha256"\],\s*elf=lab\["bootstrap_elf"\]/);
+  assert.match(writerCall, /manifest_url=lab\["bootstrap_manifest_url"\]/);
+  assert.match(writerCall, /firmware_base_url=lab\["bootstrap_firmware_base_url"\]/);
+  assert.match(writerCall, /allow_downgrade=True/);
+  const writerDowngrade = hil.indexOf("allow_downgrade=True", writerInstall);
+  const writerTrigger = hil.indexOf("trigger_writer_watchdog_cycle()", writerDowngrade);
+  const writerRollback = hil.indexOf("writer_rollback = wait_for_identity(", writerTrigger);
+  const writerValid = hil.indexOf("writer_image_state = wait_for_ota_image_state(", writerRollback);
+  assert.ok(thirdWatchdog > coldTrigger && writerInstall > thirdWatchdog &&
+    writerCallEnd > writerInstall &&
+    writerDowngrade > writerInstall && writerTrigger > writerDowngrade &&
+    writerRollback > writerTrigger && writerValid > writerRollback);
+  const watchdog = section(
+    gate, "def pending_image_power_watchdog(", "\ndef wait_for_identity(",
+  );
+  assert.doesNotMatch(watchdog, /\/renew/);
+  assert.match(watchdog, /\/release/);
+  assert.match(hil, /wait_for_ota_image_state\(committed_endpoint, rollback_pending=False\)/);
+  assert.match(hil, /wait_for_ota_image_state\(cold_endpoint, rollback_pending=False\)/);
+  const install = section(gate, "def release_hil_install_once(", "\ndef run_release_hil(");
+  assert.equal((install.match(/allow_downgrade=allow_downgrade/g) || []).length, 2);
+  assert.match(install, /hil_manifest_url=manifest_url/);
+  assert.match(install, /hil_firmware_base_url=firmware_base_url/);
+  assert.match(install, /wait_for_ota_image_state\(endpoint, rollback_pending=True\)/);
+  assert.match(install,
+    /wait_for_ota_image_state\(endpoint, rollback_pending=True\)[\s\S]{0,180}?post_witness_status\s*=\s*request_status_deadline\(endpoint, timeout=HTTP_TIMEOUT_S\)/);
+  assert.match(install,
+    /validate_identity\([\s\S]{0,100}?post_witness_status[\s\S]{0,180}?require_release_hil_channel\(post_witness_status, channel\)/);
+  assert.match(install, /return post_witness_status, transfer/);
+
+  const production = gate.slice(gate.indexOf("if args.confirm_production != PRODUCTION_ROLE"));
+  assert.match(production, /production_evidence\s*=\s*stress_board\([\s\S]{0,300}?require_x10a=True,[\s\S]{0,100}?require_weather=True,/);
+};
+
+const runCentral = () => spawnSync(process.execPath, [centralContract], {
   cwd: root,
   env: { ...process.env, PRODUCTION_OTA_CONTRACT_ROOT: tmp },
   encoding: "utf8",
 });
 
+const runContracts = () => {
+  const central = runCentral();
+  if (central.status !== 0) return central;
+  try {
+    supplementalContract();
+    return { status: 0, stdout: central.stdout, stderr: central.stderr };
+  } catch (error) {
+    return { status: 1, stdout: central.stdout, stderr: `${central.stderr}${error.stack}\n` };
+  }
+};
+
 try {
   restore();
-  const baseline = run();
+  const baseline = runContracts();
   if (baseline.status !== 0) {
     process.stderr.write(baseline.stdout + baseline.stderr);
-    throw new Error("production OTA contract is already red on the unmodified tree");
+    throw new Error("production OTA contracts are already red on the unmodified tree");
   }
 
   const cases = [
-    ["the test-board role is redirected to production", () =>
-      replaceOnce("scripts/production-ota-gate.py", 'BENCH_ROLE = "bench"',
-        'BENCH_ROLE = "production"')],
-    ["the explicit ordinary bench-install action is removed", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'parser.add_argument("--install-bench", action="store_true")',
-        'parser.add_argument("--install-bench-bypassed", action="store_true")')],
-    ["the ordinary bench current-version lease is bypassed", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "if current_version == target_version:", "if False:")],
-    ["the ordinary bench update write is bypassed", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "update_generation = post_update_once(", "update_generation = update_write_bypassed(")],
-    ["the ordinary bench verifier evidence is bypassed", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'require_ota_transfer_evidence(host, transfer, phase="bench target")',
-        "pass  # bench verifier evidence bypassed")],
-    ["the ordinary bench rollback-health dwell is bypassed", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "health_window = wait_for_bench_health_window(",
-        "health_window = bypass_bench_health_window(")],
-    ["the ordinary bench pressure stage is bypassed", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "stress = stress_board(", "stress = bypass_bench_stress(")],
-    ["the ordinary bench action falls through into release and production", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        '        print(json.dumps(result, indent=2, sort_keys=True))\n        return 0\n\n    release_manifest',
-        '        print(json.dumps(result, indent=2, sort_keys=True))\n        bench_return_bypassed()\n\n    release_manifest')],
-    ["the runtime accepts abbreviated noncanonical gate options", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "ArgumentParser(description=__doc__, allow_abbrev=False)",
-        "ArgumentParser(description=__doc__)")],
+    ["the bench role is redirected to production", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'BENCH_ROLE = "bench"', 'BENCH_ROLE = "production"')],
     ["the pressure window is shortened", () =>
       replaceOnce("scripts/production-ota-gate.py", "STRESS_SECONDS = 180", "STRESS_SECONDS = 60")],
-    ["the manifest observer is shorter than firmware's bounded check path", () =>
-      replaceOnce("scripts/production-ota-gate.py", "OTA_CHECK_TIMEOUT_S = 120",
-        "OTA_CHECK_TIMEOUT_S = 30")],
-    ["the sole-write observer is shorter than firmware's bounded install path", () =>
+    ["the manifest observer is shorter than firmware's bounded check", () =>
+      replaceOnce("scripts/production-ota-gate.py", "OTA_CHECK_TIMEOUT_S = 120", "OTA_CHECK_TIMEOUT_S = 30")],
+    ["the sole-write observer is shorter than firmware's install", () =>
       replaceOnce("scripts/production-ota-gate.py", "OTA_TIMEOUT_S = 480", "OTA_TIMEOUT_S = 180")],
-    ["the compact OTA observer restores connection-close heap churn", () =>
-      replaceOnce("scripts/production-ota-gate.py", "OTA_STATUS_POLL_SECONDS = 0.5",
-        "OTA_STATUS_POLL_SECONDS = 0.1")],
-    ["the completed-verifier dwell is too short for the bounded observer", () =>
-      replaceOnce("main/ota_update.cpp", "kDoneBeforeRebootMs = 3000",
-        "kDoneBeforeRebootMs = 600")],
-    ["the compact OTA request can outlive the completed-state evidence", () =>
-      replaceOnce("scripts/production-ota-gate.py", "OTA_STATUS_REQUEST_TIMEOUT_S = 1.0",
-        "OTA_STATUS_REQUEST_TIMEOUT_S = 5.0")],
-    ["the reboot bypasses the completed-verifier dwell constant", () =>
-      replaceOnce("main/ota_update.cpp", "pdMS_TO_TICKS(kDoneBeforeRebootMs)",
-        "pdMS_TO_TICKS(600)")],
-    ["the compact observer bypasses its bounded poll constant", () =>
-      replaceOnce("scripts/production-ota-gate.py", "time.sleep(OTA_STATUS_POLL_SECONDS)",
-        "time.sleep(5.0)")],
-    ["the compact whole-request deadline is silently expanded", () =>
-      replaceOnce("scripts/production-ota-gate.py", "deadline = time.monotonic() + timeout",
-        "deadline = time.monotonic() + timeout * 10")],
-    ["the reboot observer falls back to per-operation urllib timeouts", () =>
+    ["chunked framing accepts an unsupported transfer coding", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'transfer_encodings[0] != b"chunked"', "False")],
+    ["chunk sizes are no longer strict hexadecimal", () =>
+      replaceOnce("scripts/production-ota-gate.py", 're.fullmatch(rb"[0-9A-Fa-f]+", size_text)', "True")],
+    ["chunk bodies can exceed their fixed bound", () =>
+      replaceOnce("scripts/production-ota-gate.py", "chunk_size > max_body_bytes - len(body)", "False")],
+    ["chunk trailers and trailing bytes are accepted", () =>
+      replaceOnce("scripts/production-ota-gate.py", "chunked HTTP response has trailers or bytes after its terminator", "ignored trailing chunk bytes")],
+    ["malformed HTTP 503 responses bypass full framing classification", () =>
+      replaceOnce("scripts/production-ota-gate.py", "if status < 200 or status >= 300:", "if False:")],
+    ["status pressure re-resolves the board hostname", () =>
+      replaceNth("scripts/production-ota-gate.py", "request_status_deadline(status_endpoint, timeout=HTTP_TIMEOUT_S)", 'request_json(host, "/status")', 2)],
+    ["values pressure re-resolves the board hostname", () =>
+      replaceOnce("scripts/production-ota-gate.py", "request_values_deadline(status_endpoint, timeout=HTTP_TIMEOUT_S)", 'request_json(host, "/values")')],
+    ["offer polling ignores the exact application SHA", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'status.get("available_sha256") != expected_app_sha256', "False")],
+    ["offer polling ignores the exact channel", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'status.get("available_channel") != expected_channel', "False")],
+    ["offer polling ignores the accepted generation", () =>
+      replaceOnce("scripts/production-ota-gate.py", "generation != expected_generation", "False")],
+    ["the sole update write omits its exact SHA", () =>
+      replaceOnce("scripts/production-ota-gate.py", '"sha256": expected_app_sha256', '"ignored": expected_app_sha256')],
+    ["the update no longer requires the successor generation", () =>
+      replaceOnce("scripts/production-ota-gate.py", "check_generation + 1", "check_generation")],
+    ["the deterministic weather refresh no longer waits for idle", () =>
+      replaceOnce("scripts/production-ota-gate.py", "weather did not become idle before its HIL refresh", "weather idle wait bypassed")],
+    ["the deterministic weather refresh call is removed", () =>
+      replaceNth("scripts/production-ota-gate.py", "request_weather_refresh(", "ignore_weather_refresh(", 2)],
+    ["the weather refresh becomes persistent", () =>
+      replaceOnce("scripts/production-ota-gate.py", '"refresh": True', '"refresh": False')],
+    ["firmware Weather refresh ignores diagnostics consent", () =>
+      replaceOnce("main/http_config.cpp", "if (!c.diagnostics_enabled)", "if (false)")],
+    ["firmware Weather refresh acknowledges a missing task", () =>
+      replaceOnce("main/http_config.cpp", "if (!weather_forecast_request_refresh(refresh_token))", "if (false)")],
+    ["Weather HIL accepts a foreign success edge", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        'ota = request_json_deadline(\n                status_endpoint, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S,\n            )',
-        'ota = request_json(host, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S)')],
-    ["a pre-header reboot EOF becomes a hard gate failure", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'raise CompactTransportError("compact HTTP response ended before its headers")',
-        'fail("compact HTTP response ended before its headers")')],
-    ["a mid-body reboot EOF becomes a hard gate failure", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'raise CompactTransportError("compact HTTP response ended before its declared body")',
-        'fail("compact HTTP response ended before its declared body")')],
-    ["the reboot observer stops retrying compact transport EOF", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "except (CompactTransportError, OSError, TimeoutError):",
-        "except (OSError, TimeoutError, json.JSONDecodeError):")],
-    ["complete malformed compact JSON becomes retryable", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'raise GateError("compact HTTP response has malformed JSON") from error',
-        "raise error")],
-    ["the reboot observer forgives complete malformed compact JSON", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "except (CompactTransportError, OSError, TimeoutError):",
-        "except (CompactTransportError, OSError, TimeoutError, json.JSONDecodeError):")],
-    ["publisher quiescence no longer outlives the authoritative observer", () =>
-      replaceOnce("main/logic/ota_quiesce.hpp", "OTA_QUIESCE_MAX_CYCLES = 600",
-        "OTA_QUIESCE_MAX_CYCLES = 480")],
-    ["the official bench release feed is replaced", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/manifest.json"',
-        'OFFICIAL_RELEASE_MANIFEST_URL = "https://example.test/manifest.json"')],
-    ["the full bench binary exercise is bypassed", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "full_download_evidence = exercise_bench_full_download(",
-        "full_download_evidence = bench_manifest_only_bypass(")],
-    ["the freshly installed target skips its health window", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "target_health_window = wait_for_bench_health_window(",
-        "target_health_window = bypass_target_health_window(")],
-    ["the target is denied its explicit bench downgrade", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'expected_channel="release", allow_downgrade=True',
-        'expected_channel="release", allow_downgrade=False')],
-    ["the bench is not restored to the dev channel", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'set_update_channel(host, "dev")',
-        'set_update_channel(host, "release")')],
-    ["the legacy bench restore trusts a stale idle offer", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "LEGACY_OFFER_STABLE_SECONDS = 3.0",
-        "LEGACY_OFFER_STABLE_SECONDS = 0.0")],
-    ["the release health-window wait is bypassed", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "release_health_window = wait_for_bench_health_window(",
-        "release_health_window = bypass_release_health_window(")],
-    ["a gate-only change no longer republishes an exact-source artifact", () =>
-      replaceOnce(".github/workflows/build.yml", "|production-ota-gate", "")],
-    ["full-transfer status busy refusal is no longer required", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'for key in ("status_busy_503", "values_busy_503", "diag_ok", "ota_status_ok"):',
-        'for key in ("values_busy_503", "diag_ok", "ota_status_ok"):')],
-    ["full-transfer heap telemetry is no longer required", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'fail(f"{host} target OTA did not expose sampled operation-local heap minima")',
-        'pass  # heap telemetry bypassed')],
-    ["offer polling ignores a replaced operation generation", () =>
-      replaceOnce("scripts/production-ota-gate.py", "generation != expected_generation",
-        "False")],
-    ["offer polling ignores the authoritative busy claim", () =>
-      replaceOnce("scripts/production-ota-gate.py", 'if status.get("busy") is True:',
-        "if False:")],
-    ["offer polling ignores the checked application SHA", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'status.get("available_sha256") != expected_app_sha256',
-        "False")],
-    ["the sole update POST omits the checked application SHA", () =>
-      replaceOnce("scripts/production-ota-gate.py", '"sha256": expected_app_sha256',
-        '"ignored": expected_app_sha256')],
-    ["the update may skip over an intervening accepted operation", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "expected_generation = 1 if check_generation == 0xFFFFFFFF else check_generation + 1",
-        "expected_generation = check_generation")],
-    ["legacy firmware is silently allowed into the one-write path", () =>
-      replaceOnce("scripts/production-ota-gate.py", "no update POST was sent",
-        "legacy update may continue")],
-    ["a rejected firmware operation is reported as HTTP success", () =>
-      replaceOnce("main/http_ota.cpp", 'httpd_resp_set_status(req, "503 Service Unavailable");',
-        'httpd_resp_set_status(req, "200 OK");')],
+        'refresh_fields["refresh_completed_token"] == weather_refresh_token',
+        'weather_candidate.get("successes", 0) > weather_successes_before')],
+    ["Weather HIL success is not tied to the real update commit", () =>
+      replaceOnce("main/weather_forecast.cpp", "refresh_attempt.finish(updated);",
+        "refresh_attempt.finish(ok);")],
+    ["Weather TLS completion is not stack-sampled", () =>
+      replaceNth("main/weather_forecast.cpp", "stack_watch_sample(StackWatch::Weather);",
+        "stack_watch_sample_bypassed(StackWatch::Weather);", 2)],
+    ["Weather loses its dedicated stack-watch slot", () =>
+      replaceOnce("main/stack_watch.hpp", "    Weather, //", "    Climate, //")],
+    ["Weather stack evidence is omitted from always-on status", () =>
+      replaceOnce("main/http_status.cpp", 'j += ",\\\"weather\\\":";', 'j += ",\\\"ignored_weather_stack\\\":";')],
+    ["mandatory Weather stress no longer requires Weather stack evidence", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'required_tasks.add("weather")', 'required_tasks.add("poll")')],
+    ["Weather refresh leaves a duplicate-cycle wake queued", () =>
+      replaceOnce("main/weather_forecast.cpp",
+        "if (refresh_attempt.token != 0) ulTaskNotifyTake(pdTRUE, 0);",
+        "if (false) ulTaskNotifyTake(pdTRUE, 0);")],
+    ["Weather refresh publishes its wake after releasing the token mutex", () =>
+      replaceOnce("main/weather_forecast.cpp",
+        "        xTaskNotifyGive(task);\n    }\n    return true;",
+        "    }\n    xTaskNotifyGive(task);\n    return true;")],
+    ["Weather source replacement leaves an old refresh token outstanding", () =>
+      replaceOnce("main/weather_forecast.cpp",
+        "        weather_refresh_cancel_outstanding(s_refresh_requested_token, s_refresh_completed_token);",
+        "        // old refresh token left outstanding")],
+    ["Weather source cancellation is overwritten by a late success finish", () =>
+      replaceOnce("main/logic/weather_forecast.hpp", "completed_token == token", "false")],
+    ["Weather refresh POST omits its causal token", () =>
+      replaceOnce("main/http_config.cpp", "\\\"refresh_token\\\":%llu", "\\\"ignored_token\\\":%llu")],
+    ["a saved Weather location acknowledges before synchronous invalidation", () =>
+      replaceNth("main/http_config.cpp",
+        "weather_change.commit();",
+        "weather_change.commit_after_response();", 2)],
+    ["pressure workers stop catching parser GateError", () =>
+      replaceOnce("scripts/production-ota-gate.py", /(def probe\([\s\S]{0,1400}?)except BaseException as error:/, "$1except Exception as error:")],
+    ["pressure workers discard unexpected parser failures", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'unexpected.append(f"{kind}: {error}")', "pass  # unexpected parser failure discarded")],
+    ["pressure workers may outlive the gate", () =>
+      replaceOnce("scripts/production-ota-gate.py", "if worker.is_alive():", "if False:")],
+    ["the root release-HIL policy falls back to schema 2", () =>
+      replaceOnce("scripts/production-ota-gate.py", "release-HIL root policy must be schema_version 3", "release-HIL root policy must be schema_version 2")],
+    ["the release-HIL inventory falls back to schema 2", () =>
+      replaceOnce("scripts/production-ota-gate.py", "release-HIL inventory must be a schema_version 3 object", "release-HIL inventory must be a schema_version 2 object")],
+    ["the root policy no longer pins the bootstrap application SHA", () =>
+      replaceOnce("scripts/production-ota-gate.py", '"bootstrap_app_sha256",', "")],
+    ["the bootstrap version identity is dropped", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'old_version != lab["bootstrap_version"]', "False")],
+    ["the bootstrap ELF identity is dropped", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'old_elf != lab["bootstrap_elf"]', "False")],
+    ["the pinned bootstrap artifact is not verified before hardware mutation", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "bootstrap_artifact = verify_release_hil_bootstrap_artifact(lab)",
+        "bootstrap_artifact = {}",
+      )],
+    ["the pinned bootstrap application SHA is not checked", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        'hashlib.sha256(app).hexdigest() != lab["bootstrap_app_sha256"]', "False",
+      )],
+    ["canonical controller URLs accept percent encoding", () =>
+      replaceOnce("scripts/production-ota-gate.py", '"%" in parsed.path', "False")],
+    ["canonical controller URLs accept dot segments", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'any(segment in (".", "..") for segment in parsed.path.split("/"))', "False")],
+    ["derived controller URLs may escape their authorized prefix", () =>
+      replaceOnce("scripts/production-ota-gate.py", "not parsed.path.startswith(base.path)", "False")],
+    ["the watchdog status GET is removed from the controller allowlist", () =>
+      replaceOnce("scripts/production-ota-gate.py", '("GET", "POST", "DELETE")', '("POST", "DELETE")')],
+    ["controller GET requests may carry an entity payload", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py", 'if method == "GET" and payload is not None:',
+        "if False:",
+      )],
+    ["controller GET requests emit JSON entity headers", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'if method != "GET":', "if True:")],
+    ["mutating controller requests may omit their object payload", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        'if method != "GET" and not isinstance(payload, dict):', "if False:",
+      )],
+    ["the gate omits the HIL manifest request header", () =>
+      replaceOnce("scripts/production-ota-gate.py", "HIL_MANIFEST_HEADER: manifest_url", '"X-Ignored-Manifest": manifest_url')],
+    ["the gate omits the HIL firmware-base request header", () =>
+      replaceOnce("scripts/production-ota-gate.py", "HIL_FIRMWARE_BASE_HEADER: firmware_base_url", '"X-Ignored-Firmware": firmware_base_url')],
+    ["extra headers are no longer restricted to HIL OTA checks", () =>
+      replaceOnce("scripts/production-ota-gate.py", "set(extra_headers) != HIL_FEED_HEADERS", "False")],
+    ["the HIL header pair is not sent on the accepted check", () =>
+      replaceNth("scripts/production-ota-gate.py", "extra_headers=hil_headers", "extra_headers=None", 2)],
+    ["the HIL header pair is not sent during combined stress", () =>
+      replaceNth("scripts/production-ota-gate.py", "extra_headers=hil_headers", "extra_headers=None", 1)],
+    ["the accepted generation no longer binds effective HIL URLs", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'status.get("effective_manifest_url") != expected_manifest_url', "False")],
+    ["the release-HIL install omits its transient manifest URL", () =>
+      replaceOnce("scripts/production-ota-gate.py", "hil_manifest_url=manifest_url", "hil_manifest_url=None")],
+    ["the feed-controller acknowledgement ignores the leased manifest URL", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'result.get("manifest_url") != manifest_url', "False")],
+    ["the HIL manifest override header is removed", () =>
+      replaceOnce("main/http_ota.cpp", "X-Daikin-HIL-Manifest-URL", "X-Ignored-HIL-Manifest-URL")],
+    ["the HIL firmware-base override header is removed", () =>
+      replaceOnce("main/http_ota.cpp", "X-Daikin-HIL-Firmware-Base-URL", "X-Ignored-HIL-Firmware-Base-URL")],
+    ["partial HIL header pairs are accepted", () =>
+      replaceOnce("main/http_ota.cpp", "feed_result == OtaHilFeedHeaderResult::PartialPair", "false")],
+    ["the HIL override is not passed to the OTA check", () =>
+      replaceOnce("main/http_ota.cpp", "ota_check_async(ms, override_feed)", "ota_check_async(ms, nullptr)")],
+    ["effective manifest URL evidence is omitted", () =>
+      replaceOnce("main/http_ota.cpp", 'j += ",\\"effective_manifest_url\\":"', 'j += ",\\"ignored_manifest_url\\":"')],
+    ["effective firmware-base URL evidence is omitted", () =>
+      replaceOnce("main/http_ota.cpp", 'j += ",\\"effective_firmware_base_url\\":"', 'j += ",\\"ignored_firmware_base_url\\":"')],
+    ["pending-image status evidence is omitted", () =>
+      replaceOnce("main/http_ota.cpp", 'j += ",\\"image_state\\":"', 'j += ",\\"ignored_image_state\\":"')],
+    ["the offer lease ignores generation replacement", () =>
+      replaceOnce("main/logic/ota_hil_feed.hpp", "binding.generation != generation", "false")],
+    ["the offer lease ignores the exact channel", () =>
+      replaceOnce("main/logic/ota_hil_feed.hpp", "bound_channel != channel", "false")],
+    ["the offer lease ignores the exact version", () =>
+      replaceOnce("main/logic/ota_hil_feed.hpp", "bound_version != version", "false")],
+    ["the offer lease ignores the exact application SHA", () =>
+      replaceOnce("main/logic/ota_hil_feed.hpp", "std::memcmp(binding.app_sha256.data(), app_sha256, binding.app_sha256.size()) != 0", "false")],
+    ["the offer lease drops its effective feed", () =>
+      replaceOnce("main/logic/ota_hil_feed.hpp", "out = binding.feed;", "ota_feed_urls_clear(out);")],
+    ["the first pending-image watchdog is bypassed", () =>
+      replaceNth("scripts/production-ota-gate.py", "with pending_image_power_watchdog(", "with bypassed_pending_image_watchdog(", 1)],
+    ["the committed candidate's pending-image watchdog is bypassed", () =>
+      replaceNth("scripts/production-ota-gate.py", "with pending_image_power_watchdog(", "with bypassed_pending_image_watchdog(", 2)],
+    ["the candidate-writer rollback watchdog is bypassed", () =>
+      replaceNth("scripts/production-ota-gate.py", "with pending_image_power_watchdog(", "with bypassed_pending_image_watchdog(", 3)],
+    ["the rollback watchdog is not triggered after the first install", () =>
+      replaceOnce("scripts/production-ota-gate.py", "trigger_watchdog_cycle()", "rollback_cycle_bypassed()")],
+    ["the committed candidate is not explicitly approved before autonomous commit", () =>
+      replaceOnce("scripts/production-ota-gate.py", "approve_commit_candidate()", "candidate_approval_bypassed()")],
+    ["the committed candidate is not cold-cycled after health", () =>
+      replaceOnce("scripts/production-ota-gate.py", "release_hil_power_cycle(lab, power_token)", "cold_cycle_bypassed()")],
+    ["the hard watchdog deadline extends beyond firmware commit", () =>
+      replaceOnce("scripts/production-ota-gate.py", "PENDING_IMAGE_WATCHDOG_TTL_S = 80", "PENDING_IMAGE_WATCHDOG_TTL_S = 100")],
+    ["the first candidate is not proved rollback-pending", () =>
+      replaceOnce("scripts/production-ota-gate.py", "wait_for_ota_image_state(endpoint, rollback_pending=True)", "{}")],
+    ["the rollback boundary reuses the pre-witness candidate status", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "post_witness_status = request_status_deadline(endpoint, timeout=HTTP_TIMEOUT_S)",
+        "post_witness_status = status",
+      )],
+    ["the release-HIL install returns the pre-witness candidate status", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py", "return post_witness_status, transfer",
+        "return status, transfer",
+      )],
+    ["the committed candidate is not proved valid before cold cycle", () =>
+      replaceOnce("scripts/production-ota-gate.py", "wait_for_ota_image_state(committed_endpoint, rollback_pending=False)", "committed_image_state_bypassed()")],
+    ["the candidate writer is not allowed to select the older pinned bootstrap", () =>
+      replaceNth("scripts/production-ota-gate.py", "allow_downgrade=True", "allow_downgrade=False", 3)],
+    ["the candidate-writer source identity is not the committed candidate", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "current_version=version, current_elf=elf",
+        'current_version=lab["bootstrap_version"], current_elf=elf',
+      )],
+    ["the candidate writer targets the wrong bootstrap version", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py", 'version=lab["bootstrap_version"]',
+        "version=version",
+      )],
+    ["the candidate writer targets the wrong bootstrap application", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py", 'app_sha256=lab["bootstrap_app_sha256"]',
+        "app_sha256=app_sha256",
+      )],
+    ["the candidate writer checks the candidate manifest instead of the bootstrap manifest", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py", 'manifest_url=lab["bootstrap_manifest_url"]',
+        'manifest_url=lab["manifest_url"]',
+      )],
+    ["the candidate writer downloads from the candidate base instead of the bootstrap base", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        'firmware_base_url=lab["bootstrap_firmware_base_url"]',
+        'firmware_base_url=lab["firmware_base_url"]',
+      )],
+    ["the candidate-writer rollback does not prove the candidate is valid", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "writer_image_state = wait_for_ota_image_state(",
+        "writer_image_state = writer_image_state_bypassed(",
+      )],
+    ["the OTA task stack sample is dropped before reboot", () =>
+      replaceOnce("scripts/production-ota-gate.py", '("ota_stack_min_free_bytes", "ota_stack_min_free_bytes"),', '("ignored_ota_stack", "ignored_ota_stack"),')],
+    ["the OTA task stack floor is bypassed", () =>
+      replaceOnce("scripts/production-ota-gate.py", "ota_stack < 1024", "ota_stack < 0")],
+    ["controller requests lose their whole-operation deadline", () =>
+      replaceNth("scripts/production-ota-gate.py", "deadline = time.monotonic() + HTTP_TIMEOUT_S", "deadline = float('inf')", 2)],
+    ["controller DNS no longer consumes the whole-operation deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py", "resolution_done.wait(remaining())", "resolution_done.wait(HTTP_TIMEOUT_S)")],
+    ["controller connect no longer consumes the remaining deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py", "candidate.settimeout(remaining())", "candidate.settimeout(HTTP_TIMEOUT_S)")],
+    ["controller TLS handshake is no longer explicitly deadline-bound", () =>
+      replaceOnce("scripts/production-ota-gate.py", "do_handshake_on_connect=False", "do_handshake_on_connect=True")],
+    ["post-cycle identity falls back to an unbounded status reader", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "status = request_status_deadline(\n                    endpoint, timeout=min(remaining, HTTP_TIMEOUT_S),\n                )",
+        'status = request_json(host, "/status")',
+      )],
+    ["the release-HIL health dwell falls back to an unbounded status reader", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "status = request_status_deadline(\n            endpoint, timeout=min(remaining, HTTP_TIMEOUT_S),\n        )",
+        'status = request_json(host, "/status")',
+      )],
+    ["the release-HIL bootstrap snapshot uses an unbounded status reader", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "before = request_status_deadline(initial_endpoint, timeout=HTTP_TIMEOUT_S)",
+        'before = request_json(host, "/status")',
+      )],
+    ["the release-HIL final snapshot uses an unbounded status reader", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "final = request_status_deadline(final_endpoint, timeout=HTTP_TIMEOUT_S)",
+        'final = request_json(host, "/status")',
+      )],
     ["the signature verifier is bypassed", () =>
-      replaceOnce("scripts/production-ota-gate.py", 'ROOT / "scripts/require-signed.sh"',
-        'ROOT / "scripts/signature-check-bypassed.sh"')],
-    ["the official dev artifact skips the Range preflight", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "verify_http_range_support(app_url, binary)",
-        "verify_http_range_support_bypassed(app_url, binary)")],
-    ["the official release artifact skips the Range preflight", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        "verify_http_range_support(release_url, release_binary)",
-        "verify_http_range_support_bypassed(release_url, release_binary)")],
-    ["the Range preflight accepts a full 200 response", () =>
-      replaceOnce("scripts/production-ota-gate.py", "response.status != 206", "False")],
-    ["the Range preflight ignores returned artifact bytes", () =>
-      replaceOnce("scripts/production-ota-gate.py", "body != binary[:1]", "False")],
-    ["bench pressure workers leak after an OTA failure", () =>
-      replaceOnce("scripts/production-ota-gate.py", "    finally:\n        stop.set()",
-        "    except Exception:\n        raise\n    else:\n        stop.set()")],
-    ["the complete source-contract runner is skipped", () =>
-      replaceOnce("scripts/production-ota-gate.py", 'ROOT / "scripts/run-contract-tests.sh"',
-        'ROOT / "scripts/run-contract-smoke.sh"')],
-    ["real OTA TLS is removed from the pressure window", () =>
-      replaceOnce("scripts/production-ota-gate.py", 'f"/ota/check?ms={int(time.time() * 1000)}"',
-        '"/ota/status"')],
-    ["an existing MQTT outage is hidden by the OTA pause allowance", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'if not started.get("mqtt", {}).get("connected"):',
-        "if False:")],
-    ["the intentional OTA MQTT pause is counted as an outage", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'ota_expected=ota_expected_before or mqtt_recovery_expected.is_set()',
-        'ota_expected=False')],
-    ["an in-flight OTA status sample loses its request-start pause lease", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'ota_expected=ota_expected_before or mqtt_recovery_expected.is_set()',
-        'ota_expected=mqtt_recovery_expected.is_set()')],
-    ["the OTA pause lease is captured only after the status request", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        /([ \t]*)ota_expected_before = mqtt_recovery_expected\.is_set\(\)\n\1status = request_json\(host, "\/status"\)/,
-        '$1status = request_json(host, "/status")\n$1ota_expected_before = mqtt_recovery_expected.is_set()')],
-    ["the intentional weather MQTT pause is counted as an outage", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'weather_evidence = weather_fetching or weather_successes > self.weather_successes_seen',
-        'weather_evidence = False')],
-    ["the completed weather fetch loses its MQTT resume allowance", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'weather_successes > self.weather_successes_seen',
-        'False')],
-    ["the weather MQTT allowance survives a successful reconnect", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'self.weather_expected = False',
-        'self.weather_expected = True')],
-    ["fresh weather evidence is closed by an older connected MQTT field", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'if not weather_evidence or weather_was_expected or pending_was_observed:',
-        'if True:')],
-    ["weather MQTT recovery is no longer time bounded", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'now > self.weather_deadline',
-        'False')],
-    ["a mixed pre-weather status sample cannot await the following weather edge", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        /(if weather_evidence:[\s\S]{0,400}?)self\.pending_disconnects = 0/,
-        '$1self.pending_disconnects += 0')],
-    ["a mixed status sample can wait forever after reconnect", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'if self.pending_disconnects and now > self.pending_deadline:',
-        'if False:')],
-    ["late weather evidence forgives an already expired MQTT gap", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'if self.pending_disconnects and now > self.pending_deadline:',
-        'if self.pending_disconnects and now > self.pending_deadline and not weather_evidence:')],
-    ["a pending unexplained disconnect is discarded when stress ends", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'disconnected += mqtt_recovery.finish()',
-        'pass  # pending disconnect bypassed')],
-    ["MQTT recovery after OTA TLS is no longer observed", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'if mqtt_recovery_status.get("mqtt", {}).get("connected"):',
-        "if True:")],
-    ["the reboot waiter polls full status while OTA still owns TLS", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'if ota.get("state") not in ("checking", "updating", "done"):',
-        'if True:')],
-    ["the target verifier completion is no longer observed", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        'if target_transfer.get("saw_done") is not True:',
-        'if False:')],
-    ["the final contiguous-block floor is reduced", () =>
-      replaceOnce("scripts/production-ota-gate.py", "MIN_FINAL_LARGEST_BLOCK = 16 * 1024",
-        "MIN_FINAL_LARGEST_BLOCK = 8 * 1024")],
-    ["an unwired bench is subjected to the production X10A timeout limit", () =>
-      replaceOnce("scripts/production-ota-gate.py", "return require_x10a and final[\"timeout_err\"]",
-        "return True and final[\"timeout_err\"]")],
-    ["the production canary disables its X10A requirement", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        /(production_evidence = stress_board\([\s\S]{0,200}?)require_x10a=True,/,
-        "$1require_x10a=False,")],
-    ["the production canary disables its weather TLS requirement", () =>
-      replaceOnce("scripts/production-ota-gate.py",
-        /(production_evidence = stress_board\([\s\S]{0,200}?)require_weather=True,/,
-        "$1require_weather=False,")],
-    ["the no-release result is falsified", () =>
-      replaceOnce("scripts/production-ota-gate.py", '"release_created": False',
-        '"release_created": True')],
+      replaceOnce("scripts/production-ota-gate.py", 'ROOT / "scripts/require-signed.sh"', 'ROOT / "scripts/signature-check-bypassed.sh"')],
+    ["the official release feed is replaced", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/manifest.json"', 'OFFICIAL_RELEASE_MANIFEST_URL = "https://example.invalid/manifest.json"')],
+    ["the production canary disables X10A", () =>
+      replaceOnce("scripts/production-ota-gate.py", /(production_evidence = stress_board\([\s\S]{0,220}?)require_x10a=True,/, "$1require_x10a=False,")],
+    ["the production canary disables weather TLS", () =>
+      replaceOnce("scripts/production-ota-gate.py", /(production_evidence = stress_board\([\s\S]{0,220}?)require_weather=True,/, "$1require_weather=False,")],
     ["raw OTA writes are no longer routed through the gate", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py", "direct OTA writes are forbidden; run scripts/production-ota-gate.py",
-        "direct OTA writes are allowed")],
-    ["the hook no longer pins the literal bench role", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'exact_values["--confirm-bench"] = "bench"',
-        'exact_values["--confirm-bench"] = "production"')],
-    ["the hook accepts a symlink alias as canonical", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "Path(os.path.abspath(executable)) != canonical",
-        "executable.resolve(strict=False) != canonical")],
-    ["the raw OTA guard drops HTTPie and xh", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'executable in {"http", "xh"}', 'executable == "ignored-http-client"')],
-    ["the raw OTA guard drops curl equals-form data options", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'argument.startswith(("--data", "--form", "--json=", "--upload-file="))',
-        'argument.startswith(("--ignored-data", "--form", "--json=", "--upload-file="))')],
-    ["the raw OTA guard drops HTTPie inferred body posts", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        '":=" in argument or', 'False or')],
-    ["the raw OTA guard drops PowerShell posts", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        '"-methodpost",',
-        '"-ignored-method-post",')],
-    ["the raw OTA guard drops HTTPie raw bodies", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'argument == "--raw" or argument.startswith("--raw=")',
-        'argument == "--ignored-raw" or argument.startswith("--ignored-raw=")')],
-    ["shell-built OTA update routes bypass the raw guard", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        're.search(r"https?://[^\'\\";&|]*[$`][\\s\\S]{0,160}/update", decoded, re.IGNORECASE)',
-        're.search(r"ignored-dynamic-route", decoded, re.IGNORECASE)')],
-    ["a Git shell alias can wrap the canonical OTA gate", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'args = tokens[1:]\n        if executable not in',
-        'args = tokens[1:]\n        if executable == "git":\n            continue\n        if executable not in')],
-    ["a renamed symlink can impersonate the canonical OTA gate", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "os.path.samefile(lexical, canonical)", "False")],
-    ["a renamed exact copy can impersonate the canonical OTA gate", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "filecmp.cmp(lexical, canonical, shallow=False)", "False")],
-    ["an env split-string wrapper can invoke the canonical OTA gate", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "results.extend(shell_token_sets(resolved_segment[index + 1], depth + 1))",
-        "results.extend([])")],
-    ["wrapped network clients are no longer inspected", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "for client_index, token in enumerate(tokens):",
-        "for client_index, token in enumerate(tokens[:1]):")],
-    ["dynamic OTA client methods are accepted", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)',
-        "dynamic_client_arguments = False")],
-    ["clustered curl short options bypass the OTA method parser", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = curl_short_option_effects(",
-        "method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = ignored_curl_short_options(")],
-    ["curl next transfers can hide an earlier OTA write", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'if "--next" in arguments:', "if False:")],
-    ["curl short next transfers can hide an earlier OTA write", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "if cluster_next:", "if False:")],
-    ["curl GET flags can mask a dynamic explicit POST", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        `not explicit_method and (
-                        has_get_flag or any(argument in {"-g", "--get"} for argument in arguments)
-                    )`,
-        `explicit_method != "post" and (
-                        has_get_flag or any(argument in {"-g", "--get"} for argument in arguments)
-                    )`)],
-    ["an earlier wget GET can mask a later dynamic method", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'literal_safe_method = effective_method in {"get", "head"}',
-        'literal_safe_method = any(argument in {"--method=get", "--method=head"} for argument in arguments)')],
-    ["GNU Wget option syntax can synthesize an OTA POST", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "if any(wget_argument_may_write(argument) for argument in raw_arguments):", "if False:")],
-    ["Wget startup configuration can synthesize an OTA POST", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "if shell_sets_wgetrc(decoded, raw_tokens):", "if False:")],
-    ["HTTPie stdin bodies are no longer recognized", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "shell_client_receives_stdin(decoded, executable)", "False")],
-    ["raw network clients can carry an OTA request", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "if has_raw_network_client:\n        return True",
-        "if False:\n        return True")],
-    ["shell dev-tcp can carry a raw OTA request", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        're.search(r"/dev/(?:tcp|udp)/", decoded, re.IGNORECASE)',
-        're.search(r"ignored-dev-tcp", decoded, re.IGNORECASE)')],
-    ["telnet can carry a raw OTA request", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        '"socat", "telnet"', '"socat"')],
-    ["brace-expanded client methods bypass the OTA guard", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "for expanded in expand_static_braces(argument.lower()):",
-        "for expanded in [argument.lower()]:")],
-    ["curl URL globs can reach the OTA route", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        /(def possible_ota_update_route[\s\S]{0,1200}?)for expanded in expand_static_braces\(token\):/,
-        "$1for expanded in [token]:")],
-    ["shell globs can execute the canonical OTA gate", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'token_may_name_command(token, "production-ota-gate.py")', "False")],
-    ["dynamic script paths can execute the canonical OTA gate", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        '("production-ota-" in compact and "gate.py" in compact)', "False")],
-    ["split dynamic paths can execute a gate carrying canonical artifact options", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        '"--manifest-url", "--expected-source-sha", "--expected-version",',
-        '"--ignored-manifest", "--ignored-source", "--ignored-version",')],
-    ["urllib inferred POST bodies bypass the OTA guard", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        '"urlopen(" in compact and "data=" in compact', "False")],
-    ["attached env split strings can wrap a renamed gate", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'token.startswith("-S") and token != "-S"', "False")],
-    ["equals-form env split strings can wrap a renamed gate", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        'token.startswith("--split-string=")', "False")],
-    ["Git helper strings can execute a renamed gate alias", () =>
-      replaceOnce("tools/agent-hooks/agent_hook.py",
-        "nested_tokens.extend(shell_token_sets(nested))", "nested_tokens.extend([])")],
-    ["a merely connected image can bypass allocation failure evidence", () =>
-      replaceOnce("main/logic/health_gate.hpp", "!service.allocation_failures && x10a_ready",
-        "x10a_ready")],
-    ["an accepted X10A publish no longer raises proof", () =>
-      replaceOnce("main/mqtt_ha.cpp", "s_x10a_publish_proven.store(true, std::memory_order_release)",
-        "s_x10a_publish_proven.store(false, std::memory_order_release)")],
+      replaceOnce("tools/agent-hooks/agent_hook.py", "direct OTA writes are forbidden; run scripts/production-ota-gate.py", "direct OTA writes are allowed")],
     ["a failed health cap no longer forces rollback", () =>
-      replaceOnce("main/ota_update.cpp",
-        /(HealthVerdict::GiveUp[\s\S]{0,500}?)esp_restart\(\);/,
-        "$1ota_rollback_restart_bypassed();")],
+      replaceOnce("main/ota_update.cpp", /(HealthVerdict::GiveUp[\s\S]{0,700}?)esp_restart\(\);/, "$1ota_rollback_restart_bypassed();")],
   ];
 
   let caught = 0;
   for (const [name, mutate] of cases) {
     restore();
     mutate();
-    const result = run();
-    if (result.status === 0) throw new Error(`production OTA contract missed mutation: ${name}`);
+    const result = runContracts();
+    if (result.status === 0) throw new Error(`production OTA contracts missed mutation: ${name}`);
     caught++;
     console.log(`production OTA selftest: detected — ${name}`);
   }

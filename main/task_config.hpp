@@ -11,21 +11,27 @@
 //
 // STACK SIZES deliberately stay at the call sites. They are the opposite kind of fact — each one is
 // justified by what that particular task's deepest call chain does (syslog's getaddrinfo + socket
-// chain, the OTA task's TLS handshake, the poll task's decode) and AGENTS.md's "Memory, concurrency,
-// and HTTP safety" section is emphatic that a stack budget is read off a measured frame, not chosen
-// from a table. A shared table
-// of sizes would invite exactly the copy-the-neighbour sizing it warns against.
+// chain, the OTA task's TLS handshake, the poll task's decode) and AGENTS.md's "Memory,
+// concurrency, and HTTP safety" section is emphatic that a stack budget is read off a measured
+// frame, not chosen from a table. A shared table of sizes would invite exactly the
+// copy-the-neighbour sizing it warns against.
 //
 // Relative ordering (higher preempts lower):
-//   5 — work that must not starve behind anything else of ours. The poll task OWNS the X10A UART and
+//   6 — the static HTTP deadline watchdog. It wakes only at a failed/trickling peer's absolute
+//       deadline and must run ahead of the task blocked in that peer so it can shut down the
+//       socket.
+//   5 — work that must not starve behind anything else of ours. The poll task OWNS the X10A UART
+//   and
 //       is Task-Watchdog-subscribed, so a delayed cycle is a step toward a watchdog reboot; the
 //       setup portal's DNS catch-all has to answer a joining phone's connectivity probe inside that
 //       probe's own timeout, or the captive portal never pops and the device looks unprovisionable.
 //   4 — supervisors and bridge publishers: periodic, latency-tolerant, but expected to run promptly
 //       when due. The MQTT bridge, the second (HomeHub) source, the optional ENV III sensor, the
 //       connectivity watchdog, the wired-link loss watch (which decides a reboot, so it must not
-//       sit behind a long publish), and the two OTA tasks — which hold a TLS peer that will time out.
-//   3 — local reporting with relaxed deadlines: best-effort UDP syslog, the 45-minute weather fetch,
+//       sit behind a long publish), and the two OTA tasks — which hold a TLS peer that will time
+//       out.
+//   3 — local reporting with relaxed deadlines: best-effort UDP syslog, the 45-minute weather
+//   fetch,
 //       and the recovery button's debounced sampling.
 //   2 — cosmetics. The status indicator is below everything: a dropped tick costs nothing (the next
 //       one recomputes the pattern from scratch).
@@ -35,6 +41,8 @@
 
 namespace daik {
 
+inline constexpr UBaseType_t TASK_PRIO_HTTP_DEADLINE =
+    6; // http_deadline.cpp  rare absolute socket abort
 inline constexpr UBaseType_t TASK_PRIO_POLL        = 5;  // hp_poll.cpp         X10A bus owner, wdt-subscribed
 inline constexpr UBaseType_t TASK_PRIO_CAPTIVE_DNS = 5;  // captive_dns.cpp     setup-AP DNS catch-all (setup mode only)
 inline constexpr UBaseType_t TASK_PRIO_MQTT        = 4;  // mqtt_ha.cpp         HA bridge publisher + inbound sources

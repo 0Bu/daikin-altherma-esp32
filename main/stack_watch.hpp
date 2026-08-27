@@ -18,19 +18,21 @@
 // sample instant does not have to coincide with the deepest frame — which is what lets every caller
 // sample at the top of its loop, the one point no branch can skip.
 //
-// The MINIMUM is still tracked here rather than trusted to FreeRTOS, and the reason is one task:
-// hp_modbus's stack RETIRES itself when the HomeHub address is cleared and is recreated when one is
-// saved, and a fresh task starts with a fresh high-water mark. Keeping the minimum across
-// incarnations makes every slot mean the same thing — the worst headroom this BOARD has had since
-// boot — instead of meaning that for three tasks and "since the last reconfigure" for the fourth.
+// The MINIMUM is still tracked here rather than trusted to FreeRTOS because two watched slots are
+// reincarnated: hp_modbus retires when the HomeHub address is cleared, while the OTA task exists
+// for one check/install only. A fresh task starts with a fresh high-water mark. Keeping the minimum
+// across incarnations makes every slot mean the same thing — the worst headroom this BOARD has had
+// since boot — rather than silently resetting after reconfiguration or every OTA operation.
 #include <cstdint>
 
 namespace daik {
 
 // One slot per task that carries a deep frame or a documented overflow. Deliberately NOT every task
-// this firmware creates: the ones left out (syslog, weather, ENV III, the LED, the button) have
-// small, bounded bodies and no history here, and a payload field per task would cost every consumer
-// a set of permanently-flat series to rule out — the test that retired "WiFi Quality".
+// this firmware creates: the ones left out (syslog, ENV III, the LED, the button) have small,
+// bounded bodies and no history here, and a payload field per task would cost every consumer a set
+// of permanently-flat series to rule out — the test that retired "WiFi Quality". Weather is
+// included because its 12 KiB task owns TLS + HTTP + JSON and release HIL exercises that exact
+// path.
 enum class StackWatch : uint8_t {
     // The deepest chain in the firmware (mcp_post -> http_send_status_json -> append_status_json),
     // 16384. Sampled per
@@ -41,9 +43,11 @@ enum class StackWatch : uint8_t {
     // that has never been exercised. Null says "not measured"; a number here always means a request
     // was served to get it.
     Httpd = 0,
-    Poll,        // hp_poll — #241 died here, 8192
-    Mqtt,        // the publish task, whose cycle builds every payload
-    Modbus,      // the HomeHub link; the only slot whose task can be destroyed and recreated
+    Poll,    // hp_poll — #241 died here, 8192
+    Mqtt,    // the publish task, whose cycle builds every payload
+    Modbus,  // the HomeHub link; retires and is recreated after configuration changes
+    Weather, // Open-Meteo TLS + HTTP + JSON task; release HIL requires its post-fetch evidence
+    Ota,     // transient check/install task; minimum survives task recreation for this boot
     COUNT,
 };
 
@@ -69,7 +73,7 @@ void stack_watch_sample(StackWatch which) noexcept;
 // measurements that settle it. ZERO MEANS NEVER SAMPLED, and every reporting site
 // must render that as null rather than as a number: a task that has not run yet is not a task with
 // no stack left, and on a board with no HomeHub the Modbus slot stays that way forever. The
-// ambiguity with a genuine zero is accepted — a task that has actually consumed its last word has
+// ambiguity with a genuine zero is accepted — a task that has actually consumed its last byte has
 // already taken the board down with it, so there is nobody left to read the field.
 uint32_t stack_watch_min_free_bytes(StackWatch which) noexcept;
 

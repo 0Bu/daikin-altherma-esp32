@@ -18,6 +18,7 @@
 #include "def/homehub.hpp"
 #include "diag_log.hpp"
 #include "history.hpp"
+#include "logic/history_persist.hpp" // allocation-free target fingerprint at source cutover
 #include "net.hpp"
 #include "ota_update.hpp"
 #include "stack_watch.hpp"
@@ -106,6 +107,9 @@ static DetectBackoff s_backoff;
 static std::atomic<int64_t> s_next_try_us{0};
 static std::atomic<bool> s_reconfigure_reset{false};
 static std::atomic<uint32_t> s_target_generation{1};
+// Mirrors the persisted HomeHub enable decision. /set_hp stages this bool before its durable write,
+// then mb_reconfigure() installs it without copying the string-owning Config after that boundary.
+static std::atomic<bool> s_target_enabled{false};
 static std::atomic<bool> s_network_quiesced{true};
 static_assert(std::atomic<bool>::is_always_lock_free,
               "HomeHub network quiesce acknowledgement must remain allocation- and lock-free");
@@ -783,7 +787,8 @@ static void mb_poll_once() {
     // second request covers an old cycle that happened to consume that flag before noticing the new
     // configuration. The reset keeps the boot-aligned raster and replaces old-target data with gaps.
     if (s_have_req && (target != s_req_host || c.mb_port != s_req_port || c.mb_unit_id != s_unit))
-        history_modbus_reset();
+        history_modbus_reset(logic::history_homehub_target_fingerprint(
+            target.c_str(), static_cast<uint32_t>(c.mb_port), static_cast<uint32_t>(c.mb_unit_id)));
     // Capture after the task-owned target correction above. Capturing before it made the first full
     // cycle for every new HomeHub self-reject as stale and left an avoidable full-cadence gap.
     const uint32_t history_generation = history_modbus_generation();
@@ -1088,7 +1093,7 @@ static void mb_poll_once() {
     s_cycle_tick++;
 }
 
-static void mb_task_start_if_enabled();
+static void mb_task_start_if_enabled() noexcept;
 
 // The task. Self-guarded like every other allocating FreeRTOS loop here (AGENTS.md → Memory,
 // concurrency, and HTTP safety): an escaping std::bad_alloc would reach std::terminate and reboot
@@ -1101,11 +1106,15 @@ static void mb_task(void*) {
     esp_task_wdt_add(NULL);
     for (;;) {
         esp_task_wdt_reset();
-        // Moved here from the end of the loop when the four watched stacks were given one sampler
+        // Moved here from the end of the loop when the original four watched stacks got one sampler
         // (stack_watch.hpp): behaviourally identical, since the FreeRTOS mark is retrospective, and
-        // it now sits where the other three sit — above the `break` that retires this task, so the
+        // it now sits at the same loop boundary — above the `break` that retires this task, so the
         // last cycle before a HomeHub is disabled is recorded like every other.
         stack_watch_sample(StackWatch::Modbus);
+        // /set_hp installs this POD intent synchronously after its durable save. Check it before
+        // every TLS-owner delay and before any Config copy: disabling must close the old socket and
+        // retire this task even if the allocator is too fragmented to snapshot Config indefinitely.
+        if (!s_target_enabled.load(std::memory_order_acquire)) break;
         // A HomeHub cycle copies the string-owning Config and, every fifth cycle, reserves a fresh
         // model-sized value vector. Neither is needed while OTA owns the allocator. Stand aside
         // before either allocation; the already-raised OTA flag plus its stable headroom samples
@@ -1124,9 +1133,6 @@ static void mb_task(void*) {
                 s_backoff.silent = 0;
                 s_next_try_us.store(0, std::memory_order_release);
             }
-            // Clearing the saved address disables the stack. No boot- or loop-triggered browse may
-            // turn an empty field back into an active HomeHub configuration.
-            if (config_modbus_host(config()).empty()) break;
             if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();
         } catch (const std::exception& e) {
             // Keep the allocation guard allocation-free: constructing the UI error itself can throw
@@ -1166,9 +1172,8 @@ static void mb_task(void*) {
 // 6144 with the note "4096 is too thin for that call chain". Its own locals are small (a 260 B ADU,
 // a 23-row vector) — nothing like the /status builder that drove hp_poll's sizing.
 // Start only when a persistent address is configured. Empty means no task, no browse, no requests.
-static void mb_task_start_if_enabled() {
-    const Config& c = config();
-    if (!config_modbus_enabled(c)) return;
+static void mb_task_start_if_enabled() noexcept {
+    if (!s_target_enabled.load(std::memory_order_acquire)) return;
     bool alloc_failed = false;
     {
         Lock lk(s_mtx);
@@ -1194,6 +1199,8 @@ bool mb_network_quiesced() {
     return s_network_quiesced.load(std::memory_order_acquire);
 }
 
+bool mb_target_enabled() noexcept { return s_target_enabled.load(std::memory_order_acquire); }
+
 void mb_start() {
     // The mutexes exist even when the stack does not, so /status can answer `enabled:false` rather
     // than an empty object before any task is created.
@@ -1203,11 +1210,16 @@ void mb_start() {
         diag_printf("modbus: mutex alloc failed — HomeHub stack disabled this boot\n");
         return;
     }
+    // Boot is still allowed to take a Config snapshot. The no-allocation requirement begins only
+    // after a request has crossed its durable save boundary; mb_reconfigure() receives POD there.
+    const Config c = config();
+    s_target_enabled.store(config_modbus_enabled(c), std::memory_order_release);
     mb_task_start_if_enabled();
 }
 
-void mb_reconfigure() {
+void mb_reconfigure(bool enabled) noexcept {
     if (!s_mtx || !s_cache_mtx) return;
+    s_target_enabled.store(enabled, std::memory_order_release);
     s_reconfigure_reset.store(true, std::memory_order_release);
     s_next_try_us.store(0, std::memory_order_release);
     {
@@ -1238,9 +1250,9 @@ void mb_reconfigure() {
         s_cache_target_generation = 0;
     }
     mb_task_start_if_enabled();
-    // Clearing the address is handled BY the task (it re-reads it at the top of each cycle and
-    // retires itself), so nothing is torn down from the httpd task here — the socket has exactly one
-    // owner and it stays that way.
+    // Clearing the address is handled BY the task: its allocation-free atomic target flag is read
+    // at the top of each cycle and retires it without another fallible Config snapshot. Nothing is
+    // torn down from the httpd task here — the socket has exactly one owner and it stays that way.
 }
 
 size_t mb_values_capacity() { return static_cast<size_t>(def::HOMEHUB_REG_COUNT); }

@@ -14,9 +14,10 @@
 //     discovery config. HomeHub values stay on MQTT for non-HA consumers, but are deliberately not
 //     exposed as HA entities; weather has no HA entities either.
 //   • Each cycle: publish X10A's grouped JSON to <base>/x10a, the generation-checked flat HomeHub
-//     JSON to <base>/modbus, and — only while Open-Meteo is configured — an atomic
-//     forecast/provenance snapshot to <base>/weather/openmeteo/forecast when changed, plus each fresh
-//     ENV III sample on <base>/env3.
+//     JSON to <base>/modbus, and — only while Open-Meteo is configured AND diagnostics consent is
+//     active — an atomic forecast/provenance snapshot to <base>/weather/openmeteo/forecast when
+//     changed, plus each fresh ENV III sample on <base>/env3. Removing either Weather authority
+//     retracts its retained snapshot.
 //     A disconnected HomeHub publishes `{}`, and an unavailable/stale ENV III omits its three
 //     readings (keeping only its samples/errors I2C counters), rather than carrying an old
 //     reading forward. Message topics sit directly under
@@ -24,34 +25,35 @@
 //     id identifies the DEVICE only in each discovery config's uniq_id/dev.ids + the
 //     <prefix>/<component>/<node>/<group>_<object_id> discovery topic. That node id is derived from
 //     the BASE TOPIC (logic/ha_device.hpp), not from the board's MAC, so replacing the ESP32 keeps
-//     ONE HA device and its entities; this board's MAC-derived id stays on as the MQTT client id and
-//     a second dev.ids entry (HA merges on it, so an install upgrading from a MAC-identified build
-//     keeps its device). The entity id carries the REGISTER GROUP because uniq_id and the discovery
-//     topic are flat namespaces while a label is unique only within its page (#221). The configs an
-//     older build published under a superseded identity — the MAC node id, and the un-grouped entity
-//     ids — are retracted in one pass before any replacement goes out.
+//     ONE HA device and its entities; this board's MAC-derived id stays on as the MQTT client id
+//     and a second dev.ids entry (HA merges on it, so an install upgrading from a MAC-identified
+//     build keeps its device). The entity id carries the REGISTER GROUP because uniq_id and the
+//     discovery topic are flat namespaces while a label is unique only within its page (#221). The
+//     configs an older build published under a superseded identity — the MAC node id, and the
+//     un-grouped entity ids — are retracted in one pass before any replacement goes out.
 //   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish board/link diagnostics
-//     (logic/heartbeat.hpp) to <base>/heartbeat and the separately grouped room-source/heating-curve
-//     evidence (logic/heating_curve_mqtt.hpp) to <base>/heating_curve. Both use a fixed cadence,
-//     unlike real-time source topics which publish on change.
-//   • Once per (re)connect: RETAIN the boot-time crash summary (logic/crashinfo.hpp) on <base>/crash
-//     ONLY when the reset was a real fault or a core-dump is still in flash. On a normal boot, probe
-//     the topic and delete it only if the broker still holds an older crash; a clean broker gets no
-//     empty publish, so live MQTT clients do not invent a payload-less /crash node. When a crash IS
-//     reported it drives one diagnostic HA entity — a "dump waiting" flag (the reset reason
-//     is the heartbeat's own "Reset Reason" sensor, so a crash entity for it would be a duplicate).
-//     Reason/backtrace only; never the raw dump or any secret.
+//     (logic/heartbeat.hpp) to <base>/heartbeat and the separately grouped
+//     room-source/heating-curve evidence (logic/heating_curve_mqtt.hpp) to <base>/heating_curve.
+//     Both use a fixed cadence, unlike real-time source topics which publish on change.
+//   • Once per (re)connect: RETAIN the boot-time crash summary (logic/crashinfo.hpp) on
+//   <base>/crash
+//     ONLY when the reset was a real fault or a core-dump is still in flash. On a normal boot,
+//     probe the topic and delete it only if the broker still holds an older crash; a clean broker
+//     gets no empty publish, so live MQTT clients do not invent a payload-less /crash node. When a
+//     crash IS reported it drives one diagnostic HA entity — a "dump waiting" flag (the reset
+//     reason is the heartbeat's own "Reset Reason" sensor, so a crash entity for it would be a
+//     duplicate). Reason/backtrace only; never the raw dump or any secret.
 // Read-only with respect to plant commands: one logical room source may assemble temperature,
-// target and source time from three exact topics (or use a fixed target). Bounded exact-topic probes
-// also look for actually-retained <base>/state,
-// <base>/modbus/status and resolved <base>/crash payloads; a clean broker receives no empty publish
-// on any of them.
-// No-op if mqtt_uri is empty. Memory-safe: discovery is one small publish per value; the state JSON
-// is a single few-KB build, guarded against OOM.
+// target and source time from three exact topics (or use a fixed target). Bounded exact-topic
+// probes also look for actually-retained <base>/state, <base>/modbus/status and resolved
+// <base>/crash payloads; a clean broker receives no empty publish on any of them. No-op if mqtt_uri
+// is empty. Memory-safe: discovery is one small publish per value; the state JSON is a single
+// few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
 #include "net.hpp"
 #include "config.hpp"
 #include "checkup.hpp"
+#include "def/homehub.hpp"
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "diag_crash.hpp"
@@ -73,6 +75,7 @@
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
+#include "logic/mqtt_cleanup.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
 #include "logic/ota_quiesce.hpp"   // stand aside while an OTA/weather TLS op owns the heap (#380)
@@ -134,6 +137,17 @@ static std::atomic<bool>        s_circulation_reconfigure{false};
 static std::atomic<bool>        s_circulation_probe_reconfigure{false};
 static std::atomic<bool>        s_weather_cleanup_requested{false};
 static std::atomic<bool>        s_modbus_cleanup_requested{false};
+static std::atomic<bool>        s_env3_cleanup_requested{false};
+// Source cleanup state is owned by mqtt_task. The event task contributes only fixed-size PUBACK
+// evidence and the epoch of the connected client; Settings writers contribute the request bits
+// above. A new client epoch restarts the idempotent sequence, while a reconnect of the same client
+// preserves esp-mqtt's queued packet and its expected message id.
+static MqttCleanupScheduler         s_source_cleanup;
+static MqttCleanupEvidenceQueue<32> s_source_cleanup_evidence;
+static std::atomic<bool>            s_source_cleanup_evidence_lost{false};
+static std::atomic<uint32_t>        s_mqtt_client_epoch{0};
+static std::atomic<uint32_t>        s_connected_client_epoch{0};
+static uint32_t                     s_source_cleanup_evidence_drops_reported = 0; // mqtt_task only
 
 // The task starts a subscriber-only client immediately, then replaces it with an LWT-bearing client
 // after the first X10A proof. Definitions live beside the client builder below; forward declarations
@@ -394,6 +408,10 @@ static constexpr int HEARTBEAT_INTERVAL_S = 10;
 // retirement burst makes cleanup eventually reliable without ever reintroducing a config payload.
 static constexpr int HA_RETIRE_INTERVAL_S = 5 * 60;
 static constexpr int64_t RETIRED_TOPIC_PROBE_US = 5LL * 1000 * 1000;
+// This is a byte cap, not a pre-allocation. The source queue contributes one small tombstone; the
+// remaining headroom covers the four bounded retained probes, availability and the bounded crash
+// report without permitting an unreachable broker to grow esp-mqtt's QoS outbox indefinitely.
+static constexpr uint64_t MQTT_OUTBOX_LIMIT_BYTES = 8 * 1024;
 
 // Non-allocating under the lock: `err` is always a string literal, stored as a bare pointer. Runs on
 // esp-mqtt's event task with no exception guard, so an allocating std::string assignment that threw
@@ -403,6 +421,17 @@ static void set_status(bool connected, const char* err) {
     s_status.connected = connected;
     if (err) s_error = err;
     else if (connected) s_error = "";
+}
+
+// esp_mqtt_client_stop() joins the producer task and then deletes every queued item without a
+// DELETED event. Only after that join may mqtt_task discard stale ring evidence and release the
+// scheduler's one in-flight id. The active step itself remains selected and is retried after the
+// same client handle reconnects.
+static void source_cleanup_outbox_cleared_after_transport_stop() noexcept {
+    s_source_cleanup.outbox_cleared_after_transport_stop();
+    s_source_cleanup_evidence.clear_after_producer_stop();
+    s_source_cleanup_evidence_lost.store(false, std::memory_order_release);
+    s_connected_client_epoch.store(0, std::memory_order_release);
 }
 
 // Stop the complete esp-mqtt transport before acknowledging a competing OTA/Weather TLS owner.
@@ -416,6 +445,7 @@ static __attribute__((noinline)) void mqtt_transport_pause_if_requested() {
     s_publish_network_quiesced.store(false, std::memory_order_release);
     const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);
     if (stop_rc == ESP_OK) {
+        source_cleanup_outbox_cleared_after_transport_stop();
         s_client_running.store(false, std::memory_order_release);
         s_transport_connecting.store(false, std::memory_order_release);
         s_transport_paused.store(true, std::memory_order_release);
@@ -425,6 +455,34 @@ static __attribute__((noinline)) void mqtt_transport_pause_if_requested() {
     } else {
         diag_printf("mqtt: transport pause failed (%s)\n", esp_err_to_name(stop_rc));
     }
+}
+
+// A full fixed evidence ring means mqtt_task cannot know whether the one cleanup PUBACK or DELETED
+// event was lost. Stop/join the producer and clear its outbox before retrying the same idempotent
+// step; this preserves the one-cleanup-item bound instead of guessing and queuing a duplicate.
+static __attribute__((noinline)) bool mqtt_cleanup_evidence_recovery_step(int delay_s) {
+    if (!s_source_cleanup_evidence_lost.load(std::memory_order_acquire)) return false;
+    if (!s_client_running.load(std::memory_order_acquire) || !s_client) {
+        source_cleanup_outbox_cleared_after_transport_stop();
+        return false;
+    }
+
+    s_publish_network_quiesced.store(false, std::memory_order_release);
+    const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);
+    if (stop_rc == ESP_OK) {
+        source_cleanup_outbox_cleared_after_transport_stop();
+        s_client_running.store(false, std::memory_order_release);
+        s_transport_connecting.store(false, std::memory_order_release);
+        s_transport_paused.store(true, std::memory_order_release);
+        s_connected.store(false, std::memory_order_release);
+        set_status(false, "restarting after MQTT cleanup evidence loss");
+        diag_printf("mqtt: cleanup evidence lost — transport stopped for bounded retry\n");
+    } else {
+        diag_printf("mqtt: cleanup evidence recovery stop failed (%s)\n", esp_err_to_name(stop_rc));
+    }
+    s_publish_network_quiesced.store(true, std::memory_order_release);
+    vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
+    return true;
 }
 
 // Return true after this cycle deliberately stood aside. The caller immediately continues the
@@ -523,7 +581,8 @@ static std::string board_id() {
 // Every outbound publish funnels through here so the heartbeat's mqtt_count/mqtt_fails reflect
 // every discovery/state/heartbeat/availability message, not just one of them. esp_mqtt_client_publish() returns the message id (>=0) on success
 // or -1 if it couldn't even be queued (e.g. dropped mid-disconnect).
-static bool mqtt_publish(const std::string& topic, const char* payload, int len, int qos, int retain) {
+static int mqtt_publish_id(const std::string& topic, const char* payload, int len, int qos,
+                           int retain) {
     const int rc = esp_mqtt_client_publish(s_client, topic.c_str(), payload, len, qos, retain);
     if (rc >= 0) s_mqtt_pub_ok++; else s_mqtt_pub_fail++;
     // Feed the watchdog per completed publish — mirrors poll_once's per-register reset. A single
@@ -533,7 +592,28 @@ static bool mqtt_publish(const std::string& topic, const char* payload, int len,
     // is still making progress. This runs only in mqtt_pub (the sole caller path), which is
     // subscribed, so a genuinely wedged write still trips the timeout — a progressing one never does.
     esp_task_wdt_reset();
-    return rc >= 0;
+    return rc;
+}
+
+static bool mqtt_publish(const std::string& topic, const char* payload, int len, int qos,
+                         int retain) {
+    return mqtt_publish_id(topic, payload, len, qos, retain) >= 0;
+}
+
+// Source cleanup needs an unambiguous queue result. esp_mqtt_client_publish() can enqueue QoS 1,
+// fail its synchronous socket write and still return -1; retrying that apparent failure would leave
+// two copies in the outbox. The enqueue API either returns the tracked id or proves that no item
+// was admitted, while esp-mqtt's own task performs the network write.
+static int mqtt_enqueue_id(const std::string& topic, const char* payload, int len, int qos,
+                           int retain) {
+    const int rc =
+        esp_mqtt_client_enqueue(s_client, topic.c_str(), payload, len, qos, retain, false);
+    if (rc >= 0)
+        s_mqtt_pub_ok++;
+    else
+        s_mqtt_pub_fail++;
+    esp_task_wdt_reset();
+    return rc;
 }
 
 // Start and service one exact-topic retained cleanup probe. Both functions run only on mqtt_task;
@@ -756,34 +836,39 @@ static void publish_x10a_discovery() {
 // never publish replacements. The repeat is intentional and idempotent — it also cleans a broker
 // restored from an old backup, while keeping the independent <base>/modbus state stream available
 // to Telegraf and other MQTT clients.
-static void retract_modbus_discovery() {
-    for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++)
-        mqtt_publish(modbus_discovery_topic(s_prefix, s_node, def::HOMEHUB_REGS[i]), "", 0, 0, 1);
+static bool retract_modbus_discovery(int qos = 0) {
+    bool ok = true;
+    for (int i = 0; i < RETIRED_MODBUS_HA_SENSOR_COUNT; i++)
+        if (!mqtt_publish(
+                retired_modbus_discovery_topic(s_prefix, s_node, RETIRED_MODBUS_HA_SENSORS[i]), "",
+                0, qos, 1))
+            ok = false;
+    return ok;
 }
 
-static void publish_env3_discovery() {
+static bool publish_env3_discovery() {
+    bool ok = true;
     for (size_t i = 0; i < ENV3_HA_SENSOR_COUNT; ++i) {
         const Env3HaSensor& sensor = ENV3_HA_SENSORS[i];
         const std::string topic = env3_discovery_topic(s_prefix, s_node, sensor);
         const std::string config = env3_discovery_config(s_node, s_board, s_env3, s_avail, sensor);
-        mqtt_publish(topic, config.c_str(), 0, 0, 1);
+        if (!mqtt_publish(topic, config.c_str(), 0, 0, 1)) ok = false;
     }
-}
-
-static void retract_env3_discovery() {
-    for (size_t i = 0; i < ENV3_HA_SENSOR_COUNT; ++i)
-        mqtt_publish(env3_discovery_topic(s_prefix, s_node, ENV3_HA_SENSORS[i]), "", 0, 0, 1);
+    return ok;
 }
 
 // Builds up to v1.0.0-dev.295 briefly exposed the forecast as four HA entities. Forecast history
 // now has one explicit consumer contract on MQTT instead; delete the frozen discovery topics and
 // never publish replacement configs. Repeating this with the Modbus retirement also cleans brokers
 // restored from a backup made while those entities existed.
-static void retract_weather_discovery() {
+static bool retract_weather_discovery(int qos = 0) {
+    bool ok = true;
     for (int i = 0; i < RETIRED_WEATHER_HA_SENSOR_COUNT; ++i) {
         const RetiredHaSensor& sensor = RETIRED_WEATHER_HA_SENSORS[i];
-        mqtt_publish(retired_weather_discovery_topic(s_prefix, s_node, sensor), "", 0, 0, 1);
+        if (!mqtt_publish(retired_weather_discovery_topic(s_prefix, s_node, sensor), "", 0, qos, 1))
+            ok = false;
     }
+    return ok;
 }
 
 // Build + publish each source independently. The X10A payload is grouped by register page; the
@@ -844,33 +929,135 @@ static void publish_modbus_state() {
     bool live = false;
     const std::vector<GroupedValue> values = current_modbus_values(live);
     const std::string js = live ? build_flat_json(values) : std::string("{}");
-    if (js != s_last_modbus_json) {
-        mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1);
+    if (js != s_last_modbus_json &&
+        mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) {
         s_last_modbus_json = js;
     }
 }
 
-// A user who clears one of these source configurations is explicitly asking the retained document
-// to disappear. That intent is narrower than installation publication authority: it may send only
-// a zero-length retained tombstone, even while X10A is absent, and cannot announce or replace any
-// value. Keep the request armed through broker outages; re-enabling before delivery cancels it.
-static void service_requested_topic_cleanup(const Config& c) {
-    if (!s_connected) return;
-    if (s_weather_cleanup_requested.exchange(false)) {
-        if (!c.weather_enabled) {
-            mqtt_publish(s_weather, "", 0, 1, 1);
-            s_disabled_weather_cleaned = true;
-            diag_printf("mqtt: inactive weather forecast topic deleted\n");
+struct RetainedCleanupCycle {
+    bool weather = false;
+    bool modbus  = false;
+    bool env3    = false;
+};
+
+static_assert(MQTT_WEATHER_CLEANUP_DISCOVERY_COUNT == RETIRED_WEATHER_HA_SENSOR_COUNT);
+static_assert(MQTT_MODBUS_CLEANUP_DISCOVERY_COUNT == RETIRED_MODBUS_HA_SENSOR_COUNT);
+static_assert(MQTT_ENV3_CLEANUP_DISCOVERY_COUNT == ENV3_HA_SENSOR_COUNT);
+
+static std::string source_cleanup_topic(const MqttCleanupAction& action) {
+    if (action.topic == MqttCleanupTopic::State) {
+        switch (action.source) {
+        case MqttCleanupSource::Weather:
+            return s_weather;
+        case MqttCleanupSource::Modbus:
+            return s_modbus;
+        case MqttCleanupSource::Env3:
+            return s_env3;
+        case MqttCleanupSource::None:
+            return {};
         }
     }
-    if (s_modbus_cleanup_requested.exchange(false)) {
-        if (!config_modbus_enabled(c)) {
-            mqtt_publish(s_modbus, "", 0, 1, 1);
-            s_modbus_disabled_cleaned = true;
-            s_last_modbus_json.clear();
-            diag_printf("mqtt: user-disabled Modbus topic deleted\n");
+    if (action.topic == MqttCleanupTopic::RetiredDiscovery) {
+        if (action.source == MqttCleanupSource::Weather &&
+            action.index < RETIRED_WEATHER_HA_SENSOR_COUNT)
+            return retired_weather_discovery_topic(s_prefix, s_node,
+                                                   RETIRED_WEATHER_HA_SENSORS[action.index]);
+        if (action.source == MqttCleanupSource::Modbus &&
+            action.index < RETIRED_MODBUS_HA_SENSOR_COUNT)
+            return retired_modbus_discovery_topic(s_prefix, s_node,
+                                                  RETIRED_MODBUS_HA_SENSORS[action.index]);
+    }
+    if (action.topic == MqttCleanupTopic::Env3Discovery &&
+        action.source == MqttCleanupSource::Env3 && action.index < ENV3_HA_SENSOR_COUNT)
+        return env3_discovery_topic(s_prefix, s_node, ENV3_HA_SENSORS[action.index]);
+    return {};
+}
+
+static void apply_source_cleanup_completion(const MqttCleanupCompletion& completion) {
+    switch (completion.source) {
+    case MqttCleanupSource::Weather:
+        s_disabled_weather_cleaned = true;
+        s_last_weather_json.clear();
+        diag_printf("mqtt: superseded Weather state and retired discovery deleted\n");
+        break;
+    case MqttCleanupSource::Modbus:
+        s_modbus_disabled_cleaned = true;
+        s_last_modbus_json.clear();
+        diag_printf("mqtt: superseded HomeHub state and retired discovery deleted\n");
+        break;
+    case MqttCleanupSource::Env3:
+        s_last_env3_json.clear();
+        s_last_env3_samples        = 0;
+        s_env3_discovery_announced = false;
+        s_env3_disabled_cleaned    = !completion.env3_enabled;
+        diag_printf("mqtt: superseded ENV III state%s deleted\n",
+                    completion.env3_enabled ? "" : " and discovery");
+        break;
+    case MqttCleanupSource::None:
+        break;
+    }
+}
+
+static void service_source_cleanup_evidence() {
+    MqttCleanupDeliveryEvidence evidence;
+    while (s_source_cleanup_evidence.pop(evidence)) {
+        if (evidence.outcome == MqttCleanupDeliveryOutcome::Published) {
+            if (s_source_cleanup.acknowledge(evidence))
+                apply_source_cleanup_completion(s_source_cleanup.take_completion());
+        } else if (s_source_cleanup.retry_deleted(evidence)) {
+            diag_printf("mqtt: source cleanup outbox item expired — retrying the same step\n");
         }
     }
+    const uint32_t dropped = s_source_cleanup_evidence.dropped();
+    if (dropped != s_source_cleanup_evidence_drops_reported) {
+        s_source_cleanup_evidence_drops_reported = dropped;
+        diag_printf("mqtt: source cleanup delivery evidence overflow (%u); restarting transport\n",
+                    static_cast<unsigned>(dropped));
+    }
+}
+
+// A source identity or consent change explicitly invalidates retained evidence. Consume all three
+// request bits into the pure scheduler before selecting one step: queued sources therefore remain
+// suppressed while another source waits for its PUBACK. A queue admission is not completion, and a
+// missing PUBACK does not enqueue another copy on the next one-second cycle.
+static RetainedCleanupCycle service_requested_topic_cleanup(const Config& c) {
+    s_source_cleanup.begin_cycle();
+    const bool     connected       = s_connected.load(std::memory_order_acquire);
+    const uint32_t connected_epoch = s_connected_client_epoch.load(std::memory_order_acquire);
+    if (connected && connected_epoch != 0) s_source_cleanup.reconstruct_for_client(connected_epoch);
+    if (s_weather_cleanup_requested.exchange(false, std::memory_order_acq_rel))
+        s_source_cleanup.request(MqttCleanupSource::Weather);
+    if (s_modbus_cleanup_requested.exchange(false, std::memory_order_acq_rel))
+        s_source_cleanup.request(MqttCleanupSource::Modbus);
+    if (s_env3_cleanup_requested.exchange(false, std::memory_order_acq_rel))
+        s_source_cleanup.request(MqttCleanupSource::Env3);
+
+    // Drain before queueing so an unrelated older PUBACK can never be mistaken for a newly reused
+    // numeric message id. Drain again after storing the id to cover a callback that ran before
+    // esp_mqtt_client_enqueue() returned it to this task.
+    service_source_cleanup_evidence();
+    const bool              env3_enabled = c.env3_enabled && env3_board_supported(c);
+    const MqttCleanupAction action       = s_source_cleanup.next_action(
+        connected && connected_epoch == s_source_cleanup.client_epoch(), env3_enabled);
+    if (action) {
+        const std::string topic = source_cleanup_topic(action);
+        if (!topic.empty()) {
+            const uint32_t epoch  = s_source_cleanup.client_epoch();
+            const int      msg_id = mqtt_enqueue_id(topic, "", 0, 1, 1);
+            if (msg_id >= 0) {
+                if (!s_source_cleanup.publish_queued(epoch, msg_id))
+                    diag_printf("mqtt: source cleanup scheduler rejected queued tombstone\n");
+                service_source_cleanup_evidence();
+            }
+        }
+    }
+
+    RetainedCleanupCycle suppressed;
+    suppressed.weather = s_source_cleanup.suppress(MqttCleanupSource::Weather);
+    suppressed.modbus  = s_source_cleanup.suppress(MqttCleanupSource::Modbus);
+    suppressed.env3    = s_source_cleanup.suppress(MqttCleanupSource::Env3);
+    return suppressed;
 }
 
 static void publish_weather_state(bool config_enabled) {
@@ -878,16 +1065,10 @@ static void publish_weather_state(bool config_enabled) {
     const WeatherMqttAction action = weather_mqtt_action(config_enabled, status.configured);
     if (action != WeatherMqttAction::Publish) {
         // Never retain or repeatedly publish a synthetic "not configured" forecast. A real disable
-        // is explicit user intent, so send one retained tombstone directly. The previous probe-first
-        // path could miss the retained delivery and leave the forecast behind; an idempotent empty
-        // retained publish is the broker's definitive delete operation. During the short
-        // enable/reconfigure race, simply wait for the weather task's status to catch up.
-        s_last_weather_json.clear();
-        if (action == WeatherMqttAction::CleanupRetained && !s_disabled_weather_cleaned) {
-            mqtt_publish(s_weather, "", 0, 1, 1);
-            s_disabled_weather_cleaned = true;
-            diag_printf("mqtt: disabled weather forecast topic deleted\n");
-        }
+        // is explicit user intent, so admit its tombstones to the PUBACK-driven source queue. Keep
+        // the acknowledgement cache intact until the complete Weather run is broker-confirmed.
+        if (action == WeatherMqttAction::CleanupRetained && !s_disabled_weather_cleaned)
+            s_weather_cleanup_requested.store(true, std::memory_order_release);
         return;
     }
     // Re-enabling makes the next disable a new cleanup transition.
@@ -902,8 +1083,8 @@ static void publish_weather_state(bool config_enabled) {
         status.last_attempt_unix_s, status.successes, status.errors,
         status.model, status.state, status.reason, status.error};
     const std::string js = build_weather_mqtt_json(snapshot, now_unix_s);
-    if (js != s_last_weather_json) {
-        mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1);
+    if (js != s_last_weather_json &&
+        mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1)) {
         s_last_weather_json = js;
     }
 }
@@ -911,8 +1092,9 @@ static void publish_weather_state(bool config_enabled) {
 // ENV III is independent observation telemetry and not part of either heat-pump payload. Three HA
 // discovery entities read this same document. Publish every successful sensor sample, even if
 // rounding produces the same JSON, so a time-series subscriber sees the sensor's real 10 s sampling
-// cadence. Errors/staleness publish `{}` once; each entity's availability template sees its missing
-// key and becomes unavailable instead of carrying a plausible retained outdoor value forward.
+// cadence. Errors/staleness publish a counter-only `{samples,errors}` document once; each entity's
+// availability template sees its missing reading key and becomes unavailable instead of carrying a
+// plausible retained outdoor value forward.
 static void publish_env3_state() {
     const Env3Status env = env3_status();
     const std::string js = build_env3_mqtt_json(env.fresh, env.temperature_c,
@@ -925,10 +1107,11 @@ static void publish_env3_state() {
     // drop that field silently reintroduce the gap that reads like a dropout.
     const bool new_sample = env.fresh && env.samples != s_last_env3_samples;
     if (new_sample || js != s_last_env3_json) {
-        mqtt_publish(s_env3, js.c_str(), static_cast<int>(js.size()), 0, 1);
-        s_last_env3_json = js;
+        if (mqtt_publish(s_env3, js.c_str(), static_cast<int>(js.size()), 0, 1)) {
+            s_last_env3_json    = js;
+            s_last_env3_samples = env.samples;
+        }
     }
-    s_last_env3_samples = env.samples;
 }
 
 // Stream one retained discovery config per diagnostic sensor (logic/heartbeat.hpp). These describe
@@ -1109,10 +1292,11 @@ static void publish_heartbeat() {
     f.heap_restarts   = heap_guard_restarts();
     // The stack budget (stack_watch.hpp). Read here rather than sampled here: each task records its
     // OWN mark from its own loop, because uxTaskGetStackHighWaterMark answers for the CALLING task
-    // and asking from this one would file all four under mqtt_pub's name.
+    // and asking from this one would file all five under mqtt_pub's name.
     f.httpd_stack_min_free_bytes = stack_watch_min_free_bytes(StackWatch::Httpd);
     f.poll_stack_min_free_bytes  = stack_watch_min_free_bytes(StackWatch::Poll);
     f.mqtt_stack_min_free_bytes  = stack_watch_min_free_bytes(StackWatch::Mqtt);
+    f.weather_stack_min_free_bytes = stack_watch_min_free_bytes(StackWatch::Weather);
     // One cached boot reason (diag_crash.cpp), three renderings: the slug a human reads, the raw
     // code a metrics store can keep, and the fault flag an alert fires on. Bound once so all three
     // are demonstrably the same reading rather than three lookups that only look identical.
@@ -2088,29 +2272,64 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
     case MQTT_EVENT_CONNECTED:
         if (s_mqtt_ever_connected) s_mqtt_reconnects.fetch_add(1);   // a later CONNECTED is a RE-connect
         s_mqtt_ever_connected = true;
-        s_connected = true; s_announce = true; s_ref_reconfigure = true;
-        s_circulation_reconfigure = true;
-        s_circulation_probe_reconfigure = true; set_status(true, nullptr);
+        // mqtt_task reconstructs retained-source cleanup once per CLIENT epoch. A reconnect of this
+        // same handle preserves its in-flight QoS-1 outbox item and must not enqueue a duplicate.
+        s_connected_client_epoch.store(s_mqtt_client_epoch.load(std::memory_order_acquire),
+                                       std::memory_order_release);
+        // Publish the connection flag after its epoch. An acquiring mqtt_task can never observe a
+        // connected client with epoch zero and queue a tombstone whose returned id cannot be
+        // tracked.
+        s_connected.store(true, std::memory_order_release);
+        s_announce                      = true;
+        s_ref_reconfigure               = true;
+        s_circulation_reconfigure       = true;
+        s_circulation_probe_reconfigure = true;
+        set_status(true, nullptr);
         diag_printf("mqtt: %s client connected\n",
                     s_client_is_publisher ? "publisher" : "observation");
         s_transport_connecting.store(false, std::memory_order_release);
         break;
     case MQTT_EVENT_DISCONNECTED:
-        s_connected = false; s_heartbeat_announced = false; set_status(false, nullptr);
-        { Lock lk(s_mtx); s_ref_status.subscribed = false; s_circulation_status.subscribed = false; }
+        s_connected           = false;
+        s_heartbeat_announced = false;
+        set_status(false, nullptr);
+        {
+            Lock lk(s_mtx);
+            s_ref_status.subscribed         = false;
+            s_circulation_status.subscribed = false;
+        }
         diag_printf("mqtt: disconnected (will retry)\n");
         s_transport_connecting.store(false, std::memory_order_release);
         break;
     case MQTT_EVENT_ERROR: {
-        auto* e = static_cast<esp_mqtt_event_handle_t>(data);
+        auto*       e   = static_cast<esp_mqtt_event_handle_t>(data);
         const char* why = "connection error";
         if (e && e->error_handle) {
-            if (e->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)       why = "tls/tcp error";
-            else if (e->error_handle->connect_return_code != MQTT_CONNECTION_ACCEPTED) why = "broker refused (auth/creds?)";
+            if (e->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
+                why = "tls/tcp error";
+            else if (e->error_handle->connect_return_code != MQTT_CONNECTION_ACCEPTED)
+                why = "broker refused (auth/creds?)";
         }
         set_status(false, why);
         diag_printf("mqtt: %s\n", why);
-        break; }
+        break;
+    }
+    case MQTT_EVENT_PUBLISHED: {
+        auto* e = static_cast<esp_mqtt_event_handle_t>(data);
+        if (e &&
+            !s_source_cleanup_evidence.push({s_mqtt_client_epoch.load(std::memory_order_acquire),
+                                             e->msg_id, MqttCleanupDeliveryOutcome::Published}))
+            s_source_cleanup_evidence_lost.store(true, std::memory_order_release);
+        break;
+    }
+    case MQTT_EVENT_DELETED: {
+        auto* e = static_cast<esp_mqtt_event_handle_t>(data);
+        if (e &&
+            !s_source_cleanup_evidence.push({s_mqtt_client_epoch.load(std::memory_order_acquire),
+                                             e->msg_id, MqttCleanupDeliveryOutcome::Deleted}))
+            s_source_cleanup_evidence_lost.store(true, std::memory_order_release);
+        break;
+    }
     case MQTT_EVENT_DATA: {
         auto* e = static_cast<esp_mqtt_event_handle_t>(data);
         capture_reference_frame(e);
@@ -2161,8 +2380,10 @@ static void mqtt_task(void*) {
     MqttTransportResumeState transport_resume;
 
     // Broker reachability and inbound observation do not depend on X10A. This first client carries
-    // no installation LWT, and the gate below still encloses EVERY explicit publish. It can therefore
-    // subscribe to the room source without letting an unwired board speak for the installation.
+    // no installation LWT, and the gate below still encloses every ordinary/current publish. The
+    // sole pre-gate output is a zero-length retained tombstone reconstructed from persisted source
+    // intent or a permanently retired discovery ledger. It can therefore subscribe to the room
+    // source without letting an unwired board speak for the installation.
     if (!start_current_client()) {
         s_publish_network_quiesced.store(true, std::memory_order_release);
         esp_task_wdt_delete(NULL);
@@ -2200,6 +2421,7 @@ static void mqtt_task(void*) {
         const bool network_busy = ota_busy || weather_busy;
         if (mqtt_network_hold_step(network_quiesce, network_busy, ota_busy,
                                    network_quiesce_logged, delay_s)) continue;
+        if (mqtt_cleanup_evidence_recovery_step(delay_s)) continue;
         {
         MqttPublishActivity publish_activity;
         // The network owner has released its flag and pause request. Recreate esp-mqtt's transport
@@ -2246,9 +2468,10 @@ static void mqtt_task(void*) {
             }
 
             // SubscriberOnly/Paused services exact-topic inbound subscriptions and bounded frame
-            // decoding. The only outbound exception is a user-requested retained tombstone for a
-            // just-disabled weather/HomeHub source. Ordinary publication remains below
-            // gate.publish_cycle, so no discovery/state/heartbeat/value payload can escape.
+            // decoding. The only outbound exception is a persisted source/consent-change tombstone:
+            // Weather, HomeHub and ENV III predecessor state, plus discovery that was retired or is
+            // now disabled. Ordinary publication remains below gate.publish_cycle, so no current
+            // discovery/state/heartbeat/value payload can escape.
             publish_stage = "config";
             const Config ref_config = config();
             publish_stage = "subscriptions";
@@ -2260,7 +2483,25 @@ static void mqtt_task(void*) {
             // is backing off on a silent bus. Record it on this task's independent one-second tick;
             // tying it to hp_poll would leave /status.history.rows empty exactly in that case.
             if (ref_config.diagnostics_enabled) history_record_circulation();
-            service_requested_topic_cleanup(ref_config);
+            const RetainedCleanupCycle cleanup_cycle = service_requested_topic_cleanup(ref_config);
+            // HA may have been offline for the connect-time tombstones. Repeat only the permanently
+            // retired discovery deletes on this independent timer, outside X10A publication
+            // authority, so a silent heat-pump bus cannot strand legacy entities after HA returns.
+            // A pending/active source cleanup includes the same deletes and holds this timer;
+            // ordinary source state/discovery remains inside gate.publish_cycle below.
+            publish_stage = "retire";
+            if (s_connected) {
+                if (cleanup_cycle.modbus || cleanup_cycle.weather) {
+                    ha_retire_elapsed_s = 0;
+                } else {
+                    ha_retire_elapsed_s += delay_s;
+                    if (ha_retire_elapsed_s >= HA_RETIRE_INTERVAL_S) {
+                        retract_modbus_discovery();
+                        retract_weather_discovery();
+                        ha_retire_elapsed_s = 0;
+                    }
+                }
+            }
             publish_stage = "heating_curve";
             evaluate_heating_curve(ref_config, hp);
 
@@ -2290,12 +2531,8 @@ static void mqtt_task(void*) {
                     s_x10a_publish_proven.store(false, std::memory_order_release);
                     s_last_modbus_json.clear();
                     s_last_weather_json.clear();
-                    s_disabled_weather_cleaned = false;
                     s_last_env3_json.clear();
                     s_last_env3_samples = 0;
-                    s_modbus_disabled_cleaned = false;
-                    s_env3_disabled_cleaned = false;
-                    s_env3_discovery_announced = false;
                     // Force the board/link diagnostic discovery to re-publish on THIS (re)connect. The
                     // disconnect handler also clears s_heartbeat_announced, but a DISCONNECT landing
                     // mid-discovery (after the check below, before the publishes finish) could leave it
@@ -2304,12 +2541,6 @@ static void mqtt_task(void*) {
                     s_heartbeat_announced = false;
                     heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S; // publish it right away, then every 10 s
                     mqtt_publish(s_avail, "online", 0, 0, 1);
-                    // HomeHub values remain an MQTT contract, but their former HA entities are
-                    // permanently retired. Retained tombstones remove existing entities and make a
-                    // restored stale broker converge again on the next reconnect.
-                    retract_modbus_discovery();
-                    retract_weather_discovery();
-                    ha_retire_elapsed_s = 0;
                     // Probe before deleting a retired data topic. Publishing tombstones
                     // unconditionally here recreates visible empty topics on every reconnect after
                     // the broker is already clean. DATA events raise the atomic flags only for
@@ -2362,58 +2593,54 @@ static void mqtt_task(void*) {
                 // prof == "auto" (detection pending): wait — don't publish transient generic sensors.
 
                 publish_stage = "modbus";
-                const bool modbus_enabled = mb_status().enabled;
-                if (modbus_enabled) {
-                    // State publication is independent of Home Assistant discovery. This also
-                    // starts correctly when MQTT connects before the separate Modbus task, or when
-                    // Modbus is enabled dynamically through POST /set_hp.
-                    s_modbus_disabled_cleaned = false;
-                    publish_modbus_state();
-                } else if (!s_modbus_disabled_cleaned) {
-                    // Covers a live POST /set_hp disable. Discovery and the duplicate status topic
-                    // are already retired; remove only the independent data topic.
-                    mqtt_publish(s_modbus, "", 0, 0, 1);
-                    s_last_modbus_json.clear();
-                    s_modbus_disabled_cleaned = true;
+                if (!cleanup_cycle.modbus) {
+                    const RetainedSourceAction modbus_action =
+                        retained_source_action(mb_target_enabled(), s_modbus_disabled_cleaned);
+                    if (modbus_action == RetainedSourceAction::PublishCurrent) {
+                        // State publication is independent of Home Assistant discovery. This also
+                        // starts correctly when MQTT connects before the separate Modbus task, or
+                        // when Modbus is enabled dynamically through POST /set_hp. The atomically
+                        // installed target intent — not a retiring task's status — prevents Off's
+                        // tombstone from being replaced by retained `{}`. A-to-B remains enabled
+                        // and may publish `{}` for the configured new source from the following
+                        // cycle.
+                        s_modbus_disabled_cleaned = false;
+                        publish_modbus_state();
+                    } else if (modbus_action == RetainedSourceAction::DeleteRetained) {
+                        // Covers a live POST /set_hp disable. Discovery and the duplicate status
+                        // topic are already retired; admit the delete to the ACK-driven source
+                        // queue.
+                        s_modbus_cleanup_requested.store(true, std::memory_order_release);
+                    }
                 }
 
-                // Weather remains an independent firmware input. MQTT archives it while its saved
-                // location exists; deleting the location removes the retained predecessor without
-                // publishing a synthetic disabled document. No HA entities are created.
+                // Weather remains an independent firmware input. MQTT archives it only while its
+                // saved location and diagnostics consent are both active; removing either authority
+                // deletes the retained predecessor without publishing a synthetic disabled
+                // document. No HA entities are created.
                 publish_stage = "weather";
-                publish_weather_state(ref_config.diagnostics_enabled && ref_config.weather_enabled);
+                if (!cleanup_cycle.weather)
+                    publish_weather_state(ref_config.diagnostics_enabled &&
+                                          ref_config.weather_enabled);
 
                 publish_stage = "env3";
-                const bool env3_enabled = ref_config.env3_enabled && env3_board_supported(ref_config);
-                if (env3_enabled) {
-                    s_env3_disabled_cleaned = false;
-                    if (!s_env3_discovery_announced) {
-                        publish_env3_discovery();
-                        s_env3_discovery_announced = true;
-                        diag_printf("mqtt: ENV III HA discovery announced\n");
+                if (!cleanup_cycle.env3) {
+                    const bool env3_enabled =
+                        ref_config.env3_enabled && env3_board_supported(ref_config);
+                    if (env3_enabled) {
+                        s_env3_disabled_cleaned = false;
+                        if (!s_env3_discovery_announced) {
+                            if (publish_env3_discovery()) {
+                                s_env3_discovery_announced = true;
+                                diag_printf("mqtt: ENV III HA discovery announced\n");
+                            }
+                        }
+                        publish_env3_state();
+                    } else if (!s_env3_disabled_cleaned) {
+                        // Disabling the configured sensor removes its retained data topic and its
+                        // three retained discovery configs through the ACK-driven source queue.
+                        s_env3_cleanup_requested.store(true, std::memory_order_release);
                     }
-                    publish_env3_state();
-                } else if (!s_env3_disabled_cleaned) {
-                    // Disabling the configured sensor removes its retained data topic and its three
-                    // retained discovery configs. The tombstones are repeated after every reconnect
-                    // so a restored old broker converges instead of resurrecting ghost entities.
-                    mqtt_publish(s_env3, "", 0, 0, 1);
-                    retract_env3_discovery();
-                    s_last_env3_json.clear();
-                    s_last_env3_samples = 0;
-                    s_env3_discovery_announced = false;
-                    s_env3_disabled_cleaned = true;
-                }
-
-                // HA may have been offline for the connect-time tombstones. Repeat the retired-topic
-                // cleanup periodically so it converges after HA returns; no retained config is ever
-                // recreated, and the independent /modbus + /weather data streams are untouched.
-                publish_stage = "retire";
-                ha_retire_elapsed_s += delay_s;
-                if (ha_retire_elapsed_s >= HA_RETIRE_INTERVAL_S) {
-                    retract_modbus_discovery();
-                    retract_weather_discovery();
-                    ha_retire_elapsed_s = 0;
                 }
 
                 // Fixed HEARTBEAT_INTERVAL_S cadence for both technical heartbeat and the separate
@@ -2504,6 +2731,7 @@ static bool build_client(bool publisher_lwt) {
     if (!s_user.empty()) cfg.credentials.username = s_user.c_str();
     if (!s_pass.empty()) cfg.credentials.authentication.password = s_pass.c_str();
     cfg.session.keepalive         = 30;
+    cfg.outbox.limit              = MQTT_OUTBOX_LIMIT_BYTES;
     if (publisher_lwt) {
         cfg.session.last_will.topic   = s_avail.c_str();
         cfg.session.last_will.msg     = "offline";
@@ -2514,6 +2742,11 @@ static bool build_client(bool publisher_lwt) {
 
     s_client = esp_mqtt_client_init(&cfg);
     if (!s_client) { set_status(false, "mqtt init failed"); return false; }
+    uint32_t client_epoch = s_mqtt_client_epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
+    if (client_epoch == 0) {
+        client_epoch = 1;
+        s_mqtt_client_epoch.store(client_epoch, std::memory_order_release);
+    }
     s_client_is_publisher = publisher_lwt;
     esp_mqtt_client_register_event(s_client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
                                    on_mqtt, nullptr);
@@ -2569,6 +2802,10 @@ static bool promote_client_to_publisher() {
     s_client_running.store(false, std::memory_order_release);
 
     s_connected = false;
+    s_source_cleanup.invalidate_client();
+    s_source_cleanup_evidence.clear_after_producer_stop();
+    s_source_cleanup_evidence_lost.store(false, std::memory_order_release);
+    s_connected_client_epoch.store(0, std::memory_order_release);
     set_status(false, "");
     {
         Lock lk(s_mtx);
@@ -2618,8 +2855,8 @@ void mqtt_ha_start() {
     }
 
     // The installation's base topic: the persisted value when set, else the compile-time default.
-    // Resolved ONCE, here, because the thirteen topics and the HA node id below all derive from it —
-    // a second copy of the empty-means-default rule is how one of them would end up on another base.
+    // Resolved ONCE, here, because every topic root and the HA node id below derive from it — a
+    // second copy of the empty-means-default rule is how one of them would end up on another base.
     s_base   = mqtt_base_effective(config().mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC);
     s_node   = device_node_id(s_base);   // HA device id: the installation, NOT this board
     s_board  = board_id();               // this board: MQTT client id + dev.ids merge key

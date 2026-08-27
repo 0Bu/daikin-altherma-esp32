@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -709,7 +709,7 @@ I18N.sv = localeValues([
   /* board.led_rgb_bus_down */ "Röd, dubbelblinkning — X10A frånkopplad.",
   /* board.led_rgb_mqtt_down */ "Orange, blinkar — X10A ansluten, MQTT frånkopplad.",
   /* board.led_rgb_wipe_armed */ "Röd, mycket snabb blinkning — radering redo; släpp för att avbryta.",
-  /* board.led_rgb_wiping */ "Vit, fast — inställningar raderas; koppla inte från strömmen.",
+  /* board.led_rgb_wiping */ "Vit, fast — fabriksåterställning/dataradering; koppla inte från strömmen.",
   /* board.led_gpio_off */ "Av — inget Wi-Fi-läge aktivt.",
   /* board.led_gpio_setup */ "Långsam blinkning — installationsportal aktiv.",
   /* board.led_gpio_connecting */ "Snabb blinkning — ansluter Wi-Fi.",
@@ -717,10 +717,10 @@ I18N.sv = localeValues([
   /* board.led_gpio_bus_down */ "Dubbelblinkning — X10A frånkopplad.",
   /* board.led_gpio_mqtt_down */ "Medelsnabb blinkning — X10A ansluten, MQTT frånkopplad.",
   /* board.led_gpio_wipe_armed */ "Mycket snabb blinkning — radering redo; släpp för att avbryta.",
-  /* board.led_gpio_wiping */ "Fast sken efter snabb blinkning — inställningar raderas; koppla inte från strömmen.",
+  /* board.led_gpio_wiping */ "Fast sken efter snabb blinkning — fabriksåterställning/dataradering; koppla inte från strömmen.",
   /* board.ledinv */ "Aktiv vid LOW — LED lyser vid låg stiftnivå",
   /* board.btninv */ "Aktiv vid LOW — knappen drar stiftet till GND",
-  /* board.hint */ "Håll återställningsknappen i 5 s för att radera inställningar och starta portalen. Välj «Ingen» utan ansluten knapp.",
+  /* board.hint */ "Fabriksåterställning: håll 5 s. Raderar permanent Wi-Fi/alla inställningar, historik/trender, tillståndstider och rå kärndump. Portalen öppnas bara efter fullständig radering. Annars släpp och håll igen i 5 s. Välj «Ingen» utan knapp.",
   /* card.hardware */ "Maskinvara",
   /* card.hw_off */ "Ingen",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

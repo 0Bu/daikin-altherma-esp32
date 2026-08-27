@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -709,7 +709,7 @@ I18N.ja = localeValues([
   /* board.led_rgb_bus_down */ "赤・2回点滅 — X10A切断。",
   /* board.led_rgb_mqtt_down */ "橙・点滅 — X10A接続、MQTT切断。",
   /* board.led_rgb_wipe_armed */ "赤・超高速点滅 — 消去準備完了。中止するには離します。",
-  /* board.led_rgb_wiping */ "白・点灯 — 設定消去中。電源を切らないでください。",
+  /* board.led_rgb_wiping */ "白・点灯 — 初期化/データ完全消去中。電源を切らないでください。",
   /* board.led_gpio_off */ "消灯 — Wi-Fiモードなし。",
   /* board.led_gpio_setup */ "低速点滅 — 設定ポータル動作中。",
   /* board.led_gpio_connecting */ "高速点滅 — Wi-Fi接続中。",
@@ -717,10 +717,10 @@ I18N.ja = localeValues([
   /* board.led_gpio_bus_down */ "2回点滅 — X10A切断。",
   /* board.led_gpio_mqtt_down */ "中速点滅 — X10A接続、MQTT切断。",
   /* board.led_gpio_wipe_armed */ "超高速点滅 — 消去準備完了。中止するには離します。",
-  /* board.led_gpio_wiping */ "超高速点滅後に点灯 — 設定消去中。電源を切らないでください。",
+  /* board.led_gpio_wiping */ "超高速点滅後に点灯 — 初期化/データ完全消去中。電源を切らないでください。",
   /* board.ledinv */ "アクティブLOW（端子LOWでLED点灯）",
   /* board.btninv */ "アクティブLOW（ボタンで端子をGNDへ短絡）",
-  /* board.hint */ "リセットボタンを5秒押すと全設定を消去し、設定ポータルを開きます。ボタン未接続なら「なし」を選択してください。",
+  /* board.hint */ "工場出荷時リセット：ボタンを5秒押す。Wi-Fi/全設定、履歴/トレンド、状態継続時間、未加工コアダンプを完全消去。全消去成功時のみ設定ポータルが開く。開かなければ離して再度5秒押す。未接続なら「なし」。",
   /* card.hardware */ "ハードウェア",
   /* card.hw_off */ "なし",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

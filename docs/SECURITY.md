@@ -231,11 +231,21 @@ authorization.
   client plus fixed 2 KiB download buffer have been freed, RSA/PSA validation uses a separate
   two-sample **24/12 KiB** gate before `esp_ota_end()` and again before the validation performed by
   `esp_ota_set_boot_partition()`. The TLS wait is bounded to 15 seconds and each validation wait to
-  five; whole-operation deadlines are 30 seconds for a manifest and five minutes for firmware, with
-  each read limited to the remaining interval. A trickling peer therefore cannot hold MQTT/HomeHub/
-  Syslog paused indefinitely. The ten-minute publisher/poller stale-flag cap outlives that complete
-  path and the 480-second host observer, so it cannot expire during a still-valid download. All gates
-  refuse on failure and none weakens or skips signature checking.
+  five. A monotonic budget begins before each HTTP open: 30 seconds for a manifest or changelog and
+  five minutes for firmware. DNS/TCP/TLS/request setup remains governed by the HTTP client's own
+  path-specific timeout — six seconds for changelog, 15 seconds for manifest/firmware — plus a
+  post-open budget check; the application watchdog cannot interrupt that pre-socket phase. After a
+  successful open, one boot-created timer is armed for the original
+  budget's remainder across both `esp_http_client_fetch_headers()` and every body read. Its
+  allocation-free callback only latches expiry and notifies one boot-static priority-6 watchdog
+  task. That task's lwIP thread semaphore is allocated and verified before networking; it alone
+  applies `shutdown(SHUT_RDWR)` and acknowledges completion. The HTTP owner stops the timer or joins
+  that task before close, redirect, cleanup or Range-resume reuse, so there is no cross-task
+  HTTP-client mutation or fd-reuse race. A trickling peer therefore cannot hold MQTT/HomeHub/Syslog
+  paused beyond the post-open deadline. Timer, static-task or lwIP-prime failure disables OTA and
+  Weather for the boot. The ten-minute publisher/poller stale-flag cap outlives that complete path and the
+  480-second host observer, so it cannot expire during a still-valid download. All gates refuse on
+  failure and none weakens or skips signature checking.
 
   A mid-stream read failure after a known-length post-header prefix is validated and committed may
   reconnect at most twice inside that same deadline. Each resumed stream must commit new bytes before
@@ -288,18 +298,23 @@ Three failure modes, and what recovers each:
 The rollback in mode 1 works because the *previous* firmware is selected by valid otadata while the
 new one is `PENDING_VERIFY`. A **full `@flash_args` USB flash does neither**: it rewrites the
 bootloader, partition table and **otadata (blanked to `0xFFFFFFFF`)** and writes `ota_0` directly.
-The bootloader therefore starts it in `ESP_OTA_IMG_UNDEFINED` state (not `PENDING_VERIFY`) and has no
-rollback record, even if old bytes happen to remain in `ota_1`. For a directly-flashed unsigned
+There is therefore no rollback state record for the running partition: IDF's
+[`esp_ota_get_state_partition()`](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-reference/system/ota.html#_CPPv427esp_ota_get_state_partitionPK15esp_partition_tP20esp_ota_img_states_t)
+returns `ESP_ERR_NOT_FOUND` (not `PENDING_VERIFY`), and compact
+status reports `image_state:"unknown"` plus `rollback_pending:null` rather than inventing safety.
+The bootloader has no rollback record even if old bytes happen to remain in `ota_1`. For a directly-flashed unsigned
 build, "boot the previous FW automatically" is mechanically unavailable.
 
 This is **never a brick**: no eFuses are burned and ROM download mode stays enabled, so the board is
 always re-flashable over USB. The containment is therefore *prevention*, not recovery:
 
-- **`scripts/require-signed.sh <app.bin>`** refuses to flash an unsigned image (it parses
-  `espsecure signature-info-v2`) and prints the signing command. The `$flash-esp32` skill and the
-  canonical [`AGENTS.md`](../AGENTS.md) flash rules run it before `esptool write_flash`, so the
-  mode-3 crash-loop is stopped at the source. Recovery from a board that already got an unsigned
-  image = re-flash a **signed** one.
+- **`scripts/require-signed.sh <app.bin>`** refuses to flash an untrusted image. Its dependency-free
+  verifier checks the Secure Boot v2 block structure and CRC, binds the block to the complete image
+  digest, verifies RSA-PSS/SHA-256 with the required RSA-3072 exponent, and compares the public-key
+  digest with `tools/release/ota_signing_key_digest.txt`. It prints the signing command on failure.
+  The `$flash-esp32` skill and the canonical [`AGENTS.md`](../AGENTS.md) flash rules run it before
+  `esptool write_flash`, so an unsigned, corrupted or wrong-key mode-3 crash-loop is stopped at the
+  source. Recovery from a board that already got such an image = re-flash a **trusted signed** one.
 - **`scripts/ci-build-all.sh`** closes the *Web-Serial* half of mode 3, which no host-side guard can
   reach: after building the canonical `-merged.bin`, it carves out the individual `flash_args`
   ranges, runs `require-signed.sh` on the final staged app and publishes those sparse parts. The
@@ -338,8 +353,74 @@ keeps the portal off, and losing that Ethernet lease must not be mistaken for a 
 If normal service proof is still missing at the ~10-minute hard cap, the firmware deliberately
 restarts while the image remains `PENDING_VERIFY`, so the bootloader selects the previous slot.
 The decision is the host-tested `daik::health_gate_decide()` in `main/logic/health_gate.hpp`
-(covered by `test/test_logic.cpp`). A USB/`@flash_args` image is `UNDEFINED`, never `PENDING_VERIFY`,
-so the gate is a no-op for it and can never strand a fresh board.
+(covered by `test/test_logic.cpp`). A blank/no-record USB/`@flash_args` image makes the IDF state
+read fail and is latched as `unknown`; it is never treated as `PENDING_VERIFY`, so the gate is a
+no-op for it and can never strand a fresh board. Unknown remains unknown — it is not evidence that
+rollback is absent.
+
+### Trusted release construction and isolated release HIL
+
+A manual release has a stronger path than a PR build or ordinary dev publication:
+
+- `ci-build-all.sh --verify-reproducible` keeps the first unsigned ESP32-S3 application as the
+  reference, performs a second clean build, and requires byte-for-byte identity before the one
+  signing step. The signed result is then verified independently: signature-block CRC, complete
+  image digest, RSA-PSS/SHA-256, exponent 65537 and the repository-pinned public-key digest must all
+  match. That public identity is written into manifest provenance; the private PEM is not.
+- The signing job has no repository-write permission. The separate publisher has no signing secret,
+  revalidates the artifact handoff, publishes it, and reads the manifest and application back from
+  the exact allowed Pages URL with a cache buster. A release then downloads each GitHub Release
+  binary and byte-compares it with the handoff. Publication success is therefore evidence about the
+  bytes clients can actually fetch, not only the workspace that built them.
+- Before a release publisher can run, the isolated self-hosted `release-hil` job downloads that
+  exact candidate. A root-owned schema-3 policy and a protected runner-local inventory jointly pin
+  one non-production lab board, its distinct bootstrap version/ELF/application SHA, distinct static
+  bootstrap URLs, one leased private candidate HTTPS feed, and separate feed/power controller
+  identities; production hosts, MACs and controller endpoints are explicit denylists. Controller
+  URLs are canonical HTTPS paths with no redirects, dot segments, encoding ambiguity, query or
+  credentials. The job has no OTA signing key and accepts no production role. Its renewable
+  candidate-feed lease must acknowledge the exact two served URLs and both candidate digests. The
+  gate reads the candidate back byte-for-byte; it separately reads, hashes, signature-verifies and
+  range-checks the root-pinned bootstrap manifest/application before contacting the board.
+- The release binary is not rebuilt with a lab URL. The already pinned bootstrap and the exact
+  candidate both implement a trusted-LAN-only, non-persistent HIL override: `GET /ota/check` accepts
+  `X-Daikin-HIL-Manifest-URL` and `X-Daikin-HIL-Firmware-Base-URL` only as one bounded HTTPS pair.
+  `/ota/status` must then bind those effective URLs together with generation, channel, version and
+  application SHA. The accepted update copies that single offer snapshot and uses it for both the
+  re-manifest and binary download; later configuration or requests cannot replace it. The headers
+  never enter NVS and relax neither manifest SHA nor Secure Boot signature verification.
+- An external controller-owned, non-renewable 80-second power-cycle watchdog is armed around each
+  rollback-armed installation. Because its deadline starts before the new image boots and cannot slide, a
+  killed runner before explicit candidate approval cycles the board before the firmware's
+  90-second commit boundary. On the first install the compact status must explicitly report
+  `image_state=pending_verify` and `rollback_pending=true` before the watchdog is triggered; the
+  board must return to the distinct bootstrap with X10A pins, profile, MQTT canary and OTA channel
+  intact. On the second install, exact identity, completed verifier/heap evidence,
+  `ota_stack_min_free_bytes >= 1024`, and the same pending-image state are the explicit pre-commit
+  approval boundary; it must be reached by 45 seconds of candidate uptime before the controller
+  acknowledges watchdog release. The gate then requires the autonomous 105-second health window,
+  `image_state=valid` plus `rollback_pending=false`, and performs a separate cold power cycle. The
+  committed image must return with the same configuration and power-cycle history. The gate then
+  proves the candidate's own OTA writer: under another watchdog the valid candidate performs an
+  explicit downgrade through the separately pinned bootstrap feed, including download, flash,
+  whole-image SHA, signature verification and boot selection. Its pre-reboot heap/OTA-stack evidence
+  is captured, the bootstrap must report `pending_verify`, and a hard controller cycle must make the
+  bootloader return to the already-valid candidate with unchanged configuration and explicit
+  `valid`/`rollback_pending=false`. Only then does the candidate expose the configured live stack
+  minima and pass combined HTTP/MQTT/X10A/weather stress against a fresh generation-bound candidate
+  offer. A runner failure after explicit approval but outside a later watchdog still blocks
+  publication, but intentionally no longer promises rollback of the already approved lab candidate.
+
+The HIL path is intentionally release-only: it is destructive to its isolated lab board and power
+outlet, so it does not run for PRs or routine dev builds. A green host suite still does not prove
+FreeRTOS, flash, socket or physical-bus behavior; conversely, this one lab profile does not prove a
+specific production installation.
+
+The two override headers deliberately add an outbound-HTTPS/SSRF capability to the trusted-LAN OTA
+route. They are unavailable on the open setup AP and remain behind the same Host/Origin boundary as
+the other operational routes, but they are not an authentication mechanism. The device forwards no
+controller bearer token or local credential, caps each URL at 255 bytes, and still refuses every
+untrusted image. Do not expose the operational HTTP service beyond the trusted LAN.
 
 ### Role-pinned maintainer OTA gates
 
@@ -360,8 +441,9 @@ target is constructed. Before writing, the gate requires the inventory MAC, expl
 current-version lease, current ELF, connected non-rollback WiFi, dev channel, MQTT, no safe mode or
 fault crash, no allocation-failure counters and safe internal heap. It then accepts one exact
 generation-bound dev offer and performs exactly one un-retried `POST /ota/update`. The returned
-generation must be the immediate successor; the observer must see completed validation and positive
-operation-local free/largest-block minima before the reboot returns on the exact target version.
+generation must be the immediate successor; the observer must see completed validation, positive
+operation-local free/largest-block minima and at least 1 KiB of OTA-task stack reserve before the
+reboot returns on the exact target version.
 Because the compact raw-socket observer explicitly closes each HTTP connection, the transfer-status
 cadence is bounded to 2 Hz instead of creating 10 new sessions per second beside firmware TLS. Its
 board endpoint is resolved before the sole write; a fixed-size reader then applies one monotonic
@@ -376,9 +458,12 @@ Only read-only observer GETs interrupted by reboot are sampled again; a complete
 fails hard. No compensating write or update-POST retry follows a failed acceptance check. Ordinary bench updates
 must use this OTA mode, not USB. Signed, NVS-preserving USB remains only a bootstrap path for firmware
 that predates the generation/artifact handshake or a recovery path when OTA cannot run. The current
-HTTP API does not expose ESP-IDF's running-partition state directly: the healthy 105-second dwell
-proves the documented commit conditions, while the next accepted OTA start remains the authoritative
-proof that a prior image did not stay `PENDING_VERIFY`.
+compact HTTP API exposes the boot-latched ESP-IDF image state and `rollback_pending` flag directly;
+the latter is JSON `null` while the image state is unknown, rather than claiming that rollback is
+absent without an ESP-IDF observation.
+The ordinary bench path keeps its cross-version 105-second health dwell and next accepted OTA start
+as the authoritative compatibility proof for an older stable image that predates those fields;
+release HIL additionally requires explicit `pending_verify` and `valid` observations.
 
 #### Production OTA promotion
 
@@ -398,15 +483,19 @@ cannot reach production. Waiting before both replacements is mandatory because E
 another OTA write while the running target or release is still `PENDING_VERIFY`. The freshly restored target then runs
 the fixed three-minute pressure window with another real OTA-manifest TLS fetch. Firmware deliberately
 stops MQTT while either OTA or Open-Meteo TLS holds the constrained network heap. After requiring a
-connected baseline, the gate gives each observed owner at most 15 seconds to recover; the weather
-allowance is armed only by its live `fetching` state or a newly advanced success counter. A streamed
+connected baseline, the gate gives each observed owner at most 15 seconds to recover. Weather HIL
+first receives a non-zero refresh token, then accepts only that exact requested/started/completed/
+success token plus a success-counter increment. A scheduled/retry success cannot borrow the
+allowance. A streamed
 status snapshot can see either paused MQTT before its matching weather edge or old connected MQTT
 beside new weather evidence. The first direction remains pending for the same bound until later owner
 evidence; the reverse direction keeps the allowance open until a later connected sample without fresh
 owner evidence. The OTA pause lease is captured before each streamed request and remains valid for
 that response even if another thread releases it meanwhile. Expiry, window completion, any later
 disconnect or a disconnected final status still fails.
-Optional Open-Meteo
+The initial running board identity is version plus the shortened ELF build id exposed by `/status`;
+the host has separately verified the authorized signed application SHA, but this is not a complete
+cryptographic flash readback of the already-running bytes. Optional Open-Meteo
 evidence is not a bench prerequisite.
 During OTA, `/status`, the shared `/values` sender, `/history`, `/scan`, `/models?active=1`, redacted
 `/diag` and the whole MCP POST fail fast with a small busy-503 before allocation-rich work;
@@ -435,8 +524,8 @@ catalog-wide host replay and the source/mutation contracts cover the publisher, 
 retained payload is proved only on the production role after the single update. Expected UART
 timeouts on that intentionally unwired bench do not fail the bench stage; the production role keeps
 the bounded X10A timeout-delta requirement. The bench exercises both the full binary transfer and a
-later OTA-manifest TLS check with pressure workers, but does not require the optional Open-Meteo task when device-wide
-diagnostics consent is off; the production role still requires a successful weather fetch.
+later OTA-manifest TLS check with pressure workers, but does not require an active Open-Meteo source
+when device-wide diagnostics consent is off; the production role still requires a successful fetch.
 
 A production image which predates the `busy`/generation/artifact handshake cannot enter this path:
 the gate requires the new response fields and fails before its sole POST. Its one-time migration is
@@ -519,9 +608,14 @@ present on the trusted LAN. The counter lives in `daik_cfg`, so a factory reset 
   device).
 - **Main never publishes unsigned** — if the secret is missing on a main build, CI hard-errors
   rather than shipping an image devices would reject.
+- The repository contains only the SHA-256 identity of the RSA public fields in
+  `tools/release/ota_signing_key_digest.txt`. Build, handoff, manifest, flash guard and public
+  readback all require that identity; it is a trust anchor, not secret key material.
 - **Rotation:** generate a new key, flash a build signed with it via USB (breaking TOFU
-  intentionally), update the `OTA_SIGNING_KEY` secret. Devices on the old key must be USB-reflashed
-  once to adopt the new trust anchor.
+  intentionally), update both the reviewed public-key digest and the `OTA_SIGNING_KEY` secret.
+  Devices on the old key must be USB-reflashed once to adopt the new trust anchor. Changing only the
+  secret fails continuity before an artifact can be published; changing only the digest fails RSA
+  verification against the old signing key.
 
   ```bash
   # Generate an OTA signing key (RSA-3072)

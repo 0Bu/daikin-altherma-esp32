@@ -133,7 +133,7 @@ const clientAt = download.indexOf("esp_http_client_init(", gateAt);
 assert.ok(reserveAt >= 0 && urlAt > reserveAt && weatherProbeAt > urlAt &&
           gateAt > weatherProbeAt && clientAt > gateAt,
   "response and URL allocations must finish before the final gate and client/TLS setup");
-assert.ok(download.indexOf("HttpClientCleanup cleanup(client)", clientAt) > clientAt &&
+assert.ok(/HttpClientCleanup\s+cleanup\(client,\s*socket_deadline\)/.test(download.slice(clientAt)) &&
           download.indexOf("out.reserve(", reserveAt + 1) < 0,
   "the live HTTP client must be unwind-safe and the capped response must not grow under TLS");
 const parseStart = weather.indexOf("bool parse_forecast(");
@@ -202,8 +202,16 @@ assert.ok(startupGuard >= 0 && guardNotQuiesced > startupGuard &&
           mqttStart >= 0 && startupNotQuiesced > mqttStart && configAtStart > startupNotQuiesced &&
           startupRunning > configAtStart,
   "startup must claim/recheck/yield behind an existing TLS owner before allocation, then hand off");
-assert.match(mqtt,
-  /esp_mqtt_client_stop\(s_client\)[\s\S]{0,600}?s_transport_connecting\.store\(false,\s*std::memory_order_release\)[\s\S]{0,600}?esp_mqtt_client_destroy\(s_client\)/,
+const promotionStart = mqtt.indexOf("static bool promote_client_to_publisher() {");
+const promotionEnd = mqtt.indexOf("\n}\n\nvoid mqtt_ha_start()", promotionStart);
+const promotion = mqtt.slice(promotionStart, promotionEnd);
+const promotionStop = promotion.indexOf("esp_mqtt_client_stop(s_client)");
+const promotionTransportClear = promotion.indexOf(
+  "s_transport_connecting.store(false, std::memory_order_release)", promotionStop);
+const promotionDestroy = promotion.indexOf(
+  "esp_mqtt_client_destroy(s_client)", promotionTransportClear);
+assert.ok(promotionStart >= 0 && promotionEnd > promotionStart && promotionStop >= 0 &&
+          promotionTransportClear > promotionStop && promotionDestroy > promotionTransportClear,
   "promotion must clear the transport claim explicitly because client_stop emits no disconnect event");
 assert.match(weather, /s_status\.reason\s*=\s*"heap_headroom";/,
   "a refused fetch must state the heap-headroom reason");

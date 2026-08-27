@@ -1,13 +1,13 @@
-# Style spec for daikin-altherma-esp32 first-party C/C++ (main/, test/). It does NOT apply to
+# Style spec for daikin-altherma-esp32 first-party C/C++ (main/, test/, tools/). It does NOT apply to
 # managed_components/ (vendored, regenerated — never reformat) or generated def profiles.
 #
 # 4-space indent, attached braces, left-aligned pointers, no namespace indent, aligned
 # assignments/declarations/trailing comments, short funcs kept on one line — matched to the
 # hand-formatted sources to minimize churn.
 #
-# The runner-neutral formatter in tools/agent-hooks/ honours this only where clang-format is
-# installed. VERIFY CHURN ONCE before relying on auto-format:
-#     clang-format --dry-run -Werror main/*.cpp main/*.hpp main/logic/*.hpp test/*.cpp
+# CI pins clang-format 18 and checks changed first-party C/C++ files without rewriting them.
+# Run the canonical gate (including maintained C/C++ under tools/) before expanding the baseline:
+#     CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh
 ---
 Language:        Cpp
 BasedOnStyle:    LLVM
@@ -20,7 +20,7 @@ PointerAlignment:       Left
 DerivePointerAlignment: false
 NamespaceIndentation:   None
 AccessModifierOffset:   -4
-BreakBeforeBraces:      Attached
+BreakBeforeBraces:      Attach
 IndentCaseLabels:       false
 Cpp11BracedListStyle:   true
 SpaceBeforeParens:      ControlStatements

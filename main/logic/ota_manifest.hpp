@@ -20,6 +20,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "payload_complete.hpp"
+
 namespace daik {
 
 // Release notes are a separate sibling document rather than another field in manifest.json.  The
@@ -30,25 +32,161 @@ constexpr size_t OTA_CHANGELOG_TEXT_MAX = 960;
 
 namespace detail {
 
-// Advance past a JSON string whose opening quote is at json[i]. Returns the index just past the
-// closing quote and reports the CONTENT bounds. Honours backslash escapes so a '"' inside a string
-// value cannot be mistaken for the string's end — without which a crafted value like
-// "\" , \"version\": \"9.9.9" would let an attacker inject a second, higher version.
+// Advance past a syntactically valid JSON string whose opening quote is at json[i]. Returns the
+// index just past the closing quote and reports the CONTENT bounds. Besides keeping escaped quotes
+// inside their value, this validates every escape and rejects raw controls so the narrow manifest
+// parser cannot extract an identity from a document which is not JSON.
 inline bool scan_string(const char* json, size_t len, size_t i, size_t& content_start,
                         size_t& content_end, size_t& next) {
     if (i >= len || json[i] != '"') return false;
     content_start = ++i;
-    while (i < len && json[i] != '"') {
-        if (json[i] == '\\') ++i;   // skip the escaped byte, whatever it is
-        ++i;
+    while (i < len) {
+        const unsigned char byte = static_cast<unsigned char>(json[i]);
+        if (byte == '"') {
+            content_end = i;
+            next        = i + 1;
+            return true;
+        }
+        if (byte < 0x20) return false;
+        if (byte != '\\') {
+            ++i;
+            continue;
+        }
+        if (++i >= len) return false;
+        const char escaped = json[i++];
+        if (escaped == 'u') {
+            if (len - i < 4) return false;
+            for (size_t digit = 0; digit < 4; ++digit) {
+                const char c = json[i + digit];
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+                    return false;
+            }
+            i += 4;
+        } else if (escaped != '"' && escaped != '\\' && escaped != '/' && escaped != 'b' &&
+                   escaped != 'f' && escaped != 'n' && escaped != 'r' && escaped != 't') {
+            return false;
+        }
     }
-    if (i >= len) return false;     // unterminated string -> truncated/corrupt manifest
-    content_end = i;
-    next        = i + 1;
-    return true;
+    return false; // unterminated string -> truncated/corrupt manifest
 }
 
 inline bool is_ws(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+inline void skip_ws(const char* json, size_t len, size_t& pos) {
+    while (pos < len && is_ws(json[pos])) ++pos;
+}
+
+static __attribute__((noinline)) bool skip_json_value(const char* json, size_t len, size_t& pos,
+                                                      unsigned depth);
+
+inline bool skip_json_number(const char* json, size_t len, size_t& pos) {
+    size_t i = pos;
+    if (i < len && json[i] == '-') ++i;
+    if (i >= len) return false;
+    if (json[i] == '0') {
+        ++i;
+        if (i < len && json[i] >= '0' && json[i] <= '9') return false;
+    } else {
+        if (json[i] < '1' || json[i] > '9') return false;
+        do {
+            ++i;
+        } while (i < len && json[i] >= '0' && json[i] <= '9');
+    }
+    if (i < len && json[i] == '.') {
+        ++i;
+        if (i >= len || json[i] < '0' || json[i] > '9') return false;
+        do {
+            ++i;
+        } while (i < len && json[i] >= '0' && json[i] <= '9');
+    }
+    if (i < len && (json[i] == 'e' || json[i] == 'E')) {
+        ++i;
+        if (i < len && (json[i] == '+' || json[i] == '-')) ++i;
+        if (i >= len || json[i] < '0' || json[i] > '9') return false;
+        do {
+            ++i;
+        } while (i < len && json[i] >= '0' && json[i] <= '9');
+    }
+    pos = i;
+    return true;
+}
+
+// Validate and skip one arbitrary JSON value without allocating. The firmware manifest is capped at
+// 1 KiB, but an attacker can still spend those bytes on nesting; cap recursion before it can spend
+// the OTA task's stack. Eight levels are far beyond the publisher's two-level document and are
+// included explicitly in the target-ELF stack budget.
+static __attribute__((noinline)) bool skip_json_value(const char* json, size_t len, size_t& pos,
+                                                      unsigned depth) {
+    constexpr unsigned MAX_JSON_DEPTH = 8;
+    skip_ws(json, len, pos);
+    if (pos >= len || depth > MAX_JSON_DEPTH) return false;
+
+    if (json[pos] == '"') {
+        size_t start, end, next;
+        if (!scan_string(json, len, pos, start, end, next)) return false;
+        pos = next;
+        return true;
+    }
+    if (json[pos] == '{') {
+        ++pos;
+        skip_ws(json, len, pos);
+        if (pos < len && json[pos] == '}') {
+            ++pos;
+            return true;
+        }
+        while (pos < len) {
+            size_t start, end, next;
+            if (!scan_string(json, len, pos, start, end, next)) return false;
+            pos = next;
+            skip_ws(json, len, pos);
+            if (pos >= len || json[pos++] != ':') return false;
+            if (!skip_json_value(json, len, pos, depth + 1)) return false;
+            skip_ws(json, len, pos);
+            if (pos < len && json[pos] == ',') {
+                ++pos;
+                skip_ws(json, len, pos);
+                continue;
+            }
+            if (pos < len && json[pos] == '}') {
+                ++pos;
+                return true;
+            }
+            return false;
+        }
+        return false;
+    }
+    if (json[pos] == '[') {
+        ++pos;
+        skip_ws(json, len, pos);
+        if (pos < len && json[pos] == ']') {
+            ++pos;
+            return true;
+        }
+        while (pos < len) {
+            if (!skip_json_value(json, len, pos, depth + 1)) return false;
+            skip_ws(json, len, pos);
+            if (pos < len && json[pos] == ',') {
+                ++pos;
+                skip_ws(json, len, pos);
+                continue;
+            }
+            if (pos < len && json[pos] == ']') {
+                ++pos;
+                return true;
+            }
+            return false;
+        }
+        return false;
+    }
+    for (const char* literal : {"true", "false", "null"}) {
+        const size_t literal_len = std::strlen(literal);
+        if (len - pos >= literal_len && std::memcmp(json + pos, literal, literal_len) == 0) {
+            pos += literal_len;
+            return true;
+        }
+    }
+    return skip_json_number(json, len, pos);
+}
 
 // Decode the deliberately small JSON-string subset emitted by generate-ota-changelog.py.  Raw UTF-8
 // bytes are copied unchanged; JSON quotes, slashes, newlines and tabs are unescaped.  \u escapes are
@@ -130,8 +268,10 @@ inline bool manifest_version(const char* json, size_t len, char* out, size_t out
         if (!detail::scan_string(json, len, i, vs, ve, next)) return false;   // not a string value
         const size_t vlen = ve - vs;
         if (vlen == 0 || vlen >= outlen) return false;                        // empty or won't fit
-        for (size_t k = 0; k < vlen; ++k)
-            if (json[vs + k] == '\\') return false;                           // see the note above
+        for (size_t k = 0; k < vlen; ++k) {
+            const unsigned char byte = static_cast<unsigned char>(json[vs + k]);
+            if (byte == '\\' || byte < 0x20) return false; // invalid JSON string
+        }
         std::memcpy(out, json + vs, vlen);
         out[vlen] = 0;
         return true;
@@ -172,75 +312,108 @@ inline bool ota_sha256_matches(const uint8_t actual[32], const char* expected_he
     return different == 0;
 }
 
-inline bool manifest_identity(const char* json, size_t len, OtaManifestIdentity& out) {
+[[maybe_unused]] static __attribute__((noinline)) bool
+manifest_identity(const char* json, size_t len, OtaManifestIdentity& out) {
     out = {};
     if (!json) return false;
 
-    int depth = 0;
-    int provenance_depth = -1;
-    bool have_version = false;
-    bool have_provenance = false;
-    bool have_sha = false;
-    size_t i = 0;
+    bool   have_version    = false;
+    bool   have_provenance = false;
+    bool   have_sha        = false;
+    size_t i               = 0;
 
     auto copy_plain_string = [&](size_t& pos, char* target, size_t capacity) -> bool {
-        while (pos < len && detail::is_ws(json[pos])) ++pos;
+        detail::skip_ws(json, len, pos);
         size_t start, end, next;
         if (!detail::scan_string(json, len, pos, start, end, next)) return false;
         const size_t value_len = end - start;
         if (value_len == 0 || value_len >= capacity) return false;
-        for (size_t k = 0; k < value_len; ++k)
-            if (json[start + k] == '\\') return false;
+        for (size_t k = 0; k < value_len; ++k) {
+            const unsigned char byte = static_cast<unsigned char>(json[start + k]);
+            if (byte == '\\' || byte < 0x20) return false;
+        }
         std::memcpy(target, json + start, value_len);
         target[value_len] = '\0';
         pos = next;
         return true;
     };
 
-    while (i < len) {
-        const char c = json[i];
-        if (c == '{' || c == '[') { ++depth; ++i; continue; }
-        if (c == '}' || c == ']') {
-            if (depth <= 0) return false;
-            if (depth == provenance_depth) provenance_depth = -1;
-            --depth;
-            ++i;
-            continue;
+    auto parse_provenance = [&](size_t& pos) -> bool {
+        detail::skip_ws(json, len, pos);
+        if (pos >= len || json[pos++] != '{') return false;
+        detail::skip_ws(json, len, pos);
+        if (pos < len && json[pos] == '}') {
+            ++pos;
+            return true;
         }
-        if (c != '"') { ++i; continue; }
+        while (pos < len) {
+            size_t key_start, key_end, next;
+            if (!detail::scan_string(json, len, pos, key_start, key_end, next)) return false;
+            pos = next;
+            detail::skip_ws(json, len, pos);
+            if (pos >= len || json[pos++] != ':') return false;
 
+            const size_t key_len = key_end - key_start;
+            if (key_len == 10 && std::memcmp(json + key_start, "app_sha256", 10) == 0) {
+                if (have_sha || !copy_plain_string(pos, out.app_sha256, sizeof(out.app_sha256)) ||
+                    !ota_sha256_hex_valid(out.app_sha256))
+                    return false;
+                have_sha = true;
+            } else if (!detail::skip_json_value(json, len, pos, 1)) {
+                return false;
+            }
+
+            detail::skip_ws(json, len, pos);
+            if (pos < len && json[pos] == ',') {
+                ++pos;
+                detail::skip_ws(json, len, pos);
+                continue;
+            }
+            if (pos < len && json[pos] == '}') {
+                ++pos;
+                return true;
+            }
+            return false;
+        }
+        return false;
+    };
+
+    detail::skip_ws(json, len, i);
+    if (i >= len || json[i++] != '{') return false;
+    detail::skip_ws(json, len, i);
+    if (i < len && json[i] == '}') return false;
+    while (i < len) {
         size_t key_start, key_end, next;
         if (!detail::scan_string(json, len, i, key_start, key_end, next)) return false;
         i = next;
-        size_t colon = i;
-        while (colon < len && detail::is_ws(json[colon])) ++colon;
-        if (colon >= len || json[colon] != ':') continue;  // this string was a value
-        i = colon + 1;
+        detail::skip_ws(json, len, i);
+        if (i >= len || json[i++] != ':') return false;
 
         const size_t key_len = key_end - key_start;
-        if (depth == 1 && key_len == 7 &&
-            std::memcmp(json + key_start, "version", 7) == 0) {
+        if (key_len == 7 && std::memcmp(json + key_start, "version", 7) == 0) {
             if (have_version || !copy_plain_string(i, out.version, sizeof(out.version))) return false;
             have_version = true;
+        } else if (key_len == 10 && std::memcmp(json + key_start, "provenance", 10) == 0) {
+            if (have_provenance || !parse_provenance(i)) return false;
+            have_provenance = true;
+        } else if (!detail::skip_json_value(json, len, i, 1)) {
+            return false;
+        }
+
+        detail::skip_ws(json, len, i);
+        if (i < len && json[i] == ',') {
+            ++i;
+            detail::skip_ws(json, len, i);
             continue;
         }
-        if (depth == 1 && key_len == 10 &&
-            std::memcmp(json + key_start, "provenance", 10) == 0) {
-            if (have_provenance) return false;
-            while (i < len && detail::is_ws(json[i])) ++i;
-            if (i >= len || json[i] != '{') return false;
-            have_provenance = true;
-            provenance_depth = depth + 1;
-            continue;  // leave the opening '{' for the depth tracker
+        if (i < len && json[i] == '}') {
+            ++i;
+            break;
         }
-        if (depth == provenance_depth && key_len == 10 &&
-            std::memcmp(json + key_start, "app_sha256", 10) == 0) {
-            if (have_sha || !copy_plain_string(i, out.app_sha256, sizeof(out.app_sha256)) ||
-                !ota_sha256_hex_valid(out.app_sha256)) return false;
-            have_sha = true;
-        }
+        return false;
     }
-    return depth == 0 && have_version && have_provenance && have_sha;
+    detail::skip_ws(json, len, i);
+    return i == len && have_version && have_provenance && have_sha;
 }
 
 // Parse the optional sibling changelog.json document:

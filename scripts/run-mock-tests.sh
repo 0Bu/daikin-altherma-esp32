@@ -47,6 +47,14 @@ if [ "$COVERAGE" = true ]; then
 
     COMPILER_VERSION="$("$CXX" --version 2>/dev/null || true)"
     if printf '%s' "$COMPILER_VERSION" | grep -qi clang; then
+        COMPILER_RELEASE="$(printf '%s\n' "$COMPILER_VERSION" |
+            sed -nE 's/.*clang version ([0-9]+([.][0-9]+){1,2}).*/\1/p' | head -n 1)"
+        [ -n "$COMPILER_RELEASE" ] || {
+            echo "run-mock-tests: cannot identify clang release" >&2
+            exit 1
+        }
+        COMPILER_MAJOR="${COMPILER_RELEASE%%.*}"
+        BRANCH_FAMILY=clang
         if command -v xcrun >/dev/null 2>&1 &&
            xcrun --find llvm-cov >/dev/null 2>&1; then
             GCOV_REPORT="$(xcrun llvm-cov gcov -n -b -c "$GCDA" 2>&1)"
@@ -57,18 +65,56 @@ if [ "$COVERAGE" = true ]; then
             exit 1
         fi
     elif command -v gcov >/dev/null 2>&1; then
+        COMPILER_RELEASE="$("$CXX" -dumpfullversion -dumpversion 2>/dev/null)"
+        [ -n "$COMPILER_RELEASE" ] || {
+            echo "run-mock-tests: cannot identify GCC release" >&2
+            exit 1
+        }
+        COMPILER_MAJOR="${COMPILER_RELEASE%%.*}"
+        BRANCH_FAMILY=gcc
         GCOV_REPORT="$(gcov -n -b -c "$GCDA" 2>&1)"
     else
         echo "run-mock-tests: GCC coverage needs gcov" >&2
         exit 1
     fi
 
+    # A GitHub-hosted runner and the pinned ESP-IDF container can carry the same upstream GCC
+    # family/major while producing different gcov edge inventories. Bind authoritative CI to its
+    # runner image as well; an unreviewed image name deliberately selects a missing profile and
+    # fails closed instead of silently borrowing a superficially compatible local baseline.
+    # shellcheck source=/dev/null
+    . tools/coverage/profile.sh
+    if ! BRANCH_PROFILE="$(coverage_branch_profile "$BRANCH_FAMILY" "$COMPILER_MAJOR" \
+        "${GITHUB_ACTIONS:-false}" "${RUNNER_OS:-}" "${ImageOS:-}")"; then
+        echo "run-mock-tests: cannot identify the coverage execution profile" >&2
+        exit 1
+    fi
+
+    # Bind profile changes to repository history as well as to the report. HEAD catches a dirty
+    # local baseline edit; HEAD^1 is the protected base in GitHub's merge checkout (and the previous
+    # commit on a push). The first revision introducing the baseline legitimately has no reference.
+    COVERAGE_CHECK_ARGS=(
+        --minimum 95
+        --source-dir main/logic
+        --exclude value_def.hpp
+        --branch-baseline tools/coverage/branch_baseline.json
+        --branch-profile "$BRANCH_PROFILE"
+    )
+    reference_index=0
+    for reference_revision in HEAD 'HEAD^1'; do
+        reference_file="$COVERAGE_DIR/branch-baseline-reference-$reference_index.json"
+        if git show "$reference_revision:tools/coverage/branch_baseline.json" \
+            >"$reference_file" 2>/dev/null; then
+            COVERAGE_CHECK_ARGS+=(--branch-baseline-reference "$reference_file")
+            reference_index=$((reference_index + 1))
+        fi
+    done
+
     # value_def.hpp declares the row struct and has no executable line. Every other logic header
     # must appear in gcov's inventory; otherwise a new, wholly untested header could be invisible
     # while the aggregate percentage stayed green.
     printf '%s\n' "$GCOV_REPORT" |
-        python3 tools/coverage/check_gcov_report.py \
-            --minimum 95 --source-dir main/logic --exclude value_def.hpp
+        python3 tools/coverage/check_gcov_report.py "${COVERAGE_CHECK_ARGS[@]}"
 elif command -v cmake >/dev/null 2>&1; then
     cmake -S test -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Debug >/dev/null
     cmake --build "$BUILD_DIR" --parallel

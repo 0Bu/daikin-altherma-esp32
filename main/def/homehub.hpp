@@ -5,12 +5,12 @@
 //
 // The poll engine reads INPUT registers (FC04, read-only by the Modbus spec) and a curated set of
 // HOLDING registers (FC03), read back only — this firmware issues no Modbus write. This catalog
-// remains descriptive:
-// it grants no write access, and every other holding row is telemetry-only.
+// remains descriptive: it grants no write access, and every holding row is telemetry-only.
 //
 // Decoded through logic/modbus.hpp's MbType codecs; a 32765/66/67 special value (mb_is_special) is
 // "no value" and is published as unavailable, never as a large number. Offsets are the EKRHH data
-// model's 1-based offsets (guide 4P744838-1E §9.2); the wire PDU address is offset-1 (mb_pdu_address).
+// model's 1-based offsets (guide 4P744838-1E §9.2); the wire PDU address is offset-1
+// (mb_pdu_address).
 //
 // SEMANTICS follow the EKRHH Installer reference guide §9.2 UC3 tables. Host and CI checks cannot
 // establish the physical correctness of each row, so every row is confirmed ON HARDWARE before it
@@ -65,65 +65,83 @@ struct HomeHubReg {
 // than the raw X10A pages, and every row here decodes cleanly under one MbType.
 inline constexpr HomeHubReg HOMEHUB_REGS[] = {
     // ── Faults (input) ──────────────────────────────────────────────────────────────────────────
-    {21, MbFunc::ReadInput, MbType::Int16,  1, "",      "Unit abnormality", HomeHubValueKind::UnitAbnormality},
-    {22, MbFunc::ReadInput, MbType::Text16, 1, "",      "Unit abnormality code"},
-    {23, MbFunc::ReadInput, MbType::Int16,  1, "",      "Unit abnormality sub code"},
+    {21, MbFunc::ReadInput, MbType::Int16, 1, "", "Unit abnormality",
+     HomeHubValueKind::UnitAbnormality},
+    {22, MbFunc::ReadInput, MbType::Text16, 1, "", "Unit abnormality code"},
+    {23, MbFunc::ReadInput, MbType::Int16, 1, "", "Unit abnormality sub code"},
     // ── Plant STATE (input) ─────────────────────────────────────────────────────────────────────
     // Not readings but the facts the DRAWING routes and colours on. The 3-way valve is the reason
     // they are here: with X10A silent the schematic had no valve position and drew the space branch
     // during a DHW run. The compressor witness matters just as much: without it, a live Modbus-only
     // tank charge was classified as pump-only circulation and the hot-water loop lost its heating
-    // colour. Unknown must blank/neutralise; a KNOWN state should come from whoever knows it, and the
+    // colour. Unknown must blank/neutralise; a KNOWN state should come from whoever knows it, and
+    // the
     // gateway does (EKRHH §9.2.2 offsets 30/31/37, checked against the live unit).
-    {30, MbFunc::ReadInput, MbType::Int16,  1, "",      "Circulation pump running", HomeHubValueKind::Binary},
-    {31, MbFunc::ReadInput, MbType::Int16,  1, "",      "Compressor running", HomeHubValueKind::Binary},
+    {30, MbFunc::ReadInput, MbType::Int16, 1, "", "Circulation pump running",
+     HomeHubValueKind::Binary},
+    {31, MbFunc::ReadInput, MbType::Int16, 1, "", "Compressor running", HomeHubValueKind::Binary},
     // EKRHH §9.2.2 calls this "Booster heater run": the DHW tank immersion heater, paired with
-    // X10A's exact BSH bit. It is an ON/OFF fact only; offset 51 is whole-system electrical input and
+    // X10A's exact BSH bit. It is an ON/OFF fact only; offset 51 is whole-system electrical input
+    // and
     // must not be relabelled as this heater's own power.
-    {32, MbFunc::ReadInput, MbType::Int16,  1, "",      "Booster heater run", HomeHubValueKind::Binary},
+    {32, MbFunc::ReadInput, MbType::Int16, 1, "", "Booster heater run", HomeHubValueKind::Binary},
     // EKRHH exposes the controller's actual disinfection phase directly. This is deliberately not
     // paired with X10A "Tank preheat": preheating may precede a scheduled demand, but it does not
     // prove that the anti-legionella/disinfection operation itself is active.
-    {33, MbFunc::ReadInput, MbType::Int16,  1, "",      "Disinfection operation", HomeHubValueKind::Binary},
-    {37, MbFunc::ReadInput, MbType::Int16,  1, "",      "3-way valve", HomeHubValueKind::ThreeWayValve},
+    {33, MbFunc::ReadInput, MbType::Int16, 1, "", "Disinfection operation",
+     HomeHubValueKind::Binary},
+    {37, MbFunc::ReadInput, MbType::Int16, 1, "", "3-way valve", HomeHubValueKind::ThreeWayValve},
     // What the plant is DOING, which the gateway knows and the X10A-less drawing had to call
-    // "unknown". Two flags rather than the single "operation mode" register (offset 38 / holding 3):
+    // "unknown". Two flags rather than the single "operation mode" register (offset 38 / holding
+    // 3):
     // that one says heating-vs-cooling, i.e. which SEASON the unit is configured for, and reads 1
     // (heat) throughout a DHW run — so a headline built from it would announce "heating" while the
     // diverter is on the tank. These two say whether each circuit is actually being served.
-    {52, MbFunc::ReadInput, MbType::Int16,  1, "",      "DHW normal operation", HomeHubValueKind::Binary},
-    {53, MbFunc::ReadInput, MbType::Int16,  1, "",      "Space heating/cooling normal operation", HomeHubValueKind::Binary},
+    {52, MbFunc::ReadInput, MbType::Int16, 1, "", "DHW normal operation", HomeHubValueKind::Binary},
+    {53, MbFunc::ReadInput, MbType::Int16, 1, "", "Space heating/cooling normal operation",
+     HomeHubValueKind::Binary},
     // Unlike offset 53, this CURRENT mode distinguishes the active heating and cooling seasons.
     // The diagnosis combines both: 53 proves normal space operation, 38 proves it is HEATING.
-    {38, MbFunc::ReadInput, MbType::Int16,  1, "",      "Current operation mode", HomeHubValueKind::CurrentOperationMode},
-    // ── Temperatures (input, Temp16 = signed /100 °C) ─────────────────────────────────────────────
-    {40, MbFunc::ReadInput, MbType::Temp16, 1, "°C",    "Leaving water temperature PHE"},
-    {41, MbFunc::ReadInput, MbType::Temp16, 1, "°C",    "Leaving water temperature BUH"},
-    {42, MbFunc::ReadInput, MbType::Temp16, 1, "°C",    "Return water temperature"},
-    {43, MbFunc::ReadInput, MbType::Temp16, 1, "°C",    "Domestic Hot Water temperature"},
-    {44, MbFunc::ReadInput, MbType::Temp16, 1, "°C",    "Outside air temperature"},
-    {45, MbFunc::ReadInput, MbType::Temp16, 1, "°C",    "Liquid refrigerant temperature"},
-    {50, MbFunc::ReadInput, MbType::Temp16, 1, "°C",    "Remote controller room temperature Main"},
-    // ── Flow + power (input) ──────────────────────────────────────────────────────────────────────
-    // Flow is a plain Int16 carrying L/min x100 (EKRHH §9.2), so decode as Int16 then /100 — the extra
+    {38, MbFunc::ReadInput, MbType::Int16, 1, "", "Current operation mode",
+     HomeHubValueKind::CurrentOperationMode},
+    // ── Temperatures (input, Temp16 = signed /100 °C)
+    // ─────────────────────────────────────────────
+    {40, MbFunc::ReadInput, MbType::Temp16, 1, "°C", "Leaving water temperature PHE"},
+    {41, MbFunc::ReadInput, MbType::Temp16, 1, "°C", "Leaving water temperature BUH"},
+    {42, MbFunc::ReadInput, MbType::Temp16, 1, "°C", "Return water temperature"},
+    {43, MbFunc::ReadInput, MbType::Temp16, 1, "°C", "Domestic Hot Water temperature"},
+    {44, MbFunc::ReadInput, MbType::Temp16, 1, "°C", "Outside air temperature"},
+    {45, MbFunc::ReadInput, MbType::Temp16, 1, "°C", "Liquid refrigerant temperature"},
+    {50, MbFunc::ReadInput, MbType::Temp16, 1, "°C", "Remote controller room temperature Main"},
+    // ── Flow + power (input)
+    // ──────────────────────────────────────────────────────────────────────
+    // Flow is a plain Int16 carrying L/min x100 (EKRHH §9.2), so decode as Int16 then /100 — the
+    // extra
     // divisor the `scale` field exists for. Power is a Pow16 (signed /100 kW), already scaled.
-    {49, MbFunc::ReadInput, MbType::Int16,  100, "L/min", "Flow rate"},
-    {51, MbFunc::ReadInput, MbType::Pow16,  1,   "kW",    "Heat pump power consumption"},
-    // ── Setpoints + modes (holding; all except offset 54 remain read-back-only) ───────────────────
-    {1,  MbFunc::ReadHolding, MbType::Int16, 1, "°C", "Leaving water Main Heating setpoint"},
-    {2,  MbFunc::ReadHolding, MbType::Int16, 1, "°C", "Leaving water Main Cooling setpoint"},
-    {3,  MbFunc::ReadHolding, MbType::Int16, 1, "",   "Operation mode", HomeHubValueKind::OperationMode},
-    {4,  MbFunc::ReadHolding, MbType::Int16, 1, "",   "Space heating/cooling ON/OFF", HomeHubValueKind::Binary},
-    {6,  MbFunc::ReadHolding, MbType::Int16, 1, "°C", "Room thermostat control Heating setpoint Main"},
-    {7,  MbFunc::ReadHolding, MbType::Int16, 1, "°C", "Room thermostat control Cooling setpoint Main"},
-    {9,  MbFunc::ReadHolding, MbType::Int16, 1, "",   "Quiet mode operation", HomeHubValueKind::Binary},
+    {49, MbFunc::ReadInput, MbType::Int16, 100, "L/min", "Flow rate"},
+    {51, MbFunc::ReadInput, MbType::Pow16, 1, "kW", "Heat pump power consumption"},
+    // ── Setpoints + modes (holding; read-back only) ──────────────────────────────────────────────
+    {1, MbFunc::ReadHolding, MbType::Int16, 1, "°C", "Leaving water Main Heating setpoint"},
+    {2, MbFunc::ReadHolding, MbType::Int16, 1, "°C", "Leaving water Main Cooling setpoint"},
+    {3, MbFunc::ReadHolding, MbType::Int16, 1, "", "Operation mode",
+     HomeHubValueKind::OperationMode},
+    {4, MbFunc::ReadHolding, MbType::Int16, 1, "", "Space heating/cooling ON/OFF",
+     HomeHubValueKind::Binary},
+    {6, MbFunc::ReadHolding, MbType::Int16, 1, "°C",
+     "Room thermostat control Heating setpoint Main"},
+    {7, MbFunc::ReadHolding, MbType::Int16, 1, "°C",
+     "Room thermostat control Cooling setpoint Main"},
+    {9, MbFunc::ReadHolding, MbType::Int16, 1, "", "Quiet mode operation",
+     HomeHubValueKind::Binary},
     {10, MbFunc::ReadHolding, MbType::Int16, 1, "°C", "DHW reheat setpoint"},
     // The main-zone weather-dependent offset, an Int16 in K. This firmware only READS it; the
     // Onecta app and the unit's MMI are its writers, so this row is the independent readback of
     // whatever they last set.
-    {54, MbFunc::ReadHolding, MbType::Int16, 1, "K",  "Leaving water Main Heating offset"},
-    {56, MbFunc::ReadHolding, MbType::Int16, 1, "",   "Smart Grid operation mode", HomeHubValueKind::SmartGridMode},
-    {57, MbFunc::ReadHolding, MbType::Pow16, 1, "kW", "Power limit during Recommended on / buffering"},
+    {54, MbFunc::ReadHolding, MbType::Int16, 1, "K", "Leaving water Main Heating offset"},
+    {56, MbFunc::ReadHolding, MbType::Int16, 1, "", "Smart Grid operation mode",
+     HomeHubValueKind::SmartGridMode},
+    {57, MbFunc::ReadHolding, MbType::Pow16, 1, "kW",
+     "Power limit during Recommended on / buffering"},
     {58, MbFunc::ReadHolding, MbType::Pow16, 1, "kW", "General power limit"},
 };
 inline constexpr int HOMEHUB_REG_COUNT = sizeof(HOMEHUB_REGS) / sizeof(HOMEHUB_REGS[0]);

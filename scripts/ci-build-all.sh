@@ -26,7 +26,8 @@
 # same reason. NOT scripts/next-version.sh: that is the next RELEASE version, which is deliberately
 # ahead of the version.txt floor once tags exist, i.e. exactly the drift the check rejects.
 #
-# Usage: scripts/ci-build-all.sh [--compile-only] [--source-sha <40-hex>]
+# Usage: scripts/ci-build-all.sh [--compile-only] [--verify-reproducible]
+#                                [--source-sha <40-hex>]
 #                                [--changelog-file <json>] [version]
 #        (version defaults to the version.txt the build embeds)
 #
@@ -39,11 +40,17 @@ cd "$(dirname "$0")/.."
 MODE=publish
 SOURCE_SHA=""
 CHANGELOG_FILE=""
+VERIFY_REPRODUCIBLE=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --compile-only)
             [ "$MODE" = publish ] || { echo "ci-build-all: --compile-only repeated" >&2; exit 2; }
             MODE=compile-only; shift ;;
+        --verify-reproducible)
+            [ "$VERIFY_REPRODUCIBLE" = false ] || {
+                echo "ci-build-all: --verify-reproducible repeated" >&2; exit 2;
+            }
+            VERIFY_REPRODUCIBLE=true; shift ;;
         --source-sha)
             [ -z "$SOURCE_SHA" ] || { echo "ci-build-all: --source-sha repeated" >&2; exit 2; }
             [ "$#" -ge 2 ] || { echo "ci-build-all: --source-sha requires 40 hex characters" >&2; exit 2; }
@@ -58,7 +65,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 [ "$#" -le 1 ] || {
-    echo "usage: ci-build-all.sh [--compile-only] [--source-sha <40-hex>] [--changelog-file <json>] [version]" >&2
+    echo "usage: ci-build-all.sh [--compile-only] [--verify-reproducible] [--source-sha <40-hex>] [--changelog-file <json>] [version]" >&2
     exit 2
 }
 if [ -n "$SOURCE_SHA" ] && [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
@@ -69,6 +76,18 @@ fi
     echo "ci-build-all: publishing mode requires --source-sha <40-hex>" >&2
     exit 2
 }
+[ "$VERIFY_REPRODUCIBLE" = false ] || [ "$MODE" = publish ] || {
+    echo "ci-build-all: --verify-reproducible is only valid for a signed publishing build" >&2
+    exit 2
+}
+
+# A release reproducibility proof compares two cache-independent builds. Keep both its reference
+# build and clean rebuild outside the repository and disable ccache before either compiler runs.
+# Ordinary compile/dev builds retain the shared cache below.
+if [ "$VERIFY_REPRODUCIBLE" = true ]; then
+    export CCACHE_DISABLE=1
+    export IDF_CCACHE_ENABLE=0
+    echo "ccache: disabled for reproducibility verification"
 
 # ccache, when the toolchain image has it. `idf.py set-target` below wipes the build directory, so
 # every build compiles the whole graph from scratch — in CI that was ~3 minutes of a ~5 minute job,
@@ -79,7 +98,7 @@ fi
 # Guarded on the binary rather than assumed: without it CMake would launch a compiler that is not
 # there and fail the build, and this script must keep working on any IDF image. Locally (via
 # scripts/idf-docker.sh) the same cache makes a repeat build cheap too.
-if command -v ccache >/dev/null 2>&1; then
+elif command -v ccache >/dev/null 2>&1; then
     export IDF_CCACHE_ENABLE=1
     export CCACHE_DIR="${CCACHE_DIR:-$PWD/.ccache}"
     export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-400M}"
@@ -116,15 +135,53 @@ fi
 LOCK_HASH="$(sha256sum dependencies.lock | cut -d ' ' -f1)"
 IDF_VERSION="$(scripts/idf-version.sh)"
 
+REPRO_STATE=""
+REPRO_CHECKER="scripts/check-reproducible-build.py"
+cleanup_repro_state() {
+    if [ -n "$REPRO_STATE" ] && [ -d "$REPRO_STATE" ]; then
+        rm -rf -- "$REPRO_STATE"
+    fi
+}
+if [ "$VERIFY_REPRODUCIBLE" = true ]; then
+    # The ESP-IDF GitHub Action runs this command inside its container. Host RUNNER_TEMP is not a
+    # portable container mount; /tmp is the guaranteed external, writable filesystem here and in
+    # scripts/idf-docker.sh.
+    repro_tmp_parent=/tmp
+    REPRO_STATE="$(mktemp -d "$repro_tmp_parent/daikin-repro.XXXXXX")"
+    trap cleanup_repro_state EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    # This snapshot is intentionally made only after CI stamped version.txt and before the first
+    # idf.py reference-build command. The verifier later rejects any tracked-byte drift.
+    python3 scripts/check-reproducible-build.py --prepare --state-dir "$REPRO_STATE"
+    REPRO_CHECKER="$REPRO_STATE/source/scripts/check-reproducible-build.py"
+    [ -f "$REPRO_CHECKER" ] || {
+        echo "ci-build-all: frozen reproducibility checker is missing from the source snapshot" >&2
+        exit 1
+    }
+fi
+
 suffix()     { echo ""; }
 chipfamily() { echo "ESP32-S3"; }
 
 builds_json=""
 FINAL_APP_SHA256=""
+SIGNING_KEY_SHA256=""
 for t in "${TARGETS[@]}"; do
     echo "=== building $t ($VERSION) ==="
-    rm -f sdkconfig
-    idf.py set-target "$t"
+    if [ "$VERIFY_REPRODUCIBLE" = true ]; then
+        BUILD_DIR="$REPRO_STATE/reference-$t"
+        SDKCONFIG_PATH="$REPRO_STATE/sdkconfig-reference-$t"
+        REPRO_FLASH_INPUTS="$REPRO_STATE/reproduced-flash-inputs-$t"
+    else
+        BUILD_DIR="$PWD/build"
+        SDKCONFIG_PATH="$PWD/sdkconfig"
+        REPRO_FLASH_INPUTS=""
+        rm -f "$SDKCONFIG_PATH"
+    fi
+    IDF_BUILD_ARGS=(-B "$BUILD_DIR" -D "SDKCONFIG=$SDKCONFIG_PATH")
+    idf.py "${IDF_BUILD_ARGS[@]}" set-target "$t"
     [ "$(sha256sum dependencies.lock | cut -d ' ' -f1)" = "$LOCK_HASH" ] || {
         echo "dependencies.lock changed during configuration" >&2
         echo "run idf.py update-dependencies intentionally and commit the resolved lock" >&2
@@ -133,10 +190,23 @@ for t in "${TARGETS[@]}"; do
     # Kconfig silently ignores an unknown, renamed or promptless default. Compare every declared
     # assignment with the generated file before compiling so a line that only LOOKS like a build
     # guarantee fails the same build it was meant to control.
-    python3 scripts/check-sdkconfig-defaults.py sdkconfig.defaults sdkconfig
-    idf.py build
+    python3 scripts/check-sdkconfig-defaults.py sdkconfig.defaults "$SDKCONFIG_PATH"
+    idf.py "${IDF_BUILD_ARGS[@]}" build
+    python3 scripts/check-stack-budget.py --elf "$BUILD_DIR/daikin-altherma-esp32.elf"
     sfx="$(suffix "$t")"
-    app="build/daikin-altherma-esp32.bin"
+    app="$BUILD_DIR/daikin-altherma-esp32.bin"
+    repro_app=""
+    verified_unsigned_app_sha=""
+    if [ "$VERIFY_REPRODUCIBLE" = true ]; then
+        python3 "$REPRO_CHECKER" \
+            --verify \
+            --state-dir "$REPRO_STATE" \
+            --reference-build "$BUILD_DIR" \
+            --flash-input-copy "$REPRO_FLASH_INPUTS" \
+            --repository "$PWD" \
+            --target "$t"
+        repro_app="$REPRO_FLASH_INPUTS/daikin-altherma-esp32.bin"
+    fi
 
     # The version this script stamps into manifest.json and the version the IMAGE embeds must be
     # the same string. The OTA client compares the manifest version against the version the
@@ -158,15 +228,62 @@ for t in "${TARGETS[@]}"; do
     # Sign the app image (RSA-3072, Secure Boot v2 scheme, no hardware Secure Boot). Publishing
     # mode was fail-closed on the key before the build began. Compile-only deliberately leaves the
     # linker output untouched and, crucially, never copies it into dist/.
-    # The signed image must land back on $app itself: flash_args flashes the app BY PATH
-    # ("0x20000 daikin-altherma-esp32.bin"), so merge-bin below embeds whatever is at that path.
-    # Leave the raw linker output there and the browser installer ships an app that aborts in
-    # esp_secure_boot_init_checks before app_main — a crash-loop with no bootloader rollback record.
+    # The signed image must ultimately land in every flash-input tree at the path flash_args names.
+    # In reproducibility mode, sign the exact verified clean-rebuild export, not a reference file
+    # that merely matched it earlier. Rebind its identity immediately before and after espsecure,
+    # then prove the signed output begins with those same unsigned bytes. That closes both ordinary
+    # drift and a mutation during the probabilistic signing process itself.
     if [ "$MODE" = publish ]; then
-        espsecure sign-data --version 2 --keyfile "$SIGN_KEY" --output "build/daikin-signed.bin" "$app"
-        cp "build/daikin-signed.bin" "$app"
+        sign_input="$app"
+        if [ "$VERIFY_REPRODUCIBLE" = true ]; then
+            verified_unsigned_app_sha="$(python3 "$REPRO_CHECKER" \
+                --assert-export --flash-input-copy "$REPRO_FLASH_INPUTS")"
+            [ "$(sha256sum "$app" | cut -d ' ' -f1)" = "$verified_unsigned_app_sha" ] || {
+                echo "ci-build-all: reference app drifted after reproducibility verification" >&2
+                exit 1
+            }
+            sign_input="$repro_app"
+        fi
+        unsigned_sign_input_size="$(stat -f%z "$sign_input" 2>/dev/null || stat -c%s "$sign_input")"
+        espsecure sign-data --version 2 --keyfile "$SIGN_KEY" \
+            --output "$BUILD_DIR/daikin-signed.bin" "$sign_input"
+        if [ "$VERIFY_REPRODUCIBLE" = true ]; then
+            rebound_unsigned_sha="$(python3 "$REPRO_CHECKER" \
+                --assert-export --flash-input-copy "$REPRO_FLASH_INPUTS")"
+            [ "$rebound_unsigned_sha" = "$verified_unsigned_app_sha" ] || {
+                echo "ci-build-all: verified app changed during signing" >&2
+                exit 1
+            }
+        fi
+        dd if="$BUILD_DIR/daikin-signed.bin" of="$BUILD_DIR/signed-unsigned-prefix.bin" \
+            bs=1 count="$unsigned_sign_input_size" status=none
+        cmp -s "$sign_input" "$BUILD_DIR/signed-unsigned-prefix.bin" || {
+            echo "ci-build-all: signed image payload does not match the bound unsigned app" >&2
+            exit 1
+        }
+        SIGNED_APP_SHA256="$(sha256sum "$BUILD_DIR/daikin-signed.bin" | cut -d ' ' -f1)"
+        cp "$BUILD_DIR/daikin-signed.bin" "$app"
+        if [ "$VERIFY_REPRODUCIBLE" = true ]; then
+            cp "$BUILD_DIR/daikin-signed.bin" "$repro_app"
+        fi
+        [ "$(sha256sum "$app" | cut -d ' ' -f1)" = "$SIGNED_APP_SHA256" ] || {
+            echo "ci-build-all: signed reference app copy changed" >&2
+            exit 1
+        }
+        if [ "$VERIFY_REPRODUCIBLE" = true ]; then
+            [ "$(sha256sum "$repro_app" | cut -d ' ' -f1)" = "$SIGNED_APP_SHA256" ] || {
+                echo "ci-build-all: signed reproduced app copy changed" >&2
+                exit 1
+            }
+        fi
+        current_signing_key="$(scripts/check-signing-key-continuity.py --print-digest "$app")"
+        if [ -n "$SIGNING_KEY_SHA256" ] && [ "$current_signing_key" != "$SIGNING_KEY_SHA256" ]; then
+            echo "ci-build-all: target images were signed by different keys" >&2
+            exit 1
+        fi
+        SIGNING_KEY_SHA256="$current_signing_key"
         cp "$app" "$DIST/daikin-altherma-esp32${sfx}.bin"
-        FINAL_APP_SHA256="$(sha256sum "$app" | cut -d ' ' -f1)"
+        FINAL_APP_SHA256="$SIGNED_APP_SHA256"
     else
         echo "compile-only: unsigned $t app remains in build/ and will not be uploaded or published"
     fi
@@ -183,7 +300,7 @@ for t in "${TARGETS[@]}"; do
     # Secure Boot v2 appends a 4 KB signature sector. Reserve it in an unsigned PR build so a PR
     # cannot pass the size gate and then overflow only when the trusted main build signs it.
     [ "$MODE" = publish ] || policy_limit=$((APP_SIZE_LIMIT - 0x1000))
-    idf.py size --format json2 --output-file "$size_json"
+    idf.py "${IDF_BUILD_ARGS[@]}" size --format json2 --output-file "$size_json"
     python3 scripts/report-firmware-size.py \
         --idf-size "$size_json" \
         --app "$app" \
@@ -198,8 +315,45 @@ for t in "${TARGETS[@]}"; do
         # The Web Serial manifest does NOT flash this whole file: merge-bin fills every gap with
         # 0xff, including nvs@0x9000, so writing it at offset 0 destroys the configuration even when
         # the user declines the separate whole-chip Erase prompt.
-        merged="$DIST/daikin-altherma-esp32${sfx}-merged.bin"
-        ( cd build && esptool --chip "$t" merge-bin -o "../$merged" @flash_args )
+        merged="$PWD/$DIST/daikin-altherma-esp32${sfx}-merged.bin"
+        [ "$(sha256sum "$app" | cut -d ' ' -f1)" = "$SIGNED_APP_SHA256" ] || {
+            echo "ci-build-all: signed app drifted before the published merge" >&2
+            exit 1
+        }
+        ( cd "$BUILD_DIR" && esptool --chip "$t" merge-bin -o "$merged" @flash_args )
+
+        if [ "$VERIFY_REPRODUCIBLE" = true ]; then
+            # Secure Boot v2 signing is probabilistic, so sign exactly once. Put those exact signed
+            # app bytes into the independently reproduced unsigned flash-input tree and merge that
+            # tree a second time. Equality proves the published merged image came from the verified
+            # bootloader, partition table, OTA data, flash_args and the one signed application.
+            [ "$(sha256sum "$app" | cut -d ' ' -f1)" = "$SIGNED_APP_SHA256" ] || {
+                echo "ci-build-all: signed reference app changed between merges" >&2
+                exit 1
+            }
+            [ "$(sha256sum "$repro_app" | cut -d ' ' -f1)" = "$SIGNED_APP_SHA256" ] || {
+                echo "ci-build-all: signed reproduced app changed between merges" >&2
+                exit 1
+            }
+            repro_merged="$REPRO_STATE/reproduced-merged-$t.bin"
+            ( cd "$REPRO_FLASH_INPUTS" && \
+                esptool --chip "$t" merge-bin -o "$repro_merged" @flash_args )
+            [ "$(sha256sum "$app" | cut -d ' ' -f1)" = "$SIGNED_APP_SHA256" ] || {
+                echo "ci-build-all: signed reference app changed during reproduced merge" >&2
+                exit 1
+            }
+            [ "$(sha256sum "$repro_app" | cut -d ' ' -f1)" = "$SIGNED_APP_SHA256" ] || {
+                echo "ci-build-all: signed reproduced app changed during its merge" >&2
+                exit 1
+            }
+            if ! cmp -s "$merged" "$repro_merged"; then
+                echo "ci-build-all: merged image is not reproducible after the one signing step" >&2
+                echo "published:  $(sha256sum "$merged" | cut -d ' ' -f1)" >&2
+                echo "reproduced: $(sha256sum "$repro_merged" | cut -d ' ' -f1)" >&2
+                exit 1
+            fi
+            echo "reproducible merged image: OK ($(sha256sum "$merged" | cut -d ' ' -f1))"
+        fi
 
         # Self-check: CI must never publish an installer image with an unsigned app. Verify the app
         # region of the MERGED artifact — carved back out at the offset flash_args gave it — rather
@@ -207,10 +361,15 @@ for t in "${TARGETS[@]}"; do
         # Both offsets are 4 KB multiples (an app partition is 64 KB-aligned; signing pads to 4 KB
         # and appends a 4 KB signature sector), so dd can carve it out block-wise — no pipe into
         # `head`, whose early close would SIGPIPE dd into a spurious pipefail once anything follows.
-        off="$(awk -v f="$(basename "$app")" '$2 == f { print $1 }' build/flash_args)"
-        [ -n "$off" ] || { echo "no app entry for $(basename "$app") in build/flash_args" >&2; exit 1; }
-        dd if="$merged" of=build/merged-app.bin bs=4096 skip=$(( off / 4096 )) count=$(( sz / 4096 )) status=none
-        scripts/require-signed.sh build/merged-app.bin
+        off="$(awk -v f="$(basename "$app")" '$2 == f { print $1 }' "$BUILD_DIR/flash_args")"
+        [ -n "$off" ] || { echo "no app entry for $(basename "$app") in $BUILD_DIR/flash_args" >&2; exit 1; }
+        case "$off" in
+            0x*|0X*) app_offset=$((off)) ;;
+            *[!0-9]*|'') echo "invalid app offset in $BUILD_DIR/flash_args: $off" >&2; exit 1 ;;
+            *) app_offset=$((10#$off)) ;;
+        esac
+        dd if="$merged" of="$BUILD_DIR/merged-app.bin" bs=4096 skip=$(( app_offset / 4096 )) count=$(( sz / 4096 )) status=none
+        scripts/require-signed.sh "$BUILD_DIR/merged-app.bin"
 
         # Stage only the byte ranges named by flash_args for Web Serial. Carving them from the
         # merged image retains merge-bin's header preparation, while separate manifest parts leave
@@ -218,10 +377,14 @@ for t in "${TARGETS[@]}"; do
         web_parts=""
         web_part_count=0
         while read -r off rel; do
-            src="build/$rel"
+            src="$BUILD_DIR/$rel"
             [ -f "$src" ] || { echo "flash_args part does not exist: $src" >&2; exit 1; }
             part_size="$(stat -f%z "$src" 2>/dev/null || stat -c%s "$src")"
-            part_offset=$((off))
+            case "$off" in
+                0x*|0X*) part_offset=$((off)) ;;
+                *[!0-9]*|'') echo "invalid flash offset in $BUILD_DIR/flash_args: $off" >&2; exit 1 ;;
+                *) part_offset=$((10#$off)) ;;
+            esac
             base="$(basename "$rel")"
             if [ "$base" = "$(basename "$app")" ]; then
                 web_name="daikin-altherma-esp32${sfx}.bin"
@@ -236,8 +399,8 @@ for t in "${TARGETS[@]}"; do
             }
             web_parts="${web_parts:+$web_parts,}{\"path\":\"$web_name\",\"offset\":$part_offset}"
             web_part_count=$((web_part_count + 1))
-        done < <(awk '$1 ~ /^0x[0-9a-fA-F]+$/ { print $1, $2 }' build/flash_args)
-        [ "$web_part_count" -gt 0 ] || { echo "no flash parts found in build/flash_args" >&2; exit 1; }
+        done < <(awk '$1 ~ /^(0[xX][0-9a-fA-F]+|[0-9]+)$/ { print $1, $2 }' "$BUILD_DIR/flash_args")
+        [ "$web_part_count" -gt 0 ] || { echo "no flash parts found in $BUILD_DIR/flash_args" >&2; exit 1; }
 
         # The app served to OTA and the app carved for Web Serial are now the exact same bytes.
         # Re-run the signing guard on that final staged file, not only on the pre-merge input.
@@ -271,7 +434,7 @@ for t in "${TARGETS[@]}"; do
     # justification for the retention window build.yml picks, so it belongs in the run log rather
     # than in anyone's estimate, this comment's included.
     elf="$DIST/daikin-altherma-esp32${sfx}.elf"
-    cp "build/daikin-altherma-esp32.elf" "$elf"
+    cp "$BUILD_DIR/daikin-altherma-esp32.elf" "$elf"
     ( cd "$DIST" && sha256sum "daikin-altherma-esp32${sfx}.elf" > "daikin-altherma-esp32${sfx}.elf.sha256" )
     elf_raw="$(stat -f%z "$elf" 2>/dev/null || stat -c%s "$elf")"
     if command -v xz >/dev/null 2>&1; then
@@ -301,6 +464,26 @@ if [ "$MODE" = compile-only ]; then
     exit 0
 fi
 [ -n "$FINAL_APP_SHA256" ] || { echo "ci-build-all: final signed app hash is missing" >&2; exit 1; }
+[ -n "$SIGNING_KEY_SHA256" ] || { echo "ci-build-all: signing-key identity is missing" >&2; exit 1; }
+
+# Bind every public flashable byte sequence, not only the OTA app. The same manifest is the
+# declarative artifact index used by the Pages readback, so a missing/stale bootloader, partition,
+# sparse Web Serial part or merged image cannot hide behind a healthy main application.
+artifacts_json=""
+artifact_count=0
+for artifact in "$DIST"/*.bin; do
+    artifact_name="$(basename "$artifact")"
+    [[ "$artifact_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*[.]bin$ ]] || {
+        echo "ci-build-all: unsafe artifact name $artifact_name" >&2
+        exit 1
+    }
+    artifact_sha="$(sha256sum "$artifact" | cut -d ' ' -f1)"
+    artifact_size="$(stat -f%z "$artifact" 2>/dev/null || stat -c%s "$artifact")"
+    [ "$artifact_size" -gt 0 ] || { echo "ci-build-all: empty artifact $artifact_name" >&2; exit 1; }
+    artifacts_json="${artifacts_json:+$artifacts_json,}{\"path\":\"$artifact_name\",\"sha256\":\"$artifact_sha\",\"size\":$artifact_size}"
+    artifact_count=$((artifact_count + 1))
+done
+[ "$artifact_count" -gt 0 ] || { echo "ci-build-all: no publishable binary artifacts" >&2; exit 1; }
 
 # One manifest serves both the installer (builds[]) and OTA (version). The browser installer reads
 # builds[]/chipFamily; the device OTA reads .version and pulls daikin-altherma-esp32<suffix>.bin.
@@ -312,8 +495,10 @@ cat > "$DIST/manifest.json" <<EOF
     "source_sha": "$SOURCE_SHA",
     "idf_version": "$IDF_VERSION",
     "dependencies_lock_sha256": "$LOCK_HASH",
-    "app_sha256": "$FINAL_APP_SHA256"
+    "app_sha256": "$FINAL_APP_SHA256",
+    "signing_key_sha256": "$SIGNING_KEY_SHA256"
   },
+  "artifacts": [$artifacts_json],
   "new_install_prompt_erase": true,
   "builds": [$builds_json]
 }

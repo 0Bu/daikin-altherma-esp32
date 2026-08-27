@@ -336,7 +336,11 @@ everything X10A carries.
 
 **MQTT preserves the two sources instead of merging them.** X10A is retained as grouped JSON on
 `<base>/x10a`; an enabled HomeHub publishes its separate flat map on `<base>/modbus`. A disconnected
-HomeHub sends `{}` and Off retracts that data topic. The Modbus stream deliberately has no Home
+HomeHub sends `{}` and Off retracts that data topic. Publication follows the atomically installed
+target intent, not the retiring worker's lagging status. A cleanup attempt suppresses Modbus state
+for the rest of that MQTT cycle, so Off cannot tombstone and immediately recreate `{}`; an enabled
+A-to-B cutover may publish B's empty pre-first-sample state from the following cycle. The Modbus
+stream deliberately has no Home
 Assistant discovery: publishing both sources as HA entities would create two sensors for every shared
 quantity and hide which instrument is fresh. HomeHub link health rides the heartbeat
 (`modbus_enabled`/`modbus_connected`/`modbus_rx`/`modbus_fails`, payload-only). On upgrade, bounded
@@ -368,9 +372,13 @@ non-empty `mb_host`.
 > later number. A second, different "v4" would have decoded that language byte as a HomeHub setting
 > and switched a board onto a link it does not have, silently, on upgrade.
 
-**Applied live.** `POST /set_hp` accepts `mb_host`, marks discovery complete, persists both and calls
-`mb_reconfigure()`. A non-empty address starts/reconnects the task; clearing it is handled by the task
-at the top of its next cycle, so the socket keeps exactly one owner. `POST /discover_homehub` is
+**Applied live.** `POST /set_hp` accepts `mb_host`, marks discovery complete and stages the target
+fingerprint plus enabled bit before persistence. After the durable write it passes only that POD bit
+to allocation-free `mb_reconfigure(bool enabled) noexcept`; a post-save Config copy therefore cannot
+turn success into a false 503 or lose retained cleanup. A non-empty address starts/reconnects the
+task; clearing it flips the atomic task intent, which is checked before TLS delays and Config
+snapshots at the top of the next cycle, so even allocator pressure retires the sole socket owner.
+`POST /discover_homehub` is
 separate: it runs the bounded manual search and returns `{ok:true,host:"<IPv4>"}` without saving or
 reconfiguring anything.
 
@@ -380,7 +388,7 @@ exactly the case worth seeing. Its value is the active `host:port`, and its colo
 connection-state vocabulary. Config and diagnostics only; there are no pump controls, by design.
 
 **API:** `/status.modbus` carries the link/config fields, `task_stack_min_free_bytes` (this task's
-worst stack headroom in bytes, from the one sampler all four watched stacks report through
+worst stack headroom in bytes, from the one sampler all five watched stacks report through
 — `main/stack_watch.hpp` — so this surface and the MQTT heartbeat's `modbus_stack_min_free_bytes`
 cannot answer the same question with two numbers; `null`, not `0`, when the task has never run,
 which on a board with no HomeHub is always) and the

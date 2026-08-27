@@ -2,14 +2,14 @@
 // The 24-hour trend rings. One fixed-cadence buffer per entry in logic/history.hpp's TRENDS, fed by
 // the X10A poll task, thirteen rings fed by the independent HomeHub task and three rings fed by ENV
 // III, and read by GET /history. The HomeHub set is eight paired measurements plus BSH,
-// 3-way-valve, Quiet and Smart-Grid state timelines.
+// 3-way-valve, Quiet and Smart-Grid state timelines, and the Modbus-only disinfection state.
 //
 // The buffers are STATIC storage, never heap: on this board the binding limit is the largest
 // CONTIGUOUS free block, not free heap, and a static array does not compete for it. They occupy one
 // `.noinit` region so the LIVE arrays themselves survive a power-kept reset; there is no shadow
-// copy. Thirty-two X10A/board/state rings cost 18432 bytes, thirteen HomeHub rings another 7488 bytes
-// and three ENV III rings 1728 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND and the
-// ceiling asserts beside the arrays.
+// copy. Thirty-two X10A/board/state rings cost 18432 bytes, thirteen HomeHub rings another 7488
+// bytes and three ENV III rings 1728 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND and
+// the ceiling asserts beside the arrays.
 //
 // NOT in NVS, and that has not changed: a 576-byte blob rewritten every 5 minutes is ~100k writes a
 // year in the partition that holds the WiFi credentials, to save a history that is only ever
@@ -17,24 +17,27 @@
 // the rings now survive one, through two media that each cover what the other cannot
 // (logic/history_persist.hpp carries the reasoning; this header carries the seams):
 //
-//   .noinit DRAM   — the live arrays are simply no longer zeroed at startup, so any reset that kept
-//                    power keeps the readings. Costs no flash write and no extra RAM. The one seam
+//   .noinit DRAM   — the live arrays are simply no longer zeroed at startup, so a compatible
+//                    power-preserving reset that is not the factory wipe can keep the readings.
+//                    Costs no flash write and no extra RAM. The one seam
 //                    is the bucket that was open when the device went down: it is dropped, so the
 //                    restored series can be up to one HISTORY_DT_S adrift on the axis.
 //   history        — one compact append-only record per source and completed five-minute bucket.
-//                    The 4 MiB ring journal carries the history across OTA, reboot and power loss
-//                    once the official 8 MB table has been installed.
+//                    After the boot scan succeeds and wall time is synced, the 4 MiB ring journal
+//                    carries committed history across OTA, reboot and later power loss on the
+//                    official 8 MB table.
 //
-// A sudden power loss can discard only the bucket still being folded and, in the narrowest race,
-// the just-closed record not yet serviced by the poll task. /status.history.persist independently
-// reports what happened to the RAM copy.
+// Once that journal has an eligible commit, a sudden power loss can discard only the bucket still
+// being folded and, in the narrowest race, the just-closed record not yet serviced by the poll
+// task. Before it, flash has nothing to restore. /status.history.persist independently reports only
+// what happened to the RAM copy.
 //
-// The flash path is SPLICED IN BEHIND the live samples by absolute wall-clock bucket, never appended,
-// and is skipped while the clock is unsynced — an unanchored curve has no honest position on the
-// axis. It can seed an empty live ring immediately after SNTP. A later X10A/HomeHub identity change removes the old readings but
-// preserves the boot-aligned raster as explicit gaps, so every chart shows the same elapsed window
-// without splicing devices. The UI draws the span actually retained ("Aufzeichnung · 11 h" until the
-// first full day).
+// The flash path is SPLICED IN BEHIND the live samples by absolute wall-clock bucket, never
+// appended, and is skipped while the clock is unsynced — an unanchored curve has no honest position
+// on the axis. It can seed an empty live ring immediately after SNTP. A later X10A/HomeHub identity
+// change removes the old readings but preserves the boot-aligned raster as explicit gaps, so every
+// chart shows the same elapsed window without splicing devices. The UI draws the span actually
+// retained ("Aufzeichnung · 11 h" until the first full day).
 #include "hp_poll.hpp"          // CachedValue
 #include "logic/history.hpp"
 
@@ -97,8 +100,10 @@ void history_reset();
 void history_reset_on_detect(uint32_t identity_fp);
 
 // Start a new HomeHub observation identity after host, port or unit-id changes. Like the X10A
-// reset, elapsed positions remain explicit gaps on the common boot-aligned 24-hour raster.
-void history_modbus_reset();
+// reset, elapsed positions remain explicit gaps on the common boot-aligned 24-hour raster. The
+// caller supplies the already-staged target fingerprint so this remains allocation-free after a
+// durable /set_hp save.
+void history_modbus_reset(uint32_t target_fp) noexcept;
 
 // Start a new identity for the two optional external circulation witnesses without discarding the
 // independent X10A/HomeHub histories.
@@ -138,10 +143,11 @@ size_t history_label(size_t t, char* out, size_t max);
 
 // ── Persistence seams ───────────────────────────────────────────────────────────────────────────
 
-// How this boot's rings came to be: "accept" (adopted from RAM across a reset that kept power) or
-// the reason they started empty ("power_cycle", "wrong_catalog" after an update, "bad_crc", …).
-// Reported on /status.history so a chart that emptied itself has a stated cause rather than looking
-// like a bug — logic/history_persist.hpp's HistoryRestore vocabulary.
+// The .noinit-RAM adoption verdict: "accept" across a compatible reset that kept power, or why RAM
+// started empty ("power_cycle", "wrong_catalog", "bad_crc", …). Independent compatible flash
+// records may splice in later after scan + clock sync without changing it. Reported on
+// /status.history so an emptied chart has a stated RAM cause — logic/history_persist.hpp's
+// HistoryRestore vocabulary.
 const char* history_persist_state();
 
 // Bounded final drain of completed journal buckets. Registered as an esp_restart shutdown handler

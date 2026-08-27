@@ -295,6 +295,30 @@ printf '%s' "$output" | grep -qF "ui-use-case-review" || fail "UI conditional re
 echo "  PASS  UI and schematic conditional relevance"
 pass=$((pass + 1))
 
+write_body "$HEAD_SHA"
+printf 'docs/DIAGNOSTIC_EVIDENCE.md\n' > "$WORK/files.txt"
+expect_block "diagnostic source changes require evidence review" "diagnostic-evidence-review"
+
+write_body "$HEAD_SHA"
+printf 'main/http_server.cpp\n' > "$WORK/files.txt"
+cat >> "$WORK/body.md" <<EOF
+- [x] \`\$feature-docs\` synced — merge gate @ $HEAD_SHA
+EOF
+expect_block "all HTTP allocation paths require heap review" "heap-safety-review"
+
+write_body "$HEAD_SHA"
+printf 'main/www/index.html\n' > "$WORK/files.txt"
+set +e
+output="$(run_policy 2>&1)"; rc=$?
+set -e
+[ "$rc" -eq 2 ] || fail "owner-visible UI change did not block"
+printf '%s' "$output" | grep -qF "user-docs-review" \
+  || fail "owner-visible UI change did not require user-docs review"
+printf '%s' "$output" | grep -qF "absence-review" \
+  || fail "optional-source UI surface did not require absence review"
+echo "  PASS  owner-visible optional-source UI review relevance"
+pass=$((pass + 1))
+
 echo "== complete GitHub changed-file input =="
 cat > "$WORK/file-pages.json" <<'EOF'
 [[{"filename":"docs/one.md"},{"filename":"main/two.cpp"}]]
