@@ -8187,6 +8187,29 @@ static void test_weather_forecast_contract() {
     CHECK(
         !weather_refresh_complete(3, refresh_started, 3, true, refresh_completed, refresh_success));
 
+    // OTA serialization is not a Weather result. Releasing the attempt without completion leaves
+    // the exact token outstanding, so the same request can be reclaimed and causally succeed.
+    refresh_started = refresh_completed = refresh_success = 0;
+    CHECK(weather_refresh_claim(1, refresh_completed, refresh_started) == 1);
+    CHECK(weather_refresh_defer(1, refresh_started, 1, refresh_completed));
+    CHECK(refresh_started == 1 && refresh_completed == 0 && refresh_success == 0);
+    CHECK(weather_refresh_claim(1, refresh_completed, refresh_started) == 1);
+    CHECK(
+        weather_refresh_complete(1, refresh_started, 1, true, refresh_completed, refresh_success));
+    CHECK(refresh_completed == 1 && refresh_success == 1);
+    CHECK(!weather_refresh_defer(1, refresh_started, 1, refresh_completed));
+    CHECK(!weather_refresh_defer(1, refresh_started, 0, 0));
+    CHECK(!weather_refresh_defer(2, refresh_started, 1, 0));
+    CHECK(!weather_refresh_defer(1, 2, 1, 0));
+    refresh_started = refresh_completed = refresh_success = 0;
+    CHECK(weather_refresh_claim(2, refresh_completed, refresh_started) == 2);
+    CHECK(weather_refresh_defer(2, refresh_started, 2, refresh_completed));
+    weather_refresh_cancel_outstanding(2, refresh_completed);
+    CHECK(weather_refresh_claim(2, refresh_completed, refresh_started) == 0);
+    CHECK(
+        !weather_refresh_complete(2, refresh_started, 2, true, refresh_completed, refresh_success));
+    CHECK(refresh_completed == 2 && refresh_success == 0);
+
     WeatherForecastSample bad = sample;
     bad.version               = 2;
     CHECK(!weather_validate(bad).valid &&

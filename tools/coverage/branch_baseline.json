@@ -340,8 +340,8 @@
         "taken": 125
       },
       "main/logic/weather_forecast.hpp": {
-        "outcomes": 177,
-        "taken": 165
+        "outcomes": 183,
+        "taken": 171
       },
       "main/logic/weather_mqtt.hpp": {
         "outcomes": 136,
@@ -694,8 +694,8 @@
         "taken": 143
       },
       "main/logic/weather_forecast.hpp": {
-        "outcomes": 219,
-        "taken": 203
+        "outcomes": 227,
+        "taken": 211
       },
       "main/logic/weather_mqtt.hpp": {
         "outcomes": 148,
@@ -1048,8 +1048,8 @@
         "taken": 143
       },
       "main/logic/weather_forecast.hpp": {
-        "outcomes": 219,
-        "taken": 203
+        "outcomes": 227,
+        "taken": 211
       },
       "main/logic/weather_mqtt.hpp": {
         "outcomes": 148,
