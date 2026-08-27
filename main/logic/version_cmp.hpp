@@ -80,14 +80,21 @@ inline int prerelease_compare(const char* a, const char* aend, const char* b, co
 // Split a version into its numeric core and its pre-release/build suffix, skipping one leading
 // 'v'/'V' (a git tag pasted into a manifest reads as "v1.0.1"; without this it would parse as a
 // core of 0 and compare BELOW every real version — a silent refusal to ever update).
-inline void version_split(const std::string& s, const char*& core, const char*& core_end,
+inline void version_split(const char* s, const char*& core, const char*& core_end,
                           const char*& suffix) {
-    const char* p = s.c_str();
+    const char* p = s;
     if (*p == 'v' || *p == 'V') ++p;
     core = p;
     while (*p && *p != '-' && *p != '+') ++p;
     core_end = p;
     suffix   = p;   // "" when there is none
+}
+
+// The publish-side host gate also inspects the suffix after validating one std::string candidate.
+// Keep that existing source-compatible entry point while the firmware's hot path uses const char*.
+inline void version_split(const std::string& s, const char*& core, const char*& core_end,
+                          const char*& suffix) {
+    version_split(s.c_str(), core, core_end, suffix);
 }
 
 }  // namespace detail
@@ -96,7 +103,8 @@ inline void version_split(const std::string& s, const char*& core, const char*& 
 // made only of digits and dots, with at least one digit. Anything else — an empty string, "unknown",
 // an HTML error page's first line that a broken manifest host returned — is NOT ordered against real
 // versions; the gate refuses rather than guessing.
-inline bool version_valid(const std::string& s) {
+inline bool version_valid(const char* s) {
+    if (!s) return false;
     const char *core, *core_end, *suffix;
     detail::version_split(s, core, core_end, suffix);
     if (core == core_end) return false;
@@ -139,10 +147,12 @@ inline bool version_valid(const std::string& s) {
     return ident;
 }
 
+inline bool version_valid(const std::string& s) { return version_valid(s.c_str()); }
+
 // Returns <0, 0, >0 like strcmp. Numeric segments compare NUMERICALLY, so 1.10.0 > 1.9.0 — the
 // whole reason this is not a strcmp. Equal cores fall back to the semver pre-release rule
 // (1.0.0-rc1 < 1.0.0); build metadata does not affect precedence.
-inline int version_compare(const std::string& a, const std::string& b) {
+inline int version_compare(const char* a, const char* b) {
     const char *ac, *ae, *as;  detail::version_split(a, ac, ae, as);
     const char *bc, *be, *bs;  detail::version_split(b, bc, be, bs);
     const char *ap = ac, *bp = bc;
@@ -159,6 +169,10 @@ inline int version_compare(const std::string& a, const std::string& b) {
     const char* apre_end = as; while (*apre_end && *apre_end != '+') ++apre_end;
     const char* bpre_end = bs; while (*bpre_end && *bpre_end != '+') ++bpre_end;
     return detail::prerelease_compare(as, apre_end, bs, bpre_end);
+}
+
+inline int version_compare(const std::string& a, const std::string& b) {
+    return version_compare(a.c_str(), b.c_str());
 }
 
 // THE GATE: may we install `candidate` while running `running`?

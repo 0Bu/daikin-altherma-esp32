@@ -66,7 +66,7 @@ fi
 ASAN_OPTIONS="$ASAN_OPTIONS_VALUE" \
 LSAN_OPTIONS=exitcode=23 \
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
-    "$BUILD_DIR/logic_property_tests" manifest modbus mqtt http
+    "$BUILD_DIR/logic_property_tests" manifest changelog modbus mqtt http
 
 set +e
 ASAN_OPTIONS="$ASAN_OPTIONS_VALUE" \

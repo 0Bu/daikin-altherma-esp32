@@ -164,7 +164,12 @@ source of image URLs, versions, hashes or install permission. The firmware accep
 selected manifest's HTTPS directory, without redirects, with a 1025-byte document cap and an exact
 top-level version match. CI selects only explicit user-facing conventional commit categories,
 normalizes the subject, rejects obvious hash/`refs`/issue tokens and never adds bodies, authors or
-repository metadata. The selected subject itself is public text, so contributors must not put
+repository metadata. The sole exception is the reviewed literal migration seed bound to the exact
+last target-only dev version and source SHA; it is not derived from arbitrary repository prose.
+Development publications retain ordered version-prefixed lines within that same legacy-compatible
+text field and reset at an ancestry-verified stable release between dev cores. Invalid published
+provenance fails generation. Current firmware validates the order and target and selects a newer
+update range in place only after TLS cleanup. The selected subject itself is public text, so contributors must not put
 private detail in it. A missing, stale or malformed changelog therefore changes only the modal's
 explanatory copy; the version/channel/SHA/generation checks below remain the sole artifact
 authorization.

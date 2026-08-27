@@ -141,10 +141,19 @@ under OTA TLS heap pressure.
 
 `node test/test_ui_ota_handshake.mjs` executes the normal check/update browser handshake. It proves
 that the UI waits through the pre-state-change busy lead, fetches only the generation-bound
-changelog, renders remote-looking markup as literal list text, cancels without an update POST,
-rejects a replaced generation, labels an answered 503 as device-busy rather than unreachable, and
-carries the checked channel, version, application SHA and generation into the sole update POST
-before following its immediate successor.
+changelog, renders every version-prefixed line of a skipped-build history and remote-looking markup
+as literal list text, cancels without an update POST, rejects a replaced generation, labels an
+answered 503 as device-busy rather than unreachable, and carries the checked channel, version,
+application SHA and generation into the sole update POST before following its immediate successor.
+The real-Chrome render gate opens the same cumulative dev.14 → dev.20 modal in all thirteen shipped
+languages at phone and desktop widths and applies its layout, native accessibility-tree, keyboard
+and console assertions.
+
+`python3 scripts/generate-ota-changelog.py --self-test` also runs the productive `build()` path
+against temporary Git/Pages fixtures. It pins a cumulative same-core publish, rejects missing,
+malformed and divergent published provenance, refuses budget overflow without truncation, requires
+the intervening stable release for a dev-core change, and proves that the next core starts with only
+changes after that release baseline.
 
 The same `test_ui_*.mjs` sweep includes `node test/test_ui_live_i18n.mjs`. That browser-free regression
 test executes the production banner/inspector render functions from the assembled UI source and verifies
@@ -238,7 +247,9 @@ production promotion, and the accepted update task to hash every downloaded byte
 before signed validation and boot selection.
 The optional changelog remains outside the hot `OtaStatus` copy/JSON path, uses one transient
 1025-byte document slot allocated only after TLS setup, and after TLS cleanup retains exactly the
-decoded length. The one-shot lease is freed after every accepted HTTP response path, after a
+decoded length. A cumulative development document is selected in place only after TLS cleanup;
+the contract rejects a second dynamic history allocation, overlapping-unsafe copy, stale retained
+length, or selection before client teardown. The one-shot lease is freed after every accepted HTTP response path, after a
 60-second static-timer TTL when never requested, or before the next OTA operation. The auto-reload
 callback uses a zero-wait OTA try-lock and retries one second later instead of blocking the shared
 timer daemon. It is accepted
@@ -458,6 +469,12 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   floors, exact-threshold success, a plausible aggregate with a fragmented block, sufficient
   contiguous space with insufficient total working memory, and reset/saturation of the required
   consecutive healthy-sample streak.
+- `logic/ota_changelog_range.hpp` — allocation-free selection of the notes after the running build
+  from a validated, ordered, version-prefixed development history; multiple notes for one build are
+  skipped together, a running version absent from the retained history keeps the complete list, old
+  target-only notes (including prose beginning with `v` plus a digit unless it matches the reserved
+  compact `v<version> — ` prefix) stay unchanged, while
+  malformed/out-of-order/wrong-target and equal/downgrade versioned history fails closed.
 - `logic/ota_transport.hpp` — fail-closed OTA URL policy: initial feeds require absolute HTTPS;
   redirects admit HTTPS or ordinary relative paths only, with HTTP/other schemes, protocol-relative
   authorities, malformed origins, whitespace/control bytes and backslash parser ambiguities refused;

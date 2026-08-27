@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -398,8 +398,8 @@ I18N.fr = localeValues([
   /* ota.reload_hint */ "installée — rechargez la page",
   /* ota.dialog_title */ "Mise à jour du micrologiciel",
   /* ota.switch_title */ "Changer de version du micrologiciel",
-  /* ota.changes_title */ "Nouveautés de cette version",
-  /* ota.no_changes */ "Aucun journal des modifications n’a été fourni pour cette version.",
+  /* ota.changes_title */ "Modifications de cette mise à jour",
+  /* ota.no_changes */ "Aucun journal des modifications n’a été fourni pour cette mise à jour.",
   /* ota.install_help */ "L’appareil télécharge et installe l’image signée, puis redémarre. Si le nouveau micrologiciel ne parvient pas à se connecter, l’appareil restaure automatiquement la version actuelle.",
   /* ota.switch_help */ "Cette version est plus ancienne car un autre canal de mise à jour est sélectionné. Sa signature est vérifiée avant l’installation. Si elle ne parvient pas à se connecter, l’appareil restaure automatiquement la version actuelle.",
   /* ota.install */ "Installer la mise à jour",

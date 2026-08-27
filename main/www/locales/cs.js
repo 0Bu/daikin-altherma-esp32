@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -398,8 +398,8 @@ I18N.cs = localeValues([
   /* ota.reload_hint */ "nainstalováno — načtěte stránku znovu",
   /* ota.dialog_title */ "Aktualizace firmwaru",
   /* ota.switch_title */ "Přepnout verzi firmwaru",
-  /* ota.changes_title */ "Co je v tomto sestavení nového",
-  /* ota.no_changes */ "Pro toto sestavení nebyl dodán žádný přehled změn.",
+  /* ota.changes_title */ "Změny v této aktualizaci",
+  /* ota.no_changes */ "Pro tuto aktualizaci nebyl dodán žádný přehled změn.",
   /* ota.install_help */ "Zařízení stáhne a nainstaluje podepsaný obraz a poté se restartuje. Pokud se nový firmware nepřipojí, zařízení automaticky obnoví aktuální sestavení.",
   /* ota.switch_help */ "Toto sestavení je starší, protože je vybrán jiný kanál aktualizací. Před instalací se ověří jeho podpis. Pokud se starší sestavení nepřipojí, zařízení automaticky obnoví aktuální sestavení.",
   /* ota.install */ "Nainstalovat aktualizaci",

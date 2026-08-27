@@ -181,29 +181,40 @@ S.busy = false;
 S.otaBusy = false;
 posted = null;
 acceptDecision = true;
-changelogResponse = response(200, "Add OTA changelog\nKeep <script> literal");
+changelogResponse = response(200,
+  "v1.0.3-dev.15 — Hard-reset ESP32-S3 after serial flash\n" +
+  "v1.0.3-dev.17 — Fix OTA stress HTTP handoff\n" +
+  "v1.0.3-dev.18 — Maintenance and reliability improvements.\n" +
+  "v1.0.3-dev.19 — Preserve legacy bench restore compatibility\n" +
+  "v1.0.3-dev.20 — Keep <script> literal");
 checkResponse = response(200, { ok: true, generation: 7 });
 statuses = [
   { state: "idle", busy: true, generation: 7, available: "old" },
   {
-    state: "idle", busy: false, generation: 7, current: "1.2.3-dev.3",
-    available: "1.2.3-dev.4", available_sha256: sha, available_channel: "dev",
+    state: "idle", busy: false, generation: 7, current: "1.0.3-dev.14",
+    available: "1.0.3-dev.20", available_sha256: sha, available_channel: "dev",
     update_available: true, downgrade: false,
   },
-  { state: "idle", busy: true, generation: 8, available: "1.2.3-dev.4" },
+  { state: "idle", busy: true, generation: 8, available: "1.0.3-dev.20" },
   { state: "error", busy: false, generation: 8, message: "test stop" },
 ];
 await sandbox.__api.checkFirmwareUpdate();
 assert.ok(posted, "the confirmed exact offer must reach the update boundary");
-assert.equal(element("otaVersionLine").textContent, "v1.2.3-dev.3 → v1.2.3-dev.4");
+assert.equal(element("otaVersionLine").textContent, "v1.0.3-dev.14 → v1.0.3-dev.20");
 assert.equal(element("otaChannel").textContent, "chan.dev");
 assert.deepEqual(element("otaChanges").children.map(item => item.textContent),
-  ["Add OTA changelog", "Keep <script> literal"],
-  "feed notes must render as literal per-line text in the custom modal");
+  [
+    "v1.0.3-dev.15 — Hard-reset ESP32-S3 after serial flash",
+    "v1.0.3-dev.17 — Fix OTA stress HTTP handoff",
+    "v1.0.3-dev.18 — Maintenance and reliability improvements.",
+    "v1.0.3-dev.19 — Preserve legacy bench restore compatibility",
+    "v1.0.3-dev.20 — Keep <script> literal",
+  ],
+  "a skipped-build history must render every versioned line as literal text");
 const parsed = new URL(posted, "http://device.test");
 assert.equal(parsed.pathname, "/ota/update");
 assert.deepEqual(Object.fromEntries(parsed.searchParams), {
-  after: "7", channel: "dev", version: "1.2.3-dev.4", sha256: sha,
+  after: "7", channel: "dev", version: "1.0.3-dev.20", sha256: sha,
 });
 assert.equal(statuses.length, 0, "the exact update generation must also own status polling");
 

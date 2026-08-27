@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -403,8 +403,8 @@ I18N.pl = localeValues([
   /* ota.reload_hint */ "zainstalowano — załaduj stronę ponownie",
   /* ota.dialog_title */ "Aktualizacja firmware",
   /* ota.switch_title */ "Zmień wersję firmware",
-  /* ota.changes_title */ "Nowości w tej kompilacji",
-  /* ota.no_changes */ "Dla tej kompilacji nie dostarczono listy zmian.",
+  /* ota.changes_title */ "Zmiany w tej aktualizacji",
+  /* ota.no_changes */ "Dla tej aktualizacji nie dostarczono listy zmian.",
   /* ota.install_help */ "Urządzenie pobierze i zainstaluje podpisany obraz, a następnie uruchomi się ponownie. Jeśli nowy firmware nie uzyska połączenia, urządzenie automatycznie przywróci bieżącą kompilację.",
   /* ota.switch_help */ "Ta kompilacja jest starsza, ponieważ wybrano inny kanał aktualizacji. Jej podpis zostanie sprawdzony przed instalacją. Jeśli starsza kompilacja nie uzyska połączenia, urządzenie automatycznie przywróci bieżącą kompilację.",
   /* ota.install */ "Zainstaluj aktualizację",

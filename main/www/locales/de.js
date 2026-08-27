@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -398,8 +398,8 @@ I18N.de = localeValues([
   /* ota.reload_hint */ "installiert — Seite neu laden",
   /* ota.dialog_title */ "Firmware-Update",
   /* ota.switch_title */ "Firmware-Version wechseln",
-  /* ota.changes_title */ "Neu in diesem Build",
-  /* ota.no_changes */ "Für diesen Build wurde kein Changelog bereitgestellt.",
+  /* ota.changes_title */ "Änderungen in diesem Update",
+  /* ota.no_changes */ "Für dieses Update wurde kein Changelog bereitgestellt.",
   /* ota.install_help */ "Das Gerät lädt das signierte Abbild, installiert es und startet neu. Kommt die neue Firmware nicht online, stellt das Gerät automatisch den aktuellen Build wieder her.",
   /* ota.switch_help */ "Dieser Build ist älter, weil ein anderer Update-Kanal ausgewählt ist. Seine Signatur wird vor der Installation geprüft. Kommt der ältere Build nicht online, stellt das Gerät automatisch den aktuellen Build wieder her.",
   /* ota.install */ "Update installieren",

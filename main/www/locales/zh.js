@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -398,8 +398,8 @@ I18N.zh = localeValues([
   /* ota.reload_hint */ "已安装 — 请重新加载页面",
   /* ota.dialog_title */ "固件更新",
   /* ota.switch_title */ "切换固件版本",
-  /* ota.changes_title */ "此版本的新内容",
-  /* ota.no_changes */ "此版本未提供更新日志。",
+  /* ota.changes_title */ "此更新中的更改",
+  /* ota.no_changes */ "此更新未提供更新日志。",
   /* ota.install_help */ "设备会下载并安装已签名镜像，然后重启。若新固件无法联网，设备会自动恢复当前版本。",
   /* ota.switch_help */ "由于选择了其他更新通道，此版本较旧。安装前会验证其签名；若旧版本无法联网，设备会自动恢复当前版本。",
   /* ota.install */ "安装更新",

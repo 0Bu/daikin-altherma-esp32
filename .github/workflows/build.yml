@@ -693,10 +693,11 @@ jobs:
           fi
           ./scripts/check-publish-version.sh --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"
 
-      # Build notes are public feed metadata, even while the source repository is private.  Generate
-      # them only from explicitly classified user-facing first-parent commit subjects, against the
-      # exact source recorded by the currently published feed. check-publish-version.sh above has fetched gh-pages into
-      # FETCH_HEAD; a same-source release resume reuses its already-published changelog byte-for-byte.
+      # Build notes are public feed metadata, even while the source repository is private. Generate
+      # them from explicitly classified user-facing first-parent commit subjects, plus the one
+      # reviewed version/source-bound legacy migration seed, against the exact source recorded by
+      # the currently published feed. check-publish-version.sh above has fetched gh-pages into
+      # FETCH_HEAD; a same-source release resume reuses its validated changelog byte-for-byte.
       - name: Generate public OTA changelog
         run: >-
           ./scripts/generate-ota-changelog.py

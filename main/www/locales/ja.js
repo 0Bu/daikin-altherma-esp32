@@ -1,4 +1,4 @@
-// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
+// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -398,8 +398,8 @@ I18N.ja = localeValues([
   /* ota.reload_hint */ "導入済み — ページを再読込",
   /* ota.dialog_title */ "ファームウェア更新",
   /* ota.switch_title */ "ファームウェア版を切り替える",
-  /* ota.changes_title */ "このビルドの新機能",
-  /* ota.no_changes */ "このビルドの変更履歴は提供されていません。",
+  /* ota.changes_title */ "このアップデートの変更内容",
+  /* ota.no_changes */ "このアップデートの変更履歴は提供されていません。",
   /* ota.install_help */ "署名済みイメージを取得・導入して再起動します。新しいファームウェアがオンラインにならない場合、現在のビルドを自動的に復元します。",
   /* ota.switch_help */ "別の更新チャンネルが選択されているため、このビルドは古い版です。導入前に署名を検証し、オンラインにならない場合は現在のビルドを自動的に復元します。",
   /* ota.install */ "更新をインストール",

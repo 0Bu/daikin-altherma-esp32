@@ -1138,7 +1138,7 @@ is exactly what a user would want to see move.
   spins with no label — there is no number to show yet. Up to date → "up to date", which clears
   itself after a few seconds. Update available → the UI fetches the optional, generation-bound
   `GET /ota/changelog?after=…` text and opens the firmware's own modal. It names current and offered
-  versions, labels Release versus Development, lists the published changes as literal text, and
+  versions, labels Release versus Development, lists the published changes in that update range as literal text, and
   explains signed install, reboot and automatic rollback. Missing or invalid notes do not block a
   valid signed offer: the modal shows a localized "no details supplied" fallback. On Install the UI
   sends that generation plus `available_channel`, `available`, and `available_sha256` to
