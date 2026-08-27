@@ -321,6 +321,7 @@ try {
   let routedKeyboardOpens = 0;
   let isolatedKeyboardOpens = 0;
   for (const viewport of viewports) {
+    let routedKeyboardOpensInViewport = 0;
     await page.viewport(viewport.width, viewport.height);
     for (const locale of browserLocales) {
       await activateLocale(page, locale);
@@ -339,7 +340,8 @@ try {
         const exerciseRoute = mutation === "history-flood" || locale === browserLocales[0];
         if (exerciseRoute) {
           routedKeyboardOpens++;
-          assert.ok(routedKeyboardOpens <= routedKeyboardBudget,
+          routedKeyboardOpensInViewport++;
+          assert.ok(routedKeyboardOpensInViewport <= routedModalIds.length,
             "real browser History transitions must stay bounded to one locale per viewport");
         } else {
           isolatedKeyboardOpens++;
