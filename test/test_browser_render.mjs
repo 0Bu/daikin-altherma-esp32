@@ -11,7 +11,9 @@ if (!pageFile || !fs.statSync(pageFile, { throwIfNoEntry: false })?.isFile())
   throw new Error("DAIKIN_BROWSER_PAGE must name the production-marker-assembled dashboard page");
 
 const mutation = process.env.DAIKIN_BROWSER_MUTATION || "";
-if (mutation && !["root-overflow", "modal-focus-delay"].includes(mutation))
+if (mutation && ![
+  "root-overflow", "modal-focus-delay", "history-flood", "route-isolation-bypass",
+].includes(mutation))
   throw new Error(`unknown browser selftest mutation: ${mutation}`);
 
 const layoutAudit = `(() => {
@@ -143,7 +145,7 @@ async function assertModalKeyboard(page, modalId, context) {
     `${context}: Escape must close the modal and release scroll lock`);
 }
 
-async function openModalWithKeyboard(page, modalId, selector, context) {
+async function openModalWithKeyboard(page, modalId, selector, context, { route = true } = {}) {
   const trigger = await page.evaluate(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)});
     if (!el) return { found: false };
@@ -156,13 +158,30 @@ async function openModalWithKeyboard(page, modalId, selector, context) {
   })()`);
   assert.deepEqual(trigger, { found: true, focused: true, disabled: false, visible: true },
     `${context}: the visible Settings entry must be keyboard-focusable`);
-  await page.key("Enter", { code: "Enter", keyCode: 13 });
-  await page.waitFor(`(() => {
-    const modal = document.getElementById(${JSON.stringify(modalId)});
-    const active = document.activeElement;
-    return !modal.hidden && document.documentElement.classList.contains("modal-open") &&
-      active?.getAttribute("role") === "dialog" && active.closest("#" + CSS.escape(modal.id));
-  })()`);
+  if (!route && mutation !== "route-isolation-bypass")
+    await page.evaluate("_applyingRoute = true; true");
+  try {
+    await page.key("Enter", { code: "Enter", keyCode: 13 });
+    await page.waitFor(`(() => {
+      const modal = document.getElementById(${JSON.stringify(modalId)});
+      const active = document.activeElement;
+      return !modal.hidden && document.documentElement.classList.contains("modal-open") &&
+        active?.getAttribute("role") === "dialog" && active.closest("#" + CSS.escape(modal.id));
+    })()`);
+    const routeState = await page.evaluate(`({
+      actual: parseRoute(location.hash).hash,
+      expected: routeHash("settings", ${JSON.stringify(modalId)}),
+    })`);
+    if (route) {
+      assert.equal(routeState.actual, routeState.expected,
+        `${context}: routed keyboard open must publish the exact popup hash`);
+    } else {
+      assert.equal(routeState.actual, "#settings",
+        `${context}: route-isolated keyboard open must keep the Settings hash`);
+    }
+  } finally {
+    if (!route) await page.evaluate("_applyingRoute = false; true");
+  }
 }
 
 async function assertReducedMotion(page, context, { modal = false } = {}) {
@@ -288,6 +307,12 @@ try {
   // Full semantic matrix: every shipped locale, both supported viewport classes, both views and
   // every routed modal receive DOM naming/colour checks and a native Chrome AX-tree inspection.
   // The same matrix dispatches real keyboard events for navigation plus dialog focus, Tab and Esc.
+  // Browser History itself is locale-independent, so exercise every modal's real route once per
+  // viewport and keep the remaining translated cases on the same keyboard/modal lifecycle without
+  // flooding one long-lived document with hundreds of duplicate push/back transitions.
+  const routedKeyboardBudget = viewports.length * routedModalIds.length;
+  let routedKeyboardOpens = 0;
+  let isolatedKeyboardOpens = 0;
   for (const viewport of viewports) {
     await page.viewport(viewport.width, viewport.height);
     for (const locale of browserLocales) {
@@ -304,8 +329,16 @@ try {
       await assertAccessibility(page, `${viewport.name}/${locale}/settings`, { nativeTree: true });
 
       for (const modalId of routedModalIds) {
+        const exerciseRoute = mutation === "history-flood" || locale === browserLocales[0];
+        if (exerciseRoute) {
+          routedKeyboardOpens++;
+          assert.ok(routedKeyboardOpens <= routedKeyboardBudget,
+            "real browser History transitions must stay bounded to one locale per viewport");
+        } else {
+          isolatedKeyboardOpens++;
+        }
         await openModalWithKeyboard(page, modalId, modalTriggers[modalId],
-          `${viewport.name}/${locale}/${modalId}`);
+          `${viewport.name}/${locale}/${modalId}`, { route: exerciseRoute });
         assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/${modalId}`);
         await assertAccessibility(page, `${viewport.name}/${locale}/${modalId}`, { nativeTree: true });
         await assertModalKeyboard(page, modalId, `${viewport.name}/${locale}/${modalId}`);
@@ -335,10 +368,16 @@ try {
   }
   await page.reducedMotion(false);
 
+  assert.equal(routedKeyboardOpens, routedKeyboardBudget,
+    "every routed modal requires one real browser History roundtrip per viewport");
+  assert.equal(isolatedKeyboardOpens,
+    viewports.length * (browserLocales.length - 1) * routedModalIds.length,
+    "every remaining locale requires the route-isolated keyboard/modal lifecycle");
+
   assert.deepEqual(page.diagnostics, [], "real page must emit no console errors or uncaught exceptions");
   console.log(`browser render gate passed: ${browser.product}; ${browserLocales.length} locales; ` +
     `${viewports.length} viewports; native AX + keyboard on dashboard/settings/all routed modals; ` +
-    "reduced motion on dashboard/settings/WiFi/progress/disclosures");
+    "bounded real History roundtrips; reduced motion on dashboard/settings/WiFi/progress/disclosures");
   }
 } finally {
   await browser.close();
