@@ -130,6 +130,16 @@ candidate look draw-affected and leave no completed hour. `Ok` therefore means n
 or above `0.8 K/h` was observed inside that detectable band. It does not prove the absence of a
 faster loss, and `blocked` cannot exclude one either.
 
+The row publishes the **greatest** completed-hour R5T drop plus the number of clean windows, not a
+mean or a sum. Its kWh explanation is deliberately only a 200-litre water-equivalent example: if
+the whole assumed volume cooled uniformly by the displayed rate, the water heat-content change is
+`200 kg × 1.16 Wh/(kg·K) × K`. R5T is one point in a stratified tank, tank volume is not configured,
+and individual window rates are not retained. The optional 24-hour orientation deliberately assigns
+that maximum to every clean window and converts the resulting thermal example with an assumed
+domestic-hot-water COP of `2.5–3.0`. This gives an order of magnitude for replacement electricity,
+not a measured whole-tank or daily loss; rejected and missing hours remain outside it. The 24-hour
+line is withheld until the rolling report has actually crossed its full-span boundary.
+
 The **settling** guard is charged only for a charge witness that stood at least two minutes. It is
 owed to heat entering the tank, and a one-cycle valve blip put none in; before this bound a blip
 cost the identical 105 minutes as a 40-minute charge, and one blip every 90 minutes took a

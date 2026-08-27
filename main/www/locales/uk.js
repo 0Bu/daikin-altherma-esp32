@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -1113,7 +1113,7 @@ DESCRIPTION_I18N.uk = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.uk = modelDescriptionValues([
   ["Помилка=ПОПЕРЕДЖЕННЯ; застереження або зникла за 24 год=ПРИМІТКА. Це стан блока; активний код є в «Робота»."], // health_fault
-  ["Втрата бака за годину: ПРИМІТКА від 0,8 K/h — евристика проєкту, не Daikin; видно до ≈1,85 K/h, OK не доводить справність."], // health_dhw_loss
+  ["R5T шарув.;K/h=MAX≠Ø/доба;цирк.≠причина;смуга проєкту 0,8–1,85.Прип.:200l рівно;чинні=MAX;COP;викл./відсут.h поза;ел≠вимір."], // health_dhw_loss
   ["OFF→ON: ПРИМІТКА при ≥12 циклах опалення із середнім <10 min; ГВП/холод виключені. Не межа Daikin."], // health_cycling
   ["Відтавання: ПРИМІТКА при >15 % і ≥3 циклах; не межа Daikin. R4T — живий контекст поза оцінкою, одна точка не описує весь теплообмінник."], // health_defrost
   ["Тиск: >1,0 bar; при ≤1,0 bar ПРИМІТКА, після 60 s — ПОПЕРЕДЖЕННЯ. Межа моделі може різнитися."], // health_pressure

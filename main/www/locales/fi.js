@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -999,7 +999,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Yksikön ilmoittama vika/varoitus. Nykyinen virhe on varoitus; varoitus, huomautus tai 24 tunnissa poistunut ilmoitus on tieto. Tämä on laitteen ilmoitus, ei päätelmä."], // health_fault
-  ["Mittaa tankin jäähtymistä rauhallisen tunnin aikana. ≥0,8 K/h on vertailulaitteiston huomio, ei Daikin-raja; tunnistus ulottuu noin 1,85 K/h:iin, eikä OK todista eristystä tai venttiilejä ehjiksi."], // health_dhw_loss
+  ["R5T kerrost.;K/h=MAX≠Ø/päivä;kierto≠syy;proj.alue 0,8–1,85.Olet.:200l tasainen;kelvolliset=MAX;COP;poiss./puutt.h ulkona;sähkö≠mitattu."], // health_dhw_loss
   ["Laskee kompressorin käynnit ja täydet käyttöajat. Huomio, kun vahvistettuja lämmityskäyntejä on ≥12 ja keskiarvo <10 min. DHW/jäähdytys rajataan pois, mutta runsas luokittelematon aineisto arvioidaan yhdessä. Ei Daikin-raja."], // health_cycling
   ["Sulatus: huomio yli 15 % ja ≥3 kertaa; ei Daikin-raja. R4T on arvioon kuulumaton live-tausta, eikä yksi piste kuvaa koko kennoa."], // health_defrost
   ["Liukuvan ikkunan pienin kelvollinen vesipaine: >1,0 bar vertailu, ≤1,0 bar huomio ja 60 s jatkuessa varoitus. Sallittu alue on mallikohtainen."], // health_pressure
