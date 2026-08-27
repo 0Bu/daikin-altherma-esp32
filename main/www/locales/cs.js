@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -1113,7 +1113,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Hlášení chyby či varování samotné jednotky. Aktivní chyba dává VAROVÁNÍ; varování nebo zpráva vzniklá a zaniklá do 24 h dává POZNÁMKU. Není to odhad projektu. Bez aktuální či zapamatované zprávy po načtení všech polí. Zaniklá zpráva může zůstat 24 h; aktivní kód je v Provozu."], // 0
-  ["Měří chladnutí zásobníku v klidných hodinách; vyřazuje nabíjení, odběr a vnitřní ohřev, volitelný elektroměr ukáže cirkulační čerpadlo. POZNÁMKA od 0,8 K/h je heuristika referenční instalace. Objem a rozdíl k místnosti mění rychlost. Rozpoznatelné je asi do 1,85 K/h; rychlejší ztráta může vypadnout jako odběr. OK nedokazuje izolaci ani ventily."], // 1
+  ["R5T vrstvený;K/h=MAX≠Ø/den;oběh≠příčina;pásmo proj.0,8–1,85.Předp.:200l rovně;platné=MAX;COP;vyl./chyb.h mimo;el≠měření."], // 1
   ["Počítá starty kompresoru a délku úplných běhů, pokud lze zvlášť pro vytápění, TUV a chlazení; nejasné běhy zůstávají nezařazené. Potvrzené topné běhy mají průměr ≥10 min; při nejméně 12 kratších je POZNÁMKA. TUV/chlazení se vyřadí, při mnoha nejasných se hodnotí vše. Není to limit Daikin."], // 2
   ["Odmrazení: POZNÁMKA nad 15 % při ≥3 dějích; nejde o limit Daikin. R4T je živý kontext mimo verdikt a jeden bod nepopisuje celý výměník."], // 3
   ["Nejnižší platný tlak vody v topném okruhu během klouzavého okna. Nad 1,0 bar. Při ≤1,0 bar ihned POZNÁMKA, po 60 s VAROVÁNÍ. Rozsah závisí na modelu; použijte přesný návod."], // 4

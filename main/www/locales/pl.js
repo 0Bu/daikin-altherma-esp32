@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -1152,7 +1152,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Zgłasza własny stan błędu lub ostrzeżenia pompy. Aktywny błąd daje OSTRZEŻENIE; ostrzeżenie albo komunikat pojawiający się i znikający w 24 h daje UWAGĘ. To komunikat urządzenia, nie domysł projektu. Brak bieżącej ani zapamiętanej wiadomości po odczytaniu wszystkich obsługiwanych pól. Zniknięty komunikat może pozostać 24 h; aktywny kod jest pod Stanem pracy."], // 0
-  ["Mierzy stygnięcie zasobnika w spokojnych godzinach. Wyklucza ładowanie, spadki jak pobór i grzanie wewnętrzne; opcjonalny licznik pokazuje pompę cyrkulacji. UWAGA od 0,8 K/h to heurystyka instalacji referencyjnej. Objętość i różnica do pomieszczenia zmieniają wynik. Wykrywalne jest ok. do 1,85 K/h; szybsza stała strata może zostać odfiltrowana jak pobór. OK nie dowodzi izolacji ani zaworów."], // 1
+  ["R5T warstw.;K/h=MAX≠Ø/doba;cyrk.≠przycz.;zakres proj.0,8–1,85.Zał.:200l równo;ważne=MAX;COP;wykl./brak h poza;el≠pomiar."], // 1
   ["Liczy przejścia sprężarki WYŁ.→WŁ. i długość pełnych cykli; jeśli sygnały pozwalają, rozdziela ogrzewanie, CWU i chłodzenie. Mieszane lub nieczytelne pozostają bez klasyfikacji. Potwierdzone cykle ogrzewania mają średnio ≥10 min. Przy co najmniej 12 krótszych pojawia się UWAGA; CWU i chłodzenie są wykluczone. Przy zbyt wielu nieklasyfikowanych oceniane są wszystkie. To nie limit Daikin."], // 2
   ["Liczy odszraniania: UWAGA powyżej 15% i przy ≥3 zdarzeniach; to nie limit Daikin. R4T jest kontekstem na żywo poza oceną, a jeden punkt nie opisuje całego wymiennika."], // 3
   ["Najniższe prawidłowe ciśnienie wody w obiegu grzewczym w ruchomym oknie. Powyżej 1,0 bar. Przy ≤1,0 bar natychmiast UWAGA, po 60 s ciągle — OSTRZEŻENIE. Zakres zależy od modelu; porównaj dokładną instrukcję."], // 4

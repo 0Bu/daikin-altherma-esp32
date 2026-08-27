@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -1142,7 +1142,7 @@ DESCRIPTION_I18N.it = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Stato proprio dell’unità: errore attivo dà AVVISO; avvertimento o messaggio cancellato entro 24 h dà NOTA, non una deduzione del progetto."], // health_fault
-  ["Perdita a riposo: soglia di progetto, NOTA ≥0,8 K/h; volume e ΔT incidono, >≈1,85 K/h può filtrarsi come uso e OK non prova isolamento."], // health_dhw_loss
+  ["R5T strat.;K/h=MAX≠Ø/giorno;pompa≠causa;banda prog.0,8–1,85.Ip.:200l unif.;valide=MAX;COP;escl./ass.h fuori;el.≠misurata."], // health_dhw_loss
   ["NOTA con ≥12 cicli riscaldamento medi <10 min; esclude ACS/freddo, non è limite Daikin e se troppi restano non classificati li valuta tutti insieme."], // health_cycling
   ["Conta gli sbrinamenti: NOTA oltre 15 % con ≥3 cicli; non è un limite Daikin. R4T è contesto live fuori dal verdetto; un punto non descrive tutta la batteria."], // health_defrost
   ["Minima pressione acqua: >1,0 bar; ≤1,0 dà NOTA e dopo 60 s AVVISO, ma il campo dipende dal modello."], // health_pressure

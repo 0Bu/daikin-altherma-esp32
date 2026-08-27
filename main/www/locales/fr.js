@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -1142,7 +1142,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["État propre erreur/avis : erreur active donne AVERTISSEMENT ; avis ou message effacé sous 24 h donne NOTE, sans inférence du projet."], // health_fault
-  ["Perte calme : seuil projet, NOTE ≥0,8 K/h ; volume/ΔT influent, >≈1,85 K/h peut être filtré comme usage et OK ne prouve pas l’isolation."], // health_dhw_loss
+  ["R5T strat.;K/h=MAX≠Ø/jour;pompe≠cause;bande projet 0,8–1,85.Hyp.:200l unif.;valides=MAX;COP;excl./abs.h hors;él.≠mesurée."], // health_dhw_loss
   ["NOTE : ≥12 cycles chauffage, moyenne <10 min ; ECS/froid exclus, seuil projet non Daikin ; si trop sont non classés, tous jugés ensemble."], // health_cycling
   ["Compte les dégivrages : NOTE au-delà de 15 % avec ≥3 cycles ; pas une limite Daikin. R4T est un contexte en direct hors verdict ; un point ne décrit pas toute la batterie."], // health_defrost
   ["Pression minimale : >1,0 bar ; ≤1,0 donne NOTE puis AVERTISSEMENT après 60 s, mais la plage dépend du modèle."], // health_pressure

@@ -33,7 +33,6 @@ assert.doesNotMatch(dashboardSource, /checkup \+ service \+|refrigerantServiceCa
 assert.match(dashboardSource,
              /return hp\.connected \? vcard\(t\("card\.model"\), model\) : "";/,
              "the Model card must follow plant diagnostics and precede Operation without reviving the removed outdoor card");
-
 // Pin the existing /status.health surface plus its additive evidence fields at the actual serializer.
 // The UI payloads below are synthetic by design; without this half, a C++ key drift could leave every
 // renderer test green while the board sends a different contract.
@@ -385,7 +384,8 @@ assert.equal(
   "3 starts · space 2 · hot water 1",
 );
 
-const lossWithPump = { id: "dhw_loss", verdict: "info", max_k_h: 1.2, windows: 6,
+const lossWithPump = { id: "dhw_loss", verdict: "info", full_span: true,
+                       max_k_h: 1.2, windows: 6,
                        high_windows: 2, high_with_pump: 2, high_pump_off: 0 };
 assert.equal(ui.value(lossWithPump), "NOTE");
 assert.equal(
@@ -396,18 +396,53 @@ assert.equal(
 assert.match(ui.detail(lossWithPump),
              /label="Value:">1\.2 K\/h · 6 windows · during circulation-pump operation<\/detail>/);
 assert.match(ui.detail(lossWithPump), /label="Assessment:">NOTE —/);
+assert.match(ui.detail(lossWithPump),
+  /label="How to read it:">200 l ≈ 200 kg · 1\.16 Wh\/\(kg·K\) · 1\.2 K ≈ 0\.28 kWhₜₕ/);
+assert.match(ui.detail(lossWithPump),
+  /label="24 h:">6 h × 1\.2 K\/h ≈ 1\.67 kWhₜₕ · COP 2\.5–3\.0 ⇒ 0\.56–0\.67 kWhₑₗ/);
+assert.doesNotMatch(
+  ui.detail({ id: "dhw_loss", verdict: "collecting", max_k_h: null, windows: 4 }),
+  /How to read it:|kWh/,
+  "count-only legacy evidence must not be coerced into a zero-energy example",
+);
+const earlyLoss = { id: "dhw_loss", verdict: "info", full_span: false,
+                    max_k_h: 1.2, windows: 1 };
+assert.match(ui.detail(earlyLoss), /0\.28 kWhₜₕ/,
+             "an early notable window must retain its honest one-hour size example");
+assert.doesNotMatch(ui.detail(earlyLoss), /label="24 h:"|kWhₑₗ/,
+                    "a partial report must not be labelled as a 24-hour electricity orientation");
+context.S.status = { health: {
+  covered_s: 3600, full_span: false, status: "info",
+  available: 1, assessable: 1, evaluated: 1,
+  checks: [{ id: "dhw_loss", verdict: "info", max_k_h: 1.2, windows: 6,
+             high_windows: 1, high_with_pump: 0, high_pump_off: 0 }],
+} };
+const partialLossCard = ui.card();
+assert.match(partialLossCard, /0\.28 kWhₜₕ/);
+assert.doesNotMatch(partialLossCard, /label="24 h:"|kWhₑₗ/,
+                    "the real card-level partial span must suppress the 24-hour line");
+context.S.status.health.full_span = true;
+const fullLossCard = ui.card();
+assert.match(fullLossCard,
+  /label="24 h:">6 h × 1\.2 K\/h ≈ 1\.67 kWhₜₕ · COP 2\.5–3\.0 ⇒ 0\.56–0\.67 kWhₑₗ/,
+  "the real card-level full span must enable the 24-hour orientation");
 ui.setLang("de");
-const lossWhileOff = { id: "dhw_loss", verdict: "info", max_k_h: 1.0, windows: 4,
+const lossWhileOff = { id: "dhw_loss", verdict: "info", full_span: true,
+                       max_k_h: 1.6, windows: 18,
                        high_windows: 2, high_with_pump: 0, high_pump_off: 1 };
 assert.equal(ui.value(lossWhileOff), "HINWEIS");
 assert.equal(
   ui.metric(lossWhileOff),
-  "1 K/h · 4 Fenster · auch bei ausgeschalteter Zirkulationspumpe",
+  "1,6 K/h · 18 Fenster · auch bei ausgeschalteter Zirkulationspumpe",
   "off-pump evidence must not be mislabeled as a circulation-pump cause",
 );
 assert.match(ui.detail(lossWhileOff),
-             /label="Messwert:">1 K\/h · 4 Fenster · auch bei ausgeschalteter Zirkulationspumpe<\/detail>/);
+             /label="Messwert:">1,6 K\/h · 18 Fenster · auch bei ausgeschalteter Zirkulationspumpe<\/detail>/);
 assert.match(ui.detail(lossWhileOff), /label="Bewertung:">HINWEIS —/);
+assert.match(ui.detail(lossWhileOff),
+  /label="So liest du es:">200 l ≈ 200 kg · 1,16 Wh\/\(kg·K\) · 1,6 K ≈ 0,37 kWhₜₕ/);
+assert.match(ui.detail(lossWhileOff),
+  /label="24 h:">18 h × 1,6 K\/h ≈ 6,68 kWhₜₕ · COP 2,5–3,0 ⇒ 2,23–2,67 kWhₑₗ/);
 ui.setLang("en");
 
 // Unsupported means no observation, even if a legacy payload happens to carry a plausible zero.
@@ -702,14 +737,22 @@ assert.match(pressureCopy, /NOTE immediately and a WARNING after 60 continuous s
 assert.match(pressureCopy, /sofort HINWEIS und nach 60 durchgehenden Sekunden WARNUNG/);
 
 const dhwCopy = JSON.stringify(descriptionContext.__copy.model.health_dhw_loss);
-assert.match(dhwCopy, /0\.8 K\/h, a project heuristic for one reference installation/);
-assert.match(dhwCopy, /Tank volume and the tank-to-room temperature difference change the rate/);
-assert.match(dhwCopy, /0,8 K\/h – Heuristik der Referenzanlage/);
-assert.match(dhwCopy, /Speichervolumen und Abstand zur Raumtemperatur ändern den Wert/);
-assert.match(dhwCopy, /only up to about 1\.85 K\/h/);
-assert.match(dhwCopy, /nur bis etwa 1,85 K\/h/);
-assert.match(dhwCopy, /OK means none was observed in that band/);
-assert.match(dhwCopy, /OK heißt nur: Kein Verlust im erkennbaren Band/);
+assert.match(dhwCopy, /NOTE ≥0\.8 K\/h is a project heuristic/);
+assert.match(dhwCopy, /volume\/room-temperature gap affects rate/);
+assert.match(dhwCopy, /HINWEIS ≥0,8 K\/h ist Projektheuristik/);
+assert.match(dhwCopy, /Volumen\/Abstand zur Raumtemperatur ändern den Wert/);
+assert.match(dhwCopy, /R5T is one point in a stratified tank/);
+assert.match(dhwCopy, /R5T: ein Punkt im geschichteten Speicher/);
+assert.match(dhwCopy, /greatest hourly drop, not mean\/day total/);
+assert.match(dhwCopy, /K\/h: höchster Stundenabfall, kein Mittel-\/Tageswert/);
+assert.match(dhwCopy, /Detection ends near 1\.85 K\/h/);
+assert.match(dhwCopy, /Erkennung endet nahe 1,85 K\/h/);
+assert.match(dhwCopy, /correlation, not cause/);
+assert.match(dhwCopy, /Zusammenhang, keine Ursache/);
+assert.match(dhwCopy, /each window=maximum.*COP 2\.5–3\.0/);
+assert.match(dhwCopy, /jedes Fenster=Maximum.*COP 2,5–3,0/);
+assert.match(dhwCopy, /replacement-electricity direction, not measured daily use/);
+assert.match(dhwCopy, /Ersatzstrom-Richtung, kein Messwert/);
 
 const flowCopy = JSON.stringify(descriptionContext.__copy.model.health_flow);
 assert.match(flowCopy, /observed part-load minimum.*not the nominal or design flow/);

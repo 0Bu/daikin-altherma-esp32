@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: d7c555671fa676e4c36294f2eb59b14b19a3cb54e26adefc88508a4f2741f337 -->
+<!-- diagnostic-evidence-contract: 9950624b4643927f2909ea2758c2d0d39f2920eef18417aa9becafb50ffb0558 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -113,23 +113,40 @@ Daikin service procedure. An unreadable signal is not equivalent to “no fault�
 watts emitted at specified water and ambient temperatures. Storage volume and standing loss are
 separate declared technical parameters ([E1], Article 2(17) and Annex III, section 7). This supports
 that tank heat loss is real and measurable, while also showing that test conditions and tank size
-matter.
+matter. A NIST liquid-water reference correlation gives an isobaric heat capacity of
+`4181.446 J/(kg·K)` at 298.15 K and 0.1 MPa ([R3], table 8), equivalent to about
+`1.16 Wh/(kg·K)`. This supports the UI's rounded water heat-content example, not whole-tank
+calorimetry from one sensor.
 
 **Firmware rule:** The firmware evaluates complete, quiet one-hour windows of tank sensor R5T. Tank
 charging, internal pump movement, a detected draw, implausible readings, and excessive gaps discard
 the window. A genuine charge starts a 45-minute settling period. A **NOTE** begins at `0.8 K/h`; a
 reassuring result requires six clean hours in a complete 24-hour lifecycle. The rules are the
 `DHW_LOSS_*` constants and the `DhwLoss` branch in
-[`checkup.hpp`](../main/logic/checkup.hpp).
+[`checkup.hpp`](../main/logic/checkup.hpp). The retained aggregate publishes only the greatest
+completed-hour R5T rate plus window counts and circulation correlation; it does not retain a mean,
+sum, or every window's individual rate.
 
 **Project boundary:** `0.8 K/h`, the 45-minute settling period, six clean hours, and the detectable
 upper range of about `1.85 K/h` are **project heuristics**, not Daikin limits or an implementation of
 the EU test method. A temperature drop in K/h is not directly comparable to a product-sheet loss in
-watts.
+watts. The UI's kWh figure assumes `200 l ≈ 200 kg` of water, uniform whole-volume cooling, and the
+rounded `1.16 Wh/(kg·K)` heat capacity. It is an explanatory size example based on the greatest
+single R5T drop, not an additional measurement or a configured tank volume. Its 24-hour orientation
+then assigns that maximum to every clean window and assumes a domestic-hot-water COP of `2.5–3.0`.
+Both are explicit project assumptions chosen to show scale, not a measured efficiency or a
+manufacturer performance range. Rejected and missing hours are outside that illustration.
+The 24-hour line is suppressed until the report's `full_span` boundary is true; an early notable
+window can show only its one-hour thermal size example.
 
 **Not established:** A notable drop proves neither a leaking three-way valve nor poor insulation.
 Draws, stratification, thermosiphoning, a check valve, and external circulation can produce similar
-traces. `OK` also does not exclude faster continuous loss outside the detectable band.
+traces. A circulation label shows temporal correlation, not exclusive cause. `OK` also does not
+exclude faster continuous loss outside the detectable band. Because one point in a stratified tank
+does not establish uniform cooling and the individual window rates are not retained, the result
+establishes neither whole-tank/daily thermal kWh nor electrical kWh. The UI's multiplication is
+therefore labelled as the counterfactual case where every clean window equals the maximum; reading
+it as the actual 24-hour total would fabricate a measurement.
 
 <a id="diagnosis-cycling"></a>
 ### 3. Compressor cycling (`cycling`)
@@ -310,6 +327,14 @@ together.
   [publisher page and abstract][R2-doi]. The study supports dependence on outdoor conditions, not
   this project's 15% heuristic.
 
+<a id="source-r3"></a>
+
+- **[R3]** J. Pátek, J. Hrubý, J. Klomfar, M. Součková, and A. H. Harvey,
+  *Reference Correlations for Thermophysical Properties of Liquid Water at 0.1 MPa*, Journal of
+  Physical and Chemical Reference Data 38(1), 2009, 21–29, DOI 10.1063/1.3043575:
+  [NIST publication page][R3-web] and [paper][R3-pdf]. Section used: table 8, liquid-water density
+  and isobaric heat capacity at 298.15 K. Reviewed **27 August 2026**.
+
 ## Maintenance rule
 
 A diagnosis change is not documentation-complete until this page still names the observation,
@@ -339,9 +364,12 @@ prove that a source is technically applicable; that remains the human part of th
 [E1]: #source-e1
 [R1]: #source-r1
 [R2]: #source-r2
+[R3]: #source-r3
 [D1-pdf]: https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/EHBH-D6V%2C%20EHBH-D9W%2C%20EHBX-D6V%2C%20EHBX-D9W%2C%20ERGA04-08DV%2C%20ERGA04-08DVA_4PEN496758-1B_2019_10_Installer%20reference%20guide_English.pdf
 [D2-pdf]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-high-temperature/epra14-18dw7/EPRA014-018D%28V.W%29.EPRA14-18D%28V.W%297.ETVH16UE6V%287%29_Installer%20reference%20guide_4PEN644738-1D_English.pdf
 [E1-web]: https://eur-lex.europa.eu/eli/reg/2013/814/oj/eng
 [R1-web]: https://www.gov.uk/government/publications/heat-pump-performance-effects-of-cycling
 [R1-pdf]: https://assets.publishing.service.gov.uk/media/5a78e0d9e5274a2acd18a7c6/7389-effects-cycling-heat-pump-performance.pdf
 [R2-doi]: https://doi.org/10.1016/j.applthermaleng.2009.01.003
+[R3-web]: https://www.nist.gov/publications/reference-correlations-thermophysical-properties-liquid-water-01-mpa
+[R3-pdf]: https://srd.nist.gov/jpcrdreprint/1.3043575.pdf

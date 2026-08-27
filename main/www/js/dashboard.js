@@ -1259,7 +1259,44 @@ function checkupDhwReasons(c) {
              .join(", ");
 }
 
-function checkupDetailHtml(c) {
+// Convert the ONE figure the firmware actually retains into an owner-readable energy example.
+// `max_k_h` is the greatest completed clean-hour loss, not the mean of `windows`; presenting its
+// product with the window count as an actual daily total would manufacture a measurement. The
+// firmware also has no configured tank volume. Keep the 200 l basis explicit and call the result
+// thermal energy. The second line is
+// deliberately a MAXIMUM-RATE orientation: it assigns that one retained maximum to every clean
+// window, then shows the replacement electricity for an explicitly assumed DHW COP range. It is not
+// a measured 24-hour total, and hours rejected by the evaluator are not represented.
+function checkupDhwEnergyHtml(c, fullSpan) {
+  if (c.max_k_h == null) return "";
+  const rate = Number(c.max_k_h), windows = Math.floor(Number(c.windows));
+  if (!Number.isFinite(rate) || rate < 0 || !Number.isFinite(windows) || windows < 1) return "";
+  const fmt = (n, digits) => n.toLocaleString(LANG,
+    { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const rateText = fmt(rate, 1);
+  // 200 l water is approximated as 200 kg; 1.16 Wh/(kg*K) is the rounded liquid-water heat
+  // capacity used for this explanatory example. This is deliberately not a firmware verdict.
+  const thermalKwhRaw = rate * 200 * 1.16 / 1000;
+  const thermalKwh = fmt(thermalKwhRaw, 2);
+  const heatCapacity = fmt(1.16, 2);
+  const maxThermalKwh = thermalKwhRaw * windows;
+  const copLow = 2.5, copHigh = 3.0;
+  const electricLow = fmt(maxThermalKwh / copHigh, 2);
+  const electricHigh = fmt(maxThermalKwh / copLow, 2);
+  // The formula itself is language-neutral; the localized explainer immediately below owns every
+  // assumption and claim limit. Keeping prose out of this line avoids twelve copies of one long
+  // sentence in the signed locale assets while every language still renders the same calculation.
+  const perWindow = descNoteHtml(t("meaning.label"),
+    `200 l ≈ 200 kg · ${heatCapacity} Wh/(kg·K) · ${rateText} K ≈ ${thermalKwh} kWhₜₕ`);
+  // An early notable window is published before the rolling report has crossed 24 hours. Keep its
+  // honest one-hour size example, but do not put a "24 h" label on a partial report.
+  const dayOrientation = fullSpan === true ? descNoteHtml("24 h:",
+    `${windows} h × ${rateText} K/h ≈ ${fmt(maxThermalKwh, 2)} kWhₜₕ · ` +
+    `COP ${fmt(copLow, 1)}–${fmt(copHigh, 1)} ⇒ ${electricLow}–${electricHigh} kWhₑₗ`) : "";
+  return perWindow + dayOrientation;
+}
+
+function checkupDetailHtml(c, fullSpan = c.full_span === true) {
   const statusKey = checkupStatusKey(c);
   const value = checkupMetricValue(c);
   let detail;
@@ -1314,8 +1351,10 @@ function checkupDetailHtml(c) {
     detail += t(c.id === "cycling" ? "check.detail.outdoor_cycling"
                                    : "check.detail.outdoor_defrost");
   const reading = value ? descNoteHtml(t("check.detail.value_label"), value) : "";
-  return reading + descNoteHtml(t("check.detail.assessment_label"),
-                                `${checkupStatusText(c)} — ${detail}`);
+  const assessment = descNoteHtml(t("check.detail.assessment_label"),
+                                  `${checkupStatusText(c)} — ${detail}`);
+  const energy = c.id === "dhw_loss" ? checkupDhwEnergyHtml(c, fullSpan) : "";
+  return reading + assessment + energy;
 }
 
 function checkupDefrostShare(c) {
@@ -1449,7 +1488,7 @@ function checkupCardHtml(includeHealth = true) {
       const tone = CHECKUP_TONE[checkupStatusKey(c)] || "";
       healthRows += modelDescRow(`health_${c.id}`, t(key), checkupValue(c),
                                  { cls: `checkup-val${tone ? ` ${tone}` : ""}`,
-                                   bodyPrefix: checkupDetailHtml(c) });
+                                   bodyPrefix: checkupDetailHtml(c, h.full_span === true) });
     }
   }
   // This row shares the card visually but remains independent of /status.health: it is not counted

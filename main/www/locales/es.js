@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1158,7 +1158,7 @@ DESCRIPTION_I18N.es = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Estado propio de error/aviso: error activo da AVISO; aviso o mensaje borrado en 24 h da NOTA, sin inferencia del proyecto."], // health_fault
-  ["Pérdida tranquila: regla del proyecto, NOTA ≥0,8 K/h; volumen y ΔT influyen, >≈1,85 K/h puede filtrarse como consumo y OK no prueba aislamiento."], // health_dhw_loss
+  ["R5T estrat.;K/h=MAX≠Ø/día;bomba≠causa;banda proy.0,8–1,85.Sup.:200l unif.;válidas=MAX;COP;excl./aus.h fuera;el≠medido."], // health_dhw_loss
   ["NOTA con ≥12 ciclos de calefacción y media <10 min; excluye ACS/frío, no es límite Daikin y si quedan demasiados sin clasificar evalúa todos juntos."], // health_cycling
   ["Cuenta desescarches: NOTA con >15 % y ≥3 ciclos; no es límite Daikin. R4T es contexto en vivo, no entra en el veredicto y un punto no representa toda la batería."], // health_defrost
   ["Presión mínima: >1,0 bar; ≤1,0 da NOTA y tras 60 s ADVERTENCIA, pero el intervalo depende del modelo."], // health_pressure
