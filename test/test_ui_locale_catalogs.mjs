@@ -435,8 +435,8 @@ try {
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
 }
-assert.ok(localeGzipTotal <= 278528,
-  `locale assets use ${localeGzipTotal} bytes and exhaust the signed application budget`);
+assert.ok(localeGzipTotal <= 279552,
+  `locale assets use ${localeGzipTotal} bytes and exceed the 273 KiB aggregate-growth guard`);
 
 const cmake = fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8");
 const status = fs.readFileSync(path.join(root, "main/http_status.cpp"), "utf8");

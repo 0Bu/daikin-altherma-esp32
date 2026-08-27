@@ -70,8 +70,10 @@ explicit choice of *Custom* removes that identity and its M5Stack accessory capa
   MQTT down — plus the recovery button's red strobe (armed) and solid white (erasing). *Active low*
   does not apply to a WS2812: it encodes "off" as the zero colour, so there is no drive level to
   invert.
-- Recovery button → `btn_gpio 41`, **active low**. Held 5 s it erases all stored config and reboots
-  into the setup portal.
+- Recovery button → `btn_gpio 41`, **active low**. Held 5 s it performs a fail-closed privacy wipe:
+  serialized configuration, legacy WiFi credentials, history/trend/dwell state and the raw coredump
+  are erased. It reboots into the setup portal only after every erase succeeds; an incomplete wipe
+  stays on the current boot and must be retried.
 
 **The Grove port is the tidy way in.** HY2.0-4P carries **GND, 5 V, G2, G1** — the same four wires
 X10A needs — so one Grove breakout cable reaches the service port. Without one, the female header on

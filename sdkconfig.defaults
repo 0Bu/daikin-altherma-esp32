@@ -54,6 +54,16 @@ CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER=y
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
 
+# Report QoS outbox expiry so the ACK-driven retained-source cleanup can retry the exact deleted
+# step. Without this event, a broker outage longer than ESP-MQTT's 30-second expiry would leave the
+# firmware suppressing that source forever even though the outbox no longer owned its tombstone.
+CONFIG_MQTT_REPORT_DELETED_MESSAGES=y
+
+# Keep MQTT packet identifiers collision-free across the bounded 8 KiB/30-second outbox lifetime.
+# Cleanup delivery evidence is correlated by packet id; random ids could alias a concurrent
+# SUBSCRIBE, UNSUBSCRIBE or QoS-1 publish before the cleanup tombstone is acknowledged or deleted.
+CONFIG_MQTT_MSG_ID_INCREMENTAL=y
+
 # LWIP sockets — the default of 10 is tight: the http server (several open sockets), its
 # listener, mDNS, SNTP, the MQTT bridge and the OTA client can leave no BSD socket free.
 # Lift the cap to match the TCP PCB pools (16) so the background OTA download has room.

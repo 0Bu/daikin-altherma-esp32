@@ -24,6 +24,7 @@ idf_component_register(
         "http_server.cpp"
         "http_common.cpp"
         "http_client_diag.cpp"
+        "http_deadline.cpp"
         "http_status.cpp"
         "http_config.cpp"
         "http_ota.cpp"
@@ -134,9 +135,9 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
 # function dense with EH cleanup regions is the worst case for that. -Os on this ONE translation
 # unit took that historical frame to 0xea0 = 3744 (−68%), and the deepest httpd path — `mcp_post`,
 # NOT `h_status` — from 14512 bytes of a 16384 stack to 6480. Re-measured from the release ELF on
-# 2026-08-21 after the refrigerant-service object: the one remaining bounded-sink instantiation is
-# 0x12f0 = 4848, `mcp_post` is 0x4d0 = 1232 and `http_send_status_json` is 128. The same conservative
-# complete-path sum is 7552, leaving ~8800 before ISR frames and exception unwinding. MCP now streams
+# 2026-08-27 after the release-gate expansion: the one remaining bounded-sink instantiation is
+# 0x1320 = 4896, `mcp_post` is 0x4d0 = 1232 and `http_send_status_json` is 128. The automated
+# conservative complete-path sum is 7664, leaving 8720 before ISR frames and exception unwinding. MCP now streams
 # its prefix/status/suffix too, so the larger body adds no body-sized contiguous allocation.
 #
 # The ORIGINAL -Og/-Os change was verified on hardware too, not only on the ELF: both images built

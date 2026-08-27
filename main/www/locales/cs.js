@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -709,7 +709,7 @@ I18N.cs = localeValues([
   /* board.led_rgb_bus_down */ "Červená, dvojité bliknutí — X10A je odpojeno.",
   /* board.led_rgb_mqtt_down */ "Oranžová, bliká — X10A je připojeno, MQTT odpojeno.",
   /* board.led_rgb_wipe_armed */ "Červená, velmi rychle bliká — mazání připraveno; uvolněním je zrušíte.",
-  /* board.led_rgb_wiping */ "Bílá, svítí — nastavení se maže; neodpojujte napájení.",
+  /* board.led_rgb_wiping */ "Bílá, svítí — reset/mazání dat; neodpojujte napájení.",
   /* board.led_gpio_off */ "Nesvítí — není aktivní žádný režim Wi-Fi.",
   /* board.led_gpio_setup */ "Pomalu bliká — konfigurační portál je aktivní.",
   /* board.led_gpio_connecting */ "Rychle bliká — připojuje se k Wi-Fi.",
@@ -717,10 +717,10 @@ I18N.cs = localeValues([
   /* board.led_gpio_bus_down */ "Dvojité bliknutí — X10A je odpojeno.",
   /* board.led_gpio_mqtt_down */ "Bliká střední rychlostí — X10A je připojeno, MQTT odpojeno.",
   /* board.led_gpio_wipe_armed */ "Velmi rychle bliká — mazání připraveno; uvolněním je zrušíte.",
-  /* board.led_gpio_wiping */ "Po velmi rychlém blikání svítí — nastavení se maže; neodpojujte napájení.",
+  /* board.led_gpio_wiping */ "Po rychlém blikání svítí — reset/mazání dat; neodpojujte napájení.",
   /* board.ledinv */ "Aktivní v nízké úrovni (LED svítí, když je pin buzen na LOW)",
   /* board.btninv */ "Aktivní v nízké úrovni (tlačítko spojí pin s GND)",
-  /* board.hint */ "Podržením tlačítka reset po dobu 5 sekund vymažete všechna nastavení a otevřete konfigurační portál. Pokud není připojeno žádné tlačítko, vyberte „Žádná“.",
+  /* board.hint */ "Tovární reset: podržte 5 s. Trvale smaže Wi-Fi/všechna nastavení, historii/trendy, délky stavů a nezpracovaný výpis po pádu. Portál se otevře jen po úplném úspěchu. Jinak uvolněte a znovu podržte 5 s. Bez tlačítka vyberte „Žádná“.",
   /* card.hardware */ "Vybavení",
   /* card.hw_off */ "Žádné",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

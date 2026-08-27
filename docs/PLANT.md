@@ -76,10 +76,12 @@ window on update.
 **A reboot or power interruption no longer discards the completed hours.** This is the measurement that tolerates one worst: the window is 24 h and
 the requirements are hours, so losing it loses the *verdict*, not a few samples — and a device on the
 `dev` channel that keeps up to date may never reach 24 h at all. The rings therefore live in
-`.noinit` DRAM, so any reset that kept power carries them across without a write. Each completed
-hour is additionally appended to the existing upper-flash `history` journal with its exact interval
-end, model identity, layout fingerprint and CRC. That path restores the rolling evidence after OTA
-section movement and power loss; only the open hour can be missing. `/status.health.persist` states
+`.noinit` DRAM, so any compatible reset that kept power carries them across without a write. Once the
+journal scan succeeds and wall time is synchronized, each completed hour is additionally appended
+to the existing upper-flash `history` journal with its exact interval end, model identity, layout
+fingerprint and CRC. After the first eligible commit that path restores rolling evidence after OTA
+section movement and later power loss; before it flash has no RAM-only hour to restore.
+`/status.health.persist` states
 whether earlier observations were accepted instead of letting a shortened card look unexplained.
 
 The same checks guard both media. A **layout
@@ -259,16 +261,20 @@ path. It exists as comparison evidence for heating-curve diagnosis, and is optio
 
 Its own task waits for WiFi and a synchronized clock, then fetches a bounded six-hour JSON response
 over CA-verified HTTPS every 45 minutes, retrying after 5 on failure. The request path does none of
-that work: `POST /set_weather` only saves and wakes the task, so no DNS, TLS or JSON ever runs on the
-httpd worker. The response is bounded *before* it is read (a `Content-Length` cap, then fixed chunks
-against a running total) and never stored — nothing about a forecast survives a reboot.
+that work: an ordinary `POST /set_weather` persists a changed location and wakes the task, so no
+DNS, TLS or JSON ever runs on the httpd worker. The release-HIL-only `refresh:true` form is accepted
+only for the unchanged, enabled saved location with diagnostics enabled; it writes no NVS, requests
+one causal refresh and returns its token. The response is bounded *before* it is read (a
+`Content-Length` cap, then fixed chunks against a running total) and never stored — nothing about a
+forecast survives a reboot.
 
 **Saving a location is the location-specific consent.** Handing these coordinates and this
 installation's public source IP to a third party is the act being consented to. Fetching additionally
 requires the default-off plant-diagnostics master; a saved location is dormant while it is off.
-Clearing the location wakes the task, stops it, drops the runtime values and retracts the retained
-MQTT evidence document — a retained forecast nobody deletes goes on reading like a live input long
-after collection was withdrawn.
+Clearing the location wakes the task into its dormant state, drops the runtime values and retracts
+the retained MQTT evidence document — a retained forecast nobody deletes goes on reading like a
+live input long after collection was withdrawn. The worker itself remains alive on an ordinary
+non-safe boot so a later opt-in can apply without rebooting.
 
 **Almost everything else here is a refusal**, and that is the design:
 

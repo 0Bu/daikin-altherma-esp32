@@ -7,9 +7,9 @@
 // the only instrument that settles them is source TEXT — the same argument run-contract-tests.sh
 // makes for the Modbus write path and the MQTT lifecycle.
 //
-// Four of the five rules below pin a defect this firmware shipped. The fifth pins the shape they
-// share: an optional source that goes away must take its DERIVED artefacts with it — its trend, its
-// retained topic, its verdict — and must never take anything ELSE with it.
+// The rules below pin both shipped defects and the shared shape behind them: an optional source
+// which goes away must take its derived artefacts with it — its trend, retained topic and verdict —
+// and must never take anything else with it.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
@@ -18,13 +18,19 @@ const history = read("main/history.cpp");
 const checkup = read("main/checkup.cpp");
 const poll = read("main/hp_poll.cpp");
 const pollHeader = read("main/hp_poll.hpp");
+const modbus = read("main/hp_modbus.cpp");
 const mqtt = read("main/mqtt_ha.cpp");
 const weather = read("main/weather_forecast.cpp");
+const httpConfig = read("main/http_config.cpp");
+const configSource = read("main/config.cpp");
 const status = read("main/http_status.cpp");
 const mcp = read("main/mcp_server.cpp");
 const chunkSink = read("main/logic/chunk_sink.hpp");
 const redact = read("main/logic/redact.hpp");
 const diagnosis = read("main/logic/heating_curve_diagnosis.hpp");
+const weatherLogic = read("main/logic/weather_forecast.hpp");
+const weatherMqtt = read("main/logic/weather_mqtt.hpp");
+const mqttPublishGate = read("main/logic/mqtt_publish_gate.hpp");
 
 // ── 1. The BOARD's own trends have ONE owner, and it is not the heat pump ───────────────────────
 // free_heap/max_alloc describe the ESP32. They used to be folded inside history_record(), which is
@@ -179,6 +185,9 @@ assert.match(status, /if \(mb\.enabled\) \{[\s\S]*?HOMEHUB_HISTORIES/,
   "HomeHub trends must be offered only while that stack is enabled");
 assert.match(status, /if \(env_enabled\) \{[\s\S]*?ENV3_HISTORIES/,
   "ENV III trends must be offered only while that sensor is enabled");
+assert.match(status,
+  /const bool env3_configured\s*=\s*active_config\.env3_enabled && env3_board_supported\(active_config\);[\s\S]*?env3_source && \(!env3_configured \|\| env_t < 0\)/,
+  "an explicitly requested ENV III history must fail closed while the source is disabled");
 
 // ── 3. A never-started task must not make a CONFIGURED source read as absent ────────────────────
 // `configured` answers "did the user set this up", which is a fact about the CONFIG. Reading it off
@@ -201,6 +210,408 @@ assert.match(weather,
 assert.match(status,
   /\\"hourly\\":\[.*hourly_temperature_c.*hourly_humidity_pct.*hourly_pressure_hpa/s,
   "/status must expose bounded timestamped climate points for the future graph");
+const weatherStatusStart = status.indexOf("// Direct Open-Meteo forecast.");
+const weatherStatusEnd = status.indexOf('j += "},";', weatherStatusStart);
+const weatherStatus = status.slice(weatherStatusStart, weatherStatusEnd);
+assert.ok(weatherStatusStart >= 0 && weatherStatusEnd > weatherStatusStart,
+  "/status Weather serialization must remain an identifiable complete operation");
+assert.match(weatherStatus,
+  /const bool\s+weather_safe_mode\s*=\s*safe_mode_active\(\)[\s\S]*?weather_source_active\s*=\s*weather_configured && c\.diagnostics_enabled && !weather_safe_mode[\s\S]*?weather_has_value\s*=\s*weather_source_active && wf\.has_value/,
+  "Weather values must have active source, diagnostics-consent and non-safe-mode authority");
+assert.match(weatherStatus,
+  /if \(!weather_configured\)[\s\S]*?weather\.reason = "not_configured"[\s\S]*?else if \(weather_safe_mode\)[\s\S]*?weather\.reason = "safe_mode"[\s\S]*?else if \(!c\.diagnostics_enabled\)[\s\S]*?weather\.reason = "diagnostics_disabled"/,
+  "Weather freshness must state the same intentional absence reason as its visible source state");
+assert.match(weatherStatus,
+  /!weather_configured\s*\?\s*"disabled"[\s\S]*?: weather_safe_mode\s*\?\s*"waiting"[\s\S]*?: !c\.diagnostics_enabled\s*\?\s*"disabled"/,
+  "Weather visible state must distinguish unconfigured, safe-mode and consent-disabled absence");
+assert.match(weatherStatus,
+  /if \(weather_source_active && !wf\.error\.empty\(\)\)/,
+  "an intentionally absent Weather source must not leak a contradictory worker error");
+
+// Weather values are source-bound evidence, not a cache which may survive consent or identity
+// changes. Invalidation clears every scalar, series and timestamp synchronously; the RAM generation
+// additionally closes A -> B -> A and diagnostics off -> on ABA races around an in-flight fetch.
+const invalidateStart = weather.indexOf("WeatherForecastStatus invalidated_status_for(");
+const invalidateEnd = weather.indexOf("\n}\n\nstatic_assert", invalidateStart);
+assert.ok(invalidateStart >= 0 && invalidateEnd > invalidateStart,
+  "Weather invalidation must remain an identifiable complete operation");
+const invalidate = weather.slice(invalidateStart, invalidateEnd);
+for (const field of ["available", "has_value", "outdoor_mean_2h_c", "solar_energy_2h_wh_m2",
+  "hourly_count", "hourly_unix_s", "hourly_temperature_c", "hourly_humidity_pct",
+  "hourly_pressure_hpa", "issued_unix_s", "fetched_unix_s", "decision_unix_s",
+  "last_attempt_unix_s", "successes", "errors", "latitude", "longitude"]) {
+  assert.match(invalidate, new RegExp(`replacement\\.${field}`),
+    `Weather invalidation must clear source-bound ${field}`);
+}
+assert.match(invalidate, /diagnostics_disabled[\s\S]{0,100}?location_changed/,
+  "Weather must distinguish missing consent from a changed configured location");
+assert.match(weatherLogic,
+  /WeatherTaskStartState[\s\S]*?NotStarted[\s\S]*?Available[\s\S]*?DeadlineUnavailable[\s\S]*?TaskStartFailed/,
+  "Weather task availability must have explicit boot-latched states");
+assert.match(weather,
+  /std::atomic<WeatherTaskStartState>\s+s_task_start_state\s*\{\s*WeatherTaskStartState::NotStarted\s*\}/,
+  "Weather must fail closed until its worker has actually become available");
+assert.match(weather, /std::atomic<TaskHandle_t>\s+s_task\s*\{\s*nullptr\s*\}/,
+  "Weather must publish its post-http-start task handle without a C++ data race");
+assert.match(weather,
+  /static_assert\(std::atomic<TaskHandle_t>::is_always_lock_free/,
+  "Weather task-handle publication must remain lock-free on the firmware target");
+assert.match(invalidate,
+  /weather_task_failure\(\s*configured,\s*diagnostics_enabled,\s*task_state\s*\)[\s\S]*?if \(task_failure\)[\s\S]*?replacement\.state\s*=\s*"error"[\s\S]*?task_failure\.reason[\s\S]*?task_failure\.error/,
+  "Weather invalidation must map an explicit task-start state to a fail-closed source status");
+assert.match(invalidate,
+  /WeatherForecastStatus invalidated_status\([\s\S]*?invalidated_status_for\(\s*configured,\s*diagnostics_enabled,\s*s_task_start_state\.load\([^)]*\)\s*\)/,
+  "task-side Weather invalidation must consume the boot-latched task state");
+const weatherStart = weather.slice(weather.indexOf("void weather_forecast_start()"),
+  weather.indexOf("void weather_forecast_reconfigure()"));
+const weatherTask = weather.slice(weather.indexOf("void weather_task(void*)"),
+  weather.indexOf("for (;;) {", weather.indexOf("void weather_task(void*)")));
+assert.match(weatherTask,
+  /s_task_start_state\.load\(std::memory_order_acquire\)[\s\S]*?WeatherTaskStartState::Available[\s\S]*?vTaskDelay\(1\)/,
+  "a newly scheduled Weather worker must not snapshot Config before its handle/availability edge");
+assert.match(weatherStart,
+  /if \(!s_mtx\)[\s\S]*?WeatherTaskStartState::TaskStartFailed/,
+  "Weather must latch mutex allocation failure as task unavailable");
+assert.doesNotMatch(weatherStart, /s_status\./,
+  "Weather start failures must not allocate or race through mutable string status");
+assert.match(weatherStart,
+  /if \(!http_deadline_ready\(\)\)[\s\S]*?WeatherTaskStartState::DeadlineUnavailable/,
+  "Weather must latch a missing absolute-deadline owner for the whole boot");
+const weatherCreate = weatherStart.indexOf("if (xTaskCreate(");
+const weatherCreateFailure = weatherStart.indexOf("WeatherTaskStartState::TaskStartFailed",
+  weatherCreate);
+const weatherCreateFailureReturn = weatherStart.indexOf("return;", weatherCreateFailure);
+const weatherHandlePublish = weatherStart.indexOf("s_task.store(created_task",
+  weatherCreateFailureReturn);
+const weatherAvailable = weatherStart.indexOf("WeatherTaskStartState::Available");
+assert.ok(weatherCreate >= 0 && weatherCreateFailure > weatherCreate &&
+  weatherCreateFailureReturn > weatherCreateFailure &&
+  weatherHandlePublish > weatherCreateFailureReturn && weatherAvailable > weatherHandlePublish,
+  "Weather may publish task availability only after xTaskCreate succeeds; a provisional available " +
+  "state lets a concurrent source save erase the final task-start failure");
+assert.match(weatherStart,
+  /TaskHandle_t created_task\s*=\s*nullptr[\s\S]*?xTaskCreate\([\s\S]*?&created_task[\s\S]*?s_task\.store\(created_task, std::memory_order_release\)[\s\S]*?s_task_start_state\.store\(WeatherTaskStartState::Available, std::memory_order_release\)/,
+  "Weather must publish the created handle before opening the worker's first Config snapshot");
+assert.match(weather,
+  /void weather_forecast_reconfigure\(\)[\s\S]*?s_task\.load\(std::memory_order_acquire\)[\s\S]*?xTaskNotifyGive\(task\)/,
+  "Weather reconfigure must notify only an acquire-loaded task handle");
+assert.match(weather,
+  /bool weather_forecast_request_refresh\([\s\S]*?s_task\.load\(std::memory_order_acquire\)[\s\S]*?Lock lk\(s_mtx\)[\s\S]*?s_task\.load\(std::memory_order_acquire\)[\s\S]*?xTaskNotifyGive\(task\)/,
+  "Weather refresh admission and wake must use the published task handle under the token mutex");
+const weatherSnapshotStart = weather.indexOf("WeatherForecastStatus weather_forecast_status()");
+const weatherSnapshotEnd = weather.indexOf("bool weather_fetch_active()", weatherSnapshotStart);
+const weatherSnapshot = weather.slice(weatherSnapshotStart, weatherSnapshotEnd);
+assert.match(weatherSnapshot,
+  /WeatherForecastStatus status[\s\S]*?\{[\s\S]*?Lock lk\(s_mtx\)[\s\S]*?status\s*=\s*s_status[\s\S]*?\}[\s\S]*?weather_task_failure\(\s*true,\s*true,\s*s_task_start_state\.load\([^)]*\)\s*\)[\s\S]*?status\.configured\s*=\s*true[\s\S]*?status\.fetching\s*=\s*false[\s\S]*?status\.available\s*=\s*false[\s\S]*?status\.state\s*=\s*"error"[\s\S]*?task_failure\.reason[\s\S]*?task_failure\.error/,
+  "Weather snapshots must materialise the atomic start failure only after releasing the optional mutex");
+assert.match(mqtt,
+  /publish_weather_state\(bool config_enabled\)[\s\S]*?weather_forecast_status\(\)[\s\S]*?weather_mqtt_action\(config_enabled, status\.configured\)[\s\S]*?WeatherMqttAction::Publish[\s\S]*?build_weather_mqtt_json/,
+  "an active Weather config must publish its materialised boot-start failure atomically over MQTT");
+const internalInvalidateStart = weather.indexOf("bool invalidate_if_generation(");
+const internalInvalidateEnd = weather.indexOf("\n}\n\n// A saved location", internalInvalidateStart);
+const internalInvalidate = weather.slice(internalInvalidateStart, internalInvalidateEnd);
+assert.match(internalInvalidate,
+  /WeatherForecastStatus replacement = invalidated_status\([\s\S]*?Lock lk\(s_mtx\)[\s\S]*?s_source_generation\.load\([^)]*\) != expected_generation[\s\S]*?return false[\s\S]*?swap\(s_status, replacement\)/,
+  "a task-side stale source snapshot must not overwrite the authoritative HTTP commit");
+const tokenBind = weather.indexOf("const uint32_t source_generation");
+const configSnapshot = weather.indexOf("const Config cfg = config();", tokenBind);
+assert.ok(tokenBind >= 0 && configSnapshot > tokenBind,
+  "Weather must bind the ABA token before taking the Config snapshot");
+assert.match(weather,
+  /current\.diagnostics_generation\s*!=\s*cfg\.diagnostics_generation/,
+  "an in-flight Weather result must not cross a diagnostics consent generation");
+assert.match(weather,
+  /const Config before_fetch = config\(\)[\s\S]{0,500}?s_source_generation\.load\([^)]*\) != source_generation[\s\S]{0,500}?before_fetch\.diagnostics_generation != cfg\.diagnostics_generation[\s\S]{0,500}?!source_preempted\)[\s\S]{0,100}?ok = fetch_forecast/,
+  "Weather must revalidate token, consent and location after quiesce and before starting HTTPS");
+const successStart = weather.indexOf("if (ok) {");
+const successEnd = weather.indexOf("if (updated)", successStart);
+const successCommit = weather.slice(successStart, successEnd);
+const successLock = successCommit.indexOf("Lock lk(s_mtx)");
+const successToken = successCommit.indexOf(
+  "s_source_generation.load(std::memory_order_acquire) != source_generation", successLock);
+const successValue = successCommit.indexOf("s_status.has_value = true", successToken);
+assert.ok(successStart >= 0 && successEnd > successStart && successLock >= 0 &&
+  successToken > successLock && successValue > successToken,
+  "Weather success must re-check the source token under the same mutex as its value commit");
+const failureStart = weather.indexOf("const std::string failure", successEnd);
+const failureEnd = weather.indexOf("diag_printf(\"weather: Open-Meteo fetch failed", failureStart);
+const failureCommit = weather.slice(failureStart, failureEnd);
+const failureLock = failureCommit.indexOf("Lock lk(s_mtx)");
+const failureToken = failureCommit.indexOf(
+  "s_source_generation.load(std::memory_order_acquire) != source_generation", failureLock);
+const failureValue = failureCommit.indexOf("s_status.error = failure", failureToken);
+assert.ok(failureStart >= 0 && failureEnd > failureStart && failureLock >= 0 &&
+  failureToken > failureLock && failureValue > failureToken,
+  "Weather failure must not overwrite a newer synchronous invalidation");
+const setWeatherStart = httpConfig.indexOf("static esp_err_t set_weather(");
+const setWeatherEnd = httpConfig.indexOf("\n}\n\n// POST /set_board", setWeatherStart);
+const setWeather = httpConfig.slice(setWeatherStart, setWeatherEnd);
+const configSave = setWeather.indexOf("config_save(c)");
+const sourceChangeBegin = setWeather.indexOf(
+  "WeatherSourceChange weather_change(location.enabled, c.diagnostics_enabled)");
+const sourceCommit = setWeather.indexOf("weather_change.commit()", configSave);
+const retainedCleanup = setWeather.indexOf("mqtt_request_weather_cleanup()", sourceCommit);
+const savedAck = setWeather.indexOf('"saved\\":true', retainedCleanup);
+assert.ok(sourceChangeBegin >= 0 && configSave > sourceChangeBegin &&
+  sourceCommit > configSave &&
+  retainedCleanup > sourceCommit && savedAck > retainedCleanup,
+  "a changed Weather source must clear live and retained old evidence before save acknowledgement");
+assert.match(setWeather, /if \(weather_was_enabled\) mqtt_request_weather_cleanup\(\);/,
+  "changing or disabling a previously enabled Weather source must tombstone its retained evidence");
+const diagnosticsStart = httpConfig.indexOf("static esp_err_t set_diagnostics(");
+const diagnosticsEnd = httpConfig.indexOf("\n}\n\nstatic esp_err_t set_circulation", diagnosticsStart);
+const setDiagnostics = httpConfig.slice(diagnosticsStart, diagnosticsEnd);
+const diagnosticsGeneration = setDiagnostics.indexOf("diagnostics_next_generation(");
+const diagnosticsBegin = setDiagnostics.indexOf(
+  "WeatherSourceChange weather_change(c.weather_enabled, enabled)", diagnosticsGeneration);
+const diagnosticsSave = setDiagnostics.indexOf("config_save(c)", diagnosticsBegin);
+const diagnosticsCommit = setDiagnostics.indexOf("weather_change.commit()", diagnosticsSave);
+const diagnosticsCleanup = setDiagnostics.indexOf("mqtt_request_weather_cleanup()",
+                                                    diagnosticsCommit);
+const diagnosticsAck = setDiagnostics.indexOf('"saved\\":true', diagnosticsCleanup);
+assert.ok(diagnosticsGeneration >= 0 && diagnosticsBegin > diagnosticsGeneration &&
+  diagnosticsSave > diagnosticsBegin && diagnosticsCommit > diagnosticsSave &&
+  diagnosticsCleanup > diagnosticsCommit &&
+  diagnosticsAck > diagnosticsCleanup,
+  "a diagnostics consent mutation must hold Weather admission through save/invalidation and " +
+  "tombstone retained evidence before acknowledgement");
+
+// A single atomic state is the admission handshake. Weather and the HTTP mutation cannot both win:
+// NetworkActivity owns Idle->Network until its destructor, while the mutation owns
+// Idle->SourceChange across config_save() and the staged status swap.
+const networkActivityStart = weather.indexOf("struct NetworkActivity {");
+const networkActivityEnd = weather.indexOf("\n};", networkActivityStart);
+const networkActivity = weather.slice(networkActivityStart, networkActivityEnd);
+assert.match(networkActivity,
+  /compare_exchange_strong\([\s\S]*?SourceAdmission::Network[\s\S]*?s_source_generation\.load\([\s\S]*?SourceAdmission::Idle/,
+  "Weather network admission must atomically exclude a source mutation and recheck its token");
+assert.match(networkActivity,
+  /~NetworkActivity\(\)[\s\S]*?mqtt_transport_resume_after_network_heap\(\)[\s\S]*?release_admission\(\)[\s\S]*?SourceChangePending[\s\S]*?SourceChange[\s\S]*?SourceAdmission::Network[\s\S]*?SourceAdmission::Idle/,
+  "Weather must hand a completed network interval directly to a pending source mutation, or release Idle");
+const beginChangeStart = weather.indexOf("static bool begin_source_change()");
+const releaseChangeStart = weather.indexOf("static void release_source_change()",
+                                            beginChangeStart);
+const constructorStart = weather.indexOf("WeatherSourceChange::WeatherSourceChange(",
+                                          releaseChangeStart);
+const destructorStart = weather.indexOf("WeatherSourceChange::~WeatherSourceChange()",
+                                         constructorStart);
+const commitChangeStart = weather.indexOf("void WeatherSourceChange::commit()", destructorStart);
+const requestRefreshStart = weather.indexOf("bool weather_forecast_request_refresh(uint64_t& token) noexcept",
+                                             commitChangeStart);
+assert.ok(requestRefreshStart > commitChangeStart,
+  "Weather source-change assertions must end at the current refresh-request function boundary");
+const beginChange = weather.slice(beginChangeStart, releaseChangeStart);
+const releaseChange = weather.slice(releaseChangeStart, constructorStart);
+const constructor = weather.slice(constructorStart, destructorStart);
+const destructor = weather.slice(destructorStart, commitChangeStart);
+const commitChange = weather.slice(commitChangeStart, requestRefreshStart);
+assert.match(beginChange,
+  /SourceAdmission::Idle[\s\S]*?SourceAdmission::SourceChange[\s\S]*?SourceAdmission::Network[\s\S]*?SourceAdmission::SourceChangePending[\s\S]*?kSourceCancelWait/,
+  "source changes must either acquire Idle or request a direct network handoff within a bound");
+assert.match(beginChange,
+  /SourceAdmission::SourceChangePending[\s\S]*?SourceAdmission::Network[\s\S]*?return false[\s\S]*?expected == SourceAdmission::SourceChange[\s\S]*?return true/,
+  "a timed-out handoff must restore Network while a won handoff acquires the transaction");
+assert.doesNotMatch(beginChange, /s_source_generation\.fetch_add/,
+  "a fallible source save must not invalidate the still-durable source generation");
+const timeoutRollback = beginChange.indexOf("expected, SourceAdmission::Network");
+const timeoutReturn = beginChange.indexOf("return false", timeoutRollback);
+assert.ok(timeoutRollback >= 0 && timeoutReturn > timeoutRollback);
+assert.doesNotMatch(beginChange.slice(timeoutRollback, timeoutReturn),
+  /s_source_generation\.fetch_add/,
+  "a 503 timeout must not invalidate the still-authoritative source request");
+assert.match(releaseChange, /SourceAdmission::SourceChange[\s\S]*?SourceAdmission::Idle/,
+  "the source-change admission state must have one fail-closed release primitive");
+const stagedReplacement = constructor.indexOf("replacement_(invalidated_status_for(");
+const stagedAvailable = constructor.indexOf("WeatherTaskStartState::Available", stagedReplacement);
+const stagedFailureStrings = constructor.indexOf('failure_state_("error")', stagedAvailable);
+const stagedAdmission = constructor.indexOf("held_(s_mtx && begin_source_change())",
+  stagedFailureStrings);
+assert.ok(stagedReplacement >= 0 && stagedAvailable > stagedReplacement &&
+  stagedFailureStrings > stagedAvailable && stagedAdmission > stagedFailureStrings,
+  "the transaction must stage its normal and every task-failure replacement before admission");
+assert.match(destructor, /if \(!held_\) return;[\s\S]*?release_source_change\(\)/,
+  "an exception or failed Config save must release Weather admission by RAII");
+assert.match(commitChange,
+  /Lock lk\(s_mtx\)[\s\S]*?if \(\s*configured_ && diagnostics_enabled_\s*\)[\s\S]*?s_task_start_state\.load\([^)]*\)[\s\S]*?case WeatherTaskStartState::Available[\s\S]*?case WeatherTaskStartState::DeadlineUnavailable[\s\S]*?deadline_reason_[\s\S]*?deadline_error_[\s\S]*?case WeatherTaskStartState::TaskStartFailed[\s\S]*?task_start_reason_[\s\S]*?task_start_error_[\s\S]*?case WeatherTaskStartState::NotStarted[\s\S]*?not_started_reason_[\s\S]*?not_started_error_[\s\S]*?swap\(replacement_\.state, failure_state_\)[\s\S]*?swap\(replacement_\.reason, \*failure_reason\)[\s\S]*?swap\(replacement_\.error, \*failure_error\)/,
+  "Weather source commit must select the final exact task-start failure allocation-free under its mutex");
+assert.match(commitChange,
+  /Lock lk\(s_mtx\)[\s\S]*?s_source_generation\.fetch_add\(1[\s\S]*?weather_refresh_cancel_outstanding[\s\S]*?swap\(s_status, replacement_\)[\s\S]*?release_source_change\(\)[\s\S]*?held_ = false/,
+  "only a successful Config save may advance generation, cancel refresh and install staged status");
+const preemptedStart = weather.indexOf("if (source_preempted) {");
+const preemptedEnd = weather.indexOf(
+  "if (s_source_generation.load(std::memory_order_acquire) != source_generation) continue;",
+  preemptedStart);
+const preempted = weather.slice(preemptedStart, preemptedEnd);
+assert.ok(preemptedStart >= 0 && preemptedEnd > preemptedStart,
+  "the source-preempted Weather finalization must remain identifiable");
+assert.match(preempted,
+  /Lock lk\(s_mtx\)[\s\S]*?s_source_generation\.load[\s\S]*?s_status\.fetching\s*=\s*false[\s\S]*?s_status\.state\s*=\s*"waiting"[\s\S]*?refresh_attempt\.finish\(false\)/,
+  "a failed source save must not leave its admission-lost fetch reported as active");
+assert.match(weather,
+  /bool weather_fetch_active\(\)[\s\S]*?state == SourceAdmission::Network \|\|[\s\S]*?state == SourceAdmission::SourceChangePending/,
+  "a pending handoff must remain truthfully visible as an active Weather network interval");
+
+// config_save() must not discover another allocation failure after the first durable write. Stage
+// both serialized blobs and the exact RAM successor first; publication after NVS is a noexcept move.
+const configSaveStart = configSource.indexOf("bool config_save(");
+const configSaveEnd = configSource.indexOf("\n}\n\n// ── Field-owned commits", configSaveStart);
+const configSaveBody = configSource.slice(configSaveStart, configSaveEnd);
+const serviceSerialize = configSaveBody.indexOf("config_blob_serialize(b)");
+const linkSerialize = configSaveBody.indexOf("link_blob_serialize(", serviceSerialize);
+const stagedConfigMatch = configSaveBody.slice(linkSerialize).search(/Config\s+published\s*=\s*c/);
+const stagedConfig = stagedConfigMatch < 0 ? -1 : linkSerialize + stagedConfigMatch;
+const serviceWrite = configSaveBody.indexOf('nvs_set_blob("cfg"', stagedConfig);
+const linkWrite = configSaveBody.indexOf('nvs_set_blob("link"', serviceWrite);
+const ramPublish = configSaveBody.indexOf("g_cfg = std::move(published)", linkWrite);
+assert.ok(configSaveStart >= 0 && configSaveEnd > configSaveStart && serviceSerialize >= 0 &&
+  linkSerialize > serviceSerialize && stagedConfig > linkSerialize && serviceWrite > stagedConfig &&
+  linkWrite > serviceWrite && ramPublish > linkWrite,
+  "config_save must finish every allocation before its first NVS write and publish staged RAM last");
+assert.match(configSaveBody,
+  /static_assert\(std::is_nothrow_move_assignable_v<Config>/,
+  "the only post-NVS Config publication operation must be statically non-throwing");
+
+const cleanupStart = mqtt.indexOf("static RetainedCleanupCycle service_requested_topic_cleanup(");
+const cleanupEnd = mqtt.indexOf("\n}\n\nstatic void publish_weather_state", cleanupStart);
+const cleanup = mqtt.slice(cleanupStart, cleanupEnd);
+assert.match(mqtt,
+  /#include "logic\/mqtt_cleanup\.hpp"/,
+  "retained cleanup scheduling must live in an IDF-free host-tested boundary");
+const weatherRequest = cleanup.indexOf("s_weather_cleanup_requested.exchange(false");
+const modbusRequest = cleanup.indexOf("s_modbus_cleanup_requested.exchange(false");
+const env3Request = cleanup.indexOf("s_env3_cleanup_requested.exchange(false");
+const ackBefore = cleanup.indexOf("service_source_cleanup_evidence()", env3Request);
+const nextAction = cleanup.indexOf("s_source_cleanup.next_action", ackBefore);
+const trackedPublish = cleanup.indexOf('mqtt_enqueue_id(topic, "", 0, 1, 1)', nextAction);
+const rememberId = cleanup.indexOf("s_source_cleanup.publish_queued(epoch, msg_id)", trackedPublish);
+const ackAfter = cleanup.indexOf("service_source_cleanup_evidence()", rememberId);
+assert.ok(weatherRequest >= 0 && modbusRequest > weatherRequest && env3Request > modbusRequest &&
+  ackBefore > env3Request && nextAction > ackBefore && trackedPublish > nextAction &&
+  rememberId > trackedPublish && ackAfter > rememberId,
+"all source requests must enter one PUBACK-tracked queue outside the X10A gate");
+assert.doesNotMatch(cleanup, /retract_(?:weather|modbus|env3)_discovery\(1\)/,
+  "source discovery cleanup must be sequential rather than a reconnect burst");
+const mqttTaskStartForCleanup = mqtt.indexOf("static void mqtt_task(");
+const cleanupCall = mqtt.indexOf("service_requested_topic_cleanup(ref_config)",
+                                  mqttTaskStartForCleanup);
+const publishCycle = mqtt.indexOf("if (gate.publish_cycle)", cleanupCall);
+assert.ok(cleanupCall >= 0 && publishCycle > cleanupCall,
+  "explicit Weather cleanup must run even when X10A has not admitted a publish cycle");
+const mqttConnected = mqtt.indexOf("case MQTT_EVENT_CONNECTED:");
+const mqttDisconnected = mqtt.indexOf("case MQTT_EVENT_DISCONNECTED:", mqttConnected);
+const connectedHandler = mqtt.slice(mqttConnected, mqttDisconnected);
+assert.match(connectedHandler,
+  /s_connected_client_epoch\.store\(s_mqtt_client_epoch\.load/,
+  "a new client epoch must reconstruct all retained cleanup through the pure scheduler");
+assert.doesNotMatch(connectedHandler, /s_(?:weather|modbus|env3)_cleanup_requested\.store/,
+  "same-client reconnect must not blindly duplicate a queued QoS-1 tombstone");
+assert.ok(cleanupCall > mqttDisconnected && cleanupCall < publishCycle,
+  "reconstructed Weather cleanup must be serviced outside the X10A publication gate");
+const publishCycleBody = mqtt.slice(publishCycle);
+assert.match(publishCycleBody,
+  /if \(!cleanup_cycle\.weather\)[\s\S]*?publish_weather_state/,
+  "a Weather cleanup must suppress stale-snapshot publication for the rest of its MQTT cycle");
+assert.match(publishCycleBody,
+  /if \(!cleanup_cycle\.modbus\)[\s\S]*?retained_source_action\(mb_target_enabled\(\), s_modbus_disabled_cleaned\)/,
+  "a HomeHub cleanup must suppress same-cycle recreation and later follow target intent");
+assert.doesNotMatch(publishCycleBody, /mb_status\(\)\.enabled/,
+  "HomeHub task lifetime must not be used as current source-publication intent");
+assert.match(mqttPublishGate,
+  /if \(target_enabled\) return RetainedSourceAction::PublishCurrent;[\s\S]*?retained_deleted \? RetainedSourceAction::Idle\s*:\s*RetainedSourceAction::DeleteRetained/,
+  "disabled+deleted HomeHub state must stay idle while enabled A-to-B remains publishable");
+const setHpStart = httpConfig.indexOf("static esp_err_t set_hp(");
+const setHpEnd = httpConfig.indexOf("static esp_err_t discover_homehub_now", setHpStart);
+const setHp = httpConfig.slice(setHpStart, setHpEnd);
+const mbFingerprint = setHp.indexOf("const uint32_t modbus_target_fp");
+const mbEnabled = setHp.indexOf("const bool modbus_enabled", mbFingerprint);
+const mbSave = setHp.indexOf("config_save(c, /*require_link=*/x10a_sent)", mbEnabled);
+const mbHistoryReset = setHp.indexOf("history_modbus_reset(modbus_target_fp)", mbSave);
+const mbReconfigure = setHp.indexOf("mb_reconfigure(modbus_enabled)", mbHistoryReset);
+const mbCleanupRequest = setHp.indexOf("mqtt_request_modbus_cleanup()", mbReconfigure);
+assert.ok(mbFingerprint >= 0 && mbEnabled > mbFingerprint && mbSave > mbEnabled,
+  "HomeHub post-save cutover values must be staged before the durable boundary");
+assert.ok(mbHistoryReset > mbSave && mbReconfigure > mbHistoryReset &&
+          mbCleanupRequest > mbReconfigure,
+  "HomeHub generation/cache invalidation must precede predecessor cleanup admission");
+assert.match(history,
+  /void history_modbus_reset\(uint32_t target_fp\) noexcept/,
+  "HomeHub history cutover must accept a staged POD fingerprint without a Config copy");
+const mbHistoryResetStart = history.indexOf(
+  "void history_modbus_reset(uint32_t target_fp) noexcept");
+const mbHistoryResetEnd = history.indexOf(
+  "\nuint32_t history_modbus_generation()", mbHistoryResetStart);
+const mbHistoryResetBody = history.slice(mbHistoryResetStart, mbHistoryResetEnd);
+assert.ok(mbHistoryResetStart >= 0 && mbHistoryResetEnd > mbHistoryResetStart,
+  "HomeHub history cutover must remain an identifiable no-throw boundary");
+assert.doesNotMatch(mbHistoryResetBody, /current_mb_target_fp\s*\(|\bconfig\s*\(/,
+  "HomeHub history cutover must not reconstruct the target through a Config allocation");
+const mbReconfigureStart = modbus.indexOf("void mb_reconfigure(bool enabled) noexcept");
+const mbReconfigureEnd = modbus.indexOf("\nsize_t mb_values_capacity()", mbReconfigureStart);
+const mbReconfigureBody = modbus.slice(mbReconfigureStart, mbReconfigureEnd);
+assert.ok(mbReconfigureStart >= 0 && mbReconfigureEnd > mbReconfigureStart,
+  "HomeHub runtime cutover must remain explicitly noexcept");
+assert.doesNotMatch(mbReconfigureBody, /\bconfig\s*\(/,
+  "HomeHub runtime cutover must not allocate by copying Config after persistence");
+const mbTaskStart = modbus.indexOf("static void mb_task(void*)");
+const mbTaskEnd = modbus.indexOf("static void mb_task_start_if_enabled()", mbTaskStart);
+const mbTask = modbus.slice(mbTaskStart, mbTaskEnd);
+const mbDisableIntent = mbTask.indexOf(
+  "if (!s_target_enabled.load(std::memory_order_acquire)) break;");
+const mbTlsHold = mbTask.indexOf("if (ota_download_active() || weather_fetch_active())");
+assert.ok(mbDisableIntent >= 0 && mbTlsHold > mbDisableIntent,
+  "HomeHub disable must retire the task before TLS delay and any Config allocation");
+assert.doesNotMatch(mbTask, /config_modbus_host\(config\(\)\)\.empty\(\)/,
+  "HomeHub disable must not loop forever when a Config snapshot cannot allocate");
+assert.match(setHp.slice(mbReconfigure, mbCleanupRequest + 80),
+  /if \(modbus_was_enabled\) mqtt_request_modbus_cleanup\(\);/,
+  "an enabled HomeHub identity change must retract its predecessor, not only a disable");
+
+// Retained dedup state is an acknowledgement cache, not a build cache. A failed broker publish must
+// leave it unchanged so the next cycle retries the exact current document/discovery.
+const modbusPublishStart = mqtt.indexOf("static void publish_modbus_state()");
+const modbusPublishEnd = mqtt.indexOf("\n}\n\nstruct RetainedCleanupCycle", modbusPublishStart) + 2;
+const modbusPublish = mqtt.slice(modbusPublishStart, modbusPublishEnd);
+assert.match(modbusPublish,
+  /if \(js != s_last_modbus_json &&\s*mqtt_publish\(s_modbus,[\s\S]*?\)\) \{\s*s_last_modbus_json = js;\s*\}/,
+  "HomeHub dedup may advance only after the broker accepts current state");
+const weatherPublishStart = mqtt.indexOf("static void publish_weather_state(");
+const weatherPublishEnd = mqtt.indexOf("\n}\n\n// ENV III", weatherPublishStart) + 2;
+const weatherPublish = mqtt.slice(weatherPublishStart, weatherPublishEnd);
+assert.match(weatherPublish,
+  /if \(js != s_last_weather_json &&\s*mqtt_publish\(s_weather,[\s\S]*?\)\) \{\s*s_last_weather_json = js;\s*\}/,
+  "Weather dedup may advance only after the broker accepts current state");
+const env3PublishStart = mqtt.indexOf("static void publish_env3_state()");
+const env3PublishEnd = mqtt.indexOf("\n}\n\n// Stream one retained", env3PublishStart) + 2;
+const env3Publish = mqtt.slice(env3PublishStart, env3PublishEnd);
+assert.match(env3Publish,
+  /if \(new_sample \|\| js != s_last_env3_json\) \{\s*if \(mqtt_publish\(s_env3,[\s\S]*?\)\) \{\s*s_last_env3_json\s*=\s*js;\s*s_last_env3_samples\s*=\s*env\.samples;\s*\}\s*\}/,
+  "ENV III value and sample acknowledgements must advance only after publish success");
+assert.match(mqtt,
+  /static bool publish_env3_discovery\(\)[\s\S]*?if \(!mqtt_publish\([^;]*\)\) ok = false[\s\S]*?return ok/,
+  "ENV III discovery must report partial broker failure");
+assert.match(mqtt,
+  /if \(!s_env3_discovery_announced\)[\s\S]*?if \(publish_env3_discovery\(\)\)[\s\S]*?s_env3_discovery_announced = true/,
+  "ENV III discovery may be acknowledged only after every config publish succeeds");
+
+// A retained historical value is not fresh evidence after the current source reports failure.
+// Apply configured/current-availability gates before the ordinary age calculation, and publish the
+// resulting combined verdict rather than the age-only result.
+const mqttFreshStart = weatherMqtt.indexOf("inline WeatherFreshness weather_mqtt_freshness(");
+const mqttFreshEnd = weatherMqtt.indexOf("\n}\n\ninline std::string build_weather_mqtt_json", mqttFreshStart);
+const mqttFresh = weatherMqtt.slice(mqttFreshStart, mqttFreshEnd);
+assert.ok(mqttFreshStart >= 0 && mqttFreshEnd > mqttFreshStart,
+  "Weather MQTT must have one identifiable effective-freshness gate");
+const configuredGate = mqttFresh.indexOf("if (!s.configured)");
+const availabilityGate = mqttFresh.indexOf("if (!s.available)", configuredGate);
+const ageGate = mqttFresh.indexOf("return weather_freshness(", availabilityGate);
+assert.ok(configuredGate >= 0 && availabilityGate > configuredGate && ageGate > availabilityGate,
+  "Weather MQTT freshness must fail closed on configuration and current availability before age");
+assert.match(mqttFresh,
+  /!s\.available[\s\S]*?s\.reason\.empty\(\) \? "unavailable" : s\.reason\.c_str\(\)/,
+  "an unavailable Weather snapshot must name its current failure instead of claiming age-fresh");
+assert.match(weatherMqtt,
+  /const WeatherFreshness freshness = weather_mqtt_freshness\(s, now_unix_s\)[\s\S]*?out \+= freshness\.fresh \? "1" : "0"[\s\S]*?"freshness_reason", freshness\.reason/,
+  "the retained document must emit the effective freshness verdict and reason atomically");
 
 // ── 4. An ARMED diagnosis whose sampler never ran must not report itself DISABLED ───────────────
 // The sampler lives on the MQTT publish task, which safe mode never creates, while /status derives
@@ -367,13 +778,17 @@ assert.doesNotMatch(pollHeader, /std::string\s+(?:label|unit)\s*;/,
 // start race: weather raises its own flag first, waits the grace interval, re-reads OTA's flag and
 // starts HTTPS only if OTA did not win. Assert the ordered block rather than an arbitrary character
 // distance — the race explanation between those statements is deliberately allowed to be explicit.
-const weatherActivity = weather.indexOf("NetworkActivity activity;");
+const weatherActivity = weather.indexOf("NetworkActivity activity(source_generation);");
 const weatherLead = weather.indexOf("vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));",
                                   weatherActivity);
 const weatherPollBarrier = weather.indexOf("hp_poll_network_quiesced()", weatherLead);
 const weatherMqttBarrier = weather.indexOf("mqtt_publish_network_quiesced()", weatherPollBarrier);
-const weatherOtaRecheck = weather.indexOf("ota_preempted = ota_download_active();", weatherMqttBarrier);
-const weatherFetch = weather.indexOf("ok = fetch_forecast(", weatherOtaRecheck);
+const weatherOtaRecheckMatch = weather.slice(weatherMqttBarrier).search(
+  /ota_preempted\s*=\s*ota_download_active\(\);/);
+const weatherOtaRecheck = weatherOtaRecheckMatch < 0 ? -1
+  : weatherMqttBarrier + weatherOtaRecheckMatch;
+const weatherFetchMatch = weather.slice(weatherOtaRecheck).search(/ok\s*=\s*fetch_forecast\(/);
+const weatherFetch = weatherFetchMatch < 0 ? -1 : weatherOtaRecheck + weatherFetchMatch;
 assert.ok(weatherActivity >= 0 && weatherLead > weatherActivity &&
           weatherPollBarrier > weatherLead && weatherMqttBarrier > weatherPollBarrier &&
           weatherOtaRecheck > weatherMqttBarrier &&

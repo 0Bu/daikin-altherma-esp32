@@ -14,6 +14,10 @@ from pathlib import Path
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 IDF_RE = re.compile(r"^v[0-9]+\.[0-9]+(?:\.[0-9]+)?$")
+ARTIFACT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.bin$")
+PINNED_SIGNING_DIGEST = (
+    Path(__file__).resolve().parents[1] / "tools/release/ota_signing_key_digest.txt"
+)
 
 
 def digest(path: Path) -> str:
@@ -22,6 +26,30 @@ def digest(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             hasher.update(block)
     return hasher.hexdigest()
+
+
+def pinned_signing_digest() -> str:
+    try:
+        value = PINNED_SIGNING_DIGEST.read_text(encoding="ascii").strip()
+    except OSError as exc:
+        fail(f"cannot read pinned signing-key digest: {exc}")
+    if not SHA256_RE.fullmatch(value):
+        fail(f"pinned signing-key digest is not lowercase SHA-256: {value!r}")
+    return value
+
+
+def artifact_index(directory: Path) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for path in sorted(directory.glob("*.bin"), key=lambda item: item.name):
+        if path.is_symlink() or not path.is_file() or not ARTIFACT_RE.fullmatch(path.name):
+            fail(f"unsafe binary artifact: {path}")
+        size = path.stat().st_size
+        if size <= 0:
+            fail(f"empty binary artifact: {path.name}")
+        entries.append({"path": path.name, "sha256": digest(path), "size": size})
+    if not entries:
+        fail(f"no binary artifacts beside manifest in {directory}")
+    return entries
 
 
 def fail(message: str) -> None:
@@ -52,6 +80,7 @@ def check(
         "idf_version": idf_version,
         "dependencies_lock_sha256": digest(lock_path),
         "app_sha256": digest(app_path),
+        "signing_key_sha256": pinned_signing_digest(),
     }
     for field, value in expected.items():
         actual = provenance.get(field)
@@ -59,9 +88,16 @@ def check(
             fail(f"{field} mismatch: expected {value!r}, got {actual!r}")
         if field.endswith("_sha256") and not SHA256_RE.fullmatch(actual):
             fail(f"{field} is not lowercase SHA-256")
+    expected_artifacts = artifact_index(manifest_path.parent)
+    if document.get("artifacts") != expected_artifacts:
+        fail(
+            "artifacts index does not exactly bind every sibling .bin file: "
+            f"expected {expected_artifacts!r}, got {document.get('artifacts')!r}"
+        )
     print(
         "manifest provenance: OK "
-        f"(source {source_sha}, IDF {idf_version}, app {expected['app_sha256']})"
+        f"(source {source_sha}, IDF {idf_version}, app {expected['app_sha256']}, "
+        f"signing key {expected['signing_key_sha256']})"
     )
 
 
@@ -72,6 +108,7 @@ def self_test() -> None:
         lock = root / "dependencies.lock"
         manifest = root / "manifest.json"
         app.write_bytes(b"signed-app")
+        (root / "merged.bin").write_bytes(b"merged-image")
         lock.write_bytes(b"locked-components\n")
         source = "a" * 40
         idf = "v6.0.2"
@@ -82,9 +119,13 @@ def self_test() -> None:
                 "idf_version": idf,
                 "dependencies_lock_sha256": digest(lock),
                 "app_sha256": digest(app),
+                "signing_key_sha256": pinned_signing_digest(),
             }
             provenance.update(overrides)
-            manifest.write_text(json.dumps({"provenance": provenance}), encoding="utf-8")
+            manifest.write_text(json.dumps({
+                "provenance": provenance,
+                "artifacts": artifact_index(root),
+            }), encoding="utf-8")
 
         write()
         check(manifest, app, source, idf, lock)
@@ -93,6 +134,7 @@ def self_test() -> None:
             "idf_version": "v0.0.0",
             "dependencies_lock_sha256": "0" * 64,
             "app_sha256": "1" * 64,
+            "signing_key_sha256": "2" * 64,
         }
         for field, wrong in cases.items():
             write(**{field: wrong})
@@ -101,6 +143,16 @@ def self_test() -> None:
             except SystemExit:
                 continue
             raise AssertionError(f"self-test failed to reject wrong {field}")
+        write()
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        document["artifacts"][0]["sha256"] = "0" * 64
+        manifest.write_text(json.dumps(document), encoding="utf-8")
+        try:
+            check(manifest, app, source, idf, lock)
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("self-test accepted an artifact-index mismatch")
     print("manifest provenance self-test: PASS")
 
 

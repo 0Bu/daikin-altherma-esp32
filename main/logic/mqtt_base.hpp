@@ -95,9 +95,9 @@ inline bool mqtt_base_valid(const std::string& base, MqttBaseRefusal* out = null
 }
 
 // The base topic actually used, given what is stored and what was compiled in. Empty stored value =
-// the Kconfig default, so a device upgraded onto this feature keeps publishing exactly where it did.
-// One function rather than an `empty() ? … : …` at each call site: mqtt_ha.cpp derives thirteen
-// topics plus the HA node id from this string, and a second copy of the fallback rule is how one of
+// the Kconfig default, so a device upgraded onto this feature keeps publishing exactly where it
+// did. One function rather than an `empty() ? … : …` at each call site: mqtt_ha.cpp derives every
+// topic plus the HA node id from this string, and a second copy of the fallback rule is how one of
 // them would end up on a different base from the rest.
 inline std::string mqtt_base_effective(const std::string& stored, const char* compiled_default) {
     if (!stored.empty()) return stored;

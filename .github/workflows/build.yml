@@ -169,6 +169,35 @@ jobs:
       - name: Verify the logic coverage gate still has teeth
         run: ./tools/coverage/selftest.sh
 
+      # Hostile-input properties run under ASan+UBSan with deterministic seeds. This is bounded
+      # fuzzing rather than an unending campaign, so every CI run repeats the exact parser,
+      # framing and state-machine corpus and reports a reproducible failing input.
+      - name: Run sanitizer-backed hostile-input properties
+        run: ./scripts/run-sanitizer-fuzz-tests.sh
+
+      # Execute production pure headers behind fake clocks, NVS/allocator failpoints and fragmented
+      # transports, plus real POSIX slow-header/body socket reads interrupted by shutdown at an
+      # absolute deadline. This is the deterministic Device-Glue seam between isolated logic CHECKs
+      # and real HIL: NVS atomicity, OOM survival, task interleavings, X10A/Modbus/MQTT and bounded
+      # HTTP behavior are exercised together. Production HTTP/MCP glue remains outside this host
+      # seam; atomicity and both socket-deadline mutations prove the harness itself can fail.
+      - name: Run runtime and transport integration harness
+        run: ./scripts/run-runtime-integration-tests.sh
+
+      # Check only new files and changed C/C++ hunks with the exact formatter used by CI. Existing
+      # legacy drift outside the diff is not rewritten; portable whitespace/encoding invariants
+      # remain whole-tree checks. Both layers are fail-closed and have mutation self-tests.
+      - name: Install pinned C/C++ formatter
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-format-18
+      - name: Check source formatting invariants
+        env:
+          CLANG_FORMAT: clang-format-18
+        run: ./scripts/run-format-check.sh
+      - name: Verify the format gate still has teeth
+        run: ./tools/format/selftest.sh
+
       # The presenter-parity CHECK itself rides the step above (run-mock-tests.sh ends with it, in
       # every mode, where a C++ compiler is already guaranteed) — running it again here would only
       # pay for the same 200-row sweep twice. What needs its own step is its SELFTEST: both sides of
@@ -195,12 +224,22 @@ jobs:
       - name: Run complete UI use-case suite
         run: ./scripts/run-ui-use-case-tests.sh
 
+      # Source contracts cannot see layout, native accessibility or real keyboard focus. Assemble
+      # the production page and run it in system Chrome/Chromium. DOM/layout/names/colour, native AX
+      # and keyboard navigation/dialog focus/Tab/Escape cover Dashboard, Settings and all routed
+      # modals at 320/1200 px in all 13 locales. Reduced motion covers Dashboard, Settings, WiFi,
+      # progress and disclosure motion at the same locale/viewport matrix; console errors are fatal.
+      - name: Run rendered browser and accessibility gate
+        run: ./scripts/run-browser-render-tests.sh
+
       # The source-boundary contracts: assertions about main/*.cpp that the host suite cannot make,
       # since it links the IDF-free headers alone. Pinned here are the X10A-gated MQTT lifecycle (a
       # no-LWT session may subscribe before X10A; the first bus proof replaces it with the LWT
       # publisher; ordinary publishes stay behind the gate), the one X10A-free outbound exception
-      # (a single retained tombstone per explicitly disabled source, only after the disable was
-      # persisted), the HomeHub discovery lifecycle (only the explicit UI action may browse mDNS)
+      # (a bounded QoS-1 cleanup transaction reconstructed on every broker connection: predecessor
+      # state plus retired/disabled discovery after persisted source, consent or identity changes;
+      # that source's ordinary publish is suppressed for the cleanup cycle), the HomeHub discovery
+      # lifecycle (only the explicit UI action may browse mDNS)
       # and the heating-curve-diagnosis boundary (the firmware records only raw target-minus-actual
       # room error and exposes no Modbus write capability; explicit consent subscribes the saved
       # room source, while forecast evidence remains optional and private). Collection is additionally
@@ -362,6 +401,11 @@ jobs:
           python3 scripts/check-sdkconfig-defaults.py --self-test
           python3 scripts/report-firmware-size.py --self-test
           python3 scripts/check-manifest-provenance.py --self-test
+          python3 scripts/check-signing-key-continuity.py --self-test
+          python3 scripts/check-stack-budget.py --self-test
+          python3 scripts/check-reproducible-build.py --self-test
+          python3 scripts/verify-published-artifacts.py --self-test
+          python3 scripts/production-ota-gate.py --self-test
 
       # The canonical instruction contract owns the always-loaded budget and the deterministic
       # skill, reviewer, hook and safety-invariant checks.
@@ -402,7 +446,7 @@ jobs:
           # vendor/LICENSE into both feeds. A change there must therefore rebuild and republish.
           # production-ota-gate.py also binds local HEAD to manifest.source_sha; publishing its
           # changes without a new artifact would make the corrected gate impossible to execute.
-          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|production-ota-gate)[.]py$|tools/(version|web_asset)/)'
+          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate)[.]py$|tools/(version|web_asset|release|stack)/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
@@ -728,7 +772,7 @@ jobs:
           # bins don't embed makes every device download an "update" that changes nothing, forever.
           # ci-build-all.sh reads the version back out of the built image and fails if the two ever
           # drift apart again.
-          command: ./scripts/ci-build-all.sh --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
+          command: ./scripts/ci-build-all.sh ${{ steps.mode.outputs.mode == 'release' && '--verify-reproducible' || '' }} --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary
         if: always()
@@ -772,12 +816,81 @@ jobs:
             dist/manifest.json
             dist/changelog.json
 
+  # Exact release-candidate hardware gate. It runs only on the isolated, inventory-pinned lab
+  # runner. The bootstrap installs the candidate twice: the first boot is power-cut while
+  # PENDING_VERIFY and must roll back; the second commits and survives a cold restart with its NVS
+  # configuration intact. The valid candidate then installs the pinned bootstrap with its own OTA
+  # writer; a hard cycle must roll back to that valid candidate before combined transport/heap/stack
+  # pressure. Dev publication never contacts this runner. The job has no write-capable repository
+  # token and never receives the offline signing key.
+  release_hil:
+    needs: [trusted_build]
+    if: needs.trusted_build.outputs.mode == 'release'
+    runs-on: [self-hosted, daikin-release-lab]
+    timeout-minutes: 45
+    environment: release-hil
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download exact signed release candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_NAME: daikin-altherma-esp32-${{ needs.trusted_build.outputs.version }}
+          HIL_DIST: ${{ runner.temp }}/daikin-release-hil-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "$HIL_DIST"
+          gh run download "$GITHUB_RUN_ID" --repo "$GH_REPO" \
+            --name "$ARTIFACT_NAME" --dir "$HIL_DIST"
+
+      - name: Verify candidate handoff and expose its digest
+        id: artifact
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          HIL_DIST: ${{ runner.temp }}/daikin-release-hil-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ./scripts/check-manifest-provenance.py "$HIL_DIST/manifest.json" \
+            "$HIL_DIST/daikin-altherma-esp32.bin" "$SOURCE_SHA" \
+            "$(./scripts/idf-version.sh)" dependencies.lock
+          ./scripts/check-signing-key-continuity.py "$HIL_DIST/daikin-altherma-esp32.bin"
+          app_sha="$(python3 -I -c 'import json, os; print(json.load(open(os.environ["HIL_DIST"] + "/manifest.json", encoding="utf-8"))["provenance"]["app_sha256"])')"
+          echo "app_sha=$app_sha" >> "$GITHUB_OUTPUT"
+
+      # This exact, unchained command is the only release-HIL mutation boundary. Hosts, MAC,
+      # transient leased HTTPS feed and power outlet come from the runner-local schema-versioned
+      # release-hil.json inventory; no production role is accepted by this mode.
+      - name: Exercise rollback, cold restore and combined stress on isolated lab
+        env:
+          RELEASE_HIL_POWER_TOKEN: ${{ secrets.RELEASE_HIL_POWER_TOKEN }}
+          RELEASE_HIL_FEED_TOKEN: ${{ secrets.RELEASE_HIL_FEED_TOKEN }}
+          HIL_DIST: ${{ runner.temp }}/daikin-release-hil-${{ github.run_id }}
+        run: >-
+          python3 -I -B ./scripts/production-ota-gate.py
+          --release-hil
+          --confirm-release-hil release-hil
+          --execute
+          --artifact-manifest "$HIL_DIST/manifest.json"
+          --artifact-app "$HIL_DIST/daikin-altherma-esp32.bin"
+          --expected-source-sha "${{ github.sha }}"
+          --expected-version "${{ needs.trusted_build.outputs.version }}"
+          --expected-app-sha256 "${{ steps.artifact.outputs.app_sha }}"
+
   # Outward mutation boundary. It has contents:write but no signing secret and consumes only the
   # signed artifact produced by trusted_build. A failed publish can be retried without exposing the
   # key to a write-capable job.
   publish:
-    needs: [trusted_build]
-    if: needs.trusted_build.result == 'success'
+    needs: [trusted_build, release_hil]
+    if: >-
+      always() && needs.trusted_build.result == 'success' &&
+      (needs.trusted_build.outputs.mode == 'dev' || needs.release_hil.result == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -805,6 +918,7 @@ jobs:
           test -f dist/daikin-altherma-esp32.bin
           ./scripts/check-manifest-provenance.py dist/manifest.json \
             dist/daikin-altherma-esp32.bin "$SOURCE_SHA" "$(./scripts/idf-version.sh)" dependencies.lock
+          ./scripts/check-signing-key-continuity.py dist/daikin-altherma-esp32.bin
           ./scripts/check-web-installer-plan.py dist/manifest.json partitions.csv
           ./scripts/generate-ota-changelog.py --validate dist/changelog.json --version "$VERSION"
           check_mode="$MODE"
@@ -818,6 +932,7 @@ jobs:
         if: needs.trusted_build.outputs.mode == 'dev'
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          PUBLISH_OID_FILE: ${{ runner.temp }}/pages-published-oid
         run: ./scripts/publish-pages-branch.sh --dev
 
       # Publish the release feed BEFORE creating its tag/Release. If this fails, no immutable release
@@ -831,7 +946,44 @@ jobs:
         if: needs.trusted_build.outputs.mode == 'release'
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          PUBLISH_OID_FILE: ${{ runner.temp }}/pages-published-oid
         run: ./scripts/publish-pages-branch.sh
+
+      - name: Verify public feed readback
+        env:
+          BASE_URL: ${{ needs.trusted_build.outputs.mode == 'dev' && 'https://0bu.github.io/daikin-altherma-esp32/dev/' || 'https://0bu.github.io/daikin-altherma-esp32/' }}
+          SITE_DIR: ${{ needs.trusted_build.outputs.mode == 'dev' && '_site/dev' || '_site' }}
+          PAGES_PREFIX: ${{ needs.trusted_build.outputs.mode == 'dev' && 'dev' || 'root' }}
+          PUBLISH_OID_FILE: ${{ runner.temp }}/pages-published-oid
+        run: |
+          set -euo pipefail
+          test -f "$PUBLISH_OID_FILE"
+          pages_commit="$(cat "$PUBLISH_OID_FILE")"
+          git fetch --quiet --no-tags --force origin \
+            refs/heads/gh-pages:refs/remotes/origin/gh-pages
+          ./scripts/verify-published-artifacts.py \
+            --base-url "$BASE_URL" \
+            --expected-site "$SITE_DIR" \
+            --pages-commit "$pages_commit" \
+            --pages-prefix "$PAGES_PREFIX" \
+            --cache-buster "$GITHUB_RUN_ID"
+
+      - name: Rebind release tag immediately before release mutation
+        if: needs.trusted_build.outputs.mode == 'release'
+        env:
+          VERSION: ${{ needs.trusted_build.outputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            git fetch --quiet --no-tags --force origin \
+              "refs/tags/v$VERSION:refs/tags/v$VERSION"
+            tag_sha="$(git rev-parse "v$VERSION^{commit}")"
+            [ "$tag_sha" = "$SOURCE_SHA" ] || {
+              echo "v$VERSION moved to $tag_sha; expected $SOURCE_SHA" >&2
+              exit 1
+            }
+          fi
 
       - name: Create or resume release
         if: needs.trusted_build.outputs.mode == 'release'
@@ -848,6 +1000,59 @@ jobs:
             dist/*.elf.sha256
             dist/*-size.json
             dist/*-size.md
+            dist/manifest.json
+            dist/changelog.json
             _site/LICENSE.txt
             _site/THIRD_PARTY_NOTICES.md
             _site/Apache-2.0.txt
+
+      - name: Verify GitHub Release asset readback
+        if: needs.trusted_build.outputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.trusted_build.outputs.version }}
+        run: |
+          set -euo pipefail
+          readback_root="$(mktemp -d)"
+          trap 'rm -rf "$readback_root"' EXIT
+          readback="$readback_root/assets"
+          mkdir "$readback"
+          expected_names="$readback_root/expected"
+          actual_names="$readback_root/actual"
+          for expected in \
+            dist/*.bin dist/*.elf.xz dist/*.elf.sha256 dist/*-size.json dist/*-size.md \
+            dist/manifest.json dist/changelog.json \
+            _site/LICENSE.txt _site/THIRD_PARTY_NOTICES.md _site/Apache-2.0.txt; do
+            test -f "$expected"
+            basename "$expected"
+          done | LC_ALL=C sort > "$expected_names"
+          gh release view "v$VERSION" --repo "$GH_REPO" --json assets \
+            --jq '.assets[].name' | LC_ALL=C sort > "$actual_names"
+          cmp -- "$expected_names" "$actual_names"
+          gh release download "v$VERSION" --repo "$GH_REPO" --dir "$readback"
+          while IFS= read -r name; do
+            case "$name" in
+              LICENSE.txt|THIRD_PARTY_NOTICES.md|Apache-2.0.txt) expected="_site/$name" ;;
+              *) expected="dist/$name" ;;
+            esac
+            cmp -- "$expected" "$readback/$name"
+          done < "$expected_names"
+          find "$readback" -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort > "$actual_names"
+          cmp -- "$expected_names" "$actual_names"
+          ./scripts/check-signing-key-continuity.py "$readback/daikin-altherma-esp32.bin"
+
+      - name: Rebind release tag after asset readback
+        if: needs.trusted_build.outputs.mode == 'release'
+        env:
+          VERSION: ${{ needs.trusted_build.outputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags --force origin \
+            "refs/tags/v$VERSION:refs/tags/v$VERSION"
+          tag_sha="$(git rev-parse "v$VERSION^{commit}")"
+          [ "$tag_sha" = "$SOURCE_SHA" ] || {
+            echo "published v$VERSION resolves to $tag_sha; expected $SOURCE_SHA" >&2
+            exit 1
+          }

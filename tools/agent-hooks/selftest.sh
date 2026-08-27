@@ -1564,6 +1564,8 @@ cat >"$tmp/all-gates.md" <<EOF
 - [x] \$schematic-review clean — merge gate @ $head_sha
 - [x] \$ui-use-case-review clean — merge gate @ $head_sha
 - [x] \$absence-review clean — merge gate @ $head_sha
+- [x] \$diagnostic-evidence-review clean — merge gate @ $head_sha
+- [x] \$user-docs-review clean — merge gate @ $head_sha
 - [x] \$ui-gif clean — merge gate @ $head_sha
 EOF
 printf '%s\n' 'main/www/js/dashboard.js' >"$tmp/all-files.txt"
@@ -1830,10 +1832,14 @@ body = "\n".join([
     f"- [x] $project-review clean — merge gate @ {head}",
     f"- [x] $pr-hygiene-review clean — merge gate @ {head}",
     f"- [x] $domain-review clean — merge gate @ {head}",
+    f"- [x] $heap-safety-review clean — merge gate @ {head}",
     f"- [x] $feature-docs synced — merge gate @ {head}",
     f"- [x] $schematic-review clean — merge gate @ {head}",
     f"- [x] $ui-use-case-review clean — merge gate @ {head}",
     f"- [x] $absence-review clean — merge gate @ {head}",
+    f"- [x] $diagnostic-evidence-review clean — merge gate @ {head}",
+    f"- [x] $user-docs-review clean — merge gate @ {head}",
+    f"- [x] $ui-gif clean — merge gate @ {head}",
 ])
 print(json.dumps({"number": 123, "body": body, "headRefOid": head,
                   "changedFiles": int(__import__("os").environ.get("AGENT_GH_REPORTED_FILES", "1"))}))

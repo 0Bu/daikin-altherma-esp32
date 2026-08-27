@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -709,7 +709,7 @@ I18N.fi = localeValues([
   /* board.led_rgb_bus_down */ "Punainen, kaksoisvilkku — X10A irti.",
   /* board.led_rgb_mqtt_down */ "Oranssi, vilkkuu — X10A yhteydessä, MQTT irti.",
   /* board.led_rgb_wipe_armed */ "Punainen, hyvin nopea vilkku — poisto valmiina; vapauta peruuttaaksesi.",
-  /* board.led_rgb_wiping */ "Valkoinen, jatkuva — asetuksia poistetaan; älä katkaise virtaa.",
+  /* board.led_rgb_wiping */ "Valkoinen, jatkuva — tehdasasetusten palautus/tietojen poisto; älä katkaise virtaa.",
   /* board.led_gpio_off */ "Pois — ei aktiivista Wi-Fi-tilaa.",
   /* board.led_gpio_setup */ "Hidas vilkku — asetusportaali aktiivinen.",
   /* board.led_gpio_connecting */ "Nopea vilkku — yhdistää Wi-Fiin.",
@@ -717,10 +717,10 @@ I18N.fi = localeValues([
   /* board.led_gpio_bus_down */ "Kaksoisvilkku — X10A irti.",
   /* board.led_gpio_mqtt_down */ "Keskinopea vilkku — X10A yhteydessä, MQTT irti.",
   /* board.led_gpio_wipe_armed */ "Hyvin nopea vilkku — poisto valmiina; vapauta peruuttaaksesi.",
-  /* board.led_gpio_wiping */ "Jatkuva erittäin nopean vilkun jälkeen — asetuksia poistetaan; älä katkaise virtaa.",
+  /* board.led_gpio_wiping */ "Jatkuva nopean vilkun jälkeen — tehdasasetusten palautus/tietojen poisto; älä katkaise virtaa.",
   /* board.ledinv */ "Aktiivinen LOW (LED palaa nastan ollessa LOW)",
   /* board.btninv */ "Aktiivinen LOW (painike kytkee nastan GND:hen)",
-  /* board.hint */ "Poista kaikki asetukset ja avaa asetusportaali pitämällä nollauspainiketta 5 sekuntia. Valitse Ei mitään, jos painiketta ei ole.",
+  /* board.hint */ "Tehdasasetusten palautus: pidä 5 s. Poistaa pysyvästi Wi-Fi/kaikki asetukset, historian/trendit, tilojen kestoajat ja raakaydindumpin. Portaali avautuu vain, jos kaikki poistetaan onnistuneesti. Muuten vapauta ja pidä uudelleen 5 s. Valitse Ei mitään ilman painiketta.",
   /* card.hardware */ "Laitteisto",
   /* card.hw_off */ "Ei mitään",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

@@ -478,7 +478,7 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     c.mqtt_user = user;
     c.mqtt_pass = pass;
     // Applies on the reboot below, like the broker itself: mqtt_ha.cpp resolves the base ONCE at
-    // bridge start and derives thirteen topics plus the HA node id from it, so there is nothing to
+    // bridge start and derives every topic root plus the HA node id from it, so there is nothing to
     // re-point live. The retained topics under the PREVIOUS base are deliberately NOT retracted —
     // the old base is gone by the time a new bridge could delete anything, and a board that no
     // longer owns a topic must not be the thing that deletes it (docs/HOME_ASSISTANT.md carries the
@@ -716,15 +716,22 @@ static esp_err_t set_diagnostics(httpd_req_t* req) {
     Config c = config();
     if (c.diagnostics_enabled == enabled)
         return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
+    const bool weather_was_publishable = c.diagnostics_enabled && c.weather_enabled;
     c.diagnostics_enabled = enabled;
     c.diagnostics_generation = diagnostics_next_generation(c.diagnostics_generation);
+    WeatherSourceChange weather_change(c.weather_enabled, enabled);
+    if (!weather_change)
+        return send_err(req, "503 Service Unavailable",
+                        "weather request still active; retry diagnostics change");
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    weather_change.commit();
 
     checkup_set_diagnostics(enabled, c.diagnostics_generation);
     history_checkup_reset();
     history_circulation_reset();
     mqtt_reference_reconfigure();
     mqtt_circulation_reconfigure();
+    if (weather_was_publishable && !enabled) mqtt_request_weather_cleanup();
     weather_forecast_reconfigure();
     diag_printf("diagnostics: %s (generation %lu)\n", enabled ? "enabled" : "disabled",
                 static_cast<unsigned long>(c.diagnostics_generation));
@@ -859,13 +866,19 @@ static esp_err_t set_hp(httpd_req_t* req) {
     if (reset_checkup && c.profile != "auto")
         c.x10a_identity_fp = logic::history_x10a_target_fingerprint(
             c.profile.c_str(), c.rx_pin, c.tx_pin, static_cast<char>(c.proto));
+    // Stage every HomeHub value needed after persistence while the handler may still report an OOM
+    // honestly. The post-save path below accepts only POD and is noexcept: a successful durable
+    // write can therefore never become a false 503 or lose predecessor cleanup to a Config copy.
+    const uint32_t modbus_target_fp = logic::history_homehub_target_fingerprint(
+        config_modbus_host(c).c_str(), static_cast<uint32_t>(c.mb_port),
+        static_cast<uint32_t>(c.mb_unit_id));
+    const bool modbus_enabled = config_modbus_enabled(c);
     // This route owns TWO independent durability domains. An explicit X10A statement requires all
     // the atomic link-cache entry; a HomeHub-only request succeeds with the service blob and treats the
     // unchanged X10A cache as best-effort maintenance. Mixed requests were rejected above, so a 500
     // can no longer hide a HomeHub blob that already landed before a link-key failure.
     if (!config_save(c, /*require_link=*/x10a_sent))
         return send_err(req, "500 Internal Server Error", "config write failed");
-    if (modbus_was_enabled && !config_modbus_enabled(c)) mqtt_request_modbus_cleanup();
     if (reset_checkup) {
         hp_poll_reconfigure();
         checkup_reset();
@@ -878,10 +891,14 @@ static esp_err_t set_hp(httpd_req_t* req) {
         }
     }
     if (reset_mb_history) {
-        history_modbus_reset();
+        history_modbus_reset(modbus_target_fp);
         // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
         // and re-resolves its address without touching the X10A poll engine above.
-        mb_reconfigure();
+        mb_reconfigure(modbus_enabled);
+        // Publish the tombstone only after generation, status and cache have crossed to the new
+        // identity. mqtt_task can then never consume this request and republish predecessor A from
+        // the same cycle before the HomeHub owner notices B/disabled.
+        if (modbus_was_enabled) mqtt_request_modbus_cleanup();
     }
     return http_send_json(req, "{\"ok\":true}");
 }
@@ -964,9 +981,12 @@ static esp_err_t set_ntp(httpd_req_t* req) {
     return ESP_OK;
 }
 
-// POST /set_weather {latitude, longitude}. Two empty strings disable weather traffic; otherwise both
-// strict decimal coordinates are required. Saving is local and non-blocking: the dedicated weather
-// task performs TLS/DNS/JSON work only after this response.
+// POST /set_weather {latitude, longitude[, refresh]}. Two empty strings disable weather traffic;
+// otherwise both strict decimal coordinates are required. Saving is local and non-blocking: the
+// dedicated weather task performs TLS/DNS/JSON work only after this response. `refresh:true` is a
+// deliberately narrow observation-only trigger: it is accepted only when the submitted location
+// exactly matches the enabled saved location, so release HIL can schedule a real weather TLS cycle
+// without changing or rewriting NVS.
 static esp_err_t set_weather(httpd_req_t* req) {
     char body[256];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
@@ -974,6 +994,12 @@ static esp_err_t set_weather(httpd_req_t* req) {
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     const std::string latitude = js(j, "latitude");
     const std::string longitude = js(j, "longitude");
+    cJSON*            refresh_item = cJSON_GetObjectItemCaseSensitive(j, "refresh");
+    if (refresh_item && !cJSON_IsBool(refresh_item)) {
+        cJSON_Delete(j);
+        return send_err(req, "400 Bad Request", "refresh must be boolean");
+    }
+    const bool refresh = cJSON_IsTrue(refresh_item);
     cJSON_Delete(j);
     const WeatherLocationParse location = weather_location_parse(latitude, longitude);
     if (!location.valid) {
@@ -985,15 +1011,36 @@ static esp_err_t set_weather(httpd_req_t* req) {
     }
     Config c = config();
     const bool weather_was_enabled = c.weather_enabled;
-    if (location.enabled == c.weather_enabled &&
-        location.latitude_e6 == c.weather_latitude_e6 &&
-        location.longitude_e6 == c.weather_longitude_e6)
-        return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
+    const bool unchanged           = location.enabled == c.weather_enabled &&
+                           location.latitude_e6 == c.weather_latitude_e6 &&
+                           location.longitude_e6 == c.weather_longitude_e6;
+    if (refresh) {
+        if (!unchanged || !location.enabled)
+            return send_err(req, "409 Conflict", "refresh requires the saved enabled location");
+        if (!c.diagnostics_enabled)
+            return send_err(req, "409 Conflict", "refresh requires diagnostics enabled");
+        uint64_t refresh_token = 0;
+        if (!weather_forecast_request_refresh(refresh_token))
+            return send_err(req, "503 Service Unavailable",
+                            "weather task unavailable or refresh already pending");
+        char response[160];
+        std::snprintf(response, sizeof(response),
+                      "{\"ok\":true,\"reboot\":false,\"saved\":false,"
+                      "\"refresh_requested\":true,\"refresh_token\":%llu}",
+                      static_cast<unsigned long long>(refresh_token));
+        return http_send_json(req, response);
+    }
+    if (unchanged) return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":false}");
     c.weather_enabled = location.enabled;
     c.weather_latitude_e6 = location.latitude_e6;
     c.weather_longitude_e6 = location.longitude_e6;
+    WeatherSourceChange weather_change(location.enabled, c.diagnostics_enabled);
+    if (!weather_change)
+        return send_err(req, "503 Service Unavailable",
+                        "weather request still active; retry location change");
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
-    if (weather_was_enabled && !location.enabled) mqtt_request_weather_cleanup();
+    weather_change.commit();
+    if (weather_was_enabled) mqtt_request_weather_cleanup();
     weather_forecast_reconfigure();
     return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":true}");
 }

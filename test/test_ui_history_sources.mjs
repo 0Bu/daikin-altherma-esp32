@@ -56,9 +56,13 @@ assert.match(firmwareHistory, /void history_record\([^)]*\) \{\s*if \(!s_mtx\) r
 assert.match(firmwareHistory,
   /void history_record_circulation\(\)[\s\S]*advance_raster_locked\(now_us, bucket\);[\s\S]*fold_circulation_locked\(circulation\);/,
   "the MQTT witness must own a lightweight recorder that advances the common raster without X10A");
-assert.match(mqtt,
-  /service_reference_frames\(ref_config\);[\s\S]{0,500}history_record_circulation\(\);[\s\S]{0,500}if \(gate\.publish_offline\)/,
-  "circulation history must tick on the subscriber path before every X10A publication gate");
+const referenceFramesAt = mqtt.indexOf("service_reference_frames(ref_config);");
+const circulationHistoryAt = mqtt.indexOf("history_record_circulation();", referenceFramesAt);
+const offlinePublishAt = mqtt.indexOf("if (gate.publish_offline)", circulationHistoryAt);
+const ordinaryPublishAt = mqtt.indexOf("if (gate.publish_cycle)", circulationHistoryAt);
+assert.ok(referenceFramesAt >= 0 && circulationHistoryAt > referenceFramesAt &&
+  offlinePublishAt > circulationHistoryAt && ordinaryPublishAt > offlinePublishAt,
+"circulation history must tick on the subscriber path before every X10A publication gate");
 
 const S = {
   status: { history: {

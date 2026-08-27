@@ -48,8 +48,8 @@ const patterns = [
     "Red, blinking very quickly — erase armed; release to abort.", "Rot, sehr schnell blinkend — Löschen vorgemerkt; Loslassen bricht ab.",
     "Blinking very quickly — erase armed; release to abort.", "Sehr schnell blinkend — Löschen vorgemerkt; Loslassen bricht ab."],
   ["Wiping", [255, 255, 255, 1, 500, 0, 0], "wiping",
-    "White, solid — erasing settings; do not disconnect power.", "Weiß, dauerhaft — Einstellungen werden gelöscht; Strom nicht trennen.",
-    "Solid after very rapid blinking — erasing settings; do not disconnect power.", "Dauerlicht nach sehr schnellem Blinken — Einstellungen werden gelöscht; Strom nicht trennen."],
+    "White, solid — factory reset/data erase in progress; do not disconnect power.", "Weiß, dauerhaft — Werksreset/Datenlöschung läuft; Strom nicht trennen.",
+    "Solid after very rapid blinking — factory reset/data erase in progress; do not disconnect power.", "Dauerlicht nach sehr schnellem Blinken — Werksreset/Datenlöschung läuft; Strom nicht trennen."],
 ];
 
 for (const [phase, expectedPattern, suffix, rgbEnglish, rgbGerman, gpioEnglish, gpioGerman] of patterns) {
@@ -63,6 +63,26 @@ for (const [phase, expectedPattern, suffix, rgbEnglish, rgbGerman, gpioEnglish, 
       `${phase} legend must not expose technical timing values`);
   }
 }
+const englishResetHint = I18N.en["board.hint"];
+for (const expected of [
+  /Permanently erases Wi-Fi\/all settings/,
+  /recorded history\/trends/,
+  /state durations/,
+  /raw core dump/,
+  /portal opens only after the full wipe succeeds/,
+  /release and hold again for 5 seconds/,
+]) assert.match(englishResetHint, expected,
+  `English factory-reset help must disclose: ${expected}`);
+const germanResetHint = I18N.de["board.hint"];
+for (const expected of [
+  /Löscht dauerhaft WLAN\/alle Einstellungen/,
+  /Historie\/Trends/,
+  /Zustandsdauern/,
+  /Roh-Core-Dump/,
+  /nur nach vollständig erfolgreichem Löschen/,
+  /loslassen und erneut 5 s halten/,
+]) assert.match(germanResetHint, expected,
+  `German factory-reset help must disclose: ${expected}`);
 assert.doesNotMatch(style, /led-(?:single-blink|double-flash)|\.led-swatch[^}]*animation/,
   "infobox status points must stay static; the adjacent wording describes the blink pattern");
 assert.doesNotMatch(html, /id="bdLedLegend|data-i18n="board\.hint"|data-i18n="env\.pins_hint"/,
@@ -187,9 +207,9 @@ assert.ok(ledSectionAt >= 0 && ledSectionAt < resetSectionAt && resetSectionAt <
 const ledSection = rendered.slice(ledSectionAt, resetSectionAt);
 const resetSection = rendered.slice(resetSectionAt, env3SectionAt);
 const env3Section = rendered.slice(env3SectionAt);
-assert.doesNotMatch(ledSection, /Reset-Taster 5 Sekunden|SDA = Datenleitung/,
+assert.doesNotMatch(ledSection, /Werksreset: Taster 5 s|SDA = Datenleitung/,
   "the LED section must not contain reset-button or ENV III help");
-assert.match(resetSection, /Reset-Taster 5 Sekunden/,
+assert.match(resetSection, /Werksreset: Taster 5 s/,
   "the reset instructions must stay with the reset-button assignment");
 assert.doesNotMatch(resetSection, /SDA = Datenleitung/,
   "the reset-button section must not contain ENV III wiring help");

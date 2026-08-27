@@ -6,14 +6,15 @@
 //
 // STATIC, never heap — history.hpp's and checkup.hpp's argument: the binding limit on this board is
 // the largest CONTIGUOUS free block, and a static array does not compete for it. The table is
-// DWELL_MAX_SLOTS * sizeof(DwellSlot) = 1152 B, against history's ~26.5 KB of rings and the checkup's
+// DWELL_MAX_SLOTS * sizeof(DwellSlot) = 1152 B, against history's ~30 KB of rings and the checkup's
 // 1224 B, so this is the cheapest of the three by a wide margin — which is the point: the same
 // question answered with a 24-hour ring would cost 576 B PER ROW.
 //
 // Not in NVS, for their reason too (a table rewritten every second is not something to put in the
 // partition holding the WiFi credentials), and "not in NVS" does not mean "gone at every reboot":
-// the table lives in .noinit DRAM, so any reset that KEPT POWER carries it across at no cost in RAM,
-// flash or a partition. A power cycle is unrecovered and says so on /status.history.dwell_persist.
+// the table lives in .noinit DRAM, so any reset that KEPT POWER carries it across at no cost in
+// RAM, flash or a partition. A power cycle is unrecovered and says so on
+// /status.history.dwell_persist.
 //
 // An explicit X10A re-detection onto a DIFFERENT unit empties the table: the slots are addressed by
 // (register page, byte offset, converter), and the same coordinates on another model are another

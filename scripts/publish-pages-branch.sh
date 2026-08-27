@@ -41,6 +41,18 @@ fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+record_published_oid() {
+    local oid="$1"
+    [[ "$oid" =~ ^[0-9a-f]{40}$ ]] || {
+        echo "publish: API returned an invalid commit id" >&2
+        return 1
+    }
+    if [ -n "${PUBLISH_OID_FILE:-}" ]; then
+        umask 077
+        printf '%s\n' "$oid" > "$PUBLISH_OID_FILE"
+    fi
+}
+
 remote_head() {
     local line
     line="$(git ls-remote --heads origin refs/heads/gh-pages)"
@@ -75,6 +87,7 @@ while [ "$attempt" -le "$PUSH_ATTEMPTS" ]; do
         # no-op only after GitHub itself confirms that the current tip is Verified.
         gh api "repos/$GITHUB_REPOSITORY/commits/$expected" > "$tmp/existing.json"
         node scripts/pages-commit-payload.mjs verify-rest "$tmp/existing.json" "$expected" >/dev/null
+        record_published_oid "$expected"
         echo "gh-pages: $msg (unchanged, verified $expected)"
         exit 0
     fi
@@ -92,6 +105,7 @@ while [ "$attempt" -le "$PUSH_ATTEMPTS" ]; do
     set -e
 
     if [ "$api_rc" -eq 0 ] && [ "$verify_rc" -eq 0 ]; then
+        record_published_oid "$new_oid"
         echo "gh-pages: $msg ($additions additions, $deletions deletions, verified $new_oid)"
         exit 0
     fi

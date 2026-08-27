@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -709,7 +709,7 @@ I18N.it = localeValues([
   /* board.led_rgb_bus_down */ "Rosso, doppio lampeggio — X10A scollegato.",
   /* board.led_rgb_mqtt_down */ "Arancione, lampeggiante — X10A connesso, MQTT disconnesso.",
   /* board.led_rgb_wipe_armed */ "Rosso, lampeggio molto rapido — cancellazione predisposta; rilasciare per annullare.",
-  /* board.led_rgb_wiping */ "Bianco, fisso — cancellazione delle impostazioni; non scollegare l'alimentazione.",
+  /* board.led_rgb_wiping */ "Bianco, fisso — ripristino/cancellazione in corso; non scollegare l'alimentazione.",
   /* board.led_gpio_off */ "Spento — nessuna modalità Wi-Fi attiva.",
   /* board.led_gpio_setup */ "Lampeggio lento — portale di configurazione attivo.",
   /* board.led_gpio_connecting */ "Lampeggio rapido — connessione al Wi-Fi.",
@@ -717,10 +717,10 @@ I18N.it = localeValues([
   /* board.led_gpio_bus_down */ "Doppio lampeggio — X10A scollegato.",
   /* board.led_gpio_mqtt_down */ "Lampeggio a velocità media — X10A connesso, MQTT disconnesso.",
   /* board.led_gpio_wipe_armed */ "Lampeggio molto rapido — cancellazione predisposta; rilasciare per annullare.",
-  /* board.led_gpio_wiping */ "Fisso dopo un lampeggio molto rapido — cancellazione delle impostazioni; non scollegare l'alimentazione.",
+  /* board.led_gpio_wiping */ "Fisso dopo un lampeggio rapido — ripristino/cancellazione in corso; non scollegare l'alimentazione.",
   /* board.ledinv */ "Attivo basso (il LED si accende quando il pin è portato a LOW)",
   /* board.btninv */ "Attivo basso (il pulsante collega il pin a GND)",
-  /* board.hint */ "Tenere premuto il pulsante di reset per 5 secondi per cancellare tutte le impostazioni e aprire il portale di configurazione. Selezionare “Nessuno” quando non è collegato alcun pulsante.",
+  /* board.hint */ "Ripristino di fabbrica: tenere premuto 5 s. Cancella definitivamente Wi-Fi/tutte le impostazioni, cronologia/tendenze, durate degli stati e core dump non elaborato. Il portale si apre solo dopo la cancellazione completa. Altrimenti rilasciare e premere altri 5 s. Scegliere “Nessuno” senza pulsante.",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Nessuno",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

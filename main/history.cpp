@@ -66,7 +66,7 @@ struct Trend {
 // nothing can be added to the trend set without landing inside the fingerprint that guards it.
 //
 // The samples are the SAME memory that is served to /history; there is no shadow copy. That is the
-// entire reason step 1 costs nothing: a duplicate would be another 28 KB of DRAM on a board whose
+// entire reason step 1 costs nothing: a duplicate would be another ~30 KB of DRAM on a board whose
 // measured low-water free heap is ~101 KB, which is a real price for a nice-to-have. What it costs
 // instead is that the region can never be zero-initialised by the startup code, which is precisely
 // the property being bought.
@@ -102,8 +102,8 @@ static_assert(ENV3_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 1728,
 // are whatever they were". history_start() then explicitly initialises them on any boot that does
 // not adopt them, so nothing here is ever read before it is written.
 //
-// Side effect worth stating because it is a real win rather than a rounding error: the flash image
-// SHRINKS by the size of the rings (~26.5 KB), since .data carried a copy of every zero.
+// The flash image also avoids carrying a same-size initialiser for rings that startup would
+// replace.
 union PersistStore {
     PersistedHistory v;
     PersistStore() {}      // deliberately leaves v untouched
@@ -161,8 +161,8 @@ inline bool value_tenths(const std::string& s, int& out) {
 
 // Copy a fixed string into one of the Trend's own buffers, always NUL-terminated. Returns whether
 // the bytes actually MOVED, which is what keeps the persistence seal cheap: the fold loop rewrites
-// every label once a second with the identical text, and re-sealing 28 KB for that would cost a CRC
-// per second forever to record nothing.
+// every label once a second with the identical text, and re-sealing ~30 KB for that would cost a
+// CRC per second forever to record nothing.
 inline bool copy_field(char* dst, size_t max, const char* src) {
     if (std::strncmp(dst, src, max - 1) == 0) return false;
     std::strncpy(dst, src, max - 1);
@@ -211,7 +211,7 @@ inline uint32_t persist_crc() {
     return config_crc32_final(crc);
 }
 
-// Called at the end of every record cycle, but only pays the ~28 KB CRC when a commit, a reset or a
+// Called at the end of every record cycle, but only pays the ~30 KB CRC when a commit, a reset or a
 // genuine label change actually moved a sealed byte — about once per five minutes per source rather
 // than five times a second.
 inline void persist_seal_locked() {
@@ -659,14 +659,13 @@ void history_reset_on_detect(uint32_t identity_fp) {
     }
 }
 
-void history_modbus_reset() {
+void history_modbus_reset(uint32_t target_fp) noexcept {
     // Same deferred-reset boundary as X10A: a HomeHub host/port/unit edit can race the old poll
     // cycle, so the Modbus task clears and reseeds its rings before folding the new identity. Bump
     // generation and arm that reset under the SAME mutex as the fold: an old cycle either completes
     // entirely before this boundary (and readers are then hidden by the pending flag), or observes
     // the new generation and is refused. It can never consume B's reset and fold A as B's first row.
     if (!s_mtx) return;
-    const uint32_t target_fp = current_mb_target_fp();
     // Flash service takes flash -> history while assembling records. Use the same order so a target
     // change cannot race an old scoped record into the journal or restore index.
     Lock flash_lk(s_flash_mtx);
@@ -1363,7 +1362,7 @@ esp_err_t flash_read_record(size_t slot, FlashJournalRecord& out) {
 // Pass 1 finds the newest committed record and each source's latest bucket. Pass 2 walks backwards
 // from that physical head and remembers only slots inside the source's last 24-hour window. The
 // restore index is 1.7 KiB and the bounded manifest cache stays below 1.2 KiB; retaining a second
-// 26 KiB matrix beside the live rings would defeat the static memory budget this feature was
+// ~30 KiB matrix beside the live rings would defeat the static memory budget this feature was
 // designed around.
 bool flash_journal_scan() {
     uint64_t highest_sequence = 0;
@@ -1873,8 +1872,8 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
 }
 
 // A normal five-minute close is already durable within the next poll tick. The shutdown handler is
-// only a bounded final drain for the race where OTA/reconfiguration requests esp_restart between the
-// close and that tick; it never rewrites a 26 KiB snapshot.
+// only a bounded final drain for the race where OTA/reconfiguration requests esp_restart between
+// the close and that tick; it never rewrites a ~30 KiB snapshot.
 void history_flash_save() {
     if (!s_flash_part || s_flash_shutdown_started || s_flash_forgotten.load()) return;
     s_flash_shutdown_started = true;

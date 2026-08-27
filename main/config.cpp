@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include <cstdlib>          // abort() — the fail-stop when the config mutex can't be created
+#include <type_traits>
 #include <vector>
 
 namespace daik {
@@ -448,7 +449,17 @@ bool config_save(const Config& requested, bool require_link) {
                     static_cast<unsigned>(CONFIG_BLOB_MAX_STR));
         return false;
     }
+    // Stage every allocation and the exact RAM successor before the first durable write. A
+    // bad_alloc after nvs_set_blob("cfg") would otherwise report an unchanged 503/500 to the HTTP
+    // caller even though consent/location was already persisted. Moving the staged Config into
+    // g_cfg below is statically required to be non-throwing.
     const std::vector<uint8_t> blob = config_blob_serialize(b);
+    const std::vector<uint8_t> link = link_blob_serialize(
+        LinkBlob{c.rx_pin, c.tx_pin, static_cast<char>(c.proto), c.x10a_identity_fp});
+    Config published           = c;
+    published.runtime_revision = next_revision(g_cfg.runtime_revision);
+    static_assert(std::is_nothrow_move_assignable_v<Config>,
+                  "post-NVS Config publication must not allocate or throw");
 
     const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());
     if (e != ESP_OK) {
@@ -460,8 +471,6 @@ bool config_save(const Config& requested, bool require_link) {
 
     // The link remains a separate ownership domain, but its four fields are ONE atomic entry. It is
     // written after the service blob so a cache failure never taints an unrelated credential save.
-    const std::vector<uint8_t> link = link_blob_serialize(
-        LinkBlob{c.rx_pin, c.tx_pin, static_cast<char>(c.proto), c.x10a_identity_fp});
     const esp_err_t link_err = nvs_set_blob("link", link.data(), link.size());
     const bool link_ok = link_err == ESP_OK;
     if (!link_ok)
@@ -473,7 +482,7 @@ bool config_save(const Config& requested, bool require_link) {
         // /set_hp changed none of its fields; for every other route that blob is the requested save.)
         return false;
     }
-    publish_locked(c);
+    g_cfg = std::move(published);
     return true;
 }
 

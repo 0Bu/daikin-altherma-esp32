@@ -3,13 +3,15 @@
 
 // X10A owns the outbound MQTT identity, not the broker connection. A board that has never received
 // an X10A reply may still connect WITHOUT the installation LWT and subscribe to its configured
-// reference-temperature topic, but it must not publish discovery, diagnostics, auxiliary-source
-// data or cleanup tombstones. The first X10A reply promotes that read-only session to the ordinary
-// LWT-bearing publisher. A later, CONFIRMED bus loss marks an already-active installation offline
-// once, then suppresses every ordinary publish until the bus returns; inbound subscriptions stay
-// alive. X10A occasionally loses a whole poll sweep, so the current-cycle bit alone is not outage
-// evidence. The monotonic age of the last answering sweep provides the debounce without hiding a
-// sustained cable/unit failure.
+// reference-temperature topic. It may emit only empty retained tombstones that reconstruct a
+// persisted source/consent cleanup or retract permanently retired discovery; it must not publish
+// current discovery, diagnostics or auxiliary-source data. The first X10A reply promotes that
+// read-only session to the ordinary LWT-bearing publisher. A later, CONFIRMED bus loss marks an
+// already-active installation offline once, then suppresses every ordinary publish until the bus
+// returns; inbound subscriptions and the same delete-only cleanup exception stay alive. X10A
+// occasionally loses a whole poll sweep, so the current-cycle bit alone is not outage evidence.
+// The monotonic age of the last answering sweep provides the debounce without hiding a sustained
+// cable/unit failure.
 
 namespace daik {
 
@@ -18,6 +20,24 @@ enum class MqttPublishGateState {
     Active,
     Paused,
 };
+
+// A retained auxiliary source has two independent facts during reconfiguration: the durable target
+// intent changes synchronously, while its worker may remain alive until the next task cycle.
+// Publish from the intent, never from task-liveness, or a disable can tombstone and then recreate
+// retained `{}` before the retiring worker observes its stop request. An enabled A-to-B cutover
+// deliberately publishes the new source's empty state after deleting A; it is configured even
+// before B answers.
+enum class RetainedSourceAction {
+    PublishCurrent,
+    DeleteRetained,
+    Idle,
+};
+
+inline constexpr RetainedSourceAction retained_source_action(bool target_enabled,
+                                                             bool retained_deleted) {
+    if (target_enabled) return RetainedSourceAction::PublishCurrent;
+    return retained_deleted ? RetainedSourceAction::Idle : RetainedSourceAction::DeleteRetained;
+}
 
 // The poll loop runs nominally once per second, but each sweep also spends time on the wire. Use
 // elapsed source age rather than a cycle counter so MQTT/TLS hold-offs cannot stretch or shorten the

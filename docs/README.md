@@ -256,10 +256,13 @@ User credentials + the atomic X10A link cache are persisted; the model is re-det
 | `board_set` | **Legacy migration input only.** Pre-v12 builds stored this bit without a concrete preset id. On upgrade, `true` plus an exact historical field match is migrated to the same board the old UI displayed; untouched defaults (`false`) remain unidentified. New saves store `board_user_set` and the stable preset id atomically in `cfg`. |
 | `boot_fails` | Boot-loop crash counter (`safe_mode.cpp`); increments on a crash-only boot, latches recovery mode past the threshold, cleared after a healthy uptime. Lives here so a factory reset wipes it too. |
 
-The whole namespace is what the **recovery button** erases (`nvs_erase_all`, `recovery_button.cpp`):
-hold the configured button for 5 s and the device drops every stored setting and reboots into the
-setup portal. It is the only config reset that does not require reaching the device over the
-network — the way back in when it has joined a network you can no longer get onto.
+The **recovery button** performs the complete privacy reset (`recovery_button.cpp`): hold the
+configured button for 5 s and the device erases this NVS namespace, the WiFi driver's persisted
+credentials, trend and dwell RAM, the flash history journal, and any raw core dump before rebooting
+into the setup portal. If one of those erases fails it stays up and reports an incomplete reset
+instead of handing old data to a new owner. It is the only config reset that does not require
+reaching the device over the network — the way back in when it has joined a network you can no longer
+get onto.
 
 Not persisted: the **hostname** is fixed at `daikin-altherma-esp32` and is also advertised as the
 DHCP vendor class (option 60) and mDNS HTTP product identity. The mDNS TXT record adds only `/` as
@@ -325,15 +328,20 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporte
                                    #           error?,error_code?,error_detail?,error_register?},
                                    #        # link diagnostics; read-only, no write API
                                    #        field is a command. Empty host disables polling/search.
-                                   #   history:{dt,persist,rows:[{id,label}]},  # rows with a 24 h trend;
+                                   #   history:{dt,persist,dwell_persist,rows:[{id,label}],
+                                   #        modbus_rows:[{id,label}],env3_rows:[{id,label}]},
+                                   #        # source-specific rows with a 24 h trend;
                                    #        id = the concept (what /history takes), label = how the
                                    #        detected profile spells it. Absent rows are omitted.
-                                   #        persist = how THIS boot's rings came to be: "accept"
+                                   #        persist = whether THIS boot adopted sealed `.noinit`
+                                   #        trend RAM: "accept"
                                    #        (adopted from .noinit DRAM across a reset that kept
                                    #        power) or why they started empty — "power_cycle",
                                    #        "wrong_catalog" after an update, "bad_crc", "no_record",
-                                   #        "wrong_version". A chart that emptied itself has a
-                                   #        stated cause instead of looking like a defect.
+                                   #        "wrong_version". Compatible flash buckets may be
+                                   #        spliced in later after clock sync even when persist is
+                                   #        not "accept". dwell_persist is the equivalent RAM-only
+                                   #        verdict for per-row state ages; it has no flash restore.
                                    #   health:{covered_s,persist,full_span,status,available,assessable,evaluated,
                                    #        checks:[{id,verdict,evidence,observed_s,required_s,…}]},
                                    #        # rolling X10A operating OBSERVATION, not a whole-plant
@@ -392,7 +400,7 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporte
                                    #   sys:{free_heap,min_free_heap,max_alloc,heap_restarts,
                                    #        mqtt_skipped,mqtt_quiesced,poll_skipped,reset_reason,
                                    #        safe_mode,safe_mode_cause,
-                                   #        stack_min_free_bytes:{httpd,poll,mqtt,modbus}},
+                                   #        stack_min_free_bytes:{httpd,poll,mqtt,modbus,weather}},
                                    #        # per-task stack headroom; null per task until sampled.
                                    #        # Here as well as on the MQTT heartbeat because every
                                    #        # publish is X10A-gated, so a board with a silent bus
@@ -437,28 +445,34 @@ GET  /values                       # decoded readings
                                    #   TLS work. If the owner remains active it returns 503 text/plain
                                    #   "network operation in progress" before any JSON byte; retry
                                    #   the complete read-only request later.
-GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sample first:
-                                   #   {id,label,dt,unit,t0,v[],held[[from,count],…]}
+GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sample first. Optional
+     [&source=x10a|modbus|env3]    # source defaults to the backwards-compatible `x10a` wire name:
+                                   #   {id,source,label,dt,unit[,t0][,b0],v[],held[[from,count],…]}
                                    #   unit = the ROW's own unit (never a hardcoded °C).
                                    #   v = TENTHS of that unit (the browser scales by 10) or null.
                                    #   held run-length-marks WHICH nulls were the outdoor unit
                                    #   RESTING rather than a failure to measure — pages 0x20/0x21
                                    #   keep answering with the last run's numbers while the
                                    #   compressor is off, so those samples are not recorded as
-                                   #   readings. t0 = wall-clock instant of sample 0, omitted when
-                                   #   the clock has never synced (the UI then shows an age).
-                                   #   Unknown id → 404. Trends are RAM: a reboot empties them.
-                                   #   ids: dhw_tank, leaving_water, return_water, water_pressure,
-                                   #   flow, pump_signal, circuit_pressure, comp_rps, eev,
-                                   #   outdoor_air, discharge, room_temp, inv_current, ct_l1,
-                                   #   ct_l2, ct_l3 — one per numeric value the dashboard drawing
-                                   #   shows, plus the electrical rows its estimated-kW pill is
-                                   #   computed from — and free_heap plus max_alloc, the BOARD's
-                                   #   own memory in KiB, which have no register and are always
-                                   #   present. During OTA this allocation-rich route returns the
+                                   #   readings. b0 is the monotonic 5-minute bucket of sample 0;
+                                   #   t0 is its wall-clock instant and is omitted until clock sync.
+                                   #   An id outside the selected source catalog → 404. A known
+                                   #   X10A id absent from the detected profile is instead omitted
+                                   #   from /status.history.rows and may return an empty series. The
+                                   #   default catalog has 32 rings: X10A-derived values/states plus
+                                   #   board memory and the external MQTT circulation witness. That
+                                   #   witness identifies its payload source as `mqtt`; `mqtt` is not
+                                   #   a separate accepted query value.
+                                   #   Modbus has 13 rings (11 paired concepts, Smart Grid and the
+                                   #   Modbus-only disinfection state); ENV III has 3. Ask
+                                   #   /status.history for the exact rows enabled on this device.
+                                   #   Compatible warm resets may adopt sealed `.noinit` rings;
+                                   #   after a successful journal scan and clock sync, completed
+                                   #   buckets also ride the upper-flash journal across ordinary
+                                   #   reboot, OTA section movement and later power loss. Before the
+                                   #   first eligible commit, flash cannot restore RAM-only samples. The
+                                   #   factory reset erases both media. During OTA this route returns the
                                    #   same early 503 as /values; retry the complete request later.
-                                   #   (a row the detected profile lacks is simply absent from
-                                   #   /status.history.rows — ask that, don't guess).
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
 GET  /diag[?verbose=0|1][?redact=1]
                                    # plain-text in-memory diag log (raw RX frames when verbose).
@@ -534,11 +548,22 @@ POST /set_circulation              # the exact mapping above + test_proof → pe
                                    #   forecast below is optional comparison evidence, so location
                                    #   disclosure is not a prerequisite. It records raw room error,
                                    #   not a requested LWT offset; no actuator exists.)
-POST /set_weather                  # { latitude, longitude } as strict decimal strings → persist +
-                                   #   wake the firmware weather task. Both empty disables weather
-                                   #   traffic; otherwise both are required. Fetching additionally
-                                   #   requires the diagnostics master. Open-Meteo HTTPS/JSON
-                                   #   work is asynchronous, never on the httpd worker.
+POST /set_weather                  # { latitude, longitude[, refresh:true] } as strict decimal
+                                   #   strings. Ordinary requests persist + wake the weather task;
+                                   #   both empty disables weather and otherwise both are required.
+                                   #   refresh:true is a non-persistent HIL trigger only for the
+                                   #   exact unchanged, already-enabled location: success returns
+                                   #   saved:false + refresh_requested:true + a non-zero
+                                   #   refresh_token, while changed/disabled
+                                   #   coordinates or diagnostics-off return 409; a missing weather
+                                   #   task (including safe mode) returns 503. A source save may also
+                                   #   return 503 if a running request cannot hand over within 4 s;
+                                   #   then config and status remain unchanged. Successful changes
+                                   #   clear old runtime/MQTT evidence before acknowledgement.
+                                   #   /status.weather_forecast exposes requested/started/completed/
+                                   #   success token witnesses; equality to this exact token plus a
+                                   #   success-counter increment proves this request's own commit.
+                                   #   Open-Meteo HTTPS/JSON work stays async.
 POST /set_syslog                   # { host, port } → validate port range, persist + reboot ("" host
                                    #   disables). DNS/reachability resolve async, shown in /status.syslog
 POST /set_ntp                      # { server } → persist + reboot, no request-path network probe (the
@@ -657,7 +682,11 @@ POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-cho
                                    #   the editable reg/offset/size/conv fields, sent only by the
                                    #   Query button. The button and normal UI polling pause while the
                                    #   single HTTP worker waits up to 3 s for the poll task.
-GET  /ota/check[?ms=<epoch>]       # accept a background check -> {ok,generation}; busy -> HTTP 503
+GET  /ota/check[?ms=<epoch>]       # accept a background check -> {ok,generation}; busy -> HTTP 503.
+                                   #   Release HIL may add the transient, generation-bound HTTPS pair
+                                   #   X-Daikin-HIL-Manifest-URL + X-Daikin-HIL-Firmware-Base-URL;
+                                   #   partial, invalid or >255-byte pairs are 400 and are unavailable
+                                   #   on the open setup AP. Signature/digest checks remain mandatory.
 POST /ota/update?after=<generation>&channel=<release|dev>&version=<version>&sha256=<64-hex>
                                    # atomically consume that exact completed check offer;
                                    # -> immediate successor {ok,generation}; stale/busy -> 503;
@@ -665,7 +694,12 @@ POST /ota/update?after=<generation>&channel=<release|dev>&version=<version>&sha2
 GET  /ota/status                   # { state, progress, message, busy, generation, available,
                                    #   available_sha256, available_channel, update_available,
                                    #   downgrade, channel, current, heap_min_free_bytes,
-                                   #   heap_min_largest_block_bytes }
+                                   #   heap_min_largest_block_bytes, ota_stack_min_free_bytes,
+                                   #   effective_manifest_url, effective_firmware_base_url,
+                                   #   image_state, rollback_pending }. Heap minima reset per
+                                   #   operation; the sampled OTA-stack minimum is retained per boot
+                                   #   and null until sampled. rollback_pending is null while
+                                   #   image_state is unknown, never an invented false.
 GET  /ota/changelog?after=<generation>
                                    # one-shot literal UTF-8 notes for that completed check; 204 =
                                    # no valid optional notes, 409 = already consumed/expired/replaced;
@@ -745,16 +779,20 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   constants (for example `smart_grid_operation_mode: 2`); only the web UI maps them to readable names. A short
   migration probe does the same for an old retained `<base>/state` value; an already-clean broker
   receives no publish on either retired topic.
-  The optional firmware weather input is mirrored independently, only while configured, as one
-  retained atomic evidence document on `<base>/weather/openmeteo/forecast`: forecast values,
+  The optional firmware weather input is mirrored independently, only while a location is saved
+  and diagnostics consent is enabled, as one retained atomic evidence document on
+  `<base>/weather/openmeteo/forecast`: forecast values,
   Open-Meteo/ICON provenance,
   fetch and horizon timestamps, `valid_until_unix_s`, and numeric `available`/`fresh` flags. No HA
-  Discovery entities are created for weather. Upgrade cleanup retracts the four configs published
-  by the earlier short-lived contract and deletes a retained `<base>/weather_forecast` predecessor
-  when it exists. The current document contains no coordinates. A failed refresh can preserve the last values for later
+  Discovery entities are created for weather. Connect-time and five-minute delete-only retirement
+  passes retract the four configs published by the earlier short-lived contract; a separate bounded
+  probe deletes a retained `<base>/weather_forecast` predecessor only when it exists. The current
+  document contains no coordinates. A failed refresh can preserve the last values for later
   analysis, but marks them unavailable so a historian can prove what was known without treating an
-  old forecast as current. Disabling Open-Meteo publishes no disabled document; a retained predecessor
-  is probe-deleted once when present, while an already-clean broker receives no publish on this topic.
+  old forecast as current. Disabling Open-Meteo or diagnostics consent publishes no disabled
+  document: the current topic receives an idempotent QoS-1 tombstone, reconstructed on every broker
+  connect so a reset cannot revive old evidence. The legacy predecessor probe remains conditional,
+  so an already-clean broker receives no publish on `<base>/weather_forecast`.
   MQTT is not required for the firmware to fetch or evaluate weather.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.

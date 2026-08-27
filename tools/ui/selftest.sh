@@ -102,7 +102,7 @@ esac
 tpl_body="$(printf '%s' "$tpl_line" | sed 's/\[ \]/[x]/; s/<short-sha>/abcdef123456/')"
 ui_head=abcdef1234567890abcdef1234567890abcdef12
 
-# This fixture changes main/www/js/settings.js, so all four conditional reviews apply beside the
+# This fixture changes main/www/js/settings.js, so all five conditional reviews apply beside the
 # three unconditional ones. The UI line comes from the real template above.
 cat > "$hook_tmp/body.md" <<EOF
 - [x] \`\$project-review\` clean — merge gate @ abcdef123456
@@ -112,6 +112,7 @@ cat > "$hook_tmp/body.md" <<EOF
 - [x] \`\$schematic-review\` clean — merge gate @ abcdef123456
 $tpl_body
 - [x] \`\$absence-review\` clean — merge gate @ abcdef123456
+- [x] \`\$user-docs-review\` clean — merge gate @ abcdef123456
 EOF
 printf 'main/www/js/settings.js\n' > "$hook_tmp/files.txt"
 
@@ -219,7 +220,7 @@ set -e
 # a gate means adding it here in the
 # same commit, which is the point: a gate whose template line nobody checks is a gate whose stamp
 # nobody can be sure is readable.
-expected_gate_keys=(project-review pr-hygiene-review heap-safety-review feature-docs domain-review schematic-review ui-use-case-review absence-review ui-gif)
+expected_gate_keys=(project-review pr-hygiene-review heap-safety-review feature-docs domain-review schematic-review ui-use-case-review absence-review diagnostic-evidence-review user-docs-review ui-gif)
 tpl_content="$(cat "$proj/.github/pull_request_template.md")"
 tpl_lines="$(printf '%s\n' "$tpl_content" | agent_gate_task_lines | grep -iE 'gate')"
 tpl_n=0

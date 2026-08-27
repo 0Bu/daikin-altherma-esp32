@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -709,7 +709,7 @@ I18N.de = localeValues([
   /* board.led_rgb_bus_down */ "Rot, Doppelblitz — X10A getrennt.",
   /* board.led_rgb_mqtt_down */ "Orange, blinkend — X10A verbunden, MQTT getrennt.",
   /* board.led_rgb_wipe_armed */ "Rot, sehr schnell blinkend — Löschen vorgemerkt; Loslassen bricht ab.",
-  /* board.led_rgb_wiping */ "Weiß, dauerhaft — Einstellungen werden gelöscht; Strom nicht trennen.",
+  /* board.led_rgb_wiping */ "Weiß, dauerhaft — Werksreset/Datenlöschung läuft; Strom nicht trennen.",
   /* board.led_gpio_off */ "Aus — kein WLAN-Modus aktiv.",
   /* board.led_gpio_setup */ "Langsam blinkend — Setup-Portal aktiv.",
   /* board.led_gpio_connecting */ "Schnell blinkend — WLAN wird verbunden.",
@@ -717,10 +717,10 @@ I18N.de = localeValues([
   /* board.led_gpio_bus_down */ "Doppelblitz — X10A getrennt.",
   /* board.led_gpio_mqtt_down */ "Mittelschnell blinkend — X10A verbunden, MQTT getrennt.",
   /* board.led_gpio_wipe_armed */ "Sehr schnell blinkend — Löschen vorgemerkt; Loslassen bricht ab.",
-  /* board.led_gpio_wiping */ "Dauerlicht nach sehr schnellem Blinken — Einstellungen werden gelöscht; Strom nicht trennen.",
+  /* board.led_gpio_wiping */ "Dauerlicht nach sehr schnellem Blinken — Werksreset/Datenlöschung läuft; Strom nicht trennen.",
   /* board.ledinv */ "Aktiv bei LOW — LED leuchtet bei niedrigem Pin-Pegel",
   /* board.btninv */ "Aktiv bei LOW — Taster zieht den Pin auf GND",
-  /* board.hint */ "Reset-Taster 5 Sekunden halten: Alle Einstellungen werden gelöscht und das Setup-Portal startet. Ohne angeschlossenen Taster „Keine“ wählen.",
+  /* board.hint */ "Werksreset: Taster 5 s halten. Löscht dauerhaft WLAN/alle Einstellungen, Historie/Trends, Zustandsdauern und Roh-Core-Dump. Portal nur nach vollständig erfolgreichem Löschen. Sonst loslassen und erneut 5 s halten. Ohne Taster „Keine“ wählen.",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Keine",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

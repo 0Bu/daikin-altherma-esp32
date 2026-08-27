@@ -31,6 +31,7 @@
 #include "hp_poll.hpp"
 #include "hp_modbus.hpp"
 #include "http_server.hpp"
+#include "http_deadline.hpp"
 #include "mqtt_ha.hpp"
 #include "net.hpp"
 #include "nvs_storage.hpp"
@@ -70,6 +71,11 @@ static void boot_sequence() {
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     daik::diag_log_init();
+    // One shared timer, static watchdog task and static synchronization set are initialized before
+    // any network/TLS task exists. Boot also primes the watchdog's lwIP thread semaphore. OTA and
+    // Weather fail closed if that absolute socket-deadline guard is not fully ready.
+    if (!daik::http_deadline_init())
+        daik::diag_printf("http deadline: unavailable; OTA and Weather downloads disabled\n");
     if (nvs_err != ESP_OK)               // now that the diag ring exists, record the degraded boot
         daik::diag_printf("nvs: init failed (%s) — running WITHOUT persistence this boot\n",
                           esp_err_to_name(nvs_err));
@@ -153,7 +159,8 @@ static void boot_sequence() {
         // source; no installation discovery/state/diagnostic payload is published.
         daik::hp_poll_start();           // X10A poll engine
         daik::mqtt_ha_start();           // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
-        daik::weather_forecast_start();  // direct Open-Meteo HTTPS/JSON fetch (no-op without location)
+        daik::weather_forecast_start();  // worker stays dormant without location + diagnostics
+                                         // consent
         // The HomeHub Modbus stack — a SECOND, INDEPENDENT source (docs/MODBUS_PROTOCOL.md), not an
         // alternative to the line above: both run, and neither notices the other failing. A saved
         // address is polled; after the one-shot startup decision above, an empty address

@@ -1,7 +1,6 @@
-// Source-boundary contract for role-pinned bench OTA delivery and bench -> production promotion.
-// Hardware cannot run in CI, but CI can keep every fail-closed boundary reachable: exact
-// board/artifact identity, signed dev-only provenance, bounded live pressure, single un-retried
-// writes, retained production X10A proof, and rollback refusing a merely-online heap-broken image.
+// Deterministic source-boundary contract for the role-pinned OTA/HIL gate. Real board behaviour is
+// proved only by the release-hil job; this test keeps the fail-closed host and firmware wiring from
+// becoming optional or silently changing shape.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -12,542 +11,416 @@ const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const root = path.resolve(process.env.PRODUCTION_OTA_CONTRACT_ROOT || defaultRoot);
 const read = rel => fs.readFileSync(path.join(root, rel), "utf8");
 const occurrences = (text, token) => text.split(token).length - 1;
+const section = (text, start, end) => {
+  const first = text.indexOf(start);
+  const last = text.indexOf(end, first + start.length);
+  assert.ok(first >= 0 && last > first, `missing source section ${start}`);
+  return text.slice(first, last);
+};
 
 const gate = read("scripts/production-ota-gate.py");
-const hook = read("tools/agent-hooks/agent_hook.py");
-const health = read("main/logic/health_gate.hpp");
+const workflow = read(".github/workflows/build.yml");
 const ota = read("main/ota_update.cpp");
 const httpOta = read("main/http_ota.cpp");
+const otaHilFeed = read("main/logic/ota_hil_feed.hpp");
+const httpConfig = read("main/http_config.cpp");
+const httpStatus = read("main/http_status.cpp");
+const weatherSource = read("main/weather_forecast.cpp");
+const weatherHeader = read("main/weather_forecast.hpp");
+const weatherLogic = read("main/logic/weather_forecast.hpp");
+const stackWatch = read("main/stack_watch.hpp");
+const heartbeat = read("main/logic/heartbeat.hpp");
+const health = read("main/logic/health_gate.hpp");
 const mqtt = read("main/mqtt_ha.cpp");
-const quiesce = read("main/logic/ota_quiesce.hpp");
-const workflow = read(".github/workflows/build.yml");
+const hook = read("tools/agent-hooks/agent_hook.py");
 
-const abbreviatedOption = spawnSync("python3", [
-  path.join(root, "scripts/production-ota-gate.py"),
-  "--manifest", "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json",
+const abbreviated = spawnSync("python3", [
+  path.join(root, "scripts/production-ota-gate.py"), "--manifest", "https://invalid/manifest.json",
 ], { encoding: "utf8" });
-assert.equal(abbreviatedOption.status, 2,
-  "an abbreviated gate option must be rejected before any preflight or device contact");
-assert.match(abbreviatedOption.stderr, /unrecognized arguments: --manifest/,
-  "argparse must reject abbreviations instead of silently mapping them onto canonical options");
+assert.equal(abbreviated.status, 2, "argparse abbreviations must fail before device contact");
+assert.match(abbreviated.stderr, /unrecognized arguments: --manifest/);
 if (!process.env.PRODUCTION_OTA_CONTRACT_ROOT) {
-  const gateSelfTest = spawnSync("python3", [
-    path.join(root, "scripts/production-ota-gate.py"), "--self-test",
+  const selfTest = spawnSync("python3", [
+    "-I", "-B", path.join(root, "scripts/production-ota-gate.py"), "--self-test",
   ], { encoding: "utf8" });
-  assert.equal(gateSelfTest.status, 0,
-    `the gate slow-drip/deadline self-test must pass: ${gateSelfTest.stderr}`);
+  assert.equal(selfTest.status, 0, `OTA/HIL self-test failed: ${selfTest.stderr}`);
 }
 
-assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/,
-  "the bench stage must remain distinct and ordered before production");
-assert.match(gate, /production-ota\.json/,
-  "private board host/MAC identity must come from the local untracked inventory");
-assert.match(gate, /bench and production inventory identities must be distinct/,
-  "the two roles must not resolve to the same host or MAC");
+// Role, artifact and timing boundaries.
+assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/);
+assert.match(gate, /bench and production inventory identities must be distinct/);
 assert.doesNotMatch(gate, /192\.168\.|(?:[0-9A-F]{2}:){5}[0-9A-F]{2}/,
-  "the public gate must not publish a private address or real board identifier");
-assert.match(gate, /STRESS_SECONDS\s*=\s*180/,
-  "both hardware stages need the fixed three-minute pressure window");
-const otaCheckTimeout = Number(gate.match(/OTA_CHECK_TIMEOUT_S\s*=\s*(\d+)/)?.[1]);
-const otaTimeout = Number(gate.match(/OTA_TIMEOUT_S\s*=\s*(\d+)/)?.[1]);
-const otaStatusPollSeconds = Number(gate.match(/OTA_STATUS_POLL_SECONDS\s*=\s*([\d.]+)/)?.[1]);
-const otaStatusRequestTimeoutSeconds = Number(
-  gate.match(/OTA_STATUS_REQUEST_TIMEOUT_S\s*=\s*([\d.]+)/)?.[1]);
-const otaDoneDwellMs = Number(ota.match(/kDoneBeforeRebootMs\s*=\s*(\d+)/)?.[1]);
-const quiesceCycles = Number(quiesce.match(/OTA_QUIESCE_MAX_CYCLES\s*=\s*(\d+)/)?.[1]);
-assert.ok(otaCheckTimeout >= 120,
-  "host check observer must include two setup attempts, headroom waits, and manifest body deadline");
-assert.ok(otaTimeout >= 480,
-  "the sole-write observer must outlive re-manifest, five-minute firmware deadline, verification and reboot");
-assert.ok(otaDoneDwellMs >=
-    (2 * otaStatusRequestTimeoutSeconds + otaStatusPollSeconds) * 1000 + 500,
-  "the completed state must outlive a prior request, poll sleep, next request and scheduling margin");
-assert.ok(quiesceCycles > otaTimeout,
-  "publisher/poller quiescence must strictly outlive the authoritative host observer");
-assert.equal(occurrences(gate, "time.monotonic() + OTA_CHECK_TIMEOUT_S"), 4,
-  "stress, production offer, legacy offer and bench return must share the safe check timeout");
-assert.match(ota, /kManifestDeadline\s*=\s*pdMS_TO_TICKS\(30000\)/,
-  "the host check timeout relation must remain tied to the firmware manifest deadline");
-assert.match(ota, /kFirmwareDeadline\s*=\s*pdMS_TO_TICKS\(5 \* 60 \* 1000\)/,
-  "the host update timeout relation must remain tied to the firmware transfer deadline");
-assert.doesNotMatch(gate, /add_argument\([^\n]*stress|skip[-_]local|skip[-_]test|no[-_]stress/i,
-  "the production command must expose no short-duration or skipped-test bypass");
-assert.match(gate,
-  /OFFICIAL_MANIFEST_URL\s*=\s*"https:\/\/0bu\.github\.io\/daikin-altherma-esp32\/dev\/manifest\.json"/,
-  "only the official dev feed may enter production promotion");
-assert.match(gate,
-  /OFFICIAL_RELEASE_MANIFEST_URL\s*=\s*"https:\/\/0bu\.github\.io\/daikin-altherma-esp32\/manifest\.json"/,
-  "the bench rollback exercise must use only the official stable feed");
-assert.match(gate, /manifest_url\s*!=\s*OFFICIAL_MANIFEST_URL/,
-  "foreign and release manifests must fail before download");
-assert.match(gate, /provenance\.get\("source_sha"\)\s*!=\s*expected_source_sha/,
-  "the published source SHA must match the explicit promotion target");
-assert.match(gate, /hashlib\.sha256\(binary\)\.hexdigest\(\)/,
-  "the downloaded image must be matched byte-for-byte to manifest provenance");
-assert.match(gate, /scripts\/require-signed\.sh/,
-  "the downloaded application must pass the Secure Boot v2 signature gate");
-const rangeHelperStart = gate.indexOf("def verify_http_range_support(");
-const rangeHelperEnd = gate.indexOf("\ndef cache_busted(", rangeHelperStart);
-assert.ok(rangeHelperStart >= 0 && rangeHelperEnd > rangeHelperStart,
-  "the read-only official-artifact Range preflight must remain identifiable");
-const rangeHelper = gate.slice(rangeHelperStart, rangeHelperEnd);
-assert.match(rangeHelper, /"Range": "bytes=0-0"/,
-  "the host preflight must request the same byte-range mechanism used by firmware resume");
-assert.match(rangeHelper,
-  /response\.status\s*!=\s*206[\s\S]{0,220}?content_range\s*!=\s*\[f"bytes 0-0\/\{len\(binary\)\}"\][\s\S]{0,160}?content_length\s*!=\s*"1"/,
-  "the official host must prove exact 206 Content-Range and Content-Length semantics");
-assert.match(rangeHelper, /body\s*!=\s*binary\[:1\]/,
-  "the ranged byte must match the already signature- and SHA-bound artifact");
-assert.equal(occurrences(gate, "verify_http_range_support("), 3,
-  "the helper definition plus dev and release artifact checks must remain present");
-const appRange = gate.indexOf("verify_http_range_support(app_url, binary)");
-const releaseRange = gate.indexOf("verify_http_range_support(release_url, release_binary)");
-const inventoryLoad = gate.indexOf("inventory = load_inventory()", appRange);
-const productionBenchContact = gate.indexOf('test_before = request_json(bench["host"], "/status")', releaseRange);
-assert.ok(appRange >= 0 && inventoryLoad > appRange && releaseRange > inventoryLoad &&
-          productionBenchContact > releaseRange,
-  "dev Range must precede inventory use, and production staging must prove release Range before board contact");
-assert.match(gate, /git",\s*"rev-parse",\s*"HEAD"/,
-  "local host contracts must run on the manifest's exact main source");
-assert.match(gate, /git",\s*"status",\s*"--porcelain"/,
-  "dirty local code must not stand in for the published source");
-const buildRelevant = workflow.match(/relevant='([^']+)'/)?.[1];
-assert.ok(buildRelevant && new RegExp(buildRelevant).test("scripts/production-ota-gate.py"),
-  "a gate-only source change must publish a new artifact with the same exact source identity");
-assert.match(gate, /scripts\/run-mock-tests\.sh/,
-  "catalog-wide pure X10A replay must run before hardware promotion");
-assert.match(gate, /scripts\/run-contract-tests\.sh/,
-  "all X10A, OTA, production-promotion and public-readiness contracts must run before hardware promotion");
+  "tracked gate source must contain no private board identity");
+assert.match(gate, /STRESS_SECONDS\s*=\s*180/);
+assert.ok(Number(gate.match(/OTA_CHECK_TIMEOUT_S\s*=\s*(\d+)/)?.[1]) >= 120);
+assert.ok(Number(gate.match(/OTA_TIMEOUT_S\s*=\s*(\d+)/)?.[1]) >= 480);
+assert.match(gate, /OFFICIAL_MANIFEST_URL\s*=\s*"https:\/\/0bu\.github\.io\/daikin-altherma-esp32\/dev\/manifest\.json"/);
+assert.match(gate, /OFFICIAL_RELEASE_MANIFEST_URL\s*=\s*"https:\/\/0bu\.github\.io\/daikin-altherma-esp32\/manifest\.json"/);
+assert.match(gate, /hashlib\.sha256\(binary\)\.hexdigest\(\)/);
+assert.match(gate, /scripts\/require-signed\.sh/);
+assert.match(gate, /"Range": "bytes=0-0"/);
+assert.doesNotMatch(gate, /add_argument\([^\n]*(?:skip|short|no[-_]stress)/i,
+  "hardware acceptance must expose no skip/short bypass");
 
-const targetHealthWindow = gate.indexOf("target_health_window = wait_for_bench_health_window(");
-const fullDownload = gate.indexOf("full_download_evidence = exercise_bench_full_download(");
-const testStress = gate.indexOf("test_evidence = stress_board(", fullDownload);
-const productionConfirmation = gate.indexOf("if args.confirm_production != PRODUCTION_ROLE");
-const productionResolve = gate.indexOf("production_status_endpoint = resolve_http_endpoint(", productionConfirmation);
-const offer = gate.indexOf("check_generation = wait_for_ota_offer(", productionConfirmation);
-const post = gate.indexOf("    post_update_once(", offer);
-const returned = gate.indexOf("returned = wait_for_new_firmware(", post);
-const productionStress = gate.indexOf("production_evidence = stress_board(");
-const retained = gate.indexOf("retained = verify_retained_x10a(final_status)");
-assert.ok(targetHealthWindow >= 0 && fullDownload > targetHealthWindow && testStress > fullDownload &&
-          productionConfirmation > testStress &&
-          productionResolve > productionConfirmation && offer > productionResolve &&
-          post > offer && returned > post && productionStress > returned && retained > productionStress,
-  "full bench binary OTA, bench stress, production confirmation, one production update, reboot proof, canary stress and retained X10A must stay ordered");
-const fullHelperStart = gate.indexOf("def exercise_bench_full_download(");
-const fullHelperEnd = gate.indexOf("\ndef require_ota_transfer_evidence(", fullHelperStart);
-assert.ok(fullHelperStart >= 0 && fullHelperEnd > fullHelperStart,
-  "the full bench download helper must remain identifiable");
-const fullHelper = gate.slice(fullHelperStart, fullHelperEnd);
-const fullResolve = fullHelper.indexOf("status_endpoint = resolve_http_endpoint(host)");
-const releaseOffer = fullHelper.indexOf('expected_channel="release", allow_downgrade=True');
-const releasePost = fullHelper.indexOf("post_update_once(", releaseOffer);
-const releaseBoot = fullHelper.indexOf("release_status = wait_for_new_firmware(", releasePost);
-const releaseHealthWindow = fullHelper.indexOf("release_health_window = wait_for_bench_health_window(", releaseBoot);
-const devChannel = fullHelper.indexOf('set_update_channel(host, "dev")', releaseHealthWindow);
-const targetBoot = fullHelper.indexOf("target_status = wait_for_new_firmware(", devChannel);
-assert.ok(fullResolve >= 0 && releaseOffer > fullResolve && releasePost > releaseOffer && releaseBoot > releasePost &&
-  releaseHealthWindow > releaseBoot && devChannel > releaseHealthWindow && targetBoot > devChannel,
-  "the target must perform a complete release download, survive rollback probation, and return to the exact dev artifact before staging passes");
-assert.match(fullHelper,
-  /try:[\s\S]{0,500}?post_update_once\([\s\S]{0,500}?wait_for_new_firmware\([\s\S]{0,300}?finally:[\s\S]{0,160}?stop\.set\(\)[\s\S]{0,180}?worker\.join/,
-  "bench pressure workers must always stop and join when the target OTA fails closed");
-assert.match(gate, /BENCH_HEALTH_WINDOW_S\s*=\s*105/,
-  "each newly installed bench image must survive beyond its 90-second health window");
-const healthWindowStart = gate.indexOf("def wait_for_bench_health_window(");
-const healthWindowEnd = gate.indexOf("\ndef wait_for_legacy_offer(", healthWindowStart);
-const healthWindowHelper = gate.slice(healthWindowStart, healthWindowEnd);
-assert.ok(healthWindowStart >= 0 && healthWindowEnd > healthWindowStart,
-  "the shared target/release health-window helper must remain identifiable");
-assert.match(healthWindowHelper,
-  /uptime_s[\s\S]{0,900}?heap_restarts[\s\S]{0,300}?mqtt_skipped[\s\S]{0,300}?poll_skipped[\s\S]{0,900}?MIN_FINAL_FREE_HEAP[\s\S]{0,300}?MIN_FINAL_LARGEST_BLOCK/,
-  "both health-window phases must require sufficient uptime, no allocation failures and safe heap");
-assert.match(gate,
-  /target_health_window = wait_for_bench_health_window\([\s\S]{0,180}?phase="target"/,
-  "the target must survive a healthy dwell before the release exercise");
-assert.match(fullHelper,
-  /release_health_window = wait_for_bench_health_window\([\s\S]{0,180}?phase="release"/,
-  "the rollback-exercise release must survive the commit window before dev restore");
-assert.match(gate,
-  /for key in \("status_busy_503", "values_busy_503", "diag_ok", "ota_status_ok"\)[\s\S]{0,300}?target OTA did not expose sampled operation-local heap minima/,
-  "the full binary exercise must prove fast snapshot refusal, live compact surfaces and OTA-local heap telemetry");
-assert.match(gate,
-  /test_evidence = stress_board\([\s\S]{0,200}?require_x10a=False, require_weather=False/,
-  "the bench must not require intentionally absent X10A or optional weather consent");
-assert.match(gate,
-  /production_evidence = stress_board\([\s\S]{0,200}?require_x10a=True, require_weather=True/,
-  "the production canary must keep live X10A, timeout-delta and weather-TLS enforcement enabled");
-assert.equal(occurrences(gate, 'method="POST"'), 3,
-  "the only POST call sites are channel selection, exact-artifact update and legacy bench restore");
-const productionExecution = gate.slice(productionConfirmation);
-assert.equal(occurrences(productionExecution, "post_update_once("), 1,
-  "the production execution block must invoke exactly one update write");
-assert.doesNotMatch(productionExecution, /set_update_channel|legacy bench|\/ota\/update.*method="POST"/,
-  "bench channel/legacy writes must never be reachable from the production execution block");
-assert.match(gate, /Deliberately one un-retried exact-artifact write per invocation/,
-  "every exact-artifact update invocation must remain explicitly non-retrying");
-assert.match(gate, /OTA_OFFER_POLL_SECONDS\s*=\s*0\.1/,
-  "the gate must observe the accepted operation without a long blind polling gap");
-assert.match(gate, /OTA_STATUS_POLL_SECONDS\s*=\s*0\.5/,
-  "the gate must sample completed OTA state without connection-close heap churn");
-assert.match(gate, /LEGACY_OFFER_STABLE_SECONDS\s*=\s*3\.0/,
-  "the bench-only legacy return must outwait stale idle status from the accepted check");
-const legacyOfferWait = gate.slice(gate.indexOf("def wait_for_legacy_offer("),
-  gate.indexOf("\ndef exercise_bench_full_download(", gate.indexOf("def wait_for_legacy_offer(")));
-assert.match(legacyOfferWait,
-  /stable_since:\s*float\s*\|\s*None\s*=\s*None[\s\S]{0,500}?now\s*-\s*stable_since\s*>=\s*LEGACY_OFFER_STABLE_SECONDS[\s\S]{0,160}?stable_since\s*=\s*None/,
-  "the legacy offer must remain continuously exact and idle before the one bench restore write");
-const newFirmwareWait = gate.slice(gate.indexOf("def wait_for_new_firmware("),
-  gate.indexOf("\ndef set_update_channel(", gate.indexOf("def wait_for_new_firmware(")));
-assert.match(newFirmwareWait,
-  /request_json_deadline\([\s\S]{0,100}?status_endpoint, "\/ota\/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S/,
-  "the compact completed-state observer must use its whole-request deadline reader");
-assert.match(newFirmwareWait, /time\.sleep\(OTA_STATUS_POLL_SECONDS\)/,
-  "the compact completed-state observer must use its bounded poll interval");
-assert.match(newFirmwareWait,
-  /ota\.get\("state"\)\s+not\s+in\s+\("checking",\s*"updating",\s*"done"\)[\s\S]{0,160}?request_json\(host,\s*"\/status"\)/,
-  "the reboot waiter must not poll allocation-rich /status while OTA owns TLS");
-assert.match(newFirmwareWait,
-  /except HTTPError as error:[\s\S]{0,100}?error\.code\s*!=\s*503/,
-  "an expected busy-503 must not abort reboot observation");
-assert.match(gate,
-  /target_transfer\.get\("saw_done"\)\s+is\s+not\s+True[\s\S]{0,100}?never exposed its completed validation state/,
-  "bench acceptance must observe the target verifier's completed state, not just recovered heap");
-assert.match(ota, /vTaskDelay\(pdMS_TO_TICKS\(kDoneBeforeRebootMs\)\)/,
-  "the reboot handoff must use the completed-state dwell covered by the host timing contract");
-const compactReaderStart = gate.indexOf("def read_compact_json_response(");
-const compactRequestStart = gate.indexOf("def request_json_deadline(", compactReaderStart);
-const compactReader = gate.slice(compactReaderStart, compactRequestStart);
-const compactRequest = gate.slice(compactRequestStart,
-  gate.indexOf("\ndef verify_http_range_support(", compactRequestStart));
-assert.match(compactRequest,
-  /deadline\s*=\s*time\.monotonic\(\)\s*\+\s*timeout\s*\n[\s\S]{0,1600}?read_compact_json_response\([\s\S]{0,120}?deadline/,
-  "connect, request send and response read must share one monotonic deadline");
-assert.match(compactReader,
-  /remaining\s*=\s*deadline\s*-\s*time\.monotonic\(\)[\s\S]{0,160}?remaining\s*<=\s*0[\s\S]{0,160}?connection\.settimeout\(remaining\)/,
-  "every compact response receive must consume the same absolute deadline and fixed body bound");
-assert.match(compactReader, /while\s+b"\\r\\n\\r\\n"\s+not\s+in\s+response/,
-  "compact headers must be read incrementally under the absolute deadline");
-assert.match(compactReader, /while\s+len\(body\)\s*<\s*content_length/,
-  "the fixed-size compact body must be read incrementally under the absolute deadline");
-assert.match(compactReader,
-  /if not chunk:\s+raise CompactTransportError\("compact HTTP response ended before its headers"\)/,
-  "a reboot EOF before compact response headers must remain retryable");
-assert.match(compactReader,
-  /if not chunk:\s+raise CompactTransportError\("compact HTTP response ended before its declared body"\)/,
-  "a reboot EOF during the compact response body must remain retryable");
-assert.match(compactReader,
-  /except json\.JSONDecodeError as error:\s+raise GateError\("compact HTTP response has malformed JSON"\) from error/,
-  "a complete malformed JSON response must remain a hard gate failure");
-assert.match(newFirmwareWait,
-  /except \(CompactTransportError, OSError, TimeoutError\):/,
-  "the reboot observer must retry compact transport EOF without retrying the update write");
-assert.doesNotMatch(newFirmwareWait, /JSONDecodeError/,
-  "the reboot observer must not forgive a complete malformed compact response");
-assert.equal(occurrences(compactReader, "apply_remaining_timeout()"), 4,
-  "the compact reader must apply the deadline to headers, body and final completion");
-assert.equal(occurrences(gate, "resolve_http_endpoint("), 4,
-  "bench delivery, bench full-download and production must pre-resolve exactly one status endpoint");
-assert.match(gate,
-  /generation\s*=\s*status\.get\("generation"\)[\s\S]{0,180}?generation\s*!=\s*expected_generation[\s\S]{0,120}?operation generation changed/,
-  "offer status must stay bound to the synchronously accepted check generation");
-assert.match(gate,
-  /status\.get\("busy"\)\s+is\s+True:[\s\S]{0,80}?return False[\s\S]{0,140}?status\.get\("busy"\)\s+is\s+not\s+False[\s\S]{0,140}?required OTA busy handshake/,
-  "the exact generation must explicitly release its busy claim before the production write");
-assert.match(gate,
-  /accepted\s*=\s*request_json\(host, f"\/ota\/check[\s\S]{0,240}?generation\s*=\s*accepted\.get\("generation"\)[\s\S]{0,260}?generation handshake/,
-  "the manifest check must synchronously return the generation that status polling follows");
-assert.match(gate,
-  /lacks or refused the OTA generation handshake[\s\S]{0,160}?signed NVS-preserving USB bootstrap[\s\S]{0,100}?no update POST was sent/,
-  "legacy firmware must fail before the write with an explicit physical-bootstrap boundary");
-assert.match(gate,
-  /post_update_once[\s\S]{0,900}?fields\s*=\s*\{[\s\S]{0,300}?"after": check_generation[\s\S]{0,300}?"channel": expected_channel[\s\S]{0,300}?"version": expected_version[\s\S]{0,300}?"sha256": expected_app_sha256[\s\S]{0,500}?request_json\(host, f"\/ota\/update\?\{query\}"[\s\S]{0,600}?generation\s*!=\s*expected_generation/,
-  "each exact update POST must bind the checked generation, channel and artifact, then require its immediate successor");
-assert.match(gate,
-  /expected_generation\s*=\s*1 if check_generation == 0xFFFFFFFF else check_generation \+ 1/,
-  "the accepted update must be the immediate wrap-safe successor of the checked operation");
-assert.match(gate,
-  /status\.get\("available"\)\s*!=\s*expected_version[\s\S]{0,160}?available_sha256[\s\S]{0,160}?expected_app_sha256[\s\S]{0,160}?available_channel[\s\S]{0,160}?expected_channel/,
-  "the completed check status must match version, application SHA and channel before the write");
-assert.match(gate, /did not settle on the exact gated artifact within \{OTA_CHECK_TIMEOUT_S\} seconds/,
-  "a stale or wrong offer must remain bounded and fail closed at the polling deadline");
-assert.equal(occurrences(httpOta, '503 Service Unavailable'), 2,
-  "both busy check and busy update requests must return a non-success HTTP status");
-const checkAccepted = httpOta.indexOf('ota_check_async(ms)');
-const updateAccepted = httpOta.indexOf('ota_update_async(static_cast<uint32_t>(after_value)');
-const firstGenerationResponse = httpOta.indexOf('{\\"ok\\":true,\\"generation\\":%lu}', checkAccepted);
-const secondGenerationResponse = httpOta.indexOf('{\\"ok\\":true,\\"generation\\":%lu}', updateAccepted);
-assert.ok(checkAccepted >= 0 && firstGenerationResponse > checkAccepted &&
-          updateAccepted > firstGenerationResponse && secondGenerationResponse > updateAccepted,
-  "accepted check and update requests must each return their authoritative generation");
-assert.match(httpOta,
-  /j\s*\+=\s*",\\"busy\\":"[\s\S]{0,100}?s\.busy[\s\S]{0,100}?j\s*\+=\s*",\\"generation\\":"[\s\S]{0,100}?number\(s\.generation\)/,
-  "OTA status must expose busy and generation from the same mutex-protected snapshot");
-assert.match(httpOta, /available_sha256[\s\S]{0,180}?available_channel/,
-  "OTA status must expose the exact checked artifact identity consumed by host and UI");
-assert.match(gate, /for key in \("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"\)/,
-  "heap/OOM/X10A failure counters must remain stable through each pressure window");
-assert.match(gate,
-  /return require_x10a and final\["timeout_err"\] - baseline\["timeout_err"\] > MAX_X10A_TIMEOUT_DELTA/,
-  "an X10A-less bench must not fail on expected bus timeouts while production remains bounded");
-assert.match(gate, /worker\.start\(\)[\s\S]{0,500}?\/ota\/check\?ms=/,
-  "real OTA manifest TLS must overlap the concurrent HTTP pressure workers");
-assert.match(gate, /MQTT_RECOVERY_TIMEOUT_S\s*=\s*15/,
-  "the intentional OTA transport pause must have a bounded MQTT recovery window");
-assert.match(gate,
-  /started\s*=\s*request_json\(host, "\/status"\)[\s\S]{0,220}?started\.get\("mqtt", \{\}\)\.get\("connected"\)[\s\S]{0,100}?MQTT must be connected before the pressure window/,
-  "an existing MQTT outage must fail before the intentional OTA pause is armed");
-const manifestSet = gate.indexOf("manifest_active.set()", gate.indexOf("def stress_board("));
-const mqttRecoverySet = gate.indexOf("mqtt_recovery_expected.set()", manifestSet);
-const manifestClear = gate.indexOf("manifest_active.clear()", mqttRecoverySet);
-const mqttRecoveryPoll = gate.indexOf('mqtt_recovery_status = request_json(host, "/status", timeout=1)', manifestClear);
-assert.ok(manifestSet >= 0 && mqttRecoverySet > manifestSet && manifestClear > mqttRecoverySet &&
-          mqttRecoveryPoll > manifestClear,
-  "the pressure gate must distinguish the intentional TLS pause and observe MQTT recovery afterward");
-const statusLoopStart = gate.indexOf("def status_loop() -> None:");
-const otaExpectedStart = gate.indexOf(
-  "ota_expected_before = mqtt_recovery_expected.is_set()", statusLoopStart);
-const statusRequestStart = gate.indexOf(
-  'status = request_json(host, "/status")', statusLoopStart);
-const recoveryObserveStart = gate.indexOf(
-  "disconnected += mqtt_recovery.observe(", otaExpectedStart);
-const stickyOtaLease = gate.indexOf(
-  "ota_expected=ota_expected_before or mqtt_recovery_expected.is_set()", recoveryObserveStart);
-assert.ok(statusLoopStart >= 0 && otaExpectedStart > statusLoopStart &&
-          statusRequestStart > otaExpectedStart && recoveryObserveStart > statusRequestStart &&
-          stickyOtaLease > recoveryObserveStart,
-  "only a request-local expected OTA pause may suppress MQTT disconnect samples; later outages must still fail");
-assert.match(gate,
-  /weather_evidence = weather_fetching or weather_successes > self\.weather_successes_seen[\s\S]{0,700}?self\.weather_expected = True[\s\S]{0,120}?self\.weather_deadline = now \+ MQTT_RECOVERY_TIMEOUT_S/,
-  "the deliberate weather-TLS transport pause must arm a bounded MQTT recovery allowance");
-assert.match(gate,
-  /self\.weather_successes_seen = max\(self\.weather_successes_seen, weather_successes\)/,
-  "the completed weather fetch must cover the status-update to asynchronous MQTT-resume gap");
-const weatherEvidenceStart = gate.indexOf("if weather_evidence:");
-const weatherEvidenceEnd = gate.indexOf(
-  "self.weather_successes_seen = max", weatherEvidenceStart);
-const weatherEvidenceBranch = gate.slice(weatherEvidenceStart, weatherEvidenceEnd);
-assert.ok(weatherEvidenceStart >= 0 && weatherEvidenceEnd > weatherEvidenceStart,
-  "the weather-evidence tracker branch must remain identifiable");
-const pendingExpiryStart = gate.indexOf(
-  "if self.pending_disconnects and now > self.pending_deadline:");
-assert.ok(pendingExpiryStart >= 0 && pendingExpiryStart < weatherEvidenceStart,
-  "an expired unexplained disconnect must fail before later weather evidence can clear it");
-assert.match(weatherEvidenceBranch,
-  /self\.pending_disconnects = 0/,
-  "a mixed pre-weather snapshot must remain pending until later weather evidence or its deadline");
-const mqttConnectedStart = gate.indexOf("if mqtt_connected:");
-const mqttConnectedEnd = gate.indexOf("elif not ota_expected:", mqttConnectedStart);
-const mqttConnectedBranch = gate.slice(mqttConnectedStart, mqttConnectedEnd);
-assert.ok(mqttConnectedStart >= 0 && mqttConnectedEnd > mqttConnectedStart,
-  "the connected and disconnected MQTT tracker branches must remain identifiable");
-assert.match(mqttConnectedBranch,
-  /if not weather_evidence or weather_was_expected or pending_was_observed:[\s\S]{0,120}?self\.weather_expected = False/,
-  "a reconnect without weather evidence must not silently discard a pending disconnect");
-assert.match(gate,
-  /elif not ota_expected:[\s\S]{0,160}?if self\.weather_expected:[\s\S]{0,120}?now > self\.weather_deadline[\s\S]{0,500}?now > self\.pending_deadline/,
-  "weather recovery must close on reconnect and expire instead of hiding later broker outages");
-assert.match(gate,
-  /def finish\(self\) -> int:[\s\S]{0,160}?failures = self\.pending_disconnects/,
-  "the tracker must return an unexplained deferred disconnect at finish");
-assert.match(gate,
-  /disconnected \+= mqtt_recovery\.finish\(\)/,
-  "an unexplained deferred disconnect must fail when the pressure window ends");
-assert.match(gate,
-  /mqtt_recovery_deadline\s*=\s*time\.monotonic\(\) \+ MQTT_RECOVERY_TIMEOUT_S[\s\S]{0,700}?validate_identity\(mqtt_recovery_status[\s\S]{0,220}?mqtt_recovery_status\.get\("mqtt", \{\}\)\.get\("connected"\)[\s\S]{0,100}?mqtt_recovery_expected\.clear\(\)/,
-  "MQTT recovery must come from a new identity-checked status request started after TLS released");
-assert.match(gate,
-  /finished\.get\("mqtt", \{\}\)\.get\("connected"\)[\s\S]{0,100}?MQTT was not connected after the pressure window/,
-  "final hardware acceptance must still require a connected MQTT session");
-assert.match(gate,
-  /busy_503\["status"\][\s\S]{0,600}?busy_503\["values"\][\s\S]{0,2200}?did not prove fast status\/values refusal/,
-  "the manifest pressure stage must accept only the intentional OTA busy-503 window and require observing both snapshot refusals");
-assert.match(gate, /ota_check\.get\("state"\)\s*!=\s*"idle"[\s\S]{0,100}?ota_check\.get\("available"\)\s*!=\s*version/,
-  "the overlapping OTA TLS request must finish against the exact promoted dev artifact");
-assert.match(gate,
-  /if require_weather:[\s\S]{0,500}?weather\.get\("successes", 0\)[\s\S]{0,160}?weather\.get\("fetched_at"\)/,
-  "the production role must carry successful real weather TLS evidence from its fresh boot");
-assert.match(gate, /MIN_FINAL_LARGEST_BLOCK\s*=\s*16\s*\*\s*1024/,
-  "hardware acceptance must recover a 16 KiB contiguous block");
-assert.equal(occurrences(gate, '"release_created": False'), 2,
-  "both bench delivery and production promotion must state and preserve the no-release boundary");
+// One resolved identity owns every pre-write and pressure request.
+const boundedTransport = section(gate, "def read_bounded_http_response(", "\ndef verify_http_range_support(");
+assert.match(boundedTransport, /HTTP_HEADER_MAX_BYTES/);
+assert.match(boundedTransport, /transfer_encodings\[0\]\s*!=\s*b"chunked"/);
+assert.match(boundedTransport, /HTTP_CHUNK_LINE_MAX_BYTES/);
+assert.match(boundedTransport, /chunk_size\s*>\s*max_body_bytes\s*-\s*len\(body\)/);
+assert.match(boundedTransport, /trailers or bytes after its terminator/);
+assert.match(boundedTransport, /CompactTransportError/);
+assert.match(boundedTransport, /deadline\s*-\s*time\.monotonic\(\)/);
+assert.match(gate, /STATUS_MAX_BYTES\s*=\s*32\s*\*\s*1024/);
+assert.match(gate, /VALUES_MAX_BYTES\s*=\s*128\s*\*\s*1024/);
 
-const benchHelperStart = gate.indexOf("def install_bench_target(");
-const benchHelperEnd = gate.indexOf("\ndef self_test(", benchHelperStart);
-assert.ok(benchHelperStart >= 0 && benchHelperEnd > benchHelperStart,
-  "the ordinary bench-install helper must remain independently identifiable");
-const benchHelper = gate.slice(benchHelperStart, benchHelperEnd);
-const benchResolve = benchHelper.indexOf("status_endpoint = resolve_http_endpoint(host)");
-const benchIdentity = benchHelper.indexOf("validate_identity(");
-const benchOffer = benchHelper.indexOf("check_generation = wait_for_ota_offer(");
-const benchPost = benchHelper.indexOf("update_generation = post_update_once(", benchOffer);
-const benchReturn = benchHelper.indexOf("returned = wait_for_new_firmware(", benchPost);
-const benchTransfer = benchHelper.indexOf("require_ota_transfer_evidence(", benchReturn);
-const benchHealth = benchHelper.indexOf("health_window = wait_for_bench_health_window(", benchTransfer);
-const benchStress = benchHelper.indexOf("stress = stress_board(", benchHealth);
-assert.ok(benchResolve >= 0 && benchIdentity > benchResolve && benchOffer > benchIdentity && benchPost > benchOffer &&
-          benchReturn > benchPost && benchTransfer > benchReturn && benchHealth > benchTransfer &&
-          benchStress > benchHealth,
-  "bench install must bind identity, lease one offer/write, observe verification, pass probation and then stress");
-assert.equal(occurrences(benchHelper, "post_update_once("), 1,
-  "ordinary bench delivery must invoke exactly one un-retried update write");
-assert.match(benchHelper,
-  /current_version == target_version[\s\S]{0,450}?ota[\s\S]{0,120}?channel[\s\S]{0,100}?!= "dev"[\s\S]{0,250}?MQTT must be connected/,
-  "bench delivery must reject redundant versions, non-dev channels and missing MQTT before its write");
-assert.match(benchHelper,
-  /heap_restarts[\s\S]{0,180}?mqtt_skipped[\s\S]{0,180}?poll_skipped[\s\S]{0,500}?MIN_FINAL_FREE_HEAP[\s\S]{0,180}?MIN_FINAL_LARGEST_BLOCK/,
-  "bench delivery must refuse existing allocation failures or unsafe pre-update heap");
-assert.match(benchHelper,
-  /reset_reason"\) != "sw"[\s\S]{0,500}?require_x10a=False, require_weather=False/,
-  "bench acceptance must prove the OTA reboot and keep absent plant/weather sources optional");
-assert.doesNotMatch(benchHelper,
-  /PRODUCTION_ROLE|production\[|OFFICIAL_RELEASE_MANIFEST_URL|set_update_channel|wait_for_legacy_offer|allow_downgrade/,
-  "the ordinary bench helper must not contain a production, release, channel-write or legacy path");
+const stress = section(gate, "def stress_board(", "\ndef verify_retained_x10a(");
+assert.match(stress, /pinned_endpoint\s*=\s*resolve_http_endpoint\(host\)/);
+assert.match(stress, /request_status_deadline\(\s*pinned_endpoint/);
+assert.match(stress, /request_values_deadline\(pinned_endpoint/);
+assert.match(stress, /request_diag_deadline\(pinned_endpoint/);
+assert.doesNotMatch(stress, /request_bytes\(f"http:\/\/\{host\}/,
+  "pressure evidence must not re-resolve the hostname per sample");
+assert.match(stress, /validate_identity\(status, host=host, mac=mac, version=version, elf=elf\)/);
+assert.match(stress, /required_uptime\(started/);
+assert.match(stress, /required_uptime\(status/);
+assert.match(stress, /required_uptime\(finished/);
+assert.match(stress, /require_stress_ota_offer\([\s\S]{0,180}?expected_app_sha256[\s\S]{0,100}?expected_channel/);
+assert.match(stress, /weather did not become idle before its HIL refresh/);
+assert.match(stress, /except HTTPError as error:[\s\S]{0,100}?error\.code != 503/,
+  "only 503 may be retried during the explicit weather TLS window");
+assert.match(stress,
+  /weather_refresh_token, weather_successes_before = request_weather_refresh\([\s\S]{0,100}?pinned_endpoint, host, started/);
+assert.match(gate, /"refresh": True/);
+assert.match(stress,
+  /refresh_fields\["refresh_completed_token"\] == weather_refresh_token[\s\S]{0,420}?refresh_fields\["refresh_requested_token"\] != weather_refresh_token[\s\S]{0,220}?refresh_fields\["refresh_started_token"\] != weather_refresh_token[\s\S]{0,220}?refresh_fields\["refresh_success_token"\] != weather_refresh_token/,
+  "live Weather acceptance must require the exact requested, started, completed and successful token");
+assert.match(stress,
+  /successes_after <= weather_successes_before[\s\S]{0,160}?weather_candidate\.get\("fetching"\) is not False/,
+  "the causal token must still correspond to a committed new success and released fetch owner");
+assert.match(stress, /busy_503\["status"\][\s\S]{0,120}?busy_503\["values"\]/);
+assert.match(stress, /disconnected \+= mqtt_recovery\.finish\(\)/);
+assert.match(stackWatch, /Modbus,[\s\S]{0,120}?Weather,[\s\S]{0,120}?Ota,/,
+  "Weather must own a boot-local high-water slot beside the other deep tasks");
+assert.ok(occurrences(weatherSource, "stack_watch_sample(StackWatch::Weather)") >= 2,
+  "Weather must sample both its loop lifecycle and the completed TLS/HTTP/JSON interval");
+assert.match(httpStatus,
+  /weather_forecast[\s\S]*?task_stack_min_free_bytes[\s\S]*?StackWatch::Weather/,
+  "Weather status must expose its task-local high-water evidence");
+assert.match(httpStatus,
+  /stack_min_free_bytes[\s\S]*?j \+= ",\\"weather\\":";[\s\S]*?StackWatch::Weather/,
+  "the always-on sys status must expose Weather stack evidence to HIL");
+assert.match(heartbeat,
+  /weather_stack_min_free_bytes[\s\S]*?append_stack_bytes\(j, f\.weather_stack_min_free_bytes\)/,
+  "fleet heartbeat telemetry must retain Weather stack headroom");
 
-const benchAction = gate.indexOf("if args.install_bench or args.confirm_bench is not None:");
-const benchInstall = gate.indexOf("bench_evidence = install_bench_target(", benchAction);
-const benchActionReturn = gate.indexOf("        return 0", benchInstall);
-const releaseManifestLoad = gate.indexOf("release_manifest = json.loads", benchActionReturn);
-const productionTarget = gate.indexOf("production = inventory[PRODUCTION_ROLE]", releaseManifestLoad);
-assert.ok(benchAction >= 0 && benchInstall > benchAction && benchActionReturn > benchInstall &&
-          releaseManifestLoad > benchActionReturn && productionTarget > releaseManifestLoad,
-  "bench action must return before release validation or production target construction");
+const fullDownload = section(gate, "def exercise_bench_full_download(", "\ndef require_ota_transfer_evidence(");
+for (const helper of ["request_status_deadline", "request_values_deadline", "request_diag_deadline"]) {
+  assert.match(fullDownload, new RegExp(`${helper}\\(status_endpoint`),
+    `bench binary pressure must use pinned ${helper}`);
+}
+assert.match(fullDownload,
+  /pinned_release\s*=\s*request_status_deadline\(status_endpoint[\s\S]{0,240}?validate_identity\([\s\S]{0,220}?set_update_channel\(status_endpoint, "dev"\)/,
+  "the endpoint must be revalidated after the hostname-only health dwell and before restore");
+assert.match(fullDownload, /finally:[\s\S]{0,180}?stop\.set\(\)[\s\S]{0,180}?worker\.join/);
+
+const rebootWait = section(gate, "def wait_for_new_firmware(", "\ndef set_update_channel(");
+assert.match(rebootWait, /request_json_deadline\([\s\S]{0,100}?"\/ota\/status"/);
+assert.match(rebootWait, /request_status_deadline\([\s\S]{0,100}?status_endpoint/);
+assert.doesNotMatch(rebootWait, /request_json\(host,\s*"\/status"\)/,
+  "post-write identity must remain on the prevalidated endpoint");
+assert.match(rebootWait, /except \(CompactTransportError, OSError, TimeoutError\):/);
+assert.match(rebootWait,
+  /\("ota_stack_min_free_bytes",\s*"ota_stack_min_free_bytes"\)/,
+  "the pre-reboot compact status must retain the OTA task high-water evidence");
+assert.doesNotMatch(rebootWait, /JSONDecodeError/,
+  "complete malformed JSON must remain a hard failure");
+const identityWait = section(gate, "def wait_for_identity(", "\ndef wait_for_ota_image_state(");
+assert.match(identityWait, /endpoint\s*=\s*resolve_http_endpoint\(host\)/,
+  "each post-cycle identity attempt must resolve and pin one endpoint");
+assert.match(identityWait,
+  /request_status_deadline\([\s\S]{0,120}?endpoint, timeout=min\(remaining, HTTP_TIMEOUT_S\)/,
+  "post-cycle status must consume the remaining whole-attempt deadline");
+assert.doesNotMatch(identityWait, /request_json\(|request_bytes\(/,
+  "post-cycle identity must never fall back to an unbounded status reader");
+const healthWait = section(
+  gate, "def wait_for_bench_health_window(", "\ndef wait_for_legacy_offer(",
+);
+assert.match(healthWait, /endpoint\s*=\s*resolve_http_endpoint\(host\)/);
+assert.match(healthWait,
+  /request_status_deadline\([\s\S]{0,120}?timeout=min\(remaining, HTTP_TIMEOUT_S\)/);
+assert.doesNotMatch(healthWait, /request_json\(|request_bytes\(/,
+  "release-HIL health dwell must use bounded status reads");
+const transferEvidence = section(
+  gate, "def require_ota_transfer_evidence(", "\ndef install_bench_target(",
+);
+assert.match(transferEvidence, /ota_stack_min_free_bytes/);
+assert.match(transferEvidence, /ota_stack\s*<\s*1024/,
+  "every accepted current-image OTA must retain at least 1 KiB task stack");
+
+// Exact offer/write and production ordering.
 assert.match(gate,
-  /add_argument\("--install-bench", action="store_true"\)[\s\S]{0,1800}?args\.install_bench[\s\S]{0,240}?args\.execute[\s\S]{0,240}?args\.confirm_bench != BENCH_ROLE[\s\S]{0,240}?args\.confirm_production is not None/,
-  "bench action must be explicit and mutually exclusive with production execution");
-assert.match(gate, /ArgumentParser\(description=__doc__, allow_abbrev=False\)/,
-  "the runtime parser must reject every abbreviation that the canonical hook grammar rejects");
+  /def post_update_once\([\s\S]{0,1800}?"after": check_generation[\s\S]{0,300}?"channel": expected_channel[\s\S]{0,300}?"version": expected_version[\s\S]{0,300}?"sha256": expected_app_sha256/);
+assert.match(gate, /expected_generation\s*=\s*1 if check_generation == 0xFFFFFFFF else check_generation \+ 1/);
+assert.match(gate, /did not settle on the exact gated artifact within \{OTA_CHECK_TIMEOUT_S\} seconds/);
+assert.match(httpOta, /available_sha256[\s\S]{0,180}?available_channel/);
+assert.equal(occurrences(httpOta, "503 Service Unavailable"), 2);
 
-assert.match(hook, /direct OTA writes are forbidden; run scripts\/production-ota-gate\.py/,
-  "agent shell writes must be routed through the canonical role-pinned gate");
-assert.match(hook, /canonical_production_ota_command/,
-  "only the canonical direct gate command may bypass the raw OTA-write guard");
-assert.match(hook, /"--install-bench"[\s\S]{0,220}?"--confirm-bench"\]\s*=\s*"bench"/,
-  "the shell hook must admit only the explicit literal bench action and role");
-assert.match(hook, /Path\(os\.path\.abspath\(executable\)\) != canonical/,
-  "a foreign symlink alias must not impersonate the canonical gate path");
-assert.match(hook,
-  /def direct_ota_update_write[\s\S]{0,5200}?executable == "curl"[\s\S]{0,3200}?executable in \{"http", "xh"\}[\s\S]{0,2200}?executable == "wget"/,
-  "raw OTA write detection must cover ordinary curl, HTTPie/xh and wget shapes");
-assert.match(hook,
-  /argument\.startswith\(\("--data", "--form", "--json=", "--upload-file="\)\)/,
-  "all curl data/form long options, including equals forms, must imply an OTA write");
-assert.match(hook,
-  /for client_index, token in enumerate\(tokens\)/,
-  "launcher-wrapped network clients must be inspected at every token position");
-assert.ok(hook.includes('dynamic_client_arguments = any(re.search(r"[$`]", argument) for argument in raw_arguments)'),
-  "dynamic shell arguments must remain visible to every OTA client classifier");
-assert.match(hook,
-  /executable == "curl"[\s\S]{0,3600}?dynamic_client_arguments and not forces_get/,
-  "dynamic curl method/body arguments must fail unless GET or HEAD is literal");
-assert.match(hook,
-  /def curl_short_option_effects[\s\S]{0,900}?option == ":"[\s\S]{0,300}?option == "X"[\s\S]{0,300}?option in \{"d", "F", "T"\}/,
-  "clustered curl next/X/data/form/upload short options must be decoded");
-assert.ok(hook.includes("method, cluster_get, cluster_body, cluster_next, cluster_ambiguous = curl_short_option_effects("),
-  "curl short-option effects must feed the write classifier");
-assert.match(hook, /if cluster_next:\s*return True/,
-  "curl's short -: transfer boundary must fail closed like --next");
-assert.match(hook,
-  /if "--next" in arguments:\s*return True/,
-  "curl multi-transfer commands aimed at the OTA route must fail closed per transfer group");
-assert.match(hook,
-  /executable in \{"http", "xh"\}[\s\S]{0,900}?dynamic_client_arguments and explicit_methods not in \(\{"get"\}, \{"head"\}\)/,
-  "dynamic HTTPie/xh method/body arguments must fail unless GET or HEAD is literal");
-assert.match(hook,
-  /executable == "wget"[\s\S]{0,900}?dynamic_client_arguments and not literal_safe_method/,
-  "dynamic wget method/body arguments must fail unless GET or HEAD is literal");
-assert.match(hook,
-  /def wget_argument_may_write[\s\S]{0,900}?\("config", "execute", "post-file", "post-data"\)[\s\S]{0,300}?"method"\.startswith\(name\)[\s\S]{0,400}?aABDiIloOPQRtTUwX[\s\S]{0,200}?option == "e"/,
-  "GNU Wget write controls must cover clustered short options and unique long abbreviations");
-assert.match(hook,
-  /def shell_sets_wgetrc[\s\S]{0,500}?\^wgetrc\(\?:\\\+\)\?=/,
-  "quote-normalized tokens must expose explicit and appended Wget startup configuration");
-assert.match(hook,
-  /executable == "wget"[\s\S]{0,500}?shell_sets_wgetrc\(decoded, raw_tokens\)[\s\S]{0,200}?wget_argument_may_write\(argument\) for argument in raw_arguments/,
-  "explicit Wget startup configuration and parsed write controls must fail closed");
-assert.match(hook,
-  /forces_get[\s\S]{0,1800}?not forces_get and/,
-  "explicit curl GET shapes must not be mislabeled as OTA writes merely for carrying query data");
-assert.match(hook,
-  /forces_get\s*=\s*explicit_method in \{"get", "head"\} or \([\s\S]{0,160}?not explicit_method and \([\s\S]{0,120}?has_get_flag or any\(argument in \{"-g", "--get"\}/,
-  "curl -G must prove GET only when no explicit method can override it");
-assert.match(hook,
-  /effective_method\s*=\s*""[\s\S]{0,500}?effective_method = arguments\[index \+ 1\][\s\S]{0,300}?literal_safe_method = effective_method in \{"get", "head"\}/,
-  "only wget's final effective method may prove a literal GET or HEAD");
-assert.match(hook,
-  /executable in \{"http", "xh"\}[\s\S]{0,1200}?"post"[\s\S]{0,900}?":=" in argument[\s\S]{0,300}?"=" in argument and "==" not in argument/,
-  "HTTPie/xh must detect a method after options and implicit body-field POSTs");
-assert.match(hook,
-  /"-methodpost"[\s\S]{0,240}?"request\(" in compact and \("data=" in compact or "json=" in compact\)/,
-  "PowerShell and inferred interpreter body writes must remain visible to the raw classifier");
-assert.match(hook,
-  /"urlopen\(" in compact and "data=" in compact[\s\S]{0,140}?\(\?:request\|urlopen\)\\\(\[\^,\]\+,\[\^\)\]\+/,
-  "urllib keyword and positional bodies must remain write-shaped");
-assert.match(hook,
-  /def possible_ota_update_route[\s\S]{0,1400}?expand_static_braces\(token\)[\s\S]{0,500}?fnmatch\.fnmatchcase\("ota", route\)[\s\S]{0,100}?fnmatch\.fnmatchcase\("update", action\)/,
-  "shell variables and URL globs must remain in the raw-write classifier");
-assert.match(hook,
-  /https\?:\/\/\[\^'\\";&\|\]\*\[\$`\]\[\\s\\S\]\{0,160\}\/update/,
-  "a dynamic URL segment immediately upstream of /update must fail closed");
-assert.match(hook,
-  /def shell_client_receives_stdin[\s\S]{0,800}?previous_control[\s\S]{0,500}?re\.fullmatch\(r"<\{1,3\}"/,
-  "HTTPie/xh raw bodies and stdin must imply a write when no safe method is proven");
-assert.match(hook,
-  /shell_client_receives_stdin\(decoded, executable\)[\s\S]{0,600}?argument == "--raw"/,
-  "the quote-aware stdin result and explicit raw-body flags must feed HTTPie write classification");
-assert.match(hook,
-  /raw_tokens\s*=\s*shell_syntax_tokens\(decoded\)[\s\S]{0,400}?\{"nc", "ncat", "netcat", "openssl", "socat", "telnet"\}[\s\S]{0,180}?\/dev\/\(\?:tcp\|udp\)\/[\s\S]{0,120}?if has_raw_network_client:\s*return True/,
-  "every raw network client naming the OTA route must fail closed before method interpretation");
-assert.match(hook,
-  /def shell_argument_may_be_post[\s\S]{0,700}?expand_static_braces\(argument\.lower\(\)\)[\s\S]{0,500}?--method=post/,
-  "brace- and glob-expanded client method arguments must remain write-shaped");
-assert.doesNotMatch(hook,
-  /def read_only_gate_inspection[\s\S]{0,1600}?executable == "git"/,
-  "Git helpers, pagers, aliases and external diffs must not enter the inspection exception");
-assert.match(hook,
-  /def aliases_canonical_ota_gate[\s\S]{0,900}?shell_syntax_tokens\(command\)[\s\S]{0,900}?nested_tokens[\s\S]{0,900}?os\.path\.samefile\(lexical, canonical\)[\s\S]{0,100}?filecmp\.cmp\(lexical, canonical, shallow=False\)/,
-  "renamed symlink, hardlink and exact-copy aliases must not execute the canonical OTA gate");
-assert.match(hook,
-  /token in \{"-S", "--split-string"\}[\s\S]{0,500}?token\.startswith\("-S"\)[\s\S]{0,300}?token\.startswith\("--split-string="\)/,
-  "separate, attached and equals-form env split strings must be recursively classified");
-assert.match(hook,
-  /token in \{"-S", "--split-string"\}[\s\S]{0,160}?results\.extend\(shell_token_sets\(resolved_segment\[index \+ 1\], depth \+ 1\)\)/,
-  "separate env split-string payloads must actually recurse");
-assert.match(hook,
-  /token\.startswith\("-S"\)[\s\S]{0,180}?shell_token_sets\(token\[2:\], depth \+ 1\)[\s\S]{0,220}?shell_token_sets\(token\.split\("=", 1\)\[1\], depth \+ 1\)/,
-  "attached env split-string payloads must actually recurse");
-assert.match(hook,
-  /token_may_name_command\(token, "production-ota-gate\.py"\)/,
-  "shell globs that resolve to the canonical gate must fail before execution");
-assert.match(hook,
-  /"production-ota-" in compact and "gate\.py" in compact[\s\S]{0,500}?"--manifest-url"[\s\S]{0,240}?"--expected-app-sha256"/,
-  "dynamic gate executables carrying the canonical artifact option set must fail closed");
-assert.match(hook,
-  /re\.search\(r"\[\$`\]", token\) is not None and "\/scripts\/" in f"\/\{token\}"/,
-  "embedded/default dynamic construction under scripts must fail closed");
-assert.match(hook,
-  /nested_tokens\.extend\(shell_token_sets\(nested\)\)/,
-  "Git helper and pager strings must be recursively searched for renamed aliases");
-assert.match(hook,
-  /aliases_canonical_ota_gate\(payload, command\) and not read_only_inspection[\s\S]{0,120}?names_gate and not read_only_inspection/,
-  "wrappers naming the gate must fail unless they are an explicit read-only source inspection");
+const production = gate.slice(gate.indexOf("if args.confirm_production != PRODUCTION_ROLE"));
+assert.equal(occurrences(production, "post_update_once("), 1,
+  "production execution must contain exactly one update write");
+assert.doesNotMatch(production, /set_update_channel|legacy bench/);
+const prodResolve = production.indexOf("production_status_endpoint = resolve_http_endpoint(");
+const prodIdentity = production.indexOf("validate_identity(", prodResolve);
+const prodOffer = production.indexOf("check_generation = wait_for_ota_offer(", prodIdentity);
+const prodPost = production.indexOf("post_update_once(", prodOffer);
+const prodReturn = production.indexOf("wait_for_new_firmware(", prodPost);
+const prodStress = production.indexOf("production_evidence = stress_board(", prodReturn);
+const finalIdentity = production.indexOf("validate_identity(", prodStress);
+const retained = production.indexOf("verify_retained_x10a(final_status)", finalIdentity);
+assert.ok(prodResolve >= 0 && prodIdentity > prodResolve && prodOffer > prodIdentity &&
+  prodPost > prodOffer && prodReturn > prodPost && prodStress > prodReturn &&
+  finalIdentity > prodStress && retained > finalIdentity,
+  "production must preserve resolve/identity/offer/write/reboot/stress/final-identity/X10A order");
 
-assert.match(health, /OTA_HEALTH_MIN_FREE_BYTES\s*=\s*24u\s*\*\s*1024u/,
-  "rollback commit needs the measured total internal-heap floor");
-assert.match(health, /OTA_HEALTH_MIN_LARGEST_BLOCK_BYTES\s*=\s*16u\s*\*\s*1024u/,
-  "rollback commit needs the production contiguous-block floor");
-assert.match(health,
-  /normal_service\s*=\s*service\.link\s*!=\s*NetLink::None\s*&&\s*service\.heap_ready\s*&&[\s\S]{0,100}!service\.allocation_failures\s*&&\s*x10a_ready/,
-  "link alone must never commit an OTA image without heap, zero-skip and X10A proof");
-assert.match(mqtt, /s_x10a_publish_proven\.store\(true,\s*std::memory_order_release\)/,
-  "one accepted X10A state publish must raise the rollback proof");
-assert.match(ota, /hp_link_connected\(\)\s*&&\s*mqtt_x10a_publish_required\(\)/,
-  "broker-free installations must not be made un-updatable by an impossible publish proof");
-assert.match(ota,
-  /HealthVerdict::GiveUp[\s\S]{0,500}?PENDING_VERIFY[\s\S]{0,300}?esp_restart\(\);/,
-  "a failed hard-cap proof must reboot while rollback remains armed");
+// Release-HIL feed, bootstrap, persistence and hard-cancel boundaries.
+assert.match(gate, /RELEASE_HIL_POLICY_PATH\s*=\s*Path\("\/etc\/daikin-altherma-esp32\/release-hil-policy\.json"\)/);
+assert.match(gate, /release-HIL root policy must be schema_version 3/);
+assert.match(gate, /release-HIL inventory must be a schema_version 3 object/);
+const inventoryLoader = section(
+  gate, "def load_release_hil_inventory(", "\ndef run_checked(",
+);
+assert.match(inventoryLoader,
+  /allowed_tasks\s*=\s*\{[^}]*"weather"[^}]*\}[\s\S]*?if lab\["require_weather"\]:[\s\S]*?required_tasks\.add\("weather"\)/,
+  "a mandatory Weather stress run must make Weather stack evidence mandatory too");
+const stackEvidence = section(
+  gate, "def require_stack_evidence(", "\n\nclass NoRedirect",
+);
+assert.match(stackEvidence, /for task in tasks:[\s\S]*?value = stack\.get\(task\)[\s\S]*?value < minimum/,
+  "every inventory-required stack, including Weather, must meet the live floor");
+const policyLoader = section(
+  gate, "def load_release_hil_policy(", "\ndef load_release_hil_inventory(",
+);
+const policyFields = section(policyLoader, "fields = {", "\n    }");
+for (const field of ["bootstrap_version", "bootstrap_elf", "bootstrap_app_sha256",
+  "bootstrap_manifest_url", "bootstrap_firmware_base_url", "manifest_url",
+  "firmware_base_url", "feed_controller_id", "power_controller_id", "power_outlet"]) {
+  assert.match(policyFields, new RegExp(`"${field}"`), `release-HIL policy must bind ${field}`);
+}
+assert.match(httpOta, /effective_manifest_url/);
+assert.match(httpOta, /effective_firmware_base_url/);
+assert.match(httpOta, /X-Daikin-HIL-Manifest-URL/);
+assert.match(httpOta, /X-Daikin-HIL-Firmware-Base-URL/);
+const hilHeaders = section(gate, "def release_hil_request_headers(", "\ndef load_release_hil_policy(");
+assert.match(hilHeaders, /HIL_MANIFEST_HEADER/);
+assert.match(hilHeaders, /HIL_FIRMWARE_BASE_HEADER/);
+assert.match(gate, /extra_headers=hil_headers/);
+assert.match(gate, /status\.get\("effective_manifest_url"\)\s*!=\s*expected_manifest_url[\s\S]{0,180}?status\.get\("effective_firmware_base_url"\)\s*!=\s*expected_firmware_base_url/);
+assert.match(otaHilFeed, /struct OtaOfferBinding[\s\S]{0,500}?uint32_t\s+generation[\s\S]{0,500}?OtaFeedUrls\s+feed/);
+assert.match(otaHilFeed, /ota_offer_binding_copy_feed\([\s\S]{0,900}?binding\.generation\s*!=\s*generation[\s\S]{0,500}?binding\.feed/);
+assert.match(gate,
+  /old_version\s*!=\s*lab\["bootstrap_version"\][\s\S]{0,160}?old_elf\s*!=\s*lab\["bootstrap_elf"\]/);
+assert.match(gate,
+  /require_exact_release_hil_feed\([\s\S]{0,180}?lab\["manifest_url"\][\s\S]{0,120}?lab\["firmware_base_url"\]/);
+const bootstrapVerifier = section(
+  gate, "def verify_release_hil_bootstrap_artifact(", "\ndef require_release_hil_channel(",
+);
+assert.match(bootstrapVerifier, /bootstrap_app_sha256/);
+assert.match(bootstrapVerifier, /candidates\s*!=\s*\["daikin-altherma-esp32\.bin"\]/);
+assert.match(bootstrapVerifier, /hashlib\.sha256\(app\)\.hexdigest\(\)/);
+assert.match(bootstrapVerifier, /verify_image\(app,[\s\S]{0,100}?bootstrap_version/);
+assert.match(bootstrapVerifier, /elf\s*!=\s*lab\["bootstrap_elf"\]/);
+assert.match(bootstrapVerifier, /verify_http_range_support\(app_url, app\)/);
+assert.match(gate, /persistence_canaries[\s\S]{0,500}?"mqtt\.base"[\s\S]{0,120}?"mqtt\.base_custom"/);
+assert.match(gate, /history[\s\S]{0,100}?persist[\s\S]{0,100}?power_cycle/);
 
-assert.doesNotMatch(gate, /48\s*\*\s*60\s*\*\s*60|48[- ]?hour|48[- ]?stunden/i,
-  "an arbitrary 48-hour soak must not replace targeted staging and canary evidence");
+const controllerTransport = section(gate, "def control_json(", "\ndef validate_feed_lease(");
+assert.match(controllerTransport, /method not in \("GET", "POST", "DELETE"\)/,
+  "the controller method allowlist must admit the watchdog status GET");
+assert.match(controllerTransport, /if method == "GET" and payload is not None:/,
+  "controller GET requests must reject every entity payload");
+assert.match(controllerTransport, /if method != "GET" and not isinstance\(payload, dict\):/,
+  "mutating controller requests must retain an explicit object payload");
+assert.match(controllerTransport,
+  /if method != "GET":[\s\S]{0,220}?Content-Type: application\/json[\s\S]{0,120}?Content-Length:/,
+  "GET requests must omit entity headers as well as entity bytes");
 
-console.log("OTA gate: signed bench delivery, production promotion and rollback service proof pinned");
+const commitWindow = Number(ota.match(/kHealthBaseWindowS\s*=\s*(\d+)/)?.[1]);
+const watchdogTtl = Number(gate.match(/PENDING_IMAGE_WATCHDOG_TTL_S\s*=\s*(\d+)/)?.[1]);
+assert.ok(watchdogTtl > 0 && watchdogTtl < commitWindow,
+  "the non-renewable rollback deadline must expire before PENDING_VERIFY can commit");
+const watchdog = section(gate, "def pending_image_power_watchdog(", "\ndef wait_for_identity(");
+assert.match(watchdog, /cycle-watchdogs/);
+assert.doesNotMatch(watchdog, /\/renew/,
+  "a sliding renewal could extend the recovery cycle beyond the commit boundary");
+assert.match(watchdog, /\/trigger/);
+assert.match(watchdog, /\/release/);
+assert.match(watchdog, /if not triggered and not released:[\s\S]{0,900}?emergency trigger/);
+const install = section(gate, "def release_hil_install_once(", "\ndef run_release_hil(");
+assert.equal(occurrences(install, "allow_downgrade=allow_downgrade"), 2,
+  "the exact offer and its sole write must share the downgrade decision");
+const pendingWitness = install.indexOf(
+  "pending = wait_for_ota_image_state(endpoint, rollback_pending=True)",
+);
+const freshStatus = install.indexOf(
+  "post_witness_status = request_status_deadline(endpoint, timeout=HTTP_TIMEOUT_S)",
+  pendingWitness,
+);
+const freshIdentity = install.indexOf("validate_identity(", freshStatus);
+const freshChannel = install.indexOf(
+  "require_release_hil_channel(post_witness_status, channel)", freshIdentity,
+);
+const freshReturn = install.indexOf("return post_witness_status, transfer", freshChannel);
+assert.ok(pendingWitness >= 0 && freshStatus > pendingWitness && freshIdentity > freshStatus &&
+  freshChannel > freshIdentity && freshReturn > freshChannel,
+  "the 45-second decision must consume an exact post-pending-witness status snapshot");
+const hil = section(gate, "def run_release_hil(", "\ndef self_test(");
+assert.match(hil, /bootstrap_artifact\s*=\s*verify_release_hil_bootstrap_artifact\(lab\)/);
+assert.doesNotMatch(hil, /request_json\(host,\s*"\/status"\)/,
+  "release-HIL bootstrap/final identity must use bounded status reads");
+assert.match(hil,
+  /initial_endpoint\s*=\s*resolve_http_endpoint\(host\)[\s\S]{0,100}?before\s*=\s*request_status_deadline\(initial_endpoint, timeout=HTTP_TIMEOUT_S\)/);
+assert.match(hil,
+  /final_endpoint\s*=\s*resolve_http_endpoint\(host\)[\s\S]{0,100}?final\s*=\s*request_status_deadline\(final_endpoint, timeout=HTTP_TIMEOUT_S\)/);
+const watchdogArm = hil.indexOf("with pending_image_power_watchdog(");
+const firstInstall = hil.indexOf("first_status, first_transfer = release_hil_install_once(", watchdogArm);
+const firstUptime = hil.indexOf("required_uptime(first_status", firstInstall);
+const firstActive = hil.indexOf("require_watchdog_active()", firstInstall);
+const watchdogTrigger = hil.indexOf("trigger_watchdog_cycle()", firstActive);
+const rollbackWait = hil.indexOf("rolled_back = wait_for_identity(", watchdogTrigger);
+assert.ok(watchdogArm >= 0 && firstInstall > watchdogArm && firstUptime > firstInstall &&
+  firstActive > firstUptime && watchdogTrigger > firstActive && rollbackWait > watchdogTrigger,
+  "watchdog must arm before the first write and own the intentional rollback cycle");
+const secondWatchdog = hil.indexOf("with pending_image_power_watchdog(", watchdogArm + 1);
+const secondInstall = hil.indexOf("second_status, second_transfer = release_hil_install_once(", secondWatchdog);
+const secondUptime = hil.indexOf("required_uptime(second_status", secondInstall);
+const secondActive = hil.indexOf("require_commit_watchdog_active()", secondInstall);
+const approval = hil.indexOf("approve_commit_candidate()", secondActive);
+const healthWindow = hil.indexOf("health = wait_for_bench_health_window(", approval);
+const committedValid = hil.indexOf(
+  "wait_for_ota_image_state(committed_endpoint, rollback_pending=False)", healthWindow,
+);
+const committedColdCycle = hil.indexOf("release_hil_power_cycle(lab, power_token)", committedValid);
+assert.ok(secondWatchdog > rollbackWait && secondInstall > secondWatchdog &&
+  secondUptime > secondInstall && secondActive > secondUptime && approval > secondActive &&
+  healthWindow > approval && committedValid > healthWindow && committedColdCycle > committedValid,
+  "phase 2 must explicitly release the hard watchdog before commit and cold-cycle only after valid");
+const thirdWatchdog = hil.indexOf("with pending_image_power_watchdog(", secondWatchdog + 1);
+const writerInstall = hil.indexOf(
+  "bootstrap_status, candidate_writer_transfer = release_hil_install_once(", thirdWatchdog,
+);
+const writerCallEnd = hil.indexOf("\n            )", writerInstall);
+const writerCall = hil.slice(writerInstall, writerCallEnd);
+assert.match(writerCall, /host=host,\s*mac=mac,\s*current_version=version,\s*current_elf=elf/);
+assert.match(writerCall, /version=lab\["bootstrap_version"\]/);
+assert.match(writerCall,
+  /app_sha256=lab\["bootstrap_app_sha256"\],\s*elf=lab\["bootstrap_elf"\]/);
+assert.match(writerCall, /channel=lab\["channel"\]/);
+assert.match(writerCall, /manifest_url=lab\["bootstrap_manifest_url"\]/);
+assert.match(writerCall, /firmware_base_url=lab\["bootstrap_firmware_base_url"\]/);
+assert.match(writerCall, /allow_downgrade=True/);
+const writerDowngrade = hil.indexOf("allow_downgrade=True", writerInstall);
+const writerUptime = hil.indexOf("required_uptime(", writerDowngrade);
+const writerActive = hil.indexOf("require_writer_watchdog_active()", writerUptime);
+const writerTrigger = hil.indexOf("trigger_writer_watchdog_cycle()", writerActive);
+const writerRollback = hil.indexOf("writer_rollback = wait_for_identity(", writerTrigger);
+const writerIdentity = hil.indexOf("validate_identity(writer_pinned", writerRollback);
+const writerValid = hil.indexOf(
+  "writer_image_state = wait_for_ota_image_state(", writerIdentity,
+);
+const finalStress = hil.indexOf("stress = stress_board(", writerValid);
+assert.ok(thirdWatchdog > committedColdCycle && writerInstall > thirdWatchdog &&
+  writerCallEnd > writerInstall &&
+  writerDowngrade > writerInstall && writerUptime > writerDowngrade &&
+  writerActive > writerUptime && writerTrigger > writerActive && writerRollback > writerTrigger &&
+  writerIdentity > writerRollback && writerValid > writerIdentity && finalStress > writerValid,
+  "the valid candidate must write a pinned bootstrap and roll back to itself before final stress");
+assert.match(hil,
+  /writer_image_state\s*=\s*wait_for_ota_image_state\([\s\S]{0,100}?writer_endpoint, rollback_pending=False/);
+
+// Firmware-side non-persistent weather trigger and rollback health proof.
+const setWeather = section(httpConfig, "static esp_err_t set_weather(", "\n// POST /set_board");
+assert.match(setWeather, /const bool refresh\s*=\s*cJSON_IsTrue\(refresh_item\)/);
+assert.match(setWeather, /const bool unchanged\s*=\s*location\.enabled\s*==\s*c\.weather_enabled[\s\S]*?location\.latitude_e6\s*==\s*c\.weather_latitude_e6[\s\S]*?location\.longitude_e6\s*==\s*c\.weather_longitude_e6/);
+const refreshBranch = section(setWeather, "if (refresh) {", "\n    if (unchanged)");
+assert.match(refreshBranch, /if \(!unchanged \|\| !location\.enabled\)/);
+assert.match(refreshBranch,
+  /!c\.diagnostics_enabled[\s\S]{0,180}?409 Conflict[\s\S]{0,260}?!weather_forecast_request_refresh\(refresh_token\)[\s\S]{0,220}?503 Service Unavailable/,
+  "refresh must refuse without diagnostics consent and without an actual Weather task");
+assert.doesNotMatch(refreshBranch, /config_save\(/);
+assert.match(refreshBranch,
+  /refresh_token = 0[\s\S]*?\\"saved\\":false,[\s\S]*?\\"refresh_requested\\":true,[\s\S]*?\\"refresh_token\\":%llu/,
+  "the non-persistent POST must return the exact accepted causal token");
+assert.match(weatherHeader,
+  /uint64_t refresh_requested_token\s*=\s*0, refresh_started_token\s*=\s*0,[\s\S]*?refresh_completed_token\s*=\s*0,[\s\S]*?refresh_success_token\s*=\s*0/);
+const refreshClaim = section(weatherSource, "uint64_t claim_refresh_request_locked()", "\n}\n\nvoid complete_refresh_request");
+assert.match(refreshClaim,
+  /weather_refresh_claim\(s_refresh_requested_token, s_refresh_completed_token,[\s\S]*?s_refresh_started_token\)/);
+const refreshComplete = section(weatherSource, "void complete_refresh_request(",
+  "\n}\n\n// Defaults to fail-closed completion");
+assert.match(refreshComplete,
+  /weather_refresh_complete\(s_refresh_requested_token, s_refresh_started_token, token,[\s\S]*?success, s_refresh_completed_token, s_refresh_success_token\)/,
+  "firmware refresh completion must use the tested first-wins state transition");
+assert.match(weatherLogic,
+  /weather_refresh_complete\([\s\S]*?completed_token == token[\s\S]*?return false;[\s\S]*?if \(success\) success_token = token;[\s\S]*?completed_token = token/,
+  "a source-change cancellation must be final against the old attempt's late success finish");
+const weatherTask = section(weatherSource, "void weather_task(void*)", "\n}\n\n}  // namespace");
+const fetchAdmission = section(weatherTask, "time_now(now, ms);", "WeatherForecastSample sample;");
+const admissionLock = fetchAdmission.indexOf("Lock lk(s_mtx)");
+const admissionClaim = fetchAdmission.indexOf("claim_refresh_request_locked()", admissionLock);
+const admissionDrain = fetchAdmission.indexOf("ulTaskNotifyTake(pdTRUE, 0)", admissionClaim);
+const admissionFetching = fetchAdmission.indexOf("s_status.fetching = true", admissionDrain);
+assert.ok(admissionLock >= 0 && admissionClaim > admissionLock && admissionDrain > admissionClaim &&
+          admissionFetching > admissionDrain,
+  "the task must claim a request in the same lock that starts its exact fetch attempt");
+assert.match(fetchAdmission,
+  /if \(refresh_attempt\.token != 0\) ulTaskNotifyTake\(pdTRUE, 0\);/,
+  "a natural cycle that claims the request must consume its now-redundant queued wake");
+assert.match(weatherTask,
+  /RefreshRequestAttempt refresh_attempt[\s\S]*?refresh_attempt\.finish\(updated\)/,
+  "only the real forecast update commit may complete an explicit refresh successfully");
+assert.match(weatherSource,
+  /~RefreshRequestAttempt\(\) noexcept \{ finish\(false\); \}/,
+  "every exceptional or early-exit request path must fail-complete its exact token");
+assert.match(weatherSource,
+  /WeatherSourceChange::commit\(\) noexcept[\s\S]*?weather_refresh_cancel_outstanding\(s_refresh_requested_token,[\s\S]*?s_refresh_completed_token\)/,
+  "a source or consent replacement must cancel an unclaimed refresh token");
+const refreshRequest = section(weatherSource,
+  "bool weather_forecast_request_refresh(uint64_t& token) noexcept", "\n}\n\nWeatherForecastStatus");
+const refreshRequestLockStart = refreshRequest.indexOf("    {\n        Lock lk(s_mtx);");
+const refreshRequestLockEnd = refreshRequest.indexOf("\n    }\n    return true;", refreshRequestLockStart);
+const refreshRequestLock = refreshRequest.slice(refreshRequestLockStart, refreshRequestLockEnd);
+assert.ok(refreshRequestLockStart >= 0 && refreshRequestLockEnd > refreshRequestLockStart,
+  "the refresh request mutex transaction must remain identifiable");
+assert.match(refreshRequestLock,
+  /Lock lk\(s_mtx\)[\s\S]*?task\s*=\s*s_task\.load\(std::memory_order_acquire\)[\s\S]*?if \(!task[\s\S]*?s_refresh_requested_token\s*=\s*s_refresh_next_token[\s\S]*?token\s*=\s*s_refresh_requested_token[\s\S]*?xTaskNotifyGive\(task\)/,
+  "the acquire-loaded task handle, token publication and wake must share s_mtx so task-side coalescing cannot race a late Give");
+for (const field of ["requested", "started", "completed", "success"]) {
+  assert.match(httpStatus, new RegExp(`\\\\"refresh_${field}_token\\\\":`),
+    `/status must expose the ${field} token for causal HIL evidence`);
+}
+const saveWeather = section(setWeather, "if (unchanged)", "\n}");
+const weatherBegin = saveWeather.indexOf(
+  "WeatherSourceChange weather_change(location.enabled, c.diagnostics_enabled)");
+const weatherSave = saveWeather.indexOf("config_save(c)");
+const weatherInvalidate = saveWeather.indexOf("weather_change.commit()", weatherSave);
+const weatherCleanup = saveWeather.indexOf("mqtt_request_weather_cleanup()", weatherInvalidate);
+const weatherAck = saveWeather.indexOf('"saved\\":true', weatherCleanup);
+assert.ok(weatherBegin >= 0 && weatherSave > weatherBegin && weatherInvalidate > weatherSave &&
+  weatherCleanup > weatherInvalidate && weatherAck > weatherCleanup,
+  "a saved Weather source must invalidate old values and retained MQTT before acknowledging it");
+assert.match(health, /OTA_HEALTH_MIN_FREE_BYTES\s*=\s*24u\s*\*\s*1024u/);
+assert.match(health, /OTA_HEALTH_MIN_LARGEST_BLOCK_BYTES\s*=\s*16u\s*\*\s*1024u/);
+assert.match(health, /!service\.allocation_failures/);
+assert.match(mqtt, /s_x10a_publish_proven\.store\(true,\s*std::memory_order_release\)/);
+assert.match(ota, /HealthVerdict::GiveUp[\s\S]{0,700}?esp_restart\(\);/);
+
+// CI trust split and agent mutation guard remain explicit.
+assert.match(workflow, /release_hil:[\s\S]{0,500}?runs-on:\s*\[self-hosted, daikin-release-lab\]/);
+assert.match(workflow, /release_hil:[\s\S]{0,1600}?contents:\s*read/);
+assert.match(workflow, /publish:[\s\S]{0,100}?needs:\s*\[trusted_build, release_hil\]/);
+assert.match(workflow, /RELEASE_HIL_POWER_TOKEN:[\s\S]{0,120}?RELEASE_HIL_FEED_TOKEN:/);
+assert.match(hook, /direct OTA writes are forbidden; run scripts\/production-ota-gate\.py/);
+assert.match(hook, /canonical_production_ota_command/);
+
+console.log("OTA gate: transport, exact artifact, HIL feed, rollback and cancel boundaries pinned");

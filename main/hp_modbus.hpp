@@ -69,10 +69,15 @@ void mb_start();
 // after any persisted result or explicit host save/delete, in safe mode, or without a LAN lease.
 void mb_autodiscover_initial();
 
-// Ask the stack to re-read its config — POST /set_hp. Starts the task if the HomeHub was just
-// enabled, stops it if just disabled, and drops a cached socket when the address changed. Safe to
-// call from the httpd task.
-void mb_reconfigure();
+// Apply an already-staged enable decision after POST /set_hp. Starts the task if the HomeHub was
+// just enabled, stops it if just disabled, and drops a cached socket when the address changed. The
+// POD argument keeps the post-persistence cutover allocation-free and safe in the httpd task.
+void mb_reconfigure(bool enabled) noexcept;
+
+// Lock-free current durable target intent. Unlike ModbusStatus::enabled (worker lifetime), this
+// flips synchronously after a successful settings save and is therefore the MQTT publication
+// authority.
+bool mb_target_enabled() noexcept;
 
 // Lock-free acknowledgement for OTA/Weather heap ownership. True means no HomeHub cycle is inside
 // its Config/DNS/socket/vector allocation region; a disabled/non-started task is quiescent too.

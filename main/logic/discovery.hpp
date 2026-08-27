@@ -11,7 +11,6 @@
 #include "fault_state.hpp"
 #include "ha_device.hpp"
 #include "mqtt_group.hpp"
-#include "../def/homehub.hpp"
 
 namespace daik {
 
@@ -257,18 +256,55 @@ inline std::string discovery_config(const std::string& node, const std::string& 
 }
 
 // ── Retired HomeHub Modbus entities ──────────────────────────────────────────────────────────────
-// Firmware through v1.0.0-dev.257 emitted these discovery topics. HomeHub values still publish on
-// <base>/modbus, but HA must no longer expose them. Keep only the frozen topic builder so mqtt_ha.cpp
-// can delete every retained config precisely; there is deliberately no config-payload builder.
-inline const char* modbus_ha_component(const def::HomeHubReg& reg) {
-    return def::homehub_is_binary(reg) ? "binary_sensor" : "sensor";
-}
+// Firmware through v1.0.0-dev.257 emitted exactly these 27 discovery topics. This is an immutable
+// migration ledger, not a view of today's HomeHub register catalog: later telemetry rows were never
+// announced by those builds and a future catalog edit must neither add nor rename a tombstone.
+// Store the already-normalised component + object id literals that were actually written to MQTT;
+// deriving either from a current label/kind would silently make the cleanup target move over time.
+struct RetiredModbusHaSensor {
+    const char* component;
+    const char* object_id;
+};
 
-inline std::string modbus_discovery_topic(const std::string& prefix, const std::string& x10a_node,
-                                          const def::HomeHubReg& reg) {
+inline constexpr RetiredModbusHaSensor RETIRED_MODBUS_HA_SENSORS[] = {
+    {"sensor", "unit_abnormality"},
+    {"sensor", "unit_abnormality_code"},
+    {"sensor", "unit_abnormality_sub_code"},
+    {"binary_sensor", "circulation_pump_running"},
+    {"sensor", "3_way_valve"},
+    {"binary_sensor", "dhw_normal_operation"},
+    {"binary_sensor", "space_heating_cooling_normal_operation"},
+    {"sensor", "leaving_water_temperature_phe"},
+    {"sensor", "leaving_water_temperature_buh"},
+    {"sensor", "return_water_temperature"},
+    {"sensor", "domestic_hot_water_temperature"},
+    {"sensor", "outside_air_temperature"},
+    {"sensor", "liquid_refrigerant_temperature"},
+    {"sensor", "remote_controller_room_temperature_main"},
+    {"sensor", "flow_rate"},
+    {"sensor", "heat_pump_power_consumption"},
+    {"sensor", "leaving_water_main_heating_setpoint"},
+    {"sensor", "leaving_water_main_cooling_setpoint"},
+    {"sensor", "operation_mode"},
+    {"binary_sensor", "space_heating_cooling_on_off"},
+    {"sensor", "room_thermostat_control_heating_setpoint_main"},
+    {"sensor", "room_thermostat_control_cooling_setpoint_main"},
+    {"binary_sensor", "quiet_mode_operation"},
+    {"sensor", "dhw_reheat_setpoint"},
+    {"sensor", "smart_grid_operation_mode"},
+    {"sensor", "power_limit_during_recommended_on_buffering"},
+    {"sensor", "general_power_limit"},
+};
+inline constexpr int RETIRED_MODBUS_HA_SENSOR_COUNT =
+    sizeof(RETIRED_MODBUS_HA_SENSORS) / sizeof(RETIRED_MODBUS_HA_SENSORS[0]);
+static_assert(RETIRED_MODBUS_HA_SENSOR_COUNT == 27,
+              "the v1.0.0-dev.257 HomeHub discovery ledger is immutable");
+
+inline std::string retired_modbus_discovery_topic(const std::string&           prefix,
+                                                  const std::string&           x10a_node,
+                                                  const RetiredModbusHaSensor& sensor) {
     const std::string node = modbus_entity_node_id(x10a_node);
-    return prefix + "/" + modbus_ha_component(reg) + "/" + node + "/" +
-           object_id(reg.label) + "/config";
+    return prefix + "/" + sensor.component + "/" + node + "/" + sensor.object_id + "/config";
 }
 
 // ── DERIVED companion entities ───────────────────────────────────────────────────────────────────

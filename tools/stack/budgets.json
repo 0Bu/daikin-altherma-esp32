@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "symbols": {
+    "status_serializer": {
+      "pattern": "^void daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool\\)$",
+      "max_bytes": 5120
+    },
+    "mcp_post": {
+      "pattern": "^daik::mcp_post\\(",
+      "max_bytes": 1536
+    },
+    "http_send_status_json": {
+      "pattern": "^daik::http_send_status_json\\(",
+      "max_bytes": 256
+    },
+    "mqtt_task": {
+      "pattern": "^daik::mqtt_task\\(",
+      "max_bytes": 2048
+    },
+    "weather_task": {
+      "pattern": "^daik::.*weather_task\\(",
+      "max_bytes": 6144
+    },
+    "weather_fetch": {
+      "pattern": "^daik::.*fetch_forecast\\(",
+      "max_bytes": 2048
+    },
+    "weather_download": {
+      "pattern": "^daik::.*download_json\\(",
+      "max_bytes": 3072
+    },
+    "weather_parse": {
+      "pattern": "^daik::.*parse_forecast\\(",
+      "max_bytes": 3072
+    },
+    "ota_task": {
+      "pattern": "^daik::.*ota_task\\(",
+      "max_bytes": 2816
+    },
+    "ota_status_http": {
+      "pattern": "^daik::.*ota_stat\\(",
+      "max_bytes": 5376
+    },
+    "ota_manifest_fetch": {
+      "pattern": "^daik::.*fetch_manifest_identity_once\\(",
+      "max_bytes": 1408
+    },
+    "ota_manifest_fetch_wrapper": {
+      "pattern": "fetch_manifest_identity(?:ER|\\()",
+      "max_bytes": 128
+    },
+    "ota_manifest_identity": {
+      "pattern": "^daik::manifest_identity\\(",
+      "max_bytes": 512
+    },
+    "ota_manifest_skip_value": {
+      "pattern": "^daik::detail::skip_json_value\\(",
+      "max_bytes": 256
+    },
+    "http_deadline_watchdog": {
+      "pattern": "^daik::.*socket_deadline_watchdog_task\\(",
+      "max_bytes": 1024
+    },
+    "ota_check_http": {
+      "pattern": "^daik::ota_check\\(",
+      "max_bytes": 1280
+    },
+    "ota_start_check": {
+      "pattern": "^daik::.*start_check\\(",
+      "max_bytes": 768
+    },
+    "ota_health_task": {
+      "pattern": "^daik::.*health_gate_task\\(void\\*\\)$",
+      "max_bytes": 1024
+    }
+  },
+  "paths": {
+    "httpd_mcp_status": {
+      "symbols": ["mcp_post", "status_serializer"],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_status": {
+      "symbols": ["http_send_status_json", "status_serializer"],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_ota_status": {
+      "symbols": ["ota_status_http"],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "ota_task_manifest_fetch": {
+      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],
+      "multipliers": {"ota_manifest_skip_value": 9},
+      "base_bytes": 0,
+      "max_bytes": 6144
+    },
+    "httpd_ota_check": {
+      "symbols": ["ota_check_http", "ota_start_check"],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3840
+    },
+    "http_deadline_watchdog": {
+      "symbols": ["http_deadline_watchdog"],
+      "multipliers": {},
+      "base_bytes": 1024,
+      "max_bytes": 2048
+    },
+    "weather_task_download": {
+      "symbols": ["weather_task", "weather_fetch", "weather_download"],
+      "multipliers": {},
+      "base_bytes": 2048,
+      "max_bytes": 11264
+    },
+    "weather_task_parse": {
+      "symbols": ["weather_task", "weather_fetch", "weather_parse"],
+      "multipliers": {},
+      "base_bytes": 2048,
+      "max_bytes": 11264
+    },
+    "ota_health_gate": {
+      "symbols": ["ota_health_task"],
+      "multipliers": {},
+      "base_bytes": 2048,
+      "max_bytes": 3072
+    }
+  }
+}

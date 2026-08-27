@@ -264,12 +264,14 @@ assert.match(mqttHa, /s_env3\s*=\s*env3_topic\(s_base\)/,
   "ENV III must use its own message topic directly below the configured MQTT base");
 assert.match(mqttHa, /const bool new_sample = env\.fresh && env\.samples != s_last_env3_samples;[\s\S]*mqtt_publish\(s_env3, js\.c_str\(\), static_cast<int>\(js\.size\(\)\), 0, 1\)/,
   "every fresh ENV III sample must be published as retained telemetry, even when its values repeat");
-assert.match(mqttHa, /else if \(!s_env3_disabled_cleaned\)[\s\S]*mqtt_publish\(s_env3, "", 0, 0, 1\)/,
-  "disabling ENV III must retract its retained data topic");
+assert.match(mqttHa,
+  /else if \(!s_env3_disabled_cleaned\)[\s\S]*s_env3_cleanup_requested\.store\(true, std::memory_order_release\)/,
+  "disabling ENV III must admit its retained data topic to the ACK-driven cleanup queue");
 assert.match(mqttHa, /publish_env3_discovery\(\)[\s\S]*env3_discovery_config\(s_node, s_board, s_env3, s_avail, sensor\)/,
   "enabled ENV III must announce temperature, humidity, and pressure through HA discovery");
-assert.match(mqttHa, /else if \(!s_env3_disabled_cleaned\)[\s\S]*retract_env3_discovery\(\)/,
-  "disabling ENV III must retract all retained HA discovery configs as well as state");
+assert.match(mqttHa,
+  /MqttCleanupTopic::Env3Discovery[\s\S]*env3_discovery_topic\(s_prefix, s_node, ENV3_HA_SENSORS\[action.index\]\)/,
+  "the ENV III cleanup queue must retract all retained HA discovery configs as well as state");
 
 // The room-source row remains a user-configured exact MQTT mapping. Save performs the non-persistent
 // Save persists intent immediately; Delete posts the explicit empty mapping that clears the source

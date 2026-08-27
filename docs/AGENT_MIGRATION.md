@@ -122,11 +122,16 @@ fails closed on both missing and extra project skills.
   the private-inventory `bench`, and returns before production. Production promotion separately
   requires `--confirm-production production --execute`, owns its bench-first staging and one
   production write, then observes the canary read-only. Copying, wrapping, chaining or a raw POST is
-  not equivalent; production staging without `--execute` still mutates the bench.
+  not equivalent; production staging without `--execute` still mutates the bench. The separate
+  `--release-hil --confirm-release-hil release-hil --execute` shape belongs only to the isolated
+  self-hosted release workflow and is deliberately not admitted as an ordinary agent command.
 - Heap-sensitive changed-file paths make the SHA-stamped `$heap-safety-review` PR record mandatory.
   That record comes from the independent read-only `heap_safety_reviewer`; project and domain
   reviews remain independently required on every local/manual merge and every PR outside the narrow
   CI-attested Renovate Action-pin-line class.
+- Diagnosis/evidence paths and owner-visible help/status paths independently require current-head
+  `$diagnostic-evidence-review` and `$user-docs-review` records; their applicability is part of the
+  same fail-closed changed-file policy rather than an optional template convention.
 
 Upstream behavior is pinned to the official Codex documentation for
 [`AGENTS.md`](https://learn.chatgpt.com/docs/agent-configuration/agents-md),

@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -709,7 +709,7 @@ I18N.fr = localeValues([
   /* board.led_rgb_bus_down */ "Rouge, double flash — X10A déconnecté.",
   /* board.led_rgb_mqtt_down */ "Orange, clignotante — X10A connecté, MQTT déconnecté.",
   /* board.led_rgb_wipe_armed */ "Rouge, clignotement très rapide — effacement armé ; relâchez pour annuler.",
-  /* board.led_rgb_wiping */ "Blanche fixe — effacement des paramètres ; ne coupez pas l’alimentation.",
+  /* board.led_rgb_wiping */ "Blanche fixe — réinitialisation/effacement en cours ; ne coupez pas l’alimentation.",
   /* board.led_gpio_off */ "Éteinte — aucun mode Wi-Fi actif.",
   /* board.led_gpio_setup */ "Clignotement lent — portail de configuration actif.",
   /* board.led_gpio_connecting */ "Clignotement rapide — connexion au Wi-Fi.",
@@ -717,10 +717,10 @@ I18N.fr = localeValues([
   /* board.led_gpio_bus_down */ "Double flash — X10A déconnecté.",
   /* board.led_gpio_mqtt_down */ "Clignotement à vitesse moyenne — X10A connecté, MQTT déconnecté.",
   /* board.led_gpio_wipe_armed */ "Clignotement très rapide — effacement armé ; relâchez pour annuler.",
-  /* board.led_gpio_wiping */ "Fixe après un clignotement très rapide — effacement des paramètres ; ne coupez pas l’alimentation.",
+  /* board.led_gpio_wiping */ "Fixe après clignotement très rapide — réinitialisation/effacement en cours ; ne coupez pas l’alimentation.",
   /* board.ledinv */ "Actif au niveau bas (la LED s’allume lorsque la broche est commandée LOW)",
   /* board.btninv */ "Actif au niveau bas (le bouton relie la broche à GND)",
-  /* board.hint */ "Maintenez le bouton de réinitialisation pendant 5 secondes pour effacer tous les paramètres et ouvrir le portail de configuration. Sélectionnez « Aucun » lorsqu’aucun bouton n’est connecté.",
+  /* board.hint */ "Réinitialisation d’usine : maintenez 5 s. Efface définitivement le Wi-Fi/tous les paramètres, l’historique/les tendances, les durées d’état et le vidage mémoire brut. Le portail ne s’ouvre qu’après effacement complet réussi. Sinon, relâchez puis maintenez encore 5 s. Choisissez « Aucun » sans bouton.",
   /* card.hardware */ "Matériel",
   /* card.hw_off */ "Aucun",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

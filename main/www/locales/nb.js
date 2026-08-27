@@ -1,4 +1,4 @@
-// translation-source: 1a1e4d9480a8c303fb19c7df082748eb134a71d2c548980f810ec2c06d3bd40e
+// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -709,7 +709,7 @@ I18N.nb = localeValues([
   /* board.led_rgb_bus_down */ "Rød, dobbeltblink — X10A frakoblet.",
   /* board.led_rgb_mqtt_down */ "Oransje, blinker — X10A tilkoblet, MQTT frakoblet.",
   /* board.led_rgb_wipe_armed */ "Rød, svært rask blinking — sletting klargjort; slipp for å avbryte.",
-  /* board.led_rgb_wiping */ "Hvit, fast — innstillinger slettes; ikke koble fra strømmen.",
+  /* board.led_rgb_wiping */ "Hvit, fast — fabrikktilbakestilling/datasletting; ikke koble fra strømmen.",
   /* board.led_gpio_off */ "Av — ingen Wi-Fi-modus aktiv.",
   /* board.led_gpio_setup */ "Sakte blinking — oppsettportal aktiv.",
   /* board.led_gpio_connecting */ "Rask blinking — kobler til Wi-Fi.",
@@ -717,10 +717,10 @@ I18N.nb = localeValues([
   /* board.led_gpio_bus_down */ "Dobbeltblink — X10A frakoblet.",
   /* board.led_gpio_mqtt_down */ "Middels rask blinking — X10A tilkoblet, MQTT frakoblet.",
   /* board.led_gpio_wipe_armed */ "Svært rask blinking — sletting klargjort; slipp for å avbryte.",
-  /* board.led_gpio_wiping */ "Fast lys etter rask blinking — innstillinger slettes; ikke koble fra strømmen.",
+  /* board.led_gpio_wiping */ "Fast lys etter rask blinking — fabrikktilbakestilling/datasletting; ikke koble fra strømmen.",
   /* board.ledinv */ "Aktiv ved LOW — LED lyser ved lavt pinnenivå",
   /* board.btninv */ "Aktiv ved LOW — knappen trekker pinnen til GND",
-  /* board.hint */ "Hold tilbakestillingsknappen i 5 sekunder: Alle innstillinger slettes og oppsettportalen starter. Velg «Ingen» uten tilkoblet knapp.",
+  /* board.hint */ "Fabrikktilbakestilling: hold 5 s. Sletter Wi-Fi/alle innstillinger, historikk/trender, tilstandsvarighet og rå kjernedump permanent. Portalen åpnes bare etter fullført sletting. Ellers slipp og hold igjen i 5 s. Velg «Ingen» uten knapp.",
   /* card.hardware */ "Maskinvare",
   /* card.hw_off */ "Ingen",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

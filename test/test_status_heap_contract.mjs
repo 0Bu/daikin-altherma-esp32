@@ -40,7 +40,7 @@ assert.match(sink,
   /emission_started_ = true;[\s\S]*?emit_\([\s\S]*?if \(!sink\.emission_started\(\)\) throw;[\s\S]*?return false;/,
   "a serializer exception must remain a clean 503 before commit and abort the response after commit");
 assert.match(heartbeat,
-  /template <typename JsonOut>\s*\ninline void append_stack_bytes\(JsonOut& j, uint32_t words\)/,
+  /template <typename JsonOut>\s+inline void append_stack_bytes\(JsonOut& j, uint32_t bytes\)/,
   "status helpers used by the streamed instantiation must not force an owning std::string");
 
 console.log("status heap contract: GET /status and MCP get_status use one bounded streamed serializer");

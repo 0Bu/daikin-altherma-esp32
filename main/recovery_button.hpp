@@ -9,10 +9,12 @@
 // user isn't on. Until now the only cure was USB + `esptool erase_flash` — i.e. opening the
 // enclosure and finding a cable, for a config mistake.
 //
-// The button is the offline cure: hold BUTTON_FIRE_MS (logic/button.hpp) and the whole "daik_cfg"
-// NVS namespace is erased and the device reboots into the setup portal. Press classification —
-// including the arm checkpoint that warns the user before anything is destroyed — is the pure,
-// host-tested logic/button.hpp; this file is the GPIO + NVS + indicator glue.
+// The button is the offline cure: hold BUTTON_FIRE_MS (logic/button.hpp) and the firmware erases
+// the whole "daik_cfg" NVS namespace, legacy WiFi flash credentials, history journal plus
+// trend/dwell RAM, and the raw coredump. It reboots into the setup portal only when every privacy
+// erase succeeds. Press classification — including the arm checkpoint that warns before anything is
+// destroyed — is the pure, host-tested logic/button.hpp; this file coordinates GPIO, storage and
+// the indicator.
 //
 // Runtime-configured (config_model.hpp btn_gpio/btn_active_low) and DISABLED by default, because an
 // unconfigured input floats and a floating pin that reads "pressed" for five seconds would wipe a

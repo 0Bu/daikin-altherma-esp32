@@ -28,6 +28,10 @@ def copy_fixture(destination: pathlib.Path) -> None:
     destination.mkdir(parents=True)
     shutil.copytree(ROOT / "docs", destination / "docs")
     shutil.copytree(ROOT / "main", destination / "main")
+    # Matrix evidence may intentionally point at first-party release/build gates as well as firmware
+    # sources. Keep the clean fixture representative so a new valid scripts/ link does not make the
+    # mutation canary fail for an unrelated missing-fixture reason.
+    shutil.copytree(ROOT / "scripts", destination / "scripts")
     for name in ("CMakeLists.txt", "dependencies.lock", "partitions.csv", "sdkconfig.defaults"):
         shutil.copy2(ROOT / name, destination / name)
 
