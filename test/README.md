@@ -23,13 +23,16 @@ scripts/run-browser-render-tests.sh
 Uses `cmake` + `ctest` when present, else a direct `g++`/`clang++` compile of the single
 translation unit ([`test_logic.cpp`](test_logic.cpp)) with `-std=c++17 -Wall -Wextra -Werror`.
 `--coverage` uses the compiler's gcov instrumentation and enforces at least 95% aggregate executable
-line coverage across `main/logic/`. For each compiler-family/major profile, it also compares every
+line coverage across `main/logic/`. For each compiler execution profile, it also compares every
 branch-bearing header's aggregated gcov `taken/total` branch-edge counts with the committed
 `tools/coverage/branch_baseline.json` ratchet: a header may raise its ratio but may not regress it
 silently. These totals do not identify individual edges, so equal counts are not proof that the same
 branches ran. It intentionally excludes this test driver, generated profiles and system headers:
 none of those can prove that another production branch ran. GCC uses `gcov`; Clang uses `llvm-cov
-gcov` (via `xcrun` on macOS).
+gcov` (via `xcrun` on macOS). Local profiles use compiler family and major; authoritative GitHub
+coverage additionally binds the hosted runner OS and image name because its packaged toolchain can
+instrument different outcome counts from a container with the same upstream compiler release. An
+unknown runner image has no fallback profile and therefore fails closed pending review.
 
 CI runs the coverage form as the first step of `mechanical_gates`; the required `build` job consumes
 that result before conditionally compiling the esp32s3 firmware — a

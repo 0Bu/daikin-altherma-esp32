@@ -1,6 +1,6 @@
 {
   "schema": 3,
-  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0, selected by compiler family and major. The gate also compares repository-history profiles and rejects decreases; improvements require an immediate versioned update.",
+  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles select compiler family/major; authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update.",
   "profiles": {
     "clang-17": {
       "main/logic/availability.hpp": {
@@ -464,6 +464,356 @@
       "main/logic/ha_device.hpp": {
         "outcomes": 100,
         "taken": 82
+      },
+      "main/logic/health_gate.hpp": {
+        "outcomes": 26,
+        "taken": 26
+      },
+      "main/logic/heap_watchdog.hpp": {
+        "outcomes": 24,
+        "taken": 24
+      },
+      "main/logic/heartbeat.hpp": {
+        "outcomes": 362,
+        "taken": 196
+      },
+      "main/logic/heating_curve_diagnosis.hpp": {
+        "outcomes": 78,
+        "taken": 62
+      },
+      "main/logic/heating_curve_mqtt.hpp": {
+        "outcomes": 374,
+        "taken": 219
+      },
+      "main/logic/hexdump.hpp": {
+        "outcomes": 16,
+        "taken": 16
+      },
+      "main/logic/history.hpp": {
+        "outcomes": 146,
+        "taken": 140
+      },
+      "main/logic/history_persist.hpp": {
+        "outcomes": 374,
+        "taken": 261
+      },
+      "main/logic/homehub_map.hpp": {
+        "outcomes": 32,
+        "taken": 32
+      },
+      "main/logic/hp_probe.hpp": {
+        "outcomes": 138,
+        "taken": 123
+      },
+      "main/logic/hp_query_log.hpp": {
+        "outcomes": 6,
+        "taken": 6
+      },
+      "main/logic/http_body.hpp": {
+        "outcomes": 126,
+        "taken": 58
+      },
+      "main/logic/http_cache.hpp": {
+        "outcomes": 58,
+        "taken": 48
+      },
+      "main/logic/http_deadline.hpp": {
+        "outcomes": 2,
+        "taken": 2
+      },
+      "main/logic/http_request.hpp": {
+        "outcomes": 128,
+        "taken": 105
+      },
+      "main/logic/http_surface.hpp": {
+        "outcomes": 12,
+        "taken": 12
+      },
+      "main/logic/http_values_wait.hpp": {
+        "outcomes": 6,
+        "taken": 6
+      },
+      "main/logic/json.hpp": {
+        "outcomes": 66,
+        "taken": 48
+      },
+      "main/logic/label_override.hpp": {
+        "outcomes": 16,
+        "taken": 16
+      },
+      "main/logic/led_pattern.hpp": {
+        "outcomes": 40,
+        "taken": 38
+      },
+      "main/logic/link_watch.hpp": {
+        "outcomes": 14,
+        "taken": 13
+      },
+      "main/logic/lwt_select.hpp": {
+        "outcomes": 62,
+        "taken": 55
+      },
+      "main/logic/mcp.hpp": {
+        "outcomes": 621,
+        "taken": 389
+      },
+      "main/logic/modbus.hpp": {
+        "outcomes": 120,
+        "taken": 84
+      },
+      "main/logic/modbus_plan.hpp": {
+        "outcomes": 68,
+        "taken": 61
+      },
+      "main/logic/modbus_snapshot.hpp": {
+        "outcomes": 10,
+        "taken": 10
+      },
+      "main/logic/mqtt_base.hpp": {
+        "outcomes": 46,
+        "taken": 40
+      },
+      "main/logic/mqtt_cleanup.hpp": {
+        "outcomes": 77,
+        "taken": 55
+      },
+      "main/logic/mqtt_group.hpp": {
+        "outcomes": 524,
+        "taken": 366
+      },
+      "main/logic/mqtt_publish_gate.hpp": {
+        "outcomes": 20,
+        "taken": 19
+      },
+      "main/logic/mqtt_uri.hpp": {
+        "outcomes": 66,
+        "taken": 55
+      },
+      "main/logic/net_link.hpp": {
+        "outcomes": 71,
+        "taken": 60
+      },
+      "main/logic/open_meteo.hpp": {
+        "outcomes": 36,
+        "taken": 25
+      },
+      "main/logic/ota_channel.hpp": {
+        "outcomes": 86,
+        "taken": 60
+      },
+      "main/logic/ota_headroom.hpp": {
+        "outcomes": 8,
+        "taken": 8
+      },
+      "main/logic/ota_hil_feed.hpp": {
+        "outcomes": 182,
+        "taken": 156
+      },
+      "main/logic/ota_manifest.hpp": {
+        "outcomes": 530,
+        "taken": 302
+      },
+      "main/logic/ota_quiesce.hpp": {
+        "outcomes": 8,
+        "taken": 7
+      },
+      "main/logic/ota_transport.hpp": {
+        "outcomes": 174,
+        "taken": 151
+      },
+      "main/logic/ou_stale.hpp": {
+        "outcomes": 16,
+        "taken": 16
+      },
+      "main/logic/outdoor_evidence.hpp": {
+        "outcomes": 29,
+        "taken": 23
+      },
+      "main/logic/payload_complete.hpp": {
+        "outcomes": 16,
+        "taken": 16
+      },
+      "main/logic/profile_view.hpp": {
+        "outcomes": 28,
+        "taken": 23
+      },
+      "main/logic/query_flag.hpp": {
+        "outcomes": 6,
+        "taken": 6
+      },
+      "main/logic/raw_capture.hpp": {
+        "outcomes": 10,
+        "taken": 10
+      },
+      "main/logic/redact.hpp": {
+        "outcomes": 52,
+        "taken": 37
+      },
+      "main/logic/reference_temperature.hpp": {
+        "outcomes": 314,
+        "taken": 200
+      },
+      "main/logic/refrigerant_service.hpp": {
+        "outcomes": 298,
+        "taken": 222
+      },
+      "main/logic/registers.hpp": {
+        "outcomes": 10,
+        "taken": 8
+      },
+      "main/logic/state_dwell.hpp": {
+        "outcomes": 108,
+        "taken": 101
+      },
+      "main/logic/syslog_policy.hpp": {
+        "outcomes": 2,
+        "taken": 2
+      },
+      "main/logic/timestamp.hpp": {
+        "outcomes": 14,
+        "taken": 9
+      },
+      "main/logic/uart_plan.hpp": {
+        "outcomes": 6,
+        "taken": 6
+      },
+      "main/logic/ui_lang.hpp": {
+        "outcomes": 98,
+        "taken": 98
+      },
+      "main/logic/version_cmp.hpp": {
+        "outcomes": 166,
+        "taken": 141
+      },
+      "main/logic/weather_forecast.hpp": {
+        "outcomes": 219,
+        "taken": 203
+      },
+      "main/logic/weather_mqtt.hpp": {
+        "outcomes": 148,
+        "taken": 90
+      },
+      "main/logic/wifi_rollback.hpp": {
+        "outcomes": 12,
+        "taken": 12
+      },
+      "main/logic/x10a_snapshot.hpp": {
+        "outcomes": 44,
+        "taken": 36
+      }
+    },
+    "gcc-13-github-linux-ubuntu24": {
+      "main/logic/availability.hpp": {
+        "outcomes": 87,
+        "taken": 82
+      },
+      "main/logic/binary_semantics.hpp": {
+        "outcomes": 24,
+        "taken": 24
+      },
+      "main/logic/board_pins.hpp": {
+        "outcomes": 50,
+        "taken": 46
+      },
+      "main/logic/board_presets.hpp": {
+        "outcomes": 112,
+        "taken": 85
+      },
+      "main/logic/boot_guard.hpp": {
+        "outcomes": 8,
+        "taken": 8
+      },
+      "main/logic/bootlog.hpp": {
+        "outcomes": 88,
+        "taken": 62
+      },
+      "main/logic/button.hpp": {
+        "outcomes": 22,
+        "taken": 21
+      },
+      "main/logic/captive.hpp": {
+        "outcomes": 8,
+        "taken": 8
+      },
+      "main/logic/checkup.hpp": {
+        "outcomes": 813,
+        "taken": 719
+      },
+      "main/logic/checkup_persist.hpp": {
+        "outcomes": 67,
+        "taken": 57
+      },
+      "main/logic/chunk_sink.hpp": {
+        "outcomes": 200,
+        "taken": 101
+      },
+      "main/logic/circulation_source.hpp": {
+        "outcomes": 56,
+        "taken": 45
+      },
+      "main/logic/config_model.hpp": {
+        "outcomes": 216,
+        "taken": 176
+      },
+      "main/logic/config_store.hpp": {
+        "outcomes": 434,
+        "taken": 290
+      },
+      "main/logic/conv_override.hpp": {
+        "outcomes": 8,
+        "taken": 8
+      },
+      "main/logic/convert.hpp": {
+        "outcomes": 139,
+        "taken": 128
+      },
+      "main/logic/cop_scope.hpp": {
+        "outcomes": 36,
+        "taken": 33
+      },
+      "main/logic/crashinfo.hpp": {
+        "outcomes": 244,
+        "taken": 149
+      },
+      "main/logic/crc.hpp": {
+        "outcomes": 51,
+        "taken": 42
+      },
+      "main/logic/detect.hpp": {
+        "outcomes": 158,
+        "taken": 141
+      },
+      "main/logic/detect_backoff.hpp": {
+        "outcomes": 10,
+        "taken": 10
+      },
+      "main/logic/discovery.hpp": {
+        "outcomes": 332,
+        "taken": 177
+      },
+      "main/logic/env3.hpp": {
+        "outcomes": 144,
+        "taken": 112
+      },
+      "main/logic/error_codes.hpp": {
+        "outcomes": 14,
+        "taken": 10
+      },
+      "main/logic/fault_state.hpp": {
+        "outcomes": 20,
+        "taken": 20
+      },
+      "main/logic/feature_gate.hpp": {
+        "outcomes": 38,
+        "taken": 35
+      },
+      "main/logic/fixed_text.hpp": {
+        "outcomes": 14,
+        "taken": 11
+      },
+      "main/logic/ha_device.hpp": {
+        "outcomes": 100,
+        "taken": 80
       },
       "main/logic/health_gate.hpp": {
         "outcomes": 26,

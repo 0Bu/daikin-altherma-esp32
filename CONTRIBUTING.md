@@ -66,7 +66,9 @@ other selftest here: a floor that has stopped failing turns a percentage into de
 
 Coverage is two-dimensional: the aggregate executable-line floor remains 95%, while
 `tools/coverage/branch_baseline.json` ratchets each branch-bearing production logic header's
-aggregated gcov `taken/total` branch-edge counts for the selected compiler family and major. A later
+aggregated gcov `taken/total` branch-edge counts for the selected compiler execution profile. Local
+profiles use compiler family and major; authoritative GitHub coverage also binds the hosted runner
+OS and image so compiler packaging drift cannot borrow a superficially compatible baseline. A later
 change may improve a header's ratio but may not silently reduce it. Equal counts do not prove that
 the same branch edges ran; this is a count ratchet, not branch-identity evidence. The
 sanitizer/property runner drives deterministic malformed frames, JSON, URLs and boundary values

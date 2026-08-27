@@ -54,7 +54,7 @@ if [ "$COVERAGE" = true ]; then
             exit 1
         }
         COMPILER_MAJOR="${COMPILER_RELEASE%%.*}"
-        BRANCH_PROFILE="clang-$COMPILER_MAJOR"
+        BRANCH_FAMILY=clang
         if command -v xcrun >/dev/null 2>&1 &&
            xcrun --find llvm-cov >/dev/null 2>&1; then
             GCOV_REPORT="$(xcrun llvm-cov gcov -n -b -c "$GCDA" 2>&1)"
@@ -71,10 +71,22 @@ if [ "$COVERAGE" = true ]; then
             exit 1
         }
         COMPILER_MAJOR="${COMPILER_RELEASE%%.*}"
-        BRANCH_PROFILE="gcc-$COMPILER_MAJOR"
+        BRANCH_FAMILY=gcc
         GCOV_REPORT="$(gcov -n -b -c "$GCDA" 2>&1)"
     else
         echo "run-mock-tests: GCC coverage needs gcov" >&2
+        exit 1
+    fi
+
+    # A GitHub-hosted runner and the pinned ESP-IDF container can carry the same upstream GCC
+    # family/major while producing different gcov edge inventories. Bind authoritative CI to its
+    # runner image as well; an unreviewed image name deliberately selects a missing profile and
+    # fails closed instead of silently borrowing a superficially compatible local baseline.
+    # shellcheck source=/dev/null
+    . tools/coverage/profile.sh
+    if ! BRANCH_PROFILE="$(coverage_branch_profile "$BRANCH_FAMILY" "$COMPILER_MAJOR" \
+        "${GITHUB_ACTIONS:-false}" "${RUNNER_OS:-}" "${ImageOS:-}")"; then
+        echo "run-mock-tests: cannot identify the coverage execution profile" >&2
         exit 1
     fi
 

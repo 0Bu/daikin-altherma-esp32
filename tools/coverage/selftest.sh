@@ -4,6 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 CHECK=tools/coverage/check_gcov_report.py
+# shellcheck source=/dev/null
+. tools/coverage/profile.sh
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/daikin-coverage-selftest.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/main/logic"
@@ -53,6 +55,23 @@ check_status() {
         fail=$((fail + 1))
     fi
 }
+
+set +e
+profile="$(coverage_branch_profile gcc 13 false '' '')"
+[ "$profile" = gcc-13 ]
+check_status "a local compiler selects its family-major profile" 0 "$?"
+
+profile="$(coverage_branch_profile gcc 13 true Linux ubuntu24)"
+[ "$profile" = gcc-13-github-linux-ubuntu24 ]
+check_status "a hosted runner selects its exact image profile" 0 "$?"
+
+profile="$(coverage_branch_profile gcc 13 true Linux ubuntu26)"
+[ "$profile" = gcc-13-github-linux-ubuntu26 ]
+check_status "a new hosted image cannot fall back to the old runner profile" 0 "$?"
+
+coverage_branch_profile gcc 13 true Linux '' >/dev/null 2>&1
+check_status "a hosted runner without an image identity fails closed" 2 "$?"
+set -e
 
 run_report() {
     local minimum="$1"
