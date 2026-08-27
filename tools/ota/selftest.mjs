@@ -98,8 +98,8 @@ try {
         '"ota_task_manifest_fetch": {\n      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],\n      "multipliers": {"ota_manifest_skip_value": 9},\n      "base_bytes": 0,\n      "max_bytes": 6144',
         '"ota_task_manifest_fetch": {\n      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],\n      "multipliers": {"ota_manifest_skip_value": 9},\n      "base_bytes": 0,\n      "max_bytes": 11776')],
     ["the firmware manifest frame shrinks below the publisher contract", () =>
-      replaceOnce("main/ota_update.cpp", "constexpr size_t   kManifestMax = 2048;",
-        "constexpr size_t   kManifestMax = 1024;")],
+      replaceOnce("main/ota_update.cpp", "constexpr size_t kManifestMax = 2048;",
+        "constexpr size_t kManifestMax = 1024;")],
     ["the publisher stops reading the firmware manifest limit", () =>
       replaceOnce("scripts/check-manifest-provenance.py",
         'OTA_SOURCE = ROOT / "main/ota_update.cpp"',

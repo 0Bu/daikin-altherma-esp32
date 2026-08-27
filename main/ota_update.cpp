@@ -216,7 +216,8 @@ struct OtaNetworkFlag {
 // would leave almost nothing spare.  The fixed release-HIL feed pair grows OtaTaskArgs from roughly
 // 100 B to 624 B (confirmed from the ESP32-S3 ELF). The task gained another 1 KiB when the manifest
 // contract was raised from 1 KiB to 2 KiB, so its transient stack grew by the same amount to retain
-// the reviewed headroom. The task only ever exists one at a time, so this is borrowed, not resident.
+// the reviewed headroom. The task only ever exists one at a time, so this is borrowed, not
+// resident.
 constexpr int         kTaskStack     = 11776;
 constexpr UBaseType_t kTaskPrio      = TASK_PRIO_OTA; // see main/task_config.hpp for the tiers
 constexpr int         kHttpTimeoutMs = 15000;
@@ -231,7 +232,7 @@ constexpr int        kOtaBufSize = 2048; // download chunk; deliberately small (
 // The shared Web Serial/OTA manifest currently needs about 1.5 KiB for its complete provenance,
 // artifact index and installer plan. check-manifest-provenance.py reads this exact constant and
 // refuses a larger publish payload, so the producer and the fixed firmware frame cannot drift.
-constexpr size_t   kManifestMax = 2048;
+constexpr size_t kManifestMax = 2048;
 constexpr unsigned kMaxRedirects       = 5;
 constexpr int      kDoneBeforeRebootMs = 3000;
 // MQTT publishes once a second. Hold the operation flag for a little longer than one cadence before
