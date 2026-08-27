@@ -4032,9 +4032,10 @@ OTA manifest-fetch, OTA-check and both Weather task path
 sums plus a reviewed 1536-byte allowance for surrounding/nested HTTP frames. The manifest path
 multiplies its recursive JSON skipper by all nine possible simultaneous frames (root plus the
 accepted depth of eight), and a separate path budgets the static deadline watchdog. After the
-generation-bound HIL URL and stack-evidence fields landed, ESP-IDF 6.0.2 measured `ota_task` at
-**2624 bytes** plus a **48-byte** wrapper and the parser's bounded recursive frames (complete
-measured path: **4656 bytes**, ratcheted ceiling: **6144 bytes**) on the 10752-byte task stack,
+generation-bound HIL URL, stack-evidence fields and 2 KiB shared-manifest contract landed,
+ESP-IDF 6.0.2 measured `ota_task` at **2624 bytes**, the manifest fetch at **2336 bytes**, plus a
+**48-byte** wrapper and the parser's bounded recursive frames (complete measured path: **5680
+bytes**, ratcheted ceiling: **6144 bytes**) on the 11776-byte task stack,
 leaving at least 1 KiB even at the ceiling. The rollback-critical `ota_health` task has a separate
 fail-closed symbol/path gate: its current inlined production frame is **80 bytes**, plus a reviewed
 **2048-byte** allowance for IDF/logging, exception-unwind and external callees, for **2128 / 3072
