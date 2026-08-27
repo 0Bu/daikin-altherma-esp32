@@ -147,7 +147,7 @@ static MqttCleanupEvidenceQueue<32> s_source_cleanup_evidence;
 static std::atomic<bool>            s_source_cleanup_evidence_lost{false};
 static std::atomic<uint32_t>        s_mqtt_client_epoch{0};
 static std::atomic<uint32_t>        s_connected_client_epoch{0};
-static uint32_t s_source_cleanup_evidence_drops_reported = 0; // mqtt_task only
+static uint32_t                     s_source_cleanup_evidence_drops_reported = 0; // mqtt_task only
 
 // The task starts a subscriber-only client immediately, then replaces it with an LWT-bearing client
 // after the first X10A proof. Definitions live beside the client builder below; forward declarations
@@ -478,8 +478,7 @@ static __attribute__((noinline)) bool mqtt_cleanup_evidence_recovery_step(int de
         set_status(false, "restarting after MQTT cleanup evidence loss");
         diag_printf("mqtt: cleanup evidence lost — transport stopped for bounded retry\n");
     } else {
-        diag_printf("mqtt: cleanup evidence recovery stop failed (%s)\n",
-                    esp_err_to_name(stop_rc));
+        diag_printf("mqtt: cleanup evidence recovery stop failed (%s)\n", esp_err_to_name(stop_rc));
     }
     s_publish_network_quiesced.store(true, std::memory_order_release);
     vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
@@ -603,13 +602,16 @@ static bool mqtt_publish(const std::string& topic, const char* payload, int len,
 
 // Source cleanup needs an unambiguous queue result. esp_mqtt_client_publish() can enqueue QoS 1,
 // fail its synchronous socket write and still return -1; retrying that apparent failure would leave
-// two copies in the outbox. The enqueue API either returns the tracked id or proves that no item was
-// admitted, while esp-mqtt's own task performs the network write.
+// two copies in the outbox. The enqueue API either returns the tracked id or proves that no item
+// was admitted, while esp-mqtt's own task performs the network write.
 static int mqtt_enqueue_id(const std::string& topic, const char* payload, int len, int qos,
                            int retain) {
-    const int rc = esp_mqtt_client_enqueue(s_client, topic.c_str(), payload, len, qos, retain,
-                                           false);
-    if (rc >= 0) s_mqtt_pub_ok++; else s_mqtt_pub_fail++;
+    const int rc =
+        esp_mqtt_client_enqueue(s_client, topic.c_str(), payload, len, qos, retain, false);
+    if (rc >= 0)
+        s_mqtt_pub_ok++;
+    else
+        s_mqtt_pub_fail++;
     esp_task_wdt_reset();
     return rc;
 }
@@ -946,10 +948,14 @@ static_assert(MQTT_ENV3_CLEANUP_DISCOVERY_COUNT == ENV3_HA_SENSOR_COUNT);
 static std::string source_cleanup_topic(const MqttCleanupAction& action) {
     if (action.topic == MqttCleanupTopic::State) {
         switch (action.source) {
-        case MqttCleanupSource::Weather: return s_weather;
-        case MqttCleanupSource::Modbus: return s_modbus;
-        case MqttCleanupSource::Env3: return s_env3;
-        case MqttCleanupSource::None: return {};
+        case MqttCleanupSource::Weather:
+            return s_weather;
+        case MqttCleanupSource::Modbus:
+            return s_modbus;
+        case MqttCleanupSource::Env3:
+            return s_env3;
+        case MqttCleanupSource::None:
+            return {};
         }
     }
     if (action.topic == MqttCleanupTopic::RetiredDiscovery) {
@@ -988,7 +994,8 @@ static void apply_source_cleanup_completion(const MqttCleanupCompletion& complet
         diag_printf("mqtt: superseded ENV III state%s deleted\n",
                     completion.env3_enabled ? "" : " and discovery");
         break;
-    case MqttCleanupSource::None: break;
+    case MqttCleanupSource::None:
+        break;
     }
 }
 
@@ -1016,11 +1023,9 @@ static void service_source_cleanup_evidence() {
 // missing PUBACK does not enqueue another copy on the next one-second cycle.
 static RetainedCleanupCycle service_requested_topic_cleanup(const Config& c) {
     s_source_cleanup.begin_cycle();
-    const bool connected = s_connected.load(std::memory_order_acquire);
-    const uint32_t connected_epoch =
-        s_connected_client_epoch.load(std::memory_order_acquire);
-    if (connected && connected_epoch != 0)
-        s_source_cleanup.reconstruct_for_client(connected_epoch);
+    const bool     connected       = s_connected.load(std::memory_order_acquire);
+    const uint32_t connected_epoch = s_connected_client_epoch.load(std::memory_order_acquire);
+    if (connected && connected_epoch != 0) s_source_cleanup.reconstruct_for_client(connected_epoch);
     if (s_weather_cleanup_requested.exchange(false, std::memory_order_acq_rel))
         s_source_cleanup.request(MqttCleanupSource::Weather);
     if (s_modbus_cleanup_requested.exchange(false, std::memory_order_acq_rel))
@@ -1032,14 +1037,14 @@ static RetainedCleanupCycle service_requested_topic_cleanup(const Config& c) {
     // numeric message id. Drain again after storing the id to cover a callback that ran before
     // esp_mqtt_client_enqueue() returned it to this task.
     service_source_cleanup_evidence();
-    const bool env3_enabled = c.env3_enabled && env3_board_supported(c);
-    const MqttCleanupAction action = s_source_cleanup.next_action(
+    const bool              env3_enabled = c.env3_enabled && env3_board_supported(c);
+    const MqttCleanupAction action       = s_source_cleanup.next_action(
         connected && connected_epoch == s_source_cleanup.client_epoch(), env3_enabled);
     if (action) {
         const std::string topic = source_cleanup_topic(action);
         if (!topic.empty()) {
-            const uint32_t epoch = s_source_cleanup.client_epoch();
-            const int msg_id = mqtt_enqueue_id(topic, "", 0, 1, 1);
+            const uint32_t epoch  = s_source_cleanup.client_epoch();
+            const int      msg_id = mqtt_enqueue_id(topic, "", 0, 1, 1);
             if (msg_id >= 0) {
                 if (!s_source_cleanup.publish_queued(epoch, msg_id))
                     diag_printf("mqtt: source cleanup scheduler rejected queued tombstone\n");
@@ -2272,45 +2277,59 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         s_connected_client_epoch.store(s_mqtt_client_epoch.load(std::memory_order_acquire),
                                        std::memory_order_release);
         // Publish the connection flag after its epoch. An acquiring mqtt_task can never observe a
-        // connected client with epoch zero and queue a tombstone whose returned id cannot be tracked.
+        // connected client with epoch zero and queue a tombstone whose returned id cannot be
+        // tracked.
         s_connected.store(true, std::memory_order_release);
-        s_announce = true; s_ref_reconfigure = true;
-        s_circulation_reconfigure = true;
-        s_circulation_probe_reconfigure = true; set_status(true, nullptr);
+        s_announce                      = true;
+        s_ref_reconfigure               = true;
+        s_circulation_reconfigure       = true;
+        s_circulation_probe_reconfigure = true;
+        set_status(true, nullptr);
         diag_printf("mqtt: %s client connected\n",
                     s_client_is_publisher ? "publisher" : "observation");
         s_transport_connecting.store(false, std::memory_order_release);
         break;
     case MQTT_EVENT_DISCONNECTED:
-        s_connected = false; s_heartbeat_announced = false; set_status(false, nullptr);
-        { Lock lk(s_mtx); s_ref_status.subscribed = false; s_circulation_status.subscribed = false; }
+        s_connected           = false;
+        s_heartbeat_announced = false;
+        set_status(false, nullptr);
+        {
+            Lock lk(s_mtx);
+            s_ref_status.subscribed         = false;
+            s_circulation_status.subscribed = false;
+        }
         diag_printf("mqtt: disconnected (will retry)\n");
         s_transport_connecting.store(false, std::memory_order_release);
         break;
     case MQTT_EVENT_ERROR: {
-        auto* e = static_cast<esp_mqtt_event_handle_t>(data);
+        auto*       e   = static_cast<esp_mqtt_event_handle_t>(data);
         const char* why = "connection error";
         if (e && e->error_handle) {
-            if (e->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)       why = "tls/tcp error";
-            else if (e->error_handle->connect_return_code != MQTT_CONNECTION_ACCEPTED) why = "broker refused (auth/creds?)";
+            if (e->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
+                why = "tls/tcp error";
+            else if (e->error_handle->connect_return_code != MQTT_CONNECTION_ACCEPTED)
+                why = "broker refused (auth/creds?)";
         }
         set_status(false, why);
         diag_printf("mqtt: %s\n", why);
-        break; }
+        break;
+    }
     case MQTT_EVENT_PUBLISHED: {
         auto* e = static_cast<esp_mqtt_event_handle_t>(data);
-        if (e && !s_source_cleanup_evidence.push(
-                     {s_mqtt_client_epoch.load(std::memory_order_acquire), e->msg_id,
-                      MqttCleanupDeliveryOutcome::Published}))
+        if (e &&
+            !s_source_cleanup_evidence.push({s_mqtt_client_epoch.load(std::memory_order_acquire),
+                                             e->msg_id, MqttCleanupDeliveryOutcome::Published}))
             s_source_cleanup_evidence_lost.store(true, std::memory_order_release);
-        break; }
+        break;
+    }
     case MQTT_EVENT_DELETED: {
         auto* e = static_cast<esp_mqtt_event_handle_t>(data);
-        if (e && !s_source_cleanup_evidence.push(
-                     {s_mqtt_client_epoch.load(std::memory_order_acquire), e->msg_id,
-                      MqttCleanupDeliveryOutcome::Deleted}))
+        if (e &&
+            !s_source_cleanup_evidence.push({s_mqtt_client_epoch.load(std::memory_order_acquire),
+                                             e->msg_id, MqttCleanupDeliveryOutcome::Deleted}))
             s_source_cleanup_evidence_lost.store(true, std::memory_order_release);
-        break; }
+        break;
+    }
     case MQTT_EVENT_DATA: {
         auto* e = static_cast<esp_mqtt_event_handle_t>(data);
         capture_reference_frame(e);
@@ -2468,8 +2487,8 @@ static void mqtt_task(void*) {
             // HA may have been offline for the connect-time tombstones. Repeat only the permanently
             // retired discovery deletes on this independent timer, outside X10A publication
             // authority, so a silent heat-pump bus cannot strand legacy entities after HA returns.
-            // A pending/active source cleanup includes the same deletes and holds this timer; ordinary
-            // source state/discovery remains inside gate.publish_cycle below.
+            // A pending/active source cleanup includes the same deletes and holds this timer;
+            // ordinary source state/discovery remains inside gate.publish_cycle below.
             publish_stage = "retire";
             if (s_connected) {
                 if (cleanup_cycle.modbus || cleanup_cycle.weather) {
@@ -2589,7 +2608,8 @@ static void mqtt_task(void*) {
                         publish_modbus_state();
                     } else if (modbus_action == RetainedSourceAction::DeleteRetained) {
                         // Covers a live POST /set_hp disable. Discovery and the duplicate status
-                        // topic are already retired; admit the delete to the ACK-driven source queue.
+                        // topic are already retired; admit the delete to the ACK-driven source
+                        // queue.
                         s_modbus_cleanup_requested.store(true, std::memory_order_release);
                     }
                 }

@@ -15593,8 +15593,7 @@ static void test_mqtt_cleanup() {
     CHECK(env3_only.publish_queued(9, msg_id));
     CHECK(env3_only.acknowledge({9, msg_id}));
     const MqttCleanupCompletion env3_enabled_done = env3_only.take_completion();
-    CHECK(env3_enabled_done.source == MqttCleanupSource::Env3 &&
-          env3_enabled_done.env3_enabled);
+    CHECK(env3_enabled_done.source == MqttCleanupSource::Env3 && env3_enabled_done.env3_enabled);
     CHECK(env3_only.suppress(MqttCleanupSource::Env3)); // completion cycle stays suppressed
 
     CHECK(MQTT_SOURCE_CLEANUP_MAX_STEPS == 37);
