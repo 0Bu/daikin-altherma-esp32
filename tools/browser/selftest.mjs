@@ -71,4 +71,27 @@ assert.equal(delayedFocus.status, 0,
   `modal-focus delay selftest must pass after awaiting the complete open state\n${delayedFocusOutput}`);
 assert.match(delayedFocusOutput, /browser modal-focus selftest passed/,
   "modal-focus delay selftest must execute the delayed dialog-focus path");
-console.log("browser render selftest passed: injected overflow was rejected and delayed modal focus awaited");
+
+const historyFlood = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, DAIKIN_BROWSER_MUTATION: "history-flood" },
+});
+const historyFloodOutput = `${historyFlood.stdout || ""}\n${historyFlood.stderr || ""}`;
+assert.notEqual(historyFlood.status, 0,
+  "routing every translated modal matrix through browser History must make the gate fail");
+assert.match(historyFloodOutput, /real browser History transitions must stay bounded/,
+  "history-flood selftest must fail at the explicit real-route budget");
+
+const isolationBypass = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, DAIKIN_BROWSER_MUTATION: "route-isolation-bypass" },
+});
+const isolationBypassOutput = `${isolationBypass.stdout || ""}\n${isolationBypass.stderr || ""}`;
+assert.notEqual(isolationBypass.status, 0,
+  "bypassing the translated keyboard route isolation must make the gate fail");
+assert.match(isolationBypassOutput, /route-isolated keyboard open must keep the Settings hash/,
+  "route-isolation selftest must fail at the observed hash boundary");
+console.log("browser render selftest passed: overflow was rejected, delayed modal focus was awaited, " +
+  "duplicate real History transitions were bounded, and route isolation was observed");
