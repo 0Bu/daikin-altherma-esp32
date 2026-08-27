@@ -251,6 +251,10 @@
         "outcomes": 58,
         "taken": 41
       },
+      "main/logic/ota_changelog_range.hpp": {
+        "outcomes": 72,
+        "taken": 58
+      },
       "main/logic/ota_headroom.hpp": {
         "outcomes": 6,
         "taken": 6
@@ -332,8 +336,8 @@
         "taken": 96
       },
       "main/logic/version_cmp.hpp": {
-        "outcomes": 140,
-        "taken": 123
+        "outcomes": 142,
+        "taken": 125
       },
       "main/logic/weather_forecast.hpp": {
         "outcomes": 177,
@@ -601,6 +605,10 @@
         "outcomes": 86,
         "taken": 60
       },
+      "main/logic/ota_changelog_range.hpp": {
+        "outcomes": 82,
+        "taken": 67
+      },
       "main/logic/ota_headroom.hpp": {
         "outcomes": 8,
         "taken": 8
@@ -682,8 +690,8 @@
         "taken": 98
       },
       "main/logic/version_cmp.hpp": {
-        "outcomes": 166,
-        "taken": 141
+        "outcomes": 168,
+        "taken": 143
       },
       "main/logic/weather_forecast.hpp": {
         "outcomes": 219,
@@ -951,6 +959,10 @@
         "outcomes": 86,
         "taken": 60
       },
+      "main/logic/ota_changelog_range.hpp": {
+        "outcomes": 82,
+        "taken": 67
+      },
       "main/logic/ota_headroom.hpp": {
         "outcomes": 8,
         "taken": 8
@@ -1032,8 +1044,8 @@
         "taken": 98
       },
       "main/logic/version_cmp.hpp": {
-        "outcomes": 166,
-        "taken": 141
+        "outcomes": 168,
+        "taken": 143
       },
       "main/logic/weather_forecast.hpp": {
         "outcomes": 219,

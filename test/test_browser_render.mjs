@@ -269,6 +269,13 @@ try {
 
   const viewports = [{ name: "phone", width: 320, height: 760 },
                      { name: "desktop", width: 1200, height: 900 }];
+  const cumulativeOtaNotes = [
+    "v1.0.3-dev.15 — Hard-reset ESP32-S3 after serial flash",
+    "v1.0.3-dev.17 — Fix OTA stress HTTP handoff",
+    "v1.0.3-dev.18 — Maintenance and reliability improvements.",
+    "v1.0.3-dev.19 — Preserve legacy bench restore compatibility",
+    "v1.0.3-dev.20 — Accept exact legacy writer evidence",
+  ];
 
   // Keep the mutation selftest fast and focused: it proves the layout assertion itself can fail,
   // while the normal invocation below owns the full locale/state/browser matrix exactly once.
@@ -343,6 +350,50 @@ try {
         await assertAccessibility(page, `${viewport.name}/${locale}/${modalId}`, { nativeTree: true });
         await assertModalKeyboard(page, modalId, `${viewport.name}/${locale}/${modalId}`);
       }
+
+      // The OTA decision is deliberately transient rather than routed. Render the real skipped-dev
+      // history in every shipped locale and viewport so a cumulative feed cannot silently turn the
+      // modal into clipped, inaccessible or single-build-only output.
+      await page.evaluate(`(() => {
+        window.__browserOtaDecision = askOtaInstall({
+          current: "1.0.3-dev.14", available: "1.0.3-dev.20", available_channel: "dev"
+        }, ${JSON.stringify(cumulativeOtaNotes.join("\n"))}, false,
+        document.getElementById("e32Chan"), "settings");
+        return true;
+      })()`);
+      await page.waitFor(`(() => {
+        const modal = document.getElementById("otaModal");
+        return !modal.hidden && document.activeElement?.closest("#otaModal") !== null;
+      })()`);
+      assert.deepEqual(await page.evaluate(`(() => ({
+        title: document.getElementById("otaModalTitle").textContent,
+        expectedTitle: t("ota.dialog_title"),
+        changesTitle: document.querySelector("#otaModal .ota-changes-title").textContent,
+        expectedChangesTitle: t("ota.changes_title"),
+        version: document.getElementById("otaVersionLine").textContent,
+        notes: Array.from(document.querySelectorAll("#otaChanges li"), (item) => item.textContent),
+        route: location.hash,
+      }))()`), {
+        title: await page.evaluate(`t("ota.dialog_title")`),
+        expectedTitle: await page.evaluate(`t("ota.dialog_title")`),
+        changesTitle: await page.evaluate(`t("ota.changes_title")`),
+        expectedChangesTitle: await page.evaluate(`t("ota.changes_title")`),
+        version: "v1.0.3-dev.14 → v1.0.3-dev.20",
+        notes: cumulativeOtaNotes,
+        route: "#settings",
+      }, `${viewport.name}/${locale}/otaModal: complete skipped-build history must render literally`);
+      assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/otaModal`);
+      await assertAccessibility(page, `${viewport.name}/${locale}/otaModal`, { nativeTree: true });
+      await page.key("Tab", { code: "Tab", keyCode: 9 });
+      assert.equal(await page.evaluate(`document.activeElement?.closest("#otaModal") !== null`), true,
+        `${viewport.name}/${locale}/otaModal: Tab must remain inside the transient decision`);
+      await page.key("Escape", { code: "Escape", keyCode: 27 });
+      await page.waitFor("document.getElementById('otaModal').hidden");
+      assert.equal(await page.evaluate("window.__browserOtaDecision"), false,
+        `${viewport.name}/${locale}/otaModal: Escape must resolve the OTA decision as cancel`);
+      assert.equal(await page.evaluate("document.documentElement.classList.contains('modal-open')"),
+        false, `${viewport.name}/${locale}/otaModal: Escape must release scroll lock`);
+
       await page.key("Escape", { code: "Escape", keyCode: 27 });
       await page.waitFor("document.getElementById('viewDash').classList.contains('active')");
       console.log(`browser render checked: ${viewport.name}/${locale}`);

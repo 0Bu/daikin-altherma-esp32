@@ -19,6 +19,7 @@
 #include "logic/health_gate.hpp"
 #include "logic/http_deadline.hpp"
 #include "logic/ota_channel.hpp"
+#include "logic/ota_changelog_range.hpp"
 #include "logic/ota_headroom.hpp"
 #include "logic/ota_manifest.hpp"
 #include "logic/payload_complete.hpp"
@@ -744,7 +745,8 @@ bool fetch_manifest_identity(const std::string& url, OtaManifestIdentity& out, c
 // artifact, while the UI shows an explicit localized fallback instead of inventing changes.  Unlike
 // manifest.json, this body never lives on the OTA stack and never participates in update
 // authorization.
-ChangelogBuffer fetch_changelog(const std::string& manifest_url, const char* expected_version) {
+ChangelogBuffer fetch_changelog(const std::string& manifest_url, const char* running_version,
+                                const char* expected_version) {
     char url[256] = {};
     if (!ota_manifest_sibling_url(manifest_url, "changelog.json", url, sizeof(url)) ||
         !ota_url_is_absolute_https(url))
@@ -872,6 +874,17 @@ ChangelogBuffer fetch_changelog(const std::string& manifest_url, const char* exp
     close_http_client(c, socket_deadline);
     if (!ok) return {};
 
+    // The public schema remains compatible with older firmware: cumulative dev notes are ordinary
+    // version-prefixed lines inside the same bounded string. Select only the builds this device is
+    // skipping after TLS has released its heap, in place and without a second document allocation.
+    // A target-only legacy document is retained unchanged; a malformed versioned history becomes
+    // the existing localized no-notes fallback.
+    if (ota_changelog_select_range(document.get(), running_version, expected_version) ==
+        OtaChangelogRangeResult::Invalid)
+        return {};
+    decoded_len = std::strlen(document.get());
+    if (decoded_len == 0) return {};
+
     // The remote-document allocation existed only after the handshake and is still deliberately
     // temporary. Once every TLS/client allocation has gone, retain exactly the decoded bytes rather
     // than leaving the 1025-byte body slot as a long-lived island between coalescing TLS blocks.
@@ -909,8 +922,9 @@ void run_check(const OtaTaskArgs& request) {
     // switch back rather than silently calling the release channel "up to date" on a dev board.
     const bool down =
         !newer && ota_install_allowed(running, offer.version, /*allow_downgrade=*/true);
-    ChangelogBuffer changelog =
-        (newer || down) ? fetch_changelog(url, offer.version) : ChangelogBuffer{};
+    ChangelogBuffer changelog = (newer || down)
+                                    ? fetch_changelog(url, running.c_str(), offer.version)
+                                    : ChangelogBuffer{};
     const bool have_changelog = static_cast<bool>(changelog);
     if ((newer || down) && !have_changelog)
         diag_printf("ota: %s changelog unavailable or invalid for %s\n", ota_channel_name(ch),

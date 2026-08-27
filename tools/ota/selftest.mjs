@@ -32,6 +32,7 @@ const files = [
   "main/logic/http_values_wait.hpp",
   "main/logic/http_deadline.hpp",
   "main/logic/health_gate.hpp",
+  "main/logic/ota_changelog_range.hpp",
   "main/logic/ota_manifest.hpp",
   "main/logic/payload_complete.hpp",
   "main/logic/fixed_text.hpp",
@@ -656,6 +657,21 @@ try {
       replaceOnce("main/ota_update.cpp",
         "manifest_changelog(document.get(), got, expected_version,",
         "manifest_changelog(document.get(), got, \"ignored-version\",")],
+    ["the cumulative changelog is no longer selected after TLS closes", () =>
+      replaceOnce("main/ota_update.cpp",
+        "ota_changelog_select_range(document.get(), running_version, expected_version)",
+        "ota_changelog_select_range_bypassed(document.get(), running_version, expected_version)")],
+    ["the filtered changelog length is not remeasured", () =>
+      replaceOnce("main/ota_update.cpp",
+        "        return {};\n    decoded_len = std::strlen(document.get());",
+        "        return {};\n    decoded_len = got;")],
+    ["the cumulative changelog selector allocates dynamic storage", () =>
+      replaceOnce("main/logic/ota_changelog_range.hpp",
+        "    size_t selected_offset = 0;",
+        "    std::string dynamic_history;\n    size_t selected_offset = 0;")],
+    ["the cumulative changelog is copied with an overlapping-unsafe primitive", () =>
+      replaceOnce("main/logic/ota_changelog_range.hpp", "std::memmove(text,",
+        "std::memcpy(text,")],
     ["the optional changelog opens a second TLS client without a heap gate", () =>
       replaceOnce("main/ota_update.cpp",
         'wait_for_ota_headroom("changelog", OTA_CHANGELOG_HEADROOM,',

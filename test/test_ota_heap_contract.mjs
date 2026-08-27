@@ -40,6 +40,7 @@ const httpDeadline = code("main/http_deadline.cpp");
 const httpDeadlineHeader = code("main/http_deadline.hpp");
 const httpDeadlineLogic = code("main/logic/http_deadline.hpp");
 const manifestLogic = code("main/logic/ota_manifest.hpp");
+const changelogRange = code("main/logic/ota_changelog_range.hpp");
 const appMain = code("main/main.cpp");
 // Keep this source verbatim: it contains the legitimate captive-portal URI string "/*", which a
 // regex comment stripper would mistake for an unterminated block comment and erase most handlers.
@@ -642,6 +643,8 @@ const changelogDocument = changelogFetch.indexOf("heap_caps_calloc(1, kChangelog
 const changelogRead = changelogFetch.indexOf("esp_http_client_read(", changelogDocument);
 const changelogDisarm = changelogFetch.indexOf("socket_deadline.disarm()", changelogRead);
 const changelogClose = changelogFetch.lastIndexOf("close_http_client(c, socket_deadline)");
+const changelogSelect = changelogFetch.indexOf(
+  "ota_changelog_select_range(document.get(), running_version, expected_version)", changelogClose);
 const changelogExact = changelogFetch.indexOf(
   "heap_caps_malloc(decoded_len + 1, MALLOC_CAP_8BIT)", changelogClose);
 assert.ok(changelogHttps >= 0 && changelogHeapGate > changelogHttps &&
@@ -649,8 +652,8 @@ assert.ok(changelogHttps >= 0 && changelogHeapGate > changelogHttps &&
           changelogArm > changelogDeadline && changelogHeaders > changelogArm &&
           changelogDocument > changelogHeaders && changelogRead > changelogDocument &&
           changelogDisarm > changelogRead && changelogClose > changelogDisarm &&
-          changelogExact > changelogClose,
-  "the optional client must arm across headers/body, join, close TLS, then retain decoded_len+1 bytes");
+          changelogSelect > changelogClose && changelogExact > changelogSelect,
+  "the optional client must arm across headers/body, join, close TLS, select the range, then retain decoded_len+1 bytes");
 assert.match(changelogFetch, /transport_type\s*=\s*HTTP_TRANSPORT_OVER_SSL/,
   "changelog fetch must force the SSL transport");
 assert.match(changelogFetch, /disable_auto_redirect\s*=\s*true/,
@@ -658,6 +661,14 @@ assert.match(changelogFetch, /disable_auto_redirect\s*=\s*true/,
 assert.match(changelogFetch,
   /manifest_changelog\(document\.get\(\),\s*got,\s*expected_version,\s*document\.get\(\),\s*OTA_CHANGELOG_TEXT_MAX\s*\+\s*1\)/,
   "release notes must be version-bound, decoded in place and capped to the declared text budget");
+assert.match(changelogFetch,
+  /decoded_len\s*=\s*std::strlen\(document\.get\(\)\)[\s\S]{0,120}?if\s*\(decoded_len\s*==\s*0\)\s*return\s*\{\}/,
+  "the exact retained allocation must be resized after in-place range selection");
+assert.match(changelogRange,
+  /std::memmove\(text,\s*text\s*\+\s*selected_offset,\s*text_len\s*-\s*selected_offset\s*\+\s*1\)/,
+  "cumulative notes must be selected in place without a second history allocation");
+assert.doesNotMatch(changelogRange, /std::string|std::vector|new\s|malloc|calloc|realloc/,
+  "OTA changelog range selection must stay allocation-free");
 assert.match(headroom,
   /OTA_CHANGELOG_HEADROOM\s*=\s*OTA_TRANSFER_HEADROOM/,
   "the courtesy TLS client must inherit the measured dynamic-TLS transfer budget without drift");

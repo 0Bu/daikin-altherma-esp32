@@ -14,6 +14,7 @@
 #include "logic/http_request.hpp"
 #include "logic/modbus.hpp"
 #include "logic/mqtt_uri.hpp"
+#include "logic/ota_changelog_range.hpp"
 #include "logic/ota_manifest.hpp"
 
 namespace {
@@ -151,6 +152,62 @@ void test_manifest_properties() {
         REQUIRE(version[0] == '\0');
         OtaManifestIdentity identity{};
         REQUIRE(!manifest_identity(mutated.data(), mutated.size(), identity));
+    }
+}
+
+void exercise_changelog_range_input(const std::string& input) {
+    std::vector<char> buffer(input.begin(), input.end());
+    buffer.push_back('\0');
+    const OtaChangelogRangeResult result =
+        ota_changelog_select_range(buffer.data(), "1.0.3-dev.17", "1.0.3-dev.20");
+    if (result == OtaChangelogRangeResult::Invalid) {
+        REQUIRE(buffer[0] == '\0');
+    } else {
+        REQUIRE(checked_string_length(buffer.data(), buffer.size()) <= input.size());
+    }
+}
+
+void test_changelog_range_properties() {
+    g_target = "ota-changelog-range";
+    const std::string valid =
+        "v1.0.3-dev.15 — Hard-reset ESP32-S3 after serial flash\n"
+        "v1.0.3-dev.17 — Fix OTA stress HTTP handoff\n"
+        "v1.0.3-dev.18 — Maintenance and reliability improvements.\n"
+        "v1.0.3-dev.19 — Preserve legacy bench restore compatibility\n"
+        "v1.0.3-dev.20 — Accept exact legacy writer evidence";
+    const std::string expected =
+        "v1.0.3-dev.18 — Maintenance and reliability improvements.\n"
+        "v1.0.3-dev.19 — Preserve legacy bench restore compatibility\n"
+        "v1.0.3-dev.20 — Accept exact legacy writer evidence";
+    std::vector<char> selected(valid.begin(), valid.end());
+    selected.push_back('\0');
+    REQUIRE(ota_changelog_select_range(selected.data(), "1.0.3-dev.17", "1.0.3-dev.20") ==
+            OtaChangelogRangeResult::Selected);
+    REQUIRE(std::string_view(selected.data()) == expected);
+
+    const std::vector<std::string> seeds = {
+        valid,
+        "Target-only legacy note",
+        "v1.0.3-dev.20 — One target note",
+        "v1.0.3-dev.20 — First target note\nv1.0.3-dev.20 — Second target note",
+        "v1.0.3-dev.20 — Later\nv1.0.3-dev.19 — Earlier",
+        "v1.0.3-dev.20 — Valid\nlegacy line",
+        "v1.0.3-dev.x — Invalid",
+    };
+    constexpr std::array<unsigned char, 12> replacements = {
+        0x00, 0x09, 0x0a, 0x0d, 0x20, 0x2d, 0x2e, 0x76, 0x7f, 0x80, 0x94, 0xff,
+    };
+    for (const std::string& seed : seeds) {
+        exercise_changelog_range_input(seed);
+        for (std::size_t prefix = 0; prefix <= seed.size(); ++prefix)
+            exercise_changelog_range_input(seed.substr(0, prefix));
+        for (std::size_t offset = 0; offset < seed.size(); ++offset) {
+            for (const unsigned char replacement : replacements) {
+                std::string mutated = seed;
+                mutated[offset]     = static_cast<char>(replacement);
+                exercise_changelog_range_input(mutated);
+            }
+        }
     }
 }
 
@@ -400,7 +457,8 @@ bool requested(int argc, char** argv, std::string_view target) {
 }
 
 bool known_target(std::string_view target) {
-    return target == "manifest" || target == "modbus" || target == "mqtt" || target == "http";
+    return target == "manifest" || target == "changelog" || target == "modbus" ||
+           target == "mqtt" || target == "http";
 }
 
 void require_target_checks(const char* target, std::size_t before, std::size_t minimum) {
@@ -429,6 +487,12 @@ int main(int argc, char** argv) {
         require_target_checks("manifest", before, 4800);
         ran = true;
     }
+    if (requested(argc, argv, "changelog")) {
+        const std::size_t before = g_checks;
+        test_changelog_range_properties();
+        require_target_checks("changelog", before, 6000);
+        ran = true;
+    }
     if (requested(argc, argv, "modbus")) {
         const std::size_t before = g_checks;
         test_modbus_properties();
@@ -448,7 +512,8 @@ int main(int argc, char** argv) {
         ran = true;
     }
     if (!ran) {
-        std::fprintf(stderr, "usage: logic_property_tests [manifest] [modbus] [mqtt] [http]\n");
+        std::fprintf(stderr,
+                     "usage: logic_property_tests [manifest] [changelog] [modbus] [mqtt] [http]\n");
         return 2;
     }
     std::printf("sanitizer/property tests passed: %zu invariant checks\n", g_checks);

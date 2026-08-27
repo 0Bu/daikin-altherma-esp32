@@ -79,10 +79,11 @@ by hand:**
 | Development | `…/dev/` | `…/dev/manifest.json` | `…/dev/changelog.json` | every firmware-relevant push to `main`; no tag, no release |
 
 A device follows one feed at a time — gear → **Firmware** → *Update channel* (`POST /set_ota`). Dev
-builds are versioned `<next release>-dev.<n>`, a semver pre-release, so a dev board upgrades itself
-to the next release when one is cut. Going the other way (dev → the last release) means installing
-an *older* build, which the downgrade gate refuses unless the request explicitly asks for it — the
-UI does exactly that after a channel switch, and confirms it first. Publishing does **not** depend on the repository being public — CI publishes the Pages
+builds are versioned `<next release>-dev.<n>`, so SemVer ranks that future stable release above its
+development builds; the independent release feed offers it to a dev board only after a channel
+switch. While that feed still serves the preceding stable release, the switch means installing an
+older build, which the downgrade gate refuses unless the request explicitly asks for it — the UI
+does exactly that after a channel switch, and confirms it first. Publishing does **not** depend on the repository being public — CI publishes the Pages
 installer, the tags and the releases from a private repo too. See the policy
 comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 
@@ -90,7 +91,9 @@ comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 > Pages site requires an **organization on GitHub Enterprise Cloud**; it is not available to a user
 > account on GitHub Pro. So the signed firmware, the browser-installer parts, the manual merged
 > image, `manifest.json`, its exact public-byte inventory in `artifacts.json` after that channel's
-> next publish, and the selected normalized commit subjects in `changelog.json` are
+> next publish, and the selected normalized commit subjects plus the one reviewed source-bound
+> migration seed (together forming the bounded cumulative dev history needed to explain skipped
+> builds) in `changelog.json` are
 > downloadable by anyone on the internet while the source stays
 > private. Git tags and GitHub Releases are *not* public on a private repo — only accounts with
 > repo read access see those.
@@ -840,8 +843,13 @@ Derived sensors (COP etc.) and a sample dashboard: [HOME_ASSISTANT.md](HOME_ASSI
 Pull-based: the device fetches `manifest.json` from `CONFIG_DAIKIN_OTA_MANIFEST_URL` (default GitHub
 Pages), compares its `version` to the running firmware, and for a valid newer or channel-downgrade
 offer fetches the optional sibling `changelog.json`. The device-local confirmation names the exact
-current and offered versions and channel, renders those notes as literal text, and uses a localized
-no-details fallback when that version-bound document is missing, stale or invalid. On confirmation
+current and offered versions and channel, renders the changes across a skipped same-core dev-build
+range (or since the last stable release after a core change) as literal text. Target-only notes
+remain supported unless their first line uses the reserved compact `v<version> — ` cumulative
+prefix. The modal uses a localized no-details fallback when that version-bound document is missing,
+stale, invalid or describes an
+equal/older versioned range. Dev history resets after a published stable release when the next
+development core begins. On confirmation
 the device downloads `daikin-altherma-esp32.bin` through a fixed-buffer HTTPS stream into the
 inactive OTA slot, validates it and then reboots. Tap the
 firmware **version** to check — either the one in the header (next to the IP address) or the
