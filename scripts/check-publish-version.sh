@@ -20,6 +20,8 @@
 #                 release-resume -> same, but equality is a retry only when the published
 #                                   provenance.source_sha equals --source-sha exactly
 #                 dev      -> checked against gh-pages dev/manifest.json  (the dev feed)
+#                 dev-resume -> same, but equality is a retry only when the published
+#                               provenance.source_sha equals --source-sha exactly
 #                 pr|none  -> nothing is published; the check is skipped
 #     candidate   the version this run would publish (the stamped version.txt)
 #     remote      git remote holding gh-pages (default: origin)
@@ -44,7 +46,7 @@ mode="${1:-}"
 candidate="${2:-}"
 remote="${3:-origin}"
 [ -n "$mode" ] && [ -n "$candidate" ] && [ "$#" -le 3 ] || {
-    echo "usage: check-publish-version.sh [--source-sha <40-hex>] <release|release-resume|dev|pr|none> <candidate-version> [remote]" >&2
+    echo "usage: check-publish-version.sh [--source-sha <40-hex>] <release|release-resume|dev|dev-resume|pr|none> <candidate-version> [remote]" >&2
     exit 2
 }
 if [ -n "$source_sha" ] && [[ ! "$source_sha" =~ ^[0-9a-f]{40}$ ]]; then
@@ -54,14 +56,17 @@ fi
 
 case "$mode" in
     release|release-resume) manifest="manifest.json" ;;
-    dev)     manifest="dev/manifest.json" ;;
+    dev|dev-resume) manifest="dev/manifest.json" ;;
     pr|none) echo "publish gate: mode '$mode' publishes nothing — skipped"; exit 0 ;;
     *)       echo "publish gate: unknown mode '$mode'" >&2; exit 2 ;;
 esac
-[ "$mode" != release-resume ] || [ -n "$source_sha" ] || {
-    echo "publish gate: release-resume requires --source-sha <40-hex>" >&2
-    exit 2
-}
+case "$mode" in
+    release-resume|dev-resume)
+        [ -n "$source_sha" ] || {
+            echo "publish gate: $mode requires --source-sha <40-hex>" >&2
+            exit 2
+        } ;;
+esac
 
 # ASK WHETHER THE BRANCH EXISTS BEFORE FETCHING IT, because those are two different answers and only
 # one of them is safe to pass on. `git fetch` fails identically for "no such branch" and for a DNS
@@ -110,17 +115,26 @@ print(doc["version"])
     exit 2
 }
 
-# Publishing the Pages root happens before the GitHub Release/tag. If Pages succeeded and the
-# later Release API failed, a rerun sees exactly the candidate already in the root manifest. That
-# equality is a safe sideways move only when the existing manifest says it came from this exact Git
-# object. Without that binding, an exact-version retry could replace the served binary and create a
-# tag for different source while every device still sees the same version. Dev feeds and ordinary
-# release checks remain strictly forward-only.
-if [ "$mode" = release-resume ] && [ "$published" = "$candidate" ]; then
-    if [[ ! "$candidate" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-        echo "publish gate: release resume requires strict X.Y.Z SemVer (got '$candidate')" >&2
-        exit 2
-    fi
+# Publishing a Pages feed happens before its public readback and, for a release, before the GitHub
+# Release/tag. If a later step failed, a rerun sees exactly the candidate already in the manifest.
+# Equality is a safe sideways move only when the existing manifest says it came from this exact Git
+# object. Without that binding, an exact-version retry could replace the served binary while every
+# device still sees the same version. Ordinary dev/release checks remain strictly forward-only;
+# resume modes admit equality only for the feed shape they own and the exact published source.
+if { [ "$mode" = release-resume ] || [ "$mode" = dev-resume ]; } && \
+   [ "$published" = "$candidate" ]; then
+    case "$mode" in
+        release-resume)
+            if [[ ! "$candidate" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+                echo "publish gate: release resume requires strict X.Y.Z SemVer (got '$candidate')" >&2
+                exit 2
+            fi ;;
+        dev-resume)
+            if [[ ! "$candidate" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-dev\.(0|[1-9][0-9]*)$ ]]; then
+                echo "publish gate: dev resume requires strict X.Y.Z-dev.N SemVer (got '$candidate')" >&2
+                exit 2
+            fi ;;
+    esac
     published_source="$(printf '%s' "$published_json" | python3 -c '
 import json, re, sys
 doc = json.load(sys.stdin)
@@ -139,7 +153,7 @@ print(source)
         echo "publish gate: refusing $candidate resume — published source $published_source differs from candidate $source_sha" >&2
         exit 1
     fi
-    echo "publish gate: release feed already serves $candidate from $source_sha — idempotent resume permitted"
+    echo "publish gate: ${mode%-resume} feed already serves $candidate from $source_sha — idempotent resume permitted"
     exit 0
 fi
 

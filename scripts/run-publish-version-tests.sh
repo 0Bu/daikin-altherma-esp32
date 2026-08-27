@@ -39,10 +39,11 @@ git init -q "$T/work"
   git branch -M main && git remote add origin "$T/origin.git" && git push -q origin main
 )
 
-# publish <root-version> <dev-version> [root-source]: (re)create gh-pages on the bare origin.
+# publish <root-version> <dev-version> [root-source] [dev-source]: (re)create gh-pages.
 # `no-provenance` deliberately models a manifest written by the pre-provenance workflow.
 publish() {
   local root_source="${3:-$SOURCE_A}"
+  local dev_source="${4:-$SOURCE_A}"
   rm -rf "$T/pages"; git init -q "$T/pages"
   (
     cd "$T/pages" || exit 1
@@ -54,7 +55,14 @@ publish() {
       printf '{"name":"x","version":"%s","provenance":{"source_sha":"%s"}}\n' \
         "$1" "$root_source" > manifest.json
     fi
-    [ -n "${2:-}" ] && printf '{"name":"x","version":"%s"}\n' "$2" > dev/manifest.json
+    if [ -n "${2:-}" ]; then
+      if [ "$dev_source" = no-provenance ]; then
+        printf '{"name":"x","version":"%s"}\n' "$2" > dev/manifest.json
+      else
+        printf '{"name":"x","version":"%s","provenance":{"source_sha":"%s"}}\n' \
+          "$2" "$dev_source" > dev/manifest.json
+      fi
+    fi
     git add -A && git commit -qm pages
     git branch -M gh-pages && git remote add origin "$T/origin.git" && git push -qf origin gh-pages
   )
@@ -66,6 +74,8 @@ run release 1.0.0; check "release passes" "$?" "0"
 run dev 1.0.0-dev.1; check "dev passes"   "$?" "0"
 run --source-sha "$SOURCE_A" release-resume 1.0.0
 check "first release-resume passes with an explicit source" "$?" "0"
+run --source-sha "$SOURCE_A" dev-resume 1.0.0-dev.1
+check "first dev-resume passes with an explicit source" "$?" "0"
 
 echo "== 2. each mode reads its OWN feed's manifest =="
 publish 1.0.13 1.0.14-dev.2
@@ -111,6 +121,26 @@ check "equal legacy manifest without provenance fails closed" "$?" "2"
 publish 1.0.13 1.0.14-dev.2 short-source
 run --source-sha "$SOURCE_A" release-resume 1.0.13
 check "equal manifest with malformed source fails closed" "$?" "2"
+publish 1.0.13 1.0.14-dev.2
+
+echo "== 5b. a DEV resume may repeat only the exact source-bound dev version =="
+run dev-resume 1.0.14-dev.2
+check "dev resume without source identity is refused" "$?" "2"
+run --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.2
+check "equal dev version and identical source pass" "$?" "0"
+run --source-sha "$SOURCE_B" dev-resume 1.0.14-dev.2
+check "equal dev version from different source is refused" "$?" "1"
+run --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.3
+check "newer dev version still passes through resume mode" "$?" "0"
+publish 1.0.13 1.0.14-dev.2 "$SOURCE_A" no-provenance
+run --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.2
+check "equal legacy dev manifest without provenance fails closed" "$?" "2"
+publish 1.0.13 1.0.14-dev.2 "$SOURCE_A" short-source
+run --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.2
+check "equal dev manifest with malformed source fails closed" "$?" "2"
+publish 1.0.13 1.0.14
+run --source-sha "$SOURCE_A" dev-resume 1.0.14
+check "equal stable version is not accepted as a dev resume" "$?" "2"
 publish 1.0.13 1.0.14-dev.2
 
 echo "== 6. modes that publish nothing are skipped, unknown modes are not =="

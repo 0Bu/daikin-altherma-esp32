@@ -681,9 +681,14 @@ jobs:
           MODE: ${{ steps.mode.outputs.mode }}
           VERSION: ${{ steps.stamp.outputs.disp }}
           SOURCE_SHA: ${{ github.sha }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           check_mode="$MODE"
-          [ "$MODE" != release ] || check_mode=release-resume
+          if [ "$MODE" = release ]; then
+            check_mode=release-resume
+          elif [ "$MODE" = dev ] && [ "$RUN_ATTEMPT" -gt 1 ]; then
+            check_mode=dev-resume
+          fi
           ./scripts/check-publish-version.sh --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"
 
       # Build notes are public feed metadata, even while the source repository is private.  Generate
@@ -909,6 +914,7 @@ jobs:
           SOURCE_SHA: ${{ github.sha }}
           MODE: ${{ needs.trusted_build.outputs.mode }}
           VERSION: ${{ needs.trusted_build.outputs.version }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -922,7 +928,11 @@ jobs:
           ./scripts/check-web-installer-plan.py dist/manifest.json partitions.csv
           ./scripts/generate-ota-changelog.py --validate dist/changelog.json --version "$VERSION"
           check_mode="$MODE"
-          [ "$MODE" != release ] || check_mode=release-resume
+          if [ "$MODE" = release ]; then
+            check_mode=release-resume
+          elif [ "$MODE" = dev ] && [ "$RUN_ATTEMPT" -gt 1 ]; then
+            check_mode=dev-resume
+          fi
           ./scripts/check-publish-version.sh --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"
 
       - name: Assemble dev-channel site
@@ -936,9 +946,9 @@ jobs:
         run: ./scripts/publish-pages-branch.sh --dev
 
       # Publish the release feed BEFORE creating its tag/Release. If this fails, no immutable release
-      # exists. If the later API call fails, release-resume accepts the already-published same version
-      # only when its manifest names this exact github.sha; release_version can explicitly resume even
-      # after a tag was partially created.
+      # exists. If a later readback/API call fails, a workflow rerun may repeat an already-published
+      # dev or release version only when its manifest names this exact github.sha; release_version
+      # can explicitly resume a release even after a tag was partially created.
       - name: Assemble Pages site (release channel)
         if: needs.trusted_build.outputs.mode == 'release'
         run: ./scripts/build-pages.sh
@@ -966,7 +976,8 @@ jobs:
             --expected-site "$SITE_DIR" \
             --pages-commit "$pages_commit" \
             --pages-prefix "$PAGES_PREFIX" \
-            --cache-buster "$GITHUB_RUN_ID"
+            --cache-buster "$GITHUB_RUN_ID" \
+            --attempts 30
 
       - name: Rebind release tag immediately before release mutation
         if: needs.trusted_build.outputs.mode == 'release'

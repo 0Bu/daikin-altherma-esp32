@@ -435,8 +435,10 @@ resets the numbering — on 2026-07-24 that republished the dev feed as `1.0.0-d
 (a tag, or `version.txt`) — not the gate.
 
 The fourth pins the workflow's trust and delivery contract: untrusted PRs expose no signing key or
-flashable artifact, a release resume must match the published manifest's exact source SHA, and the
-license/notices, Pages feed and GitHub Release stay in their fail-closed order.
+flashable artifact, release and dev resumes must match the published manifest's exact source SHA,
+and the license/notices, Pages feed and GitHub Release stay in their fail-closed order. Public Pages
+readback remains bounded, but allows 30 attempts so a normally delayed deployment does not make a
+correctly published feed impossible to attest or rerun.
 
 Every one of their test suites is a **step of one `mechanical_gates` job**, not a job each (the
 required `gates` policy uses its own clean PR runner, and the production version gate runs in
