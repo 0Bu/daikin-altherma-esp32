@@ -98,6 +98,16 @@ assert.match(stress,
 assert.match(stress,
   /successes_after <= weather_successes_before[\s\S]{0,160}?weather_candidate\.get\("fetching"\) is not False/,
   "the causal token must still correspond to a committed new success and released fetch owner");
+const statusStress = section(stress, "    def status_loop()", "\n    def json_loop(");
+assert.match(statusStress,
+  /request_status_deadline\(\s*pinned_endpoint,\s*timeout=HTTP_TIMEOUT_S/,
+  "the full chunked /status surface needs the ordinary HTTP deadline, not the compact OTA one");
+assert.doesNotMatch(statusStress, /OTA_STATUS_REQUEST_TIMEOUT_S/,
+  "the one-second deadline is reserved for compact /ota/status observation");
+const httpTimeoutMs = Number(gate.match(/HTTP_TIMEOUT_S\s*=\s*(\d+)/)?.[1]) * 1000;
+const valuesWaitMs = Number(httpStatus.match(/kValuesTlsWait\s*=\s*pdMS_TO_TICKS\((\d+)\)/)?.[1]);
+assert.ok(httpTimeoutMs > valuesWaitMs,
+  "the full-status deadline must outlive the sole-worker bounded Weather wait");
 assert.match(stress, /busy_503\["status"\][\s\S]{0,120}?busy_503\["values"\]/);
 assert.match(stress, /disconnected \+= mqtt_recovery\.finish\(\)/);
 assert.match(stackWatch, /Modbus,[\s\S]{0,120}?Weather,[\s\S]{0,120}?Ota,/,

@@ -2694,17 +2694,20 @@ static void test_weather_fetch_headroom() {
     CHECK(!json_suffix_is_whitespace(std::string_view("\0", 1)));
 }
 
-// /values must wait behind either known firmware-owned TLS allocator, but only for a bounded
-// interval. Pin the independent owners and the exact inclusive timeout edge: using && would miss
-// the ordinary one-owner case, while using > would add another retry beyond the four-second cap.
+// /values waits boundedly behind the short Weather TLS allocator, but a newly active OTA owner must
+// pre-empt that wait immediately. Otherwise the sole HTTP worker stays parked while /status and
+// /ota/status queue behind it. Pin the transition as well as the exact inclusive Weather timeout.
 static void test_http_values_wait() {
     using logic::HttpValuesWaitDecision;
     CHECK(logic::http_values_wait_decision(false, false, 0, 4000) == HttpValuesWaitDecision::Ready);
-    CHECK(logic::http_values_wait_decision(true, false, 0, 4000) == HttpValuesWaitDecision::Wait);
+    CHECK(logic::http_values_wait_decision(true, false, 0, 4000) ==
+          HttpValuesWaitDecision::Refuse);
     CHECK(logic::http_values_wait_decision(false, true, 3999, 4000) ==
           HttpValuesWaitDecision::Wait);
-    CHECK(logic::http_values_wait_decision(true, true, 4000, 4000) ==
-          HttpValuesWaitDecision::TimedOut);
+    CHECK(logic::http_values_wait_decision(true, true, 3999, 4000) ==
+          HttpValuesWaitDecision::Refuse);
+    CHECK(logic::http_values_wait_decision(false, true, 4000, 4000) ==
+          HttpValuesWaitDecision::Refuse);
     CHECK(logic::http_values_wait_decision(false, false, 4000, 4000) ==
           HttpValuesWaitDecision::Ready);
 }

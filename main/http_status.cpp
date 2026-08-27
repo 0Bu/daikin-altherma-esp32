@@ -120,12 +120,17 @@ static bool wait_for_values_tls_owner() {
     const TickType_t started = xTaskGetTickCount();
     for (;;) {
         const TickType_t elapsed = xTaskGetTickCount() - started;
+        // Read Weather first and OTA second. During their serialized hand-off OTA raises its flag
+        // before Weather releases its own, so this order cannot manufacture an idle false/false
+        // snapshot by taking one side of the transition from each owner.
+        const bool weather_active = weather_fetch_active();
+        const bool ota_active     = ota_download_active();
         const auto decision = logic::http_values_wait_decision(
-            false, weather_fetch_active(),
+            ota_active, weather_active,
             static_cast<uint32_t>(elapsed * portTICK_PERIOD_MS),
             static_cast<uint32_t>(kValuesTlsWait * portTICK_PERIOD_MS));
         if (decision == logic::HttpValuesWaitDecision::Ready) return true;
-        if (decision == logic::HttpValuesWaitDecision::TimedOut) return false;
+        if (decision == logic::HttpValuesWaitDecision::Refuse) return false;
         vTaskDelay(kValuesTlsRetry);
     }
 }
@@ -1691,7 +1696,7 @@ esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix,
     // Do not park the sole HTTP worker for the lifetime of a firmware download. Weather remains a
     // bounded wait because it is short; OTA progress must stay responsive through /ota/status.
     if (ota_download_active()) return network_tls_busy(req);
-    if (!wait_for_values_tls_owner()) return network_tls_busy(req);
+    if (!wait_for_values_tls_owner() || ota_download_active()) return network_tls_busy(req);
     ValuesSnapshot snapshot = take_values_snapshot();
     HttpJsonChunks j(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
