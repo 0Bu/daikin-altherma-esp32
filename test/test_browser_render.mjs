@@ -330,7 +330,11 @@ try {
   let routedKeyboardOpens = 0;
   let isolatedKeyboardOpens = 0;
   for (const viewport of viewports) {
-    let routedKeyboardOpensInViewport = 0;
+    // The mutation seeds one complete locale's route budget, then exercises this same assertion on
+    // the first extra route. It proves the boundary without running a deliberately flooded modal
+    // matrix far enough to fail first on an unrelated transient-dialog timing condition.
+    let routedKeyboardOpensInViewport =
+      mutation === "history-flood" ? routedModalIds.length : 0;
     await page.viewport(viewport.width, viewport.height);
     for (const locale of browserLocales) {
       await activateLocale(page, locale);
