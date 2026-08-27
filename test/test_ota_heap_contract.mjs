@@ -1207,16 +1207,23 @@ const valuesSnapshot = valuesSend.indexOf("take_values_snapshot()", valuesWait);
 assert.ok(valuesOtaGate >= 0 && valuesWait > valuesOtaGate && valuesSnapshot > valuesWait,
   "/values must refuse OTA and finish its weather wait before allocating the model-sized snapshot");
 assert.match(valuesSend,
-  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,160}?if\s*\(!wait_for_values_tls_owner\(\)\)\s*return network_tls_busy\(req\);/,
-  "a timed-out TLS-owner wait must fail closed before the values snapshot allocation");
+  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,180}?if\s*\(!wait_for_values_tls_owner\(\)\s*\|\|\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);/,
+  "a refused TLS-owner wait and its final OTA recheck must precede the values snapshot allocation");
 assert.equal(occurrences(httpStatus, "wait_for_values_tls_owner()"), 2,
   "only the wait helper and the shared values sender may use the values-only gate");
 assert.match(httpStatus,
   /network_tls_busy\(httpd_req_t\* req\)[\s\S]*?503 Service Unavailable[\s\S]*?text\/plain[\s\S]*?network operation in progress/,
   "the bounded refusal must stay a small explicit pre-response busy-503");
-assert.match(httpStatus,
-  /http_values_wait_decision\(\s*false,\s*weather_fetch_active\(\)/,
-  "the bounded values wait is only for short weather TLS after OTA received its fast refusal");
+const valuesWaitStart = httpStatus.indexOf("static bool wait_for_values_tls_owner()");
+const valuesWaitEnd = httpStatus.indexOf("static esp_err_t network_tls_busy", valuesWaitStart);
+const valuesWaitHelper = httpStatus.slice(valuesWaitStart, valuesWaitEnd);
+const weatherRead = valuesWaitHelper.indexOf("const bool weather_active = weather_fetch_active()");
+const otaRead = valuesWaitHelper.indexOf("const bool ota_active     = ota_download_active()", weatherRead);
+const waitDecision = valuesWaitHelper.indexOf(
+  "http_values_wait_decision(\n            ota_active, weather_active", otaRead);
+assert.ok(valuesWaitStart >= 0 && valuesWaitEnd > valuesWaitStart && weatherRead >= 0 &&
+  otaRead > weatherRead && waitDecision > otaRead,
+  "the wait must read Weather then OTA before deciding, so their hand-off cannot look idle");
 assert.match(httpStatus, /kValuesTlsWait\s*=\s*pdMS_TO_TICKS\(4000\)/,
   "the values wait must remain below the five-second live-gate request timeout");
 assert.match(httpStatus, /kValuesTlsRetry\s*=\s*pdMS_TO_TICKS\(250\)/,

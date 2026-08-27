@@ -541,15 +541,33 @@ try {
       replaceOnce("main/http_status.cpp",
         /(esp_err_t http_send_values_json\([\s\S]{0,420}?)if \(ota_download_active\(\)\) return network_tls_busy\(req\);/,
         "$1if (false) return network_tls_busy(req);")],
+    ["values wait ignores OTA becoming active behind Weather", () =>
+      replaceOnce("main/http_status.cpp", "const bool ota_active     = ota_download_active();",
+        "const bool ota_active     = false;")],
+    ["values wait tears the Weather-to-OTA hand-off", () =>
+      replaceOnce(
+        "main/http_status.cpp",
+        "const bool weather_active = weather_fetch_active();\n        const bool ota_active     = ota_download_active();",
+        "const bool ota_active     = ota_download_active();\n        const bool weather_active = weather_fetch_active();",
+      )],
     ["values snapshots no longer wait behind a weather TLS owner", () =>
-      replaceOnce("main/http_status.cpp", "false, weather_fetch_active()",
-        "false, false")],
+      replaceOnce("main/http_status.cpp", "const bool weather_active = weather_fetch_active();",
+        "const bool weather_active = false;")],
     ["the values TLS wait exceeds the live request timeout", () =>
       replaceOnce("main/http_status.cpp", "pdMS_TO_TICKS(4000)",
         "pdMS_TO_TICKS(6000)")],
-    ["the values snapshot allocates before its TLS-owner wait", () =>
-      replaceOnce("main/http_status.cpp", "if (!wait_for_values_tls_owner())",
-        "if (!wait_for_values_tls_owner_bypassed())")],
+    ["the values snapshot bypasses its TLS-owner wait", () =>
+      replaceOnce(
+        "main/http_status.cpp",
+        /(esp_err_t http_send_values_json\([\s\S]{0,520}?)if \(!wait_for_values_tls_owner\(\) \|\|/,
+        "$1if (!wait_for_values_tls_owner_bypassed() ||",
+      )],
+    ["the values snapshot drops its final OTA recheck", () =>
+      replaceOnce(
+        "main/http_status.cpp",
+        /(esp_err_t http_send_values_json\([\s\S]{0,520}?if \(!wait_for_values_tls_owner\(\) \|\| )ota_download_active\(\)/,
+        "$1false",
+      )],
     ["the X10A poll no longer enters the bounded OTA quiesce", () =>
       replaceOnce("main/hp_poll.cpp", "ota_quiesce_step(network_quiesce, network_active)",
         "ota_quiesce_bypassed(network_quiesce, network_active)")],

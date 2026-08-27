@@ -1196,7 +1196,7 @@ def stress_board(
             try:
                 ota_expected_before = mqtt_recovery_expected.is_set()
                 status = request_status_deadline(
-                    pinned_endpoint, timeout=OTA_STATUS_REQUEST_TIMEOUT_S,
+                    pinned_endpoint, timeout=HTTP_TIMEOUT_S,
                 )
                 validate_identity(status, host=host, mac=mac, version=version, elf=elf)
                 hp = status.get("hp", {})

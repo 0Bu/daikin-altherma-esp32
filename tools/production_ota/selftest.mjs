@@ -306,6 +306,12 @@ try {
       replaceOnce("scripts/production-ota-gate.py", "if status < 200 or status >= 300:", "if False:")],
     ["status pressure re-resolves the board hostname", () =>
       replaceNth("scripts/production-ota-gate.py", "request_status_deadline(status_endpoint, timeout=HTTP_TIMEOUT_S)", 'request_json(host, "/status")', 2)],
+    ["full status stress reuses the compact OTA deadline", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        /(def status_loop\(\)[\s\S]{0,360}?request_status_deadline\(\s*pinned_endpoint, timeout=)HTTP_TIMEOUT_S,/,
+        "$1OTA_STATUS_REQUEST_TIMEOUT_S,",
+      )],
     ["values pressure re-resolves the board hostname", () =>
       replaceOnce("scripts/production-ota-gate.py", "request_values_deadline(status_endpoint, timeout=HTTP_TIMEOUT_S)", 'request_json(host, "/values")')],
     ["offer polling ignores the exact application SHA", () =>
