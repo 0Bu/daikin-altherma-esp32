@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -1159,7 +1159,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["Egen fel-/varningsstatus: aktivt fel ger Varning; varning eller meddelande senaste 24 t ger INFO utan projektslutsats."], // health_fault
-  ["Lugn tankförlust: projektregel INFO vid ≥0,8 K/t; volym och ΔT påverkar, >≈1,85 K/t kan filtreras som tappning, och OK bevisar inte isolering."], // health_dhw_loss
+  ["R5T skiktad;K/t=MAX≠Ø/dygn;cirk.≠orsak;proj.band 0,8–1,85.Ant.:200l jämnt;giltiga=MAX;COP;utesl./sakn.h utanför;el≠mätt."], // health_dhw_loss
   ["INFO vid ≥12 värmekörningar och medel <10 min; varmvatten/kyla utelämnas. Inte Daikin-gräns; vid många oklassificerade bedöms alla gemensamt."], // health_cycling
   ["Avfrostning: INFO över 15 % vid ≥3 cykler; inte Daikin-gräns. R4T är livekontext utanför bedömningen och en punkt beskriver inte hela batteriet."], // health_defrost
   ["Lägsta tryck: >1,0 bar; ≤1,0 ger INFO och efter 60 s Varning, men tillåtet intervall är modellberoende."], // health_pressure

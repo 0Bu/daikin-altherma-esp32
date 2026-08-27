@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -1159,7 +1159,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Egen feil-/advarselsstatus: aktiv feil gir ADVARSEL; advarsel eller melding siste 24 t gir INFO, uten prosjektinferens."], // health_fault
-  ["Rolig tanktap: prosjektregel INFO ved ≥0,8 K/t; volum og ΔT påvirker, >≈1,85 K/t kan filtreres som tapping, og OK beviser ikke isolasjon."], // health_dhw_loss
+  ["R5T lagdelt;K/t=MAX≠Ø/døgn;sirk.≠årsak;prosj.bånd 0,8–1,85.Ant.:200l jevnt;gyldige=MAX;COP;utel./mangl.h utenfor;el≠målt."], // health_dhw_loss
   ["INFO ved ≥12 varmekjøringer og snitt <10 min; tappevann/kjøling utelates. Ikke Daikin-grense; ved mye uklassert vurderes alle samlet."], // health_cycling
   ["Avriming: INFO over 15 % ved ≥3 sykluser; ikke Daikin-grense. R4T er live-kontekst utenfor vurderingen, og ett punkt beskriver ikke hele batteriet."], // health_defrost
   ["Laveste trykk: >1,0 bar; ≤1,0 gir INFO og etter 60 s ADVARSEL, men tillatt område er modellavhengig."], // health_pressure

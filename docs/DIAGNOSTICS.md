@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 4dc660fb6f8056dae32ee32714fe28e9258ee42b3a2ff3091e0793bc7de8a6be -->
+<!-- user-docs-contract: 59fa2ebe71ba7f4364935764be4050277d77feccf62fe4c71aba6d0a20b000bb -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -67,8 +67,27 @@ warning, or caution. A report that has since cleared can remain visible for up t
 
 **In plain language:** The diagnosis looks for quiet hours in which the tank was neither charged nor
 obviously affected by a hot-water draw. It then measures how quickly the tank temperature falls. An
-optional circulation-pump power measurement can help show whether that pump transported heat out of
-the tank.
+optional circulation-pump power measurement can show whether that pump was electrically operating
+during a notable window. The displayed K/h figure is the greatest R5T sensor-temperature drop in any
+completed quiet hour, not the average of all displayed windows. A pump label shows correlation during a
+notable window; it does not prove that the pump caused the full drop.
+
+**What does that mean in kWh?** The expanded row gives an explicitly labelled size example for an
+assumed **200-litre** tank. If all 200 litres cooled uniformly by the displayed rate for one hour,
+the water's heat-content change would be
+`200 kg × 1.16 Wh/(kg·K) × displayed K = Wh`. For example, **1.6 K in one hour is about 0.37 kWh of
+thermal energy**. R5T measures only one point in a stratified tank, so this is not a measured
+whole-tank loss. The firmware also retains only the greatest completed-hour rate and the number of
+windows, not each window's individual drop. It therefore cannot calculate the actual daily loss.
+
+Once the report has actually crossed 24 hours, the second UI line deliberately shows a high
+**maximum-rate example**. It is not shown for an early partial report. With 18 clean windows, it
+assumes every one equalled the displayed maximum:
+`18 h × 1.6 K/h × 200 kg × 1.16 Wh/(kg·K) = 6.68 kWh` of thermal energy. With an illustrative domestic-hot-water COP of
+`2.5–3.0`, replacing that heat would use about **2.23–2.67 kWh of electricity**; a direct electric
+heater at COP 1 would use about 6.68 kWh. This is not measured daily consumption: the real window
+rates are unavailable, R5T is not whole-tank calorimetry, and the six hours outside those 18 clean
+windows are not represented.
 
 **What range can it assess?** A **NOTE** starts at **0.8 K/h**. This is a project heuristic from one
 reference installation, not a Daikin limit. Tank volume and the temperature difference between the
@@ -84,7 +103,8 @@ stored totals alone.
 
 **What this result does not establish:** A rapid temperature drop alone proves neither a leaking
 three-way valve nor poor insulation. The sensor measures one location in a stratified tank; hot-water
-draws and natural circulation can look similar.
+draws and natural circulation can look similar. The window count does not turn the highest rate into
+an energy total.
 
 **Evidence and limits:** [Domestic-hot-water tank heat loss](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 

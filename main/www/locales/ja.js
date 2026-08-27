@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -999,7 +999,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.ja = modelDescriptionValues([
   ["本体の故障／警告状態。現在エラーは警告、警告・注意または24時間内に消えた通知は注記です。装置の報告で、推測ではありません。"], // health_fault
-  ["静穏な1時間のタンク冷却を測定。0.8 K/h以上は基準設備のヒューリスティックで注記。検出帯は約1.85 K/hまでで、OKでも断熱や弁の健全性は証明しません。"], // health_dhw_loss
+  ["R5T成層点;K/h=最大≠Ø/日;循環≠原因;プロジェクト帯0.8–1.85.仮定:200l均一;有効窓=最大;COP;除外/欠測hは外;電力≠測定。"], // health_dhw_loss
   ["圧縮機起動と完了運転時間を集計。暖房運転が12回以上かつ平均10分未満で注記。DHW／冷房は除外しますが、分類不能が多い場合は全運転を評価します。Daikin限界値ではありません。"], // health_cycling
   ["除霜が3回以上かつ15%超で注記。Daikin限界値ではありません。R4Tは判定外のライブ情報で、1点はコイル全体を示しません。"], // health_defrost
   ["移動窓内の最低有効水圧。>1.0 barが基準、≤1.0 barで注記、60秒継続で警告。許容範囲は機種依存です。"], // health_pressure

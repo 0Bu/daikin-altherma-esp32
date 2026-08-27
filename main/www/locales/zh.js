@@ -1,4 +1,4 @@
-// translation-source: 5168982ac8a7dbd59eda7c9c9076626f265279f5292a597c01c727c875cd59bc
+// translation-source: a14d731e2539e1d39ec40ffca02de93afb10fc820cc745c5cc3e4ef8609d8b85
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -1142,7 +1142,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["机组自身状态：当前错误给出“警告”；当前警示或 24 小时内已清除的消息给出“说明”，不是项目推断。"], // health_fault
-  ["静置降温：项目阈值 ≥0.8 K/h 为“说明”；水箱容积和内外温差会影响结果，>≈1.85 K/h 可能被当作用水过滤，“正常”不证明保温良好。"], // health_dhw_loss
+  ["R5T分层点;K/h=最大≠均/日;循环≠因;项目范围0.8–1.85.假设:200l均匀;有效窗=最大;COP;排除/缺失h不计;电≠测量。"], // health_dhw_loss
   ["≥12 个供暖循环且平均 <10 分钟时给出“说明”；排除生活热水/制冷，不是 Daikin 限值；若过多循环无法分类，则合并评估全部循环。"], // health_cycling
   ["除霜 >15% 且 ≥3 次时提示；不是 Daikin 限值。R4T 仅是实时背景，不参与判定，单点不代表整盘管。"], // health_defrost
   ["最低水压应 >1.0 bar；≤1.0 为“说明”，持续 60 秒为“警告”，但允许范围随型号而异。"], // health_pressure
