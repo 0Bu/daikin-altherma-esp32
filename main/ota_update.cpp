@@ -229,9 +229,10 @@ constexpr TickType_t kFirmwareDeadline       = pdMS_TO_TICKS(5 * 60 * 1000);
 constexpr int        kChangelogHttpTimeoutMs = 6000;
 constexpr TickType_t kChangelogDeadline      = pdMS_TO_TICKS(30000);
 constexpr int        kOtaBufSize = 2048; // download chunk; deliberately small (contiguous heap)
-// The shared Web Serial/OTA manifest currently needs about 1.5 KiB for its complete provenance,
-// artifact index and installer plan. check-manifest-provenance.py reads this exact constant and
-// refuses a larger publish payload, so the producer and the fixed firmware frame cannot drift.
+// The shared Web Serial/OTA manifest keeps provenance and the installer plan in this fixed frame;
+// the publisher/readback artifact index is a sibling document that firmware never fetches.
+// check-manifest-provenance.py reads this exact constant and also applies the older supported
+// release's 1 KiB restore ceiling, so neither firmware nor rollback compatibility can drift.
 constexpr size_t   kManifestMax        = 2048;
 constexpr unsigned kMaxRedirects       = 5;
 constexpr int      kDoneBeforeRebootMs = 3000;

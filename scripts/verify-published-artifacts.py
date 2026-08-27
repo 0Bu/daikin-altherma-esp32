@@ -34,7 +34,7 @@ SITE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REQUIRED_SITE_FILES = {
     "index.html", "serial-port-release.mjs", "web-installer.mjs", "heat-pump-icon.png",
     "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "Apache-2.0.txt", "manifest.json",
-    "changelog.json", "daikin-altherma-esp32.bin",
+    "artifacts.json", "changelog.json", "daikin-altherma-esp32.bin",
 }
 
 
@@ -94,15 +94,25 @@ def fetch(url: str, limit: int, cache_buster: str) -> bytes:
 
 
 def expected_artifacts(
-    manifest: bytes, directory: Path,
+    manifest: bytes, artifact_index: bytes, directory: Path,
 ) -> tuple[dict[str, Any], dict[str, bytes]]:
     try:
         document = json.loads(manifest)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ReadbackError(f"manifest is not valid UTF-8 JSON: {exc}") from exc
-    if not isinstance(document, dict) or not isinstance(document.get("artifacts"), list):
-        raise ReadbackError("manifest has no artifacts index")
-    entries = document["artifacts"]
+    if not isinstance(document, dict) or "artifacts" in document:
+        raise ReadbackError("manifest must keep the artifact index in artifacts.json")
+    try:
+        index_document = json.loads(artifact_index)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReadbackError(f"artifacts.json is not valid UTF-8 JSON: {exc}") from exc
+    if not isinstance(index_document, dict) or set(index_document) != {
+        "schema_version", "manifest_sha256", "artifacts",
+    } or index_document.get("schema_version") != 1 or \
+       index_document.get("manifest_sha256") != sha256(manifest) or \
+       not isinstance(index_document.get("artifacts"), list):
+        raise ReadbackError("artifacts.json does not bind this exact manifest")
+    entries = index_document["artifacts"]
     names: list[str] = []
     payloads: dict[str, bytes] = {}
     for entry in entries:
@@ -149,9 +159,11 @@ def expected_site(directory: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
     missing = REQUIRED_SITE_FILES - set(payloads)
     if missing:
         raise ReadbackError(f"site is missing required files: {sorted(missing)!r}")
-    document, artifacts = expected_artifacts(payloads["manifest.json"], directory)
+    document, artifacts = expected_artifacts(
+        payloads["manifest.json"], payloads["artifacts.json"], directory,
+    )
     if set(artifacts) != {name for name in payloads if name.endswith(".bin")}:
-        raise ReadbackError("manifest artifact index does not cover the exact Pages .bin set")
+        raise ReadbackError("artifacts.json does not cover the exact Pages .bin set")
     return document, payloads
 
 
@@ -309,18 +321,65 @@ def self_test() -> None:
     document = {
         "version": "1.2.3",
         "provenance": {"app_sha256": sha256(artifacts["daikin-altherma-esp32.bin"])},
+    }
+    manifest = json.dumps(document, sort_keys=True).encode()
+    artifact_index = json.dumps({
+        "schema_version": 1,
+        "manifest_sha256": sha256(manifest),
         "artifacts": [
             {"path": name, "sha256": sha256(data), "size": len(data)}
             for name, data in sorted(artifacts.items())
         ],
-    }
-    manifest = json.dumps(document, sort_keys=True).encode()
+    }, sort_keys=True).encode()
     payloads = {
         **artifacts,
         "manifest.json": manifest,
+        "artifacts.json": artifact_index,
         "index.html": b"index",
         "changelog.json": b"{}",
     }
+    with tempfile.TemporaryDirectory(prefix="daikin-artifact-index-") as temporary:
+        directory = Path(temporary)
+        for name, data in artifacts.items():
+            (directory / name).write_bytes(data)
+        checked_document, checked_artifacts = expected_artifacts(
+            manifest, artifact_index, directory,
+        )
+        assert checked_document == document and set(checked_artifacts) == set(artifacts)
+
+        def reject_index(index_bytes: bytes, name: str) -> None:
+            try:
+                expected_artifacts(manifest, index_bytes, directory)
+            except ReadbackError:
+                return
+            raise AssertionError(f"self-test accepted {name}")
+
+        stale_index = json.loads(artifact_index)
+        stale_index["manifest_sha256"] = "0" * 64
+        reject_index(json.dumps(stale_index).encode(), "a stale manifest hash")
+
+        wrong_index = json.loads(artifact_index)
+        wrong_index["artifacts"][0]["sha256"] = "0" * 64
+        reject_index(json.dumps(wrong_index).encode(), "a wrong binary hash")
+
+        missing_index = json.loads(artifact_index)
+        missing_index["artifacts"].pop()
+        reject_index(json.dumps(missing_index).encode(), "a missing binary entry")
+
+        (directory / "extra.bin").write_bytes(b"extra")
+        reject_index(artifact_index, "an unindexed extra binary")
+        (directory / "extra.bin").unlink()
+
+        (directory / "daikin-altherma-esp32.bin").unlink()
+        reject_index(artifact_index, "an indexed missing binary")
+
+        embedded_manifest = json.dumps({**document, "artifacts": []}).encode()
+        try:
+            expected_artifacts(embedded_manifest, artifact_index, directory)
+        except ReadbackError:
+            pass
+        else:
+            raise AssertionError("self-test accepted an artifact index embedded in manifest.json")
     verify_payloads(payloads, document, payloads)
     cases = [
         ({**payloads, "manifest.json": manifest + b"\n"}, "manifest"),

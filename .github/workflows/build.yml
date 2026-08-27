@@ -13,7 +13,9 @@ name: build
 # such thing as a build that had been deliberately cut, and no way to run one. Now `main` moves
 # freely on the dev feed and a release is an act: Actions -> build -> Run workflow -> release: true,
 # picking the bump level. The device chooses which feed it follows (Settings -> ESP32 -> Update
-# channel, POST /set_ota); the two feeds have identical shape, so nothing downstream is special-cased.
+# channel, POST /set_ota); each slice published by this workflow has the same shape, so nothing
+# downstream is special-cased. A root slice from an older release stays in its historical shape
+# until the next manual release; a dev push never rewrites it.
 #
 # PUBLISHING POLICY — publishes from a PRIVATE repo too, and the Pages site is PUBLIC
 #
@@ -26,7 +28,7 @@ name: build
 #     readable by anyone on the internet, regardless of repo visibility. Making a Pages site
 #     access-controlled needs an ORGANIZATION on GitHub Enterprise Cloud; it is not available to a
 #     user account on Pro. So the signed firmware, browser-installer parts, manual merged image and
-#     manifest.json are world-downloadable while the SOURCE stays private. That is an accepted trade,
+#     manifest.json and artifacts.json are world-downloadable while the SOURCE stays private. That is an accepted trade,
 #     not an oversight.
 #   • Git tags + GitHub Releases are NOT public on a private repo — only accounts with repo read
 #     access see them. They are un-gated anyway because they are what makes the OTA release feed
@@ -770,7 +772,8 @@ jobs:
           esp_idf_version: v6.0.2
           target: esp32s3
           # ci-build-all.sh builds esp32s3 and stages the signed OTA app, sparse NVS-preserving
-          # Web Serial parts, the manual full-flash merged image and manifest.json into dist/.
+          # Web Serial parts, the manual full-flash merged image, compact manifest.json and its
+          # exact manifest-bound artifacts.json inventory into dist/.
           #
           # Pass the STAMPED version (what version.txt above put into the image). OTA compares the
           # manifest version to the version the running app reports, so publishing a manifest the
@@ -819,6 +822,7 @@ jobs:
             dist/*-size.json
             dist/*-size.md
             dist/manifest.json
+            dist/artifacts.json
             dist/changelog.json
 
   # Exact release-candidate hardware gate. It runs only on the isolated, inventory-pinned lab
@@ -920,6 +924,7 @@ jobs:
           mkdir -p dist
           gh run download "$GITHUB_RUN_ID" --repo "$GH_REPO" --name "$ARTIFACT_NAME" --dir dist
           test -f dist/manifest.json
+          test -f dist/artifacts.json
           test -f dist/changelog.json
           test -f dist/daikin-altherma-esp32.bin
           ./scripts/check-manifest-provenance.py dist/manifest.json \
@@ -1012,6 +1017,7 @@ jobs:
             dist/*-size.json
             dist/*-size.md
             dist/manifest.json
+            dist/artifacts.json
             dist/changelog.json
             _site/LICENSE.txt
             _site/THIRD_PARTY_NOTICES.md
@@ -1033,7 +1039,7 @@ jobs:
           actual_names="$readback_root/actual"
           for expected in \
             dist/*.bin dist/*.elf.xz dist/*.elf.sha256 dist/*-size.json dist/*-size.md \
-            dist/manifest.json dist/changelog.json \
+            dist/manifest.json dist/artifacts.json dist/changelog.json \
             _site/LICENSE.txt _site/THIRD_PARTY_NOTICES.md _site/Apache-2.0.txt; do
             test -f "$expected"
             basename "$expected"

@@ -1,11 +1,12 @@
 #pragma once
 // Ephemeral release-HIL OTA feed selection and offer binding.  IDF-free + host-tested.
 //
-// The release HIL must exercise the byte-identical public candidate, so its private leased feed
-// cannot be compiled into a special firmware build.  Instead, trusted-LAN GET /ota/check may supply
-// one bounded pair of HTTPS URLs.  The pair is deliberately transient: it is copied into the OTA
-// task, then bound to the exact successful offer generation and copied once more into the accepted
-// update task.  It is never written to Config/NVS and a later request cannot replace it.
+// Release HIL must exercise the byte-identical public candidate, while production promotion must
+// exercise the inventory-pinned bench release leg without persisting a channel change. Neither feed
+// can be compiled into a special firmware build. Instead, trusted-LAN GET /ota/check may supply one
+// bounded pair of HTTPS URLs. The pair is deliberately transient: it is copied into the OTA task,
+// then bound to the exact successful offer generation and copied once more into the accepted update
+// task. It is never written to Config/NVS and a later request cannot replace it.
 #include "ota_channel.hpp"
 #include "ota_manifest.hpp"
 #include "ota_transport.hpp"
