@@ -1,1 +1,1 @@
-{"version":"1.0.3-dev.14","changelog":"Maintenance and reliability improvements."}
+{"version":"1.0.3-dev.15","changelog":"Hard-reset ESP32-S3 after serial flash"}

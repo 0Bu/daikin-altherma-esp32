@@ -179,12 +179,9 @@ export async function probeDevice({
     debugLogging: false,
     enableTracing: false
   });
-  let loaderReady = false;
-
   try {
     return await withTimeout((async () => {
       await loader.main();
-      loaderReady = true;
       if (typeof loader.flashId === "function") await loader.flashId();
       const chipFamily = loader.chip && loader.chip.CHIP_NAME;
       if (!chipFamily) throw errorWithName("ChipDetectionError", "The connected ESP chip could not be identified.");
@@ -199,8 +196,10 @@ export async function probeDevice({
     ));
   } finally {
     // The compatibility probe runs the flasher stub. Explicitly hand control
-    // back to the installed application before releasing the serial port.
-    await settleTransport(transport, loader, loaderReady ? "soft_reset" : undefined, cleanupTimeoutMs);
+    // back to the installed application before releasing the serial port. A
+    // partially failed loader.main() can already have started the stub; the
+    // cleanup helper resets only after esptool-js has identified a chip.
+    await settleTransport(transport, loader, "hard_reset", cleanupTimeoutMs);
   }
 }
 
@@ -265,11 +264,11 @@ export async function flashDevice({
     });
 
     onState({ stage: "restarting", percentage: 100, message: "Starting firmware" });
-    await loader.after("soft_reset");
+    await loader.after("hard_reset");
     completed = true;
     return { chipFamily, build };
   } finally {
-    await settleTransport(transport, loader, completed ? undefined : "soft_reset");
+    await settleTransport(transport, loader, completed ? undefined : "hard_reset");
   }
 }
 
