@@ -53,8 +53,8 @@ reconnect/retain/LWT behavior and incomplete HTTP framing. Two deadline scenario
 traffic: a writer trickles an incomplete header or body beyond the absolute deadline, while the
 watchdog applies `shutdown(SHUT_RDWR)` and is joined before the descriptors are closed. Mutations
 independently disable the header and body watchdog. The harness remains hardware-free and does not
-execute ESP-IDF target glue, real NVS or the production MCP/HTTP/MQTT stacks; the target build and
-hardware release gate remain separate proof layers.
+execute ESP-IDF target glue, real NVS or the production MCP/HTTP/MQTT stacks; target builds and
+separately authorized hardware acceptance remain distinct proof layers.
 
 `scripts/run-format-check.sh` always supplies the dependency-free baseline format gate: UTF-8, LF
 endings, one final newline, no tabs or trailing whitespace on maintained `main/`, `test/` and
@@ -90,7 +90,7 @@ readiness-, MQTT-, Weather-, uptime-, counter- and X10A-bypass regressions in ad
 boundary removals, while
 `tools/agent-hooks/selftest.sh` proves raw client POSTs and noncanonical gate commands are denied.
 
-The same source contract also pins the release-only HIL seam: the schema-3 bootstrap identity and
+The same source contract also pins the standalone lab-HIL seam: the schema-3 bootstrap identity and
 controller denylists, the complete transient HIL header pair, generation/channel/version/SHA plus
 effective-URL offer binding, a non-renewable controller-owned deadline around every pending-image
 install, explicit
@@ -100,7 +100,8 @@ the valid candidate downgrades through the distinct root-pinned bootstrap feed, 
 pending before a hard cycle, and rollback must return to the valid candidate with the candidate's own
 transfer/stack evidence and unchanged persistence. It also pins canonical controller paths,
 whole-operation response deadlines and exact feed acknowledgements. These are deterministic boundary
-tests; only the isolated `release_hil` job supplies physical power-cycle and bus evidence.
+tests; the release workflow does not invoke this harness or claim physical power-cycle and bus
+evidence.
 
 `node --test test/serial_port_release.test.mjs` rides the same command and exercises the Pages
 installer's serial-permission lifecycle: no control or chooser without an existing grant, direct

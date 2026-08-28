@@ -1,6 +1,5 @@
-// Deterministic source-boundary contract for the role-pinned OTA/HIL gate. Real board behaviour is
-// proved only by the release-hil job; this test keeps the fail-closed host and firmware wiring from
-// becoming optional or silently changing shape.
+// Deterministic source-boundary contract for the role-pinned OTA gate. Hardware acceptance is a
+// separate maintainer operation; this test keeps the fail-closed host and firmware wiring stable.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -680,10 +679,12 @@ assert.match(mqtt, /s_x10a_publish_proven\.store\(true,\s*std::memory_order_rele
 assert.match(ota, /HealthVerdict::GiveUp[\s\S]{0,700}?esp_restart\(\);/);
 
 // CI trust split and agent mutation guard remain explicit.
-assert.match(workflow, /release_hil:[\s\S]{0,500}?runs-on:\s*\[self-hosted, daikin-release-lab\]/);
-assert.match(workflow, /release_hil:[\s\S]{0,1600}?contents:\s*read/);
-assert.match(workflow, /publish:[\s\S]{0,100}?needs:\s*\[trusted_build, release_hil\]/);
-assert.match(workflow, /RELEASE_HIL_POWER_TOKEN:[\s\S]{0,120}?RELEASE_HIL_FEED_TOKEN:/);
+assert.match(workflow,
+  /mechanical_gates:\s*\n[\s\S]{0,300}?if:\s*github\.event_name != 'workflow_dispatch' \|\| inputs\.release != true/);
+assert.match(workflow,
+  /trusted_build:[\s\S]{0,500}?always\(\)[\s\S]{0,300}?github\.event_name == 'workflow_dispatch' && inputs\.release == true/);
+assert.match(workflow, /publish:[\s\S]{0,120}?needs:\s*\[trusted_build\]/);
+assert.doesNotMatch(workflow, /require_release_hil|release_hil:|daikin-release-lab|--release-hil/);
 assert.match(hook, /direct OTA writes are forbidden; run scripts\/production-ota-gate\.py/);
 assert.match(hook, /canonical_production_ota_command/);
 

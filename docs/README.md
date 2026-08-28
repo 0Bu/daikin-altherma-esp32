@@ -858,7 +858,8 @@ the download progress inline beside whichever version you tapped, waits for the 
 up and reloads itself onto the new UI. Both the check and the download run on their own task, never on the HTTP worker.
 
 The device does not fetch `artifacts.json`; after a channel is next published by the current
-workflow, that sibling file binds its exact compact manifest and every public `.bin` for CI readback.
+workflow, that sibling file binds its exact compact manifest and every public `.bin` for integrity
+checks.
 Keeping the inventory separate leaves `manifest.json` within the 1024-byte limit of the oldest
 supported signed restore release. A historical release slice retains its old layout until another
 manual release is cut.

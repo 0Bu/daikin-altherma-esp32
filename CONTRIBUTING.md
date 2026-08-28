@@ -438,9 +438,9 @@ resets the numbering — on 2026-07-24 that republished the dev feed as `1.0.0-d
 
 The fourth pins the workflow's trust and delivery contract: untrusted PRs expose no signing key or
 flashable artifact, release and dev resumes must match the published manifest's exact source SHA,
-and the license/notices, Pages feed and GitHub Release stay in their fail-closed order. Public Pages
-readback remains bounded, but allows 30 attempts so a normally delayed deployment does not make a
-correctly published feed impossible to attest or rerun.
+and the license/notices, Pages feed and GitHub Release stay in their fail-closed order. Development
+publication keeps a bounded public Pages readback with 30 attempts; an explicit release has no
+post-build readback or test gate.
 
 Every one of their test suites is a **step of one `mechanical_gates` job**, not a job each (the
 required `gates` policy uses its own clean PR runner, and the production version gate runs in
@@ -646,7 +646,7 @@ at different rates:
 Every slice published by the current workflow also contains `artifacts.json`. `manifest.json` stays
 below the 1024-byte reader limit of the oldest supported signed restore release and contains only
 installer/OTA data; the sibling index binds the exact manifest hash plus every published `.bin` hash
-and size for CI readback. The production promotion gate checks that restore grammar before it
+and size for integrity checks. The production promotion gate checks that restore grammar before it
 contacts the bench. A historical root slice keeps its old shape until the next manual release; a dev
 publish does not rewrite it.
 
@@ -657,13 +657,10 @@ A device picks its feed in the web UI (gear → **ESP32** → *Update channel*);
 changes that, so a contributor never has to think about which feed their change lands in. It lands
 in dev, and a maintainer decides when a release is cut from it.
 
-The manual release path also performs a second clean unsigned build and requires byte identity,
-pins and verifies the Secure Boot v2 public-key digest, and blocks publication on the isolated
-`release-hil` runner until the exact candidate has proved rollback, committed cold restore, its own
-OTA writer through a rollback-safe signed-bootstrap install, and combined runtime stress. After
-publication, CI reads the manifest and app back from Pages and the
-release binaries back from GitHub before declaring the run successful. These are release gates;
-they are not claims that a PR build or an ordinary dev publish exercised hardware.
+An explicit release dispatch does not rerun the mechanical PR suite and has no hardware dependency.
+It performs one signed firmware build, publishes the root feed, and creates the exact-source tag and
+GitHub Release. Test-board and production-board acceptance are separate maintainer operations around
+the PR/merge process; the release workflow neither repeats them nor claims hardware evidence.
 
 ## License
 

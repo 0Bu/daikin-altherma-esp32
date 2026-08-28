@@ -367,23 +367,26 @@ read fail and is latched as `unknown`; it is never treated as `PENDING_VERIFY`, 
 no-op for it and can never strand a fresh board. Unknown remains unknown — it is not evidence that
 rollback is absent.
 
-### Trusted release construction and isolated release HIL
+### Trusted release construction and separate hardware acceptance
 
 A manual release has a stronger path than a PR build or ordinary dev publication:
 
-- `ci-build-all.sh --verify-reproducible` keeps the first unsigned ESP32-S3 application as the
-  reference, performs a second clean build, and requires byte-for-byte identity before the one
-  signing step. The signed result is then verified independently: signature-block CRC, complete
+- `ci-build-all.sh` performs one signed ESP32-S3 build. The result is verified independently:
+  signature-block CRC, complete
   image digest, RSA-PSS/SHA-256, exponent 65537 and the repository-pinned public-key digest must all
   match. That public identity is written into manifest provenance; the private PEM is not.
 - The signing job has no repository-write permission. The separate publisher has no signing secret,
-  revalidates the artifact handoff, publishes it, and reads the manifest and application back from
-  the exact allowed Pages URL with a cache buster. A release then downloads each GitHub Release
-  binary and byte-compares it with the handoff. Publication success is therefore evidence about the
-  bytes clients can actually fetch, not only the workspace that built them.
-- Before a release publisher can run, the isolated self-hosted `release-hil` job downloads that
-  exact candidate. A root-owned schema-3 policy and a protected runner-local inventory jointly pin
-  one non-production lab board, its distinct bootstrap version/ELF/application SHA, distinct static
+  revalidates the artifact handoff, publishes the root feed, and creates the exact-source tag and
+  GitHub Release. A manual release dispatch skips the mechanical PR suite and performs no public or
+  hardware readback gate.
+- The release workflow has no self-hosted job, protected hardware environment, board inventory,
+  controller token or hardware-policy dependency. Test-board and production-board acceptance are
+  separate maintainer operations and are never repeated by release publication.
+
+The repository retains a standalone lab-HIL harness for independently requested destructive test
+work; `build.yml` does not invoke it and it cannot block a release. Its root-owned schema-3 policy
+and a protected runner-local inventory jointly pin
+one non-production lab board, its distinct bootstrap version/ELF/application SHA, distinct static
   bootstrap URLs, one leased private candidate HTTPS feed, and separate feed/power controller
   identities; production hosts, MACs and controller endpoints are explicit denylists. Controller
   URLs are canonical HTTPS paths with no redirects, dot segments, encoding ambiguity, query or
@@ -417,11 +420,12 @@ A manual release has a stronger path than a PR build or ordinary dev publication
   bootloader return to the already-valid candidate with unchanged configuration and explicit
   `valid`/`rollback_pending=false`. Only then does the candidate expose the configured live stack
   minima and pass combined HTTP/MQTT/X10A/weather stress against a fresh generation-bound candidate
-  offer. A runner failure after explicit approval but outside a later watchdog still blocks
-  publication, but intentionally no longer promises rollback of the already approved lab candidate.
+  offer. A runner failure after explicit approval but outside a later watchdog still fails that
+  standalone test run, but intentionally no longer promises rollback of the already approved lab
+  candidate.
 
-The HIL path is intentionally release-only: it is destructive to its isolated lab board and power
-outlet, so it does not run for PRs or routine dev builds. A green host suite still does not prove
+The standalone HIL path is destructive to its isolated lab board and power outlet, so it does not
+run for releases, PRs or routine dev builds. A green host suite still does not prove
 FreeRTOS, flash, socket or physical-bus behavior; conversely, this one lab profile does not prove a
 specific production installation.
 

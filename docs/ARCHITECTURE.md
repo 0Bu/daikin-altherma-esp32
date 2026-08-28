@@ -2446,13 +2446,13 @@ Structure:
   heap-broken image as valid. Both default feeds are live, and
   publishing runs on a private repo too (the Pages site is public either way — see
   [`README.md`](README.md)); an absent or unreachable self-hosted manifest reports a check error.
-  The release-lab uses the byte-identical binary through a transient trusted-LAN header pair on
-  `/ota/check`, never a HIL-specific compile. Both bounded HTTPS URLs become part of the completed
+  The standalone lab-HIL harness can use the same binary through a transient trusted-LAN header pair
+  on `/ota/check`, never a HIL-specific compile. Both bounded HTTPS URLs become part of the completed
   generation/channel/version/SHA offer lease shown by `/ota/status`; `/ota/update` atomically copies
   that lease before re-reading the manifest and image, so a later request or config change cannot
   mix feeds. The same compact status exposes a boot-latched `image_state` and
   `rollback_pending` without reading otadata flash on the HTTP task.
-  Release HIL first uses the pinned bootstrap writer to prove candidate rollback and then candidate
+  Standalone lab-HIL first uses the pinned bootstrap writer to prove candidate rollback and then candidate
   commit/cold restore. It subsequently exercises the valid candidate's own writer by installing the
   separately root-pinned signed bootstrap through a distinct transient feed, capturing the
   candidate-origin heap and OTA-stack minima before reboot, observing the bootstrap pending, and
@@ -2461,7 +2461,7 @@ Structure:
   The web installer carves prepared sparse parts from the merged image so a no-Erase flash skips
   NVS; compact `manifest.json` lists those parts and also doubles as the OTA feed (the `esptool-js`
   installer and the device load the same file). CI keeps the complete binary hash/size inventory in
-  sibling `artifacts.json`, bound to the exact manifest SHA-256, so public-byte readback remains
+  sibling `artifacts.json`, bound to the exact manifest SHA-256, so the integrity inventory remains
   complete without exceeding the 1024-byte reader in the oldest supported signed restore release.
 - **Ordinary bench delivery is a role-pinned, one-write OTA transaction.** The canonical
   `scripts/production-ota-gate.py ... --confirm-bench bench --install-bench` mode verifies the exact

@@ -121,6 +121,9 @@ jobs:
   # NOTE for branch protection: the required checks are now `gates` and `build`, not the three
   # old job names.
   mechanical_gates:
+    # A release is an explicit maintainer publication action for an already accepted main commit.
+    # PR/main CI owns testing; do not rerun or make those tests a prerequisite for tagging it.
+    if: github.event_name != 'workflow_dispatch' || inputs.release != true
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -596,9 +599,11 @@ jobs:
     # Skipped — not failed — when nothing the image or the site is made of changed. A skipped job
     # still reports its check, so this stays compatible with `build` as a required check.
     if: >-
-      needs.mechanical_gates.outputs.firmware == 'yes' &&
-      github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      always() && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      ((github.event_name == 'workflow_dispatch' && inputs.release == true) ||
+      (needs.mechanical_gates.result == 'success' &&
+      needs.mechanical_gates.outputs.firmware == 'yes'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -781,7 +786,7 @@ jobs:
           # bins don't embed makes every device download an "update" that changes nothing, forever.
           # ci-build-all.sh reads the version back out of the built image and fails if the two ever
           # drift apart again.
-          command: ./scripts/ci-build-all.sh ${{ steps.mode.outputs.mode == 'release' && '--verify-reproducible' || '' }} --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
+          command: ./scripts/ci-build-all.sh --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary
         if: always()
@@ -826,81 +831,12 @@ jobs:
             dist/artifacts.json
             dist/changelog.json
 
-  # Exact release-candidate hardware gate. It runs only on the isolated, inventory-pinned lab
-  # runner. The bootstrap installs the candidate twice: the first boot is power-cut while
-  # PENDING_VERIFY and must roll back; the second commits and survives a cold restart with its NVS
-  # configuration intact. The valid candidate then installs the pinned bootstrap with its own OTA
-  # writer; a hard cycle must roll back to that valid candidate before combined transport/heap/stack
-  # pressure. Dev publication never contacts this runner. The job has no write-capable repository
-  # token and never receives the offline signing key.
-  release_hil:
-    needs: [trusted_build]
-    if: needs.trusted_build.outputs.mode == 'release'
-    runs-on: [self-hosted, daikin-release-lab]
-    timeout-minutes: 45
-    environment: release-hil
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Download exact signed release candidate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          ARTIFACT_NAME: daikin-altherma-esp32-${{ needs.trusted_build.outputs.version }}
-          HIL_DIST: ${{ runner.temp }}/daikin-release-hil-${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          install -d -m 0700 "$HIL_DIST"
-          gh run download "$GITHUB_RUN_ID" --repo "$GH_REPO" \
-            --name "$ARTIFACT_NAME" --dir "$HIL_DIST"
-
-      - name: Verify candidate handoff and expose its digest
-        id: artifact
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-          HIL_DIST: ${{ runner.temp }}/daikin-release-hil-${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          ./scripts/check-manifest-provenance.py "$HIL_DIST/manifest.json" \
-            "$HIL_DIST/daikin-altherma-esp32.bin" "$SOURCE_SHA" \
-            "$(./scripts/idf-version.sh)" dependencies.lock
-          ./scripts/check-signing-key-continuity.py "$HIL_DIST/daikin-altherma-esp32.bin"
-          app_sha="$(python3 -I -c 'import json, os; print(json.load(open(os.environ["HIL_DIST"] + "/manifest.json", encoding="utf-8"))["provenance"]["app_sha256"])')"
-          echo "app_sha=$app_sha" >> "$GITHUB_OUTPUT"
-
-      # This exact, unchained command is the only release-HIL mutation boundary. Hosts, MAC,
-      # transient leased HTTPS feed and power outlet come from the runner-local schema-versioned
-      # release-hil.json inventory; no production role is accepted by this mode.
-      - name: Exercise rollback, cold restore and combined stress on isolated lab
-        env:
-          RELEASE_HIL_POWER_TOKEN: ${{ secrets.RELEASE_HIL_POWER_TOKEN }}
-          RELEASE_HIL_FEED_TOKEN: ${{ secrets.RELEASE_HIL_FEED_TOKEN }}
-          HIL_DIST: ${{ runner.temp }}/daikin-release-hil-${{ github.run_id }}
-        run: >-
-          python3 -I -B ./scripts/production-ota-gate.py
-          --release-hil
-          --confirm-release-hil release-hil
-          --execute
-          --artifact-manifest "$HIL_DIST/manifest.json"
-          --artifact-app "$HIL_DIST/daikin-altherma-esp32.bin"
-          --expected-source-sha "${{ github.sha }}"
-          --expected-version "${{ needs.trusted_build.outputs.version }}"
-          --expected-app-sha256 "${{ steps.artifact.outputs.app_sha }}"
-
   # Outward mutation boundary. It has contents:write but no signing secret and consumes only the
   # signed artifact produced by trusted_build. A failed publish can be retried without exposing the
   # key to a write-capable job.
   publish:
-    needs: [trusted_build, release_hil]
-    if: >-
-      always() && needs.trusted_build.result == 'success' &&
-      (needs.trusted_build.outputs.mode == 'dev' || needs.release_hil.result == 'success')
+    needs: [trusted_build]
+    if: needs.trusted_build.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -952,7 +888,7 @@ jobs:
         run: ./scripts/publish-pages-branch.sh --dev
 
       # Publish the release feed BEFORE creating its tag/Release. If this fails, no immutable release
-      # exists. If a later readback/API call fails, a workflow rerun may repeat an already-published
+      # exists. If a later API call fails, a workflow rerun may repeat an already-published
       # dev or release version only when its manifest names this exact github.sha; release_version
       # can explicitly resume a release even after a tag was partially created.
       - name: Assemble Pages site (release channel)
@@ -966,10 +902,11 @@ jobs:
         run: ./scripts/publish-pages-branch.sh
 
       - name: Verify public feed readback
+        if: needs.trusted_build.outputs.mode == 'dev'
         env:
-          BASE_URL: ${{ needs.trusted_build.outputs.mode == 'dev' && 'https://0bu.github.io/daikin-altherma-esp32/dev/' || 'https://0bu.github.io/daikin-altherma-esp32/' }}
-          SITE_DIR: ${{ needs.trusted_build.outputs.mode == 'dev' && '_site/dev' || '_site' }}
-          PAGES_PREFIX: ${{ needs.trusted_build.outputs.mode == 'dev' && 'dev' || 'root' }}
+          BASE_URL: https://0bu.github.io/daikin-altherma-esp32/dev/
+          SITE_DIR: _site/dev
+          PAGES_PREFIX: dev
           PUBLISH_OID_FILE: ${{ runner.temp }}/pages-published-oid
         run: |
           set -euo pipefail
@@ -1024,43 +961,7 @@ jobs:
             _site/THIRD_PARTY_NOTICES.md
             _site/Apache-2.0.txt
 
-      - name: Verify GitHub Release asset readback
-        if: needs.trusted_build.outputs.mode == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          VERSION: ${{ needs.trusted_build.outputs.version }}
-        run: |
-          set -euo pipefail
-          readback_root="$(mktemp -d)"
-          trap 'rm -rf "$readback_root"' EXIT
-          readback="$readback_root/assets"
-          mkdir "$readback"
-          expected_names="$readback_root/expected"
-          actual_names="$readback_root/actual"
-          for expected in \
-            dist/*.bin dist/*.elf.xz dist/*.elf.sha256 dist/*-size.json dist/*-size.md \
-            dist/manifest.json dist/artifacts.json dist/changelog.json \
-            _site/LICENSE.txt _site/THIRD_PARTY_NOTICES.md _site/Apache-2.0.txt; do
-            test -f "$expected"
-            basename "$expected"
-          done | LC_ALL=C sort > "$expected_names"
-          gh release view "v$VERSION" --repo "$GH_REPO" --json assets \
-            --jq '.assets[].name' | LC_ALL=C sort > "$actual_names"
-          cmp -- "$expected_names" "$actual_names"
-          gh release download "v$VERSION" --repo "$GH_REPO" --dir "$readback"
-          while IFS= read -r name; do
-            case "$name" in
-              LICENSE.txt|THIRD_PARTY_NOTICES.md|Apache-2.0.txt) expected="_site/$name" ;;
-              *) expected="dist/$name" ;;
-            esac
-            cmp -- "$expected" "$readback/$name"
-          done < "$expected_names"
-          find "$readback" -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort > "$actual_names"
-          cmp -- "$expected_names" "$actual_names"
-          ./scripts/check-signing-key-continuity.py "$readback/daikin-altherma-esp32.bin"
-
-      - name: Rebind release tag after asset readback
+      - name: Verify release tag target
         if: needs.trusted_build.outputs.mode == 'release'
         env:
           VERSION: ${{ needs.trusted_build.outputs.version }}

@@ -115,8 +115,9 @@ print(doc["version"])
     exit 2
 }
 
-# Publishing a Pages feed happens before its public readback and, for a release, before the GitHub
-# Release/tag. If a later step failed, a rerun sees exactly the candidate already in the manifest.
+# Publishing a Pages feed happens before the development-channel public readback and, for a release,
+# before the GitHub Release/tag. If a later step failed, a rerun sees exactly the candidate already
+# in the manifest.
 # Equality is a safe sideways move only when the existing manifest says it came from this exact Git
 # object. Without that binding, an exact-version retry could replace the served binary while every
 # device still sees the same version. Ordinary dev/release checks remain strictly forward-only;
