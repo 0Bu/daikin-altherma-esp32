@@ -54,6 +54,9 @@ assert.doesNotMatch(gate, /192\.168\.|(?:[0-9A-F]{2}:){5}[0-9A-F]{2}/,
 assert.match(gate, /STRESS_SECONDS\s*=\s*180/);
 assert.ok(Number(gate.match(/OTA_CHECK_TIMEOUT_S\s*=\s*(\d+)/)?.[1]) >= 120);
 assert.ok(Number(gate.match(/OTA_TIMEOUT_S\s*=\s*(\d+)/)?.[1]) >= 480);
+assert.match(gate, /PROMOTION_READY_STABLE_SAMPLES\s*=\s*2/,
+  "production promotion must not trust one potentially straddled MQTT/Weather snapshot");
+assert.match(gate, /PROMOTION_READY_SAMPLE_INTERVAL_S\s*=\s*0\.1/);
 assert.match(gate, /OFFICIAL_MANIFEST_URL\s*=\s*"https:\/\/0bu\.github\.io\/daikin-altherma-esp32\/dev\/manifest\.json"/);
 assert.match(gate, /OFFICIAL_RELEASE_MANIFEST_URL\s*=\s*"https:\/\/0bu\.github\.io\/daikin-altherma-esp32\/manifest\.json"/);
 assert.match(gate, /LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES\s*=\s*1024/);
@@ -276,6 +279,56 @@ assert.match(heartbeat,
   /weather_stack_min_free_bytes[\s\S]*?append_stack_bytes\(j, f\.weather_stack_min_free_bytes\)/,
   "fleet heartbeat telemetry must retain Weather stack headroom");
 
+const promotionSnapshot = section(
+  gate, "def production_promotion_snapshot_ready(",
+  "\ndef wait_for_production_promotion_readiness(",
+);
+assert.match(promotionSnapshot, /if uptime < last_uptime:/,
+  "pre-write readiness must fail closed on a reboot");
+assert.match(promotionSnapshot,
+  /for key in \("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"\):[\s\S]{0,140}?counters\[key\] != baseline_counters\[key\]/,
+  "pre-write readiness must retain allocation and protocol counters");
+assert.match(promotionSnapshot,
+  /counters\["timeout_err"\] - baseline_counters\["timeout_err"\] > MAX_X10A_TIMEOUT_DELTA/,
+  "pre-write readiness must retain the bounded X10A timeout delta");
+assert.match(promotionSnapshot,
+  /not hp\.get\("connected"\) or int\(hp\.get\("values", 0\)\) <= 0/,
+  "pre-write readiness must retain live X10A with positive values");
+assert.match(promotionSnapshot,
+  /status\.get\("mqtt", \{\}\)\.get\("connected"\) is not True/);
+assert.match(promotionSnapshot, /weather\["fetching"\] is not False/);
+const promotionWait = section(
+  gate, "def wait_for_production_promotion_readiness(", "\ndef require_stress_ota_offer(",
+);
+assert.match(promotionWait,
+  /deadline = time\.monotonic\(\) \+ MQTT_RECOVERY_TIMEOUT_S/,
+  "the pre-write recovery allowance must remain absolute and bounded");
+assert.equal(occurrences(promotionWait, "deadline = time.monotonic() + MQTT_RECOVERY_TIMEOUT_S"), 1,
+  "the pre-write recovery deadline must never reset");
+assert.match(promotionWait, /status: dict\[str, Any\] \| None = initial/,
+  "the initial readiness response must be represented as single-use evidence");
+assert.match(promotionWait,
+  /if status is not None:[\s\S]{0,900}?status = None[\s\S]{0,500}?time\.sleep/,
+  "each successful readiness response must be invalidated before the next fetch");
+assert.match(promotionWait, /validate_identity\(status, host=host, mac=mac, version=version, elf=elf\)/,
+  "every successful pre-write status snapshot must retain the old production identity");
+assert.match(promotionWait,
+  /stable_samples = stable_samples \+ 1 if ready else 0[\s\S]{0,120}?stable_samples >= PROMOTION_READY_STABLE_SAMPLES/,
+  "promotion needs consecutive quiescent samples");
+assert.match(promotionWait,
+  /request_status_deadline\([\s\S]{0,100}?endpoint, timeout=min\(remaining, HTTP_TIMEOUT_S\)/,
+  "each pre-write status read must consume the remaining absolute deadline");
+assert.match(promotionWait,
+  /time\.sleep\(min\(PROMOTION_READY_SAMPLE_INTERVAL_S, remaining\)\)[\s\S]{0,140}?if remaining <= 0:[\s\S]{0,220}?fail\(/,
+  "deadline expiry during the inter-sample wait must fail rather than reuse evidence");
+assert.doesNotMatch(promotionWait, /if remaining <= 0:\s+continue/,
+  "deadline expiry must never loop back to a consumed readiness sample");
+assert.match(promotionWait, /if error\.code != 503:/,
+  "only expected TLS-busy HTTP refusal may be retried before promotion");
+assert.match(promotionWait,
+  /except HTTPError as error:[\s\S]{0,180}?continue[\s\S]{0,120}?except \(CompactTransportError, OSError, TimeoutError\) as error:[\s\S]{0,160}?continue/,
+  "a retryable transport gap must not reclassify the previous status snapshot");
+
 const fullDownload = section(gate, "def exercise_bench_full_download(", "\ndef require_ota_transfer_evidence(");
 for (const helper of ["request_status_deadline", "request_values_deadline", "request_diag_deadline"]) {
   assert.match(fullDownload, new RegExp(`${helper}\\(status_endpoint`),
@@ -364,16 +417,20 @@ assert.equal(occurrences(production, "post_update_once("), 1,
 assert.doesNotMatch(production, /set_update_channel|legacy bench/);
 const prodResolve = production.indexOf("production_status_endpoint = resolve_http_endpoint(");
 const prodIdentity = production.indexOf("validate_identity(", prodResolve);
-const prodOffer = production.indexOf("check_generation = wait_for_ota_offer(", prodIdentity);
+const prodReadiness = production.indexOf(
+  "production_before = wait_for_production_promotion_readiness(", prodIdentity,
+);
+const prodOffer = production.indexOf("check_generation = wait_for_ota_offer(", prodReadiness);
 const prodPost = production.indexOf("post_update_once(", prodOffer);
 const prodReturn = production.indexOf("wait_for_new_firmware(", prodPost);
 const prodStress = production.indexOf("production_evidence = stress_board(", prodReturn);
 const finalIdentity = production.indexOf("validate_identity(", prodStress);
 const retained = production.indexOf("verify_retained_x10a(final_status)", finalIdentity);
-assert.ok(prodResolve >= 0 && prodIdentity > prodResolve && prodOffer > prodIdentity &&
+assert.ok(prodResolve >= 0 && prodIdentity > prodResolve && prodReadiness > prodIdentity &&
+  prodOffer > prodReadiness &&
   prodPost > prodOffer && prodReturn > prodPost && prodStress > prodReturn &&
   finalIdentity > prodStress && retained > finalIdentity,
-  "production must preserve resolve/identity/offer/write/reboot/stress/final-identity/X10A order");
+  "production must preserve resolve/identity/readiness/offer/write/reboot/stress/final-identity/X10A order");
 
 // Release-HIL feed, bootstrap, persistence and hard-cancel boundaries.
 assert.match(gate, /RELEASE_HIL_POLICY_PATH\s*=\s*Path\("\/etc\/daikin-altherma-esp32\/release-hil-policy\.json"\)/);
