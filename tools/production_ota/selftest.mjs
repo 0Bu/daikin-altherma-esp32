@@ -383,6 +383,22 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         'refresh_fields["refresh_completed_token"] == weather_refresh_token',
         'weather_candidate.get("successes", 0) > weather_successes_before')],
+    ["Weather HIL re-arms failures other than exact heap headroom refusal", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'weather_candidate.get("reason") == "heap_headroom"',
+        'weather_candidate.get("reason") != ""')],
+    ["Weather HIL reuses the failed refresh token", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "weather_refresh_token = next_token",
+        "weather_refresh_token = weather_refresh_token")],
+    ["Weather HIL headroom retry resets its absolute deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "time.sleep(WEATHER_HEADROOM_RETRY_DELAY_S)",
+        "weather_deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S\n                        time.sleep(WEATHER_HEADROOM_RETRY_DELAY_S)")],
+    ["Weather HIL status poll exceeds its remaining absolute deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "timeout=min(remaining, 1)",
+        "timeout=1")],
     ["Weather HIL success is not tied to the real update commit", () =>
       replaceOnce("main/weather_forecast.cpp", "refresh_attempt.finish(updated);",
         "refresh_attempt.finish(ok);")],
