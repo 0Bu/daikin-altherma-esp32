@@ -52,7 +52,7 @@ static_assert(std::atomic<bool>::is_always_lock_free,
 __attribute__((noinline)) void socket_deadline_watchdog_task(void*) noexcept {
     // With LWIP_NETCONN_SEM_PER_THREAD=1, the first BSD socket API on a task lazily allocates an
     // internal StaticSemaphore_t. Do it exactly once at boot, before TLS pressure, and verify the
-    // pinned IDF port returned its initialized semaphore. In ESP-IDF v6.0.2 the API returns nullptr
+    // selected IDF port returned its initialized semaphore. In ESP-IDF v6.1 the API returns nullptr
     // after either allocation or static-semaphore creation failure; its sys_sem_valid macro is not
     // C++ compatible because it takes the address of a C compound literal. A failed prime leaves
     // the task parked and keeps

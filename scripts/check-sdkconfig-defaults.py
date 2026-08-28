@@ -18,6 +18,9 @@ class ConfigError(ValueError):
     pass
 
 
+GENERATED_DUPLICATE_ALIAS_PREFIXES = ("CONFIG_ESP32_WIFI_", "CONFIG_WPA_")
+
+
 def parse_config(path: pathlib.Path, *, defaults: bool) -> dict[str, str]:
     values: dict[str, str] = {}
     for line_no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -36,7 +39,13 @@ def parse_config(path: pathlib.Path, *, defaults: bool) -> dict[str, str]:
             else:
                 continue
         if key in values:
-            raise ConfigError(f"{path}:{line_no}: duplicate assignment for {key}")
+            # ESP-IDF 6.1 emits a small set of legacy Wi-Fi/WPA compatibility aliases twice in
+            # generated sdkconfig. Identical repeats are harmless generated output; a changed value
+            # is still ambiguous and must fail closed. Defaults remain author-owned and unique.
+            generated_alias = key.startswith(GENERATED_DUPLICATE_ALIAS_PREFIXES)
+            if defaults or not generated_alias or values[key] != value:
+                raise ConfigError(f"{path}:{line_no}: duplicate assignment for {key}")
+            continue
         values[key] = value
     return values
 
@@ -71,6 +80,32 @@ def self_test() -> None:
         errors = check(defaults, generated)
         assert any("CONFIG_FEATURE: generated n, expected y" in error for error in errors)
         assert any("CONFIG_OFF: missing" in error for error in errors)
+
+        generated.write_text(
+            'CONFIG_TARGET="esp32s3"\nCONFIG_ESP32_WIFI_NVS_ENABLED=y\n'
+            'CONFIG_ESP32_WIFI_NVS_ENABLED=y\n'
+            '# CONFIG_OFF is not set\n',
+            encoding="utf-8",
+        )
+        duplicate_defaults = root / "duplicate.defaults"
+        duplicate_defaults.write_text(
+            'CONFIG_TARGET="esp32s3"\nCONFIG_ESP32_WIFI_NVS_ENABLED=y\n'
+            '# CONFIG_OFF is not set\n',
+            encoding="utf-8",
+        )
+        assert check(duplicate_defaults, generated) == []
+
+        generated.write_text(
+            'CONFIG_TARGET="esp32s3"\nCONFIG_ESP32_WIFI_NVS_ENABLED=y\n'
+            'CONFIG_ESP32_WIFI_NVS_ENABLED=n\n',
+            encoding="utf-8",
+        )
+        try:
+            check(duplicate_defaults, generated)
+        except ConfigError as error:
+            assert "duplicate assignment for CONFIG_ESP32_WIFI_NVS_ENABLED" in str(error)
+        else:
+            raise AssertionError("conflicting generated assignments were accepted")
 
         defaults.write_text("CONFIG_DUP=y\nCONFIG_DUP=n\n", encoding="utf-8")
         try:

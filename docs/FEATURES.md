@@ -865,7 +865,7 @@ Four properties of that core are worth naming because they are not obvious from 
   a manual release additionally builds the unsigned app again in a clean build directory and
   requires byte-for-byte identity before signing.
 - **✅ Locked managed-component graph.** [`dependencies.lock`](../dependencies.lock) commits the
-  exact direct and transitive versions plus registry content hashes resolved by ESP-IDF 6.0.2.
+  exact direct and transitive versions plus registry content hashes resolved by ESP-IDF 6.1.0.
   Dependency changes therefore occur as reviewable diffs: change a range in
   [`idf_component.yml`](../main/idf_component.yml), run `idf.py update-dependencies` through the
   Docker wrapper, and review both. The ccache key includes the lock as well as IDF and Kconfig.
@@ -875,7 +875,7 @@ Four properties of that core are worth naming because they are not obvious from 
   assignment with generated `sdkconfig`; an unknown, renamed, promptless or overridden symbol can
   no longer read like a guarantee while being ignored. Top-level `COMPONENTS main` limits CMake's
   graph to the firmware root and the transitive components it actually requires.
-- **✅ Size evidence, not only a red ceiling.** The staged app still fails above the 1,952 KiB
+- **✅ Size evidence, not only a red ceiling.** The staged app still fails above the 1,948 KiB
   policy limit, including the signature sector when present. Each build now also archives ESP-IDF's
   json2 region/section report and publishes a Markdown job summary with the current app, Flash,
   DIRAM, IRAM and `.bss` usage, so growth is visible before it reaches the ceiling.
@@ -894,7 +894,7 @@ Four properties of that core are worth naming because they are not obvious from 
   a 760-line function. The original `-Os` change took it to **3744** and the deepest httpd path from
   14512 to 6480 bytes. The release image now also uses size optimisation globally to fit its
   embedded catalogs. After
-  the refrigerant-service object and bounded MCP status sender, the 2026-08-27 release ELF measures
+  the refrigerant-service object and bounded MCP status sender, the 2026-08-28 ESP-IDF 6.1 ELF measures
   the sole bounded serializer at **4896**. The historical manual call-path walk measured **7552**
   bytes, while the automated conservative MCP gate sums **7664** of 16384 and leaves **8720 bytes**;
   the stack itself remains unchanged. The trade — less exact backtraces in
@@ -1044,7 +1044,9 @@ footprint a hard constraint; the table calls out the one deliberate compatibilit
 | `MBEDTLS_*_SSL_SESSION_TICKETS=n` | ~1.8 KB | few, long-lived TLS connections gain nothing from resumption |
 | `MBEDTLS_FS_IO=n` | ~1.2 KB | certs/keys come from the CA bundle + NVS, never a VFS path |
 | `MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y` | 50.8 KB in the 13-locale build | keeps CA verification with ESP-IDF's common roots (~99% coverage); rare excluded public roots are unsupported |
-| `ESP_WIFI_ENABLE_WPA3_OWE_STA=n` | ~0.8 KB | joins a WPA2-PSK home network |
+| `ESP_WIFI_ENABLE_WPA3_OWE_STA=n` | ~0.8 KB | omits OWE; WPA2 and WPA3-SAE station support remain enabled |
+| `ESP_WIFI_ENABLE_SAE_PK=n`, `ESP_WIFI_SOFTAP_SAE_SUPPORT=n`, `ESP_WIFI_ENABLE_WPA3_OWE_SOFTAP=n` | 13.2 KiB combined in the ESP-IDF 6.1 A/B build | the product never uses SAE-PK, and its setup SoftAP is always open; joined WPA3-SAE + H2E remain enabled |
+| `MDNS_ENABLE_CONSOLE_CLI=n`, `MDNS_ENABLE_BROWSE=n` | 4.4 KiB combined in the mDNS 1.12.0 A/B build | keeps advertisement and bounded one-shot HomeHub queries; omits the unused console and continuous browse daemon |
 
 C++ exceptions are kept on (`COMPILER_CXX_EXCEPTIONS=y`) — they *are* the HTTP OOM guard.
 

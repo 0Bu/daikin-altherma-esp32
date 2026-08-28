@@ -19,7 +19,7 @@
 //     USB-Serial/JTAG (CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG), i.e. these two ARE already spoken for.
 //   - Dedicated 4-wire JTAG (GPIO39-42, MTCK/MTDO/MTDI/MTMS) — reserved so an external debug probe
 //     stays usable; costs only 4 pins out of 45.
-// Facts verified against the pinned ESP-IDF v6.0.2 toolchain (components/esp_hal_gpspi/esp32s3/
+// Facts verified against the selected ESP-IDF v6.1 toolchain (components/esp_hal_gpspi/esp32s3/
 // include/soc/spi_pins.h, soc/soc_caps.h, docs/en/api-reference/peripherals/gpio/esp32s3.inc,
 // docs/en/api-guides/jtag-debugging/esp32s3.inc) — not board vendor documentation.
 //
