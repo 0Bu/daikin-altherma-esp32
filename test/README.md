@@ -71,8 +71,9 @@ fails even when changed-line discovery would otherwise select no C/C++ files.
 `scripts/run-browser-render-tests.sh` assembles the production UI and drives a real Chromium-family
 browser at 320 and 1200 px for all shipped locales. It checks Dashboard, Settings and every modal
 for overflow and console failures, inspects the native accessibility tree, exercises keyboard and
-Escape behavior, and repeats animation-sensitive checks under reduced motion. It is still a local
-fixture server, not device HTTP or physical sensor evidence.
+Escape behavior, waits for both `popstate` and `hashchange` before opening the following transient
+dialog, and repeats animation-sensitive checks under reduced motion. It is still a local fixture
+server, not device HTTP or physical sensor evidence.
 
 `node test/test_production_ota_gate_contract.mjs` pins both canonical maintainer OTA modes without
 contacting hardware. The ordinary `bench` action must consume one exact dev offer/write, observe
