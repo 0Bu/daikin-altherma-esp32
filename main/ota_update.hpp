@@ -7,9 +7,10 @@
 // -> require exact hash + verify signature -> reboot, with a downgrade gate that refuses anything
 // not strictly newer.
 //
-// Both halves are implemented. The DELIVERY half (ota_check_async / ota_update_async) runs on one
-// on-demand task, never the httpd worker; the ROLLBACK half (ota_health_gate_arm) keeps a fresh
-// image PENDING_VERIFY until it survives a base window AND gets online, else a reboot reverts it.
+// Both halves are implemented. The DELIVERY half (ota_check_async / ota_update_async) wakes one
+// boot-resident, statically allocated worker, never the httpd task and never a runtime heap stack;
+// the ROLLBACK half (ota_health_gate_arm) keeps a fresh image PENDING_VERIFY until it survives a
+// base window AND gets online, else a reboot reverts it.
 //
 // The downgrade gate is enforced TWICE — against the manifest's version and against the image's own
 // embedded esp_app_desc_t version — because those are separately-controlled artifacts and only the
@@ -22,12 +23,17 @@
 
 namespace daik {
 
+// Create the static OTA worker before WiFi, MQTT, HTTP and optional service tasks. A failed
+// creation disables check/update acceptance for this boot rather than allocating an 11,776-byte
+// task stack from the same fragmented runtime heap whose largest block gates TLS.
+void ota_update_init();
+
 // Per-target OTA image suffix (always "" since esp32s3 is the only target).
 const char* ota_img_suffix();
 
 // Accepted operations return a non-zero generation which is also exposed by ota_status(). A zero
-// return means the task was not accepted (busy or task-creation failure); HTTP must not report that
-// request as successful.
+// return means the operation was not accepted (busy or boot-worker unavailable); HTTP must not
+// report that request as successful.
 uint32_t ota_check_async(int64_t            browser_epoch_ms,
                          const OtaFeedUrls* hil_feed = nullptr); // GET /ota/check
 // POST /ota/update. `allow_downgrade` is set ONLY by an explicit ?downgrade=1 — the UI sends it
@@ -36,7 +42,7 @@ uint32_t ota_check_async(int64_t            browser_epoch_ms,
 // can never ask for it. See logic/version_cmp.hpp → ota_install_allowed.
 // The update is accepted only while `after_generation` is still the most recently completed check
 // and its exact channel/version/application SHA match that check's retained result.  The fixed-size
-// arguments are copied into the one task slot before the task is created, so neither a later config
+// arguments are copied into the one worker slot before it is notified, so neither a later config
 // change nor a replaced feed can redirect an accepted production operation.
 uint32_t ota_update_async(uint32_t after_generation, const char* expected_channel,
                           const char* expected_version, const char* expected_app_sha256,
@@ -77,13 +83,13 @@ struct OtaStatus {
     FixedText<8>         available_channel;  // feed which produced available + available_sha256
     FixedText<32>        current;            // running version
     FixedText<8>         channel; // "release" | "dev" — the currently selected live feed
-    bool     busy       = false;  // one accepted check/update task still owns the OTA operation
+    bool     busy       = false;  // one accepted check/update still owns the OTA worker operation
     uint32_t generation = 0;      // non-zero monotonic accepted-operation identity
     uint32_t heap_min_free_bytes          = 0; // current operation, INTERNAL 8-bit heap
     uint32_t heap_min_largest_block_bytes = 0;
-    // Worst OTA-task headroom sampled this boot. The task is recreated for every operation, so the
-    // shared stack watcher retains the minimum across incarnations. Zero means never sampled and
-    // is rendered as JSON null, not as a real zero-byte measurement.
+    // Worst OTA-worker headroom sampled this boot. The worker is resident and sleeps between
+    // operations, so the shared stack watcher retains the minimum across all of them. Zero means
+    // never sampled and is rendered as JSON null, not as a real zero-byte measurement.
     uint32_t ota_stack_min_free_bytes = 0;
     // One boot-latched IDF image-state observation maintained by the health-gate task.  The hot
     // status path never reads otadata flash.  `valid` after `pending_verify` is explicit proof that

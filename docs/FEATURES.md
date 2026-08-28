@@ -49,7 +49,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 2 | Refuse-to-flash-untrusted guard (structure, CRC, image digest, RSA-PSS and pinned key) | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
 | 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ 🧪 | [`partitions.csv`](../partitions.csv), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** (not an uptime timer) | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
-| 5 | OTA manifest check + version-bound **release/dev changelog modal** with cumulative skipped-dev-build notes + signed manual HTTPS stream with **at most two exact fail-closed Range resumes** and two-point downgrade gate; dynamic TLS records, a boot-created absolute header/body socket watchdog, clean MQTT pause, transport cleanup, phase-specific INTERNAL-heap admission, fixed status and bounded peer coordination | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`http_client_diag.cpp`](../main/http_client_diag.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`www/js/settings.js`](../main/www/js/settings.js), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/http_deadline.hpp`](../main/logic/http_deadline.hpp), [`logic/ota_transport.hpp`](../main/logic/ota_transport.hpp), [`logic/fixed_text.hpp`](../main/logic/fixed_text.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_changelog_range.hpp`](../main/logic/ota_changelog_range.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
+| 5 | OTA manifest check + version-bound **release/dev changelog modal** with cumulative skipped-dev-build notes + signed manual HTTPS stream with **at most two exact fail-closed Range resumes** and two-point downgrade gate; a boot-resident static delivery worker, dynamic TLS records, a boot-created absolute header/body socket watchdog, clean MQTT pause, transport cleanup, phase-specific INTERNAL-heap admission, fixed status and bounded peer coordination | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`http_client_diag.cpp`](../main/http_client_diag.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`www/js/settings.js`](../main/www/js/settings.js), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/http_deadline.hpp`](../main/logic/http_deadline.hpp), [`logic/ota_transport.hpp`](../main/logic/ota_transport.hpp), [`logic/fixed_text.hpp`](../main/logic/fixed_text.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_changelog_range.hpp`](../main/logic/ota_changelog_range.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
 | 6 | Live UI by **polling** bounded-chunk-streamed `/status` + `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation, both snapshots fail fast during OTA, and the model-sized values snapshot waits boundedly behind shorter Weather TLS | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`logic/http_values_wait.hpp`](../main/logic/http_values_wait.hpp), [`test_status_heap_contract.mjs`](../test/test_status_heap_contract.mjs), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
 | 7 | Minified deterministic-gzip UI **embedded in the app image**: startup page under 160 KiB, each device-local locale under 32 KiB | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs) |
 | 8 | HTTP handlers under an **OOM boundary**: `503` before the first response emission; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp) |
@@ -242,16 +242,17 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   manifest version, decodes at most 960 bytes in place in one transient 1025-byte 8-bit-heap
   document slot, and after TLS cleanup retains only the exact decoded length. The one-shot text is
   released after its response, on send failure, after a 60-second static-timer TTL, or before the
-  next OTA task, so no boot-long prose BSS, heap island or PSRAM dependency is added. The optional
+  next OTA operation, so no boot-long prose BSS, heap island or PSRAM dependency is added. The optional
   second TLS request uses the same dynamic TLS-record client and first requires the same four stable
   56 KiB total-free / 24 KiB largest-INTERNAL-block samples as the manifest and image handshakes. Its
   header and body share the same 30-second socket watchdog as the manifest.
   The device-local modal shows the exact current/available versions, channel, literal update-range change list and
   signed-update/rollback explanation in all shipped languages. Missing notes fall back locally and
   never weaken or block the signed artifact lease.
-- **✅ 🧪 Manifest check & signed download**: both network operations run on **one on-demand task,
-  one at a time** — never the httpd worker, and never twice concurrently (two TLS sessions compete
-  for the largest contiguous block). The compact shared Web Serial/OTA manifest is bounded by one
+- **✅ 🧪 Manifest check & signed download**: both network operations wake **one boot-resident,
+  statically allocated worker, one at a time** — never the httpd task, never an operation-path task
+  allocation, and never twice concurrently (two TLS sessions compete for the largest contiguous
+  block). The compact shared Web Serial/OTA manifest is bounded by one
   fixed 2 KiB body buffer inside the measured OTA function frame, while its firmware-unused full artifact
   inventory lives in sibling `artifacts.json`. The trusted packager reads that machine-readable
   firmware constant and applies the stricter 1 KiB ceiling required by the oldest supported signed
@@ -907,7 +908,7 @@ Four properties of that core are worth naming because they are not obvious from 
   Weather task branches (download and JSON parse). All three task families' path ceilings leave at
   least 1 KiB of their configured stacks; the health path carries a
   separate reviewed 2048-byte IDF/logging/exception allowance. Live FreeRTOS high-water marks remain
-  separate hardware evidence; release HIL captures the short-lived delivery task before reboot and
+  separate hardware evidence; release HIL captures the resident delivery worker before reboot and
   rejects missing or sub-1-KiB Weather evidence after the deterministic live refresh.
 - **✅ A pinned stack contract on MQTT publishing.** The release-wide `-Os` called-once inliner
   folded reference/circulation helpers into `mqtt_task` on ESP-IDF 6.0.2 and grew that fixed frame

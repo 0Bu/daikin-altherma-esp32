@@ -76,6 +76,10 @@ static void boot_sequence() {
     // Weather fail closed if that absolute socket-deadline guard is not fully ready.
     if (!daik::http_deadline_init())
         daik::diag_printf("http deadline: unavailable; OTA and Weather downloads disabled\n");
+    // Reserve the large delivery stack before WiFi/MQTT/HTTP fragment internal RAM. The worker
+    // sleeps allocation-free until /ota/check wakes it; creating this task on demand used to split
+    // the same largest block which the following TLS admission gate requires.
+    daik::ota_update_init();
     if (nvs_err != ESP_OK)               // now that the diag ring exists, record the degraded boot
         daik::diag_printf("nvs: init failed (%s) — running WITHOUT persistence this boot\n",
                           esp_err_to_name(nvs_err));

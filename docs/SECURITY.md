@@ -224,7 +224,11 @@ authorization.
   dialog spelling out that the build is older — the same trust level that can already erase the
   config or re-point the X10A pins.
 - **Heap-safe validation** *(implemented — `logic/ota_headroom.hpp`, host-tested)* — OTA raises one
-  lock-free quiesce request before any network allocation. MQTT publication, X10A/HomeHub polling
+  boot-resident, statically allocated delivery worker before WiFi, MQTT, HTTP and optional service
+  tasks; check and
+  install requests only notify it. The reviewed 11,776-byte worker stack therefore never splits the
+  fragmented runtime heap immediately before the 24-KiB contiguous TLS gate. Before each operation,
+  OTA raises one lock-free quiesce request before any network allocation. MQTT publication, X10A/HomeHub polling
   and Syslog forwarding stand aside before building allocation-rich state; the owning MQTT task
   cleanly stops and acknowledges the complete esp-mqtt transport (including MQTTS keepalive and
   subscribed traffic), while an already-running Open-Meteo TLS request gets one bounded timeout to

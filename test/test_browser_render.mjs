@@ -40,7 +40,7 @@ const layoutAudit = `(() => {
   const clipped = [];
   const candidates = document.querySelectorAll(
     "button, [role=button], [role=dialog], .field-label, .field-help, .hint, .section-label, " +
-    ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val"
+    ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .ota-alert-message"
   );
   for (const el of candidates) {
     if (!shown(el)) continue;
@@ -107,6 +107,37 @@ function assertLayout(result, context) {
     `${context}: horizontal viewport overflow ${result.rootOverflow}px at ${result.width}px`);
   assert.deepEqual(result.outside, [], `${context}: visible elements escape the viewport`);
   assert.deepEqual(result.clipped, [], `${context}: visible text is clipped`);
+}
+
+async function assertSymmetricBorder(page, selector, context) {
+  const border = await page.evaluate(`(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!element) return null;
+    const style = getComputedStyle(element);
+    const probe = document.createElement("span");
+    probe.style.color = "var(--err)";
+    document.body.appendChild(probe);
+    const expectedColor = getComputedStyle(probe).color;
+    probe.remove();
+    return {
+      widths: [style.borderTopWidth, style.borderRightWidth,
+        style.borderBottomWidth, style.borderLeftWidth],
+      styles: [style.borderTopStyle, style.borderRightStyle,
+        style.borderBottomStyle, style.borderLeftStyle],
+      colors: [style.borderTopColor, style.borderRightColor,
+        style.borderBottomColor, style.borderLeftColor],
+      expectedColor,
+    };
+  })()`);
+  assert.ok(border, `${context}: bordered alert must exist`);
+  assert.deepEqual(border.widths, ["1px", "1px", "1px", "1px"],
+    `${context}: red alert border must be equally thin on every side`);
+  assert.equal(new Set(border.styles).size, 1,
+    `${context}: alert border style must be symmetric`);
+  assert.equal(new Set(border.colors).size, 1,
+    `${context}: alert border colour must be symmetric`);
+  assert.deepEqual(border.colors, Array(4).fill(border.expectedColor),
+    `${context}: every alert border side must use the error colour`);
 }
 
 async function assertAccessibility(page, context, { nativeTree = false } = {}) {
@@ -285,6 +316,7 @@ try {
     "v1.0.3-dev.19 — Preserve legacy bench restore compatibility",
     "v1.0.3-dev.20 — Accept exact legacy writer evidence",
   ];
+  const otaMemoryError = "Not enough memory to check for updates — retry after reboot";
 
   // Keep the mutation selftest fast and focused: it proves the layout assertion itself can fail,
   // while the normal invocation below owns the full locale/state/browser matrix exactly once.
@@ -357,11 +389,74 @@ try {
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/dashboard`);
       await assertAccessibility(page, `${viewport.name}/${locale}/dashboard`, { nativeTree: true });
 
+      // Firmware errors are intentionally preserved verbatim because they carry the safe next step.
+      // Unlike compact progress labels, they can be a sentence. Exercise the production failure
+      // path so the message appears in the persistent card rather than widening the identity line.
+      await page.evaluate(`otaFail(${JSON.stringify(otaMemoryError)}); renderApp(); true`);
+      await page.frame();
+      assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/dashboard/ota-error`);
+      await assertSymmetricBorder(page, "#otaAlertDash",
+        `${viewport.name}/${locale}/dashboard/ota-error`);
+      assert.equal(await page.evaluate("document.querySelector('#otaAlertDash .ota-alert-message').innerText"), otaMemoryError,
+        `${viewport.name}/${locale}/dashboard/ota-error: firmware reason must remain complete`);
+      assert.equal(await page.evaluate("document.getElementById('otaStat').innerText"), "",
+        `${viewport.name}/${locale}/dashboard/ota-error: terminal prose must leave the meta line`);
+      assert.equal(await page.evaluate(`(() => {
+        const close = document.querySelector("#otaAlertDash .ota-alert-close");
+        close.focus();
+        const observer = new MutationObserver(() => {});
+        observer.observe(document.getElementById("otaAlertDash"),
+          { subtree: true, childList: true, attributes: true, characterData: true });
+        renderApp();
+        const mutations = observer.takeRecords().length;
+        observer.disconnect();
+        return mutations === 0 && document.activeElement === close &&
+          document.querySelector("#otaAlertDash .ota-alert-close") === close;
+      })()`), true, `${viewport.name}/${locale}/dashboard/ota-error: repaint must preserve close focus`);
+      await page.key("Enter", { code: "Enter", keyCode: 13 });
+      await page.waitFor("document.getElementById('otaAlertDash').hidden && document.getElementById('otaAlertSettings').hidden");
+
+      // Crash reports are the other persistent red evidence card. Keep the same all-sided border
+      // contract there instead of letting either card regress to a heavy left accent stripe.
+      await page.evaluate(`(() => {
+        S.status.last_crash = { reason: "panic", fault: true, coredump: false };
+        renderCrashBanner();
+        return true;
+      })()`);
+      await page.frame();
+      await assertSymmetricBorder(page, "#crashBanner",
+        `${viewport.name}/${locale}/dashboard/crash-error`);
+      await page.evaluate("S.status.last_crash = null; renderCrashBanner(); true");
+
       await page.evaluate("document.getElementById('btnSettings').focus(); true");
       await page.key("Enter", { code: "Enter", keyCode: 13 });
       await page.waitFor("document.getElementById('viewSettings').classList.contains('active')");
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/settings`);
       await assertAccessibility(page, `${viewport.name}/${locale}/settings`, { nativeTree: true });
+
+      await page.evaluate(`otaFail(${JSON.stringify(otaMemoryError)}); renderApp(); true`);
+      await page.frame();
+      assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/settings/ota-error`);
+      await assertSymmetricBorder(page, "#otaAlertSettings",
+        `${viewport.name}/${locale}/settings/ota-error`);
+      assert.equal(await page.evaluate("document.querySelector('#otaAlertSettings .ota-alert-message').innerText"), otaMemoryError,
+        `${viewport.name}/${locale}/settings/ota-error: firmware reason must remain complete`);
+      assert.equal(await page.evaluate("document.getElementById('otaStatSet').innerText"), "",
+        `${viewport.name}/${locale}/settings/ota-error: terminal prose must leave the version row`);
+      assert.equal(await page.evaluate(`(() => {
+        const close = document.querySelector("#otaAlertSettings .ota-alert-close");
+        close.focus();
+        const observer = new MutationObserver(() => {});
+        observer.observe(document.getElementById("otaAlertSettings"),
+          { subtree: true, childList: true, attributes: true, characterData: true });
+        renderApp();
+        const mutations = observer.takeRecords().length;
+        observer.disconnect();
+        return mutations === 0 && document.activeElement === close &&
+          document.querySelector("#otaAlertSettings .ota-alert-close") === close;
+      })()`), true, `${viewport.name}/${locale}/settings/ota-error: repaint must preserve close focus`);
+      await page.key("Enter", { code: "Enter", keyCode: 13 });
+      await page.waitFor("document.getElementById('otaAlertDash').hidden && document.getElementById('otaAlertSettings').hidden");
 
       for (const modalId of routedModalIds) {
         const exerciseRoute = mutation === "history-flood" || locale === browserLocales[0];

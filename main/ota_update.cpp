@@ -146,10 +146,10 @@ struct ChangelogBufferDeleter {
 };
 using ChangelogBuffer = std::unique_ptr<char, ChangelogBufferDeleter>;
 
-// One OTA task can exist at a time, so one mutex-protected fixed slot is enough to carry an exact
-// update expectation across the asynchronous task boundary.  It is populated before xTaskCreate
-// while s_busy owns the slot and is copied by value at task entry; no request string or live config
-// is consulted after acceptance.
+// One boot-resident OTA worker handles one operation at a time, so one mutex-protected fixed slot
+// is enough to carry an exact update expectation across the asynchronous task boundary. It is
+// populated before the worker notification while s_busy owns the slot and copied by value after
+// wake-up; no request string or live config is consulted after acceptance.
 enum class OtaTaskMode : uint8_t { Check, Update, Downgrade };
 struct OtaTaskArgs {
     OtaTaskMode mode       = OtaTaskMode::Check;
@@ -216,11 +216,15 @@ struct OtaNetworkFlag {
 // kManifestMax (2 KB) frame on top of it — 8192 (what the IDF OTA examples use, with no such local)
 // would leave almost nothing spare.  The fixed release-HIL feed pair grows OtaTaskArgs from roughly
 // 100 B to 624 B (confirmed from the ESP32-S3 ELF). The task gained another 1 KiB when the manifest
-// contract was raised from 1 KiB to 2 KiB, so its transient stack grew by the same amount to retain
-// the reviewed headroom. The task only ever exists one at a time, so this is borrowed, not
-// resident.
-constexpr int         kTaskStack     = 11776;
-constexpr UBaseType_t kTaskPrio      = TASK_PRIO_OTA; // see main/task_config.hpp for the tiers
+// contract was raised from 1 KiB to 2 KiB, so its stack grew by the same amount to retain the
+// reviewed headroom. Keep the worker stack out of the runtime heap: allocating this 11,776-byte
+// block on demand split the live board's ordinary 31,744-byte largest block down to 19,456 bytes,
+// below the 24-KiB TLS admission floor enforced by the task itself.
+constexpr int         kTaskStack = 11776;
+constexpr UBaseType_t kTaskPrio  = TASK_PRIO_OTA; // see main/task_config.hpp for the tiers
+StaticTask_t          s_ota_task_storage{};
+StackType_t           s_ota_task_stack[kTaskStack]{};
+TaskHandle_t          s_ota_task     = nullptr;
 constexpr int         kHttpTimeoutMs = 15000;
 // A peer which sends one byte inside every socket timeout is still not allowed to hold MQTT,
 // HomeHub and Syslog quiesced forever. The remaining-time setter bounds each ordinary IDF call;
@@ -300,10 +304,10 @@ void record_operation_min(std::atomic<uint32_t>& target, size_t value) {
 }
 
 OtaHeapSample ota_heap_sample() {
-    // The OTA task is transient, unlike the other long-lived watched tasks. Sampling beside every
-    // existing heap checkpoint gives the release HIL live evidence during manifest TLS, download,
-    // validation and retry waits, while FreeRTOS's retrospective watermark preserves the deepest
-    // frame which ran between two checkpoints.
+    // The OTA worker is boot-resident but sleeps without allocating between operations. Sampling
+    // beside every existing heap checkpoint gives the release HIL live evidence during manifest
+    // TLS, download, validation and retry waits, while FreeRTOS's retrospective watermark preserves
+    // the deepest frame which ran between two checkpoints.
     stack_watch_sample(StackWatch::Ota);
     const OtaHeapSample sample{heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
                                heap_largest_internal_block()};
@@ -1620,8 +1624,8 @@ void run_update(const OtaTaskArgs& request) {
     }
 
     // esp_ota_set_boot_partition performs a second image verification. Capture its retrospective
-    // low-water mark before publishing `done`; the task intentionally reboots instead of reaching
-    // its ordinary epilogue on this success path.
+    // low-water mark before publishing `done`; the operation intentionally reboots instead of
+    // reaching the worker's ordinary completion tail on this success path.
     stack_watch_sample(StackWatch::Ota);
 
     diag_printf("ota: installed %s, rebooting (health gate arms on next boot)\n", avail);
@@ -1637,57 +1641,69 @@ void run_update(const OtaTaskArgs& request) {
     esp_restart();
 }
 
-// One task body for both operations, so there is exactly one stack and one place the busy flag is
-// cleared. The body self-guards: a task is a C frame boundary like an HTTP handler is, so an
-// escaping std::bad_alloc means std::terminate -> reboot — and rebooting the heat-pump bridge
-// because an update CHECK ran out of memory would be absurd (AGENTS.md → Memory, concurrency, and
-// HTTP safety).
-void ota_task(void* arg) {
-    const OtaTaskArgs request = *static_cast<const OtaTaskArgs*>(arg);
-    const bool        update  = request.mode != OtaTaskMode::Check;
-    ota_heap_operation_reset();
-    {
-        OtaNetworkFlag active;
-        vTaskDelay(kNetworkQuiesceLead);
-        try {
-            // Weather uses the same TLS allocator.  Its task raises its own lock-free activity flag
-            // before the race-closing OTA re-check; an already-open request gets one HTTP timeout
-            // plus margin to unwind, while a new one observes this OTA flag and never starts.
-            if (!wait_for_poll_quiesce()) {
-                set_state("error", "Heat-pump polling is still using memory — retry shortly");
-            } else if (!wait_for_mqtt_quiesce()) {
-                set_state("error", "MQTT publishing is still using memory — retry shortly");
-            } else if (!wait_for_mqtt_transport_quiesce()) {
-                set_state("error", "MQTT transport is still using memory — retry shortly");
-            } else if (!wait_for_modbus_quiesce()) {
-                set_state("error", "HomeHub polling is still using memory — retry shortly");
-            } else if (!wait_for_syslog_quiesce()) {
-                set_state("error", "Syslog is still using memory — retry shortly");
-            } else if (!wait_for_weather_quiesce()) {
-                set_state("error",
-                          "Another network operation is still using memory — retry shortly");
-            } else if (update) {
-                run_update(request);
-            } else {
-                run_check(request);
+// One boot-resident task body handles both operations, so the reviewed 11,776-byte stack is never
+// allocated out of the fragmented runtime heap at the exact moment TLS needs its largest block.
+// The body self-guards: a task is a C frame boundary like an HTTP handler is, so an escaping
+// std::bad_alloc means std::terminate -> reboot — and rebooting the heat-pump bridge because an
+// update CHECK ran out of memory would be absurd (AGENTS.md → Memory, concurrency, and HTTP
+// safety).
+void ota_task(void*) {
+    for (;;) {
+        (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        OtaTaskArgs request{};
+        {
+            Lock lk(s_mtx);
+            // Only start_locked() notifies this worker, but fail closed if a future caller ever
+            // introduces a stray notification without first publishing a busy-owned request.
+            if (!s_busy) continue;
+            request = s_task_args;
+        }
+        const bool update = request.mode != OtaTaskMode::Check;
+        ota_heap_operation_reset();
+        {
+            OtaNetworkFlag active;
+            vTaskDelay(kNetworkQuiesceLead);
+            try {
+                // Weather uses the same TLS allocator.  Its task raises its own lock-free activity
+                // flag before the race-closing OTA re-check; an already-open request gets one HTTP
+                // timeout plus margin to unwind, while a new one observes this OTA flag and never
+                // starts.
+                if (!wait_for_poll_quiesce()) {
+                    set_state("error", "Heat-pump polling is still using memory — retry shortly");
+                } else if (!wait_for_mqtt_quiesce()) {
+                    set_state("error", "MQTT publishing is still using memory — retry shortly");
+                } else if (!wait_for_mqtt_transport_quiesce()) {
+                    set_state("error", "MQTT transport is still using memory — retry shortly");
+                } else if (!wait_for_modbus_quiesce()) {
+                    set_state("error", "HomeHub polling is still using memory — retry shortly");
+                } else if (!wait_for_syslog_quiesce()) {
+                    set_state("error", "Syslog is still using memory — retry shortly");
+                } else if (!wait_for_weather_quiesce()) {
+                    set_state("error",
+                              "Another network operation is still using memory — retry shortly");
+                } else if (update) {
+                    run_update(request);
+                } else {
+                    run_check(request);
+                }
+            } catch (const std::exception& ex) {
+                diag_printf("ota: aborted (%s)\n", ex.what());
+                set_state("error", "Out of memory — retry in a moment");
+            } catch (...) {
+                diag_printf("ota: aborted (unknown exception)\n");
+                set_state("error", "Update failed");
             }
-        } catch (const std::exception& ex) {
-            diag_printf("ota: aborted (%s)\n", ex.what());
-            set_state("error", "Out of memory — retry in a moment");
-        } catch (...) {
-            diag_printf("ota: aborted (unknown exception)\n");
-            set_state("error", "Update failed");
+        }
+        // Captures checks, refused installs and every caught-exception path before the worker
+        // sleeps again. Successful installs sample explicitly after boot selection because they
+        // reboot from run_update() and never reach here.
+        stack_watch_sample(StackWatch::Ota);
+        {
+            Lock lk(s_mtx);
+            s_busy = false;
         }
     }
-    // Captures checks, refused installs and every caught-exception path before this incarnation is
-    // deleted. Successful installs sample explicitly after boot selection because they reboot from
-    // run_update() and never reach here.
-    stack_watch_sample(StackWatch::Ota);
-    {
-        Lock lk(s_mtx);
-        s_busy = false;
-    }
-    vTaskDelete(nullptr);
 }
 
 uint32_t next_generation(uint32_t current) {
@@ -1695,11 +1711,13 @@ uint32_t next_generation(uint32_t current) {
     return current == 0 ? 1 : current;
 }
 
-// Spawn while holding the same mutex that owns busy/generation/task arguments.  Publish the
-// complete slot before xTaskCreate; the busy-owned slot stays immutable until the task has copied
-// it, even if the higher-priority task runs immediately.  On task-creation failure the prior
-// generation is restored, so a generation always identifies an operation that actually got a task.
+// Publish and wake while holding the same mutex that owns busy/generation/task arguments. The
+// busy-owned slot stays immutable until the boot-resident worker has copied it, even if that
+// higher-priority task runs immediately. A generation therefore always identifies an operation
+// accepted by an already-created worker; no operation-path task-stack allocation can consume the
+// contiguous block the following TLS gate is about to measure.
 uint32_t start_locked(const OtaTaskArgs& request, uint32_t previous_generation) {
+    if (!s_ota_task) return 0;
     s_busy                 = true;
     s_task_args            = request;
     s_generation           = next_generation(previous_generation);
@@ -1707,26 +1725,21 @@ uint32_t start_locked(const OtaTaskArgs& request, uint32_t previous_generation) 
     ensure_changelog_timer_locked();
     if (s_changelog_timer) xTimerStop(s_changelog_timer, 0);
     clear_changelog_lease_locked();
-    if (xTaskCreate(ota_task, "ota", kTaskStack, &s_task_args, kTaskPrio, nullptr) != pdPASS) {
-        s_busy           = false;
-        s_generation     = previous_generation;
-        s_status.state   = "error";
-        s_status.message = "Out of memory — retry in a moment";
-        return 0;
-    }
+    xTaskNotifyGive(s_ota_task);
     return s_generation;
 }
 
 uint32_t start_check(const OtaFeedUrls* hil_feed) {
     // The boot latch is allocation-free. Refuse before Config/feed derivation and, critically,
-    // before xTaskCreate: a transfer whose absolute socket watchdog cannot run must never start.
+    // before publishing work: a transfer whose absolute socket watchdog cannot run must never
+    // start.
     if (!http_deadline_ready()) return 0;
     // A duplicate HTTP request must lose at the busy boundary before reading Config or deriving the
     // ordinary feed. Keep this preflight short and release the OTA mutex before taking Config's
     // independent lock; the second check below is the authoritative race-closing acceptance.
     {
         Lock lk(s_mtx);
-        if (s_busy) return 0;
+        if (s_busy || !s_ota_task) return 0;
     }
     const OtaChannel channel = config_ota_channel();
     OtaTaskArgs      request{};
@@ -1777,6 +1790,13 @@ uint32_t start_update(uint32_t after_generation, const char* expected_channel,
 }
 
 } // namespace
+
+void ota_update_init() {
+    Lock lk(s_mtx);
+    if (s_ota_task) return;
+    s_ota_task = xTaskCreateStatic(ota_task, "ota", kTaskStack, nullptr, kTaskPrio,
+                                   s_ota_task_stack, &s_ota_task_storage);
+}
 
 const char* ota_img_suffix() {
     return ""; // esp32s3 is the only target, no suffix needed
