@@ -80,6 +80,8 @@ STATUS_MAX_BYTES = 32 * 1024
 VALUES_MAX_BYTES = 128 * 1024
 DIAG_MAX_BYTES = 8 * 1024
 MQTT_RECOVERY_TIMEOUT_S = 15
+PROMOTION_READY_STABLE_SAMPLES = 2
+PROMOTION_READY_SAMPLE_INTERVAL_S = 0.1
 LEGACY_OFFER_STABLE_SECONDS = 3.0
 BENCH_HEALTH_WINDOW_S = 105
 BENCH_HEALTH_WINDOW_TIMEOUT_S = 150
@@ -1206,6 +1208,87 @@ def required_uptime(status: dict[str, Any], label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         fail(f"{label} has no valid non-negative uptime_s")
     return value
+
+
+def production_promotion_snapshot_ready(
+    status: dict[str, Any], *, baseline_counters: dict[str, int], last_uptime: int,
+) -> tuple[int, bool, str]:
+    """Validate one immutable pre-write production canary and classify network quiescence."""
+    uptime = required_uptime(status, "production promotion readiness status")
+    if uptime < last_uptime:
+        fail("production rebooted while waiting for promotion readiness")
+    counters = board_counters(status)
+    for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"):
+        if counters[key] != baseline_counters[key]:
+            fail(
+                f"production {key} changed while waiting for promotion readiness "
+                f"({baseline_counters[key]} -> {counters[key]})"
+            )
+    if counters["timeout_err"] - baseline_counters["timeout_err"] > MAX_X10A_TIMEOUT_DELTA:
+        fail(f"production X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA} before promotion")
+    hp = status.get("hp", {})
+    if not hp.get("connected") or int(hp.get("values", 0)) <= 0:
+        fail("production X10A must remain live while waiting for promotion readiness")
+    weather = status.get("weather_forecast")
+    if not isinstance(weather, dict) or not isinstance(weather.get("fetching"), bool):
+        fail("production weather status has no boolean fetching state before promotion")
+    if status.get("mqtt", {}).get("connected") is not True:
+        return uptime, False, "MQTT is disconnected"
+    if weather["fetching"] is not False:
+        return uptime, False, "Weather TLS is active"
+    return uptime, True, "ready"
+
+
+def wait_for_production_promotion_readiness(
+    endpoint: ResolvedHttpEndpoint, initial: dict[str, Any], *, host: str, mac: str,
+    version: str, elf: str,
+) -> dict[str, Any]:
+    """Wait boundedly for a stable MQTT-connected, Weather-idle pre-write baseline."""
+    baseline_counters = board_counters(initial)
+    last_uptime = required_uptime(initial, "initial production promotion status")
+    deadline = time.monotonic() + MQTT_RECOVERY_TIMEOUT_S
+    status: dict[str, Any] | None = initial
+    stable_samples = 0
+    last_reason = "no stable status sample"
+    while True:
+        if status is not None:
+            validate_identity(status, host=host, mac=mac, version=version, elf=elf)
+            last_uptime, ready, last_reason = production_promotion_snapshot_ready(
+                status, baseline_counters=baseline_counters, last_uptime=last_uptime,
+            )
+            stable_samples = stable_samples + 1 if ready else 0
+            if stable_samples >= PROMOTION_READY_STABLE_SAMPLES:
+                return status
+            # A successful response is evidence exactly once. An intervening transport gap must
+            # fetch two new consecutive samples instead of reclassifying this object.
+            status = None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            fail(
+                "production did not reach stable MQTT/Weather readiness before promotion within "
+                f"{MQTT_RECOVERY_TIMEOUT_S}s: {last_reason}"
+            )
+        time.sleep(min(PROMOTION_READY_SAMPLE_INTERVAL_S, remaining))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            fail(
+                "production did not reach stable MQTT/Weather readiness before promotion within "
+                f"{MQTT_RECOVERY_TIMEOUT_S}s: {last_reason}"
+            )
+        try:
+            status = request_status_deadline(
+                endpoint, timeout=min(remaining, HTTP_TIMEOUT_S),
+            )
+        except HTTPError as error:
+            if error.code != 503:
+                raise
+            stable_samples = 0
+            last_reason = str(error)
+            continue
+        except (CompactTransportError, OSError, TimeoutError) as error:
+            stable_samples = 0
+            last_reason = str(error)
+            continue
 
 
 def require_stress_ota_offer(
@@ -3402,6 +3485,117 @@ def self_test() -> None:
         "sys": {"safe_mode": False}, "last_crash": None,
     }
     validate_identity(healthy, host="bench.invalid", mac=fixture_mac, version="x", elf="e")
+    promotion_status = {
+        **healthy,
+        "uptime_s": 10,
+        "mqtt": {"connected": False},
+        "weather_forecast": {"fetching": False},
+        "sys": {"safe_mode": False, "heap_restarts": 0, "mqtt_skipped": 0,
+                "poll_skipped": 0},
+        "hp": {"connected": True, "values": 129, "crc_err": 0, "timeout_err": 4},
+    }
+    promotion_counters = board_counters(promotion_status)
+    observed_uptime, promotion_ready, promotion_reason = production_promotion_snapshot_ready(
+        promotion_status, baseline_counters=promotion_counters, last_uptime=10,
+    )
+    assert observed_uptime == 10 and not promotion_ready and promotion_reason == "MQTT is disconnected"
+    _, promotion_ready, promotion_reason = production_promotion_snapshot_ready(
+        {**promotion_status, "mqtt": {"connected": True},
+         "weather_forecast": {"fetching": True}},
+        baseline_counters=promotion_counters, last_uptime=10,
+    )
+    assert not promotion_ready and promotion_reason == "Weather TLS is active"
+    _, promotion_ready, promotion_reason = production_promotion_snapshot_ready(
+        {**promotion_status, "uptime_s": 11, "mqtt": {"connected": True}},
+        baseline_counters=promotion_counters, last_uptime=10,
+    )
+    assert promotion_ready and promotion_reason == "ready"
+    for unsafe_promotion_status in (
+        {**promotion_status, "uptime_s": 9},
+        {**promotion_status,
+         "sys": {**promotion_status["sys"], "mqtt_skipped": 1}},
+        {**promotion_status,
+         "hp": {**promotion_status["hp"], "connected": False}},
+        {**promotion_status,
+         "hp": {**promotion_status["hp"], "timeout_err": 8}},
+    ):
+        try:
+            production_promotion_snapshot_ready(
+                unsafe_promotion_status, baseline_counters=promotion_counters, last_uptime=10,
+            )
+        except GateError:
+            pass
+        else:
+            raise AssertionError("unsafe production promotion snapshot was accepted")
+    promotion_endpoint = ResolvedHttpEndpoint(
+        socket.AF_INET, socket.SOCK_STREAM, 0, ("127.0.0.1", 80), "production.invalid",
+    )
+    promotion_ready_initial = {
+        **promotion_status, "mqtt": {"connected": True},
+    }
+    original_status_request = globals()["request_status_deadline"]
+    original_recovery_timeout = globals()["MQTT_RECOVERY_TIMEOUT_S"]
+    original_sample_interval = globals()["PROMOTION_READY_SAMPLE_INTERVAL_S"]
+    original_monotonic = time.monotonic
+    original_sleep = time.sleep
+    try:
+        globals()["PROMOTION_READY_SAMPLE_INTERVAL_S"] = 0
+        for retryable_error in (
+            HTTPError("http://production.invalid/status", 503, "busy", None, None),
+            TimeoutError("seeded status timeout"),
+        ):
+            observations: list[Any] = [
+                retryable_error,
+                {**promotion_ready_initial, "uptime_s": 11},
+                {**promotion_ready_initial, "uptime_s": 12},
+            ]
+            status_requests = [0]
+
+            def seeded_status_request(
+                _endpoint: ResolvedHttpEndpoint, *, timeout: float,
+            ) -> dict[str, Any]:
+                assert 0 < timeout <= HTTP_TIMEOUT_S
+                status_requests[0] += 1
+                observation = observations.pop(0)
+                if isinstance(observation, BaseException):
+                    raise observation
+                return observation
+
+            globals()["request_status_deadline"] = seeded_status_request
+            recovered = wait_for_production_promotion_readiness(
+                promotion_endpoint, promotion_ready_initial, host="production.invalid",
+                mac=fixture_mac, version="x", elf="e",
+            )
+            assert recovered["uptime_s"] == 12 and status_requests[0] == 3
+            assert not observations
+
+        clock = [0.0]
+        globals()["MQTT_RECOVERY_TIMEOUT_S"] = 1
+        globals()["PROMOTION_READY_SAMPLE_INTERVAL_S"] = 1
+        time.monotonic = lambda: clock[0]
+        time.sleep = lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+
+        def unexpected_status_request(
+            _endpoint: ResolvedHttpEndpoint, *, timeout: float,
+        ) -> dict[str, Any]:
+            raise AssertionError(f"deadline-expired readiness performed a request ({timeout=})")
+
+        globals()["request_status_deadline"] = unexpected_status_request
+        try:
+            wait_for_production_promotion_readiness(
+                promotion_endpoint, promotion_ready_initial, host="production.invalid",
+                mac=fixture_mac, version="x", elf="e",
+            )
+        except GateError:
+            pass
+        else:
+            raise AssertionError("production readiness reused a sample after deadline expiry")
+    finally:
+        globals()["request_status_deadline"] = original_status_request
+        globals()["MQTT_RECOVERY_TIMEOUT_S"] = original_recovery_timeout
+        globals()["PROMOTION_READY_SAMPLE_INTERVAL_S"] = original_sample_interval
+        time.monotonic = original_monotonic
+        time.sleep = original_sleep
     assert board_counters({
         "sys": {"heap_restarts": 0, "mqtt_skipped": 0, "poll_skipped": 0},
         "hp": {"crc_err": 1, "timeout_err": 2},
@@ -4777,11 +4971,12 @@ def main() -> int:
         production_before, host=production["host"], mac=production["mac"],
         version=args.expected_current_version, elf=str(production_before.get("app_elf_sha256", "")),
     )
-    hp_before = production_before.get("hp", {})
-    if not hp_before.get("connected") or int(hp_before.get("values", 0)) <= 0:
-        fail("production X10A must be live before promotion")
-    if not production_before.get("mqtt", {}).get("connected"):
-        fail("production MQTT must be connected before promotion")
+    production_before = wait_for_production_promotion_readiness(
+        production_status_endpoint, production_before,
+        host=production["host"], mac=production["mac"],
+        version=args.expected_current_version,
+        elf=str(production_before.get("app_elf_sha256", "")),
+    )
     check_generation = wait_for_ota_offer(
         production_status_endpoint, args.expected_version, args.expected_app_sha256,
     )

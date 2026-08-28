@@ -369,6 +369,72 @@ try {
         'fail(f"{host} readiness window ended without safe heap")',
         "pass  # seeded readiness heap bypass",
       )],
+    ["production promotion trusts one straddled MQTT/Weather snapshot", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "PROMOTION_READY_STABLE_SAMPLES = 2",
+        "PROMOTION_READY_STABLE_SAMPLES = 1",
+      )],
+    ["production promotion bypasses bounded network readiness", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "production_before = wait_for_production_promotion_readiness(",
+        "production_before = bypass_production_promotion_readiness(",
+      )],
+    ["production promotion accepts disconnected MQTT", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        'if status.get("mqtt", {}).get("connected") is not True:',
+        "if False:",
+      )],
+    ["production promotion ignores active Weather TLS", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        'if weather["fetching"] is not False:',
+        "if False:",
+      )],
+    ["production promotion resets its absolute readiness deadline", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        /remaining = deadline - time\.monotonic\(\)\n        if remaining <= 0:\n            fail\(\n                "production did not reach stable MQTT\/Weather readiness/,
+        "deadline = time.monotonic() + MQTT_RECOVERY_TIMEOUT_S\n        remaining = deadline - time.monotonic()\n        if remaining <= 0:\n            fail(\n                \"production did not reach stable MQTT/Weather readiness",
+      )],
+    ["production promotion reuses a consumed readiness response", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "            status = None\n        remaining = deadline - time.monotonic()",
+        "            status = status  # seeded stale-response reuse\n        remaining = deadline - time.monotonic()",
+      )],
+    ["production promotion reuses evidence after the deadline expires", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "time.sleep(min(PROMOTION_READY_SAMPLE_INTERVAL_S, remaining))\n        remaining = deadline - time.monotonic()\n        if remaining <= 0:\n            fail(",
+        "time.sleep(min(PROMOTION_READY_SAMPLE_INTERVAL_S, remaining))\n        remaining = deadline - time.monotonic()\n        if remaining <= 0:\n            continue\n        if False:\n            fail(",
+      )],
+    ["production promotion accepts an uptime regression", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "if uptime < last_uptime:",
+        "if False:",
+      )],
+    ["production promotion absorbs allocation failures", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "if counters[key] != baseline_counters[key]:",
+        "if False:",
+      )],
+    ["production promotion trusts fabricated X10A state", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        'if not hp.get("connected") or int(hp.get("values", 0)) <= 0:',
+        "if False:",
+      )],
+    ["production promotion ignores the X10A timeout delta", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        'if counters["timeout_err"] - baseline_counters["timeout_err"] > MAX_X10A_TIMEOUT_DELTA:',
+        "if False:",
+      )],
     ["the deterministic weather refresh no longer waits for idle", () =>
       replaceOnce("scripts/production-ota-gate.py", "weather did not become idle before its HIL refresh", "weather idle wait bypassed")],
     ["the deterministic weather refresh call is removed", () =>

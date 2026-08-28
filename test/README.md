@@ -79,9 +79,16 @@ server, not device HTTP or physical sensor evidence.
 contacting hardware. The ordinary `bench` action must consume one exact dev offer/write, observe
 verifier and operation-local heap evidence, survive probation and stress, and return before any
 release or production path. The separate promotion path retains its bench-first release exercise,
-one production write and read-only canaries. `tools/production_ota/selftest.mjs` seeds removals of
-those boundaries, while `tools/agent-hooks/selftest.sh` proves raw client POSTs and noncanonical gate
-commands are denied.
+two stable pre-write MQTT-connected/Weather-idle production samples, one production write and
+read-only canaries. Those samples remain bound to identity, uptime, X10A and allocation/protocol
+counters so asynchronous owner cleanup is tolerated without accepting a broker outage.
+The sustained full-`/status` stress worker uses the ordinary five-second HTTP timeout; each
+pre-write promotion-readiness read clamps that timeout to the remaining absolute 15-second window.
+The compact `/ota/status` transfer observer instead uses its separate one-second timeout constant.
+`tools/production_ota/selftest.mjs` seeds one-sample, stale-response reuse, deadline-reset/expiry,
+readiness-, MQTT-, Weather-, uptime-, counter- and X10A-bypass regressions in addition to the other
+boundary removals, while
+`tools/agent-hooks/selftest.sh` proves raw client POSTs and noncanonical gate commands are denied.
 
 The same source contract also pins the release-only HIL seam: the schema-3 bootstrap identity and
 controller denylists, the complete transient HIL header pair, generation/channel/version/SHA plus
