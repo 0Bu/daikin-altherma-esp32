@@ -2519,8 +2519,14 @@ Structure:
   A fixed three-minute concurrent
   status/values/diag + OTA-manifest-TLS pressure window follows on the freshly restored target. The
   firmware intentionally stops MQTT while either the manifest check or a background weather fetch
-  owns the constrained network heap. After first requiring a connected baseline, the gate gives each
-  observed owner a separate bounded recovery allowance: the manifest check requires a new connected
+  owns the constrained network heap. Because the first identity response after a restore can arrive
+  before MQTT reconnects, every pressure path first waits up to the bounded OTA-check deadline for a
+  connected baseline, including the bench path without Weather. The 120-second fresh-boot cap still
+  applies before pressure starts. The first status snapshot binds uptime and allocation counters
+  across the readiness wait; an uptime regression, any heap/MQTT/poll skip, or unsafe free/contiguous
+  heap at readiness completion fails before pressure and cannot be absorbed into its baseline. The
+  gate then gives each observed owner a separate bounded recovery allowance: the manifest check
+  requires a new connected
   status sample within 15 seconds after release. Weather first returns one non-zero refresh token;
   requested, started, completed and success must all equal that exact token and the success counter
   must advance. The task claims and drains the matching notification atomically, so an unbound

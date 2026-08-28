@@ -1266,36 +1266,60 @@ def stress_board(
     pinned_endpoint = resolve_http_endpoint(host)
     started = request_status_deadline(pinned_endpoint, timeout=HTTP_TIMEOUT_S)
     validate_identity(started, host=host, mac=mac, version=version, elf=elf)
-    if require_weather:
-        # A notification posted during an ordinary fetch is consumed only after that fetch and
-        # schedules another one. Do not let the first success edge masquerade as the explicit HIL
-        # refresh or clear the 503 allowance while the notified fetch is still pending.
-        idle_deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
-        while True:
+    initial_uptime = required_uptime(started, f"{host} initial readiness status")
+    initial_counters = board_counters(started)
+    readiness_keys = ("heap_restarts", "mqtt_skipped", "poll_skipped")
+    if any(initial_counters[key] != 0 for key in readiness_keys):
+        fail(f"{host} already reports an allocation failure before readiness: {initial_counters}")
+    # The first identity response after a reboot can precede MQTT reconnect by several seconds.
+    # Wait for that boot-local baseline even on the bench path that has no Weather requirement;
+    # otherwise a healthy restore races the immediate pressure precondition. When Weather is part
+    # of the canary, the same bounded loop also waits for its current owner to become idle so an
+    # ordinary fetch cannot masquerade as the explicit HIL refresh below.
+    ready_deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
+    last_ready_uptime = initial_uptime
+    while True:
+        mqtt_connected = started.get("mqtt", {}).get("connected")
+        fetching: bool | None = False
+        if require_weather:
             weather_state = started.get("weather_forecast")
             fetching = weather_state.get("fetching") if isinstance(weather_state, dict) else None
-            if fetching is False and started.get("mqtt", {}).get("connected") is True:
-                break
             if not isinstance(fetching, bool):
                 fail(f"{host} weather status has no boolean fetching state")
-            if time.monotonic() >= idle_deadline:
-                fail(f"{host} weather did not become idle before its HIL refresh")
-            time.sleep(0.1)
-            try:
-                started = request_status_deadline(pinned_endpoint, timeout=1)
-            except HTTPError as error:
-                if error.code != 503:
-                    raise
-                continue
-            except (CompactTransportError, OSError, TimeoutError):
-                continue
-            validate_identity(started, host=host, mac=mac, version=version, elf=elf)
-    if not started.get("mqtt", {}).get("connected"):
-        fail(f"{host} MQTT must be connected before the pressure window")
+        if mqtt_connected is True and (not require_weather or fetching is False):
+            break
+        if time.monotonic() >= ready_deadline:
+            if mqtt_connected is not True:
+                fail(f"{host} MQTT did not connect before the pressure window")
+            fail(f"{host} weather did not become idle before its HIL refresh")
+        time.sleep(0.1)
+        try:
+            started = request_status_deadline(pinned_endpoint, timeout=1)
+        except HTTPError as error:
+            if error.code != 503:
+                raise
+            continue
+        except (CompactTransportError, OSError, TimeoutError):
+            continue
+        validate_identity(started, host=host, mac=mac, version=version, elf=elf)
+        ready_uptime = required_uptime(started, f"{host} readiness status")
+        if ready_uptime < last_ready_uptime:
+            fail(f"{host} rebooted while waiting for pressure readiness")
+        last_ready_uptime = ready_uptime
+        ready_counters = board_counters(started)
+        if any(ready_counters[key] != initial_counters[key] for key in readiness_keys):
+            fail(
+                f"{host} readiness window recorded an allocation failure "
+                f"({initial_counters} -> {ready_counters})"
+            )
     started_uptime = required_uptime(started, f"{host} initial stress status")
     if started_uptime > MAX_TEST_START_UPTIME_S:
         fail(f"{host} must enter the pressure gate within {MAX_TEST_START_UPTIME_S}s of boot")
-    baseline = board_counters(started)
+    ready_system = started.get("sys", {})
+    if int(ready_system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP or \
+       int(ready_system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
+        fail(f"{host} readiness window ended without safe heap")
+    baseline = initial_counters
     weather_before = started.get("weather_forecast", {})
     if require_weather and not isinstance(weather_before, dict):
         fail(f"{host} weather status is not an object")
@@ -1304,7 +1328,7 @@ def stress_board(
     samples: dict[str, int] = {"status": 0, "values": 0, "diag": 0}
     busy_503: dict[str, int] = {"status": 0, "values": 0}
     errors: list[str] = []
-    uptimes: list[int] = [started_uptime]
+    uptimes: list[int] = [initial_uptime, started_uptime]
     disconnected = 0
     scheduled_tls_active = threading.Event()
     mqtt_recovery_expected = threading.Event()
