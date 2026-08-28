@@ -345,6 +345,30 @@ try {
       replaceOnce("scripts/production-ota-gate.py", '"sha256": expected_app_sha256', '"ignored": expected_app_sha256')],
     ["the update no longer requires the successor generation", () =>
       replaceOnce("scripts/production-ota-gate.py", "check_generation + 1", "check_generation")],
+    ["post-reboot bench pressure no longer waits for MQTT", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "if mqtt_connected is True and (not require_weather or fetching is False):",
+        "if require_weather and mqtt_connected is True and fetching is False:",
+      )],
+    ["post-reboot readiness absorbs allocation failures", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "if any(ready_counters[key] != initial_counters[key] for key in readiness_keys):",
+        "if False:",
+      )],
+    ["post-reboot readiness accepts an uptime regression", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        "if ready_uptime < last_ready_uptime:",
+        "if False:",
+      )],
+    ["post-reboot readiness bypasses its final heap guard", () =>
+      replaceOnce(
+        "scripts/production-ota-gate.py",
+        'fail(f"{host} readiness window ended without safe heap")',
+        "pass  # seeded readiness heap bypass",
+      )],
     ["the deterministic weather refresh no longer waits for idle", () =>
       replaceOnce("scripts/production-ota-gate.py", "weather did not become idle before its HIL refresh", "weather idle wait bypassed")],
     ["the deterministic weather refresh call is removed", () =>

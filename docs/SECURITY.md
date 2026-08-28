@@ -508,8 +508,12 @@ idle for three seconds before its one restore POST; a silently ignored write fai
 cannot reach production. Waiting before both replacements is mandatory because ESP-IDF refuses
 another OTA write while the running target or release is still `PENDING_VERIFY`. The freshly restored target then runs
 the fixed three-minute pressure window with another real OTA-manifest TLS fetch. Firmware deliberately
-stops MQTT while either OTA or Open-Meteo TLS holds the constrained network heap. After requiring a
-connected baseline, the gate gives each observed owner at most 15 seconds to recover. Weather HIL
+stops MQTT while either OTA or Open-Meteo TLS holds the constrained network heap. The first identity
+response after the restore may precede MQTT reconnect, so every pressure path waits up to the bounded
+OTA-check deadline for a connected baseline before applying the 120-second fresh-boot cap. The first
+status snapshot binds the boot uptime and allocation counters; a reboot, any heap/MQTT/poll skip or
+unsafe free/contiguous heap at readiness completion fails before pressure or production contact. The
+gate then gives each observed owner at most 15 seconds to recover. Weather HIL
 first receives a non-zero refresh token, then accepts only that exact requested/started/completed/
 success token plus a success-counter increment. If OTA wins after Weather claimed the token, the
 attempt releases only its local claim and the same outstanding token is reclaimed after OTA; an
