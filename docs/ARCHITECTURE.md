@@ -2525,7 +2525,14 @@ Structure:
   applies before pressure starts. The first status snapshot binds uptime and allocation counters
   across the readiness wait; an uptime regression, any heap/MQTT/poll skip, or unsafe free/contiguous
   heap at readiness completion fails before pressure and cannot be absorbed into its baseline. The
-  gate then gives each observed owner a separate bounded recovery allowance: the manifest check
+  post-bench production canary applies the same ownership boundary before its sole write. It waits
+  at most 15 seconds for two consecutive MQTT-connected, Weather-idle samples instead of trusting
+  one cross-subsystem snapshot during asynchronous network-owner cleanup. Every real sample remains
+  bound to the exact old production identity, monotonic uptime and live X10A. Heap-restart,
+  MQTT-skip, poll-skip and CRC counters must remain unchanged; only the established X10A timeout
+  allowance of at most three remains bounded rather than exactly invariant. A broker outage,
+  reboot or unsafe counter change still stops before the offer or update POST. The gate then gives
+  each observed owner a separate bounded recovery allowance: the manifest check
   requires a new connected
   status sample within 15 seconds after release. Weather first returns one non-zero refresh token;
   requested, started, completed and success must all equal that exact token and the success counter

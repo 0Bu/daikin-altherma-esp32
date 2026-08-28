@@ -512,8 +512,15 @@ stops MQTT while either OTA or Open-Meteo TLS holds the constrained network heap
 response after the restore may precede MQTT reconnect, so every pressure path waits up to the bounded
 OTA-check deadline for a connected baseline before applying the 120-second fresh-boot cap. The first
 status snapshot binds the boot uptime and allocation counters; a reboot, any heap/MQTT/poll skip or
-unsafe free/contiguous heap at readiness completion fails before pressure or production contact. The
-gate then gives each observed owner at most 15 seconds to recover. Weather HIL
+unsafe free/contiguous heap at readiness completion fails before pressure or production contact.
+After the bench proof, the production canary does not trust one cross-subsystem MQTT/Weather
+snapshot. It waits no more than 15 seconds for two consecutive MQTT-connected, Weather-idle samples
+while retaining the exact old production identity, monotonic uptime and live X10A. Heap-restart,
+MQTT-skip, poll-skip and CRC counters remain exactly unchanged, while the existing X10A timeout
+allowance remains bounded to three. Busy 503 responses, individual full-status timeouts and
+transport gaps are retried only inside that one absolute window; expiry, reboot, lost X10A or an
+unsafe counter change is terminal before the offer and update POST. The gate then gives each
+observed owner at most 15 seconds to recover. Weather HIL
 first receives a non-zero refresh token, then accepts only that exact requested/started/completed/
 success token plus a success-counter increment. If OTA wins after Weather claimed the token, the
 attempt releases only its local claim and the same outstanding token is reclaimed after OTA; an
