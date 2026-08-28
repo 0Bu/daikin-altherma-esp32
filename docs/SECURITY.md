@@ -518,9 +518,17 @@ first receives a non-zero refresh token, then accepts only that exact requested/
 success token plus a success-counter increment. If OTA wins after Weather claimed the token, the
 attempt releases only its local claim and the same outstanding token is reclaimed after OTA; an
 unbound scheduled/retry success cannot borrow the allowance. Only a completed, unsuccessful token
-whose exact final state is `waiting/heap_headroom` may be re-armed by the host after a five-second
-backoff. That produces a different token and success baseline without resetting the original
-120-second deadline or weakening the firmware's 56 KiB / 24 KiB gate; every other failure blocks. A streamed
+whose exact final state is `waiting/heap_headroom` may be deferred while the full three-minute stress
+window finishes. The host proves every pressure worker stopped and validates samples, 503 evidence,
+uptime, MQTT/X10A state, allocation counters and final heap. It then waits passively for at most 420
+seconds for two stable host-visible 56 KiB / 20 KiB samples while retaining the exact failed token;
+an ordinary firmware retry may update Weather state but cannot satisfy that token. The host then
+issues exactly one different non-persistent token under a separate 120-second deadline. The new token
+must commit successfully, MQTT and live X10A must recover and all final counter/uptime/heap invariants
+must still hold; a second refusal or any other failure blocks. The firmware retains the measured 56
+KiB aggregate gate and uses a 20 KiB contiguous gate that still rejects the 15.9 KiB fragmentation
+trough while admitting production's repeatable 22 KiB post-quiesce block. The gate does not claim
+Weather TLS succeeded under a load that correctly refused it. A streamed
 status snapshot can see either paused MQTT before its matching weather edge or old connected MQTT
 beside new weather evidence. The first direction remains pending for the same bound until later owner
 evidence; the reverse direction keeps the allowance open until a later connected sample without fresh

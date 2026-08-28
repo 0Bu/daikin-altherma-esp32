@@ -187,13 +187,14 @@ inline void weather_refresh_cancel_outstanding(uint64_t  requested_token,
 // CONTIGUOUS internal block. Live evidence (private issue 10): one fetch landed
 // on a fragmentation trough and pushed the boot's `min_free_heap` low-water to 800 B; it survived
 // only because the claim is brief. The gate below keeps the next fetch OUT of such a trough. Its
-// 24 KiB contiguous floor rejects the measured 15.9 KiB trough but still admits the board's healthy
-// 31.7 KiB allocator ceiling; requiring the issue's provisional 40 KiB largest-block suggestion
-// would disable weather permanently on that board. The 56 KiB aggregate floor leaves roughly
-// 16 KiB outside the measured ~40 KiB transient claim. A refusal uses the ordinary 5-minute retry,
-// not a full 45-minute raster skip, so a valid forecast does not cross its 90-minute stale boundary.
+// 20 KiB contiguous floor rejects the measured 15.9 KiB trough while admitting the production
+// board's repeatable 22 KiB post-MQTT-quiesce block. The 56 KiB aggregate floor is unchanged and
+// still leaves roughly 16 KiB outside the measured ~40 KiB transient claim. Requiring 24 KiB made
+// Weather permanently unavailable on a fully populated 129-value plant even with 60 KiB aggregate
+// free. A refusal uses the ordinary 5-minute retry, not a full 45-minute raster skip, so a valid
+// forecast does not cross its 90-minute stale boundary.
 inline constexpr size_t WEATHER_FETCH_MIN_FREE_BYTES          = 56 * 1024;
-inline constexpr size_t WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES = 24 * 1024;
+inline constexpr size_t WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES = 20 * 1024;
 
 inline bool weather_fetch_headroom_ok(size_t free_bytes, size_t largest_free_block) {
     return free_bytes >= WEATHER_FETCH_MIN_FREE_BYTES &&
