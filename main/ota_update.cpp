@@ -146,8 +146,8 @@ struct ChangelogBufferDeleter {
 };
 using ChangelogBuffer = std::unique_ptr<char, ChangelogBufferDeleter>;
 
-// One boot-resident OTA worker handles one operation at a time, so one mutex-protected fixed slot is
-// enough to carry an exact update expectation across the asynchronous task boundary. It is
+// One boot-resident OTA worker handles one operation at a time, so one mutex-protected fixed slot
+// is enough to carry an exact update expectation across the asynchronous task boundary. It is
 // populated before the worker notification while s_busy owns the slot and copied by value after
 // wake-up; no request string or live config is consulted after acceptance.
 enum class OtaTaskMode : uint8_t { Check, Update, Downgrade };
@@ -220,11 +220,11 @@ struct OtaNetworkFlag {
 // reviewed headroom. Keep the worker stack out of the runtime heap: allocating this 11,776-byte
 // block on demand split the live board's ordinary 31,744-byte largest block down to 19,456 bytes,
 // below the 24-KiB TLS admission floor enforced by the task itself.
-constexpr int         kTaskStack     = 11776;
-constexpr UBaseType_t kTaskPrio      = TASK_PRIO_OTA; // see main/task_config.hpp for the tiers
-StaticTask_t           s_ota_task_storage{};
-StackType_t            s_ota_task_stack[kTaskStack]{};
-TaskHandle_t           s_ota_task = nullptr;
+constexpr int         kTaskStack = 11776;
+constexpr UBaseType_t kTaskPrio  = TASK_PRIO_OTA; // see main/task_config.hpp for the tiers
+StaticTask_t          s_ota_task_storage{};
+StackType_t           s_ota_task_stack[kTaskStack]{};
+TaskHandle_t          s_ota_task     = nullptr;
 constexpr int         kHttpTimeoutMs = 15000;
 // A peer which sends one byte inside every socket timeout is still not allowed to hold MQTT,
 // HomeHub and Syslog quiesced forever. The remaining-time setter bounds each ordinary IDF call;
@@ -1645,7 +1645,8 @@ void run_update(const OtaTaskArgs& request) {
 // allocated out of the fragmented runtime heap at the exact moment TLS needs its largest block.
 // The body self-guards: a task is a C frame boundary like an HTTP handler is, so an escaping
 // std::bad_alloc means std::terminate -> reboot — and rebooting the heat-pump bridge because an
-// update CHECK ran out of memory would be absurd (AGENTS.md → Memory, concurrency, and HTTP safety).
+// update CHECK ran out of memory would be absurd (AGENTS.md → Memory, concurrency, and HTTP
+// safety).
 void ota_task(void*) {
     for (;;) {
         (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -1730,7 +1731,8 @@ uint32_t start_locked(const OtaTaskArgs& request, uint32_t previous_generation) 
 
 uint32_t start_check(const OtaFeedUrls* hil_feed) {
     // The boot latch is allocation-free. Refuse before Config/feed derivation and, critically,
-    // before publishing work: a transfer whose absolute socket watchdog cannot run must never start.
+    // before publishing work: a transfer whose absolute socket watchdog cannot run must never
+    // start.
     if (!http_deadline_ready()) return 0;
     // A duplicate HTTP request must lose at the busy boundary before reading Config or deriving the
     // ordinary feed. Keep this preflight short and release the OTA mutex before taking Config's

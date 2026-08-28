@@ -23,9 +23,9 @@
 
 namespace daik {
 
-// Create the static OTA worker before WiFi, MQTT, HTTP and optional service tasks. A failed creation
-// disables check/update acceptance for this boot rather than allocating an 11,776-byte task stack
-// from the same fragmented runtime heap whose largest block gates TLS.
+// Create the static OTA worker before WiFi, MQTT, HTTP and optional service tasks. A failed
+// creation disables check/update acceptance for this boot rather than allocating an 11,776-byte
+// task stack from the same fragmented runtime heap whose largest block gates TLS.
 void ota_update_init();
 
 // Per-target OTA image suffix (always "" since esp32s3 is the only target).
