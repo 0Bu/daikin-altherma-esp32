@@ -173,34 +173,89 @@ assert.match(gate, /"refresh": True/);
 assert.match(stress,
   /refresh_fields\["refresh_completed_token"\] == weather_refresh_token[\s\S]{0,420}?refresh_fields\["refresh_requested_token"\] == weather_refresh_token[\s\S]{0,220}?refresh_fields\["refresh_started_token"\] == weather_refresh_token[\s\S]{0,220}?if not exact_attempt:[\s\S]{0,180}?refresh_fields\["refresh_success_token"\] != weather_refresh_token/,
   "live Weather acceptance must require the exact requested, started, completed and successful token");
-assert.equal(occurrences(stress, "weather_deadline ="), 1,
-  "Weather headroom retries must retain one absolute HIL deadline");
+assert.equal(occurrences(stress, "\n        weather_deadline ="), 1,
+  "the under-pressure Weather observation must retain one absolute HIL deadline");
 assert.match(stress,
   /remaining = weather_deadline - time\.monotonic\(\)[\s\S]{0,140}?if remaining <= 0:[\s\S]{0,100}?request_status_deadline\([\s\S]{0,100}?timeout=min\(remaining, 1\)/,
   "each Weather status poll must be clamped to the remaining absolute deadline");
-assert.match(gate, /WEATHER_HEADROOM_RETRY_DELAY_S\s*=\s*5/,
-  "a failed headroom token must not be re-armed in a tight loop");
+assert.match(gate, /POST_STRESS_WEATHER_TIMEOUT_S\s*=\s*120/,
+  "the one post-stress Weather recovery needs its own fixed deadline");
+assert.match(gate, /POST_STRESS_HEADROOM_TIMEOUT_S\s*=\s*420/,
+  "post-stress recovery must have a bounded passive headroom wait");
+assert.match(gate, /POST_STRESS_HEADROOM_STABLE_SAMPLES\s*=\s*2/,
+  "one transient heap sample must not trigger the sole recovery attempt");
+assert.match(gate, /POST_STRESS_MIN_FREE_HEAP\s*=\s*56 \* 1024/);
+assert.match(gate, /POST_STRESS_MIN_LARGEST_BLOCK\s*=\s*20 \* 1024/);
+assert.match(weatherLogic, /WEATHER_FETCH_MIN_FREE_BYTES\s*=\s*56 \* 1024/,
+  "the measured aggregate Weather reserve must remain unchanged");
+assert.match(weatherLogic, /WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES\s*=\s*20 \* 1024/,
+  "the contiguous Weather floor must admit the measured 22 KiB production block");
+assert.doesNotMatch(gate, /WEATHER_HEADROOM_RETRY_DELAY_S/,
+  "a headroom refusal must not be re-armed while the pressure workers are active");
 assert.match(stress,
-  /refresh_fields\["refresh_success_token"\] != weather_refresh_token:[\s\S]{0,900}?weather_candidate\.get\("fetching"\) is False[\s\S]{0,180}?weather_candidate\.get\("state"\) == "waiting"[\s\S]{0,180}?weather_candidate\.get\("reason"\) == "heap_headroom"/,
-  "only an exact completed post-quiesce heap-headroom refusal may be re-armed");
+  /refresh_fields\["refresh_success_token"\] != weather_refresh_token:[\s\S]{0,900}?weather_candidate\.get\("fetching"\) is False[\s\S]{0,180}?weather_candidate\.get\("state"\) == "waiting"[\s\S]{0,180}?weather_candidate\.get\("reason"\) == "heap_headroom"[\s\S]{0,220}?weather_headroom_deferred = True[\s\S]{0,80}?break/,
+  "only an exact completed heap-headroom refusal may be deferred until after stress");
 assert.match(stress,
-  /remaining = weather_deadline - time\.monotonic\(\)[\s\S]{0,420}?time\.sleep\(WEATHER_HEADROOM_RETRY_DELAY_S\)[\s\S]{0,420}?remaining = weather_deadline - time\.monotonic\(\)/,
-  "the retry backoff and its requests must consume the original absolute deadline");
+  /remaining = max\(0\.0, deadline - time\.monotonic\(\)\)[\s\S]{0,120}?worker\.join\(remaining \+ HTTP_TIMEOUT_S \+ 1\)[\s\S]{0,120}?if worker\.is_alive\(\):[\s\S]{0,140}?fail/,
+  "every pressure worker must consume the shared stress deadline and be proven stopped");
+const workerJoin = stress.indexOf("if worker.is_alive():");
+const stressValidation = stress.indexOf("live stress produced too few successful samples");
+const postStressRearm = stress.indexOf("next_token, next_successes = request_weather_refresh(");
+assert.ok(workerJoin >= 0 && workerJoin < stressValidation && stressValidation < postStressRearm,
+  "the sole headroom re-arm must follow worker shutdown and complete stress validation");
+assert.match(stress, /if require_weather and weather_headroom_deferred:/,
+  "post-stress recovery must not be conditional on a still-running worker");
 assert.match(stress,
-  /retry_weather\.get\("refresh_requested_token"\) != weather_refresh_token[\s\S]{0,220}?retry_weather\.get\("refresh_started_token"\) != weather_refresh_token[\s\S]{0,220}?retry_weather\.get\("refresh_completed_token"\) != weather_refresh_token[\s\S]{0,220}?retry_weather\.get\("refresh_success_token"\) == weather_refresh_token[\s\S]{0,300}?retry_weather\.get\("reason"\) != "heap_headroom"/,
-  "the failed token and exact refusal state must still hold immediately before re-arm");
+  /deferred_weather\.get\("refresh_requested_token"\) != failed_weather_refresh_token[\s\S]{0,220}?deferred_weather\.get\("refresh_started_token"\) != failed_weather_refresh_token[\s\S]{0,220}?deferred_weather\.get\("refresh_completed_token"\) != failed_weather_refresh_token[\s\S]{0,220}?deferred_weather\.get\("refresh_success_token"\) == failed_weather_refresh_token/,
+  "a natural retry may change ordinary state but must not alter the exact failed HIL token");
+assert.equal(occurrences(stress, "post_stress_headroom_deadline ="), 1,
+  "the passive headroom deadline must never reset");
 assert.match(stress,
-  /next_token, next_successes = request_weather_refresh\([\s\S]{0,220}?if next_token == weather_refresh_token:[\s\S]{0,180}?weather_refresh_token = next_token[\s\S]{0,120}?weather_successes_before = next_successes/,
-  "each re-arm must use a different token with its own success baseline");
+  /remaining = post_stress_headroom_deadline - time\.monotonic\(\)[\s\S]{0,180}?request_status_deadline\([\s\S]{0,100}?timeout=min\(remaining, 1\)/,
+  "every passive headroom poll must consume the remaining absolute deadline");
 assert.match(stress,
-  /successes_after <= weather_successes_before[\s\S]{0,160}?weather_candidate\.get\("fetching"\) is not False/,
-  "the causal token must still correspond to a committed new success and released fetch owner");
+  /int\(ready_system\.get\("free_heap", 0\)\) >= POST_STRESS_MIN_FREE_HEAP[\s\S]{0,160}?int\(ready_system\.get\("max_alloc", 0\)\) >= POST_STRESS_MIN_LARGEST_BLOCK[\s\S]{0,180}?stable_headroom_samples >= POST_STRESS_HEADROOM_STABLE_SAMPLES/,
+  "the sole post-stress trigger must follow stable aggregate and contiguous headroom");
+assert.match(stress,
+  /next_token, next_successes = request_weather_refresh\([\s\S]{0,220}?if next_token == failed_weather_refresh_token:[\s\S]{0,180}?weather_refresh_token = next_token[\s\S]{0,120}?weather_successes_before = next_successes[\s\S]{0,180}?post_stress_weather_deadline = time\.monotonic\(\) \+ POST_STRESS_WEATHER_TIMEOUT_S/,
+  "the sole post-stress re-arm must use a different token, success baseline and deadline");
+assert.equal(occurrences(stress, "request_weather_refresh("), 2,
+  "Weather HIL may issue only the initial refresh and one post-stress headroom recovery");
+assert.equal(occurrences(stress, "post_stress_weather_deadline ="), 1,
+  "the post-stress recovery deadline must never reset");
+assert.match(stress,
+  /remaining = post_stress_weather_deadline - time\.monotonic\(\)[\s\S]{0,180}?request_status_deadline\([\s\S]{0,100}?timeout=min\(remaining, 1\)/,
+  "every post-stress Weather poll must consume the remaining absolute deadline");
+assert.match(stress,
+  /refresh_fields\["refresh_completed_token"\] == weather_refresh_token:[\s\S]{0,300}?refresh_fields\["refresh_success_token"\] == weather_refresh_token[\s\S]{0,300}?successes_after <= weather_successes_before[\s\S]{0,180}?weather_candidate\.get\("state"\) != "ok"[\s\S]{0,220}?fail\(f"\{host\} post-stress weather recovery failed"\)/,
+  "a second refusal or any non-causal completion must remain terminal");
+const postStressRecovery = stress.slice(postStressRearm);
+assert.match(postStressRecovery, /MQTT did not recover after post-stress Weather TLS/,
+  "post-stress success must prove MQTT recovery");
+assert.match(postStressRecovery, /if recovered\.get\("mqtt", \{\}\)\.get\("connected"\):/,
+  "post-stress recovery must wait for a genuinely connected MQTT snapshot");
+assert.match(postStressRecovery,
+  /for key in \("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"\):[\s\S]{0,120}?if final\[key\] != baseline\[key\]:/,
+  "post-stress recovery must recheck every allocation and protocol counter");
+assert.match(postStressRecovery,
+  /if require_x10a and \\\s+\(not final_hp\.get\("connected"\) or int\(final_hp\.get\("values", 0\)\) <= 0\):/,
+  "post-stress recovery must recheck live X10A and positive values");
+assert.match(postStressRecovery, /final_hp = finished\.get\("hp", \{\}\)/,
+  "final X10A evidence must come from the recovered device snapshot");
+assert.match(postStressRecovery, /changed during post-stress Weather recovery/,
+  "post-stress success must retain the allocation and protocol counters");
+assert.match(postStressRecovery, /rebooted during post-stress Weather recovery/,
+  "post-stress success must retain monotonic uptime evidence");
 const statusStress = section(stress, "    def status_loop()", "\n    def json_loop(");
 assert.match(statusStress,
   /request_status_deadline\(\s*pinned_endpoint,\s*timeout=HTTP_TIMEOUT_S/,
   "the full chunked /status surface needs the ordinary HTTP deadline, not the compact OTA one");
 assert.doesNotMatch(statusStress, /OTA_STATUS_REQUEST_TIMEOUT_S/,
   "the one-second deadline is reserved for compact /ota/status observation");
+const jsonStress = section(stress, "    def json_loop(", "\n    workers = [");
+assert.match(jsonStress,
+  /time\.sleep\(min\(interval, max\(0\.0, deadline - time\.monotonic\(\)\)\)\)/,
+  "the 15-second diagnostic cadence must not outlive the shared worker deadline");
 const httpTimeoutMs = Number(gate.match(/HTTP_TIMEOUT_S\s*=\s*(\d+)/)?.[1]) * 1000;
 const valuesWaitMs = Number(httpStatus.match(/kValuesTlsWait\s*=\s*pdMS_TO_TICKS\((\d+)\)/)?.[1]);
 assert.ok(httpTimeoutMs > valuesWaitMs,

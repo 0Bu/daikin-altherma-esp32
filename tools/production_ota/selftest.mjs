@@ -383,18 +383,58 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         'refresh_fields["refresh_completed_token"] == weather_refresh_token',
         'weather_candidate.get("successes", 0) > weather_successes_before')],
-    ["Weather HIL re-arms failures other than exact heap headroom refusal", () =>
+    ["Weather HIL defers failures other than exact heap headroom refusal", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'weather_candidate.get("reason") == "heap_headroom"',
         'weather_candidate.get("reason") != ""')],
+    ["Weather HIL re-arms headroom while pressure workers are still active", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "if require_weather and weather_headroom_deferred:",
+        "if require_weather and weather_headroom_deferred and any(worker.is_alive() for worker in workers):")],
     ["Weather HIL reuses the failed refresh token", () =>
       replaceOnce("scripts/production-ota-gate.py",
         "weather_refresh_token = next_token",
         "weather_refresh_token = weather_refresh_token")],
-    ["Weather HIL headroom retry resets its absolute deadline", () =>
+    ["Weather HIL post-stress recovery resets its absolute deadline", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        "time.sleep(WEATHER_HEADROOM_RETRY_DELAY_S)",
-        "weather_deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S\n                        time.sleep(WEATHER_HEADROOM_RETRY_DELAY_S)")],
+        "remaining = post_stress_weather_deadline - time.monotonic()",
+        "post_stress_weather_deadline = time.monotonic() + POST_STRESS_WEATHER_TIMEOUT_S\n            remaining = post_stress_weather_deadline - time.monotonic()")],
+    ["Weather HIL passive headroom wait resets its absolute deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "remaining = post_stress_headroom_deadline - time.monotonic()",
+        "post_stress_headroom_deadline = time.monotonic() + POST_STRESS_HEADROOM_TIMEOUT_S\n            remaining = post_stress_headroom_deadline - time.monotonic()")],
+    ["Weather HIL accepts one transient post-stress headroom sample", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "POST_STRESS_HEADROOM_STABLE_SAMPLES = 2",
+        "POST_STRESS_HEADROOM_STABLE_SAMPLES = 1")],
+    ["Weather HIL bypasses passive aggregate headroom", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        ">= POST_STRESS_MIN_FREE_HEAP",
+        ">= 0")],
+    ["Weather HIL bypasses passive contiguous headroom", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        ">= POST_STRESS_MIN_LARGEST_BLOCK",
+        ">= 0")],
+    ["Weather firmware restores the permanently blocking 24 KiB contiguous floor", () =>
+      replaceOnce("main/logic/weather_forecast.hpp",
+        "WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES = 20 * 1024",
+        "WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES = 24 * 1024")],
+    ["Weather HIL accepts a second post-stress headroom refusal", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'refresh_fields["refresh_success_token"] == weather_refresh_token',
+        "True")],
+    ["Weather HIL skips post-stress MQTT recovery", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if recovered.get("mqtt", {}).get("connected"):',
+        "if True:")],
+    ["Weather HIL skips final post-stress allocation counters", () =>
+      replaceNth("scripts/production-ota-gate.py",
+        "if final[key] != baseline[key]:",
+        "if False:", 2)],
+    ["Weather HIL trusts fabricated final X10A state", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'final_hp = finished.get("hp", {})',
+        'final_hp = {"connected": True, "values": 1}')],
     ["Weather HIL status poll exceeds its remaining absolute deadline", () =>
       replaceOnce("scripts/production-ota-gate.py",
         "timeout=min(remaining, 1)",
@@ -440,6 +480,10 @@ try {
       replaceOnce("scripts/production-ota-gate.py", 'unexpected.append(f"{kind}: {error}")', "pass  # unexpected parser failure discarded")],
     ["pressure workers may outlive the gate", () =>
       replaceOnce("scripts/production-ota-gate.py", "if worker.is_alive():", "if False:")],
+    ["the diagnostic worker sleeps beyond the shared deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "time.sleep(min(interval, max(0.0, deadline - time.monotonic())))",
+        "time.sleep(interval)")],
     ["the root release-HIL policy falls back to schema 2", () =>
       replaceOnce("scripts/production-ota-gate.py", "release-HIL root policy must be schema_version 3", "release-HIL root policy must be schema_version 2")],
     ["the release-HIL inventory falls back to schema 2", () =>
