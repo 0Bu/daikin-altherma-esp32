@@ -18,11 +18,11 @@
 // sample instant does not have to coincide with the deepest frame — which is what lets every caller
 // sample at the top of its loop, the one point no branch can skip.
 //
-// The MINIMUM is still tracked here rather than trusted to FreeRTOS because two watched slots are
-// reincarnated: hp_modbus retires when the HomeHub address is cleared, while the OTA task exists
-// for one check/install only. A fresh task starts with a fresh high-water mark. Keeping the minimum
-// across incarnations makes every slot mean the same thing — the worst headroom this BOARD has had
-// since boot — rather than silently resetting after reconfiguration or every OTA operation.
+// The MINIMUM is still tracked here rather than trusted to FreeRTOS because hp_modbus retires when
+// the HomeHub address is cleared and a fresh task starts with a fresh high-water mark. Keeping the
+// minimum across incarnations makes every slot mean the same thing — the worst headroom this BOARD
+// has had since boot — rather than silently resetting after reconfiguration. The OTA worker is
+// boot-resident; successive operation samples retain its worst headroom through this same slot.
 #include <cstdint>
 
 namespace daik {
@@ -47,7 +47,7 @@ enum class StackWatch : uint8_t {
     Mqtt,    // the publish task, whose cycle builds every payload
     Modbus,  // the HomeHub link; retires and is recreated after configuration changes
     Weather, // Open-Meteo TLS + HTTP + JSON task; release HIL requires its post-fetch evidence
-    Ota,     // transient check/install task; minimum survives task recreation for this boot
+    Ota,     // boot-resident check/install worker; minimum spans operations for this boot
     COUNT,
 };
 

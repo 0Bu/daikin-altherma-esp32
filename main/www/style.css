@@ -519,7 +519,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 
 /* ── Crash banner (dashboard alert when /status.last_crash is set) ─────────── */
 .crash-banner {
-  background: var(--card); border: 1px solid var(--err); border-left: 4px solid var(--err);
+  background: var(--card); border: 1px solid var(--err);
   border-radius: var(--r-card); box-shadow: var(--shadow-card); padding: 16px 18px; margin-bottom: 14px;
 }
 .crash-head { display: flex; align-items: flex-start; gap: 12px; }
@@ -547,6 +547,12 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   border-radius: var(--r-card); box-shadow: var(--shadow-card); padding: 16px 18px; margin-bottom: 14px;
 }
 .recovery-banner .crash-ico, .rollback-banner .crash-ico { background: var(--warn); }
+/* A terminal OTA failure is longer than the progress suffix beside the version and must remain
+   visible until acknowledged. Both screens own one slot at the top of their content; only the
+   active view is displayed. The device-supplied reason wraps as plain text, while the dedicated
+   close button is the sole dismissal path. */
+.ota-alert .crash-txt { flex: 1; }
+.ota-alert-message { color: var(--err); overflow-wrap: anywhere; }
 .btn.sm { padding: 8px 13px; font-size: 13.5px; }
 .btn.ghost { background: none; color: var(--muted); border-color: transparent; }
 .btn.ghost:hover { color: var(--fg); border-color: var(--line); }
@@ -699,13 +705,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .settings-toggle input:checked + .settings-toggle-track::after { transform: translateX(18px); background: var(--brand-strong); }
 .settings-toggle input:focus-visible + .settings-toggle-track { outline: 2px solid var(--brand); outline-offset: 3px; }
 .settings-toggle input:disabled + .settings-toggle-track { opacity: .55; cursor: wait; }
-/* The Firmware row carries the OTA readout (#otaStatSet) beside its version, so the check reports
-   where it was started instead of sending the user to the dashboard for it. Two adjustments to the
-   ordinary value cell, both about a message being longer than a value: it may WRAP to a second line
-   (a value cell is nowrap, and "update failed" would otherwise push the card wider than the screen),
-   staying right-aligned as it does; and the readout drops the cell's mono/600 weight, since it is a
-   sentence in the muted register of the header's copy, not a figure. `.otastat:empty` (line 92)
-   hides it whole whenever no update is in flight, so the row is just "Firmware  v1.2.3" at rest. */
+/* The Firmware row carries compact OTA progress (#otaStatSet) beside its version, so a check reports
+   where it was started instead of sending the user to the dashboard. Terminal failures use the
+   persistent card above Settings instead. The inline readout drops the cell's mono/600 weight
+   because even its short labels are prose, not figures. */
 .vrow-fw .vrow-val { white-space: normal; text-align: right; }
 .vrow-fw .otastat { font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .vrow-fw .otastat.err { color: var(--err); }

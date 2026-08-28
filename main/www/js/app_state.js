@@ -69,10 +69,14 @@ const S = {
   // otaBusy, the compact OTA endpoint can still answer while the much larger /status builder is
   // deliberately refused. That is OTA activity, not proof that the device is unreachable.
   otaInstalling: false,
-  // Whether the inline readout currently has something on screen (a ring, a percentage, a terminal
-  // message inside its linger window). It is what freezes the Settings rebuild — see renderSettings.
-  // Not the same thing as otaBusy: the terminal messages are written after the flow has released.
+  // Whether compact OTA progress or a short non-failure result is visible. It freezes the Settings
+  // rebuild — see renderSettings. Terminal failures use otaAlert instead, so their complete text
+  // never has to fit beside a version value.
   otaShown: false,
+  // Terminal OTA failures are not progress suffixes: the device may return a complete actionable
+  // sentence. It is mirrored into one alert-card slot per screen and remains until the user closes
+  // it explicitly. Navigation and the normal status poll must not dismiss it.
+  otaAlert: "",
   // The inline readout is state as well as DOM. Ordinarily otaInline paints both existing slots
   // directly. After a refresh during OTA, however, the Settings slot is created only after the
   // running update has been discovered; keeping the last paint here lets that new slot catch up.
@@ -504,6 +508,7 @@ function renderApp() {
   }
   renderHeaderMeta();
   renderSettings();
+  if (typeof paintOtaAlert === "function") paintOtaAlert();
   renderLive();
   renderCards();
 }

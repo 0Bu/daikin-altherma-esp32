@@ -253,6 +253,15 @@ function wireRestOfApp() {
     else if (act.dataset.cact === "del")  deleteCrashReport(sig);
     else if (act.dataset.cact === "copy") copyDiagnostics();
   });
+  // Terminal OTA failures are mirrored at the top of both base screens. Their static close buttons
+  // retain keyboard focus across language and status repaints; delegation keeps one handler per
+  // card rather than one lifecycle per repaint.
+  for (const id of ["otaAlertDash", "otaAlertSettings"]) {
+    $(id).addEventListener("click", (e) => {
+      if (!e.target.closest?.("[data-ota-alert-close]")) return;
+      dismissOtaAlert();
+    });
+  }
   $("wfCancel").onclick = closeWifi;
   $("wifiBackdrop").onclick = closeWifi;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("wifiModal").hidden) closeWifi(); });

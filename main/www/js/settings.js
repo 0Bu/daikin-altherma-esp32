@@ -812,11 +812,11 @@ async function runHpProbe() {
 // public Pages feed even while the repository itself is private. An absent/unreachable manifest is
 // a check error; only the optional sibling changelog may fall back without invalidating an offer.
 //
-// The whole flow reports INLINE next to that version (#otaStat) rather than through toasts. A
-// download takes tens of seconds and ticks a percentage the entire time, which as toasts meant a
-// growing stack of near-identical "Downloading… 78%" cards covering the dashboard, each outliving
-// the number it carried. Inline, the progress replaces itself in place, next to the version it is
-// about, and the page stays readable underneath.
+// Live progress reports INLINE next to that version (#otaStat) rather than through toasts. A
+// download takes tens of seconds and ticks a percentage the entire time, which as cards would cover
+// the dashboard with a rapidly changing message. A terminal failure is different: it can be a full
+// actionable sentence, so it moves into one persistent alert-card slot per screen and is dismissed
+// only through that card's close control.
 
 // A ring sized for the 12.5px meta line: 13px, 2px stroke. `indet` (no percentage yet) draws a
 // spinning quarter-arc, otherwise the arc is the download's progress. Colour is inherited
@@ -842,13 +842,12 @@ function otaRing(pct, indet) {
 // our own ring markup, so a device-supplied /ota/status.message can never reach the DOM as markup.
 // Every write bumps otaSeq, which is what makes the delayed clear below safe.
 //
-// There are TWO slots and both get the same content: the dashboard header's (#otaStat) and the one
-// in the Settings Firmware card's Version row (#otaStatSet). Either screen can start the flow, so
-// either screen has to be able to report it — and painting both unconditionally means a user who
-// switches screens mid-download finds the progress already there rather than gone. Only one is on
-// screen at a time (the other screen's DOM is hidden), so this is not two readouts competing; it is
-// one readout, present wherever the version it belongs to is. A missing slot is skipped, not an
-// error: the Settings one exists only while that card is rendered.
+// There are TWO compact-progress slots: the dashboard header's (#otaStat) and the one in the
+// Settings Firmware card's Version row (#otaStatSet). Either screen can start the flow, so either
+// screen has to be able to report it — and painting both unconditionally means a user who switches
+// screens mid-download finds the progress already there rather than gone. Terminal failures use the
+// separate persistent OTA alert slots below. A missing progress slot is skipped, not an error: the
+// Settings one exists only while that card is rendered.
 let otaSeq = 0;
 const OTA_SLOTS = ["otaStat", "otaStatSet"];
 function paintOtaInline() {
@@ -870,6 +869,39 @@ function otaInline(text, { ring = false, pct = null, cls = "" } = {}) {
   S.otaShown = !!(text || ring);          // freezes the Settings rebuild — see renderSettings
   S.otaView = { text, ring, pct, cls };   // lets a slot created after a refresh catch up immediately
   paintOtaInline();
+}
+
+const OTA_ALERT_SLOTS = ["Dash", "Settings"];
+function paintOtaAlert() {
+  const text = typeof S.otaAlert === "string" ? S.otaAlert : "";
+  for (const suffix of OTA_ALERT_SLOTS) {
+    const el = $("otaAlert" + suffix);
+    if (!el) continue;
+    el.hidden = !text;
+    // Keep the child nodes stable across the once-per-second renderApp repaint. Besides avoiding
+    // needless role=alert announcements, this preserves keyboard focus on the sole X dismissal
+    // control while an ordinary status poll lands. textContent is the device-message escaping
+    // boundary: server prose can never become markup.
+    const title = el.querySelector(".crash-title");
+    const message = el.querySelector(".ota-alert-message");
+    const close = el.querySelector(".ota-alert-close");
+    const nextTitle = t("ota.active_title");
+    const nextCloseLabel = t("btn.close");
+    if (title.textContent !== nextTitle) title.textContent = nextTitle;
+    if (message.textContent !== text) message.textContent = text;
+    if (close.getAttribute("aria-label") !== nextCloseLabel)
+      close.setAttribute("aria-label", nextCloseLabel);
+  }
+}
+function otaAlert(text) {
+  S.otaAlert = String(text || "");
+  paintOtaAlert();
+}
+function dismissOtaAlert() {
+  S.otaAlert = "";
+  paintOtaAlert();
+  const fallback = S.stage === "settings" ? $("e32Chan") || $("btnBack") : $("verLink");
+  fallback?.focus?.({ preventScroll: true });
 }
 // Clear the readout after a terminal message has had time to be read — but ONLY if nothing has been
 // written since. Tapping the version twice inside the linger window (up to date → tap again) would
@@ -954,7 +986,7 @@ function syncOtaSettingsLock() {
 }
 
 // Poll /ota/status until `state` leaves the set we're waiting on, or we run out of patience.
-// Every OTA phase is asynchronous on the device (the download runs on its own task so the single
+// Every OTA phase is asynchronous on the device (the download runs on its own worker so the single
 // httpd worker stays free), so the UI's whole job here is to watch a state machine it does not drive.
 async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, requireReleased = false) {
   for (let i = 0; i < tries; i++) {
@@ -964,12 +996,12 @@ async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, req
     if (onTick) onTick(s);
     if (expectedGeneration !== null && s.generation !== expectedGeneration)
       return { state: "error", message: t("ota.replaced") };
-    // A freshly accepted task owns its generation before the 1.1 s quiesce lead changes `state`.
+    // A freshly accepted operation owns its generation before the 1.1 s quiesce lead changes `state`.
     // The check flow must therefore wait for the authoritative busy release, not consume the old
     // idle/error payload that happens to remain visible during that lead.
     if (expectedGeneration !== null && requireReleased && s.busy) continue;
     // Update acceptance has the same lead. A terminal `done` is intentionally allowed while busy
-    // because the device reboots from run_update before the task epilogue can clear the flag; an
+    // because the device reboots from run_update before the operation tail can clear the flag; an
     // inherited idle/error payload is not evidence that the new operation finished.
     if (expectedGeneration !== null && s.busy && !waitStates.includes(s.state) && s.state !== "done")
       continue;
@@ -986,14 +1018,15 @@ async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, req
 // offer into a client-side timeout.
 const OTA_CHECK_POLL_TRIES = 150;
 
-// Terminal inline failure: show it, let it linger a beat longer than a success, and release the flow.
+// Terminal failure: clear the compact progress suffix, retain the exact reason in the alert card
+// until its close control is used, and release the flow.
 function otaFail(text) {
   S.otaInstalling = false;
   S.otaBusy = false;
   otaCacheClear();
   syncOtaSettingsLock();
-  otaInline(text, { cls: "err" });
-  otaInlineClear(6000);
+  otaInline("");
+  otaAlert(text);
 }
 
 let otaDecisionResolve = null;
@@ -1180,6 +1213,11 @@ function otaWatch(expectedGeneration = null) {
 async function resumeOta() {
   let s;
   try { s = await j("/ota/status"); } catch { return; }
+  if (s?.state === "error") {
+    otaCacheClear();
+    otaAlert(s.message || t("ota.failed"));
+    return;
+  }
   if (!s || (s.state !== "updating" && s.state !== "done")) {
     otaCacheClear();
     return;
@@ -1278,7 +1316,8 @@ function otaWaitReboot() {
     // line the user has with a browser error page, so keep the message and let them choose when.
     if (s) { location.reload(); return; }
     S.busy = false; S.otaBusy = false; S.otaInstalling = false;
-    otaInline(t("ota.reload_hint"), { cls: "err" });   // no auto-clear: it asks the user to act
+    otaInline("");
+    otaAlert(t("ota.reload_hint"));
   };
   probe();
 }

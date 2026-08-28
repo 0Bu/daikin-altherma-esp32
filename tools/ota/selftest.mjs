@@ -175,8 +175,10 @@ try {
     ["the timer callback performs socket work itself", () =>
       replaceOnce("main/http_deadline.cpp", "xTaskNotifyGive(s_deadline.watchdog_task);",
         "(void)shutdown(socket, SHUT_RDWR);")],
-    ["OTA task creation ignores an unavailable deadline watchdog", () =>
+    ["OTA operation acceptance ignores an unavailable deadline watchdog", () =>
       replaceOnce("main/ota_update.cpp", "if (!http_deadline_ready()) return 0;", "if (false) return 0;")],
+    ["OTA worker stack returns to the fragmented runtime heap", () =>
+      replaceOnce("main/ota_update.cpp", "xTaskCreateStatic(ota_task", "xTaskCreate(ota_task")],
     ["Weather payload allocation ignores an unavailable deadline watchdog", () =>
       replaceOnce("main/weather_forecast.cpp",
         /(bool download_json\([\s\S]{0,220}?)if \(!http_deadline_ready\(\)\)/,
@@ -592,12 +594,12 @@ try {
     ["an update can consume a replaced check generation", () =>
       replaceOnce("main/ota_update.cpp", "s_generation != after_generation",
         "false")],
-    ["accepted artifact identity is dropped before task creation", () =>
+    ["accepted artifact identity is dropped before worker notification", () =>
       replaceOnce("main/ota_update.cpp", /s_task_args\s*=\s*request;/,
         "s_task_args = OtaTaskArgs{};")],
-    ["task-creation failure still advances the public generation", () =>
-      replaceOnce("main/ota_update.cpp", /s_generation\s*=\s*previous_generation;/,
-        "s_generation = next_generation(previous_generation);")],
+    ["accepted OTA work no longer wakes the boot-resident worker", () =>
+      replaceOnce("main/ota_update.cpp", "xTaskNotifyGive(s_ota_task);",
+        "(void)s_ota_task;")],
     ["the downloaded byte stream is no longer hashed", () =>
       replaceOnce("main/ota_update.cpp", "psa_hash_update(&hash_operation, data, len)",
         "psa_hash_update_bypassed(&hash_operation, data, len)")],
@@ -634,7 +636,7 @@ try {
         '    stack_watch_sample_bypassed(StackWatch::Ota);\n\n    diag_printf("ota: installed')],
     ["busy OTA checks derive the default feed before refusing", () =>
       replaceOnce("main/ota_update.cpp",
-        "        if (s_busy) return 0;\n    }\n    const OtaChannel channel = config_ota_channel();",
+        "        if (s_busy || !s_ota_task) return 0;\n    }\n    const OtaChannel channel = config_ota_channel();",
         "        if (false) return 0;\n    }\n    const OtaChannel channel = config_ota_channel();")],
     ["default OTA feed resolution reintroduces dynamic strings", () =>
       replaceOnce("main/logic/ota_hil_feed.hpp",
