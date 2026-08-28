@@ -83,6 +83,17 @@ assert.notEqual(historyFlood.status, 0,
 assert.match(historyFloodOutput, /real browser History transitions must stay bounded/,
   "history-flood selftest must fail at the explicit real-route budget");
 
+const manualRoute = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, DAIKIN_BROWSER_MUTATION: "route-hashchange-manual" },
+});
+const manualRouteOutput = `${manualRoute.stdout || ""}\n${manualRoute.stderr || ""}`;
+assert.equal(manualRoute.status, 0,
+  `route-event selftest must await both navigation events\n${manualRouteOutput}`);
+assert.match(manualRouteOutput, /browser route-event selftest passed/,
+  "route-event selftest must execute the manually released hashchange path");
+
 const isolationBypass = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
   cwd: root,
   encoding: "utf8",
@@ -93,5 +104,6 @@ assert.notEqual(isolationBypass.status, 0,
   "bypassing the translated keyboard route isolation must make the gate fail");
 assert.match(isolationBypassOutput, /route-isolated keyboard open must keep the Settings hash/,
   "route-isolation selftest must fail at the observed hash boundary");
-console.log("browser render selftest passed: overflow was rejected, delayed modal focus was awaited, " +
-  "duplicate real History transitions were bounded, and route isolation was observed");
+console.log("browser render selftest passed: overflow was rejected, delayed modal focus and route " +
+  "completion were awaited, duplicate real History transitions were bounded, and route isolation " +
+  "was observed");
