@@ -2665,20 +2665,25 @@ static void test_ota_headroom() {
 
 // The weather fetch's own headroom gate (private issue 10 D) — same predicate shape as the OTA
 // gate above, but with evidence-based floors that reject the measured 15.9 KiB fragmentation
-// trough, admit the board's healthy 31.7 KiB ceiling and preserve aggregate reserve around the
-// fetch's measured ~40 KiB transient claim.
+// trough, admit the production board's repeatable 22 KiB post-quiesce block and preserve aggregate
+// reserve around the fetch's measured ~40 KiB transient claim.
 static void test_weather_fetch_headroom() {
     CHECK(WEATHER_FETCH_MIN_FREE_BYTES == 56u * 1024u);
-    CHECK(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES == 24u * 1024u);
+    CHECK(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES == 20u * 1024u);
 
     CHECK(weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES,
                                     WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES));
     CHECK(weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES + 1,
                                     WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES + 1));
+    // Two natural production retries after all host pressure ended: aggregate reserve was healthy,
+    // while MQTT quiescence repeatedly left the same 22,528-byte largest internal block.
+    CHECK(weather_fetch_headroom_ok(61168u, 22528u));
+    CHECK(weather_fetch_headroom_ok(60972u, 22528u));
 
     // The live fragmentation trough from the issue: plenty of aggregate bytes, but the largest
     // block does not leave enough room for the complete TLS/HTTP setup — retry later.
     CHECK(!weather_fetch_headroom_ok(59u * 1024u, WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES - 1));
+    CHECK(!weather_fetch_headroom_ok(64u * 1024u, 16u * 1024u - 128u));
     // Aggregate exhaustion is refused even with a large block free.
     CHECK(!weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES - 1, 32u * 1024u));
     CHECK(!weather_fetch_headroom_ok(0, 0));

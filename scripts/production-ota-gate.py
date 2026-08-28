@@ -59,7 +59,12 @@ MIN_FINAL_LARGEST_BLOCK = 16 * 1024
 MAX_X10A_TIMEOUT_DELTA = 3
 HTTP_TIMEOUT_S = 5
 OTA_CHECK_TIMEOUT_S = 120
-WEATHER_HEADROOM_RETRY_DELAY_S = 5
+POST_STRESS_HEADROOM_TIMEOUT_S = 420
+POST_STRESS_HEADROOM_STABLE_SAMPLES = 2
+POST_STRESS_HEADROOM_SAMPLE_INTERVAL_S = 1
+POST_STRESS_MIN_FREE_HEAP = 56 * 1024
+POST_STRESS_MIN_LARGEST_BLOCK = 20 * 1024
+POST_STRESS_WEATHER_TIMEOUT_S = 120
 # Firmware permits a 30 s re-manifest plus a five-minute binary deadline after bounded quiesce /
 # headroom waits, two verifier passes and reboot. The observer must outlive the only accepted write.
 OTA_TIMEOUT_S = 480
@@ -1381,7 +1386,7 @@ def stress_board(
                     remember("status", error)
             except BaseException as error:  # keep the other probes running and report every failure
                 remember("status", error)
-            time.sleep(0.25)
+            time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
 
     def json_loop(path: str, kind: str, interval: float) -> None:
         while time.monotonic() < deadline:
@@ -1402,7 +1407,7 @@ def stress_board(
                     remember(kind, error)
             except BaseException as error:
                 remember(kind, error)
-            time.sleep(interval)
+            time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
 
     workers = [
         threading.Thread(target=status_loop, daemon=True),
@@ -1444,6 +1449,7 @@ def stress_board(
     else:
         fail(f"{host} OTA manifest TLS did not release its busy claim")
     weather_refresh_status: dict[str, Any] | None = None
+    weather_headroom_deferred = False
     weather_headroom_rearms = 0
     if require_weather:
         weather_deadline = min(deadline, time.monotonic() + OTA_CHECK_TIMEOUT_S)
@@ -1483,53 +1489,18 @@ def stress_board(
                     if not exact_attempt:
                         fail(f"{host} explicitly triggered weather TLS refresh failed")
                     if refresh_fields["refresh_success_token"] != weather_refresh_token:
-                        # A post-quiesce headroom refusal is not a TLS/parser failure: firmware has
-                        # made no unsafe allocation and its ordinary five-minute retry cannot satisfy
-                        # this bounded fresh-boot HIL window. Re-arm only that exact completed
-                        # attempt, keep the original absolute deadline, and make the next token own
-                        # a fresh success baseline. Every threshold is re-applied by firmware.
-                        headroom_retry = \
+                        # A headroom refusal under the three live pressure probes proves that the
+                        # firmware failed closed before an unsafe TLS allocation. Do not turn that
+                        # pressure into a retry loop: retain the exact failed token and finish the
+                        # complete stress window before one separately bounded recovery attempt.
+                        deferred_headroom = \
                             weather_candidate.get("fetching") is False and \
                             weather_candidate.get("state") == "waiting" and \
                             weather_candidate.get("reason") == "heap_headroom"
-                        if not headroom_retry:
+                        if not deferred_headroom:
                             fail(f"{host} explicitly triggered weather TLS refresh failed")
-                        remaining = weather_deadline - time.monotonic()
-                        if remaining <= WEATHER_HEADROOM_RETRY_DELAY_S:
-                            break
-                        time.sleep(WEATHER_HEADROOM_RETRY_DELAY_S)
-                        remaining = weather_deadline - time.monotonic()
-                        if remaining <= 0:
-                            break
-                        retry_status = request_status_deadline(
-                            pinned_endpoint, timeout=min(remaining, HTTP_TIMEOUT_S),
-                        )
-                        validate_identity(
-                            retry_status, host=host, mac=mac, version=version, elf=elf,
-                        )
-                        retry_weather = retry_status.get("weather_forecast")
-                        if not isinstance(retry_weather, dict) or \
-                           retry_weather.get("refresh_requested_token") != weather_refresh_token or \
-                           retry_weather.get("refresh_started_token") != weather_refresh_token or \
-                           retry_weather.get("refresh_completed_token") != weather_refresh_token or \
-                           retry_weather.get("refresh_success_token") == weather_refresh_token or \
-                           retry_weather.get("fetching") is not False or \
-                           retry_weather.get("state") != "waiting" or \
-                           retry_weather.get("reason") != "heap_headroom":
-                            fail(f"{host} weather headroom retry state changed before re-arm")
-                        remaining = weather_deadline - time.monotonic()
-                        if remaining <= 0:
-                            break
-                        next_token, next_successes = request_weather_refresh(
-                            pinned_endpoint, host, retry_status,
-                            timeout=min(remaining, HTTP_TIMEOUT_S),
-                        )
-                        if next_token == weather_refresh_token:
-                            fail(f"{host} weather headroom retry reused its failed token")
-                        weather_refresh_token = next_token
-                        weather_successes_before = next_successes
-                        weather_headroom_rearms += 1
-                        continue
+                        weather_headroom_deferred = True
+                        break
                     successes_after = weather_candidate.get("successes")
                     if isinstance(successes_after, bool) or not isinstance(successes_after, int) or \
                        successes_after <= weather_successes_before or \
@@ -1538,7 +1509,7 @@ def stress_board(
                     weather_refresh_status = weather_candidate
                     break
             time.sleep(0.1)
-        if weather_refresh_status is None:
+        if weather_refresh_status is None and not weather_headroom_deferred:
             fail(f"{host} did not complete the explicitly triggered weather TLS refresh")
     # Each constrained network owner destroys its active flag before publishing final state. Keep
     # the 503 allowance for one scheduler turn after both exact completion observations.
@@ -1564,7 +1535,10 @@ def stress_board(
             f"{mqtt_recovery_error}"
         )
     for worker in workers:
-        worker.join(STRESS_SECONDS + HTTP_TIMEOUT_S + 10)
+        remaining = max(0.0, deadline - time.monotonic())
+        worker.join(remaining + HTTP_TIMEOUT_S + 1)
+        if worker.is_alive():
+            fail(f"{host} live stress worker did not stop at the shared deadline")
 
     # No future weather edge can justify a sample after the pressure workers have stopped.
     disconnected += mqtt_recovery.finish()
@@ -1602,6 +1576,195 @@ def stress_board(
         fail(f"{host} final internal free heap is below {MIN_FINAL_FREE_HEAP} bytes")
     if int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
         fail(f"{host} final largest block is below {MIN_FINAL_LARGEST_BLOCK} bytes")
+
+    if require_weather and weather_headroom_deferred:
+        # The stress phase has now passed in full and every allocating probe has been joined. Keep
+        # the exact failed token bound while waiting passively for two stable host-visible headroom
+        # samples. A natural firmware retry may update ordinary Weather state during this bounded
+        # recovery wait, but it cannot complete the already failed explicit token or satisfy the new
+        # causal token issued below.
+        failed_weather_refresh_token = weather_refresh_token
+        post_stress_headroom_deadline = time.monotonic() + POST_STRESS_HEADROOM_TIMEOUT_S
+        stable_headroom_samples = 0
+        recovery_ready_status: dict[str, Any] | None = None
+        while time.monotonic() < post_stress_headroom_deadline:
+            remaining = post_stress_headroom_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                candidate = request_status_deadline(
+                    pinned_endpoint, timeout=min(remaining, 1),
+                )
+            except HTTPError as error:
+                if error.code != 503:
+                    raise
+                stable_headroom_samples = 0
+                time.sleep(min(
+                    POST_STRESS_HEADROOM_SAMPLE_INTERVAL_S,
+                    max(0.0, post_stress_headroom_deadline - time.monotonic()),
+                ))
+                continue
+            except (CompactTransportError, OSError, TimeoutError):
+                stable_headroom_samples = 0
+                time.sleep(min(
+                    POST_STRESS_HEADROOM_SAMPLE_INTERVAL_S,
+                    max(0.0, post_stress_headroom_deadline - time.monotonic()),
+                ))
+                continue
+            validate_identity(candidate, host=host, mac=mac, version=version, elf=elf)
+            uptimes.append(required_uptime(candidate, f"{host} post-stress headroom status"))
+            deferred_weather = candidate.get("weather_forecast")
+            if not isinstance(deferred_weather, dict) or \
+               deferred_weather.get("refresh_requested_token") != failed_weather_refresh_token or \
+               deferred_weather.get("refresh_started_token") != failed_weather_refresh_token or \
+               deferred_weather.get("refresh_completed_token") != failed_weather_refresh_token or \
+               deferred_weather.get("refresh_success_token") == failed_weather_refresh_token:
+                fail(f"{host} weather headroom token changed before post-stress recovery")
+            ready_counters = board_counters(candidate)
+            for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"):
+                if ready_counters[key] != baseline[key]:
+                    fail(f"{host} {key} changed while waiting for post-stress headroom "
+                         f"({baseline[key]} -> {ready_counters[key]})")
+            if x10a_timeout_delta_exceeded(
+                require_x10a=require_x10a, baseline=baseline, final=ready_counters,
+            ):
+                fail(f"{host} X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA}")
+            hp = candidate.get("hp", {})
+            if require_x10a and (not hp.get("connected") or int(hp.get("values", 0)) <= 0):
+                fail(f"{host} lost X10A while waiting for post-stress headroom")
+            ready_system = candidate.get("sys", {})
+            ready = \
+                deferred_weather.get("fetching") is False and \
+                candidate.get("mqtt", {}).get("connected") is True and \
+                int(ready_system.get("free_heap", 0)) >= POST_STRESS_MIN_FREE_HEAP and \
+                int(ready_system.get("max_alloc", 0)) >= POST_STRESS_MIN_LARGEST_BLOCK
+            stable_headroom_samples = stable_headroom_samples + 1 if ready else 0
+            if stable_headroom_samples >= POST_STRESS_HEADROOM_STABLE_SAMPLES:
+                recovery_ready_status = candidate
+                break
+            time.sleep(min(
+                POST_STRESS_HEADROOM_SAMPLE_INTERVAL_S,
+                max(0.0, post_stress_headroom_deadline - time.monotonic()),
+            ))
+        else:
+            fail(f"{host} post-stress headroom recovery exceeded its absolute deadline")
+        if recovery_ready_status is None:
+            fail(f"{host} did not recover stable post-stress headroom")
+        next_token, next_successes = request_weather_refresh(
+            pinned_endpoint, host, recovery_ready_status, timeout=HTTP_TIMEOUT_S,
+        )
+        if next_token == failed_weather_refresh_token:
+            fail(f"{host} post-stress weather recovery reused its failed token")
+        weather_refresh_token = next_token
+        weather_successes_before = next_successes
+        weather_headroom_rearms = 1
+        post_stress_weather_deadline = time.monotonic() + POST_STRESS_WEATHER_TIMEOUT_S
+        while time.monotonic() < post_stress_weather_deadline:
+            remaining = post_stress_weather_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                candidate = request_status_deadline(
+                    pinned_endpoint, timeout=min(remaining, 1),
+                )
+            except HTTPError as error:
+                if error.code != 503:
+                    raise
+                time.sleep(0.1)
+                continue
+            except (CompactTransportError, OSError, TimeoutError):
+                time.sleep(0.1)
+                continue
+            validate_identity(candidate, host=host, mac=mac, version=version, elf=elf)
+            uptimes.append(required_uptime(candidate, f"{host} post-stress weather status"))
+            weather_candidate = candidate.get("weather_forecast")
+            if not isinstance(weather_candidate, dict):
+                fail(f"{host} post-stress weather status is not an object")
+            refresh_fields = {
+                key: weather_candidate.get(key)
+                for key in (
+                    "refresh_requested_token", "refresh_started_token",
+                    "refresh_completed_token", "refresh_success_token",
+                )
+            }
+            if any(isinstance(value, bool) or not isinstance(value, int) or value < 0
+                   for value in refresh_fields.values()):
+                fail(f"{host} post-stress weather status has malformed refresh-token evidence")
+            if refresh_fields["refresh_requested_token"] != weather_refresh_token:
+                fail(f"{host} post-stress weather recovery lost its requested token")
+            if refresh_fields["refresh_completed_token"] == weather_refresh_token:
+                exact_attempt = \
+                    refresh_fields["refresh_started_token"] == weather_refresh_token and \
+                    refresh_fields["refresh_success_token"] == weather_refresh_token
+                successes_after = weather_candidate.get("successes")
+                if not exact_attempt or \
+                   isinstance(successes_after, bool) or not isinstance(successes_after, int) or \
+                   successes_after <= weather_successes_before or \
+                   weather_candidate.get("fetching") is not False or \
+                   weather_candidate.get("state") != "ok" or \
+                   int(weather_candidate.get("errors", 0)) != 0:
+                    fail(f"{host} post-stress weather recovery failed")
+                weather_refresh_status = weather_candidate
+                break
+            time.sleep(0.1)
+        else:
+            fail(f"{host} post-stress weather recovery exceeded its absolute deadline")
+        if weather_refresh_status is None:
+            fail(f"{host} post-stress weather recovery did not complete")
+
+        post_weather_mqtt_deadline = time.monotonic() + MQTT_RECOVERY_TIMEOUT_S
+        post_weather_mqtt_error = "still disconnected"
+        while time.monotonic() < post_weather_mqtt_deadline:
+            remaining = post_weather_mqtt_deadline - time.monotonic()
+            try:
+                recovered = request_status_deadline(
+                    pinned_endpoint, timeout=min(remaining, 1),
+                )
+            except HTTPError as error:
+                if error.code != 503:
+                    raise
+                post_weather_mqtt_error = str(error)
+                time.sleep(0.1)
+                continue
+            except (CompactTransportError, OSError, TimeoutError) as error:
+                post_weather_mqtt_error = str(error)
+                time.sleep(0.1)
+                continue
+            validate_identity(recovered, host=host, mac=mac, version=version, elf=elf)
+            uptimes.append(required_uptime(recovered, f"{host} post-stress MQTT status"))
+            if recovered.get("mqtt", {}).get("connected"):
+                finished = recovered
+                break
+            time.sleep(0.1)
+        else:
+            fail(
+                f"{host} MQTT did not recover after post-stress Weather TLS within "
+                f"{MQTT_RECOVERY_TIMEOUT_S}s: {post_weather_mqtt_error}"
+            )
+
+        final = board_counters(finished)
+        for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"):
+            if final[key] != baseline[key]:
+                fail(f"{host} {key} changed during post-stress Weather recovery "
+                     f"({baseline[key]} -> {final[key]})")
+        if x10a_timeout_delta_exceeded(
+            require_x10a=require_x10a, baseline=baseline, final=final,
+        ):
+            fail(f"{host} X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA}")
+        final_hp = finished.get("hp", {})
+        if require_x10a and \
+           (not final_hp.get("connected") or int(final_hp.get("values", 0)) <= 0):
+            fail(f"{host} lost X10A during post-stress Weather recovery")
+        if not finished.get("mqtt", {}).get("connected"):
+            fail(f"{host} MQTT was not connected after post-stress Weather recovery")
+        system = finished.get("sys", {})
+        if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP:
+            fail(f"{host} final internal free heap is below {MIN_FINAL_FREE_HEAP} bytes")
+        if int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
+            fail(f"{host} final largest block is below {MIN_FINAL_LARGEST_BLOCK} bytes")
+        if any(later < earlier for earlier, later in zip(uptimes, uptimes[1:])):
+            fail(f"{host} rebooted during post-stress Weather recovery")
+
     weather = finished.get("weather_forecast", {})
     if require_weather:
         if not weather.get("configured"):
@@ -1612,7 +1775,7 @@ def stress_board(
             fail(f"{host} has no successful weather TLS evidence from this fresh boot")
         if weather_successes_before is None or \
            int(weather.get("successes", 0)) <= weather_successes_before:
-            fail(f"{host} completed no new weather TLS fetch inside the live stress window")
+            fail(f"{host} completed no new weather TLS fetch inside the live HIL gate")
         if weather_refresh_token is None or \
            weather.get("refresh_requested_token") != weather_refresh_token or \
            weather.get("refresh_started_token") != weather_refresh_token or \
