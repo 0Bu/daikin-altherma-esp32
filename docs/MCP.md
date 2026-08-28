@@ -125,7 +125,7 @@ Not to be confused with the device's `/mcp` above. Espressif's
   rejects by design — `scripts/idf-docker.sh` is the single build path, so nothing drifts from CI.
 - **Nothing for the fast loop** — `scripts/run-mock-tests.sh` (host logic tests) is untouched.
 
-`idf.py mcp-server` *does* exist in the pinned `espressif/idf:v6.0.2` image (verified), so this is a
+`idf.py mcp-server` *does* exist in the selected `espressif/idf:v6.1` image (verified), so this is a
 "no benefit," not a "can't." Re-evaluate only if builds move to a native host ESP-IDF, macOS gains
 Docker USB passthrough, or the board drops Secure Boot v2. A read-only ESP-IDF **Documentation** MCP
 server would be harmless if ever wanted; library docs are already covered by `context7`.

@@ -2399,7 +2399,7 @@ Structure:
   silencing MQTT or X10A indefinitely. The poll cache compounds this by owning only its formatted value:
   immutable labels and units are borrowed from firmware-lifetime catalog tables, shrinking the one
   contiguous allocation every sweep requires and eliminating two per-row string allocations.
-  `http_deadline.cpp` closes the remaining trickle gap in ESP-IDF v6.0.2: both
+  `http_deadline.cpp` closes the remaining trickle gap in ESP-IDF v6.1: both
   `esp_http_client_fetch_headers()` and `esp_http_client_read()` can repeat transport reads inside
   one public call, resetting a per-read timeout whenever another byte arrives. One timer allocated
   before networking is armed only after a successful open exposes the public socket and remains
@@ -2608,7 +2608,7 @@ Structure:
   two RSA-3072 verifier passes each receive their own bounded five-second, two-sample
   **24 KiB / 12 KiB** gate.
   The documented `HTTP_TLS_DYN_BUF_RX_STATIC` strategy is deliberately not selected on pinned
-  ESP-IDF 6.0.2: Espressif issue #18828 reports a reproducible invalid-free/assert in its TLS-1.2
+  ESP-IDF 6.1: Espressif issue #18828 reports a reproducible invalid-free/assert in its TLS-1.2
   transition. The default dynamic strategy therefore keeps per-I/O record churn, but avoids adding
   a known direct reboot path until the upstream fix is present in the pinned SDK.
   Refusal is retryable and fail-closed. Because `ESP_ERR_OTA_VALIDATE_FAILED` intentionally combines image-structure,

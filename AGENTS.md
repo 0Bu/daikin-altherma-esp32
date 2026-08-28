@@ -114,7 +114,8 @@ documentation.
 
 ## Environment and verification boundaries
 
-- The firmware target is `esp32s3`. CI currently pins ESP-IDF v6.0.2; use the version resolved by the
+- The firmware target is `esp32s3`. CI currently selects ESP-IDF v6.1 and the lock resolves 6.1.0;
+  use the version resolved by the
   repository scripts and workflow rather than an arbitrary local SDK.
 - Firmware builds run through `scripts/idf-docker.sh`. A cloud sandbox without Docker cannot prove a
   firmware build. Host logic, Node, and Python gates may still be available.

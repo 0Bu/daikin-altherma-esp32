@@ -71,7 +71,7 @@ void net_mdns_start() {
     if (err != ESP_OK)
         diag_printf("net: mDNS hostname set failed (%s) — <hostname>.local will not resolve this boot\n",
                     esp_err_to_name(err));
-    // Product first is deliberate: mdns 1.11.3 copies these small values during this call and, if
+    // Product first is deliberate: mdns 1.12.0 copies these small values during this call and, if
     // an unusually late TXT allocation fails, can retain the prefix it already copied. The stable
     // identity therefore survives ahead of optional routing/version detail. Nothing installation-
     // specific (MAC, board, IP, SSID or configured service data) is multicast.
@@ -328,7 +328,7 @@ static void eth_start_cleanup(EthStartResources& owned) {
     clear_eth_lease();
 
     // Glue owns the driver's extra reference and its default IP/ETH handlers. It must disappear
-    // before uninstall; there is no separate esp_netif_detach API in the pinned ESP-IDF 6.0.2.
+    // before uninstall; there is no separate esp_netif_detach API in the selected ESP-IDF 6.1.
     if (s_eth_glue) {
         cleanup_error("delete netif glue", esp_eth_del_netif_glue(s_eth_glue));
         s_eth_glue = nullptr;

@@ -173,6 +173,16 @@ def parse_metadata(text: str) -> dict[str, str]:
     return value
 
 
+def documentation_version(version: str) -> str:
+    """Return the ESP-IDF documentation channel for an exact resolved release.
+
+    Espressif publishes the 6.1.0 release under ``/v6.1/`` rather than ``/v6.1.0/``. Keep the
+    lock/matrix comparison exact, but normalize a patch-zero release for documentation URLs.
+    """
+    match = re.fullmatch(r"(\d+\.\d+)\.0", version)
+    return match.group(1) if match else version
+
+
 def parse_cmake_component_dependencies(path: pathlib.Path) -> list[str]:
     text = read_text(path)
     match = re.search(r"idf_component_register\s*\((.*?)\)\s*", text, re.DOTALL)
@@ -358,11 +368,13 @@ def validate(root: pathlib.Path) -> tuple[list[str], dict[str, int]]:
     used = parse_table(marked_section(text, "used"), columns=7, name="used")
     evaluated = parse_table(marked_section(text, "evaluated"), columns=7, name="evaluated")
     config_rows = parse_table(marked_section(text, "sdkconfig"), columns=3, name="sdkconfig")
+    docs_version = documentation_version(metadata["version"])
 
     findings: list[str] = []
     for required_index in (
         "https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html",
-        "https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-reference/index.html",
+        f"https://docs.espressif.com/projects/esp-idf/en/v{docs_version}/"
+        f"{metadata['target']}/api-reference/index.html",
     ):
         if required_index not in text:
             findings.append(f"matrix is missing required documentation index {required_index}")
@@ -427,12 +439,13 @@ def validate(root: pathlib.Path) -> tuple[list[str], dict[str, int]]:
                 "/projects/esp-idf/"
             ):
                 expected_prefix = (
-                    f"/projects/esp-idf/en/v{metadata['version']}/{metadata['target']}/"
+                    f"/projects/esp-idf/en/v{docs_version}/{metadata['target']}/"
                 )
                 if not parsed.path.startswith(expected_prefix):
                     findings.append(
                         f"matrix row {row[0]} ESP-IDF documentation link is not pinned to "
-                        f"matrix IDF {metadata['version']}/{metadata['target']}: {target}"
+                        f"matrix IDF documentation series {docs_version}/{metadata['target']}: "
+                        f"{target}"
                     )
 
     used_ids = {row[0] for row in used}
