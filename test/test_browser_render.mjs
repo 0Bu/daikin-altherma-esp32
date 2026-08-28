@@ -12,7 +12,8 @@ if (!pageFile || !fs.statSync(pageFile, { throwIfNoEntry: false })?.isFile())
 
 const mutation = process.env.DAIKIN_BROWSER_MUTATION || "";
 if (mutation && ![
-  "root-overflow", "modal-focus-delay", "history-flood", "route-isolation-bypass",
+  "root-overflow", "modal-focus-delay", "history-flood", "route-hashchange-manual",
+  "route-isolation-bypass",
 ].includes(mutation))
   throw new Error(`unknown browser selftest mutation: ${mutation}`);
 
@@ -172,15 +173,32 @@ async function assertModalKeyboard(page, modalId, context, { route = true } = {}
   if (route) {
     await page.evaluate(`(() => {
       window.__browserPopstateSettled = false;
+      window.__browserHashchangeSettled = false;
+      window.__browserHashchangeCount = 0;
+      const manualHashchange = ${mutation === "route-hashchange-manual"};
       window.addEventListener("popstate", () => {
         window.__browserPopstateSettled = true;
       }, { once: true });
+      window.addEventListener("hashchange", () => {
+        window.__browserHashchangeCount++;
+        if (window.__browserHashchangeCount >= (manualHashchange ? 2 : 1))
+          window.__browserHashchangeSettled = true;
+      }, { once: !manualHashchange });
       return true;
     })()`);
   }
   await page.key("Escape", { code: "Escape", keyCode: 27 });
-  await page.waitFor(`document.getElementById(${JSON.stringify(modalId)}).hidden &&
-    location.hash === "#settings" && ${route ? "window.__browserPopstateSettled === true" : "true"}`);
+  const closeSettled = `document.getElementById(${JSON.stringify(modalId)}).hidden &&
+    location.hash === "#settings" && ${route ? "window.__browserPopstateSettled === true && window.__browserHashchangeSettled === true" : "true"}`;
+  if (route && mutation === "route-hashchange-manual") {
+    await page.waitFor(`document.getElementById(${JSON.stringify(modalId)}).hidden &&
+      location.hash === "#settings" && window.__browserPopstateSettled === true &&
+      window.__browserHashchangeCount === 1 && window.__browserHashchangeSettled === false`);
+    assert.equal(await page.evaluate(`Boolean(${closeSettled})`), false,
+      "route close must remain unsettled until the final hashchange is observed");
+    await page.evaluate("window.dispatchEvent(new HashChangeEvent('hashchange')); true");
+  }
+  await page.waitFor(closeSettled);
   assert.equal(await page.evaluate("document.documentElement.classList.contains('modal-open')"), false,
     `${context}: Escape must close the modal and release scroll lock`);
 }
@@ -350,6 +368,31 @@ try {
       "selftest/desktop/pl/refTempModal");
     await assertModalKeyboard(page, "refTempModal", "selftest/desktop/pl/refTempModal");
     console.log("browser modal-focus selftest passed: delayed focus and scroll lock were awaited");
+  } else if (mutation === "route-hashchange-manual") {
+    await page.viewport(viewports[1].width, viewports[1].height);
+    await activateLocale(page, "en");
+    await page.evaluate(`(() => {
+      showStage("settings");
+      writeRoute("settings", null, { replace: true, parent: null });
+      return true;
+    })()`);
+    await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
+      "selftest/desktop/en/refTempModal");
+    await assertModalKeyboard(page, "refTempModal", "selftest/desktop/en/refTempModal");
+    await page.evaluate(`(() => {
+      window.__browserOtaDecision = askOtaInstall({
+        current: "1.0.3-dev.14", available: "1.0.3-dev.20", available_channel: "dev"
+      }, "v1.0.3-dev.20 — delayed route completion", false,
+      document.getElementById("e32Chan"), "settings");
+      return true;
+    })()`);
+    await page.waitFor(`(() => {
+      const modal = document.getElementById("otaModal");
+      return !modal.hidden && document.activeElement?.closest("#otaModal") !== null;
+    })()`);
+    await page.key("Escape", { code: "Escape", keyCode: 27 });
+    await page.waitFor("document.getElementById('otaModal').hidden");
+    console.log("browser route-event selftest passed: popstate and the manually released hashchange were awaited");
   } else if (mutation === "route-isolation-bypass") {
     // Keep this mutation focused on the exact route-isolation boundary. Running the complete
     // locale/viewport matrix would exercise unrelated transient dialogs before reaching the first
