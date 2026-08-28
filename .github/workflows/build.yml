@@ -557,7 +557,7 @@ jobs:
         if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
         with:
-          esp_idf_version: v6.0.2
+          esp_idf_version: v6.1
           target: esp32s3
           command: ./scripts/ci-build-all.sh --compile-only --source-sha "${{ github.event.pull_request.head.sha }}" "${{ steps.stamp.outputs.disp }}"
 
@@ -770,7 +770,7 @@ jobs:
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
         with:
-          esp_idf_version: v6.0.2
+          esp_idf_version: v6.1
           target: esp32s3
           # ci-build-all.sh builds esp32s3 and stages the signed OTA app, sparse NVS-preserving
           # Web Serial parts, the manual full-flash merged image, compact manifest.json and its

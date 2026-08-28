@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Print the pinned ESP-IDF version (e.g. "v6.0.2") — the ONE shell reader of that pin.
+# Print the selected ESP-IDF version (e.g. "v6.1") — the ONE shell reader of that pin.
 #
 # The version lives in exactly one place, .github/workflows/build.yml (`esp_idf_version:`, kept
 # current by Renovate's custom manager in .github/renovate.json). Three shell callers need it and
@@ -16,14 +16,14 @@
 # the old cache. So there is one reader, and it FAILS LOUDLY rather than printing an empty string
 # a caller would then embed in an image tag or a cache key.
 #
-# Usage: scripts/idf-version.sh   ->  v6.0.2 on stdout, or exit 1 with a message on stderr.
+# Usage: scripts/idf-version.sh   ->  v6.1 on stdout, or exit 1 with a message on stderr.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ci_yml="$repo_root/.github/workflows/build.yml"
 [ -f "$ci_yml" ] || { echo "idf-version: $ci_yml not found" >&2; exit 1; }
 
-# The `# v6.0.2`-style trailing comments elsewhere in the file are not matched: the pattern is
+# A `# v6.1`-style trailing comment elsewhere in the file is not matched: the pattern is
 # anchored on the `esp_idf_version:` KEY, and the value must be a vN.N[.N] tag.
 idf_version="$(grep -oE 'esp_idf_version:[[:space:]]*v[0-9]+\.[0-9]+(\.[0-9]+)?' "$ci_yml" \
   | grep -oE 'v[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"

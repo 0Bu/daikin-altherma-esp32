@@ -409,7 +409,7 @@ esp_err_t firmware_http_event(esp_http_client_event_t* event) noexcept {
     return ESP_OK;
 }
 
-// Open GET and follow the same standard redirect statuses as esp_https_ota in IDF v6.0.2.  The
+// Open GET and follow the same standard redirect statuses as esp_https_ota in IDF v6.1.  The
 // client owns no body buffer supplied by the server, and the redirect budget is finite even if a
 // broken feed points at itself.
 esp_err_t open_firmware_stream(esp_http_client_handle_t client, OtaFirmwareResponseState& response,
@@ -1172,7 +1172,7 @@ void run_update(const OtaTaskArgs& request) {
 
     // Read only the fixed image header/first segment descriptor/app descriptor first.  This binds
     // the manifest version to the bytes actually served before the inactive partition is erased or
-    // bulk data is accepted.  All three structures are public esp_app_format API in IDF v6.0.2.
+    // bulk data is accepted.  All three structures are public esp_app_format API in IDF v6.1.
     constexpr size_t kImageProbeSize =
         sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t);
     static_assert(kImageProbeSize <= kOtaBufSize, "OTA probe must fit the fixed download buffer");
@@ -1507,7 +1507,7 @@ void run_update(const OtaTaskArgs& request) {
         transfer_ok && response_complete && (total <= 0 || written == static_cast<uint64_t>(total));
 
     // CRITICAL ORDERING: free the fixed download buffer and the HTTP/TLS client BEFORE
-    // esp_ota_end().  IDF v6.0.2's esp_https_ota_finish() does the reverse — esp_ota_end first,
+    // esp_ota_end().  IDF v6.1's esp_https_ota_finish() does the reverse — esp_ota_end first,
     // cleanup second — so RSA/PSA verification had to allocate beside TLS and failed on the live
     // board with a 632-byte low-water mark.  The raw esp_ota API preserves the exact same signed
     // image verifier while letting the transport release its heap first.

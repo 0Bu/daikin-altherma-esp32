@@ -267,7 +267,7 @@ authorization.
   signed-image validation passes still bind every byte. A third interruption is never retried.
 
   `HTTP_TLS_DYN_BUF_RX_STATIC` would reduce long-transfer record churn, but it is intentionally not
-  enabled on pinned ESP-IDF 6.0.2: Espressif issue #18828 reports a reproducible TLS-1.2
+  enabled on the selected ESP-IDF 6.1 SDK: Espressif issue #18828 reports a reproducible TLS-1.2
   invalid-free/assert in that strategy. Retaining the default dynamic strategy is the safer bounded
   residual until an upstream fix is present in the pinned SDK.
 
@@ -308,7 +308,7 @@ The rollback in mode 1 works because the *previous* firmware is selected by vali
 new one is `PENDING_VERIFY`. A **full `@flash_args` USB flash does neither**: it rewrites the
 bootloader, partition table and **otadata (blanked to `0xFFFFFFFF`)** and writes `ota_0` directly.
 There is therefore no rollback state record for the running partition: IDF's
-[`esp_ota_get_state_partition()`](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32s3/api-reference/system/ota.html#_CPPv427esp_ota_get_state_partitionPK15esp_partition_tP20esp_ota_img_states_t)
+[`esp_ota_get_state_partition()`](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-reference/system/ota.html#_CPPv427esp_ota_get_state_partitionPK15esp_partition_tP20esp_ota_img_states_t)
 returns `ESP_ERR_NOT_FOUND` (not `PENDING_VERIFY`), and compact
 status reports `image_state:"unknown"` plus `rollback_pending:null` rather than inventing safety.
 The bootloader has no rollback record even if old bytes happen to remain in `ota_1`. For a directly-flashed unsigned

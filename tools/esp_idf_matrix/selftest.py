@@ -117,9 +117,9 @@ def main() -> int:
         )
         run_case(
             "IDF lock version drift",
-            lambda root: replace_once(root / "dependencies.lock", "    version: 6.0.2\n", "    version: 6.0.3\n"),
+            lambda root: replace_once(root / "dependencies.lock", "    version: 6.1.0\n", "    version: 6.1.1\n"),
             1,
-            "matrix IDF version 6.0.2 differs from lock version 6.0.3",
+            "matrix IDF version 6.1.0 differs from lock version 6.1.1",
         )
 
         def add_sdkconfig(root: pathlib.Path) -> None:
@@ -193,11 +193,11 @@ def main() -> int:
             "ESP-IDF documentation link loses version pin",
             lambda root: replace_once(
                 root / "docs/ESP_IDF_MATRIX.md",
-                "/projects/esp-idf/en/v6.0.2/esp32s3/api-guides/build-system.html",
+                "/projects/esp-idf/en/v6.1/esp32s3/api-guides/build-system.html",
                 "/projects/esp-idf/en/stable/esp32s3/api-guides/build-system.html",
             ),
             1,
-            "ESP-IDF documentation link is not pinned to matrix IDF 6.0.2/esp32s3",
+            "ESP-IDF documentation link is not pinned to matrix IDF documentation series 6.1/esp32s3",
         )
 
         def add_https_ota_call(root: pathlib.Path) -> None:

@@ -2,7 +2,7 @@
 
 // Absolute deadline guard for one blocking ESP HTTP-client socket phase.
 //
-// ESP-IDF v6.0.2's blocking esp_http_client_fetch_headers() and esp_http_client_read() each contain
+// ESP-IDF v6.1's blocking esp_http_client_fetch_headers() and esp_http_client_read() each contain
 // an internal receive loop. Updating client->timeout_ms between caller invocations therefore does
 // not stop a peer which supplies one byte inside every receive timeout. This guard arms one boot-
 // initialized esp_timer for the REMAINDER of the caller's original operation deadline. Its timer
