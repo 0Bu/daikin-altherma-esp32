@@ -305,15 +305,16 @@ live drawing, not the header mark.
   the hostname / SoftAP / MQTT base topic (the project-wide naming convention), never "Daikin
   Altherma ESP32". The detected heat-pump model is shown instead in the **Model**
   status card (§5.3 body).
-- **Meta line** (under the name): **IP address · firmware version · inline OTA status**. The IP is
+- **Meta line** (under the name): **IP address · firmware version · inline OTA progress**. The IP is
   `wifi.ip`, falling back to the browser's own `location.hostname` (e.g. the mDNS name) while it is
   empty — board identity, not a WiFi *link* fact, so it lives here rather than in the Connections
   tile's WiFi row (§5.6). The **version** (`version`) sits beside it as a button: tapping it
-  checks for an OTA update, and the whole check/download reports back **in this line**, right next to
-  the number it is about (§5.4). Both stay `--muted`: an available update is announced by the
+  checks for an OTA update, and compact check/download progress reports back **in this line**, right
+  next to the number it is about (§5.4). A terminal failure is a separate card directly below the
+  active screen's header. Both identity facts stay `--muted`: an available update is announced by the
   confirm dialog, not by colouring the header, and the version picks up the brand tint only on
   hover/focus — the same affordance the tappable value rows use. Only the IP may ellipsise on a
-  narrow screen; the version and the OTA readout are short and must stay whole. Both are `--font-mono`
+  narrow screen; the version and compact OTA readout are short and must stay whole. Both are `--font-mono`
   with tabular figures (§3): they are one identity string reading `<ip> · <version>`, and a split
   face makes the line look like two unrelated facts. Stated because it is easy to break invisibly —
   the version is a `<button>`, and resetting its UA styling with the `font:` SHORTHAND silently
@@ -1100,7 +1101,7 @@ progress in that same line, where the page underneath stays readable.
 so the **Version** row on the Settings Firmware card (§5.6) runs the identical check. It is one
 gesture with one meaning, not a second flow: the row calls the same `checkFirmwareUpdate()`.
 
-**And it stays on the screen it was tapped on.** The readout has **two slots**, not one — `#otaStat`
+**And it stays on the screen it was tapped on.** Compact progress has **two slots**, not one — `#otaStat`
 in the header line, `#otaStatSet` in the Firmware row — and `otaInline` paints both with the same
 content, so whichever screen is open is the one reporting. Only one is ever visible (the other
 screen is `display:none`), so this is one readout following the version, not two competing. The
@@ -1109,19 +1110,22 @@ lived only in the header; that is a constraint being paid for by the user. An up
 while *reading this card* — the version, the channel it follows, the build it is about to become
 are all on it — and being thrown to another screen mid-thought, to watch a ring, is the app
 deciding where you should be looking. Moving the readout costs a second `<span>`; moving the user
-costs them their place. **Nothing in the OTA flow navigates** — the only screen change is the page
+costs them their place. Terminal failures likewise have two card slots (`#otaAlertDash` and
+`#otaAlertSettings`) at the top of the two views. They preserve the complete device reason, remain
+visible across dashboard/Settings navigation and repaint, and disappear only when the card's
+localized `×` close control is activated. **Nothing in the OTA flow navigates** — the only screen change is the page
 **reload** after a successful install, which is a new page, not a jump.
 
 Because that slot is painted straight into the DOM rather than rebuilt from state, **all three
-ESP32-family cards freeze together** while the readout has anything to say (`S.otaShown`, which
-covers the terminal messages' linger too) — they are one `esp32CardHtml()` string, so there is no
+ESP32-family cards freeze together** while the compact readout has anything to say (`S.otaShown`) —
+they are one `esp32CardHtml()` string, so there is no
 freezing the Firmware card alone. Otherwise each 2 s values-poll rebuild would blink the percentage
 out and restart the spinner's animation on every frame — the same hazard the header's `#otaStat` is
 exempt from re-render. What holds still is three cards of static facts, for the seconds
 an update takes; the Connections tile beside it keeps updating, since a link dropping mid-download
 is exactly what a user would want to see move.
 
-- **The status reports inline, in that same line** — a small progress ring plus a short label,
+- **Live progress and short non-failure results report inline, in that same line** — a small progress ring plus a short label,
   immediately after the version (`#otaStat`): `192.168.1.42 · v1.2.3 ◔ 78%`. It is deliberately
   **not** a toast. A download runs for tens of seconds and ticks a percentage the whole time, which
   as toasts stacked up into a column of near-identical "Downloading… 78%" cards covering the very
@@ -1131,6 +1135,11 @@ is exactly what a user would want to see move.
   the IP and the version, so they read as a suffix, not as sentences. The readout is an
   `aria-live="polite"` region, and it collapses to nothing when idle, so the line is just
   "IP · version" whenever no update is in flight.
+- **A terminal failure is a persistent alert card**, not an inline suffix or timed toast. It appears
+  directly below the dashboard header or Settings header, uses `role="alert"`, keeps firmware text
+  as literal wrappable text, and has one clearly named `×` button. Polling, repaint and navigation do
+  not remove it; only that button does. This keeps actionable reasons such as a required reboot
+  complete on a phone without widening the identity line or Version row.
 - **The flow** — `GET /ota/check` returns the accepted operation generation; the UI then polls
   `GET /ota/status` until that same generation reports `busy=false` (every OTA phase is asynchronous
   on the device, so the UI watches a state machine it doesn't drive). This deliberately ignores the

@@ -13,8 +13,8 @@
 // reboots; after weather, the next changed state publish catches up.
 //
 // WHY THIS IS NOT JUST `return network_active`. The hold-off is BOUNDED. Activity is set by another
-// task and cleared on that task's exit paths; if an operation stalls behind a dead TCP connection, a
-// wedged TLS read or a bug that misses a clear, an unbounded rule would silence the heat-pump bridge
+// operation and cleared by that operation's completion paths; if it stalls behind a dead TCP
+// connection, a wedged TLS read or a bug that misses a clear, an unbounded rule would silence the heat-pump bridge
 // for as long as the board stays up — no publishes, no heartbeat, and no `bad_alloc` either, so the
 // one symptom that made #380 visible at all would be gone too. A firmware that goes quiet forever
 // because a fetch did not finish is strictly worse than one that drops a second of data per second.

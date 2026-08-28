@@ -26,11 +26,10 @@
     <div class="hdr-id">
       <div class="hdr-name" id="hdrName">daikin-altherma-esp32</div>
       <!-- Identity + firmware meta line: IP (or the mDNS hostname) · running version. The version is
-           a BUTTON — tapping it checks for an OTA update — and the whole check/download reports back
-           INLINE right here (#otaStat: a small progress ring + "78%"), never as a stack of toasts
-           that hides the page it is talking about (DESIGN.md §5.4). This is one of TWO readout
-           slots: the Settings Firmware card's Version row carries the other (#otaStatSet, built in
-           app.js), so a check started there reports there instead of dragging the user here. -->
+           a BUTTON — tapping it checks for an OTA update — and compact progress reports back INLINE
+           here (#otaStat: a small ring + "78%"), never as a stack of toasts. Terminal failures are
+           complete sentences and instead use the dismissible card at the top of the active screen
+           (DESIGN.md §5.4). The Settings Firmware row has the equivalent progress slot. -->
       <div class="hdr-meta">
         <span class="hdr-ip mono num" id="hdrIp"></span>
         <span class="hdr-sep" aria-hidden="true">·</span>
@@ -59,6 +58,17 @@
     <!-- ═══ DASHBOARD (the screen the app opens on) ═══ -->
     <section class="view active" id="viewDash">
       <div class="pad">
+        <!-- Terminal OTA failures are preserved verbatim in a card rather than squeezed into the
+             identity line. The same alert has a Settings-screen slot below; only the active view is
+             visible, and the card remains until its own close button is used. -->
+        <div class="ota-alert crash-banner crash-head" id="otaAlertDash" role="alert" hidden>
+          <span class="crash-ico" aria-hidden="true">!</span>
+          <div class="crash-txt">
+            <div class="crash-title"></div>
+            <div class="crash-meta ota-alert-message"></div>
+          </div>
+          <button class="iconbtn bordered ota-alert-close" data-ota-alert-close>×</button>
+        </div>
         <!-- Recovery (safe) mode banner: shown when /status.sys.safe_mode is true (the device
              crash-looped on a bad config and came up minimally). Rendered by renderRecoveryBanner();
              not dismissible — it reflects a live state and clears itself on a healthy reboot. -->
@@ -803,6 +813,14 @@
          summaries update together. -->
     <section class="view" id="viewSettings">
       <div class="pad">
+        <div class="ota-alert crash-banner crash-head" id="otaAlertSettings" role="alert" hidden>
+          <span class="crash-ico" aria-hidden="true">!</span>
+          <div class="crash-txt">
+            <div class="crash-title"></div>
+            <div class="crash-meta ota-alert-message"></div>
+          </div>
+          <button class="iconbtn bordered ota-alert-close" data-ota-alert-close>×</button>
+        </div>
         <div class="conn-tile" id="connTile"></div>
         <div id="settingsCards"></div>
         <!-- Product · version · the report action. "Report a bug" was the ESP32 card's last ROW

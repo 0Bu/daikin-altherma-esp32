@@ -1,4 +1,4 @@
-// Execute the browser-side OTA generation handshake.  A freshly accepted task owns `busy` and its
+// Execute the browser-side OTA generation handshake. A freshly accepted operation owns `busy` and its
 // generation before the firmware's 1.1 s quiesce lead changes `state`, so consuming the old idle
 // payload here recreates the production race even when the firmware API itself is correct.
 import assert from "node:assert/strict";
@@ -22,6 +22,16 @@ class Element {
     if (this._textContent === "") this.children = [];
   }
   appendChild(child) { this.children.push(child); }
+  setAttribute(name, value) { this[name] = String(value); }
+  getAttribute(name) { return this[name] ?? null; }
+  querySelector(selector) {
+    const suffix = {
+      ".crash-title": "Title",
+      ".ota-alert-message": "Message",
+      ".ota-alert-close": "Close",
+    }[selector];
+    return suffix && this.id.startsWith("otaAlert") ? element(this.id + suffix) : null;
+  }
   querySelectorAll() { return []; }
 }
 
@@ -97,7 +107,7 @@ vm.runInContext(
   { filename: "main/www/js/settings.js" },
 );
 
-// The pre-task idle payload carries the NEW generation but busy=true. It must not finish a check.
+// The pre-operation idle payload carries the NEW generation but busy=true. It must not finish a check.
 statuses = [
   { state: "idle", busy: true, generation: 7, available: "old" },
   { state: "idle", busy: false, generation: 7, available: "1.2.3-dev.4" },
@@ -114,7 +124,8 @@ assert.equal(replaced.message, "ota.replaced");
 // An answered busy response is retryable device state, not a network/unreachable diagnosis.
 checkResponse = response(503, { ok: false, error: "ota operation not accepted" });
 await sandbox.__api.checkFirmwareUpdate();
-assert.equal(S.otaView.text, "ota.busy");
+assert.equal(S.otaView.text, "", "terminal failure prose must leave the compact progress slot");
+assert.equal(S.otaAlert, "ota.busy", "retryable refusal must remain in the persistent alert card");
 assert.equal(posted, null);
 const sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -173,7 +184,8 @@ statuses = [{
   available_channel: "dev", update_available: true, downgrade: false,
 }];
 await sandbox.__api.checkFirmwareUpdate();
-assert.equal(S.otaView.text, "ota.replaced");
+assert.equal(S.otaView.text, "");
+assert.equal(S.otaAlert, "ota.replaced");
 assert.equal(posted, null);
 
 // The successful flow carries the exact checked generation/channel/version/SHA into the sole POST.
@@ -217,6 +229,7 @@ assert.deepEqual(Object.fromEntries(parsed.searchParams), {
   after: "7", channel: "dev", version: "1.0.3-dev.20", sha256: sha,
 });
 assert.equal(statuses.length, 0, "the exact update generation must also own status polling");
+assert.equal(S.otaAlert, "test stop", "a device-side update failure must retain its exact reason");
 
 // Every custom-modal dismissal is a real cancellation: the checked lease is never posted.
 S.busy = false;

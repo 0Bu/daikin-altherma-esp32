@@ -276,8 +276,8 @@ logic/captive.hpp   → what the "/*" catch-all answers: a 302 to the portal in 
 mqtt_ha.cpp/.hpp    → Home Assistant MQTT-Discovery bridge (streamed discovery), read-only
 ota_update.cpp      → OTA: manifest check + fixed-buffer esp_http_client → esp_ota stream + the
                       two-point downgrade gate + RSA validation + rollback health gate. HTTP/TLS
-                      is released before esp_ota_end; both network ops run on ONE on-demand task
-                      (never the httpd worker), one at a time; status behind a mutex
+                      is released before esp_ota_end; both network ops wake ONE boot-resident static
+                      worker (never the httpd task), one at a time; status behind a mutex
 diag_log.cpp        → in-RAM console ring served by GET /diag (static .bss buffer); each line is
                       also handed to syslog_send() for optional off-device forwarding
 syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_host is empty). The
@@ -352,7 +352,7 @@ stack_watch.cpp     → the SECOND memory budget, made reportable. Five long-liv
                      hp_poll, mqtt_pub, the HomeHub link and Weather) record their own FreeRTOS
                      stack high-water mark; the MQTT heartbeat publishes those five as
                      `*_stack_min_free_bytes`, null until sampled. Weather samples again after its
-                     TLS/HTTP/JSON interval. The short-lived OTA task records
+                     TLS/HTTP/JSON interval. The boot-resident OTA worker records
                      through the same allocation-free sampler, but its boot-local minimum appears
                      only on compact `/ota/status` so a delivery gate can retain it before reboot.
                      The heap has `/status.sys`, two trend rings and a watchdog — the stack had a
@@ -2365,7 +2365,7 @@ Structure:
   legacy release notes unchanged unless their first line uses the reserved compact
   `v<version> — ` cumulative prefix; a versioned document for an equal or older target is discarded
   rather than misrepresenting old cumulative history as new changes. That one-shot lease is freed after the first response (including a broken send), after a
-  60-second static-timer TTL when never requested, or before the next OTA task. Its one-second
+  60-second static-timer TTL when never requested, or before the next OTA operation. Its one-second
   auto-reload callback only try-locks the OTA mutex, so it cannot block the shared timer daemon.
   Thus the new image
   carries no boot-long prose BSS and a dismissed offer leaves no boot-long heap island; allocation
@@ -2379,7 +2379,16 @@ Structure:
   matching completed offer owns notes (already consumed, expired or replaced), so once-per-second
   `/ota/status` stays small during TLS and validation pressure.
 - **Heap-bounded TLS and validation.** Lock-free flags cover the complete OTA and Open-Meteo
-  network operations, beginning before either handshake. Each producer holds its flag for 1.1
+  network operations, beginning before either handshake. The 11,776-byte delivery stack and its
+  task control block are statically reserved and the worker is created before WiFi, MQTT, HTTP and
+  optional service tasks, then sleeps on a task notification between operations. This is
+  load-bearing for the contiguous budget:
+  allocating the task on demand reduced the live board's ordinary 31,744-byte largest block by
+  exactly 12,288 bytes to 19,456 bytes before the task's own 24,576-byte TLS admission check. Total
+  free heap still exceeded 66 KiB, so lowering the aggregate floor or retrying TLS could not fix the
+  self-inflicted fragmentation. A persistent worker removes task creation and deletion from every
+  check/update acceptance path while retaining the same stack watermark evidence across the boot.
+  Each producer holds its flag for 1.1
   seconds before opening TLS so the once-per-second MQTT publisher can finish its current cycle and
   stand aside; OTA also waits for an in-flight X10A sweep to acknowledge the same request and for an
   already-open weather client to unwind. HomeHub polling and Syslog forwarding also take an
@@ -3010,7 +3019,10 @@ place:
   the signed-install/reboot/rollback explanation. Cancel, backdrop and Escape never write; Install
   passes the exact check lease to `POST /ota/update`, requires the immediate successor generation,
   then polls only that operation while rendering download progress **inline next to that version**
-  (a small ring + "n%", not a toast). On `done` it does **not** use the shared reboot-reconnect poll
+  (a small ring + "n%", not a toast). Terminal failures leave the inline slot, retain the complete
+  plain-text device reason in one of two top-of-view alert-card slots, and remain across repaint and
+  dashboard/Settings navigation until the card's localized `×` control closes both twins. On `done`
+  it does **not** use the shared reboot-reconnect poll
   the config saves use — an OTA replaces the served UI itself, so `otaWaitReboot` waits for the board
   to come back (version changed / `uptime_s` went backwards / seen down→up) and **reloads the page**.
   A download already running on the device is adopted on page load (`resumeOta`), so a reload
@@ -3888,7 +3900,7 @@ for why a shared table of sizes would be the wrong shape.
 | 4 | `env3` | `env3.cpp` | The optional ENV III sensor. No task at all unless enabled on an M5Stack board. |
 | 4 | `wifi_wd` | `wifi.cpp` | The ghost-association watchdog: periodic, latency-tolerant, but must run when due. |
 | 4 | `eth_fb` | `net.cpp` | Watches for the cable being pulled from a board that came up WIRED, and decides a reboot — so it must not sit behind a long publish. Exists only on such a board. |
-| 4 | `ota` / `ota_health` | `ota_update.cpp` | Transient. The download holds a TLS peer that will time out. |
+| 4 | `ota` / `ota_health` | `ota_update.cpp` | `ota` is a boot-resident sleeping delivery worker and may hold a TLS peer; `ota_health` is a one-shot task after a candidate boot. |
 | 3 | `syslog_task` | `syslog.cpp` | Best-effort UDP; a late datagram costs nothing. Opt-in. |
 | 3 | `weather` | `weather_forecast.cpp` | Created on every ordinary non-safe boot; dormant until the opt-in location and diagnostics consent are both active. |
 | 3 | `recovery_btn` | `recovery_button.cpp` | Debounced sampling of a human-scale action. Opt-in (`btn_gpio` defaults to -1). |
@@ -3896,8 +3908,8 @@ for why a shared table of sizes would be the wrong shape.
 
 The `esp_http_server` task and esp-mqtt's own event task are created by ESP-IDF with their own
 Kconfig-set priorities and are not in this table. Optional and transient tasks above generally do
-not exist when their feature is unconfigured or inactive; Weather is the explicit exception and
-keeps an idle worker on ordinary non-safe boots. The source-absence matrix
+not exist when their feature is unconfigured or inactive. The OTA delivery worker exists on every
+boot; Weather keeps an idle worker on ordinary non-safe boots. The source-absence matrix
 (`test/test_source_absence_contract.mjs`) treats both lifecycle shapes as explicit states.
 
 Every one of them that allocates also self-guards: an escaping `std::bad_alloc` at a task boundary
@@ -3961,7 +3973,7 @@ firmware no longer has). Two rules follow:
 - **Read the task table in any core dump you open** (`USED/FREE` per task). It is the only place the
   EXACT figure is visible, and a task can sit one frame from death while every heap number looks
   perfect. Anything under ~1 KB free wants raising — `cfg.stack_size` in http_server.cpp,
-  `xTaskCreate` for the rest.
+  `xTaskCreate`/`xTaskCreateStatic` for the rest.
 - **…but the trend no longer waits for a crash** (`main/stack_watch.hpp`). Five deep tasks — httpd,
   hp_poll, mqtt_pub, the HomeHub link and Weather — record their own FreeRTOS high-water mark, and
   the MQTT heartbeat carries all five as `*_stack_min_free_bytes`. Weather samples again immediately

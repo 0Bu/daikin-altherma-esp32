@@ -77,9 +77,9 @@ assert.match(allHandler.slice(postOtaGate, trustedHeaders),
 
 // ── HTTP acceptance is the authoritative OTA operation boundary ──────────────────────────────
 // An asynchronous check/update request is not successful merely because the HTTP handler ran.
-// The OTA mutex claim and operation generation are created together; busy/task-creation refusal
-// must be non-2xx, status exposes the same mutex-protected generation+busy snapshot, and an update
-// can only consume the exact completed check generation plus artifact identity.
+// The OTA mutex claim and operation generation are created together; busy/worker-unavailable
+// refusal must be non-2xx, status exposes the same mutex-protected generation+busy snapshot, and an
+// update can only consume the exact completed check generation plus artifact identity.
 const startUpdateAt = ota.indexOf("uint32_t start_update(");
 const startUpdateTail = ota.slice(startUpdateAt);
 const startUpdateEndMatch = startUpdateTail.match(/\n}\n\n}\s*\/\/ namespace/);
@@ -104,11 +104,21 @@ assert.match(hilFeed,
   /struct OtaOfferBinding[\s\S]{0,300}?std::array<char,\s*8>\s+channel[\s\S]{0,100}?std::array<char,\s*32>\s+version[\s\S]{0,100}?std::array<char,\s*65>\s+app_sha256[\s\S]{0,100}?OtaFeedUrls\s+feed/,
   "the task offer must keep channel/version/SHA/feed in fixed-capacity storage");
 assert.match(ota,
-  /uint32_t\s+start_locked[\s\S]{0,300}?s_task_args\s*=\s*request;[\s\S]{0,500}?xTaskCreate\(ota_task/,
-  "accepted channel/version/SHA must cross the task boundary in one fixed task-owned slot");
+  /uint32_t\s+start_locked[\s\S]{0,420}?s_task_args\s*=\s*request;[\s\S]{0,500}?xTaskNotifyGive\(s_ota_task\)/,
+  "accepted channel/version/SHA must cross the task boundary in one fixed worker-owned slot");
 assert.match(ota,
-  /xTaskCreate\(ota_task[\s\S]{0,250}?s_generation\s*=\s*previous_generation/,
-  "a task-creation failure must roll back the attempted generation");
+  /void\s+ota_update_init\(\)[\s\S]{0,300}?xTaskCreateStatic\(ota_task,[\s\S]{0,180}?s_ota_task_stack,[\s\S]{0,80}?s_ota_task_storage/,
+  "the OTA stack and TCB must be allocated statically before an operation needs TLS heap");
+assert.match(ota,
+  /void\s+ota_task\(void\*\)[\s\S]{0,180}?for\s*\(;;\)[\s\S]{0,120}?ulTaskNotifyTake\(pdTRUE,\s*portMAX_DELAY\)/,
+  "the static OTA worker must remain resident and sleep between operation notifications");
+assert.doesNotMatch(ota, /xTaskCreate\(ota_task/,
+  "an OTA operation must not allocate its own task stack from runtime heap");
+const deadlineInitAt = appMain.indexOf("http_deadline_init()");
+const otaWorkerInitAt = appMain.indexOf("ota_update_init()", deadlineInitAt);
+const httpStartAt = appMain.indexOf("http_start()", otaWorkerInitAt);
+assert.ok(deadlineInitAt >= 0 && otaWorkerInitAt > deadlineInitAt && httpStartAt > otaWorkerInitAt,
+  "the static OTA worker must be initialized before the HTTP surface can accept operations");
 assert.equal(occurrences(httpOta, '503 Service Unavailable'), 2,
   "busy or unavailable check/update starts must both be HTTP non-success");
 assert.equal(occurrences(httpOta, '{\\"ok\\":true,\\"generation\\":%lu}'), 2,
@@ -218,7 +228,7 @@ const legacyRestoreManifestMaxMatch = manifestProvenance.match(
 const healthTaskStackMatch = ota.match(/constexpr int\s+kHealthTaskStack\s*=\s*(\d+)/);
 const weatherTaskStackMatch = weather.match(/constexpr int\s+kTaskStack\s*=\s*(\d+)/);
 assert.ok(otaTaskStackMatch && healthTaskStackMatch,
-  "both transient OTA task stack sizes must remain machine-readable");
+  "the resident delivery and transient health-gate stack sizes must remain machine-readable");
 assert.equal(Number(otaManifestMaxMatch?.[1]), 2048,
   "the complete shared installer manifest must fit the reviewed 2 KiB OTA frame");
 assert.equal(Number(legacyRestoreManifestMaxMatch?.[1]), 1024,
@@ -263,7 +273,7 @@ assert.match(httpOta,
   /,\\"heap_min_free_bytes\\":[\s\S]{0,160}?,\\"heap_min_largest_block_bytes\\":[\s\S]{0,240}?,\\"ota_stack_min_free_bytes\\":[\s\S]{0,180}?null/,
   "compact OTA status must expose heap dimensions and null-before-sample OTA stack evidence");
 assert.match(stackWatch, /Modbus[\s\S]{0,120}?Weather[\s\S]{0,120}?Ota[\s\S]{0,120}?COUNT/,
-  "the shared allocation-free stack watcher must retain Weather and transient OTA minima");
+  "the shared allocation-free stack watcher must retain Weather and resident-worker OTA minima");
 assert.ok(occurrences(weather, "stack_watch_sample(StackWatch::Weather)") >= 2,
   "Weather must sample after the real TLS/HTTP/JSON interval before HIL accepts it");
 assert.match(httpStatus,
@@ -306,13 +316,13 @@ assert.match(defaultFeed, /ota_fixed_text_append/,
 const startCheckAt = ota.indexOf("uint32_t start_check(");
 const startCheckEnd = ota.indexOf("\n}\n\nuint32_t start_update", startCheckAt);
 const startCheck = ota.slice(startCheckAt, startCheckEnd);
-const busyPreflight = startCheck.indexOf("if (s_busy) return 0");
+const busyPreflight = startCheck.indexOf("if (s_busy || !s_ota_task) return 0");
 const checkConfigRead = startCheck.indexOf("config_ota_channel()", busyPreflight);
 const defaultResolution = startCheck.indexOf("ota_default_feed_urls(", checkConfigRead);
 const checkAcceptanceLock = startCheck.lastIndexOf("Lock lk(s_mtx)");
 assert.ok(busyPreflight >= 0 && checkConfigRead > busyPreflight &&
   defaultResolution > checkConfigRead && checkAcceptanceLock > defaultResolution,
-  "a busy check must refuse before config/default-feed derivation, then close the acceptance race");
+  "a busy or worker-unavailable check must refuse before config/default-feed derivation, then close the acceptance race");
 const otaStatusStart = otaHeader.indexOf("struct OtaStatus {");
 const otaStatusEnd = otaHeader.indexOf("\n};", otaStatusStart);
 assert.ok(otaStatusStart >= 0 && otaStatusEnd > otaStatusStart,
@@ -416,7 +426,7 @@ assert.match(httpDeadline,
   "the boot result must have an allocation-free readiness latch");
 assert.match(startCheck,
   /if \(!http_deadline_ready\(\)\) return 0;[\s\S]{0,500}?config_ota_channel\(\)[\s\S]{0,900}?start_locked/,
-  "OTA checks must refuse before feed derivation and task creation when the watchdog is unavailable");
+  "OTA checks must refuse before feed derivation and worker notification when the watchdog is unavailable");
 assert.match(weather,
   /void weather_forecast_start\(\)[\s\S]{0,500}?!http_deadline_ready\(\)[\s\S]{0,500}?xTaskCreate\(weather_task/,
   "Weather must refuse task creation when its boot-owned deadline watchdog is unavailable");
@@ -699,8 +709,8 @@ const startLockedStart = ota.indexOf("uint32_t start_locked(");
 const startLockedEnd = ota.indexOf("uint32_t start_check(", startLockedStart);
 const startLocked = ota.slice(startLockedStart, startLockedEnd);
 assert.match(startLocked,
-  /ensure_changelog_timer_locked\(\)[\s\S]{0,120}?xTimerStop\(s_changelog_timer,\s*0\)[\s\S]{0,120}?clear_changelog_lease_locked\(\)[\s\S]{0,500}?xTaskCreate\(/,
-  "retained courtesy text must be released before any next OTA task, including the update");
+  /ensure_changelog_timer_locked\(\)[\s\S]{0,120}?xTimerStop\(s_changelog_timer,\s*0\)[\s\S]{0,120}?clear_changelog_lease_locked\(\)[\s\S]{0,500}?xTaskNotifyGive\(s_ota_task\)/,
+  "retained courtesy text must be released before waking the worker for any next operation");
 assert.match(ota,
   /bool\s+ota_changelog_release\([\s\S]{0,500}?clear_changelog_lease_locked\(\)/,
   "the HTTP handler must be able to release retained notes on success or send failure");
@@ -957,11 +967,11 @@ assert.match(update,
   /transfer_failure\s*==\s*OtaTransferFailure::Size[\s\S]*?Update rejected: image size is invalid[\s\S]*?!complete\s*\?/,
   "size refusal must outrank the incomplete-transfer fallback in the user diagnosis");
 
-// Every failure returns through ota_task, whose single epilogue releases s_busy. That is what makes
-// the memory refusal retryable without a power-cycle-only latch.
+// Every failure returns through ota_task, whose per-operation completion tail releases s_busy. That
+// is what makes the memory refusal retryable without a power-cycle-only latch.
 const taskStart = ota.indexOf("void ota_task(");
 const taskEnd = ota.indexOf("uint32_t next_generation(", taskStart);
-assert.ok(taskStart >= 0 && taskEnd > taskStart, "the OTA task epilogue must remain identifiable");
+assert.ok(taskStart >= 0 && taskEnd > taskStart, "the OTA operation tail must remain identifiable");
 const task = ota.slice(taskStart, taskEnd);
 assert.ok(task.indexOf("run_update(") < task.lastIndexOf("s_busy = false"),
   "all install exits must release the one-operation guard so the user can retry");

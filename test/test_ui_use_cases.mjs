@@ -58,10 +58,20 @@ class Element {
     if (type === "click" && typeof this.onclick === "function") await this.onclick(event);
     return event;
   }
-  querySelector(selector) { return selector === '[role="dialog"]' ? this : null; }
+  querySelector(selector) {
+    if (selector === '[role="dialog"]') return this;
+    const suffix = {
+      ".crash-title": "Title",
+      ".ota-alert-message": "Message",
+      ".ota-alert-close": "Close",
+    }[selector];
+    return suffix && this.id.startsWith("otaAlert")
+      ? this.doc.getElementById(this.id + suffix) : null;
+  }
   focus() { this.doc.activeElement = this; }
   blur() { if (this.doc.activeElement === this) this.doc.activeElement = null; }
   setAttribute(name, value) { this[name] = String(value); }
+  getAttribute(name) { return this[name] ?? null; }
   appendChild(child) { this.children.push(child); this.lastChild = child; return child; }
   remove() {}
   select() { this.selectionStart = 0; this.selectionEnd = this.value.length; }
@@ -224,6 +234,7 @@ vm.runInContext(`${source}
   this.__ui = {
     S, MODALS, ROUTED_MODALS, TRANSIENT_MODALS, POPUP_ROUTES, wire, initNavigation,
     applyRouteFromLocation, hydrateRoutedPopup, askOtaInstall, settleOtaDecision,
+    otaFail, paintOtaAlert, dismissOtaAlert,
     openWifi, openMqtt, openRefTemp, openCirculation, openWeather, openSyslog,
     openNtp, openHomehub, openBoard, openBug,
   };`, context, { filename: "main/www/app.sources" });
@@ -491,6 +502,41 @@ await document.getElementById("otaInstall").onclick();
 assert.equal(await otaDecision, true, "only the primary OTA action may accept the install");
 assert.equal(document.activeElement, otaTrigger, "OTA Install must restore initiating focus");
 assert.equal(location.hash, "", "accepting OTA must still retain the initiating route");
+
+// A terminal OTA failure is not a six-second suffix beside the version. It is mirrored into the
+// two base-screen card slots, survives navigation/repaint, preserves server text literally and can
+// disappear only through its dedicated close control.
+const otaMemoryError = "Not enough <memory> to check for updates — retry after reboot";
+ui.S.stage = "dashboard";
+ui.otaFail(otaMemoryError);
+const dashOtaAlert = document.getElementById("otaAlertDash");
+const settingsOtaAlert = document.getElementById("otaAlertSettings");
+assert.equal(ui.S.otaAlert, otaMemoryError, "the exact firmware reason must remain UI state");
+assert.equal(dashOtaAlert.hidden, false, "the dashboard OTA card must appear");
+assert.equal(settingsOtaAlert.hidden, false, "the Settings OTA card must be ready for navigation");
+assert.equal(dashOtaAlert.querySelector(".ota-alert-message").textContent, otaMemoryError,
+  "device error text must remain literal rather than becoming markup");
+assert.equal(dashOtaAlert.querySelector(".ota-alert-close")["aria-label"], "Schließen",
+  "the close glyph must have a localized accessible name");
+
+loadRoute("#settings");
+const settingsOtaClose = settingsOtaAlert.querySelector(".ota-alert-close");
+settingsOtaClose.focus();
+ui.paintOtaAlert();
+assert.equal(ui.S.otaAlert, otaMemoryError, "navigation and repaint must not dismiss the OTA card");
+assert.equal(document.activeElement, settingsOtaClose,
+  "a status repaint must preserve focus on the stable OTA close control");
+await settingsOtaAlert.fire("click", { target: { closest: () => null } });
+assert.equal(settingsOtaAlert.hidden, false, "clicking the card body must not dismiss it");
+await settingsOtaAlert.fire("click", {
+  target: { closest: (selector) => selector === "[data-ota-alert-close]" ? {} : null },
+});
+assert.equal(ui.S.otaAlert, "", "the dedicated close control must clear the OTA alert state");
+assert.equal(dashOtaAlert.hidden, true, "closing in Settings must hide the dashboard twin");
+assert.equal(settingsOtaAlert.hidden, true, "closing in Settings must hide its visible card");
+assert.equal(document.activeElement, document.getElementById("e32Chan"),
+  "closing the Settings card must restore focus inside the active screen");
+loadRoute("");
 
 // The Settings cards are live-rendered and replace their controls. A disconnected initiator must
 // restore focus to the current stable channel control, not drop it onto body behind the modal.
