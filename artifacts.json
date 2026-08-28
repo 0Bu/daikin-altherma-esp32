@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "manifest_sha256": "fba45ecd7cc933654fe4b8eab61d2b0463ff36094dce7824d05594b6bd805104",
+  "artifacts": [{"path":"daikin-altherma-esp32-merged.bin","sha256":"61cb0642da7804dc34add29585539f2660eebcd50c0bbea306c7463133780dd0","size":2101248},{"path":"daikin-altherma-esp32-web-bootloader.bin","sha256":"348fd6eb7b3c187145b4868c6f03b8bc4a270cee17c45e586525a956c115ccba","size":20112},{"path":"daikin-altherma-esp32-web-ota_data_initial.bin","sha256":"7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f","size":8192},{"path":"daikin-altherma-esp32-web-partition-table.bin","sha256":"66258d5ce69516c515934c554a206bb301f9566d2a5dfb76e3304422ce1a1751","size":3072},{"path":"daikin-altherma-esp32.bin","sha256":"3f1c1f694627456bfde1defc6bfbe887488df5422e9dd114f1fe422760c92d73","size":1970176}]
+}
