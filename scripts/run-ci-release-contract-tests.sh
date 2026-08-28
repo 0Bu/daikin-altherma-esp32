@@ -148,8 +148,12 @@ production_gate = (
     workflow_dir.parents[1] / "scripts/production-ota-gate.py"
 ).read_text(encoding="utf-8")
 
-for name in ("build", "trusted_build", "release_hil", "publish"):
+for name in ("mechanical_gates", "build", "trusted_build", "publish"):
     require(name in jobs, f"missing {name!r} job")
+
+mechanical = jobs["mechanical_gates"]
+require("if: github.event_name != 'workflow_dispatch' || inputs.release != true" in mechanical,
+        "an explicit release dispatch still runs the mechanical test suite")
 
 untrusted = jobs["build"]
 require("contents: read" in untrusted, "untrusted build is not contents:read")
@@ -173,6 +177,10 @@ require("dist/*.bin" not in untrusted and "dist/manifest.json" not in untrusted 
 
 trusted = jobs["trusted_build"]
 require("github.ref == 'refs/heads/main'" in trusted, "signed build is not restricted to main")
+require("always()" in trusted and
+        "github.event_name == 'workflow_dispatch' && inputs.release == true" in trusted and
+        "needs.mechanical_gates.result == 'success'" in trusted,
+        "trusted build does not bypass tests only for an explicit release dispatch")
 require("environment:" not in trusted,
         "trusted build unexpectedly depends on an environment instead of the repository secret")
 require("contents: read" in trusted and "contents: write" not in trusted,
@@ -197,28 +205,13 @@ require("generate-ota-changelog.py" in trusted and "--published-ref FETCH_HEAD" 
         "trusted build does not generate and retain the version-bound OTA changelog")
 require("dist/artifacts.json" in trusted,
         "trusted build does not retain the manifest-bound artifact index")
-require("--verify-reproducible" in trusted and "steps.mode.outputs.mode == 'release'" in trusted,
-        "release build does not require a clean reproducibility rebuild")
-
-hil = jobs["release_hil"]
-require("needs: [trusted_build]" in hil and
-        "if: needs.trusted_build.outputs.mode == 'release'" in hil,
-        "release HIL is not restricted to an exact successful release candidate")
-require("runs-on: [self-hosted, daikin-release-lab]" in hil and "environment: release-hil" in hil,
-        "release HIL is not pinned to the protected isolated lab runner")
-require("contents: read" in hil and "contents: write" not in hil,
-        "release HIL repository token is not read-only")
-require("secrets.OTA_SIGNING_KEY" not in hil and "RELEASE_HIL_POWER_TOKEN" in hil and
-        "RELEASE_HIL_FEED_TOKEN" in hil,
-        "release HIL secret boundary is wrong")
-require("production-ota-gate.py" in hil and "--release-hil" in hil and
-        "--confirm-release-hil release-hil" in hil and "--execute" in hil,
-        "release HIL does not use the direct role-confirmed canonical OTA gate")
-require("--confirm-production" not in hil and "production-ota.json" not in hil,
-        "release HIL can reach the production role")
-for evidence in ("check-manifest-provenance.py", "check-signing-key-continuity.py",
-                 "expected-source-sha", "expected-version", "expected-app-sha256"):
-    require(evidence in hil, f"release HIL omits exact candidate evidence {evidence}")
+require("--verify-reproducible" not in trusted,
+        "manual release still performs a second reproducibility test build")
+for forbidden in ("require_release_hil", "release_hil:", "[self-hosted, daikin-release-lab]",
+                  "environment: release-hil", "RELEASE_HIL_POWER_TOKEN",
+                  "RELEASE_HIL_FEED_TOKEN", "--release-hil"):
+    require(forbidden not in text,
+            f"manual release workflow still contains hardware blocker {forbidden!r}")
 
 ota_gate = (workflow_dir.parents[1] / "scripts" / "production-ota-gate.py").read_text(
     encoding="utf-8"
@@ -435,9 +428,9 @@ require('def post_update_once(\n    endpoint: ResolvedHttpEndpoint' in ota_gate 
         "OTA update write is not bound to its prevalidated resolved endpoint")
 
 publish = jobs["publish"]
-require("needs: [trusted_build, release_hil]" in publish and
-        "needs.release_hil.result == 'success'" in publish and "always()" in publish,
-        "publisher does not require HIL success for releases while allowing skipped dev HIL")
+require("needs: [trusted_build]" in publish and
+        "if: needs.trusted_build.result == 'success'" in publish,
+        "publisher depends on something other than the requested signed build")
 require("contents: write" in publish and "actions: read" in publish,
         "publisher permissions are incomplete")
 require("OTA_SIGNING_KEY" not in publish, "write-capable publisher can see signing key")
@@ -457,8 +450,8 @@ for name, block in (("trusted build", trusted), ("publisher", publish)):
             f"{name} does not keep first-attempt dev publishes strictly forward-only")
 require("generate-ota-changelog.py --validate dist/changelog.json" in publish,
         "publisher does not validate the handed-off OTA changelog")
-require(publish.count("dist/artifacts.json") >= 3,
-        "publisher does not validate, publish and read back artifacts.json")
+require(publish.count("dist/artifacts.json") >= 2,
+        "publisher does not validate and publish artifacts.json")
 require("target_commitish: ${{ github.sha }}" in publish,
         "new release tag is not explicitly bound to github.sha")
 for notice in ("_site/LICENSE.txt", "_site/THIRD_PARTY_NOTICES.md", "_site/Apache-2.0.txt"):
@@ -470,19 +463,18 @@ release_create = publish.find("Create or resume release")
 require(0 <= provenance_check < source_recheck < root_publish < release_create,
         "provenance/source checks, Pages and GitHub Release are ordered unsafely")
 public_readback = publish.find("Verify public feed readback")
-release_readback = publish.find("Verify GitHub Release asset readback")
-require(root_publish < public_readback < release_create < release_readback,
-        "public Pages or GitHub Release bytes are not read back in safe order")
-require("verify-published-artifacts.py" in publish and "gh release download" in publish and
-        '--pages-commit "$pages_commit"' in publish and '--pages-prefix "$PAGES_PREFIX"' in publish and
-        "--attempts 30" in publish and
-        'cmp -- "$expected_names" "$actual_names"' in publish and
-        'cmp -- "$expected" "$readback/$name"' in publish,
-        "published artifact readback does not compare exact public bytes")
+require(root_publish < public_readback < release_create and
+        "if: needs.trusted_build.outputs.mode == 'dev'" in
+        publish[public_readback:public_readback + 180],
+        "public readback is not confined to the development channel")
+require("Verify GitHub Release asset readback" not in publish and
+        "Rebind release tag after asset readback" not in publish,
+        "manual release still runs post-publication test gates")
 require("Rebind release tag immediately before release mutation" in publish and
-        "Rebind release tag after asset readback" in publish and
-        publish.count('git rev-parse "v$VERSION^{commit}"') >= 2,
-        "release tag is not rebound immediately before and after release mutation")
+        "Verify release tag target" in publish and
+        publish.count('git rev-parse "v$VERSION^{commit}"') >= 2 and
+        release_create < publish.find("Verify release tag target"),
+        "release tag is not bound before mutation and verified after creation")
 
 relevant = re.search(r"relevant='([^']+)'", text)
 require(relevant is not None and "web-installer[.]mjs" in relevant.group(1),
@@ -556,8 +548,8 @@ for workflow in workflow_dir.glob("*.y*ml"):
     for runner in re.findall(r"(?m)^\s*runs-on:\s*(.+?)\s*$", workflow_text):
         require(runner in ("ubuntu-24.04", "[self-hosted, daikin-release-lab]"),
                 f"unapproved runner {runner} in {workflow.name}")
-require(text.count("runs-on: [self-hosted, daikin-release-lab]") == 1,
-        "isolated release-lab runner label is missing or reused")
+require("self-hosted" not in text,
+        "manual release workflow still depends on a private runner")
 
 idf_pins = re.findall(r"esp_idf_version:\s*(v[0-9.]+)", text)
 require(idf_pins and len(set(idf_pins)) == 1, "ESP-IDF job pins disagree")

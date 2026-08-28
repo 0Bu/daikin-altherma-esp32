@@ -158,15 +158,17 @@ documentation.
   updates; signed USB is bootstrap/recovery only.
 - The exact historical `1.0.2` bench writer predates `ota_stack_min_free_bytes`. Only its reported
   version plus shortened ELF identity may leave that one pre-reboot measurement unknown; a present
-  invalid or below-limit value, every other writer and release HIL still fail closed. Completed
+  invalid or below-limit value, every other writer and the standalone lab-HIL mode still fail
+  closed. Completed
   validation, positive heap minima, target probation and stress remain mandatory.
 - Production promotion remains a distinct `--confirm-production production --execute` transaction:
   bench staging and stress precede one production POST plus read-only canary and retained-X10A
   checks. Direct `/ota/update` writes and release creation remain outside both modes.
-- A manual release publishes only after the isolated `release-hil` runner has exercised the exact
-  signed candidate through armed rollback, a second committed install, cold power-cycle restore,
-  and a candidate-writer downgrade to the pinned bootstrap followed by rollback to the valid
-  candidate, before stack evidence and combined stress. This CI-only mode accepts no production role.
+- A manual `workflow_dispatch` with `release: true` is the maintainer's explicit publication
+  authorization. It skips the mechanical PR suite, performs one signed firmware build, publishes
+  the release feed, and creates the exact-source tag and GitHub Release. It never contacts a board,
+  requires no self-hosted runner, inventory, environment approval or hardware evidence, and does
+  not repeat the separately authorized test-board/production-board acceptance chain.
 
 ## Build and deterministic gates
 
