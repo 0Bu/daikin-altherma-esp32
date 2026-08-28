@@ -429,7 +429,7 @@ require('def post_update_once(\n    endpoint: ResolvedHttpEndpoint' in ota_gate 
 
 publish = jobs["publish"]
 require("needs: [trusted_build]" in publish and
-        "if: needs.trusted_build.result == 'success'" in publish,
+        "if: always() && needs.trusted_build.result == 'success'" in publish,
         "publisher depends on something other than the requested signed build")
 require("contents: write" in publish and "actions: read" in publish,
         "publisher permissions are incomplete")

@@ -836,7 +836,10 @@ jobs:
   # key to a write-capable job.
   publish:
     needs: [trusted_build]
-    if: needs.trusted_build.result == 'success'
+    # `trusted_build` deliberately admits a manual release through a skipped mechanical_gates job.
+    # `always()` prevents GitHub's implicit success() from propagating that transitive skip while
+    # the explicit result check still fails closed when the signed build itself did not succeed.
+    if: always() && needs.trusted_build.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
