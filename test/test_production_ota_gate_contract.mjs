@@ -171,8 +171,27 @@ assert.match(stress,
   /weather_refresh_token, weather_successes_before = request_weather_refresh\([\s\S]{0,100}?pinned_endpoint, host, started/);
 assert.match(gate, /"refresh": True/);
 assert.match(stress,
-  /refresh_fields\["refresh_completed_token"\] == weather_refresh_token[\s\S]{0,420}?refresh_fields\["refresh_requested_token"\] != weather_refresh_token[\s\S]{0,220}?refresh_fields\["refresh_started_token"\] != weather_refresh_token[\s\S]{0,220}?refresh_fields\["refresh_success_token"\] != weather_refresh_token/,
+  /refresh_fields\["refresh_completed_token"\] == weather_refresh_token[\s\S]{0,420}?refresh_fields\["refresh_requested_token"\] == weather_refresh_token[\s\S]{0,220}?refresh_fields\["refresh_started_token"\] == weather_refresh_token[\s\S]{0,220}?if not exact_attempt:[\s\S]{0,180}?refresh_fields\["refresh_success_token"\] != weather_refresh_token/,
   "live Weather acceptance must require the exact requested, started, completed and successful token");
+assert.equal(occurrences(stress, "weather_deadline ="), 1,
+  "Weather headroom retries must retain one absolute HIL deadline");
+assert.match(stress,
+  /remaining = weather_deadline - time\.monotonic\(\)[\s\S]{0,140}?if remaining <= 0:[\s\S]{0,100}?request_status_deadline\([\s\S]{0,100}?timeout=min\(remaining, 1\)/,
+  "each Weather status poll must be clamped to the remaining absolute deadline");
+assert.match(gate, /WEATHER_HEADROOM_RETRY_DELAY_S\s*=\s*5/,
+  "a failed headroom token must not be re-armed in a tight loop");
+assert.match(stress,
+  /refresh_fields\["refresh_success_token"\] != weather_refresh_token:[\s\S]{0,900}?weather_candidate\.get\("fetching"\) is False[\s\S]{0,180}?weather_candidate\.get\("state"\) == "waiting"[\s\S]{0,180}?weather_candidate\.get\("reason"\) == "heap_headroom"/,
+  "only an exact completed post-quiesce heap-headroom refusal may be re-armed");
+assert.match(stress,
+  /remaining = weather_deadline - time\.monotonic\(\)[\s\S]{0,420}?time\.sleep\(WEATHER_HEADROOM_RETRY_DELAY_S\)[\s\S]{0,420}?remaining = weather_deadline - time\.monotonic\(\)/,
+  "the retry backoff and its requests must consume the original absolute deadline");
+assert.match(stress,
+  /retry_weather\.get\("refresh_requested_token"\) != weather_refresh_token[\s\S]{0,220}?retry_weather\.get\("refresh_started_token"\) != weather_refresh_token[\s\S]{0,220}?retry_weather\.get\("refresh_completed_token"\) != weather_refresh_token[\s\S]{0,220}?retry_weather\.get\("refresh_success_token"\) == weather_refresh_token[\s\S]{0,300}?retry_weather\.get\("reason"\) != "heap_headroom"/,
+  "the failed token and exact refusal state must still hold immediately before re-arm");
+assert.match(stress,
+  /next_token, next_successes = request_weather_refresh\([\s\S]{0,220}?if next_token == weather_refresh_token:[\s\S]{0,180}?weather_refresh_token = next_token[\s\S]{0,120}?weather_successes_before = next_successes/,
+  "each re-arm must use a different token with its own success baseline");
 assert.match(stress,
   /successes_after <= weather_successes_before[\s\S]{0,160}?weather_candidate\.get\("fetching"\) is not False/,
   "the causal token must still correspond to a committed new success and released fetch owner");

@@ -287,7 +287,10 @@ and weather-TLS transport pauses, including either
 ordering of paused MQTT and matching weather evidence in a streamed status snapshot, and the sole generation-bound
 production write, with the OTA pause lease held for every in-flight status response. The firmware
 contract also pins the post-claim OTA race: only the local Weather attempt is deferred, and the same
-outstanding causal token must be reclaimed after OTA instead of being failed or replaced. Its paired
+outstanding causal token must be reclaimed after OTA instead of being failed or replaced. A separate
+host-only path re-arms only an exact completed `waiting/heap_headroom` refusal after five seconds,
+using a different token and success baseline without resetting the original deadline; every other
+Weather failure remains terminal. Its paired
 `tools/production_ota/selftest.mjs` requires every bench-delivery, release-HIL and
 production-promotion stage-removal mutation to turn that same contract red.
 

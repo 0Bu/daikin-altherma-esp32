@@ -59,6 +59,7 @@ MIN_FINAL_LARGEST_BLOCK = 16 * 1024
 MAX_X10A_TIMEOUT_DELTA = 3
 HTTP_TIMEOUT_S = 5
 OTA_CHECK_TIMEOUT_S = 120
+WEATHER_HEADROOM_RETRY_DELAY_S = 5
 # Firmware permits a 30 s re-manifest plus a five-minute binary deadline after bounded quiesce /
 # headroom waits, two verifier passes and reboot. The observer must outlive the only accepted write.
 OTA_TIMEOUT_S = 480
@@ -1221,6 +1222,7 @@ def require_stress_ota_offer(
 
 def request_weather_refresh(
     endpoint: ResolvedHttpEndpoint, host: str, status: dict[str, Any],
+    timeout: float = HTTP_TIMEOUT_S,
 ) -> tuple[int, int]:
     """Schedule one fresh weather TLS attempt without changing the saved configuration."""
     weather = status.get("weather_forecast")
@@ -1235,7 +1237,7 @@ def request_weather_refresh(
        isinstance(successes, bool) or not isinstance(successes, int) or successes < 0:
         fail(f"{host} weather status lacks unredacted coordinates or a valid success counter")
     result = request_json_deadline(
-        endpoint, "/set_weather", method="POST", timeout=HTTP_TIMEOUT_S,
+        endpoint, "/set_weather", method="POST", timeout=timeout,
         payload={"latitude": latitude, "longitude": longitude, "refresh": True},
     )
     refresh_token = result.get("refresh_token") if isinstance(result, dict) else None
@@ -1442,11 +1444,17 @@ def stress_board(
     else:
         fail(f"{host} OTA manifest TLS did not release its busy claim")
     weather_refresh_status: dict[str, Any] | None = None
+    weather_headroom_rearms = 0
     if require_weather:
         weather_deadline = min(deadline, time.monotonic() + OTA_CHECK_TIMEOUT_S)
         while time.monotonic() < weather_deadline:
+            remaining = weather_deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                candidate = request_status_deadline(pinned_endpoint, timeout=1)
+                candidate = request_status_deadline(
+                    pinned_endpoint, timeout=min(remaining, 1),
+                )
             except HTTPError as error:
                 if error.code != 503:
                     raise
@@ -1469,10 +1477,59 @@ def stress_board(
                        for value in refresh_fields.values()):
                     fail(f"{host} weather status has malformed refresh-token evidence")
                 if refresh_fields["refresh_completed_token"] == weather_refresh_token:
-                    if refresh_fields["refresh_requested_token"] != weather_refresh_token or \
-                       refresh_fields["refresh_started_token"] != weather_refresh_token or \
-                       refresh_fields["refresh_success_token"] != weather_refresh_token:
+                    exact_attempt = \
+                        refresh_fields["refresh_requested_token"] == weather_refresh_token and \
+                        refresh_fields["refresh_started_token"] == weather_refresh_token
+                    if not exact_attempt:
                         fail(f"{host} explicitly triggered weather TLS refresh failed")
+                    if refresh_fields["refresh_success_token"] != weather_refresh_token:
+                        # A post-quiesce headroom refusal is not a TLS/parser failure: firmware has
+                        # made no unsafe allocation and its ordinary five-minute retry cannot satisfy
+                        # this bounded fresh-boot HIL window. Re-arm only that exact completed
+                        # attempt, keep the original absolute deadline, and make the next token own
+                        # a fresh success baseline. Every threshold is re-applied by firmware.
+                        headroom_retry = \
+                            weather_candidate.get("fetching") is False and \
+                            weather_candidate.get("state") == "waiting" and \
+                            weather_candidate.get("reason") == "heap_headroom"
+                        if not headroom_retry:
+                            fail(f"{host} explicitly triggered weather TLS refresh failed")
+                        remaining = weather_deadline - time.monotonic()
+                        if remaining <= WEATHER_HEADROOM_RETRY_DELAY_S:
+                            break
+                        time.sleep(WEATHER_HEADROOM_RETRY_DELAY_S)
+                        remaining = weather_deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
+                        retry_status = request_status_deadline(
+                            pinned_endpoint, timeout=min(remaining, HTTP_TIMEOUT_S),
+                        )
+                        validate_identity(
+                            retry_status, host=host, mac=mac, version=version, elf=elf,
+                        )
+                        retry_weather = retry_status.get("weather_forecast")
+                        if not isinstance(retry_weather, dict) or \
+                           retry_weather.get("refresh_requested_token") != weather_refresh_token or \
+                           retry_weather.get("refresh_started_token") != weather_refresh_token or \
+                           retry_weather.get("refresh_completed_token") != weather_refresh_token or \
+                           retry_weather.get("refresh_success_token") == weather_refresh_token or \
+                           retry_weather.get("fetching") is not False or \
+                           retry_weather.get("state") != "waiting" or \
+                           retry_weather.get("reason") != "heap_headroom":
+                            fail(f"{host} weather headroom retry state changed before re-arm")
+                        remaining = weather_deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
+                        next_token, next_successes = request_weather_refresh(
+                            pinned_endpoint, host, retry_status,
+                            timeout=min(remaining, HTTP_TIMEOUT_S),
+                        )
+                        if next_token == weather_refresh_token:
+                            fail(f"{host} weather headroom retry reused its failed token")
+                        weather_refresh_token = next_token
+                        weather_successes_before = next_successes
+                        weather_headroom_rearms += 1
+                        continue
                     successes_after = weather_candidate.get("successes")
                     if isinstance(successes_after, bool) or not isinstance(successes_after, int) or \
                        successes_after <= weather_successes_before or \
@@ -1573,6 +1630,7 @@ def stress_board(
         "ota_check": {"state": ota_check.get("state"), "available": ota_check.get("available")},
         "weather_refresh": None if weather_refresh_status is None else {
             "token": weather_refresh_token,
+            "headroom_rearms": weather_headroom_rearms,
             "successes_before": weather_successes_before,
             "successes_after": weather_refresh_status.get("successes"),
             "fetched_at": weather_refresh_status.get("fetched_at"),

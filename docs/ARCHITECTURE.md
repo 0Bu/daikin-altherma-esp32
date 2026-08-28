@@ -2532,7 +2532,11 @@ Structure:
   must advance. The task claims and drains the matching notification atomically, so an unbound
   natural/retry fetch cannot satisfy the request or leave a second unobserved TLS cycle queued. An
   OTA-preempted attempt instead releases only its local claim, allowing a later cycle to reclaim the
-  same exact token. This token-bound
+  same exact token. A different bounded exception exists only for an exact post-quiesce
+  `waiting/heap_headroom` refusal: the host waits five seconds and may request a new non-persistent
+  token with a new success baseline while retaining the original 120-second absolute deadline. Each
+  attempt still passes the firmware's unchanged 56 KiB / 24 KiB admission gate; every other failed
+  token is terminal. This token-bound
   proof also covers the short status-update to asynchronous MQTT-resume gap. Because `/status` streams subsystem snapshots, one request can
   straddle that edge and contain either old weather fields beside paused MQTT or old connected MQTT
   beside new weather evidence. In the first direction the unexplained sample stays pending for the
