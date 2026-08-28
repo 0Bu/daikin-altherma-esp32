@@ -142,6 +142,28 @@ assert.match(stress, /required_uptime\(started/);
 assert.match(stress, /required_uptime\(status/);
 assert.match(stress, /required_uptime\(finished/);
 assert.match(stress, /require_stress_ota_offer\([\s\S]{0,180}?expected_app_sha256[\s\S]{0,100}?expected_channel/);
+assert.match(stress, /ready_deadline\s*=\s*time\.monotonic\(\)\s*\+\s*OTA_CHECK_TIMEOUT_S/);
+const readinessCounters = stress.indexOf("initial_counters = board_counters(started)");
+const readinessLoop = stress.indexOf("ready_deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S");
+const readinessBaseline = stress.indexOf("baseline = initial_counters", readinessLoop);
+assert.ok(readinessCounters >= 0 && readinessCounters < readinessLoop &&
+  readinessBaseline > readinessLoop,
+  "the pressure baseline must cover the complete post-reboot readiness wait");
+assert.match(stress,
+  /if any\(initial_counters\[key\] != 0 for key in readiness_keys\):/,
+  "readiness must start without a prior allocation failure");
+assert.match(stress, /if ready_uptime < last_ready_uptime:/,
+  "readiness must fail closed on a reboot");
+assert.match(stress,
+  /if any\(ready_counters\[key\] != initial_counters\[key\] for key in readiness_keys\):/,
+  "readiness must fail closed when allocation counters change");
+assert.match(stress,
+  /if int\(ready_system\.get\("free_heap", 0\)\) < MIN_FINAL_FREE_HEAP or \\\s+int\(ready_system\.get\("max_alloc", 0\)\) < MIN_FINAL_LARGEST_BLOCK:\s+fail\(f"\{host\} readiness window ended without safe heap"\)/,
+  "readiness must prove free and contiguous heap before pressure");
+assert.match(stress,
+  /if mqtt_connected is True and \(not require_weather or fetching is False\):/,
+  "every post-reboot pressure path must wait boundedly for MQTT, even without Weather");
+assert.match(stress, /MQTT did not connect before the pressure window/);
 assert.match(stress, /weather did not become idle before its HIL refresh/);
 assert.match(stress, /except HTTPError as error:[\s\S]{0,100}?error\.code != 503/,
   "only 503 may be retried during the explicit weather TLS window");
