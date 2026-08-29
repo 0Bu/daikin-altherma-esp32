@@ -32,6 +32,12 @@ seconds. **Run them all before opening a PR.** They are also the first steps of 
 `mechanical_gates` job, whose result the required `build` check consumes, so a failure here fails
 the PR anyway.
 
+The interpreter floors are **node ≥ 18** and **python ≥ 3.11** — the latter because
+[`tools/agent-config/check_toml.py`](tools/agent-config/check_toml.py) imports `tomllib`, which
+entered the standard library in 3.11. CI runs `ubuntu-24.04` (python 3.12), so a gate that needs a
+newer interpreter than these floors passes there and fails only on a contributor's machine; keep new
+tooling inside them rather than letting one file quietly raise the floor for the whole tree.
+
 ```bash
 scripts/run-mock-tests.sh --coverage # host logic tests + 95% floor + presenter parity
 scripts/run-sanitizer-fuzz-tests.sh # deterministic hostile-input properties under sanitizers
