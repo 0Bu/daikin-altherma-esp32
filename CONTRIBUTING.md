@@ -30,7 +30,11 @@ likely to be declined — the comment density and the "why" notes in this codeba
 These run on a plain system toolchain (cmake + g++/clang++ for the first, node for the rest) in
 seconds. **Run them all before opening a PR.** They are also the first steps of CI's
 `mechanical_gates` job, whose result the required `build` check consumes, so a failure here fails
-the PR anyway.
+the PR anyway. One asymmetry: CI runs the `*/selftest.sh` mutation canaries only when the diff
+reaches something they read (the scope step in
+[`build.yml`](.github/workflows/build.yml) maps changed files to them; a push to `main` always runs
+every one). Locally, run them as this section says — the list here is what a contributor owes,
+not what CI happened to skip.
 
 The interpreter floors are **node ≥ 18** and **python ≥ 3.11** — the latter because
 [`tools/agent-config/check_toml.py`](tools/agent-config/check_toml.py) imports `tomllib`, which
@@ -374,7 +378,7 @@ mutation canaries are:
 Run `tools/agent-config/selftest.sh` after changing agent instructions, skills, subagent definitions,
 hook mappings, or the checker itself.
 
-The mechanical job runs `tools/agent-policy/selftest.sh`; the separate `pr-policy.yml` workflow
+The mechanical job runs `tools/agent-policy/selftest.sh` whenever a diff reaches it; the separate `pr-policy.yml` workflow
 provides the required `gates` check and invokes protected-base `scripts/run-agent-policy.sh` with the
 current PR body, head SHA and complete changed-file list from GitHub. Missing/partial inputs, an event SHA that is no longer
 the PR head, an unchecked or missing required review, and a stamp for an older commit all exit 2. A
