@@ -151,16 +151,29 @@ jobs:
 
       # Which MUTATION SELF-TESTS ("still has teeth") this diff can actually affect.
       #
-      # These prove a gate can still FAIL; they are pure functions of the gate's own tooling, so on
-      # a PR that touches none of it they re-prove an unchanged fact. Measured on one real PR they
-      # were 125 s of a 267 s job — 47 % of every PR's mechanical CI spent testing the gates rather
-      # than the firmware, with tools/agent-hooks/selftest.sh alone at 62 s, the slowest step in the
-      # whole pipeline.
+      # These prove a gate can still FAIL, so on a PR that cannot reach one of them it re-proves an
+      # unchanged fact. Measured on one real PR they were 125 s of a 267 s job — 47 % of every PR's
+      # mechanical CI spent testing the gates rather than the firmware, with
+      # tools/agent-hooks/selftest.sh alone at 62 s, the slowest step in the whole pipeline.
       #
       # Only the NINE self-tests costing >= 4 s are gated: they are 116 s of that 125 s, so the
       # remaining nine (9 s together) stay unconditional rather than buy 7 % for twice the
-      # conditionals. Gating is by tooling path, never by the audited DATA: a self-test seeds its own
-      # fixture, so audited content cannot change its verdict.
+      # conditionals.
+      #
+      # EACH PATTERN BELOW IS ITS SELF-TEST'S INPUT SURFACE — the tree paths that self-test reads or
+      # copies — never the subject its gate is merely named after. Most of them do NOT seed a
+      # self-contained fixture: tools/absence/selftest.sh copies main/, test/, tools/ and
+      # sdkconfig.defaults and then re-introduces defects by exact string, asserting
+      # `seed 1 did not apply — the call site moved` when main/hp_poll.cpp has moved on;
+      # tools/agent-config/selftest.sh drives scripts/run-agent-instructions-budget.sh itself;
+      # tools/esp_idf_matrix/selftest.py reads main/CMakeLists.txt, partitions.csv and
+      # sdkconfig.defaults. A mapping drawn from tool ownership instead would skip a self-test on
+      # exactly the diff that can break it — including the one diff shape that matters most, an edit
+      # to the gate script whose canary is the only thing proving it can still fail.
+      #
+      # Verdicts still never key on the audited DATA: a defect seeded into a throwaway copy is what
+      # each self-test judges, so audited content changes which files it must run for, not what it
+      # concludes.
       #
       # Fail-open by construction: anything other than an ordinary pull_request, an unresolvable
       # diff, or a change to this workflow runs the complete set. A push to main therefore always
@@ -188,16 +201,23 @@ jobs:
             echo "  $1=$value"
           }
           echo "mutation self-test scope (all=$all):"
-          # agent-hooks drives the merge gate, which runs the UI, absence and UI-GIF suites.
-          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif)/|\.codex/hooks\.json$|\.github/pull_request_template\.md$|scripts/run-(agent-policy|ui-use-case-tests|ui-gif-audit)\.sh$)'
-          emit agent_config '^(tools/agent-config/|\.codex/|\.agents/|AGENTS\.md$|scripts/gh-with-git-credentials\.sh$)'
-          emit agent_policy '^(tools/agent-policy/|\.github/workflows/pr-policy\.yml$|scripts/run-agent-policy\.sh$)'
-          emit domain '^(tools/domain/|scripts/run-domain-audit\.sh$|main/def/|docs/REGISTERS\.md$)'
-          emit absence '^(tools/absence/|scripts/run-browser-render-tests\.sh$)'
-          emit presenter '^(tools/presenter/|scripts/check-presenter-parity\.sh$|test/presenter_golden_dump\.cpp$|main/www/|main/logic/)'
-          emit uigif '^(tools/uigif/|scripts/(run-ui-gif-audit|record-dashboard-gif)\.sh$|docs/media/)'
-          emit schematic '^(tools/schematic/|scripts/run-schematic-audit\.sh$|main/www/|docs/DESIGN\.md$)'
-          emit esp_idf_matrix '^(tools/esp_idf_matrix/|scripts/run-esp-idf-matrix-audit\.sh$|docs/ESP_IDF_MATRIX\.md$)'
+          # agent-hooks drives the merge gate, which runs the UI, absence and UI-GIF suites; its
+          # formatter cases copy the real .clang-format, and it pins the exact command shapes of
+          # gh-with-git-credentials.sh and production-ota-gate.py.
+          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif)/|\.codex/hooks\.json$|\.clang-format$|\.github/pull_request_template\.md$|scripts/(run-(agent-policy|ui-use-case-tests|ui-gif-audit)|gh-with-git-credentials|production-ota-gate)\.(sh|py)$)'
+          # agent-config's canaries run scripts/run-agent-instructions-budget.sh over a fixture built
+          # from .agents/, .codex/, AGENTS.md and .mcp.json.
+          emit agent_config '^(tools/agent-config/|\.codex/|\.agents/|AGENTS\.md$|\.mcp\.json$|scripts/(gh-with-git-credentials|run-agent-instructions-budget)\.sh$)'
+          # agent-policy drives require-pr-gates.sh and reads both Renovate records.
+          emit agent_policy '^(tools/agent-policy/|tools/agent-hooks/require-pr-gates\.sh$|\.github/(workflows/(pr-policy|renovate)\.ya?ml|renovate\.json)$|scripts/(run-agent-policy|gh-with-git-credentials)\.sh$)'
+          # the domain canaries compile catalog_audit.cpp against main/logic and test/test_logic.cpp.
+          emit domain '^(tools/domain/|scripts/run-domain-audit\.sh$|main/(def|logic)/|test/test_logic\.cpp$|docs/REGISTERS\.md$)'
+          # absence copies main/, test/, tools/ and sdkconfig.defaults, then seeds by exact string.
+          emit absence '^(tools/|main/|test/|sdkconfig\.defaults$|scripts/run-browser-render-tests\.sh$)'
+          emit presenter '^(tools/(presenter|ui)/|scripts/check-presenter-parity\.sh$|test/presenter_golden_dump\.cpp$|main/(www|logic|def)/)'
+          emit uigif '^(tools/(uigif|ui)/|scripts/(run-ui-gif-audit|record-dashboard-gif)\.sh$|docs/media/|main/www/|README\.md$)'
+          emit schematic '^(tools/schematic/|scripts/run-schematic-audit\.sh$|main/(www|def)/|docs/DESIGN\.md$)'
+          emit esp_idf_matrix '^(tools/esp_idf_matrix/|scripts/run-esp-idf-matrix-audit\.sh$|main/|partitions\.csv$|sdkconfig\.defaults$|docs/ESP_IDF_MATRIX\.md$)'
 
       # Contributor-authored text: does the commit range this PR carries, or its title/description,
       # hold personal information (an email outside GitHub's own noreply/example patterns, a phone
