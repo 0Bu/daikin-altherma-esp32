@@ -140,14 +140,34 @@ jobs:
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
           tested_base="$(git rev-parse HEAD^1)"
           tested_head="$(git rev-parse HEAD^2)"
-          [ "$tested_base" = "$EVENT_BASE_SHA" ] \
-            || { echo "tested merge tree uses base $tested_base, expected $EVENT_BASE_SHA" >&2; exit 2; }
+          # The HEAD binding is exact and stays exact: it is what stops CI from attesting a tree
+          # the reviewer never saw, and every review stamp names this SHA.
           [ "$tested_head" = "$EVENT_HEAD_SHA" ] \
             || { echo "tested merge tree uses $tested_head, expected $EVENT_HEAD_SHA" >&2; exit 2; }
+          # The BASE binding cannot be exact. `pull_request.base.sha` is the base tip from when the
+          # PR was opened and never moves again — a synchronize does not refresh it — while
+          # refs/pull/N/merge is recomputed against the LIVE base. An equality check therefore held
+          # only until `main` moved under an open PR, which CONTRIBUTING.md says out loud that it
+          # does ("main moves under open PRs — expect to rebase before merge"), and no rebase can
+          # clear it: the stale value is on the PR object, not on the branch. The real invariant is
+          # weaker and is what this asserts — the tested tree merged the reviewed head onto a commit
+          # that is ON the base branch and no older than the reviewed base.
+          base_tip="$(git rev-parse --verify -q "refs/remotes/origin/$BASE_REF" || true)"
+          if [ -z "$base_tip" ]; then
+            git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
+            base_tip="$(git rev-parse --verify -q "refs/remotes/origin/$BASE_REF" || true)"
+          fi
+          [ -n "$base_tip" ] \
+            || { echo "cannot resolve the tip of base branch $BASE_REF" >&2; exit 2; }
+          git merge-base --is-ancestor "$tested_base" "$base_tip" \
+            || { echo "tested merge tree base $tested_base is not on $BASE_REF" >&2; exit 2; }
+          git merge-base --is-ancestor "$EVENT_BASE_SHA" "$tested_base" \
+            || { echo "tested merge tree base $tested_base predates the reviewed base $EVENT_BASE_SHA" >&2; exit 2; }
 
       # Which MUTATION SELF-TESTS ("still has teeth") this diff can actually affect.
       #
@@ -595,14 +615,34 @@ jobs:
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          compiled_base="$(git rev-parse HEAD^1)"
-          compiled_head="$(git rev-parse HEAD^2)"
-          [ "$compiled_base" = "$EVENT_BASE_SHA" ] \
-            || { echo "compiled merge tree uses base $compiled_base, expected $EVENT_BASE_SHA" >&2; exit 2; }
-          [ "$compiled_head" = "$EVENT_HEAD_SHA" ] \
-            || { echo "compiled merge tree uses $compiled_head, expected $EVENT_HEAD_SHA" >&2; exit 2; }
+          tested_base="$(git rev-parse HEAD^1)"
+          tested_head="$(git rev-parse HEAD^2)"
+          # The HEAD binding is exact and stays exact: it is what stops CI from attesting a tree
+          # the reviewer never saw, and every review stamp names this SHA.
+          [ "$tested_head" = "$EVENT_HEAD_SHA" ] \
+            || { echo "compiled merge tree uses $tested_head, expected $EVENT_HEAD_SHA" >&2; exit 2; }
+          # The BASE binding cannot be exact. `pull_request.base.sha` is the base tip from when the
+          # PR was opened and never moves again — a synchronize does not refresh it — while
+          # refs/pull/N/merge is recomputed against the LIVE base. An equality check therefore held
+          # only until `main` moved under an open PR, which CONTRIBUTING.md says out loud that it
+          # does ("main moves under open PRs — expect to rebase before merge"), and no rebase can
+          # clear it: the stale value is on the PR object, not on the branch. The real invariant is
+          # weaker and is what this asserts — the tested tree merged the reviewed head onto a commit
+          # that is ON the base branch and no older than the reviewed base.
+          base_tip="$(git rev-parse --verify -q "refs/remotes/origin/$BASE_REF" || true)"
+          if [ -z "$base_tip" ]; then
+            git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
+            base_tip="$(git rev-parse --verify -q "refs/remotes/origin/$BASE_REF" || true)"
+          fi
+          [ -n "$base_tip" ] \
+            || { echo "cannot resolve the tip of base branch $BASE_REF" >&2; exit 2; }
+          git merge-base --is-ancestor "$tested_base" "$base_tip" \
+            || { echo "compiled merge tree base $tested_base is not on $BASE_REF" >&2; exit 2; }
+          git merge-base --is-ancestor "$EVENT_BASE_SHA" "$tested_base" \
+            || { echo "compiled merge tree base $tested_base predates the reviewed base $EVENT_BASE_SHA" >&2; exit 2; }
 
       - name: Stamp compile-only firmware version
         if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
