@@ -235,7 +235,10 @@ jobs:
           # absence copies main/, test/, tools/ and sdkconfig.defaults, then seeds by exact string.
           emit absence '^(tools/|main/|test/|sdkconfig\.defaults$|scripts/run-browser-render-tests\.sh$)'
           emit presenter '^(tools/(presenter|ui)/|scripts/check-presenter-parity\.sh$|test/presenter_golden_dump\.cpp$|main/(www|logic|def)/)'
-          emit uigif '^(tools/(uigif|ui)/|scripts/(run-ui-gif-audit|record-dashboard-gif)\.sh$|docs/media/|main/www/|README\.md$)'
+          # uigif's section-7 cases copy the merge-gate stack into a fixture and RUN it — proving a
+          # stale recording still blocks merge past a current human $ui-gif stamp, and that the MCP
+          # merge path cannot bypass the REST-only gate — so that stack is part of its input surface.
+          emit uigif '^(tools/(uigif|ui)/|scripts/(run-ui-gif-audit|record-dashboard-gif|gh-with-git-credentials)\.sh$|docs/media/|main/www/|README\.md$|tools/agent-hooks/(require-pr-gates|pr-gate-lib)\.sh$|tools/agent-hooks/(merge_payload|run_with_timeout)\.py$|tools/agent-policy/extract_changed_files\.py$)'
           emit schematic '^(tools/schematic/|scripts/run-schematic-audit\.sh$|main/(www|def)/|docs/DESIGN\.md$)'
           emit esp_idf_matrix '^(tools/esp_idf_matrix/|scripts/run-esp-idf-matrix-audit\.sh$|main/|partitions\.csv$|sdkconfig\.defaults$|docs/ESP_IDF_MATRIX\.md$)'
 
