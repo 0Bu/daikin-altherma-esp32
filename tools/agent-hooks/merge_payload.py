@@ -1149,6 +1149,17 @@ def main() -> int:
         return 2
     tool = str(data.get("tool_name") or "")
     tool_input = data.get("tool_input") or {}
+    if "toolCall" in data and isinstance(data["toolCall"], dict):
+        tc = data["toolCall"]
+        tc_name = str(tc.get("name") or "").strip().lower()
+        tc_args = tc.get("args") or {}
+        if isinstance(tc_args, dict) and tc_name == "run_command":
+            tool = "bash"
+            tool_input = {"command": tc_args.get("CommandLine", ""), "cwd": tc_args.get("Cwd", "")}
+            if "cwd" not in data and tc_args.get("Cwd"):
+                data["cwd"] = tc_args["Cwd"]
+            elif "cwd" not in data and isinstance(data.get("workspacePaths"), list) and data["workspacePaths"]:
+                data["cwd"] = data["workspacePaths"][0]
     if not isinstance(tool_input, dict):
         return 2
     parsed: dict[str, str] | None = None

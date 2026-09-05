@@ -1039,6 +1039,7 @@ fi
 tmp_physical="$(cd "$tmp" && pwd -P)"
 wrapper_body_file="$tmp_physical/wrapper-body.md"
 printf '%s\n' 'review body canary' >"$wrapper_body_file"
+chmod 644 "$wrapper_body_file"
 rm -f "$wrapper_args" "$wrapper_marker"
 wrapper_out="$(env PATH="$wrapper_bin:/usr/bin:/bin" GH_TOKEN=selftest-wrapper-token \
     "$wrapper_under_test" pr edit 5 --body-file "$wrapper_body_file" 2>&1)"; rc=$?
