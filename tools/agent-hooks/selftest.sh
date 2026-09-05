@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Positive and negative mutation tests for canonical hook payloads and the consolidated PR gate.
 set -uo pipefail
+umask 0022
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 hook="$root/tools/agent-hooks/agent_hook.py"
@@ -31,10 +32,7 @@ PY
 }
 
 decision() {
-    python3 -c 'import json,sys
-s=sys.stdin.read().strip()
-if not s: print("")
-else: print(json.loads(s)["hookSpecificOutput"]["permissionDecision"])' 2>/dev/null
+    sed -n 's/.*"permissionDecision"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
 guard_case() {

@@ -102,11 +102,12 @@ if [ "$VERIFY_REPRODUCIBLE" = true ]; then
 elif command -v ccache >/dev/null 2>&1; then
     export IDF_CCACHE_ENABLE=1
     export CCACHE_DIR="${CCACHE_DIR:-$PWD/.ccache}"
-    export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-400M}"
+    export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-1.5G}"
     # Hash the compiler's CONTENT, not its mtime: a container image re-pulled per CI run has fresh
     # timestamps on identical binaries, which under the default mtime check would miss every time.
     export CCACHE_COMPILERCHECK=content
     echo "ccache: enabled ($CCACHE_DIR, max $CCACHE_MAXSIZE)"
+    ccache -s || true
 else
     echo "ccache: not installed — building without it"
 fi
@@ -193,6 +194,10 @@ for t in "${TARGETS[@]}"; do
     # guarantee fails the same build it was meant to control.
     python3 scripts/check-sdkconfig-defaults.py sdkconfig.defaults "$SDKCONFIG_PATH"
     idf.py "${IDF_BUILD_ARGS[@]}" build
+    if command -v ccache >/dev/null 2>&1 && [ "${IDF_CCACHE_ENABLE:-0}" = "1" ]; then
+        echo "=== ccache statistics ==="
+        ccache -s || true
+    fi
     python3 scripts/check-stack-budget.py --elf "$BUILD_DIR/daikin-altherma-esp32.elf"
     sfx="$(suffix "$t")"
     app="$BUILD_DIR/daikin-altherma-esp32.bin"

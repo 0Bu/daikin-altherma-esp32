@@ -1,0 +1,40 @@
+name: Mirror ESP-IDF Image to GHCR
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/build.yml
+      - scripts/idf-version.sh
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Mirror ESP-IDF container image to GHCR
+        run: |
+          set -euo pipefail
+          idf_ver="$(./scripts/idf-version.sh)"
+          src="espressif/idf:${idf_ver}"
+          dest="ghcr.io/${{ github.repository_owner }}/idf:${idf_ver}"
+          echo "Pulling $src..."
+          docker pull "$src"
+          echo "Tagging $dest..."
+          docker tag "$src" "$dest"
+          echo "Pushing $dest to GHCR..."
+          docker push "$dest"
+          echo "Mirroring complete: $dest"
