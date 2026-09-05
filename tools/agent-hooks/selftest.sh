@@ -2329,5 +2329,75 @@ else
     echo "FAIL  failing local absence suite did not block (rc=$rc output=$out)" >&2; fail=$((fail + 1))
 fi
 
+# ── PostToolUse formatter: changed-hunk scope only ──────────────────────────────────────────────
+# The CI format gate deliberately checks only changed hunks and leaves existing hand-formatted
+# layout alone ("legacy drift outside the diff is not rewritten"). This hook used to run
+# `clang-format -i` over the WHOLE file, doing the exact opposite on every edit: one edited line in
+# main/mqtt_ha.cpp reflowed 2226 of them, burying the real change and undoing the comment layout
+# CONTRIBUTING.md calls load-bearing. These cases pin both halves — edited lines ARE formatted,
+# untouched lines are NOT. The hook anchors to its own worktree (HOOK_ROOT), so it is staged into
+# the fixture and invoked there, the same way the merge-gate fixtures above are built.
+if command -v clang-format >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
+    fmt_root="$(cd "$(mktemp -d)" && pwd -P)"
+    mkdir -p "$fmt_root/main" "$fmt_root/tools/agent-hooks"
+    cp "$root/tools/agent-hooks/agent_hook.py" "$fmt_root/tools/agent-hooks/"
+    cp "$root/tools/agent-hooks/merge_payload.py" "$fmt_root/tools/agent-hooks/"
+    cp "$root/.clang-format" "$fmt_root/.clang-format"
+    fmt_hook="$fmt_root/tools/agent-hooks/agent_hook.py"
+    git -C "$fmt_root" init -q
+    git -C "$fmt_root" config user.email selftest@example.com
+    git -C "$fmt_root" config user.name selftest
+    # Deliberate non-clang-format layout, committed: the ratchet must preserve it.
+    printf 'int  legacy_untouched ( int a )  {  return a ;  }\nint keep_me(int b) { return b; }\n' \
+        >"$fmt_root/main/probe.cpp"
+    git -C "$fmt_root" add -A >/dev/null 2>&1
+    git -C "$fmt_root" commit -qm baseline >/dev/null 2>&1
+
+    fmt_payload() {
+        python3 - "$1" "$2" <<'PY'
+import json, sys
+path, cwd = sys.argv[1:]
+print(json.dumps({"hook_event_name": "PostToolUse", "cwd": cwd,
+                  "tool_name": "Edit", "tool_input": {"file_path": path}}))
+PY
+    }
+
+    printf 'int   added_line ( int c )  {return c ;}\n' >>"$fmt_root/main/probe.cpp"
+    fmt_payload "$fmt_root/main/probe.cpp" "$fmt_root" | python3 "$fmt_hook" format >/dev/null 2>&1
+    # Assert the alignment-INDEPENDENT part: clang-format aligns the declaration's type column
+    # with its untouched neighbours (AlignConsecutiveDeclarations), which is exactly the
+    # surrounding-context behaviour a range-limited format should have.
+    if grep -qF 'added_line(int c) { return c; }' "$fmt_root/main/probe.cpp"; then
+        echo "PASS  formatter fixes the edited line"; pass=$((pass + 1))
+    else
+        echo "FAIL  formatter did not format the edited line" >&2; fail=$((fail + 1))
+    fi
+    if grep -qF 'int  legacy_untouched ( int a )  {  return a ;  }' "$fmt_root/main/probe.cpp"; then
+        echo "PASS  formatter leaves unedited legacy layout alone"; pass=$((pass + 1))
+    else
+        echo "FAIL  formatter reflowed unedited legacy layout" >&2; fail=$((fail + 1))
+    fi
+
+    git -C "$fmt_root" add -A >/dev/null 2>&1
+    git -C "$fmt_root" commit -qm added >/dev/null 2>&1
+    fmt_before="$(cat "$fmt_root/main/probe.cpp")"
+    fmt_payload "$fmt_root/main/probe.cpp" "$fmt_root" | python3 "$fmt_hook" format >/dev/null 2>&1
+    if [ "$fmt_before" = "$(cat "$fmt_root/main/probe.cpp")" ]; then
+        echo "PASS  formatter is a no-op on an unchanged file"; pass=$((pass + 1))
+    else
+        echo "FAIL  formatter rewrote an unchanged file" >&2; fail=$((fail + 1))
+    fi
+
+    # An untracked file is entirely new: no legacy layout to protect, so format it whole.
+    printf 'int  fresh ( )  {return 0 ;}\n' >"$fmt_root/main/fresh.cpp"
+    fmt_payload "$fmt_root/main/fresh.cpp" "$fmt_root" | python3 "$fmt_hook" format >/dev/null 2>&1
+    if grep -qF 'int fresh() { return 0; }' "$fmt_root/main/fresh.cpp"; then
+        echo "PASS  formatter formats a whole untracked file"; pass=$((pass + 1))
+    else
+        echo "FAIL  formatter skipped an untracked file" >&2; fail=$((fail + 1))
+    fi
+    rm -rf "$fmt_root"
+fi
+
 echo "agent hook selftest: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

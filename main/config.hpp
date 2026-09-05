@@ -28,6 +28,13 @@ OtaChannel config_ota_channel();
 // Load from NVS, seeding any missing key from its Kconfig default.
 void config_load();
 
+// All three writers below are [[nodiscard]], for the reason nvs_storage.hpp's setters carry it one
+// layer down: a dropped result is silent, and only the caller knows what the failure costs. A
+// /set_* handler that ignores it answers 200 and reboots as if the write landed — precisely what
+// AGENTS.md's "Configuration writes are atomic and fallible. Check every result" forbids. Every
+// call site checks today; the attribute is what makes the next one a build error rather than a
+// review catch, and main/CMakeLists.txt already pins -Werror=unused-result on this component.
+
 // Persist the given config to NVS. The credential/service/board/channel fields are one atomic blob;
 // the X10A link cache (RX/TX/proto/history identity) is a separate self-healing durability domain.
 // Ordinary callers
@@ -36,23 +43,23 @@ void config_load();
 // entry landed. The model (profile + fingerprint) is NOT written. For the whole-struct writers only:
 // the /set_* handlers, serialized on the single httpd task. The poll task must NOT use this — see
 // the compare-and-commit detection helpers below.
-bool config_save(const Config& c, bool require_link = false);
+[[nodiscard]] bool config_save(const Config& c, bool require_link = false);
 
 // Atomically commit the link proven by one detection sweep, but only if the live config still has
 // the revision captured before that sweep. The NVS link write and RAM publication are
 // serialized with every HTTP config save, closing the detect-vs-/set_hp TOCTOU. A failed NVS cache
 // write still publishes the proven session state; `link_saved` reports that narrower durability
 // outcome. Returns false only when the expected revision is stale and nothing was changed.
-bool config_commit_detected_link(const Config& expected, int rx_pin, int tx_pin, Protocol proto,
-                                 uint32_t identity_fp, bool& link_saved,
-                                 uint32_t& committed_revision);
+[[nodiscard]] bool config_commit_detected_link(const Config& expected, int rx_pin, int tx_pin,
+                                               Protocol proto, uint32_t identity_fp,
+                                               bool& link_saved, uint32_t& committed_revision);
 
 // Publish the model only if nothing changed after the link commit. Keeping this as a second CAS lets
 // the caller reset every identity-bound observer while the public config still says "auto"; readers
 // never see a new profile paired with old trend/checkup/dwell state.
-bool config_commit_detected_model(uint32_t expected_revision, std::string profile,
-                                  uint32_t fp_pages, int fp_kw_tenths, int fp_iu_kw_tenths,
-                                  std::string fp_eeprom);
+[[nodiscard]] bool config_commit_detected_model(uint32_t expected_revision, std::string profile,
+                                                uint32_t fp_pages, int fp_kw_tenths,
+                                                int fp_iu_kw_tenths, std::string fp_eeprom);
 
 // Publish a whole config to the in-RAM singleton WITHOUT touching NVS. Used by POST /detect to reset
 // the session-only model back to the "auto" sentinel; the detection path itself commits through the
