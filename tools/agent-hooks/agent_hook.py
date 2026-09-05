@@ -1593,6 +1593,59 @@ def eligible_format_path(root: Path, target: str) -> Path | None:
     return None
 
 
+FORMAT_HUNK_RE = re.compile(r"^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@")
+
+
+def format_line_ranges(root: Path, path: Path) -> list[tuple[int, int]] | None:
+    """The lines THIS working-tree change touched, as clang-format --lines ranges.
+
+    Mirrors tools/format/check_format.py's changed-hunk scope on purpose. The CI gate
+    deliberately ratchets — "existing legacy drift outside the diff is not rewritten" — and a hook
+    that ran `clang-format -i` over the WHOLE file silently did the opposite: it reflowed every
+    hand-formatted line the ratchet exists to protect. Editing one line of main/mqtt_ha.cpp
+    rewrote 2226, burying the real change in a diff no reviewer can read and undoing the comment
+    layout CONTRIBUTING.md calls load-bearing.
+
+    Returns None when the scope cannot be established (no git, not a work tree, unreadable diff).
+    None means "format nothing": a hook that cannot tell new code from old must not rewrite either.
+    An untracked file is entirely new, so it has no legacy drift to protect and is formatted whole.
+    """
+    if not shutil.which("git"):
+        return None
+    try:
+        relative = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+    try:
+        untracked = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", relative],
+            check=False, capture_output=True, text=True, timeout=10,
+        )
+        if untracked.returncode != 0:
+            return None
+        if untracked.stdout.strip():
+            line_count = path.read_bytes().count(b"\n")
+            return [(1, max(1, line_count))]
+        diff = subprocess.run(
+            ["git", "-C", str(root), "diff", "--unified=0", "--no-color", "HEAD", "--", relative],
+            check=False, capture_output=True, text=True, timeout=10,
+        )
+        if diff.returncode != 0:
+            return None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    ranges: list[tuple[int, int]] = []
+    for line in diff.stdout.splitlines():
+        match = FORMAT_HUNK_RE.match(line)
+        if not match:
+            continue
+        start = int(match.group(1))
+        count = int(match.group(2)) if match.group(2) is not None else 1
+        if count > 0:
+            ranges.append((start, start + count - 1))
+    return ranges
+
+
 def run_format(_: argparse.Namespace) -> int:
     payload, _ = read_payload(fail_closed=False)
     if not payload or shutil.which("clang-format") is None:
@@ -1604,8 +1657,16 @@ def run_format(_: argparse.Namespace) -> int:
     root = HOOK_ROOT
     for target in dict.fromkeys(targets):
         path = eligible_format_path(root, target)
-        if path is not None and path.is_file():
-            subprocess.run(["clang-format", "-i", str(path)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if path is None or not path.is_file():
+            continue
+        ranges = format_line_ranges(root, path)
+        if not ranges:
+            # None (no scope) and [] (nothing changed) both mean: leave the file alone.
+            continue
+        command = ["clang-format", "-i"]
+        command.extend(f"--lines={start}:{end}" for start, end in ranges)
+        command.append(str(path))
+        subprocess.run(command, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return 0
 
 

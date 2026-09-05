@@ -140,14 +140,107 @@ jobs:
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
           tested_base="$(git rev-parse HEAD^1)"
           tested_head="$(git rev-parse HEAD^2)"
-          [ "$tested_base" = "$EVENT_BASE_SHA" ] \
-            || { echo "tested merge tree uses base $tested_base, expected $EVENT_BASE_SHA" >&2; exit 2; }
+          # The HEAD binding is exact and stays exact: it is what stops CI from attesting a tree
+          # the reviewer never saw, and every review stamp names this SHA.
           [ "$tested_head" = "$EVENT_HEAD_SHA" ] \
             || { echo "tested merge tree uses $tested_head, expected $EVENT_HEAD_SHA" >&2; exit 2; }
+          # The BASE binding cannot be exact. `pull_request.base.sha` is the base tip from when the
+          # PR was opened and never moves again — a synchronize does not refresh it — while
+          # refs/pull/N/merge is recomputed against the LIVE base. An equality check therefore held
+          # only until `main` moved under an open PR, which CONTRIBUTING.md says out loud that it
+          # does ("main moves under open PRs — expect to rebase before merge"), and no rebase can
+          # clear it: the stale value is on the PR object, not on the branch. The real invariant is
+          # weaker and is what this asserts — the tested tree merged the reviewed head onto a commit
+          # that is ON the base branch and no older than the reviewed base.
+          base_tip="$(git rev-parse --verify -q "refs/remotes/origin/$BASE_REF" || true)"
+          if [ -z "$base_tip" ]; then
+            git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
+            base_tip="$(git rev-parse --verify -q "refs/remotes/origin/$BASE_REF" || true)"
+          fi
+          [ -n "$base_tip" ] \
+            || { echo "cannot resolve the tip of base branch $BASE_REF" >&2; exit 2; }
+          git merge-base --is-ancestor "$tested_base" "$base_tip" \
+            || { echo "tested merge tree base $tested_base is not on $BASE_REF" >&2; exit 2; }
+          git merge-base --is-ancestor "$EVENT_BASE_SHA" "$tested_base" \
+            || { echo "tested merge tree base $tested_base predates the reviewed base $EVENT_BASE_SHA" >&2; exit 2; }
+
+      # Which MUTATION SELF-TESTS ("still has teeth") this diff can actually affect.
+      #
+      # These prove a gate can still FAIL, so on a PR that cannot reach one of them it re-proves an
+      # unchanged fact. Measured on one real PR they were 125 s of a 267 s job — 47 % of every PR's
+      # mechanical CI spent testing the gates rather than the firmware, with
+      # tools/agent-hooks/selftest.sh alone at 62 s, the slowest step in the whole pipeline.
+      #
+      # Only the NINE self-tests costing >= 4 s are gated: they are 116 s of that 125 s, so the
+      # remaining nine (9 s together) stay unconditional rather than buy 7 % for twice the
+      # conditionals.
+      #
+      # EACH PATTERN BELOW IS ITS SELF-TEST'S INPUT SURFACE — the tree paths that self-test reads or
+      # copies — never the subject its gate is merely named after. Most of them do NOT seed a
+      # self-contained fixture: tools/absence/selftest.sh copies main/, test/, tools/ and
+      # sdkconfig.defaults and then re-introduces defects by exact string, asserting
+      # `seed 1 did not apply — the call site moved` when main/hp_poll.cpp has moved on;
+      # tools/agent-config/selftest.sh drives scripts/run-agent-instructions-budget.sh itself;
+      # tools/esp_idf_matrix/selftest.py reads main/CMakeLists.txt, partitions.csv and
+      # sdkconfig.defaults. A mapping drawn from tool ownership instead would skip a self-test on
+      # exactly the diff that can break it — including the one diff shape that matters most, an edit
+      # to the gate script whose canary is the only thing proving it can still fail.
+      #
+      # Verdicts still never key on the audited DATA: a defect seeded into a throwaway copy is what
+      # each self-test judges, so audited content changes which files it must run for, not what it
+      # concludes.
+      #
+      # Fail-open by construction: anything other than an ordinary pull_request, an unresolvable
+      # diff, or a change to this workflow runs the complete set. A push to main therefore always
+      # re-proves every gate, which is the backstop if a path mapping here is ever too narrow.
+      - name: Scope the mutation self-tests to the tooling this diff touches
+        id: scope
+        run: |
+          set -euo pipefail
+          all=no
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            # HEAD is the merge ref, so HEAD^1 is the base tip: exactly this PR's diff.
+            git diff --name-only HEAD^1 HEAD > /tmp/meta-changed.txt || all=yes
+          else
+            all=yes
+          fi
+          # Materialise before grepping, never `git diff | grep -q`: under pipefail grep -q exits at
+          # the first match, git diff dies of SIGPIPE, and a long changed-file list with an early
+          # match would take the wrong branch (see "Detect build-relevant changes" below).
+          if [ "$all" = no ] && grep -qE '^\.github/workflows/build\.yml$' /tmp/meta-changed.txt; then
+            all=yes   # the gating logic itself changed — re-prove everything
+          fi
+          emit() {
+            if [ "$all" = yes ] || grep -qE "$2" /tmp/meta-changed.txt; then value=yes; else value=no; fi
+            echo "$1=$value" >> "$GITHUB_OUTPUT"
+            echo "  $1=$value"
+          }
+          echo "mutation self-test scope (all=$all):"
+          # agent-hooks drives the merge gate, which runs the UI, absence and UI-GIF suites; its
+          # formatter cases copy the real .clang-format, and it pins the exact command shapes of
+          # gh-with-git-credentials.sh and production-ota-gate.py.
+          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif)/|\.codex/hooks\.json$|\.clang-format$|\.github/pull_request_template\.md$|scripts/(run-(agent-policy|ui-use-case-tests|ui-gif-audit)|gh-with-git-credentials|production-ota-gate)\.(sh|py)$)'
+          # agent-config's canaries run scripts/run-agent-instructions-budget.sh over a fixture built
+          # from .agents/, .codex/, AGENTS.md and .mcp.json.
+          emit agent_config '^(tools/agent-config/|\.codex/|\.agents/|AGENTS\.md$|\.mcp\.json$|scripts/(gh-with-git-credentials|run-agent-instructions-budget)\.sh$)'
+          # agent-policy drives require-pr-gates.sh and reads both Renovate records.
+          emit agent_policy '^(tools/agent-policy/|tools/agent-hooks/require-pr-gates\.sh$|\.github/(workflows/(pr-policy|renovate)\.ya?ml|renovate\.json)$|scripts/(run-agent-policy|gh-with-git-credentials)\.sh$)'
+          # the domain canaries compile catalog_audit.cpp against main/logic and test/test_logic.cpp.
+          emit domain '^(tools/domain/|scripts/run-domain-audit\.sh$|main/(def|logic)/|test/test_logic\.cpp$|docs/REGISTERS\.md$)'
+          # absence copies main/, test/, tools/ and sdkconfig.defaults, then seeds by exact string.
+          emit absence '^(tools/|main/|test/|sdkconfig\.defaults$|scripts/run-browser-render-tests\.sh$)'
+          emit presenter '^(tools/(presenter|ui)/|scripts/check-presenter-parity\.sh$|test/presenter_golden_dump\.cpp$|main/(www|logic|def)/)'
+          # uigif's section-7 cases copy the merge-gate stack into a fixture and RUN it — proving a
+          # stale recording still blocks merge past a current human $ui-gif stamp, and that the MCP
+          # merge path cannot bypass the REST-only gate — so that stack is part of its input surface.
+          emit uigif '^(tools/(uigif|ui)/|scripts/(run-ui-gif-audit|record-dashboard-gif|gh-with-git-credentials)\.sh$|docs/media/|main/www/|README\.md$|tools/agent-hooks/(require-pr-gates|pr-gate-lib)\.sh$|tools/agent-hooks/(merge_payload|run_with_timeout)\.py$|tools/agent-policy/extract_changed_files\.py$)'
+          emit schematic '^(tools/schematic/|scripts/run-schematic-audit\.sh$|main/(www|def)/|docs/DESIGN\.md$)'
+          emit esp_idf_matrix '^(tools/esp_idf_matrix/|scripts/run-esp-idf-matrix-audit\.sh$|main/|partitions\.csv$|sdkconfig\.defaults$|docs/ESP_IDF_MATRIX\.md$)'
 
       # Contributor-authored text: does the commit range this PR carries, or its title/description,
       # hold personal information (an email outside GitHub's own noreply/example patterns, a phone
@@ -211,6 +304,7 @@ jobs:
       # can drift from the C++ rule — including the mixed-zone row this project has already shipped
       # once — and fails if any of them survives.
       - name: Verify the presenter-parity gate still has teeth
+        if: steps.scope.outputs.presenter == 'yes'
         run: ./tools/presenter/selftest.sh
 
       # Translation completeness is its own fail-closed contract. Key/count parity catches newly
@@ -262,6 +356,7 @@ jobs:
       # and a correct one are indistinguishable without re-seeding the defects, which is what this
       # does. It has already caught one of its own assertions written so that it could never fire.
       - name: Prove the source-absence matrix still catches its defects
+        if: steps.scope.outputs.absence == 'yes'
         run: ./tools/absence/selftest.sh
 
       # Keep the source-linked ESP-IDF inventory honest. The checker derives its positive surface
@@ -271,6 +366,7 @@ jobs:
       - name: Audit the ESP-IDF feature matrix
         run: ./scripts/run-esp-idf-matrix-audit.sh
       - name: Verify the ESP-IDF matrix audit still has teeth
+        if: steps.scope.outputs.esp_idf_matrix == 'yes'
         run: ./tools/esp_idf_matrix/selftest.sh
 
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
@@ -285,6 +381,7 @@ jobs:
       # must keep catching the four decode bugs it was built for (re-introduced into a throwaway
       # copy; the tree is never touched).
       - name: Verify the audit still has teeth
+        if: steps.scope.outputs.domain == 'yes'
         run: ./tools/domain/selftest.sh
 
       # Value-description coverage: the domain audit above asks whether a published value is
@@ -330,6 +427,7 @@ jobs:
       - name: Audit the dashboard schematic
         run: ./scripts/run-schematic-audit.sh
       - name: Verify the schematic audit still has teeth
+        if: steps.scope.outputs.schematic == 'yes'
         run: ./tools/schematic/selftest.sh
 
       # Redaction coverage. A bug report is a PUBLIC issue carrying the device's own /status and
@@ -380,6 +478,7 @@ jobs:
       - name: Audit the README's dashboard recording
         run: ./scripts/run-ui-gif-audit.sh
       - name: Verify the recording audit still has teeth
+        if: steps.scope.outputs.uigif == 'yes'
         run: ./tools/uigif/selftest.sh
 
       # The gh-pages publish follows the expensive firmware build, so a regression still fails late.
@@ -417,14 +516,17 @@ jobs:
       - name: Check agent instruction and configuration integrity
         run: ./scripts/run-agent-instructions-budget.sh
       - name: Verify the agent configuration gate still has teeth
+        if: steps.scope.outputs.agent_config == 'yes'
         run: ./tools/agent-config/selftest.sh
       - name: Verify runner-neutral hook guards and merge binding
+        if: steps.scope.outputs.agent_hooks == 'yes'
         run: ./tools/agent-hooks/selftest.sh
 
       # Review evidence is PR state, not a file marker. The canaries prove missing inputs, missing or
       # stale stamps and conditional relevance fail CLOSED for canonical `$name` records. Live
       # enforcement runs separately in the required data-only `pr-policy.yml` workflow.
       - name: Verify the PR evidence policy still has teeth
+        if: steps.scope.outputs.agent_policy == 'yes'
         run: ./tools/agent-policy/selftest.sh
 
       # Does this change reach anything the FIRMWARE BUILD or the PUBLISHED SITE is made of? If
@@ -516,14 +618,34 @@ jobs:
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          compiled_base="$(git rev-parse HEAD^1)"
-          compiled_head="$(git rev-parse HEAD^2)"
-          [ "$compiled_base" = "$EVENT_BASE_SHA" ] \
-            || { echo "compiled merge tree uses base $compiled_base, expected $EVENT_BASE_SHA" >&2; exit 2; }
-          [ "$compiled_head" = "$EVENT_HEAD_SHA" ] \
-            || { echo "compiled merge tree uses $compiled_head, expected $EVENT_HEAD_SHA" >&2; exit 2; }
+          tested_base="$(git rev-parse HEAD^1)"
+          tested_head="$(git rev-parse HEAD^2)"
+          # The HEAD binding is exact and stays exact: it is what stops CI from attesting a tree
+          # the reviewer never saw, and every review stamp names this SHA.
+          [ "$tested_head" = "$EVENT_HEAD_SHA" ] \
+            || { echo "compiled merge tree uses $tested_head, expected $EVENT_HEAD_SHA" >&2; exit 2; }
+          # The BASE binding cannot be exact. `pull_request.base.sha` is the base tip from when the
+          # PR was opened and never moves again — a synchronize does not refresh it — while
+          # refs/pull/N/merge is recomputed against the LIVE base. An equality check therefore held
+          # only until `main` moved under an open PR, which CONTRIBUTING.md says out loud that it
+          # does ("main moves under open PRs — expect to rebase before merge"), and no rebase can
+          # clear it: the stale value is on the PR object, not on the branch. The real invariant is
+          # weaker and is what this asserts — the tested tree merged the reviewed head onto a commit
+          # that is ON the base branch and no older than the reviewed base.
+          base_tip="$(git rev-parse --verify -q "refs/remotes/origin/$BASE_REF" || true)"
+          if [ -z "$base_tip" ]; then
+            git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
+            base_tip="$(git rev-parse --verify -q "refs/remotes/origin/$BASE_REF" || true)"
+          fi
+          [ -n "$base_tip" ] \
+            || { echo "cannot resolve the tip of base branch $BASE_REF" >&2; exit 2; }
+          git merge-base --is-ancestor "$tested_base" "$base_tip" \
+            || { echo "compiled merge tree base $tested_base is not on $BASE_REF" >&2; exit 2; }
+          git merge-base --is-ancestor "$EVENT_BASE_SHA" "$tested_base" \
+            || { echo "compiled merge tree base $tested_base predates the reviewed base $EVENT_BASE_SHA" >&2; exit 2; }
 
       - name: Stamp compile-only firmware version
         if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'

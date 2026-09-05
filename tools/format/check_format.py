@@ -11,6 +11,11 @@ import sys
 
 
 SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
+# Named rather than written inline: a backslash inside an f-string expression is a SyntaxError
+# before Python 3.12 (PEP 701 lifted that), and this module is imported by the format gate every
+# contributor runs. Keeping the escape out of the f-strings below holds the whole tooling tree at
+# one interpreter floor instead of making this one file the highest.
+NEWLINE = b"\n"
 CONTROL_PAREN_RE = re.compile(r"\b(if|for|while|switch|catch|return)(\s*)\(")
 KEYWORD_BRACE_RE = re.compile(r"\b(else|try|do)(\s*)\{")
 RAW_STRING_RE = re.compile(r'(?:u8|u|U|L)?R"([^\s\\()]{0,16})\(')
@@ -230,9 +235,9 @@ def check_file(path: Path, root: Path) -> list[str]:
         findings.append(f"{relative}:1: empty source file")
         return findings
     if not data.endswith(b"\n"):
-        findings.append(f"{relative}:{data.count(b'\n') + 1}: missing final newline")
+        findings.append(f"{relative}:{data.count(NEWLINE) + 1}: missing final newline")
     elif data.endswith(b"\n\n"):
-        findings.append(f"{relative}:{data.count(b'\n')}: duplicate final newline")
+        findings.append(f"{relative}:{data.count(NEWLINE)}: duplicate final newline")
     for line_number, line in enumerate(data.splitlines(), start=1):
         if b"\t" in line:
             findings.append(f"{relative}:{line_number}: tab character violates UseTab: Never")
