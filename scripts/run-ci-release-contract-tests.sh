@@ -2,6 +2,7 @@
 # Fast, hardware-free contracts for the CI trust split and release/version plumbing. These tests
 # intentionally exercise the boundaries without needing ESP-IDF, a signing key, GitHub or a board.
 set -uo pipefail
+umask 0022
 cd "$(dirname "$0")/.." || exit 1
 REPO="$PWD"
 

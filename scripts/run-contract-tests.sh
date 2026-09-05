@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 0022
 
 proj="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$proj"

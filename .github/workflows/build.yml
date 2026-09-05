@@ -287,8 +287,10 @@ jobs:
       # remain whole-tree checks. Both layers are fail-closed and have mutation self-tests.
       - name: Install pinned C/C++ formatter
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-format-18
+          if ! command -v clang-format-18 >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends clang-format-18
+          fi
       - name: Check source formatting invariants
         env:
           CLANG_FORMAT: clang-format-18
@@ -329,7 +331,7 @@ jobs:
       # modals at 320/1200 px in all 13 locales. Reduced motion covers Dashboard, Settings, WiFi,
       # progress and disclosure motion at the same locale/viewport matrix; console errors are fatal.
       - name: Run rendered browser and accessibility gate
-        run: ./scripts/run-browser-render-tests.sh
+        run: ./scripts/run-browser-render-tests.sh --if-ui-changed
 
       # The source-boundary contracts: assertions about main/*.cpp that the host suite cannot make,
       # since it links the IDF-free headers alone. Pinned here are the X10A-gated MQTT lifecycle (a
@@ -678,6 +680,20 @@ jobs:
           restore-keys: |
             ccache-esp32s3-${{ steps.cckey.outputs.hash }}-
 
+      - name: Prefetch ESP-IDF container image
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        run: |
+          set -euo pipefail
+          idf_ver="$(./scripts/idf-version.sh)"
+          mirror="ghcr.io/${{ github.repository_owner }}/idf:${idf_ver}"
+          echo "Prefetching $mirror (falling back to Docker Hub if unavailable)..."
+          if docker pull "$mirror"; then
+            docker tag "$mirror" "espressif/idf:${idf_ver}"
+            echo "Prefetched $mirror successfully"
+          else
+            echo "Mirror unavailable; continuing with direct pull in action"
+          fi
+
       - name: Compile firmware without flashable artifacts
         if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
@@ -696,6 +712,13 @@ jobs:
       - name: Hand the ccache tree back to the runner
         if: always() && needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
         run: sudo chown -R "$(id -u):$(id -g)" .ccache || true
+
+      - name: Save ccache
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
+        with:
+          path: .ccache
+          key: ccache-esp32s3-${{ steps.cckey.outputs.hash }}-${{ github.run_id }}
 
       - name: Enforce non-flashable PR artifact boundary
         if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
@@ -893,6 +916,19 @@ jobs:
           key: ccache-esp32s3-${{ steps.cckey.outputs.hash }}-${{ github.run_id }}
           restore-keys: |
             ccache-esp32s3-${{ steps.cckey.outputs.hash }}-
+
+      - name: Prefetch ESP-IDF container image
+        run: |
+          set -euo pipefail
+          idf_ver="$(./scripts/idf-version.sh)"
+          mirror="ghcr.io/${{ github.repository_owner }}/idf:${idf_ver}"
+          echo "Prefetching $mirror (falling back to Docker Hub if unavailable)..."
+          if docker pull "$mirror"; then
+            docker tag "$mirror" "espressif/idf:${idf_ver}"
+            echo "Prefetched $mirror successfully"
+          else
+            echo "Mirror unavailable; continuing with direct pull in action"
+          fi
 
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0

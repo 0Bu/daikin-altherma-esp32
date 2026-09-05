@@ -325,8 +325,15 @@ try {
   assert.deepEqual(Object.keys(modalTriggers).sort(), [...routedModalIds].sort(),
     "real-browser keyboard triggers must cover every routed modal");
 
-  const viewports = [{ name: "phone", width: 320, height: 760 },
+  let viewports = [{ name: "phone", width: 320, height: 760 },
                      { name: "desktop", width: 1200, height: 900 }];
+  const vpIndex = process.argv.indexOf("--viewport");
+  if (vpIndex !== -1 && process.argv[vpIndex + 1]) {
+    const requested = process.argv[vpIndex + 1];
+    viewports = viewports.filter((v) => v.name === requested);
+    if (viewports.length === 0)
+      throw new Error(`unknown viewport requested: ${requested}`);
+  }
   const cumulativeOtaNotes = [
     "v1.0.3-dev.15 — Hard-reset ESP32-S3 after serial flash",
     "v1.0.3-dev.17 — Fix OTA stress HTTP handoff",
