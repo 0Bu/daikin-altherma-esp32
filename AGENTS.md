@@ -79,9 +79,9 @@ conditional workflows and are not necessarily PR checkbox gates.
   the commit range and PR title/description for personal information or non-English prose beyond what
   `scripts/run-pr-hygiene-audit.sh` catches by shape alone.
 
-Phase 7 of the agent migration is complete. `AGENTS.md`, `.agents/skills/`, `.codex/agents/`,
-`.codex/config.toml`, `.codex/hooks.json`, and `tools/agent-hooks/` are the canonical project
-surfaces; operating and rollback notes are in `docs/AGENT_MIGRATION.md`. Do not introduce
+Phase 7 of the agent migration is complete. `AGENTS.md`, `.agents/skills/`, `.agents/hooks.json`,
+`.codex/agents/`, `.codex/config.toml`, `.codex/hooks.json`, and `tools/agent-hooks/` are the canonical
+project surfaces; operating and rollback notes are in `docs/AGENT_MIGRATION.md`. Do not introduce
 runner-specific copies of project policy, skills, reviewers, or gates.
 
 ## Sources of truth
@@ -156,11 +156,7 @@ documentation.
   the exact signed dev artifact, performs one un-retried POST only to `bench`, survives rollback
   probation and stress, and cannot contact `production`. Use OTA, not USB, for ordinary bench
   updates; signed USB is bootstrap/recovery only.
-- The exact historical `1.0.2` bench writer predates `ota_stack_min_free_bytes`. Only its reported
-  version plus shortened ELF identity may leave that one pre-reboot measurement unknown; a present
-  invalid or below-limit value, every other writer and the standalone lab-HIL mode still fail
-  closed. Completed
-  validation, positive heap minima, target probation and stress remain mandatory.
+- Completed validation, positive heap minima, `ota_stack_min_free_bytes` checks, target probation and stress remain mandatory across all updates.
 - Production promotion remains a distinct `--confirm-production production --execute` transaction:
   bench staging and stress precede one production POST plus read-only canary and retained-X10A
   checks. Direct `/ota/update` writes and release creation remain outside both modes.

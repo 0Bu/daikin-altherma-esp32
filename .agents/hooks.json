@@ -1,0 +1,45 @@
+{
+  "safety-guards": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|view_file|replace_file_content|write_to_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" pre-tool-guards",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/tools/agent-hooks/require-pr-gates.sh\"",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "replace_file_content|write_to_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" format",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" stop-logic-tests",
+        "timeout": 600
+      }
+    ]
+  }
+}

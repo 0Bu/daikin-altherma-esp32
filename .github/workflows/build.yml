@@ -224,7 +224,7 @@ jobs:
           # agent-hooks drives the merge gate, which runs the UI, absence and UI-GIF suites; its
           # formatter cases copy the real .clang-format, and it pins the exact command shapes of
           # gh-with-git-credentials.sh and production-ota-gate.py.
-          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif)/|\.codex/hooks\.json$|\.clang-format$|\.github/pull_request_template\.md$|scripts/(run-(agent-policy|ui-use-case-tests|ui-gif-audit)|gh-with-git-credentials|production-ota-gate)\.(sh|py)$)'
+          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif)/|(\.codex|\.agents)/hooks\.json$|\.clang-format$|\.github/pull_request_template\.md$|scripts/(run-(agent-policy|ui-use-case-tests|ui-gif-audit)|gh-with-git-credentials|production-ota-gate)\.(sh|py)$)'
           # agent-config's canaries run scripts/run-agent-instructions-budget.sh over a fixture built
           # from .agents/, .codex/, AGENTS.md and .mcp.json.
           emit agent_config '^(tools/agent-config/|\.codex/|\.agents/|AGENTS\.md$|\.mcp\.json$|scripts/(gh-with-git-credentials|run-agent-instructions-budget)\.sh$)'
@@ -522,7 +522,9 @@ jobs:
         run: ./tools/agent-config/selftest.sh
       - name: Verify runner-neutral hook guards and merge binding
         if: steps.scope.outputs.agent_hooks == 'yes'
-        run: ./tools/agent-hooks/selftest.sh
+        run: |
+          python3 ./tools/agent-hooks/test_agent_hooks.py
+          ./tools/agent-hooks/selftest.sh
 
       # Review evidence is PR state, not a file marker. The canaries prove missing inputs, missing or
       # stale stamps and conditional relevance fail CLOSED for canonical `$name` records. Live
