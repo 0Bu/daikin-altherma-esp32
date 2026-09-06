@@ -205,8 +205,38 @@ if (!credentialWrapperMarkers.every((marker) => credentialWrapper.includes(marke
   throw new Error("canonical GitHub credential wrapper no longer keeps credentials transient");
 }
 const httpServer = fs.readFileSync("main/http_server.cpp", "utf8");
-if (!/exact total 39[\s\S]{0,80}cfg\.max_uri_handlers\s*=\s*39;/.test(httpServer)) {
-  throw new Error("http_server.cpp has drifted from the documented 39-handler trusted-LAN surface");
+const maxHandlersMatch = httpServer.match(/cfg\.max_uri_handlers\s*=\s*(\d+);/);
+if (!maxHandlersMatch) {
+  throw new Error("http_server.cpp does not declare cfg.max_uri_handlers");
+}
+const maxHandlers = parseInt(maxHandlersMatch[1], 10);
+
+const handlerFiles = fs
+  .readdirSync("main")
+  .filter(
+    (f) =>
+      (f.startsWith("http_") && f.endsWith(".cpp") && f !== "http_common.cpp" && f !== "http_server.cpp") ||
+      f === "mcp_server.cpp"
+  )
+  .map((f) => `main/${f}`);
+
+let registeredRouteCount = 0;
+for (const file of handlerFiles) {
+  const content = fs.readFileSync(file, "utf8");
+  const matches = content.match(/\bhttp_register(?:_on)?\s*\(\s*s\b/g) ?? [];
+  registeredRouteCount += matches.length;
+}
+
+if (registeredRouteCount !== maxHandlers) {
+  throw new Error(
+    `derived trusted-LAN route count (${registeredRouteCount}) does not match cfg.max_uri_handlers (${maxHandlers})`
+  );
+}
+const documentedTotalRegex = new RegExp(`exact total ${registeredRouteCount}`);
+if (!documentedTotalRegex.test(httpServer)) {
+  throw new Error(
+    `http_server.cpp comments do not document the derived exact total of ${registeredRouteCount} handlers`
+  );
 }
 
 if (fs.existsSync(".github/FUNDING.yml")) {

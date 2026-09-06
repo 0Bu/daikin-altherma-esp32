@@ -913,11 +913,28 @@ void hp_poll_start() {
 // The MAXIMUM number of rows THIS cache can hold, so /values and the MQTT bridge size their snapshot
 // buffers correctly. Under-sizing silently TRUNCATES rows out of a snapshot — the #35-#39
 // absent-value shape. The HomeHub is a separate stack with its own mb_values_capacity().
-size_t hp_values_capacity() { return def::lookup_view(config().profile.c_str()).count(); }
-
-size_t hp_values_snapshot(CachedValue* out, size_t max) {
-    if (!s_mtx) return 0;
+size_t hp_values_capacity(uint32_t* revision_out) {
+    if (!s_mtx) {
+        if (revision_out) *revision_out = 0;
+        return def::lookup_view(config().profile.c_str()).count();
+    }
     Lock lk(s_mtx);
+    if (revision_out) *revision_out = s_cache_revision;
+    const size_t n = s_cache.size();
+    const char* prof = (s_cache_profile && *s_cache_profile) ? s_cache_profile : config().profile.c_str();
+    const size_t prof_cap = def::lookup_view(prof).count();
+    return n > prof_cap ? n : prof_cap;
+}
+
+size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out, uint32_t* revision_out) {
+    if (!s_mtx) {
+        if (total_out) *total_out = 0;
+        if (revision_out) *revision_out = 0;
+        return 0;
+    }
+    Lock lk(s_mtx);
+    if (total_out) *total_out = s_cache.size();
+    if (revision_out) *revision_out = s_cache_revision;
     size_t n = s_cache.size() < max ? s_cache.size() : max;
     for (size_t i = 0; i < n; i++) out[i] = s_cache[i];
     return n;
