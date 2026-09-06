@@ -74,10 +74,11 @@ struct HpStats {
 
 // The max cache row count for the ACTIVE transport (X10A profile rows, or the HomeHub map on Modbus
 // TCP) — /values and the MQTT bridge size their snapshot buffers from this so no row is truncated.
-size_t   hp_values_capacity();
+size_t hp_values_capacity(uint32_t* revision_out = nullptr);
 
 // Thread-safe snapshot copy of the current value cache. Returns count written.
-size_t   hp_values_snapshot(CachedValue* out, size_t max);
+size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out = nullptr,
+                          uint32_t* revision_out = nullptr);
 
 // Copy the current cache into a caller-prepared, profile-stable layout. The caller supplies the
 // row identities (label/reg/off/conv) and pre-reserves each value string. Missing rows are cleared

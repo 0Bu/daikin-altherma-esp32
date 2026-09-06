@@ -3416,8 +3416,11 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   RX/TX are auto-detected: read-only on the card while the bus answers, a pins_avail
                   dropdown (re-runs detection) when it doesn't.
 GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structural metadata where
-                  it applies: "binary":true, "held":true and `x10a_group` only for a catalog label
-                  reused on more than one register page. The last field reuses MQTT's audited page
+                  it applies: "binary":true, "binary_semantic":id, "held":true and `x10a_group` only for a catalog label
+                  reused on more than one register page. `binary_semantic` names the exceptional selector
+                  identities (converters 300–307) with documented non-boolean meaning (e.g. valve paths or
+                  heater stages via logic/binary_semantics.hpp) so the browser avoids presenting a selected path
+                  as a generic ON/OFF switch. The `x10a_group` field reuses MQTT's audited page
                   namespace (for example `outdoor_state` versus `hydronic`), so the dashboard can
                   keep both independent fault channels without displaying two indistinguishable
                   "Error Code" rows or giving their accordions one shared key. `reg` is the
@@ -3454,10 +3457,12 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   HomeHub register — the browser matches on that string and does NO matching of its
                   own, since a label match here is the substitution lwt_select/ou_stale exist to
                   prevent. The HomeHub's own readings ride a SECOND array, `modbus`
-                  [{label,value,unit,off[,binary][,enum][,concept]}] — two arrays, never merged, mirroring
+                  [{label,value,unit,off[,binary][,enum][,concept][,history]}] — two arrays, never merged, mirroring
                   the two stacks: the sources have separate liveness, and merging would make "is this
                   reading current?" a per-row question no consumer could answer. `off` is the EKRHH
-                  data-model offset (def/homehub.hpp), which is what the pairing keys on.
+                  data-model offset (def/homehub.hpp), which is what the pairing keys on. `history`
+                  attaches a Modbus-only timeline (logic/homehub_history_for) even when the row has no
+                  X10A `concept` counterpart.
                   THE ARRAY IS EMITTED ONLY WHILE THE LINK IS LIVE AT THE MOMENT THE SNAPSHOT IS
                   TAKEN and carries that session's latest FULL cycle — bounded to at most four poll
                   intervals old while the 1 Hz fast cycles keep link/gate/context state current. A

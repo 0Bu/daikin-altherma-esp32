@@ -6,4 +6,4 @@
 2. **Test Enforcement**: Any new function, converter, enum, or validator added here
    MUST have a corresponding `CHECK` in `test/test_logic.cpp`.
 3. **No Generated Table Edits**: Files under `main/def/` are machine-generated catalog
-   outputs. Never edit them directly; put overrides in `main/logic/overlay.hpp`.
+   outputs. Never edit them directly; put overrides in `main/def/overlay.hpp`.
