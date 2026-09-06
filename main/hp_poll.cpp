@@ -921,7 +921,8 @@ size_t hp_values_capacity(uint32_t* revision_out) {
     Lock lk(s_mtx);
     if (revision_out) *revision_out = s_cache_revision;
     const size_t n = s_cache.size();
-    const char* prof = (s_cache_profile && *s_cache_profile) ? s_cache_profile : config().profile.c_str();
+    const char*  prof =
+        (s_cache_profile && *s_cache_profile) ? s_cache_profile : config().profile.c_str();
     const size_t prof_cap = def::lookup_view(prof).count();
     return n > prof_cap ? n : prof_cap;
 }
