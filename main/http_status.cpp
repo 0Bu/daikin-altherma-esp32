@@ -1470,9 +1470,23 @@ struct ValuesSnapshot {
 static ValuesSnapshot take_values_snapshot() {
     ValuesSnapshot snapshot;
 
-    const size_t x10a_cap = hp_values_capacity();
-    snapshot.x10a.resize(x10a_cap ? x10a_cap : 1);
-    snapshot.x10a.resize(hp_values_snapshot(snapshot.x10a.data(), snapshot.x10a.size()));
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        uint32_t     cap_rev  = 0;
+        const size_t x10a_cap = hp_values_capacity(&cap_rev);
+        if (snapshot.x10a.size() < x10a_cap) {
+            snapshot.x10a.resize(x10a_cap ? x10a_cap : 1);
+        }
+        size_t       total    = 0;
+        uint32_t     snap_rev = 0;
+        const size_t n =
+            hp_values_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), &total, &snap_rev);
+        if (attempt == 0 && (total > snapshot.x10a.size() || snap_rev != cap_rev)) {
+            snapshot.x10a.resize(total ? total : 1);
+            continue;
+        }
+        snapshot.x10a.resize(n);
+        break;
+    }
     snapshot.x10a_label_ambiguous.resize(snapshot.x10a.size());
     for (size_t i = 0; i < snapshot.x10a.size(); i++) {
         // object_id()/ha_slug() owns a temporary std::string. Resolve it before transfer starts so
