@@ -7,6 +7,7 @@
 // large output (e.g. /diag) instead of one big std::string. (See docs/ARCHITECTURE.md → Memory constraints.)
 #include "http_handlers.hpp"
 #include "diag_log.hpp"   // diag_printf — a route that failed to register must not do so silently
+#include "heap_guard.hpp"
 #include "net.hpp"
 #include "ota_update.hpp"
 #include "provisioning.hpp"
@@ -99,6 +100,11 @@ static esp_err_t handle_all(httpd_req_t* req) {
         // remained reachable through a rebound hostname.
         if (!provisioning_ap_active() && !trusted_lan_headers_allowed(req))
             return reject_request(req, "403 Forbidden", "request origin not allowed");
+
+        if (ota_download_active() && !http_is_ota_route(req->uri))
+            return reject_request(req, "503 Service Unavailable", "update in progress");
+        if (heap_largest_internal_block() < 6144 && !http_is_ota_route(req->uri))
+            return reject_request(req, "503 Service Unavailable", "heap low");
 
         // All body-bearing POST handlers parse JSON. text/plain and HTML-form bodies are deliberately
         // refused: both are CORS-safelisted request shapes a hostile page can emit without preflight.

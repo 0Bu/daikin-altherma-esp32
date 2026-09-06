@@ -47,6 +47,8 @@
 #include <exception>
 #include <string>
 #include <vector>
+#include "logic/ota_quiesce.hpp"
+#include "ota_update.hpp"
 
 namespace daik {
 
@@ -106,6 +108,9 @@ static DetectBackoff s_backoff;
 // to the previous HomeHub before the poll task has had time to close that socket.
 static std::atomic<int64_t> s_next_try_us{0};
 static std::atomic<bool> s_reconfigure_reset{false};
+static std::atomic<bool>     s_mb_task_running{false};
+static std::atomic<bool>     s_ota_quiesced{false};
+static std::atomic<uint32_t> s_mb_cache_revision{1};
 static std::atomic<uint32_t> s_target_generation{1};
 // Mirrors the persisted HomeHub enable decision. /set_hp stages this bool before its durable write,
 // then mb_reconfigure() installs it without copying the string-owning Config after that boundary.
@@ -808,6 +813,7 @@ static void mb_poll_once() {
             s_cache.clear();
             s_cache_generation = 0;
             s_cache_target_generation = 0;
+            s_mb_cache_revision.fetch_add(1, std::memory_order_release);
         }
         { Lock lk(s_mtx); s_status.values = 0; }
         history_record_modbus(nullptr, 0, history_generation); // advance this identity with a gap
@@ -1055,10 +1061,12 @@ static void mb_poll_once() {
             s_cache = std::move(fresh);            // move-assign: steals the buffer, cannot throw
             s_cache_generation = cycle_generation;
             s_cache_target_generation = cycle_target_generation;
+            s_mb_cache_revision.fetch_add(1, std::memory_order_release);
         } else {
             s_cache.clear();
             s_cache_generation = 0;
             s_cache_target_generation = 0;
+            s_mb_cache_revision.fetch_add(1, std::memory_order_release);
         }
     }
     bool final_current_session = false;
@@ -1103,7 +1111,11 @@ static void mb_task_start_if_enabled() noexcept;
 // It exits itself when the HomeHub is disabled, which is what makes "no HomeHub, no stack" literal
 // rather than a claim: the task, its 6 KB stack and the socket all go away.
 static void mb_task(void*) {
+    s_mb_task_running.store(true, std::memory_order_release);
     esp_task_wdt_add(NULL);
+    OtaQuiesceState ota_quiesce;
+    bool            ota_quiesce_logged     = false;
+    bool            ota_quiesce_cap_logged = false;
     for (;;) {
         esp_task_wdt_reset();
         // Moved here from the end of the loop when the original four watched stacks got one sampler
@@ -1115,32 +1127,57 @@ static void mb_task(void*) {
         // every TLS-owner delay and before any Config copy: disabling must close the old socket and
         // retire this task even if the allocator is too fragmented to snapshot Config indefinitely.
         if (!s_target_enabled.load(std::memory_order_acquire)) break;
-        // A HomeHub cycle copies the string-owning Config and, every fifth cycle, reserves a fresh
-        // model-sized value vector. Neither is needed while OTA owns the allocator. Stand aside
-        // before either allocation; the already-raised OTA flag plus its stable headroom samples
-        // also let an in-flight cycle unwind before TLS is admitted.
-        if (ota_download_active() || weather_fetch_active()) {
-            vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
-            continue;
-        }
-        MbNetworkActivity network_activity;
-        if (ota_download_active() || weather_fetch_active()) {
-            vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
-            continue;
-        }
-        try {
-            if (s_reconfigure_reset.exchange(false, std::memory_order_acq_rel)) {
-                s_backoff.silent = 0;
-                s_next_try_us.store(0, std::memory_order_release);
+
+        const bool ota_active = ota_download_active();
+        if (ota_quiesce_step(ota_quiesce, ota_active)) {
+            s_ota_quiesced.store(true, std::memory_order_release);
+            esp_task_wdt_reset();
+            if (!ota_quiesce_logged) {
+                diag_printf("modbus: holding off sweeps during OTA\n");
+                ota_quiesce_logged = true;
             }
-            if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();
-        } catch (const std::exception& e) {
-            // Keep the allocation guard allocation-free: constructing the UI error itself can throw
-            // when the exception was std::bad_alloc. Transport/protocol failures take the structured
-            // status_error() path before reaching this last-resort guard.
-            diag_printf("modbus: cycle skipped (%s)\n", e.what());
-        } catch (...) {
-            diag_printf("modbus: cycle skipped (oom?)\n");
+            vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
+            continue;
+        }
+        s_ota_quiesced.store(false, std::memory_order_release);
+        if (ota_quiesce_exhausted(ota_quiesce, ota_active)) {
+            if (!ota_quiesce_cap_logged) {
+                diag_printf("modbus: OTA hold-off budget spent after %u cycles, polling again\n",
+                            static_cast<unsigned>(OTA_QUIESCE_MAX_CYCLES));
+                ota_quiesce_cap_logged = true;
+            }
+        } else {
+            ota_quiesce_logged     = false;
+            ota_quiesce_cap_logged = false;
+        }
+
+        if (weather_fetch_active()) {
+            vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
+            continue;
+        }
+        {
+            MbNetworkActivity network_activity;
+            if (ota_download_active() || weather_fetch_active()) {
+                // Recheck closes the opposite race if OTA or weather began right as we
+                // claimed network activity. Exit scope immediately so MbNetworkActivity
+                // destructor restores s_network_quiesced to true before the inter-cycle delay.
+            } else {
+                try {
+                    if (s_reconfigure_reset.exchange(false, std::memory_order_acq_rel)) {
+                        s_backoff.silent = 0;
+                        s_next_try_us.store(0, std::memory_order_release);
+                    }
+                    if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();
+                } catch (const std::exception& e) {
+                    // Keep the allocation guard allocation-free: constructing the UI error itself
+                    // can throw when the exception was std::bad_alloc. Transport/protocol failures
+                    // take the structured status_error() path before reaching this last-resort
+                    // guard.
+                    diag_printf("modbus: cycle skipped (%s)\n", e.what());
+                } catch (...) {
+                    diag_printf("modbus: cycle skipped (oom?)\n");
+                }
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
     }
@@ -1156,6 +1193,7 @@ static void mb_task(void*) {
         s_cache.clear();
         s_cache_generation = 0;
         s_cache_target_generation = 0;
+        s_mb_cache_revision.fetch_add(1, std::memory_order_release);
     }
     diag_printf("modbus: HomeHub disabled by empty configuration — stack stopped\n");
     esp_task_wdt_delete(NULL);
@@ -1163,6 +1201,8 @@ static void mb_task(void*) {
     // cleared s_task. Its mb_reconfigure() correctly saw a task still alive and did not duplicate it;
     // now re-check the latest intent so that request is not lost in the teardown window.
     mb_task_start_if_enabled();
+    s_ota_quiesced.store(false, std::memory_order_release);
+    s_mb_task_running.store(false, std::memory_order_release);
     vTaskDelete(nullptr);
 }
 
@@ -1248,6 +1288,7 @@ void mb_reconfigure(bool enabled) noexcept {
         s_cache.clear();
         s_cache_generation = 0;
         s_cache_target_generation = 0;
+        s_mb_cache_revision.fetch_add(1, std::memory_order_release);
     }
     mb_task_start_if_enabled();
     // Clearing the address is handled BY the task: its allocation-free atomic target flag is read
@@ -1294,5 +1335,12 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
         live = false;
     return n;
 }
+
+bool hp_modbus_ota_quiesced() {
+    return !s_mb_task_running.load(std::memory_order_acquire) ||
+           s_ota_quiesced.load(std::memory_order_acquire);
+}
+
+uint32_t mb_cache_generation() { return s_mb_cache_revision.load(std::memory_order_acquire); }
 
 }  // namespace daik

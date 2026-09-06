@@ -103,4 +103,14 @@ inline bool http_json_content_type(std::string_view value) {
     return !params.empty();
 }
 
+// Returns true if the requested URI belongs to the OTA subsystem (/ota/status, /ota/check,
+// /ota/update). When memory is low or an OTA update is actively downloading, all non-OTA routes
+// are early-rejected with 503 so background browser polling doesn't fragment the TLS receive heap.
+inline bool http_is_ota_route(std::string_view uri) {
+    if (uri == "/ota") return true;
+    if (uri.size() > 4 && uri.substr(0, 4) == "/ota" && (uri[4] == '/' || uri[4] == '?'))
+        return true;
+    return false;
+}
+
 }  // namespace daik

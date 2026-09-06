@@ -52,7 +52,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 5 | OTA manifest check + version-bound **release/dev changelog modal** with cumulative skipped-dev-build notes + signed manual HTTPS stream with **at most two exact fail-closed Range resumes** and two-point downgrade gate; a boot-resident static delivery worker, dynamic TLS records, a boot-created absolute header/body socket watchdog, clean MQTT pause, transport cleanup, phase-specific INTERNAL-heap admission, fixed status and bounded peer coordination | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`http_client_diag.cpp`](../main/http_client_diag.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`www/js/settings.js`](../main/www/js/settings.js), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/http_deadline.hpp`](../main/logic/http_deadline.hpp), [`logic/ota_transport.hpp`](../main/logic/ota_transport.hpp), [`logic/fixed_text.hpp`](../main/logic/fixed_text.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_changelog_range.hpp`](../main/logic/ota_changelog_range.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
 | 6 | Live UI by **polling** bounded-chunk-streamed `/status` + `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation, both snapshots fail fast during OTA, and the model-sized values snapshot waits boundedly behind shorter Weather TLS | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`logic/http_values_wait.hpp`](../main/logic/http_values_wait.hpp), [`test_status_heap_contract.mjs`](../test/test_status_heap_contract.mjs), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
 | 7 | Minified deterministic-gzip UI **embedded in the app image**: startup page under 160 KiB, each device-local locale under 32 KiB | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs) |
-| 8 | HTTP handlers under an **OOM boundary**: `503` before the first response emission; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp) |
+| 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline + active-OTA / low-heap early rejection; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp), [`logic/http_request.hpp`](../main/logic/http_request.hpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
 | 10 | **MQTTS + verified common-root CA bundle**; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 11 | Core dump to flash + offline symbolication, with a proven **orphan dump** erased so no undecodable download is ever offered | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
@@ -109,8 +109,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 66 | **Complete UI interaction merge gate** — the assembled production UI is *executed* in a deterministic DOM harness, covering every modal in the production registry | ✅ 🧪 | [`test_ui_use_cases.mjs`](../test/test_ui_use_cases.mjs), [`run-ui-use-case-tests.sh`](../scripts/run-ui-use-case-tests.sh) |
 | 68 | **Source-boundary contract gate** — source-text assertions about `main/*.cpp` the host suite structurally cannot make (task, order, and which file is entitled) | ✅ | [`run-contract-tests.sh`](../scripts/run-contract-tests.sh), [`test_heating_curve_diagnosis_contract.mjs`](../test/test_heating_curve_diagnosis_contract.mjs) |
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
-| 70 | **Runtime MQTT base topic** — the installation identity is a saved setting, not a compile-time one, so two boards on one broker stop sharing retained topics, metrics series and their HA device | ✅ 🧪 | [`logic/mqtt_base.hpp`](../main/logic/mqtt_base.hpp), [`http_config.cpp`](../main/http_config.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
-| 71 | **Pinned stack compiler contracts on `/status` and MQTT publishing** — `http_status.cpp` stays at `-Os`, while `mqtt_ha.cpp` keeps called-once helper boundaries and a fatal 2 KiB per-function frame ceiling so size optimisation cannot silently fold transient publish state back into the fixed MQTT task frame | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
+| 71 | **Pinned stack compiler contracts on `/status` and MQTT publishing** — `http_status.cpp` stays at `-Os` and scopes subsystem locals (+2836 B free stack) in `http_append_status_json()` with chunked streaming, while `mqtt_ha.cpp` keeps called-once helper boundaries and a fatal 2 KiB per-function frame ceiling so size optimisation cannot silently fold transient publish state back into the fixed MQTT task frame | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 81 | **Stack-headroom telemetry** — the second memory budget, made reportable: five deep tasks record their own FreeRTOS high-water mark and the heartbeat carries all five, so a growing call frame is a falling line rather than a core dump nobody has yet | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp) |
 | 72 | **Power-loss-surviving 24-hour trends and opt-in plant checkup** — `.noinit` DRAM covers power-preserving resets; the upper-4-MiB append journal stores dense five-minute X10A/HomeHub/ENV III records, daily semantic-id manifests that preserve unchanged series across catalog edits, and enabled hourly diagnosis records. CRC, last-written commit and rotating sectors fail closed on torn writes; the build guards 72-hour capacity. The official 8 MB table is required; browser storage is not a measurement source | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
 | 82 | **Reproducible ESP-IDF build inputs** — exact transitive component lock, explicit ESP-IDF/CMake/C++ floors and wall-clock-free app metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -258,7 +257,8 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   firmware constant and applies the stricter 1 KiB ceiling required by the oldest supported signed
   restore release before publishing can hand either parser an artifact it cannot consume. The
   lock-free OTA heap lease begins before manifest TLS setup,
-  gives the once-per-second MQTT publisher and X10A poller one cycle to stand aside, prevents a new
+  gives the once-per-second MQTT publisher, X10A poller and Modbus poller (`wait_for_modbus_quiesce()`, `hp_modbus_ota_quiesced()`)
+  one cycle to stand aside, prevents a new
   weather request and waits a bounded interval for an existing one, and stays active through image
   validation. The monotonic budget starts before each open. Once `esp_http_client_open()` exposes the
   public socket, one boot-created `esp_timer` is armed for only the remaining 30-second manifest or
@@ -388,9 +388,10 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
 - **Modem sleep disabled** (`WIFI_PS_NONE`) — trades idle-power saving for a consistently responsive
   HTTP UI.
 - **LWIP tuned for the workload**: the socket cap is lifted (http server + mDNS + SNTP + MQTT + OTA
-  can otherwise starve the download of a socket) and the TCP windows doubled. A **160 KiB gzip hard
-  limit** on the single startup-page response fails the build before that response can silently
-  justify more buffers; each separately requested locale asset has its own **32 KiB** limit.
+  can otherwise starve the download of a socket), TCP receive window doubled, and default TCP send
+  buffer halved (`CONFIG_LWIP_TCP_SND_BUF_DEFAULT=5760`, 4×MSS) to conserve internal SRAM heap buffers.
+  A **160 KiB gzip hard limit** on the single startup-page response fails the build before that response
+  can silently justify more buffers; each separately requested locale asset has its own **32 KiB** limit.
 
   The sources keep their load-bearing comments and the artefact carries none: the offline minifier
   ([`minify_and_gzip.py`](../tools/web_asset/minify_and_gzip.py)) strips **HTML, CSS and JS**
@@ -440,23 +441,29 @@ other.
 - **✅ gzip UI embedded in the app image**: the build inlines the page and its fragments,
   minifies, and pre-compresses them deterministically (`EMBED_FILES`). gzip is deliberate because
   the trusted-LAN origin is HTTP and browsers do not consistently negotiate Brotli there.
-- **✅ OOM discipline** ([`http_common.cpp`](../main/http_common.cpp)): every route runs under one
+- **✅ 🧪 OOM discipline & early rejection** ([`http_common.cpp`](../main/http_common.cpp),
+  [`logic/http_request.hpp`](../main/logic/http_request.hpp)): every route runs under one
   trampoline whose `try/catch` returns **503 instead of crashing** while it still owns the response
-  status. A chunked route may have sent status/headers even when its first chunk call reports a
-  socket error; the bounded stream helper therefore closes the 503 window before that call and then
-  consumes later exceptions so httpd closes the incomplete response. Host tests inject OOM before
-  emission, after a successful first chunk, and after a failed first chunk. No path unwinds through
-  esp_http_server's C frames.
+  status. Non-OTA routes are early-rejected with `503` during active OTA download or when the largest
+  contiguous internal heap block drops below 6144 B (`heap_largest_internal_block() < 6144`),
+  shielding critical TLS allocations. A chunked route may have sent status/headers even when its first
+  chunk call reports a socket error; the bounded stream helper therefore closes the 503 window before
+  that call and then consumes later exceptions so httpd closes the incomplete response. Host tests inject
+  OOM before emission, after a successful first chunk, and after a failed first chunk. No path unwinds
+  through esp_http_server's C frames.
 - **✅ The same discipline covers every allocating FreeRTOS task loop**, since a task entry is a C
   frame boundary exactly like a handler. Its corollary: **a throw must never strand a mutex** —
   `xSemaphoreTake` is not released by unwinding, so critical sections are either non-allocating or
   taken through an RAII lock.
-- **✅ Chunked streaming for the large responses** — the core-dump image, and one trended row's
-  24-hour ring flushed every 64 samples, so the peak string stays a few hundred bytes. The series
-  carries the **row's own** unit rather than a hardcoded one, samples as exact integer tenths, and
+- **✅ Chunked streaming for large responses** — `/status` streams in bounded 1 KiB chunks (`HttpJsonChunks`)
+  with zero whole-body heap reallocations; unredacted `/diag` streams in 1 KiB chunks (512 B during active OTA)
+  directly from static ring storage with zero dynamic heap allocations; the core-dump image, and
+  one trended row's 24-hour ring flushed every 64 samples, so the peak string stays a few hundred bytes.
+  The series carries the **row's own** unit rather than a hardcoded one, samples as exact integer tenths, and
   nulls whose reason rides **alongside** rather than inside the value array. `t0` is derived from the
   newest sample's age on the monotonic clock — and **omitted** entirely while the clock has never
-  synced, so the UI reads out an age rather than a fabricated timestamp.
+  synced, so the UI reads out an age rather than a fabricated timestamp. Subsystem locals in
+  `http_append_status_json()` are scoped into explicit blocks, freeing +2836 bytes of `httpd` stack.
 - **✅ 🧪 Free register probe** ([`logic/hp_probe.hpp`](../main/logic/hp_probe.hpp)): `POST /hp/query`
   reads one caller-chosen register and returns the raw frame plus, by default, every converter the
   requested slice admits — identical decodes merged so the answer names a choice rather than repeating
@@ -482,7 +489,9 @@ other.
 [`HOME_ASSISTANT.md`](HOME_ASSISTANT.md)).
 
 - **✅ 🧪 HA MQTT auto-discovery.** One retained discovery config per value of the active profile,
-  pointing at a shared grouped source topic republished only when the payload changes. The node id
+  pointing at a shared grouped source topic republished only when the payload changes. Cache
+  generation counters (`hp_cache_generation()`, `mb_cache_generation()`) guard state publishing,
+  eliminating 1-Hz string and JSON allocation churn when telemetry values are unchanged. The node id
   is the slugified **base topic** (a runtime setting since blob v16), not the board's MAC, so replacing the ESP32 keeps the HA device
   with its entities and statistics instead of creating a second one.
 - **✅ 🧪 The entity id carries the register group.** `uniq_id` and the discovery topic's last
@@ -796,7 +805,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | Detection | `detect`, `detect_backoff`, `uart_plan` |
 | Config & board | `config_model`, `config_store`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
 | MQTT / HA | `discovery`, `ha_device`, `mqtt_base`, `mqtt_cleanup`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus`, `weather_mqtt` |
-| HTTP | `http_body`, `payload_complete`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `chunk_sink`, `redact` |
+| HTTP | `http_body`, `http_request`, `payload_complete`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `chunk_sink`, `redact` |
 | OTA & boot | `health_gate`, `http_deadline`, `version_cmp`, `ota_manifest`, `ota_changelog_range`, `ota_hil_feed`, `ota_channel`, `ota_transport`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |
 | Network policy | `wifi_rollback`, `link_watch`, `syslog_policy`, `timestamp` |
 | On-board analysis ([`PLANT.md`](PLANT.md)) | `history`, `checkup`, `outdoor_evidence`, `refrigerant_service`, `state_dwell`, `heating_curve_diagnosis`, `open_meteo`, `circulation_source` |
@@ -1050,6 +1059,7 @@ footprint a hard constraint; the table calls out the one deliberate compatibilit
 | `ESP_WIFI_ENABLE_WPA3_OWE_STA=n` | ~0.8 KB | omits OWE; WPA2 and WPA3-SAE station support remain enabled |
 | `ESP_WIFI_ENABLE_SAE_PK=n`, `ESP_WIFI_SOFTAP_SAE_SUPPORT=n`, `ESP_WIFI_ENABLE_WPA3_OWE_SOFTAP=n` | 13.2 KiB combined in the ESP-IDF 6.1 A/B build | the product never uses SAE-PK, and its setup SoftAP is always open; joined WPA3-SAE + H2E remain enabled |
 | `MDNS_ENABLE_CONSOLE_CLI=n`, `MDNS_ENABLE_BROWSE=n` | 4.4 KiB combined in the mDNS 1.12.0 A/B build | keeps advertisement and bounded one-shot HomeHub queries; omits the unused console and continuous browse daemon |
+| `LWIP_TCP_SND_BUF_DEFAULT=5760` | ~5.7 KB/socket | halving default send buffer keeps 4×MSS while saving heap buffers per socket |
 
 C++ exceptions are kept on (`COMPILER_CXX_EXCEPTIONS=y`) — they *are* the HTTP OOM guard.
 

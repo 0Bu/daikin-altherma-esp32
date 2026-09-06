@@ -30,6 +30,7 @@
 #include "heap_guard.hpp"
 #include "hp_modbus.hpp"
 #include "hp_poll.hpp"
+#include "hp_modbus.hpp"
 #include "http_client_diag.hpp"
 #include "http_deadline.hpp"
 #include "mqtt_ha.hpp"
@@ -528,12 +529,13 @@ bool wait_for_mqtt_transport_quiesce() {
 }
 
 bool wait_for_modbus_quiesce() {
-    if (mb_network_quiesced()) return true;
+    if (mb_network_quiesced() && hp_modbus_ota_quiesced()) return true;
     diag_printf("ota: waiting for the in-flight HomeHub cycle to release heap\n");
     const TickType_t started = xTaskGetTickCount();
-    while (!mb_network_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
+    while ((!mb_network_quiesced() || !hp_modbus_ota_quiesced()) &&
+           xTaskGetTickCount() - started < kPollQuiesceWait)
         vTaskDelay(kAllocatorRetryDelay);
-    if (mb_network_quiesced()) return true;
+    if (mb_network_quiesced() && hp_modbus_ota_quiesced()) return true;
     const OtaHeapSample sample = ota_heap_sample();
     diag_printf("ota: HomeHub task did not acknowledge quiesce (free=%u B largest=%u B)\n",
                 static_cast<unsigned>(sample.free_bytes),

@@ -172,8 +172,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "outcomes": 88,
-        "taken": 78
+        "outcomes": 98,
+        "taken": 88
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 8,
@@ -526,8 +526,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "outcomes": 128,
-        "taken": 105
+        "outcomes": 142,
+        "taken": 118
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
@@ -880,8 +880,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "outcomes": 128,
-        "taken": 105
+        "outcomes": 142,
+        "taken": 118
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
