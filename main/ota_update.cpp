@@ -1091,13 +1091,6 @@ void run_update(const OtaTaskArgs& request) {
     // so nothing here needs to scale with it — and this allocation competes with the MQTTS session
     // for the largest CONTIGUOUS free block, which is the real ceiling on this device.
     http.buffer_size = kOtaBufSize;
-#if CONFIG_MBEDTLS_DYNAMIC_BUFFER
-    // Post-handshake, convert the TLS RX buffer to static allocation for the duration of the
-    // firmware stream. During bulk download of ~1.5 MB in 16 KiB TLS records, freeing and
-    // re-allocating 16,405 B on every record risks heap fragmentation when concurrent HTTP requests
-    // arrive. The static strategy holds the single RX buffer until the client is closed.
-    http.tls_dyn_buf_strategy = HTTP_TLS_DYN_BUF_RX_STATIC;
-#endif
 
     const HttpClientProbe    before = http_client_probe();
     esp_http_client_handle_t client = esp_http_client_init(&http);

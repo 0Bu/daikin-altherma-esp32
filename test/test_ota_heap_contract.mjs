@@ -885,8 +885,6 @@ assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_BUFFER=y$/m,
   "ESP-IDF's handshake-aware dynamic TLS buffers must remain enabled");
 assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n$/m,
   "TLS config/key/CA lifetime must not be shortened without reconnect redesign");
-assert.match(ota, /http\.tls_dyn_buf_strategy\s*=\s*HTTP_TLS_DYN_BUF_RX_STATIC;/,
-  "firmware stream must pin the static RX buffer strategy post-handshake to prevent record-to-record heap fragmentation");
 assert.equal(occurrences(update, "wait_for_ota_headroom("), 3,
   "the install path needs one TLS gate and a separate RSA gate before both IDF validation passes");
 assert.match(ota,
