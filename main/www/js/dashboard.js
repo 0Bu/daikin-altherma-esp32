@@ -1610,13 +1610,11 @@ function connLinks() {
   if (eth.present) {
     const speed = eth.speed_mbps != null
       ? `${eth.speed_mbps} Mbit/s${eth.full_duplex ? " " + t("conn.eth_fd") : ""}` : "";
+    const state = eth.lease ? (speed || t("conn.connected")) : eth.link ? t("conn.eth_no_lease") : t("conn.eth_no_cable");
     links.push({ label: "Ethernet",
       cls: eth.lease ? "ok" : eth.link ? "warn" : "err",
-      // The three states are genuinely different and a user acts differently on each: no cable, a
-      // cable with no lease (a DHCP or VLAN problem), and a working link.
-      value: eth.lease ? esc(speed || t("conn.connected"))
-           : eth.link  ? t("conn.eth_no_lease") : t("conn.eth_no_cable"),
-      state: eth.lease ? t("conn.connected") : eth.link ? t("conn.eth_no_lease") : t("conn.eth_no_cable") });
+      value: esc(state),
+      state });
   }
 
   // WiFi has no "connecting" state in /status (just connected: true/false), so it is a two-state
@@ -1697,10 +1695,11 @@ function connLinks() {
 // screen readers, so `state` (a plain-text status word, never shown visually) goes into the row's
 // aria-label instead of the generic "Edit X" every other edit affordance in this app uses.
 function connRow(l) {
-  return `<button class="conn-row${l.detail ? " has-detail" : ""}" type="button" data-edit="${esc(l.edit)}" aria-label="${esc(t("conn.aria", l.label, l.state))}">` +
+  const aria = l.edit ? t("conn.aria", l.label, l.state) : `${l.label}: ${l.state}`;
+  return `<button class="conn-row${l.detail ? " has-detail" : ""}" type="button"${l.edit ? ` data-edit="${esc(l.edit)}"` : " disabled"} aria-label="${esc(aria)}">` +
     `<span class="conn-label">${esc(l.label)}</span>` +
-    `<span class="conn-value"><span class="conn-val ${l.cls || ""}">${l.value}</span></span>` +
-    `${editIcon}${l.detail ? `<span class="conn-detail-wrap"><span class="conn-detail">${esc(l.detail)}</span></span>` : ""}</button>`;
+    `<span class="conn-value"><span class="conn-val ${l.cls}">${l.value}</span></span>` +
+    `${l.edit ? editIcon : ""}${l.detail ? `<span class="conn-detail-wrap"><span class="conn-detail">${esc(l.detail)}</span></span>` : ""}</button>`;
 }
 function connectionsHtml() {
   return `<div class="section-label">${esc(t("conn.title"))}</div>` + connLinks().map(connRow).join("");
