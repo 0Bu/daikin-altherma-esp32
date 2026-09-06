@@ -1954,7 +1954,16 @@ static esp_err_t h_diag(httpd_req_t* req) {
     static char buf[6144];
     size_t n = diag_dump(buf, sizeof(buf));
     httpd_resp_set_type(req, "text/plain");
-    if (!redact) return httpd_resp_send(req, buf, n);
+    if (!redact) {
+        // Stream plain /diag in 1 KiB chunks instead of one monolithic send, preventing lwIP from
+        // queuing multiple TCP pbufs across the internal heap at once and fragmenting memory during
+        // background OTA downloads.
+        for (size_t off = 0; off < n; off += 1024) {
+            const size_t len = std::min<size_t>(1024, n - off);
+            if (httpd_resp_send_chunk(req, buf + off, len) != ESP_OK) return ESP_FAIL;
+        }
+        return httpd_resp_send_chunk(req, nullptr, 0);
+    }
 
     // Redacted: a handful of log statements interpolate a host, an IP or an SSID (logic/redact.hpp).
     // Rewritten line by line and flushed in ~1 KB chunks, rather than as one redacted copy of the
