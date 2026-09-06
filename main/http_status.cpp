@@ -1952,14 +1952,14 @@ static esp_err_t h_diag(httpd_req_t* req) {
     // per-line strings and a 1280-byte growable chunk, so only that allocation-rich variant waits.
     if (redact && ota_download_active()) return network_tls_busy(req);
     static char  buf[6144];
-    const size_t max_dump = ota_download_active() ? 1024 : sizeof(buf);
+    const size_t max_dump = ota_download_active() ? 512 : sizeof(buf);
     size_t       n        = diag_dump(buf, max_dump);
     httpd_resp_set_type(req, "text/plain");
     if (!redact) {
-        // Stream plain /diag in 1 KiB chunks instead of one monolithic send. When OTA is actively
-        // downloading, clamp the dump to 1 KiB so lwIP queues only a single TCP pbuf, preventing
-        // multi-pbuf internal heap fragmentation while mbedTLS re-allocates its 16 KiB RX record
-        // buffer.
+        // Stream plain /diag in 1 KiB chunks instead of one monolithic send. When OTA is
+        // actively downloading, clamp the dump to 512 B so lwIP queues only a single small TCP
+        // pbuf, preventing multi-pbuf internal heap fragmentation while mbedTLS re-allocates
+        // its 16 KiB RX record buffer.
         for (size_t off = 0; off < n; off += 1024) {
             const size_t len = std::min<size_t>(1024, n - off);
             if (httpd_resp_send_chunk(req, buf + off, len) != ESP_OK) return ESP_FAIL;

@@ -233,7 +233,7 @@ constexpr TickType_t kManifestDeadline       = pdMS_TO_TICKS(30000);
 constexpr TickType_t kFirmwareDeadline       = pdMS_TO_TICKS(5 * 60 * 1000);
 constexpr int        kChangelogHttpTimeoutMs = 6000;
 constexpr TickType_t kChangelogDeadline      = pdMS_TO_TICKS(30000);
-constexpr int        kOtaBufSize = 2048; // download chunk; deliberately small (contiguous heap)
+constexpr int        kOtaBufSize = 1024; // download chunk; deliberately small (contiguous heap)
 // The shared Web Serial/OTA manifest keeps provenance and the installer plan in this fixed frame;
 // the publisher/readback artifact index is a sibling document that firmware never fetches.
 // check-manifest-provenance.py reads this exact constant and also applies the older supported
@@ -1090,7 +1090,8 @@ void run_update(const OtaTaskArgs& request) {
     // Small receive buffer on purpose. The image is ~1.5 MB but is written to flash chunk by chunk,
     // so nothing here needs to scale with it — and this allocation competes with the MQTTS session
     // for the largest CONTIGUOUS free block, which is the real ceiling on this device.
-    http.buffer_size = kOtaBufSize;
+    http.buffer_size    = kOtaBufSize;
+    http.buffer_size_tx = 512;
 
     const HttpClientProbe    before = http_client_probe();
     esp_http_client_handle_t client = esp_http_client_init(&http);

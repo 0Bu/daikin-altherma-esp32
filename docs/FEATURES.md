@@ -280,7 +280,7 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   byte stream is parsed here: bounded, allocation-free, depth-aware, and it **refuses rather than
   truncates** an oversized value.
 - **✅ 🧪 Heap-safe signed-image validation** ([`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp)):
-  the firmware streams HTTPS through a fixed 2 KiB INTERNAL buffer into the inactive partition,
+  the firmware streams HTTPS through a fixed 1 KiB INTERNAL buffer into the inactive partition,
   then destroys that buffer and the complete HTTP/TLS client **before** `esp_ota_end()` invokes the
   unchanged RSA-3072/PSA verifier. ESP-IDF's dynamic TLS-record buffers allocate and right-size RX/TX
   records only while needed; TLS config/key/CA lifetime is deliberately unchanged. Every manifest

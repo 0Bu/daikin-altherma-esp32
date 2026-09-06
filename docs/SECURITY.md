@@ -237,7 +237,7 @@ authorization.
   are enabled without the more invasive option that frees registered config/key/CA data. Before
   every manifest or image handshake, four consecutive samples must show **56 KiB total free
   INTERNAL 8-bit heap** and a **24 KiB largest contiguous INTERNAL block**. After the HTTP/TLS
-  client plus fixed 2 KiB download buffer have been freed, RSA/PSA validation uses a separate
+  client plus fixed 1 KiB download buffer have been freed, RSA/PSA validation uses a separate
   two-sample **24/12 KiB** gate before `esp_ota_end()` and again before the validation performed by
   `esp_ota_set_boot_partition()`. The TLS wait is bounded to 15 seconds and each validation wait to
   five. A monotonic budget begins before each HTTP open: 30 seconds for a manifest or changelog and

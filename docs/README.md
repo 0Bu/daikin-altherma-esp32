@@ -481,7 +481,7 @@ GET  /diag[?verbose=0|1][?redact=1]
                                    #   redacted text can grow past the static dump buffer, and the
                                    #   alternatives were a second ~8 KB .bss buffer or a ~6 KB
                                    #   contiguous heap allocation. During OTA, plain /diag remains
-                                   #   available from static storage (clamped to 1 KiB to prevent burst
+                                   #   available from static storage (clamped to 512 B to prevent burst
                                    #   pbuf heap fragmentation); redact=1 returns the early busy-503
                                    #   before creating its string chunk.
 GET  /scan                         # WiFi scan → {"networks":[{ssid,rssi}]} (name + signal only, no
@@ -892,7 +892,7 @@ manual release is cut.
 - **Rollback armed** *(implemented)*: `main.cpp` defers `esp_ota_mark_app_valid_cancel_rollback()` to
   a health gate (~90 s), so a boots-but-crashes image reverts.
 - **Signed images:** Secure Boot v2 RSA-3072 signing *without* hardware Secure Boot — the running
-  app frees the fixed 2 KiB download buffer and the complete HTTP/TLS client before `esp_ota_end()`
+  app frees the fixed 1 KiB download buffer and the complete HTTP/TLS client before `esp_ota_end()`
   validates the image; only then may its inactive slot be selected for boot. Every manifest and
   image TLS handshake requires four stable samples at 56 KiB free INTERNAL heap and a 24 KiB
   largest INTERNAL block. After transport cleanup, both IDF verification passes — `esp_ota_end()`
