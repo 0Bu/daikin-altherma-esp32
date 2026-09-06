@@ -1286,8 +1286,11 @@ const diagEnd = httpStatus.indexOf("static esp_err_t h_diag_clear(", diagStart);
 const diagHandler = httpStatus.slice(diagStart, diagEnd);
 assert.ok(diagStart >= 0 && diagEnd > diagStart, "/diag must remain identifiable");
 assert.match(diagHandler,
-  /if\s*\(redact\s*&&\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,1200}?chunk\.reserve\(1280\)/,
+  /if\s*\(redact\s*&&\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,1600}?chunk\.reserve\(1280\)/,
   "redacted /diag must refuse OTA before its growable chunk while plain static-ring diagnostics remain available");
+assert.match(diagHandler,
+  /for\s*\([^)]*off\s*\+=\s*1024\)[\s\S]{0,120}?httpd_resp_send_chunk\(/,
+  "plain /diag must stream in chunks to avoid burst pbuf heap pressure during OTA");
 const scanStart = httpStatus.indexOf("static esp_err_t h_scan(");
 const scanEnd = httpStatus.indexOf("void http_register_status(", scanStart);
 const scanHandler = httpStatus.slice(scanStart, scanEnd);
