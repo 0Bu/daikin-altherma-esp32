@@ -40,6 +40,47 @@ def normalized_tool(value: object) -> str:
     return tool.lower()
 
 
+_CURRENT_IS_ANTIGRAVITY = False
+
+
+def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    global _CURRENT_IS_ANTIGRAVITY
+    _CURRENT_IS_ANTIGRAVITY = False
+    if "toolCall" in payload and isinstance(payload["toolCall"], dict):
+        payload["_is_antigravity"] = True
+        _CURRENT_IS_ANTIGRAVITY = True
+        tc = payload["toolCall"]
+        name = normalized_tool(tc.get("name"))
+        args = tc.get("args") or {}
+        if not isinstance(args, dict):
+            args = {}
+        if name == "run_command":
+            payload.setdefault("tool_name", "bash")
+            payload.setdefault("tool_input", {
+                "command": args.get("CommandLine", ""),
+                "cwd": args.get("Cwd", ""),
+            })
+            if "cwd" not in payload and args.get("Cwd"):
+                payload["cwd"] = args["Cwd"]
+        elif name in {"replace_file_content", "write_to_file"}:
+            payload.setdefault("tool_name", "edit" if name == "replace_file_content" else "write")
+            payload.setdefault("tool_input", {"file_path": args.get("TargetFile", "")})
+        elif name == "view_file":
+            payload.setdefault("tool_name", "read")
+            payload.setdefault("tool_input", {"file_path": args.get("AbsolutePath", "")})
+        else:
+            payload.setdefault("tool_name", name)
+            payload.setdefault("tool_input", args)
+        if "cwd" not in payload:
+            ws = payload.get("workspacePaths")
+            if isinstance(ws, list) and ws and isinstance(ws[0], str):
+                payload["cwd"] = ws[0]
+    elif "stepIdx" in payload or "conversationId" in payload or "executionNum" in payload:
+        payload["_is_antigravity"] = True
+        _CURRENT_IS_ANTIGRAVITY = True
+    return payload
+
+
 def read_payload(*, fail_closed: bool) -> tuple[dict[str, Any] | None, str | None]:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -50,7 +91,7 @@ def read_payload(*, fail_closed: bool) -> tuple[dict[str, Any] | None, str | Non
         return (None, f"hook payload is not valid JSON: {exc}") if fail_closed else ({}, None)
     if not isinstance(payload, dict):
         return (None, "hook payload must be a JSON object") if fail_closed else ({}, None)
-    return payload, None
+    return normalize_payload(payload), None
 
 
 def tool_input(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1512,18 +1553,29 @@ def partition_violation(payload: dict[str, Any], *, shell_only: bool = False) ->
 
 
 def emit_permission(decision: str, reason: str) -> None:
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": decision,
-                    "permissionDecisionReason": reason,
-                }
-            },
-            separators=(",", ":"),
+    if _CURRENT_IS_ANTIGRAVITY:
+        print(
+            json.dumps(
+                {
+                    "decision": decision,
+                    "reason": reason,
+                },
+                separators=(",", ":"),
+            )
         )
-    )
+    else:
+        print(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": decision,
+                        "permissionDecisionReason": reason,
+                    }
+                },
+                separators=(",", ":"),
+            )
+        )
 
 
 def guard_secrets(payload: dict[str, Any] | None, error: str | None) -> bool:
@@ -1570,7 +1622,10 @@ def run_pre_tool_guards(args: argparse.Namespace) -> int:
     assert payload is not None
     if guard_production_ota(payload):
         return 0
-    guard_partitions(payload, shell_only=args.partition_shell_only)
+    if guard_partitions(payload, shell_only=args.partition_shell_only):
+        return 0
+    if _CURRENT_IS_ANTIGRAVITY:
+        print(json.dumps({"decision": "allow"}, separators=(",", ":")))
     return 0
 
 
@@ -1667,6 +1722,8 @@ def run_format(_: argparse.Namespace) -> int:
         command.extend(f"--lines={start}:{end}" for start, end in ranges)
         command.append(str(path))
         subprocess.run(command, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if _CURRENT_IS_ANTIGRAVITY:
+        print("{}")
     return 0
 
 
@@ -1794,7 +1851,8 @@ def run_stop_logic_tests(_: argparse.Namespace) -> int:
     except subprocess.TimeoutExpired as exc:
         output = f"host logic tests exceeded 540 seconds: {exc}"
     reason = ("Host logic tests failed — fix before stopping:\n" + output)[:4000]
-    print(json.dumps({"decision": "block", "reason": reason}, separators=(",", ":")))
+    decision = "continue" if _CURRENT_IS_ANTIGRAVITY else "block"
+    print(json.dumps({"decision": decision, "reason": reason}, separators=(",", ":")))
     return 0
 
 
