@@ -3546,12 +3546,11 @@ GET  /models?active=1   lazy X10A-diagnosis feed: streams exact queryable ValueD
                   available without claiming that generic was detected. The RX/TX dropdown still takes its GPIOs from
                   /status.pins_avail, NOT from the legacy pin_hint. During OTA this dynamic variant
                   returns the common early busy-503; static GET /models remains reachable
-GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. ?redact=1 scrubs the handful of
-                  lines that interpolate a host/IP/SSID (logic/redact.hpp) and switches the response
-                  to CHUNKED: a replacement is longer than most values it replaces, so the redacted
-                  text can GROW past the static dump buffer, and the alternatives are a second ~8 KB
-                  .bss buffer or a ~6 KB contiguous heap allocation. Plain /diag keeps serving its
-                  static ring during OTA; redact=1 returns the early busy-503 before its string chunk
+GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. Streams in 1 KiB chunks. ?redact=1 scrubs the handful of
+                  lines that interpolate a host/IP/SSID (logic/redact.hpp): a replacement is longer than most values
+                  it replaces, so the redacted text can GROW past the static dump buffer, and the alternatives are a second
+                  ~8 KB .bss buffer or a ~6 KB contiguous heap allocation. Plain /diag keeps serving its
+                  static ring during OTA (dump volume clamped to 1 KiB to avoid multi-pbuf lwIP heap fragmentation); redact=1 returns the early busy-503 before its string chunk
 POST /diag/clear  clear the in-memory diagnostic ring. Destructive actions are POST-only, so a link,
                   prefetch or crawler cannot erase evidence.
 GET  /status?redact=1   the bug-report form of /status: all 27 reporter-identifying values read

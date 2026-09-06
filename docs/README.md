@@ -475,14 +475,15 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
 GET  /diag[?verbose=0|1][?redact=1]
                                    # plain-text in-memory diag log (raw RX frames when verbose).
-                                   #   ?redact=1 scrubs the handful of lines that interpolate a
-                                   #   host, an IP or an SSID (logic/redact.hpp) and switches the
-                                   #   response to CHUNKED: a replacement is longer than most values
-                                   #   it replaces, so the redacted text can grow past the static
-                                   #   dump buffer, and the alternatives were a second ~8 KB .bss
-                                   #   buffer or a ~6 KB contiguous heap allocation. During OTA,
-                                   #   plain /diag remains available from static storage; redact=1
-                                   #   returns the early busy-503 before creating its string chunk.
+                                   #   Streams in 1 KiB chunks. ?redact=1 scrubs the handful of
+                                   #   lines that interpolate a host, an IP or an SSID (logic/redact.hpp):
+                                   #   a replacement is longer than most values it replaces, so the
+                                   #   redacted text can grow past the static dump buffer, and the
+                                   #   alternatives were a second ~8 KB .bss buffer or a ~6 KB
+                                   #   contiguous heap allocation. During OTA, plain /diag remains
+                                   #   available from static storage (clamped to 1 KiB to prevent burst
+                                   #   pbuf heap fragmentation); redact=1 returns the early busy-503
+                                   #   before creating its string chunk.
 GET  /scan                         # WiFi scan → {"networks":[{ssid,rssi}]} (name + signal only, no
                                    #   auth field). Trusted-LAN only, and read by no shipped client:
                                    #   the setup portal takes a TYPED SSID and never scans. A
