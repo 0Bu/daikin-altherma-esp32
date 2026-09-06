@@ -474,14 +474,13 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 }
 .conn-tile .section-label { display: block; margin-bottom: 4px; }
 .conn-row {
-  display: grid; grid-template-columns: max-content minmax(0,1fr) max-content;
-  width: 100%; align-items: center; column-gap: 12px; row-gap: 0;
-  padding: 11px 0; border-top: 1px solid var(--line);
-  font: inherit; background: none; border-left: 0; border-right: 0; border-bottom: 0;
-  cursor: pointer; text-align: left; color: inherit;
+  display: grid; grid-template-columns: max-content minmax(0,1fr) 15px;
+  width: 100%; align-items: center; gap: 0 12px;
+  padding: 11px 0; border: 0; border-top: 1px solid var(--line);
+  font: inherit; background: none; text-align: left; color: inherit;
 }
-.conn-row:hover .conn-label, .conn-row:hover .vcard-edit-icon { color: var(--brand-strong); }
-.conn-row .vcard-edit-icon { flex: none; margin-bottom: 0; }
+.conn-row[data-edit] { cursor: pointer; }
+.conn-row[data-edit]:hover :is(.conn-label, .vcard-edit-icon) { color: var(--brand-strong); }
 .conn-label {
   font-size: 12px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
   color: var(--muted); flex: none;
