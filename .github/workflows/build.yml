@@ -687,7 +687,8 @@ jobs:
         run: |
           set -euo pipefail
           idf_ver="$(./scripts/idf-version.sh)"
-          mirror="ghcr.io/${{ github.repository_owner }}/idf:${idf_ver}"
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          mirror="ghcr.io/${owner}/idf:${idf_ver}"
           echo "Prefetching $mirror (falling back to Docker Hub if unavailable)..."
           if docker pull "$mirror"; then
             docker tag "$mirror" "espressif/idf:${idf_ver}"
@@ -923,7 +924,8 @@ jobs:
         run: |
           set -euo pipefail
           idf_ver="$(./scripts/idf-version.sh)"
-          mirror="ghcr.io/${{ github.repository_owner }}/idf:${idf_ver}"
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          mirror="ghcr.io/${owner}/idf:${idf_ver}"
           echo "Prefetching $mirror (falling back to Docker Hub if unavailable)..."
           if docker pull "$mirror"; then
             docker tag "$mirror" "espressif/idf:${idf_ver}"

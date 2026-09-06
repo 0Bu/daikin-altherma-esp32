@@ -1856,6 +1856,30 @@ def run_stop_logic_tests(_: argparse.Namespace) -> int:
     return 0
 
 
+def run_pr_gates(_: argparse.Namespace) -> int:
+    payload, error = read_payload(fail_closed=True)
+    if error:
+        emit_error(error)
+        return 2
+    raw = json.dumps(payload)
+    cmd = ["bash", str(HOOK_ROOT / "tools/agent-hooks/require-pr-gates.sh")]
+    result = subprocess.run(cmd, input=raw.encode("utf-8"), capture_output=True)
+    if result.returncode == 0:
+        if _CURRENT_IS_ANTIGRAVITY:
+            print(json.dumps({"decision": "allow"}, separators=(",", ":")))
+        return 0
+    reason = (
+        result.stderr.decode("utf-8", errors="replace").strip()
+        or result.stdout.decode("utf-8", errors="replace").strip()
+        or "PR review gates failed"
+    )
+    if _CURRENT_IS_ANTIGRAVITY:
+        print(json.dumps({"decision": "deny", "reason": reason}, separators=(",", ":")))
+    else:
+        sys.stderr.write(reason + "\n")
+    return result.returncode
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1872,6 +1896,8 @@ def build_parser() -> argparse.ArgumentParser:
     prompt_context.set_defaults(func=run_prompt_context)
     stop_tests = subparsers.add_parser("stop-logic-tests")
     stop_tests.set_defaults(func=run_stop_logic_tests)
+    pr_gates = subparsers.add_parser("pr-gates")
+    pr_gates.set_defaults(func=run_pr_gates)
     return parser
 
 

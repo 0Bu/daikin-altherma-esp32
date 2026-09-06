@@ -29,8 +29,9 @@ jobs:
         run: |
           set -euo pipefail
           idf_ver="$(./scripts/idf-version.sh)"
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
           src="espressif/idf:${idf_ver}"
-          dest="ghcr.io/${{ github.repository_owner }}/idf:${idf_ver}"
+          dest="ghcr.io/${owner}/idf:${idf_ver}"
           echo "Pulling $src..."
           docker pull "$src"
           echo "Tagging $dest..."

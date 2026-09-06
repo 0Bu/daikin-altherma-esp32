@@ -58,6 +58,27 @@ elif [ "$force_check" != "1" ] && [ -z "$body_file$head_sha$files_file" ]; then
 fi
 [ "$payload_expected" -eq 0 ] || [ -n "$payload" ] || { echo "agent PR gates: empty hook payload; refusing merge policy bypass" >&2; exit 2; }
 
+is_antigravity=0
+case "$payload" in
+    *'"toolCall"'*) is_antigravity=1 ;;
+esac
+if [ "$is_antigravity" -eq 1 ]; then
+    exec 3>&1
+    exec 1>&2
+fi
+cleanup() {
+    rc=$?
+    [ -z "${tmp:-}" ] || rm -rf "$tmp"
+    if [ "$is_antigravity" -eq 1 ]; then
+        if [ "$rc" -eq 0 ]; then
+            printf '{"decision": "allow"}\n' >&3
+        else
+            printf '{"decision": "deny", "reason": "PR policy gates rejected the action"}\n' >&3
+        fi
+    fi
+}
+trap cleanup EXIT
+
 action=""; payload_cwd=""; target_repo=""; target_host=""; parse_error=""; expected_head=""
 if [ -n "$payload" ]; then
     parsed_payload="$(mktemp)" || exit 2
@@ -121,7 +142,6 @@ if [ -n "$action" ]; then
     fi
 fi
 tmp="$(mktemp -d)" || exit 2
-trap 'rm -rf "$tmp"' EXIT
 
 if [ -n "$body_file$head_sha$files_file$pr_metadata_file$head_commit_file$head_commit_pages_file" ]; then
     # Any explicit/CI override disables network discovery. Partial input is a policy error.
