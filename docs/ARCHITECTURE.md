@@ -2423,7 +2423,7 @@ Structure:
   heap and OTA-stack reserve before cleanup. One known-length prefix committed after header and
   app-description validation may then reconnect at most twice inside the same accepted generation
   and original five-minute deadline. The old TLS client and
-  2 KiB buffer are freed, the same stable 56/24-KiB admission is reacquired, and the original HTTPS
+  1 KiB buffer are freed, the same stable 56/24-KiB admission is reacquired, and the original HTTPS
   URL must answer `Range: bytes=<written>-` with HTTP 206, exactly one matching `Content-Range` and
   the exact remaining `Content-Length`. The live sequential OTA handle and PSA hash continue; 200,
   chunked or duplicate/missing/mismatched range metadata aborts without boot selection. A resumed
@@ -2593,7 +2593,7 @@ Structure:
   first. The gate fails before its POST and never falls back to the legacy false-success API. This
   workflow creates no release and contains no 48-hour soak gate.
 - **Validation gets the transport's heap back first.** The firmware downloads through a fixed
-  2 KiB INTERNAL buffer and closes/frees both that buffer and the complete HTTP/TLS client before
+  1 KiB INTERNAL buffer and closes/frees both that buffer and the complete HTTP/TLS client before
   finishing the PSA SHA-256 stream and calling `esp_ota_end()`. The stream digest must match the
   application SHA captured from the completed check; `esp_ota_end()` remains IDF's mandatory
   RSA-3072/PSA verifier. `esp_ota_set_boot_partition()` performs another IDF image/signature
@@ -3550,7 +3550,7 @@ GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. Streams in 1 KiB chunk
                   lines that interpolate a host/IP/SSID (logic/redact.hpp): a replacement is longer than most values
                   it replaces, so the redacted text can GROW past the static dump buffer, and the alternatives are a second
                   ~8 KB .bss buffer or a ~6 KB contiguous heap allocation. Plain /diag keeps serving its
-                  static ring during OTA (dump volume clamped to 1 KiB to avoid multi-pbuf lwIP heap fragmentation); redact=1 returns the early busy-503 before its string chunk
+                  static ring during OTA (dump volume clamped to 512 B to avoid multi-pbuf lwIP heap fragmentation); redact=1 returns the early busy-503 before its string chunk
 POST /diag/clear  clear the in-memory diagnostic ring. Destructive actions are POST-only, so a link,
                   prefetch or crawler cannot erase evidence.
 GET  /status?redact=1   the bug-report form of /status: all 27 reporter-identifying values read

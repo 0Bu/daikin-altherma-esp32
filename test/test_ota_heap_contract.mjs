@@ -1289,8 +1289,8 @@ assert.match(diagHandler,
   /if\s*\(redact\s*&&\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,1600}?chunk\.reserve\(1280\)/,
   "redacted /diag must refuse OTA before its growable chunk while plain static-ring diagnostics remain available");
 assert.match(diagHandler,
-  /ota_download_active\(\)\s*\?\s*1024\s*:\s*sizeof\(buf\)/,
-  "plain /diag must clamp ring dump to 1024 B during active OTA to prevent multi-pbuf lwIP heap fragmentation");
+  /ota_download_active\(\)\s*\?\s*512\s*:\s*sizeof\(buf\)/,
+  "plain /diag must clamp ring dump to 512 B during active OTA to prevent multi-pbuf lwIP heap fragmentation");
 assert.match(diagHandler,
   /for\s*\([^)]*off\s*\+=\s*1024\)[\s\S]{0,120}?httpd_resp_send_chunk\(/,
   "plain /diag must stream in chunks to avoid burst pbuf heap pressure during OTA");
