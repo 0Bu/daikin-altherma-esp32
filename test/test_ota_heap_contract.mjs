@@ -885,6 +885,8 @@ assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_BUFFER=y$/m,
   "ESP-IDF's handshake-aware dynamic TLS buffers must remain enabled");
 assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n$/m,
   "TLS config/key/CA lifetime must not be shortened without reconnect redesign");
+assert.match(ota, /http\.tls_dyn_buf_strategy\s*=\s*HTTP_TLS_DYN_BUF_RX_STATIC;/,
+  "firmware stream must pin the static RX buffer strategy post-handshake to prevent record-to-record heap fragmentation");
 assert.equal(occurrences(update, "wait_for_ota_headroom("), 3,
   "the install path needs one TLS gate and a separate RSA gate before both IDF validation passes");
 assert.match(ota,
@@ -1286,8 +1288,11 @@ const diagEnd = httpStatus.indexOf("static esp_err_t h_diag_clear(", diagStart);
 const diagHandler = httpStatus.slice(diagStart, diagEnd);
 assert.ok(diagStart >= 0 && diagEnd > diagStart, "/diag must remain identifiable");
 assert.match(diagHandler,
-  /if\s*\(redact\s*&&\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,1200}?chunk\.reserve\(1280\)/,
+  /if\s*\(redact\s*&&\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,1600}?chunk\.reserve\(1280\)/,
   "redacted /diag must refuse OTA before its growable chunk while plain static-ring diagnostics remain available");
+assert.match(diagHandler,
+  /for\s*\([^)]*off\s*\+=\s*1024\)[\s\S]{0,120}?httpd_resp_send_chunk\(/,
+  "plain /diag must stream in chunks to avoid burst pbuf heap pressure during OTA");
 const scanStart = httpStatus.indexOf("static esp_err_t h_scan(");
 const scanEnd = httpStatus.indexOf("void http_register_status(", scanStart);
 const scanHandler = httpStatus.slice(scanStart, scanEnd);
