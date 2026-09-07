@@ -462,13 +462,13 @@ static void test_convert() {
 
     // Non-finite values (NaN, infinity) must be rejected by reading_plausible.
     Reading r_nan;
-    r_nan.ok = true;
+    r_nan.ok    = true;
     r_nan.value = std::numeric_limits<double>::quiet_NaN();
     CHECK(!reading_plausible(ot, r_nan));
     CHECK(!reading_plausible(cop, r_nan));
 
     Reading r_inf;
-    r_inf.ok = true;
+    r_inf.ok    = true;
     r_inf.value = std::numeric_limits<double>::infinity();
     CHECK(!reading_plausible(ot, r_inf));
     CHECK(!reading_plausible(cop, r_inf));

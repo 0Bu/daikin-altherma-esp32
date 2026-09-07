@@ -173,17 +173,17 @@ static bool jb(cJSON* o, const char* k, bool def) {
 struct JsonGuard {
     explicit JsonGuard(cJSON* root = nullptr) : root(root) {}
     ~JsonGuard() { reset(); }
-    JsonGuard(const JsonGuard&) = delete;
+    JsonGuard(const JsonGuard&)            = delete;
     JsonGuard& operator=(const JsonGuard&) = delete;
-    void reset(cJSON* next = nullptr) {
+    void       reset(cJSON* next = nullptr) {
         if (root) cJSON_Delete(root);
         root = next;
     }
     cJSON* get() const { return root; }
     operator cJSON*() const { return root; }
-    cJSON* operator->() const { return root; }
+    cJSON*   operator->() const { return root; }
     explicit operator bool() const { return root != nullptr; }
-    cJSON* root = nullptr;
+    cJSON*   root = nullptr;
 };
 
 static esp_err_t set_wifi(httpd_req_t* req) {

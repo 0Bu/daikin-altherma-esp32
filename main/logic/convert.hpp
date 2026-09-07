@@ -107,11 +107,17 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
         case 108: r.value = read_s16(data, n, true) * 0.1;         r.ok = (r.value != -3276.8); break;
         case 109: r.value = read_s16(data, n, false) / 256.0 * 2.0; r.ok = true; break;
         case 110: r.value = read_s16(data, n, true) / 256.0 * 2.0;  r.ok = true; break;
-        case 111: r.value = read_s16(data, n, false) * 0.5;        r.ok = true; break;
+        case 111:
+            r.value = read_s16(data, n, false) * 0.5;
+            r.ok    = true;
+            break;
         // Unsigned 16-bit (counts / steps / CT current).
         case 151: r.value = read_u16(data, n, false);             r.ok = true; break;
         case 152: r.value = read_u16(data, n, true);              r.ok = true; break;
-        case 161: r.value = read_u16(data, n, false) * 0.5;       r.ok = true; break;    // CT current (0.5 A)
+        case 161:
+            r.value = read_u16(data, n, false) * 0.5;
+            r.ok    = true;
+            break;
         // Target/ECH2O temps: signed LE ×0.1, with 0x8000 (-3276.8) meaning "no data".
         case 114:
         case 119: r.value = read_s16(data, n, false) * 0.1;       r.ok = (r.value != -3276.8); break;
