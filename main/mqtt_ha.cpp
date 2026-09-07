@@ -782,7 +782,7 @@ static void retract_stale_values(const logic::ProfileView& prof, const std::stri
 // X10A topic (s_x10a) and pulls its value out via a value_template. A bit-flag row lands
 // under the binary_sensor component, everything else under sensor (logic/discovery.hpp ha_component).
 static void publish_x10a_discovery() {
-    const std::string profile_id = config().profile;
+    const std::string profile_id = config_profile();
     // The VIEW, not the raw profile: every row hp_poll caches needs a discovery config, and the
     // applicable overlay blocks (def/overlay.hpp) are part of that row set. Announcing fewer rows than the
     // X10A topic carries would leave the extra values in MQTT with no HA entity to land in.
@@ -1280,7 +1280,6 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, con
 static void publish_heartbeat() {
     HpStats  hp = hp_stats();
     WifiInfo wi = wifi_info();
-    const Config cfg = config();
     HeartbeatFields f;
     f.version         = esp_app_get_description()->version;
     f.platform        = CONFIG_IDF_TARGET;
@@ -1337,7 +1336,7 @@ static void publish_heartbeat() {
     f.mqtt_quiesced   = s_mqtt_quiesced.load(std::memory_order_relaxed);
     f.poll_skipped    = hp_skipped_cycles();
     f.bus_connected   = hp.connected;
-    f.bus_proto       = static_cast<char>(cfg.proto);
+    f.bus_proto                   = static_cast<char>(config_x10a_protocol());
     f.registers       = hp.registers;
     f.values          = hp.values;
     f.crc_err         = hp.crc_err;
@@ -1361,35 +1360,37 @@ static void publish_heartbeat() {
 // mapping or heating policy; the nested objects keep related evidence together for generic MQTT
 // browsers while retaining numeric leaves for Telegraf/VictoriaMetrics.
 static void publish_heating_curve_telemetry() {
-    const Config cfg = config();
-    if (!cfg.diagnostics_enabled) return;
+    if (!config_diagnostics_enabled()) return;
     HeatingCurveMqttFields f;
     const ReferenceTemperatureStatus rt = reference_temperature_status();
     const uint64_t room_now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
     int64_t room_now_unix_s = -1;
     int32_t room_now_sub_ms = 0;
     time_now(room_now_unix_s, room_now_sub_ms);
-    const ReferenceFreshness room_freshness = reference_freshness(
-        rt.has_value, rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms,
-        room_now_unix_s, room_now_ms, cfg.ref_temp_max_age_s);
+    ReferenceFreshness room_freshness;
     ReferenceRoomRaw room_raw;
-    room_raw.configured = !cfg.ref_temp_topic.empty();
-    room_raw.has_temperature = rt.has_value;
-    room_raw.payload_valid = rt.error.empty();
-    room_raw.temperature_c = rt.temperature_c;
-    room_raw.has_source_time = rt.has_source_time;
-    room_raw.setpoint_mapped = cfg.ref_temp_fixed_setpoint_tenths != 0 ||
-                               !cfg.ref_temp_setpoint_topic.empty() ||
-                               !cfg.ref_temp_setpoint_path.empty();
-    room_raw.has_setpoint = rt.has_setpoint;
-    room_raw.setpoint_c = rt.setpoint_c;
-    room_raw.enabled_mapped = !cfg.ref_temp_enabled_path.empty();
-    room_raw.has_enabled = rt.has_enabled;
-    room_raw.enabled = rt.enabled;
-    room_raw.hvac_mode_mapped = !cfg.ref_temp_hvac_mode_path.empty();
-    room_raw.has_hvac_mode = rt.has_hvac_mode;
-    room_raw.hvac_mode = rt.hvac_mode;
-    room_raw.payload_reason = rt.rejection_reason;
+    with_config([&](const Config& cfg) {
+        room_freshness      = reference_freshness(rt.has_value, rt.retained, rt.has_source_time,
+                                                  rt.source_unix_s, rt.received_ms, room_now_unix_s,
+                                                  room_now_ms, cfg.ref_temp_max_age_s);
+        room_raw.configured = !cfg.ref_temp_topic.empty();
+        room_raw.has_temperature = rt.has_value;
+        room_raw.payload_valid   = rt.error.empty();
+        room_raw.temperature_c   = rt.temperature_c;
+        room_raw.has_source_time = rt.has_source_time;
+        room_raw.setpoint_mapped = cfg.ref_temp_fixed_setpoint_tenths != 0 ||
+                                   !cfg.ref_temp_setpoint_topic.empty() ||
+                                   !cfg.ref_temp_setpoint_path.empty();
+        room_raw.has_setpoint     = rt.has_setpoint;
+        room_raw.setpoint_c       = rt.setpoint_c;
+        room_raw.enabled_mapped   = !cfg.ref_temp_enabled_path.empty();
+        room_raw.has_enabled      = rt.has_enabled;
+        room_raw.enabled          = rt.enabled;
+        room_raw.hvac_mode_mapped = !cfg.ref_temp_hvac_mode_path.empty();
+        room_raw.has_hvac_mode    = rt.has_hvac_mode;
+        room_raw.hvac_mode        = rt.hvac_mode;
+        room_raw.payload_reason   = rt.rejection_reason;
+    });
     const ReferenceRoomSample room = reference_room_sample(room_raw, room_freshness);
     f.room_temperature_valid = room.temperature_valid;
     f.room_setpoint_valid = room.setpoint_valid;
@@ -2871,10 +2872,11 @@ void mqtt_ha_start() {
         diag_printf("mqtt: reference receive queue alloc failed\n");
     }
 
-    // The installation's base topic: the persisted value when set, else the compile-time default.
     // Resolved ONCE, here, because every topic root and the HA node id below derive from it — a
     // second copy of the empty-means-default rule is how one of them would end up on another base.
-    s_base   = mqtt_base_effective(config().mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC);
+    s_base            = with_config([](const Config& c) {
+        return mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC);
+    });
     s_node   = device_node_id(s_base);   // HA device id: the installation, NOT this board
     s_board  = board_id();               // this board: MQTT client id + dev.ids merge key
     s_prefix = CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX;

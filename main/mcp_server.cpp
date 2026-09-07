@@ -90,8 +90,6 @@ static esp_err_t mcp_post(httpd_req_t* req) {
                 mcp_result_end(suffix);
                 return http_send_values_json(req, response, suffix);
             }
-            mcp_tool_result_end(response);
-            break;
         default:
             response += "{}";  // unreachable: mcp_parse maps an unknown method to -32601
             break;

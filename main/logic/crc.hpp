@@ -61,6 +61,13 @@ inline bool reply_len_valid(Protocol proto, int reply_len, size_t buflen) {
     return reply_len >= minimum && reply_len_fits(reply_len, buflen);
 }
 
+// Dynamic Protocol-I reply length validity check. A valid Protocol-I reply frame
+// requires at least 4 bytes (0x40 opcode, register echo, length byte, and checksum),
+// and must fit within the caller's buffer.
+inline bool dynamic_reply_len_valid(int reply_len, size_t buflen) {
+    return reply_len >= 4 && reply_len_fits(reply_len, buflen);
+}
+
 // HP "did not understand the request" reply (both protocols).
 inline bool is_error_reply(const uint8_t* buf, int len) {
     return len >= 2 && buf[0] == 0x15 && buf[1] == 0xea;

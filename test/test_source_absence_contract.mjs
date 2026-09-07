@@ -52,7 +52,7 @@ assert.match(history, /void history_record_board\(\)\s*\{[\s\S]*?advance_raster_
 // assertion would then permit the very defect it was written for, since the board trends' original
 // failure was being reachable only when the heat pump was.
 const prologue = poll.match(
-  /^\s*history_record_board\(\);((?:\s*\n\s*(?:\/\/[^\n]*|[A-Za-z_][A-Za-z0-9_:]*\([^;]*\);))*)\s*\n\s*if \(config\(\)\.profile == "auto"\)/m);
+  /^\s*history_record_board\(\);((?:\s*\n\s*(?:\/\/[^\n]*|[A-Za-z_][A-Za-z0-9_:]*\([^;]*\);))*)\s*\n\s*if \((?:config\(\)\.profile|config_profile\(\)) == "auto"\)/m);
 assert.ok(prologue,
   "the poll task must record the board trends BEFORE it decides whether to detect or to sweep — " +
   "inside either branch is what made them depend on the heat pump being reachable");
@@ -134,7 +134,7 @@ assert.ok(detectSnapshotAt >= 0 && detectModeGuardAt > detectSnapshotAt &&
 // dev-channel OTA shorter than an hour.  The handler is bounded so a busy observer can cost one
 // candidate but can never strand an already-installed OTA image.
 assert.match(checkup,
-  /void checkup_reboot_save\(\)[\s\S]*?xSemaphoreTake\(s_mtx, pdMS_TO_TICKS\(200\)\)[\s\S]*?dhw_loss_checkpoint\(s_dhw_state,[\s\S]*?h\.payload\.pending\s*=\s*P\(\)\.dhw\.pending/,
+  /void checkup_reboot_save\(\)[\s\S]*?(?:Lock\s+lk\(s_mtx,\s*pdMS_TO_TICKS\(200\)\)|xSemaphoreTake\(s_mtx,\s*pdMS_TO_TICKS\(200\)\))[\s\S]*?dhw_loss_checkpoint\(s_dhw_state,[\s\S]*?h\.payload\.pending\s*=\s*P\(\)\.dhw\.pending/,
   "intentional reboot must checkpoint both the in-flight DHW candidate and completed pending windows under a bounded lock");
 assert.match(checkup,
   /checkup_dhw_handoff_valid\([\s\S]*?P\(\)\.dhw\.pending\s*=\s*P\(\)\.dhw_handoff\.payload\.pending;[\s\S]*?dhw_loss_adopt\(/,
@@ -705,7 +705,7 @@ assert.doesNotMatch(status, /build_modbus_values_array|const std::string arr\s*=
 // rule. THREE paths reach it, and the two failure paths are the ones a refactor drops.
 assert.match(poll, /if \(!hp_uart_init\([\s\S]{0,900}?dwell_record\(nullptr, 0, cycle_generation\);/,
   "a cycle that could not bring up the UART must book blind time, not skip the table");
-assert.match(poll, /if \(config\(\)\.profile == "auto"\)[\s\S]{0,2200}?dwell_record\(nullptr, 0, generation\);/,
+assert.match(poll, /if \((?:config\(\)\.profile|config_profile\(\)) == "auto"\)[\s\S]{0,2200}?dwell_record\(nullptr, 0, generation\);/,
   "a board whose X10A never resolves a profile must age its restored state ages out, or a reboot " +
   "would present the frozen pre-reboot durations as current");
 assert.match(poll, /checkup_record\(fresh\.data\(\)[\s\S]{0,900}?dwell_record\(fresh\.data\(\), fresh\.size\(\),\s*cycle_generation\);/,

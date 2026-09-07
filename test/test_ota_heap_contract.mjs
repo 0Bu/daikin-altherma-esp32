@@ -990,7 +990,9 @@ assert.match(pollTask, /OtaQuiesceState\s+network_quiesce/,
 const active = pollTask.indexOf("ota_download_active(");
 const weatherActive = pollTask.indexOf("weather_fetch_active(", active);
 const quiesce = pollTask.indexOf("ota_quiesce_step(network_quiesce, network_active)", weatherActive);
-const configRead = pollTask.indexOf("config().profile");
+const configRead = pollTask.includes("config_profile()")
+  ? pollTask.indexOf("config_profile()")
+  : pollTask.indexOf("config().profile");
 const pollOnce = pollTask.indexOf("poll_once(");
 assert.ok(active >= 0 && weatherActive > active && quiesce > weatherActive &&
           configRead > quiesce && pollOnce > quiesce,
@@ -1136,7 +1138,7 @@ assert.ok(modbusOtaHold >= 0 && modbusWeatherHold > modbusOtaHold &&
 assert.match(modbusTask.slice(modbusOtaHold, modbusPollCall),
   /vTaskDelay\([\s\S]*?continue;/,
   "the HomeHub network hold must yield at its ordinary cadence");
-assert.match(modbusPoll, /const Config& c = config\(\);[\s\S]*?std::vector/,
+assert.match(modbusPoll, /(?:const Config& c = config\(\);|with_config\()[\s\S]*?std::vector/,
   "the allocation-rich HomeHub cycle must still own the Config snapshot and model-sized values");
 assert.match(modbus,
   /struct\s+MbNetworkActivity[\s\S]{0,220}?s_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,220}?s_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
@@ -1147,7 +1149,9 @@ assert.match(modbus,
 
 const syslogLoopAnchor = syslog.indexOf("const TickType_t check_interval");
 const syslogLoopStart = syslog.indexOf("while (true)", syslogLoopAnchor);
-const syslogConfig = syslog.indexOf("const Config& c = config()", syslogLoopStart);
+const syslogConfig = syslog.includes("with_config(")
+  ? syslog.indexOf("with_config(", syslogLoopStart)
+  : syslog.indexOf("const Config& c = config()", syslogLoopStart);
 assert.ok(syslogLoopAnchor >= 0 && syslogLoopStart > syslogLoopAnchor &&
           syslogConfig > syslogLoopStart,
   "the allocating Syslog loop must remain identifiable");

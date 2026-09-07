@@ -167,13 +167,13 @@ restore() { cp -R "$ROOT/main" "$TMP/"; }
 #    call moves inside the resolved-profile branch, so a board whose X10A never answers records no
 #    heap curve — on exactly the board someone is debugging.
 python3 - "$TMP/main/hp_poll.cpp" <<'PY'
-import sys
+import sys, re
 p = sys.argv[1]
 s = open(p).read()
 seed = s.replace("            history_record_board();\n", "", 1)
 assert seed != s, "seed 1 did not apply — the call site moved"
-seed = seed.replace('if (config().profile != "auto") poll_once();',
-                    'if (config().profile != "auto") { history_record_board(); poll_once(); }', 1)
+seed, _ = re.subn(r'if \((?:config\(\)\.profile|config_profile\(\)) != "auto"\) poll_once\(\);',
+                  'if (config_profile() != "auto") { history_record_board(); poll_once(); }', seed, count=1)
 open(p, "w").write(seed)
 PY
 expect_red "board trends recorded only once a profile is resolved" run_contract
@@ -304,12 +304,12 @@ restore
 #    proximity search (`history_record_board();[\s\S]{0,600}?heap_guard_sample();`), which spans the
 #    `if` line happily, so it went green with the call sitting inside the branch.
 python3 - "$TMP/main/hp_poll.cpp" <<'PY'
-import sys
+import sys, re
 p = sys.argv[1]
 s = open(p).read()
-seed = s.replace('            heap_guard_sample();\n            if (config().profile == "auto") {',
-                 '            if (config().profile == "auto") {\n                heap_guard_sample();', 1)
-assert seed != s, "seed 9 did not apply — the heap watchdog's call site moved"
+seed, count = re.subn(r'            heap_guard_sample\(\);\n            if \((?:config\(\)\.profile|config_profile\(\)) == "auto"\) \{',
+                      '            if (config_profile() == "auto") {\n                heap_guard_sample();', s, count=1)
+assert count == 1, "seed 9 did not apply — the heap watchdog's call site moved"
 open(p, "w").write(seed)
 PY
 expect_red "the heap watchdog sampling only once a profile is resolved" run_contract
@@ -325,7 +325,7 @@ import sys
 p = sys.argv[1]
 s = open(p).read()
 seed = s.replace('            history_record_board();',
-                 '            if (config().profile != "auto") history_record_board();', 1)
+                 '            if (config_profile() != "auto") history_record_board();', 1)
 assert seed != s, "seed 10 did not apply — the call site moved"
 open(p, "w").write(seed)
 PY
