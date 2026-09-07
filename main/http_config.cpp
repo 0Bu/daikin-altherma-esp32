@@ -674,7 +674,7 @@ static CirculationSourceTestConfig circulation_test_config(const CirculationRequ
 }
 
 static esp_err_t test_circulation(httpd_req_t* req) {
-    if (!config().diagnostics_enabled)
+    if (!config_diagnostics_enabled())
         return send_err(req, "409 Conflict", "Enable plant diagnostics before testing this source");
     CirculationRequest in;
     if (const char* error = parse_circulation_request(req, in))
@@ -1216,10 +1216,7 @@ static esp_err_t set_lang(httpd_req_t* req) {
 // invalidate the fingerprint, so the next poll cycle sweeps protocol + re-fingerprints the unit
 // (hp_poll.cpp poll_detect). Detection state is session-only, so this is a RAM-only reset.
 static esp_err_t do_detect(httpd_req_t* req) {
-    Config c   = config();
-    c.profile  = "auto";
-    c.fp_valid = false;
-    config_set_runtime(c);
+    config_reset_detection();
     hp_poll_reconfigure();
     checkup_reset();
     dwell_reset();

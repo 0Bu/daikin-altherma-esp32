@@ -784,8 +784,17 @@ static_assert(MB_PLAN.count * 3 <= def::HOMEHUB_REG_COUNT,
 static void mb_poll_once() {
     const uint32_t cycle_target_generation =
         s_target_generation.load(std::memory_order_acquire);
-    const Config& c = config();
-    const std::string target = config_modbus_host(c);
+    struct ModbusTargetConfig {
+        int mb_port = 0;
+        uint8_t mb_unit_id = 0;
+    };
+    std::string target;
+    ModbusTargetConfig c;
+    with_config([&](const Config& cfg) {
+        target = config_modbus_host(cfg);
+        c.mb_port = cfg.mb_port;
+        c.mb_unit_id = cfg.mb_unit_id;
+    });
 
     // The poll task owns the socket identity, so it is the final race-free authority for a target
     // change. /set_hp also requests this reset immediately to hide the old series from readers; this

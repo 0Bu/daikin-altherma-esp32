@@ -71,11 +71,42 @@ ConfigLinkSnapshot config_link_snapshot() {
     return {g_cfg.proto, g_cfg.rx_pin, g_cfg.tx_pin};
 }
 
+namespace detail {
+void config_lock() {
+    if (g_mtx) xSemaphoreTake(g_mtx, portMAX_DELAY);
+}
+void config_unlock() {
+    if (g_mtx) xSemaphoreGive(g_mtx);
+}
+const Config& config_ref_locked() {
+    return g_cfg;
+}
+} // namespace detail
+
+bool config_wifi_configured() {
+    Lock lk(g_mtx);
+    return !g_cfg.wifi_ssid.empty();
+}
+
+bool config_diagnostics_enabled() {
+    Lock lk(g_mtx);
+    return g_cfg.diagnostics_enabled;
+}
+
 OtaChannel config_ota_channel() {
     Lock lk(g_mtx);
     return g_cfg.ota_channel;
 }
 
+Protocol config_x10a_protocol() {
+    Lock lk(g_mtx);
+    return g_cfg.proto;
+}
+
+std::string config_profile() {
+    Lock lk(g_mtx);
+    return g_cfg.profile;
+}
 static uint32_t next_revision(uint32_t current) {
     uint32_t next = current + 1;
     return next ? next : 1;
@@ -530,8 +561,14 @@ bool config_commit_detected_model(uint32_t expected_revision, std::string profil
     return true;
 }
 
-// Whole-struct RAM publish (no NVS). Sole caller is POST /detect (http_config.cpp), which resets
-// profile->"auto" + clears the fingerprint: acceptable as a whole-struct write because it runs on the
+void config_reset_detection() {
+    Lock lk(g_mtx);
+    g_cfg.profile = "auto";
+    g_cfg.fp_valid = false;
+    g_cfg.runtime_revision = next_revision(g_cfg.runtime_revision);
+}
+
+// Whole-struct RAM publish (no NVS). Acceptable as a whole-struct write because it runs on the
 // httpd task, which OWNS the credential fields (serialized against the other /set_* handlers), so it
 // cannot revert them. The poll task must NOT use this — it uses the revision-checked helpers above.
 void config_set_runtime(const Config& c) { publish(c); }

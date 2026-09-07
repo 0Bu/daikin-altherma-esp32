@@ -8,6 +8,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include "rtos_guard.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -53,9 +54,10 @@ void diag_printf(const char* fmt, ...) {
     // vsnprintf returns the length it *would* have written; clamp to what actually fit.
     if (n > (int)sizeof(line) - pre - 1) n = (int)sizeof(line) - pre - 1;
     int total = pre + n;
-    if (s_mtx) xSemaphoreTake(s_mtx, portMAX_DELAY);
-    append(line, total);
-    if (s_mtx) xSemaphoreGive(s_mtx);
+    {
+        SemGuard lk(s_mtx);
+        append(line, total);
+    }
     syslog_send(line, total);
     // Callers include the line ending because the ring and syslog stream need it. ESP_LOGI adds its
     // own line ending, so forwarding that same suffix to the console produced a blank serial line
@@ -72,8 +74,8 @@ void diag_set_verbose(bool on) { s_verbose.store(on, std::memory_order_relaxed);
 bool diag_verbose() { return s_verbose.load(std::memory_order_relaxed); }
 
 size_t diag_dump(char* out, size_t max) {
-    if (!s_mtx) return 0;
-    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    SemGuard lk(s_mtx);
+    if (!lk) return 0;
     size_t n = 0;
     if (s_wrapped) { // oldest half first
         size_t tail = RING - s_len;
@@ -82,14 +84,12 @@ size_t diag_dump(char* out, size_t max) {
     }
     size_t head = s_len < (max - n) ? s_len : (max - n);
     memcpy(out + n, s_buf, head); n += head;
-    xSemaphoreGive(s_mtx);
     return n;
 }
 
 void diag_clear() {
-    if (s_mtx) xSemaphoreTake(s_mtx, portMAX_DELAY);
+    SemGuard lk(s_mtx);
     s_len = 0; s_wrapped = false;
-    if (s_mtx) xSemaphoreGive(s_mtx);
 }
 
 } // namespace daik

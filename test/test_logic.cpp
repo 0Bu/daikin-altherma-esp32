@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <limits>
 #include <map>
@@ -22,6 +23,11 @@
 #include "logic/board_pins.hpp"
 #include "logic/board_presets.hpp"
 #include "logic/binary_semantics.hpp"
+#include "logic/circulation_source.hpp"
+#include "logic/ha_device.hpp"
+#include "logic/label_override.hpp"
+#include "logic/outdoor_evidence.hpp"
+#include "logic/value_def.hpp"
 #include "logic/chunk_sink.hpp"
 #include "logic/fault_state.hpp"
 #include "logic/raw_capture.hpp"
@@ -197,6 +203,18 @@ static void test_crc() {
     CHECK(!reply_len_valid(Protocol::I, 3, test_buflen));
     CHECK(reply_len_valid(Protocol::S, 2, test_buflen));
     CHECK(!reply_len_valid(Protocol::S, 1, test_buflen));
+
+    // 3. Dynamic Protocol-I reply length validity check (requires minimum 4 bytes + buffer fit):
+    CHECK(dynamic_reply_len_valid(4, test_buflen) == true);
+    CHECK(dynamic_reply_len_valid(12, test_buflen) == true);
+    CHECK(dynamic_reply_len_valid(64, test_buflen) == true);
+    CHECK(dynamic_reply_len_valid(3, test_buflen) == false);
+    CHECK(dynamic_reply_len_valid(2, test_buflen) == false);
+    CHECK(dynamic_reply_len_valid(1, test_buflen) == false);
+    CHECK(dynamic_reply_len_valid(0, test_buflen) == false);
+    CHECK(dynamic_reply_len_valid(-1, test_buflen) == false);
+    CHECK(dynamic_reply_len_valid(65, test_buflen) == false);
+    CHECK(dynamic_reply_len_valid(257, test_buflen) == false);
 
     // The STATIC length is now bound-checked too (hp_comm.cpp's hp_query, before the request goes
     // out) — the dynamic override was checked from the start while reply_len()'s own answer was
@@ -2991,6 +3009,26 @@ static void test_heartbeat() {
         // other four look like they were measured.
         CHECK(sj.find("\"poll_stack_min_free_bytes\":null,") != std::string::npos);
         CHECK(sj.find("\"mqtt_stack_min_free_bytes\":null,") != std::string::npos);
+    }
+    {
+        std::string s;
+        append_stack_bytes(s, 0);
+        CHECK(s == "null");
+        s.clear();
+        append_stack_bytes(s, 1024);
+        CHECK(s == "1024");
+
+        std::string streamed;
+        BoundedChunkSink<std::function<bool(std::string_view, bool)>, 64> sink(
+            [&](std::string_view chunk, bool) {
+                streamed.append(chunk.data(), chunk.size());
+                return true;
+            });
+        append_stack_bytes(sink, 0);
+        sink += ",";
+        append_stack_bytes(sink, 2048);
+        CHECK(sink.finish());
+        CHECK(streamed == "null,2048");
     }
     // THE UNIT IS PART OF THE IDENTIFIER, and it is BYTES. ESP-IDF's uxTaskGetStackHighWaterMark
     // answers in bytes where vanilla FreeRTOS answers in words, and this field name becomes the

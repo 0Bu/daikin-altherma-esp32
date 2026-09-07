@@ -788,7 +788,7 @@ static void poll_task(void*) {
             // already unconditional, already 1 Hz and already reads the heap — and adding a resident
             // task to watch the largest contiguous block would spend the very resource it measures.
             heap_guard_sample();
-            if (config().profile == "auto") {
+            if (config_profile() == "auto") {
                 // Keep the CHECKUP's clock running while the bus is unidentified. The window is now
                 // adopted from .noinit at boot (logic/checkup_persist.hpp), and a board whose X10A
                 // stops answering across a reboot — a pulled cable, a /set_hp onto wrong pins —
@@ -833,7 +833,7 @@ static void poll_task(void*) {
                     s_next_detect_us    = now + static_cast<int64_t>(wait_s) * 1000000;
                 }
             }
-            if (config().profile != "auto") poll_once();       // then poll it (same cycle if resolved)
+            if (config_profile() != "auto") poll_once();       // then poll it (same cycle if resolved)
         } catch (const std::exception& e) {
             // COUNT FIRST, then log. diag_printf allocates, so on the heap that caused this it can
             // throw again — and a second throw inside the handler is std::terminate, i.e. the reboot
@@ -918,13 +918,13 @@ void hp_poll_start() {
 size_t hp_values_capacity(uint32_t* revision_out) {
     if (!s_mtx) {
         if (revision_out) *revision_out = 0;
-        return def::lookup_view(config().profile.c_str()).count();
+        return def::lookup_view(config_profile().c_str()).count();
     }
     Lock lk(s_mtx);
     if (revision_out) *revision_out = s_cache_revision;
     const size_t n = s_cache.size();
     const char*  prof =
-        (s_cache_profile && *s_cache_profile) ? s_cache_profile : config().profile.c_str();
+        (s_cache_profile && *s_cache_profile) ? s_cache_profile : config_profile().c_str();
     const size_t prof_cap = def::lookup_view(prof).count();
     return n > prof_cap ? n : prof_cap;
 }

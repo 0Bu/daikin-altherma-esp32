@@ -247,7 +247,9 @@ void checkup_reboot_save() {
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (s_reboot_saved_this_boot) return;
     s_reboot_saved_this_boot = true;
-    if (!s_mtx || xSemaphoreTake(s_mtx, pdMS_TO_TICKS(200)) != pdTRUE) {
+    // Bounded lock (200 ms): intentional reboot handoff must never strand an installed OTA image.
+    Lock lk(s_mtx, pdMS_TO_TICKS(200));
+    if (!lk) {
         P().dhw_handoff.magic = 0;
         diag_printf("checkup: DHW reboot handoff skipped (checkup busy)\n");
         return;
@@ -270,7 +272,6 @@ void checkup_reboot_save() {
 
     const logic::DhwLossProgress p = logic::dhw_loss_progress(s_dhw_state,
                                                                esp_timer_get_time());
-    xSemaphoreGive(s_mtx);
     diag_printf("checkup: DHW reboot handoff saved (%u min candidate, %u completed window(s))\n",
                 static_cast<unsigned>(p.candidate_observed_s / 60),
                 static_cast<unsigned>(h.payload.pending.windows));

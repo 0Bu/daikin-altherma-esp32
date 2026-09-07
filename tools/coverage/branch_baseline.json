@@ -44,8 +44,8 @@
         "taken": 38
       },
       "main/logic/chunk_sink.hpp": {
-        "outcomes": 182,
-        "taken": 91
+        "outcomes": 212,
+        "taken": 107
       },
       "main/logic/circulation_source.hpp": {
         "outcomes": 56,
@@ -76,8 +76,8 @@
         "taken": 140
       },
       "main/logic/crc.hpp": {
-        "outcomes": 39,
-        "taken": 32
+        "outcomes": 41,
+        "taken": 34
       },
       "main/logic/detect.hpp": {
         "outcomes": 140,
@@ -124,8 +124,8 @@
         "taken": 18
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 402,
-        "taken": 216
+        "outcomes": 406,
+        "taken": 219
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 66,
@@ -398,8 +398,8 @@
         "taken": 57
       },
       "main/logic/chunk_sink.hpp": {
-        "outcomes": 200,
-        "taken": 101
+        "outcomes": 238,
+        "taken": 120
       },
       "main/logic/circulation_source.hpp": {
         "outcomes": 56,
@@ -430,8 +430,8 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 51,
-        "taken": 42
+        "outcomes": 55,
+        "taken": 46
       },
       "main/logic/detect.hpp": {
         "outcomes": 158,
@@ -478,8 +478,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 362,
-        "taken": 196
+        "outcomes": 366,
+        "taken": 199
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 78,
@@ -752,8 +752,8 @@
         "taken": 57
       },
       "main/logic/chunk_sink.hpp": {
-        "outcomes": 200,
-        "taken": 101
+        "outcomes": 238,
+        "taken": 120
       },
       "main/logic/circulation_source.hpp": {
         "outcomes": 56,
@@ -784,8 +784,8 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 51,
-        "taken": 42
+        "outcomes": 55,
+        "taken": 46
       },
       "main/logic/detect.hpp": {
         "outcomes": 158,
@@ -832,8 +832,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 362,
-        "taken": 196
+        "outcomes": 366,
+        "taken": 199
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 78,

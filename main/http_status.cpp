@@ -300,7 +300,6 @@ using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 // No count here on purpose: this file IS the set (every jstr_r below is one member), and stating
 // how many would be the sixth restatement of a number that had already drifted in four places.
 //
-// Runs on ONE task: the httpd worker. It used to run on the poll task too (the /events WebSocket
 // broadcaster), and that second runner is what overflowed hp_poll's stack (#241). GET /status now
 // instantiates this serializer with a 1 KiB bounded sink: the live payload is already ~8.7 KiB and a
 // growing whole-body std::string needed a ~15 KiB contiguous reallocation under OTA/weather TLS,
@@ -323,7 +322,9 @@ static void append_status_json(JsonOut& j, bool redact) {
     // that produced it (scripts/decode-coredump.sh), and pairs with last_crash below.
     char elf_sha[65] = {0};
     esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
-    j += "\"app_elf_sha256\":" + jstr(elf_sha) + ",";
+    j += "\"app_elf_sha256\":";
+    j += jstr(elf_sha);
+    j += ",";
     // GPIOs the UI offers in the RX/TX pin dropdown. A concrete selected board narrows the generic
     // ESP32-S3 chip-safe set to pads its PCB actually exposes; Custom keeps the generic list because
     // only its owner knows that board's headers. In both cases the live reservation removes the
@@ -594,21 +595,31 @@ static void append_status_json(JsonOut& j, bool redact) {
     // stored credentials" checkbox, which is the only way to reach /set_mqtt's clear_creds.
     {
         const MqttStatus m = mqtt_status();
-        j += "\"mqtt\":{\"configured\":" + std::string(m.configured ? "true" : "false") +
-             ",\"connected\":" + (m.connected ? "true" : "false") +
-             ",\"tls\":" + (m.tls ? "true" : "false") + ",\"has_creds\":" +
-             ((!c.mqtt_user.empty() || !c.mqtt_pass.empty()) ? "true" : "false") +
-             ",\"broker\":" + jstr_r(m.broker, redact) +
-             (m.error.empty() ? "" : ",\"error\":" + jstr(m.error));
+        j += "\"mqtt\":{\"configured\":";
+        j += m.configured ? "true" : "false";
+        j += ",\"connected\":";
+        j += m.connected ? "true" : "false";
+        j += ",\"tls\":";
+        j += m.tls ? "true" : "false";
+        j += ",\"has_creds\":";
+        j += (!c.mqtt_user.empty() || !c.mqtt_pass.empty()) ? "true" : "false";
+        j += ",\"broker\":";
+        j += jstr_r(m.broker, redact);
+        if (!m.error.empty()) {
+            j += ",\"error\":";
+            j += jstr(m.error);
+        }
         // The installation's base topic, ALWAYS the effective one — the empty stored value means
         // "the compile-time default" (logic/mqtt_base.hpp), and reporting "" would make a default
         // device look unconfigured to the modal that has to prefill this field. `base_custom` is
         // the separate fact: whether the user has stated a base, which is what the UI needs to know
         // before offering Reset. Redacted like reference_temperature.name and for the same reason —
         // it is a word the user typed, and it becomes this installation's Home Assistant device id.
-        j += ",\"base\":" +
-             jstr_r(mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC), redact) +
-             ",\"base_custom\":" + std::string(c.mqtt_base.empty() ? "false" : "true") + "},";
+        j += ",\"base\":";
+        j += jstr_r(mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC), redact);
+        j += ",\"base_custom\":";
+        j += c.mqtt_base.empty() ? "false" : "true";
+        j += "},";
     }
     // One exact MQTT-backed living-room source. Freshness and canonical eligibility remain separate:
     // a disabled thermostat may still expose a trustworthy temperature but cannot emit room_error_k.
@@ -1063,25 +1074,48 @@ static void append_status_json(JsonOut& j, bool redact) {
     }
     {
         const SyslogStatus sy = syslog_status();
-        j += "\"syslog\":{\"configured\":" + std::string(sy.configured ? "true" : "false") +
-             ",\"resolved\":" + (sy.resolved ? "true" : "false") +
-             ",\"reachable\":" + (sy.reachable ? "true" : "false") +
-             ",\"host\":" + jstr_r(sy.host, redact) + ",\"port\":" + std::to_string(sy.port) +
-             (sy.error.empty() ? "" : ",\"error\":" + jstr(sy.error)) + "},";
+        j += "\"syslog\":{\"configured\":";
+        j += sy.configured ? "true" : "false";
+        j += ",\"resolved\":";
+        j += sy.resolved ? "true" : "false";
+        j += ",\"reachable\":";
+        j += sy.reachable ? "true" : "false";
+        j += ",\"host\":";
+        j += jstr_r(sy.host, redact);
+        j += ",\"port\":";
+        j += std::to_string(sy.port);
+        if (!sy.error.empty()) {
+            j += ",\"error\":";
+            j += jstr(sy.error);
+        }
+        j += "},";
     }
     {
         const HpStats hp = hp_stats();
-        j += "\"hp\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto))) +
-             ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin) +
-             ",\"connected\":" + (hp.connected ? "true" : "false") +
-             ",\"last_ok_s\":" + std::to_string(hp.last_ok_s) +
-             ",\"registers\":" + std::to_string(hp.registers) +
-             ",\"values\":" + std::to_string(hp.values) +
-             ",\"crc_err\":" + std::to_string(hp.crc_err) +
-             ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
+        j += "\"hp\":{\"proto\":";
+        j += jstr(std::string(1, static_cast<char>(c.proto)));
+        j += ",\"rx\":";
+        j += std::to_string(c.rx_pin);
+        j += ",\"tx\":";
+        j += std::to_string(c.tx_pin);
+        j += ",\"connected\":";
+        j += hp.connected ? "true" : "false";
+        j += ",\"last_ok_s\":";
+        j += std::to_string(hp.last_ok_s);
+        j += ",\"registers\":";
+        j += std::to_string(hp.registers);
+        j += ",\"values\":";
+        j += std::to_string(hp.values);
+        j += ",\"crc_err\":";
+        j += std::to_string(hp.crc_err);
+        j += ",\"timeout_err\":";
+        j += std::to_string(hp.timeout_err);
+        j += "},";
     }
 
-    j += "\"profile\":{\"id\":" + jstr(c.profile) + "},";
+    j += "\"profile\":{\"id\":";
+    j += jstr(c.profile);
+    j += "},";
 
     // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A link
     // reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task exists;
@@ -1145,7 +1179,8 @@ static void append_status_json(JsonOut& j, bool redact) {
     // with successive += like everything else here: a `a + b + c` chain materialises every
     // intermediate at once, all live in one frame on the httpd task's stack (AGENTS.md → Memory,
     // concurrency, and HTTP safety; the v1.0.12 stack overflow happened on THIS task).
-    j += "\"history\":{\"dt\":" + std::to_string(logic::HISTORY_DT_S);
+    j += "\"history\":{\"dt\":";
+    j += std::to_string(logic::HISTORY_DT_S);
     // The .noinit-RAM adoption verdict for this boot. "accept" means a compatible reset kept the
     // sealed bytes; every other value names why RAM started empty. This is deliberately independent
     // of flash: after a successful journal scan and clock sync, compatible records may still splice
@@ -1498,20 +1533,30 @@ static void append_status_json(JsonOut& j, bool redact) {
     // integers.
     {
         const MqttSkipStats skips = mqtt_skip_stats();
-        j += "\"sys\":{\"free_heap\":" + std::to_string(esp_get_free_heap_size()) +
-             ",\"min_free_heap\":" + std::to_string(esp_get_minimum_free_heap_size()) +
-             ",\"max_alloc\":" + std::to_string(heap_largest_internal_block()) +
-             ",\"heap_restarts\":" + std::to_string(heap_guard_restarts()) +
-             ",\"mqtt_skipped\":" + std::to_string(skips.skipped) +
-             ",\"mqtt_quiesced\":" + std::to_string(skips.quiesced) +
-             ",\"poll_skipped\":" + std::to_string(hp_skipped_cycles()) +
-             ",\"reset_reason\":" + jstr(reset_reason_name(diag_crash_info().reason)) +
-             ",\"safe_mode\":" + (safe_mode_active() ? "true" : "false") +
-             // WHY it is minimal, so the recovery banner can give advice that fits the cause: a
-             // crash loop points at the configuration (the RX/TX pins first), a heap give-up does
-             // not, and telling that reader to check their pins sends them to fix something that
-             // is already correct. null whenever safe_mode is false.
-             ",\"safe_mode_cause\":" + (safe_mode_cause() ? jstr(safe_mode_cause()) : "null");
+        j += "\"sys\":{\"free_heap\":";
+        j += std::to_string(esp_get_free_heap_size());
+        j += ",\"min_free_heap\":";
+        j += std::to_string(esp_get_minimum_free_heap_size());
+        j += ",\"max_alloc\":";
+        j += std::to_string(heap_largest_internal_block());
+        j += ",\"heap_restarts\":";
+        j += std::to_string(heap_guard_restarts());
+        j += ",\"mqtt_skipped\":";
+        j += std::to_string(skips.skipped);
+        j += ",\"mqtt_quiesced\":";
+        j += std::to_string(skips.quiesced);
+        j += ",\"poll_skipped\":";
+        j += std::to_string(hp_skipped_cycles());
+        j += ",\"reset_reason\":";
+        j += jstr(reset_reason_name(diag_crash_info().reason));
+        j += ",\"safe_mode\":";
+        j += safe_mode_active() ? "true" : "false";
+        // WHY it is minimal, so the recovery banner can give advice that fits the cause: a
+        // crash loop points at the configuration (the RX/TX pins first), a heap give-up does
+        // not, and telling that reader to check their pins sends them to fix something that
+        // is already correct. null whenever safe_mode is false.
+        j += ",\"safe_mode_cause\":";
+        j += safe_mode_cause() ? jstr(safe_mode_cause()) : "null";
         // THE OTHER MEMORY BUDGET, on the surface that needs no broker. The MQTT heartbeat carries
         // the same five figures, but every ordinary publish — the heartbeat included — sits behind
         // the X10A publish gate (logic/mqtt_publish_gate.hpp): a board whose bus never answers
@@ -1547,9 +1592,13 @@ static void append_status_json(JsonOut& j, bool redact) {
     // this boot lands.
     {
         const TimeStatus ts = time_status();
-        j += "\"ntp\":{\"server\":" + jstr_r(ts.server, redact) +
-             ",\"synced\":" + (ts.synced ? "true" : "false") +
-             ",\"time\":" + (ts.synced ? jstr(rfc3339_utc(ts.unix_time)) : "null") + "},";
+        j += "\"ntp\":{\"server\":";
+        j += jstr_r(ts.server, redact);
+        j += ",\"synced\":";
+        j += ts.synced ? "true" : "false";
+        j += ",\"time\":";
+        j += ts.synced ? jstr(rfc3339_utc(ts.unix_time)) : "null";
+        j += "},";
     }
 
     // Explicit opt-in boundary for optional plant diagnostics and their external source collection.
@@ -1565,13 +1614,17 @@ static void append_status_json(JsonOut& j, bool redact) {
     // carries in its "-dev.N" suffix, but a device can be SET to a channel it is not running a build
     // from (that is exactly the state between picking a channel and installing from it), so the
     // setting is reported on its own rather than inferred from the version string.
-    j += "\"ota\":{\"channel\":" + jstr(ota_channel_name(c.ota_channel)) + "},";
+    j += "\"ota\":{\"channel\":";
+    j += jstr(ota_channel_name(c.ota_channel));
+    j += "},";
 
     // The web UI's manual language override (logic/ui_lang.hpp; POST /set_lang). "auto" (the default)
     // means the browser keeps detecting the language on its own; a supported code forces one on every client.
     // Reported here for the same reason as the channel: the ESP32 card's language selector renders
     // from /status, and the browser applies a named language over its navigator.language guess.
-    j += "\"ui\":{\"lang\":" + jstr(ui_lang_name(c.ui_lang)) + "},";
+    j += "\"ui\":{\"lang\":";
+    j += jstr(ui_lang_name(c.ui_lang));
+    j += "},";
 
     // Last reset: null on a clean boot, else the crash summary (reset reason + core-dump backtrace).
     // The reason/backtrace come from the boot-time CACHE (diag_crash.cpp) — never re-parsed from
@@ -1582,8 +1635,9 @@ static void append_status_json(JsonOut& j, bool redact) {
     // costs one 4-byte flash read — the same read GET /coredump already does per request.
     {
         const CrashInfo crash = diag_crash_info_live();
-        j += "\"last_crash\":" +
-             std::string(crash_is_notable(crash) ? build_crash_json(crash) : "null") + ",";
+        j += "\"last_crash\":";
+        j += (crash_is_notable(crash) ? build_crash_json(crash) : "null");
+        j += ",";
     }
 
     // Auto-detection: proto/model derived from the X10A bus (hp_detect.cpp). The candidate set is
@@ -1592,9 +1646,14 @@ static void append_status_json(JsonOut& j, bool redact) {
     // UI only DISPLAYS the outcome (the Model card); candidates[]/ambiguous are reported for
     // diagnostics, not for a picker. There is no manual model selection anywhere in the UI.
     {
-        j += "\"detect\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto)));
-        j += ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin);
-        j += ",\"valid\":" + std::string(c.fp_valid ? "true" : "false");
+        j += "\"detect\":{\"proto\":";
+        j += jstr(std::string(1, static_cast<char>(c.proto)));
+        j += ",\"rx\":";
+        j += std::to_string(c.rx_pin);
+        j += ",\"tx\":";
+        j += std::to_string(c.tx_pin);
+        j += ",\"valid\":";
+        j += (c.fp_valid ? "true" : "false");
         // TWO capacities, reported as separate fields and never merged. `capacity_kw` is the
         // OUTDOOR unit's own report (page 0x00 offset 12), null whenever its variable-length
         // descriptor is too short to carry offset 12. `capacity_kw_iu` is the INDOOR unit's rated
@@ -1624,7 +1683,8 @@ static void append_status_json(JsonOut& j, bool redact) {
         // out, and it is the window in which a SWAPPED unit is most likely to be misreported.
         kw_field("capacity_kw", c.fp_valid ? c.fp_kw_tenths : -1);
         kw_field("capacity_kw_iu", c.fp_valid ? c.fp_iu_kw_tenths : -1);
-        j += ",\"ou_eeprom\":" + jstr(c.fp_valid ? c.fp_eeprom : std::string());
+        j += ",\"ou_eeprom\":";
+        j += jstr(c.fp_valid ? c.fp_eeprom : std::string());
         // Candidate ids + the DISTINCT model families among them. Detection is coarse — models that
         // share a page_mask+capacity are register-identical on X10A — so the UI shows a single
         // family only when all candidates agree; a mixed set is reported honestly as "not uniquely
@@ -1923,6 +1983,7 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
     }
     j += "]";
 }
+
 
 // The two sources ride ONE response but stay two arrays, mirroring the two stacks behind them:
 // `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only for a snapshot proven live, so
@@ -2335,7 +2396,11 @@ static esp_err_t h_scan(httpd_req_t* req) {
     std::string j = "{\"networks\":[";
     for (int i = 0; i < n; i++) {
         if (i) j += ",";
-        j += "{\"ssid\":" + jstr(e[i].ssid) + ",\"rssi\":" + std::to_string(e[i].rssi) + "}";
+        j += "{\"ssid\":";
+        j += jstr(e[i].ssid);
+        j += ",\"rssi\":";
+        j += std::to_string(e[i].rssi);
+        j += "}";
     }
     j += "]}";
     return http_send_json(req, j.c_str());

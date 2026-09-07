@@ -90,13 +90,24 @@ HpQueryResult hp_query_detailed(uint8_t reg, Protocol proto, uint8_t* buf, size_
     int len = 0;
     const int64_t start = esp_timer_get_time();
     while (len < replyLen && (esp_timer_get_time() - start) < HP_QUERY_TIMEOUT_US) {
+        const bool header_complete = (proto == Protocol::I) ? (len >= 3) : (len >= 2);
+        if (header_complete && reply_len_fits(replyLen, buflen)) {
+            const int want = replyLen - len;
+            const int read = uart_read_bytes(PORT, buf + len, want, pdMS_TO_TICKS(20));
+            if (read > 0) {
+                len += read;
+            } else if (read < 0) {
+                break;
+            }
+            continue;
+        }
         uint8_t ch;
         if (uart_read_bytes(PORT, &ch, 1, pdMS_TO_TICKS(20)) == 1) {
             if (static_cast<size_t>(len) < buflen) buf[len] = ch;
             len++;
             if (proto == Protocol::I && len == 3) {
                 replyLen = reply_len_dynamic(buf);
-                if (!reply_len_valid(proto, replyLen, buflen)) {
+                if (!dynamic_reply_len_valid(replyLen, buflen)) {
                     if (hp_query_should_log(log_policy, HpQueryFailure::InvalidLength))
                         diag_printf("HP invalid dynamic reply len %d (max %u) on reg 0x%02x (rx=%d tx=%d)\n",
                                     replyLen, static_cast<unsigned>(buflen), reg, s_rx, s_tx);
