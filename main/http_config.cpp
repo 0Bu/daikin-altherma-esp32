@@ -170,16 +170,32 @@ static bool jb(cJSON* o, const char* k, bool def) {
     return cJSON_IsBool(v) ? cJSON_IsTrue(v) : def;
 }
 
+struct JsonGuard {
+    explicit JsonGuard(cJSON* root = nullptr) : root(root) {}
+    ~JsonGuard() { reset(); }
+    JsonGuard(const JsonGuard&) = delete;
+    JsonGuard& operator=(const JsonGuard&) = delete;
+    void reset(cJSON* next = nullptr) {
+        if (root) cJSON_Delete(root);
+        root = next;
+    }
+    cJSON* get() const { return root; }
+    operator cJSON*() const { return root; }
+    cJSON* operator->() const { return root; }
+    explicit operator bool() const { return root != nullptr; }
+    cJSON* root = nullptr;
+};
+
 static esp_err_t set_wifi(httpd_req_t* req) {
     char body[512];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string ssid = js(j, "ssid");
     std::string pass = js(j, "pass");
     std::string reason;
     if (!wifi_credentials_valid(ssid, pass, reason)) {
-        cJSON_Delete(j);
+        j.reset();
         return send_err(req, "400 Bad Request", reason.c_str());
     }
     Config c = config();
@@ -198,7 +214,7 @@ static esp_err_t set_wifi(httpd_req_t* req) {
     c.wifi_rolled_back = false;
     c.wifi_ssid = ssid;
     c.wifi_pass = pass;
-    cJSON_Delete(j);
+    j.reset();
     // A failed save leaves NVS *and* RAM on the old credentials, so rebooting would silently drop
     // the user back onto the old network behind an {"ok":true} — say so and stay up instead.
     if (!config_save(c)) {
@@ -318,7 +334,7 @@ static bool tcp_port_probe(const struct in_addr& ip, int port, int timeout_ms) {
 static esp_err_t set_mqtt(httpd_req_t* req) {
     char body[512];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string broker      = js(j, "broker");
     std::string user        = js(j, "user");
@@ -330,7 +346,7 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     // deliberately-renamed installation back onto the shared base and merge it with another board.
     const bool  base_given  = cJSON_HasObjectItem(j, "base");
     std::string base        = js(j, "base");
-    cJSON_Delete(j);
+    j.reset();
 
     Config c = config();
     if (!base_given) base = c.mqtt_base;
@@ -505,7 +521,7 @@ struct RefTempRequest {
 static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out) {
     char body[1536];
     if (http_read_body(req, body, sizeof(body)) < 0) return "bad body";
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return "bad json";
     out.name      = js(j, "name");
     out.topic     = js(j, "topic");
@@ -534,7 +550,7 @@ static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out)
     out.max_age_s = age_item && cJSON_IsNumber(age_item)
                   ? static_cast<uint32_t>(age_item->valueint)
                   : REF_TEMP_MAX_AGE_DEFAULT_S;
-    cJSON_Delete(j);
+    j.reset();
 
     if (!fixed_type_valid) return "Fixed target temperature must use at most one decimal place";
     if (!age_type_valid) return "Maximum age must be a whole number";
@@ -628,7 +644,7 @@ static bool parse_tenths_w(cJSON* root, const char* key, uint16_t fallback, uint
 static const char* parse_circulation_request(httpd_req_t* req, CirculationRequest& out) {
     char body[1280];
     if (http_read_body(req, body, sizeof(body)) < 0) return "bad body";
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return "bad json";
     out.name = js(j, "name");
     out.topic = js(j, "topic");
@@ -651,7 +667,7 @@ static const char* parse_circulation_request(httpd_req_t* req, CirculationReques
                                      CIRC_SOURCE_ON_TENTHS_W_DEFAULT, out.on_tenths_w);
     const bool off_ok = parse_tenths_w(j, "off_threshold_w",
                                       CIRC_SOURCE_OFF_TENTHS_W_DEFAULT, out.off_tenths_w);
-    cJSON_Delete(j);
+    j.reset();
     if (!age_ok) return "Maximum age must be a whole number";
     if (!confirm_ok) return "Confirmation time must be a whole number";
     if (!proof_ok) return "Test proof must be a whole number";
@@ -703,15 +719,15 @@ static esp_err_t set_diagnostics(httpd_req_t* req) {
     char body[128];
     if (http_read_body(req, body, sizeof(body)) < 0)
         return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     cJSON* item = cJSON_GetObjectItemCaseSensitive(j, "enabled");
     if (!cJSON_IsBool(item)) {
-        cJSON_Delete(j);
+        j.reset();
         return send_err(req, "400 Bad Request", "enabled must be boolean");
     }
     const bool enabled = cJSON_IsTrue(item);
-    cJSON_Delete(j);
+    j.reset();
 
     Config c = config();
     if (c.diagnostics_enabled == enabled)
@@ -780,7 +796,7 @@ static esp_err_t set_circulation(httpd_req_t* req) {
 static esp_err_t set_hp(httpd_req_t* req) {
     char body[2048];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     Config c    = config();
     const bool modbus_was_enabled = config_modbus_enabled(c);
@@ -823,7 +839,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     const bool host_sent = cJSON_IsString(hostItem);
     const bool homehub_sent = host_sent || cJSON_IsNumber(portItem) || cJSON_IsNumber(unitItem);
     if (!set_hp_update_domains_compatible(x10a_sent, homehub_sent)) {
-        cJSON_Delete(j);
+        j.reset();
         return send_err(req, "400 Bad Request",
                         "update X10A and HomeHub in separate requests");
     }
@@ -837,7 +853,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // and an accepted-but-inert field would read like a capability that still exists.
     const bool reset_mb_history = homehub_history_identity_changed(
         old_mb_host, old_mb_port, old_mb_unit, c.mb_host, c.mb_port, c.mb_unit_id);
-    cJSON_Delete(j);
+    j.reset();
     std::string reason;
     // Pass the real Kconfig-derived octal-SPI + status-LED facts (config.cpp) so validate() rejects a
     // chip-reserved GPIO — a flash/strapping/JTAG pad the UI dropdown never offers but a raw curl POST
@@ -920,11 +936,11 @@ static esp_err_t discover_homehub_now(httpd_req_t* req) {
 static esp_err_t set_syslog(httpd_req_t* req) {
     char body[512];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string host = js(j, "host");
     int port = ji(j, "port", 514);
-    cJSON_Delete(j);
+    j.reset();
 
     // Only the port range is validated synchronously (cheap). DNS resolution + reachability are done
     // asynchronously by the syslog task and surfaced via /status.syslog {resolved, reachable, error},
@@ -964,10 +980,10 @@ static esp_err_t set_syslog(httpd_req_t* req) {
 static esp_err_t set_ntp(httpd_req_t* req) {
     char body[256];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string server = js(j, "server");
-    cJSON_Delete(j);
+    j.reset();
 
     Config c = config();
     if (server == c.ntp_server) return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
@@ -990,17 +1006,17 @@ static esp_err_t set_ntp(httpd_req_t* req) {
 static esp_err_t set_weather(httpd_req_t* req) {
     char body[256];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     const std::string latitude = js(j, "latitude");
     const std::string longitude = js(j, "longitude");
     cJSON*            refresh_item = cJSON_GetObjectItemCaseSensitive(j, "refresh");
     if (refresh_item && !cJSON_IsBool(refresh_item)) {
-        cJSON_Delete(j);
+        j.reset();
         return send_err(req, "400 Bad Request", "refresh must be boolean");
     }
     const bool refresh = cJSON_IsTrue(refresh_item);
-    cJSON_Delete(j);
+    j.reset();
     const WeatherLocationParse location = weather_location_parse(latitude, longitude);
     if (!location.valid) {
         if (std::strcmp(location.reason, "both_coordinates_required") == 0)
@@ -1059,7 +1075,7 @@ static esp_err_t set_weather(httpd_req_t* req) {
 static esp_err_t set_board(httpd_req_t* req) {
     char body[512];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     const Config& cur = config();
     Config c = cur;
@@ -1073,12 +1089,12 @@ static esp_err_t set_board(httpd_req_t* req) {
     c.env3_scl       = ji(j, "env3_scl", c.env3_scl);
     cJSON* preset_item = cJSON_GetObjectItem(j, "preset_id");
     if (preset_item && !cJSON_IsString(preset_item)) {
-        cJSON_Delete(j);
+        j.reset();
         return send_err(req, "400 Bad Request", "preset_id must be a string");
     }
     const bool preset_sent = preset_item != nullptr;
     const std::string preset_key = preset_sent ? preset_item->valuestring : "";
-    cJSON_Delete(j);
+    j.reset();
     // Submitting this form is an explicit board statement. Current clients send the stable key;
     // for a pre-v12 cached UI, recover the same exact-match choice once and persist it explicitly.
     c.board_user_set = true;
@@ -1139,14 +1155,14 @@ static esp_err_t set_board(httpd_req_t* req) {
 static esp_err_t set_env3(httpd_req_t* req) {
     char body[256];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     const Config cur = config();
     Config c = cur;
     c.env3_enabled = jb(j, "enabled", c.env3_enabled);
     c.env3_sda = ji(j, "sda", c.env3_sda);
     c.env3_scl = ji(j, "scl", c.env3_scl);
-    cJSON_Delete(j);
+    j.reset();
     bool env_allowed = false;
     const esp_err_t env_result = env3_save_preflight(req, cur, c, env_allowed);
     if (!env_allowed) return env_result;
@@ -1171,10 +1187,10 @@ static esp_err_t set_env3(httpd_req_t* req) {
 static esp_err_t set_ota(httpd_req_t* req) {
     char body[128];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string channel = js(j, "channel");
-    cJSON_Delete(j);
+    j.reset();
 
     if (!ota_channel_valid(channel)) return send_err(req, "400 Bad Request", "unknown channel");
 
@@ -1196,10 +1212,10 @@ static esp_err_t set_ota(httpd_req_t* req) {
 static esp_err_t set_lang(httpd_req_t* req) {
     char body[128];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string lang = js(j, "lang");
-    cJSON_Delete(j);
+    j.reset();
 
     if (!ui_lang_valid(lang)) return send_err(req, "400 Bad Request", "unknown language");
 
@@ -1289,7 +1305,7 @@ static void probe_append_decode(JsonOut& out, const ProbeDecode& d) {
 static esp_err_t hp_query_probe(httpd_req_t* req) {
     char body[192];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
+    JsonGuard j(cJSON_Parse(body));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     ProbeRequest q;
     q.reg    = ji(j, "reg", -1);
@@ -1298,7 +1314,7 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
     // No converter named = sweep. That is the DEFAULT on purpose: requiring an id before any value
     // is visible would ask the user to answer the question they came here to ask.
     q.conv   = cJSON_HasObjectItem(j, "conv") ? ji(j, "conv", PROBE_SWEEP) : PROBE_SWEEP;
-    cJSON_Delete(j);
+    j.reset();
 
     const ProbeReject reject = probe_validate(q);
     if (reject != ProbeReject::None)

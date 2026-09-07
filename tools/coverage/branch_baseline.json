@@ -64,8 +64,8 @@
         "taken": 7
       },
       "main/logic/convert.hpp": {
-        "outcomes": 131,
-        "taken": 122
+        "outcomes": 133,
+        "taken": 124
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 30,
@@ -418,8 +418,8 @@
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 139,
-        "taken": 128
+        "outcomes": 141,
+        "taken": 130
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -772,8 +772,8 @@
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 139,
-        "taken": 128
+        "outcomes": 141,
+        "taken": 130
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,

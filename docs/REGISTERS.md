@@ -227,7 +227,7 @@ High nibble of the byte (`(byte & 0xF0) >> 4`):
 | 0 | Stop |
 | 1 | Heating |
 | 2 | Cooling |
-| 4 | Domestic Hot Water |
+| 4 | DHW |
 | 5 | Heating + DHW |
 | 6 | Cooling + DHW |
 

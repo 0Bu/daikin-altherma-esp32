@@ -188,11 +188,12 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       heap_largest_internal_block() < 6144 B (via logic/http_request.hpp http_is_ota_route()).
                       No route is exempt any more: the one that was (/events, raw-registered
                       because is_websocket bypasses the trampoline) no longer exists
-http_status.cpp     → GET / (web UI), /locale.js, /status, /values, /history, /models, /diag, /scan, /coredump,
-                      POST /crash/dismiss. The live /status and /values bodies use one bounded 1 KiB
-                      chunk sink instead of a body-sized contiguous allocation; unredacted GET /diag streams
-                      directly from static storage in 1 KiB chunks (clamped to 512 B during active OTA) with
-                      zero heap allocation. append_status_json() scopes subsystem local structs, saving +2836 B
+http_status.cpp     → GET / (web UI), /index.html, /favicon.ico, /heat-pump-icon.png, /locale.js, /status, /values,
+                      /history, /scan, /models, /diag, /coredump, /* (captive/catch-all),
+                      POST /diag/clear, /coredump/clear, /crash/dismiss — all sixteen. The live /status and /values
+                      bodies use one bounded 1 KiB chunk sink instead of a body-sized contiguous allocation;
+                      unredacted GET /diag streams directly from static storage in 1 KiB chunks (clamped to 512 B during
+                      active OTA) with zero heap allocation. append_status_json() scopes subsystem local structs, saving +2836 B
                       httpd stack, and runs on the httpd task ALONE — see "Push vs. poll" below for why that
                       sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_temp, /set_weather,
@@ -259,6 +260,10 @@ http_deadline.cpp/.hpp
                       which applies shutdown(SHUT_RDWR) and acknowledges completion. The owner stops
                       the timer or joins that acknowledgement before fd close/reuse. No callback
                       enters the socket API, touches an HTTP client or creates a failure-time task.
+http_client_diag.cpp/.hpp
+                    → allocation-free evidence for outbound HTTPS failures (OTA and Open-Meteo): captures
+                      heap and stack probes before esp_http_client initialization, logs socket/TLS/mbedtls
+                      error codes without heap allocation, and returns structured failure reasons
 mcp_server.cpp      → /mcp — POST is the stateless Streamable-HTTP MCP device glue. It dispatches
                       only read-only get_status/get_hp_values and reuses http_status.cpp's exact
                       JSON builders; both results stream through the same bounded sink as their
@@ -3875,6 +3880,9 @@ POST /set_lang    {lang:"auto"|"en"|"de"|"es"|"fr"|"it"|"pl"|"cs"|"uk"|"zh"|"ja"
                   -> {"ok":true,"reboot":false} like the other /set_* routes
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the
                   fingerprint (RAM only) -> the next poll cycle sweeps protocol + re-fingerprints
+POST /hp/query    {reg:0..255,offset:0..31,size:1|2[,conv:0..999]} -> free register probe (logic/hp_probe.hpp):
+                  one-shot read of a caller-chosen page served on the poll task; persists nothing.
+                  Omitting `conv` sweeps candidate converters; returns raw frame, payload slice, and decodes
 GET  /ota/check   synchronously claim an async manifest check and return
                   {ok:true,generation}; busy/task-unavailable -> HTTP 503 + ok:false. ?ms= is parsed
                   but gates nothing — TLS date validation is compiled out, so OTA needs no wall clock.
