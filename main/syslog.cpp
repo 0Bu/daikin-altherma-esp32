@@ -380,17 +380,22 @@ void syslog_init() {
             const bool network_up = net_is_up();
 
             if (!configured) {
-                if (sock >= 0) { close(sock); sock = -1; }
+                if (sock >= 0) {
+                    close(sock);
+                    sock = -1;
+                }
                 if (resolved || reachable) { resolved = reachable = false; set_status(false, false, ""); }
                 // Block until a line arrives, then drop it (nothing to forward) — no busy-spin.
-                network_activity.release();
                 SyslogMsg msg;
                 xQueueReceive(s_queue, &msg, portMAX_DELAY);
                 continue;
             }
 
             if (!network_up) {
-                if (sock >= 0) { close(sock); sock = -1; }
+                if (sock >= 0) {
+                    close(sock);
+                    sock = -1;
+                }
                 if (resolved) {
                     resolved = false;
                     reachable = false;
@@ -402,7 +407,10 @@ void syslog_init() {
 
             // Config changed → re-resolve now.
             if (syslog_host != last_host || syslog_port != last_port) {
-                if (sock >= 0) { close(sock); sock = -1; }
+                if (sock >= 0) {
+                    close(sock);
+                    sock = -1;
+                }
                 resolved = false; reachable = false;
                 last_host = syslog_host;
                 last_port = syslog_port;
@@ -443,41 +451,45 @@ void syslog_init() {
                     // Ahead of the queue drain, so the crash leads the backlog rather than trailing it.
                     if (!replayed) replayed = syslog_replay_boot(sock, dest_addr);
                 } else {
-                    if (sock >= 0) { close(sock); sock = -1; }
+                    if (sock >= 0) {
+                        close(sock);
+                        sock = -1;
+                    }
                     resolved = false; reachable = false;
                     set_status(false, false, "DNS lookup failed");
                     if (!logged_state) {
-                        diag_printf("syslog: DNS lookup failed for %s (error %d)\n", syslog_host.c_str(), err);
+                        diag_printf("syslog: DNS lookup failed for %s (error %d)\n",
+                                    syslog_host.c_str(), err);
                         logged_state = true;
                     }
                 }
             }
 
-            // Forward one queued line while a destination is resolved. Delivery is gated on DNS only
-            // (resolved), never on the advisory reachability probe.
+            // Drain one line from the ring; non-blocking poll with timeout so a quiet bus doesn't
+            // spin. The queue is sized to survive network jitter without dropping lines.
             SyslogMsg msg;
             if (xQueueReceive(s_queue, &msg, pdMS_TO_TICKS(500)) == pdTRUE) {
                 if (resolved) {
                     int err = 0;
                     switch (syslog_sendto(sock, dest_addr, msg.text, msg.len, &err)) {
-                        case SendResult::Ok:
-                            if (send_failing) {   // first line through after an outage
-                                diag_printf("syslog: forwarding recovered\n");
-                                send_failing = false;
-                            }
-                            break;
-                        case SendResult::Empty:   // nothing to send — neither success nor failure
-                            break;
-                        // Whether this clears the resolve throttle now depends on WHICH error it was
-                        // (logic/syslog_policy.hpp), not merely that one occurred.
-                        case SendResult::SendFailed:
-                            handle_send_failure(err, "sendto", resolved, logged_state,
-                                                have_checked, send_failing);
-                            break;
-                        case SendResult::SocketFailed:
-                            handle_send_failure(err, "socket creation", resolved, logged_state,
-                                                have_checked, send_failing);
-                            break;
+                    case SendResult::Ok:
+                        if (send_failing) { // first line through after an outage
+                            diag_printf("syslog: forwarding recovered\n");
+                            send_failing = false;
+                        }
+                        break;
+                    case SendResult::Empty: // nothing to send — neither success nor failure
+                        break;
+                    // Whether this clears the resolve throttle now depends on WHICH error it was
+                    // (logic/syslog_policy.hpp), not merely that one occurred.
+                    case SendResult::SendFailed:
+                        handle_send_failure(err, "sendto", resolved, logged_state, have_checked,
+                                            send_failing);
+                        break;
+                    case SendResult::SocketFailed:
+                        handle_send_failure(err, "socket creation", resolved, logged_state,
+                                            have_checked, send_failing);
+                        break;
                     }
                 }
             }
