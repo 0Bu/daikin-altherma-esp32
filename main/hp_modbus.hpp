@@ -110,4 +110,12 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live);
 // The cache's upper bound (def::HOMEHUB_REG_COUNT) — callers size their snapshot buffer from this.
 size_t mb_values_capacity();
 
+// Has the running Modbus task observed OTA's lock-free quiesce request and left its allocation-rich
+// cycle? True also when no Modbus task exists, because there is then no cycle for OTA to wait on.
+bool hp_modbus_ota_quiesced();
+
+// Identity / revision counter for committed Modbus value cache updates.
+// Increments on each cache update, clear, or session reset.
+uint32_t mb_cache_generation();
+
 }  // namespace daik

@@ -259,6 +259,8 @@ static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards 
                                                       // full-string copy cost a permanent ~3 KB block
                                                       // and one copy per cycle (private issue 10)
 static std::string s_last_modbus_json;
+static uint32_t    s_last_x10a_cache_gen   = 0;
+static uint32_t    s_last_modbus_cache_gen = 0;
 static std::string s_last_weather_json;
 static std::string s_last_env3_json;
 // Rate-limit the hard-cap diagnostic. The payload itself is no longer boot-long storage: dev.12's
@@ -2518,6 +2520,7 @@ static void mqtt_task(void*) {
                 s_last_x10a_digest = 0;
                 s_last_x10a_digest_valid = false;
                 s_x10a_publish_proven.store(false, std::memory_order_release);
+                s_last_x10a_cache_gen = 0;
                 heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;
                 diag_printf("mqtt: X10A restored — publishing resumed\n");
             }
@@ -2530,6 +2533,8 @@ static void mqtt_task(void*) {
                     s_last_x10a_digest_valid = false;
                     s_x10a_publish_proven.store(false, std::memory_order_release);
                     s_last_modbus_json.clear();
+                    s_last_x10a_cache_gen   = 0;
+                    s_last_modbus_cache_gen = 0;
                     s_last_weather_json.clear();
                     s_last_env3_json.clear();
                     s_last_env3_samples = 0;
@@ -2585,10 +2590,17 @@ static void mqtt_task(void*) {
                     // correctly replaced its cache with an empty snapshot. Do not turn that honest
                     // local absence into a retained `{}` for every downstream consumer. The next
                     // answering sweep seeds state because the digest guard is still invalid here.
-                    if (hp.connected) publish_x10a_state(ref_config, true);
+                    if (hp.connected) {
+                        publish_x10a_state(ref_config, true);
+                        s_last_x10a_cache_gen = hp_cache_generation();
+                    }
                 } else if (hp.connected && !s_announced_profile.empty() &&
                            prof == s_announced_profile) {
-                    publish_x10a_state(ref_config, false);     // republish only when it changed
+                    const uint32_t x10a_gen = hp_cache_generation();
+                    if (x10a_gen != s_last_x10a_cache_gen || !s_last_x10a_digest_valid) {
+                        publish_x10a_state(ref_config, false); // republish only when it changed
+                        s_last_x10a_cache_gen = x10a_gen;
+                    }
                 }
                 // prof == "auto" (detection pending): wait — don't publish transient generic sensors.
 
@@ -2605,12 +2617,17 @@ static void mqtt_task(void*) {
                         // and may publish `{}` for the configured new source from the following
                         // cycle.
                         s_modbus_disabled_cleaned = false;
-                        publish_modbus_state();
+                        const uint32_t mb_gen     = mb_cache_generation();
+                        if (mb_gen != s_last_modbus_cache_gen || s_last_modbus_json.empty()) {
+                            publish_modbus_state();
+                            s_last_modbus_cache_gen = mb_gen;
+                        }
                     } else if (modbus_action == RetainedSourceAction::DeleteRetained) {
                         // Covers a live POST /set_hp disable. Discovery and the duplicate status
                         // topic are already retired; admit the delete to the ACK-driven source
                         // queue.
                         s_modbus_cleanup_requested.store(true, std::memory_order_release);
+                        s_last_modbus_cache_gen = 0;
                     }
                 }
 

@@ -8913,6 +8913,26 @@ static void test_http_request_policy() {
     CHECK(!http_json_content_type("application/x-www-form-urlencoded"));
     CHECK(!http_json_content_type("application/jsonp"));
     CHECK(!http_json_content_type("application/json;"));
+
+    CHECK(http_is_ota_route("/ota"));
+    CHECK(http_is_ota_route("/ota?foo=1"));
+    CHECK(http_is_ota_route("/ota/"));
+    CHECK(http_is_ota_route("/ota/update"));
+    CHECK(http_is_ota_route("/ota/update?url=http://foo"));
+    CHECK(http_is_ota_route("/ota/check"));
+    CHECK(http_is_ota_route("/ota/check?foo=1"));
+    CHECK(http_is_ota_route("/ota/status"));
+    CHECK(http_is_ota_route("/ota/status?clear=1"));
+    CHECK(http_is_ota_route("/ota/apply"));
+    CHECK(http_is_ota_route("/ota/apply?reboot=1"));
+    CHECK(!http_is_ota_route(""));
+    CHECK(!http_is_ota_route("/"));
+    CHECK(!http_is_ota_route("/status"));
+    CHECK(!http_is_ota_route("/values"));
+    CHECK(!http_is_ota_route("/diag"));
+    CHECK(!http_is_ota_route("/set_ota"));
+    CHECK(!http_is_ota_route("/otax"));
+    CHECK(!http_is_ota_route("/ota_bad"));
 }
 
 // logic/lwt_select.hpp — the leaving-water MEASUREMENT picker that feeds ΔT / heat output / COP.
