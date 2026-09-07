@@ -115,14 +115,27 @@ class RenovateActionPrTest(unittest.TestCase):
                 pr["commits"] = commits
                 self.assertFalse(self.eligible(pr, commit, pages))
 
+    def test_renovate_identity_and_name_variants_are_eligible(self) -> None:
+        for name in ("Renovate Bot", "Renovate"):
+            for login in ("renovate-bot", "renovate[bot]"):
+                with self.subTest(name=name, login=login):
+                    pr, commit, pages = fixture()
+                    commit["author"]["login"] = login
+                    commit["committer"]["login"] = login
+                    commit["commit"]["author"]["name"] = name
+                    commit["commit"]["committer"]["name"] = name
+                    self.assertTrue(self.eligible(pr, commit, pages))
+
     def test_wrong_commit_identity_or_signature_is_rejected(self) -> None:
-        for mutation in ("login", "email"):
+        for mutation in ("login", "email", "name"):
             with self.subTest(mutation=mutation):
                 pr, commit, pages = fixture()
                 if mutation == "login":
                     commit["committer"]["login"] = "0Bu"
-                else:
+                elif mutation == "email":
                     commit["commit"]["author"]["email"] = "renovate@example.invalid"
+                else:
+                    commit["commit"]["author"]["name"] = "Attacker"
                 self.assertFalse(self.eligible(pr, commit, pages))
 
     def test_head_mismatch_is_rejected(self) -> None:

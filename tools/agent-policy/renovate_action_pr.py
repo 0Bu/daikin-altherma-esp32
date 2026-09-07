@@ -143,11 +143,11 @@ def classify(
         return False, "commit signature metadata is missing"
     for role in ("author", "committer"):
         actor = commit.get(role)
-        if not isinstance(actor, dict) or actor.get("login") != "renovate-bot":
+        if not isinstance(actor, dict) or actor.get("login") not in {"renovate-bot", "renovate[bot]"}:
             return False, f"commit {role} is not the configured Renovate identity"
         signature = git_commit.get(role)
         if not isinstance(signature, dict) or (
-            signature.get("name") != "Renovate Bot"
+            signature.get("name") not in {"Renovate Bot", "Renovate"}
             or signature.get("email") != "renovate@whitesourcesoftware.com"
         ):
             return False, f"commit {role} signature metadata is not Renovate's"

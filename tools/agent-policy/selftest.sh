@@ -234,6 +234,21 @@ cat > "$WORK/renovate-head-commit-pages.json" <<EOF
 EOF
 CASE_RENOVATE_CONTEXT=1 expect_renovate_pass "immutable head-bound pin-line PR needs no human records"
 
+cat > "$WORK/head-commit.json" <<EOF
+{"sha":"$HEAD_SHA","author":{"login":"renovate-bot"},"committer":{"login":"renovate-bot"},
+ "commit":{"author":{"name":"Renovate","email":"renovate@whitesourcesoftware.com"},
+ "committer":{"name":"Renovate","email":"renovate@whitesourcesoftware.com"}},
+ "parents":[{"sha":"$parent_sha"}]}
+EOF
+CASE_RENOVATE_CONTEXT=1 expect_renovate_pass "Renovate name variant needs no human records"
+
+cat > "$WORK/head-commit.json" <<EOF
+{"sha":"$HEAD_SHA","author":{"login":"renovate-bot"},"committer":{"login":"renovate-bot"},
+ "commit":{"author":{"name":"Renovate Bot","email":"renovate@whitesourcesoftware.com"},
+ "committer":{"name":"Renovate Bot","email":"renovate@whitesourcesoftware.com"}},
+ "parents":[{"sha":"$parent_sha"}]}
+EOF
+
 cat > "$WORK/merge-payload.json" <<EOF
 {"hook_event_name":"PreToolUse","cwd":"$ROOT","tool_name":"exec_command",
  "tool_input":{"cmd":"$ROOT/scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/45/merge -f sha=$HEAD_SHA -f merge_method=squash","workdir":"$ROOT"}}
