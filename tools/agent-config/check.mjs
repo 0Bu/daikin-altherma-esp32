@@ -124,6 +124,8 @@ const expectedSkills = [
   "absence-review",
   "add-logic-test",
   "bug-triage",
+  "deploy-prod",
+  "deploy-test",
   "device-triage",
   "diagnostic-evidence-review",
   "domain-review",
