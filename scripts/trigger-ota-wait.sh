@@ -129,29 +129,52 @@ if [ "$update_avail" != "true" ] && [ "$is_downgrade" != "true" ]; then
     fi
 fi
 
+# Extract checked OTA parameters
+check_gen=$(printf '%s' "$ota_status" | jq -r '.generation // empty')
+avail_channel=$(printf '%s' "$ota_status" | jq -r '.available_channel // empty')
+avail_sha256=$(printf '%s' "$ota_status" | jq -r '.available_sha256 // empty')
+
+if [ -z "$check_gen" ] || [ -z "$avail_channel" ] || [ -z "$available_ver" ] || [ -z "$avail_sha256" ]; then
+    err "Incomplete OTA check response: generation='$check_gen', channel='$avail_channel', version='$available_ver', sha256='$avail_sha256'"
+    exit 1
+fi
+
 # Build POST URL
-post_query=""
+post_query="?after=$check_gen&channel=$avail_channel&version=$available_ver&sha256=$avail_sha256"
 if [ "$is_downgrade" = "true" ] || [ "$ALLOW_DOWNGRADE" -eq 1 ]; then
-    post_query="?downgrade=1"
+    post_query="${post_query}&downgrade=1"
     log "Initiating OTA update (with ?downgrade=1)..."
 else
     log "Initiating OTA update..."
 fi
 
-curl -sS --max-time 5 -X POST "http://$IP/ota/update$post_query" >/dev/null 2>&1 || true
+post_resp=$(curl -sS --max-time 10 -X POST "http://$IP/ota/update$post_query" 2>&1 || true)
+if ! printf '%s' "$post_resp" | jq -e '.ok == true' >/dev/null 2>&1; then
+    err "OTA update request refused by device: $post_resp"
+    exit 1
+fi
+
+expected_gen=$(printf '%s' "$post_resp" | jq -r '.generation // empty')
+log "OTA update accepted (generation $expected_gen). Downloading and installing update..."
 
 # Monitor progress until reboot
-log "Downloading and installing update..."
 last_progress=-1
 device_went_down=0
+consecutive_drops=0
 
 while [ "$(date +%s)" -le "$deadline" ]; do
-    raw=$(curl -sS --max-time 2 "http://$IP/ota/status" 2>/dev/null || true)
+    raw=$(curl -sS --max-time 3 "http://$IP/ota/status" 2>/dev/null || true)
     if [ -z "$raw" ]; then
-        log "Device connection dropped (device rebooting)..."
-        device_went_down=1
-        break
+        if [ "$last_progress" -ge 80 ] || [ "$consecutive_drops" -ge 5 ]; then
+            log "Device connection dropped after progress=${last_progress}% (device rebooting)..."
+            device_went_down=1
+            break
+        fi
+        consecutive_drops=$((consecutive_drops + 1))
+        sleep 1
+        continue
     fi
+    consecutive_drops=0
 
     # Check for 503 Service Unavailable (firmware sends this right before reboot)
     if printf '%s' "$raw" | grep -q "update in progress"; then
@@ -173,6 +196,12 @@ while [ "$(date +%s)" -le "$deadline" ]; do
         if [ "$state" = "error" ]; then
             err "OTA failed on device: $msg"
             exit 1
+        fi
+
+        if [ "$state" = "done" ]; then
+            log "OTA installation done. Waiting for reboot..."
+            device_went_down=1
+            break
         fi
     fi
     sleep 1
