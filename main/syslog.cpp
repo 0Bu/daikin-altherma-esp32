@@ -482,11 +482,17 @@ void syslog_init() {
                 }
             }
           } catch (const std::exception& e) {
-              if (sock >= 0) { close(sock); sock = -1; }
+              if (sock >= 0) {
+                  close(sock);
+                  sock = -1;
+              }
               diag_printf("syslog: task cycle skipped (%s)\n", e.what());
               vTaskDelay(pdMS_TO_TICKS(1000));
           } catch (...) {
-              if (sock >= 0) { close(sock); sock = -1; }
+              if (sock >= 0) {
+                  close(sock);
+                  sock = -1;
+              }
               diag_printf("syslog: task cycle skipped (oom?)\n");
               vTaskDelay(pdMS_TO_TICKS(1000));
           }

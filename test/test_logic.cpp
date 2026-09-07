@@ -3037,7 +3037,7 @@ static void test_heartbeat() {
         append_stack_bytes(s, 1024);
         CHECK(s == "1024");
 
-        std::string streamed;
+        std::string                                                       streamed;
         BoundedChunkSink<std::function<bool(std::string_view, bool)>, 64> sink(
             [&](std::string_view chunk, bool) {
                 streamed.append(chunk.data(), chunk.size());

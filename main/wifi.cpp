@@ -431,9 +431,9 @@ bool wifi_start_sta() {
     // syslog, not just the serial console), and that call chain nests syslog_send inside
     // diag_printf — measured at ~700 B of frame depth this task never carried while it used
     // ESP_LOGW. 4096 is what every other diag_printf-calling task here is sized at (mqtt_pub;
-    // hp_poll takes 8192). The hardware watchpoint (CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK) turns an
-    // overflow into an immediate panic — which would land during the memory-pressure wedge this watchdog
-    // exists to break, i.e. exactly when it must not.
+    // hp_poll takes 8192). The hardware watchpoint (CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK) turns
+    // an overflow into an immediate panic — which would land during the memory-pressure wedge this
+    // watchdog exists to break, i.e. exactly when it must not.
     if (xTaskCreate(wifi_watchdog_task, "wifi_wd", 4096, nullptr, TASK_PRIO_WIFI_WD, nullptr) != pdPASS)
         diag_printf("wifi: watchdog task alloc failed — ghost-association recovery disabled this boot\n");
     return true;
