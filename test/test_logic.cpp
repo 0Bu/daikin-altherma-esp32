@@ -286,10 +286,18 @@ static void test_convert() {
     CHECK(!approx(convert(u151, u2b).value,
                   convert(u152, u2b).value)); // 151 != 152 on the same bytes
 
-    // conv 161 = unsigned big-endian ×0.5 (CT current).
+    // conv 161 = unsigned little-endian ×0.5 (CT current).
     ValueDef      ct{0x63, 0, 161, 1, 3, "CT"};
     const uint8_t a[] = {0x14}; // 20 -> 10.0 A
     CHECK(approx(convert(ct, a).value, 10.0));
+    ValueDef      ct2{0x63, 0, 161, 2, 3, "CT2"};
+    const uint8_t a2b[] = {0x2C, 0x01}; // LE 300 -> 150.0 A
+    CHECK(convert(ct2, a2b).ok && approx(convert(ct2, a2b).value, 150.0));
+
+    // conv 111 = signed little-endian ×0.5.
+    ValueDef      s111{0x30, 0, 111, 2, -1, "s111"};
+    const uint8_t s111_b[] = {0x2C, 0x01}; // LE 300 -> 150.0
+    CHECK(convert(s111, s111_b).ok && approx(convert(s111, s111_b).value, 150.0));
 
     ValueDef unk{0x00, 0, 998, 1, -1, "x"}; // layout marker -> unimplemented/skipped
     CHECK(convert(unk, c).unimpl);
@@ -451,6 +459,19 @@ static void test_convert() {
     const uint8_t cop3000[] = {0xB8, 0x0B}; // LE 3000 -> 300.0, must NOT be clipped (not °C)
     CHECK(reading_plausible(cop, convert(cop, cop3000)) &&
           approx(convert(cop, cop3000).value, 300.0));
+
+    // Non-finite values (NaN, infinity) must be rejected by reading_plausible.
+    Reading r_nan;
+    r_nan.ok    = true;
+    r_nan.value = std::numeric_limits<double>::quiet_NaN();
+    CHECK(!reading_plausible(ot, r_nan));
+    CHECK(!reading_plausible(cop, r_nan));
+
+    Reading r_inf;
+    r_inf.ok    = true;
+    r_inf.value = std::numeric_limits<double>::infinity();
+    CHECK(!reading_plausible(ot, r_inf));
+    CHECK(!reading_plausible(cop, r_inf));
 
     // ── KNOWN DEFECT WITNESS — Target Evap. Temp. on page 0x10/6 (issue #194)
     // ───────────────────── The envelope above has a measured hole, and this pins it so neither

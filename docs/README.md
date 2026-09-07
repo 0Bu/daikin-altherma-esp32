@@ -254,6 +254,7 @@ User credentials + the atomic X10A link cache are persisted; the model is re-det
 | `rx_pin` / `tx_pin` / `proto` | **Legacy link migration inputs only.** They are read when `link` is absent or invalid, then superseded by the next successful config save or detection result. |
 | `board_set` | **Legacy migration input only.** Pre-v12 builds stored this bit without a concrete preset id. On upgrade, `true` plus an exact historical field match is migrated to the same board the old UI displayed; untouched defaults (`false`) remain unidentified. New saves store `board_user_set` and the stable preset id atomically in `cfg`. |
 | `boot_fails` | Boot-loop crash counter (`safe_mode.cpp`); increments on a crash-only boot, latches recovery mode past the threshold, cleared after a healthy uptime. Lives here so a factory reset wipes it too. |
+| `heap_rst` | Heap watchdog restart counter (`heap_guard.cpp`); tracks consecutive low-memory restarts, escalates to safe mode once exhausted, cleared after a healthy uptime. |
 
 The **recovery button** performs the complete privacy reset (`recovery_button.cpp`): hold the
 configured button for 5 s and the device erases this NVS namespace, the WiFi driver's persisted
