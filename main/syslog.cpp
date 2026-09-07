@@ -94,8 +94,8 @@ SyslogStatus syslog_status() {
     SyslogStatus copy;
     with_config([&copy](const Config& c) {
         copy.configured = !c.syslog_host.empty();
-        copy.host = c.syslog_host;
-        copy.port = c.syslog_port;
+        copy.host       = c.syslog_host;
+        copy.port       = c.syslog_port;
     });
     copy.resolved = false;
     copy.reachable = false;
@@ -185,8 +185,8 @@ enum class SendResult { Ok, Empty, SocketFailed, SendFailed };
 // cannot read errno itself once this returns: close() is free to set errno, so a call site reading
 // it afterwards may classify the close instead of the send — and this errno now decides whether the
 // resolve throttle is cleared (logic/syslog_policy.hpp), so a wrong value costs a probe storm.
-static SendResult syslog_sendto(int& sock, const struct sockaddr_in& dest, const char* text, size_t len,
-                                int* out_err = nullptr) {
+static SendResult syslog_sendto(int& sock, const struct sockaddr_in& dest, const char* text,
+                                size_t len, int* out_err = nullptr) {
     if (out_err) *out_err = 0;
     while (len > 0 && (text[len - 1] == '\n' || text[len - 1] == '\r' || text[len - 1] == ' ')) {
         len--;
@@ -309,7 +309,8 @@ static bool syslog_replay_boot(int& sock, const struct sockaddr_in& dest) {
         std::string lines[CRASH_LOG_LINE_MAX];
         const int n = build_crash_log_lines(diag_crash_info(), lines, CRASH_LOG_LINE_MAX);
         for (int i = 0; i < n; i++) {
-            if (syslog_sendto(sock, dest, lines[i].data(), lines[i].size()) != SendResult::Ok) return false;
+            if (syslog_sendto(sock, dest, lines[i].data(), lines[i].size()) != SendResult::Ok)
+                return false;
         }
         diag_printf("syslog: replayed boot record + %d crash line(s)\n", n);
         return true;

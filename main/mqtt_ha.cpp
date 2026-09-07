@@ -1370,26 +1370,26 @@ static void publish_heating_curve_telemetry() {
     ReferenceFreshness room_freshness;
     ReferenceRoomRaw room_raw;
     with_config([&](const Config& cfg) {
-        room_freshness = reference_freshness(
-            rt.has_value, rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms,
-            room_now_unix_s, room_now_ms, cfg.ref_temp_max_age_s);
+        room_freshness      = reference_freshness(rt.has_value, rt.retained, rt.has_source_time,
+                                                  rt.source_unix_s, rt.received_ms, room_now_unix_s,
+                                                  room_now_ms, cfg.ref_temp_max_age_s);
         room_raw.configured = !cfg.ref_temp_topic.empty();
         room_raw.has_temperature = rt.has_value;
-        room_raw.payload_valid = rt.error.empty();
-        room_raw.temperature_c = rt.temperature_c;
+        room_raw.payload_valid   = rt.error.empty();
+        room_raw.temperature_c   = rt.temperature_c;
         room_raw.has_source_time = rt.has_source_time;
         room_raw.setpoint_mapped = cfg.ref_temp_fixed_setpoint_tenths != 0 ||
                                    !cfg.ref_temp_setpoint_topic.empty() ||
                                    !cfg.ref_temp_setpoint_path.empty();
-        room_raw.has_setpoint = rt.has_setpoint;
-        room_raw.setpoint_c = rt.setpoint_c;
-        room_raw.enabled_mapped = !cfg.ref_temp_enabled_path.empty();
-        room_raw.has_enabled = rt.has_enabled;
-        room_raw.enabled = rt.enabled;
+        room_raw.has_setpoint     = rt.has_setpoint;
+        room_raw.setpoint_c       = rt.setpoint_c;
+        room_raw.enabled_mapped   = !cfg.ref_temp_enabled_path.empty();
+        room_raw.has_enabled      = rt.has_enabled;
+        room_raw.enabled          = rt.enabled;
         room_raw.hvac_mode_mapped = !cfg.ref_temp_hvac_mode_path.empty();
-        room_raw.has_hvac_mode = rt.has_hvac_mode;
-        room_raw.hvac_mode = rt.hvac_mode;
-        room_raw.payload_reason = rt.rejection_reason;
+        room_raw.has_hvac_mode    = rt.has_hvac_mode;
+        room_raw.hvac_mode        = rt.hvac_mode;
+        room_raw.payload_reason   = rt.rejection_reason;
     });
     const ReferenceRoomSample room = reference_room_sample(room_raw, room_freshness);
     f.room_temperature_valid = room.temperature_valid;
@@ -2874,7 +2874,7 @@ void mqtt_ha_start() {
 
     // Resolved ONCE, here, because every topic root and the HA node id below derive from it — a
     // second copy of the empty-means-default rule is how one of them would end up on another base.
-    s_base   = with_config([](const Config& c) {
+    s_base            = with_config([](const Config& c) {
         return mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC);
     });
     s_node   = device_node_id(s_base);   // HA device id: the installation, NOT this board
