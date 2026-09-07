@@ -241,6 +241,7 @@ jobs:
           emit uigif '^(tools/(uigif|ui)/|scripts/(run-ui-gif-audit|record-dashboard-gif|gh-with-git-credentials)\.sh$|docs/media/|main/www/|README\.md$|tools/agent-hooks/(require-pr-gates|pr-gate-lib)\.sh$|tools/agent-hooks/(merge_payload|run_with_timeout)\.py$|tools/agent-policy/extract_changed_files\.py$)'
           emit schematic '^(tools/schematic/|scripts/run-schematic-audit\.sh$|main/(www|def)/|docs/DESIGN\.md$)'
           emit esp_idf_matrix '^(tools/esp_idf_matrix/|scripts/run-esp-idf-matrix-audit\.sh$|main/|partitions\.csv$|sdkconfig\.defaults$|docs/ESP_IDF_MATRIX\.md$)'
+          emit ota '^(tools/(ota|production_ota)/|scripts/production-ota-gate\.py|test/test_.*ota.*|main/logic/ota_.*|main/http_ota\.cpp|main/ota_update\.cpp)'
 
       # Contributor-authored text: does the commit range this PR carries, or its title/description,
       # hold personal information (an email outside GitHub's own noreply/example patterns, a phone
@@ -350,6 +351,11 @@ jobs:
       # test/test_*_contract.mjs, so one now joins the gate without a workflow edit.
       - name: Test firmware source-boundary contracts
         run: ./scripts/run-contract-tests.sh
+      - name: Verify the OTA contracts still have teeth
+        if: steps.scope.outputs.ota == 'yes'
+        run: |
+          node tools/ota/selftest.mjs
+          node tools/production_ota/selftest.mjs
       # The SOURCE-ABSENCE matrix runs inside the two suites above (test_source_absence_contract.mjs
       # rides the contract glob, test_ui_absence_matrix.mjs the UI one), so only its selftest needs a
       # step. It earns one for the reason the domain/schematic/redaction selftests do, and more

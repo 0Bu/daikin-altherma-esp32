@@ -161,7 +161,32 @@ if ! run_contract >/dev/null 2>&1 || ! run_ui >/dev/null 2>&1; then
 fi
 echo "ok:   unmodified tree is clean"
 
-restore() { cp -R "$ROOT/main" "$TMP/"; }
+MUTATED_FILES=()
+python3() {
+  for arg in "$@"; do
+    if [[ "$arg" == "$TMP/"* ]]; then
+      local rel="${arg#$TMP/}"
+      MUTATED_FILES+=("$rel")
+    fi
+  done
+  command python3 "$@"
+}
+
+restore() {
+  if [ $# -gt 0 ]; then
+    for f in "$@"; do
+      cp "$ROOT/$f" "$TMP/$f"
+    done
+    MUTATED_FILES=()
+  elif [ ${#MUTATED_FILES[@]} -gt 0 ]; then
+    for rel in "${MUTATED_FILES[@]}"; do
+      cp "$ROOT/$rel" "$TMP/$rel"
+    done
+    MUTATED_FILES=()
+  else
+    cp -R "$ROOT/main" "$TMP/"
+  fi
+}
 
 # 1. Put the board trends back behind the heat pump's poll cycle. This is the defect verbatim: the
 #    call moves inside the resolved-profile branch, so a board whose X10A never answers records no
