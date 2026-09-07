@@ -78,9 +78,7 @@ void config_lock() {
 void config_unlock() {
     if (g_mtx) xSemaphoreGive(g_mtx);
 }
-const Config& config_ref_locked() {
-    return g_cfg;
-}
+const Config& config_ref_locked() { return g_cfg; }
 } // namespace detail
 
 bool config_wifi_configured() {
@@ -563,14 +561,15 @@ bool config_commit_detected_model(uint32_t expected_revision, std::string profil
 
 void config_reset_detection() {
     Lock lk(g_mtx);
-    g_cfg.profile = "auto";
-    g_cfg.fp_valid = false;
+    g_cfg.profile          = "auto";
+    g_cfg.fp_valid         = false;
     g_cfg.runtime_revision = next_revision(g_cfg.runtime_revision);
 }
 
 // Whole-struct RAM publish (no NVS). Acceptable as a whole-struct write because it runs on the
-// httpd task, which OWNS the credential fields (serialized against the other /set_* handlers), so it
-// cannot revert them. The poll task must NOT use this — it uses the revision-checked helpers above.
+// httpd task, which OWNS the credential fields (serialized against the other /set_* handlers), so
+// it cannot revert them. The poll task must NOT use this — it uses the revision-checked helpers
+// above.
 void config_set_runtime(const Config& c) { publish(c); }
 
 // Kconfig-derived hardware facts (see config.hpp). Kept here — the one file that already owns the

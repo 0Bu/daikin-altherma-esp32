@@ -26,23 +26,22 @@ ConfigLinkSnapshot config_link_snapshot();
 // ── Allocation-free accessors (lock-guarded) ──
 // These read individual fields without copying the entire 656-byte Config struct with its
 // 24 std::string members, avoiding continuous heap fragmentation on frequent read paths.
-bool config_wifi_configured();
-bool config_diagnostics_enabled();
+bool        config_wifi_configured();
+bool        config_diagnostics_enabled();
 OtaChannel config_ota_channel();
-Protocol config_x10a_protocol();
+Protocol    config_x10a_protocol();
 std::string config_profile();
 
 // Run a callable with a const reference to the live Config under the internal mutex.
 // Note: the callable runs with the config mutex held — it must not call any function
 // that re-enters config mutex methods (non-recursive mutex), and should not perform long I/O.
 namespace detail {
-void config_lock();
-void config_unlock();
+void          config_lock();
+void          config_unlock();
 const Config& config_ref_locked();
 } // namespace detail
 
-template <typename F>
-auto with_config(F&& f) -> decltype(f(std::declval<const Config&>())) {
+template <typename F> auto with_config(F&& f) -> decltype(f(std::declval<const Config&>())) {
     static_assert(!std::is_reference_v<decltype(f(std::declval<const Config&>()))>,
                   "with_config callable must not return a reference into Config");
     static_assert(!std::is_pointer_v<decltype(f(std::declval<const Config&>()))>,
@@ -90,12 +89,13 @@ void config_load();
                                                 uint32_t fp_pages, int fp_kw_tenths,
                                                 int fp_iu_kw_tenths, std::string fp_eeprom);
 
-// Atomically reset the session-only model back to the "auto" sentinel and invalidate the fingerprint
-// WITHOUT touching NVS or overwriting concurrently detected link settings. Used by POST /detect.
+// Atomically reset the session-only model back to the "auto" sentinel and invalidate the
+// fingerprint WITHOUT touching NVS or overwriting concurrently detected link settings. Used by POST
+// /detect.
 void config_reset_detection();
 
-// Publish a whole config to the in-RAM singleton WITHOUT touching NVS. Whole-struct like config_save,
-// so the same rule applies: httpd task only.
+// Publish a whole config to the in-RAM singleton WITHOUT touching NVS. Whole-struct like
+// config_save, so the same rule applies: httpd task only.
 void config_set_runtime(const Config& c);
 
 // ── Build/hardware facts read from Kconfig, exposed so logic/board_pins.hpp's octal_spi input comes

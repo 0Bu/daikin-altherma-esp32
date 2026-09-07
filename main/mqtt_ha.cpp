@@ -1336,7 +1336,7 @@ static void publish_heartbeat() {
     f.mqtt_quiesced   = s_mqtt_quiesced.load(std::memory_order_relaxed);
     f.poll_skipped    = hp_skipped_cycles();
     f.bus_connected   = hp.connected;
-    f.bus_proto       = static_cast<char>(config_x10a_protocol());
+    f.bus_proto                   = static_cast<char>(config_x10a_protocol());
     f.registers       = hp.registers;
     f.values          = hp.values;
     f.crc_err         = hp.crc_err;

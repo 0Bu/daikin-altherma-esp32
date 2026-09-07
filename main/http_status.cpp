@@ -1984,7 +1984,6 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
     j += "]";
 }
 
-
 // The two sources ride ONE response but stay two arrays, mirroring the two stacks behind them:
 // `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only for a snapshot proven live, so
 // a device without one sees exactly the payload it saw before this feature existed. The one shared

@@ -833,7 +833,7 @@ static void poll_task(void*) {
                     s_next_detect_us    = now + static_cast<int64_t>(wait_s) * 1000000;
                 }
             }
-            if (config_profile() != "auto") poll_once();       // then poll it (same cycle if resolved)
+            if (config_profile() != "auto") poll_once(); // then poll it (same cycle if resolved)
         } catch (const std::exception& e) {
             // COUNT FIRST, then log. diag_printf allocates, so on the heap that caused this it can
             // throw again — and a second throw inside the handler is std::terminate, i.e. the reboot
