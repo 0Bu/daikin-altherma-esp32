@@ -15,7 +15,7 @@ from start" or equivalent) explicitly authorizes:
 - Monitoring the GitHub Actions CI run on `main` until the dev feed is published
 - Triggering OTA update and running health verification on the test device (`192.168.1.104`)
 - If `.104` is healthy, triggering OTA update and running strict verification on the production heat pump (`192.168.1.170`)
-- In case of test failures or findings: analyzing the root cause (`$device-triage`), fixing the code, running and repeating `$deploy-test` on `.104` until green, and re-running `deploy-prod` from the beginning
+- When both devices are verified healthy: cleaning up the merged remote branch and temporary deployment artifacts
 
 It does **NOT** authorize:
 - Touching unrelated production devices or altering live heat pump parameters
@@ -82,7 +82,7 @@ Verify test device health:
 scripts/verify-device-health.sh --ip 192.168.1.104 --timeout 60
 ```
 
-If the health check fails or any finding occurs, proceed directly to **Step 7 (Failure recovery loop)**. Do NOT proceed to production.
+If the health check fails or any finding occurs, proceed directly to **Step 8 (Failure recovery loop)**. Do NOT proceed to production.
 
 ### 5. OTA on production device (.170) & test
 
@@ -104,7 +104,7 @@ Strict production requirements:
 - `last_crash.fault == false` (no unhandled panic/watchdog)
 - Largest contiguous heap block is healthy
 
-If any check fails or any finding occurs, proceed immediately to **Step 7**.
+If any check fails or any finding occurs, proceed immediately to **Step 8**.
 
 ### 6. Report success
 
@@ -113,7 +113,26 @@ When both devices are verified healthy:
 - Summarize device metrics (uptime, heap, MQTT status, X10A status)
 - Confirm successful rollout to both test bench and production heat pump
 
-### 7. Failure recovery loop ("on findings/errors, fix, run deploy-test until green, then repeat deploy-prod from start")
+### 7. Cleanup after successful rollout
+
+After the successful deployment and verification:
+1. **Remote branch deletion:** Delete the merged feature branch from GitHub:
+   ```bash
+   git push origin --delete <branch>
+   ```
+2. **Local branch & worktree cleanup:**
+   Prune remote tracking refs and remove the local merged branch:
+   ```bash
+   git fetch --prune origin
+   git branch -d <branch>
+   ```
+3. **Temporary files:**
+   Clean up temporary PR body files or test logs:
+   ```bash
+   rm -f /private/tmp/pr-body.md /private/tmp/changed-files.txt /tmp/dt_status.json
+   ```
+
+### 8. Failure recovery loop ("on findings/errors, fix, run deploy-test until green, then repeat deploy-prod from start")
 
 If an error or finding occurs at any point during this workflow:
 
