@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 59fa2ebe71ba7f4364935764be4050277d77feccf62fe4c71aba6d0a20b000bb -->
+<!-- user-docs-contract: ad86fdf65223ced2d2aef83016ab273d8e4d4ce56026fc2c1e6feff1c46606dd -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly

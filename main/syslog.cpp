@@ -92,10 +92,11 @@ static void set_status(bool resolved, bool reachable, const char* error) {
 
 SyslogStatus syslog_status() {
     SyslogStatus copy;
-    const Config& c = config();
-    copy.configured = !c.syslog_host.empty();
-    copy.host = c.syslog_host;
-    copy.port = c.syslog_port;
+    with_config([&copy](const Config& c) {
+        copy.configured = !c.syslog_host.empty();
+        copy.host       = c.syslog_host;
+        copy.port       = c.syslog_port;
+    });
     copy.resolved = false;
     copy.reachable = false;
     const char* err = "";
@@ -184,18 +185,20 @@ enum class SendResult { Ok, Empty, SocketFailed, SendFailed };
 // cannot read errno itself once this returns: close() is free to set errno, so a call site reading
 // it afterwards may classify the close instead of the send — and this errno now decides whether the
 // resolve throttle is cleared (logic/syslog_policy.hpp), so a wrong value costs a probe storm.
-static SendResult syslog_sendto(const struct sockaddr_in& dest, const char* text, size_t len,
-                                int* out_err = nullptr) {
+static SendResult syslog_sendto(int& sock, const struct sockaddr_in& dest, const char* text,
+                                size_t len, int* out_err = nullptr) {
     if (out_err) *out_err = 0;
     while (len > 0 && (text[len - 1] == '\n' || text[len - 1] == '\r' || text[len - 1] == ' ')) {
         len--;
     }
     if (len == 0) return SendResult::Empty;
 
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (sock < 0) {
-        if (out_err) *out_err = errno;
-        return SendResult::SocketFailed;
+        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+        if (sock < 0) {
+            if (out_err) *out_err = errno;
+            return SendResult::SocketFailed;
+        }
     }
 
     char packet[320];
@@ -230,9 +233,10 @@ static SendResult syslog_sendto(const struct sockaddr_in& dest, const char* text
         if (sendto(sock, packet, pkt_len, 0, (struct sockaddr*)&dest, sizeof(dest)) < 0) {
             if (out_err) *out_err = errno;
             r = SendResult::SendFailed;
+            close(sock);
+            sock = -1;
         }
     }
-    close(sock);
     return r;
 }
 
@@ -281,7 +285,7 @@ static void handle_send_failure(int err, const char* what, bool& resolved, bool&
 // field dates the REPLAY (this boot, once SNTP has synced) — not the crash, which happened sometime
 // in the previous, likely-unsynced boot; the collector's own receive timestamp is still the only
 // honest clock for *that*.
-static bool syslog_replay_boot(const struct sockaddr_in& dest) {
+static bool syslog_replay_boot(int& sock, const struct sockaddr_in& dest) {
     // Best-effort diagnostics must never take the device down. The record builders allocate (~800 B
     // total, worst case), and an uncaught std::bad_alloc here would unwind through the FreeRTOS/C
     // task frames → std::terminate → reboot; because the replay re-runs on EVERY boot that would be
@@ -298,14 +302,15 @@ static bool syslog_replay_boot(const struct sockaddr_in& dest) {
         id.safe_mode = safe_mode_active();
 
         const std::string boot = build_boot_line(id);
-        if (syslog_sendto(dest, boot.data(), boot.size()) != SendResult::Ok) return false;
+        if (syslog_sendto(sock, dest, boot.data(), boot.size()) != SendResult::Ok) return false;
 
         // Short-lived and small (<= 3 lines, each capped at ~200 bytes by construction — see
         // logic/bootlog.hpp): no risk to the contiguous-block budget this firmware runs against.
         std::string lines[CRASH_LOG_LINE_MAX];
         const int n = build_crash_log_lines(diag_crash_info(), lines, CRASH_LOG_LINE_MAX);
         for (int i = 0; i < n; i++) {
-            if (syslog_sendto(dest, lines[i].data(), lines[i].size()) != SendResult::Ok) return false;
+            if (syslog_sendto(sock, dest, lines[i].data(), lines[i].size()) != SendResult::Ok)
+                return false;
         }
         diag_printf("syslog: replayed boot record + %d crash line(s)\n", n);
         return true;
@@ -329,162 +334,211 @@ void syslog_init() {
         return;
     }
 
-    if (pdPASS != xTaskCreate([](void*) {
-        struct sockaddr_in dest_addr{};
-        bool resolved = false;        // DNS resolved → dest_addr valid → forwarding lines
-        bool reachable = false;       // advisory probe result (see syslog_ping_host)
-        std::string last_host;
-        int last_port = -1;
-        bool logged_state = false;    // one-shot log of the current resolve outcome
-        bool have_checked = false;    // false → re-resolve immediately (boot / config change / HARD send error)
-        bool send_failing = false;    // latch: forwarding is broken → log the transition, not every line
-        bool replayed = false;        // one-shot: the boot/crash records have gone out (see
-                                      // syslog_replay_boot) — never re-sent on a re-resolve/reconnect
-        TickType_t last_check = 0;
-        const TickType_t check_interval = pdMS_TO_TICKS(10000); // re-resolve + re-probe cadence
+    if (pdPASS !=
+        xTaskCreate(
+            [](void*) {
+                struct sockaddr_in dest_addr {};
+                bool resolved  = false; // DNS resolved → dest_addr valid → forwarding lines
+                bool reachable = false; // advisory probe result (see syslog_ping_host)
+                std::string last_host;
+                int         last_port    = -1;
+                bool        logged_state = false; // one-shot log of the current resolve outcome
+                bool have_checked = false; // false → re-resolve immediately (boot / config change /
+                                           // HARD send error)
+                bool send_failing =
+                    false; // latch: forwarding is broken → log the transition, not every line
+                bool replayed =
+                    false; // one-shot: the boot/crash records have gone out (see
+                           // syslog_replay_boot) — never re-sent on a re-resolve/reconnect
+                TickType_t       last_check = 0;
+                const TickType_t check_interval =
+                    pdMS_TO_TICKS(10000); // re-resolve + re-probe cadence
 
-        while (true) {
-          // OTA diagnostics themselves wake this queue. Do not answer those lines with a Config
-          // copy, DNS/ping work or a fresh UDP socket beside the TLS handshake. The fixed queue is
-          // intentionally allowed to buffer/drop best-effort syslog while /diag and serial retain
-          // the authoritative local evidence.
-          if (ota_download_active() || weather_fetch_active()) {
-              vTaskDelay(pdMS_TO_TICKS(250));
-              continue;
-          }
-          SyslogNetworkActivity network_activity;
-          if (ota_download_active() || weather_fetch_active()) {
-              vTaskDelay(pdMS_TO_TICKS(250));
-              continue;
-          }
-          // Guard the whole cycle like mqtt_task/poll_task (AGENTS.md → Memory, concurrency, and
-          // HTTP safety):
-          // this loop allocates every pass (the config() snapshot copies ~10 std::strings, plus
-          // getaddrinfo/last_host), and a FreeRTOS task entry is a C-frame boundary — an escaping
-          // std::bad_alloc would reach std::terminate and reboot, dropping the poll cycle + MQTT the
-          // reboot was supposed to preserve. Skip the cycle, keep the last state, delay so a starved
-          // task can't hot-spin. (The "syslog:" tag self-drops from forwarding; the line still reaches
-          // /diag + serial.)
-          try {
-            const Config& c = config();
-            bool configured = !c.syslog_host.empty();
-            const bool network_up = net_is_up();
-
-            if (!configured) {
-                if (resolved || reachable) { resolved = reachable = false; set_status(false, false, ""); }
-                // Block until a line arrives, then drop it (nothing to forward) — no busy-spin.
-                network_activity.release();
-                SyslogMsg msg;
-                xQueueReceive(s_queue, &msg, portMAX_DELAY);
-                continue;
-            }
-
-            if (!network_up) {
-                if (resolved) {
-                    resolved = false;
-                    reachable = false;
-                    set_status(false, false, "Network disconnected");
-                }
-                vTaskDelay(pdMS_TO_TICKS(2000));
-                continue;
-            }
-
-            // Config changed → re-resolve now.
-            if (c.syslog_host != last_host || c.syslog_port != last_port) {
-                resolved = false; reachable = false;
-                last_host = c.syslog_host;
-                last_port = c.syslog_port;
-                logged_state = false;
-                have_checked = false;
-                set_status(false, false, "");
-                diag_printf("syslog: target set to %s:%d\n", last_host.c_str(), last_port);
-            }
-
-            // Throttle the resolve+probe to check_interval. NOTE: gate on have_checked, NOT on
-            // !resolved — a persistently failing DNS/host must not re-run getaddrinfo()+ping every
-            // loop (that churned ~3 KB of ping-session heap every ~2.4 s, a fragmentation risk).
-            TickType_t now = xTaskGetTickCount();
-            if (!have_checked || (now - last_check >= check_interval)) {
-                last_check = now;
-                have_checked = true;
-
-                struct addrinfo hints{}, *res = nullptr;
-                hints.ai_family = AF_INET;
-                hints.ai_socktype = SOCK_DGRAM;
-                char port_str[16];
-                std::snprintf(port_str, sizeof(port_str), "%d", c.syslog_port);
-                int err = getaddrinfo(c.syslog_host.c_str(), port_str, &hints, &res);
-                if (err == 0 && res != nullptr) {
-                    std::memcpy(&dest_addr, res->ai_addr, sizeof(struct sockaddr_in));
-                    freeaddrinfo(res);
-                    resolved = true;                                   // DNS ok → forward regardless
-                    reachable = syslog_ping_host(dest_addr.sin_addr);  // advisory only
-                    set_status(true, reachable, "");
-                    if (!logged_state) {
-                        char ip_str[32];
-                        inet_ntop(AF_INET, &dest_addr.sin_addr, ip_str, sizeof(ip_str));
-                        diag_printf("syslog: forwarding to %s (%s), reachable=%s\n",
-                                    c.syslog_host.c_str(), ip_str, reachable ? "yes" : "no-ping-reply");
-                        logged_state = true;
+                int sock = -1;
+                while (true) {
+                    // OTA diagnostics themselves wake this queue. Do not answer those lines with a
+                    // Config copy, DNS/ping work or a fresh UDP socket beside the TLS handshake.
+                    // The fixed queue is intentionally allowed to buffer/drop best-effort syslog
+                    // while /diag and serial retain the authoritative local evidence.
+                    if (ota_download_active() || weather_fetch_active()) {
+                        vTaskDelay(pdMS_TO_TICKS(250));
+                        continue;
                     }
-                    // First reachable collector of this boot → replay what happened before it existed.
-                    // Ahead of the queue drain, so the crash leads the backlog rather than trailing it.
-                    if (!replayed) replayed = syslog_replay_boot(dest_addr);
-                } else {
-                    resolved = false; reachable = false;
-                    set_status(false, false, "DNS lookup failed");
-                    if (!logged_state) {
-                        diag_printf("syslog: DNS lookup failed for %s (error %d)\n", c.syslog_host.c_str(), err);
-                        logged_state = true;
+                    SyslogNetworkActivity network_activity;
+                    if (ota_download_active() || weather_fetch_active()) {
+                        vTaskDelay(pdMS_TO_TICKS(250));
+                        continue;
                     }
-                }
-            }
+                    // Guard the whole cycle like mqtt_task/poll_task (AGENTS.md → Memory,
+                    // concurrency, and HTTP safety): this loop runs getaddrinfo/last_host, and a
+                    // FreeRTOS task entry is a C-frame boundary — an escaping std::bad_alloc would
+                    // reach std::terminate and reboot, dropping the poll cycle + MQTT the reboot
+                    // was supposed to preserve. Skip the cycle, keep the last state, delay so a
+                    // starved task can't hot-spin. (The "syslog:" tag self-drops from forwarding;
+                    // the line still reaches /diag + serial.)
+                    try {
+                        std::string syslog_host;
+                        int         syslog_port = 0;
+                        with_config([&](const Config& c) {
+                            syslog_host = c.syslog_host;
+                            syslog_port = c.syslog_port;
+                        });
+                        const bool configured = !syslog_host.empty();
+                        const bool network_up = net_is_up();
 
-            // Forward one queued line while a destination is resolved. Delivery is gated on DNS only
-            // (resolved), never on the advisory reachability probe.
-            SyslogMsg msg;
-            if (xQueueReceive(s_queue, &msg, pdMS_TO_TICKS(500)) == pdTRUE) {
-                if (resolved) {
-                    int err = 0;
-                    switch (syslog_sendto(dest_addr, msg.text, msg.len, &err)) {
-                        case SendResult::Ok:
-                            if (send_failing) {   // first line through after an outage
-                                diag_printf("syslog: forwarding recovered\n");
-                                send_failing = false;
+                        if (!configured) {
+                            if (sock >= 0) {
+                                close(sock);
+                                sock = -1;
                             }
-                            break;
-                        case SendResult::Empty:   // nothing to send — neither success nor failure
-                            break;
-                        // Whether this clears the resolve throttle now depends on WHICH error it was
-                        // (logic/syslog_policy.hpp), not merely that one occurred.
-                        case SendResult::SendFailed:
-                            handle_send_failure(err, "sendto", resolved, logged_state,
-                                                have_checked, send_failing);
-                            break;
-                        case SendResult::SocketFailed:
-                            handle_send_failure(err, "socket creation", resolved, logged_state,
-                                                have_checked, send_failing);
-                            break;
+                            if (resolved || reachable) {
+                                resolved = reachable = false;
+                                set_status(false, false, "");
+                            }
+                            // Block until a line arrives, then drop it (nothing to forward) — no
+                            // busy-spin.
+                            SyslogMsg msg;
+                            xQueueReceive(s_queue, &msg, portMAX_DELAY);
+                            continue;
+                        }
+
+                        if (!network_up) {
+                            if (sock >= 0) {
+                                close(sock);
+                                sock = -1;
+                            }
+                            if (resolved) {
+                                resolved  = false;
+                                reachable = false;
+                                set_status(false, false, "Network disconnected");
+                            }
+                            vTaskDelay(pdMS_TO_TICKS(2000));
+                            continue;
+                        }
+
+                        // Config changed → re-resolve now.
+                        if (syslog_host != last_host || syslog_port != last_port) {
+                            if (sock >= 0) {
+                                close(sock);
+                                sock = -1;
+                            }
+                            resolved     = false;
+                            reachable    = false;
+                            last_host    = syslog_host;
+                            last_port    = syslog_port;
+                            logged_state = false;
+                            have_checked = false;
+                            set_status(false, false, "");
+                            diag_printf("syslog: target set to %s:%d\n", last_host.c_str(),
+                                        last_port);
+                        }
+
+                        // Throttle the resolve+probe to check_interval. NOTE: gate on have_checked,
+                        // NOT on !resolved — a persistently failing DNS/host must not re-run
+                        // getaddrinfo()+ping every loop (that churned ~3 KB of ping-session heap
+                        // every ~2.4 s, a fragmentation risk).
+                        TickType_t now = xTaskGetTickCount();
+                        if (!have_checked || (now - last_check >= check_interval)) {
+                            last_check   = now;
+                            have_checked = true;
+
+                            struct addrinfo hints {
+                            }, *res = nullptr;
+                            hints.ai_family   = AF_INET;
+                            hints.ai_socktype = SOCK_DGRAM;
+                            char port_str[16];
+                            std::snprintf(port_str, sizeof(port_str), "%d", syslog_port);
+                            int err = getaddrinfo(syslog_host.c_str(), port_str, &hints, &res);
+                            if (err == 0 && res != nullptr) {
+                                std::memcpy(&dest_addr, res->ai_addr, sizeof(struct sockaddr_in));
+                                freeaddrinfo(res);
+                                resolved  = true; // DNS ok → forward regardless
+                                reachable = syslog_ping_host(dest_addr.sin_addr); // advisory only
+                                set_status(true, reachable, "");
+                                if (!logged_state) {
+                                    char ip_str[32];
+                                    inet_ntop(AF_INET, &dest_addr.sin_addr, ip_str, sizeof(ip_str));
+                                    diag_printf("syslog: forwarding to %s (%s), reachable=%s\n",
+                                                syslog_host.c_str(), ip_str,
+                                                reachable ? "yes" : "no-ping-reply");
+                                    logged_state = true;
+                                }
+                                // First reachable collector of this boot → replay what happened
+                                // before it existed. Ahead of the queue drain, so the crash leads
+                                // the backlog rather than trailing it.
+                                if (!replayed) replayed = syslog_replay_boot(sock, dest_addr);
+                            } else {
+                                if (sock >= 0) {
+                                    close(sock);
+                                    sock = -1;
+                                }
+                                resolved  = false;
+                                reachable = false;
+                                set_status(false, false, "DNS lookup failed");
+                                if (!logged_state) {
+                                    diag_printf("syslog: DNS lookup failed for %s (error %d)\n",
+                                                syslog_host.c_str(), err);
+                                    logged_state = true;
+                                }
+                            }
+                        }
+
+                        // Drain one line from the ring; non-blocking poll with timeout so a quiet
+                        // bus doesn't spin. The queue is sized to survive network jitter without
+                        // dropping lines.
+                        SyslogMsg msg;
+                        if (xQueueReceive(s_queue, &msg, pdMS_TO_TICKS(500)) == pdTRUE) {
+                            if (resolved) {
+                                int err = 0;
+                                switch (syslog_sendto(sock, dest_addr, msg.text, msg.len, &err)) {
+                                case SendResult::Ok:
+                                    if (send_failing) { // first line through after an outage
+                                        diag_printf("syslog: forwarding recovered\n");
+                                        send_failing = false;
+                                    }
+                                    break;
+                                case SendResult::Empty: // nothing to send — neither success nor
+                                                        // failure
+                                    break;
+                                // Whether this clears the resolve throttle now depends on WHICH
+                                // error it was (logic/syslog_policy.hpp), not merely that one
+                                // occurred.
+                                case SendResult::SendFailed:
+                                    handle_send_failure(err, "sendto", resolved, logged_state,
+                                                        have_checked, send_failing);
+                                    break;
+                                case SendResult::SocketFailed:
+                                    handle_send_failure(err, "socket creation", resolved,
+                                                        logged_state, have_checked, send_failing);
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (const std::exception& e) {
+                        if (sock >= 0) {
+                            close(sock);
+                            sock = -1;
+                        }
+                        diag_printf("syslog: task cycle skipped (%s)\n", e.what());
+                        vTaskDelay(pdMS_TO_TICKS(1000));
+                    } catch (...) {
+                        if (sock >= 0) {
+                            close(sock);
+                            sock = -1;
+                        }
+                        diag_printf("syslog: task cycle skipped (oom?)\n");
+                        vTaskDelay(pdMS_TO_TICKS(1000));
                     }
                 }
-            }
-          } catch (const std::exception& e) {
-              diag_printf("syslog: task cycle skipped (%s)\n", e.what());
-              vTaskDelay(pdMS_TO_TICKS(1000));
-          } catch (...) {
-              diag_printf("syslog: task cycle skipped (oom?)\n");
-              vTaskDelay(pdMS_TO_TICKS(1000));
-          }
-        }
-        // 6144: this task runs getaddrinfo() + raw socket()/sendto() directly on its own stack (unlike
-        // esp-mqtt, whose socket work lives in an internal task). 4096 is too thin for that call chain.
-    }, "syslog_task", 6144, nullptr, TASK_PRIO_SYSLOG, nullptr))
+                // 6144: this task runs getaddrinfo() + raw socket()/sendto() directly on its own
+                // stack (unlike esp-mqtt, whose socket work lives in an internal task). 4096 is too
+                // thin for that call chain.
+            },
+            "syslog_task", 6144, nullptr, TASK_PRIO_SYSLOG, nullptr))
         diag_printf("syslog: task alloc failed — syslog forwarding disabled this boot\n");
 }
 
-bool syslog_network_quiesced() {
-    return s_network_quiesced.load(std::memory_order_acquire);
-}
+bool syslog_network_quiesced() { return s_network_quiesced.load(std::memory_order_acquire); }
 
 void syslog_send(const char* msg, size_t len) {
     if (!s_queue) return;

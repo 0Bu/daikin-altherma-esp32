@@ -588,12 +588,17 @@ async function applyLive(patch, okMsg) {
 // Picking RX/TX from the dropdown points auto-detection at those pins: reset to "auto" so the next
 // poll cycle re-sweeps the chosen pair (+ its swap), then refresh a few times to catch the connect —
 // on success the card flips the pins to read-only.
+let pickTimer;
 async function onPinPick() {
   const rx = +$("e32Rx").value, tx = +$("e32Tx").value;
   $("e32Rx").blur(); $("e32Tx").blur();
   if (!(await applyLive({ profile: "auto", rx, tx }, t("toast.trying_pins")))) return;
-  let n = 0;
-  const iv = setInterval(async () => { await refreshStatus(); if (++n >= 5 || S.status?.hp?.connected) clearInterval(iv); }, 1500);
+  clearTimeout(pickTimer);
+  let n = 0, p = async () => {
+    await refreshStatus();
+    if (++n < 5 && !S.status?.hp?.connected) pickTimer = setTimeout(p, 1500);
+  };
+  pickTimer = setTimeout(p, 1500);
 }
 
 // Picking an update channel saves it (POST /set_ota — live, no reboot) and then immediately runs
