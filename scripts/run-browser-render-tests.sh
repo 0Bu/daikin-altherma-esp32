@@ -7,7 +7,7 @@ cd "$root"
 export NODE_OPTIONS="${NODE_OPTIONS:-} --experimental-websocket"
 
 if [[ "${1:-}" == "--if-ui-changed" ]]; then
-  if [[ "${GITHUB_REF:-}" != "refs/heads/main" ]] && git rev-parse --verify HEAD^1 >/dev/null 2>&1; then
+  if git rev-parse --verify HEAD^1 >/dev/null 2>&1; then
     ui_pattern='^(main/www/|main/def/|main/http_|test/test_browser|test/test_ui|tools/browser/|tools/ui/|tools/schematic/|tools/web_asset/|tools/presenter/|tools/localization/|scripts/run-browser-render-tests[.]sh|[.]github/workflows/build[.]yml$)'
     if ! git diff --name-only HEAD^1 HEAD | grep -qE "$ui_pattern"; then
       echo "browser render gate: no UI/browser-relevant changes in diff; skipped"

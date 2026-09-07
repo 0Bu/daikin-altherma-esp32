@@ -10,29 +10,33 @@ pass=0
 
 fail() { echo "agent-config selftest: $1" >&2; exit 1; }
 
+TEMPLATE="$WORK/__template__"
+mkdir -p "$TEMPLATE"
+{
+  printf '%s\n' \
+    ".mcp.json" \
+    ".codex/config.toml" \
+    ".codex/hooks.json" \
+    "AGENTS.md" \
+    "scripts/gh-with-git-credentials.sh" \
+    "tools/agent-config/safety-invariants.json"
+  find "$ROOT/.codex/agents" "$ROOT/.agents/skills" -type f -print \
+    | sed "s#^$ROOT/##"
+} | sort -u > "$WORK/__template_files.txt"
+while IFS= read -r relative; do
+  [ -n "$relative" ] || continue
+  mkdir -p "$TEMPLATE/$(dirname "$relative")"
+  cp "$ROOT/$relative" "$TEMPLATE/$relative"
+done < "$WORK/__template_files.txt"
+rm "$WORK/__template_files.txt"
+git -C "$TEMPLATE" init -q
+git -C "$TEMPLATE" add .
+
 make_fixture() {
-  local dest="$1" list="$1/files.txt" relative
+  local dest="$1"
   rm -rf "$dest"
   mkdir -p "$dest"
-  {
-    printf '%s\n' \
-      ".mcp.json" \
-      ".codex/config.toml" \
-      ".codex/hooks.json" \
-      "AGENTS.md" \
-      "scripts/gh-with-git-credentials.sh" \
-      "tools/agent-config/safety-invariants.json"
-    find "$ROOT/.codex/agents" "$ROOT/.agents/skills" -type f -print \
-      | sed "s#^$ROOT/##"
-  } | sort -u > "$list"
-  while IFS= read -r relative; do
-    [ -n "$relative" ] || continue
-    mkdir -p "$dest/$(dirname "$relative")"
-    cp "$ROOT/$relative" "$dest/$relative"
-  done < "$list"
-  rm "$list"
-  git -C "$dest" init -q
-  git -C "$dest" add .
+  cp -R "$TEMPLATE/." "$dest/"
 }
 
 run_gate() {

@@ -444,13 +444,13 @@ for t in "${TARGETS[@]}"; do
     ( cd "$DIST" && sha256sum "daikin-altherma-esp32${sfx}.elf" > "daikin-altherma-esp32${sfx}.elf.sha256" )
     elf_raw="$(stat -f%z "$elf" 2>/dev/null || stat -c%s "$elf")"
     if command -v xz >/dev/null 2>&1; then
-        xz -9 -T0 -f "$elf"
+        xz -6 -T0 -f "$elf"
     else
         # No xz binary. ESP-IDF always brings a Python and lzma is stdlib, so this is a real
         # fallback — never "leave it uncompressed", which would silently double storage again and
         # look identical in a green log.
         python3 -c 'import lzma, shutil, sys
-with open(sys.argv[1], "rb") as f, lzma.open(sys.argv[1] + ".xz", "wb", preset=9) as g:
+with open(sys.argv[1], "rb") as f, lzma.open(sys.argv[1] + ".xz", "wb", preset=6) as g:
     shutil.copyfileobj(f, g)' "$elf"
         rm -f "$elf"
     fi

@@ -8,37 +8,95 @@ hook="$root/tools/agent-hooks/agent_hook.py"
 pr_gate="$root/tools/agent-hooks/require-pr-gates.sh"
 tmp="$(mktemp -d)" || exit 2
 tmp_physical="$(cd "$tmp" && pwd -P)"
-trap 'rm -rf "$tmp"' EXIT
 pass=0
 fail=0
 
 payload() {
-    local payload_cwd="${AGENT_TEST_PAYLOAD_CWD:-$root}"
-    python3 - "$1" "$2" "$3" "$payload_cwd" <<'PY'
-import json, sys
-tool, key, value, cwd = sys.argv[1:]
-print(json.dumps({"hook_event_name": "PreToolUse", "cwd": cwd,
-                  "tool_name": tool, "tool_input": {key: value}}))
-PY
+    local cwd="${AGENT_TEST_PAYLOAD_CWD:-$root}" tool="$1" key="$2" val="$3"
+    cwd="${cwd//\\/\\\\}"; cwd="${cwd//\"/\\\"}"; cwd="${cwd//$'\n'/\\n}"; cwd="${cwd//$'\r'/\\r}"; cwd="${cwd//$'\t'/\\t}"
+    tool="${tool//\\/\\\\}"; tool="${tool//\"/\\\"}"; tool="${tool//$'\n'/\\n}"; tool="${tool//$'\r'/\\r}"; tool="${tool//$'\t'/\\t}"
+    key="${key//\\/\\\\}"; key="${key//\"/\\\"}"; key="${key//$'\n'/\\n}"; key="${key//$'\r'/\\r}"; key="${key//$'\t'/\\t}"
+    val="${val//\\/\\\\}"; val="${val//\"/\\\"}"; val="${val//$'\n'/\\n}"; val="${val//$'\r'/\\r}"; val="${val//$'\t'/\\t}"
+    printf '{"hook_event_name":"PreToolUse","cwd":"%s","tool_name":"%s","tool_input":{"%s":"%s"}}\n' \
+        "$cwd" "$tool" "$key" "$val"
 }
 
 payload_with_workdir() {
-    python3 - "$1" "$2" "$3" "$4" <<'PY'
-import json, sys
-tool, command, cwd, workdir = sys.argv[1:]
-print(json.dumps({"hook_event_name": "PreToolUse", "cwd": cwd,
-                  "tool_name": tool, "tool_input": {"cmd": command, "workdir": workdir}}))
-PY
+    local tool="$1" cmd="$2" cwd="$3" workdir="$4"
+    cwd="${cwd//\\/\\\\}"; cwd="${cwd//\"/\\\"}"; cwd="${cwd//$'\n'/\\n}"; cwd="${cwd//$'\r'/\\r}"; cwd="${cwd//$'\t'/\\t}"
+    tool="${tool//\\/\\\\}"; tool="${tool//\"/\\\"}"; tool="${tool//$'\n'/\\n}"; tool="${tool//$'\r'/\\r}"; tool="${tool//$'\t'/\\t}"
+    cmd="${cmd//\\/\\\\}"; cmd="${cmd//\"/\\\"}"; cmd="${cmd//$'\n'/\\n}"; cmd="${cmd//$'\r'/\\r}"; cmd="${cmd//$'\t'/\\t}"
+    workdir="${workdir//\\/\\\\}"; workdir="${workdir//\"/\\\"}"; workdir="${workdir//$'\n'/\\n}"; workdir="${workdir//$'\r'/\\r}"; workdir="${workdir//$'\t'/\\t}"
+    printf '{"hook_event_name":"PreToolUse","cwd":"%s","tool_name":"%s","tool_input":{"cmd":"%s","workdir":"%s"}}\n' \
+        "$cwd" "$tool" "$cmd" "$workdir"
 }
 
 decision() {
     sed -n 's/.*"permissionDecision"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
+cat > "$tmp/worker.py" <<'PY'
+import io, json, os, re, sys
+from unittest.mock import patch, MagicMock
+
+hook_path = os.path.abspath(sys.argv[1])
+sys.path.insert(0, os.path.dirname(hook_path))
+import agent_hook
+
+args = MagicMock()
+args.partition_shell_only = False
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    if line == "__EXIT__":
+        break
+    try:
+        fake_out = io.StringIO()
+        with patch("sys.stdin", io.StringIO(line)), patch("sys.stdout", fake_out), patch("sys.stderr", fake_out):
+            rc = agent_hook.run_pre_tool_guards(args)
+        out = fake_out.getvalue().strip()
+        m = re.search(r'"permissionDecision"\s*:\s*"([^"]*)"', out)
+        decision = m.group(1) if m else ""
+        first_line = out.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+        print(f"{rc}\t{decision}\t{first_line}", flush=True)
+    except Exception as e:
+        print(f"1\t\t{e}", flush=True)
+PY
+
+fifo_in="$tmp/gw_in"
+fifo_out="$tmp/gw_out"
+mkfifo "$fifo_in" "$fifo_out"
+python3 -u "$tmp/worker.py" "$hook" < "$fifo_in" > "$fifo_out" &
+gw_pid=$!
+
+exec 3> "$fifo_in"
+exec 4< "$fifo_out"
+
+cleanup_gw() {
+    printf '__EXIT__\n' >&3 2>/dev/null || true
+    exec 3>&- 2>/dev/null || true
+    exec 4<&- 2>/dev/null || true
+    wait "$gw_pid" 2>/dev/null || true
+    rm -rf "$tmp"
+}
+trap cleanup_gw EXIT
+
 guard_case() {
     local name="$1" input="$2" expected="$3" out got rc
-    out="$(printf '%s' "$input" | python3 "$hook" pre-tool-guards 2>&1)"; rc=$?
-    got="$(printf '%s' "$out" | decision)"
+    if [ -n "${gw_pid:-}" ] && kill -0 "$gw_pid" 2>/dev/null; then
+        printf '%s\n' "$input" >&3
+        local resp
+        IFS= read -r resp <&4
+        rc="${resp%%$'\t'*}"
+        resp="${resp#*$'\t'}"
+        got="${resp%%$'\t'*}"
+        out="${resp#*$'\t'}"
+    else
+        out="$(printf '%s' "$input" | python3 "$hook" pre-tool-guards 2>&1)"; rc=$?
+        got="$(printf '%s' "$out" | decision)"
+    fi
     if [ "$rc" -eq 0 ] && [ "$got" = "$expected" ]; then
         echo "PASS  $name"; pass=$((pass + 1))
     else

@@ -25,17 +25,40 @@ jobs:
       - name: Log in to GitHub Container Registry
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Mirror ESP-IDF container image to GHCR
+      - name: Build and push slim ESP-IDF container image to GHCR
         run: |
           set -euo pipefail
           idf_ver="$(./scripts/idf-version.sh)"
           owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
           src="espressif/idf:${idf_ver}"
           dest="ghcr.io/${owner}/idf:${idf_ver}"
-          echo "Pulling $src..."
-          docker pull "$src"
-          echo "Tagging $dest..."
-          docker tag "$src" "$dest"
+          echo "Building slim image from $src..."
+          cat <<EOF | docker build -t "$dest" -
+          FROM ${src} AS source
+          RUN rm -rf \
+              /opt/esp/tools/riscv32-esp-elf \
+              /opt/esp/tools/riscv32-esp-elf-gdb \
+              /opt/esp/tools/esp32p4-elf \
+              /opt/esp/tools/openocd-esp32 \
+              /opt/esp/tools/qemu-riscv32 \
+              /opt/esp/tools/qemu-xtensa \
+              /opt/esp/tools/esp-clangd \
+              /root/.cache \
+              /tmp/*
+          RUN python3 -c 'import json; p="/opt/esp/idf/tools/tools.json"; d=json.load(open(p)); [t.update({"install": "on_request"}) for t in d.get("tools", []) if t.get("name") in {"riscv32-esp-elf", "riscv32-esp-elf-gdb", "openocd-esp32", "esp-clangd"}]; json.dump(d, open(p, "w"), indent=2)'
+
+          FROM scratch
+          COPY --from=source / /
+          ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+              IDF_PATH="/opt/esp/idf" \
+              IDF_TOOLS_PATH="/opt/esp" \
+              IDF_GITHUB_ASSETS="" \
+              IDF_PYTHON_CHECK_CONSTRAINTS="no" \
+              IDF_CCACHE_ENABLE="1" \
+              IDF_SKIP_TOOLS_CHECK="1"
+          ENTRYPOINT ["/opt/esp/entrypoint.sh"]
+          CMD ["/bin/bash"]
+          EOF
           echo "Pushing $dest to GHCR..."
           docker push "$dest"
           echo "Mirroring complete: $dest"
