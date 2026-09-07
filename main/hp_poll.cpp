@@ -109,6 +109,7 @@ static HpProbeReply           s_probe_reply;
 // a second at worst. Not in s_stats: that mutex must not be taken on the path out of an OOM.
 static std::atomic<uint32_t> s_cycles_skipped{0};
 static std::atomic<uint32_t> s_target_generation{1};
+static std::atomic<uint32_t> s_cache_generation{1};
 static std::atomic<bool>     s_poll_task_running{false};
 static std::atomic<bool>     s_network_quiesced{false};
 
@@ -519,6 +520,7 @@ static void poll_once() {
         s_cache_profile    = prof.id;
         s_cache_identity_fp = c.x10a_identity_fp;
         ++s_cache_revision;
+        s_cache_generation.fetch_add(1, std::memory_order_release);
         s_stats.connected  = any_ok;
         s_stats.registers  = regs;
         s_stats.values     = static_cast<int>(s_cache.size());
@@ -1086,6 +1088,8 @@ bool hp_poll_generation_matches(uint32_t generation) {
     return generation != 0 && s_target_generation.load(std::memory_order_acquire) == generation;
 }
 
+uint32_t hp_cache_generation() { return s_cache_generation.load(std::memory_order_acquire); }
+
 void hp_poll_reconfigure() {
     // POST /detect and POST /set_hp (new pins) run on the httpd task and put profile back to "auto".
     // Drop any accumulated detect backoff so a just-rewired bus is swept on the NEXT poll cycle, not
@@ -1106,6 +1110,7 @@ void hp_poll_reconfigure() {
     s_cache_profile = "";
     s_cache_identity_fp = 0;
     ++s_cache_revision;
+    s_cache_generation.fetch_add(1, std::memory_order_release);
     s_stats.connected = false;
     s_stats.registers = 0;
     s_stats.values = 0;

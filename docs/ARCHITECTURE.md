@@ -184,13 +184,17 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       handler in user_ctx and installs the handle_all trampoline, which calls it
                       inside try/catch — std::bad_alloc → 503, any other throw → 500, instead of
                       unwinding through esp_http_server's C frames to std::terminate → reboot.
+                      Non-OTA routes are early-rejected with 503 during active OTA download or when
+                      heap_largest_internal_block() < 6144 B (via logic/http_request.hpp http_is_ota_route()).
                       No route is exempt any more: the one that was (/events, raw-registered
                       because is_websocket bypasses the trampoline) no longer exists
 http_status.cpp     → GET / (web UI), /locale.js, /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. The live /status and /values bodies use one bounded 1 KiB
-                      chunk sink instead of a body-sized contiguous allocation;
-                      append_status_json() runs on the httpd task ALONE —
-                      see "Push vs. poll" below for why that sentence is load-bearing
+                      chunk sink instead of a body-sized contiguous allocation; unredacted GET /diag streams
+                      directly from static storage in 1 KiB chunks (clamped to 512 B during active OTA) with
+                      zero heap allocation. append_status_json() scopes subsystem local structs, saving +2836 B
+                      httpd stack, and runs on the httpd task ALONE — see "Push vs. poll" below for why that
+                      sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_temp, /set_weather,
                       /test_circulation, /set_circulation,
                       /set_syslog,
@@ -1144,8 +1148,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
   the fixed mDNS name or a current WiFi/Ethernet IPv4; a present `Origin` is checked independently
   against the same device identities, and cross-site/unknown Fetch Metadata fails closed. Native
   clients without browser headers remain valid. Every POST carrying a body must declare
-  `application/json`, excluding CORS-safelisted form/text requests. The captive portal skips only
-  the Host/browser check because OS probes intentionally arrive under unrelated hostnames.
+  `application/json`, excluding CORS-safelisted form/text requests. Non-OTA routes are early-rejected
+  with `503 Service Unavailable` (`http_is_ota_route()`) during active OTA download or when
+  `heap_largest_internal_block() < 6144` B, shielding in-flight TLS allocations. The captive portal
+  skips only the Host/browser check because OS probes intentionally arrive under unrelated hostnames.
 - `logic/query_flag.hpp` — `query_flag_on(value)`: a `?verbose=1`-style flag fires only on exactly
   `"1"`. `httpd_query_key_value` succeeds on key PRESENCE, so acting on that alone formerly let
   `?clear=0` wipe the diag log / coredump. Clearing is no longer a query flag: only the explicit
@@ -2390,8 +2396,9 @@ Structure:
   check/update acceptance path while retaining the same stack watermark evidence across the boot.
   Each producer holds its flag for 1.1
   seconds before opening TLS so the once-per-second MQTT publisher can finish its current cycle and
-  stand aside; OTA also waits for an in-flight X10A sweep to acknowledge the same request and for an
-  already-open weather client to unwind. HomeHub polling and Syslog forwarding also take an
+  stand aside; OTA also waits for an in-flight X10A sweep (`wait_for_poll_quiesce()`) and an in-flight
+  Modbus poll cycle (`wait_for_modbus_quiesce()`, `hp_modbus_ota_quiesced()`) to acknowledge the same
+  request and for an already-open weather client to unwind. HomeHub polling and Syslog forwarding also take an
   allocation-free OTA branch before copying configuration, reserving value vectors, resolving DNS,
   pinging or creating a UDP socket; OTA diagnostics therefore cannot wake Syslog into allocator
   competition beside X509. New X10A/HomeHub/Syslog work and new weather requests then stay out until
@@ -2737,7 +2744,14 @@ Structure:
   deduplicated away. The one exact changed-state allocation can still fail under external heap
   pressure; the publish-skip catch keeps the prior retained state and logs the throw second's
   allocation-free heap snapshot (`free=`/`largest=`) on the same line, narrowing the next collision
-  to the allocations active at that second instead of relying only on 10-s samples.
+  to the allocations active at that second instead of relying only on 10-s samples. In addition,
+  `mqtt_task` caches `hp_cache_generation()` and `mb_cache_generation()`, serializing and publishing
+  telemetry state only when cache generation changes or cache is newly populated, eliminating 1-Hz
+  string and JSON allocation churn on steady state.
+- **TCP buffer footprint:** `CONFIG_LWIP_TCP_SND_BUF_DEFAULT=5760` (halved from 11520 to 4×MSS) in
+  `sdkconfig.defaults` reduces per-socket lwIP send buffer SRAM consumption while preserving full 8×MSS
+  receive windows (`CONFIG_LWIP_TCP_WND_DEFAULT=11520`), protecting contiguous internal heap from
+  socket-buffer fragmentation.
 - **Boot recovery / anti-brick** — an unsigned app aborts pre-`app_main`, so only the bootloader can
   recover, and only via a recorded previous OTA slot; a direct USB flash of an unsigned build both
   crash-loops and blanks the otadata rollback record. Contained by the pre-flash guard
@@ -4089,6 +4103,10 @@ the current release image now also selects global `CONFIG_COMPILER_OPTIMIZATION_
 signed application must fit the fixed OTA slot with all device-local catalogs. The builder is no
 longer an outlier at all — 3744 against `history_record`'s 3296. The accepted trade-off is less exact
 debug backtraces in return for both measured stack headroom and the required flash-image headroom.
+Subsystem-structure encapsulation inside `http_append_status_json()` takes this further: large subsystem structs
+(`Config` 656 B, `CheckupReport` 332 B, `ReferenceTemperatureStatus` 168 B, `WeatherForecastStatus` 240 B)
+are scoped into explicit `{ ... }` blocks so their stack slots are not held concurrently, reclaiming an
+additional +2836 bytes of free stack for the `httpd` task.
 
 **Re-measured from the release ELF on 2026-08-27 after the release-gate expansion.** The only
 remaining status instantiation is the bounded sink at **0x1320 = 4896** bytes; the owning-string

@@ -314,14 +314,7 @@ template <typename JsonOut>
 static void append_status_json(JsonOut& j, bool redact) {
     const Config& c = config();
     const BoardPreset* selected_board = board_selected_preset(c);
-    HpStats     hp  = hp_stats();
-    const logic::RefrigerantServiceSnapshot refrigerant_service = refrigerant_service_status();
-    MqttStatus  m   = mqtt_status();
-    ReferenceTemperatureStatus rt = reference_temperature_status();
-    CirculationSourceStatus circulation = circulation_source_status();
-    const logic::HeatingCurveSnapshot heating_curve = heating_curve_status();
-    WeatherForecastStatus wf = weather_forecast_status();
-    WifiInfo    wi  = wifi_info();
+
     j += "{";
     j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
     j += "\"platform\":" + jstr(CONFIG_IDF_TARGET) + ",";
@@ -337,15 +330,20 @@ static void append_status_json(JsonOut& j, bool redact) {
     // status indicator, recovery button and enabled ENV III pair, and Ethernet removes its SPI pads.
     // The same board table and reservations also gate /set_hp below, so the picker cannot advertise
     // a physically absent or already occupied GPIO that the request path would nevertheless accept.
-    int pins[BOARD_PINS_MAX];
-    const ReservedPins x10a_used = config_reserved_pins(c).plus(net_eth_reserved_pins());
-    int npins = selected_board
-        ? board_preset_x10a_pins_offerable(selected_board, pins, BOARD_PINS_MAX,
-                                            hw_octal_spi(), x10a_used)
-        : board_pins_offerable(pins, BOARD_PINS_MAX, hw_octal_spi(), x10a_used);
-    j += "\"pins_avail\":[";
-    for (int i = 0; i < npins; i++) { if (i) j += ","; j += std::to_string(pins[i]); }
-    j += "],";
+    {
+        int                pins[BOARD_PINS_MAX];
+        const ReservedPins x10a_used = config_reserved_pins(c).plus(net_eth_reserved_pins());
+        int                npins     = selected_board
+                                           ? board_preset_x10a_pins_offerable(selected_board, pins, BOARD_PINS_MAX,
+                                                                              hw_octal_spi(), x10a_used)
+                                           : board_pins_offerable(pins, BOARD_PINS_MAX, hw_octal_spi(), x10a_used);
+        j += "\"pins_avail\":[";
+        for (int i = 0; i < npins; i++) {
+            if (i) j += ",";
+            j += std::to_string(pins[i]);
+        }
+        j += "],";
+    }
     // Board-local hardware: what the indicator + recovery button are configured as, plus the pins
     // they MAY be moved to. A separate list from pins_avail — wider by the dedicated-JTAG pads,
     // which are legal for an onboard LED/button but withheld from the X10A picker (board_pins.hpp
@@ -353,70 +351,99 @@ static void append_status_json(JsonOut& j, bool redact) {
     // either local pin. That second filter is the mirror of the reservation pins_avail already
     // applies in the other direction. Drives the ESP32 card's hardware rows; /set_board writes them
     // back.
-    int lpins[BOARD_LOCAL_PINS_MAX];
-    int nlpins = board_pins_local(lpins, BOARD_LOCAL_PINS_MAX, hw_octal_spi(),
-                                  config_board_reserved_pins(c).plus(net_eth_reserved_pins()));
-    // Appended piece by piece with `+=` rather than as one `a + b + c + …` chain. A chain has to
-    // materialise EVERY intermediate std::string at once — each one a live object in this frame — and
-    // this function overflowed the httpd task's stack doing exactly that (see http_server.cpp for the
-    // measurement and the crash it caused). `+=` holds one temporary at a time and takes a bare string
-    // literal with no std::string wrapper at all, so it drops the allocations too. Same shape below
-    // for the presets, and worth keeping if this block grows again.
-    j += "\"board\":{\"led_gpio\":";  j += std::to_string(c.led_gpio);
-    j += ",\"led_type\":";            j += std::to_string(c.led_type);
-    j += ",\"led_inverted\":";        j += c.led_inverted ? "true" : "false";
-    j += ",\"btn_gpio\":";            j += std::to_string(c.btn_gpio);
-    j += ",\"btn_active_low\":";      j += c.btn_active_low ? "true" : "false";
-    // Explicit board identity, atomically persisted with the hardware values. `user_set=false`
-    // means untouched build defaults; `preset_id=custom` means the user deliberately saved manual
-    // hardware. No consumer has to infer Atom/XIAO from pins.
-    j += ",\"user_set\":";            j += c.board_user_set ? "true" : "false";
-    j += ",\"preset_id\":";           j += jstr(c.board_user_set ? board_preset_key(c.board_preset_id) : "");
-    j += ",\"preset_name\":";         j += jstr(selected_board ? selected_board->name : "");
-    j += ",\"vendor\":";              j += jstr(board_vendor_name(board_selected_vendor(c)));
-    j += ",\"pins_local\":[";
-    for (int i = 0; i < nlpins; i++) { if (i) j += ","; j += std::to_string(lpins[i]); }
-    // ...and the ready-made settings for the boards this project documents (logic/board_presets.hpp),
-    // so the Hardware modal can fill all five fields from one pick instead of asking the user to
-    // transcribe pin numbers out of docs/BOARDS.md. Sent HERE rather than from a route of their own
-    // because the modal already reads pins_local from this payload: one source, no second fetch to
-    // fail, and the presets cannot arrive disagreeing with the pin lists they must fit inside. Two
-    // fixed rows (~170 bytes) — bounded, unlike the per-value payloads the heap rules are about.
-    const BoardPreset* presets[BOARD_PRESETS_MAX];
-    int npre = board_presets_offerable(presets, BOARD_PRESETS_MAX, hw_octal_spi(),
-                                       config_board_reserved_pins(c));
-    // An explicitly selected board is identity, not a promise that its optional onboard defaults
-    // are still enabled. Keep it in the selector even when a customized LED/button or another live
-    // reservation means re-applying the factory fields would currently be rejected.
-    if (selected_board) {
-        bool present = false;
-        for (int i = 0; i < npre; ++i) present = present || presets[i] == selected_board;
-        if (!present && npre < BOARD_PRESETS_MAX) presets[npre++] = selected_board;
+    {
+        int lpins[BOARD_LOCAL_PINS_MAX];
+        int nlpins = board_pins_local(lpins, BOARD_LOCAL_PINS_MAX, hw_octal_spi(),
+                                      config_board_reserved_pins(c).plus(net_eth_reserved_pins()));
+        // Appended piece by piece with `+=` rather than as one `a + b + c + …` chain. A chain has
+        // to materialise EVERY intermediate std::string at once — each one a live object in this
+        // frame — and this function overflowed the httpd task's stack doing exactly that (see
+        // http_server.cpp for the measurement and the crash it caused). `+=` holds one temporary at
+        // a time and takes a bare string literal with no std::string wrapper at all, so it drops
+        // the allocations too. Same shape below for the presets, and worth keeping if this block
+        // grows again.
+        j += "\"board\":{\"led_gpio\":";
+        j += std::to_string(c.led_gpio);
+        j += ",\"led_type\":";
+        j += std::to_string(c.led_type);
+        j += ",\"led_inverted\":";
+        j += c.led_inverted ? "true" : "false";
+        j += ",\"btn_gpio\":";
+        j += std::to_string(c.btn_gpio);
+        j += ",\"btn_active_low\":";
+        j += c.btn_active_low ? "true" : "false";
+        // Explicit board identity, atomically persisted with the hardware values. `user_set=false`
+        // means untouched build defaults; `preset_id=custom` means the user deliberately saved
+        // manual hardware. No consumer has to infer Atom/XIAO from pins.
+        j += ",\"user_set\":";
+        j += c.board_user_set ? "true" : "false";
+        j += ",\"preset_id\":";
+        j += jstr(c.board_user_set ? board_preset_key(c.board_preset_id) : "");
+        j += ",\"preset_name\":";
+        j += jstr(selected_board ? selected_board->name : "");
+        j += ",\"vendor\":";
+        j += jstr(board_vendor_name(board_selected_vendor(c)));
+        j += ",\"pins_local\":[";
+        for (int i = 0; i < nlpins; i++) {
+            if (i) j += ",";
+            j += std::to_string(lpins[i]);
+        }
+        // ...and the ready-made settings for the boards this project documents
+        // (logic/board_presets.hpp), so the Hardware modal can fill all five fields from one pick
+        // instead of asking the user to transcribe pin numbers out of docs/BOARDS.md. Sent HERE
+        // rather than from a route of their own because the modal already reads pins_local from
+        // this payload: one source, no second fetch to fail, and the presets cannot arrive
+        // disagreeing with the pin lists they must fit inside. Two fixed rows (~170 bytes) —
+        // bounded, unlike the per-value payloads the heap rules are about.
+        const BoardPreset* presets[BOARD_PRESETS_MAX];
+        int npre = board_presets_offerable(presets, BOARD_PRESETS_MAX, hw_octal_spi(),
+                                           config_board_reserved_pins(c));
+        // An explicitly selected board is identity, not a promise that its optional onboard
+        // defaults are still enabled. Keep it in the selector even when a customized LED/button or
+        // another live reservation means re-applying the factory fields would currently be
+        // rejected.
+        if (selected_board) {
+            bool present = false;
+            for (int i = 0; i < npre; ++i) present = present || presets[i] == selected_board;
+            if (!present && npre < BOARD_PRESETS_MAX) presets[npre++] = selected_board;
+        }
+        j += "],\"presets\":[";
+        for (int i = 0; i < npre; i++) {
+            if (i) j += ",";
+            j += "{\"id\":";
+            j += jstr(presets[i]->key);
+            j += ",\"name\":";
+            j += jstr(presets[i]->name);
+            j += ",\"vendor\":";
+            j += jstr(board_vendor_name(presets[i]->vendor));
+            j += ",\"led_gpio\":";
+            j += std::to_string(presets[i]->led_gpio);
+            j += ",\"led_type\":";
+            j += std::to_string(presets[i]->led_type);
+            j += ",\"led_inverted\":";
+            j += presets[i]->led_inverted ? "true" : "false";
+            j += ",\"btn_gpio\":";
+            j += std::to_string(presets[i]->btn_gpio);
+            j += ",\"btn_active_low\":";
+            j += presets[i]->btn_active_low ? "true" : "false";
+            // Candidate pins are board-specific and filtered by the live X10A link. The browser
+            // applies the pending LED/button reservations because those can change before this
+            // atomic form is submitted. AtomS3 Lite therefore exposes exactly 1/2/5/6/7/8/38;
+            // GPIO39 and chip-only pads stay unavailable for ENV III.
+            int       bipins[BOARD_I2C_PINS_MAX];
+            const int nbipins = board_preset_i2c_pins_offerable(
+                presets[i], bipins, BOARD_I2C_PINS_MAX, hw_octal_spi(),
+                config_link_pins(c).plus(net_eth_reserved_pins()));
+            j += ",\"i2c_pins\":[";
+            for (int k = 0; k < nbipins; ++k) {
+                if (k) j += ",";
+                j += std::to_string(bipins[k]);
+            }
+            j += "]";
+            j += "}";
+        }
+        j += "]},";
     }
-    j += "],\"presets\":[";
-    for (int i = 0; i < npre; i++) {
-        if (i) j += ",";
-        j += "{\"id\":";              j += jstr(presets[i]->key);
-        j += ",\"name\":";            j += jstr(presets[i]->name);
-        j += ",\"vendor\":";          j += jstr(board_vendor_name(presets[i]->vendor));
-        j += ",\"led_gpio\":";        j += std::to_string(presets[i]->led_gpio);
-        j += ",\"led_type\":";        j += std::to_string(presets[i]->led_type);
-        j += ",\"led_inverted\":";    j += presets[i]->led_inverted ? "true" : "false";
-        j += ",\"btn_gpio\":";        j += std::to_string(presets[i]->btn_gpio);
-        j += ",\"btn_active_low\":";  j += presets[i]->btn_active_low ? "true" : "false";
-        // Candidate pins are board-specific and filtered by the live X10A link. The browser applies
-        // the pending LED/button reservations because those can change before this atomic form is
-        // submitted. AtomS3 Lite therefore exposes exactly 1/2/5/6/7/8/38; GPIO39 and chip-only
-        // pads stay unavailable for ENV III.
-        int bipins[BOARD_I2C_PINS_MAX];
-        const int nbipins = board_preset_i2c_pins_offerable(
-            presets[i], bipins, BOARD_I2C_PINS_MAX, hw_octal_spi(), config_link_pins(c).plus(net_eth_reserved_pins()));
-        j += ",\"i2c_pins\":[";
-        for (int k = 0; k < nbipins; ++k) { if (k) j += ","; j += std::to_string(bipins[k]); }
-        j += "]";
-        j += "}";
-    }
-    j += "]},";
     // Independent outdoor-climate observation. These values do not replace the Daikin R1T source:
     // only fresh, whole ENV III samples are exposed as numbers, while stale/error state stays
     // explicit. The integrated Board Hardware form may select AtomS3 Lite and ENV III in the same
@@ -425,211 +452,308 @@ static void append_status_json(JsonOut& j, bool redact) {
     // choices and the request path validates the complete proposed snapshot authoritatively.
     const bool env_supported = env3_board_supported(c);
     const bool env_enabled = env_supported && c.env3_enabled;
-    const Env3Status env = env3_status();
-    int epins[BOARD_I2C_PINS_MAX];
-    const int nepins = board_preset_i2c_pins_offerable(
-        selected_board, epins, BOARD_I2C_PINS_MAX, hw_octal_spi(), config_link_pins(c).plus(net_eth_reserved_pins()));
-    const Env3Preset* epresets[ENV3_PRESETS_MAX];
-    const int nepre = env3_presets_offerable(epresets, ENV3_PRESETS_MAX, selected_board, hw_octal_spi(),
-                                             config_link_pins(c).plus(net_eth_reserved_pins()));
-    const bool env_fresh = env_enabled && env.fresh;
-    char env_temp[24] = {0}, env_hum[24] = {0}, env_press[24] = {0};
-    if (env_fresh) {
-        std::snprintf(env_temp, sizeof(env_temp), "%.2f", env.temperature_c);
-        std::snprintf(env_hum, sizeof(env_hum), "%.2f", env.humidity_pct);
-        std::snprintf(env_press, sizeof(env_press), "%.2f", env.pressure_hpa);
+    {
+        const Env3Status env = env3_status();
+        int              epins[BOARD_I2C_PINS_MAX];
+        const int        nepins = board_preset_i2c_pins_offerable(
+            selected_board, epins, BOARD_I2C_PINS_MAX, hw_octal_spi(),
+            config_link_pins(c).plus(net_eth_reserved_pins()));
+        const Env3Preset* epresets[ENV3_PRESETS_MAX];
+        const int         nepre =
+            env3_presets_offerable(epresets, ENV3_PRESETS_MAX, selected_board, hw_octal_spi(),
+                                   config_link_pins(c).plus(net_eth_reserved_pins()));
+        const bool env_fresh    = env_enabled && env.fresh;
+        char       env_temp[24] = {0}, env_hum[24] = {0}, env_press[24] = {0};
+        if (env_fresh) {
+            std::snprintf(env_temp, sizeof(env_temp), "%.2f", env.temperature_c);
+            std::snprintf(env_hum, sizeof(env_hum), "%.2f", env.humidity_pct);
+            std::snprintf(env_press, sizeof(env_press), "%.2f", env.pressure_hpa);
+        }
+        j += "\"env3\":{\"type\":\"env_iii\",\"supported\":";
+        j += env_supported ? "true" : "false";
+        j += ",\"enabled\":";
+        j += env_enabled ? "true" : "false";
+        j += ",\"sda\":";
+        j += std::to_string(c.env3_sda);
+        j += ",\"scl\":";
+        j += std::to_string(c.env3_scl);
+        j += ",\"connected\":";
+        j += env_enabled && env.connected ? "true" : "false";
+        j += ",\"fresh\":";
+        j += env_fresh ? "true" : "false";
+        j += ",\"age_s\":";
+        j += env_enabled && env.samples ? std::to_string(env.age_s) : "null";
+        j += ",\"temperature_c\":";
+        j += env_fresh ? env_temp : "null";
+        j += ",\"humidity_pct\":";
+        j += env_fresh ? env_hum : "null";
+        j += ",\"pressure_hpa\":";
+        j += env_fresh ? env_press : "null";
+        j += ",\"error\":";
+        j += jstr(!env_supported ? "unsupported_board" : env_enabled ? env.error : "disabled");
+        j += ",\"samples\":";
+        j += std::to_string(env.samples);
+        j += ",\"errors\":";
+        j += std::to_string(env.errors);
+        j += ",\"pins_avail\":[";
+        for (int i = 0; i < nepins; ++i) {
+            if (i) j += ",";
+            j += std::to_string(epins[i]);
+        }
+        j += "],\"presets\":[";
+        for (int i = 0; i < nepre; ++i) {
+            if (i) j += ",";
+            j += "{\"name\":";
+            j += jstr(epresets[i]->name);
+            j += ",\"sda\":";
+            j += std::to_string(epresets[i]->sda);
+            j += ",\"scl\":";
+            j += std::to_string(epresets[i]->scl);
+            j += "}";
+        }
+        j += "]},";
     }
-    j += "\"env3\":{\"type\":\"env_iii\",\"supported\":";
-    j += env_supported ? "true" : "false";
-    j += ",\"enabled\":"; j += env_enabled ? "true" : "false";
-    j += ",\"sda\":"; j += std::to_string(c.env3_sda);
-    j += ",\"scl\":"; j += std::to_string(c.env3_scl);
-    j += ",\"connected\":"; j += env_enabled && env.connected ? "true" : "false";
-    j += ",\"fresh\":"; j += env_fresh ? "true" : "false";
-    j += ",\"age_s\":"; j += env_enabled && env.samples ? std::to_string(env.age_s) : "null";
-    j += ",\"temperature_c\":"; j += env_fresh ? env_temp : "null";
-    j += ",\"humidity_pct\":"; j += env_fresh ? env_hum : "null";
-    j += ",\"pressure_hpa\":"; j += env_fresh ? env_press : "null";
-    j += ",\"error\":";
-    j += jstr(!env_supported ? "unsupported_board" : env_enabled ? env.error : "disabled");
-    j += ",\"samples\":"; j += std::to_string(env.samples);
-    j += ",\"errors\":"; j += std::to_string(env.errors);
-    j += ",\"pins_avail\":[";
-    for (int i = 0; i < nepins; ++i) { if (i) j += ","; j += std::to_string(epins[i]); }
-    j += "],\"presets\":[";
-    for (int i = 0; i < nepre; ++i) {
-        if (i) j += ",";
-        j += "{\"name\":"; j += jstr(epresets[i]->name);
-        j += ",\"sda\":"; j += std::to_string(epresets[i]->sda);
-        j += ",\"scl\":"; j += std::to_string(epresets[i]->scl); j += "}";
+    {
+        const WifiInfo wi            = wifi_info();
+        char           bssid_str[18] = {0};
+        char           mac_str[18]   = {0};
+        if (wi.connected) {
+            snprintf(bssid_str, sizeof(bssid_str), "%02X:%02X:%02X:%02X:%02X:%02X", wi.bssid[0],
+                     wi.bssid[1], wi.bssid[2], wi.bssid[3], wi.bssid[4], wi.bssid[5]);
+        }
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X", wi.mac[0], wi.mac[1],
+                 wi.mac[2], wi.mac[3], wi.mac[4], wi.mac[5]);
+        j += "\"wifi\":{\"ssid\":" + jstr_r(c.wifi_ssid, redact) +
+             ",\"ip\":" + jstr_r(wi.ip, redact) +
+             ",\"rssi\":" + (wi.connected ? std::to_string(wi.rssi) : "null") +
+             ",\"connected\":" + (wi.connected ? "true" : "false") +
+             ",\"bssid\":" + (wi.connected ? jstr_r(bssid_str, redact) : "null") +
+             ",\"mac\":" + jstr_r(mac_str, redact) +
+             ",\"std\":" + (wi.connected ? jstr(wi.std) : "null") +
+             // The last credential change was undone (wifi.cpp restored the previous network).
+             // Sticky until the next POST /set_wifi, because a rollback leaves no other trace: the
+             // reboot it takes wipes the diag ring and the card just shows the old SSID again. The
+             // dashboard does not render this yet (a banner lands with the web-UI write-feedback
+             // work, PR #65) — for now it is the API's answer to "did my save actually stick?".
+             ",\"rolled_back\":" + std::string(c.wifi_rolled_back ? "true" : "false") + "},";
+        // WHICH TRANSPORT carries the device, and what the optional wire is doing. A separate block
+        // from "wifi" rather than a widening of it, because the two describe different hardware and
+        // a reader must be able to tell "no radio configured" from "no radio because there is a
+        // cable": on a wired board the wifi block above is entirely honest — not connected, no
+        // RSSI, no BSSID — and would be indistinguishable from a broken install without this.
+        //
+        // `ip` is the ACTIVE transport's address, so a client has one field to read instead of a
+        // rule to re-derive; it is empty (never a stale one) while nothing holds a lease.
+        // `eth.supported` says whether this BUILD carries the driver at all, which is what lets the
+        // UI hide the row rather than show a permanently absent feature — the modbus_rows/env3_rows
+        // rule applied to a transport. The pins are reported even with no controller present, since
+        // "where would it go" is the question docs/BOARDS.md answers and the one a user wiring one
+        // asks.
+        const EthInfo eth             = net_eth_info();
+        const EthPins eth_pins        = net_eth_pins();
+        char          eth_mac_str[18] = {0};
+        if (eth.present)
+            snprintf(eth_mac_str, sizeof(eth_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X", eth.mac[0],
+                     eth.mac[1], eth.mac[2], eth.mac[3], eth.mac[4], eth.mac[5]);
+        const NetLink kind = net_kind();
+        j += "\"net\":{\"kind\":";
+        j += jstr(net_link_str(kind));
+        j += ",\"ip\":";
+        j += jstr_r(kind == NetLink::Eth ? eth.ip : kind == NetLink::Wifi ? wi.ip : "", redact);
+        j += ",\"eth\":{\"supported\":";
+        j += net_eth_pins_valid(eth_pins) ? "true" : "false";
+        j += ",\"present\":";
+        j += eth.present ? "true" : "false";
+        j += ",\"link\":";
+        j += eth.link ? "true" : "false";
+        j += ",\"lease\":";
+        j += eth.lease ? "true" : "false";
+        j += ",\"ip\":";
+        j += jstr_r(eth.ip, redact);
+        j += ",\"mac\":";
+        j += eth.present ? jstr_r(eth_mac_str, redact) : "null";
+        // Speed/duplex are the PHY's, so they mean something only while a cable is negotiated; null
+        // rather than a plausible-looking 10/half on an unplugged port.
+        j += ",\"speed_mbps\":";
+        j += eth.link ? std::to_string(eth.speed_mbps) : "null";
+        j += ",\"full_duplex\":";
+        j += eth.link ? (eth.full_duplex ? "true" : "false") : "null";
+        j += ",\"pins\":{\"sclk\":";
+        j += std::to_string(eth_pins.sclk);
+        j += ",\"cs\":";
+        j += std::to_string(eth_pins.cs);
+        j += ",\"miso\":";
+        j += std::to_string(eth_pins.miso);
+        j += ",\"mosi\":";
+        j += std::to_string(eth_pins.mosi);
+        j += "}}},";
     }
-    j += "]},";
-    char bssid_str[18] = {0};
-    char mac_str[18] = {0};
-    if (wi.connected) {
-        snprintf(bssid_str, sizeof(bssid_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-                 wi.bssid[0], wi.bssid[1], wi.bssid[2], wi.bssid[3], wi.bssid[4], wi.bssid[5]);
-    }
-    snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-             wi.mac[0], wi.mac[1], wi.mac[2], wi.mac[3], wi.mac[4], wi.mac[5]);
-    j += "\"wifi\":{\"ssid\":" + jstr_r(c.wifi_ssid, redact) + ",\"ip\":" + jstr_r(wi.ip, redact) +
-         ",\"rssi\":" + (wi.connected ? std::to_string(wi.rssi) : "null") +
-         ",\"connected\":" + (wi.connected ? "true" : "false") +
-         ",\"bssid\":" + (wi.connected ? jstr_r(bssid_str, redact) : "null") +
-         ",\"mac\":" + jstr_r(mac_str, redact) +
-         ",\"std\":" + (wi.connected ? jstr(wi.std) : "null") +
-         // The last credential change was undone (wifi.cpp restored the previous network). Sticky
-         // until the next POST /set_wifi, because a rollback leaves no other trace: the reboot it
-         // takes wipes the diag ring and the card just shows the old SSID again. The dashboard does
-         // not render this yet (a banner lands with the web-UI write-feedback work, PR #65) — for
-         // now it is the API's answer to "did my save actually stick?".
-         ",\"rolled_back\":" + std::string(c.wifi_rolled_back ? "true" : "false") + "},";
-    // WHICH TRANSPORT carries the device, and what the optional wire is doing. A separate block
-    // from "wifi" rather than a widening of it, because the two describe different hardware and a
-    // reader must be able to tell "no radio configured" from "no radio because there is a cable":
-    // on a wired board the wifi block above is entirely honest — not connected, no RSSI, no BSSID —
-    // and would be indistinguishable from a broken install without this.
-    //
-    // `ip` is the ACTIVE transport's address, so a client has one field to read instead of a rule
-    // to re-derive; it is empty (never a stale one) while nothing holds a lease. `eth.supported`
-    // says whether this BUILD carries the driver at all, which is what lets the UI hide the row
-    // rather than show a permanently absent feature — the modbus_rows/env3_rows rule applied to a
-    // transport. The pins are reported even with no controller present, since "where would it go"
-    // is the question docs/BOARDS.md answers and the one a user wiring one asks.
-    const EthInfo eth = net_eth_info();
-    const EthPins eth_pins = net_eth_pins();
-    char eth_mac_str[18] = {0};
-    if (eth.present)
-        snprintf(eth_mac_str, sizeof(eth_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-                 eth.mac[0], eth.mac[1], eth.mac[2], eth.mac[3], eth.mac[4], eth.mac[5]);
-    const NetLink kind = net_kind();
-    j += "\"net\":{\"kind\":";  j += jstr(net_link_str(kind));
-    j += ",\"ip\":";            j += jstr_r(kind == NetLink::Eth ? eth.ip
-                                          : kind == NetLink::Wifi ? wi.ip : "", redact);
-    j += ",\"eth\":{\"supported\":"; j += net_eth_pins_valid(eth_pins) ? "true" : "false";
-    j += ",\"present\":";       j += eth.present ? "true" : "false";
-    j += ",\"link\":";          j += eth.link ? "true" : "false";
-    j += ",\"lease\":";         j += eth.lease ? "true" : "false";
-    j += ",\"ip\":";            j += jstr_r(eth.ip, redact);
-    j += ",\"mac\":";           j += eth.present ? jstr_r(eth_mac_str, redact) : "null";
-    // Speed/duplex are the PHY's, so they mean something only while a cable is negotiated; null
-    // rather than a plausible-looking 10/half on an unplugged port.
-    j += ",\"speed_mbps\":";    j += eth.link ? std::to_string(eth.speed_mbps) : "null";
-    j += ",\"full_duplex\":";   j += eth.link ? (eth.full_duplex ? "true" : "false") : "null";
-    j += ",\"pins\":{\"sclk\":"; j += std::to_string(eth_pins.sclk);
-    j += ",\"cs\":";            j += std::to_string(eth_pins.cs);
-    j += ",\"miso\":";          j += std::to_string(eth_pins.miso);
-    j += ",\"mosi\":";          j += std::to_string(eth_pins.mosi);
-    j += "}}},";
     // has_creds says only WHETHER credentials are stored — never what they are (/status stays
     // secret-free). Read from the CONFIG, not from MqttStatus: creds outlive a disabled broker, and
     // that is exactly the state the UI must offer to clear. It drives the MQTT modal's "remove
     // stored credentials" checkbox, which is the only way to reach /set_mqtt's clear_creds.
-    j += "\"mqtt\":{\"configured\":" + std::string(m.configured ? "true" : "false") +
-         ",\"connected\":" + (m.connected ? "true" : "false") +
-         ",\"tls\":" + (m.tls ? "true" : "false") +
-         ",\"has_creds\":" + ((!c.mqtt_user.empty() || !c.mqtt_pass.empty()) ? "true" : "false") +
-         ",\"broker\":" + jstr_r(m.broker, redact) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error));
-    // The installation's base topic, ALWAYS the effective one — the empty stored value means "the
-    // compile-time default" (logic/mqtt_base.hpp), and reporting "" would make a default device look
-    // unconfigured to the modal that has to prefill this field. `base_custom` is the separate fact:
-    // whether the user has stated a base, which is what the UI needs to know before offering Reset.
-    // Redacted like reference_temperature.name and for the same reason — it is a word the user typed,
-    // and it becomes this installation's Home Assistant device id.
-    j += ",\"base\":" + jstr_r(mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC), redact) +
-         ",\"base_custom\":" + std::string(c.mqtt_base.empty() ? "false" : "true") + "},";
+    {
+        const MqttStatus m = mqtt_status();
+        j += "\"mqtt\":{\"configured\":" + std::string(m.configured ? "true" : "false") +
+             ",\"connected\":" + (m.connected ? "true" : "false") +
+             ",\"tls\":" + (m.tls ? "true" : "false") + ",\"has_creds\":" +
+             ((!c.mqtt_user.empty() || !c.mqtt_pass.empty()) ? "true" : "false") +
+             ",\"broker\":" + jstr_r(m.broker, redact) +
+             (m.error.empty() ? "" : ",\"error\":" + jstr(m.error));
+        // The installation's base topic, ALWAYS the effective one — the empty stored value means
+        // "the compile-time default" (logic/mqtt_base.hpp), and reporting "" would make a default
+        // device look unconfigured to the modal that has to prefill this field. `base_custom` is
+        // the separate fact: whether the user has stated a base, which is what the UI needs to know
+        // before offering Reset. Redacted like reference_temperature.name and for the same reason —
+        // it is a word the user typed, and it becomes this installation's Home Assistant device id.
+        j += ",\"base\":" +
+             jstr_r(mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC), redact) +
+             ",\"base_custom\":" + std::string(c.mqtt_base.empty() ? "false" : "true") + "},";
+    }
     // One exact MQTT-backed living-room source. Freshness and canonical eligibility remain separate:
     // a disabled thermostat may still expose a trustworthy temperature but cannot emit room_error_k.
-    const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
-    const uint64_t ref_age_s = rt.has_value && now_ms >= rt.received_ms
-                             ? (now_ms - rt.received_ms) / 1000 : 0;
-    int64_t now_unix_s = -1;
-    int32_t now_sub_ms = 0;
-    time_now(now_unix_s, now_sub_ms);
-    ReferenceFreshness freshness = reference_freshness(rt.has_value, rt.retained,
-        rt.has_source_time, rt.source_unix_s, rt.received_ms, now_unix_s, now_ms,
-        c.ref_temp_max_age_s);
-    ReferenceRoomRaw room_raw;
-    room_raw.configured = !c.ref_temp_topic.empty();
-    room_raw.has_temperature = rt.has_value;
-    room_raw.payload_valid = rt.error.empty();
-    room_raw.temperature_c = rt.temperature_c;
-    room_raw.has_source_time = rt.has_source_time;
-    room_raw.setpoint_mapped = c.ref_temp_fixed_setpoint_tenths != 0 ||
-                               !c.ref_temp_setpoint_topic.empty() ||
-                               !c.ref_temp_setpoint_path.empty();
-    room_raw.has_setpoint = rt.has_setpoint;
-    room_raw.setpoint_c = rt.setpoint_c;
-    room_raw.enabled_mapped = !c.ref_temp_enabled_path.empty();
-    room_raw.has_enabled = rt.has_enabled;
-    room_raw.enabled = rt.enabled;
-    room_raw.hvac_mode_mapped = !c.ref_temp_hvac_mode_path.empty();
-    room_raw.has_hvac_mode = rt.has_hvac_mode;
-    room_raw.hvac_mode = rt.hvac_mode;
-    room_raw.payload_reason = rt.rejection_reason;
-    const ReferenceRoomSample room = reference_room_sample(room_raw, freshness);
-    if (!rt.error.empty()) { freshness.fresh = false; freshness.reason = "invalid"; }
-    char ref_value[32] = {0};
-    if (rt.has_value) std::snprintf(ref_value, sizeof(ref_value), "%.6g", rt.temperature_c);
-    char ref_setpoint[32] = {0};
-    if (rt.has_setpoint) std::snprintf(ref_setpoint, sizeof(ref_setpoint), "%.6g", rt.setpoint_c);
-    char ref_error_k[32] = {0};
-    if (room.has_room_error) std::snprintf(ref_error_k, sizeof(ref_error_k), "%.6g", room.room_error_k);
-    j += "\"reference_temperature\":{\"configured\":";
-    j += c.ref_temp_topic.empty() ? "false" : "true";
-    j += ",\"name\":";          j += jstr_r(c.ref_temp_name, redact);
-    j += ",\"topic\":";         j += jstr_r(c.ref_temp_topic, redact);
-    j += ",\"temperature_path\":"; j += jstr_r(c.ref_temp_path, redact);
-    j += ",\"setpoint_topic\":"; j += jstr_r(c.ref_temp_setpoint_topic, redact);
-    j += ",\"setpoint_path\":"; j += jstr_r(c.ref_temp_setpoint_path, redact);
-    j += ",\"fixed_setpoint_c\":";
-    if (c.ref_temp_fixed_setpoint_tenths == 0) j += "null";
-    else {
-        char fixed_setpoint[16];
-        std::snprintf(fixed_setpoint, sizeof(fixed_setpoint), "%.1f",
-                      static_cast<double>(c.ref_temp_fixed_setpoint_tenths) / 10.0);
-        j += fixed_setpoint;
+    {
+        const ReferenceTemperatureStatus rt = reference_temperature_status();
+        const uint64_t now_ms               = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+        const uint64_t ref_age_s =
+            rt.has_value && now_ms >= rt.received_ms ? (now_ms - rt.received_ms) / 1000 : 0;
+        int64_t now_unix_s = -1;
+        int32_t now_sub_ms = 0;
+        time_now(now_unix_s, now_sub_ms);
+        ReferenceFreshness freshness =
+            reference_freshness(rt.has_value, rt.retained, rt.has_source_time, rt.source_unix_s,
+                                rt.received_ms, now_unix_s, now_ms, c.ref_temp_max_age_s);
+        ReferenceRoomRaw room_raw;
+        room_raw.configured      = !c.ref_temp_topic.empty();
+        room_raw.has_temperature = rt.has_value;
+        room_raw.payload_valid   = rt.error.empty();
+        room_raw.temperature_c   = rt.temperature_c;
+        room_raw.has_source_time = rt.has_source_time;
+        room_raw.setpoint_mapped = c.ref_temp_fixed_setpoint_tenths != 0 ||
+                                   !c.ref_temp_setpoint_topic.empty() ||
+                                   !c.ref_temp_setpoint_path.empty();
+        room_raw.has_setpoint          = rt.has_setpoint;
+        room_raw.setpoint_c            = rt.setpoint_c;
+        room_raw.enabled_mapped        = !c.ref_temp_enabled_path.empty();
+        room_raw.has_enabled           = rt.has_enabled;
+        room_raw.enabled               = rt.enabled;
+        room_raw.hvac_mode_mapped      = !c.ref_temp_hvac_mode_path.empty();
+        room_raw.has_hvac_mode         = rt.has_hvac_mode;
+        room_raw.hvac_mode             = rt.hvac_mode;
+        room_raw.payload_reason        = rt.rejection_reason;
+        const ReferenceRoomSample room = reference_room_sample(room_raw, freshness);
+        if (!rt.error.empty()) {
+            freshness.fresh  = false;
+            freshness.reason = "invalid";
+        }
+        char ref_value[32] = {0};
+        if (rt.has_value) std::snprintf(ref_value, sizeof(ref_value), "%.6g", rt.temperature_c);
+        char ref_setpoint[32] = {0};
+        if (rt.has_setpoint)
+            std::snprintf(ref_setpoint, sizeof(ref_setpoint), "%.6g", rt.setpoint_c);
+        char ref_error_k[32] = {0};
+        if (room.has_room_error)
+            std::snprintf(ref_error_k, sizeof(ref_error_k), "%.6g", room.room_error_k);
+        j += "\"reference_temperature\":{\"configured\":";
+        j += c.ref_temp_topic.empty() ? "false" : "true";
+        j += ",\"name\":";
+        j += jstr_r(c.ref_temp_name, redact);
+        j += ",\"topic\":";
+        j += jstr_r(c.ref_temp_topic, redact);
+        j += ",\"temperature_path\":";
+        j += jstr_r(c.ref_temp_path, redact);
+        j += ",\"setpoint_topic\":";
+        j += jstr_r(c.ref_temp_setpoint_topic, redact);
+        j += ",\"setpoint_path\":";
+        j += jstr_r(c.ref_temp_setpoint_path, redact);
+        j += ",\"fixed_setpoint_c\":";
+        if (c.ref_temp_fixed_setpoint_tenths == 0)
+            j += "null";
+        else {
+            char fixed_setpoint[16];
+            std::snprintf(fixed_setpoint, sizeof(fixed_setpoint), "%.1f",
+                          static_cast<double>(c.ref_temp_fixed_setpoint_tenths) / 10.0);
+            j += fixed_setpoint;
+        }
+        j += ",\"timestamp_topic\":";
+        j += jstr_r(c.ref_temp_time_topic, redact);
+        j += ",\"timestamp_path\":";
+        j += jstr_r(c.ref_temp_time_path, redact);
+        j += ",\"enabled_path\":";
+        j += jstr_r(c.ref_temp_enabled_path, redact);
+        j += ",\"hvac_mode_path\":";
+        j += jstr_r(c.ref_temp_hvac_mode_path, redact);
+        j += ",\"source_id\":\"";
+        j += REF_ROOM_SOURCE_ID;
+        j += "\"";
+        j += ",\"calibration_k\":0";
+        j += ",\"temperature_min_c\":";
+        j += std::to_string(REF_ROOM_TEMPERATURE_MIN_C);
+        j += ",\"temperature_max_c\":";
+        j += std::to_string(REF_ROOM_TEMPERATURE_MAX_C);
+        j += ",\"max_age_s\":";
+        j += std::to_string(c.ref_temp_max_age_s);
+        j += ",\"subscribed\":";
+        j += rt.subscribed ? "true" : "false";
+        j += ",\"has_value\":";
+        j += rt.has_value ? "true" : "false";
+        j += ",\"temperature_c\":";
+        j += rt.has_value ? ref_value : "null";
+        j += ",\"has_setpoint\":";
+        j += rt.has_setpoint ? "true" : "false";
+        j += ",\"setpoint_c\":";
+        j += rt.has_setpoint ? ref_setpoint : "null";
+        j += ",\"enabled\":";
+        j += rt.has_enabled ? (rt.enabled ? "true" : "false") : "null";
+        j += ",\"hvac_mode\":";
+        j += rt.has_hvac_mode ? jstr(rt.hvac_mode) : "null";
+        j += ",\"received_at\":";
+        j += rt.has_value && rt.received_unix_s >= 0 ? jstr(rfc3339_utc(rt.received_unix_s))
+                                                     : "null";
+        j += ",\"received_ago_s\":";
+        j += rt.has_value ? std::to_string(ref_age_s) : "null";
+        j += ",\"source_at\":";
+        j += rt.has_value && rt.has_source_time ? jstr(rfc3339_utc(rt.source_unix_s)) : "null";
+        j += ",\"source_unix_s\":";
+        j += rt.has_value && rt.has_source_time ? std::to_string(rt.source_unix_s) : "null";
+        j += ",\"timestamp_source\":";
+        j += rt.has_value ? jstr(rt.timestamp_source) : "null";
+        j += ",\"age_s\":";
+        j += freshness.age_known ? std::to_string(freshness.age_s) : "null";
+        j += ",\"fresh\":";
+        j += freshness.fresh ? "true" : "false";
+        j += ",\"freshness_reason\":";
+        j += jstr(freshness.reason);
+        j += ",\"temperature_valid\":";
+        j += room.temperature_valid ? "true" : "false";
+        j += ",\"setpoint_valid\":";
+        j += room.setpoint_valid ? "true" : "false";
+        j += ",\"control_eligible\":";
+        j += room.control_eligible ? "true" : "false";
+        j += ",\"room_error_k\":";
+        j += room.has_room_error ? ref_error_k : "null";
+        j += ",\"reason\":";
+        j += jstr(reference_room_reason_name(room.reason));
+        j += ",\"reason_code\":";
+        j += std::to_string(static_cast<unsigned>(room.reason));
+        j += ",\"retained\":";
+        j += rt.has_value && rt.retained ? "true" : "false";
+        j += ",\"messages\":";
+        j += std::to_string(rt.messages);
+        j += ",\"errors\":";
+        j += std::to_string(rt.errors);
+        j += ",\"rejections\":";
+        j += std::to_string(rt.rejections);
+        if (!rt.eligibility_error.empty()) {
+            j += ",\"eligibility_error\":";
+            j += jstr(rt.eligibility_error);
+        }
+        if (!rt.error.empty()) {
+            j += ",\"error\":";
+            j += jstr(rt.error);
+        }
+        j += "},";
     }
-    j += ",\"timestamp_topic\":"; j += jstr_r(c.ref_temp_time_topic, redact);
-    j += ",\"timestamp_path\":"; j += jstr_r(c.ref_temp_time_path, redact);
-    j += ",\"enabled_path\":"; j += jstr_r(c.ref_temp_enabled_path, redact);
-    j += ",\"hvac_mode_path\":"; j += jstr_r(c.ref_temp_hvac_mode_path, redact);
-    j += ",\"source_id\":\""; j += REF_ROOM_SOURCE_ID; j += "\"";
-    j += ",\"calibration_k\":0";
-    j += ",\"temperature_min_c\":"; j += std::to_string(REF_ROOM_TEMPERATURE_MIN_C);
-    j += ",\"temperature_max_c\":"; j += std::to_string(REF_ROOM_TEMPERATURE_MAX_C);
-    j += ",\"max_age_s\":";     j += std::to_string(c.ref_temp_max_age_s);
-    j += ",\"subscribed\":";    j += rt.subscribed ? "true" : "false";
-    j += ",\"has_value\":";     j += rt.has_value ? "true" : "false";
-    j += ",\"temperature_c\":"; j += rt.has_value ? ref_value : "null";
-    j += ",\"has_setpoint\":"; j += rt.has_setpoint ? "true" : "false";
-    j += ",\"setpoint_c\":"; j += rt.has_setpoint ? ref_setpoint : "null";
-    j += ",\"enabled\":"; j += rt.has_enabled ? (rt.enabled ? "true" : "false") : "null";
-    j += ",\"hvac_mode\":"; j += rt.has_hvac_mode ? jstr(rt.hvac_mode) : "null";
-    j += ",\"received_at\":";
-    j += rt.has_value && rt.received_unix_s >= 0 ? jstr(rfc3339_utc(rt.received_unix_s)) : "null";
-    j += ",\"received_ago_s\":"; j += rt.has_value ? std::to_string(ref_age_s) : "null";
-    j += ",\"source_at\":";
-    j += rt.has_value && rt.has_source_time ? jstr(rfc3339_utc(rt.source_unix_s)) : "null";
-    j += ",\"source_unix_s\":";
-    j += rt.has_value && rt.has_source_time ? std::to_string(rt.source_unix_s) : "null";
-    j += ",\"timestamp_source\":"; j += rt.has_value ? jstr(rt.timestamp_source) : "null";
-    j += ",\"age_s\":";         j += freshness.age_known ? std::to_string(freshness.age_s) : "null";
-    j += ",\"fresh\":";         j += freshness.fresh ? "true" : "false";
-    j += ",\"freshness_reason\":"; j += jstr(freshness.reason);
-    j += ",\"temperature_valid\":"; j += room.temperature_valid ? "true" : "false";
-    j += ",\"setpoint_valid\":"; j += room.setpoint_valid ? "true" : "false";
-    j += ",\"control_eligible\":"; j += room.control_eligible ? "true" : "false";
-    j += ",\"room_error_k\":"; j += room.has_room_error ? ref_error_k : "null";
-    j += ",\"reason\":"; j += jstr(reference_room_reason_name(room.reason));
-    j += ",\"reason_code\":"; j += std::to_string(static_cast<unsigned>(room.reason));
-    j += ",\"retained\":";      j += rt.has_value && rt.retained ? "true" : "false";
-    j += ",\"messages\":";      j += std::to_string(rt.messages);
-    j += ",\"errors\":";        j += std::to_string(rt.errors);
-    j += ",\"rejections\":";    j += std::to_string(rt.rejections);
-    if (!rt.eligibility_error.empty()) { j += ",\"eligibility_error\":"; j += jstr(rt.eligibility_error); }
-    if (!rt.error.empty()) { j += ",\"error\":"; j += jstr(rt.error); }
-    j += "},";
     // Heating-curve diagnosis v2: raw room error sampled only in confirmed HEATING operation. The
     // absolute timestamp + monotonic sequence is the durable event contract; no actuator-derived
     // P/quantized/bounded/requested-offset vocabulary remains.
@@ -641,231 +765,322 @@ static void append_status_json(JsonOut& j, bool redact) {
     // which is exactly what the reader has already done. logic/heating_curve_diagnosis.hpp names the
     // situation instead (host-tested), so the state stays honestly `off` while the reason says the
     // sampler is not running.
-    const bool heating_curve_armed = heating_curve_diagnosis_armed(c);
-    const logic::HeatingCurveReason heating_curve_reason = logic::heating_curve_reported_reason(
-        heating_curve_armed, heating_curve.state, heating_curve.reason);
-    j += "\"heating_curve\":{\"method_version\":";
-    j += std::to_string(logic::HEATING_CURVE_DIAGNOSIS_METHOD_VERSION);
-    j += ",\"armed\":"; j += heating_curve_armed ? "true" : "false";
-    j += ",\"state\":\""; j += logic::heating_curve_state_name(heating_curve.state); j += "\"";
-    j += ",\"state_code\":"; j += std::to_string(static_cast<unsigned>(heating_curve.state));
-    j += ",\"reason\":\""; j += logic::heating_curve_reason_name(heating_curve_reason); j += "\"";
-    j += ",\"reason_code\":"; j += std::to_string(static_cast<unsigned>(heating_curve_reason));
-    j += ",\"sample_eligible\":"; j += heating_curve.sample_eligible ? "true" : "false";
-    j += ",\"current_room_error_k\":";
-    j += heating_curve.has_current_room_error
-       ? std::to_string(heating_curve.current_room_error_k) : "null";
-    j += ",\"last_sample_room_error_k\":";
-    j += heating_curve.has_last_sample
-       ? std::to_string(heating_curve.last_sample_room_error_k) : "null";
-    j += ",\"last_sample_unix_s\":";
-    j += heating_curve.has_last_sample ? std::to_string(heating_curve.last_sample_unix_s) : "null";
-    j += ",\"outdoor_temperature_c\":";
-    j += heating_curve.has_outdoor_temperature
-       ? std::to_string(heating_curve.outdoor_temperature_c) : "null";
-    j += ",\"outdoor_source\":";
-    j += heating_curve.has_outdoor_temperature
-       ? jstr(logic::outdoor_source_name(heating_curve.outdoor_source)) : "null";
-    j += ",\"last_sample_outdoor_temperature_c\":";
-    j += heating_curve.has_last_sample_outdoor
-       ? std::to_string(heating_curve.last_sample_outdoor_temperature_c) : "null";
-    j += ",\"last_sample_outdoor_source\":";
-    j += heating_curve.has_last_sample_outdoor
-       ? jstr(logic::outdoor_source_name(heating_curve.last_sample_outdoor_source)) : "null";
-    j += ",\"plant_outdoor_temperature_c\":";
-    j += heating_curve.has_plant_outdoor_temperature
-       ? std::to_string(heating_curve.plant_outdoor_temperature_c) : "null";
-    j += ",\"plant_outdoor_source\":";
-    j += heating_curve.has_plant_outdoor_temperature
-       ? jstr(logic::outdoor_source_name(heating_curve.plant_outdoor_source)) : "null";
-    j += ",\"last_sample_plant_outdoor_temperature_c\":";
-    j += heating_curve.has_last_sample_plant_outdoor
-       ? std::to_string(heating_curve.last_sample_plant_outdoor_temperature_c) : "null";
-    j += ",\"last_sample_plant_outdoor_source\":";
-    j += heating_curve.has_last_sample_plant_outdoor
-       ? jstr(logic::outdoor_source_name(heating_curve.last_sample_plant_outdoor_source)) : "null";
-    j += ",\"forecast_available\":"; j += heating_curve.forecast_available ? "true" : "false";
-    j += ",\"plant_gate_known\":"; j += heating_curve.plant_gate_known ? "true" : "false";
-    j += ",\"plant_gate_active\":"; j += heating_curve.plant_gate_active ? "true" : "false";
-    j += ",\"heating_mode_known\":"; j += heating_curve.heating_mode_known ? "true" : "false";
-    j += ",\"heating_mode_active\":"; j += heating_curve.heating_mode_active ? "true" : "false";
-    j += ",\"room_source_unix_s\":";
-    j += heating_curve.room_has_source_time ? std::to_string(heating_curve.room_source_unix_s) : "null";
-    j += ",\"room_age_s\":";
-    j += heating_curve.room_age_known ? std::to_string(heating_curve.room_age_s) : "null";
-    j += ",\"sequence\":"; j += std::to_string(heating_curve.sequence);
-    j += ",\"evaluations\":"; j += std::to_string(heating_curve.evaluations);
-    j += ",\"samples\":"; j += std::to_string(heating_curve.samples);
-    j += ",\"holds\":"; j += std::to_string(heating_curve.holds);
-    j += ",\"blocks\":"; j += std::to_string(heating_curve.blocks);
-    j += "},";
+    {
+        const logic::HeatingCurveSnapshot heating_curve       = heating_curve_status();
+        const bool                        heating_curve_armed = heating_curve_diagnosis_armed(c);
+        const logic::HeatingCurveReason heating_curve_reason = logic::heating_curve_reported_reason(
+            heating_curve_armed, heating_curve.state, heating_curve.reason);
+        j += "\"heating_curve\":{\"method_version\":";
+        j += std::to_string(logic::HEATING_CURVE_DIAGNOSIS_METHOD_VERSION);
+        j += ",\"armed\":";
+        j += heating_curve_armed ? "true" : "false";
+        j += ",\"state\":\"";
+        j += logic::heating_curve_state_name(heating_curve.state);
+        j += "\"";
+        j += ",\"state_code\":";
+        j += std::to_string(static_cast<unsigned>(heating_curve.state));
+        j += ",\"reason\":\"";
+        j += logic::heating_curve_reason_name(heating_curve_reason);
+        j += "\"";
+        j += ",\"reason_code\":";
+        j += std::to_string(static_cast<unsigned>(heating_curve_reason));
+        j += ",\"sample_eligible\":";
+        j += heating_curve.sample_eligible ? "true" : "false";
+        j += ",\"current_room_error_k\":";
+        j += heating_curve.has_current_room_error
+                 ? std::to_string(heating_curve.current_room_error_k)
+                 : "null";
+        j += ",\"last_sample_room_error_k\":";
+        j += heating_curve.has_last_sample ? std::to_string(heating_curve.last_sample_room_error_k)
+                                           : "null";
+        j += ",\"last_sample_unix_s\":";
+        j += heating_curve.has_last_sample ? std::to_string(heating_curve.last_sample_unix_s)
+                                           : "null";
+        j += ",\"outdoor_temperature_c\":";
+        j += heating_curve.has_outdoor_temperature
+                 ? std::to_string(heating_curve.outdoor_temperature_c)
+                 : "null";
+        j += ",\"outdoor_source\":";
+        j += heating_curve.has_outdoor_temperature
+                 ? jstr(logic::outdoor_source_name(heating_curve.outdoor_source))
+                 : "null";
+        j += ",\"last_sample_outdoor_temperature_c\":";
+        j += heating_curve.has_last_sample_outdoor
+                 ? std::to_string(heating_curve.last_sample_outdoor_temperature_c)
+                 : "null";
+        j += ",\"last_sample_outdoor_source\":";
+        j += heating_curve.has_last_sample_outdoor
+                 ? jstr(logic::outdoor_source_name(heating_curve.last_sample_outdoor_source))
+                 : "null";
+        j += ",\"plant_outdoor_temperature_c\":";
+        j += heating_curve.has_plant_outdoor_temperature
+                 ? std::to_string(heating_curve.plant_outdoor_temperature_c)
+                 : "null";
+        j += ",\"plant_outdoor_source\":";
+        j += heating_curve.has_plant_outdoor_temperature
+                 ? jstr(logic::outdoor_source_name(heating_curve.plant_outdoor_source))
+                 : "null";
+        j += ",\"last_sample_plant_outdoor_temperature_c\":";
+        j += heating_curve.has_last_sample_plant_outdoor
+                 ? std::to_string(heating_curve.last_sample_plant_outdoor_temperature_c)
+                 : "null";
+        j += ",\"last_sample_plant_outdoor_source\":";
+        j += heating_curve.has_last_sample_plant_outdoor
+                 ? jstr(logic::outdoor_source_name(heating_curve.last_sample_plant_outdoor_source))
+                 : "null";
+        j += ",\"forecast_available\":";
+        j += heating_curve.forecast_available ? "true" : "false";
+        j += ",\"plant_gate_known\":";
+        j += heating_curve.plant_gate_known ? "true" : "false";
+        j += ",\"plant_gate_active\":";
+        j += heating_curve.plant_gate_active ? "true" : "false";
+        j += ",\"heating_mode_known\":";
+        j += heating_curve.heating_mode_known ? "true" : "false";
+        j += ",\"heating_mode_active\":";
+        j += heating_curve.heating_mode_active ? "true" : "false";
+        j += ",\"room_source_unix_s\":";
+        j += heating_curve.room_has_source_time ? std::to_string(heating_curve.room_source_unix_s)
+                                                : "null";
+        j += ",\"room_age_s\":";
+        j += heating_curve.room_age_known ? std::to_string(heating_curve.room_age_s) : "null";
+        j += ",\"sequence\":";
+        j += std::to_string(heating_curve.sequence);
+        j += ",\"evaluations\":";
+        j += std::to_string(heating_curve.evaluations);
+        j += ",\"samples\":";
+        j += std::to_string(heating_curve.samples);
+        j += ",\"holds\":";
+        j += std::to_string(heating_curve.holds);
+        j += ",\"blocks\":";
+        j += std::to_string(heating_curve.blocks);
+        j += "},";
+    }
     // Independent electrical witness for the potable-water circulation pump. Topic/name are
     // identifying installation data and therefore follow the same redaction boundary as the room
     // source. Power and source-time remain non-secret diagnostic evidence.
-    char circulation_power[32] = {0};
-    if (circulation.has_value)
-        std::snprintf(circulation_power, sizeof(circulation_power), "%.6g", circulation.power_w);
-    auto tenths_w_text = [](uint16_t value) {
-        char out[24];
-        std::snprintf(out, sizeof(out), "%u.%u", static_cast<unsigned>(value / 10),
-                      static_cast<unsigned>(value % 10));
-        return std::string(out);
-    };
-    j += "\"circulation_source\":{\"configured\":";
-    j += c.circulation_topic.empty() ? "false" : "true";
-    j += ",\"name\":"; j += jstr_r(c.circulation_name, redact);
-    j += ",\"topic\":"; j += jstr_r(c.circulation_topic, redact);
-    j += ",\"power_path\":"; j += jstr_r(c.circulation_power_path, redact);
-    j += ",\"timestamp_path\":"; j += jstr_r(c.circulation_time_path, redact);
-    j += ",\"max_age_s\":"; j += std::to_string(c.circulation_max_age_s);
-    j += ",\"on_threshold_w\":"; j += tenths_w_text(c.circulation_on_tenths_w);
-    j += ",\"off_threshold_w\":"; j += tenths_w_text(c.circulation_off_tenths_w);
-    j += ",\"confirm_s\":"; j += std::to_string(c.circulation_confirm_s);
-    j += ",\"subscribed\":"; j += circulation.subscribed ? "true" : "false";
-    j += ",\"has_value\":"; j += circulation.has_value ? "true" : "false";
-    j += ",\"power_w\":"; j += circulation.has_value ? circulation_power : "null";
-    j += ",\"state\":"; j += jstr(circulation_power_state_name(circulation.state));
-    j += ",\"source_at\":";
-    j += circulation.has_value && circulation.has_source_time
-        ? jstr(rfc3339_utc(circulation.source_unix_s)) : "null";
-    j += ",\"source_unix_s\":";
-    j += circulation.has_value && circulation.has_source_time
-        ? std::to_string(circulation.source_unix_s) : "null";
-    j += ",\"timestamp_source\":";
-    j += circulation.has_value ? jstr(circulation.timestamp_source) : "null";
-    j += ",\"age_s\":";
-    j += circulation.age_known ? std::to_string(circulation.age_s) : "null";
-    j += ",\"fresh\":"; j += circulation.fresh ? "true" : "false";
-    j += ",\"freshness_reason\":"; j += jstr(circulation.freshness_reason);
-    j += ",\"retained\":";
-    j += circulation.has_value && circulation.retained ? "true" : "false";
-    j += ",\"messages\":"; j += std::to_string(circulation.messages);
-    j += ",\"errors\":"; j += std::to_string(circulation.errors);
-    j += ",\"rejections\":"; j += std::to_string(circulation.rejections);
-    if (!circulation.error.empty()) { j += ",\"error\":"; j += jstr(circulation.error); }
-    j += "},";
+    {
+        const CirculationSourceStatus circulation           = circulation_source_status();
+        char                          circulation_power[32] = {0};
+        if (circulation.has_value)
+            std::snprintf(circulation_power, sizeof(circulation_power), "%.6g",
+                          circulation.power_w);
+        auto tenths_w_text = [](uint16_t value) {
+            char out[24];
+            std::snprintf(out, sizeof(out), "%u.%u", static_cast<unsigned>(value / 10),
+                          static_cast<unsigned>(value % 10));
+            return std::string(out);
+        };
+        j += "\"circulation_source\":{\"configured\":";
+        j += c.circulation_topic.empty() ? "false" : "true";
+        j += ",\"name\":";
+        j += jstr_r(c.circulation_name, redact);
+        j += ",\"topic\":";
+        j += jstr_r(c.circulation_topic, redact);
+        j += ",\"power_path\":";
+        j += jstr_r(c.circulation_power_path, redact);
+        j += ",\"timestamp_path\":";
+        j += jstr_r(c.circulation_time_path, redact);
+        j += ",\"max_age_s\":";
+        j += std::to_string(c.circulation_max_age_s);
+        j += ",\"on_threshold_w\":";
+        j += tenths_w_text(c.circulation_on_tenths_w);
+        j += ",\"off_threshold_w\":";
+        j += tenths_w_text(c.circulation_off_tenths_w);
+        j += ",\"confirm_s\":";
+        j += std::to_string(c.circulation_confirm_s);
+        j += ",\"subscribed\":";
+        j += circulation.subscribed ? "true" : "false";
+        j += ",\"has_value\":";
+        j += circulation.has_value ? "true" : "false";
+        j += ",\"power_w\":";
+        j += circulation.has_value ? circulation_power : "null";
+        j += ",\"state\":";
+        j += jstr(circulation_power_state_name(circulation.state));
+        j += ",\"source_at\":";
+        j += circulation.has_value && circulation.has_source_time
+                 ? jstr(rfc3339_utc(circulation.source_unix_s))
+                 : "null";
+        j += ",\"source_unix_s\":";
+        j += circulation.has_value && circulation.has_source_time
+                 ? std::to_string(circulation.source_unix_s)
+                 : "null";
+        j += ",\"timestamp_source\":";
+        j += circulation.has_value ? jstr(circulation.timestamp_source) : "null";
+        j += ",\"age_s\":";
+        j += circulation.age_known ? std::to_string(circulation.age_s) : "null";
+        j += ",\"fresh\":";
+        j += circulation.fresh ? "true" : "false";
+        j += ",\"freshness_reason\":";
+        j += jstr(circulation.freshness_reason);
+        j += ",\"retained\":";
+        j += circulation.has_value && circulation.retained ? "true" : "false";
+        j += ",\"messages\":";
+        j += std::to_string(circulation.messages);
+        j += ",\"errors\":";
+        j += std::to_string(circulation.errors);
+        j += ",\"rejections\":";
+        j += std::to_string(circulation.rejections);
+        if (!circulation.error.empty()) {
+            j += ",\"error\":";
+            j += jstr(circulation.error);
+        }
+        j += "},";
+    }
     // Direct Open-Meteo forecast. Fetch time is the 90-minute liveness clock; the provider does not
     // expose model-run issue time, so issued_at remains null instead of being fabricated. Failed
     // refreshes retain the last numbers for diagnosis but set available/fresh false.
-    const bool weather_configured = c.weather_enabled;
-    const bool weather_safe_mode  = safe_mode_active();
-    const bool weather_source_active =
-        weather_configured && c.diagnostics_enabled && !weather_safe_mode;
-    const bool       weather_has_value = weather_source_active && wf.has_value;
-    WeatherFreshness weather = weather_freshness(
-        weather_has_value, wf.fetched_unix_s, now_unix_s, WEATHER_MAX_AGE_S);
-    if (!weather_configured) {
-        weather.fresh  = false;
-        weather.reason = "not_configured";
-    } else if (weather_safe_mode) {
-        weather.fresh  = false;
-        weather.reason = "safe_mode";
-    } else if (!c.diagnostics_enabled) {
-        weather.fresh  = false;
-        weather.reason = "diagnostics_disabled";
-    } else if (!wf.available) {
-        weather.fresh  = false;
-        weather.reason = wf.reason.empty() ? "unavailable" : wf.reason.c_str();
-    }
-    const bool        weather_available   = weather_source_active && wf.available && weather.fresh;
-    const bool        weather_fetching    = weather_source_active && wf.fetching;
-    const std::string weather_latitude = weather_configured
-            ? weather_coordinate_format_e6(c.weather_latitude_e6) : std::string();
-    const std::string weather_longitude = weather_configured
-            ? weather_coordinate_format_e6(c.weather_longitude_e6) : std::string();
-    char weather_outdoor[32] = {0}, weather_solar[32] = {0};
-    if (wf.has_value) {
-        std::snprintf(weather_outdoor, sizeof(weather_outdoor), "%.6g", wf.outdoor_mean_2h_c);
-        std::snprintf(weather_solar, sizeof(weather_solar), "%.6g", wf.solar_energy_2h_wh_m2);
-    }
-    j += "\"weather_forecast\":{\"configured\":";
-    j += weather_configured ? "true" : "false";
-    j += ",\"provider\":\"open-meteo\"";
-    j += ",\"model\":"; j += jstr(wf.model);
-    j += ",\"fetch_interval_s\":"; j += std::to_string(WEATHER_FETCH_INTERVAL_S);
-    j += ",\"max_age_s\":"; j += std::to_string(WEATHER_MAX_AGE_S);
-    j += ",\"fetching\":"; j += weather_fetching ? "true" : "false";
-    j += ",\"available\":"; j += weather_available ? "true" : "false";
-    j += ",\"has_value\":"; j += weather_has_value ? "true" : "false";
-    j += ",\"latitude\":"; j += weather_latitude.empty() ? "null" : jstr_r(weather_latitude, redact);
-    j += ",\"longitude\":"; j += weather_longitude.empty() ? "null" : jstr_r(weather_longitude, redact);
-    j += ",\"state\":";
-    j += jstr(!weather_configured      ? "disabled"
-              : weather_safe_mode      ? "waiting"
-              : !c.diagnostics_enabled ? "disabled"
-                                       : wf.state);
-    j += ",\"outdoor_mean_2h_c\":"; j += weather_has_value ? weather_outdoor : "null";
-    j += ",\"solar_energy_2h_wh_m2\":"; j += weather_has_value ? weather_solar : "null";
-    j += ",\"hourly\":[";
-    if (weather_has_value) {
-        const size_t count = std::min(wf.hourly_count, WEATHER_HOURLY_CAP);
-        for (size_t i = 0; i < count; ++i) {
-            if (i) j += ',';
-            char temperature[32] = {0}, humidity[32] = {0}, pressure[32] = {0};
-            std::snprintf(temperature, sizeof(temperature), "%.6g", wf.hourly_temperature_c[i]);
-            std::snprintf(humidity, sizeof(humidity), "%.6g", wf.hourly_humidity_pct[i]);
-            std::snprintf(pressure, sizeof(pressure), "%.6g", wf.hourly_pressure_hpa[i]);
-            j += "{\"time_unix_s\":"; j += std::to_string(wf.hourly_unix_s[i]);
-            j += ",\"temperature_c\":"; j += temperature;
-            j += ",\"humidity_pct\":"; j += humidity;
-            j += ",\"pressure_hpa\":"; j += pressure;
-            j += '}';
+    {
+        const WeatherForecastStatus wf         = weather_forecast_status();
+        int64_t                     now_unix_s = -1;
+        int32_t                     now_sub_ms = 0;
+        time_now(now_unix_s, now_sub_ms);
+        const bool weather_configured = c.weather_enabled;
+        const bool weather_safe_mode  = safe_mode_active();
+        const bool weather_source_active =
+            weather_configured && c.diagnostics_enabled && !weather_safe_mode;
+        const bool       weather_has_value = weather_source_active && wf.has_value;
+        WeatherFreshness weather =
+            weather_freshness(weather_has_value, wf.fetched_unix_s, now_unix_s, WEATHER_MAX_AGE_S);
+        if (!weather_configured) {
+            weather.fresh  = false;
+            weather.reason = "not_configured";
+        } else if (weather_safe_mode) {
+            weather.fresh  = false;
+            weather.reason = "safe_mode";
+        } else if (!c.diagnostics_enabled) {
+            weather.fresh  = false;
+            weather.reason = "diagnostics_disabled";
+        } else if (!wf.available) {
+            weather.fresh  = false;
+            weather.reason = wf.reason.empty() ? "unavailable" : wf.reason.c_str();
         }
+        const bool weather_available = weather_source_active && wf.available && weather.fresh;
+        const bool weather_fetching  = weather_source_active && wf.fetching;
+        const std::string weather_latitude =
+            weather_configured ? weather_coordinate_format_e6(c.weather_latitude_e6)
+                               : std::string();
+        const std::string weather_longitude =
+            weather_configured ? weather_coordinate_format_e6(c.weather_longitude_e6)
+                               : std::string();
+        char weather_outdoor[32] = {0}, weather_solar[32] = {0};
+        if (wf.has_value) {
+            std::snprintf(weather_outdoor, sizeof(weather_outdoor), "%.6g", wf.outdoor_mean_2h_c);
+            std::snprintf(weather_solar, sizeof(weather_solar), "%.6g", wf.solar_energy_2h_wh_m2);
+        }
+        j += "\"weather_forecast\":{\"configured\":";
+        j += weather_configured ? "true" : "false";
+        j += ",\"provider\":\"open-meteo\"";
+        j += ",\"model\":";
+        j += jstr(wf.model);
+        j += ",\"fetch_interval_s\":";
+        j += std::to_string(WEATHER_FETCH_INTERVAL_S);
+        j += ",\"max_age_s\":";
+        j += std::to_string(WEATHER_MAX_AGE_S);
+        j += ",\"fetching\":";
+        j += weather_fetching ? "true" : "false";
+        j += ",\"available\":";
+        j += weather_available ? "true" : "false";
+        j += ",\"has_value\":";
+        j += weather_has_value ? "true" : "false";
+        j += ",\"latitude\":";
+        j += weather_latitude.empty() ? "null" : jstr_r(weather_latitude, redact);
+        j += ",\"longitude\":";
+        j += weather_longitude.empty() ? "null" : jstr_r(weather_longitude, redact);
+        j += ",\"state\":";
+        j += jstr(!weather_configured      ? "disabled"
+                  : weather_safe_mode      ? "waiting"
+                  : !c.diagnostics_enabled ? "disabled"
+                                           : wf.state);
+        j += ",\"outdoor_mean_2h_c\":";
+        j += weather_has_value ? weather_outdoor : "null";
+        j += ",\"solar_energy_2h_wh_m2\":";
+        j += weather_has_value ? weather_solar : "null";
+        j += ",\"hourly\":[";
+        if (weather_has_value) {
+            const size_t count = std::min(wf.hourly_count, WEATHER_HOURLY_CAP);
+            for (size_t i = 0; i < count; ++i) {
+                if (i) j += ',';
+                char temperature[32] = {0}, humidity[32] = {0}, pressure[32] = {0};
+                std::snprintf(temperature, sizeof(temperature), "%.6g", wf.hourly_temperature_c[i]);
+                std::snprintf(humidity, sizeof(humidity), "%.6g", wf.hourly_humidity_pct[i]);
+                std::snprintf(pressure, sizeof(pressure), "%.6g", wf.hourly_pressure_hpa[i]);
+                j += "{\"time_unix_s\":";
+                j += std::to_string(wf.hourly_unix_s[i]);
+                j += ",\"temperature_c\":";
+                j += temperature;
+                j += ",\"humidity_pct\":";
+                j += humidity;
+                j += ",\"pressure_hpa\":";
+                j += pressure;
+                j += '}';
+            }
+        }
+        j += ']';
+        j += ",\"issued_at\":";
+        j += weather_has_value && wf.issued_unix_s >= 0 ? jstr(rfc3339_utc(wf.issued_unix_s))
+                                                        : "null";
+        j += ",\"fetched_at\":";
+        j += weather_has_value ? jstr(rfc3339_utc(wf.fetched_unix_s)) : "null";
+        j += ",\"valid_for_decision_at\":";
+        j += weather_has_value ? jstr(rfc3339_utc(wf.decision_unix_s)) : "null";
+        j += ",\"last_attempt_at\":";
+        j += wf.last_attempt_unix_s >= 0 ? jstr(rfc3339_utc(wf.last_attempt_unix_s)) : "null";
+        j += ",\"age_s\":";
+        j += weather.age_known ? std::to_string(weather.age_s) : "null";
+        j += ",\"fresh\":";
+        j += weather.fresh ? "true" : "false";
+        j += ",\"freshness_reason\":";
+        j += jstr(weather.reason);
+        j += ",\"successes\":";
+        j += std::to_string(wf.successes);
+        j += ",\"errors\":";
+        j += std::to_string(wf.errors);
+        j += ",\"refresh_requested_token\":";
+        j += std::to_string(wf.refresh_requested_token);
+        j += ",\"refresh_started_token\":";
+        j += std::to_string(wf.refresh_started_token);
+        j += ",\"refresh_completed_token\":";
+        j += std::to_string(wf.refresh_completed_token);
+        j += ",\"refresh_success_token\":";
+        j += std::to_string(wf.refresh_success_token);
+        j += ",\"task_stack_min_free_bytes\":";
+        append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Weather));
+        if (!weather_configured) {
+            j += ",\"reason\":\"not_configured\"";
+        } else if (weather_safe_mode) {
+            j += ",\"reason\":\"safe_mode\"";
+        } else if (!c.diagnostics_enabled) {
+            j += ",\"reason\":\"diagnostics_disabled\"";
+        } else if (!wf.reason.empty()) {
+            j += ",\"reason\":";
+            j += jstr(wf.reason);
+        }
+        if (weather_source_active && !wf.error.empty()) {
+            j += ",\"error\":";
+            j += jstr(wf.error);
+        }
+        j += "},";
     }
-    j += ']';
-    j += ",\"issued_at\":";
-    j += weather_has_value && wf.issued_unix_s >= 0 ? jstr(rfc3339_utc(wf.issued_unix_s)) : "null";
-    j += ",\"fetched_at\":";
-    j += weather_has_value ? jstr(rfc3339_utc(wf.fetched_unix_s)) : "null";
-    j += ",\"valid_for_decision_at\":";
-    j += weather_has_value ? jstr(rfc3339_utc(wf.decision_unix_s)) : "null";
-    j += ",\"last_attempt_at\":";
-    j += wf.last_attempt_unix_s >= 0 ? jstr(rfc3339_utc(wf.last_attempt_unix_s)) : "null";
-    j += ",\"age_s\":"; j += weather.age_known ? std::to_string(weather.age_s) : "null";
-    j += ",\"fresh\":"; j += weather.fresh ? "true" : "false";
-    j += ",\"freshness_reason\":"; j += jstr(weather.reason);
-    j += ",\"successes\":"; j += std::to_string(wf.successes);
-    j += ",\"errors\":"; j += std::to_string(wf.errors);
-    j += ",\"refresh_requested_token\":";
-    j += std::to_string(wf.refresh_requested_token);
-    j += ",\"refresh_started_token\":";
-    j += std::to_string(wf.refresh_started_token);
-    j += ",\"refresh_completed_token\":";
-    j += std::to_string(wf.refresh_completed_token);
-    j += ",\"refresh_success_token\":";
-    j += std::to_string(wf.refresh_success_token);
-    j += ",\"task_stack_min_free_bytes\":";
-    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Weather));
-    if (!weather_configured) {
-        j += ",\"reason\":\"not_configured\"";
-    } else if (weather_safe_mode) {
-        j += ",\"reason\":\"safe_mode\"";
-    } else if (!c.diagnostics_enabled) {
-        j += ",\"reason\":\"diagnostics_disabled\"";
-    } else if (!wf.reason.empty()) {
-        j += ",\"reason\":";
-        j += jstr(wf.reason);
+    {
+        const SyslogStatus sy = syslog_status();
+        j += "\"syslog\":{\"configured\":" + std::string(sy.configured ? "true" : "false") +
+             ",\"resolved\":" + (sy.resolved ? "true" : "false") +
+             ",\"reachable\":" + (sy.reachable ? "true" : "false") +
+             ",\"host\":" + jstr_r(sy.host, redact) + ",\"port\":" + std::to_string(sy.port) +
+             (sy.error.empty() ? "" : ",\"error\":" + jstr(sy.error)) + "},";
     }
-    if (weather_source_active && !wf.error.empty()) {
-        j += ",\"error\":";
-        j += jstr(wf.error);
+    {
+        const HpStats hp = hp_stats();
+        j += "\"hp\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto))) +
+             ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin) +
+             ",\"connected\":" + (hp.connected ? "true" : "false") +
+             ",\"last_ok_s\":" + std::to_string(hp.last_ok_s) +
+             ",\"registers\":" + std::to_string(hp.registers) +
+             ",\"values\":" + std::to_string(hp.values) +
+             ",\"crc_err\":" + std::to_string(hp.crc_err) +
+             ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
     }
-    j += "},";
-    SyslogStatus sy = syslog_status();
-    j += "\"syslog\":{\"configured\":" + std::string(sy.configured ? "true" : "false") +
-         ",\"resolved\":" + (sy.resolved ? "true" : "false") +
-         ",\"reachable\":" + (sy.reachable ? "true" : "false") +
-         ",\"host\":" + jstr_r(sy.host, redact) +
-         ",\"port\":" + std::to_string(sy.port) +
-         (sy.error.empty() ? "" : ",\"error\":" + jstr(sy.error)) + "},";
-    j += "\"hp\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto))) +
-         ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin) +
-         ",\"connected\":" + (hp.connected ? "true" : "false") +
-         ",\"last_ok_s\":" + std::to_string(hp.last_ok_s) +
-         ",\"registers\":" + std::to_string(hp.registers) +
-         ",\"values\":" + std::to_string(hp.values) +
-         ",\"crc_err\":" + std::to_string(hp.crc_err) +
-         ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
+
     j += "\"profile\":{\"id\":" + jstr(c.profile) + "},";
 
     // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A link
@@ -1182,127 +1397,147 @@ static void append_status_json(JsonOut& j, bool redact) {
     // tracker's default unsupported_profile state. Every number below is from one uninterrupted
     // series of fresh same-sweep X10A values. There is no settling limit, completed-test state or
     // refrigerant-charge judgement in this contract.
-    if (c.fp_valid && refrigerant_service.coverage_evaluated) {
-    j += "\"refrigerant_service\":{\"kind\":\"observation\",\"state\":";
-    json_append_quoted(j, logic::refrigerant_service_state_name(refrigerant_service.state));
-    j += ",\"continuous_s\":";
-    j += std::to_string(refrigerant_service.continuous_s);
-    j += ",\"samples\":";
-    j += std::to_string(refrigerant_service.samples);
-    j += ",\"mode\":";
-    json_append_quoted(j, logic::refrigerant_service_mode_name(refrigerant_service.mode));
-    j += ",\"blocker\":";
-    if (refrigerant_service.blocker == logic::RefrigerantServiceBlocker::None) j += "null";
-    else json_append_quoted(j, logic::refrigerant_service_blocker_name(refrigerant_service.blocker));
-    j += ",\"special_phases_known\":";
-    j += refrigerant_service.special_phases_known ? "true" : "false";
-    // These false fields are part of the truth contract, not future promises: the bridge observes
-    // ordinary traffic and an EEV command.  It neither establishes a settled/full-load condition nor
-    // receives independent mechanical valve feedback.
-    j += ",\"load_proven\":false,\"eev_feedback\":false,\"limitations\":[";
-    bool service_limitation_separator = false;
-    auto append_service_limitation = [&j, &service_limitation_separator](const char* name) {
-        if (service_limitation_separator) j += ",";
-        json_append_quoted(j, name);
-        service_limitation_separator = true;
-    };
-    if (refrigerant_service.limitation_mask & logic::RefrigerantServiceSpecialPhases)
-        append_service_limitation("special_phases_unavailable");
-    if (refrigerant_service.limitation_mask & logic::RefrigerantServiceTemperatures)
-        append_service_limitation("temperature_context_incomplete");
-    if (refrigerant_service.limitation_mask & logic::RefrigerantServicePressureSides)
-        append_service_limitation("pressure_sides_incomplete");
-    if (refrigerant_service.limitation_mask & logic::RefrigerantServiceOutdoorContext)
-        append_service_limitation("outdoor_context_incomplete");
-    j += "]";
-    j += ",\"metrics\":{";
-    auto append_service_metric = [&j](const char* key,
-                                      const logic::RefrigerantServiceMetricSnapshot& metric) {
-        j += "\"";
-        j += key;
-        j += "\":";
-        if (!metric.available) { j += "null"; return; }
-        auto append_tenths = [&j](int value) {
-            if (value < 0) j += "-";
-            const unsigned magnitude = static_cast<unsigned>(value < 0 ? -value : value);
-            j += std::to_string(magnitude / 10);
-            j += ".";
-            j += std::to_string(magnitude % 10);
-        };
-        j += "{\"min\":"; append_tenths(metric.min_tenths);
-        j += ",\"mean\":"; append_tenths(metric.mean_tenths);
-        j += ",\"max\":"; append_tenths(metric.max_tenths);
-        j += "}";
-    };
-    append_service_metric("compressor_rps", refrigerant_service.rps);
-    j += ","; append_service_metric("discharge_c", refrigerant_service.discharge);
-    j += ","; append_service_metric("eev_command_pls", refrigerant_service.eev_command);
-    j += ","; append_service_metric("high_pressure_bar", refrigerant_service.high_pressure);
-    j += ","; append_service_metric("low_pressure_bar", refrigerant_service.low_pressure);
-    j += "}},";
+    {
+        const logic::RefrigerantServiceSnapshot refrigerant_service = refrigerant_service_status();
+        if (c.fp_valid && refrigerant_service.coverage_evaluated) {
+            j += "\"refrigerant_service\":{\"kind\":\"observation\",\"state\":";
+            json_append_quoted(j, logic::refrigerant_service_state_name(refrigerant_service.state));
+            j += ",\"continuous_s\":";
+            j += std::to_string(refrigerant_service.continuous_s);
+            j += ",\"samples\":";
+            j += std::to_string(refrigerant_service.samples);
+            j += ",\"mode\":";
+            json_append_quoted(j, logic::refrigerant_service_mode_name(refrigerant_service.mode));
+            j += ",\"blocker\":";
+            if (refrigerant_service.blocker == logic::RefrigerantServiceBlocker::None)
+                j += "null";
+            else
+                json_append_quoted(
+                    j, logic::refrigerant_service_blocker_name(refrigerant_service.blocker));
+            j += ",\"special_phases_known\":";
+            j += refrigerant_service.special_phases_known ? "true" : "false";
+            // These false fields are part of the truth contract, not future promises: the bridge
+            // observes ordinary traffic and an EEV command.  It neither establishes a
+            // settled/full-load condition nor receives independent mechanical valve feedback.
+            j += ",\"load_proven\":false,\"eev_feedback\":false,\"limitations\":[";
+            bool service_limitation_separator = false;
+            auto append_service_limitation = [&j, &service_limitation_separator](const char* name) {
+                if (service_limitation_separator) j += ",";
+                json_append_quoted(j, name);
+                service_limitation_separator = true;
+            };
+            if (refrigerant_service.limitation_mask & logic::RefrigerantServiceSpecialPhases)
+                append_service_limitation("special_phases_unavailable");
+            if (refrigerant_service.limitation_mask & logic::RefrigerantServiceTemperatures)
+                append_service_limitation("temperature_context_incomplete");
+            if (refrigerant_service.limitation_mask & logic::RefrigerantServicePressureSides)
+                append_service_limitation("pressure_sides_incomplete");
+            if (refrigerant_service.limitation_mask & logic::RefrigerantServiceOutdoorContext)
+                append_service_limitation("outdoor_context_incomplete");
+            j += "]";
+            j += ",\"metrics\":{";
+            auto append_service_metric =
+                [&j](const char* key, const logic::RefrigerantServiceMetricSnapshot& metric) {
+                    j += "\"";
+                    j += key;
+                    j += "\":";
+                    if (!metric.available) {
+                        j += "null";
+                        return;
+                    }
+                    auto append_tenths = [&j](int value) {
+                        if (value < 0) j += "-";
+                        const unsigned magnitude =
+                            static_cast<unsigned>(value < 0 ? -value : value);
+                        j += std::to_string(magnitude / 10);
+                        j += ".";
+                        j += std::to_string(magnitude % 10);
+                    };
+                    j += "{\"min\":";
+                    append_tenths(metric.min_tenths);
+                    j += ",\"mean\":";
+                    append_tenths(metric.mean_tenths);
+                    j += ",\"max\":";
+                    append_tenths(metric.max_tenths);
+                    j += "}";
+                };
+            append_service_metric("compressor_rps", refrigerant_service.rps);
+            j += ",";
+            append_service_metric("discharge_c", refrigerant_service.discharge);
+            j += ",";
+            append_service_metric("eev_command_pls", refrigerant_service.eev_command);
+            j += ",";
+            append_service_metric("high_pressure_bar", refrigerant_service.high_pressure);
+            j += ",";
+            append_service_metric("low_pressure_bar", refrigerant_service.low_pressure);
+            j += "}},";
+        }
     }
 
     // System health: heap headroom + why the device last booted, so both are visible from the LAN
     // without a serial console (and without a broker — unlike the MQTT heartbeat). free_heap
-    // is the current free, min_free_heap the since-boot low-water mark (the leak indicator), max_alloc
-    // the largest CONTIGUOUS block (the true OOM ceiling on this heap-tight chip). reset_reason reuses
-    // the boot-time cached reason (diag_crash.cpp) mapped via logic/reset_reason.hpp; safe_mode is the
-    // latched boot-loop recovery flag (safe_mode.cpp — true once too many crash boots accumulated, so
-    // poll + MQTT were skipped). heap_restarts is how many CONSECUTIVE heap-watchdog restarts
-    // preceded this boot (heap_guard.cpp): that restart is an esp_restart(), so reset_reason reads
-    // "sw" — the same value a config save produces — and without this field a board restarting
-    // itself every five minutes would be indistinguishable from one somebody kept saving settings
-    // on, which is exactly the unattributable reboot this block exists to prevent. 0 on any ordinary
-    // boot. Small numbers + a short slug appended to the existing builder — no large contiguous
-    // allocation, and nothing here is a `+` chain.
+    // is the current free, min_free_heap the since-boot low-water mark (the leak indicator),
+    // max_alloc the largest CONTIGUOUS block (the true OOM ceiling on this heap-tight chip).
+    // reset_reason reuses the boot-time cached reason (diag_crash.cpp) mapped via
+    // logic/reset_reason.hpp; safe_mode is the latched boot-loop recovery flag (safe_mode.cpp —
+    // true once too many crash boots accumulated, so poll + MQTT were skipped). heap_restarts is
+    // how many CONSECUTIVE heap-watchdog restarts preceded this boot (heap_guard.cpp): that restart
+    // is an esp_restart(), so reset_reason reads "sw" — the same value a config save produces — and
+    // without this field a board restarting itself every five minutes would be indistinguishable
+    // from one somebody kept saving settings on, which is exactly the unattributable reboot this
+    // block exists to prevent. 0 on any ordinary boot. Small numbers + a short slug appended to the
+    // existing builder — no large contiguous allocation, and nothing here is a `+` chain.
     //
-    // Beside them, what that headroom already COST while the board DID survive (#380): cycles the two
-    // 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches — a reading
-    // dropped, or (poll) never read at all; mqtt_quiesced is the publisher standing aside on purpose
-    // while an OTA/weather TLS operation owns the heap (logic/ota_quiesce.hpp), the same gap with a
-    // stated cause.
-    // The three of them complete the sequence the two figures above start: min_free_heap says how
-    // close the board came, these say what it lost getting there, and heap_restarts says when it did
-    // not get there at all. Three atomic loads and three plain integers.
-    const MqttSkipStats skips = mqtt_skip_stats();
-    j += "\"sys\":{\"free_heap\":" + std::to_string(esp_get_free_heap_size()) +
-         ",\"min_free_heap\":" + std::to_string(esp_get_minimum_free_heap_size()) +
-         ",\"max_alloc\":" + std::to_string(heap_largest_internal_block()) +
-         ",\"heap_restarts\":" + std::to_string(heap_guard_restarts()) +
-         ",\"mqtt_skipped\":" + std::to_string(skips.skipped) +
-         ",\"mqtt_quiesced\":" + std::to_string(skips.quiesced) +
-         ",\"poll_skipped\":" + std::to_string(hp_skipped_cycles()) +
-         ",\"reset_reason\":" + jstr(reset_reason_name(diag_crash_info().reason)) +
-         ",\"safe_mode\":" + (safe_mode_active() ? "true" : "false") +
-         // WHY it is minimal, so the recovery banner can give advice that fits the cause: a
-         // crash loop points at the configuration (the RX/TX pins first), a heap give-up does
-         // not, and telling that reader to check their pins sends them to fix something that
-         // is already correct. null whenever safe_mode is false.
-         ",\"safe_mode_cause\":" + (safe_mode_cause() ? jstr(safe_mode_cause()) : "null");
-    // THE OTHER MEMORY BUDGET, on the surface that needs no broker. The MQTT heartbeat carries the
-    // same five figures, but every ordinary publish — the heartbeat included — sits behind the
-    // X10A publish gate (logic/mqtt_publish_gate.hpp): a board whose bus never answers publishes
-    // nothing at all, and safe mode never starts the publish task in the first place. Those are
-    // exactly the boards whose stack headroom someone wants, so a metric reachable only over MQTT
-    // would be absent precisely where it is the evidence — the shape that once folded the board's
-    // own heap trends inside the heat pump's poll cycle. Grouped under one key so the unit is
-    // stated once; null per task until that task has been sampled (main/stack_watch.hpp).
-    //
-    // Appended with successive += rather than extended onto the chain above: this builder is the
-    // one whose frame overflowed the httpd stack twice, and a chain materialises every intermediate
-    // std::string in one frame (AGENTS.md → Memory, concurrency, and HTTP safety). Five integers,
-    // one at a time.
-    j += ",\"stack_min_free_bytes\":{\"httpd\":";
-    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Httpd));
-    j += ",\"poll\":";
-    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Poll));
-    j += ",\"mqtt\":";
-    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Mqtt));
-    j += ",\"modbus\":";
-    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Modbus));
-    j += ",\"weather\":";
-    append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Weather));
-    j += "}},";
+    // Beside them, what that headroom already COST while the board DID survive (#380): cycles the
+    // two 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches — a
+    // reading dropped, or (poll) never read at all; mqtt_quiesced is the publisher standing aside
+    // on purpose while an OTA/weather TLS operation owns the heap (logic/ota_quiesce.hpp), the same
+    // gap with a stated cause. The three of them complete the sequence the two figures above start:
+    // min_free_heap says how close the board came, these say what it lost getting there, and
+    // heap_restarts says when it did not get there at all. Three atomic loads and three plain
+    // integers.
+    {
+        const MqttSkipStats skips = mqtt_skip_stats();
+        j += "\"sys\":{\"free_heap\":" + std::to_string(esp_get_free_heap_size()) +
+             ",\"min_free_heap\":" + std::to_string(esp_get_minimum_free_heap_size()) +
+             ",\"max_alloc\":" + std::to_string(heap_largest_internal_block()) +
+             ",\"heap_restarts\":" + std::to_string(heap_guard_restarts()) +
+             ",\"mqtt_skipped\":" + std::to_string(skips.skipped) +
+             ",\"mqtt_quiesced\":" + std::to_string(skips.quiesced) +
+             ",\"poll_skipped\":" + std::to_string(hp_skipped_cycles()) +
+             ",\"reset_reason\":" + jstr(reset_reason_name(diag_crash_info().reason)) +
+             ",\"safe_mode\":" + (safe_mode_active() ? "true" : "false") +
+             // WHY it is minimal, so the recovery banner can give advice that fits the cause: a
+             // crash loop points at the configuration (the RX/TX pins first), a heap give-up does
+             // not, and telling that reader to check their pins sends them to fix something that
+             // is already correct. null whenever safe_mode is false.
+             ",\"safe_mode_cause\":" + (safe_mode_cause() ? jstr(safe_mode_cause()) : "null");
+        // THE OTHER MEMORY BUDGET, on the surface that needs no broker. The MQTT heartbeat carries
+        // the same five figures, but every ordinary publish — the heartbeat included — sits behind
+        // the X10A publish gate (logic/mqtt_publish_gate.hpp): a board whose bus never answers
+        // publishes nothing at all, and safe mode never starts the publish task in the first place.
+        // Those are exactly the boards whose stack headroom someone wants, so a metric reachable
+        // only over MQTT would be absent precisely where it is the evidence — the shape that once
+        // folded the board's own heap trends inside the heat pump's poll cycle. Grouped under one
+        // key so the unit is stated once; null per task until that task has been sampled
+        // (main/stack_watch.hpp).
+        //
+        // Appended with successive += rather than extended onto the chain above: this builder is
+        // the one whose frame overflowed the httpd stack twice, and a chain materialises every
+        // intermediate std::string in one frame (AGENTS.md → Memory, concurrency, and HTTP safety).
+        // Five integers, one at a time.
+        j += ",\"stack_min_free_bytes\":{\"httpd\":";
+        append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Httpd));
+        j += ",\"poll\":";
+        append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Poll));
+        j += ",\"mqtt\":";
+        append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Mqtt));
+        j += ",\"modbus\":";
+        append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Modbus));
+        j += ",\"weather\":";
+        append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Weather));
+        j += "}},";
+    }
 
     // NTP: its own top-level block (not folded into sys), mirroring syslog{} — it is a runtime-
     // configurable network service like syslog/MQTT (POST /set_ntp -> NVS "ntp_server"), not a static
@@ -1310,10 +1545,12 @@ static void append_status_json(JsonOut& j, bool redact) {
     // resolved from NVS/Kconfig at boot — sntp_time.cpp never changes it live, a server edit reboots),
     // not necessarily who actually answered. synced/time are null/false until the first SNTP reply of
     // this boot lands.
-    const TimeStatus ts = time_status();
-    j += "\"ntp\":{\"server\":" + jstr_r(ts.server, redact) +
-         ",\"synced\":" + (ts.synced ? "true" : "false") +
-         ",\"time\":" + (ts.synced ? jstr(rfc3339_utc(ts.unix_time)) : "null") + "},";
+    {
+        const TimeStatus ts = time_status();
+        j += "\"ntp\":{\"server\":" + jstr_r(ts.server, redact) +
+             ",\"synced\":" + (ts.synced ? "true" : "false") +
+             ",\"time\":" + (ts.synced ? jstr(rfc3339_utc(ts.unix_time)) : "null") + "},";
+    }
 
     // Explicit opt-in boundary for optional plant diagnostics and their external source collection.
     // Kept separate from system/link health: X10A, HomeHub and the technical heartbeat remain active.
@@ -1343,88 +1580,99 @@ static void append_status_json(JsonOut& j, bool redact) {
     // `coredump` is the exception: it must reflect flash NOW, not at boot, or a dump erased via
     // POST /coredump/clear leaves a banner with no download unless this is refreshed. Refreshing it
     // costs one 4-byte flash read — the same read GET /coredump already does per request.
-    const CrashInfo crash = diag_crash_info_live();
-    j += "\"last_crash\":" + std::string(crash_is_notable(crash) ? build_crash_json(crash) : "null") + ",";
+    {
+        const CrashInfo crash = diag_crash_info_live();
+        j += "\"last_crash\":" +
+             std::string(crash_is_notable(crash) ? build_crash_json(crash) : "null") + ",";
+    }
 
     // Auto-detection: proto/model derived from the X10A bus (hp_detect.cpp). The candidate set is
     // recomputed cheaply from the stored fingerprint (no re-probe) via the pure logic/detect.hpp.
     // Detection is fully automatic — the firmware applies the best-fit representative itself and the
     // UI only DISPLAYS the outcome (the Model card); candidates[]/ambiguous are reported for
     // diagnostics, not for a picker. There is no manual model selection anywhere in the UI.
-    j += "\"detect\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto)));
-    j += ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin);
-    j += ",\"valid\":" + std::string(c.fp_valid ? "true" : "false");
-    // TWO capacities, reported as separate fields and never merged. `capacity_kw` is the OUTDOOR
-    // unit's own report (page 0x00 offset 12), null whenever its variable-length descriptor is too
-    // short to carry offset 12. `capacity_kw_iu` is the INDOOR unit's rated code (0x60 offset 6) —
-    // the same 0.1 kW units, and what detection already falls back to for RANKING. They are NOT
-    // interchangeable: a 6 kW outdoor unit is routinely paired with an 8 kW indoor unit, so
-    // substituting one for the other under a single name would publish a figure for the wrong half
-    // of the plant. Reported side by side, the UI can say which unit a shown capacity came from.
-    // Successive += with bare literals (never one + chain) — see AGENTS.md → Memory, concurrency,
-    // and HTTP safety:
-    // the httpd task's stack is the tight one, and a chain holds every intermediate at once.
-    auto kw_field = [&j](const char* name, int tenths) {
-        j += ",\"";
-        j += name;
-        j += "\":";
-        if (tenths < 0) { j += "null"; return; }
-        j += std::to_string(tenths / 10);
-        j += ".";
-        j += std::to_string(tenths % 10);
-    };
-    // All three unit FACTS are gated on fp_valid, like candidates[] already is. POST /detect clears
-    // the fingerprint to force a fresh pass, and until that pass lands there is nothing measured to
-    // report — emitting the previous unit's capacity/EEPROM through that window is exactly the
-    // "cached fingerprint presented as a live reading" docs/DESIGN.md §5.3 rules out, and it is the
-    // window in which a SWAPPED unit is most likely to be misreported.
-    kw_field("capacity_kw", c.fp_valid ? c.fp_kw_tenths : -1);
-    kw_field("capacity_kw_iu", c.fp_valid ? c.fp_iu_kw_tenths : -1);
-    j += ",\"ou_eeprom\":" + jstr(c.fp_valid ? c.fp_eeprom : std::string());
-    // Candidate ids + the DISTINCT model families among them. Detection is coarse — models that share
-    // a page_mask+capacity are register-identical on X10A — so the UI shows a single family only when
-    // all candidates agree; a mixed set is reported honestly as "not uniquely identifiable" rather
-    // than asserting the (arbitrary) best-fit's name.
-    int total = 0;
-    std::string cand, fams;
-    if (c.fp_valid) {
-        Fingerprint fp{};
-        fp.page_mask = c.fp_pages;
-        fp.kw_tenths = c.fp_kw_tenths;
-        // Carried so this recomputed fingerprint stays a faithful copy of the one detection used —
-        // and since #225 it is LOAD-BEARING here, not merely faithful: detect_candidates narrows by
-        // the I/U capacity when the O/U figure is absent, so omitting this field would make /status
-        // report a set the device never considered (the live unit: 8 candidates across 4 families
-        // instead of 3 across 2, which is the over-broad reading that put a wrong family into #213).
-        fp.iu_kw_tenths = c.fp_iu_kw_tenths;
-        int nsig = 0;
-        const Signature* sigs = def::signatures(nsig);
-        const char* out[64];
-        total = detect_candidates(sigs, nsig, fp, out, static_cast<int>(sizeof(out) / sizeof(out[0])));
-        const int shown = total < 64 ? total : 64;
-        std::vector<std::string> seen;
-        for (int i = 0; i < shown; i++) {
-            if (i) cand += ",";
-            cand += jstr(out[i]);
-            const def::ModelName* mn = def::model_name(out[i]);
-            std::string fam = mn ? mn->family : "Altherma";
-            if (std::find(seen.begin(), seen.end(), fam) == seen.end()) {
-                if (!seen.empty()) fams += ",";
-                fams += jstr(fam);
-                seen.push_back(fam);
+    {
+        j += "\"detect\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto)));
+        j += ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin);
+        j += ",\"valid\":" + std::string(c.fp_valid ? "true" : "false");
+        // TWO capacities, reported as separate fields and never merged. `capacity_kw` is the
+        // OUTDOOR unit's own report (page 0x00 offset 12), null whenever its variable-length
+        // descriptor is too short to carry offset 12. `capacity_kw_iu` is the INDOOR unit's rated
+        // code (0x60 offset 6) — the same 0.1 kW units, and what detection already falls back to
+        // for RANKING. They are NOT interchangeable: a 6 kW outdoor unit is routinely paired with
+        // an 8 kW indoor unit, so substituting one for the other under a single name would publish
+        // a figure for the wrong half of the plant. Reported side by side, the UI can say which
+        // unit a shown capacity came from. Successive += with bare literals (never one + chain) —
+        // see AGENTS.md → Memory, concurrency, and HTTP safety: the httpd task's stack is the tight
+        // one, and a chain holds every intermediate at once.
+        auto kw_field = [&j](const char* name, int tenths) {
+            j += ",\"";
+            j += name;
+            j += "\":";
+            if (tenths < 0) {
+                j += "null";
+                return;
+            }
+            j += std::to_string(tenths / 10);
+            j += ".";
+            j += std::to_string(tenths % 10);
+        };
+        // All three unit FACTS are gated on fp_valid, like candidates[] already is. POST /detect
+        // clears the fingerprint to force a fresh pass, and until that pass lands there is nothing
+        // measured to report — emitting the previous unit's capacity/EEPROM through that window is
+        // exactly the "cached fingerprint presented as a live reading" docs/DESIGN.md §5.3 rules
+        // out, and it is the window in which a SWAPPED unit is most likely to be misreported.
+        kw_field("capacity_kw", c.fp_valid ? c.fp_kw_tenths : -1);
+        kw_field("capacity_kw_iu", c.fp_valid ? c.fp_iu_kw_tenths : -1);
+        j += ",\"ou_eeprom\":" + jstr(c.fp_valid ? c.fp_eeprom : std::string());
+        // Candidate ids + the DISTINCT model families among them. Detection is coarse — models that
+        // share a page_mask+capacity are register-identical on X10A — so the UI shows a single
+        // family only when all candidates agree; a mixed set is reported honestly as "not uniquely
+        // identifiable" rather than asserting the (arbitrary) best-fit's name.
+        int         total = 0;
+        std::string cand, fams;
+        if (c.fp_valid) {
+            Fingerprint fp{};
+            fp.page_mask = c.fp_pages;
+            fp.kw_tenths = c.fp_kw_tenths;
+            // Carried so this recomputed fingerprint stays a faithful copy of the one detection
+            // used — and since #225 it is LOAD-BEARING here, not merely faithful: detect_candidates
+            // narrows by the I/U capacity when the O/U figure is absent, so omitting this field
+            // would make /status report a set the device never considered (the live unit: 8
+            // candidates across 4 families instead of 3 across 2, which is the over-broad reading
+            // that put a wrong family into #213).
+            fp.iu_kw_tenths       = c.fp_iu_kw_tenths;
+            int              nsig = 0;
+            const Signature* sigs = def::signatures(nsig);
+            const char*      out[64];
+            total                          = detect_candidates(sigs, nsig, fp, out,
+                                                               static_cast<int>(sizeof(out) / sizeof(out[0])));
+            const int                shown = total < 64 ? total : 64;
+            std::vector<std::string> seen;
+            for (int i = 0; i < shown; i++) {
+                if (i) cand += ",";
+                cand += jstr(out[i]);
+                const def::ModelName* mn  = def::model_name(out[i]);
+                std::string           fam = mn ? mn->family : "Altherma";
+                if (std::find(seen.begin(), seen.end(), fam) == seen.end()) {
+                    if (!seen.empty()) fams += ",";
+                    fams += jstr(fam);
+                    seen.push_back(fam);
+                }
             }
         }
+        j += ",\"candidates\":[" + cand + "]";
+        j += ",\"families\":[" + fams + "]";
+        j += ",\"ambiguous\":" + std::string(total > 1 ? "true" : "false");
+        // Display metadata for the profile actually being read (best-fit representative or
+        // generic).
+        const def::ModelName* wm = def::model_name(c.profile.c_str());
+        j += ",\"model\":";
+        j += wm ? "{\"name\":" + jstr(wm->name) + ",\"family\":" + jstr(wm->family) +
+                      ",\"marketing\":" + jstr(wm->marketing) + "}"
+                : "null";
+        j += "}";
     }
-    j += ",\"candidates\":[" + cand + "]";
-    j += ",\"families\":[" + fams + "]";
-    j += ",\"ambiguous\":" + std::string(total > 1 ? "true" : "false");
-    // Display metadata for the profile actually being read (best-fit representative or generic).
-    const def::ModelName* wm = def::model_name(c.profile.c_str());
-    j += ",\"model\":";
-    j += wm ? "{\"name\":" + jstr(wm->name) + ",\"family\":" + jstr(wm->family) +
-                  ",\"marketing\":" + jstr(wm->marketing) + "}"
-            : "null";
-    j += "}";
     j += "}";
 }
 

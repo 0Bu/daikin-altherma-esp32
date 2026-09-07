@@ -143,6 +143,10 @@ bool hp_poll_ota_quiesced();
 uint32_t hp_poll_generation();
 bool     hp_poll_generation_matches(uint32_t generation);
 
+// Identity / revision counter for committed X10A value cache updates.
+// Bumps each time s_cache is committed or cleared.
+uint32_t hp_cache_generation();
+
 // Signal the poll task to re-read config (called by /set_hp after config_save).
 void hp_poll_reconfigure();
 
