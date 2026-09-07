@@ -78,6 +78,8 @@ conditional workflows and are not necessarily PR checkbox gates.
 - `$pr-hygiene-review`: required before opening a PR and before every ordinary PR merge, to check
   the commit range and PR title/description for personal information or non-English prose beyond what
   `scripts/run-pr-hygiene-audit.sh` catches by shape alone.
+- `$deploy-test`: use for "flashe und teste .104" — builds via Docker, signs, USB-flashes test board (.104), verifies health, and runs automated diagnostic/fix loop on findings.
+- `$deploy-prod`: use for production delivery — verifies gates, merges PR, waits for CI dev build, deploys OTA to .104 & tests, deploys OTA to production .170 & tests, and runs automated diagnostic/fix loop on findings.
 
 Phase 7 of the agent migration is complete. `AGENTS.md`, `.agents/skills/`, `.agents/hooks.json`,
 `.codex/agents/`, `.codex/config.toml`, `.codex/hooks.json`, and `tools/agent-hooks/` are the canonical
