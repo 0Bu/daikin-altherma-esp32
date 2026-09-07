@@ -44,8 +44,8 @@
         "taken": 38
       },
       "main/logic/chunk_sink.hpp": {
-        "outcomes": 212,
-        "taken": 107
+        "outcomes": 272,
+        "taken": 144
       },
       "main/logic/circulation_source.hpp": {
         "outcomes": 56,
@@ -398,8 +398,8 @@
         "taken": 57
       },
       "main/logic/chunk_sink.hpp": {
-        "outcomes": 238,
-        "taken": 120
+        "outcomes": 308,
+        "taken": 162
       },
       "main/logic/circulation_source.hpp": {
         "outcomes": 56,
@@ -752,8 +752,8 @@
         "taken": 57
       },
       "main/logic/chunk_sink.hpp": {
-        "outcomes": 238,
-        "taken": 120
+        "outcomes": 308,
+        "taken": 162
       },
       "main/logic/circulation_source.hpp": {
         "outcomes": 56,

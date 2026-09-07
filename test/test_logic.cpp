@@ -2002,6 +2002,25 @@ static void test_json() {
     CHECK(transport_failed.emission_started() && transport_failed.failed());
     CHECK(failed_emit_attempts == 1);
 
+    // Sink lifecycle edge cases: const char* null, finish after finish, append after finish,
+    // failure during the final chunk flush, and append after failure.
+    auto final_fail_emit = [](std::string_view, bool final) { return !final; };
+    BoundedChunkSink<decltype(final_fail_emit), 4> final_fail(final_fail_emit);
+    final_fail += static_cast<const char*>(nullptr);
+    final_fail += 'x';
+    final_fail += std::string("y");
+    CHECK(!final_fail.finish());
+    CHECK(final_fail.failed());
+    CHECK(!final_fail.finish());
+    final_fail += "ignored";
+
+    auto success_emit = [](std::string_view, bool) { return true; };
+    BoundedChunkSink<decltype(success_emit), 4> finish_twice(success_emit);
+    finish_twice += "test";
+    CHECK(finish_twice.finish());
+    CHECK(finish_twice.finish());
+    finish_twice += "ignored";
+
     // The compact /ota/status route uses only fixed-capacity text and a fixed response buffer while
     // TLS owns the heap. Assignment always terminates and truncates deterministically; response
     // overflow is explicit and never emits a silently truncated JSON document.
