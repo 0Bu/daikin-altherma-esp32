@@ -2059,32 +2059,31 @@ static esp_err_t h_active_model_values(httpd_req_t* req) {
     // same. A cached unresolved response would leave the expert picker empty after the device has
     // newer rows, so this live, installation-specific catalog must never be reused.
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return finish_bounded_stream(j, [&](auto&) {
-        j += "{\"profile\":";
-        json_append_quoted(j, c.profile);
-        j += ",\"definition\":";
-        json_append_quoted(j, profile ? std::string_view(profile->id) : std::string_view{});
-        j += ",\"fallback\":";
-        j += fallback ? "true" : "false";
-        j += ",\"values\":[";
-        if (profile) {
-            const auto view = def::resolved(*profile);
-            bool comma = false;
-            for (size_t i = 0; i < view.count(); i++) {
-                const ValueDef& row = view[i];
-                if (!probe_catalog_row(row)) continue;
-                if (comma) j += ',';
-                comma = true;
-                j += "{\"reg\":";    append_json_uint(j, row.reg);
-                j += ",\"offset\":"; append_json_uint(j, row.offset);
-                j += ",\"conv\":";   append_json_uint(j, static_cast<uint64_t>(row.conv));
-                j += ",\"size\":";   append_json_uint(j, row.size);
-                j += ",\"label\":";  json_append_quoted(j, row.label);
-                j += '}';
-            }
+    j += "{\"profile\":";
+    json_append_quoted(j, c.profile);
+    j += ",\"definition\":";
+    json_append_quoted(j, profile ? std::string_view(profile->id) : std::string_view{});
+    j += ",\"fallback\":";
+    j += fallback ? "true" : "false";
+    j += ",\"values\":[";
+    if (profile) {
+        const auto view = def::resolved(*profile);
+        bool comma = false;
+        for (size_t i = 0; i < view.count(); i++) {
+            const ValueDef& row = view[i];
+            if (!probe_catalog_row(row)) continue;
+            if (comma) j += ',';
+            comma = true;
+            j += "{\"reg\":";    append_json_uint(j, row.reg);
+            j += ",\"offset\":"; append_json_uint(j, row.offset);
+            j += ",\"conv\":";   append_json_uint(j, static_cast<uint64_t>(row.conv));
+            j += ",\"size\":";   append_json_uint(j, row.size);
+            j += ",\"label\":";  json_append_quoted(j, row.label);
+            j += '}';
         }
-        j += "]}";
-    }) ? ESP_OK : ESP_FAIL;
+    }
+    j += "]}";
+    return j.finish() ? ESP_OK : ESP_FAIL;
 }
 
 // Model catalog + pin hint (def/models_catalog.hpp, generated alongside the def/*.hpp profiles).

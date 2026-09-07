@@ -1,7 +1,7 @@
 #pragma once
 // Atomic config persistence (F02). The credential + service settings — WiFi credentials, the one-shot
-// rollback backup + flags, MQTT, syslog, NTP, board-local hardware (v2), optional ENV III wiring (v11)
-// and explicit preset identity (v12) — are serialized into ONE length-checked,
+// rollback backup + flags, MQTT, syslog, NTP, board-local hardware (v2) and its explicit preset
+// identity (v11) — are serialized into ONE length-checked,
 // CRC32-protected byte blob and written to a single NVS key ("cfg"). A single nvs_set_blob is atomic
 // at the NVS entry level: either the whole new blob lands or the previous one remains. So a save is
 // all-or-nothing across BOTH a mid-write NVS failure AND a power cut, with no per-key rollback and no
