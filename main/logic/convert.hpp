@@ -96,7 +96,7 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
     Reading r;
     const int n = def.size;
     switch (def.conv) {
-        // Signed 16-bit; odd id = little-endian, even = big-endian; then a fixed-point scale.
+        // Signed 16-bit; even id = little-endian, odd = big-endian; then a fixed-point scale.
         case 101: r.value = read_s16(data, n, false);              r.ok = true; break;
         case 102: r.value = read_s16(data, n, true);               r.ok = true; break;
         case 103: r.value = read_s16(data, n, false) / 256.0;      r.ok = true; break;
