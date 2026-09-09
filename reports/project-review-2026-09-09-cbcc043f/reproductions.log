@@ -1,0 +1,13 @@
+reviewed_commit=d5fc344a191861ea3979635ad883fb0fc019a4c6
+config fail-after=cfg threw=1 cfg_writes=1 link_writes=0 decoded=1 RAM=old-example-network-name-for-review FLASH=new-example-network-name-for-review
+config fail-after=link threw=1 cfg_writes=1 link_writes=1 decoded=1 RAM=old-example-network-name-for-review FLASH=new-example-network-name-for-review
+weather opened=1 closed=0 cleaned=0
+ota exception_escaped_task=1 busy=1 task_deleted=0
+uart requested=0x61 reply_reg=0x20 accepted_len=20 crc=1 wrong_LWT=7.7 wire=40 20 12 6d 00 4d 00 00 00 00 00 00 00 00 00 00 00 00 00 d3
+uart production_formatter_ok=1 publish_value=7.7
+detect mask=0x1bff capacity=80 best=altherma_ebla_edla_d_series_4_8kw_monobloc
+detect mask=0x13ff capacity=80 best=altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3
+detect mask=0x0bff capacity=80 best=altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3
+hybrid raw=0x01 mode=Hybrid boiler_demand=0
+hybrid raw=0x09 mode=? boiler_demand=1
+hybrid raw=0x05 mode=? boiler_demand=0
