@@ -28,6 +28,7 @@ struct DetectResult {
     // why #225 narrows the set by the I/U fallback instead of leaving it spanning kW classes.
     std::vector<std::string> candidates; // (empty = none → generic)
     std::string best;                    // single best-fit id to READ with ("" = none → generic)
+    bool transport_incomplete = false; // sweep had dropped pages due to transport errors
 };
 
 // Run one detection pass on the configured rx/tx pins. UART I/O — call only from the poll task.

@@ -151,8 +151,11 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
                     set_text(r, (v < 7 && IU_MODE[v][0]) ? IU_MODE[v] : "?"); break; }
         case 203: { int v = data[0];                                          // error class
                     set_text(r, v < 4 ? ERR_TYPE[v] : "?"); break; }
-        case 316: { int v = data[0];                                          // hybrid mode
-                    set_text(r, v < 3 ? HYBRID[v] : "?"); break; }
+        case 316: {
+            int v = (data[0] >> 4) & 0x0F; // hybrid mode (high nibble)
+            set_text(r, v < 3 ? HYBRID[v] : "?");
+            break;
+        }
         case 211: r.value = data[0]; r.ok = true; break;                     // fan step (0 = stopped)
         case 204: { char t[3] = {ERR_C1[(data[0] >> 4) & 0xF], ERR_C2[data[0] & 0xF], 0};
                     set_text(r, t[0] == ' ' ? t + 1 : t); break; }            // error code (2 chars)

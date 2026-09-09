@@ -146,7 +146,7 @@ Startup / Defrost / … / Low-noise).
 | **203** | byte | Error class: `0` Normal, `1` Error, `2` Warning, `3` Caution |
 | **204** | byte | Error code — high nibble → first-char table, low nibble → second-char table, see [§4.3](#43-error-code-conv-204) |
 | 219 | byte | Indoor-unit capacity class code (maps to nominal kW) |
-| 316 | byte | Hybrid op mode: `0` H/P only, `1` Hybrid, `2` Boiler only |
+| 316 | `(byte & 0xF0) >> 4` (**high nibble**) | Hybrid op mode: `0` H/P only, `1` Hybrid, `2` Boiler only |
 | 314 / 317 | byte | Software/version codes |
 
 ### 3.5 Refrigerant type (const)

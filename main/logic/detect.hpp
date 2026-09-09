@@ -309,4 +309,30 @@ inline constexpr bool detect_commit_no_match(int consecutive_no_match) {
     return consecutive_no_match >= DETECT_NO_MATCH_CONFIRMATIONS;
 }
 
+// ── Incomplete sweeps: when a page dropped due to transport errors, do not jump models
+// ───────────── When a page fails to answer due to timeouts or CRC errors (rather than an
+// affirmative NAK), the reduced fingerprint can match a smaller/different profile family (e.g.
+// Monobloc -> Geo3). An incomplete sweep must be corroborated across consecutive passes before
+// committing.
+inline constexpr int DETECT_INCOMPLETE_CONFIRMATIONS = 2;
+
+inline constexpr bool detect_commit_incomplete(int consecutive_incomplete) {
+    return consecutive_incomplete >= DETECT_INCOMPLETE_CONFIRMATIONS;
+}
+
+// Track consecutive incomplete detections for corroboration.
+// Returns true when the same candidate profile has been corroborated across
+// DETECT_INCOMPLETE_CONFIRMATIONS consecutive passes. If the candidate profile changes
+// between passes, the confirmation tally resets.
+inline bool detect_incomplete_step(std::string& tracked_profile, int& consecutive_count,
+                                   const std::string& candidate_profile) {
+    if (tracked_profile != candidate_profile) {
+        tracked_profile   = candidate_profile;
+        consecutive_count = 1;
+    } else {
+        consecutive_count++;
+    }
+    return detect_commit_incomplete(consecutive_count);
+}
+
 } // namespace daik

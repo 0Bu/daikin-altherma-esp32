@@ -392,8 +392,17 @@ static void test_convert() {
     CHECK(convert(fs, f0).text[0] == '\0');
     CHECK(convert(fs, f5).ok && approx(convert(fs, f5).value, 5.0));
     ValueDef      hy{0x64, 2, 316, 1, -1, "hy"};
-    const uint8_t h1[] = {0x01};
+    const uint8_t h0[]  = {0x00};
+    const uint8_t h1[]  = {0x10};
+    const uint8_t h2[]  = {0x20};
+    const uint8_t h3[]  = {0x30};
+    const uint8_t h1e[] = {
+        0x1E}; // High nibble = 1 (Hybrid), low nibble = 0xE (boiler demand bits 3,2,1 set)
+    CHECK(std::string(convert(hy, h0).text) == "H/P only");
     CHECK(std::string(convert(hy, h1).text) == "Hybrid");
+    CHECK(std::string(convert(hy, h2).text) == "Boiler only");
+    CHECK(std::string(convert(hy, h3).text) == "?");
+    CHECK(std::string(convert(hy, h1e).text) == "Hybrid");
 
     // conv 801-805 = refrigerant type (encoded by the converter id; reads no bytes). The id ->
     // curve mapping in profile_refrigerant depends on each label decoding correctly.
@@ -1889,14 +1898,53 @@ static void test_detect() {
         CHECK(!generic_has_rps);           // no compressor witness for ou_stale either
     }
 
-    // The rule itself: one no-match sweep is not evidence, two are. A transient cannot survive two
-    // independent passes; a genuinely unrecognised unit says it twice and is then read with
-    // generic.
-    CHECK(DETECT_NO_MATCH_CONFIRMATIONS == 2);
-    CHECK(!detect_commit_no_match(0));
-    CHECK(!detect_commit_no_match(1)); // the case that used to pin `generic` at once
-    CHECK(detect_commit_no_match(2));
-    CHECK(detect_commit_no_match(3)); // saturates — never un-commits
+    // F01 regression test: lost A0 or A1 page must not immediately switch a Monobloc to Geo3.
+    // At capacity 80 (8.0 kW), the complete 0x1bff fingerprint identifies the Monobloc profile.
+    // If 0xA0 or 0xA1 drops due to transport errors, the reduced mask (0x13ff or 0x0bff) selects
+    // Geo3.
+    {
+        Fingerprint mono      = live;
+        mono.kw_tenths        = 80;
+        const char* best_full = detect_best(sigs, nsig, mono);
+        CHECK(best_full && std::string(best_full) == "altherma_ebla_edla_d_series_4_8kw_monobloc");
+
+        Fingerprint mono_no_a0 = mono;
+        mono_no_a0.page_mask &= ~page_mask_bit(0xA0);
+        CHECK(mono_no_a0.page_mask == 0x13ff);
+        const char* best_no_a0 = detect_best(sigs, nsig, mono_no_a0);
+        CHECK(best_no_a0 &&
+              std::string(best_no_a0) == "altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3");
+
+        Fingerprint mono_no_a1 = mono;
+        mono_no_a1.page_mask &= ~page_mask_bit(0xA1);
+        CHECK(mono_no_a1.page_mask == 0x0bff);
+        const char* best_no_a1 = detect_best(sigs, nsig, mono_no_a1);
+        CHECK(best_no_a1 &&
+              std::string(best_no_a1) == "altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3");
+    }
+
+    // Incomplete detection corroboration rule (F01):
+    // Requires DETECT_INCOMPLETE_CONFIRMATIONS consecutive identical passes before committing.
+    CHECK(DETECT_INCOMPLETE_CONFIRMATIONS == 2);
+    CHECK(!detect_commit_incomplete(0));
+    CHECK(!detect_commit_incomplete(1));
+    CHECK(detect_commit_incomplete(2));
+    CHECK(detect_commit_incomplete(3));
+
+    {
+        std::string tracked;
+        int         count = 0;
+        CHECK(!detect_incomplete_step(tracked, count, "geo3"));
+        CHECK(count == 1);
+        CHECK(tracked == "geo3");
+        CHECK(detect_incomplete_step(tracked, count, "geo3"));
+        CHECK(count == 2);
+        CHECK(tracked == "geo3");
+        // Changing candidate profile on next pass resets counter:
+        CHECK(!detect_incomplete_step(tracked, count, "monobloc"));
+        CHECK(count == 1);
+        CHECK(tracked == "monobloc");
+    }
 
     // ── EEPROM render: raw hex pairs for display ──
     const uint8_t ee[] = {0x0B, 0x02, 0x00, 0x01, 0x03, 0x02};
