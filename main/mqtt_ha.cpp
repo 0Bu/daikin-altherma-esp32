@@ -2814,33 +2814,39 @@ static bool promote_client_to_publisher() {
             diag_printf("mqtt: subscriber client stop failed (%s)\n", esp_err_to_name(stop_rc));
             return false;
         }
-        // esp_mqtt_client_stop() deliberately emits no DISCONNECTED event. Withdraw a possible
-        // BEFORE_CONNECT claim explicitly after the transport task has stopped; MqttPublishActivity
-        // still keeps the firmware acknowledgement false throughout this promotion.
-        s_transport_connecting.store(false, std::memory_order_release);
-        s_client_running.store(false, std::memory_order_release);
+    }
+    // esp_mqtt_client_stop() deliberately emits no DISCONNECTED event. Withdraw a possible
+    // BEFORE_CONNECT claim explicitly after the transport task has stopped; MqttPublishActivity
+    // still keeps the firmware acknowledgement false throughout this promotion.
+    s_transport_connecting.store(false, std::memory_order_release);
+    s_client_running.store(false, std::memory_order_release);
 
-        s_connected = false;
-        s_source_cleanup.invalidate_client();
-        s_source_cleanup_evidence.clear_after_producer_stop();
-        s_source_cleanup_evidence_lost.store(false, std::memory_order_release);
-        s_connected_client_epoch.store(0, std::memory_order_release);
-        set_status(false, "");
-        {
-            Lock lk(s_mtx);
-            s_ref_status.subscribed         = false;
-            s_circulation_status.subscribed = false;
-        }
-        s_ref_subscribed_topics = {};
-        s_circulation_subscribed_topic.clear();
-        s_circulation_probe_subscribed_topic.clear();
-        s_circulation_probe_task_generation = 0;
+    s_connected = false;
+    s_source_cleanup.invalidate_client();
+    s_source_cleanup_evidence.clear_after_producer_stop();
+    s_source_cleanup_evidence_lost.store(false, std::memory_order_release);
+    s_connected_client_epoch.store(0, std::memory_order_release);
+    set_status(false, "");
+    {
+        Lock lk(s_mtx);
+        s_ref_status.subscribed         = false;
+        s_circulation_status.subscribed = false;
+    }
+    s_ref_subscribed_topics = {};
+    s_circulation_subscribed_topic.clear();
+    s_circulation_probe_subscribed_topic.clear();
+    s_circulation_probe_task_generation = 0;
+    if (s_client) {
         esp_mqtt_client_destroy(s_client);
         s_client = nullptr;
     }
 
     if (!build_client(true) || !start_current_client()) {
         diag_printf("mqtt: publisher client promotion failed\n");
+        if (s_client) {
+            esp_mqtt_client_destroy(s_client);
+            s_client = nullptr;
+        }
         return false;
     }
     diag_printf("mqtt: X10A proven — publisher client started with installation LWT\n");
