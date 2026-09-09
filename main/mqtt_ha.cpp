@@ -2376,7 +2376,7 @@ static void mqtt_task(void*) {
     int heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;    // publish immediately on the first connected cycle
     int ha_retire_elapsed_s = HA_RETIRE_INTERVAL_S;
     MqttPublishGateState publish_gate = MqttPublishGateState::SubscriberOnly;
-    bool publisher_promotion_failed = false;
+    int                  publisher_promotion_retry_countdown_s = 0;
     OtaQuiesceState network_quiesce;                   // current TLS operation's hold-off budget
     bool network_quiesce_logged     = false;           // one diag line per operation, not per cycle
     bool network_quiesce_cap_logged = false;           // and one if that budget ever runs out
@@ -2406,6 +2406,10 @@ static void mqtt_task(void*) {
         // still reports the deepest frame the task has ever built.
         stack_watch_sample(StackWatch::Mqtt);
         const int delay_s = POLL_INTERVAL_S;
+        if (publisher_promotion_retry_countdown_s > 0) {
+            publisher_promotion_retry_countdown_s =
+                std::max(0, publisher_promotion_retry_countdown_s - delay_s);
+        }
 
         // STAND ASIDE while an OTA or weather HTTPS operation owns the heap (#380). Placed above
         // the try, before the first allocation of the cycle: everything below this point builds
@@ -2460,11 +2464,11 @@ static void mqtt_task(void*) {
             // client whose CONNECT packet carries the installation LWT. A clean stop means the old
             // no-LWT session cannot emit `offline`; publication begins only after the replacement
             // client reports MQTT_EVENT_CONNECTED on a later cycle.
-            if (gate.promote_publisher && !publisher_promotion_failed) {
+            if (gate.promote_publisher && publisher_promotion_retry_countdown_s == 0) {
                 if (promote_client_to_publisher()) {
                     publish_gate = gate.next;
                 } else {
-                    publisher_promotion_failed = true; // do not repeat a stop/destroy transition
+                    publisher_promotion_retry_countdown_s = 5; // retry after 5 s backoff
                 }
             } else if (!gate.promote_publisher) {
                 publish_gate = gate.next;
@@ -2803,39 +2807,37 @@ static bool start_current_client() {
 // boundary. Task-owned subscription bookkeeping is cleared because the broker discarded the old
 // clean session; MQTT_EVENT_CONNECTED on the replacement forces both exact-topic subscriptions.
 static bool promote_client_to_publisher() {
-    if (!s_client) {
-        set_status(false, "mqtt init failed");
-        return false;
-    }
-    const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);
-    if (stop_rc != ESP_OK) {
-        set_status(false, "client stop failed");
-        diag_printf("mqtt: subscriber client stop failed (%s)\n", esp_err_to_name(stop_rc));
-        return false;
-    }
-    // esp_mqtt_client_stop() deliberately emits no DISCONNECTED event. Withdraw a possible
-    // BEFORE_CONNECT claim explicitly after the transport task has stopped; MqttPublishActivity
-    // still keeps the firmware acknowledgement false throughout this promotion.
-    s_transport_connecting.store(false, std::memory_order_release);
-    s_client_running.store(false, std::memory_order_release);
+    if (s_client) {
+        const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);
+        if (stop_rc != ESP_OK) {
+            set_status(false, "client stop failed");
+            diag_printf("mqtt: subscriber client stop failed (%s)\n", esp_err_to_name(stop_rc));
+            return false;
+        }
+        // esp_mqtt_client_stop() deliberately emits no DISCONNECTED event. Withdraw a possible
+        // BEFORE_CONNECT claim explicitly after the transport task has stopped; MqttPublishActivity
+        // still keeps the firmware acknowledgement false throughout this promotion.
+        s_transport_connecting.store(false, std::memory_order_release);
+        s_client_running.store(false, std::memory_order_release);
 
-    s_connected = false;
-    s_source_cleanup.invalidate_client();
-    s_source_cleanup_evidence.clear_after_producer_stop();
-    s_source_cleanup_evidence_lost.store(false, std::memory_order_release);
-    s_connected_client_epoch.store(0, std::memory_order_release);
-    set_status(false, "");
-    {
-        Lock lk(s_mtx);
-        s_ref_status.subscribed = false;
-        s_circulation_status.subscribed = false;
+        s_connected = false;
+        s_source_cleanup.invalidate_client();
+        s_source_cleanup_evidence.clear_after_producer_stop();
+        s_source_cleanup_evidence_lost.store(false, std::memory_order_release);
+        s_connected_client_epoch.store(0, std::memory_order_release);
+        set_status(false, "");
+        {
+            Lock lk(s_mtx);
+            s_ref_status.subscribed         = false;
+            s_circulation_status.subscribed = false;
+        }
+        s_ref_subscribed_topics = {};
+        s_circulation_subscribed_topic.clear();
+        s_circulation_probe_subscribed_topic.clear();
+        s_circulation_probe_task_generation = 0;
+        esp_mqtt_client_destroy(s_client);
+        s_client = nullptr;
     }
-    s_ref_subscribed_topics = {};
-    s_circulation_subscribed_topic.clear();
-    s_circulation_probe_subscribed_topic.clear();
-    s_circulation_probe_task_generation = 0;
-    esp_mqtt_client_destroy(s_client);
-    s_client = nullptr;
 
     if (!build_client(true) || !start_current_client()) {
         diag_printf("mqtt: publisher client promotion failed\n");

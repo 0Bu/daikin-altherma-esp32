@@ -80,8 +80,8 @@
         "taken": 34
       },
       "main/logic/detect.hpp": {
-        "outcomes": 140,
-        "taken": 125
+        "outcomes": 142,
+        "taken": 127
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -434,8 +434,8 @@
         "taken": 46
       },
       "main/logic/detect.hpp": {
-        "outcomes": 158,
-        "taken": 141
+        "outcomes": 160,
+        "taken": 143
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -788,8 +788,8 @@
         "taken": 46
       },
       "main/logic/detect.hpp": {
-        "outcomes": 158,
-        "taken": 141
+        "outcomes": 160,
+        "taken": 143
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
