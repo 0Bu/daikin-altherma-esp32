@@ -1,1 +1,1 @@
-{"version":"1.0.5-dev.2","changelog":"v1.0.5-dev.2 — Resolve code audit findings in convert, http handlers, and docs\nv1.0.5-dev.2 — Supply verified check parameters to /ota/update and harden reboot detection"}
+{"version":"1.0.5-dev.4","changelog":"v1.0.5-dev.2 — Resolve code audit findings in convert, http handlers, and docs\nv1.0.5-dev.2 — Supply verified check parameters to /ota/update and harden reboot detection\nv1.0.5-dev.4 — Preserve exact OTA contract sequence in promote_client_to_publisher\nv1.0.5-dev.4 — Resolve review findings F01, F02, F06, F09, F11"}
