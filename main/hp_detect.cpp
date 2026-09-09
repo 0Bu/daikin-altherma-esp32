@@ -18,11 +18,11 @@ static const uint8_t PROBE_PAGES[] = {
     0x00, 0x10, 0x11, 0x20, 0x21, 0x30, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0xA0, 0xA1};
 
 // Query one register; on a valid reply copy its payload into out[0..outmax) and return the payload
-// length, else -1. (hp_query already strips framing/CRC and returns <0 on timeout/NAK/bad CRC.)
+// length, else the hp_query negative code (<0: -2 = NAK/rejected, -1 = timeout/invalid, -3 = bad CRC).
 static int read_page(uint8_t reg, Protocol proto, uint8_t* out, int outmax) {
     uint8_t buf[64];
     const int n = hp_query(reg, proto, buf, sizeof(buf), HpQueryLogPolicy::IntegrityOnly);
-    if (n <= 0) return -1;
+    if (n <= 0) return n;
     const int poff = payload_offset(proto);
     int paylen = n - poff - 1;                       // minus header, minus CRC byte
     if (paylen < 0) paylen = 0;
@@ -60,15 +60,23 @@ static constexpr int DETECT_PAGE_TRIES = 3;
 // reader to ignore it. Now 0 is healthy and any non-zero is a real dropped reply that the retry
 // caught — which is the number worth watching, since that is the failure #214 is about. A page that
 // never answered needs no counter: its bit is already absent from the page mask on the same line.
+// Returns payload length on success (>=0), -2 on affirmative NAK (0x15 0xEA), or -1/-3 on transport failure.
 static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& recovered) {
+    int last_err = -1;
     for (int attempt = 0; attempt < DETECT_PAGE_TRIES; attempt++) {
         const int n = read_page(reg, proto, out, outmax);
         if (n >= 0) {
             recovered += attempt;                    // 0 on a first-try answer
             return n;
         }
+        last_err = n;
+        if (n == -2) {
+            // Negative reply (0x15 0xEA) from the unit: the heat pump affirmatively does not
+            // support this page. No need to retry.
+            return -2;
+        }
     }
-    return -1;                                       // absent, not dropped — nothing to report
+    return last_err;                                 // -1 or -3: transport failure after retries
 }
 
 DetectResult hp_detect_run() {
@@ -148,10 +156,14 @@ DetectResult hp_detect_run() {
     uint8_t pageA0[32]; int lenA0 = -1;              // O/U-II rows — raw, for the diag dump below
     uint8_t pageA1[32]; int lenA1 = -1;
     int probe_retries = 0;                           // dropped replies the retry RECOVERED (0 = healthy)
+    int probe_transport_errors = 0;
     for (uint8_t reg : PROBE_PAGES) {
         uint8_t pay[32];
         const int paylen = read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries);
-        if (paylen < 0) continue;
+        if (paylen < 0) {
+            if (paylen != -2 && reg != 0x11) probe_transport_errors++;
+            continue;
+        }
         if (reg == 0x11) {
             len11 = paylen;
             for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page11)); i++) page11[i] = pay[i];
@@ -226,10 +238,11 @@ DetectResult hp_detect_run() {
         eeprom_render(fp.eeprom, 6, ee, static_cast<int>(sizeof(ee)));
     }
 
-    r.page_mask    = fp.page_mask;
-    r.kw_tenths    = fp.kw_tenths;
-    r.iu_kw_tenths = fp.iu_kw_tenths;
-    r.eeprom       = ee;
+    r.page_mask            = fp.page_mask;
+    r.kw_tenths            = fp.kw_tenths;
+    r.iu_kw_tenths         = fp.iu_kw_tenths;
+    r.eeprom               = ee;
+    r.transport_incomplete = (probe_transport_errors > 0);
 
     // 5. Narrow to the best-fitting candidate profiles.
     int nsig = 0;
@@ -254,9 +267,9 @@ DetectResult hp_detect_run() {
     // page probe is working harder to hold the fingerprint together, which is the condition that
     // used to change the model silently (#214). It counts only retries that RECOVERED a page, so 0
     // is the healthy reading and any non-zero is a reply that was actually dropped.
-    diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d iu_kw=%d eeprom=[%s] retries=%d -> %d candidate(s), best=%s\n",
+    diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d iu_kw=%d eeprom=[%s] retries=%d transport_err=%d -> %d candidate(s), best=%s\n",
                 static_cast<char>(r.proto), r.rx, r.tx, static_cast<unsigned>(fp.page_mask),
-                fp.kw_tenths, fp.iu_kw_tenths, ee, probe_retries, n,
+                fp.kw_tenths, fp.iu_kw_tenths, ee, probe_retries, probe_transport_errors, n,
                 r.best.empty() ? "(none)" : r.best.c_str());
     return r;
 }

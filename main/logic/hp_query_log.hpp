@@ -22,6 +22,7 @@ enum class HpQueryFailure : uint8_t {
     Rejected,
     ShortReply,
     InvalidLength,
+    InvalidHeader,
     BadCrc,
 };
 

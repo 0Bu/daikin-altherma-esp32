@@ -59,6 +59,16 @@ inline bool is_error_reply(const uint8_t* buf, int len) {
     return len >= 2 && buf[0] == 0x15 && buf[1] == 0xea;
 }
 
+// Check if an incoming reply matches the expected query opcode and register.
+// For Protocol I, reply MUST start with 0x40 followed by the queried register.
+// Protocol S replies do not echo 0x40/reg in the same header format.
+inline bool reply_header_matches(const uint8_t* buf, int len, uint8_t expected_reg, Protocol proto) {
+    if (proto == Protocol::I) {
+        return len >= 2 && buf[0] == 0x40 && buf[1] == expected_reg;
+    }
+    return true;
+}
+
 // Verify the trailing-byte checksum over the first len-1 bytes.
 inline bool crc_ok(const uint8_t* buf, int len) {
     return len >= 1 && crc(buf, len - 1) == buf[len - 1];

@@ -44,6 +44,7 @@
 #include "logic/health_gate.hpp"
 #include "logic/version_cmp.hpp"
 #include "logic/ota_channel.hpp"
+#include "logic/ota_message.hpp"
 #include "logic/ui_lang.hpp"
 #include "logic/ota_headroom.hpp"
 #include "logic/ota_manifest.hpp"
@@ -182,6 +183,33 @@ static void test_crc() {
             CHECK(reply_len_fits(n, 64));
         }
     }
+    // Protocol I reply header must match opcode 0x40 and echoed register
+    const uint8_t hdr_ok[] = {0x40, 0x61, 0x12};
+    CHECK(reply_header_matches(hdr_ok, 3, 0x61, Protocol::I));
+    // Mismatched register echo (e.g. delayed response for 0x20 when querying 0x61)
+    const uint8_t hdr_delayed[] = {0x40, 0x20, 0x12};
+    CHECK(!reply_header_matches(hdr_delayed, 3, 0x61, Protocol::I));
+    // Invalid opcode (not 0x40)
+    const uint8_t hdr_bad_op[] = {0x41, 0x61, 0x12};
+    CHECK(!reply_header_matches(hdr_bad_op, 3, 0x61, Protocol::I));
+    // Short header (< 2 bytes)
+    const uint8_t hdr_short[] = {0x40};
+    CHECK(!reply_header_matches(hdr_short, 1, 0x61, Protocol::I));
+    // Protocol S is not bound by 0x40 header
+    CHECK(reply_header_matches(hdr_delayed, 3, 0x61, Protocol::S));
+
+    // Full delayed response witness frame from F05 (20 bytes for 0x20 arriving while querying 0x61):
+    // 40 20 12 6D 00 4D 00 00 00 00 00 00 00 00 00 00 00 00 00 D3
+    const uint8_t delayed_0x20[] = {
+        0x40, 0x20, 0x12, 0x6D, 0x00, 0x4D, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xD3
+    };
+    CHECK(crc_ok(delayed_0x20, sizeof(delayed_0x20)));
+    CHECK(reply_len_dynamic(delayed_0x20) == 20);
+    // Header check rejects it when expecting reg 0x61:
+    CHECK(!reply_header_matches(delayed_0x20, sizeof(delayed_0x20), 0x61, Protocol::I));
+    // Header check accepts it when expecting reg 0x20:
+    CHECK(reply_header_matches(delayed_0x20, sizeof(delayed_0x20), 0x20, Protocol::I));
 }
 
 static void test_hp_query_log_policy() {
@@ -192,9 +220,11 @@ static void test_hp_query_log_policy() {
     CHECK(!hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::Rejected));
     CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::ShortReply));
     CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::InvalidLength));
+    CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::InvalidHeader));
     CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::BadCrc));
     CHECK(hp_query_should_log(HpQueryLogPolicy::All, HpQueryFailure::NoReply));
     CHECK(hp_query_should_log(HpQueryLogPolicy::All, HpQueryFailure::Rejected));
+    CHECK(hp_query_should_log(HpQueryLogPolicy::All, HpQueryFailure::InvalidHeader));
 }
 
 static void test_registers() {
@@ -319,8 +349,25 @@ static void test_convert() {
     CHECK(convert(fs, f0).text[0] == '\0');
     CHECK(convert(fs, f5).ok && approx(convert(fs, f5).value, 5.0));
     ValueDef hy{0x64, 2, 316, 1, -1, "hy"};
-    const uint8_t h1[] = {0x01};
+    const uint8_t h0[] = {0x00}; // high nibble 0 -> H/P only
+    const uint8_t h1[] = {0x10}; // high nibble 1 -> Hybrid
+    const uint8_t h2[] = {0x20}; // high nibble 2 -> Boiler only
+    const uint8_t h3[] = {0x30}; // high nibble 3 -> out of range "?"
+    CHECK(std::string(convert(hy, h0).text) == "H/P only");
     CHECK(std::string(convert(hy, h1).text) == "Hybrid");
+    CHECK(std::string(convert(hy, h2).text) == "Boiler only");
+    CHECK(std::string(convert(hy, h3).text) == "?");
+
+    // Coexisting low-nibble demand bits (bit 3 = Boiler Operation Demand, bit 2 = Boiler DHW Demand, bit 1 = Bypass Valve)
+    // must not perturb the high-nibble hybrid mode, and vice versa:
+    ValueDef boiler_op_demand{0x64, 2, 303, 1, -1, "bod"};
+    ValueDef boiler_dhw_demand{0x64, 2, 302, 1, -1, "bdd"};
+    ValueDef bypass_valve{0x64, 2, 301, 1, -1, "bpv"};
+    const uint8_t h_demand[] = {0x1E}; // high nibble 1 (Hybrid), bits 3, 2, 1 set
+    CHECK(std::string(convert(hy, h_demand).text) == "Hybrid");
+    CHECK(convert(boiler_op_demand, h_demand).ok && approx(convert(boiler_op_demand, h_demand).value, 1.0));
+    CHECK(convert(boiler_dhw_demand, h_demand).ok && approx(convert(boiler_dhw_demand, h_demand).value, 1.0));
+    CHECK(convert(bypass_valve, h_demand).ok && approx(convert(bypass_valve, h_demand).value, 1.0));
 
     // conv 801-805 = refrigerant type (encoded by the converter id; reads no bytes). The id -> curve
     // mapping in profile_refrigerant depends on each label decoding correctly.
@@ -700,6 +747,10 @@ static void test_config_model() {
     CHECK(!config_save_succeeded(true, false, true));
     CHECK(!config_save_succeeded(false, true, false));
     CHECK(!config_save_succeeded(false, true, true));
+
+    // Staging and publishing the config must be strictly noexcept (F04)
+    CHECK(std::is_nothrow_move_constructible<Config>::value);
+    CHECK(std::is_nothrow_move_assignable<Config>::value);
 
     Config c;
     c.rx_pin = 44; c.tx_pin = 43;
@@ -1696,6 +1747,56 @@ static void test_detect() {
     CHECK(!detect_commit_no_match(1));                  // the case that used to pin `generic` at once
     CHECK(detect_commit_no_match(2));
     CHECK(detect_commit_no_match(3));                   // saturates — never un-commits
+
+    // Incomplete sweep corroboration: a sweep where pages dropped to transport errors must not
+    // jump models on a single pass (e.g. Monobloc losing 0xA0/0xA1 picking Geo3).
+    CHECK(DETECT_INCOMPLETE_CONFIRMATIONS == 2);
+    CHECK(!detect_commit_incomplete(0));
+    CHECK(!detect_commit_incomplete(1));
+    CHECK(detect_commit_incomplete(2));
+    CHECK(detect_commit_incomplete(3));
+
+    // detect_incomplete_step requires the SAME candidate model across consecutive incomplete passes
+    {
+        std::string tracked;
+        int count = 0;
+        // Pass 1: candidate Geo3 -> incomplete, not committed (pass 1/2)
+        CHECK(!detect_incomplete_step(tracked, count, "geo3"));
+        CHECK(tracked == "geo3" && count == 1);
+
+        // Pass 2: different candidate dropped another page -> resets count to 1, not committed!
+        CHECK(!detect_incomplete_step(tracked, count, "ech2o"));
+        CHECK(tracked == "ech2o" && count == 1);
+
+        // Pass 3: same candidate ech2o -> confirmed (pass 2/2)!
+        CHECK(detect_incomplete_step(tracked, count, "ech2o"));
+        CHECK(tracked == "ech2o" && count == 2);
+
+        // Pass 4: same candidate ech2o -> continues confirmed (pass 3/2)
+        CHECK(detect_incomplete_step(tracked, count, "ech2o"));
+        CHECK(tracked == "ech2o" && count == 3);
+    }
+
+    // Monobloc -> Geo3 regression check (F01):
+    {
+        Fingerprint mono = live; // 0x1bff, kw=80
+        CHECK(std::string(detect_best(sigs, nsig, mono)) == "altherma_ebla_edla_d_series_4_8kw_monobloc");
+
+        // When 0xA0 drops, remaining mask is 0x13ff:
+        Fingerprint lost_a0 = mono;
+        lost_a0.page_mask &= ~page_mask_bit(0xA0);
+        CHECK(lost_a0.page_mask == 0x13ff);
+        CHECK(std::string(detect_best(sigs, nsig, lost_a0)) == "altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3");
+
+        // When 0xA1 drops, remaining mask is 0x0bff:
+        Fingerprint lost_a1 = mono;
+        lost_a1.page_mask &= ~page_mask_bit(0xA1);
+        CHECK(lost_a1.page_mask == 0x0bff);
+        CHECK(std::string(detect_best(sigs, nsig, lost_a1)) == "altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3");
+
+        // The incomplete-sweep gate requires corroboration before committing this change:
+        CHECK(!detect_commit_incomplete(1));
+    }
 
     // ── EEPROM render: raw hex pairs for display ──
     const uint8_t ee[] = {0x0B, 0x02, 0x00, 0x01, 0x03, 0x02};
@@ -4959,6 +5060,70 @@ static void test_ota_channel() {
     CHECK(ota_version_is_dev("1.0.8-dev.3") && ota_version_is_dev("1.0.8-dev"));
     CHECK(!ota_version_is_dev("1.0.8") && !ota_version_is_dev("1.0.8-rcdev") && !ota_version_is_dev(""));
     CHECK(!ota_version_is_dev("1.0.8-PR-42"));      // a PR preview build is its own thing
+}
+
+// ── Bounded non-allocating OTA message (logic/ota_message.hpp, F07) ─────────────────────────
+static void test_ota_message() {
+    OtaMessage msg;
+    CHECK(msg.empty());
+    CHECK(std::strcmp(msg.c_str(), "") == 0);
+    CHECK(msg == "");
+    CHECK("" == msg);
+    CHECK(msg == std::string(""));
+    CHECK(std::string("") == msg);
+
+    // Construction and assignment from string literals and std::string
+    OtaMessage m1("Out of memory — retry in a moment");
+    CHECK(!m1.empty());
+    CHECK(m1 == "Out of memory — retry in a moment");
+    CHECK("Out of memory — retry in a moment" == m1);
+    CHECK(m1 != "other");
+    CHECK("other" != m1);
+    CHECK(m1 == std::string("Out of memory — retry in a moment"));
+    CHECK(std::string("Out of memory — retry in a moment") == m1);
+    CHECK(m1 != std::string("other"));
+    CHECK(std::string("other") != m1);
+
+    OtaMessage m2 = std::string("error");
+    CHECK(m2 == "error");
+    m2 = "idle";
+    CHECK(m2 == "idle");
+    m2 = std::string("updating");
+    CHECK(m2 == "updating");
+
+    // Copying and comparing two OtaMessage instances
+    OtaMessage m3 = m2;
+    CHECK(m3 == m2);
+    CHECK(!(m3 != m2));
+    m3 = "done";
+    CHECK(m3 != m2);
+    CHECK(!(m3 == m2));
+
+    // String view conversion
+    std::string_view sv = m1;
+    CHECK(sv == "Out of memory — retry in a moment");
+
+    // Null safety
+    m2.assign(nullptr);
+    CHECK(m2.empty());
+    CHECK(m2 == "");
+
+    // Clear
+    m1.clear();
+    CHECK(m1.empty());
+
+    // Truncation at buffer limit (128 bytes including NUL)
+    std::string long_str(200, 'x');
+    OtaMessage m_long(long_str);
+    CHECK(std::strlen(m_long.c_str()) == 127);
+    CHECK(m_long.c_str()[127] == '\0');
+
+    // Nothrow verification
+    static_assert(std::is_nothrow_default_constructible<OtaMessage>::value);
+    static_assert(std::is_nothrow_copy_constructible<OtaMessage>::value);
+    static_assert(std::is_nothrow_copy_assignable<OtaMessage>::value);
+    static_assert(std::is_nothrow_move_constructible<OtaMessage>::value);
+    static_assert(std::is_nothrow_move_assignable<OtaMessage>::value);
 }
 
 // ── UI language override (logic/ui_lang.hpp) ─────────────────────────────────────────────────
@@ -13355,6 +13520,7 @@ int main() {
     test_version_cmp();
     test_ota_manifest();
     test_ota_channel();
+    test_ota_message();
     test_ui_lang();
     test_profile_view();
     test_metric_identity();

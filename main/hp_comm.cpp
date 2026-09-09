@@ -97,8 +97,14 @@ int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen,
             if (static_cast<size_t>(len) < buflen) buf[len] = ch;
             len++;
             if (proto == Protocol::I && len == 3) {
+                if (!reply_header_matches(buf, len, reg, proto)) {
+                    if (hp_query_should_log(log_policy, HpQueryFailure::InvalidHeader))
+                        diag_printf("HP invalid reply header 0x%02x 0x%02x on reg 0x%02x (rx=%d tx=%d)\n",
+                                    buf[0], buf[1], reg, s_rx, s_tx);
+                    return -1;
+                }
                 replyLen = reply_len_dynamic(buf);
-                if (!reply_len_fits(replyLen, buflen)) {
+                if (!reply_len_fits(replyLen, buflen) || replyLen < 4) {
                     if (hp_query_should_log(log_policy, HpQueryFailure::InvalidLength))
                         diag_printf("HP invalid dynamic reply len %d (max %u) on reg 0x%02x (rx=%d tx=%d)\n",
                                     replyLen, static_cast<unsigned>(buflen), reg, s_rx, s_tx);
@@ -123,6 +129,11 @@ int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen,
         if (hp_query_should_log(log_policy, HpQueryFailure::ShortReply))
             diag_printf("HP short reply reg 0x%02x %d/%d (rx=%d tx=%d)\n",
                         reg, len, replyLen, s_rx, s_tx);
+        return -1;
+    }
+    if (!reply_header_matches(buf, len, reg, proto)) {
+        if (hp_query_should_log(log_policy, HpQueryFailure::InvalidHeader))
+            diag_printf("HP invalid reply header on reg 0x%02x (rx=%d tx=%d)\n", reg, s_rx, s_tx);
         return -1;
     }
     if (!crc_ok(buf, len)) {

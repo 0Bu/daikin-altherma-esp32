@@ -12,7 +12,10 @@
 // second binds a lying manifest to the bytes actually served. See docs/SECURITY.md → OTA image
 // signing, docs/ARCHITECTURE.md → OTA, logic/version_cmp.hpp and logic/health_gate.hpp.
 #include <cstdint>
+#include <cstring>
 #include <string>
+#include <string_view>
+#include "logic/ota_message.hpp"
 
 namespace daik {
 
@@ -53,9 +56,9 @@ void ota_health_gate_arm();                        // main.cpp: arm rollback hea
 bool ota_download_active();
 
 struct OtaStatus {
-    std::string state;            // idle|checking|updating|done|error
+    OtaMessage  state;            // idle|checking|updating|done|error
     int         progress = 0;     // 0..100
-    std::string message;
+    OtaMessage  message;
     bool        update_available = false;
     std::string available;        // manifest version of the SELECTED channel
     std::string current;          // running version

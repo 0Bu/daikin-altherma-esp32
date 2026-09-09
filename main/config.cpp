@@ -70,15 +70,19 @@ static uint32_t next_revision(uint32_t current) {
     return next ? next : 1;
 }
 
-static void publish_locked(const Config& requested) {
-    Config c = requested;
-    c.runtime_revision = next_revision(g_cfg.runtime_revision);
-    g_cfg = std::move(c);
+static_assert(std::is_nothrow_move_constructible<Config>::value,
+              "Config must be nothrow move constructible for no-throw commit");
+static_assert(std::is_nothrow_move_assignable<Config>::value,
+              "Config must be nothrow move assignable for no-throw commit");
+
+static void publish_locked(Config requested) noexcept {
+    requested.runtime_revision = next_revision(g_cfg.runtime_revision);
+    g_cfg = std::move(requested);
 }
 
-static void publish(const Config& c) {
+static void publish(Config c) {
     Lock lk(g_mtx);
-    publish_locked(c);
+    publish_locked(std::move(c));
 }
 
 void config_load() {
@@ -438,7 +442,12 @@ bool config_save(const Config& requested, bool require_link) {
                     static_cast<unsigned>(CONFIG_BLOB_MAX_STR));
         return false;
     }
+    // Prepare ALL serializations and stage the new RAM configuration BEFORE writing to flash.
+    // If any allocation throws std::bad_alloc, flash remains completely untouched.
     const std::vector<uint8_t> blob = config_blob_serialize(b);
+    const std::vector<uint8_t> link = link_blob_serialize(
+        LinkBlob{c.rx_pin, c.tx_pin, static_cast<char>(c.proto), c.x10a_identity_fp});
+    Config staged = c;
 
     const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());
     if (e != ESP_OK) {
@@ -450,8 +459,6 @@ bool config_save(const Config& requested, bool require_link) {
 
     // The link remains a separate ownership domain, but its four fields are ONE atomic entry. It is
     // written after the service blob so a cache failure never taints an unrelated credential save.
-    const std::vector<uint8_t> link = link_blob_serialize(
-        LinkBlob{c.rx_pin, c.tx_pin, static_cast<char>(c.proto), c.x10a_identity_fp});
     const esp_err_t link_err = nvs_set_blob("link", link.data(), link.size());
     const bool link_ok = link_err == ESP_OK;
     if (!link_ok)
@@ -463,7 +470,7 @@ bool config_save(const Config& requested, bool require_link) {
         // /set_hp changed none of its fields; for every other route that blob is the requested save.)
         return false;
     }
-    publish_locked(c);
+    publish_locked(std::move(staged));
     return true;
 }
 

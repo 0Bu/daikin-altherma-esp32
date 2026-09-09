@@ -206,7 +206,7 @@ esp_err_t open_firmware_stream(esp_http_client_handle_t client, OtaRedirectLocat
     return ESP_FAIL;
 }
 
-void set_state(const char* state, const char* message = "") {
+void set_state(const char* state, const char* message = "") noexcept {
     Lock lk(s_mtx);
     s_status.state   = state;
     s_status.message = message;
@@ -760,6 +760,12 @@ void ota_task(void* arg) {
     const char mode      = arg ? *static_cast<const char*>(arg) : 0;
     const bool update    = mode != 0;
     const bool downgrade = mode == kUpdateDowngradeMode;
+    struct BusyGuard {
+        ~BusyGuard() {
+            Lock lk(s_mtx);
+            s_busy = false;
+        }
+    } busy_guard;
     {
         OtaNetworkFlag active;
         vTaskDelay(kNetworkQuiesceLead);

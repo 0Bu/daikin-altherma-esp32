@@ -69,6 +69,8 @@ static std::atomic<bool>     s_ota_quiesced{false};
 // backoff above. Falling back to `generic` costs ~46 rows including every derived figure, so it
 // waits for corroboration rather than acting on one sweep (detect_commit_no_match, #214).
 static int                   s_no_match = 0;
+static int                   s_incomplete_detect = 0;
+static std::string           s_incomplete_profile;
 
 // Raw page-dump budget for the RUNNING compressor (logic/raw_capture.hpp) — poll-task-owned, RAM
 // only, never refilled within a boot. The detect-pass dump in hp_detect.cpp captures the same pages
@@ -418,11 +420,13 @@ static bool poll_detect() {                         // false only when an attemp
     const uint32_t identity_fp = logic::history_x10a_target_fingerprint(
         detected_profile.c_str(), d.rx, d.tx, static_cast<char>(d.proto));
     bool first_no_match = false;
+    bool first_incomplete = false;
     bool generic_committed = false;
     bool link_saved = true;
     bool committed = false;
     uint32_t link_revision = 0;
     int no_match_count = 0;
+    int incomplete_count = 0;
     {
         // This is the detect/reconfigure commit barrier. The sweep itself stays unlocked, but every
         // side effect (NVS link, RAM model, identity resets) is conditional on the captured target
@@ -433,6 +437,8 @@ static bool poll_detect() {                         // false only when an attemp
         if (s_target_generation.load(std::memory_order_acquire) != cycle_generation) return true;
 
         if (d.best.empty()) {
+            s_incomplete_detect = 0;
+            s_incomplete_profile.clear();
             no_match_count = ++s_no_match;
             if (!detect_commit_no_match(no_match_count)) {
                 // Do not cache either a generic identity or a changed link on the unconfirmed pass:
@@ -441,11 +447,24 @@ static bool poll_detect() {                         // false only when an attemp
             } else {
                 generic_committed = true;
             }
+        } else if (d.transport_incomplete) {
+            s_no_match = 0;
+            const bool confirmed = detect_incomplete_step(
+                s_incomplete_profile, s_incomplete_detect, d.best);
+            incomplete_count = s_incomplete_detect;
+            if (!confirmed) {
+                // Do not commit a model that might be an artifact of lost pages without confirmation
+                first_incomplete = true;
+            }
         } else {
             s_no_match = 0;
+            s_incomplete_detect = 0;
+            s_incomplete_profile.clear();
         }
 
-        if (!first_no_match) {
+        if (first_incomplete) {
+            // Unconfirmed incomplete sweep: transport errors might have obscured pages, do not commit yet
+        } else if (!first_no_match) {
             committed = config_commit_detected_link(
                 expected, d.rx, d.tx, d.proto, identity_fp, link_saved, link_revision);
             if (committed) {
@@ -464,6 +483,11 @@ static bool poll_detect() {                         // false only when an attemp
     if (first_no_match) {
         diag_printf("detect: no profile matched (pass %d/%d) — re-detecting before falling back to generic\n",
                     no_match_count, DETECT_NO_MATCH_CONFIRMATIONS);
+        return true;
+    }
+    if (first_incomplete) {
+        diag_printf("detect: sweep incomplete due to transport errors (pass %d/%d) — re-detecting before committing model %s\n",
+                    incomplete_count, DETECT_INCOMPLETE_CONFIRMATIONS, detected_profile.c_str());
         return true;
     }
     if (!committed) {
@@ -581,7 +605,8 @@ static void poll_task(void*) {
                 // about the PREVIOUS sweeps, and carrying it over would let a fresh request inherit
                 // a confirmation it never earned.
                 if (s_detect_reset.exchange(false)) {
-                    s_backoff.silent = 0; s_next_detect_us = 0; s_no_match = 0;
+                    s_backoff.silent = 0; s_next_detect_us = 0; s_no_match = 0; s_incomplete_detect = 0;
+                    s_incomplete_profile.clear();
                 }
                 const int64_t now = esp_timer_get_time();
                 if (now >= s_next_detect_us) {

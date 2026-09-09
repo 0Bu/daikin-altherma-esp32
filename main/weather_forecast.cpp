@@ -23,6 +23,7 @@
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,18 @@ std::string open_meteo_url(const Config& cfg) {
            "&forecast_hours=6&timeformat=unixtime&timezone=GMT&temperature_unit=celsius";
 }
 
+struct HttpClientGuard {
+    esp_http_client_handle_t client = nullptr;
+    bool opened = false;
+    ~HttpClientGuard() noexcept {
+        if (client) {
+            if (opened) esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            client = nullptr;
+        }
+    }
+};
+
 bool download_json(const Config& weather, std::string& out, std::string& error) {
     const std::string url = open_meteo_url(weather);
     const HttpClientProbe before = http_client_probe();
@@ -81,39 +94,45 @@ bool download_json(const Config& weather, std::string& out, std::string& error) 
         error = "out_of_memory";
         return false;
     }
+    HttpClientGuard guard{client, false};
     esp_http_client_set_header(client, "Accept", "application/json");
+
+    out.clear();
+    out.reserve(2048);
 
     bool ok = false;
     const esp_err_t opened = esp_http_client_open(client, 0);
     if (opened != ESP_OK) {
         http_client_log_open_failure("weather", client, opened, before);
         error = "connect_failed";
-    } else if (esp_http_client_fetch_headers(client) < 0) {
-        error = "response_failed";
-    } else if (esp_http_client_get_status_code(client) != 200) {
-        error = "http_" + std::to_string(esp_http_client_get_status_code(client));
     } else {
-        const int64_t claimed = esp_http_client_get_content_length(client);
-        if (claimed > static_cast<int64_t>(kPayloadMax)) {
-            error = "payload_too_large";
+        guard.opened = true;
+        if (esp_http_client_fetch_headers(client) < 0) {
+            error = "response_failed";
+        } else if (esp_http_client_get_status_code(client) != 200) {
+            error = "http_" + std::to_string(esp_http_client_get_status_code(client));
         } else {
-            out.clear();
-            out.reserve(static_cast<size_t>(claimed > 0 ? std::min<int64_t>(claimed, 2048) : 2048));
-            char chunk[1024];
-            while (out.size() <= kPayloadMax) {
-                const int n = esp_http_client_read(client, chunk, sizeof(chunk));
-                if (n < 0) { error = "read_failed"; break; }
-                if (n == 0) { ok = !out.empty(); if (!ok) error = "empty_payload"; break; }
-                if (out.size() + static_cast<size_t>(n) > kPayloadMax) {
-                    error = "payload_too_large";
-                    break;
+            const int64_t claimed = esp_http_client_get_content_length(client);
+            if (claimed > static_cast<int64_t>(kPayloadMax)) {
+                error = "payload_too_large";
+            } else {
+                if (claimed > 2048) {
+                    out.reserve(static_cast<size_t>(claimed));
                 }
-                out.append(chunk, static_cast<size_t>(n));
+                char chunk[1024];
+                while (out.size() <= kPayloadMax) {
+                    const int n = esp_http_client_read(client, chunk, sizeof(chunk));
+                    if (n < 0) { error = "read_failed"; break; }
+                    if (n == 0) { ok = !out.empty(); if (!ok) error = "empty_payload"; break; }
+                    if (out.size() + static_cast<size_t>(n) > kPayloadMax) {
+                        error = "payload_too_large";
+                        break;
+                    }
+                    out.append(chunk, static_cast<size_t>(n));
+                }
             }
         }
     }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
     return ok;
 }
 
@@ -153,13 +172,14 @@ bool json_unit(cJSON* units, const char* key, const char* expected) {
 
 bool parse_forecast(const std::string& payload, int64_t fetched_unix_s,
                     WeatherForecastSample& sample, std::string& error) {
-    cJSON* root = cJSON_ParseWithLength(payload.data(), payload.size());
+    std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(
+        cJSON_ParseWithLength(payload.data(), payload.size()), &cJSON_Delete);
     if (!root) { error = "json_invalid"; return false; }
     bool ok = false;
     do {
-        cJSON* utc_offset = cJSON_GetObjectItemCaseSensitive(root, "utc_offset_seconds");
-        cJSON* hourly = cJSON_GetObjectItemCaseSensitive(root, "hourly");
-        cJSON* units = cJSON_GetObjectItemCaseSensitive(root, "hourly_units");
+        cJSON* utc_offset = cJSON_GetObjectItemCaseSensitive(root.get(), "utc_offset_seconds");
+        cJSON* hourly = cJSON_GetObjectItemCaseSensitive(root.get(), "hourly");
+        cJSON* units = cJSON_GetObjectItemCaseSensitive(root.get(), "hourly_units");
         if (!cJSON_IsNumber(utc_offset) || utc_offset->valuedouble != 0 ||
             !cJSON_IsObject(hourly) || !cJSON_IsObject(units)) {
             error = "payload_shape_invalid";
@@ -192,7 +212,6 @@ bool parse_forecast(const std::string& payload, int64_t fetched_unix_s,
         if (!validation.valid) { error = validation.reason; break; }
         ok = true;
     } while (false);
-    cJSON_Delete(root);
     return ok;
 }
 

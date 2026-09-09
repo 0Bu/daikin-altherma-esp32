@@ -106,6 +106,7 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -1182,12 +1183,12 @@ static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& fr
     const bool setpoint_frame = !setpoint_topic.empty() && frame.topic == setpoint_topic;
     const bool timestamp_frame = !timestamp_topic.empty() && frame.topic == timestamp_topic;
     if (!temperature_frame && !setpoint_frame && !timestamp_frame) return out;
-    cJSON* root = cJSON_ParseWithLength(frame.payload, frame.payload_len);
+    std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(
+        cJSON_ParseWithLength(frame.payload, frame.payload_len), &cJSON_Delete);
     if (!root) { out.error = "payload is not valid JSON"; return out; }
     if (temperature_frame) {
-        cJSON* item = reference_json_item(root, temperature_path);
+        cJSON* item = reference_json_item(root.get(), temperature_path);
         if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble)) {
-            cJSON_Delete(root);
             out.error = "Temperature path is missing or not numeric";
             return out;
         }
@@ -1195,23 +1196,21 @@ static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& fr
         out.temperature_c = item->valuedouble;
     }
     if (setpoint_frame) {
-        cJSON* setpoint_item = reference_json_item(root, setpoint_path);
+        cJSON* setpoint_item = reference_json_item(root.get(), setpoint_path);
         if (cJSON_IsNumber(setpoint_item) && std::isfinite(setpoint_item->valuedouble)) {
             out.setpoint_updated = true;
             out.has_setpoint = true;
             out.setpoint_c = setpoint_item->valuedouble;
         } else {
-            cJSON_Delete(root);
             out.error_reason = ReferenceRoomReason::MissingSetpoint;
             out.error = "Setpoint path is missing or not numeric";
             return out;
         }
     }
     if (timestamp_frame) {
-        cJSON* timestamp_item = reference_json_item(root, timestamp_path);
+        cJSON* timestamp_item = reference_json_item(root.get(), timestamp_path);
         if (!reference_payload_timestamp(timestamp_item, out.source_unix_s,
                                          out.timestamp_source)) {
-            cJSON_Delete(root);
             out.error_reason = ReferenceRoomReason::MissingSourceTime;
             out.error = "Timestamp path is missing or not RFC3339/Unix seconds";
             return out;
@@ -1220,14 +1219,13 @@ static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& fr
         out.has_source_time = true;
         if (frame.received_unix_s >= 0 &&
             out.source_unix_s > frame.received_unix_s + REF_TEMP_FUTURE_TOLERANCE_S) {
-            cJSON_Delete(root);
             out.error_reason = ReferenceRoomReason::FutureTimestamp;
             out.error = "Source timestamp is in the future";
             return out;
         }
     }
     if (temperature_frame && !enabled_path.empty()) {
-        cJSON* enabled_item = reference_json_item(root, enabled_path);
+        cJSON* enabled_item = reference_json_item(root.get(), enabled_path);
         if (cJSON_IsBool(enabled_item)) {
             out.has_enabled = true;
             out.enabled = cJSON_IsTrue(enabled_item);
@@ -1242,7 +1240,7 @@ static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& fr
         }
     }
     if (temperature_frame && !hvac_mode_path.empty()) {
-        cJSON* hvac_item = reference_json_item(root, hvac_mode_path);
+        cJSON* hvac_item = reference_json_item(root.get(), hvac_mode_path);
         if (cJSON_IsString(hvac_item) && hvac_item->valuestring &&
             std::strlen(hvac_item->valuestring) <= 16) {
             out.has_hvac_mode = true;
@@ -1253,7 +1251,6 @@ static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& fr
             out.control_error = "HVAC mode path is missing or not a short string";
         }
     }
-    cJSON_Delete(root);
     out.valid = true;
     return out;
 }
@@ -1284,30 +1281,27 @@ static DecodedCirculationFrame decode_circulation_frame(const ReferenceMqttFrame
                                                         const std::string& power_path,
                                                         const std::string& timestamp_path) {
     DecodedCirculationFrame out;
-    cJSON* root = cJSON_ParseWithLength(frame.payload, frame.payload_len);
+    std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(
+        cJSON_ParseWithLength(frame.payload, frame.payload_len), &cJSON_Delete);
     if (!root) { out.error = "payload is not valid JSON"; return out; }
-    cJSON* power = reference_json_item(root, power_path);
+    cJSON* power = reference_json_item(root.get(), power_path);
     if (!cJSON_IsNumber(power) || !std::isfinite(power->valuedouble) ||
         power->valuedouble < 0.0 || power->valuedouble > CIRC_SOURCE_POWER_MAX_W) {
-        cJSON_Delete(root);
         out.error = "Power path is missing, not numeric or out of range";
         return out;
     }
-    cJSON* timestamp = reference_json_item(root, timestamp_path);
+    cJSON* timestamp = reference_json_item(root.get(), timestamp_path);
     if (!reference_payload_timestamp(timestamp, out.source_unix_s, out.timestamp_source)) {
-        cJSON_Delete(root);
         out.error = "Timestamp path is missing or not RFC3339/Unix seconds";
         return out;
     }
     if (frame.received_unix_s >= 0 &&
         out.source_unix_s > frame.received_unix_s + REF_TEMP_FUTURE_TOLERANCE_S) {
-        cJSON_Delete(root);
         out.error = "Source timestamp is in the future";
         return out;
     }
     out.power_w = power->valuedouble;
     out.valid = true;
-    cJSON_Delete(root);
     return out;
 }
 
@@ -1949,7 +1943,7 @@ static void mqtt_task(void*) {
     int heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;    // publish immediately on the first connected cycle
     int ha_retire_elapsed_s = HA_RETIRE_INTERVAL_S;
     MqttPublishGateState publish_gate = MqttPublishGateState::SubscriberOnly;
-    bool publisher_promotion_failed = false;
+    int publisher_promotion_retry_countdown_s = 0;
     OtaQuiesceState network_quiesce;                   // current TLS operation's hold-off budget
     bool network_quiesce_logged     = false;           // one diag line per operation, not per cycle
     bool network_quiesce_cap_logged = false;           // and one if that budget ever runs out
@@ -1967,6 +1961,9 @@ static void mqtt_task(void*) {
         // regardless of connection state, so this must NOT be gated on s_connected or an actual
         // publish, or a long MQTT disconnect (no publishes) would false-trip the timeout.
         esp_task_wdt_reset();
+        if (publisher_promotion_retry_countdown_s > 0) {
+            --publisher_promotion_retry_countdown_s;
+        }
         // This task's stack headroom, recorded beside the watchdog reset and for the same reason:
         // it is the one statement of the cycle that no branch reaches past. That matters more here
         // than in the other loops — the OTA hold-off below `continue`s out of the cycle entirely,
@@ -2029,11 +2026,11 @@ static void mqtt_task(void*) {
             // client whose CONNECT packet carries the installation LWT. A clean stop means the old
             // no-LWT session cannot emit `offline`; publication begins only after the replacement
             // client reports MQTT_EVENT_CONNECTED on a later cycle.
-            if (gate.promote_publisher && !publisher_promotion_failed) {
+            if (gate.promote_publisher && publisher_promotion_retry_countdown_s == 0) {
                 if (promote_client_to_publisher()) {
                     publish_gate = gate.next;
                 } else {
-                    publisher_promotion_failed = true; // do not repeat a stop/destroy transition
+                    publisher_promotion_retry_countdown_s = 5; // retry after 5 s backoff
                 }
             } else if (!gate.promote_publisher) {
                 publish_gate = gate.next;
@@ -2321,30 +2318,28 @@ static bool start_current_client() {
 // boundary. Task-owned subscription bookkeeping is cleared because the broker discarded the old
 // clean session; MQTT_EVENT_CONNECTED on the replacement forces both exact-topic subscriptions.
 static bool promote_client_to_publisher() {
-    if (!s_client) {
-        set_status(false, "mqtt init failed");
-        return false;
-    }
-    const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);
-    if (stop_rc != ESP_OK) {
-        set_status(false, "client stop failed");
-        diag_printf("mqtt: subscriber client stop failed (%s)\n", esp_err_to_name(stop_rc));
-        return false;
-    }
+    if (s_client) {
+        const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);
+        if (stop_rc != ESP_OK) {
+            set_status(false, "client stop failed");
+            diag_printf("mqtt: subscriber client stop failed (%s)\n", esp_err_to_name(stop_rc));
+            return false;
+        }
 
-    s_connected = false;
-    set_status(false, "");
-    {
-        Lock lk(s_mtx);
-        s_ref_status.subscribed = false;
-        s_circulation_status.subscribed = false;
+        s_connected = false;
+        set_status(false, "");
+        {
+            Lock lk(s_mtx);
+            s_ref_status.subscribed = false;
+            s_circulation_status.subscribed = false;
+        }
+        s_ref_subscribed_topics = {};
+        s_circulation_subscribed_topic.clear();
+        s_circulation_probe_subscribed_topic.clear();
+        s_circulation_probe_task_generation = 0;
+        esp_mqtt_client_destroy(s_client);
+        s_client = nullptr;
     }
-    s_ref_subscribed_topics = {};
-    s_circulation_subscribed_topic.clear();
-    s_circulation_probe_subscribed_topic.clear();
-    s_circulation_probe_task_generation = 0;
-    esp_mqtt_client_destroy(s_client);
-    s_client = nullptr;
 
     if (!build_client(true) || !start_current_client()) {
         diag_printf("mqtt: publisher client promotion failed\n");
