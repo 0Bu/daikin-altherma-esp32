@@ -148,10 +148,14 @@ DetectResult hp_detect_run() {
     uint8_t pageA0[32]; int lenA0 = -1;              // O/U-II rows — raw, for the diag dump below
     uint8_t pageA1[32]; int lenA1 = -1;
     int probe_retries = 0;                           // dropped replies the retry RECOVERED (0 = healthy)
+    int                     probe_transport_errors = 0;
     for (uint8_t reg : PROBE_PAGES) {
         uint8_t pay[32];
         const int paylen = read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries);
-        if (paylen < 0) continue;
+        if (paylen < 0) {
+            if (paylen != -2 && reg != 0x11) probe_transport_errors++;
+            continue;
+        }
         if (reg == 0x11) {
             len11 = paylen;
             for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page11)); i++) page11[i] = pay[i];
@@ -226,10 +230,11 @@ DetectResult hp_detect_run() {
         eeprom_render(fp.eeprom, 6, ee, static_cast<int>(sizeof(ee)));
     }
 
-    r.page_mask    = fp.page_mask;
-    r.kw_tenths    = fp.kw_tenths;
-    r.iu_kw_tenths = fp.iu_kw_tenths;
-    r.eeprom       = ee;
+    r.page_mask            = fp.page_mask;
+    r.kw_tenths            = fp.kw_tenths;
+    r.iu_kw_tenths         = fp.iu_kw_tenths;
+    r.eeprom               = ee;
+    r.transport_incomplete = (probe_transport_errors > 0);
 
     // 5. Narrow to the best-fitting candidate profiles.
     int nsig = 0;
@@ -254,9 +259,10 @@ DetectResult hp_detect_run() {
     // page probe is working harder to hold the fingerprint together, which is the condition that
     // used to change the model silently (#214). It counts only retries that RECOVERED a page, so 0
     // is the healthy reading and any non-zero is a reply that was actually dropped.
-    diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d iu_kw=%d eeprom=[%s] retries=%d -> %d candidate(s), best=%s\n",
+    diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d iu_kw=%d eeprom=[%s] retries=%d "
+                "transport_err=%d -> %d candidate(s), best=%s\n",
                 static_cast<char>(r.proto), r.rx, r.tx, static_cast<unsigned>(fp.page_mask),
-                fp.kw_tenths, fp.iu_kw_tenths, ee, probe_retries, n,
+                fp.kw_tenths, fp.iu_kw_tenths, ee, probe_retries, probe_transport_errors, n,
                 r.best.empty() ? "(none)" : r.best.c_str());
     return r;
 }

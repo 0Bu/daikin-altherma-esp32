@@ -155,8 +155,25 @@ git clone https://github.com/0Bu/daikin-altherma-esp32.git && cd daikin-altherma
 
 # Optional compile-time defaults (WiFi, MQTT, model, pins) — all also settable at runtime:
 ./scripts/idf-docker.sh idf.py menuconfig                         # → Daikin Altherma Configuration
+```
 
-# Flash from the host (preserves nvs — @flash_args skips nvs). Match --chip to the build:
+### Flashing
+
+This firmware requires a **Secure Boot v2-signed application image** (`CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`). An **unsigned** binary will crash-loop before `app_main`.
+
+- **Without a local signing key**: use the [web installer](https://0bu.github.io/daikin-altherma-esp32/) or download official signed release/CI binaries (see [docs/SECURITY.md](SECURITY.md)).
+- **With your own signing key**: sign the built binary and verify it before flashing:
+
+```bash
+# 1. Sign the application binary (requires your offline RSA-3072 key):
+espsecure sign-data --version 2 --keyfile <path-to>/ota_signing_key.pem \
+  --output build/daikin-signed.bin build/daikin-altherma-esp32.bin
+cp build/daikin-signed.bin build/daikin-altherma-esp32.bin
+
+# 2. Verify signature before flashing:
+./scripts/require-signed.sh build/daikin-altherma-esp32.bin
+
+# 3. Flash from the host (preserves nvs — @flash_args skips nvs). Match --chip to the build:
 cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args"
 ```
 
