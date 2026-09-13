@@ -1483,9 +1483,9 @@ def stress_board(
                 with lock:
                     samples[kind] += 1
             except HTTPError as error:
-                if kind == "values" and error.code == 503 and scheduled_tls_active.is_set():
+                if kind in ("values", "diag") and error.code == 503 and scheduled_tls_active.is_set():
                     with lock:
-                        busy_503["values"] += 1
+                        busy_503[kind] = busy_503.get(kind, 0) + 1
                 else:
                     remember(kind, error)
             except BaseException as error:
@@ -2205,7 +2205,7 @@ def record_bench_pressure_failure(
 ) -> None:
     """Keep every worker failure visible to the joining thread; no parser exception may vanish."""
     with lock:
-        if isinstance(error, HTTPError) and kind in ("status", "values") and error.code == 503:
+        if isinstance(error, HTTPError) and kind in ("status", "values", "diag") and error.code == 503:
             counts[f"{kind}_busy_503"] = counts.get(f"{kind}_busy_503", 0) + 1
         elif isinstance(error, (CompactTransportError, OSError, TimeoutError)):
             counts[f"{kind}_reboot_gap"] = counts.get(f"{kind}_reboot_gap", 0) + 1
@@ -3945,6 +3945,12 @@ def self_test() -> None:
         "status", GateError("malformed chunk fixture"), pressure_counts,
         pressure_unexpected, threading.Lock(),
     )
+    assert pressure_unexpected == ["status: malformed chunk fixture"]
+    record_bench_pressure_failure(
+        "diag", HTTPError("http://fixture.invalid/diag", 503, "heap low", None, None),
+        pressure_counts, pressure_unexpected, threading.Lock(),
+    )
+    assert pressure_counts.get("diag_busy_503") == 1
     assert pressure_unexpected == ["status: malformed chunk fixture"]
 
     # The sole update POST consumes one already-resolved sockaddr. A hostile second resolver answer
