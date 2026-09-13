@@ -408,15 +408,7 @@ bool config_save(const Config& requested, bool require_link) {
         // The only concurrent writer is auto-detection. An unrelated HTTP form owns service fields,
         // not the detected X10A session, so a snapshot taken before detection must carry forward the
         // newly proven model/link rather than silently reverting them on publication.
-        c.profile = g_cfg.profile;
-        c.proto = g_cfg.proto;
-        c.rx_pin = g_cfg.rx_pin;
-        c.tx_pin = g_cfg.tx_pin;
-        c.x10a_identity_fp = g_cfg.x10a_identity_fp;
-        c.fp_pages = g_cfg.fp_pages;
-        c.fp_kw_tenths = g_cfg.fp_kw_tenths;
-        c.fp_iu_kw_tenths = g_cfg.fp_iu_kw_tenths;
-        c.fp_eeprom = g_cfg.fp_eeprom;
+        reconcile_detected_config(c, g_cfg);
     }
     ConfigBlob b;
     b.wifi_ssid = c.wifi_ssid;                 b.wifi_pass = c.wifi_pass;

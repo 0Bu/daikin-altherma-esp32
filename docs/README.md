@@ -16,6 +16,10 @@ to the visible 24-hour results and what a user can do next is in [**DIAGNOSTICS.
 the source, threshold and claim boundary for every check is recorded in
 [**DIAGNOSTIC_EVIDENCE.md**](DIAGNOSTIC_EVIDENCE.md).
 
+Maintainer review: [12 September 2026 code and workflow findings](reviews/2026-09-12-code-audit.md)
+records open defects, source references, reproduction evidence and verification limits at a fixed
+source revision. It does not change firmware behavior.
+
 ---
 
 ## Hardware

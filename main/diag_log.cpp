@@ -1,6 +1,7 @@
 // In-RAM diagnostic ring served by GET /diag. Static .bss buffer, no heap growth. See
 // diag_log.hpp.
 #include "diag_log.hpp"
+#include "logic/diag_tail.hpp"
 #include "syslog.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -76,15 +77,7 @@ bool diag_verbose() { return s_verbose.load(std::memory_order_relaxed); }
 size_t diag_dump(char* out, size_t max) {
     SemGuard lk(s_mtx);
     if (!lk) return 0;
-    size_t n = 0;
-    if (s_wrapped) { // oldest half first
-        size_t tail = RING - s_len;
-        size_t copy = tail < max ? tail : max;
-        memcpy(out, s_buf + s_len, copy); n += copy;
-    }
-    size_t head = s_len < (max - n) ? s_len : (max - n);
-    memcpy(out + n, s_buf, head); n += head;
-    return n;
+    return diag_dump_tail(s_buf, RING, s_len, s_wrapped, out, max);
 }
 
 void diag_clear() {

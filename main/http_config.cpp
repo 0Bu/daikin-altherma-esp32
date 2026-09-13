@@ -18,6 +18,7 @@
 #include "env3.hpp"
 #include "heap_guard.hpp"
 #include "history.hpp"
+#include "json_guard.hpp"
 #include "hp_poll.hpp"
 #include "def/registry.hpp"    // def::lookup — the active profile, for conv 405's refrigerant curve
 #include "logic/config_model.hpp"
@@ -169,22 +170,6 @@ static bool jb(cJSON* o, const char* k, bool def) {
     cJSON* v = cJSON_GetObjectItem(o, k);
     return cJSON_IsBool(v) ? cJSON_IsTrue(v) : def;
 }
-
-struct JsonGuard {
-    explicit JsonGuard(cJSON* root = nullptr) : root(root) {}
-    ~JsonGuard() { reset(); }
-    JsonGuard(const JsonGuard&)            = delete;
-    JsonGuard& operator=(const JsonGuard&) = delete;
-    void       reset(cJSON* next = nullptr) {
-        if (root) cJSON_Delete(root);
-        root = next;
-    }
-    cJSON* get() const { return root; }
-    operator cJSON*() const { return root; }
-    cJSON*   operator->() const { return root; }
-    explicit operator bool() const { return root != nullptr; }
-    cJSON*   root = nullptr;
-};
 
 static esp_err_t set_wifi(httpd_req_t* req) {
     char body[512];

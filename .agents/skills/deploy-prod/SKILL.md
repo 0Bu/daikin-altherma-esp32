@@ -1,6 +1,6 @@
 ---
 name: deploy-prod
-description: Execute quality gates, merge PR to main, wait for CI dev build, trigger and test OTA on .104, then trigger and test OTA on production .170, with automated fix-and-retry on findings. Use when deploy-test is green and ready for production deployment.
+description: Execute quality gates, merge PR to main, wait for CI dev build, run canonical bench delivery gate, then run canonical production promotion gate, with automated fix-and-retry on findings. Use when deploy-test is green and ready for production deployment.
 ---
 
 # deploy-prod
@@ -8,13 +8,13 @@ description: Execute quality gates, merge PR to main, wait for CI dev build, tri
 ## Authorization boundary
 
 Treat requests to inspect or review as read-only. A request to deploy to production (such as
-"merge, run gates, if green OTA .104 and test, if green OTA .170 and test, on findings fix and retry
+"merge, run gates, if green OTA test bench and test, if green OTA production and test, on findings fix and retry
 from start" or equivalent) explicitly authorizes:
 - Running deterministic quality gates and stamping required PR review checkboxes
 - Merging the current pull request to `main` via the repository CAS merge wrapper
 - Monitoring the GitHub Actions CI run on `main` until the dev feed is published
-- Triggering OTA update and running health verification on the test device (`192.168.1.104`)
-- If `.104` is healthy, triggering OTA update and running strict verification on the production heat pump (`192.168.1.170`)
+- Running the canonical role-bound bench delivery gate on the test bench device (`bench` role)
+- If the bench device is healthy, running the canonical role-bound promotion gate on the production heat pump (`production` role)
 - When both devices are verified healthy: cleaning up the merged remote branch and temporary deployment artifacts
 
 It does **NOT** authorize:
@@ -24,8 +24,8 @@ It does **NOT** authorize:
 
 ## Device roles
 
-- **Test Device (.104)**: `192.168.1.104` — Test bench board. First OTA target. X10A heat pump connection is optional.
-- **Production Device (.170)**: `192.168.1.170` — Live Daikin Altherma installation. Second OTA target. Requires `hp.connected == true` and valid `/values`.
+- **Test Device (Bench)**: Private inventory role `bench` (`~/.config/daikin-altherma-esp32/production-ota.json`). First OTA target. X10A heat pump connection is optional.
+- **Production Device (Production)**: Private inventory role `production` (`~/.config/daikin-altherma-esp32/production-ota.json`). Live Daikin Altherma installation. Second OTA target. Requires `hp.connected == true` and valid `/values`.
 
 ## Steps
 
@@ -70,33 +70,41 @@ run_id="$(scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-alther
 scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 run watch "$run_id" --exit-status
 ```
 
-### 4. OTA on test device (.104) & test
+### 4. Canonical bench delivery gate on test bench
 
-Trigger and wait for OTA update on `192.168.1.104`:
+Execute the canonical role-bound bench update transaction:
 ```bash
-scripts/trigger-ota-wait.sh --ip 192.168.1.104 --channel dev --timeout 300
+scripts/production-ota-gate.py \
+  --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json \
+  --expected-source-sha <commit-sha> \
+  --expected-version <target-version> \
+  --expected-app-sha256 <app-elf-sha256> \
+  --expected-current-version <current-bench-version> \
+  --confirm-bench bench \
+  --install-bench
 ```
 
-Verify test device health:
+This single command binds the exact signed artifact, performs at most one POST to the bench role, verifies rollback probation, and executes the sustained pressure gate.
+
+If bench gate fails or any finding occurs, proceed directly to **Step 8 (Failure recovery loop)**. Do NOT proceed to production.
+
+### 5. Canonical production promotion gate & canary
+
+Once the bench gate has passed cleanly, execute the distinct production promotion transaction:
 ```bash
-scripts/verify-device-health.sh --ip 192.168.1.104 --timeout 60
+scripts/production-ota-gate.py \
+  --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json \
+  --expected-source-sha <commit-sha> \
+  --expected-version <target-version> \
+  --expected-app-sha256 <app-elf-sha256> \
+  --expected-current-version <current-production-version> \
+  --confirm-production production \
+  --execute
 ```
 
-If the health check fails or any finding occurs, proceed directly to **Step 8 (Failure recovery loop)**. Do NOT proceed to production.
+This transaction proves the candidate on the bench under HTTP pressure, restores bench target, runs sustained stress, performs at most one POST to the production role, and verifies the read-only canary.
 
-### 5. OTA on production device (.170) & test
-
-Once `.104` is proven green without errors, trigger and wait for OTA update on the production device `192.168.1.170`:
-```bash
-scripts/trigger-ota-wait.sh --ip 192.168.1.170 --channel dev --timeout 300
-```
-
-Run strict production health verification:
-```bash
-scripts/verify-device-health.sh --ip 192.168.1.170 --require-hp --timeout 60
-```
-
-Strict production requirements:
+Strict production requirements verified by the promotion gate:
 - HTTP `/status` answers with the new version
 - `hp.connected == true` (active X10A communication with heat pump)
 - `/values` delivers non-empty metric array
@@ -136,34 +144,41 @@ After the successful deployment and verification:
 
 If an error or finding occurs at any point during this workflow:
 
-#### Case A: Failure during gates, CI, or on test board (.104)
-1. **Diagnose:** Pull snapshot from `.104` or CI logs:
+#### Case A: Failure during gates, CI, or on test bench
+1. **Diagnose:** Pull snapshot from test bench device or CI logs:
    ```bash
-   curl -sS "http://192.168.1.104/status" | jq .
-   curl -sS "http://192.168.1.104/diag?verbose=1"
+   curl -sS "http://<bench-host>/status" | jq .
+   curl -sS "http://<bench-host>/diag?verbose=1"
    ```
 2. **Fix in code:** Create a fix branch (`agent/fix-...`), implement the correction, and add unit/contract tests.
 3. **Execute `$deploy-test`:**
-   Run `$deploy-test` (build locally, USB-flash `.104`, test `.104`).
-4. **Repeat `$deploy-test`** until `.104` is completely green without any error.
+   Run `$deploy-test` (build locally, flash/update bench, verify bench).
+4. **Repeat `$deploy-test`** until bench is completely green without any error.
 5. **Restart `$deploy-prod`:**
    Once `$deploy-test` is fully green, push the fix branch, open/update the PR, and restart `deploy-prod` from **Step 1**.
 
-#### Case B: Failure on production board (.170)
-1. **Immediate rollback on .170:**
-   Immediately trigger rollback/downgrade on `192.168.1.170` to restore production plant operation:
+#### Case B: Failure on production board
+1. **Immediate recovery on production:**
+   Restore production plant operation by installing the verified previous known-good release image using the canonical promotion gate, binding exact known-good version, commit SHA, and ELF SHA:
    ```bash
-   scripts/trigger-ota-wait.sh --ip 192.168.1.170 --allow-downgrade --timeout 300
+   scripts/production-ota-gate.py \
+     --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json \
+     --expected-source-sha <known-good-source-sha> \
+     --expected-version <known-good-version> \
+     --expected-app-sha256 <known-good-app-sha256> \
+     --expected-current-version <installed-version> \
+     --confirm-production production \
+     --execute
    ```
-2. **Diagnose:** Capture snapshot and logs from `.170`:
+2. **Diagnose:** Capture snapshot and logs from production:
    ```bash
-   curl -sS "http://192.168.1.170/status" | jq .
-   curl -sS "http://192.168.1.170/diag?verbose=1"
+   curl -sS "http://<production-host>/status" | jq .
+   curl -sS "http://<production-host>/diag?verbose=1"
    ```
    If a crash occurred, symbolize the core dump via `$device-triage`.
 3. **Fix in code:** Implement correction on a fix branch and add regression tests.
 4. **Execute `$deploy-test`:**
-   Run `$deploy-test` (build locally, USB-flash `.104`, test `.104`).
-5. **Repeat `$deploy-test`** until `.104` is completely green without any error.
+   Run `$deploy-test` (build locally, flash/update bench, verify bench).
+5. **Repeat `$deploy-test`** until bench is completely green without any error.
 6. **Restart `$deploy-prod`:**
    Once `$deploy-test` is fully green, push the fix branch, open/update the PR, and restart `deploy-prod` from **Step 1**.
