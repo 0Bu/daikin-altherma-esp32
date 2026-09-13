@@ -63,7 +63,9 @@ if [ -z "$initial_status" ] || ! printf '%s' "$initial_status" | jq -e '.version
 fi
 
 initial_version=$(printf '%s' "$initial_status" | jq -r '.version')
-log "Current firmware version on $IP: $initial_version"
+initial_uptime=$(printf '%s' "$initial_status" | jq -r '.uptime_s // 0')
+initial_elf_sha=$(printf '%s' "$initial_status" | jq -r '.app_elf_sha256 // empty')
+log "Current firmware version on $IP: $initial_version (uptime: ${initial_uptime}s)"
 
 # If device already has expected version and no downgrade forced
 if [ -n "$EXPECTED_VERSION" ] && [ "$initial_version" = "$EXPECTED_VERSION" ] && [ "$ALLOW_DOWNGRADE" -eq 0 ]; then
@@ -116,17 +118,31 @@ if [ -n "$EXPECTED_VERSION" ] && [ "$initial_version" = "$EXPECTED_VERSION" ]; t
     exit 0
 fi
 
-if [ "$update_avail" != "true" ] && [ "$is_downgrade" != "true" ]; then
+if [ "$initial_version" = "$available_ver" ] && [ -z "$EXPECTED_VERSION" ]; then
+    log "Device is already on latest available build ($available_ver). No update needed."
+    exit 0
+fi
+
+# R2: Reject downgrade offer unless --allow-downgrade was explicitly requested
+if [ "$is_downgrade" = "true" ] && [ "$ALLOW_DOWNGRADE" -ne 1 ]; then
+    err "Manifest offers a downgrade ('$available_ver' < '$initial_version'), but --allow-downgrade was not specified"
+    exit 1
+fi
+
+if [ "$update_avail" != "true" ] && [ "$ALLOW_DOWNGRADE" -ne 1 ]; then
     if [ -n "$EXPECTED_VERSION" ] && [ "$available_ver" != "$EXPECTED_VERSION" ]; then
         err "Manifest does not offer expected version '$EXPECTED_VERSION' (available: '$available_ver'). CI build/publish might still be in progress."
         exit 1
-    elif [ "$initial_version" = "$available_ver" ]; then
-        log "Device is already on latest available build ($available_ver)."
-        exit 0
     else
         err "No update available according to device manifest"
         exit 1
     fi
+fi
+
+# R3: Validate expected version BEFORE the write
+if [ -n "$EXPECTED_VERSION" ] && [ "$available_ver" != "$EXPECTED_VERSION" ]; then
+    err "Available version '$available_ver' does not match requested expected version '$EXPECTED_VERSION'. Aborting before write."
+    exit 1
 fi
 
 # Extract checked OTA parameters
@@ -139,9 +155,9 @@ if [ -z "$check_gen" ] || [ -z "$avail_channel" ] || [ -z "$available_ver" ] || 
     exit 1
 fi
 
-# Build POST URL
+# Build POST URL: only include downgrade=1 if explicitly allowed
 post_query="?after=$check_gen&channel=$avail_channel&version=$available_ver&sha256=$avail_sha256"
-if [ "$is_downgrade" = "true" ] || [ "$ALLOW_DOWNGRADE" -eq 1 ]; then
+if [ "$ALLOW_DOWNGRADE" -eq 1 ]; then
     post_query="${post_query}&downgrade=1"
     log "Initiating OTA update (with ?downgrade=1)..."
 else
@@ -154,7 +170,12 @@ if ! printf '%s' "$post_resp" | jq -e '.ok == true' >/dev/null 2>&1; then
     exit 1
 fi
 
+# R4: Bind accepted generation
 expected_gen=$(printf '%s' "$post_resp" | jq -r '.generation // empty')
+if [ -z "$expected_gen" ]; then
+    err "Device did not return an accepted generation in update response"
+    exit 1
+fi
 log "OTA update accepted (generation $expected_gen). Downloading and installing update..."
 
 # Monitor progress until reboot
@@ -184,6 +205,12 @@ while [ "$(date +%s)" -le "$deadline" ]; do
     fi
 
     if printf '%s' "$raw" | jq -e '.state' >/dev/null 2>&1; then
+        poll_gen=$(printf '%s' "$raw" | jq -r '.generation // empty')
+        if [ -n "$poll_gen" ] && [ "$poll_gen" != "$expected_gen" ]; then
+            err "Observed foreign generation '$poll_gen' (expected '$expected_gen')"
+            exit 1
+        fi
+
         state=$(printf '%s' "$raw" | jq -r '.state // empty')
         progress=$(printf '%s' "$raw" | jq -r '.progress // 0')
         msg=$(printf '%s' "$raw" | jq -r '.message // empty')
@@ -200,7 +227,6 @@ while [ "$(date +%s)" -le "$deadline" ]; do
 
         if [ "$state" = "done" ]; then
             log "OTA installation done. Waiting for reboot..."
-            device_went_down=1
             break
         fi
     fi
@@ -209,25 +235,39 @@ done
 
 # Wait for device to reboot and return online
 log "Waiting for device to finish reboot and come back online..."
-sleep 5
 
 reboot_ok=0
 new_version=""
+new_elf_sha=""
+new_uptime=0
 while [ "$(date +%s)" -le "$deadline" ]; do
     chk=$(curl -sS --max-time 3 "http://$IP/status" 2>/dev/null || true)
-    if [ -n "$chk" ] && printf '%s' "$chk" | jq -e '.version' >/dev/null 2>&1; then
+    if [ -z "$chk" ]; then
+        device_went_down=1
+    elif printf '%s' "$chk" | jq -e '.version' >/dev/null 2>&1; then
         new_version=$(printf '%s' "$chk" | jq -r '.version')
         new_elf_sha=$(printf '%s' "$chk" | jq -r '.app_elf_sha256 // empty')
-        uptime=$(printf '%s' "$chk" | jq -r '.uptime_s // 0')
-        log "Device is back online! Version: $new_version ($new_elf_sha), Uptime: ${uptime}s"
-        reboot_ok=1
-        break
+        new_uptime=$(printf '%s' "$chk" | jq -r '.uptime_s // 0')
+        log "Device responded: version=$new_version ($new_elf_sha), uptime=${new_uptime}s"
+
+        # R4: Check for reboot evidence: connection dropped, uptime decreased, or ELF changed
+        if [ "$device_went_down" -eq 1 ] || [ "$new_uptime" -lt "$initial_uptime" ] || \
+           { [ -n "$initial_elf_sha" ] && [ -n "$new_elf_sha" ] && [ "$new_elf_sha" != "$initial_elf_sha" ]; }; then
+            reboot_ok=1
+            break
+        fi
     fi
     sleep 2
 done
 
 if [ "$reboot_ok" -eq 0 ]; then
-    err "Timed out waiting for device to return online after OTA update"
+    err "Device did not reboot after OTA update (no connection drop and uptime did not reset: ${new_uptime}s >= initial ${initial_uptime}s)"
+    exit 1
+fi
+
+# R4: Selected offer must match installed version
+if [ "$new_version" != "$available_ver" ]; then
+    err "Version mismatch after OTA: expected selected offer '$available_ver', but device runs '$new_version'"
     exit 1
 fi
 
@@ -236,16 +276,42 @@ if [ -n "$EXPECTED_VERSION" ] && [ "$new_version" != "$EXPECTED_VERSION" ]; then
     exit 1
 fi
 
-log "Waiting 5 seconds for OTA rollback/health gate to settle..."
-sleep 5
+# R4: Verify image state and rollback health gate
+log "Verifying OTA image state and rollback health gate..."
+settled=0
+img_state=""
+rollback_pending=""
+while [ "$(date +%s)" -le "$deadline" ]; do
+    raw_final=$(curl -sS --max-time 3 "http://$IP/ota/status" 2>/dev/null || true)
+    if [ -n "$raw_final" ] && printf '%s' "$raw_final" | jq -e 'has("image_state")' >/dev/null 2>&1; then
+        img_state=$(printf '%s' "$raw_final" | jq -r 'if has("image_state") and (.image_state != null) then .image_state else empty end')
+        rollback_pending=$(printf '%s' "$raw_final" | jq -r 'if has("rollback_pending") and (.rollback_pending != null) then .rollback_pending else empty end')
+        log "Image status: state='$img_state', rollback_pending=$rollback_pending"
 
-ota_final=$(curl -sS --max-time 3 "http://$IP/ota/status" 2>/dev/null || echo "{}")
-img_state=$(printf '%s' "$ota_final" | jq -r '.image_state // empty')
-rollback_pending=$(printf '%s' "$ota_final" | jq -r '.rollback_pending // false')
+        if [ "$img_state" = "aborted" ] || [ "$img_state" = "invalid" ]; then
+            err "OTA image was marked '$img_state' by health gate!"
+            exit 1
+        fi
 
-log "Image status: state='$img_state', rollback_pending=$rollback_pending"
-if [ "$img_state" = "aborted" ] || [ "$img_state" = "invalid" ]; then
-    err "OTA image was marked $img_state by health gate!"
+        if [ "$rollback_pending" = "true" ]; then
+            err "OTA image has rollback_pending=true!"
+            exit 1
+        fi
+
+        if [ "$img_state" = "valid" ] && [ "$rollback_pending" = "false" ]; then
+            settled=1
+            break
+        fi
+
+        if [ "$img_state" = "pending_verify" ]; then
+            log "OTA image is pending_verify, waiting for health probation to complete..."
+        fi
+    fi
+    sleep 2
+done
+
+if [ "$settled" -ne 1 ]; then
+    err "Timed out waiting for OTA image to reach valid state without rollback pending (last state: '${img_state:-missing}', rollback_pending: '${rollback_pending:-missing}')"
     exit 1
 fi
 

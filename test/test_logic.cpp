@@ -42,6 +42,7 @@
 #include "logic/convert.hpp"
 #include "logic/crashinfo.hpp"
 #include "logic/crc.hpp"
+#include "logic/diag_tail.hpp"
 #include "logic/detect.hpp"
 #include "logic/detect_backoff.hpp"
 #include "logic/discovery.hpp"
@@ -809,6 +810,42 @@ static void test_config_model() {
     CHECK(!config_save_succeeded(true, false, true));
     CHECK(!config_save_succeeded(false, true, false));
     CHECK(!config_save_succeeded(false, true, true));
+
+    // reconcile_detected_config carries forward the complete detected link and model state,
+    // including fp_valid, so concurrent service saves never revert a detection commit.
+    {
+        Config current;
+        current.profile          = "altherma3_r_erga";
+        current.proto            = Protocol::S;
+        current.rx_pin           = 1;
+        current.tx_pin           = 2;
+        current.x10a_identity_fp = 0x12345678u;
+        current.fp_pages         = 3;
+        current.fp_kw_tenths     = 60;
+        current.fp_iu_kw_tenths  = 50;
+        current.fp_eeprom        = "eeprom_signature";
+        current.fp_valid         = true;
+
+        Config stale_snapshot;
+        stale_snapshot.wifi_ssid = "new-net";
+        stale_snapshot.profile   = "auto";
+        stale_snapshot.fp_valid  = false;
+        stale_snapshot.rx_pin    = 44;
+        stale_snapshot.tx_pin    = 43;
+
+        reconcile_detected_config(stale_snapshot, current);
+        CHECK(stale_snapshot.wifi_ssid == "new-net");
+        CHECK(stale_snapshot.profile == "altherma3_r_erga");
+        CHECK(stale_snapshot.proto == Protocol::S);
+        CHECK(stale_snapshot.rx_pin == 1);
+        CHECK(stale_snapshot.tx_pin == 2);
+        CHECK(stale_snapshot.x10a_identity_fp == 0x12345678u);
+        CHECK(stale_snapshot.fp_pages == 3);
+        CHECK(stale_snapshot.fp_kw_tenths == 60);
+        CHECK(stale_snapshot.fp_iu_kw_tenths == 50);
+        CHECK(stale_snapshot.fp_eeprom == "eeprom_signature");
+        CHECK(stale_snapshot.fp_valid == true);
+    }
 
     Config c;
     c.rx_pin = 44;
@@ -15976,7 +16013,112 @@ static void test_http_deadline() {
     CHECK(http_deadline_ticks_to_us(remaining_ticks, tick_period_ms) == UINT64_C(50000));
 }
 
+static void test_diag_tail() {
+    // 1. Empty buffer or zero budget
+    char out[1024];
+    CHECK(diag_dump_tail(nullptr, 6144, 0, false, out, sizeof(out)) == 0u);
+    char ring[6144];
+    CHECK(diag_dump_tail(ring, sizeof(ring), 0, false, out, 0) == 0u);
+    CHECK(diag_dump_tail(ring, sizeof(ring), 10, false, nullptr, 10) == 0u);
+
+    // 2. Unwrapped buffer smaller than max: no truncation, whole content returned
+    const char   msg1[] = "[   1.000] Hello world\n[   2.000] Line two\n";
+    const size_t len1   = sizeof(msg1) - 1;
+    std::memcpy(ring, msg1, len1);
+    size_t n = diag_dump_tail(ring, sizeof(ring), len1, false, out, sizeof(out));
+    CHECK(n == len1);
+    CHECK(std::string(out, n) == std::string(msg1));
+
+    // 3. Wrapped buffer smaller than max: no truncation, full ring returned oldest-to-newest
+    char small_ring[20];
+    std::memcpy(small_ring + 4, "0123456789ABCDEF", 16);
+    std::memcpy(small_ring, "WXYZ", 4);
+    n = diag_dump_tail(small_ring, 20, 4, true, out, 50);
+    CHECK(n == 20u);
+    CHECK(std::string(out, n) == "0123456789ABCDEFWXYZ");
+
+    // 4. Unwrapped buffer larger than max: truncated tail returned, latest record visible
+    std::string lines;
+    for (int i = 0; i < 40; ++i) {
+        lines += "[  " + std::to_string(i) + ".000] log message " + std::to_string(i) + "\n";
+    }
+    lines += "[  99.000] LATEST_OTA_ERROR_MARKER\n";
+    CHECK(lines.size() > 512);
+    std::memcpy(ring, lines.data(), lines.size());
+
+    n = diag_dump_tail(ring, sizeof(ring), lines.size(), false, out, 512);
+    CHECK(n <= 512);
+    std::string res(out, n);
+    CHECK(res.rfind(kDiagTruncatedMarker, 0) == 0);
+    CHECK(res.find("LATEST_OTA_ERROR_MARKER\n") != std::string::npos);
+    std::string payload = res.substr(kDiagMarkerLen);
+    CHECK(payload.rfind("[  ", 0) == 0);
+
+    // 5. Wrapped buffer larger than max: truncated tail returned across ring wrap boundary
+    std::string wrap_lines;
+    int         line_idx = 0;
+    while (wrap_lines.size() < 6144 - 40) {
+        wrap_lines += "[ " + std::to_string(line_idx++) + "] padding record across buffer\n";
+    }
+    wrap_lines += "[999] LATEST_OTA_ERROR_MARKER\n";
+    size_t split = wrap_lines.size() - 1000;
+    std::memcpy(ring + 1000, wrap_lines.data(), split);
+    std::memcpy(ring, wrap_lines.data() + split, 1000);
+    n = diag_dump_tail(ring, 6144, 1000, true, out, 512);
+    CHECK(n <= 512);
+    std::string wrap_res(out, n);
+    CHECK(wrap_res.rfind(kDiagTruncatedMarker, 0) == 0);
+    CHECK(wrap_res.find("LATEST_OTA_ERROR_MARKER\n") != std::string::npos);
+    std::string wrap_payload = wrap_res.substr(kDiagMarkerLen);
+    CHECK(wrap_payload.rfind("[ ", 0) == 0 || wrap_payload.rfind("[", 0) == 0);
+
+    // 5b. Wrapped buffer with physical boundary split (phys_start + payload_len > ring_size)
+    char wrap_ring[100];
+    // Fill with pattern: 0..99
+    for (int i = 0; i < 100; ++i) {
+        wrap_ring[i] = static_cast<char>('A' + (i % 26));
+    }
+    // Set len = 10, total = 100, max = 40 (marker=20, payload=20).
+    // logical_start = 100 - 20 = 80.
+    // char_at(79) should be '\n' so no line scanning adjustment.
+    // logical index 79 is physical: (10 + 79) % 100 = 89.
+    wrap_ring[89] = '\n';
+    // phys_start will be (10 + 80) % 100 = 90.
+    // payload_len = 20. phys_start + payload_len = 110 > 100.
+    // chunk1 = 10 (ring[90..99]), chunk2 = 10 (ring[0..9]).
+    std::memcpy(wrap_ring + 90, "0123456789", 10);
+    std::memcpy(wrap_ring, "ABCDEFGHIJ", 10);
+    n = diag_dump_tail(wrap_ring, 100, 10, true, out, 40);
+    CHECK(n == 40u);
+    CHECK(std::string(out, 20) == std::string(kDiagTruncatedMarker));
+    CHECK(std::string(out + 20, 20) == "0123456789ABCDEFGHIJ");
+
+    // 5c. Truncation where logical_start is mid-line and next newline is at total - 1
+    char nl_ring[50];
+    std::memset(nl_ring, 'x', sizeof(nl_ring));
+    nl_ring[49] = '\n';
+    // len=50, unwrapped, max=30 (marker=20, payload budget=10).
+    // logical_start = 50 - 10 = 40. char_at(39) == 'x' != '\n'.
+    // Next newline is at i = 49 (which is total - 1).
+    // i + 1 == total, so logical_start is not set to i + 1.
+    n = diag_dump_tail(nl_ring, sizeof(nl_ring), 50, false, out, 30);
+    CHECK(n == 30u);
+
+    // 5d. Truncation where no newline is found after logical_start
+    char nonl_ring[50];
+    std::memset(nonl_ring, 'y', sizeof(nonl_ring));
+    // logical_start = 40, no newline found in remaining bytes
+    n = diag_dump_tail(nonl_ring, sizeof(nonl_ring), 50, false, out, 30);
+    CHECK(n == 30u);
+
+    // 6. Max smaller than or equal to marker length
+    n = diag_dump_tail(ring, sizeof(ring), lines.size(), false, out, 10);
+    CHECK(n == 10u);
+    CHECK(std::string(out, n) == std::string(kDiagTruncatedMarker, 10));
+}
+
 int main() {
+    test_diag_tail();
     test_http_cache();
     test_crc();
     test_hp_query_log_policy();

@@ -69,6 +69,12 @@ while [ "$(date +%s)" -le "$deadline" ]; do
     if [ -n "$raw_status" ] && printf '%s' "$raw_status" | jq -e '.version' >/dev/null 2>&1; then
         status_json="$raw_status"
         reachable=1
+        if printf '%s' "$status_json" | jq -e '.mqtt.configured == true and .mqtt.connected == false' >/dev/null 2>&1; then
+            if [ "$(date +%s)" -lt "$deadline" ]; then
+                sleep 2
+                continue
+            fi
+        fi
         break
     fi
     sleep 2
@@ -84,85 +90,136 @@ log "Device responded. Evaluating health criteria..."
 failures=0
 
 # 1. Version check
-actual_version=$(printf '%s' "$status_json" | jq -r '.version // empty')
-if [ -n "$EXPECTED_VERSION" ]; then
-    if [ "$actual_version" != "$EXPECTED_VERSION" ]; then
-        err "Version mismatch: expected '$EXPECTED_VERSION', got '$actual_version'"
-        failures=$((failures + 1))
-    else
-        log "✓ Version: $actual_version (matches expected)"
-    fi
+if ! printf '%s' "$status_json" | jq -e 'has("version") and (.version | type == "string" and length > 0)' >/dev/null 2>&1; then
+    err "Mandatory field 'version' missing, empty, or not a string"
+    failures=$((failures + 1))
+    actual_version=""
 else
-    log "✓ Version: $actual_version"
+    actual_version=$(printf '%s' "$status_json" | jq -r '.version')
+    if [ -n "$EXPECTED_VERSION" ]; then
+        if [ "$actual_version" != "$EXPECTED_VERSION" ]; then
+            err "Version mismatch: expected '$EXPECTED_VERSION', got '$actual_version'"
+            failures=$((failures + 1))
+        else
+            log "✓ Version: $actual_version (matches expected)"
+        fi
+    else
+        log "✓ Version: $actual_version"
+    fi
 fi
 
 # 2. ELF SHA check
-actual_elf_sha=$(printf '%s' "$status_json" | jq -r '.app_elf_sha256 // empty')
-if [ -n "$EXPECTED_ELF_SHA" ]; then
-    if [[ "$actual_elf_sha" != "$EXPECTED_ELF_SHA"* ]]; then
-        err "ELF SHA mismatch: expected prefix '$EXPECTED_ELF_SHA', got '$actual_elf_sha'"
-        failures=$((failures + 1))
-    else
-        log "✓ ELF SHA: $actual_elf_sha (matches expected)"
-    fi
+if ! printf '%s' "$status_json" | jq -e 'has("app_elf_sha256") and (.app_elf_sha256 | type == "string" and length > 0)' >/dev/null 2>&1; then
+    err "Mandatory field 'app_elf_sha256' missing, empty, or not a string"
+    failures=$((failures + 1))
+    actual_elf_sha=""
 else
-    log "✓ ELF SHA: ${actual_elf_sha:-none}"
+    actual_elf_sha=$(printf '%s' "$status_json" | jq -r '.app_elf_sha256')
+    if [ -n "$EXPECTED_ELF_SHA" ]; then
+        if [[ "$actual_elf_sha" != "$EXPECTED_ELF_SHA"* ]]; then
+            err "ELF SHA mismatch: expected prefix '$EXPECTED_ELF_SHA', got '$actual_elf_sha'"
+            failures=$((failures + 1))
+        else
+            log "✓ ELF SHA: $actual_elf_sha (matches expected)"
+        fi
+    else
+        log "✓ ELF SHA: $actual_elf_sha"
+    fi
 fi
 
 # 3. Uptime
-uptime_s=$(printf '%s' "$status_json" | jq -r '.uptime_s // 0')
-log "✓ Uptime: ${uptime_s}s"
-
-# 4. WiFi / Network
-wifi_connected=$(printf '%s' "$status_json" | jq -r '.wifi.connected // false')
-device_ip=$(printf '%s' "$status_json" | jq -r '.net.ip // empty')
-if [ "$wifi_connected" != "true" ] && [ -z "$device_ip" ]; then
-    err "WiFi not connected and no IP reported"
+if ! printf '%s' "$status_json" | jq -e 'has("uptime_s") and (.uptime_s | type == "number" and . >= 0)' >/dev/null 2>&1; then
+    err "Mandatory field 'uptime_s' missing or invalid number"
     failures=$((failures + 1))
 else
+    uptime_s=$(printf '%s' "$status_json" | jq -r '.uptime_s')
+    log "✓ Uptime: ${uptime_s}s"
+fi
+
+# 4. WiFi / Network
+if ! printf '%s' "$status_json" | jq -e '(.wifi.connected == true) or (.net.ip | type == "string" and length > 0)' >/dev/null 2>&1; then
+    err "Network not connected (.wifi.connected != true and no valid .net.ip)"
+    failures=$((failures + 1))
+else
+    device_ip=$(printf '%s' "$status_json" | jq -r '.net.ip // empty')
     log "✓ Network: connected (IP: ${device_ip:-unknown})"
 fi
 
 # 5. MQTT Broker
-mqtt_connected=$(printf '%s' "$status_json" | jq -r '.mqtt.connected // false')
-if [ "$mqtt_connected" != "true" ]; then
-    err "MQTT broker not connected (.mqtt.connected: false)"
+if ! printf '%s' "$status_json" | jq -e '.mqtt.connected == true' >/dev/null 2>&1; then
+    err "MQTT broker not connected (.mqtt.connected != true)"
     failures=$((failures + 1))
 else
     log "✓ MQTT: connected to broker"
 fi
 
 # 6. Crash & Fault analysis
-last_crash_fault=$(printf '%s' "$status_json" | jq -r '.last_crash.fault // false')
-last_crash_reason=$(printf '%s' "$status_json" | jq -r '.last_crash.reason // empty')
-last_crash_coredump=$(printf '%s' "$status_json" | jq -r '.last_crash.coredump // false')
-
-if [ "$last_crash_fault" = "true" ]; then
-    err "Active crash fault detected! reason='$last_crash_reason'"
-    err "Details: $(printf '%s' "$status_json" | jq -c '.last_crash')"
+if ! printf '%s' "$status_json" | jq -e 'has("last_crash")' >/dev/null 2>&1; then
+    err "Mandatory field 'last_crash' missing from status"
     failures=$((failures + 1))
 else
-    log "✓ Crash check: clean (fault: false, reset_reason: '${last_crash_reason:-normal}')"
-    if [ "$last_crash_coredump" = "true" ]; then
-        warn "Flash carries an orphan coredump partition from an older boot (fault is false on this boot)"
+    crash_type=$(printf '%s' "$status_json" | jq -r '.last_crash | type')
+    if [ "$crash_type" = "null" ]; then
+        log "✓ Crash check: clean (last_crash is null)"
+    elif [ "$crash_type" = "object" ]; then
+        if ! printf '%s' "$status_json" | jq -e '.last_crash.fault | type == "boolean"' >/dev/null 2>&1; then
+            err "Field 'last_crash.fault' missing or not a boolean"
+            failures=$((failures + 1))
+        elif [ "$(printf '%s' "$status_json" | jq -r '.last_crash.fault')" = "true" ]; then
+            last_crash_reason=$(printf '%s' "$status_json" | jq -r '.last_crash.reason // empty')
+            err "Active crash fault detected! reason='$last_crash_reason'"
+            err "Details: $(printf '%s' "$status_json" | jq -c '.last_crash')"
+            failures=$((failures + 1))
+        else
+            last_crash_reason=$(printf '%s' "$status_json" | jq -r '.last_crash.reason // empty')
+            last_crash_coredump=$(printf '%s' "$status_json" | jq -r '.last_crash.coredump // false')
+            log "✓ Crash check: clean (fault: false, reset_reason: '${last_crash_reason:-normal}')"
+            if [ "$last_crash_coredump" = "true" ]; then
+                warn "Flash carries an orphan coredump partition from an older boot (fault is false on this boot)"
+            fi
+        fi
+    else
+        err "Field 'last_crash' is invalid type ($crash_type, expected null or object)"
+        failures=$((failures + 1))
     fi
 fi
 
 # 7. Safe mode & Heap health
-safe_mode=$(printf '%s' "$status_json" | jq -r '.sys.safe_mode // false')
-safe_mode_cause=$(printf '%s' "$status_json" | jq -r '.sys.safe_mode_cause // empty')
-if [ "$safe_mode" = "true" ]; then
-    err "Device is in safe mode! Cause: ${safe_mode_cause:-unspecified}"
+if ! printf '%s' "$status_json" | jq -e 'has("sys") and (.sys | type == "object")' >/dev/null 2>&1; then
+    err "Mandatory object 'sys' missing from status"
     failures=$((failures + 1))
 else
-    log "✓ Safe mode: off"
-fi
+    if ! printf '%s' "$status_json" | jq -e '.sys.safe_mode | type == "boolean"' >/dev/null 2>&1; then
+        err "Field 'sys.safe_mode' missing or not a boolean"
+        failures=$((failures + 1))
+    elif [ "$(printf '%s' "$status_json" | jq -r '.sys.safe_mode')" = "true" ]; then
+        safe_mode_cause=$(printf '%s' "$status_json" | jq -r '.sys.safe_mode_cause // empty')
+        err "Device is in safe mode! Cause: ${safe_mode_cause:-unspecified}"
+        failures=$((failures + 1))
+    else
+        log "✓ Safe mode: off"
+    fi
 
-free_heap=$(printf '%s' "$status_json" | jq -r '.sys.free_heap // 0')
-max_alloc=$(printf '%s' "$status_json" | jq -r '.sys.max_alloc // 0')
-log "✓ Heap: ${free_heap} B free, largest contiguous block: ${max_alloc} B"
-if [ "$max_alloc" -gt 0 ] && [ "$max_alloc" -lt 10000 ]; then
-    warn "Largest contiguous heap block ($max_alloc B) is below 10 KiB threshold"
+    free_heap=""
+    if ! printf '%s' "$status_json" | jq -e '.sys.free_heap | type == "number" and . > 0' >/dev/null 2>&1; then
+        err "Mandatory field 'sys.free_heap' missing or not a positive number"
+        failures=$((failures + 1))
+    else
+        free_heap=$(printf '%s' "$status_json" | jq -r '.sys.free_heap')
+    fi
+
+    if ! printf '%s' "$status_json" | jq -e '.sys.max_alloc | type == "number"' >/dev/null 2>&1; then
+        err "Mandatory field 'sys.max_alloc' missing or not a number"
+        failures=$((failures + 1))
+    else
+        max_alloc=$(printf '%s' "$status_json" | jq -r '.sys.max_alloc')
+        if [ "$max_alloc" -lt 10000 ]; then
+            err "Largest contiguous heap block ($max_alloc B) is below 10,000 B minimum requirement"
+            failures=$((failures + 1))
+        else
+            log "✓ Heap: ${free_heap:-0} B free, largest contiguous block: ${max_alloc} B"
+        fi
+    fi
 fi
 
 # 8. Heat Pump (X10A) checks
