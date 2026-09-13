@@ -141,6 +141,26 @@ const parseEnd = weather.indexOf("bool fetch_forecast(", parseStart);
 assert.ok(parseStart >= 0 && parseEnd > parseStart &&
           weather.slice(parseStart, parseEnd).includes("JsonCleanup cleanup(root)"),
   "the cJSON tree must be released when parse-time vector or error allocations throw");
+
+const refDecodeStart = mqtt.indexOf("static DecodedReferenceFrame decode_reference_frame(");
+const refDecodeEnd = mqtt.indexOf("static DecodedCirculationFrame decode_circulation_frame(", refDecodeStart);
+assert.ok(refDecodeStart >= 0 && refDecodeEnd > refDecodeStart,
+  "decode_reference_frame must exist in mqtt_ha.cpp");
+const refDecode = mqtt.slice(refDecodeStart, refDecodeEnd);
+assert.match(refDecode, /JsonGuard\s+root\s*\(\s*cJSON_ParseWithLength/,
+  "decode_reference_frame must wrap cJSON_ParseWithLength in JsonGuard RAII");
+assert.ok(!refDecode.includes("cJSON_Delete(root)"),
+  "decode_reference_frame must rely on JsonGuard RAII, not manual cJSON_Delete");
+
+const circDecodeStart = refDecodeEnd;
+const circDecodeEnd = mqtt.indexOf("static ReferenceFreshness circulation_frame_freshness(", circDecodeStart);
+assert.ok(circDecodeStart >= 0 && circDecodeEnd > circDecodeStart,
+  "decode_circulation_frame must exist in mqtt_ha.cpp");
+const circDecode = mqtt.slice(circDecodeStart, circDecodeEnd);
+assert.match(circDecode, /JsonGuard\s+root\s*\(\s*cJSON_ParseWithLength/,
+  "decode_circulation_frame must wrap cJSON_ParseWithLength in JsonGuard RAII");
+assert.ok(!circDecode.includes("cJSON_Delete(root)"),
+  "decode_circulation_frame must rely on JsonGuard RAII, not manual cJSON_Delete");
 const fetchAt = weather.indexOf("fetch_forecast(cfg, sample, error");
 const quiesceAt = weather.indexOf("vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs))");
 const pollBarrierAt = weather.indexOf("hp_poll_network_quiesced()", quiesceAt);

@@ -312,10 +312,13 @@ struct RuntimeConfigSnapshot {
     daik::ConfigBlob service;
     daik::LinkBlob   link;
     uint32_t         revision = 0;
+    std::string      profile  = "auto";
+    bool             fp_valid = false;
 };
 
-// Minimal executable form of config.cpp's ownership rule: detection owns only the link and uses a
-// revision compare-and-commit; an HTTP writer with a stale snapshot carries the newer link forward.
+// Minimal executable form of config.cpp's ownership rule: detection owns link and model fields and
+// uses a revision compare-and-commit; an HTTP writer with a stale snapshot carries the newly
+// detected link and model (including fp_valid) forward.
 class ConfigCoordinator {
 public:
     ConfigCoordinator(ConfigPersistenceAdapter& persistence, RuntimeConfigSnapshot initial)
@@ -331,13 +334,27 @@ public:
         return true;
     }
 
+    bool commit_detected_model(uint32_t expected_revision, std::string profile, bool fp_valid) {
+        if (current_.revision != expected_revision) return false;
+        current_.profile  = std::move(profile);
+        current_.fp_valid = fp_valid;
+        ++current_.revision;
+        return true;
+    }
+
     bool save_http(RuntimeConfigSnapshot requested, bool require_link) {
-        if (requested.revision != current_.revision) requested.link = current_.link;
+        if (!require_link && requested.revision != current_.revision) {
+            requested.link     = current_.link;
+            requested.profile  = current_.profile;
+            requested.fp_valid = current_.fp_valid;
+        }
         if (persistence_.save_config(requested.service) != NvsResult::Ok) return false;
         const bool link_ok = persistence_.save_link(requested.link) == NvsResult::Ok;
         if (require_link && !link_ok) return false;
         current_.service = std::move(requested.service);
         if (link_ok) current_.link = requested.link;
+        current_.profile  = requested.profile;
+        current_.fp_valid = requested.fp_valid;
         ++current_.revision;
         return true;
     }

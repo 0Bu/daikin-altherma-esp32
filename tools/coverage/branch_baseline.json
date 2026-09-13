@@ -87,6 +87,10 @@
         "outcomes": 10,
         "taken": 10
       },
+      "main/logic/diag_tail.hpp": {
+        "outcomes": 28,
+        "taken": 28
+      },
       "main/logic/discovery.hpp": {
         "outcomes": 310,
         "taken": 166
@@ -441,6 +445,10 @@
         "outcomes": 10,
         "taken": 10
       },
+      "main/logic/diag_tail.hpp": {
+        "outcomes": 28,
+        "taken": 28
+      },
       "main/logic/discovery.hpp": {
         "outcomes": 332,
         "taken": 177
@@ -794,6 +802,10 @@
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
         "taken": 10
+      },
+      "main/logic/diag_tail.hpp": {
+        "outcomes": 28,
+        "taken": 28
       },
       "main/logic/discovery.hpp": {
         "outcomes": 332,

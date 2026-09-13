@@ -237,11 +237,26 @@ inline constexpr uint32_t diagnostics_next_generation(uint32_t current) {
 // Whole-struct config_save() stays for the HTTP handlers: they own the credential fields and are
 // serialized against each other on the single httpd task.
 //
-// The rule is therefore ASYMMETRIC, on purpose. It closes poll→httpd (a detection commit can no
-// longer revert credentials) but not httpd→poll: a /set_* save still republishes its whole snapshot,
-// so it can revert a link commit that landed in its own sub-millisecond snapshot→save window. That
-// direction is left open because it is self-correcting and cheap — detection re-runs and re-fixes
-// the link — whereas the credentials it protects are user-entered and unrecoverable.
+// The revision check reconciles concurrent writes in both directions: detection commits patch
+// only detection-owned fields (never reverting user credentials), while an HTTP service save
+// whose snapshot predates a detection commit carries forward the entire newly detected link and
+// model state (including validity) rather than silently reverting it.
+
+// Reconcile a stale service snapshot with newly detected link and model fields.
+// Preserves the complete detection-owned state (pins, proto, identity, profile, and fingerprint
+// validity/data) when an unrelated HTTP form commits an older snapshot.
+inline void reconcile_detected_config(Config& c, const Config& current) {
+    c.profile          = current.profile;
+    c.proto            = current.proto;
+    c.rx_pin           = current.rx_pin;
+    c.tx_pin           = current.tx_pin;
+    c.x10a_identity_fp = current.x10a_identity_fp;
+    c.fp_pages         = current.fp_pages;
+    c.fp_kw_tenths     = current.fp_kw_tenths;
+    c.fp_iu_kw_tenths  = current.fp_iu_kw_tenths;
+    c.fp_eeprom        = current.fp_eeprom;
+    c.fp_valid         = current.fp_valid;
+}
 
 // Decide whether a whole-struct config save achieved what its CALLER requires. The atomic service
 // blob and the self-healing X10A link cache are deliberately different durability domains:

@@ -105,21 +105,27 @@ void test_config_detection_http_interleaving() {
 
     VirtualScheduler scheduler;
     bool             detection_saved = false;
+    bool             model_saved     = false;
     bool             http_saved      = false;
     scheduler.after(10, [&] {
         detection_saved =
             coordinator.commit_detected_link(1, daik::LinkBlob{1, 2, 'S', 0xAABBCCDDu});
     });
+    scheduler.after(
+        15, [&] { model_saved = coordinator.commit_detected_model(2, "altherma3_r_erga", true); });
     scheduler.after(20, [&] { http_saved = coordinator.save_http(stale_http_snapshot, false); });
     scheduler.run();
 
     CHECK(detection_saved);
+    CHECK(model_saved);
     CHECK(http_saved);
     CHECK_EQ(scheduler.now_ms(), uint64_t{20});
     CHECK_EQ(coordinator.snapshot().service.mqtt_uri, std::string("mqtts://new-broker.local"));
     CHECK_EQ(coordinator.snapshot().link.rx_pin, 1);
     CHECK_EQ(coordinator.snapshot().link.tx_pin, 2);
     CHECK_EQ(coordinator.snapshot().link.proto, 'S');
+    CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_r_erga"));
+    CHECK_EQ(coordinator.snapshot().fp_valid, true);
 
     ConfigPersistenceAdapter rebooted(nvs, allocations);
     daik::ConfigBlob         service;
@@ -128,6 +134,36 @@ void test_config_detection_http_interleaving() {
     CHECK(rebooted.load_link(link));
     CHECK_EQ(service.mqtt_uri, std::string("mqtts://new-broker.local"));
     CHECK_EQ(link.identity_fp, uint32_t{0xAABBCCDDu});
+
+    // Case B: Save-before-detection (HTTP commits first, then detection commits)
+    {
+        RuntimeConfigSnapshot snap = coordinator.snapshot();
+        snap.service.wifi_ssid     = "new-net";
+        CHECK(coordinator.save_http(snap, false));
+        CHECK_EQ(coordinator.snapshot().service.wifi_ssid, std::string("new-net"));
+        CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_r_erga"));
+        CHECK_EQ(coordinator.snapshot().fp_valid, true);
+
+        // Detection re-commits with new model
+        const uint32_t cur_rev = coordinator.snapshot().revision;
+        CHECK(coordinator.commit_detected_model(cur_rev, "altherma3_geo", true));
+        CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_geo"));
+        CHECK_EQ(coordinator.snapshot().fp_valid, true);
+        CHECK_EQ(coordinator.snapshot().service.wifi_ssid, std::string("new-net"));
+    }
+
+    // Case C: Explicit set_hp (require_link=true) overrides link even on revision difference
+    {
+        RuntimeConfigSnapshot stale_hp = coordinator.snapshot();
+        stale_hp.link                  = daik::LinkBlob{10, 11, 'I', 0x99887766u};
+        CHECK(coordinator.commit_detected_model(coordinator.snapshot().revision, "altherma3_geo",
+                                                true));
+        CHECK(stale_hp.revision != coordinator.snapshot().revision);
+        CHECK(coordinator.save_http(stale_hp, /*require_link=*/true));
+        CHECK_EQ(coordinator.snapshot().link.rx_pin, 10);
+        CHECK_EQ(coordinator.snapshot().link.tx_pin, 11);
+        CHECK_EQ(coordinator.snapshot().link.proto, 'I');
+    }
 }
 
 void test_oom_http_and_task_guarantees() {
