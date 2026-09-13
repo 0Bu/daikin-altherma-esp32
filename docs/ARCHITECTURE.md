@@ -165,7 +165,11 @@ config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi
                       RAM if only its cache write fails, so detection need merely run again after
                       reboot. config_load reads `cfg` and `link`
                       first, falling back to each domain's legacy per-key values when its blob is
-                      absent (fresh device / pre-blob OTA) or invalid
+                      absent (fresh device / pre-blob OTA) or invalid. The legacy per-key NVS names
+                      recognized in namespace `daik_cfg` are: `wifi_ssid`, `wifi_pass`,
+                      `wifi_ssid_back`, `wifi_pass_back`, `wifi_rollback`, `wifi_rolledbk`,
+                      `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `syslog_host`, `syslog_port`,
+                      `ntp_server`, `board_set`, `rx_pin`, `tx_pin`, and `proto`.
 nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters return esp_err_t and
                        are [[nodiscard]] — a dropped write is silent (compare to ESP_OK, not bool)
 http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns register their own routes.

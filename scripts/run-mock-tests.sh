@@ -84,8 +84,26 @@ if [ "$COVERAGE" = true ]; then
     # fails closed instead of silently borrowing a superficially compatible local baseline.
     # shellcheck source=/dev/null
     . tools/coverage/profile.sh
+    RUNNER_OS_VAL="${RUNNER_OS:-}"
+    IMAGE_OS_VAL="${ImageOS:-}"
+    if [ "${GITHUB_ACTIONS:-false}" != true ]; then
+        if [ -z "$RUNNER_OS_VAL" ]; then
+            RUNNER_OS_VAL="$(uname -s 2>/dev/null || true)"
+        fi
+        if [ -z "$IMAGE_OS_VAL" ]; then
+            if [ "$RUNNER_OS_VAL" = "Linux" ] && [ -f /etc/os-release ]; then
+                # shellcheck source=/dev/null
+                os_id="$(. /etc/os-release 2>/dev/null && echo "${ID:-}")"
+                os_ver="$(. /etc/os-release 2>/dev/null && echo "${VERSION_ID:-}")"
+                os_ver_major="${os_ver%%.*}"
+                IMAGE_OS_VAL="${os_id}${os_ver_major}"
+            elif [ "$RUNNER_OS_VAL" = "Darwin" ]; then
+                IMAGE_OS_VAL=""
+            fi
+        fi
+    fi
     if ! BRANCH_PROFILE="$(coverage_branch_profile "$BRANCH_FAMILY" "$COMPILER_MAJOR" \
-        "${GITHUB_ACTIONS:-false}" "${RUNNER_OS:-}" "${ImageOS:-}")"; then
+        "${GITHUB_ACTIONS:-false}" "$RUNNER_OS_VAL" "$IMAGE_OS_VAL")"; then
         echo "run-mock-tests: cannot identify the coverage execution profile" >&2
         exit 1
     fi
