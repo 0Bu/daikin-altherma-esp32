@@ -1,5 +1,12 @@
 # Project review — 13 September 2026
 
+> **Status:** Actionable findings P1, P2, P3, and P5 are implemented:
+> - **P1 (resolved):** Local profiles now bind platform/packaging slugs (`tools/coverage/profile.sh`, `scripts/run-mock-tests.sh`, `tools/coverage/branch_baseline.json`). Stock Ubuntu 24.04 GCC 13.3.0 resolves to `gcc-13-linux-ubuntu24` with its verified 80/100 outcome count; Darwin resolves to `clang-17-darwin` or `gcc-13-darwin`; unreviewed distributions fail closed.
+> - **P2 (resolved):** Added a status block to [`docs/reviews/2026-09-12-code-audit.md`][prior-review] clarifying that all findings R1–R8 were resolved in commit `c764905` (PR #99).
+> - **P3 (resolved):** `scripts/run-sanitizer-fuzz-tests.sh` now retries alternative compilers (e.g. `g++`) before degrading to UBSan or failing.
+> - **P5 (resolved):** Legacy per-key NVS names (`wifi_ssid`, `wifi_pass`, `wifi_ssid_back`, `wifi_pass_back`, `wifi_rollback`, `wifi_rolledbk`, `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `syslog_host`, `syslog_port`, `ntp_server`, `board_set`, `rx_pin`, `tx_pin`, `proto`) are documented in [`docs/ARCHITECTURE.md`][arch-doc].
+> - **P4, P6:** Preserved as standing architectural observations.
+
 A whole-project `$project-review` pass over source revision
 [`57337de57de0`][source] (`main`). This is not a diff review: the reviewed branch is
 byte-identical to `origin/main`, so the subject is the project as it currently stands —
@@ -350,3 +357,4 @@ Stated explicitly, because green gates do not prove these:
 [sanitizer]: https://github.com/0Bu/daikin-altherma-esp32/blob/57337de57de0/scripts/run-sanitizer-fuzz-tests.sh
 [prior-review]: 2026-09-12-code-audit.md
 [config]: https://github.com/0Bu/daikin-altherma-esp32/blob/57337de57de0/main/config.cpp
+[arch-doc]: ../ARCHITECTURE.md

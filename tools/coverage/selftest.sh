@@ -61,6 +61,24 @@ profile="$(coverage_branch_profile gcc 13 false '' '')"
 [ "$profile" = gcc-13 ]
 check_status "a local compiler selects its family-major profile" 0 "$?"
 
+profile="$(coverage_branch_profile gcc 13 false Linux ubuntu24)"
+[ "$profile" = gcc-13-linux-ubuntu24 ]
+check_status "a local compiler on a reviewed Linux platform selects its platform profile" 0 "$?"
+
+profile="$(coverage_branch_profile clang 17 false Darwin '')"
+[ "$profile" = clang-17-darwin ]
+check_status "a local compiler on Darwin selects its platform profile" 0 "$?"
+
+profile="$(coverage_branch_profile gcc 13 false Darwin '')"
+[ "$profile" = gcc-13-darwin ]
+check_status "a local GCC compiler on Darwin selects its platform profile" 0 "$?"
+
+coverage_branch_profile gcc 13 false '!!!' '' >/dev/null 2>&1
+check_status "a local compiler with an unparseable OS fails closed" 2 "$?"
+
+coverage_branch_profile gcc 13 false Linux '!!!' >/dev/null 2>&1
+check_status "a local compiler with an unparseable image fails closed" 2 "$?"
+
 profile="$(coverage_branch_profile gcc 13 true Linux ubuntu24)"
 [ "$profile" = gcc-13-github-linux-ubuntu24 ]
 check_status "a hosted runner selects its exact image profile" 0 "$?"
