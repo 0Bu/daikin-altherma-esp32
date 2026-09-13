@@ -1,5 +1,9 @@
 # Code and workflow review — 12 September 2026
 
+> **Status:** All eight findings (R1–R8) were resolved in commit [`c764905`][resolution]
+> (PR #99). The findings and analysis below are preserved as the finding record for reviewed
+> revision [`446be181`][source].
+
 This review identifies eight open findings in source revision
 [`446be181c6bd9042784dcfc212296569d7961012`][source]. Four concern deployment
 selection or acceptance, one concerns the separate health helper, and three concern
@@ -369,6 +373,7 @@ behavior the existing gates actually exercise.
    then follow the separately authorized production chain.
 
 [source]: https://github.com/0Bu/daikin-altherma-esp32/tree/446be181c6bd9042784dcfc212296569d7961012
+[resolution]: https://github.com/0Bu/daikin-altherma-esp32/commit/c764905da3c5faef5b6336e9dbb9a68ecb9c5a54
 [ota-policy]: https://github.com/0Bu/daikin-altherma-esp32/blob/446be181c6bd9042784dcfc212296569d7961012/AGENTS.md#L156-L164
 [deploy-prod]: https://github.com/0Bu/daikin-altherma-esp32/blob/446be181c6bd9042784dcfc212296569d7961012/.agents/skills/deploy-prod/SKILL.md
 [deploy-test]: https://github.com/0Bu/daikin-altherma-esp32/blob/446be181c6bd9042784dcfc212296569d7961012/.agents/skills/deploy-test/SKILL.md
