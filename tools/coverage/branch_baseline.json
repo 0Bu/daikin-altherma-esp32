@@ -1496,8 +1496,8 @@
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 141,
-        "taken": 130
+        "outcomes": 153,
+        "taken": 142
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
