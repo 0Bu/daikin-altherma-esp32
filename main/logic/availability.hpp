@@ -109,12 +109,13 @@ enum class AvailabilityPolicy : uint8_t {
 // (0x62, 15, conv 405). Two facts about it decide everything below, and BOTH were measured rather
 // than assumed — getting either wrong is the #35-#39 shape with a second sensor in front of it:
 //
-//   (1) IT IS THE HIGH SIDE. Over 1419 running samples its value tracks the LEAVING WATER across a
-//       55 K span (3.2-64.1 °C against LWT 9.5-64.8 °C; paired mean difference -0.9 K) while outdoor
-//       air stayed inside a 7 K band. It is the condensing pressure, not the evaporating one.
+//   (1) IT IS THE PHE SIDE. Over 1419 mixed-mode running samples its value tracks LEAVING WATER
+//       across a 55 K span (3.2-64.1 °C against LWT 9.5-64.8 °C; paired mean difference -0.9 K)
+//       while outdoor air stayed inside a 7 K band. It is high/condensing in heating and low/
+//       evaporating in cooling; the mixed-mode mean is correlation evidence, not a condenser pinch.
 //   (2) IT IS THE ONLY REFRIGERANT PRESSURE ROW ON THAT PAGE. There is no low-side witness anywhere
 //       in the catalog's hydronic page, and the page-0x20 transducers that would carry one read
-//       exactly 0.0 bar in 56433/56433 samples over 120 days (conv 405 drops bar <= 0, so their own
+//       exactly 0.0 bar in 56433/56433 samples over 120 days (conv 405 drops kgf/cm²G <= 0, so their own
 //       (T) twins have never published a sample).
 //
 // (1) is why this rule reaches exactly ONE of the three page-0x20 zero rows, and why the pairing
@@ -393,7 +394,7 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // saturation temperatures in the same 16-byte reply (0x20/12, 0x20/14, conv 405), which would
     // have needed no cross-page state at all. They are unusable here — those transducers read
     // exactly 0.0 bar in 56433/56433 samples over 120 days, at rest and at 42 rps alike, and conv
-    // 405 drops bar <= 0, so neither (T) row has ever published one sample in the store's whole
+    // 405 drops kgf/cm²G <= 0, so neither (T) row has ever published one sample in the store's whole
     // retention. A rule keyed to them would be permanently silent on the very unit whose zeros
     // motivated it, and unverifiable live on this board forever. The high side is also the thinner
     // of the two on-page witnesses by catalog reach — 0x20/12 is carried by 23 of 44 profile tables

@@ -294,6 +294,27 @@ assert.equal(h.DERIVED.cop.fn({
 }, threeCtPhases), null,
   "a complete positive CT set must still suppress the mismatched historical COP boundary");
 
+// Thermal output has the same compressor boundary as the live pill. Preserve a no-flow bucket as
+// zero, retain signed active/defrost transfer, and refuse pump-overrun redistribution.
+assert.equal(h.DERIVED.pth.ready({
+  flow: true, leaving_water: true, return_water: true, comp_rps: false,
+}), false, "thermal output is unavailable when the profile has no compressor witness");
+assert.equal(h.DERIVED.pth.fn({
+  flow: 0, leaving_water: 35, return_water: 30, comp_rps: 0,
+}), 0, "a stopped circuit with measured zero flow is zero transfer");
+assert.equal(h.DERIVED.pth.fn({
+  flow: 0, leaving_water: null, return_water: null, comp_rps: null,
+}), 0, "measured no flow proves zero transfer without temperature or compressor samples");
+assert.equal(h.DERIVED.pth.fn({
+  flow: 20, leaving_water: 35, return_water: 30, comp_rps: 0,
+}), null, "pump overrun must not be drawn as heat-pump output");
+assert.ok(h.DERIVED.pth.fn({
+  flow: 20, leaving_water: 35, return_water: 30, comp_rps: 45,
+}) > 0, "a running compressor keeps the signed water-side transfer");
+assert.ok(h.DERIVED.pth.fn({
+  flow: 20, leaving_water: 30, return_water: 35, comp_rps: 45,
+}) < 0, "defrost and cooling retain the signed reverse transfer");
+
 // A successful HomeHub poll proves transport freshness, not when the controller last refreshed its
 // outdoor-temperature register. Keep that qualification in the graph popup: the chart must remain
 // compact, while hovering any petrol plateau names its observed interval and unknown measurement age.

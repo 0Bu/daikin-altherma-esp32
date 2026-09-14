@@ -424,26 +424,45 @@ static void test_convert() {
     const uint8_t cap8[] = {0x08};
     CHECK(convert(cap, cap8).ok && approx(convert(cap, cap8).value, 8.0));
 
-    // Refrigerant pressure->temperature curve is monotonic in the working range.
-    CHECK(press2temp(20.0) < press2temp(30.0));
-    // Refrigerant type selects the curve: R410A (801) and R22 (803) differ from the R32 (802)
-    // default; unknown ids (804/805) fall back to R32. A conv-405 row must honour rtype.
+    // Refrigerant pressure->temperature curves stay monotonic only inside their declared input
+    // intervals. The first 0.1 kgf/cm²G beyond each ceiling must fail closed instead of publishing
+    // the sixth-order polynomial's falling branch as a plausible temperature.
+    for (int rtype : {801, 802, 803}) {
+        const double max = press2temp_max_kgf_cm2g(rtype);
+        double previous = press2temp(0.1, rtype);
+        CHECK(std::isfinite(previous));
+        for (double pressure = 0.2; pressure <= max; pressure += 0.1) {
+            const double current = press2temp(pressure, rtype);
+            CHECK(std::isfinite(current) && current > previous);
+            previous = current;
+        }
+        CHECK(std::isfinite(press2temp(max, rtype)));
+        CHECK(!std::isfinite(press2temp(max + 0.1, rtype)));
+    }
+    // Refrigerant type selects the curve: R410A (801) and R22 (803) differ from R32 (802).
+    // Omitted, unsupported and unknown ids produce no result. A conv-405 row must honour rtype.
     CHECK(!approx(press2temp(20.0, 801), press2temp(20.0, 802)));
     CHECK(!approx(press2temp(20.0, 803), press2temp(20.0, 802)));
-    CHECK(approx(press2temp(20.0, 804), press2temp(20.0, 802)));
+    CHECK(!std::isfinite(press2temp(20.0, 804)));
+    CHECK(!std::isfinite(press2temp(20.0, 805)));
+    CHECK(!std::isfinite(press2temp(20.0, 0)));
+    CHECK(!std::isfinite(press2temp(std::numeric_limits<double>::quiet_NaN(), 802)));
     ValueDef      p405{0x62, 0, 405, 2, 1, "Pt"};
-    const uint8_t p200[] = {0xC8, 0x00}; // LE 200 -> 20.0 bar in
+    const uint8_t p200[] = {0xC8, 0x00}; // LE 200 -> 20.0 kgf/cm²G in
     CHECK(!approx(convert(p405, p200, 801).value, convert(p405, p200, 802).value));
-    CHECK(approx(convert(p405, p200, 802).value, convert(p405, p200).value)); // default == R32
+    CHECK(!convert(p405, p200).ok);
+    CHECK(!convert(p405, p200, 804).ok);
+    CHECK(!convert(p405, p200, 805).ok);
+    CHECK(!convert(p405, p200, 0).ok);
 
     // conv 405 saturation temp from a 0-bar sensor (absent on many hydrobox units, or the
     // compressor simply off) must NOT publish its press2temp(0) ≈ -51 °C placeholder — drop it
     // INTRINSICALLY in convert() (the 0-bar decision needs the raw pressure, which the publish-time
     // filter never sees).
-    const uint8_t zerobar[] = {0x00, 0x00}; // 0 bar in -> no meaningful sat temp
+    const uint8_t zerobar[] = {0x00, 0x00}; // 0 kgf/cm²G in -> no meaningful sat temp
     CHECK(!convert(p405, zerobar).ok);
-    const uint8_t realbar[] = {0x64, 0x00}; // LE 100 -> 10.0 bar -> a real sat temp kept
-    CHECK(convert(p405, realbar).ok);
+    const uint8_t realbar[] = {0x64, 0x00}; // LE 100 -> 10.0 kgf/cm²G -> real sat temp kept
+    CHECK(convert(p405, realbar, 802).ok);
 
     // reading_plausible: the publish-time °C envelope (TEMP_MIN_C/TEMP_MAX_C), applied by hp_format
     // — NOT inside convert(), which keeps its intrinsic per-converter semantics so the catalog
@@ -562,8 +581,8 @@ static void test_convert() {
     CHECK(approx(convert(evap, evap2406).value * 0.1, 24.06)); // at rest  ~= ambient
     CHECK(approx(convert(evap, evap1459).value * 0.1, 14.59)); // running  ~= 8 K below ambient
 
-    // A REFRIGERANT pressure of 0 bar is an unreported transducer, not a reading: these are
-    // ABSOLUTE pressures and a sealed circuit is never at vacuum. Measured on a live 4-8 kW unit,
+    // A REFRIGERANT pressure of exact zero is an absent/unreported transducer on the observed X10A
+    // path, not a reading. Measured on a live 4-8 kW unit,
     // High/Low Pressure (0x20/12+14) read exactly 0.0 bar both at rest and at 42 rps, while the
     // 0x62/15 refrigerant sensor read a correct 15.3 bar — so the 0.0 reached HA as a real pressure
     // (#35-#39 shape). WATER pressure must keep publishing 0 bar: a drained system genuinely reads
@@ -611,12 +630,33 @@ static void test_convert() {
     CHECK(
         !reading_plausible(pprof[3], convert(pprof[3], p0bar), pprof, pn)); // ...but caught with it
 
-    // profile_refrigerant: pick the 801-805 row's id, else default to R32 (802).
+    // profile_refrigerant: pick the 801-805 row's id, else fail closed as unknown.
     const ValueDef prof801[]   = {{0x00, 0, 801, 0, -1, "*Refrigerant type"},
                                   {0x61, 0, 105, 2, 1, "T"}};
     const ValueDef prof_none[] = {{0x61, 0, 105, 2, 1, "T"}};
     CHECK(profile_refrigerant(prof801, 2) == 801);
-    CHECK(profile_refrigerant(prof_none, 1) == 802);
+    CHECK(profile_refrigerant(prof_none, 1) == 0);
+
+    // Every registered profile that can publish a saturation-temperature row declares exactly one
+    // supported correlation. This includes the hand-written R32 fixture: no production profile may
+    // regain the old implicit-R32 substitution.
+    for (const auto& p : def::profiles) {
+        int refrigerant_rows = 0;
+        bool saturation_rows = false;
+        for (size_t i = 0; i < p.count; ++i) {
+            refrigerant_rows += p.values[i].conv >= 801 && p.values[i].conv <= 805;
+            saturation_rows |= p.values[i].conv == 405;
+        }
+        if (saturation_rows) {
+            CHECK(refrigerant_rows == 1);
+            CHECK(press2temp_max_kgf_cm2g(profile_refrigerant(p.values, p.count)) > 0.0);
+        }
+    }
+
+    // Pressure is decoded intrinsically in kgf/cm² and normalized to bar only for publication.
+    CHECK(approx(value_for_publication(2, 15.3), 15.0041745));
+    CHECK(approx(value_for_publication(2, 1.0), 0.980665));
+    CHECK(approx(value_for_publication(1, 15.3), 15.3));
 
     // display_decimals: ×0.01 -> 2, scaled families (incl. 161 CT current and 405) -> 1, integers
     // 0.
@@ -628,7 +668,8 @@ static void test_convert() {
     CHECK(display_decimals(217) == 0);
 
     // Catalog-wide regression guard for the "Water pressure" quirk: the hydronic water
-    // pressure at reg 0x62 offset 11 must decode as raw bar (conv 105, type 2) in EVERY profile —
+    // pressure at reg 0x62 offset 11 must decode intrinsically as kgf/cm² (conv 105, type 2) in
+    // EVERY profile —
     // never the refrigerant saturation-temp curve (conv 405) the catalog mis-assigned on the 4-8kW
     // / E-series models. (Legit conv-405 refrigerant "(T)" rows live at other offsets, e.g.
     // 0x62[15].)
@@ -639,7 +680,7 @@ static void test_convert() {
                 CHECK(p.values[i].conv == 105 && p.values[i].type == 2);
                 wp_checked++;
             }
-    CHECK(wp_checked >= 40); // every model carries this row; all must be raw bar
+    CHECK(wp_checked >= 40); // every model carries this row; all publish as bar after normalization
 
     // Catalog guard (#35): "Mixed water temp." at reg 0x64 offset 10 is signed BE ×0.01 (conv 118)
     // in EVERY profile — never conv 105 (signed LE ×0.1), which decodes 0D DA as -971.5 °C.
@@ -5515,7 +5556,7 @@ static void test_hp_probe() {
 
     // ── A 2-byte field: 0x010A little-endian = 266 raw, 26.6 as a ×0.1 temperature.
     const uint8_t two[2] = {0x0A, 0x01};
-    int           n      = probe_sweep(two, 2, 0, 2, d, PROBE_MAX_DECODES);
+    int           n      = probe_sweep(two, 2, 0, 2, d, PROBE_MAX_DECODES, 802);
     CHECK(n > 0 && n <= PROBE_MAX_DECODES);
     const ProbeDecode* t = probe_find(d, n, 105);
     CHECK(t && t->ok && !t->is_text && t->value == 26.6);
@@ -5537,6 +5578,13 @@ static void test_hp_probe() {
     // conv 405 reads the same bytes as a pressure and answers a saturation temperature.
     const ProbeDecode* sat = probe_find(d, n, 405);
     CHECK(sat && sat->ok && sat->value != 26.6);
+
+    // A positive pressure still needs explicit refrigerant metadata. This guards the probe helpers'
+    // fail-closed default: without a declared profile, conv 405 must not silently assume R32.
+    const uint8_t positive_pressure[2] = {0xC8, 0x00};
+    n = probe_sweep(positive_pressure, 2, 0, 2, d, PROBE_MAX_DECODES);
+    const ProbeDecode* unknown_refrigerant = probe_find(d, n, 405);
+    CHECK(unknown_refrigerant && !unknown_refrigerant->ok && !unknown_refrigerant->is_text);
 
     // ── The 0x8000 sentinel is exactly where 105 and 107 part company, and getting that wrong is
     // the difference between publishing -3276.8 °C and reporting "no data".
@@ -5649,6 +5697,8 @@ static void test_hp_probe() {
     CHECK(!probe_decode_one(nullptr, 2, 0, 2, 105, single, unimpl));
     // A converter that runs and refuses is a successful decode with ok=false, not a failure.
     CHECK(probe_decode_one(zero, 2, 0, 2, 405, single, unimpl) && !single.ok && !unimpl);
+    CHECK(probe_decode_one(positive_pressure, 2, 0, 2, 405, single, unimpl) && !single.ok &&
+          !unimpl);
 
     // The output bound is structural: no field width can offer more candidates than one answer
     // holds.

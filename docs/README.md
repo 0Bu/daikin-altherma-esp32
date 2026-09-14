@@ -25,8 +25,8 @@ findings are in the verification apparatus rather than in firmware. It does not 
 behavior either.
 [14 September 2026 domain review](reviews/2026-09-14-domain-review.md) is the physical-correctness
 pass: refrigerant saturation curves, unit conventions, heat-meter constants and the thresholds the
-plant checks rest on, each checked against external reference data. It does not change firmware
-behavior either.
+plant checks rest on, with confirmed findings, rejected claims, evidence limits and the corrections
+implemented by PR 102.
 
 ---
 

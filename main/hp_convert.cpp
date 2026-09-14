@@ -14,7 +14,7 @@ bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int
     Reading r = convert(def, payload + def.offset, rtype);   // rtype selects the conv-405 curve
     if (r.unimpl) return false;
     // Drop impossible placeholders: a °C reading off the physical envelope (576 °C, ±3276.x), or a
-    // refrigerant pressure at 0 bar (an unreported transducer — a sealed circuit is never at vacuum).
+    // refrigerant pressure at 0 kgf/cm²G (an absent/unreported transducer on the observed X10A path).
     if (!reading_plausible(def, r, profile, count)) return false;
     // Then the adjudicated per-row availability ledger (logic/availability.hpp): a value the envelope
     // above cannot see is wrong because it is perfectly ordinary — a target temperature of exactly
@@ -40,6 +40,7 @@ bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int
         else out = (def.conv == 204) ? format_error_code(r.text) : r.text;
         return true;
     }
+    r.value = value_for_publication(def.type, r.value);
     char b[32];
     // Per-converter decimal precision (logic/convert.hpp): 2 for ×0.01, 1 for scaled, 0 for integers.
     snprintf(b, sizeof(b), "%.*f", display_decimals(def.conv), r.value);

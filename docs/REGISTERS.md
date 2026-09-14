@@ -28,15 +28,16 @@ matching `daik::ValueDef` in [`logic/value_def.hpp`](../main/logic/value_def.hpp
 | `offset` | Byte offset of the value **within the reply payload** (payload starts at byte 3 for protocol `I`) |
 | `conv` | Converter id — how the bytes become a number/enum (see [§3](#3-converter-reference)) |
 | `size` | Field width in bytes (1 or 2) |
-| `type` | Unit/`device_class` hint: `1`=°C, `2`=bar, `3`=A, `-1`=generic. Independent of `conv` |
+| `type` | Publication unit/`device_class`: `1`=°C, `2`=bar, `3`=A, `-1`=generic. Independent of `conv` |
 | `label` | Human label (English) |
 
 A model profile is just an array of these rows. One register request feeds many rows (all the
 values whose `reg` matches), each sliced out by `(offset, size)` and decoded by `conv`.
 
-> **`type` vs `conv`.** `conv` decides the *math* (sign, scale, enum). `type` only decides the HA
-> unit/`device_class` shown. Current values often carry `type = -1` and put "(A)" in the label; the
-> numeric scale still comes from `conv`.
+> **`type` vs `conv`.** `conv` decides the intrinsic wire decode (sign, scale, enum). `type` decides
+> the HA unit/`device_class` and normalizes pressure from wire kgf/cm² to published bar. Current
+> values often carry `type = -1` and put "(A)" in the label; their numeric scale still comes from
+> `conv`.
 
 ---
 
@@ -77,22 +78,26 @@ just `data[0]`. Sign is chosen by the converter. This is `read_u16`/`read_s16` i
 | **161 / 162** | u16 | `raw × 0.5` | **CT current sensor (0.5 A/step)** |
 | 163 | u16 | `raw × 0.25` | |
 | 401–418 | s16 | same maths as 101–118 | **pressure/current family** — `type` selects display unit |
-| **405 / 406** | s16 | `raw × 0.1` (kgf/cm² ≈ bar) | **refrigerant pressure**; where the value is labelled "(T)" it is shown as **saturation temperature** — see below |
+| **405 / 406** | s16 | `raw × 0.1` kgf/cm² | **refrigerant pressure**; where the value is labelled "(T)" it is shown as **saturation temperature** — see below |
 | 451–465 | u16 | same maths as 151–165 | pressure family, unsigned |
 | 881–885 | s16 | `raw × 0.1` | |
 
-**Base units.** Temperatures are **°C**; pressures are **kgf/cm²** at the wire (0.098 → MPa,
-0.981 → bar, 14.223 → psi if a different display unit is wanted). The firmware works in °C and
-bar. `114 / 119` are target temperatures with a **"no data" marker** — raw little-endian bytes
+**Base units.** Temperatures are **°C**; pressures are **kgf/cm²** at the wire. `hp_format()` applies
+the exact `0.980665` factor before publishing a type-2 value as bar (`0.0980665` converts one raw
+tenth to bar). The gauge/absolute reference of the recovered X10A pressure field remains project
+evidence pending an independent service-gauge comparison. `114 / 119` are target temperatures with
+a **"no data" marker** — raw little-endian bytes
 `00 80`, i.e. the signed 16-bit value `0x8000` = `-3276.8` (matched on the decoded value in
 `logic/convert.hpp`), rendered as `---` — otherwise `raw × 0.1`.
 
 The same raw refrigerant-pressure bytes appear twice in a model: once as the pressure itself
 (`conv 105`, `type = 2` → bar) and once as the **saturation temperature** (`conv 405`, `type = 1` →
 °C). For the "(T)" saturation form, `conv 405` in [`logic/convert.hpp`](../main/logic/convert.hpp)
-takes `raw × 0.1` and applies a per-refrigerant pressure→saturation-temperature polynomial
-(R410A / R32 / R22), selected by the refrigerant from page `0x00`. A **0-bar** input (an absent/idle
-pressure sensor) is dropped rather than published as its `press2temp(0) ≈ -51 °C` placeholder.
+takes `raw × 0.1 kgf/cm²G` and applies a per-refrigerant pressure→saturation-temperature polynomial
+(R410A / R32 / R22), selected by the refrigerant from page `0x00`. Each correlation has a conservative
+monotonicity ceiling (40.0 / 47.0 / 28.0 kgf/cm²G respectively); zero, higher values, missing type
+metadata and unsupported R407C/R134a correlations are dropped instead of being extrapolated or
+substituted.
 
 **Publish-time plausibility (`reading_plausible`).** Beyond the per-converter `-3276.8` marker above,
 a decoded **°C** reading (`type = 1`) outside a physical envelope (`[-60, 200]`) is dropped at publish

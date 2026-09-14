@@ -210,8 +210,8 @@ int main() {
             for (int b2 : kTri)
                 for (int s : kTri)
                     for (int pb = 0; pb < 2; pb++) {
-                        const bool buh_known = (b1 != -1) || (b2 != -1);
                         const bool buh_on    = (b1 == 1) || (b2 == 1);
+                        const bool buh_known = buh_on || ((b1 != -1) && (b2 != -1));
                         const bool bsh_known = s != -1;
                         const bool bsh_on    = s == 1;
                         const CopPlan plan = cop_plan(pel, buh_known, buh_on,
