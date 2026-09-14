@@ -47,10 +47,14 @@ inline double press2temp_r32(double d) {
 }
 inline constexpr double press2temp_max_kgf_cm2g(int rtype) {
     switch (rtype) {
-        case 801: return 40.0;  // derivative changes sign at 40.316...
-        case 802: return 47.0;  // derivative changes sign at 47.369...
-        case 803: return 28.0;  // derivative changes sign at 28.741...
-        default:  return 0.0;   // no correlation for R407C/R134a/unknown
+    case 801:
+        return 40.0; // derivative changes sign at 40.316...
+    case 802:
+        return 47.0; // derivative changes sign at 47.369...
+    case 803:
+        return 28.0; // derivative changes sign at 28.741...
+    default:
+        return 0.0; // no correlation for R407C/R134a/unknown
     }
 }
 inline double press2temp(double d, int rtype = 0) {
@@ -114,42 +118,84 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 0) 
     Reading r;
     const int n = def.size;
     switch (def.conv) {
-        // Signed 16-bit; odd id = little-endian, even = big-endian; then a fixed-point scale.
-        case 101: r.value = read_s16(data, n, false);              r.ok = true; break;
-        case 102: r.value = read_s16(data, n, true);               r.ok = true; break;
-        case 103: r.value = read_s16(data, n, false) / 256.0;      r.ok = true; break;
-        case 104: r.value = read_s16(data, n, true) / 256.0;       r.ok = true; break;
-        case 105: r.value = read_s16(data, n, false) * 0.1;        r.ok = true; break;   // temperature (LE)
-        case 106: r.value = read_s16(data, n, true) * 0.1;         r.ok = true; break;
-        case 107: r.value = read_s16(data, n, false) * 0.1;        r.ok = (r.value != -3276.8); break;
-        case 108: r.value = read_s16(data, n, true) * 0.1;         r.ok = (r.value != -3276.8); break;
-        case 109: r.value = read_s16(data, n, false) / 256.0 * 2.0; r.ok = true; break;
-        case 110: r.value = read_s16(data, n, true) / 256.0 * 2.0;  r.ok = true; break;
-        case 111:
-            r.value = read_s16(data, n, false) * 0.5;
-            r.ok    = true;
-            break;
-        // Unsigned 16-bit (counts / steps / CT current).
-        case 151: r.value = read_u16(data, n, false);             r.ok = true; break;
-        case 152: r.value = read_u16(data, n, true);              r.ok = true; break;
-        case 161:
-            r.value = read_u16(data, n, false) * 0.5;
-            r.ok    = true;
-            break;
-        // Target/ECH2O temps: signed LE ×0.1, with 0x8000 (-3276.8) meaning "no data".
-        case 114:
-        case 119: r.value = read_s16(data, n, false) * 0.1;       r.ok = (r.value != -3276.8); break;
-        // Signed big-endian ×0.01 (mixed-water temp).
-        case 118: r.value = read_s16(data, n, true) * 0.01;       r.ok = true; break;
-        // Refrigerant pressure raw (signed LE ×0.1 kgf/cm²G) -> saturation temperature (°C). A
-        // 0/negative value is an absent/idle sensor, and a value outside the selected correlation's
-        // monotonic interval cannot be decoded safely. Unknown/R407C/R134a correlations fail closed.
-        case 405: {
-            const double pressure_kgf_cm2g = read_s16(data, n, false) * 0.1;
-            r.value = press2temp(pressure_kgf_cm2g, rtype);
-            r.ok    = std::isfinite(r.value);
-            break;
-        }
+    // Signed 16-bit; odd id = little-endian, even = big-endian; then a fixed-point scale.
+    case 101:
+        r.value = read_s16(data, n, false);
+        r.ok    = true;
+        break;
+    case 102:
+        r.value = read_s16(data, n, true);
+        r.ok    = true;
+        break;
+    case 103:
+        r.value = read_s16(data, n, false) / 256.0;
+        r.ok    = true;
+        break;
+    case 104:
+        r.value = read_s16(data, n, true) / 256.0;
+        r.ok    = true;
+        break;
+    case 105:
+        r.value = read_s16(data, n, false) * 0.1;
+        r.ok    = true;
+        break; // temperature (LE)
+    case 106:
+        r.value = read_s16(data, n, true) * 0.1;
+        r.ok    = true;
+        break;
+    case 107:
+        r.value = read_s16(data, n, false) * 0.1;
+        r.ok    = (r.value != -3276.8);
+        break;
+    case 108:
+        r.value = read_s16(data, n, true) * 0.1;
+        r.ok    = (r.value != -3276.8);
+        break;
+    case 109:
+        r.value = read_s16(data, n, false) / 256.0 * 2.0;
+        r.ok    = true;
+        break;
+    case 110:
+        r.value = read_s16(data, n, true) / 256.0 * 2.0;
+        r.ok    = true;
+        break;
+    case 111:
+        r.value = read_s16(data, n, false) * 0.5;
+        r.ok    = true;
+        break;
+    // Unsigned 16-bit (counts / steps / CT current).
+    case 151:
+        r.value = read_u16(data, n, false);
+        r.ok    = true;
+        break;
+    case 152:
+        r.value = read_u16(data, n, true);
+        r.ok    = true;
+        break;
+    case 161:
+        r.value = read_u16(data, n, false) * 0.5;
+        r.ok    = true;
+        break;
+    // Target/ECH2O temps: signed LE ×0.1, with 0x8000 (-3276.8) meaning "no data".
+    case 114:
+    case 119:
+        r.value = read_s16(data, n, false) * 0.1;
+        r.ok    = (r.value != -3276.8);
+        break;
+    // Signed big-endian ×0.01 (mixed-water temp).
+    case 118:
+        r.value = read_s16(data, n, true) * 0.01;
+        r.ok    = true;
+        break;
+    // Refrigerant pressure raw (signed LE ×0.1 kgf/cm²G) -> saturation temperature (°C). A
+    // 0/negative value is an absent/idle sensor, and a value outside the selected correlation's
+    // monotonic interval cannot be decoded safely. Unknown/R407C/R134a correlations fail closed.
+    case 405: {
+        const double pressure_kgf_cm2g = read_s16(data, n, false) * 0.1;
+        r.value                        = press2temp(pressure_kgf_cm2g, rtype);
+        r.ok                           = std::isfinite(r.value);
+        break;
+    }
 
         // ── Bit flags: conv 300+b -> bit b (0=LSB) of data[0] -> numeric 1/0 ──
         // Numeric at the source so every consumer — /values, WebSocket, history and MQTT — observes
@@ -330,10 +376,10 @@ inline bool is_refrigerant_pressure(const ValueDef& def, const ValueDef* profile
 // read exactly 0.0 bar both at rest AND with the compressor at 42 rps, while the always-live
 // 0x62/15 refrigerant sensor read a correct 15.3 bar. Publishing that 0.0 as a measurement is the
 // #35-#39 shape — a well-formed, plausible-looking, physically false value — and it reached Home
-// Assistant as a real pressure. Their conv-405 companions were dropped by case 405 (kgf/cm²G <= 0 leaves
-// r.ok false; press2temp(0) ≈ -51 °C would pass the °C envelope), so this makes pressure agree with
-// the temperature the same row declines to publish. Water pressure is deliberately NOT covered: a
-// drained or depressurised system genuinely reads 0 bar and must keep saying so.
+// Assistant as a real pressure. Their conv-405 companions were dropped by case 405 (kgf/cm²G <= 0
+// leaves r.ok false; press2temp(0) ≈ -51 °C would pass the °C envelope), so this makes pressure
+// agree with the temperature the same row declines to publish. Water pressure is deliberately NOT
+// covered: a drained or depressurised system genuinely reads 0 bar and must keep saying so.
 //
 // Deliberately SEPARATE from convert() and applied by hp_format at publish time, not folded into
 // the converter: convert() must keep its INTRINSIC per-converter semantics so the catalog audit's

@@ -428,8 +428,8 @@ static void test_convert() {
     // intervals. The first 0.1 kgf/cm²G beyond each ceiling must fail closed instead of publishing
     // the sixth-order polynomial's falling branch as a plausible temperature.
     for (int rtype : {801, 802, 803}) {
-        const double max = press2temp_max_kgf_cm2g(rtype);
-        double previous = press2temp(0.1, rtype);
+        const double max      = press2temp_max_kgf_cm2g(rtype);
+        double       previous = press2temp(0.1, rtype);
         CHECK(std::isfinite(previous));
         for (double pressure = 0.2; pressure <= max; pressure += 0.1) {
             const double current = press2temp(pressure, rtype);
@@ -641,8 +641,8 @@ static void test_convert() {
     // supported correlation. This includes the hand-written R32 fixture: no production profile may
     // regain the old implicit-R32 substitution.
     for (const auto& p : def::profiles) {
-        int refrigerant_rows = 0;
-        bool saturation_rows = false;
+        int  refrigerant_rows = 0;
+        bool saturation_rows  = false;
         for (size_t i = 0; i < p.count; ++i) {
             refrigerant_rows += p.values[i].conv >= 801 && p.values[i].conv <= 805;
             saturation_rows |= p.values[i].conv == 405;

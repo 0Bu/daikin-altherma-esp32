@@ -94,16 +94,17 @@ enum class AvailabilityPolicy : uint8_t {
     Bit7MeansAbsent,    // current page shows a documented overlaid bit, so the number is not usable
 };
 
-// ── THE CROSS-PAGE SATURATION WITNESS ─────────────────────────────────────────────────────────────
+// ── THE CROSS-PAGE SATURATION WITNESS
+//
 // Where the co-witness for ZeroAbsentAboveSaturation is read from, and what it is.
 //
 // A flat ZeroMeansAbsent cannot be used on the outdoor unit's own thermistors: unlike a fan
 // heatsink, 0 °C is where those sensors LIVE for much of a heating season, so an unconditional rule
-// would withhold a real reading far more often than it removes a false one. The way past that is not
-// a better threshold but a SECOND SOURCE — a quantity measured at the same instant that makes the
-// zero impossible rather than merely unlikely — and the same move that let PAGE_ABSENCE_RULES be
-// safe across 45 unmeasured profiles applies here: the witness is re-read from the LIVE reply, so an
-// installation where the zero is genuine answers differently and the row publishes untouched.
+// would withhold a real reading far more often than it removes a false one. The way past that is
+// not a better threshold but a SECOND SOURCE — a quantity measured at the same instant that makes
+// the zero impossible rather than merely unlikely — and the same move that let PAGE_ABSENCE_RULES
+// be safe across 45 unmeasured profiles applies here: the witness is re-read from the LIVE reply,
+// so an installation where the zero is genuine answers differently and the row publishes untouched.
 //
 // The witness is the refrigerant pressure sensor's saturation temperature on the HYDRONIC page,
 // (0x62, 15, conv 405). Two facts about it decide everything below, and BOTH were measured rather
@@ -115,17 +116,17 @@ enum class AvailabilityPolicy : uint8_t {
 //       evaporating in cooling; the mixed-mode mean is correlation evidence, not a condenser pinch.
 //   (2) IT IS THE ONLY REFRIGERANT PRESSURE ROW ON THAT PAGE. There is no low-side witness anywhere
 //       in the catalog's hydronic page, and the page-0x20 transducers that would carry one read
-//       exactly 0.0 bar in 56433/56433 samples over 120 days (conv 405 drops kgf/cm²G <= 0, so their own
-//       (T) twins have never published a sample).
+//       exactly 0.0 bar in 56433/56433 samples over 120 days (conv 405 drops kgf/cm²G <= 0, so
+//       their own (T) twins have never published a sample).
 //
 // (1) is why this rule reaches exactly ONE of the three page-0x20 zero rows, and why the pairing
 // INVERTS the one first proposed for them. A high-side witness says nothing about the low side: an
 // outdoor coil (the EVAPORATOR in heating) at 0 °C while the refrigerant condenses at 49 °C is not
 // a contradiction, it is a January afternoon — and so is a suction pipe at 0 °C. Keying either of
-// those to this witness would withhold a real reading in exactly the season it matters, which is the
-// failure direction #224 says a wrong adjudication must never take. The LIQUID LINE is downstream of
-// the condenser, so it IS the high side: liquid temperature = condensing temperature - subcooling,
-// and that is a relation this witness can refute.
+// those to this witness would withhold a real reading in exactly the season it matters, which is
+// the failure direction #224 says a wrong adjudication must never take. The LIQUID LINE is
+// downstream of the condenser, so it IS the high side: liquid temperature = condensing temperature
+// - subcooling, and that is a relation this witness can refute.
 inline constexpr uint8_t SAT_WITNESS_REG    = 0x62;
 inline constexpr uint8_t SAT_WITNESS_OFFSET = 15;
 inline constexpr int     SAT_WITNESS_CONV   = 405;
@@ -304,7 +305,8 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // different findings and must not be recorded as the same one, or the fix looks like a
     // suppression that was quietly lifted. #194.
     //
-    // Target Cond. Temp. — raw 0x0000 all day: exactly one distinct value across a full audit window
+    // Target Cond. Temp. — raw 0x0000 all day: exactly one distinct value across a full audit
+    // window
     // while the inverter reached 32 rps and the discharge pipe passed 100 °C (#209), and "reads 0.0
     // even mid-run", which is why logic/ou_stale.hpp already records it as a useless witness. A
     // condensing TARGET of exactly 0 °C during a heat-up is not a target; the field is unpopulated.
@@ -312,7 +314,8 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // absent. NOTE the evidence is ONE unit: #209's audit and #194's both ran against the same
     // board, which detection has always resolved to altherma_ebla_edla_d_series_4_8kw_monobloc (the
     // syslog detect line says so at every boot on record) — #213's "two unit families" read the
-    // hardware identification in #209's scope section as if it were the running profile. The verdict
+    // hardware identification in #209's scope section as if it were the running profile. The
+    // verdict
     // stands on the raw 0x0000 through full cycles; the second family does not exist yet.
     {0x10, 8, 114, nullptr, AvailabilityPolicy::ZeroMeansAbsent, 0.0,
      "#209: raw 0x0000 through a full compressor cycle (one unit, two audits)"},
@@ -352,11 +355,13 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // the outcome of trying to close them and is deliberately kept beside the rules it did not
     // become.
     {0x21, 6, 105, "Fan1 Fin temp.", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
-     "#224: exactly 0.0 in 1140/1140 running samples while INV fin read 16.5-55.5 and ambient >=17.5"},
+     "#224: exactly 0.0 in 1140/1140 running samples while INV fin read 16.5-55.5 and ambient "
+     ">=17.5"},
     {0x21, 8, 105, "Fan2 Fin temp.", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
      "#224: same, and a 4-8 kW monobloc has one fan — there is no second fan inverter to measure"},
     {0x21, 10, 105, "Compressor outlet temperature", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
-     "#224: exactly 0.0 in 1140/1140 running samples while the discharge pipe it feeds read 101 °C"},
+     "#224: exactly 0.0 in 1140/1140 running samples while the discharge pipe it feeds read 101 "
+     "°C"},
 
     // ── Page 0x20: the liquid line is adjudicated, the coil and suction pipe are REFUSED (#224) ──
     // All three read exactly 0.0 in 1419/1419 running samples over 7 days (min == max == 0.0 on
@@ -369,7 +374,8 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     //     0x20/10 conv 105  Liquid pipe temp.         ADJUDICATED, conditional on the witness
     //
     // WHY ONLY ONE OF THE THREE, and why it is the one first predicted least likely to survive. The
-    // three rows do not sit on the same side of the circuit, and the only witness that exists is the
+    // three rows do not sit on the same side of the circuit, and the only witness that exists is
+    // the
     // HIGH side (see SAT_WITNESS_* above — measured, it tracks leaving water across a 55 K span):
     //
     //     0x20/2  outdoor coil    = the EVAPORATOR in heating  -> LOW side  -> not refutable here
@@ -394,7 +400,8 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // saturation temperatures in the same 16-byte reply (0x20/12, 0x20/14, conv 405), which would
     // have needed no cross-page state at all. They are unusable here — those transducers read
     // exactly 0.0 bar in 56433/56433 samples over 120 days, at rest and at 42 rps alike, and conv
-    // 405 drops kgf/cm²G <= 0, so neither (T) row has ever published one sample in the store's whole
+    // 405 drops kgf/cm²G <= 0, so neither (T) row has ever published one sample in the store's
+    // whole
     // retention. A rule keyed to them would be permanently silent on the very unit whose zeros
     // motivated it, and unverifiable live on this board forever. The high side is also the thinner
     // of the two on-page witnesses by catalog reach — 0x20/12 is carried by 23 of 44 profile tables
@@ -412,7 +419,8 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // SILENT. That is the intended fail-open rather than a gap to close by loosening the witness —
     // a rule that reaches fewer models because fewer models can evidence it is behaving correctly.
     // The reference unit is one of the eight, which is what makes it verifiable on hardware at all,
-    // and every witness-carrying profile also carries the liquid line, so no witness judges nothing.
+    // and every witness-carrying profile also carries the liquid line, so no witness judges
+    // nothing.
     //
     // RESIDUAL COST: on an air-source model that DOES populate this row, a genuine liquid-line
     // reading of exactly 0.00 °C is withheld while the refrigerant is simultaneously condensing
@@ -442,7 +450,7 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // reaches every row on it. See the note at the top of this file for why the row-level shape did
     // not survive contact with 0xA0.
 
-    // ── Expansion valve pulse positions (conv 151) — raw 0xFFF8 is not a position ─────────────────
+    // ── Expansion valve pulse positions (conv 151): raw 0xFFF8 is not a position
     // MEASURED on the reference unit's published series (VictoriaMetrics, 30 days, 30 s samples of
     // "Expansion valve 1 (pls)" = 0x30/3): the working range is 0-474 pulses, and then SIX samples
     // of exactly 65528. Nothing whatever lies in between — not one sample in (500, 60000) in the
@@ -450,18 +458,19 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     //
     // 65528 is 0xFFF8: 65528 read unsigned, -8 read signed. THE SIGNED READING IS REFUTED, which
     // matters because "conv 151 should have been signed" is the obvious first diagnosis and it is
-    // wrong twice over. (a) A valve driven briefly past its mechanical zero would report a SPREAD of
-    // small negatives (0xFFFF, 0xFFFE, …) and would be reached from positions near 0; all six
+    // wrong twice over. (a) A valve driven briefly past its mechanical zero would report a spread
+    // of small negatives (0xFFFF, 0xFFFE, …) and would be reached from positions near 0; all six
     // occurrences are the identical integer and each sits between neighbouring samples of ~450, and
-    // no valve travels 450 -> -8 -> 450 inside 30 s. (b) conv 151 is documented as u16 (REGISTERS.md
-    // §3.1) and the firmware implements it that way, so re-reading it signed would change every one
+    // no valve travels 450 -> -8 -> 450 inside 30 s. (b) conv 151 is documented as u16 in
+    // REGISTERS.md §3.1, and the firmware implements it that way, so re-reading it signed would
+    // change every one
     // of the catalog's 113 conv-151 rows on the strength of a number that is not a position under
     // EITHER reading. Withholding the value is the one answer both readings agree on.
     //
     // WHY NOT IN convert(): folding an envelope into a converter blinds the domain audit's
     // converters_equivalent(), the exact gate that catches a wrong converter id (tools/domain,
     // and the note in reading_plausible() spells this out). WHY NOT IN reading_plausible(): these
-    // rows are dataType -1, so neither of its envelopes (°C, bar) can reach them, and the only other
+    // rows are dataType -1, so neither of its envelopes (°C, bar) can reach them. The only other
     // handle is the "(pls)" in the label — the one thing this project does not key on.
     //
     // ALL FIVE COORDINATES, not just the one with the capture. conv 151 has exactly one use in the
