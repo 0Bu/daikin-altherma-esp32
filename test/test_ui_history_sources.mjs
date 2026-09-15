@@ -709,4 +709,45 @@ await h.ensureHist("dhw_tank", "modbus");
 assert.equal(fetched, "/history?row=dhw_tank&source=modbus");
 assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), [457]);
 
+// DHW tank (R5T) single integrated chart: Smart-Grid Boost and Heizstab (BSH) phases
+// are drawn directly into the temperature chart and displayed in the tooltip and legend.
+S.status.history.rows = [{ id: "dhw_tank", label: "Domestic Hot Water temperature" }];
+S.status.history.modbus_rows = [
+  { id: "dhw_tank", label: "Domestic Hot Water temperature" },
+  { id: "smart_grid_mode", label: "Smart Grid operation mode" },
+  { id: "bsh_state", label: "Booster heater run" },
+];
+S.hist.set("dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
+S.hist.set("modbus:smart_grid_mode", { dt: 300, b0: 100, v: [0, 20, 20, 0] }); // Mode 2 = Boost (2 buckets = 10 min)
+S.hist.set("modbus:bsh_state", { dt: 300, b0: 100, v: [0, 0, 10, 0] });        // BSH active (1 bucket = 5 min)
+
+view = h.historyView("dhw_tank");
+const dhwHtml = h.histHtml("dhw_tank", "°C", "Warmwasserspeicher");
+assert.match(dhwHtml, /class="vhist-phase vhist-phase-boost"/, "DHW chart must render Boost phase bands");
+assert.match(dhwHtml, /class="vhist-phase vhist-phase-bsh"/, "DHW chart must render BSH phase bands");
+assert.doesNotMatch(dhwHtml, /class="vhist-phase-bar/, "DHW chart must not render top phase bar");
+assert.match(dhwHtml, /vhist-legend-boost/, "DHW legend must display Boost indicator");
+assert.match(dhwHtml, /vhist-legend-bsh/, "DHW legend must display BSH indicator");
+assert.match(dhwHtml, /10 min/, "DHW legend must include Boost duration");
+assert.match(dhwHtml, /5 min/, "DHW legend must include BSH duration");
+
+// Verify tooltips include active phases
+assert.doesNotMatch(h.scrubText(view, 0), /Boost|Heizstab/, "Sample 0 without active phases");
+assert.match(h.scrubText(view, 1), /· Boost aktiv$/, "Sample 1 with active Boost");
+assert.match(h.scrubText(view, 2), /· Boost aktiv \+ Heizstab aktiv$/, "Sample 2 with both active");
+assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without active phases");
+
+// ensureHistPair("dhw_tank") fetches auxiliary series
+fetchedUrls = [];
+S.hist.delete("dhw_tank");
+S.hist.delete("modbus:dhw_tank");
+S.hist.delete("modbus:smart_grid_mode");
+S.hist.delete("bsh_state");
+S.hist.delete("modbus:bsh_state");
+await h.ensureHistPair("dhw_tank");
+assert.ok(fetchedUrls.includes("/history?row=smart_grid_mode&source=modbus"),
+  "ensureHistPair(dhw_tank) must request smart_grid_mode");
+assert.ok(fetchedUrls.includes("/history?row=bsh_state&source=modbus"),
+  "ensureHistPair(dhw_tank) must request modbus:bsh_state");
+
 console.log("UI history sources: X10A and Modbus rings align, gap, render and fetch independently");

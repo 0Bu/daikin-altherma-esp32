@@ -986,6 +986,23 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-area.env-forecast-temperature { fill: var(--flow-hot); opacity: .065; stroke: none; }
 .vhist-area.env-forecast-humidity { fill: var(--flow-cold); opacity: .065; stroke: none; }
 .vhist-area.env-forecast-pressure { fill: var(--env-pressure); opacity: .065; stroke: none; }
+/* Phase highlight bands for DHW tank (R5T) temperature chart */
+.vhist-phase { stroke: none; pointer-events: none; }
+.vhist-phase.vhist-phase-boost { fill: var(--src-mb); opacity: .14; }
+.vhist-phase.vhist-phase-bsh { fill: var(--warn); opacity: .22; }
+.vhist-source.vhist-legend-boost { --vhist-colour: var(--src-mb); }
+.vhist-source.vhist-legend-bsh { --vhist-colour: var(--warn); }
+.vhist-source.vhist-legend-boost i,
+.vhist-source.vhist-legend-bsh i {
+  border: none;
+  border-radius: 2px;
+}
+.vhist-source.vhist-legend-boost i {
+  background: color-mix(in srgb, var(--src-mb) 40%, transparent);
+}
+.vhist-source.vhist-legend-bsh i {
+  background: color-mix(in srgb, var(--warn) 50%, transparent);
+}
 /* Forecasts repeat the same area-plus-upper-line construction below the measured ENV III opacity;
    the rest of the future stays transparent and provenance remains in the tooltip. */
 .vhist-forecast-divider { stroke: var(--muted); stroke-width: 1px;

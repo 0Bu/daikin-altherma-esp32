@@ -219,6 +219,9 @@ async function ensureHistPair(id) {
     hasHist(id) ? ensureHist(id) : null,
     hasModbusHist(id) ? ensureHist(id, "modbus") : null,
     hasEnv3Hist(id) ? ensureHist(id, "env3") : null,
+    id === "dhw_tank" ? ensureHist("smart_grid_mode", "modbus") : null,
+    id === "dhw_tank" ? ensureHist("bsh_state") : null,
+    id === "dhw_tank" ? ensureHist("bsh_state", "modbus") : null,
   ]);
 }
 
@@ -864,6 +867,48 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   , "vhist-state");
 }
 
+function alignAuxSample(view, h, i) {
+  if (!h || !Array.isArray(h.v) || !h.v.length) return null;
+  let idx = -1;
+  if (Number.isInteger(view.b0) && Number.isInteger(h.b0)) {
+    idx = (view.b0 + i) - h.b0;
+  } else if (typeof view.t0 === "number" && typeof h.t0 === "number") {
+    const dt = h.dt || view.dt || 300;
+    idx = Math.round(((view.t0 + i * (view.dt || 300)) - h.t0) / dt);
+  } else {
+    idx = h.v.length - view.v.length + i;
+  }
+  return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
+}
+
+function dhwAuxPhases(view) {
+  if (!view || view.id !== "dhw_tank" || !Array.isArray(view.v)) return null;
+  const sgM = S.hist?.get?.(histCacheKey("smart_grid_mode", "modbus"));
+  const sgX = S.hist?.get?.("smart_grid_mode");
+  const bshX = S.hist?.get?.("bsh_state");
+  const bshM = S.hist?.get?.(histCacheKey("bsh_state", "modbus"));
+  if (!sgM && !sgX && !bshX && !bshM) return null;
+
+  const n = view.v.length;
+  const boost = Array(n).fill(false);
+  const bsh = Array(n).fill(false);
+  let boostCount = 0, bshCount = 0;
+
+  for (let i = 0; i < n; i++) {
+    const vSg = alignAuxSample(view, sgM, i) ?? alignAuxSample(view, sgX, i);
+    if (vSg != null && (vSg === 20 || vSg === 30)) {
+      boost[i] = true;
+      boostCount++;
+    }
+    const vBsh = alignAuxSample(view, bshX, i) ?? alignAuxSample(view, bshM, i);
+    if (vBsh != null && vBsh === 10) {
+      bsh[i] = true;
+      bshCount++;
+    }
+  }
+  return { boost, bsh, boostCount, bshCount, dt: view.dt || 300 };
+}
+
 // One historied row's trend, as the markup appended under its explainer text. Every state is a
 // SENTENCE rather than an empty box: not fetched, no readings yet, fetch failed. `null` samples are
 // GAPS (a timed-out register, or a reading reading_plausible() refused) and must break the line —
@@ -991,9 +1036,52 @@ function histHtml(id, unit, name, source = "") {
     pinTip = `<div class="vhist-tip vhist-pinned ${tipSideClass(frac)} mono num" ` +
       `style="--tip-p:${px}">${esc(scrubText(view, pi))}</div>`;
   }
-  const legend = view.series.length > 1 || view.series[0].source === "modbus"
-    ? `<div class="vhist-legend">${view.series.map((s) =>
-        `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`).join("")}</div>`
+  const aux = id === "dhw_tank" ? dhwAuxPhases(view) : null;
+  let phaseBands = "";
+  const legendItems = (view.series.length > 1 || view.series[0].source === "modbus")
+    ? view.series.map((s) =>
+        `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`)
+    : [];
+  if (aux) {
+    const toRuns = (flags) => {
+      const out = [];
+      for (let i = 0; i < flags.length; i++) {
+        if (!flags[i]) continue;
+        const from = i;
+        while (i + 1 < flags.length && flags[i + 1]) i++;
+        out.push([from, i - from + 1]);
+      }
+      return out;
+    };
+    const step = n > 1 ? HIST_W / (n - 1) : HIST_W;
+    const renderRuns = (runs, cls) => {
+      let s = "";
+      for (const [from, count] of runs) {
+        const x0 = n > 1 ? Math.max(0, X(from) - step / 2) : 0;
+        const x1 = n > 1 ? Math.min(HIST_W, X(from + count - 1) + step / 2) : HIST_W;
+        const w = Math.max(1, x1 - x0);
+        s += `<rect class="vhist-phase ${cls}" x="${x0.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${HIST_H}"/>`;
+      }
+      return s;
+    };
+    phaseBands += renderRuns(toRuns(aux.boost), "vhist-phase-boost");
+    phaseBands += renderRuns(toRuns(aux.bsh), "vhist-phase-bsh");
+
+    if (aux.boostCount > 0) {
+      legendItems.push(
+        `<span class="vhist-source vhist-legend-boost"><i></i>${esc(t("hist.boost_active"))}` +
+        ` <small class="mono num">(${histDuration(aux.boostCount * aux.dt)})</small></span>`
+      );
+    }
+    if (aux.bshCount > 0) {
+      legendItems.push(
+        `<span class="vhist-source vhist-legend-bsh"><i></i>${esc(t("hist.heater_active"))}` +
+        ` <small class="mono num">(${histDuration(aux.bshCount * aux.dt)})</small></span>`
+      );
+    }
+  }
+  const legend = legendItems.length
+    ? `<div class="vhist-legend">${legendItems.join("")}</div>`
     : "";
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
@@ -1002,7 +1090,7 @@ function histHtml(id, unit, name, source = "") {
       `<div class="vhist-tip vhist-live vhist-tip-right mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
-        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${area}${line}${dots}</svg>` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${phaseBands}${area}${line}${dots}</svg>` +
         nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${s.source === "modbus" ? " mb" : ""}" data-source="${s.source}" hidden></span>`).join("") +
@@ -1406,7 +1494,17 @@ function scrubText(h, i) {
   const val = h.series && (h.series.length > 1 || h.series[0].source === "modbus")
     ? h.series.map(sourceText).join(h.id === "outdoor_air" ? "\n" : " · ")
     : valueText(h.series ? h.series[0] : h);
-  return pointWhen() + " · " + val;
+  let res = pointWhen() + " · " + val;
+  if (h.id === "dhw_tank") {
+    const aux = dhwAuxPhases(h);
+    if (aux) {
+      const active = [];
+      if (aux.boost[i]) active.push(t("hist.boost_active"));
+      if (aux.bsh[i]) active.push(t("hist.heater_active"));
+      if (active.length) res += " · " + active.join(" + ");
+    }
+  }
+  return res;
 }
 
 // The combined ENV III tooltip is the one place where three independently scaled instruments are
