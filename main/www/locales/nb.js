@@ -1,4 +1,4 @@
-// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
+// translation-source: caef92ce6d04cf47276f2baa57c78e76949e16d867ee28ce3848640278759fc8
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -919,8 +919,8 @@ INSPECT_I18N.nb = inspectValues(
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Ved aktiv kjøling skal R1T være lavere enn R4T, derfor negativ verdi.`
       : `${fmt1(d.dt)} K${d.dtSet != null ? ` mot varmemål ${fmt1(d.dtSet)} K` : ""}. Positiv verdi betyr at PHE tilfører vannet varme.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Anslått kjøleeffekt" : "Anslått varmeeffekt", "Anslått varmeeffekt ved PHE", (d) => d && d.pthKind === "cooling"
-      ? "Anslag for uttatt varme: vannmengde × (R4T−R1T) × 4,186 kJ/kg·K, antatt vann. Avhenger av vannmengde, sensorer og væske; glykol endrer resultatet. Vises bare med kompressor og kjølerettet ΔT."
-      : "Anslag for levert varme: vannmengde × (R1T−R4T) × 4,186 kJ/kg·K, antatt vann. Avhenger av vannmengde, sensorer og væske; glykol endrer resultatet. BUH etter R1T er utenfor.", (d) => d.dtStale
+      ? "Anslag for uttatt varme: vannmengde/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)), antatt vann. Avhenger av vannmengde, sensorer og væske; glykol endrer resultatet. Vises bare med kompressor og kjølerettet ΔT."
+      : "Anslag for levert varme: vannmengde/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)), antatt vann. Avhenger av vannmengde, sensorer og væske; glykol endrer resultatet. BUH etter R1T er utenfor.", (d) => d.dtStale
       ? d.bsh === true
         ? "Ingen PHE-beregning uten bekreftet sirkulasjon. BSH kan fortsatt varme tanken direkte, men denne varmen krysser ikke R1T/R4T og kan ikke måles på bussen."
         : "Ingen effektberegning uten bekreftet vannstrøm gjennom PHE. Manglende driftspunkt betyr ikke 0 kW."

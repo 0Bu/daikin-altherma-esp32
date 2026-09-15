@@ -365,10 +365,10 @@ inline bool probe_decode_same(const ProbeDecode& a, const Reading& r) {
 // answers. Returns the number of distinct rows written to `out` (at most `max`).
 //
 // `rtype` is the refrigerant curve conv 405 needs. The caller passes the ACTIVE profile's value
-// where one is resolved; the R32 default matches convert()'s and covers every unit that has not
-// been identified yet — which, on the `generic` profile this tool is most useful on, is all of them.
+// where one is resolved; an unidentified/generic profile must leave converter 405 refused rather
+// than silently interpreting it as R32.
 inline int probe_sweep(const uint8_t* payload, int payload_len, int offset, int size,
-                       ProbeDecode* out, int max, int rtype = 802) {
+                       ProbeDecode* out, int max, int rtype = 0) {
     if (!payload || !out || max <= 0) return 0;
     if (!probe_slice_fits(offset, size, payload_len)) return 0;
 
@@ -418,7 +418,7 @@ inline int probe_sweep(const uint8_t* payload, int payload_len, int offset, int 
 // response schema. `unimpl` is reported rather than hidden: "this id decodes nothing" is a real
 // answer to "what is conv 462".
 inline bool probe_decode_one(const uint8_t* payload, int payload_len, int offset, int size,
-                             int conv, ProbeDecode& out, bool& unimpl, int rtype = 802) {
+                             int conv, ProbeDecode& out, bool& unimpl, int rtype = 0) {
     unimpl = false;
     if (!payload || !probe_slice_fits(offset, size, payload_len)) return false;
     const ValueDef def{static_cast<uint8_t>(0), static_cast<uint8_t>(offset), conv,

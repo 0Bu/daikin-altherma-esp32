@@ -1,4 +1,4 @@
-// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
+// translation-source: caef92ce6d04cf47276f2baa57c78e76949e16d867ee28ce3848640278759fc8
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -916,8 +916,8 @@ INSPECT_I18N.fr = inspectValues(
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. En froid actif R1T doit être sous R4T ; la différence signée est donc négative.`
       : `${fmt1(d.dt)} K${d.dtSet != null ? ` pour une cible chauffage de ${fmt1(d.dtSet)} K` : ""}. Positif signifie que le PHE apporte de la chaleur à l’eau.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Puissance froid estimée" : "Puissance thermique estimée", "Puissance thermique estimée au PHE", (d) => d && d.pthKind === "cooling"
-      ? "Estimation de la chaleur retirée : débit × (R4T−R1T) × 4,186 kJ/kg·K en supposant de l’eau. Dépend du débit, des capteurs et du fluide ; le glycol change le calcul. Affichée seulement avec compresseur en marche et écart dans le sens froid."
-      : "Estimation de la chaleur transmise : débit × (R1T−R4T) × 4,186 kJ/kg·K en supposant de l’eau. Dépend du débit, des capteurs et du fluide ; le glycol change le calcul. Le BUH est après R1T et hors de cette valeur.", (d) => d.dtStale ? d.bsh === true
+      ? "Estimation de la chaleur retirée : débit/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) en supposant de l’eau. Dépend du débit, des capteurs et du fluide ; le glycol change le calcul. Affichée seulement avec compresseur en marche et écart dans le sens froid."
+      : "Estimation de la chaleur transmise : débit/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) en supposant de l’eau. Dépend du débit, des capteurs et du fluide ; le glycol change le calcul. Le BUH est après R1T et hors de cette valeur.", (d) => d.dtStale ? d.bsh === true
       ? "Aucun transfert calculable au PHE faute de circulation établie. La résistance interne peut encore chauffer le ballon, mais sa chaleur ne traverse pas R1T/R4T et ce bus ne peut pas la chiffrer."
       : "Aucune puissance calculable faute de mouvement d’eau établi au PHE. Il manque un point de travail ; cela ne signifie pas 0 kW."
       : d.pth == null ? null

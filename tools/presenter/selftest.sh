@@ -99,7 +99,7 @@ expect_red "an unknown tank-heater state is treated as off" \
 # The same mistake on the backup heater, which reaches the answer by the other route: an unknown BUH
 # then reads as quiet and the pre-BUH numerator stands in for a post-BUH row that does not exist.
 expect_red "an unknown backup-heater state is treated as off" \
-  's/const heaterQuiet = (buh1 != null || buh2 != null) \&\& !(buh1 === true || buh2 === true);/const heaterQuiet = !(buh1 === true || buh2 === true);/'
+  's/const heaterQuiet = buh1 != null \&\& buh2 != null \&\& !(buh1 === true || buh2 === true);/const heaterQuiet = !(buh1 === true || buh2 === true);/'
 
 # The second BUH step dropped from the collapse: a unit firing step 2 alone reads as quiet.
 expect_red "the second backup-heater step drops out of the collapse" \

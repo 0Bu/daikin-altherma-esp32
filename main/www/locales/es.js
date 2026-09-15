@@ -1,4 +1,4 @@
-// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
+// translation-source: caef92ce6d04cf47276f2baa57c78e76949e16d867ee28ce3848640278759fc8
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -918,8 +918,8 @@ INSPECT_I18N.es = inspectValues(
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. En refrigeración activa R1T debe estar por debajo de R4T, por eso la diferencia es negativa.`
       : `${fmt1(d.dt)} K${d.dtSet != null ? ` frente al objetivo de calefacción de ${fmt1(d.dtSet)} K` : ""}. Un valor positivo indica que el PHE aporta calor al agua.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Potencia de frío estimada" : "Potencia térmica estimada", "Potencia térmica estimada en el PHE", (d) => d && d.pthKind === "cooling"
-      ? "Estimación del calor extraído: caudal × (R4T−R1T) × 4,186 kJ/kg·K suponiendo agua. Depende de caudal, sensores y fluido; con glicol cambia. Solo se muestra con compresor en marcha y diferencia en dirección de refrigeración."
-      : "Estimación del calor entregado: caudal × (R1T−R4T) × 4,186 kJ/kg·K suponiendo agua. Depende de caudal, sensores y fluido; con glicol cambia. BUH está después de R1T y queda fuera de esta cifra.", (d) => d.dtStale
+      ? "Estimación del calor extraído: caudal/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) suponiendo agua. Depende de caudal, sensores y fluido; con glicol cambia. Solo se muestra con compresor en marcha y diferencia en dirección de refrigeración."
+      : "Estimación del calor entregado: caudal/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) suponiendo agua. Depende de caudal, sensores y fluido; con glicol cambia. BUH está después de R1T y queda fuera de esta cifra.", (d) => d.dtStale
       ? d.bsh === true
         ? "No se calcula transferencia en el PHE porque no se demuestra circulación. La resistencia interna aún puede calentar el depósito, pero su calor no cruza R1T/R4T y este bus no puede cuantificarlo."
         : "No se calcula potencia porque no se demuestra movimiento de agua por el PHE. Falta un punto de trabajo; no significa 0 kW."

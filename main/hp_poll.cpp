@@ -395,10 +395,10 @@ static void poll_once() {
         // Capture the CROSS-PAGE saturation witness as its page goes by, for the NEXT cycle's
         // page-0x20 rows (logic/availability.hpp). Decoded through the ordinary converter with this
         // profile's own refrigerant curve, so the witness is the same number the row publishes —
-        // never a second, looser decode of the same bytes. conv 405 refuses bar <= 0, so a unit
-        // whose pressure sensor does not report leaves r.ok false and the witness stays absent.
-        // GATED on the profile declaring the row: on a model that does not, these bytes are whatever
-        // that model puts there, and a witness read off them would be invented.
+        // never a second, looser decode of the same bytes. conv 405 refuses kgf/cm²G <= 0, so a
+        // unit whose pressure sensor does not report leaves r.ok false and the witness stays
+        // absent. GATED on the profile declaring the row: on a model that does not, these bytes are
+        // whatever that model puts there, and a witness read off them would be invented.
         if (reg == SAT_WITNESS_REG && has_sat_witness_row &&
             SAT_WITNESS_OFFSET + 2 <= paylen) {
             const ValueDef w{SAT_WITNESS_REG, SAT_WITNESS_OFFSET, SAT_WITNESS_CONV, 2, 1, "sat"};

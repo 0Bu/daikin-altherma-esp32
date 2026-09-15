@@ -104,13 +104,21 @@ const DERIVED = {
     fn: (s) => (s.leaving_water == null || s.return_water == null ? null
                                                                   : s.leaving_water - s.return_water),
   },
-  // Water ≈ 4.186 kJ/kg·K, flow in l/min — d.pth's formula, and SIGNED for its reason: during a
+  // Water ρ·cp ≈ 4.186 kJ/l·K, flow in l/min — d.pth's formula, and SIGNED for its reason: during a
   // defrost the unit pulls heat back out of the water and the curve must show that, not a floor.
+  // A stopped circuit with measured zero flow is zero transfer. With water still moving, however,
+  // the compressor witness is mandatory: pump overrun can redistribute stored heat and a non-zero
+  // arithmetic balance in that bucket is not heat-pump output (the same rule as thermalValue()).
   pth: {
-    unit: "kW", ins: ["flow", "leaving_water", "return_water"],
-    ready: (h) => h.flow && h.leaving_water && h.return_water,
-    fn: (s) => (s.flow == null || s.leaving_water == null || s.return_water == null
-                  ? null : (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water)),
+    unit: "kW", ins: ["flow", "leaving_water", "return_water", "comp_rps"],
+    ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps,
+    fn: (s) => {
+      if (s.flow == null) return null;
+      if (!(s.flow > 0.5)) return 0;
+      if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
+      if (!(s.comp_rps > 5)) return null;
+      return (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water);
+    },
   },
   // Amps × an assumed 230 V, a complete declared CT set preferred over inverter current —
   // liveData()'s rule, one sample at a time. The live version needs `d.ouHeldOver` to gate the INV

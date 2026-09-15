@@ -23,6 +23,10 @@ source revision. It does not change firmware behavior.
 over the same areas plus the gate suite, CI trust boundaries and documentation consistency; its
 findings are in the verification apparatus rather than in firmware. It does not change firmware
 behavior either.
+[14 September 2026 domain review](reviews/2026-09-14-domain-review.md) is the physical-correctness
+pass: refrigerant saturation curves, unit conventions, heat-meter constants and the thresholds the
+plant checks rest on, with confirmed findings, rejected claims, evidence limits and the corrections
+implemented by PR 102.
 
 ---
 

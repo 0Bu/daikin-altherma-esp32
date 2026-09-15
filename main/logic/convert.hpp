@@ -12,6 +12,7 @@
 // skipped rather than reported wrong.
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include "value_def.hpp"
 #include "registers.hpp"
 
@@ -25,7 +26,10 @@ struct Reading {
     char   text[24] = {0};
 };
 
-// ── Refrigerant pressure -> saturation temperature (°C). RType: 801=R410A, 802=R32, 803=R22 ──
+// ── Refrigerant gauge pressure (kgf/cm²G) -> saturation temperature (°C) ───────────────────────
+// The recovered correlations are monotonic only over a bounded input interval. Do not extrapolate
+// their falling high-pressure branch into a plausible-looking temperature. Unsupported refrigerants
+// likewise have no safe substitute: 804=R407C and 805=R134a deliberately return no value.
 inline double press2temp_r410a(double d) {
     return -8.4448460086362E-07*d*d*d*d*d*d + 0.000112833751855216*d*d*d*d*d
            - 0.00584955138495273*d*d*d*d + 0.149130933664499*d*d*d
@@ -36,12 +40,30 @@ inline double press2temp_r22(double d) {
            - 0.0175087997648461*d*d*d*d + 0.318620413943417*d*d*d
            - 3.0844373741869*d*d + 19.0217687284902*d - 42.3282361912494;
 }
-inline double press2temp(double d, int rtype = 802) {
-    if (rtype == 801) return press2temp_r410a(d);
-    if (rtype == 803) return press2temp_r22(d);
+inline double press2temp_r32(double d) {
     return -2.6989493795556E-07*d*d*d*d*d*d + 4.26383417104661E-05*d*d*d*d*d
            - 0.00262978346547749*d*d*d*d + 0.0805858127503585*d*d*d
            - 1.31924457284073*d*d + 13.4157368435437*d - 51.1813342993155;
+}
+inline constexpr double press2temp_max_kgf_cm2g(int rtype) {
+    switch (rtype) {
+    case 801:
+        return 40.0; // derivative changes sign at 40.316...
+    case 802:
+        return 47.0; // derivative changes sign at 47.369...
+    case 803:
+        return 28.0; // derivative changes sign at 28.741...
+    default:
+        return 0.0; // no correlation for R407C/R134a/unknown
+    }
+}
+inline double press2temp(double d, int rtype = 0) {
+    const double ceiling = press2temp_max_kgf_cm2g(rtype);
+    if (!std::isfinite(d) || !(d > 0.0) || d > ceiling)
+        return std::numeric_limits<double>::quiet_NaN();
+    if (rtype == 801) return press2temp_r410a(d);
+    if (rtype == 803) return press2temp_r22(d);
+    return press2temp_r32(d);
 }
 
 // ── Enum / flag label tables (recovered from the X10A value definitions) ──────────────────────
@@ -92,48 +114,88 @@ inline const char* on_off_number(const char* text) {
 }
 
 // Convert one value. `data` points at the value's bytes inside the reply payload.
-inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802) {
+inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 0) {
     Reading r;
     const int n = def.size;
     switch (def.conv) {
-        // Signed 16-bit; even id = little-endian, odd = big-endian; then a fixed-point scale.
-        case 101: r.value = read_s16(data, n, false);              r.ok = true; break;
-        case 102: r.value = read_s16(data, n, true);               r.ok = true; break;
-        case 103: r.value = read_s16(data, n, false) / 256.0;      r.ok = true; break;
-        case 104: r.value = read_s16(data, n, true) / 256.0;       r.ok = true; break;
-        case 105: r.value = read_s16(data, n, false) * 0.1;        r.ok = true; break;   // temperature (LE)
-        case 106: r.value = read_s16(data, n, true) * 0.1;         r.ok = true; break;
-        case 107: r.value = read_s16(data, n, false) * 0.1;        r.ok = (r.value != -3276.8); break;
-        case 108: r.value = read_s16(data, n, true) * 0.1;         r.ok = (r.value != -3276.8); break;
-        case 109: r.value = read_s16(data, n, false) / 256.0 * 2.0; r.ok = true; break;
-        case 110: r.value = read_s16(data, n, true) / 256.0 * 2.0;  r.ok = true; break;
-        case 111:
-            r.value = read_s16(data, n, false) * 0.5;
-            r.ok    = true;
-            break;
-        // Unsigned 16-bit (counts / steps / CT current).
-        case 151: r.value = read_u16(data, n, false);             r.ok = true; break;
-        case 152: r.value = read_u16(data, n, true);              r.ok = true; break;
-        case 161:
-            r.value = read_u16(data, n, false) * 0.5;
-            r.ok    = true;
-            break;
-        // Target/ECH2O temps: signed LE ×0.1, with 0x8000 (-3276.8) meaning "no data".
-        case 114:
-        case 119: r.value = read_s16(data, n, false) * 0.1;       r.ok = (r.value != -3276.8); break;
-        // Signed big-endian ×0.01 (mixed-water temp).
-        case 118: r.value = read_s16(data, n, true) * 0.01;       r.ok = true; break;
-        // Refrigerant pressure raw (signed LE ×0.1) -> saturation temperature (°C). A 0/negative
-        // pressure is an absent/idle sensor (an OU with the compressor off publishes 0 bar), not a
-        // reading — its saturation temperature (press2temp(0) ≈ -51 °C) is a placeholder, so drop it
-        // rather than publish an impossible sat-temp. A running circuit's low-side pressure is well
-        // above 0, so this never hides a real reading.
-        case 405: {
-            const double bar = read_s16(data, n, false) * 0.1;
-            if (bar <= 0.0) break;                                 // absent sensor -> r.ok stays false
-            r.value = press2temp(bar, rtype);                     r.ok = true;
-            break;
-        }
+    // Signed 16-bit; odd id = little-endian, even = big-endian; then a fixed-point scale.
+    case 101:
+        r.value = read_s16(data, n, false);
+        r.ok    = true;
+        break;
+    case 102:
+        r.value = read_s16(data, n, true);
+        r.ok    = true;
+        break;
+    case 103:
+        r.value = read_s16(data, n, false) / 256.0;
+        r.ok    = true;
+        break;
+    case 104:
+        r.value = read_s16(data, n, true) / 256.0;
+        r.ok    = true;
+        break;
+    case 105:
+        r.value = read_s16(data, n, false) * 0.1;
+        r.ok    = true;
+        break; // temperature (LE)
+    case 106:
+        r.value = read_s16(data, n, true) * 0.1;
+        r.ok    = true;
+        break;
+    case 107:
+        r.value = read_s16(data, n, false) * 0.1;
+        r.ok    = (r.value != -3276.8);
+        break;
+    case 108:
+        r.value = read_s16(data, n, true) * 0.1;
+        r.ok    = (r.value != -3276.8);
+        break;
+    case 109:
+        r.value = read_s16(data, n, false) / 256.0 * 2.0;
+        r.ok    = true;
+        break;
+    case 110:
+        r.value = read_s16(data, n, true) / 256.0 * 2.0;
+        r.ok    = true;
+        break;
+    case 111:
+        r.value = read_s16(data, n, false) * 0.5;
+        r.ok    = true;
+        break;
+    // Unsigned 16-bit (counts / steps / CT current).
+    case 151:
+        r.value = read_u16(data, n, false);
+        r.ok    = true;
+        break;
+    case 152:
+        r.value = read_u16(data, n, true);
+        r.ok    = true;
+        break;
+    case 161:
+        r.value = read_u16(data, n, false) * 0.5;
+        r.ok    = true;
+        break;
+    // Target/ECH2O temps: signed LE ×0.1, with 0x8000 (-3276.8) meaning "no data".
+    case 114:
+    case 119:
+        r.value = read_s16(data, n, false) * 0.1;
+        r.ok    = (r.value != -3276.8);
+        break;
+    // Signed big-endian ×0.01 (mixed-water temp).
+    case 118:
+        r.value = read_s16(data, n, true) * 0.01;
+        r.ok    = true;
+        break;
+    // Refrigerant pressure raw (signed LE ×0.1 kgf/cm²G) -> saturation temperature (°C). A
+    // 0/negative value is an absent/idle sensor, and a value outside the selected correlation's
+    // monotonic interval cannot be decoded safely. Unknown/R407C/R134a correlations fail closed.
+    case 405: {
+        const double pressure_kgf_cm2g = read_s16(data, n, false) * 0.1;
+        r.value                        = press2temp(pressure_kgf_cm2g, rtype);
+        r.ok                           = std::isfinite(r.value);
+        break;
+    }
 
         // ── Bit flags: conv 300+b -> bit b (0=LSB) of data[0] -> numeric 1/0 ──
         // Numeric at the source so every consumer — /values, WebSocket, history and MQTT — observes
@@ -305,17 +367,19 @@ inline bool is_refrigerant_pressure(const ValueDef& def, const ValueDef* profile
 // because the temperature converters (105/114/118/119/405) are also used for non-°C rows (conv 105
 // carries O/U capacity kW and BE_COP at dataType -1) that must pass through unchanged.
 //
-// ALSO drops a refrigerant pressure at or below 0 bar. These are ABSOLUTE pressures (measured: 15.3
-// bar at a 22.1 °C saturation temperature, matching R32's saturation curve), and a sealed
-// refrigerant circuit is never at absolute vacuum — so 0.0 bar is an absent/unreported transducer,
-// not a reading. Observed on a live 4-8 kW unit: "High Pressure" and "Low Pressure" (0x20/12+14)
+// ALSO drops a refrigerant pressure at or below 0 kgf/cm²G. The X10A reference identifies the wire
+// unit as kgf/cm²; the recovered pressure-temperature correlations strongly support a gauge
+// coordinate. That pressure reference remains project evidence until checked against an independent
+// service gauge. Zero is still an
+// absent/unreported transducer, not a useful circuit reading. Observed on a live 4-8 kW unit:
+// "High Pressure" and "Low Pressure" (0x20/12+14)
 // read exactly 0.0 bar both at rest AND with the compressor at 42 rps, while the always-live
 // 0x62/15 refrigerant sensor read a correct 15.3 bar. Publishing that 0.0 as a measurement is the
 // #35-#39 shape — a well-formed, plausible-looking, physically false value — and it reached Home
-// Assistant as a real pressure. Their conv-405 companions were dropped by case 405 (bar <= 0 leaves
-// r.ok false; press2temp(0) ≈ -51 °C would pass the °C envelope), so this makes pressure agree with
-// the temperature the same row declines to publish. Water pressure is deliberately NOT covered: a
-// drained or depressurised system genuinely reads 0 bar and must keep saying so.
+// Assistant as a real pressure. Their conv-405 companions were dropped by case 405 (kgf/cm²G <= 0
+// leaves r.ok false; press2temp(0) ≈ -51 °C would pass the °C envelope), so this makes pressure
+// agree with the temperature the same row declines to publish. Water pressure is deliberately NOT
+// covered: a drained or depressurised system genuinely reads 0 bar and must keep saying so.
 //
 // Deliberately SEPARATE from convert() and applied by hp_format at publish time, not folded into
 // the converter: convert() must keep its INTRINSIC per-converter semantics so the catalog audit's
@@ -339,13 +403,21 @@ inline bool reading_plausible(const ValueDef& def, const Reading& r,
 
 // The active profile declares its refrigerant once via a size-0 row whose conv id is 801-805
 // (801=R410A, 802=R32, 803=R22, 804=R407C, 805=R134a). That id selects the press2temp curve used by
-// conv-405 saturation-temperature rows; without it every unit would decode on the R32 curve (the
-// press2temp default), off by several °C on an R410A/R22 unit. Returns the declared id, or 802 (R32)
-// when the profile carries no refrigerant row. 804/805 have no dedicated curve and fall back to R32.
+// conv-405 saturation-temperature rows; the former implicit R32 default decoded every unit on that
+// curve, off by several °C on an R410A/R22 unit. Returns the declared id, or 0 when
+// the profile carries no refrigerant row. Unsupported or missing metadata must make conv-405
+// unavailable instead of silently substituting the R32 correlation.
 inline int profile_refrigerant(const ValueDef* v, size_t count) {
     for (size_t i = 0; i < count; i++)
         if (v[i].conv >= 801 && v[i].conv <= 805) return v[i].conv;
-    return 802;
+    return 0;
+}
+
+// `type` is the publication-unit hint, while `conv` above remains the intrinsic wire decode. X10A
+// pressure values arrive in kgf/cm² and Home Assistant receives bar, so normalize only at the
+// publication boundary. Saturation-temperature rows use type 1 and are already °C.
+inline double value_for_publication(int dataType, double value) {
+    return dataType == 2 ? value * 0.980665 : value;
 }
 
 // Decimal places for a numeric converter's display/publish string. conv 118 is a signed ×0.01 value

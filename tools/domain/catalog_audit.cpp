@@ -297,7 +297,7 @@ std::map<std::string, int>& rtype_map() {
 }
 int rtype_of(const std::string& profile) {
     auto it = rtype_map().find(profile);
-    return (it == rtype_map().end()) ? 802 : it->second;
+    return (it == rtype_map().end()) ? 0 : it->second;
 }
 
 // ── Findings ──────────────────────────────────────────────────────────────────────────────────
