@@ -1626,6 +1626,11 @@ function renderInspectHist(e, row) {
   if (id) {
     if (trendSource) ensureHist(id, trendSource);
     else ensureHistPair(id);                // throttled to once a minute inside; no-op once cached
+    if (id === "dhw_tank") {
+      ensureHist("smart_grid_mode", "modbus");
+      ensureHist("bsh_state");
+      ensureHist("bsh_state", "modbus");
+    }
   }
   const h = id && trendSource !== "modbus" ? S.hist.get(id) : null;
   const mh = id && trendSource !== "x10a" ? S.hist.get(histCacheKey(id, "modbus")) : null;
@@ -1635,10 +1640,15 @@ function renderInspectHist(e, row) {
   // still leave a tooltip/crosshair DOM completely alone.
   const liveGen = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
     ? historyView(id, trendSource)?.gen || "" : "";
+  const auxGen = id === "dhw_tank"
+    ? `${S.hist.get(histCacheKey("smart_grid_mode", "modbus"))?.gen || ""}/` +
+      `${S.hist.get("bsh_state")?.gen || ""}/` +
+      `${S.hist.get(histCacheKey("bsh_state", "modbus"))?.gen || ""}`
+    : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, h ? (h.err ? "e" : h.gen) : "", mh ? (mh.err ? "e" : mh.gen) : "",
-               liveGen, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
+               liveGen, auxGen, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
   if (sig === S.inspHistSig) return;
   S.inspHistSig = sig;
   const el = $("inspHist");
