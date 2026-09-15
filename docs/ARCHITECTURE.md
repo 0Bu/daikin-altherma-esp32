@@ -393,14 +393,16 @@ host-testable core is unusually large and valuable, because the risky parts are 
   scale or endianness would silently corrupt a reading; unit-tested per converter id against
   known-good reference outputs. Also `reading_plausible()` — the **publish-time** filter that drops a
   °C reading (dataType 1) outside a physical envelope (an idle unit's 576 °C, a ±3276.x sentinel),
-  **and** a refrigerant pressure at or below 0 bar; applied by `hp_format`, deliberately **not** folded
+  **and** a refrigerant pressure at or below 0 kgf/cm²G; applied by `hp_format`, deliberately **not** folded
   into `convert()` so the domain audit still sees each converter's intrinsic semantics (conv 105 vs 114
   on the no-data sentinel). conv 405 separately drops a saturation temp derived from a 0-bar
   (absent/idle) pressure — the pressure rule makes the bar row agree with the °C row beside it, which
   was already being withheld.
-  The pressure rule may need the **whole profile table**, because 0 bar is physically impossible for
-  refrigerant (absolute pressure; a sealed circuit is never at vacuum) yet perfectly real for water (a
-  drained system). `is_refrigerant_pressure()` decides which is which **structurally**, never from the
+  The pressure rule may need the **whole profile table**, because a zero refrigerant-transducer row is
+  an absent/unreported value on the observed X10A path yet zero is perfectly real for water in a
+  drained system. The recovered correlations support a gauge-pressure coordinate; that reference is
+  still project evidence pending an independent service-gauge comparison. `is_refrigerant_pressure()`
+  decides which is which **structurally**, never from the
   label — an alias or a translation would flip it, the `lwt_select.hpp` lesson — on either of two
   signals:
   1. **The page.** `0x20`/`0x21`/`0xA0`/`0xA1` are the outdoor unit's own pages; there is no water
@@ -575,9 +577,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
   **Which side of the circuit a row sits on decides whether the witness can speak for it**, and that
   is the whole adjudication. The only witness the catalog carries is `(0x62, 15, conv 405)` — the
   refrigerant pressure sensor's saturation temperature on the hydronic page — and it is measurably
-  the **high side**: over 1419 running samples it tracks *leaving water* across a 55 K span
+  the **PHE side**: over 1419 mixed-mode running samples it tracks *leaving water* across a 55 K span
   (3.2–64.1 °C against LWT 9.5–64.8 °C, paired mean difference −0.9 K) while outdoor air stayed
-  inside a 7 K band. So exactly one of the three rows is adjudicated:
+  inside a 7 K band. It is high/condensing in heating and low/evaporating in cooling; the mixed-mode
+  mean is correlation evidence, not a condenser-pinch measurement. So exactly one of the three rows
+  is adjudicated for the heating/high-side condition:
 
   | row | side | outcome |
   |---|---|---|
@@ -600,7 +604,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   low side, which never reaches 30 °C, so the rule switches *itself* off rather than anyone having to
   detect the mode. The on-page witness that would have needed no cross-page state at all (`0x20/12`,
   `0x20/14`, conv 405) is unusable: those transducers read exactly 0.0 bar in 56433/56433 samples over
-  120 days, and conv 405 drops `bar <= 0`, so neither `(T)` row has ever published one sample.
+  120 days, and conv 405 drops `kgf/cm²G <= 0`, so neither `(T)` row has ever published one sample.
 
   Two gates keep the witness honest. The capture is **gated on the profile declaring the row** — on a
   model without it, bytes 15–16 of the hydronic page are whatever that model puts there, and a

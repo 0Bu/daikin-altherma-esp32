@@ -656,9 +656,13 @@ the volumetric heat capacity of the loop fluid, `ρ·cp/60`:
 
 | Loop fluid | `Cf` |
 |---|---|
-| Pure water | **0.070** |
-| ~30 % propylene glycol | ~0.063 |
-| ~30 % ethylene glycol | ~0.066 |
+| Pure water at ~35 °C | **0.0692** |
+| 30 % propylene glycol by mass at ~35 °C | ~0.0660 |
+| 30 % ethylene glycol by mass at ~35 °C | ~0.0647 |
+
+These are temperature-specific volumetric values. The firmware dashboard uses the simpler
+reference-fluid factor `4.186 kJ/(l·K)` (`Cf = 0.06977`), so its water estimate is about 0.8 % higher
+than this 35 °C Home Assistant example before sensor and installation uncertainty.
 
 ```yaml
 template:
@@ -677,7 +681,7 @@ template:
           {% set flow  = states('sensor.daikin_altherma_flow_sensor_l_min') | float %}
           {% set t_out = states('sensor.daikin_altherma_leaving_water_temp_after_buh_r2t') | float %}
           {% set t_in  = states('sensor.daikin_altherma_inlet_water_temp_r4t') | float %}
-          {% set cf    = 0.070 %}   {# 0.070 water · ~0.063 for 30% propylene glycol — set to your loop #}
+          {% set cf    = 0.0692 %}  {# water near 35 °C · set this for your fluid and concentration #}
           {{ (flow * cf * (t_out - t_in)) | round(3) }}
 ```
 
@@ -810,7 +814,7 @@ range. Metric names follow your Telegraf field naming:
 # not floored to zero, or the integral below overstates production. See step 1.
 daikin_flow_rate_lmin
   * (daikin_leaving_water_temp_after_buh_r2t - daikin_return_water_temp_before_phe_r4t)
-  * 0.070
+  * 0.0692
 
 # produced heat [kWh] over $__range  — MetricsQL integrate() returns value·seconds, so ÷3600
 integrate($P[$__range]) / 3600
@@ -831,8 +835,10 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   loop); discrete integration at even 30 s costs ~0.01–0.1 % of the yearly total, and rising/falling
   edges largely cancel. This firmware polls every **1 s** (fixed, not configurable), so the integral
   is not sampling-bound.
-- **What dominates instead:** (a) the loop-fluid constant — a glycol mix lowers `Cf` ~10 % vs water,
-  a systematic error if you leave it at 0.070; (b) small-ΔT amplification — ±0.1 K on a 3 K heating
+- **What dominates instead:** (a) the loop-fluid constant — a 30 % by-mass glycol mix lowers `Cf`
+  roughly 5–7 % vs water near 35 °C, and stronger mixes lower it further; concentration by volume
+  is a different input, so use the fluid supplier's property table rather than relabelling it. A
+  wrong constant is a systematic error; (b) small-ΔT amplification — ±0.1 K on a 3 K heating
   ΔT is already ~3 %, and the leaving/return sensors are uncalibrated factory parts (~±0.5–1 K);
   (c) whether a genuine volumetric flow signal exists. Every model profile shipped here defines the
   flow sensor (`0x62/9`) plus both leaving (`0x61/2|4`) and return (`0x61/8`) water temps, so the

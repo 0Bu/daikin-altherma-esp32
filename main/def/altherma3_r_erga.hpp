@@ -10,6 +10,7 @@
 namespace daik::def {
 
 inline constexpr ValueDef altherma3_r_erga[] = {
+    {0x00,  0, 802, 0, -1, "*Refrigerant type"},
     {0x10,  0, 217, 1, -1, "Operation Mode"},
     {0x10,  4, 203, 1, -1, "Operation / Fault"},
     {0x10,  5, 204, 1, -1, "Fault Code"},

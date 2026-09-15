@@ -93,7 +93,7 @@ const postBuhRow = () => {
 // make the gate a third copy of the very thing it is comparing. Measured: while these two lines sat
 // in liveData(), the selftest's "unknown tank heater treated as off" mutation passed the gate.
 const copPlan = (pelSrc, buh1, buh2, bsh, pbOk) => {
-  const heaterQuiet = (buh1 != null || buh2 != null) && !(buh1 === true || buh2 === true);
+  const heaterQuiet = buh1 != null && buh2 != null && !(buh1 === true || buh2 === true);
   const tankQuiet   = bsh != null && bsh !== true;
   if (pelSrc == null)    return { scope: null,    block: "no_pel",      postBuh: false };
   if (pelSrc === "INV")  return { scope: "hp",    block: null,          postBuh: false };
@@ -317,7 +317,7 @@ function liveData() {
   if (d.ouHeldOver) takeMb("out", "outdoor_air");
   // Circuit refrigerant pressure for the schematic's high-side badge. The outdoor unit's own High
   // Pressure transducer (reg 0x20) reads 0 bar while the compressor is off — but a sealed R32 circuit
-  // is never at 0 bar, so "0.0 bar" paints a live-looking fault on an idle unit. Fall back to the
+  // use exact 0.0 as an absent value, so publishing it paints a live-looking fault. Fall back to the
   // always-live Refrigerant pressure sensor (reg 0x62/15), which reports the real equalised system
   // pressure at rest (~14 bar for R32 near 20 °C). When the compressor runs, High Pressure is the true
   // discharge pressure and wins. Neither present (17 profiles carry no pressure row) → null → "—".
@@ -339,7 +339,7 @@ function liveData() {
   // therefore blanks the working-point claim just like a measured zero does.
   d.dtStale = waterMoving(d) !== true;
   // Derived figures, marked "est." in the UI — the bus has no energy registers. Thermal output from
-  // flow × ΔT (water ≈ 4.186 kJ/kg·K); electrical from the CT phase currents at an assumed 230 V,
+  // flow/60 × ΔT × ρ·cp (water ≈ 4.186 kJ/l·K); electrical from the CT phase currents at an assumed 230 V,
   // falling back to the inverter primary current when the profile has no CT rows. applyThermalPlan
   // keeps the signed raw balance for defrost, turns active cooling into positive cooling capacity,
   // and refuses to call pump-only residual-heat circulation an output.
@@ -630,8 +630,8 @@ function renderLive() {
   // comment above warns about. The zero is arithmetically true (flow 0 carries nothing) and reads
   // as a measured plant output anyway: with the tank heater firing, "≈ 0.0 kW" sat beside a tank
   // climbing at ~2.7 kW. No working point is not an output of zero. Note this gates the LIVE pill
-  // only, not the 24-hour curve (DERIVED.pth): there a flat zero is the honest shape of a day that
-  // delivered nothing, and a gap would be indistinguishable from missing data.
+  // pill's instantaneous mode/direction gate. DERIVED.pth keeps measured no-flow buckets at zero
+  // but also requires the compressor witness when water moves, so pump overrun becomes a gap.
   setTxt("svPth", fmt1(d.pth));   // derived — applyThermalPlan already refuses pump-only circulation
   // THREE-VALUED, and that is the whole fix. `d.valveDhw === true` collapsed "I cannot read the
   // valve" into "heating", which is a positive claim: with X10A silent during a DHW run the drawing
@@ -1000,10 +1000,10 @@ const INSPECT = {
     aria: { en: "Thermal capacity at the PHE (estimated)", de: "Geschätzte thermische Leistung am PHE" },
     trend: (d) => d && d.pthKind === "cooling" ? "" : "pth",
     what: (d) => d && d.pthKind === "cooling"
-      ? { en: "An ESTIMATE of heat removed from the water: flow × (R4T−R1T) × 4.186 kJ/kg·K, assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the cooling-direction temperature difference. R1T/R4T are internal PHE sensors, not downstream emitter sensors.",
-          de: "Eine SCHÄTZUNG der dem Wasser entzogenen Wärme: Durchfluss × (R4T−R1T) × 4,186 kJ/kg·K unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Kühlrichtung. R1T/R4T sind interne PHE-Fühler und keine Fühler an den nachgeschalteten Flächen." }
-      : { en: "An ESTIMATE of heat transferred into the water: flow × (R1T−R4T) × 4.186 kJ/kg·K, assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the heating-direction temperature difference. The backup heater sits after R1T and is outside this figure.",
-          de: "Eine SCHÄTZUNG der ins Wasser übertragenen Wärme: Durchfluss × (R1T−R4T) × 4,186 kJ/kg·K unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Heizrichtung. Der Zusatzheizer sitzt hinter R1T und ist in diesem Wert nicht enthalten." },
+      ? { en: "An ESTIMATE of heat removed from the water: flow/60 × (R4T−R1T) × ρ·cp (≈ 4.186 kJ/(l·K)), assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the cooling-direction temperature difference. R1T/R4T are internal PHE sensors, not downstream emitter sensors.",
+          de: "Eine SCHÄTZUNG der dem Wasser entzogenen Wärme: Durchfluss/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Kühlrichtung. R1T/R4T sind interne PHE-Fühler und keine Fühler an den nachgeschalteten Flächen." }
+      : { en: "An ESTIMATE of heat transferred into the water: flow/60 × (R1T−R4T) × ρ·cp (≈ 4.186 kJ/(l·K)), assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the heating-direction temperature difference. The backup heater sits after R1T and is outside this figure.",
+          de: "Eine SCHÄTZUNG der ins Wasser übertragenen Wärme: Durchfluss/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Heizrichtung. Der Zusatzheizer sitzt hinter R1T und ist in diesem Wert nicht enthalten." },
     head: (d) => (d.dtStale || d.pth == null ? "—" : "≈ " + fmt1(d.pth) + " kW"),
     // The COP is quoted here only while it is built on THIS figure. With a whole-unit electrical
     // input the quotient moves to the post-BUH outlet (logic/cop_scope.hpp), so it is no longer

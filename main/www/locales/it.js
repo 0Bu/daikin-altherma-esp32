@@ -1,4 +1,4 @@
-// translation-source: 5d871d5ac649125e5dd02c251c9b45a34dc6cedbda5e9c48c95895bed7694182
+// translation-source: caef92ce6d04cf47276f2baa57c78e76949e16d867ee28ce3848640278759fc8
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -916,8 +916,8 @@ INSPECT_I18N.it = inspectValues(
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Nel raffrescamento attivo R1T deve essere sotto R4T; la differenza con segno è quindi negativa.`
       : `${fmt1(d.dt)} K${d.dtSet != null ? ` rispetto all’obiettivo di riscaldamento di ${fmt1(d.dtSet)} K` : ""}. Positivo significa che il PHE cede calore all’acqua.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Potenza frigorifera stimata" : "Potenza termica stimata", "Potenza termica stimata sul PHE", (d) => d && d.pthKind === "cooling"
-      ? "Stima del calore sottratto: portata × (R4T−R1T) × 4,186 kJ/kg·K assumendo acqua. Dipende da portata, sensori e fluido; il glicole cambia il calcolo. Mostrata solo con compressore in marcia e differenza nella direzione di raffrescamento."
-      : "Stima del calore ceduto: portata × (R1T−R4T) × 4,186 kJ/kg·K assumendo acqua. Dipende da portata, sensori e fluido; il glicole cambia il calcolo. BUH è dopo R1T e resta fuori dal valore.", (d) => d.dtStale ? d.bsh === true
+      ? "Stima del calore sottratto: portata/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) assumendo acqua. Dipende da portata, sensori e fluido; il glicole cambia il calcolo. Mostrata solo con compressore in marcia e differenza nella direzione di raffrescamento."
+      : "Stima del calore ceduto: portata/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) assumendo acqua. Dipende da portata, sensori e fluido; il glicole cambia il calcolo. BUH è dopo R1T e resta fuori dal valore.", (d) => d.dtStale ? d.bsh === true
       ? "Nessun trasferimento calcolabile sul PHE perché la circolazione non è dimostrata. La resistenza interna può ancora scaldare il serbatoio, ma il suo calore non attraversa R1T/R4T e questo bus non può quantificarlo."
       : "Nessuna potenza calcolabile perché non è dimostrato movimento d’acqua sul PHE. Manca un punto operativo; non significa 0 kW."
       : d.pth == null ? null
