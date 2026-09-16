@@ -62,6 +62,31 @@ function scopeSvg(svg, prefix) {
   return out;
 }
 
+// A light-ribbon variant needs SEVERAL overlays on one pipe, so each flow path becomes a <g> that
+// takes over the run's id with N identical children under it. The id moves to the group because the
+// id is what says "this run is flowing" — the renderer toggles `.on` there and every strand follows.
+// The children keep the run's classes (which is how each still picks up its own thermal colour, the
+// cooling swap and the neutral grey) and gain `fx-s<i>`, which is all the variant CSS needs to give
+// strand 3 a different width, blur, speed and wander from strand 1.
+// Every clone carries the SAME `d` as the pipe it traces and the same endpoints, so G010 and
+// E003/E004 read a stack of strands exactly as they read one overlay.
+const FLOW_CLASSES = /\b(?:sc-flow|sc-rflow|sc-tank-flow|sc-space-flow)\b/;
+
+function strandify(svg, count) {
+  if (count < 2) return svg;
+  return svg.replace(/<path\b([^>]*?)\/>/g, (whole, attrs) => {
+    const cls = /class="([^"]*)"/.exec(attrs);
+    if (!cls || !FLOW_CLASSES.test(cls[1])) return whole;
+    const id = /id="([^"]*)"/.exec(attrs);
+    const body = attrs.replace(/\s*id="[^"]*"/, '');
+    let out = `<g class="fx-strands"${id ? ` id="${id[1]}"` : ''}>`;
+    for (let i = 1; i <= count; i++) {
+      out += `<path${body.replace(/class="([^"]*)"/, `class="$1 fx-s${i}"`)}/>`;
+    }
+    return `${out}</g>`;
+  });
+}
+
 function gradientRulesFor(prefix) {
   return CSS_GRADIENT_RULES
     .map(([cls, id]) => `.panel[data-variant="${prefix}"] svg .${cls} { stroke: url(#${prefix}-${id}); }`)
@@ -96,27 +121,42 @@ function themeStamps(css) {
   return `:root[data-theme="light"] {${light}}\n:root[data-theme="dark"] {${dark}}`;
 }
 
-// ── 2. The five panels ──────────────────────────────────────────────────────────────────────────
+// ── 2. The panels, in two families ──────────────────────────────────────────────────────────────
 const VARIANTS = [
-  { key: 'now', cls: '', name: 'Aktuell', tag: 'heute im Gerät',
+  { key: 'a', cls: 'fx-a', strands: 5, family: 'ribbon', name: 'Aurora', tag: 'Version A',
+    claim: 'Fünf Stränge, lange weiche Striche, jeder auf einer anderen Umlaufzeit — sie gleiten ' +
+           'ewig aneinander vorbei, ohne sich je zu wiederholen. Breiter Dunst um einen harten ' +
+           'hellen Faden. Die langsamste: ein Vorhang, keine Strömung.',
+    specs: ['5 Stränge · 3,4× bis 0,22×', 'Striche 70/34', '3,6–6,3 s Drift', 'Band ~22 Einheiten breit'] },
+  { key: 'b', cls: 'fx-b', strands: 4, family: 'ribbon', name: 'Magnetfeld', tag: 'Version B',
+    claim: 'Die beiden mittleren Stränge schwingen gegenphasig und eine halbe Strichperiode ' +
+           'versetzt — sie kreuzen sich alle 0,95 s und lesen sich als Doppelhelix um das Rohr. ' +
+           'Kurze Striche, 1,25 s: die schnelle, gespannte. Auch die billigste im Zeichnen.',
+    specs: ['4 Stränge, 2 als Helix ±7', 'Striche 26/14', '1,25 s Drift', 'Kreuzung alle 0,95 s'] },
+  { key: 'c', cls: 'fx-c', strands: 6, family: 'ribbon', name: 'Sternenstrom', tag: 'Version C',
+    claim: 'Ein breiter Dunst als Flussbett, darüber fünf feine Stränge aus sehr kurzen Strichen — ' +
+           'jeder mit eigener Länge, Geschwindigkeit, Wanderung und Funkeltakt, keiner ein Teiler ' +
+           'des anderen. Kein Band, sondern ein Schwarm. Die körnige.',
+    specs: ['6 Stränge', 'Striche 0,8 bis 120', '0,75–6,5 s Drift', 'Funkeln 0,9–2,6 s'] },
+  { key: 'now', cls: '', strands: 1, family: 'ref', name: 'Aktuell', tag: 'heute im Gerät',
     claim: 'Gleichmäßige Striche, 9 an / 15 aus, 1,1 s pro Takt. Die Referenz — daran wird gemessen.',
     specs: ['dasharray 9 15', '1,1 s', 'kein Leuchten'] },
-  { key: 'v1', cls: 'fx-v1', name: 'Plasmastrom', tag: 'Variante 1',
-    claim: 'Tropfen, die sich zu Schlieren dehnen, verschmelzen und wieder abreißen. Weiche Kanten ' +
-           'durch einen 1,4-px-Blur, zwei Perioden (1,7 s / 4,1 s), die sich nie treffen.',
+  { key: 'v1', cls: 'fx-v1', strands: 1, family: 'quiet', name: 'Plasmastrom', tag: 'Variante 1',
+    claim: 'Tropfen, die sich zu Schlieren dehnen, verschmelzen und wieder abreißen. Weiche ' +
+           'Kanten durch einen 1,4-px-Blur, zwei Perioden (1,7 s / 4,1 s), die sich nie treffen.',
     specs: ['Muster atmet 4/20 ↔ 19/5', 'blur + 2 Höfe', '1,7 s · 4,1 s'] },
-  { key: 'v2', cls: 'fx-v2', name: 'Kometenschweif', tag: 'Variante 2',
-    claim: 'Ein heller Kopf, dahinter ein Schweif aus kleiner werdenden Funken — alles ein einziges ' +
-           'achtstelliges Strichmuster, kurz genug, dass ein ganzer Komet auch in die 47 Einheiten ' +
-           'kurzen Vorlaufstücke passt.',
+  { key: 'v2', cls: 'fx-v2', strands: 1, family: 'quiet', name: 'Kometenschweif', tag: 'Variante 2',
+    claim: 'Ein heller Kopf, dahinter ein Schweif aus kleiner werdenden Funken — alles ein ' +
+           'einziges achtstelliges Strichmuster, kurz genug, dass ein ganzer Komet auch in die 47 ' +
+           'Einheiten kurzen Vorlaufstücke passt.',
     specs: ['dasharray 1 3 2 3 5 3 12 10', '0,55 s', 'Hof pulst 2,3 s'] },
-  { key: 'v3', cls: 'fx-v3', name: 'Fusionsimpuls', tag: 'Variante 3',
+  { key: 'v3', cls: 'fx-v3', strands: 1, family: 'quiet', name: 'Fusionsimpuls', tag: 'Variante 3',
     claim: 'Keine Strömung, sondern Entladungen: drei runde Pakete in ungleichem Abstand, schnell, ' +
-           'weißglühender Kern. Die lauteste der vier.',
+           'weißglühender Kern. Die lauteste der ersten vier.',
     specs: ['dasharray 1 33 1 25 1 43', '0,82 s', 'brightness 1,28'] },
-  { key: 'v4', cls: 'fx-v4', name: 'Polarlicht', tag: 'Variante 4',
+  { key: 'v4', cls: 'fx-v4', strands: 1, family: 'quiet', name: 'Polarlicht', tag: 'Variante 4',
     claim: 'Das Rohr wirkt gefüllt; was wandert, ist die Naht. Drei langsame Wellen für Breite, ' +
-           'Deckkraft und Hof laufen gegeneinander. Die ruhigste der vier.',
+           'Deckkraft und Hof laufen gegeneinander. Die ruhigste der ersten vier.',
     specs: ['dasharray 54 7 26 7', '3,2 s · 2,05 s · 6,5 s', 'nur Sättigung, kein Hue-Shift'] },
 ];
 
@@ -219,11 +259,31 @@ const ALL_VALUE_IDS = [...new Set(SCENARIOS.flatMap((s) => Object.keys(s.values)
 // ── 4. Emit ─────────────────────────────────────────────────────────────────────────────────────
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-const panels = VARIANTS.map((v) => `
+const FAMILY_INTRO = {
+  ribbon: { title: 'Lichtbänder',
+            note: 'Mehrere Stränge auf demselben Rohr, jeder mit eigener Breite, Farbe, ' +
+                  'Unschärfe, Geschwindigkeit und einer langsamen Wanderung von wenigen Einheiten. ' +
+                  'Wo sie sich überlagern, addieren sie sich — der helle Grat dieser Summe wandert ' +
+                  'die Leitung entlang. Für das dunkle Schema gebaut.' },
+  ref:    { title: 'Referenz', note: 'Was heute im Gerät läuft.' },
+  quiet:  { title: 'Die ruhigere Familie',
+            note: 'Aus der ersten Runde: je ein reiner CSS-Block auf der Überlagerung, die es ' +
+                  'schon gibt — kein zusätzliches Element, keine Markup-Änderung, keine neue Farbe.' },
+};
+
+let lastFamily = null;
+const panels = VARIANTS.map((v) => {
+  const head = v.family === lastFamily ? '' : `
+      <header class="family">
+        <h2 class="family-title">${esc(FAMILY_INTRO[v.family].title)}</h2>
+        <p class="family-note">${esc(FAMILY_INTRO[v.family].note)}</p>
+      </header>`;
+  lastFamily = v.family;
+  return `${head}
       <article class="panel" data-variant="${v.key}">
         <header class="panel-head">
           <p class="panel-tag">${esc(v.tag)}</p>
-          <h2 class="panel-name">${esc(v.name)}</h2>
+          <h3 class="panel-name">${esc(v.name)}</h3>
           <p class="panel-claim">${esc(v.claim)}</p>
           <ul class="spec">${v.specs.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>
         </header>
@@ -231,12 +291,13 @@ const panels = VARIANTS.map((v) => `
           <figure class="schem-card" id="schem" data-fx="${v.cls}">
             <div class="card schem-face">
               <div class="schem-scroll">
-${scopeSvg(svgSource, v.key)}
+${strandify(scopeSvg(svgSource, v.key), v.strands)}
               </div>
             </div>
           </figure>
         </div>
-      </article>`).join('\n');
+      </article>`;
+}).join('\n');
 
 const html = `<title>Fließende Leitungen</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -293,6 +354,14 @@ fieldset.ctl { border: 0; margin: 0; padding: 0; }
 .chip:focus-visible, .switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .panels { display: flex; flex-direction: column; gap: 34px; padding-block: 30px 0; }
+/* A family heading is the page's real structure — the two groups differ in what shipping one costs,
+   not in taste — so it gets the weight and the panels below it drop to a third level. */
+.family { padding-block: 26px 0; }
+.panels > .family:first-child { padding-top: 6px; }
+.family-title { margin: 0; font-size: clamp(19px, 3.4vw, 23px); font-weight: 700;
+  letter-spacing: -.01em; }
+.family-note { margin: 7px 0 0; max-width: 68ch; font-size: 14px; line-height: 1.6;
+  color: var(--ink-2); }
 /* Not a card: the stage below carries the fill and the border, the header is plain text with a
    rule, so the eye lands on the drawing rather than on five identical boxes. */
 .panel-head { border-top: 1px solid var(--rule); padding-top: 16px; }
@@ -300,7 +369,7 @@ fieldset.ctl { border: 0; margin: 0; padding: 0; }
 .panel-tag { margin: 0; font-family: var(--fx-mono); font-size: 11.5px; letter-spacing: .12em;
   text-transform: uppercase; color: var(--accent); }
 .panel[data-variant="now"] .panel-tag { color: var(--ink-2); }
-.panel-name { margin: 4px 0 0; font-size: clamp(22px, 4vw, 29px); font-weight: 600;
+.panel-name { margin: 4px 0 0; font-size: clamp(20px, 3.6vw, 26px); font-weight: 600;
   letter-spacing: -.02em; }
 .panel-claim { margin: 8px 0 0; max-width: 68ch; font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
 .spec { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
@@ -340,10 +409,14 @@ ${themeStamps(shippedCss)}
 <div class="wrap">
   <header class="masthead">
     <p class="eyebrow">Dashboard-Schema · Wasserkreis</p>
-    <h1>Vier Arten, fließendes Wasser zu zeigen</h1>
+    <h1>Sieben Arten, fließendes Wasser zu zeigen</h1>
     <p class="lede">Dieselbe Zeichnung, dieselben Rohre, dieselben Messwerte — nur die Animation der
-      Vor- und Rücklaufüberlagerung ist ausgetauscht. Oben die heutige Fassung als Referenz, darunter
-      die vier Vorschläge. Szenario wechseln, vergleichen, eine Nummer nennen.</p>
+      Vor- und Rücklaufüberlagerung ist ausgetauscht. Zuerst die drei Lichtbänder, dann die heutige
+      Fassung als Referenz, darunter die vier ruhigeren aus der ersten Runde. Szenario wechseln,
+      vergleichen, einen Namen nennen.</p>
+    <p class="lede">Die Lichtbänder sind für das <strong>dunkle Schema</strong> gebaut: dort
+      addieren sich die Stränge, im hellen fallen sie auf gewöhnliche Deckkraft zurück. Der Schalter
+      rechts oben wechselt.</p>
   </header>
 
   <div class="controls">
@@ -366,11 +439,20 @@ ${panels}
   </main>
 
   <footer class="foot">
-    <p>Jede Variante ist ein reiner CSS-Block auf den Überlagerungen, die es schon gibt — kein neues
-      SVG-Element, keine neue Pfadgeometrie, kein SVG-Filter. Die Farbe kommt unverändert aus
-      <code>--flow-hot</code> / <code>--flow-cold</code>, inklusive des Tauschs im Kühlbetrieb und des
-      neutralen Grau bei reiner Umwälzung. Bei <code>prefers-reduced-motion</code> steht die Bewegung
-      still und der aktive Strang bleibt durch Farbe und Leuchten erkennbar.</p>
+    <p><strong>Was die vier ruhigeren kosten:</strong> nichts außer CSS. Kein neues SVG-Element,
+      keine neue Pfadgeometrie, kein SVG-Filter, und die Farbe kommt unverändert aus
+      <code>--flow-hot</code> / <code>--flow-cold</code>.</p>
+    <p><strong>Was die drei Lichtbänder kosten:</strong> aus jeder animierten Leitung wird eine
+      Gruppe mit vier bis sechs gleichen Pfaden. Der Schema-Audit trägt das — jeder Strang hat
+      dasselbe <code>d</code> wie das gezeichnete Rohr und dieselben Enden —, aber es ist eine
+      Markup-Änderung an einer stark abgesicherten Datei, und es sind vier bis sechs Striche statt
+      einem, mehrere davon unscharf. Dazu kommen neue Farbtöne: die breitesten und hellsten Stränge
+      tragen weiter <code>--flow-hot</code> / <code>--flow-cold</code> samt Tausch im Kühlbetrieb und
+      neutralem Grau bei reiner Umwälzung, die Akzentstränge aber sind Bernstein/Rosé bzw.
+      Cyan/Violett — nicht mehr das farbfehlsichtigkeitsgeprüfte Paar aus DESIGN.md §9. Das ist die
+      eine Sache, die man bewusst entscheiden sollte.</p>
+    <p>In beiden Familien gilt: bei <code>prefers-reduced-motion</code> steht die Bewegung still und
+      der aktive Strang bleibt durch Farbe und Leuchten erkennbar.</p>
     <p>Erzeugt aus <code>main/www/index.html</code> und <code>main/www/style.css</code> —
       <code>node tools/uipreview/build_flow_preview.mjs</code>.</p>
   </footer>
@@ -398,7 +480,7 @@ function paint() {
     if (fig.dataset.fx) fig.classList.add(fig.dataset.fx);
     if (document.getElementById('refrigerantChk').checked) fig.classList.add('fx-refrigerant');
 
-    fig.querySelectorAll('.sc-flow, .sc-rflow, .sc-tank-flow, .sc-space-flow')
+    fig.querySelectorAll('.sc-flow, .sc-rflow, .sc-tank-flow, .sc-space-flow, .fx-strands')
        .forEach((el) => el.classList.remove('on', 'rev'));
     for (const id of scenario.on) {
       const el = fig.querySelector('#' + id);

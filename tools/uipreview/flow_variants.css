@@ -151,3 +151,211 @@ svg .sc-space-flow { color: var(--space-flow-top); }
   0%, 100% { filter: saturate(.92) drop-shadow(0 0 3px) drop-shadow(0 0 8px); }
   50%      { filter: saturate(1.30) drop-shadow(0 0 6px) drop-shadow(0 0 18px); }
 }
+
+/* ════════════════════════════════════════════════════════════════════════════════════════════
+   ZWEITE FAMILIE — Lichtbänder (Versionen A, B, C)
+   ────────────────────────────────────────────────────────────────────────────────────────────
+   WHAT CHANGES HERE. The four above animate the ONE overlay each pipe already has. These three
+   stack SEVERAL overlays on the same pipe — five, four and six — and let them drift apart: each
+   strand has its own width, colour, blur, dash pattern, speed and a slow lissajous wander of a few
+   user units. Where the strands overlap they add up, and the bright ridge of that sum wanders
+   along the run. That is where the braided, flowing-ribbon look comes from; a single stroke cannot
+   produce it, whatever you animate on it.
+
+   WHAT SHIPPING ONE COSTS, stated plainly because it is the real difference from the first four:
+   · Markup. Each animated run becomes a <g> carrying the run's id with N identical <path> children.
+     The preview's generator does this mechanically; shipping it means the same transform in
+     main/www/index.html (by hand or generated at build). The audit survives it — every clone has
+     the SAME `d` as the drawn pipe (G010) and the same start and end (E003/E004) — but it is a
+     markup change to a heavily gated file, which the first four deliberately were not.
+   · Paint. N strokes instead of one, several of them blurred, is real compositor work on a phone.
+     Version B is the cheapest (4 strands, little blur), A the most expensive (5, one at 6 px).
+   · Colour. `--flow-hot`/`--flow-cold` still carry the claim — the widest and the brightest
+     strands are painted with them, and the thermal swap in cooling applies to the accents too.
+     But the accent and veil strands are NEW hues (amber/rose on the warm side, cyan/violet on the
+     cold), and they are not the CVD-validated pair. Two people who read the drawing by hue alone
+     see a wider band of colour than DESIGN.md §9 currently specifies. That is a deliberate
+     departure, not an oversight, and it is the one thing to decide consciously before shipping.
+   · Theme. This family is built for the dark scheme, where the strands blend additively. In light
+     it falls back to ordinary alpha at raised opacity: still handsome, noticeably tamer.
+   Everything else from the first four still holds: pure CSS, no SVG filter, no new path geometry,
+   and `prefers-reduced-motion` leaves a lit, legible, motionless band. */
+
+/* Additive blending is what makes overlapping strands read as one glowing body — but `screen`
+   against a light card is white on white, so light keeps ordinary alpha and raises the opacities
+   instead. One multiplier, applied in every strand's `stroke-opacity`. */
+:root { --fx-blend: normal; --fx-dim: 1.75; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --fx-blend: screen; --fx-dim: 1; }
+}
+:root[data-theme="dark"] { --fx-blend: screen; --fx-dim: 1; }
+
+/* The two extra hues per strand set, following the SAME thermal rule as the stroke: warm family on
+   the supply, cool family on the return, swapped in cooling, and both collapsed to the neutral grey
+   when the circulation is pump-only — a residual-heat interval must not gain colour by gaining
+   strands. `--fx-core` is the near-white the thinnest strand is painted with. */
+#schem { --fx-core:#FFF6E9; --fx-accent:var(--flow-hot); --fx-veil:var(--flow-hot); }
+#schem .fx-strands > .hot  { --fx-accent:#FFB03A; --fx-veil:#C33BE8; }
+#schem .fx-strands > .cold { --fx-accent:#3BE8E0; --fx-veil:#6A4BFF; }
+#schem.cooling-mode .fx-strands > .water-flow.hot  { --fx-accent:#3BE8E0; --fx-veil:#6A4BFF; }
+#schem.cooling-mode .fx-strands > .water-flow.cold { --fx-accent:#FFB03A; --fx-veil:#C33BE8; }
+#schem.water-neutral .fx-strands > .water-flow.hot,
+#schem.water-neutral .fx-strands > .water-flow.cold { --fx-accent:var(--muted); --fx-veil:var(--muted); }
+#schem .fx-strands > .sc-tank-flow  { --fx-accent:#FFB03A; --fx-veil:#C33BE8; }
+#schem .fx-strands > .sc-space-flow { --fx-accent:#FFB03A; --fx-veil:#6A4BFF; }
+#schem.bsh-on .fx-strands > .sc-tank-flow { --fx-accent:var(--warn); --fx-veil:#C33BE8; }
+
+/* How far a strand may wander is the ELEMENT's business, not the keyframe's: a pipe run has open
+   space either side of it, while the tank and the space circuit trace a box with readings inside.
+   The keyframes below are therefore written in multiples of `--fx-amp`, and the two perimeter
+   families set it to a bit over a third — the band still breathes, but it no longer lies across
+   "set 55 °C". */
+#schem .fx-strands > path { --fx-amp: 1px; }
+#schem .fx-strands > .sc-tank-flow, #schem .fx-strands > .sc-space-flow { --fx-amp: .38px; }
+
+/* The wander, and the spread. Each strand traces a small ellipse in user units — so a horizontal
+   run shows its vertical half and a vertical run its horizontal half, and every orientation in the
+   drawing moves — but the ellipses are also CENTRED at different offsets, from -5.5 above the pipe
+   to +4 below it. That is what separates the strands at rest instead of leaving them concentric:
+   the band spreads about 22 units across a 5-unit pipe, four times its width, and the strands cross
+   and part as their periods drift. Wider than this and the band swallows the value pills it runs
+   past; the pills paint later than the overlays, so it passes BEHIND them and they stay readable,
+   which is what allows a band this size at all. */
+@keyframes fx-w1 { 0%,100% { transform: translate(0,calc(var(--fx-amp) * -12.5)); } 25% { transform: translate(calc(var(--fx-amp) * 5),calc(var(--fx-amp) * -5.5)); }
+                   50%     { transform: translate(0,calc(var(--fx-amp) * 1.5)); }   75% { transform: translate(calc(var(--fx-amp) * -5),calc(var(--fx-amp) * -5.5)); } }
+@keyframes fx-w2 { 0%,100% { transform: translate(0,calc(var(--fx-amp) * 9.5)); }   25% { transform: translate(calc(var(--fx-amp) * -4),calc(var(--fx-amp) * 4)); }
+                   50%     { transform: translate(0,calc(var(--fx-amp) * -1.5)); }  75% { transform: translate(calc(var(--fx-amp) * 4),calc(var(--fx-amp) * 4)); } }
+@keyframes fx-w3 { 0%,100% { transform: translate(calc(var(--fx-amp) * -4.5),calc(var(--fx-amp) * -1)); } 25% { transform: translate(0,calc(var(--fx-amp) * 5)); }
+                   50%     { transform: translate(calc(var(--fx-amp) * 4.5),calc(var(--fx-amp) * -1)); }  75% { transform: translate(0,calc(var(--fx-amp) * -7)); } }
+@keyframes fx-w4 { 0%,100% { transform: translate(0,calc(var(--fx-amp) * 4.5)); }   25% { transform: translate(calc(var(--fx-amp) * 2.5),calc(var(--fx-amp) * 1.5)); }
+                   50%     { transform: translate(0,calc(var(--fx-amp) * -1.5)); }  75% { transform: translate(calc(var(--fx-amp) * -2.5),calc(var(--fx-amp) * 1.5)); } }
+@keyframes fx-w5 { 0%,100% { transform: translate(.calc(var(--fx-amp) * 8),calc(var(--fx-amp) * -1)); } 50% { transform: translate(-.calc(var(--fx-amp) * 8),calc(var(--fx-amp) * 1)); } }
+@keyframes fx-w6 { 0%,100% { transform: translate(calc(var(--fx-amp) * -2),calc(var(--fx-amp) * 7)); }  25% { transform: translate(calc(var(--fx-amp) * 3.5),calc(var(--fx-amp) * 2)); }
+                   50%     { transform: translate(calc(var(--fx-amp) * 2),calc(var(--fx-amp) * -6)); }  75% { transform: translate(calc(var(--fx-amp) * -3.5),calc(var(--fx-amp) * 2)); } }
+/* The braid: two strands on opposite phases of the same swing, so they cross twice a period. */
+@keyframes fx-braid-a { 0%,100% { transform: translateY(calc(var(--fx-amp) * -7)); } 50% { transform: translateY(calc(var(--fx-amp) * 7)); } }
+@keyframes fx-braid-b { 0%,100% { transform: translateY(calc(var(--fx-amp) * 7)); }  50% { transform: translateY(calc(var(--fx-amp) * -7)); } }
+/* Twinkle scales each strand's own resting opacity rather than fixing a value, so one keyframe
+   serves six strands that sit at six different weights. */
+@keyframes fx-twinkle { 0%,100% { stroke-opacity: calc(var(--o) * .25); } 45% { stroke-opacity: var(--o); } }
+
+/* ── Version A · „Aurora" ────────────────────────────────────────────────────────────────────
+   Five strands, long soft dashes (70/34), all five on different drift periods so they slide past
+   one another for ever without repeating. Widths run 3.4× down to 0.22× of the pipe's own stroke
+   and the blur falls with them, which is what gives the band a wide haze around a hard bright
+   thread. The slowest of the three: a curtain, not a current. */
+#schem.fx-a .fx-strands.on > path,
+#schem.fx-a.bsh-on .fx-strands > .sc-tank-flow {
+  opacity: 1; mix-blend-mode: var(--fx-blend); stroke-linecap: round; stroke-dasharray: 70 34;
+}
+#schem.fx-a .fx-strands.on > .fx-s1, #schem.fx-a.bsh-on .fx-strands > .sc-tank-flow.fx-s1 {
+  stroke: var(--fx-veil); stroke-width: calc(var(--fx-w) * 3.4);
+  stroke-opacity: calc(.30 * var(--fx-dim)); filter: blur(8px);
+  animation: fxa-drift 5.1s linear infinite, fx-w1 7.3s ease-in-out infinite;
+}
+#schem.fx-a .fx-strands.on > .fx-s2, #schem.fx-a.bsh-on .fx-strands > .sc-tank-flow.fx-s2 {
+  stroke-width: calc(var(--fx-w) * 2.1); stroke-opacity: calc(.40 * var(--fx-dim));
+  filter: blur(4.2px) drop-shadow(0 0 9px);
+  animation: fxa-drift 4.2s linear infinite, fx-w2 5.9s ease-in-out infinite;
+}
+#schem.fx-a .fx-strands.on > .fx-s3, #schem.fx-a.bsh-on .fx-strands > .sc-tank-flow.fx-s3 {
+  stroke: var(--fx-accent); stroke-width: calc(var(--fx-w) * 1.25);
+  stroke-opacity: calc(.60 * var(--fx-dim)); filter: blur(2px) drop-shadow(0 0 7px);
+  animation: fxa-drift 6.3s linear infinite, fx-w3 8.1s ease-in-out infinite;
+}
+#schem.fx-a .fx-strands.on > .fx-s4, #schem.fx-a.bsh-on .fx-strands > .sc-tank-flow.fx-s4 {
+  stroke-width: calc(var(--fx-w) * .6); stroke-opacity: calc(.8 * var(--fx-dim)); filter: blur(.7px);
+  animation: fxa-drift 3.6s linear infinite, fx-w4 6.7s ease-in-out infinite;
+}
+#schem.fx-a .fx-strands.on > .fx-s5, #schem.fx-a.bsh-on .fx-strands > .sc-tank-flow.fx-s5 {
+  stroke: var(--fx-core); stroke-width: calc(var(--fx-w) * .22); stroke-opacity: .95;
+  animation: fxa-drift 4.7s linear infinite, fx-w5 9.2s ease-in-out infinite;
+}
+#schem.fx-a.fx-refrigerant .fx-strands.rev > path { animation-direction: reverse, normal; }
+@keyframes fxa-drift { to { stroke-dashoffset: -104; } }
+
+/* ── Version B · „Magnetfeld" ────────────────────────────────────────────────────────────────
+   Four strands, and the two middle ones are the point: same swing, opposite phase, half a dash
+   period apart, so they cross twice every 1.9 s and read as a double helix wound round the run.
+   Short dashes (26/14) at 1.25 s make it the fast, tense one — plasma held in a field rather than
+   water drifting. Little blur, hard bloom: the cheapest of the three to paint. */
+#schem.fx-b .fx-strands.on > path,
+#schem.fx-b.bsh-on .fx-strands > .sc-tank-flow {
+  opacity: 1; mix-blend-mode: var(--fx-blend); stroke-linecap: round; stroke-dasharray: 26 14;
+}
+#schem.fx-b .fx-strands.on > .fx-s1, #schem.fx-b.bsh-on .fx-strands > .sc-tank-flow.fx-s1 {
+  stroke: var(--fx-veil); stroke-width: calc(var(--fx-w) * 3.2);
+  stroke-opacity: calc(.28 * var(--fx-dim)); filter: blur(6px);
+  animation: fxb-drift 2.6s linear infinite, fx-w1 4.3s ease-in-out infinite;
+}
+#schem.fx-b .fx-strands.on > .fx-s2, #schem.fx-b.bsh-on .fx-strands > .sc-tank-flow.fx-s2 {
+  stroke-width: calc(var(--fx-w) * 1.4); stroke-opacity: calc(.68 * var(--fx-dim));
+  filter: blur(1.4px) drop-shadow(0 0 10px);
+  animation: fxb-drift 1.25s linear infinite, fx-braid-a 1.9s ease-in-out infinite;
+}
+#schem.fx-b .fx-strands.on > .fx-s3, #schem.fx-b.bsh-on .fx-strands > .sc-tank-flow.fx-s3 {
+  stroke: var(--fx-accent); stroke-width: calc(var(--fx-w) * 1.4);
+  stroke-opacity: calc(.68 * var(--fx-dim)); filter: blur(1.4px) drop-shadow(0 0 10px);
+  animation: fxb-drift 1.25s linear infinite, fx-braid-b 1.9s ease-in-out infinite;
+  animation-delay: -.625s, 0s;
+}
+#schem.fx-b .fx-strands.on > .fx-s4, #schem.fx-b.bsh-on .fx-strands > .sc-tank-flow.fx-s4 {
+  stroke: var(--fx-core); stroke-width: calc(var(--fx-w) * .3); stroke-opacity: 1;
+  filter: drop-shadow(0 0 4px);
+  animation: fxb-drift 1.05s linear infinite, fx-w5 2.3s ease-in-out infinite;
+}
+#schem.fx-b.fx-refrigerant .fx-strands.rev > path { animation-direction: reverse, normal; }
+@keyframes fxb-drift { to { stroke-dashoffset: -40; } }
+
+/* ── Version C · „Sternenstrom" ──────────────────────────────────────────────────────────────
+   One wide, almost solid haze for the body of the river, and five fine strands of very short
+   dashes over it — each a different length, speed, wander and twinkle period, none dividing into
+   another. What travels is not a band but a swarm: sparks carried in a current, denser where the
+   strands happen to align. The granular one. */
+#schem.fx-c .fx-strands.on > path,
+#schem.fx-c.bsh-on .fx-strands > .sc-tank-flow {
+  opacity: 1; mix-blend-mode: var(--fx-blend); stroke-linecap: round;
+}
+#schem.fx-c .fx-strands.on > .fx-s1, #schem.fx-c.bsh-on .fx-strands > .sc-tank-flow.fx-s1 {
+  stroke-width: calc(var(--fx-w) * 3.6); stroke-opacity: calc(.22 * var(--fx-dim));
+  stroke-dasharray: 120 40; filter: blur(9px);
+  animation: fxc-d1 6.5s linear infinite, fx-w3 7.7s ease-in-out infinite;
+}
+#schem.fx-c .fx-strands.on > .fx-s2, #schem.fx-c.bsh-on .fx-strands > .sc-tank-flow.fx-s2 {
+  --o: calc(.9 * var(--fx-dim));
+  stroke-width: calc(var(--fx-w) * .6); stroke-dasharray: 2 11; filter: blur(.4px) drop-shadow(0 0 6px);
+  animation: fxc-d2 1.35s linear infinite, fx-w1 5.3s ease-in-out infinite,
+             fx-twinkle 1.7s ease-in-out infinite;
+}
+#schem.fx-c .fx-strands.on > .fx-s3, #schem.fx-c.bsh-on .fx-strands > .sc-tank-flow.fx-s3 {
+  --o: calc(.9 * var(--fx-dim)); stroke: var(--fx-accent);
+  stroke-width: calc(var(--fx-w) * .42); stroke-dasharray: 1.5 17; filter: drop-shadow(0 0 6px);
+  animation: fxc-d3 .95s linear infinite, fx-w6 4.1s ease-in-out infinite,
+             fx-twinkle 1.1s ease-in-out infinite;
+}
+#schem.fx-c .fx-strands.on > .fx-s4, #schem.fx-c.bsh-on .fx-strands > .sc-tank-flow.fx-s4 {
+  --o: .95; stroke: var(--fx-core);
+  stroke-width: calc(var(--fx-w) * .32); stroke-dasharray: 1 23; filter: drop-shadow(0 0 5px);
+  animation: fxc-d4 2.1s linear infinite, fx-w2 6.9s ease-in-out infinite,
+             fx-twinkle 2.6s ease-in-out infinite;
+}
+#schem.fx-c .fx-strands.on > .fx-s5, #schem.fx-c.bsh-on .fx-strands > .sc-tank-flow.fx-s5 {
+  --o: calc(.85 * var(--fx-dim)); stroke: var(--fx-veil);
+  stroke-width: calc(var(--fx-w) * .55); stroke-dasharray: 2.5 9; filter: blur(.5px) drop-shadow(0 0 8px);
+  animation: fxc-d5 1.7s linear infinite, fx-w4 4.7s ease-in-out infinite,
+             fx-twinkle 1.45s ease-in-out infinite;
+}
+#schem.fx-c .fx-strands.on > .fx-s6, #schem.fx-c.bsh-on .fx-strands > .sc-tank-flow.fx-s6 {
+  --o: 1; stroke: var(--fx-core);
+  stroke-width: calc(var(--fx-w) * .24); stroke-dasharray: .8 31; filter: drop-shadow(0 0 4px);
+  animation: fxc-d6 .75s linear infinite, fx-w6 3.3s ease-in-out infinite,
+             fx-twinkle .9s ease-in-out infinite;
+}
+#schem.fx-c.fx-refrigerant .fx-strands.rev > path { animation-direction: reverse, normal, normal; }
+#schem.fx-c.fx-refrigerant .fx-strands.rev > .fx-s1 { animation-direction: reverse, normal; }
+@keyframes fxc-d1 { to { stroke-dashoffset: -160; } }
+@keyframes fxc-d2 { to { stroke-dashoffset: -13; } }
+@keyframes fxc-d3 { to { stroke-dashoffset: -18.5; } }
+@keyframes fxc-d4 { to { stroke-dashoffset: -24; } }
+@keyframes fxc-d5 { to { stroke-dashoffset: -11.5; } }
+@keyframes fxc-d6 { to { stroke-dashoffset: -31.8; } }
