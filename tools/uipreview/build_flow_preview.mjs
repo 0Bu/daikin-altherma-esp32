@@ -1,0 +1,420 @@
+#!/usr/bin/env node
+// Builds tools/uipreview/flow-preview.html: today's water-flow animation and the four candidates
+// from flow_variants.css, side by side, on the REAL schematic.
+//
+// Why it generates rather than hand-copies: a mock-up drawn beside the product is a drawing of the
+// product, and it drifts the day someone moves a pipe. This reads main/www/index.html and
+// main/www/style.css directly, so what the preview shows is what the firmware would ship — down to
+// the pill positions, the thermal colour swap in cooling and the subdued plate channels. Rerun it
+// after any schematic change and the comparison is current again.
+//
+// Usage: node tools/uipreview/build_flow_preview.mjs [-o out.html]
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+
+const args = process.argv.slice(2);
+const outIdx = args.indexOf('-o');
+const outPath = outIdx >= 0 ? args[outIdx + 1] : path.join(root, 'tools/uipreview/flow-preview.html');
+
+// ── 1. The real markup and the real stylesheet ──────────────────────────────────────────────────
+const indexHtml = read('main/www/index.html');
+const start = indexHtml.indexOf('<svg viewBox="0 0 790 451"');
+const end = indexHtml.indexOf('</svg>', start);
+if (start < 0 || end < 0) {
+  console.error('build_flow_preview: the schematic <svg viewBox="0 0 790 451"> block is gone from ' +
+                'main/www/index.html — the drawing was restructured, so fix this extractor rather ' +
+                'than shipping a preview of markup that no longer exists.');
+  process.exit(2);
+}
+const svgSource = indexHtml.slice(start, end + '</svg>'.length);
+const shippedCss = read('main/www/style.css');
+const variantCss = read('tools/uipreview/flow_variants.css');
+
+// Ids referenced from inside the SVG by url(#…) / href="#…". Five copies of the drawing live on one
+// page, so these get a per-copy prefix; without it every copy would resolve its gradients and its
+// fan blades against the FIRST copy's defs, which also means against that copy's custom-property
+// values — one figure's thermal colours painted onto all five.
+const LOCAL_IDS = ['pheRefrigerantFlow', 'pheWaterFlow', 'tankFlow', 'spaceFlow', 'fanBlade', 'pumpVane'];
+// The four GRADIENTS are named in main/www/style.css, not in the markup (`stroke: url(#tankFlow)`),
+// so prefixing the definition alone leaves those four rules pointing at an id that no longer
+// exists — the overlay then paints with no stroke at all and the tank, the space circuit and both
+// plate channels simply vanish. Each panel therefore gets its own copies of those four rules,
+// scoped by the panel and pointing at its own prefixed gradient. `#schem.bsh-on .sc-tank-flow`
+// outranks them on specificity, so the electric-heater orange still wins over the charge gradient.
+const CSS_GRADIENT_RULES = [
+  ['sc-phe-refrigerant-flow', 'pheRefrigerantFlow'],
+  ['sc-phe-water-flow', 'pheWaterFlow'],
+  ['sc-tank-flow', 'tankFlow'],
+  ['sc-space-flow', 'spaceFlow'],
+];
+
+function scopeSvg(svg, prefix) {
+  let out = svg;
+  for (const id of LOCAL_IDS) {
+    out = out.replaceAll(`id="${id}"`, `id="${prefix}-${id}"`);
+    out = out.replaceAll(`url(#${id})`, `url(#${prefix}-${id})`);
+    out = out.replaceAll(`href="#${id}"`, `href="#${prefix}-${id}"`);
+  }
+  return out;
+}
+
+function gradientRulesFor(prefix) {
+  return CSS_GRADIENT_RULES
+    .map(([cls, id]) => `.panel[data-variant="${prefix}"] svg .${cls} { stroke: url(#${prefix}-${id}); }`)
+    .join('\n');
+}
+
+// The firmware's palette switches on `prefers-color-scheme` alone, so the page's own light/dark
+// button would recolour the bench and leave all five drawings in the OS theme. Re-emitting the two
+// token blocks under explicit [data-theme] stamps — the light one included, so the button wins in
+// both directions — makes the toggle reach the schematic without editing style.css.
+function braceBlock(css, from) {
+  const open = css.indexOf('{', from);
+  let depth = 0;
+  for (let i = open; i < css.length; i++) {
+    if (css[i] === '{') depth++;
+    else if (css[i] === '}' && --depth === 0) return css.slice(open + 1, i);
+  }
+  throw new Error('unbalanced braces in style.css near index ' + from);
+}
+
+function themeStamps(css) {
+  const lightAt = css.indexOf('\n:root {');
+  const darkAt = css.indexOf('@media (prefers-color-scheme: dark) {');
+  if (lightAt < 0 || darkAt < 0) {
+    console.error('build_flow_preview: style.css no longer opens with a :root token block plus a ' +
+                  'prefers-color-scheme dark block — the theme button cannot be wired without ' +
+                  'them, so update this extractor.');
+    process.exit(2);
+  }
+  const light = braceBlock(css, lightAt);
+  const dark = braceBlock(css, css.indexOf(':root {', darkAt));
+  return `:root[data-theme="light"] {${light}}\n:root[data-theme="dark"] {${dark}}`;
+}
+
+// ── 2. The five panels ──────────────────────────────────────────────────────────────────────────
+const VARIANTS = [
+  { key: 'now', cls: '', name: 'Aktuell', tag: 'heute im Gerät',
+    claim: 'Gleichmäßige Striche, 9 an / 15 aus, 1,1 s pro Takt. Die Referenz — daran wird gemessen.',
+    specs: ['dasharray 9 15', '1,1 s', 'kein Leuchten'] },
+  { key: 'v1', cls: 'fx-v1', name: 'Plasmastrom', tag: 'Variante 1',
+    claim: 'Tropfen, die sich zu Schlieren dehnen, verschmelzen und wieder abreißen. Weiche Kanten ' +
+           'durch einen 1,4-px-Blur, zwei Perioden (1,7 s / 4,1 s), die sich nie treffen.',
+    specs: ['Muster atmet 4/20 ↔ 19/5', 'blur + 2 Höfe', '1,7 s · 4,1 s'] },
+  { key: 'v2', cls: 'fx-v2', name: 'Kometenschweif', tag: 'Variante 2',
+    claim: 'Ein heller Kopf, dahinter ein Schweif aus kleiner werdenden Funken — alles ein einziges ' +
+           'achtstelliges Strichmuster, kurz genug, dass ein ganzer Komet auch in die 47 Einheiten ' +
+           'kurzen Vorlaufstücke passt.',
+    specs: ['dasharray 1 3 2 3 5 3 12 10', '0,55 s', 'Hof pulst 2,3 s'] },
+  { key: 'v3', cls: 'fx-v3', name: 'Fusionsimpuls', tag: 'Variante 3',
+    claim: 'Keine Strömung, sondern Entladungen: drei runde Pakete in ungleichem Abstand, schnell, ' +
+           'weißglühender Kern. Die lauteste der vier.',
+    specs: ['dasharray 1 33 1 25 1 43', '0,82 s', 'brightness 1,28'] },
+  { key: 'v4', cls: 'fx-v4', name: 'Polarlicht', tag: 'Variante 4',
+    claim: 'Das Rohr wirkt gefüllt; was wandert, ist die Naht. Drei langsame Wellen für Breite, ' +
+           'Deckkraft und Hof laufen gegeneinander. Die ruhigste der vier.',
+    specs: ['dasharray 54 7 26 7', '3,2 s · 2,05 s · 6,5 s', 'nur Sättigung, kein Hue-Shift'] },
+];
+
+// ── 3. Scenarios: which branch flows, in what thermal colour, with which readings ───────────────
+// The class sets and the overlay lists mirror renderSchematic() in main/www/js/schematic.js —
+// notably that a branch animates only when the 3-way valve SAYS which way it is pointing, and that
+// pump-only circulation is thermally neutral rather than painted as heating.
+const COMMON = ['fPhe', 'fSup1', 'fSup2', 'fSup3', 'fRet'];
+const HEATING = ['fHeat', 'fHeatRet', 'fSpaceEdgeL', 'fSpaceEdgeR'];
+const DHW = ['fTank', 'fTankRet', 'fTankEdgeL', 'fTankEdgeR'];
+const REFRIGERANT = ['rfHot', 'rfPhe', 'rfCold'];
+
+const SCENARIOS = [
+  { key: 'heat', label: 'Heizen',
+    cls: ['pump-on', 'fan-on'], on: [...COMMON, ...HEATING, ...REFRIGERANT], rev: [],
+    values: { svMode: 'Heizen', svStatus: 'Verdichter läuft · Raum 21,4 °C', svDotFill: 'var(--ok)',
+              svLwt: '38,6', svRwt: '33,1', svDt: '5,5', svFlow: '18,4', svPth: '5,8', svCop: '4,2',
+              svPel: '1,4', svRps: '58', svHp: '28,4', svLp: '7,9', svDisch: '71,2', svR2t: '5,4',
+              svR3t: '11,8', svEev: '42', svOut: '4,8', svOuHx: '1,2', svWp: '1,8', svPump: '64',
+              svValve: '3WV → Heizung', svValve2: 'zu', svFlowSwitch: 'ja', svSpaceH: 'EIN',
+              svTank: '46,2', svTankSet: '50', svRoom: '21,4', svRoomSet: '21,5', svEnv3Temp: '20,9' } },
+  { key: 'cool', label: 'Kühlen',
+    cls: ['pump-on', 'fan-on', 'cooling-mode'], on: [...COMMON, ...HEATING, ...REFRIGERANT], rev: REFRIGERANT,
+    values: { svMode: 'Kühlen', svStatus: 'Verdichter läuft · Raum 25,8 °C', svDotFill: 'var(--ok)',
+              svLwt: '16,2', svRwt: '21,0', svDt: '4,8', svFlow: '17,9', svPth: '4,1', svCop: '3,6',
+              svCopLabel: 'EER', svPel: '1,1', svRps: '44', svHp: '21,6', svLp: '9,4', svDisch: '58,3',
+              svR2t: '14,9', svR3t: '29,4', svEev: '51', svOut: '31,2', svOuHx: '38,6', svWp: '1,7',
+              svPump: '58', svValve: '3WV → Heizung', svValve2: 'zu', svFlowSwitch: 'ja',
+              svSpaceH: 'EIN', svTank: '44,8', svTankSet: '50', svRoom: '25,8', svRoomSet: '24,0',
+              svEnv3Temp: '26,4' } },
+  { key: 'dhw', label: 'Warmwasser',
+    cls: ['pump-on', 'fan-on'], on: [...COMMON, ...DHW, ...REFRIGERANT], rev: [],
+    values: { svMode: 'Warmwasser', svStatus: 'Speicherladung läuft', svDotFill: 'var(--ok)',
+              svLwt: '52,4', svRwt: '45,9', svDt: '6,5', svFlow: '15,2', svPth: '5,7', svCop: '3,1',
+              svPel: '1,8', svRps: '72', svHp: '34,1', svLp: '7,2', svDisch: '84,6', svR2t: '4,1',
+              svR3t: '13,2', svEev: '38', svOut: '4,8', svOuHx: '0,6', svWp: '1,9', svPump: '71',
+              svValve: '3WV → Speicher', svValve2: 'zu', svFlowSwitch: 'ja', svSpaceH: 'AUS',
+              svTank: '46,2', svTankSet: '55', svRoom: '21,1', svRoomSet: '21,5', svEnv3Temp: '20,7' } },
+  { key: 'bsh', label: 'Heizstab',
+    cls: ['pump-on', 'bsh-on'], on: [...COMMON, ...DHW], rev: [],
+    values: { svMode: 'Warmwasser', svStatus: 'Elektrischer Heizstab aktiv', svDotFill: 'var(--warn)',
+              svLwt: '41,0', svRwt: '40,2', svDt: '0,8', svFlow: '14,6', svPump: '55',
+              svValve: '3WV → Speicher', svValve2: 'zu', svFlowSwitch: 'ja', svSpaceH: 'AUS',
+              svTank: '58,9', svTankSet: '60', svRoom: '21,0', svRoomSet: '21,5', svOut: '3,1',
+              svPel: '2,9', svEnv3Temp: '20,6' } },
+  { key: 'neutral', label: 'Nur Pumpe',
+    cls: ['pump-on', 'water-neutral'], on: [...COMMON, ...HEATING], rev: [],
+    values: { svMode: 'Bereitschaft', svStatus: 'Umwälzung ohne Wärmeerzeugung', svDotFill: 'var(--muted)',
+              svLwt: '29,4', svRwt: '29,0', svDt: '0,4', svFlow: '12,1', svPump: '42',
+              svValve: '3WV → Heizung', svValve2: 'zu', svFlowSwitch: 'ja', svSpaceH: 'AUS',
+              svTank: '43,7', svTankSet: '50', svRoom: '21,2', svRoomSet: '21,5', svOut: '6,2',
+              svEnv3Temp: '20,9' } },
+];
+
+// Every scenario declares a full drawing: anything a scenario leaves out is blanked back to the
+// firmware's own "no reading" dash rather than left showing the previous scenario's number.
+const ALL_VALUE_IDS = [...new Set(SCENARIOS.flatMap((s) => Object.keys(s.values)))]
+  .filter((id) => id !== 'svDotFill');
+
+// ── 4. Emit ─────────────────────────────────────────────────────────────────────────────────────
+const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const panels = VARIANTS.map((v) => `
+      <article class="panel" data-variant="${v.key}">
+        <header class="panel-head">
+          <p class="panel-tag">${esc(v.tag)}</p>
+          <h2 class="panel-name">${esc(v.name)}</h2>
+          <p class="panel-claim">${esc(v.claim)}</p>
+          <ul class="spec">${v.specs.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>
+        </header>
+        <div class="stage">
+          <figure class="schem-card" id="schem" data-fx="${v.cls}">
+            <div class="card schem-face">
+              <div class="schem-scroll">
+${scopeSvg(svgSource, v.key)}
+              </div>
+            </div>
+          </figure>
+        </div>
+      </article>`).join('\n');
+
+const html = `<title>Fließende Leitungen</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* ── Page chrome. Deliberately NOT the firmware's stylesheet: the bench around the drawing must not
+      be mistaken for the drawing. Cool instrument neutrals, Daikin's own cyan as the only accent. ── */
+:root {
+  --bench:#EEF1F5; --slab:#FFFFFF; --ink:#0F1621; --ink-2:#55637A; --rule:#DCE2EA;
+  --accent:#0079BD; --accent-soft:#E4F2FB; --stage:#F7F9FB;
+  --fx-sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --fx-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bench:#0B0F15; --slab:#141A23; --ink:#E7ECF3; --ink-2:#93A2B6; --rule:#242D3A;
+    --accent:#33ABE8; --accent-soft:#122435; --stage:#0F141C;
+  }
+}
+:root[data-theme="dark"] {
+  --bench:#0B0F15; --slab:#141A23; --ink:#E7ECF3; --ink-2:#93A2B6; --rule:#242D3A;
+  --accent:#33ABE8; --accent-soft:#122435; --stage:#0F141C;
+}
+body { background: var(--bench); color: var(--ink); font-family: var(--fx-sans); }
+.wrap { max-width: 1060px; margin: 0 auto; padding-inline: 18px; padding-block: 0 56px; }
+
+.masthead { padding-block: 40px 22px; border-bottom: 2px solid var(--ink); }
+.eyebrow { margin: 0 0 10px; font-family: var(--fx-mono); font-size: 11.5px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--accent); }
+.masthead h1 { margin: 0; font-size: clamp(30px, 6vw, 46px); font-weight: 700; letter-spacing: -.025em;
+  line-height: 1.05; text-wrap: balance; }
+.lede { margin: 14px 0 0; max-width: 62ch; font-size: 16px; line-height: 1.6; color: var(--ink-2); }
+
+/* The control bar sticks because the panels are tall: the comparison is only worth anything if the
+   scenario can be changed while a variant is on screen. */
+.controls { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+  background: color-mix(in srgb, var(--bench) 92%, transparent); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--rule); margin-inline: -18px; padding: 12px 18px;
+  display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: center; }
+.ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ctl > legend, .ctl-label { font-family: var(--fx-mono); font-size: 11px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-2); padding: 0; }
+fieldset.ctl { border: 0; margin: 0; padding: 0; }
+.chip { font: 500 13px/1 var(--fx-sans); color: var(--ink); background: var(--slab);
+  border: 1px solid var(--rule); border-radius: 999px; padding: 8px 14px; cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s; }
+.chip:hover { border-color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+:root[data-theme="dark"] .chip[aria-pressed="true"],
+:root:not([data-theme="light"]) .chip[aria-pressed="true"] { color: #06131D; }
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;
+  color: var(--ink); }
+.switch input { accent-color: var(--accent); width: 16px; height: 16px; }
+.chip:focus-visible, .switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.panels { display: flex; flex-direction: column; gap: 34px; padding-block: 30px 0; }
+/* Not a card: the stage below carries the fill and the border, the header is plain text with a
+   rule, so the eye lands on the drawing rather than on five identical boxes. */
+.panel-head { border-top: 1px solid var(--rule); padding-top: 16px; }
+.panel[data-variant="now"] .panel-head { border-top-color: var(--ink); }
+.panel-tag { margin: 0; font-family: var(--fx-mono); font-size: 11.5px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--accent); }
+.panel[data-variant="now"] .panel-tag { color: var(--ink-2); }
+.panel-name { margin: 4px 0 0; font-size: clamp(22px, 4vw, 29px); font-weight: 600;
+  letter-spacing: -.02em; }
+.panel-claim { margin: 8px 0 0; max-width: 68ch; font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
+.spec { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
+.spec li { font-family: var(--fx-mono); font-size: 11.5px; color: var(--ink-2);
+  background: var(--accent-soft); border-radius: 5px; padding: 4px 8px; }
+.stage { margin-top: 14px; background: var(--stage); border: 1px solid var(--rule);
+  border-radius: 14px; padding: 10px; }
+
+/* The drawing scales to the panel by default so the whole plant is in one frame; "Nah am
+   Wasserkreis" swaps the viewBox for the water circuit instead of zooming the page. */
+.stage .schem-scroll svg { min-width: 0; }
+.stage .schem-face { box-shadow: none; border-color: transparent; }
+body.zoom .stage .schem-scroll svg { min-width: 0; }
+
+.foot { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--rule);
+  font-size: 13.5px; line-height: 1.65; color: var(--ink-2); max-width: 70ch; }
+.foot code { font-family: var(--fx-mono); font-size: 12.5px; }
+@media (max-width: 560px) { .controls { gap: 12px 18px; } .chip { padding: 7px 12px; } }
+</style>
+
+<style>
+/* ── The firmware's own stylesheet, verbatim from main/www/style.css ──────────────────────────── */
+${shippedCss}
+</style>
+
+<style>
+/* ── The candidates, verbatim from tools/uipreview/flow_variants.css ──────────────────────────── */
+${variantCss}
+</style>
+
+<style>
+/* ── Generated: one gradient set per panel, and the firmware palette on an explicit theme stamp ── */
+${VARIANTS.map((v) => gradientRulesFor(v.key)).join('\n')}
+${themeStamps(shippedCss)}
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">Dashboard-Schema · Wasserkreis</p>
+    <h1>Vier Arten, fließendes Wasser zu zeigen</h1>
+    <p class="lede">Dieselbe Zeichnung, dieselben Rohre, dieselben Messwerte — nur die Animation der
+      Vor- und Rücklaufüberlagerung ist ausgetauscht. Oben die heutige Fassung als Referenz, darunter
+      die vier Vorschläge. Szenario wechseln, vergleichen, eine Nummer nennen.</p>
+  </header>
+
+  <div class="controls">
+    <fieldset class="ctl" id="scenarioCtl">
+      <legend>Szenario</legend>
+    </fieldset>
+    <div class="ctl">
+      <span class="ctl-label" id="viewLabel">Ansicht</span>
+      <button type="button" class="chip" id="zoomBtn" aria-pressed="false">Nah am Wasserkreis</button>
+      <label class="switch" for="refrigerantChk">
+        <input type="checkbox" id="refrigerantChk">
+        Kältemittel mitanimieren
+      </label>
+      <button type="button" class="chip" id="themeBtn" aria-pressed="false">Dunkel</button>
+    </div>
+  </div>
+
+  <main class="panels">
+${panels}
+  </main>
+
+  <footer class="foot">
+    <p>Jede Variante ist ein reiner CSS-Block auf den Überlagerungen, die es schon gibt — kein neues
+      SVG-Element, keine neue Pfadgeometrie, kein SVG-Filter. Die Farbe kommt unverändert aus
+      <code>--flow-hot</code> / <code>--flow-cold</code>, inklusive des Tauschs im Kühlbetrieb und des
+      neutralen Grau bei reiner Umwälzung. Bei <code>prefers-reduced-motion</code> steht die Bewegung
+      still und der aktive Strang bleibt durch Farbe und Leuchten erkennbar.</p>
+    <p>Erzeugt aus <code>main/www/index.html</code> und <code>main/www/style.css</code> —
+      <code>node tools/uipreview/build_flow_preview.mjs</code>.</p>
+  </footer>
+</div>
+
+<script>
+const SCENARIOS = ${JSON.stringify(SCENARIOS)};
+const ALL_VALUE_IDS = ${JSON.stringify(ALL_VALUE_IDS)};
+const STATE_CLASSES = ['pump-on', 'fan-on', 'cooling-mode', 'water-neutral', 'bsh-on'];
+const FULL_VIEWBOX = '0 0 790 451';
+/* The water circuit alone, in the diagram group's own translated coordinates (it hangs 48 px up):
+   the supply run at y=132, the return at y=372, the tank out to x=780. */
+const WATER_VIEWBOX = '362 108 428 292';
+
+const figures = [...document.querySelectorAll('.stage .schem-card')];
+let scenario = SCENARIOS[0];
+let zoom = false;
+
+function paint() {
+  for (const fig of figures) {
+    fig.className = 'schem-card';
+    // no-room / no-spaceh / no-dhw stay OFF: the preview shows a fully equipped plant, which is the
+    // case where the most pipe is animated and therefore the hardest one for a variant to carry.
+    for (const c of scenario.cls) fig.classList.add(c);
+    if (fig.dataset.fx) fig.classList.add(fig.dataset.fx);
+    if (document.getElementById('refrigerantChk').checked) fig.classList.add('fx-refrigerant');
+
+    fig.querySelectorAll('.sc-flow, .sc-rflow, .sc-tank-flow, .sc-space-flow')
+       .forEach((el) => el.classList.remove('on', 'rev'));
+    for (const id of scenario.on) {
+      const el = fig.querySelector('#' + id);
+      if (el) el.classList.add('on');
+    }
+    for (const id of scenario.rev) {
+      const el = fig.querySelector('#' + id);
+      if (el) el.classList.add('rev');
+    }
+    for (const id of ALL_VALUE_IDS) {
+      const el = fig.querySelector('#' + id);
+      if (el) el.textContent = scenario.values[id] ?? '—';
+    }
+    const dot = fig.querySelector('#svDot');
+    if (dot) dot.setAttribute('fill', scenario.values.svDotFill || 'var(--muted)');
+    const svg = fig.querySelector('svg');
+    if (svg) svg.setAttribute('viewBox', zoom ? WATER_VIEWBOX : FULL_VIEWBOX);
+  }
+}
+
+const ctl = document.getElementById('scenarioCtl');
+for (const s of SCENARIOS) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'chip';
+  b.textContent = s.label;
+  b.setAttribute('aria-pressed', String(s === scenario));
+  b.addEventListener('click', () => {
+    scenario = s;
+    ctl.querySelectorAll('.chip').forEach((o) => o.setAttribute('aria-pressed', String(o === b)));
+    paint();
+  });
+  ctl.append(b);
+}
+
+const zoomBtn = document.getElementById('zoomBtn');
+zoomBtn.addEventListener('click', () => {
+  zoom = !zoom;
+  zoomBtn.setAttribute('aria-pressed', String(zoom));
+  zoomBtn.textContent = zoom ? 'Ganze Anlage' : 'Nah am Wasserkreis';
+  paint();
+});
+document.getElementById('refrigerantChk').addEventListener('change', paint);
+
+const themeBtn = document.getElementById('themeBtn');
+themeBtn.addEventListener('click', () => {
+  const dark = document.documentElement.getAttribute('data-theme') !== 'dark';
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  themeBtn.setAttribute('aria-pressed', String(dark));
+  themeBtn.textContent = dark ? 'Hell' : 'Dunkel';
+});
+
+paint();
+</script>
+`;
+
+fs.writeFileSync(outPath, html);
+console.log(`build_flow_preview: ${path.relative(root, outPath)} — ${VARIANTS.length} panels, ` +
+            `${SCENARIOS.length} scenarios, ${(html.length / 1024).toFixed(0)} KB`);

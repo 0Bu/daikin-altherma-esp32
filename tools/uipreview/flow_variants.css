@@ -1,0 +1,153 @@
+/* Water-flow animation variants for the dashboard schematic — four candidate treatments of the
+   moving dashes that state "water is flowing here right now" (DESIGN.md §5.3).
+   ────────────────────────────────────────────────────────────────────────────────────────────
+   WHAT THIS FILE IS. A staging area, not shipped CSS. tools/uipreview/build_flow_preview.mjs
+   splices it onto the REAL main/www/style.css and the REAL schematic markup so the four can be
+   judged side by side against today's animation. Once one is picked, its block (plus the shared
+   prelude) moves verbatim into main/www/style.css and this file and its preview go away.
+
+   THE CONSTRAINTS EVERY VARIANT HERE HONOURS, because they are what makes a variant shippable:
+   · Pure CSS on the overlays that already exist. No new element, no new id, no new `d` — the
+     schematic audit's G010 pins every overlay to a drawn pipe, and E003/E004 pin where it may
+     start and stop. A prettier animation is not a reason to touch that geometry.
+   · No SVG filter, so no `<defs>` edit and no per-element filter region. An SVG filter region on
+     a horizontal line collapses (its fill bbox has zero height), which forces a userSpaceOnUse
+     region the size of the whole drawing on each of ~14 animated paths. CSS `blur()`/
+     `drop-shadow()` cost the compositor a fraction of that and need no markup at all.
+   · `drop-shadow()` with no colour argument uses the element's `color`, which is why the prelude
+     mirrors every `stroke` rule onto `color`: the glow then follows the SAME three-way thermal
+     rule as the stroke (warm/cool/neutral, swapped in cooling) instead of being painted on.
+   · The dash PERIOD is constant inside a variant and the drift keyframe ends on exactly minus one
+     period, so the scroll loops seamlessly. Where a variant also morphs the dash pattern, the
+     morph keeps the sum: V1 moves between 4+20, 19+5 and 10+14 — all 24.
+   · Stroke widths are written as a multiple of `--fx-w`, the overlay's own resting width (5 px on
+     a pipe run, 3 px on a tank/space perimeter, 3.5 px on a refrigerant run), so one keyframe
+     serves overlays of three different weights without fattening the thin ones.
+   · The global `prefers-reduced-motion` rule in style.css kills `animation` only. Every variant
+     therefore states its glow as a plain `filter` declaration too: motion stops, the branch stays
+     lit and legible, which is the documented reduced-motion contract.
+   · Nothing here touches --flow-hot/--flow-cold themselves, and no variant hue-rotates: that pair
+     is CVD-validated (DESIGN.md §9) and stays exactly as specified in both themes.
+
+   The refrigerant circuit keeps its existing dashes unless `.fx-refrigerant` is on the figure —
+   the ask was the water. The class is here so the preview can show both answers. */
+
+/* ── Shared prelude — required by all four variants ──────────────────────────────────────────── */
+
+/* The resting stroke width of each overlay family, as a value the keyframes can scale. */
+svg .sc-flow { --fx-w: 5px; }
+svg .sc-rflow { --fx-w: 3.5px; }
+svg .sc-tank-flow, svg .sc-space-flow { --fx-w: 3px; }
+
+/* Glow colour. `drop-shadow()` without a colour uses `color`, so each overlay carries its stroke
+   colour there as well — including the cooling swap and the neutral pump-only case, mirrored from
+   the stroke rules above so the two can never disagree about what this water is doing. */
+svg .sc-flow.hot, svg .sc-rflow.hot { color: var(--flow-hot); }
+svg .sc-flow.cold, svg .sc-rflow.cold { color: var(--flow-cold); }
+.cooling-mode .water-flow.hot { color: var(--flow-cold); }
+.cooling-mode .water-flow.cold { color: var(--flow-hot); }
+.water-neutral .water-flow.hot,
+.water-neutral .water-flow.cold { color: var(--muted); }
+svg .sc-phe-water-flow { color: var(--phe-water-supply); }
+svg .sc-tank-flow { color: var(--flow-hot); }
+svg .sc-space-flow { color: var(--space-flow-top); }
+#schem.bsh-on .sc-tank-flow { color: var(--warn); }
+
+/* ── Variante 1 · „Plasmastrom" ──────────────────────────────────────────────────────────────
+   Liquid globules. The dash pattern breathes between sparse drops (4/20) and fat slugs (19/5)
+   while the sum stays 24, so the drops stretch until their round caps nearly touch, merge into a
+   single moving body, and pull apart again. A soft `blur()` under the glow removes the hard dash
+   edge, which is what separates "plasma" from "a dashed line with a shadow". Drift 1.7 s against a
+   4.1 s breath: the two periods do not divide, so the run never visibly repeats. */
+#schem.fx-v1 svg .sc-flow.on,
+#schem.fx-v1 svg .sc-tank-flow.on,
+#schem.fx-v1 svg .sc-space-flow.on,
+#schem.fx-v1.fx-refrigerant svg .sc-rflow.on,
+#schem.fx-v1.bsh-on svg .sc-tank-flow {
+  filter: blur(1.4px) drop-shadow(0 0 3px) drop-shadow(0 0 7px);
+  animation: fxv1-drift 1.7s linear infinite, fxv1-breathe 4.1s ease-in-out infinite;
+}
+#schem.fx-v1.fx-refrigerant svg .sc-rflow.on.rev { animation-direction: reverse, normal; }
+@keyframes fxv1-drift { to { stroke-dashoffset: -24; } }
+@keyframes fxv1-breathe {
+  0%, 100% { stroke-dasharray: 4 20;  stroke-width: calc(var(--fx-w) * .86); }
+  30%      { stroke-dasharray: 19 5;  stroke-width: calc(var(--fx-w) * 1.30); }
+  62%      { stroke-dasharray: 10 14; stroke-width: calc(var(--fx-w) * 1.04); }
+}
+
+/* ── Variante 2 · „Kometenschweif" ───────────────────────────────────────────────────────────
+   One bright head with a tail of receding sparks. The whole comet is a single multi-stop
+   dasharray — 1 3 2 3 5 3 12 10, sum 39 — laid out along the path so the long dash leads and the
+   sparks shrink behind it, then a 10-unit gap before the next comet. The period is kept UNDER the
+   shortest run in the drawing (the three 47-unit supply stubs between the BUH and the 3-way
+   valve): a longer comet would show those stubs one fragment of itself at a time and read as a
+   solid bar. Because the pattern scrolls rather than each dash being animated, the tail keeps its
+   shape at every speed. The halo flares on its own 2.3 s cycle, off-beat from the 0.55 s scroll. */
+#schem.fx-v2 svg .sc-flow.on,
+#schem.fx-v2 svg .sc-tank-flow.on,
+#schem.fx-v2 svg .sc-space-flow.on,
+#schem.fx-v2.fx-refrigerant svg .sc-rflow.on,
+#schem.fx-v2.bsh-on svg .sc-tank-flow {
+  stroke-dasharray: 1 3 2 3 5 3 12 10;
+  stroke-width: calc(var(--fx-w) * 1.06);
+  filter: drop-shadow(0 0 2px) drop-shadow(0 0 7px);
+  animation: fxv2-comet .55s linear infinite, fxv2-flare 2.3s ease-in-out infinite;
+}
+#schem.fx-v2.fx-refrigerant svg .sc-rflow.on.rev { animation-direction: reverse, normal; }
+@keyframes fxv2-comet { to { stroke-dashoffset: -39; } }
+@keyframes fxv2-flare {
+  0%, 100% { filter: drop-shadow(0 0 2px) drop-shadow(0 0 6px); }
+  50%      { filter: drop-shadow(0 0 3px) drop-shadow(0 0 13px); }
+}
+
+/* ── Variante 3 · „Fusionsimpuls" ────────────────────────────────────────────────────────────
+   Discharges, not a stream. Three round packets per 104 units at deliberately uneven spacing
+   (1 33 1 25 1 43), fired through at 0.82 s so a packet crosses a pipe run in well under a
+   second, each throbbing on a half-period alternate so it swells as it travels. `brightness()`
+   past the two halos blows the core toward white — the loudest of the four, and the one that
+   reads as a plant working hard rather than water moving. */
+#schem.fx-v3 svg .sc-flow.on,
+#schem.fx-v3 svg .sc-tank-flow.on,
+#schem.fx-v3 svg .sc-space-flow.on,
+#schem.fx-v3.fx-refrigerant svg .sc-rflow.on,
+#schem.fx-v3.bsh-on svg .sc-tank-flow {
+  stroke-dasharray: 1 33 1 25 1 43;
+  filter: drop-shadow(0 0 3px) drop-shadow(0 0 10px) brightness(1.28) saturate(1.15);
+  animation: fxv3-fire .82s linear infinite, fxv3-throb .41s ease-in-out infinite alternate;
+}
+#schem.fx-v3.fx-refrigerant svg .sc-rflow.on.rev { animation-direction: reverse, alternate-reverse; }
+@keyframes fxv3-fire { to { stroke-dashoffset: -104; } }
+@keyframes fxv3-throb {
+  from { stroke-width: calc(var(--fx-w) * .95); }
+  to   { stroke-width: calc(var(--fx-w) * 1.55); }
+}
+
+/* ── Variante 4 · „Polarlicht" ───────────────────────────────────────────────────────────────
+   A near-continuous ribbon instead of dashes: 54 on, 7 off, 26 on, 7 off — the pipe reads as
+   filled, and what moves is the seam. Three slow, non-dividing cycles (3.2 s drift, 2.05 s
+   shimmer, 6.5 s veil) breathe the width, the stroke opacity and the glow radius past each other,
+   so the light appears to wander along the run rather than march. `stroke-opacity` rather than
+   `opacity`, so it multiplies with the plate's deliberately subdued 35 % instead of overriding it.
+   Saturation alone carries the shimmer — no hue rotation, so the CVD-validated hot/cold pair is
+   exactly the specified one at every frame. The quietest of the four. */
+#schem.fx-v4 svg .sc-flow.on,
+#schem.fx-v4 svg .sc-tank-flow.on,
+#schem.fx-v4 svg .sc-space-flow.on,
+#schem.fx-v4.fx-refrigerant svg .sc-rflow.on,
+#schem.fx-v4.bsh-on svg .sc-tank-flow {
+  stroke-dasharray: 54 7 26 7;
+  filter: saturate(1.1) drop-shadow(0 0 4px) drop-shadow(0 0 11px);
+  animation: fxv4-drift 3.2s linear infinite,
+             fxv4-shimmer 2.05s ease-in-out infinite,
+             fxv4-veil 6.5s ease-in-out infinite;
+}
+#schem.fx-v4.fx-refrigerant svg .sc-rflow.on.rev { animation-direction: reverse, normal, normal; }
+@keyframes fxv4-drift { to { stroke-dashoffset: -94; } }
+@keyframes fxv4-shimmer {
+  0%, 100% { stroke-width: calc(var(--fx-w) * .78); stroke-opacity: .72; }
+  50%      { stroke-width: calc(var(--fx-w) * 1.22); stroke-opacity: 1; }
+}
+@keyframes fxv4-veil {
+  0%, 100% { filter: saturate(.92) drop-shadow(0 0 3px) drop-shadow(0 0 8px); }
+  50%      { filter: saturate(1.30) drop-shadow(0 0 6px) drop-shadow(0 0 18px); }
+}
