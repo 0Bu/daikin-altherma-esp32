@@ -133,43 +133,83 @@ const SCENARIOS = [
   { key: 'heat', label: 'Heizen',
     cls: ['pump-on', 'fan-on'], on: [...COMMON, ...HEATING, ...REFRIGERANT], rev: [],
     values: { svMode: 'Heizen', svStatus: 'Verdichter läuft · Raum 21,4 °C', svDotFill: 'var(--ok)',
-              svLwt: '38,6', svRwt: '33,1', svDt: '5,5', svFlow: '18,4', svPth: '5,8', svCop: '4,2',
-              svPel: '1,4', svRps: '58', svHp: '28,4', svLp: '7,9', svDisch: '71,2', svR2t: '5,4',
-              svR3t: '11,8', svEev: '42', svOut: '4,8', svOuHx: '1,2', svWp: '1,8', svPump: '64',
-              svValve: '3WV → Heizung', svValve2: 'zu', svFlowSwitch: 'ja', svSpaceH: 'EIN',
-              svTank: '46,2', svTankSet: '50', svRoom: '21,4', svRoomSet: '21,5', svEnv3Temp: '20,9' } },
+              svLwt: '38,6', svR2t: '38,6', svRwt: '34,1', svDt: '4,5', svFlow: '18,4',
+              svPth: '5,8', svPel: '1,4', svCop: '4,1', svRps: '58', svHp: '28,4', svLp: '7,9',
+              svDisch: '71,2', svR3t: '33,6', svEev: '42', svOut: '4,8', svOuHx: '-1,8',
+              svWp: '1,8', svPump: '64', svValve: '3WV → Heizung', svValve2: 'zu',
+              svFlowSwitch: 'ja', svSpaceH: 'EIN', svTank: '46,2', svTankSet: '50',
+              svRoom: '21,4', svRoomSet: '21,5', svEnv3Temp: '20,9' } },
   { key: 'cool', label: 'Kühlen',
     cls: ['pump-on', 'fan-on', 'cooling-mode'], on: [...COMMON, ...HEATING, ...REFRIGERANT], rev: REFRIGERANT,
     values: { svMode: 'Kühlen', svStatus: 'Verdichter läuft · Raum 25,8 °C', svDotFill: 'var(--ok)',
-              svLwt: '16,2', svRwt: '21,0', svDt: '4,8', svFlow: '17,9', svPth: '4,1', svCop: '3,6',
-              svCopLabel: 'EER', svPel: '1,1', svRps: '44', svHp: '21,6', svLp: '9,4', svDisch: '58,3',
-              svR2t: '14,9', svR3t: '29,4', svEev: '51', svOut: '31,2', svOuHx: '38,6', svWp: '1,7',
-              svPump: '58', svValve: '3WV → Heizung', svValve2: 'zu', svFlowSwitch: 'ja',
-              svSpaceH: 'EIN', svTank: '44,8', svTankSet: '50', svRoom: '25,8', svRoomSet: '24,0',
+              svLwt: '16,2', svR2t: '16,3', svRwt: '21,0', svDt: '-4,8', svFlow: '17,9',
+              svPth: '6,0', svPel: '1,7', svCop: '3,5', svCopLabel: 'EER', svRps: '44',
+              svHp: '21,6', svLp: '11,2', svDisch: '58,3', svR3t: '29,4', svEev: '51',
+              svOut: '31,2', svOuHx: '36,4', svWp: '1,7', svPump: '58',
+              svValve: '3WV → Heizung', svValve2: 'zu', svFlowSwitch: 'ja', svSpaceH: 'EIN',
+              svTank: '44,8', svTankSet: '50', svRoom: '25,8', svRoomSet: '24,0',
               svEnv3Temp: '26,4' } },
   { key: 'dhw', label: 'Warmwasser',
     cls: ['pump-on', 'fan-on'], on: [...COMMON, ...DHW, ...REFRIGERANT], rev: [],
     values: { svMode: 'Warmwasser', svStatus: 'Speicherladung läuft', svDotFill: 'var(--ok)',
-              svLwt: '52,4', svRwt: '45,9', svDt: '6,5', svFlow: '15,2', svPth: '5,7', svCop: '3,1',
-              svPel: '1,8', svRps: '72', svHp: '34,1', svLp: '7,2', svDisch: '84,6', svR2t: '4,1',
-              svR3t: '13,2', svEev: '38', svOut: '4,8', svOuHx: '0,6', svWp: '1,9', svPump: '71',
-              svValve: '3WV → Speicher', svValve2: 'zu', svFlowSwitch: 'ja', svSpaceH: 'AUS',
-              svTank: '46,2', svTankSet: '55', svRoom: '21,1', svRoomSet: '21,5', svEnv3Temp: '20,7' } },
+              svLwt: '52,4', svR2t: '52,4', svRwt: '45,9', svDt: '6,5', svFlow: '12,6',
+              svPth: '5,7', svPel: '1,8', svCop: '3,2', svRps: '72', svHp: '36,5', svLp: '7,2',
+              svDisch: '84,6', svR3t: '46,8', svEev: '38', svOut: '4,8', svOuHx: '-3,6',
+              svWp: '1,9', svPump: '71', svValve: '3WV → Speicher', svValve2: 'zu',
+              svFlowSwitch: 'ja', svSpaceH: 'AUS', svTank: '46,2', svTankSet: '55',
+              svRoom: '21,1', svRoomSet: '21,5', svEnv3Temp: '20,7' } },
+  // The immersion heater sits IN the store, so the water loop is carrying residual heat, not a
+  // compressor output: `water-neutral` for the grey circulation, `bsh-on` for the orange store.
+  // The outdoor unit's own readings stay blank because its pages freeze with the compressor off —
+  // the same reason the drawing suppresses the inverter-current fallback there.
   { key: 'bsh', label: 'Heizstab',
-    cls: ['pump-on', 'bsh-on'], on: [...COMMON, ...DHW], rev: [],
+    cls: ['pump-on', 'bsh-on', 'water-neutral'], on: [...COMMON, ...DHW], rev: [],
     values: { svMode: 'Warmwasser', svStatus: 'Elektrischer Heizstab aktiv', svDotFill: 'var(--warn)',
-              svLwt: '41,0', svRwt: '40,2', svDt: '0,8', svFlow: '14,6', svPump: '55',
-              svValve: '3WV → Speicher', svValve2: 'zu', svFlowSwitch: 'ja', svSpaceH: 'AUS',
-              svTank: '58,9', svTankSet: '60', svRoom: '21,0', svRoomSet: '21,5', svOut: '3,1',
-              svPel: '2,9', svEnv3Temp: '20,6' } },
+              svLwt: '41,0', svR2t: '41,0', svRwt: '40,2', svDt: '0,8', svFlow: '14,6',
+              svPel: '2,9', svWp: '1,8', svPump: '55', svValve: '3WV → Speicher', svValve2: 'zu',
+              svFlowSwitch: 'ja', svSpaceH: 'AUS', svTank: '58,9', svTankSet: '60',
+              svRoom: '21,0', svRoomSet: '21,5', svOut: '3,1', svEnv3Temp: '20,6' } },
   { key: 'neutral', label: 'Nur Pumpe',
     cls: ['pump-on', 'water-neutral'], on: [...COMMON, ...HEATING], rev: [],
     values: { svMode: 'Bereitschaft', svStatus: 'Umwälzung ohne Wärmeerzeugung', svDotFill: 'var(--muted)',
-              svLwt: '29,4', svRwt: '29,0', svDt: '0,4', svFlow: '12,1', svPump: '42',
-              svValve: '3WV → Heizung', svValve2: 'zu', svFlowSwitch: 'ja', svSpaceH: 'AUS',
-              svTank: '43,7', svTankSet: '50', svRoom: '21,2', svRoomSet: '21,5', svOut: '6,2',
-              svEnv3Temp: '20,9' } },
+              svLwt: '29,4', svR2t: '29,4', svRwt: '29,0', svDt: '0,4', svFlow: '12,1',
+              svWp: '1,7', svPump: '42', svValve: '3WV → Heizung', svValve2: 'zu',
+              svFlowSwitch: 'ja', svSpaceH: 'AUS', svTank: '43,7', svTankSet: '50',
+              svRoom: '21,2', svRoomSet: '21,5', svOut: '6,2', svEnv3Temp: '20,9' } },
 ];
+
+// The readings are invented, but they are not arbitrary: a picture of a plant that cannot exist is
+// the exact failure shape scripts/run-domain-audit.sh is there to catch, and it would be no less
+// wrong for being a preview. So the three derived figures are checked against the two they come
+// from before the page is written, the same relation the firmware computes:
+//   Pth [kW] = flow [l/min] / 60 · 4.18 kJ/(kg·K) · ΔT [K]   (water, ρ ≈ 1 kg/l)
+//   COP/EER  = Pth / Pel
+// ΔT is SIGNED — R1T at the PHE outlet minus R4T at its inlet — so it is negative in cooling, where
+// the outlet is the cold supply. A scenario with the compressor off declares neither figure at all:
+// pump-only circulation and an immersion-heater charge are not compressor output, and the firmware
+// withholds both rather than crediting residual heat to the heat pump.
+const num = (s) => parseFloat(String(s).replace(',', '.'));
+for (const sc of SCENARIOS) {
+  const v = sc.values;
+  if (v.svPth === undefined) {
+    if (v.svCop !== undefined) {
+      console.error(`build_flow_preview: scenario "${sc.key}" states a COP with no heat output.`);
+      process.exit(2);
+    }
+    continue;
+  }
+  const pth = Math.abs(num(v.svFlow)) / 60 * 4.18 * Math.abs(num(v.svDt));
+  if (Math.abs(pth - num(v.svPth)) > 0.06) {
+    console.error(`build_flow_preview: scenario "${sc.key}" claims ${v.svPth} kW at ${v.svFlow} l/min ` +
+                  `and ΔT ${v.svDt} K, but that is ${pth.toFixed(2)} kW — fix the fixture, not this check.`);
+    process.exit(2);
+  }
+  if (Math.abs(num(v.svPth) / num(v.svPel) - num(v.svCop)) > 0.06) {
+    console.error(`build_flow_preview: scenario "${sc.key}" claims ${v.svCop} from ${v.svPth} kW ` +
+                  `over ${v.svPel} kW, which is ${(num(v.svPth) / num(v.svPel)).toFixed(2)}.`);
+    process.exit(2);
+  }
+}
 
 // Every scenario declares a full drawing: anything a scenario leaves out is blanked back to the
 // firmware's own "no reading" dash rather than left showing the previous scenario's number.
