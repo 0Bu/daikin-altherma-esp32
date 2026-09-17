@@ -231,6 +231,245 @@ static void test_crc() {
             CHECK(reply_len_fits(n, 64));
         }
     }
+
+    // --- Echo detection and preamble synchronization (robustness against BSS138 TX-echo) ---
+    {
+        uint8_t req_i[4];
+        int     qlen_i = build_request(0x60, Protocol::I, req_i);
+        // Preamble validity for both protocols
+        CHECK(is_valid_preamble(Protocol::I, 0x40));
+        CHECK(is_valid_preamble(Protocol::I, 0x15));
+        CHECK(!is_valid_preamble(Protocol::I, 0x00));
+        CHECK(!is_valid_preamble(Protocol::I, 0x03));
+        CHECK(!is_valid_preamble(Protocol::I, 0xFF));
+        CHECK(is_valid_preamble(Protocol::S, 0x50));
+        CHECK(is_valid_preamble(Protocol::S, 0x00));
+
+        // Test starts_with_request_echo edge cases
+        CHECK(starts_with_request_echo(req_i, 1, req_i, qlen_i));
+        CHECK(starts_with_request_echo(req_i, 4, req_i, qlen_i));
+        CHECK(!starts_with_request_echo(req_i, 0, req_i, qlen_i));
+        CHECK(!starts_with_request_echo(req_i, 4, req_i, 0));
+        uint8_t diff_b[4] = {0x99, 0x99, 0x99, 0x99};
+        CHECK(!starts_with_request_echo(diff_b, 1, req_i, qlen_i));
+
+        // Additional reply classify & crc edge cases
+        CHECK(!is_error_reply(diff_b, 1));
+        CHECK(!crc_ok(diff_b, 0));
+        CHECK(hp_reply_classify(0x60, Protocol::I, diff_b, 0, 6) == HpReplyKind::NoReply);
+        CHECK(hp_reply_classify(0x60, Protocol::I, diff_b, 4, -1) == HpReplyKind::ShortReply);
+        uint8_t bad_op[6] = {0x41, 0x60, 0x04, 0xAA, 0xBB, 0};
+        bad_op[5]         = crc(bad_op, 5);
+        CHECK(hp_reply_classify(0x60, Protocol::I, bad_op, 6, 6) == HpReplyKind::UnexpectedReply);
+
+        uint8_t s_valid[6] = {0x50, 0x01, 0x02, 0x03, 0x04, 0};
+        s_valid[5]         = crc(s_valid, 5);
+        CHECK(hp_reply_classify(0x50, Protocol::S, s_valid, 6, 6) == HpReplyKind::Ok);
+
+        // Test resync helper on Protocol S
+        uint8_t s_sync_buf[4] = {0x11, 0x22, 0x33, 0x44};
+        int     s_sync_len    = 4;
+        hp_resync_buffer(Protocol::S, s_sync_buf, s_sync_len);
+        CHECK(s_sync_len == 3);
+        CHECK(s_sync_buf[0] == 0x22);
+
+        // Test 1: Clean Protocol I frame without echo
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6); // 0x04 + 2
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60);
+        }
+
+        // Test 2: Protocol I frame preceded by TX-echo (BSS138)
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len = 0;
+            // Echo bytes (req_i), followed by valid reply
+            const uint8_t stream[] = {req_i[0], req_i[1], req_i[2], req_i[3], 0x40,
+                                      0x60,     0x04,     0xAA,     0xBB,     0};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60 && buf[2] == 0x04);
+        }
+
+        // Test 3: Protocol I frame preceded by noise bytes
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {0x00, 0xFF, 0x12, 0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60);
+        }
+
+        // Test 4: False preamble / glitch causing invalid dynamic length at len==3, then real frame
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len = 0;
+            // 0x40, 0xFF, 0xFE -> dynamic len 0xFE + 2 = 256 (>64, invalid!), followed by valid
+            // frame
+            const uint8_t stream[] = {0x40, 0xFF, 0xFE, 0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60);
+        }
+
+        // Test 5: Protocol S frame with and without echo
+        {
+            uint8_t         req_s[4];
+            int             qlen_s = build_request(0x50, Protocol::S, req_s);
+            HpFrameReceiver rx(Protocol::S, req_s, qlen_s, 64, 6);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {req_s[0], req_s[1], req_s[2], 0x50, 0x01,
+                                        0x02,     0x03,     0x04,     0x05};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 6);
+            CHECK(buf[0] == 0x50);
+        }
+
+        // Test 6: Protocol I NAK frame with echo
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {req_i[0], req_i[1], req_i[2], req_i[3], 0x15, 0xEA};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 2);
+            CHECK(is_error_reply(buf, len));
+        }
+
+        // Test 7: Partial echo mismatch recovering via preamble resync
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len = 0;
+            // First byte matches req_i[0], second byte is 0x40 (real preamble)
+            const uint8_t stream[] = {req_i[0], 0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60);
+        }
+
+        // Test 8: Buffer boundary overflow protection
+        {
+            uint8_t         req_s[4];
+            int             qlen_s = build_request(0x50, Protocol::S, req_s);
+            HpFrameReceiver rx(Protocol::S, req_s, qlen_s, 4, 4);
+            uint8_t         buf[4]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {0x50, 0x01, 0x02, 0x03, 0x04, 0x05};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 6);
+        }
+
+        // Test 9: Loop simulation with Protocol I TX-echo — verify header_complete never fires
+        // during echo
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {
+                req_i[0], req_i[1], req_i[2], req_i[3],         // TX echo
+                0x40,     0x60,     0x04,     0xAA,     0xBB, 0 // reply
+            };
+            int stream_idx = 0;
+            while (len < rx.reply_len() && stream_idx < 10) {
+                if (rx.header_complete(len)) {
+                    // Bulk read remaining bytes
+                    while (stream_idx < 10 && len < rx.reply_len()) {
+                        buf[len++] = stream[stream_idx++];
+                    }
+                    break;
+                }
+                rx.feed_byte(stream[stream_idx++], buf, len);
+            }
+            CHECK(rx.echo_checked());
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60 && buf[2] == 0x04);
+            CHECK(buf[3] == 0xAA && buf[4] == 0xBB && buf[5] == 0);
+        }
+
+        // Test 10: Loop simulation with Protocol S TX-echo
+        {
+            uint8_t         req_s[4];
+            int             qlen_s = build_request(0x50, Protocol::S, req_s);
+            HpFrameReceiver rx(Protocol::S, req_s, qlen_s, 64, 6);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {
+                req_s[0], req_s[1], req_s[2],                  // TX echo (3 bytes)
+                0x50,     0x01,     0x02,     0x03, 0x04, 0x05 // reply (6 bytes)
+            };
+            int stream_idx = 0;
+            while (len < rx.reply_len() && stream_idx < 9) {
+                if (rx.header_complete(len)) {
+                    // Bulk read remaining bytes
+                    while (stream_idx < 9 && len < rx.reply_len()) {
+                        buf[len++] = stream[stream_idx++];
+                    }
+                    break;
+                }
+                rx.feed_byte(stream[stream_idx++], buf, len);
+            }
+            CHECK(rx.echo_checked());
+            CHECK(len == 6);
+            CHECK(buf[0] == 0x50 && buf[1] == 0x01);
+            CHECK(buf[5] == 0x05);
+        }
+
+        // Test 11: HpFrameReceiver constructor safely clamps qlen > 4
+        {
+            uint8_t long_req[10] = {0x03, 0x60, 0x00, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+            HpFrameReceiver rx(Protocol::I, long_req, 10, 64, 12);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {0x03, 0x60, 0x00, 0x00, 0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(rx.echo_checked());
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60);
+        }
+
+        // Test 12: Valid query echo with invalid dynamic length flags error and preserves frame
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {0x40, 0x60, 0xFE};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(rx.has_invalid_length());
+            CHECK(rx.invalid_length() == 256);
+            CHECK(len == 3);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60 && buf[2] == 0xFE);
+        }
+
+        // Test 13: False preamble at buf[0] followed by real preamble at buf[1] resyncs
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {0x40, 0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60 && buf[2] == 0x04);
+        }
+    }
 }
 
 static void test_hp_query_log_policy() {
@@ -488,6 +727,30 @@ static void test_convert() {
     const uint8_t cop3000[] = {0xB8, 0x0B}; // LE 3000 -> 300.0, must NOT be clipped (not °C)
     CHECK(reading_plausible(cop, convert(cop, cop3000)) &&
           approx(convert(cop, cop3000).value, 300.0));
+
+    // conv 164 = outdoor fan speed (raw × 5.0)
+    ValueDef      fan{0x53, 2, 164, 1, -1, "fan"};
+    const uint8_t fan3[] = {0x03};
+    CHECK(convert(fan, fan3).ok && approx(convert(fan, fan3).value, 15.0));
+
+    // conv 200 = raw byte / output / frequency
+    ValueDef      freq{0x53, 4, 200, 1, -1, "freq"};
+    const uint8_t freq45[] = {0x2D};
+    CHECK(convert(freq, freq45).ok && approx(convert(freq, freq45).value, 45.0));
+
+    // conv 201 = operation mode (Protocol S alias for 217)
+    ValueDef om201{0x55, 0, 201, 1, -1, "om201"};
+    CHECK(std::string(convert(om201, m1).text) == "Heating");
+    CHECK(published_kind(201) == PublishedKind::Text);
+
+    // conv 312 = Delta-Tr (signed-magnitude Q3.4 fixed-point / 16)
+    ValueDef      dtr{0x54, 12, 312, 1, -1, "dtr"};
+    const uint8_t dtr_pos[] = {0x12}; // 0x12 = 18 -> 18 / 16.0 = 1.125
+    CHECK(convert(dtr, dtr_pos).ok && approx(convert(dtr, dtr_pos).value, 1.125));
+    const uint8_t dtr_neg[] = {0x92}; // -1.125
+    CHECK(convert(dtr, dtr_neg).ok && approx(convert(dtr, dtr_neg).value, -1.125));
+    const uint8_t dtr_zero[] = {0x80}; // negative zero -> normalized to 0.0
+    CHECK(convert(dtr, dtr_zero).ok && approx(convert(dtr, dtr_zero).value, 0.0));
 
     // Non-finite values (NaN, infinity) must be rejected by reading_plausible.
     Reading r_nan;
@@ -1706,6 +1969,11 @@ static void test_registry() {
     // sizing via def::lookup().
     const auto& epra = def::lookup("altherma_epra_d_d7_etsh_x_16p30_50_e_e7_series_14_18kw_ech2o");
     CHECK(epra.count > 64);
+
+    // Protocol S profile registration
+    const auto& proto_s = def::lookup("protocol_s");
+    CHECK(std::string(proto_s.id) == "protocol_s");
+    CHECK(proto_s.count == 25);
 }
 
 // Build a page mask from a list of register pages (mirrors what hp_detect sets when a page
@@ -1746,6 +2014,9 @@ static void test_detect() {
     // 0x11 is probed for its digits but intentionally not a page-mask bit (no profile decodes it).
     CHECK(page_bit(0x11) < 0 && page_mask_bit(0x11) == 0);
     CHECK(page_bit(0x00) >= 0 && page_bit(0x64) >= 0);
+    // Protocol S register pages
+    CHECK(page_bit(0x50) == 13 && page_bit(0x53) == 14 && page_bit(0x54) == 15 &&
+          page_bit(0x55) == 16 && page_bit(0x56) == 17);
 
     // ── detect_candidates against the REAL derived signatures ──
     Signature sigs[64];
@@ -5658,6 +5929,8 @@ static void test_hp_probe() {
     // so a regenerated profile cannot silently add another omitted width.
     const uint8_t sample_bytes[2] = {1, 0};
     for (const auto& profile : def::profiles) {
+        if (std::strcmp(profile.id, "protocol_s") == 0)
+            continue; // Protocol S legacy profile (not in Protocol I catalog probe)
         const auto view = def::resolved(profile);
         for (size_t i = 0; i < view.count(); i++) {
             const ValueDef& row = view[i];
@@ -9225,6 +9498,13 @@ static void test_lwt_select() {
     {
         const char* generic[] = {"DHW setpoint", "Leaving water temperature"};
         CHECK(lwt_select(generic, 2) == 1);
+        // Monobloc Page 0xA1: "(Raw data)Water heat exchanger outlet temp." selected under Tier 2
+        const char* monobloc[] = {
+            "DHW setpoint",
+            "(Raw data)Water heat exchanger outlet temp.",
+            "(Raw data)Water heat exchanger inlet temp.",
+        };
+        CHECK(lwt_select(monobloc, 3) == 1);
         // ...but if the ONLY leaving-water row is a setpoint, select nothing (blank beats wrong).
         const char* only_sp[] = {"Leaving Water Setpoint (main)", "DHW setpoint"};
         CHECK(lwt_select(only_sp, 2) == -1);
@@ -12729,7 +13009,13 @@ static void test_profile_view() {
     // Every profile reads page 0x10, so every profile gets the supplement. If a future generated
     // profile drops the page this CHECK fails rather than the device quietly gaining a round-trip.
     for (const auto& p : def::profiles) {
-        const auto   v                   = def::resolved(p);
+        const auto v = def::resolved(p);
+        if (std::strcmp(p.id, "protocol_s") == 0) {
+            CHECK(v.count() == p.count);
+            CHECK(v.extra_count == 0);
+            CHECK(v.extra2_count == 0);
+            continue;
+        }
         const bool   observation_profile = std::string(p.id) == def::OBSERVABILITY_PROFILE;
         const size_t expected            = p.count + def::RETRY_ROW_COUNT +
                                 (observation_profile ? def::OBSERVABILITY_ROW_COUNT : 0);
@@ -13208,6 +13494,31 @@ static void test_metric_identity() {
         "outdoor_state_target_cond_temp",
         "outdoor_state_target_discharge_temp",
         "outdoor_state_target_evap_temp",
+        "other_20r_sv_output",
+        "other_20s_4_way_output",
+        "other_52c_output",
+        "other_caution_code",
+        "other_comp_preheat",
+        "other_crankcase_heater",
+        "other_delta_tr_deg",
+        "other_discharge_pipe_temp_c",
+        "other_ener_cut_output",
+        "other_error_code",
+        "other_ev_pls",
+        "other_fin_temp_c",
+        "other_hp_sensor_kgcm2",
+        "other_indoor_heat_exchanger_temp_c",
+        "other_indoor_suction_air_temp_c",
+        "other_inv_comp_frequency_hz",
+        "other_lp_sensor_kgcm2",
+        "other_operation_mode",
+        "other_outdoor_air_temp_c",
+        "other_outdoor_fan_lower_rps",
+        "other_outdoor_fan_upper_rps",
+        "other_outdoor_heat_exchanger_temp_c",
+        "other_r_c_setpoint_c",
+        "other_thermo_off_error",
+        "other_warning_code",
         "water_hx_raw_data_water_heat_exchanger_inlet_temp",
         "water_hx_raw_data_water_heat_exchanger_outlet_temp",
         "water_hx_target_discharge_temp",
@@ -15480,6 +15791,8 @@ static void test_availability() {
     int zero_rows = 0, fan1_rows = 0, fan2_rows = 0, cout_rows = 0, geo_shared_rows = 0;
     int liq_rows = 0, liq_brine_rows = 0;
     for (const auto& p : def::profiles) {
+        if (std::strcmp(p.id, "protocol_s") == 0)
+            continue; // Protocol S legacy profile (pages 0x50-0x56)
         profiles_total++;
         const auto view                = def::resolved(p);
         int        publishable_on_0x10 = 0;
@@ -15774,6 +16087,8 @@ static void test_fault_state() {
     // Every profile that carries an error class gets the pair, and the two rows land in DIFFERENT
     // groups — which is what keeps the short JSON keys unambiguous.
     for (const auto& p : def::profiles) {
+        if (std::strcmp(p.id, "protocol_s") == 0)
+            continue; // Protocol S has conv 204 error codes, no conv 203 error class
         int classes = 0;
         for (size_t i = 0; i < p.count; i++) {
             if (p.values[i].conv != 203) continue;
@@ -16105,16 +16420,18 @@ static void test_diag_tail() {
     CHECK(payload.rfind("[  ", 0) == 0);
 
     // 5. Wrapped buffer larger than max: truncated tail returned across ring wrap boundary
-    std::string wrap_lines;
-    int         line_idx = 0;
-    while (wrap_lines.size() < 6144 - 40) {
+    std::string       wrap_lines;
+    int               line_idx = 0;
+    const std::string marker   = "[999] LATEST_OTA_ERROR_MARKER\n";
+    while (wrap_lines.size() + marker.size() + 50 <= sizeof(ring)) {
         wrap_lines += "[ " + std::to_string(line_idx++) + "] padding record across buffer\n";
     }
-    wrap_lines += "[999] LATEST_OTA_ERROR_MARKER\n";
+    wrap_lines += marker;
+    CHECK(wrap_lines.size() <= sizeof(ring));
     size_t split = wrap_lines.size() - 1000;
     std::memcpy(ring + 1000, wrap_lines.data(), split);
     std::memcpy(ring, wrap_lines.data() + split, 1000);
-    n = diag_dump_tail(ring, 6144, 1000, true, out, 512);
+    n = diag_dump_tail(ring, sizeof(ring), 1000, true, out, 512);
     CHECK(n <= 512);
     std::string wrap_res(out, n);
     CHECK(wrap_res.rfind(kDiagTruncatedMarker, 0) == 0);

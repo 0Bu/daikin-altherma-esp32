@@ -64,8 +64,8 @@
         "taken": 7
       },
       "main/logic/convert.hpp": {
-        "outcomes": 143,
-        "taken": 134
+        "outcomes": 150,
+        "taken": 141
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 30,
@@ -76,12 +76,12 @@
         "taken": 140
       },
       "main/logic/crc.hpp": {
-        "outcomes": 41,
-        "taken": 34
+        "outcomes": 105,
+        "taken": 99
       },
       "main/logic/detect.hpp": {
-        "outcomes": 142,
-        "taken": 127
+        "outcomes": 147,
+        "taken": 132
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -156,8 +156,8 @@
         "taken": 30
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 118,
-        "taken": 103
+        "outcomes": 126,
+        "taken": 112
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 4,
@@ -204,8 +204,8 @@
         "taken": 13
       },
       "main/logic/lwt_select.hpp": {
-        "outcomes": 50,
-        "taken": 44
+        "outcomes": 52,
+        "taken": 46
       },
       "main/logic/mcp.hpp": {
         "outcomes": 579,
@@ -422,8 +422,8 @@
         "taken": 7
       },
       "main/logic/convert.hpp": {
-        "outcomes": 143,
-        "taken": 134
+        "outcomes": 150,
+        "taken": 141
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 30,
@@ -434,12 +434,12 @@
         "taken": 140
       },
       "main/logic/crc.hpp": {
-        "outcomes": 41,
-        "taken": 34
+        "outcomes": 105,
+        "taken": 99
       },
       "main/logic/detect.hpp": {
-        "outcomes": 142,
-        "taken": 127
+        "outcomes": 147,
+        "taken": 132
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -514,8 +514,8 @@
         "taken": 30
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 118,
-        "taken": 103
+        "outcomes": 126,
+        "taken": 112
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 4,
@@ -562,8 +562,8 @@
         "taken": 13
       },
       "main/logic/lwt_select.hpp": {
-        "outcomes": 50,
-        "taken": 44
+        "outcomes": 52,
+        "taken": 46
       },
       "main/logic/mcp.hpp": {
         "outcomes": 579,
@@ -780,8 +780,8 @@
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 141,
-        "taken": 130
+        "outcomes": 160,
+        "taken": 149
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -792,12 +792,12 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 55,
-        "taken": 46
+        "outcomes": 121,
+        "taken": 114
       },
       "main/logic/detect.hpp": {
-        "outcomes": 160,
-        "taken": 143
+        "outcomes": 165,
+        "taken": 148
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -872,8 +872,8 @@
         "taken": 32
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 138,
-        "taken": 123
+        "outcomes": 136,
+        "taken": 122
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -920,8 +920,8 @@
         "taken": 13
       },
       "main/logic/lwt_select.hpp": {
-        "outcomes": 62,
-        "taken": 55
+        "outcomes": 64,
+        "taken": 57
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
@@ -1138,8 +1138,8 @@
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 141,
-        "taken": 130
+        "outcomes": 160,
+        "taken": 149
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -1150,12 +1150,12 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 55,
-        "taken": 46
+        "outcomes": 121,
+        "taken": 114
       },
       "main/logic/detect.hpp": {
-        "outcomes": 160,
-        "taken": 143
+        "outcomes": 165,
+        "taken": 148
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -1230,8 +1230,8 @@
         "taken": 32
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 138,
-        "taken": 123
+        "outcomes": 136,
+        "taken": 122
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -1278,8 +1278,8 @@
         "taken": 13
       },
       "main/logic/lwt_select.hpp": {
-        "outcomes": 62,
-        "taken": 55
+        "outcomes": 64,
+        "taken": 57
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
@@ -1496,8 +1496,8 @@
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 153,
-        "taken": 142
+        "outcomes": 160,
+        "taken": 149
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -1508,12 +1508,12 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 55,
-        "taken": 46
+        "outcomes": 121,
+        "taken": 114
       },
       "main/logic/detect.hpp": {
-        "outcomes": 160,
-        "taken": 143
+        "outcomes": 165,
+        "taken": 148
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -1588,8 +1588,8 @@
         "taken": 32
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 138,
-        "taken": 123
+        "outcomes": 136,
+        "taken": 122
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -1636,8 +1636,8 @@
         "taken": 13
       },
       "main/logic/lwt_select.hpp": {
-        "outcomes": 62,
-        "taken": 55
+        "outcomes": 64,
+        "taken": 57
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
@@ -1854,8 +1854,8 @@
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 141,
-        "taken": 130
+        "outcomes": 160,
+        "taken": 149
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -1866,12 +1866,12 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 55,
-        "taken": 46
+        "outcomes": 121,
+        "taken": 114
       },
       "main/logic/detect.hpp": {
-        "outcomes": 160,
-        "taken": 143
+        "outcomes": 165,
+        "taken": 148
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -1907,7 +1907,7 @@
       },
       "main/logic/ha_device.hpp": {
         "outcomes": 100,
-        "taken": 80
+        "taken": 82
       },
       "main/logic/health_gate.hpp": {
         "outcomes": 26,
@@ -1946,8 +1946,8 @@
         "taken": 32
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 138,
-        "taken": 123
+        "outcomes": 136,
+        "taken": 122
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -1994,8 +1994,8 @@
         "taken": 13
       },
       "main/logic/lwt_select.hpp": {
-        "outcomes": 62,
-        "taken": 55
+        "outcomes": 64,
+        "taken": 57
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,

@@ -20,9 +20,16 @@ inline uint8_t crc(const uint8_t* src, int len) {
 //   Protocol S: {0x02, reg, crc}         (len 3)
 inline int build_request(uint8_t reg, Protocol proto, uint8_t buf[4]) {
     if (proto == Protocol::S) {
-        buf[0] = 0x02; buf[1] = reg; buf[2] = crc(buf, 2); return 3;
+        buf[0] = 0x02;
+        buf[1] = reg;
+        buf[2] = crc(buf, 2);
+        return 3;
     }
-    buf[0] = 0x03; buf[1] = 0x40; buf[2] = reg; buf[3] = crc(buf, 3); return 4;
+    buf[0] = 0x03;
+    buf[1] = 0x40;
+    buf[2] = reg;
+    buf[3] = crc(buf, 3);
+    return 4;
 }
 
 // Expected reply length. Protocol I starts at 12 and is overridden once byte[2] is read
@@ -30,12 +37,15 @@ inline int build_request(uint8_t reg, Protocol proto, uint8_t buf[4]) {
 inline int reply_len(uint8_t reg, Protocol proto) {
     if (proto == Protocol::I) return 12;
     switch (reg) {
-        case 0x50: return 6;
-        // NOTE: There is an unverified discrepancy in S-protocol register 0x56.
-        // Some protocol documentation suggests the size is 6 bytes, but our implementation
-        // currently uses 4 bytes. This remains to be verified against real hardware.
-        case 0x56: return 4;
-        default:   return 18;
+    case 0x50:
+        return 6;
+    // NOTE: There is an unverified discrepancy in S-protocol register 0x56.
+    // Some protocol documentation suggests the size is 6 bytes, but our implementation
+    // currently uses 4 bytes. This remains to be verified against real hardware.
+    case 0x56:
+        return 4;
+    default:
+        return 18;
     }
 }
 
@@ -91,8 +101,8 @@ enum class HpReplyKind : uint8_t {
     InvalidLength,
 };
 
-inline HpReplyKind hp_reply_classify(uint8_t reg, Protocol proto, const uint8_t* buf,
-                                     int received, int expected) {
+inline HpReplyKind hp_reply_classify(uint8_t reg, Protocol proto, const uint8_t* buf, int received,
+                                     int expected) {
     if (!buf || received <= 0) return HpReplyKind::NoReply;
     if (received >= 2 && is_error_reply(buf, received)) return HpReplyKind::Rejected;
     if (expected < 0 || received < expected) return HpReplyKind::ShortReply;
@@ -105,5 +115,117 @@ inline HpReplyKind hp_reply_classify(uint8_t reg, Protocol proto, const uint8_t*
 // Where the value payload starts inside a full reply (past the header): protocol S = 1,
 // protocol I = 3.
 inline int payload_offset(Protocol proto) { return proto == Protocol::S ? 1 : 3; }
+
+// Preamble validity for X10A replies.
+inline bool is_valid_preamble(Protocol proto, uint8_t byte) {
+    if (proto == Protocol::I) {
+        return byte == 0x40 || byte == 0x15;
+    }
+    return true;
+}
+
+// Request echo detection for half-duplex / level-shifter transceivers (e.g. BSS138).
+inline bool starts_with_request_echo(const uint8_t* buf, int len, const uint8_t* req, int qlen) {
+    if (len <= 0 || qlen <= 0) return false;
+    const int cmp_len = len < qlen ? len : qlen;
+    for (int i = 0; i < cmp_len; ++i) {
+        if (buf[i] != req[i]) return false;
+    }
+    return true;
+}
+
+// Drop leading byte and advance to the next valid preamble.
+inline void hp_resync_buffer(Protocol proto, uint8_t* buf, int& len) {
+    while (len > 0) {
+        for (int i = 0; i < len - 1; ++i) buf[i] = buf[i + 1];
+        len--;
+        if (len > 0 && proto == Protocol::I) {
+            if (is_valid_preamble(proto, buf[0])) break;
+        } else {
+            break;
+        }
+    }
+}
+
+// Pure frame receiver for stream parsing, echo stripping, and preamble synchronization.
+class HpFrameReceiver {
+public:
+    HpFrameReceiver(Protocol proto, const uint8_t* req, int qlen, size_t buflen,
+                    int initial_reply_len)
+        : proto_(proto), qlen_(qlen > 4 ? 4 : (qlen < 0 ? 0 : qlen)), buflen_(buflen),
+          reply_len_(initial_reply_len), default_reply_len_(initial_reply_len) {
+        for (int i = 0; i < qlen_; ++i) req_[i] = req[i];
+    }
+
+    void feed_byte(uint8_t ch, uint8_t* buf, int& len) {
+        if (!echo_checked_) {
+            if (echo_len_ < qlen_ && ch == req_[echo_len_]) {
+                echo_buf_[echo_len_++] = ch;
+                if (echo_len_ == qlen_) {
+                    echo_checked_ = true;
+                    echo_len_     = 0;
+                }
+                return;
+            }
+            // Not matching echo: flush any buffered echo bytes and ch into buf
+            echo_checked_ = true;
+            for (int i = 0; i < echo_len_; ++i) {
+                push_byte(echo_buf_[i], buf, len);
+            }
+            echo_len_ = 0;
+            push_byte(ch, buf, len);
+            return;
+        }
+
+        push_byte(ch, buf, len);
+    }
+
+    bool header_complete(int len) const {
+        if (!echo_checked_) return false;
+        return (proto_ == Protocol::I) ? (len >= 3) : (len >= 2);
+    }
+
+    int  reply_len() const { return reply_len_; }
+    bool echo_checked() const { return echo_checked_; }
+    bool has_invalid_length() const { return invalid_length_; }
+    int  invalid_length() const { return invalid_dyn_len_; }
+
+private:
+    void push_byte(uint8_t ch, uint8_t* buf, int& len) {
+        if (len == 0 && proto_ == Protocol::I && !is_valid_preamble(proto_, ch)) {
+            // Drop noise preceding valid preamble
+            return;
+        }
+
+        if (static_cast<size_t>(len) < buflen_) buf[len] = ch;
+        len++;
+
+        if (proto_ == Protocol::I && len == 3) {
+            const int dyn = reply_len_dynamic(buf);
+            if (dynamic_reply_len_valid(dyn, buflen_)) {
+                reply_len_ = dyn;
+            } else if (qlen_ >= 3 && buf[0] == 0x40 && buf[1] == req_[2]) {
+                invalid_length_  = true;
+                invalid_dyn_len_ = dyn;
+            } else {
+                // Leading byte was likely noise/false preamble
+                hp_resync_buffer(proto_, buf, len);
+                reply_len_ = default_reply_len_;
+            }
+        }
+    }
+
+    Protocol proto_;
+    uint8_t  req_[4]{};
+    int      qlen_{0};
+    size_t   buflen_{0};
+    int      reply_len_{0};
+    int      default_reply_len_{0};
+    bool     echo_checked_{false};
+    uint8_t  echo_buf_[4]{};
+    int      echo_len_{0};
+    bool     invalid_length_{false};
+    int      invalid_dyn_len_{0};
+};
 
 } // namespace daik
