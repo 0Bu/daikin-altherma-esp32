@@ -38,7 +38,7 @@ const rowHeldOver = (r, d) => !!(d && d.ouHeldOver && r && OU_HELD_PAGES.include
 //     keying on the (R1T) tag (not a "heat exch" keyword, which also hits outdoor/refrigerant rows)
 //     lights up the alias-labelled profiles that "leaving water.*before" alone missed.
 //   Tier 2 = any leaving/outlet-water measurement that is NOT a setpoint / mixed-zone / post-BUH.
-const lwtWater = (l) => l.includes("leaving water") || l.includes("outlet water") || l.includes("inflow");
+const lwtWater = (l) => l.includes("leaving water") || l.includes("outlet water") || l.includes("water heat exchanger outlet") || l.includes("inflow");
 const lwtReject = (l) => l.includes("setpoint") || l.includes("mixed") || l.includes("r2t") || l.includes("after buh") || l.includes("after buffer");
 // The two tiers as NAMED predicates over a raw label, one per C++ twin (lwt_is_pre_buh /
 // lwt_is_measurement). Named rather than inlined into the find() callbacks below because
@@ -191,7 +191,7 @@ function liveData() {
   // the BUH off (the normal case) before/after are equal, and the derived heat output must not
   // credit the resistive heater to the heat pump.
   const lwt = vLwt();   // pre-BUH R1T measurement, never a setpoint (see vLwt / logic/lwt_select.hpp)
-  const ret = vNum(/inlet water/i);
+  const ret = vNum(/inlet water|water.*inlet/i);
   const ctRows = (S._values || []).filter((x) => /current measured by ct/i.test(x.label || ""));
   // A phase withheld by the firmware is not a zero-current phase. In particular, CT-L3 is null
   // while its byte's overlaid HP-Forced bit is asserted. Summing only the surviving phases would
@@ -952,7 +952,7 @@ const INSPECT = {
           de: `Dem Wasser werden rund ${fmt1(d.pth)} kW entzogen: ${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K.` }
       : { en: `About ${fmt1(d.pth)} kW transferred into the water (${fmt1(d.flow)} l/min at ΔT ${fmt1(d.dt)} K).`,
           de: `Rund ${fmt1(d.pth)} kW gehen ins Wasser über: ${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K.` },
-    rows: [lwtRow, /inlet water/i, /flow sensor/i],
+    rows: [lwtRow, /inlet water|water.*inlet/i, /flow sensor/i],
   },
   lwt: {
     t: { en: "PHE water outlet (pre-BUH, R1T)", de: "PHE-Wasseraustritt · vor BUH · R1T" },
@@ -968,7 +968,7 @@ const INSPECT = {
       de: "Hinter dem Zusatzheizer gemeldete Wassertemperatur. Anders als der R1T-Wert vor dem BUH kann sie die vom elektrischen Heizer eingebrachte Wärme enthalten. Die genaue Lage zu Pumpe und bauseitigen Ventilen hängt von der Hydraulikeinheit ab.",
     },
   },
-  rwt: { t: { en: "PHE water inlet (R4T)", de: "PHE-Wassereintritt · R4T" }, re: /inlet water/i, sample: "Inlet Water Temp. (R4T)" },
+  rwt: { t: { en: "PHE water inlet (R4T)", de: "PHE-Wassereintritt · R4T" }, re: /inlet water|water.*inlet/i, sample: "Inlet Water Temp. (R4T)" },
   dt: {
     t: { en: "Water-side ΔT across the PHE", de: "Wasserseitiges ΔT am PHE" },
     trend: "dt",   // computed series — see DERIVED
@@ -991,7 +991,7 @@ const INSPECT = {
           de: `${fmt1(d.dt)} K. Beim aktiven Kühlen soll R1T unter R4T liegen; die vorzeichenbehaftete Differenz ist daher negativ.` }
       : { en: `${fmt1(d.dt)} K${d.dtSet != null ? ` against a ${fmt1(d.dtSet)} K heating target` : ""}. Positive means the PHE is adding heat to the water.`,
           de: `${fmt1(d.dt)} K${d.dtSet != null ? ` bei ${fmt1(d.dtSet)} K Heiz-Ziel` : ""}. Positiv bedeutet, dass der PHE dem Wasser Wärme zuführt.` },
-    rows: [lwtRow, /inlet water/i, /target delta t heating/i],
+    rows: [lwtRow, /inlet water|water.*inlet/i, /target delta t heating/i],
   },
   pth: {
     t: (d) => d && d.pthKind === "cooling"
@@ -1347,7 +1347,7 @@ const INSPECT = {
               de: `Zirkulation zum Raumkreis mit ${fmt1(d.flow)} l/min. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}.` }
         : { en: "Current pump and flow readings do not establish circulation through the space branch.",
             de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation durch den Raumzweig." },
-    rows: [lwtRow, /inlet water/i, /^space heating operation/i],
+    rows: [lwtRow, /inlet water|water.*inlet/i, /^space heating operation/i],
   },
   wret: {
     t: { en: "PHE inlet pipe", de: "Leitung zum PHE-Eintritt" },
@@ -1360,7 +1360,7 @@ const INSPECT = {
           de: `Kommt mit ${degC(d.ret)} zurück, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` }
       : { en: "Current pump and flow readings do not establish circulation in the return pipe.",
           de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation in der Rücklaufleitung." },
-    rows: [/inlet water/i, /flow sensor/i, /^water pressure$/i],
+    rows: [/inlet water|water.*inlet/i, /flow sensor/i, /^water pressure$/i],
   },
   flow: {
     t: { en: "Flow rate", de: "Durchfluss" },
