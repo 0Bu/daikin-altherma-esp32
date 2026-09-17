@@ -316,7 +316,7 @@ static_assert(sizeof(ProbeDecode) * PROBE_MAX_DECODES <= 2048,
 // to the user; duplicate labels remain separate rows at the transport layer.
 inline bool probe_catalog_row(const ValueDef& row) {
     return !row.no_publish && row.label && row.label[0] != '\0' &&
-           (row.size == 1 || row.size == 2) && row.conv >= 0 && row.conv <= 999;
+           (row.size == 1 || row.size == 2) && row.conv <= 999;
 }
 
 // Exact profile lookup for the UI feed. The production registry's ordinary lookup deliberately

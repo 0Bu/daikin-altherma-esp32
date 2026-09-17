@@ -43,6 +43,17 @@ printf '%s\n' \
     '    }' \
     '  }' \
     '}' >"$LOWERED_BASELINE"
+HALF_EVEN_BASELINE="$TMP/half-even-branch-baseline.json"
+printf '%s\n' \
+    '{' \
+    '  "schema": 3,' \
+    '  "profiles": {' \
+    '    "test": {' \
+    '      "main/logic/a.hpp": {"taken": 149, "outcomes": 160},' \
+    '      "main/logic/b.hpp": {"taken": 3, "outcomes": 5}' \
+    '    }' \
+    '  }' \
+    '}' >"$HALF_EVEN_BASELINE"
 pass=0
 fail=0
 
@@ -170,6 +181,16 @@ printf "%s\n" \
     "Taken at least once:60.00% of 5" |
     run_report 95 --branch-baseline "$BASELINE" --branch-profile test
 check_status "a rounded percentage that cannot represent integer outcomes fails" 1 "$?"
+
+printf "%s\n" \
+    "File 'main/logic/a.hpp'" \
+    "Lines executed:100.00% of 160" \
+    "Taken at least once:93.12% of 160" \
+    "File 'main/logic/b.hpp'" \
+    "Lines executed:75.00% of 4" \
+    "Taken at least once:60.00% of 5" |
+    run_report 95 --branch-baseline "$HALF_EVEN_BASELINE" --branch-profile test
+check_status "a half-even rounded percentage representation passes" 0 "$?"
 
 printf "%s\n" \
     "File 'main/logic/a.hpp'" \

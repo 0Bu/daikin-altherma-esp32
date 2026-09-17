@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN, ROUND_HALF_UP
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -90,10 +90,14 @@ def parse_branch_report(lines: list[str]) -> dict[str, tuple[int, int]]:
                         Decimal("1"), rounding=ROUND_HALF_UP
                     )
                 )
-                rounded = (
+                rounded_up = (
                     Decimal(taken) * Decimal(100) / Decimal(outcomes)
                 ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                if percent.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) != rounded:
+                rounded_even = (
+                    Decimal(taken) * Decimal(100) / Decimal(outcomes)
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
+                target_percent = percent.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                if target_percent != rounded_up and target_percent != rounded_even:
                     raise ValueError(
                         f"inconsistent gcov branch summary for {canonical}: "
                         f"{percent}% of {outcomes} cannot represent an integer outcome count"

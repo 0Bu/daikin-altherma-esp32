@@ -1,4 +1,4 @@
-// translation-source: caef92ce6d04cf47276f2baa57c78e76949e16d867ee28ce3848640278759fc8
+// translation-source: 59dfce0dad00dfcf4c9cac4c97ce4f4636c655b35e03eee73d22bc18fac20682
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",

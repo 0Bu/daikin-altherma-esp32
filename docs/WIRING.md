@@ -95,6 +95,19 @@ The board the compile-time pin defaults are written for, so it needs no pin conf
              +-----------------------------------------------------------------------------------------+
 ```
 
+## Bi-Zone modules and the X12A port
+
+On installations equipped with a Daikin Bi-Zone kit (such as EKMIK / EKMIKC) or secondary mixing PCB,
+the unit's `X10A` port on the main controller board is often already occupied by the internal wiring harness
+connecting the bi-zone expansion module.
+
+In this scenario:
+- The bi-zone module PCB exposes an identical secondary service port labeled **`X12A`**.
+- `X12A` uses the exact same **JST-EH 2.5 mm 5-pin** connector and identical pinout as `X10A`:
+  `Pin 1: +5 V`, `Pin 2: HP-TX`, `Pin 3: HP-RX`, `Pin 4: NC`, `Pin 5: GND`.
+- Connect the ESP32 to `X12A` on the bi-zone board using the same cable assembly, pin assignments, and voltage/level-shifting rules described above.
+- Communication protocol, register polling, and telemetry operate identically over `X12A`.
+
 ## Picking pins on a different board
 
 The dropdown (`/status.pins_avail`) always starts with the **chip-level** safe list from
