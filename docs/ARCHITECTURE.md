@@ -62,7 +62,8 @@ sntp_time.cpp/.hpp  → SNTP client (esp_netif_sntp, config().ntp_server — NVS
                        stores the raw pointer it's given, not a copy — so a later /set_ntp edit
                        reboots into a fresh config_load() rather than mutating it live.
 hp_comm.cpp/.hpp    → X10A UART transport: request framing for protocol I and S, 9600 8E1,
-                       CRC, timeout handling
+                       CRC, timeout handling, and frame reception with TX-echo suppression
+                       and preamble resynchronization (logic/crc.hpp HpFrameReceiver)
 hp_detect.cpp/.hpp  → auto-detect glue: protocol sweep + page probe → bus fingerprint → candidate
                        models (logic/detect.hpp); register→value extraction is in logic/registers.hpp
 hp_convert.cpp/.hpp → converter functions: raw bytes →
@@ -406,7 +407,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   label — an alias or a translation would flip it, the `lwt_select.hpp` lesson — on either of two
   signals:
   1. **The page.** `0x20`/`0x21`/`0xA0`/`0xA1` are the outdoor unit's own pages; there is no water
-     circuit out there. Measured across all 45 shipped profiles: every `dataType 2` row on `0x20` and
+     circuit out there. Measured across all 46 shipped profiles: every `dataType 2` row on `0x20` and
      `0xA0` is a refrigerant pressure, and no water-pressure row appears on either. This signal needs
      no profile table at all.
   2. **A conv-405 saturation-temperature twin** at the same `(reg, offset)` — 405 only ever accompanies
@@ -665,7 +666,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   every one an exact multiple of `12.8 °C` — its raw low byte never leaves `0x00`/`0x80`, which is
   not how a thermistor read at 0.1 °C resolution behaves, and `reading_plausible()` cannot refuse it
   because 192 °C is inside the ±200 °C envelope. Each signature is re-evaluated against the **live**
-  reply every cycle, which is what makes a page rule safe across all 45 profiles where a static
+  reply every cycle, which is what makes a page rule safe across all 46 profiles where a static
   per-model claim would not be: an installation that *has* the second unit answers with something the
   signature does not match, and every row on the page publishes untouched — including `0xA0/8`, which
   keeps its own `AboveRangeIsAbsent` ceiling. That composition is why the page fact could not stay a
@@ -1483,10 +1484,12 @@ just-wired unit is still identified promptly. A pass does:
 
 1. **Pin + protocol sweep** — try the identity page `0x00` on candidate RX/TX pairs (the cached
    pins first, their **swap** — a reversed X10A wire is the commonest mistake — then the per-target
-   default and its swap) × protocol (cached framing first, then the other); keep the pins **and**
-   framing that return a valid CRC-checked reply instead of `15 EA`. Only X10A-designated pins are
-   probed (no arbitrary GPIO). The UART driver is **installed once** and each candidate is a
-   register-only pin remap (`uart_set_pin`), not a driver reinstall (`logic/uart_plan.hpp`,
+   default and its swap) × protocol (cached framing first, then the other); for Protocol S legacy units
+   (which do not answer page `0x00`), page `0x50` is probed instead. Frame reception is handled by
+   `HpFrameReceiver` (`logic/crc.hpp`), which suppresses hardware TX-echoes and resynchronizes preambles.
+   Keep the pins **and** framing that return a valid CRC-checked reply instead of `15 EA`. Only
+   X10A-designated pins are probed (no arbitrary GPIO). The UART driver is **installed once** and each
+   candidate is a register-only pin remap (`uart_set_pin`), not a driver reinstall (`logic/uart_plan.hpp`,
    host-tested) — the old reinstall-per-candidate allocated a fresh RX ring + driver struct on every
    swap and, on a silent bus that alternates pins forever, fragmented the heap into an `abort()`. The
    winning pins/protocol are re-persisted only when they changed (a UI pin override survives reboot);
@@ -1577,13 +1580,17 @@ received `{"ok":true}`. These helpers patch only detection-owned fields (`apply_
 in `logic/config_model.hpp`, host-tested); whole-struct `config_save` remains for the HTTP handlers,
 which own the credential/service fields and are serialized on the single httpd task.
 
+- **Protocol S legacy unit** → directly applied with the dedicated `protocol_s` profile (no signature matching or capacity class ranking).
 - **exactly one candidate** → applied; the UI shows "Detected: <family> · ~kW".
-- **several candidates** → the best-fit representative is read with. The 41 Altherma models collapse
+- **several candidates** → the best-fit representative is read with. The 39 detectable Altherma models collapse
   to a few page-mask classes, and within a class they often differ only by untestable flag bits (e.g.
   an ERGA split vs an EBLA monobloc differ by one bit with identical labels), so the exact model
   **cannot** be determined from bus data. The UI reports this honestly — the distinct candidate
   **families** plus the O/U EEPROM digits to match the nameplate — rather than asserting a guessed
-  name.
+  name. If a sweep experienced actual transport frame corruption (`BadCrc`, setting `transport_incomplete`),
+  committing the detected model requires confirmation by 2 consecutive agreeing sweeps (`detect_incomplete_step`),
+  preventing noise-induced page loss from locking in a wrong model class. Unpopulated probe pages that time out
+  or return NAK are normal and do not increment `transport_err`.
 
   What this used to claim, and what is measurably true, differ (legacy-230 B). The claim was that a
   representative choice is free because "every candidate is register-equivalent, so the decoded VALUES

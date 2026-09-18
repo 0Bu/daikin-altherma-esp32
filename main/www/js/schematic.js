@@ -60,6 +60,29 @@ const vLwt = () => {
   const n = parseFloat(r.value);
   return Number.isFinite(n) ? n : null;
 };
+// Return-water MEASUREMENT for ΔT / heat output / COP. Host-tested twin:
+// main/logic/rwt_select.hpp + test/test_logic.cpp test_rwt_select() — keep the token lists
+// byte-for-byte in sync (lowercase substring, no regex).
+//   Tier 1 = the PHE return water inlet (R4T) under any catalog label form ("inlet water temp.(r4t)",
+//     "return water temp before phe (r4t)", "[hpsu] tr return temp (r4t)").
+//   Tier 2 = any return/inlet-water measurement that is NOT raw data (0xA1), outdoor, or brine.
+const rwtWater = (l) => l.includes("inlet water") || l.includes("return water") || l.includes("return temp") || l.includes("water heat exchanger inlet");
+const rwtReject = (l) => l.includes("raw data") || l.includes("o/u") || l.includes("deicer") || l.includes("phase") || l.includes("outdoor") || l.includes("brine");
+const rwtIsR4t = (l) => rwtWater(l) && !rwtReject(l) && l.includes("r4t");
+const rwtIsMeasurement = (l) => rwtWater(l) && !rwtReject(l);
+const rwtRow = () => {
+  const vals = (S._values || []).filter((x) => x.value != null);
+  const low = (x) => (x.label || "").toLowerCase();
+  let r = vals.find((x) => rwtIsR4t(low(x)));
+  if (!r) r = vals.find((x) => rwtIsMeasurement(low(x)));
+  return r || null;
+};
+const vRwt = () => {
+  const r = rwtRow();
+  if (!r) return null;
+  const n = parseFloat(r.value);
+  return Number.isFinite(n) ? n : null;
+};
 // The POST-BUH (R2T) leaving-water measurement — the COP numerator when the electrical figure is a
 // WHOLE-UNIT one. Host-tested twin: main/logic/cop_scope.hpp cop_is_post_buh / cop_post_buh_select
 // (test/test_logic.cpp test_cop_scope), gated against the whole catalog; keep the tokens below
@@ -191,7 +214,7 @@ function liveData() {
   // the BUH off (the normal case) before/after are equal, and the derived heat output must not
   // credit the resistive heater to the heat pump.
   const lwt = vLwt();   // pre-BUH R1T measurement, never a setpoint (see vLwt / logic/lwt_select.hpp)
-  const ret = vNum(/inlet water|water.*inlet/i);
+  const ret = vRwt();   // PHE inlet R4T measurement, never 0xA1 raw data (see vRwt / logic/rwt_select.hpp)
   const ctRows = (S._values || []).filter((x) => /current measured by ct/i.test(x.label || ""));
   // A phase withheld by the firmware is not a zero-current phase. In particular, CT-L3 is null
   // while its byte's overlaid HP-Forced bit is asserted. Summing only the surviving phases would
@@ -952,7 +975,7 @@ const INSPECT = {
           de: `Dem Wasser werden rund ${fmt1(d.pth)} kW entzogen: ${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K.` }
       : { en: `About ${fmt1(d.pth)} kW transferred into the water (${fmt1(d.flow)} l/min at ΔT ${fmt1(d.dt)} K).`,
           de: `Rund ${fmt1(d.pth)} kW gehen ins Wasser über: ${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K.` },
-    rows: [lwtRow, /inlet water|water.*inlet/i, /flow sensor/i],
+    rows: [lwtRow, rwtRow, /flow sensor/i],
   },
   lwt: {
     t: { en: "PHE water outlet (pre-BUH, R1T)", de: "PHE-Wasseraustritt · vor BUH · R1T" },
@@ -968,7 +991,7 @@ const INSPECT = {
       de: "Hinter dem Zusatzheizer gemeldete Wassertemperatur. Anders als der R1T-Wert vor dem BUH kann sie die vom elektrischen Heizer eingebrachte Wärme enthalten. Die genaue Lage zu Pumpe und bauseitigen Ventilen hängt von der Hydraulikeinheit ab.",
     },
   },
-  rwt: { t: { en: "PHE water inlet (R4T)", de: "PHE-Wassereintritt · R4T" }, re: /inlet water|water.*inlet/i, sample: "Inlet Water Temp. (R4T)" },
+  rwt: { t: { en: "PHE water inlet (R4T)", de: "PHE-Wassereintritt · R4T" }, pick: rwtRow, sample: "Inlet Water Temp. (R4T)" },
   dt: {
     t: { en: "Water-side ΔT across the PHE", de: "Wasserseitiges ΔT am PHE" },
     trend: "dt",   // computed series — see DERIVED
@@ -991,7 +1014,7 @@ const INSPECT = {
           de: `${fmt1(d.dt)} K. Beim aktiven Kühlen soll R1T unter R4T liegen; die vorzeichenbehaftete Differenz ist daher negativ.` }
       : { en: `${fmt1(d.dt)} K${d.dtSet != null ? ` against a ${fmt1(d.dtSet)} K heating target` : ""}. Positive means the PHE is adding heat to the water.`,
           de: `${fmt1(d.dt)} K${d.dtSet != null ? ` bei ${fmt1(d.dtSet)} K Heiz-Ziel` : ""}. Positiv bedeutet, dass der PHE dem Wasser Wärme zuführt.` },
-    rows: [lwtRow, /inlet water|water.*inlet/i, /target delta t heating/i],
+    rows: [lwtRow, rwtRow, /target delta t heating/i],
   },
   pth: {
     t: (d) => d && d.pthKind === "cooling"
@@ -1347,7 +1370,7 @@ const INSPECT = {
               de: `Zirkulation zum Raumkreis mit ${fmt1(d.flow)} l/min. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}.` }
         : { en: "Current pump and flow readings do not establish circulation through the space branch.",
             de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation durch den Raumzweig." },
-    rows: [lwtRow, /inlet water|water.*inlet/i, /^space heating operation/i],
+    rows: [lwtRow, rwtRow, /^space heating operation/i],
   },
   wret: {
     t: { en: "PHE inlet pipe", de: "Leitung zum PHE-Eintritt" },
@@ -1360,7 +1383,7 @@ const INSPECT = {
           de: `Kommt mit ${degC(d.ret)} zurück, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` }
       : { en: "Current pump and flow readings do not establish circulation in the return pipe.",
           de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation in der Rücklaufleitung." },
-    rows: [/inlet water|water.*inlet/i, /flow sensor/i, /^water pressure$/i],
+    rows: [rwtRow, /flow sensor/i, /^water pressure$/i],
   },
   flow: {
     t: { en: "Flow rate", de: "Durchfluss" },
@@ -1627,6 +1650,7 @@ function renderInspectHist(e, row) {
     if (trendSource) ensureHist(id, trendSource);
     else ensureHistPair(id);                // throttled to once a minute inside; no-op once cached
     if (id === "dhw_tank") {
+      ensureHist("smart_grid_mode");
       ensureHist("smart_grid_mode", "modbus");
       ensureHist("bsh_state");
       ensureHist("bsh_state", "modbus");
@@ -1641,7 +1665,8 @@ function renderInspectHist(e, row) {
   const liveGen = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
     ? historyView(id, trendSource)?.gen || "" : "";
   const auxGen = id === "dhw_tank"
-    ? `${S.hist.get(histCacheKey("smart_grid_mode", "modbus"))?.gen || ""}/` +
+    ? `${S.hist.get("smart_grid_mode")?.gen || ""}/` +
+      `${S.hist.get(histCacheKey("smart_grid_mode", "modbus"))?.gen || ""}/` +
       `${S.hist.get("bsh_state")?.gen || ""}/` +
       `${S.hist.get(histCacheKey("bsh_state", "modbus"))?.gen || ""}`
     : "";

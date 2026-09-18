@@ -802,7 +802,17 @@ static esp_err_t set_hp(httpd_req_t* req) {
     const int old_tx = c.tx_pin;
     // "auto" (the UI's only value) requests a fresh detection; a concrete id pins the model for this
     // session (accepted for API flexibility, never offered in the UI).
-    if (profile_sent) c.profile = profItem->valuestring;
+    if (profile_sent) {
+        c.profile = profItem->valuestring;
+        if (c.profile != "auto" && !def::has_profile(c.profile.c_str())) {
+            j.reset();
+            return send_err(req, "400 Bad Request", "unknown profile id");
+        }
+        if (!set_hp_profile_compatible(c.profile, c.proto)) {
+            j.reset();
+            return send_err(req, "400 Bad Request", "profile incompatible with detected protocol");
+        }
+    }
     if (set_hp_clears_fingerprint(profile_sent, c.profile)) c.fp_valid = false;
     // proto is auto-detected (hp_detect.cpp), not set from the UI.
     c.rx_pin    = ji(j, "rx", c.rx_pin);

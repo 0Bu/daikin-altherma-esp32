@@ -78,6 +78,7 @@
 #include "logic/checkup_persist.hpp"
 #include "logic/history_persist.hpp"
 #include "logic/lwt_select.hpp"
+#include "logic/rwt_select.hpp"
 #include "logic/profile_view.hpp"
 #include "logic/ou_stale.hpp"
 #include "logic/cop_scope.hpp"
@@ -468,6 +469,22 @@ static void test_crc() {
             CHECK(len == 6);
             CHECK(rx.reply_len() == 6);
             CHECK(buf[0] == 0x40 && buf[1] == 0x60 && buf[2] == 0x04);
+        }
+
+        // Test 14: Truncated TX echo (03 40 10 missing last byte) immediately followed by reply (40
+        // 10 04 AA BB cksum). Header initially forms 40 10 40 (dyn len 66 > 64). Must resync to
+        // second 40 rather than flagging invalid length.
+        {
+            const uint8_t   req_10[] = {0x03, 0x40, 0x10, 0xAD};
+            HpFrameReceiver rx(Protocol::I, req_10, 4, 64, 12);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {0x03, 0x40, 0x10, 0x40, 0x10, 0x04, 0xAA, 0xBB, 0};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(!rx.has_invalid_length());
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x10 && buf[2] == 0x04);
         }
     }
 }
@@ -892,6 +909,7 @@ static void test_convert() {
     CHECK(reading_plausible(pprof[3], convert(pprof[3], p0bar))); // 0x62/15 — not caught
     CHECK(
         !reading_plausible(pprof[3], convert(pprof[3], p0bar), pprof, pn)); // ...but caught with it
+    CHECK(reading_plausible(pprof[0], Reading{false, false, 0.0}));         // !r.ok passes through
 
     // profile_refrigerant: pick the 801-805 row's id, else fail closed as unknown.
     const ValueDef prof801[]   = {{0x00, 0, 801, 0, -1, "*Refrigerant type"},
@@ -924,6 +942,7 @@ static void test_convert() {
     // display_decimals: ×0.01 -> 2, scaled families (incl. 161 CT current and 405) -> 1, integers
     // 0.
     CHECK(display_decimals(118) == 2);
+    CHECK(display_decimals(312) == 2);
     CHECK(display_decimals(161) == 1); // was formatted as an integer, losing 0.5
     CHECK(display_decimals(105) == 1);
     CHECK(display_decimals(405) == 1);
@@ -1100,6 +1119,7 @@ static void test_convert() {
     // HA hints derived from the dataType field.
     CHECK(std::string(unit_for_datatype(1)) == "°C");
     CHECK(std::string(device_class_for_datatype(3)) == "current");
+    CHECK(std::string(unit_for_datatype(3)) == "A");
     CHECK(std::string(unit_for_datatype(2)) == "bar");
     CHECK(std::string(unit_for_datatype(-1)).empty());
 }
@@ -1433,6 +1453,21 @@ static void test_config_model() {
     CHECK(set_hp_update_domains_compatible(false, true));      // HomeHub owns the blob result
     CHECK(set_hp_update_domains_compatible(false, false));     // no-op remains harmless
     CHECK(!set_hp_update_domains_compatible(true, true));      // no partial cross-domain save
+    CHECK(set_hp_profile_compatible("auto", Protocol::I));
+    CHECK(set_hp_profile_compatible("auto", Protocol::S));
+    CHECK(set_hp_profile_compatible("", Protocol::I));
+    CHECK(set_hp_profile_compatible("", Protocol::S));
+    CHECK(set_hp_profile_compatible("altherma_lt_ca_cb_04_08kw", Protocol::I));
+    CHECK(!set_hp_profile_compatible("altherma_lt_ca_cb_04_08kw", Protocol::S));
+    CHECK(!set_hp_profile_compatible("protocol_s", Protocol::I));
+    CHECK(set_hp_profile_compatible("protocol_s", Protocol::S));
+
+    CHECK(def::has_profile("generic"));
+    CHECK(def::has_profile("protocol_s"));
+    CHECK(def::has_profile("altherma_lt_ca_cb_04_08kw"));
+    CHECK(!def::has_profile("non_existent_profile"));
+    CHECK(!def::has_profile(""));
+    CHECK(!def::has_profile(nullptr));
     CHECK(!homehub_history_identity_changed("hub.local", 502, 1, "hub.local", 502, 1));
     CHECK(homehub_history_identity_changed("hub-a.local", 502, 1, "hub-b.local", 502, 1));
     CHECK(homehub_history_identity_changed("hub.local", 502, 1, "hub.local", 1502, 1));
@@ -6100,8 +6135,6 @@ static void test_hp_probe() {
     // so a regenerated profile cannot silently add another omitted width.
     const uint8_t sample_bytes[2] = {1, 0};
     for (const auto& profile : def::profiles) {
-        if (std::strcmp(profile.id, "protocol_s") == 0)
-            continue; // Protocol S legacy profile (not in Protocol I catalog probe)
         const auto view = def::resolved(profile);
         for (size_t i = 0; i < view.count(); i++) {
             const ValueDef& row = view[i];
@@ -7986,9 +8019,9 @@ static void test_config_blob_strings_fit() {
     // Exactly at the bound is legal and must survive the round trip.
     ConfigBlob max_all;
     max_all.wifi_ssid = max_all.wifi_pass = max_all.wifi_ssid_backup = max_all.wifi_pass_backup =
-        max_all.mqtt_uri = max_all.mqtt_user = max_all.mqtt_pass = max_all.syslog_host =
-            max_all.ntp_server = max_all.mb_host = max_all.ref_temp_name = max_all.ref_temp_topic =
-                max_all.ref_temp_path                           = max_all.ref_temp_setpoint_path =
+        max_all.mqtt_uri = max_all.mqtt_user = max_all.mqtt_pass = max_all.mqtt_base =
+            max_all.syslog_host = max_all.ntp_server = max_all.mb_host = max_all.ref_temp_name =
+                max_all.ref_temp_topic = max_all.ref_temp_path  = max_all.ref_temp_setpoint_path =
                     max_all.ref_temp_time_path                  = max_all.ref_temp_enabled_path =
                         max_all.ref_temp_hvac_mode_path         = max_all.circulation_name =
                             max_all.circulation_topic           = max_all.circulation_power_path =
@@ -8012,6 +8045,7 @@ static void test_config_blob_strings_fit() {
         &ConfigBlob::mqtt_uri,
         &ConfigBlob::mqtt_user,
         &ConfigBlob::mqtt_pass,
+        &ConfigBlob::mqtt_base,
         &ConfigBlob::syslog_host,
         &ConfigBlob::ntp_server,
         &ConfigBlob::mb_host,
@@ -8029,7 +8063,7 @@ static void test_config_blob_strings_fit() {
         &ConfigBlob::ref_temp_setpoint_topic,
         &ConfigBlob::ref_temp_time_topic,
     };
-    CHECK(sizeof(kStrings) / sizeof(kStrings[0]) == 23);
+    CHECK(sizeof(kStrings) / sizeof(kStrings[0]) == 24);
     for (std::string ConfigBlob::*field : kStrings) {
         ConfigBlob c;
         c.wifi_ssid = "net";
@@ -9714,6 +9748,79 @@ static void test_lwt_select() {
         if (idx >= 0)
             CHECK(!logic::lwt_is_reject(labels[idx]) && logic::lwt_ci_contains(labels[idx], "r1t"));
     }
+}
+
+// logic/rwt_select.hpp — the return-water MEASUREMENT picker that feeds ΔT / heat output / COP.
+// Guards against selecting page 0xA1 raw data instead of R4T (issue report finding H1).
+static void test_rwt_select() {
+    using logic::rwt_select;
+
+    // --- The H1 finding: 0xA1 raw data sorts BEFORE the PHE inlet R4T sensor on 21 profiles.
+    //     The picker must select the R4T sensor (Tier 1), never the 0xA1 raw data row. ---
+    {
+        const char* rows[] = {
+            "(Raw data)Water heat exchanger inlet temp.", // 0xA1 — sorts first, must be rejected
+            "Inlet water temp.(R4T)",                     // 0x61 — the correct PHE inlet sensor
+        };
+        CHECK(rwt_select(rows, 2) == 1);
+    }
+
+    // --- Traps that must NOT be selected as the main return-water measurement ---
+    {
+        const char* traps[] = {
+            "O/U Heat Exch. Temp.(R4T)", // outdoor unit refrigerant heat exchanger
+            "Outdoor heat exchanger temp.",
+            "Brine inlet temp.",
+            "2 phase thermistor (R4T)",
+            "Deicer temp.",
+            "(Raw data)Water heat exchanger inlet temp.",
+        };
+        CHECK(rwt_select(traps, 6) == -1);
+    }
+
+    // --- Alias label forms for R4T (Tier 1) ---
+    {
+        const char* r1[] = {"Return Water Temp before PHE (R4T)"};
+        CHECK(rwt_select(r1, 1) == 0);
+        const char* r2[] = {"[HPSU] Tr return Temp (R4T)"};
+        CHECK(rwt_select(r2, 1) == 0);
+        const char* r3[] = {"Inlet water temp. (R4T)"};
+        CHECK(rwt_select(r3, 1) == 0);
+    }
+
+    // --- Tier 2 fallback: non-R4T water inlet measurement without reject tokens ---
+    {
+        const char* fallback[] = {
+            "Water heat exchanger inlet temp.",
+        };
+        CHECK(rwt_select(fallback, 1) == 0);
+
+        // Tier 1 beats Tier 2 regardless of sort order
+        const char* order1[] = {
+            "Water heat exchanger inlet temp.",
+            "Inlet water temp.(R4T)",
+        };
+        CHECK(rwt_select(order1, 2) == 1);
+    }
+
+    // --- Catalog conformance: EVERY detectable profile must resolve a real return-water
+    // measurement,
+    //     and it must never be raw data / outdoor / brine / etc. ---
+    int detectable_checked = 0;
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        const char* labels[128];
+        size_t      n = 0;
+        for (size_t i = 0; i < p.count && n < 128; i++) labels[n++] = p.values[i].label;
+        int idx = rwt_select(labels, n);
+        CHECK(idx >= 0);
+        if (idx >= 0) {
+            const char* sel = labels[idx];
+            CHECK(logic::rwt_is_water(sel) && !logic::rwt_is_reject(sel));
+        }
+        detectable_checked++;
+    }
+    CHECK(detectable_checked >= 39);
 }
 
 // ── logic/ou_stale.hpp — readings the outdoor unit stops refreshing while the compressor is off ──
@@ -13665,31 +13772,31 @@ static void test_metric_identity() {
         "outdoor_state_target_cond_temp",
         "outdoor_state_target_discharge_temp",
         "outdoor_state_target_evap_temp",
-        "other_20r_sv_output",
-        "other_20s_4_way_output",
-        "other_52c_output",
-        "other_caution_code",
-        "other_comp_preheat",
-        "other_crankcase_heater",
-        "other_delta_tr_deg",
-        "other_discharge_pipe_temp_c",
-        "other_ener_cut_output",
-        "other_error_code",
-        "other_ev_pls",
-        "other_fin_temp_c",
-        "other_hp_sensor_kgcm2",
-        "other_indoor_heat_exchanger_temp_c",
-        "other_indoor_suction_air_temp_c",
-        "other_inv_comp_frequency_hz",
-        "other_lp_sensor_kgcm2",
-        "other_operation_mode",
-        "other_outdoor_air_temp_c",
-        "other_outdoor_fan_lower_rps",
-        "other_outdoor_fan_upper_rps",
-        "other_outdoor_heat_exchanger_temp_c",
-        "other_r_c_setpoint_c",
-        "other_thermo_off_error",
-        "other_warning_code",
+        "split_actuators_20r_sv_output",
+        "split_actuators_20s_4_way_output",
+        "split_actuators_52c_output",
+        "split_actuators_comp_preheat",
+        "split_actuators_crankcase_heater",
+        "split_actuators_ener_cut_output",
+        "split_actuators_ev_pls",
+        "split_actuators_inv_comp_frequency_hz",
+        "split_actuators_outdoor_fan_lower_rps",
+        "split_actuators_outdoor_fan_upper_rps",
+        "split_pressures_hp_sensor_kgcm2",
+        "split_pressures_lp_sensor_kgcm2",
+        "split_sensors_delta_tr_deg",
+        "split_sensors_discharge_pipe_temp_c",
+        "split_sensors_fin_temp_c",
+        "split_sensors_indoor_heat_exchanger_temp_c",
+        "split_sensors_indoor_suction_air_temp_c",
+        "split_sensors_outdoor_air_temp_c",
+        "split_sensors_outdoor_heat_exchanger_temp_c",
+        "split_sensors_r_c_setpoint_c",
+        "split_state_caution_code",
+        "split_state_error_code",
+        "split_state_operation_mode",
+        "split_state_thermo_off_error",
+        "split_state_warning_code",
         "water_hx_raw_data_water_heat_exchanger_inlet_temp",
         "water_hx_raw_data_water_heat_exchanger_outlet_temp",
         "water_hx_target_discharge_temp",
@@ -16676,6 +16783,7 @@ int main() {
     test_http_surface();
     test_http_request_policy();
     test_lwt_select();
+    test_rwt_select();
     test_ou_stale();
     test_cop_scope();
     test_conv_override();

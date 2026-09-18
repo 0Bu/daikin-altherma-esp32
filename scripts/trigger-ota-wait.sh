@@ -82,7 +82,8 @@ if [ "$current_channel" != "$CHANNEL" ]; then
 fi
 
 # Trigger /ota/check
-now_ms=$(date +%s%3N 2>/dev/null || echo "$(( $(date +%s) * 1000 ))")
+now_ms=$(date +%s%3N 2>/dev/null || true)
+case "$now_ms" in *N*|"") now_ms="$(( $(date +%s) * 1000 ))" ;; esac
 log "Triggering /ota/check..."
 curl -sS --max-time 5 "http://$IP/ota/check?ms=$now_ms" >/dev/null 2>&1 || true
 
@@ -196,13 +197,6 @@ while [ "$(date +%s)" -le "$deadline" ]; do
         continue
     fi
     consecutive_drops=0
-
-    # Check for 503 Service Unavailable (firmware sends this right before reboot)
-    if printf '%s' "$raw" | grep -q "update in progress"; then
-        log "Device reports final flash stage ('update in progress'). Reboot imminent..."
-        device_went_down=1
-        break
-    fi
 
     if printf '%s' "$raw" | jq -e '.state' >/dev/null 2>&1; then
         poll_gen=$(printf '%s' "$raw" | jq -r '.generation // empty')

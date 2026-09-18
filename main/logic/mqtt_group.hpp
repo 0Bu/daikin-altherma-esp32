@@ -42,6 +42,14 @@ inline const char* group_for_page(uint8_t reg) {
         case 0x20: return "outdoor_sensors";
         case 0x21: return "inverter";
         case 0x30: return "actuators";
+        case 0x50:
+            return "split_pressures";
+        case 0x53:
+            return "split_actuators";
+        case 0x54:
+            return "split_sensors";
+        case 0x55:
+            return "split_state";
         case 0xA0: return "outdoor_aux";
         case 0xA1: return "water_hx";
         case 0x60: return "hydronic";

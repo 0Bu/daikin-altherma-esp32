@@ -103,7 +103,7 @@ enum class AvailabilityPolicy : uint8_t {
 // would withhold a real reading far more often than it removes a false one. The way past that is
 // not a better threshold but a SECOND SOURCE — a quantity measured at the same instant that makes
 // the zero impossible rather than merely unlikely — and the same move that let PAGE_ABSENCE_RULES
-// be safe across 45 unmeasured profiles applies here: the witness is re-read from the LIVE reply,
+// be safe across 46 unmeasured profiles applies here: the witness is re-read from the LIVE reply,
 // so an installation where the zero is genuine answers differently and the row publishes untouched.
 //
 // The witness is the refrigerant pressure sensor's saturation temperature on the HYDRONIC page,
@@ -190,13 +190,14 @@ struct AvailabilityRule {
     const char*        why;      // the evidence, on record beside the rule
 };
 
-// ── PAGE-LEVEL ABSENCE ────────────────────────────────────────────────────────────────────────────
-// What a whole page reply looks like when the hardware behind it is not fitted. Keyed on the page,
-// so it reaches every row on it — including one that already carries a value rule of its own, and
-// one the generator has not emitted yet.
+// ── PAGE-LEVEL ABSENCE
+// ──────────────────────────────────────────────────────────────────────────── What a whole page
+// reply looks like when the hardware behind it is not fitted. Keyed on the page, so it reaches
+// every row on it — including one that already carries a value rule of its own, and one the
+// generator has not emitted yet.
 //
 // Each signature is evaluated against the LIVE reply on every cycle, which is what makes a
-// page-keyed rule safe across all 45 profiles where a static per-model claim would not be: an
+// page-keyed rule safe across all 46 profiles where a static per-model claim would not be: an
 // installation that HAS the hardware answers with something that does not match the signature, and
 // every row on the page publishes untouched. The rules therefore fail OPEN — an ambiguous or short
 // reply is not an absence — and each demands a reply long enough to reach its last witness byte.

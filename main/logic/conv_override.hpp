@@ -8,7 +8,7 @@
 // generator lives outside this repo, and a correction that lived in a generated table would be lost
 // on the next generator run. So the verdict lives here, in logic/, IDF-free, keyed on the row's
 // structural identity and carrying its evidence beside the rule — where the CI logic test can
-// assert it against the real 45-profile catalog.
+// assert it against the real 46-profile catalog.
 //
 // The two headers answer different questions and must not be merged:
 //
@@ -17,9 +17,10 @@
 //                      differently, and then it IS a measurement)
 //
 // An entry here is a stronger claim than an availability verdict — it does not merely suppress a
-// value, it asserts a different one — so the evidentiary bar is correspondingly higher: a rule needs
-// evidence that is STRUCTURAL (a property of the wire integers themselves), not merely a physical
-// range that looks nicer. Fitting a scale to make a number plausible is exactly how #35-#39 shipped.
+// value, it asserts a different one — so the evidentiary bar is correspondingly higher: a rule
+// needs evidence that is STRUCTURAL (a property of the wire integers themselves), not merely a
+// physical range that looks nicer. Fitting a scale to make a number plausible is exactly how
+// #35-#39 shipped.
 //
 // ── The one entry: Target Evap. Temp. (0x10/6), conv 114 -> conv 109 ─────────────────────────────
 //
@@ -32,8 +33,8 @@
 // The wire integers turned out to be recoverable WITHOUT that capture, which is why this can be
 // settled now: conv 114 publishes `raw * 0.1` and display_decimals(114) == 1, so the published
 // string carries the 16-bit register EXACTLY — `raw = published * 10`, no information lost. #194
-// assumed otherwise ("back-derived from a value already rounded to one decimal"); that assumption is
-// what kept the issue open. Every value this row has ever published is therefore a wire sample.
+// assumed otherwise ("back-derived from a value already rounded to one decimal"); that assumption
+// is what kept the issue open. Every value this row has ever published is therefore a wire sample.
 //
 // Combining the stored VictoriaMetrics series (run-time, 46 distinct integers) with the boot-time
 // page dumps replayed to syslog (at rest, 8 distinct integers) gives 54 distinct wire integers:
@@ -50,9 +51,9 @@
 // like ambient") has no such structure: it reads 22.01, 22.14, 22.40, 23.04 … — arbitrary
 // two-decimal numbers with no underlying grid.
 //
-// The physical reading that falls out is a textbook evaporating temperature, and the run values form
-// a near-continuous 0.1 K sweep, which is what a real temperature does and what x0.1's 1.3 K steps
-// conspicuously are not:
+// The physical reading that falls out is a textbook evaporating temperature, and the run values
+// form a near-continuous 0.1 K sweep, which is what a real temperature does and what x0.1's 1.3 K
+// steps conspicuously are not:
 //
 //                       conv 114 (x0.1)        conv 109 (/128)
 //   compressor running   133.1 - 199.6 °C       10.4 - 15.6 °C
@@ -77,8 +78,9 @@
 // a per-model fact nobody established. The residual risk of a catalog-wide correction from one
 // unit's data is bounded by what the CURRENT decode produces: x0.1 puts this register at
 // 133 - 243 °C wherever it is populated, which is impossible on every model, so no model can be
-// reading it correctly today. (That bound is the argument, and it is why the same reasoning does not
-// license touching the three rows above, where the current decode yields a perfectly ordinary 0.0.)
+// reading it correctly today. (That bound is the argument, and it is why the same reasoning does
+// not license touching the three rows above, where the current decode yields a perfectly ordinary
+// 0.0.)
 #include "value_def.hpp"
 #include "label_override.hpp"   // the sibling ledger adjudicated() also composes (the row's LABEL)
 

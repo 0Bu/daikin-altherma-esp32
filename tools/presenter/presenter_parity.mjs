@@ -42,23 +42,23 @@ vm.createContext(context);
 try {
   vm.runInContext(
     SOURCE +
-      "\nthis.__api = { lwtIsPreBuh, lwtIsMeasurement, isPostBuhRow, copPlan, OU_HELD_PAGES," +
-      " lwtRow, postBuhRow };",
+      "\nthis.__api = { lwtIsPreBuh, lwtIsMeasurement, rwtIsR4t, rwtIsMeasurement, isPostBuhRow, copPlan, OU_HELD_PAGES," +
+      " lwtRow, rwtRow, postBuhRow };",
     context, { filename: "main/www/app.sources" });
 } catch (e) {
   // A renamed or inlined-away rule lands here as a bare ReferenceError. Say what it means instead of
   // printing a stack: the rule is UNREACHABLE, which is not the same finding as the two copies
   // disagreeing, and it must not be reported as one.
   console.error(`presenter_parity: cannot reach the browser presenter rules — ${e.message}\n` +
-                "Each of lwtIsPreBuh / lwtIsMeasurement / isPostBuhRow / copPlan / lwtRow / " +
-                "postBuhRow / OU_HELD_PAGES must stay a named binding in main/www/js/schematic.js: " +
+                "Each of lwtIsPreBuh / lwtIsMeasurement / rwtIsR4t / rwtIsMeasurement / isPostBuhRow / copPlan / lwtRow / " +
+                "rwtRow / postBuhRow / OU_HELD_PAGES must stay a named binding in main/www/js/schematic.js: " +
                 "a rule folded back into its caller is one this gate can no longer compare.");
   process.exit(2);
 }
 const ui = context.__api;
 
-for (const name of ["lwtIsPreBuh", "lwtIsMeasurement", "isPostBuhRow", "copPlan",
-                    "lwtRow", "postBuhRow"]) {
+for (const name of ["lwtIsPreBuh", "lwtIsMeasurement", "rwtIsR4t", "rwtIsMeasurement",
+                    "isPostBuhRow", "copPlan", "lwtRow", "rwtRow", "postBuhRow"]) {
   if (typeof ui[name] !== "function") {
     // Exit 2, not a diff: a rule that has been renamed or inlined away is not "in parity", it is
     // unreachable — and a gate that silently compares nothing is worse than no gate.
@@ -90,12 +90,14 @@ for (const raw of lines) {
   const f = raw.split("\t");
   switch (f[0]) {
     case "ROW": {
-      const [, label, regStr, pre, meas, post, held] = f;
+      const [, label, regStr, pre, meas, r4t, rwtMeas, post, held] = f;
       const reg = Number(regStr);
       const l = low(label);
       const subject = `${label} @0x${reg.toString(16)}`;
       if (ui.lwtIsPreBuh(l) !== (pre === "1")) bad("ROW", subject, "pre-BUH", pre, ui.lwtIsPreBuh(l) ? 1 : 0);
       if (ui.lwtIsMeasurement(l) !== (meas === "1")) bad("ROW", subject, "measurement", meas, ui.lwtIsMeasurement(l) ? 1 : 0);
+      if (ui.rwtIsR4t(l) !== (r4t === "1")) bad("ROW", subject, "rwt-r4t", r4t, ui.rwtIsR4t(l) ? 1 : 0);
+      if (ui.rwtIsMeasurement(l) !== (rwtMeas === "1")) bad("ROW", subject, "rwt-measurement", rwtMeas, ui.rwtIsMeasurement(l) ? 1 : 0);
       if (ui.isPostBuhRow(l, reg) !== (post === "1")) bad("ROW", subject, "post-BUH", post, ui.isPostBuhRow(l, reg) ? 1 : 0);
       if (ui.OU_HELD_PAGES.includes(reg) !== (held === "1")) bad("ROW", subject, "held-over page", held, ui.OU_HELD_PAGES.includes(reg) ? 1 : 0);
       counts.ROW++;
@@ -110,14 +112,16 @@ for (const raw of lines) {
       break;
     }
     case "PICKANS": {
-      const [, id, lwtIdx, pbIdx] = f;
+      const [, id, lwtIdx, rwtIdx, pbIdx] = f;
       const rows = picks.get(id) || [];
       // Drive the REAL selectors through the real state object, so list filtering and ordering are
       // exercised, not just the per-row predicate.
       context.S._values = rows;
       const gotLwt = rows.indexOf(ui.lwtRow());
+      const gotRwt = rows.indexOf(ui.rwtRow());
       const gotPb = rows.indexOf(ui.postBuhRow());
       if (gotLwt !== Number(lwtIdx)) bad("PICK", id, "leaving-water index", lwtIdx, gotLwt);
+      if (gotRwt !== Number(rwtIdx)) bad("PICK", id, "return-water index", rwtIdx, gotRwt);
       if (gotPb !== Number(pbIdx)) bad("PICK", id, "post-BUH index", pbIdx, gotPb);
       context.S._values = [];
       counts.PICK++;

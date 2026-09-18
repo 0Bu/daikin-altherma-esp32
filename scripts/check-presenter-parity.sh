@@ -4,6 +4,7 @@
 #   main/www/js/schematic.js          main/logic/…
 #   ─────────────────────────────     ────────────────────────────────────────────────
 #   lwtIsPreBuh / lwtIsMeasurement    lwt_select.hpp  lwt_is_pre_buh / lwt_is_measurement
+#   rwtIsR4t / rwtIsMeasurement       rwt_select.hpp  rwt_is_r4t / rwt_is_measurement
 #   isPostBuhRow / postBuhRow         cop_scope.hpp   cop_is_post_buh / cop_post_buh_select
 #   copPlan                           cop_scope.hpp   cop_plan
 #   OU_HELD_PAGES                     ou_stale.hpp    ou_page_holds_over

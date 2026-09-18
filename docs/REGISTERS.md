@@ -74,7 +74,8 @@ just `data[0]`. Sign is chosen by the converter. This is `read_u16`/`read_s16` i
 | 153 / 154 | u16 | `raw ÷ 256` | |
 | 155 / 156 | u16 | `raw × 0.1` | |
 | 157 / 158 | u16 | `raw ÷ 256 × 2` | |
-| 159 / 160 / 164 | u16 | `raw` | unsigned raw |
+| 159 / 160 | u16 | `raw` | unsigned raw |
+| **164** | u16 BE | `raw × 5.0` | **fan speed (Protocol S)** |
 | **161 / 162** | u16 | `raw × 0.5` | **CT current sensor (0.5 A/step)** |
 | 163 | u16 | `raw × 0.25` | |
 | 401–418 | s16 | same maths as 101–118 | **pressure/current family** — `type` selects display unit |
@@ -138,6 +139,8 @@ Startup / Defrost / … / Low-noise).
 |-----:|---------|-----|
 | 310 | `(byte & 0x70) >> 4` | 3-bit protection-retry counter (bits 4–6) |
 | 311 | `byte & 0x07` | 3-bit counter / BUH output-capacity step (bits 0–2) |
+| 312 | `(byte & 0x7F) ÷ 16`, bit 7 sign | temperature deviation / delta (1/16 K steps, Protocol S) |
+| 200 | raw numeric byte | raw byte / output / frequency (Protocol S) |
 | 211 | raw numeric byte (`0` = stopped) | fan step |
 | 212 / 213 | byte as hex | MPU / option code |
 | 214 / 215 | raw byte (no name table) | model/software EEPROM identification digits — 215 a digit pair, 214 a single digit. Exposed as the raw byte; page `0x11` is rendered as space-separated hex for display (`logic/detect.hpp` `eeprom_render`) and used only as an auto-detection hint, never decoded to a model name. |
@@ -146,6 +149,7 @@ Startup / Defrost / … / Low-noise).
 
 | Conv | Field | Values |
 |-----:|-------|--------|
+| **201** | byte | Operation mode (Protocol S) — same values as conv 217 |
 | **217** | byte | Operation mode — see [§4.1](#41-operation-mode-conv-217) |
 | **315** | `(byte & 0xF0) >> 4` (**high nibble**) | Indoor/hydronic operation mode — see [§4.2](#42-indoorhydronic-operation-mode-conv-315) |
 | **203** | byte | Error class: `0` Normal, `1` Error, `2` Warning, `3` Caution |
@@ -524,6 +528,12 @@ the I/U capacity code (`0x60` offset 6).
 > deliberately a **page** rule: an individual inlet, outlet or target of exactly 0 °C remains
 > publishable when any other byte proves the page populated, and a short reply that does not reach
 > the flags proves nothing. Page `0xA0` above carries the same finding under a different signature.
+>
+> **Primary vs. raw data.** The rows on page `0xA1` (`(Raw data)...`) carry uncalibrated raw thermistor
+> values (or belong to an auxiliary/second outdoor unit on multi-unit systems). The primary hydronic
+> circuit water temperatures used for space heating/cooling ΔT, thermal output, and COP are the calibrated
+> sensors on page `0x61` (`0x61/2` R1T leaving water before BUH, and `0x61/8` R4T inlet water). Both
+> `logic/lwt_select.hpp` and `logic/rwt_select.hpp` ensure primary sensors take precedence over raw data.
 
 #### Register `0x60`
 

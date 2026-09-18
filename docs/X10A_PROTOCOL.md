@@ -42,7 +42,7 @@ firmware probes both at start-up (see [§7](#7-unit-detection)).
 | Variant | Used by | Request framing | Reply payload starts at |
 |---------|---------|-----------------|-------------------------|
 | **`I`** ("indoor"/40-command) | Altherma indoor+outdoor, most modern units | `03 40 <reg> <cksum>` | byte 3 (after `40 <reg> <len>`) |
-| **`S`** (short/split) | Some split & legacy units | `02 <reg> <cksum>` | byte 1 (after `<len>`) |
+| **`S`** (short/split) | Some split & legacy units | `02 <reg> <cksum>` | byte 1 (after `<reg>`) |
 
 The Altherma register catalog in [`REGISTERS.md`](REGISTERS.md) is the **`I`** variant. `S` uses the
 same checksum and the same value-definition model but a shorter request header and fixed reply
@@ -117,9 +117,25 @@ is the single validity test for a received frame. Implemented as `daik::crc()` i
 
 ### Reply (Protocol `S`)
 
-`S` replies are `<reg-or-data> …` with a **fixed length per register** rather than a length byte;
-the value payload starts at offset **1**. Known fixed lengths: register `0x50` → 6 bytes,
-`0x56` → 4 bytes, others → 18 bytes.
+```
+┌──────┬───────────────────────┬────────┐
+│  reg │  payload (fixed len)  │ cksum  │
+└──────┴───────────────────────┴────────┘
+  echo
+```
+
+- Protocol `S` replies begin directly with `<reg>` echoing the requested page, followed by the value payload and a checksum byte (`0xFF - sum`).
+- Unlike Protocol `I`, Protocol `S` has **no length byte** — wire length is fixed per register (`hp_expected_reply_len()` in [`logic/crc.hpp`](../main/logic/crc.hpp)). Known fixed lengths: register `0x50` → 6 bytes, `0x56` → 4 bytes, others (`0x51`–`0x55`, etc.) → 18 bytes.
+- The **value payload** starts at byte offset **1** (immediately after `<reg>`, `payload_offset(S) = 1`).
+
+### Frame receiver, TX echo suppression & resynchronization (`HpFrameReceiver`)
+
+Bidirectional level-shifter transceivers (such as TXS0108E or simple transistor circuits) can reflect transmitted request bytes back onto the RX line. Additionally, line noise or framing slips can inject leading garbage bytes.
+
+The pure, host-tested `HpFrameReceiver` state machine ([`logic/crc.hpp`](../main/logic/crc.hpp)) handles this robustly on both protocol variants:
+1. **TX-echo suppression**: If the RX stream mirrors the transmitted request frame (`03 40 <reg> <cksum>` for Protocol `I` or `02 <reg> <cksum>` for Protocol `S`), `HpFrameReceiver` recognizes the echo pattern and drops it without interpreting it as an invalid reply.
+2. **Preamble resynchronization**: When arbitrary bytes precede a frame or a truncated echo occurs, the receiver scans forward for valid preamble signatures (`0x40` for `I`, `<reg>` for `S`) instead of aborting the cycle with `invalid_length`.
+3. **NAK handling**: `15 EA` error replies are recognized promptly, terminating reception without waiting for a full-frame timeout.
 
 ---
 
@@ -134,7 +150,9 @@ busy) it answers with a two-byte NAK on **both** variants:
 
 `is_error_reply()` matches `buf[0]==0x15 && buf[1]==0xEA`. Treat it as "this register is not
 available on this unit" and move on — it is normal during detection and for registers a given model
-does not populate. One bad register must never stall the poll cycle.
+does not populate. (Certain models or absent expansion boards simply do not answer unpopulated pages
+at all, resulting in a bus timeout rather than a NAK; detection treats both as absent pages rather
+than transport errors.) One bad register must never stall the poll cycle.
 
 ---
 

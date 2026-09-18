@@ -2,6 +2,7 @@
 // X10A frame handling. Pure + IDF-free so
 // test/test_logic.cpp can assert it against real captured frames on the host. The device
 // wrapper (hp_comm.cpp) only adds the UART read/write around these.
+#include <cstddef>
 #include <cstdint>
 
 namespace daik {
@@ -204,11 +205,11 @@ private:
             const int dyn = reply_len_dynamic(buf);
             if (dynamic_reply_len_valid(dyn, buflen_)) {
                 reply_len_ = dyn;
-            } else if (qlen_ >= 3 && buf[0] == 0x40 && buf[1] == req_[2]) {
+            } else if (qlen_ >= 3 && buf[0] == 0x40 && buf[1] == req_[2] && buf[2] != 0x40) {
                 invalid_length_  = true;
                 invalid_dyn_len_ = dyn;
             } else {
-                // Leading byte was likely noise/false preamble
+                // Leading byte was likely noise/false preamble or truncated echo
                 hp_resync_buffer(proto_, buf, len);
                 reply_len_ = default_reply_len_;
             }

@@ -146,11 +146,16 @@ else
 fi
 
 # 5. MQTT Broker
-if ! printf '%s' "$status_json" | jq -e '.mqtt.connected == true' >/dev/null 2>&1; then
-    err "MQTT broker not connected (.mqtt.connected != true)"
-    failures=$((failures + 1))
+mqtt_configured=$(printf '%s' "$status_json" | jq -r '.mqtt.configured // false')
+if [ "$mqtt_configured" = "true" ]; then
+    if ! printf '%s' "$status_json" | jq -e '.mqtt.connected == true' >/dev/null 2>&1; then
+        err "MQTT broker not connected (.mqtt.connected != true)"
+        failures=$((failures + 1))
+    else
+        log "✓ MQTT: connected to broker"
+    fi
 else
-    log "✓ MQTT: connected to broker"
+    log "✓ MQTT: disabled (not configured)"
 fi
 
 # 6. Crash & Fault analysis
