@@ -162,10 +162,12 @@ inline constexpr bool homehub_is_text(const HomeHubReg& r) {
     return r.type == MbType::Text16;
 }
 
+inline constexpr const HomeHubReg* altherma4_find(uint16_t offset);
+
 inline constexpr const HomeHubReg* homehub_find(uint16_t offset) {
     for (int i = 0; i < HOMEHUB_REG_COUNT; i++)
         if (HOMEHUB_REGS[i].offset == offset) return &HOMEHUB_REGS[i];
-    return nullptr;
+    return altherma4_find(offset);
 }
 
 // Stable semantic id carried beside a numeric enum in /values. MQTT deliberately publishes only
@@ -196,7 +198,7 @@ inline bool homehub_decode(const HomeHubReg& r, uint16_t raw, MbValue& out) {
 // verbatim. Int16 enums, flags and ordinary integers all remain numeric constants; semantic enum
 // metadata is emitted separately by /values and the browser names known states visually. This also
 // leaves an undocumented enum value diagnosable as its raw number instead of silently coercing it.
-// Scaled numerics print one decimal.
+// Scaled numerics print one decimal, except pressure in bar which prints two decimals.
 inline bool homehub_format(const HomeHubReg& r, uint16_t raw, char* buf, int buflen) {
     if (buf == nullptr || buflen <= 0) return false;
     MbValue v;
@@ -205,6 +207,8 @@ inline bool homehub_format(const HomeHubReg& r, uint16_t raw, char* buf, int buf
         std::snprintf(buf, static_cast<size_t>(buflen), "%s", v.text);
     } else if (r.type == MbType::Int16 && r.scale == 1) {
         std::snprintf(buf, static_cast<size_t>(buflen), "%d", static_cast<int>(v.value));
+    } else if (r.unit != nullptr && std::strcmp(r.unit, "bar") == 0) {
+        std::snprintf(buf, static_cast<size_t>(buflen), "%.2f", v.value);
     } else {
         std::snprintf(buf, static_cast<size_t>(buflen), "%.1f", v.value);
     }
@@ -212,3 +216,5 @@ inline bool homehub_format(const HomeHubReg& r, uint16_t raw, char* buf, int buf
 }
 
 }  // namespace daik::def
+
+#include "altherma4.hpp"

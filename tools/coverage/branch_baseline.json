@@ -52,8 +52,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 204,
-        "taken": 155
+        "outcomes": 208,
+        "taken": 159
       },
       "main/logic/config_store.hpp": {
         "outcomes": 464,
@@ -152,8 +152,8 @@
         "taken": 219
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 32,
-        "taken": 30
+        "outcomes": 42,
+        "taken": 42
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 126,
@@ -410,8 +410,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 204,
-        "taken": 155
+        "outcomes": 208,
+        "taken": 159
       },
       "main/logic/config_store.hpp": {
         "outcomes": 464,
@@ -510,8 +510,8 @@
         "taken": 219
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 32,
-        "taken": 30
+        "outcomes": 42,
+        "taken": 42
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 126,
@@ -768,8 +768,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 216,
-        "taken": 176
+        "outcomes": 220,
+        "taken": 180
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
@@ -868,8 +868,8 @@
         "taken": 261
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 32,
-        "taken": 32
+        "outcomes": 42,
+        "taken": 42
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 136,
@@ -1126,8 +1126,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 216,
-        "taken": 176
+        "outcomes": 220,
+        "taken": 180
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
@@ -1226,8 +1226,8 @@
         "taken": 261
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 32,
-        "taken": 32
+        "outcomes": 42,
+        "taken": 42
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 136,
@@ -1484,8 +1484,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 216,
-        "taken": 176
+        "outcomes": 220,
+        "taken": 180
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
@@ -1584,8 +1584,8 @@
         "taken": 261
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 32,
-        "taken": 32
+        "outcomes": 42,
+        "taken": 42
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 136,
@@ -1842,8 +1842,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 216,
-        "taken": 176
+        "outcomes": 220,
+        "taken": 180
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
@@ -1942,8 +1942,8 @@
         "taken": 261
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 32,
-        "taken": 32
+        "outcomes": 42,
+        "taken": 42
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 136,

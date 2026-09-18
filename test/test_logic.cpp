@@ -5379,8 +5379,11 @@ static void test_homehub_map() {
     CHECK(homehub_concept_for(51) ==
           nullptr); // power: X10A has no equivalent, deliberately unpaired
     CHECK(homehub_concept_for(999) == nullptr);
-    CHECK(homehub_concept_index("heat_pump_power") == -1);
+    std::string unk_concept = "heat_pump_power";
+    CHECK(homehub_concept_index(unk_concept.c_str()) == -1);
     CHECK(homehub_concept_index(nullptr) == -1);
+    std::string unk_history = "unknown_history";
+    CHECK(homehub_history_index(unk_history.c_str()) == -1);
 
     // The X10A side resolves through trend_row_matches, so it agrees with the trend rings by
     // construction. Spot-check the locators the pairings above depend on.
@@ -5521,6 +5524,174 @@ static void test_homehub_map() {
         for (size_t i = 0; i < HOMEHUB_STATE_COUNT; i++)
             CHECK(resolves_everywhere(HOMEHUB_STATES[i].concept_id) == detectable);
     }
+}
+
+static void test_altherma4() {
+    using namespace daik::def;
+    using namespace daik::logic;
+
+    CHECK(ALTHERMA4_REG_COUNT == 43);
+    CHECK(ALTHERMA4_REG_COUNT > HOMEHUB_REG_COUNT);
+
+    // Every register must remain independently addressable and findable
+    for (int i = 0; i < ALTHERMA4_REG_COUNT; i++) {
+        CHECK(altherma4_find(ALTHERMA4_REGS[i].offset) == &ALTHERMA4_REGS[i]);
+        CHECK(!object_id(ALTHERMA4_REGS[i].label).empty());
+        for (int k = i + 1; k < ALTHERMA4_REG_COUNT; k++)
+            CHECK(object_id(ALTHERMA4_REGS[i].label) != object_id(ALTHERMA4_REGS[k].label));
+    }
+
+    // Extended registers: 65, 66, 67, 68, 74, 75, 76, 77, 79, 80, 83
+    const HomeHubReg* r65 = altherma4_find(65);
+    CHECK(r65 && r65->space == MbFunc::ReadInput && r65->kind == HomeHubValueKind::SmartGridMode);
+    CHECK(std::string(homehub_enum_id(r65->kind)) == "smart_grid_mode");
+
+    const HomeHubReg* r66 = altherma4_find(66);
+    CHECK(r66 && r66->space == MbFunc::ReadInput && r66->type == MbType::Int16 &&
+          std::string(r66->unit) == "%");
+
+    const HomeHubReg* r67 = altherma4_find(67);
+    CHECK(r67 && r67->space == MbFunc::ReadInput && r67->type == MbType::Int16 &&
+          std::string(r67->unit) == "%");
+
+    const HomeHubReg* r68 = altherma4_find(68);
+    CHECK(r68 && r68->space == MbFunc::ReadInput && r68->type == MbType::Int16 &&
+          std::string(r68->unit) == "%");
+
+    const HomeHubReg* r74 = altherma4_find(74);
+    CHECK(r74 && r74->space == MbFunc::ReadInput && r74->type == MbType::Temp16 &&
+          std::string(r74->unit) == "°C");
+
+    const HomeHubReg* r75 = altherma4_find(75);
+    CHECK(r75 && r75->space == MbFunc::ReadInput && r75->type == MbType::Temp16 &&
+          std::string(r75->unit) == "°C");
+
+    const HomeHubReg* r76 = altherma4_find(76);
+    CHECK(r76 && r76->space == MbFunc::ReadInput && r76->type == MbType::Temp16 &&
+          std::string(r76->unit) == "°C");
+
+    const HomeHubReg* r77 = altherma4_find(77);
+    CHECK(r77 && r77->space == MbFunc::ReadInput && r77->type == MbType::Temp16 &&
+          std::string(r77->unit) == "°C");
+
+    const HomeHubReg* r79 = altherma4_find(79);
+    CHECK(r79 && r79->space == MbFunc::ReadInput && r79->type == MbType::Int16 &&
+          r79->scale == 100 && std::string(r79->unit) == "bar");
+
+    const HomeHubReg* r80 = altherma4_find(80);
+    CHECK(r80 && r80->space == MbFunc::ReadInput && r80->type == MbType::Temp16 &&
+          std::string(r80->unit) == "°C");
+
+    const HomeHubReg* r83 = altherma4_find(83);
+    CHECK(r83 && r83->space == MbFunc::ReadInput && r83->kind == HomeHubValueKind::OperationMode);
+    CHECK(std::string(homehub_enum_id(r83->kind)) == "operation_mode");
+
+    // Water pressure decode and 2-decimal formatting (%.2f bar)
+    char    buf[32];
+    MbValue val;
+    CHECK(homehub_decode(*r79, 185, val) && approx(val.value, 1.85));
+    CHECK(homehub_format(*r79, 185, buf, sizeof(buf)) && std::string(buf) == "1.85");
+    CHECK(homehub_format(*r79, 200, buf, sizeof(buf)) && std::string(buf) == "2.00");
+    CHECK(homehub_format(*r79, 0, buf, sizeof(buf)) && std::string(buf) == "0.00");
+    CHECK(homehub_format_pressure(1.85, buf, sizeof(buf), true) && std::string(buf) == "1.85 bar");
+    CHECK(homehub_format_pressure(1.85, buf, sizeof(buf), false) && std::string(buf) == "1.85");
+    CHECK(!homehub_format_pressure(1.85, nullptr, sizeof(buf), true));
+    CHECK(!homehub_format_pressure(1.85, buf, 0, true));
+
+    // Pressure truncation & small buffer boundary tests: "1.85 bar" is 8 chars + null = 9 bytes
+    CHECK(!homehub_format_pressure(1.85, buf, 4, true));
+    CHECK(!homehub_format_pressure(1.85, buf, 8, true));
+    CHECK(homehub_format_pressure(1.85, buf, 9, true) && std::string(buf) == "1.85 bar");
+    // Without unit: "1.85" is 4 chars + null = 5 bytes
+    CHECK(!homehub_format_pressure(1.85, buf, 4, false));
+    CHECK(homehub_format_pressure(1.85, buf, 5, false) && std::string(buf) == "1.85");
+
+    // Negative pressure (signed int16)
+    CHECK(homehub_format_pressure(-0.5, buf, sizeof(buf), true) && std::string(buf) == "-0.50 bar");
+    CHECK(homehub_decode(*r79, static_cast<uint16_t>(-50), val) && approx(val.value, -0.5));
+    CHECK(homehub_format(*r79, static_cast<uint16_t>(-50), buf, sizeof(buf)) &&
+          std::string(buf) == "-0.50");
+
+    // Special value handling on register 79
+    CHECK(!homehub_decode(*r79, MB_UNAVAILABLE, val));
+    CHECK(!homehub_format(*r79, MB_UNSUPPORTED, buf, sizeof(buf)));
+    CHECK(!homehub_format(*r79, MB_WAIT, buf, sizeof(buf)));
+
+    // Decode and format all extended registers with typical values
+    CHECK(homehub_decode(*r65, 2, val) && approx(val.value, 2.0));
+    CHECK(homehub_format(*r65, 2, buf, sizeof(buf)) && std::string(buf) == "2");
+    CHECK(homehub_decode(*altherma4_find(66), 45, val) && approx(val.value, 45.0));
+    CHECK(homehub_format(*altherma4_find(66), 45, buf, sizeof(buf)) && std::string(buf) == "45");
+    CHECK(homehub_decode(*altherma4_find(67), 100, val) && approx(val.value, 100.0));
+    CHECK(homehub_format(*altherma4_find(67), 100, buf, sizeof(buf)) && std::string(buf) == "100");
+    CHECK(homehub_decode(*r68, 75, val) && approx(val.value, 75.0));
+    CHECK(homehub_format(*r68, 75, buf, sizeof(buf)) && std::string(buf) == "75");
+    CHECK(homehub_decode(*r74, 3500, val) && approx(val.value, 35.0));
+    CHECK(homehub_format(*r74, 3500, buf, sizeof(buf)) && std::string(buf) == "35.0");
+    CHECK(homehub_decode(*r75, 4850, val) && approx(val.value, 48.5));
+    CHECK(homehub_format(*r75, 4850, buf, sizeof(buf)) && std::string(buf) == "48.5");
+    CHECK(homehub_decode(*r76, 5200, val) && approx(val.value, 52.0));
+    CHECK(homehub_format(*r76, 5200, buf, sizeof(buf)) && std::string(buf) == "52.0");
+    CHECK(homehub_decode(*r77, 4900, val) && approx(val.value, 49.0));
+    CHECK(homehub_format(*r77, 4900, buf, sizeof(buf)) && std::string(buf) == "49.0");
+    CHECK(homehub_decode(*r80, 3000, val) && approx(val.value, 30.0));
+    CHECK(homehub_format(*r80, 3000, buf, sizeof(buf)) && std::string(buf) == "30.0");
+    CHECK(homehub_decode(*r83, 1, val) && approx(val.value, 1.0));
+    CHECK(homehub_format(*r83, 1, buf, sizeof(buf)) && std::string(buf) == "1");
+
+    // Negative temperature decoding on extended registers (e.g. outdoor leaving water at -5.5 °C)
+    CHECK(homehub_decode(*r74, static_cast<uint16_t>(-550), val) && approx(val.value, -5.5));
+    CHECK(homehub_format(*r74, static_cast<uint16_t>(-550), buf, sizeof(buf)) &&
+          std::string(buf) == "-5.5");
+
+    // homehub_find resolves Altherma 4 registers seamlessly
+    CHECK(homehub_find(79) == altherma4_find(79));
+    CHECK(homehub_find(79) != nullptr);
+    CHECK(std::string(homehub_find(79)->label) == "Water pressure");
+    CHECK(homehub_find(65) != nullptr &&
+          std::string(homehub_find(65)->label) == "Demand response mode");
+    CHECK(homehub_find(43) != nullptr &&
+          std::string(homehub_find(43)->label) == "Domestic Hot Water temperature");
+    CHECK(homehub_find(999) == nullptr);
+
+    // Pairing / concept for offset 79 -> water_pressure
+    CHECK(std::string(homehub_concept_for(79)) == "water_pressure");
+    const TrendDef* trend_wp = trend_by_id("water_pressure");
+    CHECK(trend_wp != nullptr);
+    CHECK(trend_wp->reg == 0x62 && trend_wp->off == 11);
+
+    // Non-paired extended registers return nullptr for concept (they are honest Modbus-only
+    // readings)
+    const uint16_t non_paired_ext[] = {65, 66, 67, 68, 74, 75, 76, 77, 80, 83};
+    for (uint16_t off : non_paired_ext) {
+        CHECK(homehub_concept_for(off) == nullptr);
+    }
+    // Extended registers do not invent unbacked Modbus history rings
+    for (uint16_t off : non_paired_ext) {
+        CHECK(homehub_history_for(off) == nullptr);
+    }
+    CHECK(homehub_history_for(79) == nullptr);
+
+    // Plan building & batch compression for Altherma 4
+    MbFunc   spaces[ALTHERMA4_REG_COUNT]  = {};
+    uint16_t offsets[ALTHERMA4_REG_COUNT] = {};
+    uint8_t  order[ALTHERMA4_REG_COUNT]   = {};
+    MbBatch  batch[ALTHERMA4_REG_COUNT]   = {};
+    for (int i = 0; i < ALTHERMA4_REG_COUNT; i++) {
+        spaces[i]  = ALTHERMA4_REGS[i].space;
+        offsets[i] = ALTHERMA4_REGS[i].offset;
+    }
+    CHECK(mb_plan_order(spaces, offsets, ALTHERMA4_REG_COUNT, order));
+    int bcount =
+        mb_plan_build(spaces, offsets, ALTHERMA4_REG_COUNT, order, batch, ALTHERMA4_REG_COUNT);
+    CHECK(bcount == 14);
+    CHECK(bcount * 3 <= ALTHERMA4_REG_COUNT);
+
+    // Verify ModbusProfile names including unknown fallback
+    CHECK(std::string(modbus_profile_name(ModbusProfile::Auto)) == "auto");
+    CHECK(std::string(modbus_profile_name(ModbusProfile::HomeHub)) == "homehub");
+    CHECK(std::string(modbus_profile_name(ModbusProfile::Altherma4)) == "altherma4");
+    CHECK(std::string(modbus_profile_name(static_cast<ModbusProfile>(99))) == "unknown");
 }
 
 static void test_bootlog() {
@@ -16543,6 +16714,7 @@ int main() {
     test_modbus_snapshot();
     test_homehub();
     test_homehub_map();
+    test_altherma4();
     test_ota_quiesce();
     test_ota_headroom();
     test_weather_fetch_headroom();
