@@ -16553,7 +16553,7 @@ static void test_diag_tail() {
     // 1. Empty buffer or zero budget
     char out[1024];
     CHECK(diag_dump_tail(nullptr, 6144, 0, false, out, sizeof(out)) == 0u);
-    char ring[6144];
+    char ring[8192];
     CHECK(diag_dump_tail(ring, sizeof(ring), 0, false, out, 0) == 0u);
     CHECK(diag_dump_tail(ring, sizeof(ring), 10, false, nullptr, 10) == 0u);
 

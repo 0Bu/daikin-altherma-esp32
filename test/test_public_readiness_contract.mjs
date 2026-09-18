@@ -20,7 +20,7 @@ try {
   fs.symlinkSync(git, path.join(bin, "git"));
 
   // If the audit regresses to calling ripgrep, the sentinel is found before any host installation
-  // and makes the contract fail. ubuntu-24.04 does not install rg by default; Node + Git are the
+  // and makes the contract fail. ubuntu-26.04 does not install rg by default; Node + Git are the
   // intentionally declared baseline.
   const rg = path.join(bin, "rg");
   fs.writeFileSync(rg, "#!/bin/sh\nexit 91\n", { mode: 0o755 });

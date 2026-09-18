@@ -547,7 +547,7 @@ for workflow in workflow_dir.glob("*.y*ml"):
     workflow_text = workflow.read_text(encoding="utf-8")
     require("ubuntu-latest" not in workflow_text, f"floating runner remains in {workflow.name}")
     for runner in re.findall(r"(?m)^\s*runs-on:\s*(.+?)\s*$", workflow_text):
-        require(runner in ("ubuntu-24.04", "[self-hosted, daikin-release-lab]"),
+        require(runner in ("ubuntu-26.04", "[self-hosted, daikin-release-lab]"),
                 f"unapproved runner {runner} in {workflow.name}")
 require("self-hosted" not in text,
         "manual release workflow still depends on a private runner")
