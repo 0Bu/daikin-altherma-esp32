@@ -337,13 +337,15 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporte
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
-                                   #   modbus:{enabled,connected,discovering,host,port,unit_id,rx,
-                                   #           fails,values,task_stack_min_free_bytes, # null until
+                                   #   modbus:{enabled,connected,discovering,searched,profile,
+                                   #           host,port,unit_id,rx,fails,values,
+                                   #           task_stack_min_free_bytes, # null until
                                    #           the task runs — never 0, which would read as
                                    #           "no stack left" on every board with no HomeHub
                                    #           plant_gate_known,plant_gate_active,
                                    #           error?,error_code?,error_detail?,error_register?},
-                                   #        # link diagnostics; read-only, no write API
+                                   #        # link diagnostics (profile: auto|homehub|altherma4);
+                                   #        # read-only, no write API
                                    #        field is a command. Empty host disables polling/search.
                                    #   history:{dt,persist,dwell_persist,rows:[{id,label}],
                                    #        modbus_rows:[{id,label}],env3_rows:[{id,label}]},

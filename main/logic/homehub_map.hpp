@@ -32,6 +32,7 @@
 // setpoint limits) carries a null concept and is simply never paired — it shows up as a Modbus-only
 // reading. That is the honest outcome, not a gap to be filled by loosening the rule.
 #include <cstddef>
+#include <cstdio>
 #include "history.hpp"   // TRENDS / TrendDef / trend_row_matches — the shared concept vocabulary
 
 namespace daik::logic {
@@ -165,10 +166,30 @@ inline constexpr HomeHubState HOMEHUB_STATES[] = {
 };
 inline constexpr size_t HOMEHUB_STATE_COUNT = sizeof(HOMEHUB_STATES) / sizeof(HOMEHUB_STATES[0]);
 
+// Daikin Altherma 4 pairings. Extends the EKRHH/UC3 pairing catalog with native Altherma 4
+// quantities (register 79 water_pressure ↔ X10A 0x62/11).
+inline constexpr HomeHubConcept ALTHERMA4_CONCEPTS[] = {
+    {79, "water_pressure"}, // water pressure ↔ 0x62/11 Water pressure
+};
+inline constexpr size_t ALTHERMA4_CONCEPT_COUNT =
+    sizeof(ALTHERMA4_CONCEPTS) / sizeof(ALTHERMA4_CONCEPTS[0]);
+
+// Format pressure in bar with 2 decimal places (%.2f bar).
+inline bool homehub_format_pressure(double bar, char* buf, size_t buflen,
+                                    bool include_unit = true) {
+    if (buf == nullptr || buflen == 0) return false;
+    const size_t needed = include_unit
+                              ? static_cast<size_t>(std::snprintf(buf, buflen, "%.2f bar", bar))
+                              : static_cast<size_t>(std::snprintf(buf, buflen, "%.2f", bar));
+    return needed < buflen;
+}
+
 // The concept a HomeHub register carries, or nullptr when it has no X10A counterpart.
 inline const char* homehub_concept_for(uint16_t offset) {
     for (const auto& c : HOMEHUB_CONCEPTS)
         if (c.offset == offset) return c.concept_id;
+    for (const auto& a : ALTHERMA4_CONCEPTS)
+        if (a.offset == offset) return a.concept_id;
     for (const auto& s : HOMEHUB_STATES)
         if (s.offset == offset) return s.concept_id;
     return nullptr;
@@ -240,6 +261,29 @@ constexpr bool homehub_offsets_are_distinct() {
             if (c.offset == s.offset) return false;
     return true;
 }
+constexpr bool altherma4_concepts_are_trends() {
+    for (const auto& a : ALTHERMA4_CONCEPTS) {
+        bool found = false;
+        for (const auto& d : TRENDS)
+            if (trend_cstr_eq(a.concept_id, d.id)) {
+                found = true;
+                break;
+            }
+        if (!found) return false;
+    }
+    return true;
+}
+constexpr bool altherma4_offsets_are_distinct() {
+    for (size_t i = 0; i < ALTHERMA4_CONCEPT_COUNT; i++) {
+        for (const auto& c : HOMEHUB_CONCEPTS)
+            if (ALTHERMA4_CONCEPTS[i].offset == c.offset) return false;
+        for (const auto& s : HOMEHUB_STATES)
+            if (ALTHERMA4_CONCEPTS[i].offset == s.offset) return false;
+        for (size_t j = i + 1; j < ALTHERMA4_CONCEPT_COUNT; j++)
+            if (ALTHERMA4_CONCEPTS[i].offset == ALTHERMA4_CONCEPTS[j].offset) return false;
+    }
+    return true;
+}
 }  // namespace detail
 static_assert(detail::homehub_concepts_are_trends(),
               "a HOMEHUB_CONCEPTS entry names a trend id that logic/history.hpp does not define");
@@ -249,5 +293,11 @@ static_assert(detail::homehub_state_ids_are_distinct(),
               "a HOMEHUB_STATES id collides with a trend id or another state id");
 static_assert(detail::homehub_offsets_are_distinct(),
               "a HomeHub offset appears in both HOMEHUB_CONCEPTS and HOMEHUB_STATES");
+static_assert(
+    detail::altherma4_concepts_are_trends(),
+    "an ALTHERMA4_CONCEPTS entry names a trend id that logic/history.hpp does not define");
+static_assert(
+    detail::altherma4_offsets_are_distinct(),
+    "an ALTHERMA4_CONCEPTS offset collides with HOMEHUB_CONCEPTS, HOMEHUB_STATES, or itself");
 
 }  // namespace daik::logic

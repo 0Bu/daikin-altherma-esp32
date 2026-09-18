@@ -1,4 +1,4 @@
-// translation-source: 59dfce0dad00dfcf4c9cac4c97ce4f4636c655b35e03eee73d22bc18fac20682
+// translation-source: b2c0aaf45bb2281cc8e48c65dd712a6f0ae9064ec6d18044c1c72654f43336c6
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",

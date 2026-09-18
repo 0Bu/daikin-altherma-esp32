@@ -240,6 +240,46 @@ whatever the first cycle read.
 `hp_modbus.cpp` `static_assert`s that batching still collapses the map, so a future register added
 into a gap re-prices the link visibly instead of quietly restoring the per-register sweep.
 
+## Daikin Altherma 4 Modbus TCP support
+
+In addition to the legacy EKRHH (Altherma 3) 32-register map, this firmware supports native **Daikin Altherma 4** Modbus TCP telemetry.
+
+### Extended register catalog
+
+Altherma 4 introduces 11 additional registers beyond the base 32 registers (total 43 registers):
+
+| Register (FC04 Input) | Type | Unit | Meaning | Description / Pairing |
+|---|---|---|---|---|
+| `65` | `Int16` | | Demand response mode | Smart grid / demand response operating mode |
+| `66` | `Int16` | `%` | Bypass valve position | Bypass 3-way/mixing valve position |
+| `67` | `Int16` | `%` | Tank valve position | DHW tank valve position |
+| `68` | `Int16` | `%` | Circulation pump speed | Variable-speed water pump modulation |
+| `74` | `Temp16` | `°C` | Leaving water temp outdoor | Outdoor unit leaving water temperature |
+| `75` | `Temp16` | `°C` | Leaving water temp tank valve | Leaving water temperature at tank valve |
+| `76` | `Temp16` | `°C` | DHW temp upper | Dual-sensor DHW tank upper temperature |
+| `77` | `Temp16` | `°C` | DHW temp lower | Dual-sensor DHW tank lower temperature |
+| `79` | `Int16` (÷100) | `bar` | Water pressure | Circuit water pressure (formatted with 2 decimal places, e.g. `1.85 bar`), paired to X10A concept `water_pressure` (`0x62/11`) |
+| `80` | `Temp16` | `°C` | Heating/cooling target | Active flow temperature target |
+| `83` | `Int16` | | Unit operation mode | Current operational state |
+
+### Batch compression
+
+The 43 registers of the Altherma 4 map collapse into **14 contiguous batches** (5 holding, 9 input). Batch compression satisfies `count * 3 <= 43` ($14 \times 3 = 42 \le 43$).
+
+### Automatic profile detection and fail-closed fallback
+
+Detection is **100% automatic** at runtime without requiring any UI configuration:
+
+1. **Initial session state (`Auto`):** On every new TCP connection session (`status_socket_open`), the active profile is set to `Auto`.
+2. **Probing:** The firmware attempts to read batches using the 43-register `ALTHERMA4_REGS` catalog and `MB_PLAN_ALTHERMA4`.
+3. **Promotion to `Altherma4`:** If any extended register (> 58) successfully returns data, `s_active_profile` transitions to `ModbusProfile::Altherma4`.
+4. **Graceful fallback to `HomeHub`:** When connected to an Altherma 3 / EKRHH unit, registers > 58 return Modbus Exception 02 (*Illegal Data Address*). The firmware intercepts this exception on extended batches/registers in `Auto` mode:
+   - It transitions `s_active_profile` immediately to `ModbusProfile::HomeHub`.
+   - It does **not** call `note_failure()`, preserving `status_recovered()` and preventing false `status_error()` transitions.
+   - It stops issuing remaining extended queries for the session.
+   - The UI and `/status` remain green and healthy, reporting the 32 valid base registers.
+5. **Reconnection resilience:** If the connection drops and reconnects (e.g. following equipment swap), the new session re-enters `Auto` mode and re-probes cleanly.
+
 ## How the two sources meet
 
 In exactly one place: [`main/logic/homehub_map.hpp`](../main/logic/homehub_map.hpp), which says which
@@ -387,7 +427,8 @@ combined link state with X10A, since either can be down alone and one merged "co
 exactly the case worth seeing. Its value is the active `host:port`, and its colour follows the shared
 connection-state vocabulary. Config and diagnostics only; there are no pump controls, by design.
 
-**API:** `/status.modbus` carries the link/config fields, `task_stack_min_free_bytes` (this task's
+**API:** `/status.modbus` carries the link/config fields (including `searched` and detected `profile`:
+`auto` \| `homehub` \| `altherma4`), `task_stack_min_free_bytes` (this task's
 worst stack headroom in bytes, from the one sampler all five watched stacks report through
 — `main/stack_watch.hpp` — so this surface and the MQTT heartbeat's `modbus_stack_min_free_bytes`
 cannot answer the same question with two numbers; `null`, not `0`, when the task has never run,
