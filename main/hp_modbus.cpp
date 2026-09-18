@@ -164,7 +164,7 @@ ModbusStatus mb_status() {
     if (!s_mtx) return ModbusStatus{};
     Lock lk(s_mtx);
     ModbusStatus s = s_status;
-    s.profile = s_active_profile.load(std::memory_order_acquire);
+    s.profile      = s_active_profile.load(std::memory_order_acquire);
     return s;
 }
 
@@ -743,19 +743,17 @@ static std::string failure_message(const MbFailure& f) {
 // matters more — its shape is asserted HERE, where it is used, rather than checked at runtime by
 // code that would have no useful answer if the check failed.
 namespace {
-template <size_t N>
-struct MbPlanT {
+template <size_t N> struct MbPlanT {
     uint8_t        order[N] = {};
     logic::MbBatch batch[N] = {};
     int            count    = 0;
     bool           ok       = false;
 };
 
-template <size_t N>
-constexpr MbPlanT<N> mb_plan_make_from(const def::HomeHubReg (&regs)[N]) {
+template <size_t N> constexpr MbPlanT<N> mb_plan_make_from(const def::HomeHubReg (&regs)[N]) {
     MbPlanT<N> p;
-    MbFunc   spaces[N]  = {};
-    uint16_t offsets[N] = {};
+    MbFunc     spaces[N]  = {};
+    uint16_t   offsets[N] = {};
     for (size_t i = 0; i < N; i++) {
         spaces[i]  = regs[i].space;
         offsets[i] = regs[i].offset;
@@ -936,12 +934,12 @@ static void mb_poll_once() {
     MbRead io;
     bool link_broken = false;                      // a transport/framing failure ended the stream
 
-    const ModbusProfile cur_prof = s_active_profile.load(std::memory_order_acquire);
-    const bool use_altherma4 = (cur_prof != ModbusProfile::HomeHub);
-    const int plan_count = use_altherma4 ? MB_PLAN_ALTHERMA4.count : MB_PLAN.count;
-    const logic::MbBatch* plan_batches = use_altherma4 ? MB_PLAN_ALTHERMA4.batch : MB_PLAN.batch;
-    const uint8_t* plan_orders = use_altherma4 ? MB_PLAN_ALTHERMA4.order : MB_PLAN.order;
-    const def::HomeHubReg* active_regs = use_altherma4 ? def::ALTHERMA4_REGS : def::HOMEHUB_REGS;
+    const ModbusProfile    cur_prof      = s_active_profile.load(std::memory_order_acquire);
+    const bool             use_altherma4 = (cur_prof != ModbusProfile::HomeHub);
+    const int              plan_count    = use_altherma4 ? MB_PLAN_ALTHERMA4.count : MB_PLAN.count;
+    const logic::MbBatch*  plan_batches  = use_altherma4 ? MB_PLAN_ALTHERMA4.batch : MB_PLAN.batch;
+    const uint8_t*         plan_orders   = use_altherma4 ? MB_PLAN_ALTHERMA4.order : MB_PLAN.order;
+    const def::HomeHubReg* active_regs   = use_altherma4 ? def::ALTHERMA4_REGS : def::HOMEHUB_REGS;
 
     // Read the rows of one batch one register at a time. The fallback path, and the whole path for a
     // single-register batch. `break`s on anything but an exception, for the reason the batch loop
@@ -949,7 +947,7 @@ static void mb_poll_once() {
     // the original cause with "not connected".
     const auto read_singly = [&](const logic::MbBatch& b) {
         for (uint8_t k = 0; k < b.count; k++) {
-            const def::HomeHubReg& r = active_regs[plan_orders[b.row_first + k]];
+            const def::HomeHubReg& r   = active_regs[plan_orders[b.row_first + k]];
             uint16_t pdu = 0;
             if (!mb_pdu_address(r.offset, pdu)) continue;
             MbFailure failure;
@@ -959,7 +957,8 @@ static void mb_poll_once() {
                     s_active_profile.load(std::memory_order_relaxed) == ModbusProfile::Auto &&
                     failure.type == MbFailureType::Exception) {
                     s_active_profile.store(ModbusProfile::HomeHub, std::memory_order_release);
-                    diag_printf("modbus: extended register %u returned exception %d — falling back to HomeHub profile\n",
+                    diag_printf("modbus: extended register %u returned exception %d — falling back "
+                                "to HomeHub profile\n",
                                 static_cast<unsigned>(r.offset), failure.detail);
                     return;
                 }
@@ -1014,7 +1013,8 @@ static void mb_poll_once() {
             if (b.first_offset > 58 &&
                 s_active_profile.load(std::memory_order_relaxed) == ModbusProfile::Auto) {
                 s_active_profile.store(ModbusProfile::HomeHub, std::memory_order_release);
-                diag_printf("modbus: extended batch starting at %u returned exception %d — falling back to HomeHub profile\n",
+                diag_printf("modbus: extended batch starting at %u returned exception %d — falling "
+                            "back to HomeHub profile\n",
                             static_cast<unsigned>(b.first_offset), failure.detail);
                 break;
             }
@@ -1035,7 +1035,7 @@ static void mb_poll_once() {
             continue;
         }
         for (uint8_t k = 0; k < b.count; k++) {
-            const def::HomeHubReg& r = active_regs[plan_orders[b.row_first + k]];
+            const def::HomeHubReg& r   = active_regs[plan_orders[b.row_first + k]];
             uint16_t raw = 0;
             if (!mb_reg_at(io.resp, k, raw)) {
                 // The parse already bound the reply to the requested quantity, so this is a
@@ -1092,7 +1092,7 @@ static void mb_poll_once() {
             // reports 0 for the same reason the full path does — the cache is about to go with it.
             if (!final_current_session) s_status.values = 0;
             s_status.connected = final_current_session;
-            s_status.profile = s_active_profile.load(std::memory_order_relaxed);
+            s_status.profile             = s_active_profile.load(std::memory_order_relaxed);
             s_status.plant_gate_known = final_current_session && plant_gate_known;
             s_status.plant_gate_active = final_current_session && plant_gate_active;
             s_status.heating_mode_known = final_current_session && heating_mode_known;
@@ -1153,7 +1153,7 @@ static void mb_poll_once() {
             s_target_generation.load(std::memory_order_acquire) == cycle_target_generation;
         s_status.values = final_current_session ? committed : 0;
         s_status.connected = final_current_session;
-        s_status.profile = s_active_profile.load(std::memory_order_relaxed);
+        s_status.profile             = s_active_profile.load(std::memory_order_relaxed);
         s_status.plant_gate_known = final_current_session && plant_gate_known;
         s_status.plant_gate_active = final_current_session && plant_gate_active;
         s_status.heating_mode_known = final_current_session && heating_mode_known;
@@ -1362,9 +1362,7 @@ void mb_reconfigure(bool enabled) noexcept {
 
 size_t mb_values_capacity() { return static_cast<size_t>(def::ALTHERMA4_REG_COUNT); }
 
-ModbusProfile mb_active_profile() {
-    return s_active_profile.load(std::memory_order_acquire);
-}
+ModbusProfile mb_active_profile() { return s_active_profile.load(std::memory_order_acquire); }
 
 size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
     live = false;

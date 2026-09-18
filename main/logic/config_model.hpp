@@ -29,16 +29,19 @@ enum class BoardPresetId : uint8_t {
 // Runtime Modbus profile. Auto starts with Altherma 4 extended registers and gracefully falls back
 // to HomeHub (EKRHH / Altherma 3) on Exception 02 (Illegal Data Address).
 enum class ModbusProfile : uint8_t {
-    Auto = 0,
-    HomeHub = 1,
+    Auto      = 0,
+    HomeHub   = 1,
     Altherma4 = 2,
 };
 
 inline const char* modbus_profile_name(ModbusProfile p) {
     switch (p) {
-        case ModbusProfile::Auto:      return "auto";
-        case ModbusProfile::HomeHub:   return "homehub";
-        case ModbusProfile::Altherma4: return "altherma4";
+    case ModbusProfile::Auto:
+        return "auto";
+    case ModbusProfile::HomeHub:
+        return "homehub";
+    case ModbusProfile::Altherma4:
+        return "altherma4";
     }
     return "unknown";
 }

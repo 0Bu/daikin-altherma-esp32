@@ -169,17 +169,18 @@ inline constexpr size_t HOMEHUB_STATE_COUNT = sizeof(HOMEHUB_STATES) / sizeof(HO
 // Daikin Altherma 4 pairings. Extends the EKRHH/UC3 pairing catalog with native Altherma 4
 // quantities (register 79 water_pressure ↔ X10A 0x62/11).
 inline constexpr HomeHubConcept ALTHERMA4_CONCEPTS[] = {
-    { 79, "water_pressure" },  // water pressure ↔ 0x62/11 Water pressure
+    {79, "water_pressure"}, // water pressure ↔ 0x62/11 Water pressure
 };
 inline constexpr size_t ALTHERMA4_CONCEPT_COUNT =
     sizeof(ALTHERMA4_CONCEPTS) / sizeof(ALTHERMA4_CONCEPTS[0]);
 
 // Format pressure in bar with 2 decimal places (%.2f bar).
-inline bool homehub_format_pressure(double bar, char* buf, size_t buflen, bool include_unit = true) {
+inline bool homehub_format_pressure(double bar, char* buf, size_t buflen,
+                                    bool include_unit = true) {
     if (buf == nullptr || buflen == 0) return false;
     const size_t needed = include_unit
-        ? static_cast<size_t>(std::snprintf(buf, buflen, "%.2f bar", bar))
-        : static_cast<size_t>(std::snprintf(buf, buflen, "%.2f", bar));
+                              ? static_cast<size_t>(std::snprintf(buf, buflen, "%.2f bar", bar))
+                              : static_cast<size_t>(std::snprintf(buf, buflen, "%.2f", bar));
     return needed < buflen;
 }
 
@@ -264,7 +265,10 @@ constexpr bool altherma4_concepts_are_trends() {
     for (const auto& a : ALTHERMA4_CONCEPTS) {
         bool found = false;
         for (const auto& d : TRENDS)
-            if (trend_cstr_eq(a.concept_id, d.id)) { found = true; break; }
+            if (trend_cstr_eq(a.concept_id, d.id)) {
+                found = true;
+                break;
+            }
         if (!found) return false;
     }
     return true;
@@ -289,9 +293,11 @@ static_assert(detail::homehub_state_ids_are_distinct(),
               "a HOMEHUB_STATES id collides with a trend id or another state id");
 static_assert(detail::homehub_offsets_are_distinct(),
               "a HomeHub offset appears in both HOMEHUB_CONCEPTS and HOMEHUB_STATES");
-static_assert(detail::altherma4_concepts_are_trends(),
-              "an ALTHERMA4_CONCEPTS entry names a trend id that logic/history.hpp does not define");
-static_assert(detail::altherma4_offsets_are_distinct(),
-              "an ALTHERMA4_CONCEPTS offset collides with HOMEHUB_CONCEPTS, HOMEHUB_STATES, or itself");
+static_assert(
+    detail::altherma4_concepts_are_trends(),
+    "an ALTHERMA4_CONCEPTS entry names a trend id that logic/history.hpp does not define");
+static_assert(
+    detail::altherma4_offsets_are_distinct(),
+    "an ALTHERMA4_CONCEPTS offset collides with HOMEHUB_CONCEPTS, HOMEHUB_STATES, or itself");
 
 }  // namespace daik::logic
