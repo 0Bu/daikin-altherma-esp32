@@ -124,7 +124,7 @@ jobs:
     # A release is an explicit maintainer publication action for an already accepted main commit.
     # PR/main CI owns testing; do not rerun or make those tests a prerequisite for tagging it.
     if: github.event_name != 'workflow_dispatch' || inputs.release != true
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     outputs:
       firmware: ${{ steps.changes.outputs.firmware }}
@@ -605,7 +605,7 @@ jobs:
   build:
     needs: [mechanical_gates]
     if: always() && github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -758,7 +758,7 @@ jobs:
       ((github.event_name == 'workflow_dispatch' && inputs.release == true) ||
       (needs.mechanical_gates.result == 'success' &&
       needs.mechanical_gates.outputs.firmware == 'yes'))
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -1008,7 +1008,7 @@ jobs:
     # `always()` prevents GitHub's implicit success() from propagating that transitive skip while
     # the explicit result check still fails closed when the signed build itself did not succeed.
     if: always() && needs.trusted_build.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       actions: read

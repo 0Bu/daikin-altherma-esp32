@@ -21,7 +21,7 @@ permissions:
   pull-requests: write
 jobs:
   renovate:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       # COMMIT SIGNING: this bot CANNOT sign, and that is why the main ruleset no longer requires it.
