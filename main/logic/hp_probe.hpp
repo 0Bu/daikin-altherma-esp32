@@ -8,7 +8,7 @@
 // claims. Three questions the normal telemetry surface cannot answer, all of them live — this probe
 // is the deliberately separate answer:
 //
-//   • "What does an unmapped model put on this page?" — 45 profile definitions ship today
+//   • "What does an unmapped model put on this page?" — 46 profile definitions ship today
 //     (39 detectable model profiles plus generic and compatibility definitions), and the fleet has
 //     more. A
 //     user whose unit detects as `generic` previously had no way to find out what its pages carry
@@ -36,9 +36,9 @@
 // impossible °C or a 0-bar refrigerant pressure, and value_available() adjudicates whether the row
 // is populated on this unit at all. This path deliberately runs NEITHER. That is the point — the
 // question is "what do these bytes read as", and a filter that hid the impossible answer would hide
-// exactly the evidence needed to adjudicate a new row. But it means a probe can hand back 240.6 °C where /values and
-// Home Assistant correctly show nothing, so nothing here may be quoted as a reading, and the two
-// numbers disagreeing is the tool working rather than a defect.
+// exactly the evidence needed to adjudicate a new row. But it means a probe can hand back 240.6 °C
+// where /values and Home Assistant correctly show nothing, so nothing here may be quoted as a
+// reading, and the two numbers disagreeing is the tool working rather than a defect.
 //
 // Pure and IDF-free so the request bounds, the reply-status mapping and — the part that actually
 // carries risk — the CONVERTER SWEEP are asserted on the host. The sweep runs every candidate
@@ -50,6 +50,7 @@
 #include <cstdint>
 #include <string_view>
 #include "convert.hpp"
+#include "crc.hpp"
 #include "value_def.hpp"
 
 namespace daik {
@@ -232,34 +233,64 @@ struct ProbeCandidate {
 
 inline constexpr ProbeCandidate PROBE_CANDIDATES[] = {
     // 2-byte fields: scale/sign/endianness — the family the "which converter" question is about.
-    {105, 2}, {106, 2},                       // signed ×0.1 LE / BE — the temperature pair
-    {107, 2}, {108, 2}, {114, 2}, {119, 2},   // same maths, 0x8000 = no data (alias unless sentinel)
-    {101, 2}, {102, 2},                       // signed raw
-    {103, 2}, {104, 2},                       // signed /256
-    {109, 2}, {110, 2},                       // signed /256 ×2
-    {111, 2},                                 // signed ×0.5
-    {118, 2},                                 // signed BE ×0.01
-    {151, 2}, {152, 2},                       // unsigned raw
-    {161, 2},                                 // unsigned ×0.5 — CT current
-    {405, 2},                                 // pressure -> saturation temperature
+    {105, 2},
+    {106, 2}, // signed ×0.1 LE / BE — the temperature pair
+    {107, 2},
+    {108, 2},
+    {114, 2},
+    {119, 2}, // same maths, 0x8000 = no data (alias unless sentinel)
+    {101, 2},
+    {102, 2}, // signed raw
+    {103, 2},
+    {104, 2}, // signed /256
+    {109, 2},
+    {110, 2}, // signed /256 ×2
+    {111, 2}, // signed ×0.5
+    {118, 2}, // signed BE ×0.01
+    {151, 2},
+    {152, 2}, // unsigned raw
+    {161, 2}, // unsigned ×0.5 — CT current
+    {164, 2}, // unsigned BE ×5.0 — fan speed
+    {405, 2}, // pressure -> saturation temperature
     // 1-byte numeric fields used by the production catalog. These converters intentionally accept
     // width 1 (logic/registers.hpp reads data[0]); omitting them made the default sweep miss real
     // rows such as O/U capacity (105) and CT current (161).
-    {105, 1}, {101, 1}, {152, 1}, {161, 1},
+    {105, 1},
+    {101, 1},
+    {152, 1},
+    {161, 1},
+    {164, 1},
+    {312, 1},
     // 1-byte fields: the raw byte, then the readings that mask or index it.
-    {211, 1}, {219, 1}, {214, 1}, {215, 1},   // data[0] verbatim (aliases of each other)
-    {310, 1}, {311, 1},                       // 3-bit windows, bits 4-6 and 0-2
-    {217, 1}, {203, 1}, {204, 1}, {315, 1}, {316, 1},   // enum / error-code labels
-    {300, 1}, {301, 1}, {302, 1}, {303, 1},
-    {304, 1}, {305, 1}, {306, 1}, {307, 1},   // bit flags, bit 0..7
+    {211, 1},
+    {219, 1},
+    {214, 1},
+    {215, 1},
+    {200, 1}, // data[0] verbatim (aliases of each other)
+    {310, 1},
+    {311, 1}, // 3-bit windows, bits 4-6 and 0-2
+    {217, 1},
+    {201, 1},
+    {203, 1},
+    {204, 1},
+    {315, 1},
+    {316, 1}, // enum / error-code labels
+    {300, 1},
+    {301, 1},
+    {302, 1},
+    {303, 1},
+    {304, 1},
+    {305, 1},
+    {306, 1},
+    {307, 1}, // bit flags, bit 0..7
 };
 
 inline constexpr int PROBE_CANDIDATE_COUNT =
     static_cast<int>(sizeof(PROBE_CANDIDATES) / sizeof(PROBE_CANDIDATES[0]));
 
 // How many candidates one field width offers. Every candidate ends up in exactly one row — either
-// naming it or merged into it as an alias — so this one number bounds BOTH the row count (nothing
-// merged) and any single row's alias list (everything merged into one).
+// naming it or merged into it as an alias — so this one number bounds the row count (nothing
+// merged).
 inline constexpr int probe_candidate_count_for(uint8_t size) {
     int n = 0;
     for (int i = 0; i < PROBE_CANDIDATE_COUNT; i++)
@@ -281,7 +312,7 @@ inline constexpr bool probe_candidate_offered(int conv, uint8_t size) {
 inline constexpr int PROBE_MAX_DECODES =
     probe_candidate_count_for(1) > probe_candidate_count_for(2) ? probe_candidate_count_for(1)
                                                                 : probe_candidate_count_for(2);
-inline constexpr int PROBE_MAX_ALIASES = PROBE_MAX_DECODES - 1;
+inline constexpr int PROBE_MAX_ALIASES = 12;
 
 // The sweep's whole output is ONE stack array in the HTTP handler, on the task with the deepest
 // call chain in the firmware (16 KB; the bounded status path remains its largest consumer — see

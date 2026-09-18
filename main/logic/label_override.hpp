@@ -8,10 +8,10 @@
 // generator lives outside this repo, and a correction that lived in a generated table would be lost
 // on the next generator run. So the verdict lives here, in logic/, IDF-free, keyed on the row's
 // structural identity and carrying its evidence beside the rule — where the CI logic test can
-// assert it against the real 45-profile catalog.
+// assert it against the real 46-profile catalog.
 //
-// It is separate from conv_override.hpp on purpose — the two answer different questions and apply to
-// different fields of the same row:
+// It is separate from conv_override.hpp on purpose — the two answer different questions and apply
+// to different fields of the same row:
 //
 //   conv_override.hpp   is the row being DECODED with the right converter?  (verdict: decode it
 //                       differently, and then it IS the right value)
@@ -22,13 +22,14 @@
 // suffix (logic/discovery.hpp row_object_id/object_id), so the word inside it is a PUBLISHED CLAIM
 // about the quantity — test_metric_identity() (#217) and test_tie_break_identity() (#230 B) both
 // gate on it. That is also why a rename is a MIGRATION, not a free edit: it retires the old series
-// and starts the new one at zero (mqtt_ha.cpp's retract_relabeled_values deletes the stale HA entity
-// on upgrade; a VictoriaMetrics series cannot be carried across a rename by any firmware action).
+// and starts the new one at zero (mqtt_ha.cpp's retract_relabeled_values deletes the stale HA
+// entity on upgrade; a VictoriaMetrics series cannot be carried across a rename by any firmware
+// action).
 //
 // EVIDENTIARY BAR — the oracle here is docs/REGISTERS.md, exactly as it is for the domain audit's
 // LABEL-UNIT check. A rule needs the spec (or an on-record catalog fact), never a spelling that
-// merely reads nicer. This is a weaker claim than a conv_override — it changes the field's NAME, not
-// its decoded value — but it is still a claim about the wire, so it is keyed the same way.
+// merely reads nicer. This is a weaker claim than a conv_override — it changes the field's NAME,
+// not its decoded value — but it is still a claim about the wire, so it is keyed the same way.
 //
 // ── The one entry: Fan 1 step (0x30/1, conv 211), "Fan 1 (10 rpm)" -> "Fan 1 (step)" ─────────────
 //

@@ -98,15 +98,16 @@ The board the compile-time pin defaults are written for, so it needs no pin conf
 ## Bi-Zone modules and the X12A port
 
 On installations equipped with a Daikin Bi-Zone kit (such as EKMIK / EKMIKC) or secondary mixing PCB,
-the unit's `X10A` port on the main controller board is often already occupied by the internal wiring harness
+the unit's `X10A` port on the main controller board may be occupied by the internal wiring harness
 connecting the bi-zone expansion module.
 
-In this scenario:
-- The bi-zone module PCB exposes an identical secondary service port labeled **`X12A`**.
-- `X12A` uses the exact same **JST-EH 2.5 mm 5-pin** connector and identical pinout as `X10A`:
-  `Pin 1: +5 V`, `Pin 2: HP-TX`, `Pin 3: HP-RX`, `Pin 4: NC`, `Pin 5: GND`.
-- Connect the ESP32 to `X12A` on the bi-zone board using the same cable assembly, pin assignments, and voltage/level-shifting rules described above.
-- Communication protocol, register polling, and telemetry operate identically over `X12A`.
+In this scenario, community field reports describe connecting via the secondary port labeled **`X12A`** on the bi-zone module PCB:
+- `X12A` uses a matching **JST-EH 2.5 mm 5-pin** connector.
+- Community observations report the pinout mirrors `X10A` (`Pin 1: +5 V`, `Pin 2: HP-TX`, `Pin 3: HP-RX`, `Pin 4: NC`, `Pin 5: GND`). However, this pinout remains **unconfirmed by official Daikin service schematics** across all PCB revisions.
+- Communication framing, register polling, and telemetry operate over the same serial bus.
+
+> [!WARNING]
+> Because the `X12A` pinout is an unconfirmed field observation, **always verify pin voltages and polarity with a digital multimeter** before connecting the ESP32. Confirm that Pin 1 is +5 V and Pin 5 is GND. Connecting +5 V to a 3.3 V signal line or reversing power will permanently damage the microcontroller.
 
 ## Picking pins on a different board
 

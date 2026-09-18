@@ -227,6 +227,7 @@ async function ensureHistPair(id) {
     hasHist(id) ? ensureHist(id) : null,
     hasModbusHist(id) ? ensureHist(id, "modbus") : null,
     hasEnv3Hist(id) ? ensureHist(id, "env3") : null,
+    id === "dhw_tank" ? ensureHist("smart_grid_mode") : null,
     id === "dhw_tank" ? ensureHist("smart_grid_mode", "modbus") : null,
     id === "dhw_tank" ? ensureHist("bsh_state") : null,
     id === "dhw_tank" ? ensureHist("bsh_state", "modbus") : null,
@@ -904,7 +905,7 @@ function dhwAuxPhases(view) {
 
   for (let i = 0; i < n; i++) {
     const vSg = alignAuxSample(view, sgM, i) ?? alignAuxSample(view, sgX, i);
-    if (vSg != null && (vSg === 20 || vSg === 30)) {
+    if (vSg != null && vSg === 20) {
       boost[i] = true;
       boostCount++;
     }

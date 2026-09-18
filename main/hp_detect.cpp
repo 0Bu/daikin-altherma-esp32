@@ -187,7 +187,7 @@ DetectResult hp_detect_run() {
         const int     paylen =
             read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries);
         if (paylen < 0) {
-            if (paylen != -2 && reg != 0x11 && reg != 0x56) probe_transport_errors++;
+            if (paylen == -3 && reg != 0x11 && reg != 0x56) probe_transport_errors++;
             continue;
         }
         if (reg == 0x11) {

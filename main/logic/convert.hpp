@@ -437,7 +437,7 @@ inline constexpr double TEMP_MAX_C = 200.0;
 // profiles are regenerated. Two independent structural signals, either of which is sufficient:
 //
 //  1. The PAGE. 0x20/0x21 (outdoor sensors + inverter) and 0xA0/0xA1 (the second outdoor unit) are
-//     the outdoor unit's own pages — there is no water circuit out there. Measured across all 45
+//     the outdoor unit's own pages — there is no water circuit out there. Measured across all 46
 //     shipped profiles: every dataType-2 row on 0x20 and 0xA0 is a refrigerant pressure (High/Low
 //     Pressure, "Pressure", "Pressure sensor") and NOT ONE water-pressure row appears on either.
 //     0x21/0xA1 carry no bar row today and are included because the same physical argument covers
@@ -533,11 +533,12 @@ inline double value_for_publication(int dataType, double value) {
     return dataType == 2 ? value * 0.980665 : value;
 }
 
-// Decimal places for a numeric converter's display/publish string. conv 118 is a signed ×0.01 value
-// (two decimals); the ×0.1 / ÷256 / ×0.5 scaled families (103-119, 161, 405) keep one; everything
-// else is an integer. Kept here (not in the device .cpp) so the precision policy is host-tested.
+// Decimal places for a numeric converter's display/publish string. conv 118 (signed ×0.01) and
+// 312 (1/16 K steps) keep two decimals; the ×0.1 / ÷256 / ×0.5 scaled families (103-119, 161, 405)
+// keep one; everything else is an integer. Kept here (not in the device .cpp) so the precision
+// policy is host-tested.
 inline int display_decimals(int conv) {
-    if (conv == 118) return 2;
+    if (conv == 118 || conv == 312) return 2;
     if ((conv >= 103 && conv <= 119) || conv == 161 || conv == 405) return 1;
     return 0;
 }

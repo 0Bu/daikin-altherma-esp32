@@ -19,12 +19,13 @@
 // or structural trap.
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
-#include "logic/conv_override.hpp"   // adjudicated() — the row AS PUBLISHED, label override included
+#include "logic/conv_override.hpp" // adjudicated() — the row AS PUBLISHED, label override included
 #include "logic/cop_scope.hpp"
 #include "logic/label_override.hpp"
 #include "logic/lwt_select.hpp"
 #include "logic/ou_stale.hpp"
 #include "logic/profile_view.hpp"
+#include "logic/rwt_select.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -53,36 +54,44 @@ void require_clean(const std::string& label) {
 
 void emit_row(const std::string& label, unsigned reg) {
     require_clean(label);
-    std::printf("ROW\t%s\t%u\t%d\t%d\t%d\t%d\n",
-                label.c_str(), reg,
-                lwt_is_pre_buh(label.c_str())        ? 1 : 0,
-                lwt_is_measurement(label.c_str())    ? 1 : 0,
-                cop_is_post_buh(label.c_str(), reg)  ? 1 : 0,
-                ou_page_holds_over(reg)              ? 1 : 0);
+    std::printf("ROW\t%s\t%u\t%d\t%d\t%d\t%d\t%d\t%d\n", label.c_str(), reg,
+                lwt_is_pre_buh(label.c_str()) ? 1 : 0, lwt_is_measurement(label.c_str()) ? 1 : 0,
+                rwt_is_r4t(label.c_str()) ? 1 : 0, rwt_is_measurement(label.c_str()) ? 1 : 0,
+                cop_is_post_buh(label.c_str(), reg) ? 1 : 0, ou_page_holds_over(reg) ? 1 : 0);
 }
 
 const char* scope_name(CopScope s) {
     switch (s) {
-        case CopScope::HeatPump: return "hp";
-        case CopScope::Plant:    return "plant";
-        default:                 return "null";
+    case CopScope::HeatPump:
+        return "hp";
+    case CopScope::Plant:
+        return "plant";
+    default:
+        return "null";
     }
 }
 
 const char* block_name(CopBlock b) {
     switch (b) {
-        case CopBlock::NoPelSource:  return "no_pel";
-        case CopBlock::BuhNoPostBuh: return "buh_no_r2t";
-        case CopBlock::TankHeater:   return "tank_heater";
-        default:                     return "null";
+    case CopBlock::NoPelSource:
+        return "no_pel";
+    case CopBlock::BuhNoPostBuh:
+        return "buh_no_r2t";
+    case CopBlock::TankHeater:
+        return "tank_heater";
+    default:
+        return "null";
     }
 }
 
 const char* pel_name(PelSource p) {
     switch (p) {
-        case PelSource::Ct:  return "CT";
-        case PelSource::Inv: return "INV";
-        default:             return "null";
+    case PelSource::Ct:
+        return "CT";
+    case PelSource::Inv:
+        return "INV";
+    default:
+        return "null";
     }
 }
 
@@ -100,8 +109,8 @@ void emit_pick(const char* id, const std::vector<std::pair<std::string, unsigned
         labels.push_back(r.first.c_str());
         regs.push_back(r.second);
     }
-    std::printf("PICKANS\t%s\t%d\t%d\n", id,
-                lwt_select(labels.data(), labels.size()),
+    std::printf("PICKANS\t%s\t%d\t%d\t%d\n", id, lwt_select(labels.data(), labels.size()),
+                rwt_select(labels.data(), labels.size()),
                 cop_post_buh_select(labels.data(), regs.data(), labels.size()));
 }
 
@@ -112,8 +121,8 @@ int main() {
 
     // ── The catalog's own (label, register) pairs ──────────────────────────────────────────────
     // Through adjudicated(), because that is the label the browser is handed: a row whose published
-    // identity logic/label_override.hpp corrects must be judged under the corrected spelling, or the
-    // gate would compare the two copies on a string neither of them ever sees.
+    // identity logic/label_override.hpp corrects must be judged under the corrected spelling, or
+    // the gate would compare the two copies on a string neither of them ever sees.
     std::set<std::pair<std::string, unsigned>> seen;
     for (const auto& p : def::profiles) {
         const auto v = def::resolved(p);
@@ -129,7 +138,8 @@ int main() {
     // corpus going to nothing — a changed accessor, an empty registry — because a parity gate over
     // zero rows passes with the loudest possible green.
     if (seen.size() < 150) {
-        std::fprintf(stderr, "presenter_golden_dump: only %zu catalog rows — the corpus collapsed\n",
+        std::fprintf(stderr,
+                     "presenter_golden_dump: only %zu catalog rows — the corpus collapsed\n",
                      seen.size());
         return 2;
     }
@@ -139,39 +149,45 @@ int main() {
     // that shares its offset and converter with the hydronic outlet, the setpoint that must never
     // stand in for a measurement, and the four post-BUH spellings the catalog actually ships.
     static const std::pair<const char*, unsigned> kSynthetic[] = {
-        {"LEAVING WATER TEMP. BEFORE BUH (R1T)",              0x61},
-        {"leaving water temp. before buh (r1t)",              0x61},
-        {"Leaving  Water  Temp.  before  BUH  (R1T)",         0x61},  // the double-space spelling
-        {"Leaving water temp. mixed zone (R1T)",              0x61},  // EKMIK bizone — must NOT win
-        {"LW setpoint (main)",                                0x61},
-        {"Leaving water temp. setpoint before BUH (R1T)",     0x61},
-        {"Leaving water temp. after BUH (R2T)",               0x61},
-        {"Leaving Water Temp  after BUH (R2T)",               0x61},
+        {"LEAVING WATER TEMP. BEFORE BUH (R1T)", 0x61},
+        {"leaving water temp. before buh (r1t)", 0x61},
+        {"Leaving  Water  Temp.  before  BUH  (R1T)", 0x61}, // the double-space spelling
+        {"Leaving water temp. mixed zone (R1T)", 0x61},      // EKMIK bizone — must NOT win
+        {"LW setpoint (main)", 0x61},
+        {"Leaving water temp. setpoint before BUH (R1T)", 0x61},
+        {"Leaving water temp. after BUH (R2T)", 0x61},
+        {"Leaving Water Temp  after BUH (R2T)", 0x61},
         // The post-BUH reject tokens WITHOUT the (R2T) tag. Every post-BUH row the catalog ships
         // today carries both, so "after buh"/"after buffer" are redundant against "r2t" on the real
         // corpus and a copy that dropped them would diverge nowhere — measured, not assumed: the
         // selftest's mutation of those tokens passed until these two labels existed. They are what
         // the tokens are actually for, since a generator run may spell either half on its own.
-        {"Leaving water temp. after BUH",                     0x61},
-        {"Outlet water temp. after Buffer/BUH",               0x61},
-        {"Outlet Water BUH Temp. (R2T)",                      0x61},
-        {"[HPSU] Tvbh inflow Temp after Buffer/BUH (R2T)",    0x61},
-        {"[HPSU] Tv inflow Temp  (R1T)",                      0x61},
-        {"Outlet Water Heat Exch. Temp. (R1T)",               0x61},
-        {"Leaving water temp. after PHE (R1T)",               0x61},
-        {"Discharge pipe temp.(R2T)",                         0x20},  // held-over page, NOT water
-        {"Leaving water temp. after BUH (R2T)",               0x20},  // water tokens on a dead page
-        {"Leaving water temp. after BUH (R2T)",               0x21},
-        {"O/U Heat Exch. Temp.(R4T)",                         0x20},
-        {"Outdoor heat exchanger temp.",                      0x20},
-        {"Outdoor Air Temp. (R1T)",                           0x20},  // (R1T) on the OUTDOOR sensor
-        {"INV frequency (rps)",                               0x30},
-        {"INV frequency (rps)",                               0x21},  // witness on a frozen page
-        {"Inlet water temp. (R4T)",                           0x61},
-        {"",                                                  0x61},
-        {"r1t",                                               0x61},  // tag alone is not water
-        {"leaving water",                                     0x61},  // water alone, no tag
-        {"Leaving water temp. before BUH (R1T)",              0x62},
+        {"Leaving water temp. after BUH", 0x61},
+        {"Outlet water temp. after Buffer/BUH", 0x61},
+        {"Outlet Water BUH Temp. (R2T)", 0x61},
+        {"[HPSU] Tvbh inflow Temp after Buffer/BUH (R2T)", 0x61},
+        {"[HPSU] Tv inflow Temp  (R1T)", 0x61},
+        {"Outlet Water Heat Exch. Temp. (R1T)", 0x61},
+        {"Leaving water temp. after PHE (R1T)", 0x61},
+        {"Discharge pipe temp.(R2T)", 0x20},           // held-over page, NOT water
+        {"Leaving water temp. after BUH (R2T)", 0x20}, // water tokens on a dead page
+        {"Leaving water temp. after BUH (R2T)", 0x21},
+        {"O/U Heat Exch. Temp.(R4T)", 0x20},
+        {"Outdoor heat exchanger temp.", 0x20},
+        {"Outdoor Air Temp. (R1T)", 0x20}, // (R1T) on the OUTDOOR sensor
+        {"INV frequency (rps)", 0x30},
+        {"INV frequency (rps)", 0x21}, // witness on a frozen page
+        {"Inlet water temp. (R4T)", 0x61},
+        {"(Raw data)Water heat exchanger inlet temp.", 0xA1},
+        {"Water heat exchanger inlet temp.", 0x61},
+        {"Return Water Temp before PHE (R4T)", 0x61},
+        {"[HPSU] Tr return Temp (R4T)", 0x61},
+        {"Brine inlet temp.", 0x21},
+        {"2 phase thermistor (R4T)", 0x20},
+        {"", 0x61},
+        {"r1t", 0x61},           // tag alone is not water
+        {"leaving water", 0x61}, // water alone, no tag
+        {"Leaving water temp. before BUH (R1T)", 0x62},
     };
     for (const auto& s : kSynthetic) emit_row(std::string(s.first), s.second);
 
@@ -179,11 +195,11 @@ int main() {
     emit_pick("empty", {});
     emit_pick("none", {{"Inlet water temp. (R4T)", 0x61}, {"Water pressure", 0x61}});
     // Tier 2 appears FIRST in the list and tier 1 second: the tier must win, not the position.
-    emit_pick("tier2_before_tier1", {{"Outlet water temp.", 0x61},
-                                     {"Leaving water temp. before BUH (R1T)", 0x61}});
+    emit_pick("tier2_before_tier1",
+              {{"Outlet water temp.", 0x61}, {"Leaving water temp. before BUH (R1T)", 0x61}});
     // Only a setpoint and a mixed-zone row: blank is the right answer, never a substitute.
-    emit_pick("reject_only", {{"LW setpoint (main)", 0x61},
-                              {"Leaving water temp. mixed zone (R1T)", 0x61}});
+    emit_pick("reject_only",
+              {{"LW setpoint (main)", 0x61}, {"Leaving water temp. mixed zone (R1T)", 0x61}});
     // Two tier-1 rows: first wins, deterministically.
     emit_pick("two_tier1", {{"Outlet Water Heat Exch. Temp. (R1T)", 0x61},
                             {"Leaving water temp. before BUH (R1T)", 0x61}});
@@ -192,6 +208,11 @@ int main() {
                                      {"Leaving water temp. before BUH (R1T)", 0x61},
                                      {"Leaving water temp. after BUH (R2T)", 0x61}});
     emit_pick("postbuh_none", {{"Leaving water temp. before BUH (R1T)", 0x61}});
+    // RWT: 0xA1 raw data must never beat R4T, even when 0xA1 sorts first
+    emit_pick("rwt_tier1_over_0xA1", {{"(Raw data)Water heat exchanger inlet temp.", 0xA1},
+                                      {"Inlet water temp.(R4T)", 0x61}});
+    emit_pick("rwt_tier1_over_tier2",
+              {{"Water heat exchanger inlet temp.", 0x61}, {"Inlet water temp.(R4T)", 0x61}});
 
     // ── The COP scope rule, exhaustively ───────────────────────────────────────────────────────
     // 3 electrical sources x 9 backup-heater step pairs x 3 tank-heater states x post-BUH row or
@@ -200,25 +221,24 @@ int main() {
     // The two heater STEPS are enumerated as raw tri-states (-1 unknown / 0 off / 1 on) rather than
     // as the (known, on) pair cop_plan() takes, and the collapse to that pair is done HERE. That is
     // the point rather than an implementation detail: "UNKNOWN is not OFF" is the rule's most
-    // dangerous step, off is its permissive branch, and a collapse performed on only one side of the
-    // comparison is a step the gate cannot see. Measured — while the browser did this in its
+    // dangerous step, off is its permissive branch, and a collapse performed on only one side of
+    // the comparison is a step the gate cannot see. Measured — while the browser did this in its
     // caller, a copy that read an unknown tank heater as off passed this gate.
     static const PelSource kPel[] = {PelSource::None, PelSource::Ct, PelSource::Inv};
-    static const int kTri[] = {-1, 0, 1};
+    static const int       kTri[] = {-1, 0, 1};
     for (PelSource pel : kPel)
         for (int b1 : kTri)
             for (int b2 : kTri)
                 for (int s : kTri)
                     for (int pb = 0; pb < 2; pb++) {
-                        const bool buh_on    = (b1 == 1) || (b2 == 1);
+                        const bool    buh_on    = (b1 == 1) || (b2 == 1);
                         const bool    buh_known = buh_on || ((b1 != -1) && (b2 != -1));
-                        const bool bsh_known = s != -1;
-                        const bool bsh_on    = s == 1;
-                        const CopPlan plan = cop_plan(pel, buh_known, buh_on,
-                                                      bsh_known, bsh_on, pb != 0);
-                        std::printf("COP\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%d\n",
-                                    pel_name(pel), b1, b2, s, pb,
-                                    scope_name(plan.scope), block_name(plan.block),
+                        const bool    bsh_known = s != -1;
+                        const bool    bsh_on    = s == 1;
+                        const CopPlan plan =
+                            cop_plan(pel, buh_known, buh_on, bsh_known, bsh_on, pb != 0);
+                        std::printf("COP\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%d\n", pel_name(pel), b1, b2,
+                                    s, pb, scope_name(plan.scope), block_name(plan.block),
                                     plan.use_post_buh ? 1 : 0);
                     }
     return 0;

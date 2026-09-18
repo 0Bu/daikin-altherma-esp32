@@ -732,7 +732,10 @@ assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), [457]);
 
 // DHW tank (R5T) single integrated chart: Smart-Grid Boost and Heizstab (BSH) phases
 // are drawn directly into the temperature chart and displayed in the tooltip and legend.
-S.status.history.rows = [{ id: "dhw_tank", label: "Domestic Hot Water temperature" }];
+S.status.history.rows = [
+  { id: "dhw_tank", label: "Domestic Hot Water temperature" },
+  { id: "smart_grid_mode", label: "Smart Grid operation mode" },
+];
 S.status.history.modbus_rows = [
   { id: "dhw_tank", label: "Domestic Hot Water temperature" },
   { id: "smart_grid_mode", label: "Smart Grid operation mode" },
@@ -762,10 +765,13 @@ assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without ac
 fetchedUrls = [];
 S.hist.delete("dhw_tank");
 S.hist.delete("modbus:dhw_tank");
+S.hist.delete("smart_grid_mode");
 S.hist.delete("modbus:smart_grid_mode");
 S.hist.delete("bsh_state");
 S.hist.delete("modbus:bsh_state");
 await h.ensureHistPair("dhw_tank");
+assert.ok(fetchedUrls.includes("/history?row=smart_grid_mode"),
+  "ensureHistPair(dhw_tank) must request x10a smart_grid_mode");
 assert.ok(fetchedUrls.includes("/history?row=smart_grid_mode&source=modbus"),
   "ensureHistPair(dhw_tank) must request smart_grid_mode");
 assert.ok(fetchedUrls.includes("/history?row=bsh_state&source=modbus"),
