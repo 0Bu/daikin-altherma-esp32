@@ -5547,38 +5547,47 @@ static void test_altherma4() {
     CHECK(std::string(homehub_enum_id(r65->kind)) == "smart_grid_mode");
 
     const HomeHubReg* r66 = altherma4_find(66);
-    CHECK(r66 && r66->space == MbFunc::ReadInput && r66->type == MbType::Int16 && std::string(r66->unit) == "%");
+    CHECK(r66 && r66->space == MbFunc::ReadInput && r66->type == MbType::Int16 &&
+          std::string(r66->unit) == "%");
 
     const HomeHubReg* r67 = altherma4_find(67);
-    CHECK(r67 && r67->space == MbFunc::ReadInput && r67->type == MbType::Int16 && std::string(r67->unit) == "%");
+    CHECK(r67 && r67->space == MbFunc::ReadInput && r67->type == MbType::Int16 &&
+          std::string(r67->unit) == "%");
 
     const HomeHubReg* r68 = altherma4_find(68);
-    CHECK(r68 && r68->space == MbFunc::ReadInput && r68->type == MbType::Int16 && std::string(r68->unit) == "%");
+    CHECK(r68 && r68->space == MbFunc::ReadInput && r68->type == MbType::Int16 &&
+          std::string(r68->unit) == "%");
 
     const HomeHubReg* r74 = altherma4_find(74);
-    CHECK(r74 && r74->space == MbFunc::ReadInput && r74->type == MbType::Temp16 && std::string(r74->unit) == "°C");
+    CHECK(r74 && r74->space == MbFunc::ReadInput && r74->type == MbType::Temp16 &&
+          std::string(r74->unit) == "°C");
 
     const HomeHubReg* r75 = altherma4_find(75);
-    CHECK(r75 && r75->space == MbFunc::ReadInput && r75->type == MbType::Temp16 && std::string(r75->unit) == "°C");
+    CHECK(r75 && r75->space == MbFunc::ReadInput && r75->type == MbType::Temp16 &&
+          std::string(r75->unit) == "°C");
 
     const HomeHubReg* r76 = altherma4_find(76);
-    CHECK(r76 && r76->space == MbFunc::ReadInput && r76->type == MbType::Temp16 && std::string(r76->unit) == "°C");
+    CHECK(r76 && r76->space == MbFunc::ReadInput && r76->type == MbType::Temp16 &&
+          std::string(r76->unit) == "°C");
 
     const HomeHubReg* r77 = altherma4_find(77);
-    CHECK(r77 && r77->space == MbFunc::ReadInput && r77->type == MbType::Temp16 && std::string(r77->unit) == "°C");
+    CHECK(r77 && r77->space == MbFunc::ReadInput && r77->type == MbType::Temp16 &&
+          std::string(r77->unit) == "°C");
 
     const HomeHubReg* r79 = altherma4_find(79);
-    CHECK(r79 && r79->space == MbFunc::ReadInput && r79->type == MbType::Int16 && r79->scale == 100 && std::string(r79->unit) == "bar");
+    CHECK(r79 && r79->space == MbFunc::ReadInput && r79->type == MbType::Int16 &&
+          r79->scale == 100 && std::string(r79->unit) == "bar");
 
     const HomeHubReg* r80 = altherma4_find(80);
-    CHECK(r80 && r80->space == MbFunc::ReadInput && r80->type == MbType::Temp16 && std::string(r80->unit) == "°C");
+    CHECK(r80 && r80->space == MbFunc::ReadInput && r80->type == MbType::Temp16 &&
+          std::string(r80->unit) == "°C");
 
     const HomeHubReg* r83 = altherma4_find(83);
     CHECK(r83 && r83->space == MbFunc::ReadInput && r83->kind == HomeHubValueKind::OperationMode);
     CHECK(std::string(homehub_enum_id(r83->kind)) == "operation_mode");
 
     // Water pressure decode and 2-decimal formatting (%.2f bar)
-    char buf[32];
+    char    buf[32];
     MbValue val;
     CHECK(homehub_decode(*r79, 185, val) && approx(val.value, 1.85));
     CHECK(homehub_format(*r79, 185, buf, sizeof(buf)) && std::string(buf) == "1.85");
@@ -5600,7 +5609,8 @@ static void test_altherma4() {
     // Negative pressure (signed int16)
     CHECK(homehub_format_pressure(-0.5, buf, sizeof(buf), true) && std::string(buf) == "-0.50 bar");
     CHECK(homehub_decode(*r79, static_cast<uint16_t>(-50), val) && approx(val.value, -0.5));
-    CHECK(homehub_format(*r79, static_cast<uint16_t>(-50), buf, sizeof(buf)) && std::string(buf) == "-0.50");
+    CHECK(homehub_format(*r79, static_cast<uint16_t>(-50), buf, sizeof(buf)) &&
+          std::string(buf) == "-0.50");
 
     // Special value handling on register 79
     CHECK(!homehub_decode(*r79, MB_UNAVAILABLE, val));
@@ -5631,14 +5641,17 @@ static void test_altherma4() {
 
     // Negative temperature decoding on extended registers (e.g. outdoor leaving water at -5.5 °C)
     CHECK(homehub_decode(*r74, static_cast<uint16_t>(-550), val) && approx(val.value, -5.5));
-    CHECK(homehub_format(*r74, static_cast<uint16_t>(-550), buf, sizeof(buf)) && std::string(buf) == "-5.5");
+    CHECK(homehub_format(*r74, static_cast<uint16_t>(-550), buf, sizeof(buf)) &&
+          std::string(buf) == "-5.5");
 
     // homehub_find resolves Altherma 4 registers seamlessly
     CHECK(homehub_find(79) == altherma4_find(79));
     CHECK(homehub_find(79) != nullptr);
     CHECK(std::string(homehub_find(79)->label) == "Water pressure");
-    CHECK(homehub_find(65) != nullptr && std::string(homehub_find(65)->label) == "Demand response mode");
-    CHECK(homehub_find(43) != nullptr && std::string(homehub_find(43)->label) == "Domestic Hot Water temperature");
+    CHECK(homehub_find(65) != nullptr &&
+          std::string(homehub_find(65)->label) == "Demand response mode");
+    CHECK(homehub_find(43) != nullptr &&
+          std::string(homehub_find(43)->label) == "Domestic Hot Water temperature");
     CHECK(homehub_find(999) == nullptr);
 
     // Pairing / concept for offset 79 -> water_pressure
@@ -5647,7 +5660,8 @@ static void test_altherma4() {
     CHECK(trend_wp != nullptr);
     CHECK(trend_wp->reg == 0x62 && trend_wp->off == 11);
 
-    // Non-paired extended registers return nullptr for concept (they are honest Modbus-only readings)
+    // Non-paired extended registers return nullptr for concept (they are honest Modbus-only
+    // readings)
     const uint16_t non_paired_ext[] = {65, 66, 67, 68, 74, 75, 76, 77, 80, 83};
     for (uint16_t off : non_paired_ext) {
         CHECK(homehub_concept_for(off) == nullptr);
@@ -5668,7 +5682,8 @@ static void test_altherma4() {
         offsets[i] = ALTHERMA4_REGS[i].offset;
     }
     CHECK(mb_plan_order(spaces, offsets, ALTHERMA4_REG_COUNT, order));
-    int bcount = mb_plan_build(spaces, offsets, ALTHERMA4_REG_COUNT, order, batch, ALTHERMA4_REG_COUNT);
+    int bcount =
+        mb_plan_build(spaces, offsets, ALTHERMA4_REG_COUNT, order, batch, ALTHERMA4_REG_COUNT);
     CHECK(bcount == 14);
     CHECK(bcount * 3 <= ALTHERMA4_REG_COUNT);
 
