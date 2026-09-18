@@ -86,8 +86,8 @@ static uint32_t    s_cycle_tick = 0;
 // per-cycle because the usual cause is permanent for this hub configuration (a register the unit
 // does not implement); re-probing it as a batch every cycle would pay the exception forever and
 // still fall back. Cleared on reconnect: a different hub, or the same hub reconfigured, deserves the
-// cheap plan again.
-static bool        s_batch_split[def::HOMEHUB_REG_COUNT] = {false};
+static bool                       s_batch_split[def::ALTHERMA4_REG_COUNT] = {false};
+static std::atomic<ModbusProfile> s_active_profile{ModbusProfile::Auto};
 
 // ── The value cache — this stack's own, deliberately NOT hp_poll's ──────────────────────────────
 // Two independent sources need two caches: sharing one would mean a dead X10A bus wipes the HomeHub
@@ -163,7 +163,9 @@ using Lock = SemGuard;
 ModbusStatus mb_status() {
     if (!s_mtx) return ModbusStatus{};
     Lock lk(s_mtx);
-    return s_status;
+    ModbusStatus s = s_status;
+    s.profile = s_active_profile.load(std::memory_order_acquire);
+    return s;
 }
 
 // ── Status writers. Strings are built BY THE CALLER and swapped in (noexcept) so nothing allocates
@@ -249,6 +251,7 @@ static bool status_socket_open(std::string host, int port, int unit,
     // single reads is forgotten, because the reason for it (a register this hub does not implement)
     // is a property of the peer we may have just stopped talking to.
     s_cycle_tick = 0;
+    s_active_profile.store(ModbusProfile::Auto, std::memory_order_release);
     for (bool& split : s_batch_split) split = false;
     Lock lk(s_mtx);
     if (s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
@@ -258,6 +261,7 @@ static bool status_socket_open(std::string host, int port, int unit,
     s_status.unit_id     = unit;
     s_status.connected   = false;
     s_status.discovering = false;
+    s_status.profile     = ModbusProfile::Auto;
     if (++s_link_generation == 0) ++s_link_generation;  // zero stays the "no session" sentinel
     return true;
 }
@@ -739,37 +743,40 @@ static std::string failure_message(const MbFailure& f) {
 // matters more — its shape is asserted HERE, where it is used, rather than checked at runtime by
 // code that would have no useful answer if the check failed.
 namespace {
-struct MbPlan {
-    uint8_t          order[def::HOMEHUB_REG_COUNT] = {};
-    logic::MbBatch   batch[def::HOMEHUB_REG_COUNT] = {};
-    int              count = 0;
-    bool             ok    = false;
+template <size_t N>
+struct MbPlanT {
+    uint8_t        order[N] = {};
+    logic::MbBatch batch[N] = {};
+    int            count    = 0;
+    bool           ok       = false;
 };
 
-constexpr MbPlan mb_plan_make() {
-    MbPlan p;
-    MbFunc   spaces[def::HOMEHUB_REG_COUNT]  = {};
-    uint16_t offsets[def::HOMEHUB_REG_COUNT] = {};
-    for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++) {
-        spaces[i]  = def::HOMEHUB_REGS[i].space;
-        offsets[i] = def::HOMEHUB_REGS[i].offset;
+template <size_t N>
+constexpr MbPlanT<N> mb_plan_make_from(const def::HomeHubReg (&regs)[N]) {
+    MbPlanT<N> p;
+    MbFunc   spaces[N]  = {};
+    uint16_t offsets[N] = {};
+    for (size_t i = 0; i < N; i++) {
+        spaces[i]  = regs[i].space;
+        offsets[i] = regs[i].offset;
     }
-    p.ok = logic::mb_plan_order(spaces, offsets, def::HOMEHUB_REG_COUNT, p.order);
+    p.ok = logic::mb_plan_order(spaces, offsets, static_cast<int>(N), p.order);
     if (!p.ok) return p;
-    p.count = logic::mb_plan_build(spaces, offsets, def::HOMEHUB_REG_COUNT, p.order, p.batch,
-                                   def::HOMEHUB_REG_COUNT);
+    p.count = logic::mb_plan_build(spaces, offsets, static_cast<int>(N), p.order, p.batch,
+                                   static_cast<int>(N));
     p.ok = p.count > 0;
     return p;
 }
-constexpr MbPlan MB_PLAN = mb_plan_make();
 
-// A duplicated (space, offset) would hand one reply word to two rows and shift every row after it —
-// so the plan is not merely unusable, it would be quietly WRONG. Refuse to build.
+constexpr auto MB_PLAN = mb_plan_make_from<def::HOMEHUB_REG_COUNT>(def::HOMEHUB_REGS);
 static_assert(MB_PLAN.ok, "HomeHub register table does not yield a usable read plan");
-// The saving, asserted rather than remembered: the map is read in far fewer requests than it has
-// registers. A future register added into a gap will move this number and should be noticed.
 static_assert(MB_PLAN.count * 3 <= def::HOMEHUB_REG_COUNT,
               "batching no longer collapses the HomeHub map — re-check the register offsets");
+
+constexpr auto MB_PLAN_ALTHERMA4 = mb_plan_make_from<def::ALTHERMA4_REG_COUNT>(def::ALTHERMA4_REGS);
+static_assert(MB_PLAN_ALTHERMA4.ok, "Altherma 4 register table does not yield a usable read plan");
+static_assert(MB_PLAN_ALTHERMA4.count * 3 <= def::ALTHERMA4_REG_COUNT,
+              "batching no longer collapses the Altherma 4 map — re-check the register offsets");
 } // namespace
 
 // ── One poll cycle ───────────────────────────────────────────────────────────────────────────────
@@ -847,7 +854,7 @@ static void mb_poll_once() {
     const bool full = logic::mb_cycle_is_full(s_cycle_tick);
 
     std::vector<CachedValue> fresh;
-    if (full) fresh.reserve(def::HOMEHUB_REG_COUNT);
+    if (full) fresh.reserve(def::ALTHERMA4_REG_COUNT);
     MbFailure first_failure;
     bool plant_gate_known = false;
     bool plant_gate_active = false;
@@ -867,6 +874,12 @@ static void mb_poll_once() {
     // One register word: gates/fast context always, a cache row only on a full cycle. Gates are read from
     // the SAME word the row is built from — they are not a second read and cannot disagree with it.
     const auto take_row = [&](const def::HomeHubReg& r, uint16_t raw) {
+        if (r.space == MbFunc::ReadInput && r.offset > 58 &&
+            s_active_profile.load(std::memory_order_relaxed) == ModbusProfile::Auto) {
+            s_active_profile.store(ModbusProfile::Altherma4, std::memory_order_release);
+            diag_printf("modbus: detected Altherma 4 profile via extended register %u\n",
+                        static_cast<unsigned>(r.offset));
+        }
         // THE SPACE-OPERATION GATE — input register 53 explicitly covers heating AND cooling. It
         // separates normal space operation from DHW/standstill, but only input register 38 below can
         // distinguish a heating window from cooling. A sentinel/out-of-range word leaves `known`
@@ -923,18 +936,33 @@ static void mb_poll_once() {
     MbRead io;
     bool link_broken = false;                      // a transport/framing failure ended the stream
 
+    const ModbusProfile cur_prof = s_active_profile.load(std::memory_order_acquire);
+    const bool use_altherma4 = (cur_prof != ModbusProfile::HomeHub);
+    const int plan_count = use_altherma4 ? MB_PLAN_ALTHERMA4.count : MB_PLAN.count;
+    const logic::MbBatch* plan_batches = use_altherma4 ? MB_PLAN_ALTHERMA4.batch : MB_PLAN.batch;
+    const uint8_t* plan_orders = use_altherma4 ? MB_PLAN_ALTHERMA4.order : MB_PLAN.order;
+    const def::HomeHubReg* active_regs = use_altherma4 ? def::ALTHERMA4_REGS : def::HOMEHUB_REGS;
+
     // Read the rows of one batch one register at a time. The fallback path, and the whole path for a
     // single-register batch. `break`s on anything but an exception, for the reason the batch loop
     // does: every other failure closed or desynced the stream, so continuing would only overwrite
     // the original cause with "not connected".
     const auto read_singly = [&](const logic::MbBatch& b) {
         for (uint8_t k = 0; k < b.count; k++) {
-            const def::HomeHubReg& r = def::HOMEHUB_REGS[MB_PLAN.order[b.row_first + k]];
+            const def::HomeHubReg& r = active_regs[plan_orders[b.row_first + k]];
             uint16_t pdu = 0;
             if (!mb_pdu_address(r.offset, pdu)) continue;
             MbFailure failure;
             if (!mb_read(r.space, pdu, 1, io, failure)) {
                 failure.reg = r.offset;
+                if (r.offset > 58 &&
+                    s_active_profile.load(std::memory_order_relaxed) == ModbusProfile::Auto &&
+                    failure.type == MbFailureType::Exception) {
+                    s_active_profile.store(ModbusProfile::HomeHub, std::memory_order_release);
+                    diag_printf("modbus: extended register %u returned exception %d — falling back to HomeHub profile\n",
+                                static_cast<unsigned>(r.offset), failure.detail);
+                    return;
+                }
                 note_failure(failure);
                 if (failure.type != MbFailureType::Exception) { link_broken = true; return; }
                 continue;                          // an exception is about THIS register only
@@ -952,15 +980,29 @@ static void mb_poll_once() {
         }
     };
 
-    for (int bi = 0; bi < MB_PLAN.count && !link_broken; bi++) {
-        const logic::MbBatch& b = MB_PLAN.batch[bi];
+    for (int bi = 0; bi < plan_count && !link_broken; bi++) {
+        const logic::MbBatch& b = plan_batches[bi];
         if (!full && !logic::mb_batch_is_fast(b)) continue;
         esp_task_wdt_reset();                      // each request is a bounded LAN round-trip
 
-        if (b.count <= 1 || s_batch_split[bi]) { read_singly(b); continue; }
+        if (b.count <= 1 || s_batch_split[bi]) {
+            read_singly(b);
+            if (s_active_profile.load(std::memory_order_acquire) == ModbusProfile::HomeHub &&
+                use_altherma4 && b.first_offset > 58) {
+                break;
+            }
+            continue;
+        }
 
         uint16_t pdu = 0;
-        if (!mb_pdu_address(b.first_offset, pdu)) { read_singly(b); continue; }
+        if (!mb_pdu_address(b.first_offset, pdu)) {
+            read_singly(b);
+            if (s_active_profile.load(std::memory_order_acquire) == ModbusProfile::HomeHub &&
+                use_altherma4 && b.first_offset > 58) {
+                break;
+            }
+            continue;
+        }
         MbFailure failure;
         if (!mb_read(b.space, pdu, b.count, io, failure)) {
             failure.reg = b.first_offset;
@@ -968,6 +1010,13 @@ static void mb_poll_once() {
                 note_failure(failure);
                 link_broken = true;
                 continue;
+            }
+            if (b.first_offset > 58 &&
+                s_active_profile.load(std::memory_order_relaxed) == ModbusProfile::Auto) {
+                s_active_profile.store(ModbusProfile::HomeHub, std::memory_order_release);
+                diag_printf("modbus: extended batch starting at %u returned exception %d — falling back to HomeHub profile\n",
+                            static_cast<unsigned>(b.first_offset), failure.detail);
+                break;
             }
             // An exception is a valid reply about ONE register, and a batched request cannot say
             // which. Re-read this run singly — this cycle and, since the usual cause is a register
@@ -979,10 +1028,14 @@ static void mb_poll_once() {
                         static_cast<unsigned>(b.first_offset),
                         static_cast<unsigned>(b.first_offset + b.count - 1));
             read_singly(b);
+            if (s_active_profile.load(std::memory_order_acquire) == ModbusProfile::HomeHub &&
+                use_altherma4 && b.first_offset > 58) {
+                break;
+            }
             continue;
         }
         for (uint8_t k = 0; k < b.count; k++) {
-            const def::HomeHubReg& r = def::HOMEHUB_REGS[MB_PLAN.order[b.row_first + k]];
+            const def::HomeHubReg& r = active_regs[plan_orders[b.row_first + k]];
             uint16_t raw = 0;
             if (!mb_reg_at(io.resp, k, raw)) {
                 // The parse already bound the reply to the requested quantity, so this is a
@@ -1039,6 +1092,7 @@ static void mb_poll_once() {
             // reports 0 for the same reason the full path does — the cache is about to go with it.
             if (!final_current_session) s_status.values = 0;
             s_status.connected = final_current_session;
+            s_status.profile = s_active_profile.load(std::memory_order_relaxed);
             s_status.plant_gate_known = final_current_session && plant_gate_known;
             s_status.plant_gate_active = final_current_session && plant_gate_active;
             s_status.heating_mode_known = final_current_session && heating_mode_known;
@@ -1099,6 +1153,7 @@ static void mb_poll_once() {
             s_target_generation.load(std::memory_order_acquire) == cycle_target_generation;
         s_status.values = final_current_session ? committed : 0;
         s_status.connected = final_current_session;
+        s_status.profile = s_active_profile.load(std::memory_order_relaxed);
         s_status.plant_gate_known = final_current_session && plant_gate_known;
         s_status.plant_gate_active = final_current_session && plant_gate_active;
         s_status.heating_mode_known = final_current_session && heating_mode_known;
@@ -1305,7 +1360,11 @@ void mb_reconfigure(bool enabled) noexcept {
     // torn down from the httpd task here — the socket has exactly one owner and it stays that way.
 }
 
-size_t mb_values_capacity() { return static_cast<size_t>(def::HOMEHUB_REG_COUNT); }
+size_t mb_values_capacity() { return static_cast<size_t>(def::ALTHERMA4_REG_COUNT); }
+
+ModbusProfile mb_active_profile() {
+    return s_active_profile.load(std::memory_order_acquire);
+}
 
 size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
     live = false;

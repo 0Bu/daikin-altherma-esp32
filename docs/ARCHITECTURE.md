@@ -3333,10 +3333,11 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   or {min,mean,max} in the unit named by its key}], omitted until this boot has
                   detected an X10A profile and evaluated the current profile's signal coverage,
                   plus
-                  modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,
+                  modbus{enabled,connected,discovering,searched,profile,host,port,unit_id,rx,fails,
                   values,task_stack_min_free_bytes,plant_gate_known,plant_gate_active
                   [,error,error_code,error_detail,error_register]}
-                  — the HomeHub link diagnostics. READ-ONLY: there is no actuator object and no
+                  — the HomeHub / Altherma 4 Modbus link diagnostics (profile is "auto", "homehub" or
+                  "altherma4"). READ-ONLY: there is no actuator object and no
                   actuation flag — the link is read-only. task_stack_min_free_bytes comes from the
                   one sampler all five watched stacks report through (main/stack_watch.hpp), not
                   from ModbusStatus, so this surface and the MQTT heartbeat cannot answer the same

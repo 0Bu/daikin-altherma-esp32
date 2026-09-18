@@ -1128,6 +1128,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ",\"connected\":";            j += mb.connected ? "true" : "false";
     j += ",\"discovering\":";          j += mb.discovering ? "true" : "false";
     j += ",\"searched\":";             j += c.mb_discovery_done ? "true" : "false";
+    j += ",\"profile\":";              j += jstr(modbus_profile_name(mb.profile));
     // The ADDRESS comes from the CONFIG, the STATE from the live link.
     // Reading the address off the link status was wrong before the first connect ever succeeded:
     // ModbusStatus is zero-initialised, so a device that had never dialled reported port 0 and unit

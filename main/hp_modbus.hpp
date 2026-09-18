@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <string>
 #include "hp_poll.hpp"      // CachedValue — the shared row shape, so /values needs no second type
+#include "logic/config_model.hpp"
 #include "logic/modbus.hpp"
 #include "logic/outdoor_evidence.hpp"
 
@@ -30,10 +31,11 @@ namespace daik {
 // Link diagnostics for /status.modbus and the MQTT heartbeat. `enabled` is runtime task existence
 // and therefore requires a saved host.
 struct ModbusStatus {
-    bool        enabled     = false;   // task active (a configured address is being polled)
-    bool        connected   = false;   // current socket has committed a full cycle and is still live
-    bool        discovering = false;   // compatibility field; explicit UI search is request-local
-    std::string host;                  // configured address ("" = disabled)
+    bool          enabled     = false;   // task active (a configured address is being polled)
+    bool          connected   = false;   // current socket has committed a full cycle and is still live
+    bool          discovering = false;   // compatibility field; explicit UI search is request-local
+    ModbusProfile profile     = ModbusProfile::Auto; // detected/active Modbus profile
+    std::string   host;                  // configured address ("" = disabled)
     int         port    = 0;
     int         unit_id = 0;
     uint32_t    rx_ok   = 0;           // successful register reads since boot
@@ -107,8 +109,11 @@ ModbusStatus mb_status();
 // generation-checked answer.
 size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live);
 
-// The cache's upper bound (def::HOMEHUB_REG_COUNT) — callers size their snapshot buffer from this.
+// The cache's upper bound (def::ALTHERMA4_REG_COUNT) — callers size their snapshot buffer from this.
 size_t mb_values_capacity();
+
+// Active/detected Modbus profile (Auto, HomeHub, Altherma4).
+ModbusProfile mb_active_profile();
 
 // Has the running Modbus task observed OTA's lock-free quiesce request and left its allocation-rich
 // cycle? True also when no Modbus task exists, because there is then no cycle for OTA to wait on.
