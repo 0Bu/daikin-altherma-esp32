@@ -38,7 +38,7 @@ not what CI happened to skip.
 
 The interpreter floors are **node ≥ 18** and **python ≥ 3.11** — the latter because
 [`tools/agent-config/check_toml.py`](tools/agent-config/check_toml.py) imports `tomllib`, which
-entered the standard library in 3.11. CI runs `ubuntu-24.04` (python 3.12), so a gate that needs a
+entered the standard library in 3.11. CI runs `ubuntu-26.04` (python 3.14), so a gate that needs a
 newer interpreter than these floors passes there and fails only on a contributor's machine; keep new
 tooling inside them rather than letting one file quietly raise the floor for the whole tree.
 
@@ -99,7 +99,7 @@ desktop widths, across every locale, with
 keyboard, accessibility-tree, reduced-motion, overflow and console-error checks.
 
 `run-format-check.sh` always enforces portable whole-tree invariants. CI additionally installs exact
-clang-format 18.1.3 and checks every new file and changed C/C++ hunk; it does not reformat legacy
+clang-format 18.1.8 and checks every new file and changed C/C++ hunk; it does not reformat legacy
 lines outside the diff. A local run may skip that layer when the pinned executable is unavailable,
 but `CI=true` requires the pinned executable and fails closed on another version. The canonical full
 gate, including maintained C/C++ under `tools/`, is

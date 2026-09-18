@@ -286,7 +286,7 @@ if (!/if: always\(\)[\s\S]{0,160}run: rm -f ota_signing_key\.pem/.test(buildWork
 JS
 
 # Keep this audit on the runner's declared Node + Git baseline. In particular, do not add an
-# undeclared ripgrep dependency: ubuntu-24.04 does not preinstall `rg`, and treating exit 127 like
+# undeclared ripgrep dependency: ubuntu-26.04 does not preinstall `rg`, and treating exit 127 like
 # "pattern absent" produces a misleading documentation failure instead of auditing the tree.
 node <<'JS'
 const fs = require("node:fs");

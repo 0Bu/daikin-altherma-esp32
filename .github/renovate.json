@@ -44,6 +44,11 @@
         "Regenerate and commit `dependencies.lock` with the bumped image (`scripts/idf-docker.sh idf.py update-dependencies`); CI rejects a lock rewritten implicitly during configuration.",
         "⚠️ **On a major ESP-IDF bump — check the migration guide.** Mbed TLS and component moves (cJSON is already a managed dep) plus `esp-mqtt`/`esp_https_ota` TLS can change. Confirm the CI `build` job is green for the esp32s3 target."
       ]
+    },
+    {
+      "description": "Disable GitHub runner image updates. Runner OS migrations require reviewed toolchain/compiler changes, branch coverage profiles, and human review gates.",
+      "matchDepTypes": ["github-runner"],
+      "enabled": false
     }
   ]
 }
