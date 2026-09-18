@@ -1694,32 +1694,38 @@ static void append_status_json(JsonOut& j, bool redact) {
         int         total = 0;
         std::string cand, fams;
         if (c.fp_valid) {
-            Fingerprint fp{};
-            fp.page_mask = c.fp_pages;
-            fp.kw_tenths = c.fp_kw_tenths;
-            // Carried so this recomputed fingerprint stays a faithful copy of the one detection
-            // used — and since #225 it is LOAD-BEARING here, not merely faithful: detect_candidates
-            // narrows by the I/U capacity when the O/U figure is absent, so omitting this field
-            // would make /status report a set the device never considered (the live unit: 8
-            // candidates across 4 families instead of 3 across 2, which is the over-broad reading
-            // that put a wrong family into #213).
-            fp.iu_kw_tenths       = c.fp_iu_kw_tenths;
-            int              nsig = 0;
-            const Signature* sigs = def::signatures(nsig);
-            const char*      out[64];
-            total                          = detect_candidates(sigs, nsig, fp, out,
-                                                               static_cast<int>(sizeof(out) / sizeof(out[0])));
-            const int                shown = total < 64 ? total : 64;
-            std::vector<std::string> seen;
-            for (int i = 0; i < shown; i++) {
-                if (i) cand += ",";
-                cand += jstr(out[i]);
-                const def::ModelName* mn  = def::model_name(out[i]);
-                std::string           fam = mn ? mn->family : "Altherma";
-                if (std::find(seen.begin(), seen.end(), fam) == seen.end()) {
-                    if (!seen.empty()) fams += ",";
-                    fams += jstr(fam);
-                    seen.push_back(fam);
+            if (c.proto == Protocol::S) {
+                total = 1;
+                cand  = jstr("protocol_s");
+                fams  = jstr("Legacy / Protocol S");
+            } else {
+                Fingerprint fp{};
+                fp.page_mask = c.fp_pages;
+                fp.kw_tenths = c.fp_kw_tenths;
+                // Carried so this recomputed fingerprint stays a faithful copy of the one detection
+                // used — and since #225 it is LOAD-BEARING here, not merely faithful:
+                // detect_candidates narrows by the I/U capacity when the O/U figure is absent, so
+                // omitting this field would make /status report a set the device never considered
+                // (the live unit: 8 candidates across 4 families instead of 3 across 2, which is
+                // the over-broad reading that put a wrong family into #213).
+                fp.iu_kw_tenths       = c.fp_iu_kw_tenths;
+                int              nsig = 0;
+                const Signature* sigs = def::signatures(nsig);
+                const char*      out[64];
+                total                          = detect_candidates(sigs, nsig, fp, out,
+                                                                   static_cast<int>(sizeof(out) / sizeof(out[0])));
+                const int                shown = total < 64 ? total : 64;
+                std::vector<std::string> seen;
+                for (int i = 0; i < shown; i++) {
+                    if (i) cand += ",";
+                    cand += jstr(out[i]);
+                    const def::ModelName* mn  = def::model_name(out[i]);
+                    std::string           fam = mn ? mn->family : "Altherma";
+                    if (std::find(seen.begin(), seen.end(), fam) == seen.end()) {
+                        if (!seen.empty()) fams += ",";
+                        fams += jstr(fam);
+                        seen.push_back(fam);
+                    }
                 }
             }
         }

@@ -50,6 +50,7 @@ inline constexpr ModelName MODEL_NAMES[] = {
     {"altherma_lt_multi_hybrid", "Altherma LT Multi Hybrid", "Altherma LT / older", ""},
     {"altherma_monobloc_ca_05_07kw", "Altherma Monobloc CA 05-07kW", "Altherma LT / older", ""},
     {"altherma_top_grade", "Altherma Top-Grade", "Altherma LT / older", ""},
+    {"protocol_s", "Daikin Protocol S", "Legacy / Protocol S", ""},
 };
 
 // Display metadata for a profile id; nullptr if unknown (e.g. "generic").

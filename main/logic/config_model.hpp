@@ -509,6 +509,17 @@ inline Protocol parse_protocol(const std::string& s) {
     return (!s.empty() && (s[0] == 'S' || s[0] == 's')) ? Protocol::S : Protocol::I;
 }
 
+// Protocol and profile compatibility for /set_hp:
+// - "auto" is always compatible.
+// - On Protocol::S, only "protocol_s" is allowed.
+// - On Protocol::I, "protocol_s" is disallowed (Protocol I units must not use the Protocol S
+// profile).
+inline bool set_hp_profile_compatible(const std::string& profile, Protocol proto) {
+    if (profile.empty() || profile == "auto") return true;
+    if (proto == Protocol::S) return profile == "protocol_s";
+    return profile != "protocol_s";
+}
+
 // A /set_hp update carries the model "profile" only when the request explicitly sends it. A
 // wiring-only patch (RX/TX pins, no "profile" key) OMITS it, and such a patch must not disturb a
 // settled detection. Only an explicit "auto" — a re-detect request or the Wiring Save — clears the

@@ -56,9 +56,9 @@
 namespace daik::def {
 
 // Generic Altherma fallback: the universal register core present (with identical layout) in >=95%
-// of the 41 Altherma "I"-protocol models — so a unit whose exact model can't be identified,
-// or an older/S-protocol unit, still reports every essential value over X10A. Machine-derived as
-// the high-frequency intersection of the decoded model catalog by the offline generator
+// of the 39 detectable Altherma "I"-protocol models — so a unit whose exact model can't be identified
+// still reports every essential value over X10A (S-protocol units read the dedicated protocol_s profile).
+// Machine-derived as the high-frequency intersection of the decoded model catalog by the offline generator
 // (gen_profiles.py, maintained outside this repo); keep in sync when regenerating and verify rows
 // against docs/REGISTERS.md. Pages a given unit lacks simply time out and are skipped by the
 // poller.
@@ -253,6 +253,13 @@ inline constexpr Profile profiles[] = {
      sizeof(minichiller_inverter_04_08kw) / sizeof(minichiller_inverter_04_08kw[0])},
     {"protocol_s", protocol_s, sizeof(protocol_s) / sizeof(protocol_s[0])},
 };
+
+inline bool has_profile(const char* id) {
+    if (!id || !*id) return false;
+    for (const auto& p : profiles)
+        if (std::strcmp(p.id, id) == 0) return true;
+    return false;
+}
 
 inline const Profile& lookup(const char* id) {
     for (const auto& p : profiles)

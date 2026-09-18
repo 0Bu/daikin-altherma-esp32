@@ -52,20 +52,20 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 208,
-        "taken": 159
+        "outcomes": 214,
+        "taken": 165
       },
       "main/logic/config_store.hpp": {
         "outcomes": 464,
-        "taken": 287
+        "taken": 288
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
         "taken": 7
       },
       "main/logic/convert.hpp": {
-        "outcomes": 150,
-        "taken": 141
+        "outcomes": 152,
+        "taken": 145
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 30,
@@ -76,8 +76,8 @@
         "taken": 140
       },
       "main/logic/crc.hpp": {
-        "outcomes": 105,
-        "taken": 99
+        "outcomes": 107,
+        "taken": 101
       },
       "main/logic/detect.hpp": {
         "outcomes": 147,
@@ -157,7 +157,7 @@
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 126,
-        "taken": 112
+        "taken": 113
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 4,
@@ -232,8 +232,8 @@
         "taken": 54
       },
       "main/logic/mqtt_group.hpp": {
-        "outcomes": 308,
-        "taken": 253
+        "outcomes": 312,
+        "taken": 257
       },
       "main/logic/mqtt_publish_gate.hpp": {
         "outcomes": 14,
@@ -251,13 +251,13 @@
         "outcomes": 26,
         "taken": 16
       },
-      "main/logic/ota_channel.hpp": {
-        "outcomes": 58,
-        "taken": 41
-      },
       "main/logic/ota_changelog_range.hpp": {
         "outcomes": 72,
         "taken": 58
+      },
+      "main/logic/ota_channel.hpp": {
+        "outcomes": 58,
+        "taken": 41
       },
       "main/logic/ota_headroom.hpp": {
         "outcomes": 6,
@@ -318,6 +318,10 @@
       "main/logic/registers.hpp": {
         "outcomes": 8,
         "taken": 6
+      },
+      "main/logic/rwt_select.hpp": {
+        "outcomes": 54,
+        "taken": 45
       },
       "main/logic/state_dwell.hpp": {
         "outcomes": 102,
@@ -410,20 +414,20 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 208,
-        "taken": 159
+        "outcomes": 214,
+        "taken": 165
       },
       "main/logic/config_store.hpp": {
         "outcomes": 464,
-        "taken": 287
+        "taken": 288
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
         "taken": 7
       },
       "main/logic/convert.hpp": {
-        "outcomes": 150,
-        "taken": 141
+        "outcomes": 152,
+        "taken": 145
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 30,
@@ -434,8 +438,8 @@
         "taken": 140
       },
       "main/logic/crc.hpp": {
-        "outcomes": 105,
-        "taken": 99
+        "outcomes": 107,
+        "taken": 101
       },
       "main/logic/detect.hpp": {
         "outcomes": 147,
@@ -515,7 +519,7 @@
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 126,
-        "taken": 112
+        "taken": 113
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 4,
@@ -590,8 +594,8 @@
         "taken": 54
       },
       "main/logic/mqtt_group.hpp": {
-        "outcomes": 308,
-        "taken": 253
+        "outcomes": 312,
+        "taken": 257
       },
       "main/logic/mqtt_publish_gate.hpp": {
         "outcomes": 14,
@@ -609,13 +613,13 @@
         "outcomes": 26,
         "taken": 16
       },
-      "main/logic/ota_channel.hpp": {
-        "outcomes": 58,
-        "taken": 41
-      },
       "main/logic/ota_changelog_range.hpp": {
         "outcomes": 72,
         "taken": 58
+      },
+      "main/logic/ota_channel.hpp": {
+        "outcomes": 58,
+        "taken": 41
       },
       "main/logic/ota_headroom.hpp": {
         "outcomes": 6,
@@ -676,6 +680,10 @@
       "main/logic/registers.hpp": {
         "outcomes": 8,
         "taken": 6
+      },
+      "main/logic/rwt_select.hpp": {
+        "outcomes": 54,
+        "taken": 45
       },
       "main/logic/state_dwell.hpp": {
         "outcomes": 102,
@@ -768,20 +776,20 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 220,
-        "taken": 180
+        "outcomes": 228,
+        "taken": 188
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
-        "taken": 290
+        "taken": 291
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 160,
-        "taken": 149
+        "outcomes": 162,
+        "taken": 153
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -792,8 +800,8 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 121,
-        "taken": 114
+        "outcomes": 123,
+        "taken": 116
       },
       "main/logic/detect.hpp": {
         "outcomes": 165,
@@ -873,7 +881,7 @@
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 136,
-        "taken": 122
+        "taken": 123
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -948,8 +956,8 @@
         "taken": 55
       },
       "main/logic/mqtt_group.hpp": {
-        "outcomes": 524,
-        "taken": 366
+        "outcomes": 528,
+        "taken": 370
       },
       "main/logic/mqtt_publish_gate.hpp": {
         "outcomes": 20,
@@ -967,13 +975,13 @@
         "outcomes": 36,
         "taken": 25
       },
-      "main/logic/ota_channel.hpp": {
-        "outcomes": 86,
-        "taken": 60
-      },
       "main/logic/ota_changelog_range.hpp": {
         "outcomes": 82,
         "taken": 67
+      },
+      "main/logic/ota_channel.hpp": {
+        "outcomes": 86,
+        "taken": 60
       },
       "main/logic/ota_headroom.hpp": {
         "outcomes": 8,
@@ -1034,6 +1042,10 @@
       "main/logic/registers.hpp": {
         "outcomes": 10,
         "taken": 8
+      },
+      "main/logic/rwt_select.hpp": {
+        "outcomes": 66,
+        "taken": 56
       },
       "main/logic/state_dwell.hpp": {
         "outcomes": 108,
@@ -1126,20 +1138,20 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 220,
-        "taken": 180
+        "outcomes": 228,
+        "taken": 188
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
-        "taken": 290
+        "taken": 291
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 160,
-        "taken": 149
+        "outcomes": 162,
+        "taken": 153
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -1150,8 +1162,8 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 121,
-        "taken": 114
+        "outcomes": 123,
+        "taken": 116
       },
       "main/logic/detect.hpp": {
         "outcomes": 165,
@@ -1231,7 +1243,7 @@
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 136,
-        "taken": 122
+        "taken": 123
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -1306,8 +1318,8 @@
         "taken": 55
       },
       "main/logic/mqtt_group.hpp": {
-        "outcomes": 524,
-        "taken": 366
+        "outcomes": 528,
+        "taken": 370
       },
       "main/logic/mqtt_publish_gate.hpp": {
         "outcomes": 20,
@@ -1325,13 +1337,13 @@
         "outcomes": 36,
         "taken": 25
       },
-      "main/logic/ota_channel.hpp": {
-        "outcomes": 86,
-        "taken": 60
-      },
       "main/logic/ota_changelog_range.hpp": {
         "outcomes": 82,
         "taken": 67
+      },
+      "main/logic/ota_channel.hpp": {
+        "outcomes": 86,
+        "taken": 60
       },
       "main/logic/ota_headroom.hpp": {
         "outcomes": 8,
@@ -1392,6 +1404,10 @@
       "main/logic/registers.hpp": {
         "outcomes": 10,
         "taken": 8
+      },
+      "main/logic/rwt_select.hpp": {
+        "outcomes": 66,
+        "taken": 56
       },
       "main/logic/state_dwell.hpp": {
         "outcomes": 108,
@@ -1484,20 +1500,20 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 220,
-        "taken": 180
+        "outcomes": 228,
+        "taken": 188
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
-        "taken": 290
+        "taken": 291
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 160,
-        "taken": 149
+        "outcomes": 162,
+        "taken": 153
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -1508,8 +1524,8 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 121,
-        "taken": 114
+        "outcomes": 123,
+        "taken": 116
       },
       "main/logic/detect.hpp": {
         "outcomes": 165,
@@ -1589,7 +1605,7 @@
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 136,
-        "taken": 122
+        "taken": 123
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -1664,8 +1680,8 @@
         "taken": 55
       },
       "main/logic/mqtt_group.hpp": {
-        "outcomes": 524,
-        "taken": 366
+        "outcomes": 528,
+        "taken": 370
       },
       "main/logic/mqtt_publish_gate.hpp": {
         "outcomes": 20,
@@ -1683,13 +1699,13 @@
         "outcomes": 36,
         "taken": 25
       },
-      "main/logic/ota_channel.hpp": {
-        "outcomes": 86,
-        "taken": 60
-      },
       "main/logic/ota_changelog_range.hpp": {
         "outcomes": 82,
         "taken": 67
+      },
+      "main/logic/ota_channel.hpp": {
+        "outcomes": 86,
+        "taken": 60
       },
       "main/logic/ota_headroom.hpp": {
         "outcomes": 8,
@@ -1750,6 +1766,10 @@
       "main/logic/registers.hpp": {
         "outcomes": 10,
         "taken": 8
+      },
+      "main/logic/rwt_select.hpp": {
+        "outcomes": 66,
+        "taken": 56
       },
       "main/logic/state_dwell.hpp": {
         "outcomes": 108,
@@ -1842,20 +1862,20 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 220,
-        "taken": 180
+        "outcomes": 228,
+        "taken": 188
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
-        "taken": 290
+        "taken": 291
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 160,
-        "taken": 149
+        "outcomes": 162,
+        "taken": 153
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -1866,8 +1886,8 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 121,
-        "taken": 114
+        "outcomes": 123,
+        "taken": 116
       },
       "main/logic/detect.hpp": {
         "outcomes": 165,
@@ -1947,7 +1967,7 @@
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 136,
-        "taken": 122
+        "taken": 123
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -2022,8 +2042,8 @@
         "taken": 55
       },
       "main/logic/mqtt_group.hpp": {
-        "outcomes": 524,
-        "taken": 366
+        "outcomes": 528,
+        "taken": 370
       },
       "main/logic/mqtt_publish_gate.hpp": {
         "outcomes": 20,
@@ -2041,13 +2061,13 @@
         "outcomes": 36,
         "taken": 25
       },
-      "main/logic/ota_channel.hpp": {
-        "outcomes": 86,
-        "taken": 60
-      },
       "main/logic/ota_changelog_range.hpp": {
         "outcomes": 82,
         "taken": 67
+      },
+      "main/logic/ota_channel.hpp": {
+        "outcomes": 86,
+        "taken": 60
       },
       "main/logic/ota_headroom.hpp": {
         "outcomes": 8,
@@ -2108,6 +2128,10 @@
       "main/logic/registers.hpp": {
         "outcomes": 10,
         "taken": 8
+      },
+      "main/logic/rwt_select.hpp": {
+        "outcomes": 66,
+        "taken": 56
       },
       "main/logic/state_dwell.hpp": {
         "outcomes": 108,

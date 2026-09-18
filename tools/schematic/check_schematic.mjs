@@ -296,7 +296,7 @@ const PEL_INSPECT = evalTable('const PEL_INSPECT = {', '\n};', '{', 'PEL_INSPECT
   PEL_MEASURED_WHAT: {}, PEL_ESTIMATED_WHAT: {},
 });
 const INSPECT = evalTable('const INSPECT = {', '\n};', '{', 'INSPECT', {
-  lwtRow: noop, postBuhRow: noop, vRow: noop, pickValue: noop, PEL_INSPECT,
+  lwtRow: noop, rwtRow: noop, postBuhRow: noop, vRow: noop, pickValue: noop, PEL_INSPECT,
   OUTDOOR_HX_RE: /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|Outdoor heat exchanger temp\.|R4T-Deicer temp\.)$/i,
 });
 function loadI18n() {

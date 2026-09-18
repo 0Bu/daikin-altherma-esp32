@@ -159,32 +159,35 @@ struct TrendDef {
 inline constexpr TrendDef TRENDS[] = {
     // Pages that are resampled every cycle, so these buffers fill continuously. Grouped by that,
     // not by circuit: 0x62/15 is a REFRIGERANT reading that happens to live on a hydronic page.
-    { "dhw_tank",         TrendKind::Row, 0x61, 10, "°C",  "" },  // DHW tank temp. (R5T)
-    { "leaving_water",    TrendKind::Row, 0x61,  2, "°C",  "" },  // pre-BUH outlet — lwt_select's row
-    { "return_water",     TrendKind::Row, 0x61,  8, "°C",  "" },  // Inlet water temp. (R4T)
-    { "leaving_water_post_buh", TrendKind::Row, 0x61, 4, "°C", "" }, // post-BUH outlet (R2T)
-    { "refrigerant_liquid", TrendKind::Row, 0x61, 6, "°C", "" }, // liquid-side R3T
-    { "water_pressure",   TrendKind::Row, 0x62, 11, "bar", "" },  // the WATER circuit, not refrigerant
-    { "flow",             TrendKind::Row, 0x62,  9, "",    "" },  // Flow sensor (l/min) — unit in label
-    { "pump_signal",      TrendKind::Row, 0x62, 12, "",    "" },  // INVERTED (0 = max, 100 = stop)
+    {"dhw_tank", TrendKind::Row, 0x61, 10, "°C", ""}, // DHW tank temp. (R5T)
+    {"leaving_water", TrendKind::Row, 0x61, 2, "°C",
+     ""}, // pre-BUH outlet (R1T at 0x61/2; fixed ring, matches lwt_select Tier 1)
+    {"return_water", TrendKind::Row, 0x61, 8, "°C", ""},           // Inlet water temp. (R4T)
+    {"leaving_water_post_buh", TrendKind::Row, 0x61, 4, "°C", ""}, // post-BUH outlet (R2T)
+    {"refrigerant_liquid", TrendKind::Row, 0x61, 6, "°C", ""},     // liquid-side R3T
+    {"water_pressure", TrendKind::Row, 0x62, 11, "bar", ""}, // the WATER circuit, not refrigerant
+    {"flow", TrendKind::Row, 0x62, 9, "", ""},         // Flow sensor (l/min) — unit in label
+    {"pump_signal", TrendKind::Row, 0x62, 12, "", ""}, // INVERTED (0 = max, 100 = stop)
     // The high-side refrigerant pressure the UI actually draws. NOT the 0x20/12+14 transducers: the
     // pill already falls back off them (they freeze with their page), and on the measured unit they
     // read exactly 0.0 bar at rest AND at 42 rps — which reading_plausible() refuses as impossible
     // for a sealed circuit — while this sensor read a correct 15.3 bar. A ring on them would be a
     // permanently empty chart bought with 576 bytes. That is why the schematic's LOW-pressure pill
-    // has no trend while every other numeric pill now does: it is the SAME 0x20 transducer pair, and
-    // the reference install has published a flat 0.0 bar from both for 30 days. There is no low-side
+    // has no trend while every other numeric pill now does: it is the SAME 0x20 transducer pair,
+    // and
+    // the reference install has published a flat 0.0 bar from both for 30 days. There is no
+    // low-side
     // equivalent of the 0x62/15 fallback, so the honest answer is no chart rather than an empty one
     // — the absent-feature rule (feature_gate.hpp), applied to a sensor that reports nothing.
-    { "circuit_pressure", TrendKind::Row, 0x62, 15, "bar", "" },
-    { "comp_rps",         TrendKind::Row, 0x30,  0, "",    "" },  // INV frequency (rps) — run/idle
-    { "eev",              TrendKind::Row, 0x30,  3, "",    "" },  // Expansion valve 1 (pls) — live page
+    {"circuit_pressure", TrendKind::Row, 0x62, 15, "bar", ""},
+    {"comp_rps", TrendKind::Row, 0x30, 0, "", ""}, // INV frequency (rps) — run/idle
+    {"eev", TrendKind::Row, 0x30, 3, "", ""},      // Expansion valve 1 (pls) — live page
     // Outdoor — 0x20/0x21 freeze while the compressor rests, so every sample passes the held-over
     // gate below and the chart shows gaps rather than a staircase of the last run's numbers.
-    { "outdoor_air",      TrendKind::Row, 0x20,  0, "°C",  "" },  // R1T-Outdoor air temp.
-    { "outdoor_heat_exchanger", TrendKind::Row, 0x20, 2, "°C", "" }, // outdoor coil R4T
-    { "discharge",        TrendKind::Row, 0x20,  4, "°C",  "" },  // Discharge pipe temp. — the hot side
-    { "room_temp",        TrendKind::Row, 0x61, 12, "°C",  "" },  // Indoor ambient temp. (R1T)
+    {"outdoor_air", TrendKind::Row, 0x20, 0, "°C", ""},            // R1T-Outdoor air temp.
+    {"outdoor_heat_exchanger", TrendKind::Row, 0x20, 2, "°C", ""}, // outdoor coil R4T
+    {"discharge", TrendKind::Row, 0x20, 4, "°C", ""},  // Discharge pipe temp. — the hot side
+    {"room_temp", TrendKind::Row, 0x61, 12, "°C", ""}, // Indoor ambient temp. (R1T)
     // The ELECTRICAL inputs. They are here as INPUTS, not as charts of their own: the dashboard's
     // "electrical input (est.)" pill is derived in the browser (amps x an assumed 230 V, CT clamps
     // preferred over the inverter current, the fallback gated on the held-over rule), and the only
@@ -193,58 +196,59 @@ inline constexpr TrendDef TRENDS[] = {
     // marking the INV ring already carries IS the gate — 0x21 is a frozen page, so a sample the
     // outdoor unit was not measuring is stored as HeldOver rather than as last run's amps, which is
     // precisely the distinction the live pill makes.
-    { "inv_current",      TrendKind::Row, 0x21,  0, "",    "" },  // INV primary current (A) — 39/39
+    {"inv_current", TrendKind::Row, 0x21, 0, "", ""}, // INV primary current (A) — 39/39
     // The CT clamps are fitted on 20 of the 39 detection profiles and read a flat 0 A on an install
     // without them (measured here over 30 days), which is exactly why the live rule prefers them
     // only when their sum is non-zero. Three rings for one figure because the sum is the browser's
     // to make: a "total current" trend would be a derived quantity computed in the firmware and
     // then again in www/js/history.js, and the two would be free to disagree.
-    { "ct_l1",            TrendKind::Row, 0x63, 14, "",    "" },
-    { "ct_l2",            TrendKind::Row, 0x63, 15, "",    "" },
-    { "ct_l3",            TrendKind::Row, 0x63, 16, "",    "" },
+    {"ct_l1", TrendKind::Row, 0x63, 14, "", ""},
+    {"ct_l2", TrendKind::Row, 0x63, 15, "", ""},
+    {"ct_l3", TrendKind::Row, 0x63, 16, "", ""},
     // Outdoor-unit mode flags. Defrost is event-folded so an observed short cycle survives its
     // open bucket; Quiet is a persistent mode whose latest observed value wins. Converter ids are
     // load-bearing because both pages also contain unrelated bits at neighbouring/shared offsets.
-    { "defrost_state",     TrendKind::BinaryEvent, 0x10,  1, "", "", 304 },
-    { "quiet_state",       TrendKind::BinaryState, 0x60,  2, "", "", 301 },
+    {"defrost_state", TrendKind::BinaryEvent, 0x10, 1, "", "", 304},
+    {"quiet_state", TrendKind::BinaryState, 0x60, 2, "", "", 301},
     // The DHW immersion-heater run flag. Seven dimensionless bits share 0x60/12, so converter 305
     // is load-bearing: without it this trend would attach to whichever valve/pump bit sorts first.
     // It is event-folded rather than last-value-folded so a heater pulse seen by a poll cannot be
     // erased by a later OFF in the same 5-minute bucket. The UI calls the resulting spans sampled
     // active windows, not exact runtime; a pulse entirely between poll sweeps can still be missed.
-    { "bsh_state",         TrendKind::BinaryEvent, 0x60, 12, "", "", 305 },
-    // X10A's only related state is tank PREHEAT, not a direct disinfection flag. Keep its own id and
+    {"bsh_state", TrendKind::BinaryEvent, 0x60, 12, "", "", 305},
+    // X10A's only related state is tank PREHEAT, not a direct disinfection flag. Keep its own id
+    // and
     // timeline so a reader can correlate it with HomeHub input 33 without the UI claiming equality.
     // Event folding retains a short observed preheat pulse within its five-minute bucket.
-    { "tank_preheat_state", TrendKind::BinaryEvent, 0x62, 8, "", "", 303 },
+    {"tank_preheat_state", TrendKind::BinaryEvent, 0x62, 8, "", "", 303},
     // The hydronic backup heater has two separately published stages. Keep both exact converter-
     // qualified bits: the browser combines their aligned rings into one categorical BUH timeline
     // (off / step 1 / step 2), while each raw row still retains its own auditable history. Event
     // folding is intentional here too — a short heater pulse observed anywhere in the open bucket
     // must not be erased by a later OFF and disappear from the 5-minute raster.
-    { "buh_step1",          TrendKind::BinaryEvent, 0x60, 12, "", "", 304 },
-    { "buh_step2",          TrendKind::BinaryEvent, 0x60, 12, "", "", 303 },
+    {"buh_step1", TrendKind::BinaryEvent, 0x60, 12, "", "", 304},
+    {"buh_step2", TrendKind::BinaryEvent, 0x60, 12, "", "", 303},
     // The diverter is a persistent selector, not an event: the latest observed state in the bucket
     // wins, so the timeline shows which branch was selected at each five-minute sample. Converter
     // 306 is the load-bearing half of the locator in the shared 0x60/12 state byte.
-    { "valve_dhw",          TrendKind::BinaryState, 0x60, 12, "", "", 306 },
-    { "valve_heat",         TrendKind::BinaryState, 0x60, 12, "", "", 307 }, // legacy id: 2WV output ON/OFF
-    { "water_flow_switch",  TrendKind::BinaryState, 0x60, 11, "", "", 307 },
+    {"valve_dhw", TrendKind::BinaryState, 0x60, 12, "", "", 306},
+    {"valve_heat", TrendKind::BinaryState, 0x60, 12, "", "", 307}, // legacy id: 2WV output ON/OFF
+    {"water_flow_switch", TrendKind::BinaryState, 0x60, 11, "", "", 307},
     // A STATE timeline rather than a numeric sensor curve. X10A exposes the mode through two
     // independent contact bits, so no single catalog row can be its locator. The recorder combines
     // both structurally identified rows into the documented 0..3 mode and stores it in tenths like
     // every other series (0/10/20/30 on the wire). Mode 2 is Boost in the browser. Keeping the full
     // enum preserves Forced off/Forced on for the scrub readout and lets the independent HomeHub
     // mode use the same concept without erasing disagreements.
-    { "smart_grid_mode",   TrendKind::SmartGridMode, 0, 0, "", "Smart Grid operation mode" },
+    {"smart_grid_mode", TrendKind::SmartGridMode, 0, 0, "", "Smart Grid operation mode"},
     // The BOARD's own memory. Not a plant reading, and here for the reason the single numbers on
     // /status could never answer: whether the heap is DRIFTING. A leak or a creeping fragmentation
     // shows as a slope over hours and is invisible in any one sample, which is why the spot figures
     // were dropped from the UI once (#186) — a diagnosis nobody could make from what was shown.
     // Both are in KiB: bytes would overflow the int16 ring at 32.8 kB of heap.
-    { "free_heap",        TrendKind::FreeHeap, 0, 0, "KiB", "Free heap" },
-    { "max_alloc",        TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block" },
-    { "circulation_state", TrendKind::CirculationState, 0, 0, "", "DHW circulation pump" },
+    {"free_heap", TrendKind::FreeHeap, 0, 0, "KiB", "Free heap"},
+    {"max_alloc", TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block"},
+    {"circulation_state", TrendKind::CirculationState, 0, 0, "", "DHW circulation pump"},
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
 // 32 trends = 18432 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
@@ -471,7 +475,7 @@ constexpr HistorySample history_smart_grid_mode(bool c1_known, bool c1_on,
 // Parsing rather than reaching into the decode path is deliberate: the converters stay the single
 // source of what a value means, so the domain audit keeps seeing them unchanged and a trend can
 // never disagree with the number shown next to it. Locale is not a concern — hp_format writes a
-// plain "%.1f" with '.' and the firmware runs the C locale.
+// plain "%.*f" with '.' and the firmware runs the C locale.
 //
 // Returns false for an empty value (the cycle produced nothing) and for a non-numeric one. The
 // second case rejects legacy/corrupt textual states that strtof would otherwise read as 0 and draw
