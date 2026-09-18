@@ -99,7 +99,7 @@ desktop widths, across every locale, with
 keyboard, accessibility-tree, reduced-motion, overflow and console-error checks.
 
 `run-format-check.sh` always enforces portable whole-tree invariants. CI additionally installs exact
-clang-format 18.1.3 and checks every new file and changed C/C++ hunk; it does not reformat legacy
+clang-format 18.1.8 and checks every new file and changed C/C++ hunk; it does not reformat legacy
 lines outside the diff. A local run may skip that layer when the pinned executable is unavailable,
 but `CI=true` requires the pinned executable and fails closed on another version. The canonical full
 gate, including maintained C/C++ under `tools/`, is
