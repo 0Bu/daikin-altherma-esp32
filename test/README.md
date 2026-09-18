@@ -59,7 +59,7 @@ separately authorized hardware acceptance remain distinct proof layers.
 `scripts/run-format-check.sh` always supplies the dependency-free baseline format gate: UTF-8, LF
 endings, one final newline, no tabs or trailing whitespace on maintained `main/`, `test/` and
 `tools/` C/C++ sources, while excluding generated `main/def/` tables. CI additionally installs exact
-clang-format 18.1.3 and rejects formatter changes on every new file and changed hunk. A local run may
+clang-format 18.1.8 and rejects formatter changes on every new file and changed hunk. A local run may
 omit that second layer when the pinned executable is unavailable; `CI=true` fails closed without the
 pinned executable or on a different version. Run the complete local gate, including `tools/`, as
 `CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh`.
