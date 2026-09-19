@@ -869,7 +869,7 @@ const INSPECT = {
           ? { en: `Running — compressor at ${fmt0(d.rps)} rps${d.quiet ? ", capped by quiet mode" : ""}.`,
               de: `Läuft — Verdichter mit ${fmt0(d.rps)} rps${d.quiet ? ", durch den Leise-Modus begrenzt" : ""}.` }
           : { en: "Running — the HomeHub reports the compressor ON; speed and detailed outdoor-unit readings require X10A.",
-              de: "Läuft — der HomeHub meldet den Verdichter ON; Drehzahl und detaillierte Außengerätewerte benötigen X10A." }
+              de: "Läuft — der HomeHub meldet laufenden Verdichter; Drehzahl und detaillierte Außengerätewerte benötigen X10A." }
         // Says why held X10A readings are not repeated at rest (logic/ou_stale.hpp). A structurally
         // paired HomeHub outdoor register may replace the held value; unpaired fields stay "—".
         : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
@@ -1075,7 +1075,7 @@ const INSPECT = {
     trend: (d) => d && d.efficiencyKind === "eer" ? "" : "cop",
     what: (d) => d && d.efficiencyKind === "eer"
       ? { en: "Estimated cooling capacity divided by estimated electrical input. The cooling numerator uses internal PHE sensors and is accepted only with a running compressor and R1T below R4T. The result inherits the water/glycol, sensor, voltage and power-factor assumptions of both estimates. Daikin also describes calculated energy figures as estimates whose accuracy is not guaranteed. This is an instantaneous EER, not a seasonal efficiency figure; metered seasonal energy is more meaningful.",
-          de: "Geschätzte Kälteleistung geteilt durch geschätzte elektrische Aufnahme. Der Kühlzähler nutzt die internen PHE-Fühler und wird nur bei laufendem Verdichter sowie R1T unter R4T gewertet. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Das ist ein momentaner EER und keine saisonale Effizienzkennzahl; aussagekräftiger ist saisonal gemessene Energie." }
+          de: "Geschätzte Kälteleistung geteilt durch geschätzte elektrische Aufnahme. Die Kälteleistung im Zähler nutzt die internen PHE-Fühler und wird nur bei laufendem Verdichter sowie R1T unter R4T gewertet. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Das ist ein momentaner EER und keine saisonale Effizienzkennzahl; aussagekräftiger ist saisonal gemessene Energie." }
       : {
       en: "Estimated heat output divided by estimated electrical input. The two values must describe compatible boundaries: with CT currents the UI uses heat after the backup heater when that sensor exists; with inverter current it shows the heat pump alone. Whether the CTs include every relevant electrical load depends on their installation, so this is not automatically a whole-plant meter. The result inherits the fluid, sensor, voltage and power-factor assumptions of both estimates. Use it as a live indication; metered seasonal energy is more meaningful. With the compressor stopped it shows \"—\".",
       de: "Geschätzte Wärmeleistung geteilt durch geschätzte elektrische Aufnahme. Beide Werte müssen zueinander passende Bilanzgrenzen beschreiben: Bei Stromwandlern verwendet die UI die Wärme hinter dem Zusatzheizer, sofern dieser Fühler vorhanden ist; beim Inverterstrom zeigt sie nur die Wärmepumpe. Ob die Stromwandler alle relevanten elektrischen Verbraucher erfassen, hängt von ihrem Einbau ab; der Wert ist daher nicht automatisch ein Gesamtanlagen-Zähler. Das Ergebnis übernimmt die Annahmen zu Medium, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Als Live-Hinweis verwenden; aussagekräftiger ist saisonal gemessene Energie. Bei stehendem Verdichter zeigt er „—“.",
@@ -1315,7 +1315,7 @@ const INSPECT = {
             de: `Durchströmt — Expansionsventil bei ${fmt0(d.eev)} Impulsen.` }
         : { en: "Flowing — the HomeHub confirms compressor operation; expansion-valve position requires X10A.",
             de: "Durchströmt — der HomeHub bestätigt Verdichterbetrieb; die Stellung des Expansionsventils benötigt X10A." }
-      : { en: "Still — the compressor is stopped.", de: "Steht — der Verdichter ist OFF." },
+      : { en: "Still — the compressor is stopped.", de: "Kein Durchfluss — der Verdichter steht." },
     rows: [/^low pressure$/i, /expansion valve ?1/i],
   },
   wsup: {
@@ -1365,7 +1365,7 @@ const INSPECT = {
       : waterMoving(d)
         ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
           ? { en: `Residual-heat circulation toward the hydraulic space branch at ${fmt1(d.flow)} l/min; no active cooling. Internal PHE sensors read R1T ${degC(d.lwt)} and R4T ${degC(d.ret)}; the field-side temperature is not measured.`,
-              de: `Restwärme-Umlauf zum hydraulischen Raumzweig mit ${fmt1(d.flow)} l/min; keine aktive Kühlung. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}; die Temperatur auf der Feldseite wird nicht gemessen.` }
+              de: `Restwärme-Umlauf zum hydraulischen Raumzweig mit ${fmt1(d.flow)} l/min; keine aktive Kühlung. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}; die Temperatur an den Heiz-/Kühlflächen des Gebäudes wird nicht gemessen.` }
           : { en: `Circulating toward the space branch at ${fmt1(d.flow)} l/min. Internal PHE sensors read R1T ${degC(d.lwt)} and R4T ${degC(d.ret)}.`,
               de: `Zirkulation zum Raumkreis mit ${fmt1(d.flow)} l/min. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}.` }
         : { en: "Current pump and flow readings do not establish circulation through the space branch.",

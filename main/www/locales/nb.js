@@ -1,4 +1,4 @@
-// translation-source: 319d2c6911ad1a2bae821bc883e75a511ce0e7c8b6230236d926f40717c35440
+// translation-source: d6a91c86771d72646749d43c20da474c5903b9a6eb045100e392ca8f5995666f
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -30,7 +30,7 @@ I18N.nb = localeValues([
   /* sys.warning_line */ (c) => "Advarsel · " + c + " — kontroller varmepumpen.",
   /* sys.polled */ (s) => `lest for ${s} s siden`,
   /* recovery.title */ "Gjenopprettingsmodus",
-  /* recovery.meta_heap */ "Enheten gikk flere ganger tom for minne og startet på nytt. Den kjører nå uten varmepumpeforbindelse og MQTT, slik at nettsiden er tilgjengelig. Konfigurasjonen er trolig i orden — installer nyere fastvare under Innstillinger. Et strømbrudd prøver alle funksjoner på nytt.",
+  /* recovery.meta_heap */ "Enheten gikk flere ganger tom for minne og startet på nytt. Den kjører nå uten varmepumpeforbindelse og MQTT, slik at nettsiden er tilgjengelig. Konfigurasjonen er trolig i orden — installer nyere fastvare under Innstillinger. En omstart ved å bryte og koble til strømmen igjen prøver alle funksjoner på nytt.",
   /* recovery.meta */ "Enheten har startet på nytt flere ganger og er i gjenopprettingsmodus. Varmepumpeforbindelsen og MQTT er satt på pause. Kontroller konfigurasjonen, særlig RX/TX-pinnene på protokollkortet, og start enheten på nytt.",
   /* rollback.title */ "Wi-Fi-endringen mislyktes — tilbakestilt",
   /* rollback.meta */ (back) => `Enheten kunne ikke koble til med de nye Wi-Fi-innstillingene. Det forrige nettverket${back} ble gjenopprettet, og enheten startet på nytt. Kontroller nettverksnavn og passord under Innstillinger → Tilkoblinger og prøv igjen.`,
@@ -305,32 +305,32 @@ I18N.nb = localeValues([
   /* hist.boost_active */ "Boost aktiv",
   /* hist.boost_inactive */ "Boost av",
   /* hist.boost_aria */ (l, d) => `${l} — Smart Grid-historikk med fire moduser. ${d}. Bruk piltastene.`,
-  /* hist.defrost_total */ (d) => `Avriming registrert · ${d} rutenettid`,
+  /* hist.defrost_total */ (d) => `Avriming registrert · ${d} i 5-minuttersintervaller`,
   /* hist.defrost_none */ "Ingen avriming registrert i perioden.",
   /* hist.defrost_active */ "Avriming aktiv",
   /* hist.defrost_inactive */ "Avriming av",
   /* hist.defrost_aria */ (l, d) => `${l} — avrimingshistorikk. ${d}. Bruk piltastene.`,
-  /* hist.quiet_total */ (d) => `Stillemodus registrert · ${d} rutenettid`,
+  /* hist.quiet_total */ (d) => `Stillemodus registrert · ${d} i 5-minuttersintervaller`,
   /* hist.quiet_none */ "Ingen stillemodus registrert i perioden.",
   /* hist.quiet_active */ "Stillemodus aktiv",
   /* hist.quiet_inactive */ "Stillemodus av",
   /* hist.quiet_aria */ (l, d) => `${l} — historikk for stillemodus. ${d}. Bruk piltastene.`,
-  /* hist.heater_total */ (d) => `Tankvarmer registrert · ${d} rutenettid`,
+  /* hist.heater_total */ (d) => `Tankvarmer registrert · ${d} i 5-minuttersintervaller`,
   /* hist.heater_none */ "Ingen tankvarmer registrert i perioden.",
   /* hist.heater_active */ "Tankvarmer aktiv",
   /* hist.heater_inactive */ "Tankvarmer av",
   /* hist.heater_aria */ (l, d) => `${l} — historikk for tankvarmer. ${d}. Bruk piltastene.`,
-  /* hist.preheat_total */ (d) => `Forvarming av tank registrert · ${d} rutenettid`,
+  /* hist.preheat_total */ (d) => `Forvarming av tank registrert · ${d} i 5-minuttersintervaller`,
   /* hist.preheat_none */ "Ingen forvarming av tank registrert i perioden.",
   /* hist.preheat_active */ "Forvarming aktiv",
   /* hist.preheat_inactive */ "Forvarming av",
   /* hist.preheat_aria */ (l, d) => `${l} — X10A-historikk for tankforvarming. ${d}. Bruk piltastene.`,
-  /* hist.disinfection_total */ (d) => `Desinfeksjon registrert · ${d} rutenettid`,
+  /* hist.disinfection_total */ (d) => `Desinfeksjon registrert · ${d} i 5-minuttersintervaller`,
   /* hist.disinfection_none */ "Ingen tankdesinfeksjon registrert i perioden.",
   /* hist.disinfection_active */ "Desinfeksjon aktiv",
   /* hist.disinfection_inactive */ "Desinfeksjon av",
   /* hist.disinfection_aria */ (l, d) => `${l} — HomeHub-historikk for tankdesinfeksjon. ${d}. Bruk piltastene.`,
-  /* hist.buh_total */ (d) => `Tilleggsvarmer registrert · ${d} rutenettid`,
+  /* hist.buh_total */ (d) => `Tilleggsvarmer registrert · ${d} i 5-minuttersintervaller`,
   /* hist.buh_none */ "Ingen bruk av tilleggsvarmer registrert i perioden.",
   /* hist.buh_active */ "Tilleggsvarmer aktiv",
   /* hist.buh_inactive */ "Tilleggsvarmer av",
@@ -343,7 +343,7 @@ I18N.nb = localeValues([
   /* hist.valve_dhw */ "Tappevann",
   /* hist.valve_space */ "Romkrets",
   /* hist.valve_aria */ (l, d) => `${l} — historikk for 3-veisventil. ${d}. Bruk piltastene.`,
-  /* hist.circ_total */ (d) => `Pumpedrift registrert · ${d} rutenettid`,
+  /* hist.circ_total */ (d) => `Pumpedrift registrert · ${d} i 5-minuttersintervaller`,
   /* hist.circ_none */ "Ingen pumpedrift registrert i perioden.",
   /* hist.circ_on */ "Går",
   /* hist.circ_off */ "Stoppet",
@@ -356,7 +356,7 @@ I18N.nb = localeValues([
   /* hist.valve2_off */ "2WV-utgang AV",
   /* hist.valve2_none */ "Ingen PÅ-tilstand for 2WV-utgangen i perioden.",
   /* hist.valve2_aria */ (l, d) => `${l} — historikk for 2WV-utgang. ${d}. Bruk piltastene.`,
-  /* hist.flow_switch_total */ (d) => `X10A-status PÅ · ${d} rutenettid`,
+  /* hist.flow_switch_total */ (d) => `X10A-status PÅ · ${d} i 5-minuttersintervaller`,
   /* hist.flow_switch_on */ "X10A-status PÅ",
   /* hist.flow_switch_off */ "X10A-status AV",
   /* hist.flow_switch_none */ "Ingen PÅ-tilstand for denne X10A-statusen i perioden.",
@@ -720,7 +720,7 @@ I18N.nb = localeValues([
   /* board.led_gpio_wiping */ "Fast lys etter rask blinking — fabrikktilbakestilling/datasletting; ikke koble fra strømmen.",
   /* board.ledinv */ "Aktiv ved LOW — LED lyser ved lavt pinnenivå",
   /* board.btninv */ "Aktiv ved LOW — knappen trekker pinnen til GND",
-  /* board.hint */ "Fabrikktilbakestilling: hold 5 s. Sletter Wi-Fi/alle innstillinger, historikk/trender, tilstandsvarighet og rå kjernedump permanent. Portalen åpnes bare etter fullført sletting. Ellers slipp og hold igjen i 5 s. Velg «Ingen» uten knapp.",
+  /* board.hint */ "Fabrikktilbakestilling: hold 5 s. Sletter Wi-Fi/alle innstillinger, historikk/trender, tilstandsvarighet og rå kjernedump permanent. Oppsettportalen (Wi-Fi) åpnes bare etter fullført og vellykket sletting. Ellers slipp og hold igjen i 5 s. Velg «Ingen» uten knapp.",
   /* card.hardware */ "Maskinvare",
   /* card.hw_off */ "Ingen",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
@@ -1159,14 +1159,14 @@ DESCRIPTION_I18N.nb = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Egen feil-/advarselsstatus: aktiv feil gir ADVARSEL; advarsel eller melding siste 24 t gir INFO, uten prosjektinferens."], // health_fault
-  ["R5T lagdelt;K/t=MAX≠Ø/døgn;sirk.≠årsak;prosj.bånd 0,8–1,85.Ant.:200l jevnt;gyldige=MAX;COP;utel./mangl.h utenfor;el≠målt."], // health_dhw_loss
+  ["Måler rolige timer på R5T: K/t er største timesfall; pumpe er korrelasjon, ikke årsak. INFO ved ≥0,8 K/t og slutt ved 1,85 K/t er prosjektheuristikk. For 200 l anslås erstatningsel, ikke måling."], // health_dhw_loss
   ["INFO ved ≥12 varmekjøringer og snitt <10 min; tappevann/kjøling utelates. Ikke Daikin-grense; ved mye uklassert vurderes alle samlet."], // health_cycling
   ["Avriming: INFO over 15 % ved ≥3 sykluser; ikke Daikin-grense. R4T er live-kontekst utenfor vurderingen, og ett punkt beskriver ikke hele batteriet."], // health_defrost
   ["Laveste trykk: >1,0 bar; ≤1,0 gir INFO og etter 60 s ADVARSEL, men tillatt område er modellavhengig."], // health_pressure
   ["Vannmengde etter 60 s pumpedrift: bare målt utsnitt; sammenlign samme modell/modus/vilkår, ingen universell grense."], // health_flow
   ["Observert BUH-/BSH-tid: kulde, nød, avriming, tappevann eller overskudd kan forklare; ingen universell grense."], // health_heater
   ["Eksperimentell overvåking av fem interne vernetellere: bare klar økning mellom sammenlignbare avlesninger teller, også når den først blir synlig ved stans eller en overgang i kompressorstatus. Basisverdi, stabile eller fallende verdier, hull og nullstillinger teller ikke. Økning gir INFO, ikke diagnose; ingen økning beviser ikke fravær av begrensning."], // health_retries
-  ["Ledig RAM/24 t: varig fall kan vise beholdte allokeringer. En omstart med fortsatt strømforsyning viderefører trenden i RAM; normal omstart, fastvareoppdatering eller strømbrudd gjenoppretter fullførte 5-minuttersintervaller fra flash. Bare det åpne intervallet kan mangle."], // free_heap
+  ["Ledig RAM og trend over 24 t: vedvarende fall kan tyde på ufrigjorte allokeringer. Etter omstart eller strømbrudd gjenopprettes lukkede 5-minutters intervaller fra flash-minnet."], // free_heap
   ["Største sammenhengende blokk som TLS/OTA trenger; fall med stabil total-RAM tyder på fragmentering."], // max_alloc
   ["Utedelens nominelle effekt, ikke aktuell produksjon."], // capacity
   ["INNEDELENS nominelle effekt; ikke utedel eller komplett anlegg."], // capacity_iu

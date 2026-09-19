@@ -1,4 +1,4 @@
-// translation-source: 319d2c6911ad1a2bae821bc883e75a511ce0e7c8b6230236d926f40717c35440
+// translation-source: d6a91c86771d72646749d43c20da474c5903b9a6eb045100e392ca8f5995666f
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -189,7 +189,7 @@ I18N.es = localeValues([
   /* check.detail.fault.past_unknown */ "Apareció un mensaje durante las últimas 24 horas. No se puede saber si sigue activo: la fila de fallos no responde, así que comprueba la conexión X10A.",
   /* check.detail.collecting */ (n, r) => `${n} de ${r} capturados; todavía no es posible evaluar.`,
   /* check.detail.cycling_split */ " Aquí solo se evalúa la calefacción de espacios confirmada. Los ciclos de agua caliente tienen otras restricciones; se excluye la refrigeración identificada con certeza. Se cuenta por ciclo completo: la válvula de 3 vías y, en el circuito de climatización, el modo de funcionamiento de la U/I deben permanecer legibles y sin cambios durante todo el ciclo. Todo lo demás queda sin clasificar y no se evalúa.",
-  /* check.detail.cycling_pooled */ " Se evalúan todos los ciclos juntos porque las pruebas de clasificación fueron insuficientes: una entrada era demasiado escasa, se clasificaron menos de 12 ciclos o más del 10 % de los ciclos completos quedaron sin clasificar. Por tanto, el agua caliente o la refrigeración pueden ocultar ciclos cortos de calefacción. Las cifras de clase contiguas son observaciones y no determinaron el veredicto.",
+  /* check.detail.cycling_pooled */ " Se evalúan todos los ciclos juntos porque los datos de clasificación no fueron suficientes: una entrada era demasiado escasa, se clasificaron menos de 12 ciclos o más del 10 % de los ciclos completos quedaron sin clasificar. Por tanto, el agua caliente o la refrigeración pueden ocultar ciclos cortos de calefacción. Las cifras de clase contiguas son observaciones y no determinaron el veredicto.",
   /* check.detail.outdoor_cycling */ " Las cifras exteriores de X10A solo incluyen muestras recientes de ciclos de calefacción de espacios completos y clasificados de forma coherente. Sirven de contexto y no cambian el umbral de ciclos ni el veredicto.",
   /* check.detail.outdoor_defrost */ " Las cifras exteriores de X10A solo incluyen muestras recientes cuando tanto el estado de desescarche como el del compresor eran legibles y el compresor estaba funcionando. Sirven de contexto y no cambian el umbral de desescarche ni el veredicto.",
   /* check.detail.dhw_candidate */ (n, r, c, w) => `${n} de ${r} completados en ventanas limpias de una hora; ventana limpia actual: ${c} de ${w}.`,
@@ -203,7 +203,7 @@ I18N.es = localeValues([
   /* check.detail.dhw_reason.draw */ "caída similar a una extracción",
   /* check.detail.dhw_reason.reading */ "R5T no plausible",
   /* check.detail.dhw_reason.blind */ "X10A no responde",
-  /* check.detail.collecting_unknown */ "Aún no hay suficientes pruebas utilizables para realizar una evaluación.",
+  /* check.detail.collecting_unknown */ "Aún no hay suficientes datos utilizables para realizar una evaluación.",
   /* check.detail.observation */ "Solo valor medido; no existe un límite universal de OK/AVISO.",
   /* check.detail.experimental */ "Observación experimental; un contador estable no demuestra que no se produjera ninguna limitación.",
   /* check.detail.unavailable */ "El perfil activo no proporciona datos evaluables para esta comprobación.",
@@ -517,12 +517,12 @@ I18N.es = localeValues([
   /* dyn.plant_outdoor_help */ "Es la entrada 44 de HomeHub, el concepto de aire exterior propio de la bomba de calor. Se captura en el mismo ciclo Modbus actual que las condiciones de las ventanas de calefacción y su fuente se guarda con el evento. Permanece separado de ENV III y nunca cambia si se registra o no un evento.",
   /* dyn.shadow_strategy */ "Desviación ambiente bruta · 30 min",
   /* dyn.card_help */ "Cada 30 minutos durante una calefacción de espacios claramente identificada, el firmware registra cuánto se desvía la temperatura de la habitación de referencia de su objetivo, junto con la temperatura exterior de ese momento cuando la proporciona un sensor. Junto con el tiempo de funcionamiento, los límites mínimos de temperatura del agua de impulsión y la actividad del termostato, el patrón a largo plazo puede mostrar si la curva de calefacción tiende a ser demasiado alta o baja. Una desviación ambiente de 1 K no implica automáticamente un cambio de 1 K en el agua de impulsión. Esta función solo lee datos y no escribe nada en la bomba de calor.",
-  /* dyn.state_help_recording */ "La calefacción de espacios confirmada está funcionando y la entrada de habitación es válida, por lo que se registran muestras brutas del error ambiente. Interpreta una tendencia estacional junto con el tiempo de funcionamiento y las pruebas de recorte; una sola muestra no es un veredicto.",
+  /* dyn.state_help_recording */ "La calefacción de espacios confirmada está funcionando y la entrada de habitación es válida, por lo que se registran muestras brutas del error ambiente. Interpreta una tendencia estacional junto con el tiempo de funcionamiento y los datos de recorte; una sola muestra no es un veredicto.",
   /* dyn.state_help_waiting */ "La instalación no está ahora en funcionamiento normal de climatización, por lo que no se registra ninguna muestra. Durante el verano es el estado normal y esperado, no un fallo.",
   /* dyn.state_help_cooling */ "HomeHub informa de funcionamiento normal de climatización, pero el modo actual es refrigeración. Las ventanas de refrigeración se excluyen deliberadamente del conjunto de datos de la curva de calefacción.",
-  /* dyn.state_help_blocked */ "Falta una entrada necesaria, por lo que no se registra nada. El registro se reanuda cuando vuelve; nunca se muestrean pruebas antiguas o ambiguas.",
+  /* dyn.state_help_blocked */ "Falta una entrada necesaria, por lo que no se registra nada. El registro se reanuda cuando vuelve; nunca se muestrean datos antiguos o ambiguos.",
   /* dyn.state_help_room */ "La lectura de habitación llega al dispositivo, pero ahora no puede proporcionar una desviación válida respecto al objetivo. No se genera ninguna muestra hasta que la fuente vuelva a ser utilizable.",
-  /* dyn.state_help_setup */ "El diagnóstico comienza cuando se guarda una fuente MQTT de habitación con marca temporal y un objetivo. La previsión es una prueba comparativa opcional; no es necesario revelar la ubicación.",
+  /* dyn.state_help_setup */ "El diagnóstico comienza cuando se guarda una fuente MQTT de habitación con marca temporal y un objetivo. La previsión proporciona valores comparativos opcionales; no es necesario revelar la ubicación.",
   /* dyn.state_help_inactive */ "Las fuentes están configuradas, pero nada las evalúa: el muestreador se ejecuta en la conexión MQTT y esta placa arrancó en modo seguro tras varios arranques con fallo, donde todo consumidor opcional se mantiene inactivo. No se pierde nada: el registro se reanuda solo cuando la placa vuelve a arrancar normalmente.",
   /* dyn.state_help_no_broker */ "Hay una fuente de habitación guardada, pero el diagnóstico la lee mediante MQTT y no hay ningún bróker configurado. Configura el bróker en la tarjeta Conexiones; se conserva la fuente guardada y el registro comienza por sí solo.",
   /* dyn.state_help_setup_homehub */ "El diagnóstico necesita que HomeHub indique cuándo la instalación está calentando realmente; sin él no puede distinguir una ventana de calefacción del agua caliente o una parada. Configura la dirección de HomeHub en la tarjeta Protocolo.",
@@ -720,7 +720,7 @@ I18N.es = localeValues([
   /* board.led_gpio_wiping */ "Fijo tras parpadeo muy rápido — restablecimiento/borrado en curso; no desconectes la alimentación.",
   /* board.ledinv */ "Activo en nivel bajo (el LED se enciende cuando el pin está en LOW)",
   /* board.btninv */ "Activo en nivel bajo (el botón conecta el pin a GND)",
-  /* board.hint */ "Restablecimiento de fábrica: mantén pulsado 5 s. Borra permanentemente Wi-Fi/todos los ajustes, historial/tendencias, duraciones de estado y volcado de memoria sin procesar. El portal solo se abre si todo se borra correctamente. Si no, suelta y mantén otros 5 s. Elige «Ninguno» sin botón.",
+  /* board.hint */ "Restablecimiento de fábrica: mantén pulsado 5 s. Borra permanentemente Wi-Fi/todos los ajustes, historial/tendencias, duraciones de estado y volcado de memoria sin procesar. El portal de configuración (Wi-Fi) solo se abre tras un borrado completo y correcto. Si no, suelta y mantén otros 5 s. Elige «Ninguno» sin botón.",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Ninguno",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
@@ -945,7 +945,7 @@ INSPECT_I18N.es = inspectValues(
       const on = x10aDown() ? null : vOn(/^bsh$/i);
       return on == null ? null : on ? "Resistencia del depósito activa." : "Inactiva: la resistencia del depósito está apagada.";
     }], // bsh
-    ["Válvula de 3 vías", 0, "La salida lógica selecciona el camino del depósito o de climatización. No es una confirmación mecánica de posición ni una prueba de caudal.", (d) => d.valveDhw == null ? null : d.valveDhw
+    ["Válvula de 3 vías", 0, "La salida lógica selecciona el camino del depósito o de climatización. No es una confirmación mecánica de posición ni demuestra caudal.", (d) => d.valveDhw == null ? null : d.valveDhw
       ? "El control indica el camino del depósito. Esto no demuestra posición mecánica, caudal ni carga activa."
       : "El control indica el camino de climatización. Esto no demuestra posición mecánica ni circulación."], // valve
     ["Salida de válvula de 2 vías", 0, "Salida binaria X10A para una 2WV del circuito de climatización. No informa de la posición mecánica ni equivale al modo calefacción/refrigeración.", (d) => d.valve2On == null ? null : d.valve2On
@@ -1158,14 +1158,14 @@ DESCRIPTION_I18N.es = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Estado propio de error/aviso: error activo da AVISO; aviso o mensaje borrado en 24 h da NOTA, sin inferencia del proyecto."], // health_fault
-  ["R5T estrat.;K/h=MAX≠Ø/día;bomba≠causa;banda proy.0,8–1,85.Sup.:200l unif.;válidas=MAX;COP;excl./aus.h fuera;el≠medido."], // health_dhw_loss
-  ["NOTA con ≥12 ciclos de calefacción y media <10 min; excluye ACS/frío, no es límite Daikin y si quedan demasiados sin clasificar evalúa todos juntos."], // health_cycling
-  ["Cuenta desescarches: NOTA con >15 % y ≥3 ciclos; no es límite Daikin. R4T es contexto en vivo, no entra en el veredicto y un punto no representa toda la batería."], // health_defrost
-  ["Presión mínima: >1,0 bar; ≤1,0 da NOTA y tras 60 s ADVERTENCIA, pero el intervalo depende del modelo."], // health_pressure
-  ["Caudal tras 60 s de bomba: solo tramo medido; un valor aislado dice poco y se compara en igual modelo, modo y condiciones, sin límite universal."], // health_flow
+  ["Mide horas tranquilas en R5T: K/h es la mayor caída horaria; la bomba indica correlación, no causa. NOTA con ≥0,8 K/h y fin en 1,85 K/h son heurísticas del proyecto. Para 200 l orienta sobre reposición, no consumo medido."], // health_dhw_loss
+  ["NOTA con ≥12 ciclos de calefacción y media <10 min; excluye ACS/refrigeración y no es un límite Daikin. Si hay demasiados sin clasificar, se evalúan todos juntos."], // health_cycling
+  ["Desescarche: NOTA sobre 15% y ≥3 ciclos; no es límite Daikin. R4T es contexto en vivo fuera de la evaluación; un punto no describe toda la batería."], // health_defrost
+  ["Presión mínima: >1,0 bar; ≤1,0 da NOTA y tras 60 s AVISO, pero el rango permitido varía según el modelo."], // health_pressure
+  ["Caudal tras 60 s de bomba: tramo medido, no de diseño; comparar mismo modelo, modo y condiciones, sin límite universal."], // health_flow
   ["Tiempo observado de BUH/BSH: frío, emergencia, desescarche, ACS o excedentes pueden explicarlo; no hay límite universal."], // health_heater
   ["5 contadores experimentales poco documentados: solo un aumento comparable da NOTA, no diagnóstico; sin aumentos tampoco se excluye limitación."], // health_retries
-  ["RAM libre actual y tendencia de 24 h: una caída persistente puede indicar asignaciones retenidas. Un reinicio con alimentación conserva la tendencia en RAM; un reinicio normal, una actualización o un corte recupera de flash los intervalos cerrados de 5 min. Solo puede faltar el intervalo abierto."], // free_heap
+  ["RAM libre actual y tendencia 24 h: una caída continua puede indicar asignaciones no liberadas. Tras un reinicio o corte, los intervalos cerrados de 5 min se restauran desde la memoria flash."], // free_heap
   ["Mayor bloque contiguo necesario para TLS/OTA; si cae con RAM total estable, indica fragmentación."], // max_alloc
   ["Capacidad nominal de la unidad exterior, no su producción actual."], // capacity
   ["Capacidad nominal de la UNIDAD INTERIOR; no corresponde a la exterior ni al sistema completo."], // capacity_iu
