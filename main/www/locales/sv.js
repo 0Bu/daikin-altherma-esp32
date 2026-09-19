@@ -1,4 +1,4 @@
-// translation-source: 319d2c6911ad1a2bae821bc883e75a511ce0e7c8b6230236d926f40717c35440
+// translation-source: d6a91c86771d72646749d43c20da474c5903b9a6eb045100e392ca8f5995666f
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -30,7 +30,7 @@ I18N.sv = localeValues([
   /* sys.warning_line */ (c) => "Varning · " + c + " — kontrollera värmepumpen.",
   /* sys.polled */ (s) => `läst för ${s} s sedan`,
   /* recovery.title */ "Återställningsläge",
-  /* recovery.meta_heap */ "Minnesbrist orsakade flera omstarter. Värmepumpsanslutning och MQTT är pausade så webbsidan fungerar. Installera nyare firmware under Inställningar; ett strömavbrott provar alla funktioner igen.",
+  /* recovery.meta_heap */ "Minnesbrist orsakade flera omstarter. Värmepumpsanslutning och MQTT är pausade så webbsidan fungerar. Installera nyare firmware under Inställningar; en omstart genom att bryta och återansluta strömmen provar alla funktioner igen.",
   /* recovery.meta */ "Flera omstarter utlöste återställningsläge med pausad värmepumpsanslutning och MQTT. Kontrollera konfigurationen, särskilt RX/TX-stiften, och starta om.",
   /* rollback.title */ "Wi-Fi-ändringen misslyckades — återställd",
   /* rollback.meta */ (back) => `Nya Wi-Fi-inställningar fungerade inte. Föregående nätverk${back} återställdes och enheten startades om. Kontrollera namn och lösenord under Inställningar → Anslutningar.`,
@@ -305,32 +305,32 @@ I18N.sv = localeValues([
   /* hist.boost_active */ "Boost aktiv",
   /* hist.boost_inactive */ "Boost av",
   /* hist.boost_aria */ (l, d) => `${l} — Smart Grid-historik med fyra lägen. ${d}. Använd piltangenterna.`,
-  /* hist.defrost_total */ (d) => `Avfrostning registrerad · ${d} rutnätstid`,
+  /* hist.defrost_total */ (d) => `Avfrostning registrerad · ${d} i 5-minutersintervall`,
   /* hist.defrost_none */ "Ingen avfrostning registrerad i perioden.",
   /* hist.defrost_active */ "Avfrostning aktiv",
   /* hist.defrost_inactive */ "Avfrostning av",
   /* hist.defrost_aria */ (l, d) => `${l} — avfrostningshistorik. ${d}. Använd piltangenterna.`,
-  /* hist.quiet_total */ (d) => `Tyst läge registrerat · ${d} rutnätstid`,
+  /* hist.quiet_total */ (d) => `Tyst läge registrerat · ${d} i 5-minutersintervall`,
   /* hist.quiet_none */ "Inget tyst läge registrerat under perioden.",
   /* hist.quiet_active */ "Tyst läge aktivt",
   /* hist.quiet_inactive */ "Tyst läge av",
   /* hist.quiet_aria */ (l, d) => `${l} — historik för tyst läge. ${d}. Använd piltangenterna.`,
-  /* hist.heater_total */ (d) => `Tankvärmare registrerad · ${d} rutnätstid`,
+  /* hist.heater_total */ (d) => `Tankvärmare registrerad · ${d} i 5-minutersintervall`,
   /* hist.heater_none */ "Ingen tankvärmare registrerad i perioden.",
   /* hist.heater_active */ "Tankvärmare aktiv",
   /* hist.heater_inactive */ "Tankvärmare av",
   /* hist.heater_aria */ (l, d) => `${l} — historik för tankvärmare. ${d}. Använd piltangenterna.`,
-  /* hist.preheat_total */ (d) => `Förvärmning av tank registrerad · ${d} rutnätstid`,
+  /* hist.preheat_total */ (d) => `Förvärmning av tank registrerad · ${d} i 5-minutersintervall`,
   /* hist.preheat_none */ "Ingen förvärmning av tank registrerad i perioden.",
   /* hist.preheat_active */ "Förvärmning aktiv",
   /* hist.preheat_inactive */ "Förvärmning av",
   /* hist.preheat_aria */ (l, d) => `${l} — X10A-historik för tankförvärmning. ${d}. Använd piltangenterna.`,
-  /* hist.disinfection_total */ (d) => `Desinfektion registrerad · ${d} rutnätstid`,
+  /* hist.disinfection_total */ (d) => `Desinfektion registrerad · ${d} i 5-minutersintervall`,
   /* hist.disinfection_none */ "Ingen tankdesinfektion registrerad i perioden.",
   /* hist.disinfection_active */ "Desinfektion aktiv",
   /* hist.disinfection_inactive */ "Desinfektion av",
   /* hist.disinfection_aria */ (l, d) => `${l} — HomeHub-historik för tankdesinfektion. ${d}. Använd piltangenterna.`,
-  /* hist.buh_total */ (d) => `Tillsatsvärmare registrerad · ${d} rutnätstid`,
+  /* hist.buh_total */ (d) => `Tillsatsvärmare registrerad · ${d} i 5-minutersintervall`,
   /* hist.buh_none */ "Ingen användning av tillsatsvärmare registrerad under perioden.",
   /* hist.buh_active */ "Tillsatsvärmare aktiv",
   /* hist.buh_inactive */ "Tillsatsvärmare av",
@@ -343,7 +343,7 @@ I18N.sv = localeValues([
   /* hist.valve_dhw */ "Varmvatten",
   /* hist.valve_space */ "Rumskrets",
   /* hist.valve_aria */ (l, d) => `${l} — historik för 3-vägsventil. ${d}. Använd piltangenterna.`,
-  /* hist.circ_total */ (d) => `Pumpdrift registrerad · ${d} rutnätstid`,
+  /* hist.circ_total */ (d) => `Pumpdrift registrerad · ${d} i 5-minutersintervall`,
   /* hist.circ_none */ "Ingen pumpdrift registrerad i perioden.",
   /* hist.circ_on */ "Går",
   /* hist.circ_off */ "Stoppad",
@@ -356,7 +356,7 @@ I18N.sv = localeValues([
   /* hist.valve2_off */ "2WV-utgång AV",
   /* hist.valve2_none */ "Inget PÅ-tillstånd för 2WV-utgången under perioden.",
   /* hist.valve2_aria */ (l, d) => `${l} — historik för 2WV-utgång. ${d}. Använd piltangenterna.`,
-  /* hist.flow_switch_total */ (d) => `X10A-status PÅ · ${d} rutnätstid`,
+  /* hist.flow_switch_total */ (d) => `X10A-status PÅ · ${d} i 5-minutersintervall`,
   /* hist.flow_switch_on */ "X10A-status PÅ",
   /* hist.flow_switch_off */ "X10A-status AV",
   /* hist.flow_switch_none */ "Inget PÅ-tillstånd för denna X10A-status under perioden.",
@@ -720,7 +720,7 @@ I18N.sv = localeValues([
   /* board.led_gpio_wiping */ "Fast sken efter snabb blinkning — fabriksåterställning/dataradering; koppla inte från strömmen.",
   /* board.ledinv */ "Aktiv vid LOW — LED lyser vid låg stiftnivå",
   /* board.btninv */ "Aktiv vid LOW — knappen drar stiftet till GND",
-  /* board.hint */ "Fabriksåterställning: håll 5 s. Raderar permanent Wi-Fi/alla inställningar, historik/trender, tillståndstider och rå kärndump. Portalen öppnas bara efter fullständig radering. Annars släpp och håll igen i 5 s. Välj «Ingen» utan knapp.",
+  /* board.hint */ "Fabriksåterställning: håll 5 s. Raderar permanent Wi-Fi/alla inställningar, historik/trender, tillståndstider och rå kärndump. Konfigurationsportalen (Wi-Fi) öppnas bara efter fullständig och lyckad radering. Annars släpp och håll igen i 5 s. Välj «Ingen» utan knapp.",
   /* card.hardware */ "Maskinvara",
   /* card.hw_off */ "Ingen",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
@@ -1159,14 +1159,14 @@ DESCRIPTION_I18N.sv = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["Egen fel-/varningsstatus: aktivt fel ger Varning; varning eller meddelande senaste 24 t ger INFO utan projektslutsats."], // health_fault
-  ["R5T skiktad;K/t=MAX≠Ø/dygn;cirk.≠orsak;proj.band 0,8–1,85.Ant.:200l jämnt;giltiga=MAX;COP;utesl./sakn.h utanför;el≠mätt."], // health_dhw_loss
+  ["Mäter lugna timmar på R5T: K/t är största timfallet; pump är korrelation, inte orsak. INFO vid ≥0,8 K/t och slut vid 1,85 K/t är projektheuristik. För 200 l uppskattas ersättningsel, inte mätning."], // health_dhw_loss
   ["INFO vid ≥12 värmekörningar och medel <10 min; varmvatten/kyla utelämnas. Inte Daikin-gräns; vid många oklassificerade bedöms alla gemensamt."], // health_cycling
   ["Avfrostning: INFO över 15 % vid ≥3 cykler; inte Daikin-gräns. R4T är livekontext utanför bedömningen och en punkt beskriver inte hela batteriet."], // health_defrost
   ["Lägsta tryck: >1,0 bar; ≤1,0 ger INFO och efter 60 s Varning, men tillåtet intervall är modellberoende."], // health_pressure
   ["Vattenflöde efter 60 s pumpdrift: endast uppmätt avsnitt; jämför samma modell/läge/villkor, ingen universell gräns."], // health_flow
   ["Observerad BUH-/BSH-tid: kyla, nödläge, avfrostning, varmvatten eller överskott kan förklara; ingen universell gräns."], // health_heater
   ["Experimentell bevakning av fem interna skyddsräknare. Endast en tydlig ökning mellan jämförbara avläsningar räknas, även om den först syns vid stopp eller övergång i kompressorstatus; baslinje, stabila/fallande värden, luckor och återställningar räknas inte. En ökning är information, inte diagnos, och ingen ökning bevisar inte att ingen begränsning skett."], // health_retries
-  ["Ledigt RAM/24 h: varaktig nedgång kan visa kvarhållna allokeringar. En varm omstart med kvarvarande matning fortsätter RAM-trenden; normal omstart, firmwareuppdatering eller strömavbrott återläser endast avslutade 5-minutersintervall från flash, och öppet intervall kan saknas."], // free_heap
+  ["Ledigt RAM och trend över 24 h: ihållande nedgång kan tyda på allokeringar som inte frigörs. Efter omstart eller strömavbrott återställs avslutade 5-minutersintervall från flashminnet."], // free_heap
   ["Största sammanhängande block som TLS/OTA behöver; fall med stabilt total-RAM tyder på fragmentering."], // max_alloc
   ["Utomhusenhetens nominella effekt, inte aktuell produktion."], // capacity
   ["Inomhusenhetens nominella effekt; inte utomhusenheten eller hela anläggningen."], // capacity_iu

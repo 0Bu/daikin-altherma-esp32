@@ -1,4 +1,4 @@
-// translation-source: 319d2c6911ad1a2bae821bc883e75a511ce0e7c8b6230236d926f40717c35440
+// translation-source: d6a91c86771d72646749d43c20da474c5903b9a6eb045100e392ca8f5995666f
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -189,7 +189,7 @@ I18N.it = localeValues([
   /* check.detail.fault.past_unknown */ "Nelle ultime 24 ore è comparso un messaggio. Non è possibile leggere se sia ancora attivo — la riga dei guasti non risponde, quindi controllare il collegamento X10A.",
   /* check.detail.collecting */ (n, r) => `${n} di ${r} acquisiti; non è ancora possibile effettuare una valutazione.`,
   /* check.detail.cycling_split */ " Qui viene valutato solo il riscaldamento ambienti confermato. I cicli dell'acqua calda rispondono a vincoli diversi; il raffrescamento identificato con certezza è escluso. Conteggio per ciclo completo: la valvola a 3 vie e, sul circuito ambiente, la modalità operativa I/U devono restare leggibili e invariate per l'intero ciclo. Tutto il resto non viene classificato né valutato.",
-  /* check.detail.cycling_pooled */ " Valutazione con tutti i cicli raggruppati perché le prove di classificazione erano insufficienti: un ingresso era troppo sporadico, sono stati classificati meno di 12 cicli o più del 10% dei cicli completati non era classificato. L'acqua calda o il raffrescamento possono quindi mascherare cicli di riscaldamento brevi. I dati di classe riportati accanto sono osservazioni, non hanno determinato il verdetto.",
+  /* check.detail.cycling_pooled */ " Valutazione con tutti i cicli raggruppati perché i dati di classificazione erano insufficienti: un ingresso era troppo sporadico, sono stati classificati meno di 12 cicli o più del 10% dei cicli completati non era classificato. L'acqua calda o il raffrescamento possono quindi mascherare cicli di riscaldamento brevi. I dati di classe riportati accanto sono osservazioni, non hanno determinato il verdetto.",
   /* check.detail.outdoor_cycling */ " I dati esterni X10A comprendono solo campioni recenti di cicli di riscaldamento ambienti completati e classificati in modo coerente. Forniscono contesto e non modificano la soglia o il verdetto sui cicli.",
   /* check.detail.outdoor_defrost */ " I dati esterni X10A comprendono solo campioni recenti mentre lo stato di sbrinamento e del compressore erano leggibili e il compressore era in funzione. Forniscono contesto e non modificano la soglia o il verdetto sullo sbrinamento.",
   /* check.detail.dhw_candidate */ (n, r, c, w) => `${n} di ${r} completati in finestre pulite di un'ora; finestra pulita attuale: ${c} di ${w}.`,
@@ -517,12 +517,12 @@ I18N.it = localeValues([
   /* dyn.plant_outdoor_help */ "È l'ingresso HomeHub 44, il valore di aria esterna proprio della pompa di calore. Viene acquisito nello stesso ciclo Modbus corrente dei criteri della finestra di riscaldamento e la sua sorgente viene memorizzata con l'evento. Resta separato da ENV III e non modifica mai la decisione di registrare un evento.",
   /* dyn.shadow_strategy */ "Deviazione ambiente grezza · 30 min",
   /* dyn.card_help */ "Ogni 30 minuti, durante un riscaldamento ambienti chiaramente identificato, il firmware registra di quanto la temperatura dell'ambiente di riferimento si discosta dall'obiettivo, insieme alla temperatura esterna di quel momento se un sensore la fornisce. Insieme a durata di funzionamento, limiti minimi della temperatura di mandata e attività del termostato, l'andamento nel lungo periodo può indicare se la curva climatica tende a essere troppo alta o troppo bassa. Una deviazione ambiente di 1 K non implica automaticamente una variazione di 1 K dell'acqua di mandata. Questa funzione legge soltanto i dati e non scrive nulla nella pompa di calore.",
-  /* dyn.state_help_recording */ "Il riscaldamento ambienti confermato è in funzione e l'ingresso ambiente è valido, quindi vengono registrati campioni grezzi dell'errore ambiente. Valutare l'andamento stagionale insieme a durata di funzionamento e prove di limitazione; un singolo campione non è un verdetto.",
+  /* dyn.state_help_recording */ "Il riscaldamento ambienti confermato è in funzione e l'ingresso ambiente è valido, quindi vengono registrati campioni grezzi dell'errore ambiente. Valutare l'andamento stagionale insieme a durata di funzionamento e dati di limitazione; un singolo campione non è un verdetto.",
   /* dyn.state_help_waiting */ "Al momento l'impianto non è in normale funzionamento ambienti, quindi non viene registrato alcun campione. Durante l'estate questo è lo stato normale previsto, non un guasto.",
   /* dyn.state_help_cooling */ "HomeHub segnala il normale funzionamento ambienti, ma la modalità attuale è il raffrescamento. Le finestre di raffrescamento sono escluse intenzionalmente dai dati della curva climatica.",
   /* dyn.state_help_blocked */ "Manca un ingresso necessario, quindi non viene registrato nulla. La registrazione riprende quando torna disponibile; dati vecchi o ambigui non vengono mai campionati.",
   /* dyn.state_help_room */ "La lettura ambiente raggiunge il dispositivo, ma al momento non può fornire una deviazione valida dall'obiettivo. Non viene creato alcun campione finché la sorgente non torna utilizzabile.",
-  /* dyn.state_help_setup */ "La diagnosi inizia quando viene salvata una sorgente ambiente MQTT con indicazione temporale e obiettivo. La previsione è un confronto facoltativo; non è necessario comunicare la posizione.",
+  /* dyn.state_help_setup */ "La diagnosi inizia quando viene salvata una sorgente ambiente MQTT con indicazione temporale e obiettivo. Le previsioni forniscono valori comparativi facoltativi; non è necessario indicare la posizione.",
   /* dyn.state_help_inactive */ "Le sorgenti sono configurate, ma non vengono valutate: il campionatore funziona sulla connessione MQTT e questa scheda si è avviata in modalità provvisoria dopo ripetuti arresti anomali, nella quale ogni componente facoltativo resta inattivo. Non si perde nulla — la registrazione riprende da sola quando la scheda torna ad avviarsi normalmente.",
   /* dyn.state_help_no_broker */ "È salvata una sorgente ambiente, ma la diagnosi la legge tramite MQTT e non è configurato alcun broker. Impostare il broker nella scheda Connessioni; la sorgente ambiente salvata viene conservata e la registrazione si avvia automaticamente.",
   /* dyn.state_help_setup_homehub */ "La diagnosi necessita di HomeHub per sapere quando l'impianto sta realmente riscaldando; senza non può distinguere una finestra di riscaldamento dall'acqua calda o da un arresto. Impostare l'indirizzo HomeHub nella scheda Protocollo.",
@@ -720,7 +720,7 @@ I18N.it = localeValues([
   /* board.led_gpio_wiping */ "Fisso dopo un lampeggio rapido — ripristino/cancellazione in corso; non scollegare l'alimentazione.",
   /* board.ledinv */ "Attivo basso (il LED si accende quando il pin è portato a LOW)",
   /* board.btninv */ "Attivo basso (il pulsante collega il pin a GND)",
-  /* board.hint */ "Ripristino di fabbrica: tenere premuto 5 s. Cancella definitivamente Wi-Fi/tutte le impostazioni, cronologia/tendenze, durate degli stati e core dump non elaborato. Il portale si apre solo dopo la cancellazione completa. Altrimenti rilasciare e premere altri 5 s. Scegliere “Nessuno” senza pulsante.",
+  /* board.hint */ "Ripristino di fabbrica: tenere premuto 5 s. Cancella definitivamente Wi-Fi/tutte le impostazioni, cronologia/tendenze, durate degli stati e core dump non elaborato. Il portale di configurazione (Wi-Fi) si apre solo dopo una cancellazione completa e riuscita. Altrimenti rilasciare e premere altri 5 s. Scegliere “Nessuno” senza pulsante.",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Nessuno",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
@@ -1142,14 +1142,14 @@ DESCRIPTION_I18N.it = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Stato proprio dell’unità: errore attivo dà AVVISO; avvertimento o messaggio cancellato entro 24 h dà NOTA, non una deduzione del progetto."], // health_fault
-  ["R5T strat.;K/h=MAX≠Ø/giorno;pompa≠causa;banda prog.0,8–1,85.Ip.:200l unif.;valide=MAX;COP;escl./ass.h fuori;el.≠misurata."], // health_dhw_loss
+  ["Misura R5T a riposo: K/h è il massimo calo orario; la pompa è correlazione, non causa. NOTA con ≥0,8 K/h e limite a 1,85 K/h sono stime del progetto. Su 200 l orienta sul reintegro, non consumo misurato."], // health_dhw_loss
   ["NOTA con ≥12 cicli riscaldamento medi <10 min; esclude ACS/freddo, non è limite Daikin e se troppi restano non classificati li valuta tutti insieme."], // health_cycling
   ["Conta gli sbrinamenti: NOTA oltre 15 % con ≥3 cicli; non è un limite Daikin. R4T è contesto live fuori dal verdetto; un punto non descrive tutta la batteria."], // health_defrost
   ["Minima pressione acqua: >1,0 bar; ≤1,0 dà NOTA e dopo 60 s AVVISO, ma il campo dipende dal modello."], // health_pressure
   ["Portata dopo 60 s di pompa: solo tratto misurato; un dato isolato dice poco, confrontare stesso modello, modo e condizioni, senza soglia universale."], // health_flow
   ["Durata osservata di BUH e BSH: freddo, emergenza, sbrinamento, ACS o surplus possono spiegarla; nessun limite universale."], // health_heater
   ["5 contatori sperimentali poco documentati: solo un aumento comparabile dà NOTA, non diagnosi; senza aumenti le limitazioni non sono escluse."], // health_retries
-  ["RAM libera attuale e andamento su 24 h: una discesa persistente può indicare allocazioni non liberate. Un riavvio con alimentazione conserva l’andamento in RAM; un riavvio normale, un aggiornamento o un’interruzione ripristina dal flash gli intervalli chiusi di 5 min. Può mancare solo quello aperto."], // free_heap
+  ["RAM libera attuale e andamento 24 h: un calo continuo indica possibili allocazioni non liberate. Dopo riavvio o interruzione, gli intervalli chiusi di 5 min sono ripristinati dalla memoria flash."], // free_heap
   ["Massimo blocco contiguo richiesto da TLS/OTA; se cala con RAM totale stabile indica frammentazione."], // max_alloc
   ["Capacità nominale dell’unità esterna dalla pagina identificativa, non potenza prodotta ora."], // capacity
   ["Capacità nominale dell’UNITÀ INTERNA; non va attribuita all’esterna o all’intero sistema."], // capacity_iu

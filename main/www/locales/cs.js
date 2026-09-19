@@ -1,4 +1,4 @@
-// translation-source: 319d2c6911ad1a2bae821bc883e75a511ce0e7c8b6230236d926f40717c35440
+// translation-source: d6a91c86771d72646749d43c20da474c5903b9a6eb045100e392ca8f5995666f
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -189,7 +189,7 @@ I18N.cs = localeValues([
   /* check.detail.fault.past_unknown */ "Během posledních 24 hodin se objevilo hlášení. Zda je právě aktivní, nelze zjistit — řádek poruch neodpovídá, proto zkontrolujte spojení X10A.",
   /* check.detail.collecting */ (n, r) => `Zachyceno ${n} z ${r}; vyhodnocení zatím není možné.`,
   /* check.detail.cycling_split */ " Zde se vyhodnocuje pouze potvrzené vytápění prostoru. Ohřev teplé vody podléhá jiným omezením; jednoznačně rozpoznané chlazení je vyloučeno. Počítá se každý úplný běh: trojcestný ventil a u prostorového okruhu i provozní režim I/U musí zůstat po celý běh čitelné a beze změny. Vše ostatní zůstává nezařazené a není posuzováno ani jedním způsobem.",
-  /* check.detail.cycling_pooled */ " Všechny běhy byly vyhodnoceny společně, protože nebyl dostatek důkazů pro zařazení: některý vstup byl příliš řídký, bylo zařazeno méně než 12 běhů nebo více než 10 % dokončených běhů zůstalo nezařazených. Ohřev teplé vody nebo chlazení proto mohou zakrýt krátké topné běhy. Údaje o třídách vedle tohoto textu jsou pouze pozorování, nerozhodovaly o výsledku.",
+  /* check.detail.cycling_pooled */ " Všechny běhy byly vyhodnoceny společně, protože nebyl dostatek dat pro zařazení: některý vstup byl příliš řídký, bylo zařazeno méně než 12 běhů nebo více než 10 % dokončených běhů zůstalo nezařazených. Ohřev teplé vody nebo chlazení proto mohou zakrýt krátké topné běhy. Údaje o třídách vedle tohoto textu jsou pouze pozorování, nerozhodovaly o výsledku.",
   /* check.detail.outdoor_cycling */ " Venkovní hodnoty X10A obsahují jen čerstvé vzorky z dokončených a konzistentně zařazených běhů vytápění prostoru. Slouží jako kontext a nemění práh ani výsledek hodnocení cyklování.",
   /* check.detail.outdoor_defrost */ " Venkovní hodnoty X10A obsahují jen čerstvé vzorky, kdy byly čitelné stav odmrazování i stav kompresoru a kompresor běžel. Slouží jako kontext a nemění práh ani výsledek hodnocení odmrazování.",
   /* check.detail.dhw_candidate */ (n, r, c, w) => `${n} z ${r} dokončeno v čistých hodinových oknech; aktuální čisté okno: ${c} z ${w}.`,
@@ -203,7 +203,7 @@ I18N.cs = localeValues([
   /* check.detail.dhw_reason.draw */ "pokles podobný odběru",
   /* check.detail.dhw_reason.reading */ "nevěrohodná hodnota R5T",
   /* check.detail.dhw_reason.blind */ "X10A neodpovídá",
-  /* check.detail.collecting_unknown */ "Pro vyhodnocení zatím není dostatek použitelných důkazů.",
+  /* check.detail.collecting_unknown */ "Pro vyhodnocení zatím není dostatek použitelných údajů.",
   /* check.detail.observation */ "Pouze naměřená hodnota; neexistuje univerzální limit V POŘÁDKU/VAROVÁNÍ.",
   /* check.detail.experimental */ "Experimentální pozorování; stabilní čítač nedokazuje, že nedošlo k omezení.",
   /* check.detail.unavailable */ "Aktivní profil neposkytuje pro tuto kontrolu žádná vyhodnotitelná data.",
@@ -305,32 +305,32 @@ I18N.cs = localeValues([
   /* hist.boost_active */ "Posílení aktivní",
   /* hist.boost_inactive */ "Posílení vypnuté",
   /* hist.boost_aria */ (l, d) => `${l} — časová osa stavu Smart Grid se všemi čtyřmi režimy. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
-  /* hist.defrost_total */ (d) => `Odmrazování pozorováno jako aktivní · ${d} vzorkovaného času rastru`,
+  /* hist.defrost_total */ (d) => `Odmrazování aktivní · ${d} v 5minutovém rastru`,
   /* hist.defrost_none */ "V zaznamenaném období nebyl pozorován žádný cyklus odmrazování.",
   /* hist.defrost_active */ "Odmrazování aktivní",
   /* hist.defrost_inactive */ "Odmrazování vypnuté",
   /* hist.defrost_aria */ (l, d) => `${l} — časová osa odmrazování. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
-  /* hist.quiet_total */ (d) => `Tichý režim pozorován jako aktivní · ${d} vzorkovaného času rastru`,
+  /* hist.quiet_total */ (d) => `Tichý režim aktivní · ${d} v 5minutovém rastru`,
   /* hist.quiet_none */ "V zaznamenaném období nebyl pozorován žádný interval tichého režimu.",
   /* hist.quiet_active */ "Tichý režim aktivní",
   /* hist.quiet_inactive */ "Tichý režim vypnutý",
   /* hist.quiet_aria */ (l, d) => `${l} — časová osa tichého režimu. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
-  /* hist.heater_total */ (d) => `Ohřívač pozorován jako aktivní · ${d} vzorkovaného času rastru`,
+  /* hist.heater_total */ (d) => `Topné těleso aktivní · ${d} v 5minutovém rastru`,
   /* hist.heater_none */ "V zaznamenaném období nebylo pozorováno použití topného tělesa zásobníku.",
   /* hist.heater_active */ "Topné těleso aktivní",
   /* hist.heater_inactive */ "Topné těleso vypnuté",
   /* hist.heater_aria */ (l, d) => `${l} — časová osa topného tělesa zásobníku. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
-  /* hist.preheat_total */ (d) => `Předehřev zásobníku pozorován jako aktivní · ${d} vzorkovaného času rastru`,
+  /* hist.preheat_total */ (d) => `Předehřev zásobníku aktivní · ${d} v 5minutovém rastru`,
   /* hist.preheat_none */ "V zaznamenaném období nebyl pozorován žádný interval předehřevu zásobníku.",
   /* hist.preheat_active */ "Předehřev zásobníku aktivní",
   /* hist.preheat_inactive */ "Předehřev zásobníku vypnutý",
   /* hist.preheat_aria */ (l, d) => `${l} — časová osa předehřevu zásobníku X10A. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
-  /* hist.disinfection_total */ (d) => `Dezinfekce pozorována jako aktivní · ${d} vzorkovaného času rastru`,
+  /* hist.disinfection_total */ (d) => `Dezinfekce aktivní · ${d} v 5minutovém rastru`,
   /* hist.disinfection_none */ "V zaznamenaném období nebyl pozorován žádný dezinfekční provoz.",
   /* hist.disinfection_active */ "Dezinfekce aktivní",
   /* hist.disinfection_inactive */ "Dezinfekce vypnutá",
   /* hist.disinfection_aria */ (l, d) => `${l} — časová osa dezinfekce HomeHub. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
-  /* hist.buh_total */ (d) => `Záložní topné těleso pozorováno jako aktivní · ${d} vzorkovaného času rastru`,
+  /* hist.buh_total */ (d) => `Záložní topné těleso aktivní · ${d} v 5minutovém rastru`,
   /* hist.buh_none */ "V zaznamenaném období nebylo pozorováno použití záložního topného tělesa.",
   /* hist.buh_active */ "Záložní topné těleso aktivní",
   /* hist.buh_inactive */ "Záložní topné těleso vypnuté",
@@ -343,7 +343,7 @@ I18N.cs = localeValues([
   /* hist.valve_dhw */ "TUV",
   /* hist.valve_space */ "Prostorový okruh",
   /* hist.valve_aria */ (l, d) => `${l} — časová osa trojcestného ventilu. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
-  /* hist.circ_total */ (d) => `Čerpadlo pozorováno v chodu · ${d} vzorkovaného času rastru`,
+  /* hist.circ_total */ (d) => `Čerpadlo v chodu · ${d} v 5minutovém rastru`,
   /* hist.circ_none */ "V zaznamenaném období nebyl pozorován žádný běh čerpadla.",
   /* hist.circ_on */ "Běží",
   /* hist.circ_off */ "Zastaveno",
@@ -356,7 +356,7 @@ I18N.cs = localeValues([
   /* hist.valve2_off */ "Výstup 2WV VYP",
   /* hist.valve2_none */ "Ve zvoleném období nebyl pro výstup dvoucestného ventilu zaznamenán stav ZAP.",
   /* hist.valve2_aria */ (l, d) => `${l} — časová osa výstupu dvoucestného ventilu. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
-  /* hist.flow_switch_total */ (d) => `Stav X10A ZAP · ${d} vzorkovaného času rastru`,
+  /* hist.flow_switch_total */ (d) => `Stav X10A ZAP · ${d} v 5minutovém rastru`,
   /* hist.flow_switch_on */ "Stav X10A ZAP",
   /* hist.flow_switch_off */ "Stav X10A VYP",
   /* hist.flow_switch_none */ "Ve zvoleném období nebyl pro tento stav X10A zaznamenán stav ZAP.",
@@ -517,12 +517,12 @@ I18N.cs = localeValues([
   /* dyn.plant_outdoor_help */ "Jde o vstup HomeHub 44, tedy vlastní údaj tepelného čerpadla o venkovním vzduchu. Zachycuje se ve stejném aktuálním cyklu Modbus jako podmínky topného okna a jeho zdroj se ukládá s událostí. Zůstává oddělený od ENV III a nikdy nemění rozhodnutí, zda se událost zaznamená.",
   /* dyn.shadow_strategy */ "Hrubá odchylka místnosti · 30 min",
   /* dyn.card_help */ "Každých 30 minut během jednoznačně rozpoznaného vytápění prostoru firmware zaznamená rozdíl mezi teplotou referenční místnosti a jejím cílem spolu s venkovní teplotou v daném okamžiku, pokud ji poskytuje některý snímač. Spolu s dobou běhu, minimálními limity výstupní vody a činností termostatu může dlouhodobější průběh ukázat, zda bývá topná křivka příliš vysoká nebo příliš nízká. Odchylka místnosti 1 K automaticky neznamená změnu výstupní vody o 1 K. Tato funkce pouze čte data a nic do tepelného čerpadla nezapisuje.",
-  /* dyn.state_help_recording */ "Běží potvrzené vytápění prostoru a vstup místnosti je platný, proto se zaznamenávají hrubé vzorky chyby místnosti. Sezónní trend čtěte spolu s dobou běhu a důkazy o omezení; jeden vzorek není závěr.",
+  /* dyn.state_help_recording */ "Běží potvrzené vytápění prostoru a vstup místnosti je platný, proto se zaznamenávají hrubé vzorky chyby místnosti. Sezónní trend čtěte spolu s dobou běhu a údaji o omezení; jeden vzorek není závěr.",
   /* dyn.state_help_waiting */ "Soustava právě není v normálním prostorovém provozu, proto se vzorek nezaznamenává. V létě jde o normální očekávaný stav, nikoli poruchu.",
   /* dyn.state_help_cooling */ "HomeHub hlásí normální prostorový provoz, ale aktuálním režimem je chlazení. Okna chlazení jsou ze souboru dat pro topnou křivku záměrně vyloučena.",
-  /* dyn.state_help_blocked */ "Chybí povinný vstup, proto se nic nezaznamenává. Záznam se obnoví, jakmile se vstup vrátí; zastaralé nebo nejednoznačné důkazy se nikdy nevzorkují.",
+  /* dyn.state_help_blocked */ "Chybí povinný vstup, proto se nic nezaznamenává. Záznam se obnoví, jakmile se vstup vrátí; zastaralá nebo nejednoznačná data se nikdy nepřebírají.",
   /* dyn.state_help_room */ "Hodnota z místnosti se dostává do zařízení, ale právě z ní nelze vytvořit platnou odchylku od cíle. Dokud nebude zdroj opět použitelný, vzorek nevznikne.",
-  /* dyn.state_help_setup */ "Diagnostika se spustí po uložení zdroje místnosti MQTT s časovým údajem a cílem. Předpověď je volitelný srovnávací důkaz; není nutné zveřejnit polohu.",
+  /* dyn.state_help_setup */ "Diagnostika se spustí po uložení zdroje místnosti MQTT s časovým údajem a cílem. Předpověď poskytuje volitelné srovnávací hodnoty; není nutné uvádět polohu.",
   /* dyn.state_help_inactive */ "Zdroje jsou nastaveny, ale nic je nevyhodnocuje: vzorkovač běží na připojení MQTT a tato deska se po opakovaných pádech spustila v nouzovém režimu, ve kterém jsou všichni volitelní odběratelé vypnuti. Nic se neztratí — záznam se sám obnoví, jakmile se deska znovu spustí normálně.",
   /* dyn.state_help_no_broker */ "Zdroj místnosti je uložen, ale diagnostika jej čte přes MQTT a není nastaven žádný broker. Nastavte broker na kartě Připojení; uložený zdroj místnosti zůstane zachován a záznam se spustí sám.",
   /* dyn.state_help_setup_homehub */ "Diagnostika potřebuje HomeHub, aby poznala, kdy soustava skutečně vytápí; bez něj nerozliší topné okno od ohřevu teplé vody nebo klidu. Nastavte adresu HomeHubu na kartě Protokol.",
@@ -720,7 +720,7 @@ I18N.cs = localeValues([
   /* board.led_gpio_wiping */ "Po rychlém blikání svítí — reset/mazání dat; neodpojujte napájení.",
   /* board.ledinv */ "Aktivní v nízké úrovni (LED svítí, když je pin buzen na LOW)",
   /* board.btninv */ "Aktivní v nízké úrovni (tlačítko spojí pin s GND)",
-  /* board.hint */ "Tovární reset: podržte 5 s. Trvale smaže Wi-Fi/všechna nastavení, historii/trendy, délky stavů a nezpracovaný výpis po pádu. Portál se otevře jen po úplném úspěchu. Jinak uvolněte a znovu podržte 5 s. Bez tlačítka vyberte „Žádná“.",
+  /* board.hint */ "Tovární reset: podržte 5 s. Trvale smaže Wi-Fi/všechna nastavení, historii/trendy, délky stavů a nezpracovaný výpis po pádu. Konfigurační portál (Wi-Fi) se otevře jen po úplném a úspěšném smazání. Jinak uvolněte a znovu podržte 5 s. Bez tlačítka vyberte „Žádná“.",
   /* card.hardware */ "Vybavení",
   /* card.hw_off */ "Žádné",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
@@ -1113,14 +1113,14 @@ DESCRIPTION_I18N.cs = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Hlášení chyby či varování samotné jednotky. Aktivní chyba dává VAROVÁNÍ; varování nebo zpráva vzniklá a zaniklá do 24 h dává POZNÁMKU. Není to odhad projektu. Bez aktuální či zapamatované zprávy po načtení všech polí. Zaniklá zpráva může zůstat 24 h; aktivní kód je v Provozu."], // 0
-  ["R5T vrstvený;K/h=MAX≠Ø/den;oběh≠příčina;pásmo proj.0,8–1,85.Předp.:200l rovně;platné=MAX;COP;vyl./chyb.h mimo;el≠měření."], // 1
+  ["Měří klidové hodiny R5T: K/h je nejvyšší hodinový propad; čerpadlo značí souvislost, ne příčinu. POZNÁMKA při ≥0,8 K/h a mez 1,85 K/h jsou heuristiky projektu. Pro 200 l odhaduje dohřev, nikoli měření."], // 1
   ["Počítá starty kompresoru a délku úplných běhů, pokud lze zvlášť pro vytápění, TUV a chlazení; nejasné běhy zůstávají nezařazené. Potvrzené topné běhy mají průměr ≥10 min; při nejméně 12 kratších je POZNÁMKA. TUV/chlazení se vyřadí, při mnoha nejasných se hodnotí vše. Není to limit Daikin."], // 2
   ["Odmrazení: POZNÁMKA nad 15 % při ≥3 dějích; nejde o limit Daikin. R4T je živý kontext mimo verdikt a jeden bod nepopisuje celý výměník."], // 3
   ["Nejnižší platný tlak vody v topném okruhu během klouzavého okna. Nad 1,0 bar. Při ≤1,0 bar ihned POZNÁMKA, po 60 s VAROVÁNÍ. Rozsah závisí na modelu; použijte přesný návod."], // 4
   ["Nejnižší průtok po 60 s souvislého běhu vnitřního čerpadla; vyřazuje rozběh, klid a výpadky. JEN MĚŘENÍ: minimum při částečné zátěži, ne jmenovitý ani návrhový průtok. Obecná mez není; návod platí jen pro stejný model, režim a podmínky. Jeden nízký údaj bez poruchy málo dokazuje."], // 5
   ["Odděleně ukazuje dobu běhu BUH pro dům a BSH v zásobníku. JEN MĚŘENÍ. Mráz, nouze, odmrazování, plán TUV či přebytky mohou běh vysvětlit. Obecná mez OK/VAROVÁNÍ není."], // 6
   ["Experimentálně sleduje pět ochranných čítačů. Počítá jen jasný růst mezi srovnatelnými čteními; základ, stálost, pokles, mezera a reset ne. Bez pozorovaného růstu. Růst dává POZNÁMKU, ne diagnózu; bez růstu nelze kvůli neúplné dokumentaci vyloučit omezení."], // 7
-  ["Paměť RAM právě nevyužitá firmwarem. Krátké změny WiFi, MQTT a webu jsou normální; důležitější je trend 24 h. Má být přibližně stabilní s vratnými propady. Trvalý pokles může znamenat neuvolněné alokace. Restart s napájením drží trend v RAM; běžný restart, update či výpadek obnoví hotové 5min bloky z flash. Chybět může otevřený."], // 8
+  ["Volná paměť RAM a trend 24 h: trvalý pokles může značit neuvolněnou paměť. Po restartu či výpadku se uzavřené 5minutové intervaly obnovují z paměti flash."], // 8
   ["Největší souvislý blok volné RAM. TLS a OTA potřebují jeden velký blok i při vyšším celkovém volnu. Je nejvýše roven volné RAM. Klesá-li při stabilní volné RAM, roste fragmentace haldy a velká alokace může selhat před vyčerpáním paměti."], // 9
   ["Jmenovitý výkon venkovní jednotky z její identifikace; třída hardwaru, ne aktuální výroba."], // 10
   ["Jmenovitý výkon VNITŘNÍ jednotky, zobrazený protože identifikace venkovní vlastní výkon nemá. Vnitřní a venkovní jednotka mohou mít různé třídy; nejde o výkon venkovní ani celého systému."], // 11

@@ -752,7 +752,7 @@ assert.match(dhwCopy, /Zusammenhang, keine Ursache/);
 assert.match(dhwCopy, /each window=maximum.*COP 2\.5–3\.0/);
 assert.match(dhwCopy, /jedes Fenster=Maximum.*COP 2,5–3,0/);
 assert.match(dhwCopy, /replacement-electricity direction, not measured daily use/);
-assert.match(dhwCopy, /Ersatzstrom-Richtung, kein Messwert/);
+assert.match(dhwCopy, /elektrischer Nachheizbedarf, kein Messwert/);
 
 const flowCopy = JSON.stringify(descriptionContext.__copy.model.health_flow);
 assert.match(flowCopy, /observed part-load minimum.*not the nominal or design flow/);

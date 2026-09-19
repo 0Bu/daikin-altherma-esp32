@@ -1,4 +1,4 @@
-// translation-source: 319d2c6911ad1a2bae821bc883e75a511ce0e7c8b6230236d926f40717c35440
+// translation-source: d6a91c86771d72646749d43c20da474c5903b9a6eb045100e392ca8f5995666f
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -522,12 +522,12 @@ I18N.pl = localeValues([
   /* dyn.plant_outdoor_help */ "To wejście HomeHub 44, czyli własna wartość powietrza zewnętrznego pompy ciepła. Jest pobierana z tego samego bieżącego cyklu Modbus co warunki okna ogrzewania, a jej źródło jest zapisywane ze zdarzeniem. Pozostaje oddzielna od ENV III i nigdy nie zmienia decyzji o zarejestrowaniu zdarzenia.",
   /* dyn.shadow_strategy */ "Surowe odchylenie temperatury pomieszczenia · 30 min",
   /* dyn.card_help */ "Co 30 minut podczas jednoznacznie rozpoznanego ogrzewania pomieszczeń firmware rejestruje odchylenie temperatury pomieszczenia referencyjnego od wartości docelowej wraz z temperaturą zewnętrzną w tej chwili, jeśli dostarcza ją czujnik. W połączeniu z czasem pracy, minimalnymi ograniczeniami temperatury wody zasilającej i aktywnością termostatu długoterminowy przebieg może wskazać, czy krzywa grzewcza jest zwykle zbyt wysoka lub zbyt niska. Odchylenie temperatury pomieszczenia o 1 K nie oznacza automatycznie zmiany temperatury wody zasilającej o 1 K. Ta funkcja tylko odczytuje dane i nie zapisuje niczego do pompy ciepła.",
-  /* dyn.state_help_recording */ "Potwierdzone ogrzewanie pomieszczeń działa, a dane z pomieszczenia są prawidłowe, dlatego rejestrowane są surowe próbki błędu temperatury. Oceniaj przebieg sezonu wraz z czasem pracy i dowodami ograniczeń; pojedyncza próbka nie jest werdyktem.",
+  /* dyn.state_help_recording */ "Potwierdzone ogrzewanie pomieszczeń działa, a dane z pomieszczenia są prawidłowe, dlatego rejestrowane są surowe próbki błędu temperatury. Oceniaj przebieg sezonu wraz z czasem pracy i danymi o ograniczeniach; pojedyncza próbka nie jest werdyktem.",
   /* dyn.state_help_waiting */ "Instalacja nie pracuje teraz w normalnym trybie pomieszczeń, dlatego próbka nie jest rejestrowana. Latem jest to normalny, oczekiwany stan, a nie usterka.",
   /* dyn.state_help_cooling */ "HomeHub zgłasza normalną pracę obiegu pomieszczeń, ale bieżącym trybem jest chłodzenie. Okna chłodzenia są celowo wykluczone ze zbioru danych krzywej grzewczej.",
   /* dyn.state_help_blocked */ "Brakuje wymaganego wejścia, dlatego nic nie jest rejestrowane. Rejestrowanie zostanie wznowione, gdy wróci; nieaktualne ani niejednoznaczne dane nigdy nie są próbkowane.",
   /* dyn.state_help_room */ "Odczyt z pomieszczenia dociera do urządzenia, ale obecnie nie pozwala obliczyć prawidłowego odchylenia od celu. Próbka nie powstanie, dopóki źródło nie będzie ponownie użyteczne.",
-  /* dyn.state_help_setup */ "Diagnostyka rozpoczyna się po zapisaniu źródła temperatury pomieszczenia MQTT ze znacznikiem czasu i wartością docelową. Prognoza jest opcjonalnym materiałem porównawczym; ujawnianie lokalizacji nie jest wymagane.",
+  /* dyn.state_help_setup */ "Diagnostyka rozpoczyna się po zapisaniu źródła temperatury pomieszczenia MQTT ze znacznikiem czasu i wartością docelową. Prognoza dostarcza opcjonalnych wartości porównawczych; ujawnianie lokalizacji nie jest wymagane.",
   /* dyn.state_help_inactive */ "Źródła są skonfigurowane, ale nic ich nie ocenia: próbnik działa w ramach połączenia MQTT, a ta płytka uruchomiła się w trybie bezpiecznym po powtarzających się awariach podczas rozruchu, w którym wszystkie opcjonalne usługi pozostają wyłączone. Nic nie przepada — rejestrowanie wznowi się automatycznie, gdy płytka znów uruchomi się normalnie.",
   /* dyn.state_help_no_broker */ "Źródło temperatury pomieszczenia jest zapisane, ale diagnostyka odczytuje je przez MQTT, a broker nie jest skonfigurowany. Ustaw brokera na karcie Połączenia; zapisane źródło zostanie zachowane, a rejestrowanie uruchomi się automatycznie.",
   /* dyn.state_help_setup_homehub */ "Diagnostyka wymaga HomeHub, aby określić, kiedy instalacja rzeczywiście ogrzewa; bez niego nie odróżni okna ogrzewania od ciepłej wody ani postoju. Ustaw adres HomeHub na karcie Protokół.",
@@ -725,7 +725,7 @@ I18N.pl = localeValues([
   /* board.led_gpio_wiping */ "Świeci stale po szybkim miganiu — reset/kasowanie danych; nie odłączaj zasilania.",
   /* board.ledinv */ "Aktywny stan niski (dioda świeci, gdy pin jest ustawiony na LOW)",
   /* board.btninv */ "Aktywny stan niski (przycisk zwiera pin do GND)",
-  /* board.hint */ "Reset fabryczny: przytrzymaj 5 s. Trwale kasuje Wi-Fi/wszystkie ustawienia, historię/trendy, czasy stanów i surowy zrzut po awarii. Portal otworzy się tylko po pełnym sukcesie. Jeśli nie, zwolnij i przytrzymaj ponownie 5 s. Bez przycisku wybierz „Brak”.",
+  /* board.hint */ "Reset fabryczny: przytrzymaj 5 s. Trwale kasuje Wi-Fi/wszystkie ustawienia, historię/trendy, czasy stanów i surowy zrzut po awarii. Portal konfiguracyjny (Wi-Fi) otworzy się tylko po całkowitym i pomyślnym skasowaniu danych. Jeśli nie, zwolnij i przytrzymaj ponownie 5 s. Bez przycisku wybierz „Brak”.",
   /* card.hardware */ "Sprzęt",
   /* card.hw_off */ "Brak",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
@@ -1152,14 +1152,14 @@ DESCRIPTION_I18N.pl = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Zgłasza własny stan błędu lub ostrzeżenia pompy. Aktywny błąd daje OSTRZEŻENIE; ostrzeżenie albo komunikat pojawiający się i znikający w 24 h daje UWAGĘ. To komunikat urządzenia, nie domysł projektu. Brak bieżącej ani zapamiętanej wiadomości po odczytaniu wszystkich obsługiwanych pól. Zniknięty komunikat może pozostać 24 h; aktywny kod jest pod Stanem pracy."], // 0
-  ["R5T warstw.;K/h=MAX≠Ø/doba;cyrk.≠przycz.;zakres proj.0,8–1,85.Zał.:200l równo;ważne=MAX;COP;wykl./brak h poza;el≠pomiar."], // 1
+  ["Mierzy spokojne godziny R5T: K/h to największy spadek godzinowy; pompa to korelacja, nie przyczyna. UWAGA przy ≥0,8 K/h i koniec przy 1,85 K/h to heurystyki projektu. Dla 200 l szacuje prąd dogrzewania, a nie pomiar."], // 1
   ["Liczy przejścia sprężarki WYŁ.→WŁ. i długość pełnych cykli; jeśli sygnały pozwalają, rozdziela ogrzewanie, CWU i chłodzenie. Mieszane lub nieczytelne pozostają bez klasyfikacji. Potwierdzone cykle ogrzewania mają średnio ≥10 min. Przy co najmniej 12 krótszych pojawia się UWAGA; CWU i chłodzenie są wykluczone. Przy zbyt wielu nieklasyfikowanych oceniane są wszystkie. To nie limit Daikin."], // 2
   ["Liczy odszraniania: UWAGA powyżej 15% i przy ≥3 zdarzeniach; to nie limit Daikin. R4T jest kontekstem na żywo poza oceną, a jeden punkt nie opisuje całego wymiennika."], // 3
   ["Najniższe prawidłowe ciśnienie wody w obiegu grzewczym w ruchomym oknie. Powyżej 1,0 bar. Przy ≤1,0 bar natychmiast UWAGA, po 60 s ciągle — OSTRZEŻENIE. Zakres zależy od modelu; porównaj dokładną instrukcję."], // 4
   ["Najniższy przepływ po 60 s ciągłej pracy pompy wewnętrznej; pomija rozruch, postój i luki komunikacji. TYLKO POMIAR: minimum częściowego obciążenia po rozruchu, nie przepływ nominalny ani projektowy. Nie ma uniwersalnej granicy; minimum instrukcji dotyczy tego samego modelu, trybu i warunków. Jedna niska wartość bez błędu niewiele dowodzi."], // 5
   ["Osobno pokazuje czas pracy BUH dla obiegu domu i BSH w zasobniku CWU. TYLKO POMIAR. Mróz, awaria, wsparcie odszraniania, harmonogram CWU lub sterowanie nadwyżką mogą uzasadniać pracę. Nie ma uniwersalnego progu OK/OSTRZEŻENIE."], // 6
   ["Eksperymentalnie obserwuje pięć wewnętrznych liczników ochrony. Liczy tylko wyraźny wzrost między porównywalnymi odczytami, także pierwszy widoczny przy postoju lub zmianie sprężarki; baza, brak wzrostu, spadki, luki i reset nie liczą się. Brak zaobserwowanego wzrostu. Wzrost daje UWAGĘ, nie diagnozę usterki; brak wzrostu nie dowodzi braku ograniczeń, bo liczniki nie są w pełni opisane."], // 7
-  ["Pamięć RAM obecnie nieużywana przez firmware. Krótkie zmiany od WiFi, MQTT i WWW są normalne; trend 24 h mówi więcej niż jeden odczyt. Zwykle stabilna z przejściowymi spadkami, które wracają. Trwały spadek może oznaczać niezwolnione alokacje. Restart z zasilaniem zachowuje trend w RAM; zwykły restart, aktualizacja lub utrata zasilania odtwarza zakończone 5-minutowe koszyki z flash. Może brakować tylko otwartego."], // 8
+  ["Wolna pamięć RAM i trend 24 h: stały spadek może wskazywać na niezwalniane alokacje. Po restarcie lub zaniku zasilania zamknięte 5-minutowe przedziały są przywracane z pamięci flash."], // 8
   ["Największy ciągły blok wolnej pamięci RAM. TLS i OTA potrzebują jednego dość dużego bloku, nawet gdy łącznie wolnej pamięci jest więcej. Zawsze nie większy niż cała wolna RAM. Jeśli wolna RAM jest stabilna, a ten blok maleje, rośnie fragmentacja sterty i duża alokacja może zawieść przed wyczerpaniem pamięci."], // 9
   ["Nominalna moc jednostki zewnętrznej z jej strony identyfikacyjnej. To klasa sprzętu, nie aktualna produkcja."], // 10
   ["Nominalna moc JEDNOSTKI WEWNĘTRZNEJ. Jest pokazana, gdy strona identyfikacji zewnętrznej nie ma własnej mocy; etykieta wskazuje źródło. Jednostki mogą mieć różne klasy. Nie odczytuj tego jako mocy zewnętrznej ani całego systemu."], // 11
