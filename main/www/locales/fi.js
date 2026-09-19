@@ -1,4 +1,4 @@
-// translation-source: 319d2c6911ad1a2bae821bc883e75a511ce0e7c8b6230236d926f40717c35440
+// translation-source: d6a91c86771d72646749d43c20da474c5903b9a6eb045100e392ca8f5995666f
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -30,7 +30,7 @@ I18N.fi = localeValues([
   /* sys.warning_line */ (c) => "Varoitus · " + c + " — tarkista lämpöpumppu.",
   /* sys.polled */ (s) => `Luettu ${s} s sitten`,
   /* recovery.title */ "Palautustila",
-  /* recovery.meta_heap */ "Muisti loppui toistuvasti ja laite käynnistyi uudelleen. Lämpöpumppuyhteys ja MQTT on nyt poistettu käytöstä, jotta käyttöliittymä säilyy tavoitettavana. Asetukset ovat todennäköisesti kunnossa — asenna uudempi laiteohjelmisto Asetuksista. Virrankatkaisu yrittää käynnistää kaikki palvelut uudelleen.",
+  /* recovery.meta_heap */ "Muisti loppui toistuvasti ja laite käynnistyi uudelleen. Lämpöpumppuyhteys ja MQTT on nyt poistettu käytöstä, jotta käyttöliittymä säilyy tavoitettavana. Asetukset ovat todennäköisesti kunnossa — asenna uudempi laiteohjelmisto Asetuksista. Virran katkaiseminen ja kytkeminen uudelleen käynnistää kaikki palvelut uudelleen.",
   /* recovery.meta */ "Laite käynnistyi toistuvasti uudelleen ja siirtyi palautustilaan. Lämpöpumppu- ja MQTT-yhteydet on keskeytetty. Tarkista asetukset, erityisesti Asetukset-näkymän Protokolla-kortin RX/TX-nastat, ja käynnistä laite uudelleen.",
   /* rollback.title */ "WiFi-muutos epäonnistui — palautettu",
   /* rollback.meta */ (back) => `Laite ei saanut yhteyttä uusilla WiFi-asetuksilla. Edellinen verkko${back} palautettiin ja laite käynnistyi uudelleen. Tarkista verkon nimi ja salasana kohdasta Asetukset → Yhteydet ja yritä uudelleen.`,
@@ -189,7 +189,7 @@ I18N.fi = localeValues([
   /* check.detail.fault.past_unknown */ "Viesti ilmeni viimeisen 24 tunnin aikana. Nykytilaa ei voida lukea, koska vikarivi ei vastaa — tarkista X10A-yhteys.",
   /* check.detail.collecting */ (n, r) => `Tallennettu ${n}/${r}; arviota ei voi vielä tehdä.`,
   /* check.detail.cycling_split */ " Tässä arvioidaan vain vahvistettu tilalämmitys. Käyttövesijaksoilla on eri ehdot ja tunnistettu jäähdytys jätetään pois. Koko jakson ajan 3WV:n ja tilapiirin I/U-toimintatilan on oltava luettavissa ja muuttumattomia. Muut jaksot jäävät luokittelematta ja arvioimatta.",
-  /* check.detail.cycling_pooled */ " Kaikki jaksot arvioidaan yhdessä, koska luokittelunäyttö ei riittänyt: tulo oli liian harva, luokiteltuja jaksoja oli alle 12 tai yli 10 % valmiista jaksoista jäi luokittelematta. Käyttövesi tai jäähdytys voi siksi peittää lyhyet lämmitysjaksot. Luokkaluvut ovat havaintoja, eivät päätöksen peruste.",
+  /* check.detail.cycling_pooled */ " Kaikki jaksot arvioidaan yhdessä, koska luokittelutiedot eivät riittäneet: tulo oli liian harva, luokiteltuja jaksoja oli alle 12 tai yli 10 % valmiista jaksoista jäi luokittelematta. Käyttövesi tai jäähdytys voi siksi peittää lyhyet lämmitysjaksot. Luokkaluvut ovat havaintoja, eivät päätöksen peruste.",
   /* check.detail.outdoor_cycling */ " X10A-ulkoluvut sisältävät vain valmiiden, johdonmukaisesti tilalämmitykseksi luokiteltujen jaksojen tuoreet näytteet. Ne ovat taustatietoa eivätkä muuta rajaa tai arviota.",
   /* check.detail.outdoor_defrost */ " X10A-ulkoluvut sisältävät vain tuoreet näytteet, kun sulatus- ja kompressoritila olivat luettavissa ja kompressori kävi. Ne ovat taustatietoa eivätkä muuta rajaa tai arviota.",
   /* check.detail.dhw_candidate */ (n, r, c, w) => `${n}/${r} ${n === 1 ? "puhdas tunnin ikkuna valmis" : "puhdasta tunnin ikkunaa valmiina"}; nykyinen ikkuna ${c}/${w}.`,
@@ -203,7 +203,7 @@ I18N.fi = localeValues([
   /* check.detail.dhw_reason.draw */ "vedenottoa muistuttava lasku",
   /* check.detail.dhw_reason.reading */ "epäuskottava R5T",
   /* check.detail.dhw_reason.blind */ "X10A ei vastaa",
-  /* check.detail.collecting_unknown */ "Arvioon kelpaavaa näyttöä ei ole vielä tarpeeksi.",
+  /* check.detail.collecting_unknown */ "Arvioon kelpaavia mittaustietoja ei ole vielä tarpeeksi.",
   /* check.detail.observation */ "Vain mitattu arvo; yleistä OK/VAROITUS-rajaa ei ole.",
   /* check.detail.experimental */ "Kokeellinen havainto; vakaa laskuri ei todista, ettei rajoitusta tapahtunut.",
   /* check.detail.unavailable */ "Aktiivinen profiili ei anna arvioitavaa dataa tähän tarkistukseen.",
@@ -520,7 +520,7 @@ I18N.fi = localeValues([
   /* dyn.state_help_recording */ "Tilalämmitys ja kelvollinen huonetulo on vahvistettu, joten raaka huonevirhe tallennetaan. Tulkitse kausisuunta käyntiajan ja rajoitusten kanssa; yksi näyte ei ole johtopäätös.",
   /* dyn.state_help_waiting */ "Laitteisto ei ole nyt normaalissa tilalämmityksessä, joten näytettä ei tallenneta. Kesällä tämä on odotettu tila, ei vika.",
   /* dyn.state_help_cooling */ "HomeHub ilmoittaa normaalin tilakäytön, mutta tila on jäähdytys. Jäähdytysikkunat jätetään lämmityskäyräaineiston ulkopuolelle.",
-  /* dyn.state_help_blocked */ "Tarvittava tulo puuttuu, joten mitään ei tallenneta. Tallennus jatkuu tulon palattua; vanhaa tai epäselvää näyttöä ei käytetä.",
+  /* dyn.state_help_blocked */ "Tarvittava tulo puuttuu, joten mitään ei tallenneta. Tallennus jatkuu tulon palattua; vanhoja tai epäselviä mittaustietoja ei käytetä.",
   /* dyn.state_help_room */ "Huonelukema saapuu, mutta siitä ei nyt saada kelvollista poikkeamaa tavoitteesta. Näytettä ei muodosteta ennen kuin lähde kelpaa.",
   /* dyn.state_help_setup */ "Diagnostiikka alkaa, kun aikaleimallinen MQTT-huonelähde ja tavoite tallennetaan. Ennuste on valinnainen vertailu; sijaintia ei tarvitse luovuttaa.",
   /* dyn.state_help_inactive */ "Lähteet on määritetty, mutta niitä ei arvioida. Näytteenotto toimii MQTT-yhteydessä, ja toistuvien kaatumisten vikasietotila pysäyttää valinnaiset kuluttajat. Tallennus jatkuu normaalin käynnistyksen jälkeen.",
@@ -720,7 +720,7 @@ I18N.fi = localeValues([
   /* board.led_gpio_wiping */ "Jatkuva nopean vilkun jälkeen — tehdasasetusten palautus/tietojen poisto; älä katkaise virtaa.",
   /* board.ledinv */ "Aktiivinen LOW (LED palaa nastan ollessa LOW)",
   /* board.btninv */ "Aktiivinen LOW (painike kytkee nastan GND:hen)",
-  /* board.hint */ "Tehdasasetusten palautus: pidä 5 s. Poistaa pysyvästi Wi-Fi/kaikki asetukset, historian/trendit, tilojen kestoajat ja raakaydindumpin. Portaali avautuu vain, jos kaikki poistetaan onnistuneesti. Muuten vapauta ja pidä uudelleen 5 s. Valitse Ei mitään ilman painiketta.",
+  /* board.hint */ "Tehdasasetusten palautus: pidä 5 s. Poistaa pysyvästi Wi-Fi/kaikki asetukset, historian/trendit, tilojen kestoajat ja raakaydindumpin. Wi-Fi-määritysportaali avautuu vain, jos kaikki tiedot saadaan poistettua kokonaan ja onnistuneesti. Muuten vapauta ja pidä uudelleen 5 s. Valitse Ei mitään ilman painiketta.",
   /* card.hardware */ "Laitteisto",
   /* card.hw_off */ "Ei mitään",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
@@ -999,14 +999,14 @@ DESCRIPTION_I18N.fi = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Yksikön ilmoittama vika/varoitus. Nykyinen virhe on varoitus; varoitus, huomautus tai 24 tunnissa poistunut ilmoitus on tieto. Tämä on laitteen ilmoitus, ei päätelmä."], // health_fault
-  ["R5T kerrost.;K/h=MAX≠Ø/päivä;kierto≠syy;proj.alue 0,8–1,85.Olet.:200l tasainen;kelvolliset=MAX;COP;poiss./puutt.h ulkona;sähkö≠mitattu."], // health_dhw_loss
+  ["Mittaa rauhallisia R5T-tunteja: K/h on suurin pudotus; pumppu on korrelaatio, ei syy. HUOMAUTUS arvolla ≥0,8 K/h ja päättyminen 1,85 K/h ovat projektiheuristiikkaa. 200 l säiliölle se arvioi sähköä, ei mittausta."], // health_dhw_loss
   ["Laskee kompressorin käynnit ja täydet käyttöajat. Huomio, kun vahvistettuja lämmityskäyntejä on ≥12 ja keskiarvo <10 min. DHW/jäähdytys rajataan pois, mutta runsas luokittelematon aineisto arvioidaan yhdessä. Ei Daikin-raja."], // health_cycling
   ["Sulatus: huomio yli 15 % ja ≥3 kertaa; ei Daikin-raja. R4T on arvioon kuulumaton live-tausta, eikä yksi piste kuvaa koko kennoa."], // health_defrost
   ["Liukuvan ikkunan pienin kelvollinen vesipaine: >1,0 bar vertailu, ≤1,0 bar huomio ja 60 s jatkuessa varoitus. Sallittu alue on mallikohtainen."], // health_pressure
   ["Pienin virtaus, kun sisäinen pumppu on käynyt 60 s. Mittaa osakuorman käyttöä, ei suunnitteluvirtausta; yleistä rajaa ei ole eikä yksi pieni arvo todista vikaa."], // health_flow
   ["BUH:n ja BSH:n havaittu käyttöaika. Käyttö voi olla normaalia pakkasella, hätätilassa, sulatuksessa, DHW:ssa tai ylijäämäohjauksessa; yhteistä OK-/varoitusrajaa ei ole."], // health_heater
   ["Seuraa viittä suojalaskuria kokeellisesti. Vain selvä kasvu katkeamattomissa vertailukelpoisissa näytteissä osoittaa toiminnan, ei syytä; absoluuttinen arvo ei ole todiste, ja kynnys, nollaus sekä 7→0 ovat tuntemattomat. Kasvun puute ei todista ettei rajoitusta ollut."], // health_retries
-  ["Käyttämätön RAM nyt ja 24 h kehitys. Palautuva lyhyt lasku voi olla normaali, jatkuva lasku voi viitata vapautumattomaan varaukseen. Virrallisessa lämpimässä uudelleenkäynnistyksessä RAM-historia säilyy; tavallinen uudelleenkäynnistys, päivitys tai sähkökatko palauttaa flash-muistista valmiit 5 min jaksot, mutta avoin jakso voi puuttua."], // free_heap
+  ["Vapaa RAM ja 24 h kehitys: jatkuva lasku voi viitata vapauttamattomiin varauksiin. Uudelleenkäynnistyksen tai sähkökatkon jälkeen suljetut 5 min jaksot palautetaan flash-muistista."], // free_heap
   ["Suurin yhtenäinen vapaa RAM-lohko. TLS/OTA tarvitsee suuren yksittäisen lohkon; lasku vakaan kokonaismuistin rinnalla voi tarkoittaa pirstoutumista ja varausvirheitä."], // max_alloc
   ["Ulkoyksikön ID-sivulta luettu nimellisteholuokka, ei nykyinen lämpöteho."], // capacity
   ["Sisäyksikön nimellisteho; sitä ei voi tulkita ulkoyksikön tai koko laitteiston tehoksi."], // capacity_iu

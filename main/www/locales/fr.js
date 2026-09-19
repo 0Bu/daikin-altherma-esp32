@@ -1,4 +1,4 @@
-// translation-source: 319d2c6911ad1a2bae821bc883e75a511ce0e7c8b6230236d926f40717c35440
+// translation-source: d6a91c86771d72646749d43c20da474c5903b9a6eb045100e392ca8f5995666f
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -189,7 +189,7 @@ I18N.fr = localeValues([
   /* check.detail.fault.past_unknown */ "Un message est apparu au cours des dernières 24 heures. Impossible de savoir s’il est actif actuellement — la ligne de défaut ne répond pas, vérifiez donc la liaison X10A.",
   /* check.detail.collecting */ (n, r) => `${n} sur ${r} capturés ; aucune évaluation n’est encore possible.`,
   /* check.detail.cycling_split */ " Seul le chauffage des locaux confirmé est évalué ici. Les cycles d’eau chaude obéissent à d’autres contraintes ; le rafraîchissement identifié avec certitude est exclu. Le comptage se fait par cycle complet : la vanne 3 voies et, sur le circuit des locaux, le mode de fonctionnement de l’U/I doivent rester lisibles et inchangés pendant tout le cycle. Tout le reste demeure non classé et n’est pas évalué.",
-  /* check.detail.cycling_pooled */ " Tous les cycles sont évalués ensemble, car les preuves de classification étaient insuffisantes : une entrée était trop rare, moins de 12 cycles ont été classés ou plus de 10 % des cycles terminés n’ont pas été classés. L’eau chaude ou le rafraîchissement peuvent donc masquer de courts cycles de chauffage. Les chiffres de classe affichés à côté sont des observations et n’ont pas déterminé le verdict.",
+  /* check.detail.cycling_pooled */ " Tous les cycles sont évalués ensemble, car les données de classification étaient insuffisantes : une entrée était trop rare, moins de 12 cycles ont été classés ou plus de 10 % des cycles terminés n’ont pas été classés. L’eau chaude ou le rafraîchissement peuvent donc masquer de courts cycles de chauffage. Les chiffres de classe affichés à côté sont des observations et n’ont pas déterminé le verdict.",
   /* check.detail.outdoor_cycling */ " Les valeurs extérieures X10A ne comprennent que des mesures récentes issues de cycles de chauffage des locaux terminés et classés de manière cohérente. Elles fournissent du contexte et ne modifient ni le seuil de cyclage ni le verdict.",
   /* check.detail.outdoor_defrost */ " Les valeurs extérieures X10A ne comprennent que des mesures récentes lorsque les états du dégivrage et du compresseur étaient tous deux lisibles et que le compresseur fonctionnait. Elles fournissent du contexte et ne modifient ni le seuil de dégivrage ni le verdict.",
   /* check.detail.dhw_candidate */ (n, r, c, w) => `${n} sur ${r} terminés dans des fenêtres propres d’une heure ; fenêtre propre actuelle : ${c} sur ${w}.`,
@@ -203,7 +203,7 @@ I18N.fr = localeValues([
   /* check.detail.dhw_reason.draw */ "baisse semblable à un puisage",
   /* check.detail.dhw_reason.reading */ "R5T non plausible",
   /* check.detail.dhw_reason.blind */ "X10A ne répond pas",
-  /* check.detail.collecting_unknown */ "Pas encore assez de preuves exploitables pour une évaluation.",
+  /* check.detail.collecting_unknown */ "Pas encore assez de données exploitables pour une évaluation.",
   /* check.detail.observation */ "Valeur mesurée uniquement ; il n’existe pas de limite universelle OK/AVERTISSEMENT.",
   /* check.detail.experimental */ "Observation expérimentale ; un compteur stable ne prouve pas qu’aucune limitation ne s’est produite.",
   /* check.detail.unavailable */ "Le profil actif ne fournit aucune donnée évaluable pour cette vérification.",
@@ -517,12 +517,12 @@ I18N.fr = localeValues([
   /* dyn.plant_outdoor_help */ "Il s’agit de l’entrée HomeHub 44, la propre notion d’air extérieur de la pompe à chaleur. Elle est capturée pendant le même cycle Modbus actuel que les conditions des fenêtres de chauffage, et sa source est enregistrée avec l’événement. Elle reste distincte d’ENV III et ne change jamais la décision d’enregistrer un événement.",
   /* dyn.shadow_strategy */ "Écart ambiant brut · 30 min",
   /* dyn.card_help */ "Toutes les 30 minutes pendant un chauffage des locaux clairement identifié, le micrologiciel enregistre l’écart entre la température de la pièce de référence et sa cible, ainsi que la température extérieure à cet instant lorsqu’un capteur la fournit. Avec la durée de fonctionnement, les limites minimales de température de départ d’eau et l’activité du thermostat, la tendance à long terme peut montrer si la courbe de chauffe tend à être trop haute ou trop basse. Un écart ambiant de 1 K n’implique pas automatiquement une modification de 1 K du départ d’eau. Cette fonction lit uniquement les données et n’écrit rien dans la pompe à chaleur.",
-  /* dyn.state_help_recording */ "Le chauffage des locaux confirmé fonctionne et l’entrée de pièce est valide ; les échantillons bruts d’erreur ambiante sont donc enregistrés. Interprétez une tendance saisonnière avec la durée de fonctionnement et les preuves d’écrêtement ; un seul échantillon n’est pas un verdict.",
+  /* dyn.state_help_recording */ "Le chauffage des locaux confirmé fonctionne et l’entrée de pièce est valide ; les échantillons bruts d’erreur ambiante sont donc enregistrés. Interprétez une tendance saisonnière avec la durée de fonctionnement et les données d’écrêtement ; un seul échantillon n’est pas un verdict.",
   /* dyn.state_help_waiting */ "L’installation n’est pas actuellement en fonctionnement normal des locaux, aucun échantillon n’est donc enregistré. Pendant l’été, il s’agit de l’état normal attendu et non d’un défaut.",
   /* dyn.state_help_cooling */ "HomeHub signale un fonctionnement normal des locaux, mais le mode actuel est le rafraîchissement. Les fenêtres de rafraîchissement sont volontairement exclues du jeu de données de la courbe de chauffe.",
-  /* dyn.state_help_blocked */ "Une entrée requise est manquante, rien n’est donc enregistré. L’enregistrement reprend dès son retour ; les preuves périmées ou ambiguës ne sont jamais échantillonnées.",
+  /* dyn.state_help_blocked */ "Une entrée requise est manquante, rien n’est donc enregistré. L’enregistrement reprend dès son retour ; les données périmées ou ambiguës ne sont jamais échantillonnées.",
   /* dyn.state_help_room */ "Le relevé de pièce parvient à l’appareil, mais ne peut pas actuellement fournir un écart valide par rapport à la cible. Aucun échantillon n’est formé tant que la source n’est pas de nouveau exploitable.",
-  /* dyn.state_help_setup */ "Le diagnostic démarre lorsqu’une source de pièce MQTT horodatée avec une cible est enregistrée. Les prévisions constituent une preuve comparative facultative ; aucune divulgation de l’emplacement n’est nécessaire.",
+  /* dyn.state_help_setup */ "Le diagnostic démarre lorsqu’une source de pièce MQTT horodatée avec une cible est enregistrée. Les prévisions fournissent des valeurs comparatives facultatives ; aucune indication de l’emplacement n’est nécessaire.",
   /* dyn.state_help_inactive */ "Les sources sont configurées, mais rien ne les évalue : l’échantillonneur fonctionne avec la connexion MQTT, et cette carte a démarré en mode sécurisé après plusieurs démarrages avec plantage, où tous les consommateurs facultatifs restent inactifs. Rien n’est perdu — l’enregistrement reprend automatiquement lorsque la carte redémarre normalement.",
   /* dyn.state_help_no_broker */ "Une source de pièce est enregistrée, mais le diagnostic la lit via MQTT et aucun broker n’est configuré. Configurez le broker dans la carte Connexions ; la source enregistrée est conservée et l’enregistrement démarre automatiquement.",
   /* dyn.state_help_setup_homehub */ "Le diagnostic a besoin du HomeHub pour savoir quand l’installation chauffe réellement ; sans lui, il ne peut pas distinguer une fenêtre de chauffage de l’eau chaude ou d’un arrêt. Configurez l’adresse du HomeHub dans la carte Protocole.",
@@ -720,7 +720,7 @@ I18N.fr = localeValues([
   /* board.led_gpio_wiping */ "Fixe après clignotement très rapide — réinitialisation/effacement en cours ; ne coupez pas l’alimentation.",
   /* board.ledinv */ "Actif au niveau bas (la LED s’allume lorsque la broche est commandée LOW)",
   /* board.btninv */ "Actif au niveau bas (le bouton relie la broche à GND)",
-  /* board.hint */ "Réinitialisation d’usine : maintenez 5 s. Efface définitivement le Wi-Fi/tous les paramètres, l’historique/les tendances, les durées d’état et le vidage mémoire brut. Le portail ne s’ouvre qu’après effacement complet réussi. Sinon, relâchez puis maintenez encore 5 s. Choisissez « Aucun » sans bouton.",
+  /* board.hint */ "Réinitialisation d’usine : maintenez 5 s. Efface définitivement le Wi-Fi/tous les paramètres, l’historique/les tendances, les durées d’état et le vidage mémoire brut. Le portail de configuration (Wi-Fi) ne s’ouvre qu’après un effacement complet et réussi. Sinon, relâchez puis maintenez encore 5 s. Choisissez « Aucun » sans bouton.",
   /* card.hardware */ "Matériel",
   /* card.hw_off */ "Aucun",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
@@ -935,7 +935,7 @@ INSPECT_I18N.fr = inspectValues(
       : `${fmt1(d.cop)} kW thermiques par kW électrique dans le périmètre pompe à chaleur : ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Le BUH est hors des deux valeurs.`], // cop
     ["Chauffage d’appoint · BUH", "Chauffage d’appoint BUH", "Appoint électrique du circuit d’eau placé après R1T. Ses étages peuvent relever le départ et la consommation ; ce n’est pas la résistance interne BSH du ballon.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Étage 2 : les deux étages chauffent." : d.buh1 ? "Étage 1 : un étage chauffe." : "Inactif : aucun étage BUH ne chauffe."], // buh
     ["Résistance du ballon", "Résistance électrique du ballon", "Résistance d’immersion BSH dans le ballon. Elle peut chauffer avec compresseur, pompe et débit à zéro ; son contact X10A ne mesure aucune puissance.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Résistance du ballon active." : "Inactive : résistance du ballon arrêtée."; }], // bsh
-    ["Vanne 3 voies", 0, "La sortie logique sélectionne le ballon ou les locaux. Ce n’est ni un retour mécanique de position ni une preuve de débit.", (d) => d.valveDhw == null ? null : d.valveDhw ? "La commande indique le ballon. Cela ne prouve ni position mécanique, ni débit, ni charge active." : "La commande indique les locaux. Cela ne prouve ni position mécanique ni circulation."], // valve
+    ["Vanne 3 voies", 0, "La sortie logique sélectionne le ballon ou les locaux. Ce n’est ni un retour mécanique de position ni une confirmation de débit.", (d) => d.valveDhw == null ? null : d.valveDhw ? "La commande indique le ballon. Cela ne prouve ni position mécanique, ni débit, ni charge active." : "La commande indique les locaux. Cela ne prouve ni position mécanique ni circulation."], // valve
     ["Sortie vanne 2 voies", 0, "Sortie binaire X10A pour une 2WV du circuit locaux. Elle n’indique pas la position mécanique et n’équivaut pas au mode chauffage/froid.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A indique la sortie 2WV active. Cela ne prouve ni chauffage actif ni position mécanique ; vérifier mode et fonctionnement des locaux." : "X10A indique la sortie 2WV inactive. Cela ne signifie pas à lui seul le froid et ne contredit pas un mode chauffage configuré, surtout au repos."], // valve2
     ["Ballon ECS", "Ballon ECS ou stockage thermique", "Ballon mesuré par R5T. Charge, consigne et résistance BSH sont affichées séparément."], // tank
     [(d) => activeSpaceKind(d) === "cool" ? "Circuit froid" : activeSpaceKind(d) === "heat" ? "Circuit chauffage" : "Circuit locaux", "Circuit des locaux", "Émetteurs du bâtiment : radiateurs, plancher ou ventilo-convecteurs. L’installation décide s’ils chauffent, refroidissent ou les deux ; R1T/R4T sont mesurés dans la pompe et ne confirment pas leur température.", (d) => d.valveDhw === true ? "Le chemin locaux n’est pas sélectionné ; pompe et débit indiquent séparément une éventuelle circulation vers le ballon."
@@ -1142,14 +1142,14 @@ DESCRIPTION_I18N.fr = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["État propre erreur/avis : erreur active donne AVERTISSEMENT ; avis ou message effacé sous 24 h donne NOTE, sans inférence du projet."], // health_fault
-  ["R5T strat.;K/h=MAX≠Ø/jour;pompe≠cause;bande projet 0,8–1,85.Hyp.:200l unif.;valides=MAX;COP;excl./abs.h hors;él.≠mesurée."], // health_dhw_loss
+  ["Mesure R5T en heures calmes : K/h est la plus forte baisse horaire ; la pompe est une corrélation, pas une cause. NOTE dès ≥0,8 K/h et fin à 1,85 K/h sont des heuristiques du projet. Pour 200 l estime le réchauffage, non mesuré."], // health_dhw_loss
   ["NOTE : ≥12 cycles chauffage, moyenne <10 min ; ECS/froid exclus, seuil projet non Daikin ; si trop sont non classés, tous jugés ensemble."], // health_cycling
   ["Compte les dégivrages : NOTE au-delà de 15 % avec ≥3 cycles ; pas une limite Daikin. R4T est un contexte en direct hors verdict ; un point ne décrit pas toute la batterie."], // health_defrost
   ["Pression minimale : >1,0 bar ; ≤1,0 donne NOTE puis AVERTISSEMENT après 60 s, mais la plage dépend du modèle."], // health_pressure
   ["Débit après 60 s de pompe : tronçon mesuré, pas débit de calcul ; comparer mêmes modèle/mode/conditions, sans seuil universel."], // health_flow
   ["Durée BUH/BSH observée : froid, secours, dégivrage, ECS ou surplus peuvent l’expliquer ; aucune limite universelle."], // health_heater
   ["5 compteurs expérimentaux peu documentés : seule une hausse comparable donne NOTE, pas diagnostic ; sans hausse, une limitation reste possible."], // health_retries
-  ["RAM libre actuelle et tendance sur 24 h : une baisse durable peut signaler des allocations retenues. Un redémarrage sous tension conserve la tendance en RAM ; un redémarrage normal, une mise à jour ou une coupure restaure depuis le flash les tranches closes de 5 min. Seule la tranche ouverte peut manquer."], // free_heap
+  ["RAM libre actuelle et tendance 24 h : une baisse durable peut indiquer des allocations non libérées. Après redémarrage ou coupure, les intervalles clos de 5 min sont restaurés depuis le flash."], // free_heap
   ["Plus grand bloc contigu requis par TLS/OTA ; sa baisse avec RAM totale stable indique une fragmentation."], // max_alloc
   ["Puissance nominale de l’unité extérieure, pas sa production actuelle."], // capacity
   ["Puissance nominale de l’UNITÉ INTÉRIEURE ; ne pas l’attribuer à l’extérieure ou au système complet."], // capacity_iu
