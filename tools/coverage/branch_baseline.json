@@ -1,5 +1,4 @@
 {
-  "schema": 3,
   "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update.",
   "profiles": {
     "clang-17-darwin": {
@@ -780,8 +779,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 228,
-        "taken": 188
+        "outcomes": 238,
+        "taken": 197
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
@@ -792,8 +791,8 @@
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 162,
-        "taken": 153
+        "outcomes": 164,
+        "taken": 155
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -804,12 +803,12 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 121,
-        "taken": 114
+        "outcomes": 111,
+        "taken": 106
       },
       "main/logic/detect.hpp": {
-        "outcomes": 165,
-        "taken": 148
+        "outcomes": 175,
+        "taken": 158
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -820,8 +819,8 @@
         "taken": 28
       },
       "main/logic/discovery.hpp": {
-        "outcomes": 332,
-        "taken": 177
+        "outcomes": 334,
+        "taken": 179
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -880,12 +879,12 @@
         "taken": 259
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 42,
-        "taken": 42
+        "outcomes": 36,
+        "taken": 36
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 136,
-        "taken": 123
+        "outcomes": 140,
+        "taken": 127
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -932,8 +931,8 @@
         "taken": 13
       },
       "main/logic/lwt_select.hpp": {
-        "outcomes": 64,
-        "taken": 57
+        "outcomes": 66,
+        "taken": 66
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
@@ -946,6 +945,10 @@
       "main/logic/modbus_plan.hpp": {
         "outcomes": 68,
         "taken": 61
+      },
+      "main/logic/modbus_profile.hpp": {
+        "outcomes": 32,
+        "taken": 30
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 10,
@@ -1142,8 +1145,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 228,
-        "taken": 188
+        "outcomes": 238,
+        "taken": 197
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
@@ -1154,8 +1157,8 @@
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 162,
-        "taken": 153
+        "outcomes": 164,
+        "taken": 155
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -1166,12 +1169,12 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 121,
-        "taken": 114
+        "outcomes": 111,
+        "taken": 106
       },
       "main/logic/detect.hpp": {
-        "outcomes": 165,
-        "taken": 148
+        "outcomes": 175,
+        "taken": 158
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -1182,8 +1185,8 @@
         "taken": 28
       },
       "main/logic/discovery.hpp": {
-        "outcomes": 332,
-        "taken": 177
+        "outcomes": 334,
+        "taken": 179
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -1242,12 +1245,12 @@
         "taken": 259
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 42,
-        "taken": 42
+        "outcomes": 36,
+        "taken": 36
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 136,
-        "taken": 123
+        "outcomes": 140,
+        "taken": 127
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -1294,8 +1297,8 @@
         "taken": 13
       },
       "main/logic/lwt_select.hpp": {
-        "outcomes": 64,
-        "taken": 57
+        "outcomes": 66,
+        "taken": 66
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
@@ -1308,6 +1311,10 @@
       "main/logic/modbus_plan.hpp": {
         "outcomes": 68,
         "taken": 61
+      },
+      "main/logic/modbus_profile.hpp": {
+        "outcomes": 32,
+        "taken": 30
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 10,
@@ -1454,5 +1461,6 @@
         "taken": 36
       }
     }
-  }
+  },
+  "schema": 3
 }
