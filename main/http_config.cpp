@@ -808,9 +808,12 @@ static esp_err_t set_hp(httpd_req_t* req) {
             j.reset();
             return send_err(req, "400 Bad Request", "unknown profile id");
         }
-        if (!set_hp_profile_compatible(c.profile, c.proto)) {
+        if (!set_hp_profile_compatible(c.profile, c.proto, c.fp_valid)) {
             j.reset();
             return send_err(req, "400 Bad Request", "profile incompatible with detected protocol");
+        }
+        if (c.profile == "protocol_s") {
+            c.proto = Protocol::S;
         }
     }
     if (set_hp_clears_fingerprint(profile_sent, c.profile)) c.fp_valid = false;
@@ -820,7 +823,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     const bool reset_checkup =
         set_hp_resets_checkup(profile_sent, old_rx, old_tx, c.rx_pin, c.tx_pin);
     if (reset_checkup) c.x10a_identity_fp = 0;  // replaced below only for a committed manual model
-    // The HomeHub Modbus stack (issue #32). All optional — an omitted key keeps its stored value, so
+    // The HomeHub Modbus stack (issue legacy-32). All optional — an omitted key keeps its stored value, so
     // a wiring-only patch (rx/tx) leaves the HomeHub untouched and the pin picker's
     // {profile:"auto",rx,tx} POST cannot switch anything on. This is a SECOND source, not an
     // alternative to X10A: enabling it starts a separate task, it does not stop the X10A poll.
@@ -1274,7 +1277,7 @@ static void probe_append_decode(JsonOut& out, const ProbeDecode& d) {
         out += ",\"aliases\":[";
         for (int i = 0; i < d.alias_count; i++) {
             if (i) out += ',';
-            probe_append_int(out, d.alias[i]);
+            probe_append_int(out, d.alias(i));
         }
         out += ']';
     }

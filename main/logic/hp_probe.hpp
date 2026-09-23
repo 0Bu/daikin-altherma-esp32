@@ -312,31 +312,46 @@ inline constexpr bool probe_candidate_offered(int conv, uint8_t size) {
 inline constexpr int PROBE_MAX_DECODES =
     probe_candidate_count_for(1) > probe_candidate_count_for(2) ? probe_candidate_count_for(1)
                                                                 : probe_candidate_count_for(2);
-inline constexpr int PROBE_MAX_ALIASES = 12;
+inline constexpr int PROBE_MAX_ALIASES = PROBE_CANDIDATE_COUNT;
+static_assert(PROBE_CANDIDATE_COUNT <= 64, "PROBE_CANDIDATES must fit in uint64_t alias_mask");
 
 // The sweep's whole output is ONE stack array in the HTTP handler, on the task with the deepest
 // call chain in the firmware (16 KB; the bounded status path remains its largest consumer — see
-// http_server.cpp). So the per-row cost is deliberate: `uint16_t` aliases and a bound derived
-// from the table rather than rounded up. MEASURED at today's table: 23 rows x 88 bytes = 2024 bytes,
-// against ~4.6 KB for the obvious `int alias[PROBE_CANDIDATE_COUNT]` in a hand-picked 24-row array.
-// This is not premature: a stack budget is exactly what killed the httpd task twice (v1.0.12, #318).
+// http_server.cpp). Using a uint64_t alias_mask indexes PROBE_CANDIDATES without truncation
+// and keeps sizeof(ProbeDecode) down to 56 bytes.
 static_assert(PROBE_MAX_DECODES <= 32,
               "a sweep's output is one httpd-stack array — keep the candidate table small enough "
               "that it stays under about 2 KB");
 
-// One decoded answer. `alias` names the other converters that produced a byte-identical decode, so
-// a merged row still says exactly which ids it stands for — a contributor writing a catalog entry
-// needs the id, and "105" and "119" are not interchangeable in a def/*.hpp row even when they agree
-// on today's bytes.
+// One decoded answer. `alias_mask` records other candidates in PROBE_CANDIDATES that produced
+// an identical decode, eliminating alias truncation without stack bloat.
 struct ProbeDecode {
-    int    conv        = 0;
-    bool   ok          = false;   // convert() produced a numeric value
-    bool   is_text     = false;   // convert() produced a label instead
-    double value       = 0.0;
-    char   text[24]    = {0};
-    uint16_t alias[PROBE_MAX_ALIASES] = {0};   // uint16_t: converter ids are <= 999, and this array
-                                              // is what the row's stack cost is made of (see above)
-    int    alias_count = 0;
+    int      conv        = 0;
+    bool     ok          = false;   // convert() produced a numeric value
+    bool     is_text     = false;   // convert() produced a label instead
+    double   value       = 0.0;
+    char     text[24]    = {0};
+    uint64_t alias_mask  = 0;
+    int      alias_count = 0;
+
+    bool has_alias(int candidate_conv) const {
+        for (int i = 0; i < PROBE_CANDIDATE_COUNT; i++) {
+            if ((alias_mask & (uint64_t(1) << i)) && PROBE_CANDIDATES[i].conv == candidate_conv)
+                return true;
+        }
+        return false;
+    }
+
+    uint16_t alias(int idx) const {
+        int cur = 0;
+        for (int i = 0; i < PROBE_CANDIDATE_COUNT; i++) {
+            if (alias_mask & (uint64_t(1) << i)) {
+                if (cur == idx) return static_cast<uint16_t>(PROBE_CANDIDATES[i].conv);
+                cur++;
+            }
+        }
+        return 0;
+    }
 };
 
 static_assert(sizeof(ProbeDecode) * PROBE_MAX_DECODES <= 2048,
@@ -421,11 +436,8 @@ inline int probe_sweep(const uint8_t* payload, int payload_len, int offset, int 
         bool merged = false;
         for (int k = 0; k < n; k++) {
             if (!probe_decode_same(out[k], r)) continue;
-            // The bound cannot be reached — every candidate lands in exactly one row, so a row can
-            // absorb at most the width's candidate count minus itself — but a table edit that broke
-            // that invariant must overwrite nothing.
-            if (out[k].alias_count < PROBE_MAX_ALIASES)
-                out[k].alias[out[k].alias_count++] = static_cast<uint16_t>(PROBE_CANDIDATES[i].conv);
+            out[k].alias_mask |= (uint64_t(1) << i);
+            out[k].alias_count++;
             merged = true;
             break;
         }
@@ -433,12 +445,14 @@ inline int probe_sweep(const uint8_t* payload, int payload_len, int offset, int 
         if (n >= max) break;   // bounded output; the table is ordered so the informative rows land first
 
         ProbeDecode d;
-        d.conv    = PROBE_CANDIDATES[i].conv;
-        d.ok      = r.ok;
-        d.is_text = r.text[0] != '\0';
-        d.value   = r.value;
+        d.conv        = PROBE_CANDIDATES[i].conv;
+        d.ok          = r.ok;
+        d.is_text     = r.text[0] != '\0';
+        d.value       = r.value;
         for (int c = 0; c < static_cast<int>(sizeof(d.text)); c++) d.text[c] = r.text[c];
         d.text[sizeof(d.text) - 1] = '\0';
+        d.alias_mask  = 0;
+        d.alias_count = 0;
         out[n++] = d;
     }
     return n;

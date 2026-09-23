@@ -61,7 +61,7 @@ const GROUPS = [
                      "floor loop shut off"]],
   // Bare "pressure" is safe HERE and only here: the two water-pressure spellings are claimed by the
   // group above, so what is left ("Pressure", "Pressure sensor(T)", …) is refrigerant — the same
-  // generically-named rows logic/hp_convert.cpp documents as its known is_refrigerant_pressure gap.
+  // generically-named rows logic/convert.hpp documents as its known is_refrigerant_pressure gap.
   ["Refrigerant / outdoor", ["outdoor", "heat-exchanger", "heat exchanger", "o/u heat exch",
                              "pressure", "refrigerant", "refrig.", "compressor", "fan",
                              "expansion valve", "discharge", "suction", "liquid", "deicer",

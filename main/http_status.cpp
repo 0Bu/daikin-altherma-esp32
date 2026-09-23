@@ -201,6 +201,9 @@ static esp_err_t h_index(httpd_req_t* req) {
     bool not_modified = false;
     const esp_err_t cache_err = static_asset_cache(req, "dashboard", etag, sizeof(etag), not_modified);
     if (cache_err != ESP_OK || not_modified) return cache_err;
+    httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    httpd_resp_set_hdr(req, "X-Frame-Options", "DENY");
+    httpd_resp_set_hdr(req, "Referrer-Policy", "no-referrer");
     return http_send_gzip(req, "text/html", index_html_gz_start, index_html_gz_end);
 }
 
@@ -1695,9 +1698,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         std::string cand, fams;
         if (c.fp_valid) {
             if (c.proto == Protocol::S) {
-                total = 1;
-                cand  = jstr("protocol_s");
-                fams  = jstr("Legacy / Protocol S");
+                if (c.fp_pages != 0) {
+                    total = 1;
+                    cand  = jstr("protocol_s");
+                    fams  = jstr("Legacy / Protocol S");
+                }
             } else {
                 Fingerprint fp{};
                 fp.page_mask = c.fp_pages;

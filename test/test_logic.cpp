@@ -62,6 +62,7 @@
 #include "logic/ota_transport.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/hp_query_log.hpp"
+#include "logic/modbus_profile.hpp"
 #include "logic/http_body.hpp"
 #include "logic/http_cache.hpp"
 #include "logic/http_deadline.hpp"
@@ -246,15 +247,9 @@ static void test_crc() {
         CHECK(is_valid_preamble(Protocol::S, 0x50));
         CHECK(is_valid_preamble(Protocol::S, 0x00));
 
-        // Test starts_with_request_echo edge cases
-        CHECK(starts_with_request_echo(req_i, 1, req_i, qlen_i));
-        CHECK(starts_with_request_echo(req_i, 4, req_i, qlen_i));
-        CHECK(!starts_with_request_echo(req_i, 0, req_i, qlen_i));
-        CHECK(!starts_with_request_echo(req_i, 4, req_i, 0));
-        uint8_t diff_b[4] = {0x99, 0x99, 0x99, 0x99};
-        CHECK(!starts_with_request_echo(diff_b, 1, req_i, qlen_i));
 
         // Additional reply classify & crc edge cases
+        uint8_t diff_b[6] = {0x40, 0x60, 0x02, 0x01, 0x02, 0x00};
         CHECK(!is_error_reply(diff_b, 1));
         CHECK(!crc_ok(diff_b, 0));
         CHECK(hp_reply_classify(0x60, Protocol::I, diff_b, 0, 6) == HpReplyKind::NoReply);
@@ -267,12 +262,20 @@ static void test_crc() {
         s_valid[5]         = crc(s_valid, 5);
         CHECK(hp_reply_classify(0x50, Protocol::S, s_valid, 6, 6) == HpReplyKind::Ok);
 
-        // Test resync helper on Protocol S
+        // Test resync helper on Protocol S and boundary conditions
         uint8_t s_sync_buf[4] = {0x11, 0x22, 0x33, 0x44};
         int     s_sync_len    = 4;
         hp_resync_buffer(Protocol::S, s_sync_buf, s_sync_len);
         CHECK(s_sync_len == 3);
         CHECK(s_sync_buf[0] == 0x22);
+
+        int empty_resync_len = 0;
+        hp_resync_buffer(Protocol::I, diff_b, empty_resync_len);
+        CHECK(empty_resync_len == 0);
+        CHECK(hp_reply_classify(0x60, Protocol::I, diff_b, 1, 6) == HpReplyKind::ShortReply);
+        HpFrameReceiver rx_neg(Protocol::I, diff_b, -1, 64, 12);
+        HpFrameReceiver rx_huge(Protocol::I, diff_b, 10, 64, 12);
+
 
         // Test 1: Clean Protocol I frame without echo
         {
@@ -320,6 +323,18 @@ static void test_crc() {
             // 0x40, 0xFF, 0xFE -> dynamic len 0xFE + 2 = 256 (>64, invalid!), followed by valid
             // frame
             const uint8_t stream[] = {0x40, 0xFF, 0xFE, 0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60);
+        }
+
+        // Test 4b: Protocol I false preamble where buf[2] == 0x40 (echo/noise)
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len = 0;
+            const uint8_t   stream[] = {0x40, 0x60, 0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
             for (uint8_t b : stream) rx.feed_byte(b, buf, len);
             CHECK(len == 6);
             CHECK(rx.reply_len() == 6);
@@ -911,6 +926,16 @@ static void test_convert() {
         !reading_plausible(pprof[3], convert(pprof[3], p0bar), pprof, pn)); // ...but caught with it
     CHECK(reading_plausible(pprof[0], Reading{false, false, 0.0}));         // !r.ok passes through
 
+    // Protocol S refrigerant pressures on page 0x50 must also drop 0.0 bar:
+    const ValueDef s_hp{0x50, 0, 103, 2, 2, "HP Sensor(bar)"};
+    const ValueDef s_lp{0x50, 2, 103, 2, 2, "LP Sensor(bar)"};
+    CHECK(is_refrigerant_pressure(s_hp, nullptr, 0));
+    CHECK(is_refrigerant_pressure(s_lp, nullptr, 0));
+    CHECK(!reading_plausible(s_hp, convert(s_hp, p0bar)));
+    CHECK(!reading_plausible(s_lp, convert(s_lp, p0bar)));
+    const uint8_t s_pos[] = {0x64, 0x00}; // 10.0 bar
+    CHECK(reading_plausible(s_hp, convert(s_hp, s_pos)));
+
     // profile_refrigerant: pick the 801-805 row's id, else fail closed as unknown.
     const ValueDef prof801[]   = {{0x00, 0, 801, 0, -1, "*Refrigerant type"},
                                   {0x61, 0, 105, 2, 1, "T"}};
@@ -1125,6 +1150,44 @@ static void test_convert() {
 }
 
 static void test_config_model() {
+    // wifi_config_field_copy: 32-byte SSID must not be truncated, short strings zero-padded
+    {
+        uint8_t     ssid_buf[32];
+        const char* full_32 = "12345678901234567890123456789012"; // exactly 32 bytes
+        wifi_config_field_copy(ssid_buf, sizeof(ssid_buf), full_32);
+        CHECK(std::memcmp(ssid_buf, full_32, 32) == 0);
+
+        uint8_t     short_buf[32];
+        const char* short_str = "MyWiFi";
+        wifi_config_field_copy(short_buf, sizeof(short_buf), short_str);
+        CHECK(std::memcmp(short_buf, "MyWiFi", 6) == 0);
+        for (size_t i = 6; i < sizeof(short_buf); i++) {
+            CHECK(short_buf[i] == 0);
+        }
+
+        uint8_t pass_buf[64];
+        char    pass_63[64];
+        std::memset(pass_63, 'A', 63);
+        pass_63[63] = '\0';
+        wifi_config_field_copy(pass_buf, sizeof(pass_buf), pass_63);
+        CHECK(std::memcmp(pass_buf, pass_63, 63) == 0);
+        CHECK(pass_buf[63] == 0);
+
+        char pass_64[65];
+        std::memset(pass_64, 'B', 64);
+        pass_64[64] = '\0';
+        wifi_config_field_copy(pass_buf, sizeof(pass_buf), pass_64);
+        CHECK(std::memcmp(pass_buf, pass_64, 64) == 0);
+
+        // Null / empty / edge handling
+        wifi_config_field_copy(short_buf, sizeof(short_buf), nullptr);
+        for (size_t i = 0; i < sizeof(short_buf); i++) {
+            CHECK(short_buf[i] == 0);
+        }
+        wifi_config_field_copy(nullptr, 32, "test");
+        wifi_config_field_copy(short_buf, 0, "test");
+    }
+
     // The atomic service blob and the self-healing link cache have different success contracts.
     // Ordinary service routes own only blob fields, so a cache-maintenance hiccup after that commit
     // must not report a false 500; /set_hp owns the cache and therefore does require it.
@@ -2329,6 +2392,29 @@ static void test_detect() {
         CHECK(count == 1);
         CHECK(tracked == "monobloc");
     }
+
+    // ── Transport error classification (M4) ──
+    CHECK(is_transport_error(HpReplyKind::BadCrc));
+    CHECK(is_transport_error(HpReplyKind::ShortReply));
+    CHECK(is_transport_error(HpReplyKind::UnexpectedReply));
+    CHECK(is_transport_error(HpReplyKind::InvalidLength));
+    CHECK(!is_transport_error(HpReplyKind::Ok));
+    CHECK(!is_transport_error(HpReplyKind::NoReply));
+    CHECK(!is_transport_error(HpReplyKind::Rejected));
+
+    // ── Protocol S detection via page_mask (M5) ──
+    CHECK(detect_profile_for_protocol_s(0) == nullptr);
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x00)) == nullptr);
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x50)) != nullptr &&
+          std::string(detect_profile_for_protocol_s(page_mask_bit(0x50))) == "protocol_s");
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x53)) != nullptr &&
+          std::string(detect_profile_for_protocol_s(page_mask_bit(0x53))) == "protocol_s");
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x54)) != nullptr &&
+          std::string(detect_profile_for_protocol_s(page_mask_bit(0x54))) == "protocol_s");
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x55)) != nullptr &&
+          std::string(detect_profile_for_protocol_s(page_mask_bit(0x55))) == "protocol_s");
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x56)) != nullptr &&
+          std::string(detect_profile_for_protocol_s(page_mask_bit(0x56))) == "protocol_s");
 
     // ── EEPROM render: raw hex pairs for display ──
     const uint8_t ee[] = {0x0B, 0x02, 0x00, 0x01, 0x03, 0x02};
@@ -5628,21 +5714,6 @@ static void test_altherma4() {
     CHECK(homehub_format(*r79, 185, buf, sizeof(buf)) && std::string(buf) == "1.85");
     CHECK(homehub_format(*r79, 200, buf, sizeof(buf)) && std::string(buf) == "2.00");
     CHECK(homehub_format(*r79, 0, buf, sizeof(buf)) && std::string(buf) == "0.00");
-    CHECK(homehub_format_pressure(1.85, buf, sizeof(buf), true) && std::string(buf) == "1.85 bar");
-    CHECK(homehub_format_pressure(1.85, buf, sizeof(buf), false) && std::string(buf) == "1.85");
-    CHECK(!homehub_format_pressure(1.85, nullptr, sizeof(buf), true));
-    CHECK(!homehub_format_pressure(1.85, buf, 0, true));
-
-    // Pressure truncation & small buffer boundary tests: "1.85 bar" is 8 chars + null = 9 bytes
-    CHECK(!homehub_format_pressure(1.85, buf, 4, true));
-    CHECK(!homehub_format_pressure(1.85, buf, 8, true));
-    CHECK(homehub_format_pressure(1.85, buf, 9, true) && std::string(buf) == "1.85 bar");
-    // Without unit: "1.85" is 4 chars + null = 5 bytes
-    CHECK(!homehub_format_pressure(1.85, buf, 4, false));
-    CHECK(homehub_format_pressure(1.85, buf, 5, false) && std::string(buf) == "1.85");
-
-    // Negative pressure (signed int16)
-    CHECK(homehub_format_pressure(-0.5, buf, sizeof(buf), true) && std::string(buf) == "-0.50 bar");
     CHECK(homehub_decode(*r79, static_cast<uint16_t>(-50), val) && approx(val.value, -0.5));
     CHECK(homehub_format(*r79, static_cast<uint16_t>(-50), buf, sizeof(buf)) &&
           std::string(buf) == "-0.50");
@@ -5728,6 +5799,120 @@ static void test_altherma4() {
     CHECK(std::string(modbus_profile_name(ModbusProfile::Altherma4)) == "altherma4");
     CHECK(std::string(modbus_profile_name(static_cast<ModbusProfile>(99))) == "unknown");
 }
+
+static void test_modbus_profile() {
+    using namespace daik::logic;
+    // ── MODBUS_BASE_MAX_OFFSET invariant and is_extended_register ──
+    CHECK(MODBUS_BASE_MAX_OFFSET == 58);
+    CHECK(!is_extended_register(0));
+    CHECK(!is_extended_register(1));
+    CHECK(!is_extended_register(58));
+    CHECK(is_extended_register(59));
+    CHECK(is_extended_register(79));
+    CHECK(is_extended_register(83));
+
+    // ── is_valid_altherma4_probe_value ──
+    // Special / sentinel values are rejected
+    CHECK(!is_valid_altherma4_probe_value(79, MB_WAIT));
+    CHECK(!is_valid_altherma4_probe_value(79, MB_UNAVAILABLE));
+    CHECK(!is_valid_altherma4_probe_value(79, MB_UNSUPPORTED));
+    // Offset 79 (Water pressure in bar * 100): valid range is 0 < raw <= 600
+    CHECK(!is_valid_altherma4_probe_value(79, 0));       // 0 bar is not plausible for live running water pressure
+    CHECK(is_valid_altherma4_probe_value(79, 50));       // 0.5 bar
+    CHECK(is_valid_altherma4_probe_value(79, 150));      // 1.5 bar
+    CHECK(is_valid_altherma4_probe_value(79, 600));      // 6.0 bar
+    CHECK(!is_valid_altherma4_probe_value(79, 601));     // > 6.0 bar rejected
+    CHECK(!is_valid_altherma4_probe_value(79, 1000));
+    // Non-probe register returns true unless special
+    CHECK(is_valid_altherma4_probe_value(43, 450));
+    CHECK(!is_valid_altherma4_probe_value(43, MB_WAIT));
+    CHECK(!is_valid_altherma4_probe_value(43, MB_UNAVAILABLE));
+    CHECK(!is_valid_altherma4_probe_value(43, MB_UNSUPPORTED));
+
+    // ── evaluate_probe_result state machine ──
+    // 1. Current profile is Auto:
+    // Successful probe with valid raw value detects Altherma4
+    auto dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, 180);
+    CHECK(dec.next_profile == ModbusProfile::Altherma4);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+
+    // Successful probe with invalid raw value stays Auto (does not falsely promote)
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+
+    // Explicit unsupported sentinel on extended register confirms HomeHub
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, MB_UNSUPPORTED);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+
+    // Successful read of standard (non-extended) register stays Auto
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 43, 500);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+
+    // Modbus Exception 0x02 on extended register probe confirms HomeHub (Altherma 3 / EKRHH)
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x02, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+
+    // Transient Modbus Exception 0x06 (Server Busy) on probe keeps Auto and retries
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x06, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(dec.count_failure);
+
+    // Modbus Exception on standard register counts failure and stays Auto
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x02, 43, 0);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(dec.count_failure);
+
+    // Transport failure on extended register probe falls back to HomeHub, closes socket without counting error
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(!dec.link_ok);
+    CHECK(!dec.count_failure);
+
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ConnectionClosed, 0, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(!dec.link_ok);
+    CHECK(!dec.count_failure);
+
+    // Transport failure on standard register stays Auto, closes socket and counts failure
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 43, 0);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(!dec.link_ok);
+    CHECK(dec.count_failure);
+
+    // 2. Current profile is locked (HomeHub or Altherma4):
+    // Preserves profile across reads and failures
+    dec = evaluate_probe_result(ModbusProfile::HomeHub, MbFailureType::None, 0, 43, 500);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+
+    dec = evaluate_probe_result(ModbusProfile::HomeHub, MbFailureType::ResponseTimeout, 0, 43, 0);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(!dec.link_ok);
+    CHECK(dec.count_failure);
+
+    dec = evaluate_probe_result(ModbusProfile::Altherma4, MbFailureType::None, 0, 79, 180);
+    CHECK(dec.next_profile == ModbusProfile::Altherma4);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+
+    dec = evaluate_probe_result(ModbusProfile::Altherma4, MbFailureType::ResponseTimeout, 0, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::Altherma4);
+    CHECK(!dec.link_ok);
+    CHECK(dec.count_failure);
+}
+
 
 static void test_bootlog() {
     // ── Build identity: emitted on EVERY boot, clean or not — it is what ties a log stream to a
@@ -5918,9 +6103,7 @@ static const ProbeDecode* probe_find(const ProbeDecode* d, int n, int conv) {
     return nullptr;
 }
 static bool probe_has_alias(const ProbeDecode& d, int conv) {
-    for (int i = 0; i < d.alias_count; i++)
-        if (d.alias[i] == conv) return true;
-    return false;
+    return d.has_alias(conv);
 }
 static const ProbeDecode* probe_find_or_alias(const ProbeDecode* d, int n, int conv) {
     for (int i = 0; i < n; i++)
@@ -6079,6 +6262,40 @@ static void test_hp_probe() {
     n                          = probe_sweep(zero, 2, 0, 2, d, PROBE_MAX_DECODES);
     const ProbeDecode* refused = probe_find(d, n, 405);
     CHECK(refused && !refused->ok && !refused->is_text);
+    CHECK(sizeof(ProbeDecode) == 56);
+    for (int i = 0; i < n; i++) {
+        CHECK(d[i].alias_count <= PROBE_CANDIDATE_COUNT);
+    }
+
+    // Probe candidate count conservation: sum of (1 + alias_count) across all decodes
+    // must equal probe_candidate_count_for(width) for both 0x00 and 0xFF inputs.
+    {
+        const uint8_t byte00[] = {0x00};
+        const uint8_t byteFF[] = {0xFF};
+        ProbeDecode   decs1[PROBE_MAX_DECODES];
+        int           n1_0   = probe_sweep(byte00, 1, 0, 1, decs1, PROBE_MAX_DECODES);
+        int           sum1_0 = 0;
+        for (int i = 0; i < n1_0; i++) sum1_0 += (1 + decs1[i].alias_count);
+        CHECK(sum1_0 == probe_candidate_count_for(1));
+
+        int n1_F   = probe_sweep(byteFF, 1, 0, 1, decs1, PROBE_MAX_DECODES);
+        int sum1_F = 0;
+        for (int i = 0; i < n1_F; i++) sum1_F += (1 + decs1[i].alias_count);
+        CHECK(sum1_F == probe_candidate_count_for(1));
+
+        const uint8_t word00[] = {0x00, 0x00};
+        const uint8_t wordFF[] = {0xFF, 0xFF};
+        ProbeDecode   decs2[PROBE_MAX_DECODES];
+        int           n2_0   = probe_sweep(word00, 2, 0, 2, decs2, PROBE_MAX_DECODES);
+        int           sum2_0 = 0;
+        for (int i = 0; i < n2_0; i++) sum2_0 += (1 + decs2[i].alias_count);
+        CHECK(sum2_0 == probe_candidate_count_for(2));
+
+        int n2_F   = probe_sweep(wordFF, 2, 0, 2, decs2, PROBE_MAX_DECODES);
+        int sum2_F = 0;
+        for (int i = 0; i < n2_F; i++) sum2_F += (1 + decs2[i].alias_count);
+        CHECK(sum2_F == probe_candidate_count_for(2));
+    }
 
     // ── A 1-byte field, 0x05: bits 0 and 2 set, and every enum table indexed by a byte the poll
     // path may never have handed it. OP_MODE[5] is "Auto Cool"; conv 203/316 have no entry for 5
@@ -9633,6 +9850,17 @@ static void test_http_request_policy() {
 static void test_lwt_select() {
     using logic::lwt_select;
 
+    CHECK(!logic::lwt_ci_contains(nullptr, "test"));
+    CHECK(!logic::lwt_ci_contains("test", nullptr));
+    CHECK(!logic::lwt_ci_contains("test", ""));
+    CHECK(logic::lwt_is_reject("leaving water after buffer"));
+    CHECK(logic::lwt_is_reject("leaving water after buh"));
+    CHECK(logic::lwt_is_reject("leaving water (raw data)"));
+    const char* with_null_tier1[] = {nullptr, "Leaving water temp. before BUH (R1T)"};
+    CHECK(lwt_select(with_null_tier1, 2) == 1);
+    const char* with_null_tier2[] = {nullptr, "Leaving water temperature"};
+    CHECK(lwt_select(with_null_tier2, 2) == 1);
+
     // --- the #121 case: a "Leaving water" SETPOINT sorts before the R1T measurement (the fixture
     //     layout). The old fallback `vNum(/leaving water/i)` picked index 0 — a 45 °C setpoint. ---
     {
@@ -9703,13 +9931,13 @@ static void test_lwt_select() {
     {
         const char* generic[] = {"DHW setpoint", "Leaving water temperature"};
         CHECK(lwt_select(generic, 2) == 1);
-        // Monobloc Page 0xA1: "(Raw data)Water heat exchanger outlet temp." selected under Tier 2
+        // Monobloc Page 0xA1: "(Raw data)..." rows are rejected from LWT (M2)
         const char* monobloc[] = {
             "DHW setpoint",
             "(Raw data)Water heat exchanger outlet temp.",
             "(Raw data)Water heat exchanger inlet temp.",
         };
-        CHECK(lwt_select(monobloc, 3) == 1);
+        CHECK(lwt_select(monobloc, 3) == -1);
         // ...but if the ONLY leaving-water row is a setpoint, select nothing (blank beats wrong).
         const char* only_sp[] = {"Leaving Water Setpoint (main)", "DHW setpoint"};
         CHECK(lwt_select(only_sp, 2) == -1);
@@ -13782,8 +14010,8 @@ static void test_metric_identity() {
         "split_actuators_inv_comp_frequency_hz",
         "split_actuators_outdoor_fan_lower_rps",
         "split_actuators_outdoor_fan_upper_rps",
-        "split_pressures_hp_sensor_kgcm2",
-        "split_pressures_lp_sensor_kgcm2",
+        "split_pressures_hp_sensor_bar",
+        "split_pressures_lp_sensor_bar",
         "split_sensors_delta_tr_deg",
         "split_sensors_discharge_pipe_temp_c",
         "split_sensors_fin_temp_c",
@@ -16818,6 +17046,7 @@ int main() {
     test_mqtt_base();
     test_mqtt_uri();
     test_modbus();
+    test_modbus_profile();
     test_modbus_plan();
     test_modbus_snapshot();
     test_homehub();

@@ -270,15 +270,15 @@ The 43 registers of the Altherma 4 map collapse into **14 contiguous batches** (
 
 Detection is **100% automatic** at runtime without requiring any UI configuration:
 
-1. **Initial session state (`Auto`):** On every new TCP connection session (`status_socket_open`), the active profile is set to `Auto`.
+1. **Initial session state (`Auto`):** When connecting to a new target host, port, or unit ID (`status_socket_open`), the active profile begins in `Auto`.
 2. **Probing:** The firmware attempts to read batches using the 43-register `ALTHERMA4_REGS` catalog and `MB_PLAN_ALTHERMA4`.
-3. **Promotion to `Altherma4`:** If any extended register (> 58) successfully returns data, `s_active_profile` transitions to `ModbusProfile::Altherma4`.
-4. **Graceful fallback to `HomeHub`:** When connected to an Altherma 3 / EKRHH unit, registers > 58 return Modbus Exception 02 (*Illegal Data Address*). The firmware intercepts this exception on extended batches/registers in `Auto` mode:
+3. **Promotion to `Altherma4`:** If any extended register (offset > 58) successfully returns valid data (e.g. water pressure in offset 79 is plausibly 0..6.0 bar), `s_active_profile` transitions to `ModbusProfile::Altherma4`.
+4. **Graceful fallback to `HomeHub`:** When connected to an Altherma 3 / EKRHH unit, registers > 58 return Modbus Exception 02 (*Illegal Data Address*) or connection close/timeout. The firmware evaluates this failure via `logic::evaluate_probe_result()`:
    - It transitions `s_active_profile` immediately to `ModbusProfile::HomeHub`.
-   - It does **not** call `note_failure()`, preserving `status_recovered()` and preventing false `status_error()` transitions.
-   - It stops issuing remaining extended queries for the session.
+   - It does **not** call `note_failure()` or increment `rx_fail`, preserving `status_recovered()` and preventing false `status_error()` transitions.
+   - It resets `s_batch_split` and stops issuing remaining extended queries for the session.
    - The UI and `/status` remain green and healthy, reporting the 32 valid base registers.
-5. **Reconnection resilience:** If the connection drops and reconnects (e.g. following equipment swap), the new session re-enters `Auto` mode and re-probes cleanly.
+5. **Sticky profile across reconnects:** While connected to the same target endpoint (`host:port:unit_id`), the detected profile (`HomeHub` or `Altherma4`) is preserved across TCP reconnects to avoid repetitive probe exceptions on Altherma 3. Changing configuration or target address resets the profile to `Auto` to re-probe cleanly.
 
 ## How the two sources meet
 

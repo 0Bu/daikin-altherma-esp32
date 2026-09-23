@@ -125,15 +125,6 @@ inline bool is_valid_preamble(Protocol proto, uint8_t byte) {
     return true;
 }
 
-// Request echo detection for half-duplex / level-shifter transceivers (e.g. BSS138).
-inline bool starts_with_request_echo(const uint8_t* buf, int len, const uint8_t* req, int qlen) {
-    if (len <= 0 || qlen <= 0) return false;
-    const int cmp_len = len < qlen ? len : qlen;
-    for (int i = 0; i < cmp_len; ++i) {
-        if (buf[i] != req[i]) return false;
-    }
-    return true;
-}
 
 // Drop leading byte and advance to the next valid preamble.
 inline void hp_resync_buffer(Protocol proto, uint8_t* buf, int& len) {

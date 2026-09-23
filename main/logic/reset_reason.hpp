@@ -7,7 +7,7 @@
 //
 // SINGLE SOURCE OF TRUTH: the slug table already lives in crashinfo.hpp (crash_reason_slug), which
 // backs /status.last_crash and the retained MQTT crash entity. reset_reason_name() reuses it so the
-// sys block, the crash HA entity and the heartbeat reset_reason (issue #5) all speak ONE vocabulary —
+// sys block, the crash HA entity and the heartbeat reset_reason (issue legacy-5) all speak ONE vocabulary —
 // no second table to drift. This header just gives that mapping an intention-revealing name for the
 // general reset-reason case (a poweron / software reboot is not a "crash"), and a stable include point
 // for the HA-diagnostics follow-up to reuse.

@@ -19,7 +19,7 @@ a value that is **physically false**.
 That is this project's characteristic failure. A wrong converter id compiles, passes every host
 test, drifts no doc, and publishes `-971.5 °C` to Home Assistant as a mixed-water temperature. It
 shipped on eight profiles at once. A bizone valve *position* shipped as a 12800 °C temperature
-sensor; a "no data" sentinel shipped as a real `-3276.8 °C` reading (issues #35–#39). Every one was
+sensor; a "no data" sentinel shipped as a real `-3276.8 °C` reading (issues legacy-35–legacy-39). Every one was
 found by a slow manual review — none by a gate, because no gate was asking "**is this true?**".
 
 This review asks that. Nothing here is about style or structure.

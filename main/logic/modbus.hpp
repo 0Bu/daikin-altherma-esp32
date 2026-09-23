@@ -5,7 +5,7 @@
 // (EKRHH) — READ-ONLY. It frames and parses only the reads this firmware issues: input registers
 // (read-only by the Modbus spec itself) and holding-register readback, including Smart Grid / power-limit /
 // setpoint ones (EKRHH guide §9.2.1 regs 56-58) — not just an internal decision-engine subset (see
-// issue #32 / docs/SECURITY.md for how that surface is exposed).
+// issue legacy-32 / docs/SECURITY.md for how that surface is exposed).
 //
 // Compatibility is NOT unconditional (EKRHH guide 4P744838-1E): the Modbus register set requires
 // Unified MMI2 firmware >= 7.8.0 on the audited ERGA-EV / EHBH / X-E family, and individual registers

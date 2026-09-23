@@ -143,7 +143,8 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 102 | **Real-browser rendering and accessibility gate** — the assembled production UI runs in Chrome across all locales and mobile/desktop widths, including native accessibility, keyboard, overflow, reduced-motion and console contracts | ✅ 🧪 | [`test_browser_render.mjs`](../test/test_browser_render.mjs), [`run-browser-render-tests.sh`](../scripts/run-browser-render-tests.sh) |
 | 103 | **Signed release artifact construction** — a trusted-main job isolates the signing key, pins signing-key continuity and manifest provenance, then hands the exact artifact to a separate write-capable publisher that binds and verifies the release tag against the requested source SHA | ✅ 🧪 | [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-signing-key-continuity.py`](../scripts/check-signing-key-continuity.py), [`check-manifest-provenance.py`](../scripts/check-manifest-provenance.py), [`build.yml`](../.github/workflows/build.yml) |
 | 104 | **Hardware acceptance separated from publication** — the canonical private-inventory bench and production OTA transactions remain explicit maintainer operations; a manual release skips the PR test suite, never contacts a board and depends on no lab runner, private inventory or hardware policy | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`build.yml`](../.github/workflows/build.yml) |
-| 105 | **Protocol S legacy transport & hardware TX-echo suppression** — Protocol S support for legacy Daikin units, `HpFrameReceiver` preamble resynchronization and hardware TX-echo suppression for level-shifter transceivers | ✅ 🧪 | [`logic/crc.hpp`](../main/logic/crc.hpp), [`hp_comm.cpp`](../main/hp_comm.cpp), [`hp_detect.cpp`](../main/hp_detect.cpp), [`def/protocol_s.hpp`](../main/def/protocol_s.hpp), [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) |
+| 105 | **Protocol S legacy transport & hardware TX-echo suppression** — Protocol S support for legacy Daikin units, `HpFrameReceiver` preamble resynchronization and hardware TX-echo suppression for level-shifter transceivers on Protocol I | ✅ 🧪 | [`logic/crc.hpp`](../main/logic/crc.hpp), [`hp_comm.cpp`](../main/hp_comm.cpp), [`hp_detect.cpp`](../main/hp_detect.cpp), [`def/protocol_s.hpp`](../main/def/protocol_s.hpp), [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) |
+| 106 | **Altherma 4 Modbus TCP extended telemetry & auto-detection** — Modbus TCP extension for Daikin Altherma 4 with 11 additional registers (43 total across 14 batches), active register probing (FC04 offset 79) with exception-0x02 fallback to HomeHub, and dedicated status tracking | ✅ 🧪 | [`logic/modbus_profile.hpp`](../main/logic/modbus_profile.hpp), [`def/altherma4.hpp`](../main/def/altherma4.hpp), [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
 
 ---
 
@@ -728,9 +729,9 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
 - **✅ 🧪 Batched reads on two cadences** ([`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp)):
   the hub is **shared** — Onecta, the MMI, evcc and any LAN collector use the same `:502` — so what
   this firmware asks for is a question about someone else's device. The 32 EKRHH offsets fall into
-  ten contiguous runs. The two diagnosis gates (input 53 and 38) and the plant-outdoor context
-  (input 44) are time-sensitive, so a **full** cycle is ten requests every fifth poll tick and the
-  ticks between it read their three batches alone: **32 → ~4.4 requests/s**. A fast cycle commits
+  ten contiguous runs (or 14 runs for 43 Altherma 4 registers). The two diagnosis gates (input 53 and 38) and the plant-outdoor context
+  (input 44) are time-sensitive, so a **full** cycle is ten requests (14 on Altherma 4) every fifth poll tick and the
+  ticks between it read their three batches alone: **32 → ~4.4 requests/s** (43 → ~5.2 requests/s on Altherma 4). A fast cycle commits
   only those two gates and that context — its thirteen registers are not a general cache — and a
   batch answered with a Modbus exception is re-read register by
   register for the rest of the session, because an exception names one register and a batch cannot

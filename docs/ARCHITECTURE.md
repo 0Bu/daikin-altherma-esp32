@@ -63,7 +63,7 @@ sntp_time.cpp/.hpp  → SNTP client (esp_netif_sntp, config().ntp_server — NVS
                        reboots into a fresh config_load() rather than mutating it live.
 hp_comm.cpp/.hpp    → X10A UART transport: request framing for protocol I and S, 9600 8E1,
                        CRC, timeout handling, and frame reception with TX-echo suppression
-                       and preamble resynchronization (logic/crc.hpp HpFrameReceiver)
+                       and preamble resynchronization for Protocol I (logic/crc.hpp HpFrameReceiver)
 hp_detect.cpp/.hpp  → auto-detect glue: protocol sweep + page probe → bus fingerprint → candidate
                        models (logic/detect.hpp); register→value extraction is in logic/registers.hpp
 hp_convert.cpp/.hpp → converter functions: raw bytes →
@@ -1587,7 +1587,8 @@ which own the credential/service fields and are serialized on the single httpd t
   an ERGA split vs an EBLA monobloc differ by one bit with identical labels), so the exact model
   **cannot** be determined from bus data. The UI reports this honestly — the distinct candidate
   **families** plus the O/U EEPROM digits to match the nameplate — rather than asserting a guessed
-  name. If a sweep experienced actual transport frame corruption (`BadCrc`, setting `transport_incomplete`),
+  name. If a sweep experienced actual transport frame corruption (such as `BadCrc`, `ShortReply`,
+  `UnexpectedReply`, or `InvalidLength`, setting `transport_incomplete`),
   committing the detected model requires confirmation by 2 consecutive agreeing sweeps (`detect_incomplete_step`),
   preventing noise-induced page loss from locking in a wrong model class. Unpopulated probe pages that time out
   or return NAK are normal and do not increment `transport_err`.
@@ -1635,7 +1636,7 @@ which own the credential/service fields and are serialized on the single httpd t
   detection, and was reported as one. The EEPROM is **not** decoded to a model name (no digit→name
   table; the one real path to exact ID would need an external EEPROM-code table).
 - **none, bus answered** → the **generic Altherma profile** (`def/registry.hpp` `generic[]` = the ≥95%
-  universal register core), so an unrecognized or S-protocol unit still reports every essential value.
+  universal register core), so an unrecognized Protocol I unit still reports every essential value (the generic profile covers Protocol I only; Protocol S units use the dedicated `protocol_s` profile).
 - **no bus** → stays `auto` and retries; the UI reports the unit isn't responding (check X10A wiring).
 
 The resolved `profile` and fingerprint (`fp_pages`/`fp_kw_tenths`/`fp_iu_kw_tenths`/`fp_eeprom`) live

@@ -174,15 +174,6 @@ inline constexpr HomeHubConcept ALTHERMA4_CONCEPTS[] = {
 inline constexpr size_t ALTHERMA4_CONCEPT_COUNT =
     sizeof(ALTHERMA4_CONCEPTS) / sizeof(ALTHERMA4_CONCEPTS[0]);
 
-// Format pressure in bar with 2 decimal places (%.2f bar).
-inline bool homehub_format_pressure(double bar, char* buf, size_t buflen,
-                                    bool include_unit = true) {
-    if (buf == nullptr || buflen == 0) return false;
-    const size_t needed = include_unit
-                              ? static_cast<size_t>(std::snprintf(buf, buflen, "%.2f bar", bar))
-                              : static_cast<size_t>(std::snprintf(buf, buflen, "%.2f", bar));
-    return needed < buflen;
-}
 
 // The concept a HomeHub register carries, or nullptr when it has no X10A counterpart.
 inline const char* homehub_concept_for(uint16_t offset) {

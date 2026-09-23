@@ -26,6 +26,7 @@
 #include "logic/detect_backoff.hpp"   // the SAME backoff the X10A sweep uses on a silent bus
 #include "logic/homehub_map.hpp"      // the concept a register pairs on
 #include "logic/modbus_plan.hpp"      // WHICH requests a cycle issues — batching + the gate cadence
+#include "logic/modbus_profile.hpp"   // auto-detection state machine and extended registers
 #include "logic/modbus_snapshot.hpp"  // a cache is live only for the TCP session that committed it
 
 #include "esp_netif.h"
@@ -86,8 +87,17 @@ static uint32_t    s_cycle_tick = 0;
 // per-cycle because the usual cause is permanent for this hub configuration (a register the unit
 // does not implement); re-probing it as a batch every cycle would pay the exception forever and
 // still fall back. Cleared on reconnect: a different hub, or the same hub reconfigured, deserves the
+// cheap plan again.
 static bool                       s_batch_split[def::ALTHERMA4_REG_COUNT] = {false};
+// Currently detected or active Modbus profile. Starts in Auto, transitions to Altherma4 on successful
+// read of extended registers, or falls back to HomeHub if extended registers produce an exception.
+// Sticky across reconnects to the same target host/port/unit to prevent repetitive probe cycles.
 static std::atomic<ModbusProfile> s_active_profile{ModbusProfile::Auto};
+static std::string                s_last_resolved_host;
+static int                        s_last_resolved_port = 0;
+static int                        s_last_resolved_unit = 0;
+static ModbusProfile              s_last_resolved_profile = ModbusProfile::Auto;
+static uint32_t                   s_probe_rejects = 0;
 
 // ── The value cache — this stack's own, deliberately NOT hp_poll's ──────────────────────────────
 // Two independent sources need two caches: sharing one would mean a dead X10A bus wipes the HomeHub
@@ -131,25 +141,8 @@ struct MbNetworkActivity {
     }
 };
 
-enum class MbFailureType {
-    None,
-    RequestBuild,
-    SendTimeout,
-    SendFailed,
-    ResponseTimeout,
-    ConnectionClosed,
-    ReceiveFailed,
-    InvalidResponse,
-    Exception,
-};
-
-// One failed register read. Fixed-size facts only: the poll loop can preserve the FIRST real cause
-// without allocating or letting every later "socket already closed" attempt overwrite it.
-struct MbFailure {
-    MbFailureType type   = MbFailureType::None;
-    int           detail = -1;    // errno, Modbus exception code, or MbParse ordinal
-    uint16_t      reg    = 0;     // 1-based HomeHub data-model offset
-};
+using logic::MbFailureType;
+using logic::MbFailure;
 
 // RAII guard around s_mtx (same idiom as hp_poll.cpp/config.cpp): releases on unwind so a
 // std::bad_alloc thrown while copying strings out never strands the mutex.
@@ -251,8 +244,18 @@ static bool status_socket_open(std::string host, int port, int unit,
     // single reads is forgotten, because the reason for it (a register this hub does not implement)
     // is a property of the peer we may have just stopped talking to.
     s_cycle_tick = 0;
-    s_active_profile.store(ModbusProfile::Auto, std::memory_order_release);
     for (bool& split : s_batch_split) split = false;
+    ModbusProfile prof = ModbusProfile::Auto;
+    if (host == s_last_resolved_host && port == s_last_resolved_port && unit == s_last_resolved_unit &&
+        s_last_resolved_profile != ModbusProfile::Auto) {
+        prof = s_last_resolved_profile;
+    } else {
+        s_last_resolved_host.clear();
+        s_last_resolved_port = 0;
+        s_last_resolved_unit = 0;
+        s_last_resolved_profile = ModbusProfile::Auto;
+    }
+    s_active_profile.store(prof, std::memory_order_release);
     Lock lk(s_mtx);
     if (s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
         return false;
@@ -261,7 +264,7 @@ static bool status_socket_open(std::string host, int port, int unit,
     s_status.unit_id     = unit;
     s_status.connected   = false;
     s_status.discovering = false;
-    s_status.profile     = ModbusProfile::Auto;
+    s_status.profile     = prof;
     if (++s_link_generation == 0) ++s_link_generation;  // zero stays the "no session" sentinel
     return true;
 }
@@ -610,7 +613,8 @@ struct MbRead {
     MbResponse resp;
 };
 
-static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbRead& io, MbFailure& failure) {
+static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbRead& io, MbFailure& failure,
+                    bool is_probe = false) {
     MbResponse& out = io.resp;
     out = MbResponse{};
     failure = MbFailure{};
@@ -625,7 +629,12 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbRead& io, MbFai
     const int n = mb_build_read(req, sizeof(req), txn, unit, space, addr, qty);
     if (n < 0) {
         failure.type = MbFailureType::RequestBuild;
-        { Lock lk(s_mtx); s_status.rx_fail++; }
+        if (!is_probe) {
+            Lock lk(s_mtx);
+            s_status.rx_fail++;
+        } else {
+            s_probe_rejects++;
+        }
         return false;
     }
     const int sent = send(s_sock, req, n, 0);
@@ -639,13 +648,29 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbRead& io, MbFai
         else
             failure.type = MbFailureType::SendFailed;
         close_sock();
-        { Lock lk(s_mtx); s_status.rx_fail++; s_status.connected = false; }
+        if (!is_probe) {
+            Lock lk(s_mtx);
+            s_status.rx_fail++;
+            s_status.connected = false;
+        } else {
+            Lock lk(s_mtx);
+            s_probe_rejects++;
+            s_status.connected = false;
+        }
         return false;
     }
     const int got = recv_adu(s_sock, io.adu, sizeof(io.adu), failure);
     if (got < 0) {
         close_sock();
-        { Lock lk(s_mtx); s_status.rx_fail++; s_status.connected = false; }
+        if (!is_probe) {
+            Lock lk(s_mtx);
+            s_status.rx_fail++;
+            s_status.connected = false;
+        } else {
+            Lock lk(s_mtx);
+            s_probe_rejects++;
+            s_status.connected = false;
+        }
         return false;
     }
     const MbParse p = mb_parse_response(io.adu, got, txn, unit, space, qty, out);
@@ -657,9 +682,11 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbRead& io, MbFai
     // An Exception is a VALID reply (the register is simply unreadable now) — count it but keep the
     // socket. Any framing / txn / desync error means the stream is out of step: drop the socket so
     // the next cycle reconnects rather than mis-parsing every following reply.
-    {
+    if (!is_probe) {
         Lock lk(s_mtx);
         s_status.rx_fail++;
+    } else {
+        s_probe_rejects++;
     }
     if (p == MbParse::Exception) {
         failure.type = MbFailureType::Exception;
@@ -872,11 +899,19 @@ static void mb_poll_once() {
     // One register word: gates/fast context always, a cache row only on a full cycle. Gates are read from
     // the SAME word the row is built from — they are not a second read and cannot disagree with it.
     const auto take_row = [&](const def::HomeHubReg& r, uint16_t raw) {
-        if (r.space == MbFunc::ReadInput && r.offset > 58 &&
+        if (r.space == MbFunc::ReadInput && logic::is_extended_register(r.offset) &&
             s_active_profile.load(std::memory_order_relaxed) == ModbusProfile::Auto) {
-            s_active_profile.store(ModbusProfile::Altherma4, std::memory_order_release);
-            diag_printf("modbus: detected Altherma 4 profile via extended register %u\n",
-                        static_cast<unsigned>(r.offset));
+            auto decision = logic::evaluate_probe_result(
+                ModbusProfile::Auto, logic::MbFailureType::None, 0, r.offset, raw);
+            if (decision.next_profile == ModbusProfile::Altherma4) {
+                s_active_profile.store(ModbusProfile::Altherma4, std::memory_order_release);
+                s_last_resolved_host    = s_req_host;
+                s_last_resolved_port    = s_req_port;
+                s_last_resolved_unit    = s_unit;
+                s_last_resolved_profile = ModbusProfile::Altherma4;
+                diag_printf("modbus: detected Altherma 4 profile via extended register %u\n",
+                            static_cast<unsigned>(r.offset));
+            }
         }
         // THE SPACE-OPERATION GATE — input register 53 explicitly covers heating AND cooling. It
         // separates normal space operation from DHW/standstill, but only input register 38 below can
@@ -935,7 +970,7 @@ static void mb_poll_once() {
     bool link_broken = false;                      // a transport/framing failure ended the stream
 
     const ModbusProfile    cur_prof      = s_active_profile.load(std::memory_order_acquire);
-    const bool             use_altherma4 = (cur_prof != ModbusProfile::HomeHub);
+    const bool             use_altherma4 = (cur_prof == ModbusProfile::Altherma4);
     const int              plan_count    = use_altherma4 ? MB_PLAN_ALTHERMA4.count : MB_PLAN.count;
     const logic::MbBatch*  plan_batches  = use_altherma4 ? MB_PLAN_ALTHERMA4.batch : MB_PLAN.batch;
     const uint8_t*         plan_orders   = use_altherma4 ? MB_PLAN_ALTHERMA4.order : MB_PLAN.order;
@@ -953,13 +988,27 @@ static void mb_poll_once() {
             MbFailure failure;
             if (!mb_read(r.space, pdu, 1, io, failure)) {
                 failure.reg = r.offset;
-                if (r.offset > 58 &&
-                    s_active_profile.load(std::memory_order_relaxed) == ModbusProfile::Auto &&
-                    failure.type == MbFailureType::Exception) {
-                    s_active_profile.store(ModbusProfile::HomeHub, std::memory_order_release);
-                    diag_printf("modbus: extended register %u returned exception %d — falling back "
+                if (logic::is_extended_register(r.offset) &&
+                    s_active_profile.load(std::memory_order_relaxed) == ModbusProfile::Auto) {
+                    auto decision = logic::evaluate_probe_result(
+                        ModbusProfile::Auto, failure.type, failure.detail, r.offset);
+                    s_active_profile.store(decision.next_profile, std::memory_order_release);
+                    s_last_resolved_host    = s_req_host;
+                    s_last_resolved_port    = s_req_port;
+                    s_last_resolved_unit    = s_unit;
+                    s_last_resolved_profile = decision.next_profile;
+                    for (bool& split : s_batch_split) split = false;
+                    diag_printf("modbus: extended register %u returned %d — falling back "
                                 "to HomeHub profile\n",
                                 static_cast<unsigned>(r.offset), failure.detail);
+                    if (!decision.link_ok) {
+                        close_sock();
+                        { Lock lk(s_mtx); s_status.connected = false; }
+                        link_broken = true;
+                    }
+                    if (decision.count_failure) {
+                        note_failure(failure);
+                    }
                     return;
                 }
                 note_failure(failure);
@@ -987,7 +1036,7 @@ static void mb_poll_once() {
         if (b.count <= 1 || s_batch_split[bi]) {
             read_singly(b);
             if (s_active_profile.load(std::memory_order_acquire) == ModbusProfile::HomeHub &&
-                use_altherma4 && b.first_offset > 58) {
+                use_altherma4 && logic::is_extended_register(b.first_offset)) {
                 break;
             }
             continue;
@@ -997,7 +1046,7 @@ static void mb_poll_once() {
         if (!mb_pdu_address(b.first_offset, pdu)) {
             read_singly(b);
             if (s_active_profile.load(std::memory_order_acquire) == ModbusProfile::HomeHub &&
-                use_altherma4 && b.first_offset > 58) {
+                use_altherma4 && logic::is_extended_register(b.first_offset)) {
                 break;
             }
             continue;
@@ -1006,16 +1055,54 @@ static void mb_poll_once() {
         if (!mb_read(b.space, pdu, b.count, io, failure)) {
             failure.reg = b.first_offset;
             if (failure.type != MbFailureType::Exception) {
+                if (logic::is_extended_register(b.first_offset) &&
+                    s_active_profile.load(std::memory_order_relaxed) == ModbusProfile::Auto) {
+                    auto decision = logic::evaluate_probe_result(
+                        ModbusProfile::Auto, failure.type, failure.detail, b.first_offset);
+                    s_active_profile.store(decision.next_profile, std::memory_order_release);
+                    s_last_resolved_host    = s_req_host;
+                    s_last_resolved_port    = s_req_port;
+                    s_last_resolved_unit    = s_unit;
+                    s_last_resolved_profile = decision.next_profile;
+                    for (bool& split : s_batch_split) split = false;
+                    diag_printf("modbus: extended batch starting at %u failed with type %d — falling "
+                                "back to HomeHub profile\n",
+                                static_cast<unsigned>(b.first_offset), static_cast<int>(failure.type));
+                    if (!decision.link_ok) {
+                        close_sock();
+                        { Lock lk(s_mtx); s_status.connected = false; }
+                        link_broken = true;
+                    }
+                    if (decision.count_failure) {
+                        note_failure(failure);
+                    }
+                    break;
+                }
                 note_failure(failure);
                 link_broken = true;
                 continue;
             }
-            if (b.first_offset > 58 &&
+            if (logic::is_extended_register(b.first_offset) &&
                 s_active_profile.load(std::memory_order_relaxed) == ModbusProfile::Auto) {
-                s_active_profile.store(ModbusProfile::HomeHub, std::memory_order_release);
+                auto decision = logic::evaluate_probe_result(
+                    ModbusProfile::Auto, failure.type, failure.detail, b.first_offset);
+                s_active_profile.store(decision.next_profile, std::memory_order_release);
+                s_last_resolved_host    = s_req_host;
+                s_last_resolved_port    = s_req_port;
+                s_last_resolved_unit    = s_unit;
+                s_last_resolved_profile = decision.next_profile;
+                for (bool& split : s_batch_split) split = false;
                 diag_printf("modbus: extended batch starting at %u returned exception %d — falling "
                             "back to HomeHub profile\n",
                             static_cast<unsigned>(b.first_offset), failure.detail);
+                if (!decision.link_ok) {
+                    close_sock();
+                    { Lock lk(s_mtx); s_status.connected = false; }
+                    link_broken = true;
+                }
+                if (decision.count_failure) {
+                    note_failure(failure);
+                }
                 break;
             }
             // An exception is a valid reply about ONE register, and a batched request cannot say
@@ -1029,7 +1116,7 @@ static void mb_poll_once() {
                         static_cast<unsigned>(b.first_offset + b.count - 1));
             read_singly(b);
             if (s_active_profile.load(std::memory_order_acquire) == ModbusProfile::HomeHub &&
-                use_altherma4 && b.first_offset > 58) {
+                use_altherma4 && logic::is_extended_register(b.first_offset)) {
                 break;
             }
             continue;
@@ -1049,6 +1136,63 @@ static void mb_poll_once() {
                 break;
             }
             take_row(r, raw);
+        }
+    }
+
+    // Extended capability probe: when running in Auto, probe a single extended register
+    // (MODBUS_PROBE_REGISTER = 79, Water pressure) at the end of each full cycle.
+    if (full && cur_prof == ModbusProfile::Auto && !link_broken && s_sock >= 0) {
+        uint16_t probe_pdu = 0;
+        if (mb_pdu_address(logic::MODBUS_PROBE_REGISTER, probe_pdu)) {
+            MbFailure probe_failure;
+            if (mb_read(MbFunc::ReadInput, probe_pdu, 1, io, probe_failure, /*is_probe=*/true)) {
+                uint16_t raw = 0;
+                if (mb_reg_at(io.resp, 0, raw)) {
+                    auto decision = logic::evaluate_probe_result(
+                        ModbusProfile::Auto, logic::MbFailureType::None, 0,
+                        logic::MODBUS_PROBE_REGISTER, raw);
+                    s_active_profile.store(decision.next_profile, std::memory_order_release);
+                    s_last_resolved_host    = s_req_host;
+                    s_last_resolved_port    = s_req_port;
+                    s_last_resolved_unit    = s_unit;
+                    s_last_resolved_profile = decision.next_profile;
+                    if (decision.next_profile == ModbusProfile::Altherma4) {
+                        diag_printf("modbus: detected Altherma 4 profile via probe register %u\n",
+                                    static_cast<unsigned>(logic::MODBUS_PROBE_REGISTER));
+                        if (const def::HomeHubReg* pr = def::altherma4_find(logic::MODBUS_PROBE_REGISTER)) {
+                            take_row(*pr, raw);
+                        }
+                    } else {
+                        diag_printf("modbus: probe register %u returned unphysical value %u — falling back to HomeHub profile\n",
+                                    static_cast<unsigned>(logic::MODBUS_PROBE_REGISTER), static_cast<unsigned>(raw));
+                    }
+                }
+            } else {
+                probe_failure.reg = logic::MODBUS_PROBE_REGISTER;
+                auto decision = logic::evaluate_probe_result(
+                    ModbusProfile::Auto, probe_failure.type, probe_failure.detail,
+                    logic::MODBUS_PROBE_REGISTER);
+                s_active_profile.store(decision.next_profile, std::memory_order_release);
+                s_last_resolved_host    = s_req_host;
+                s_last_resolved_port    = s_req_port;
+                s_last_resolved_unit    = s_unit;
+                s_last_resolved_profile = decision.next_profile;
+                for (bool& split : s_batch_split) split = false;
+                diag_printf("modbus: probe register %u failed (type %d / detail %d) — %s\n",
+                            static_cast<unsigned>(logic::MODBUS_PROBE_REGISTER),
+                            static_cast<int>(probe_failure.type), probe_failure.detail,
+                            decision.next_profile == ModbusProfile::HomeHub
+                                ? "falling back to HomeHub profile"
+                                : "staying in Auto profile");
+                if (!decision.link_ok) {
+                    close_sock();
+                    { Lock lk(s_mtx); s_status.connected = false; }
+                    link_broken = true;
+                }
+                if (decision.count_failure) {
+                    note_failure(probe_failure);
+                }
+            }
         }
     }
 
@@ -1346,6 +1490,10 @@ void mb_reconfigure(bool enabled) noexcept {
         s_status.heating_mode_known = false;
         s_status.heating_mode_active = false;
         s_status.plant_outdoor = logic::OutdoorEvidence{};
+        s_last_resolved_host.clear();
+        s_last_resolved_port = 0;
+        s_last_resolved_unit = 0;
+        s_last_resolved_profile = ModbusProfile::Auto;
     }
     {
         Lock lk(s_cache_mtx);

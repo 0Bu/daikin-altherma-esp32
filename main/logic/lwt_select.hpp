@@ -2,8 +2,8 @@
 // Leaving-water MEASUREMENT selection — the row the web UI feeds into ΔT, the derived heat output
 // ("pth = flow/60 * 4.186 * dt"), COP and the --flow-hot trend. Getting the wrong row here is not a
 // cosmetic display bug: a setpoint or the post-BUH (R2T) sensor substituted for the pre-BUH (R1T)
-// measurement makes all four derived numbers *plausibly* wrong (issue #121, the failure shape of
-// #35-#39 — no numeric tell, just wrong).
+// measurement makes all four derived numbers *plausibly* wrong (issue legacy-121, the failure shape of
+// legacy-35-legacy-39 — no numeric tell, just wrong).
 //
 // This header is the host-testable twin of www/js/schematic.js's pickLwtRow(): the SELECTION
 // happens browser-side (there is no firmware caller), but the rule runs against the generated def/
@@ -13,9 +13,9 @@
 // regex) so the token lists below are byte-for-byte comparable across the languages.
 //
 //   water(l)   := l⊇"leaving water" | "outlet water" | "water heat exchanger outlet" | "inflow"
-//   reject(l)  := l⊇"setpoint" | "mixed" | "r2t" | "after buh" | "after buffer"
+//   reject(l)  := l⊇"setpoint" | "mixed" | "r2t" | "after buh" | "after buffer" | "raw data"
 //   Tier 1 (pre-BUH R1T outlet): water(l) && !reject(l) && l⊇"r1t"
-//   Tier 2 (any leaving-water measurement, #121 fallback): water(l) && !reject(l)
+//   Tier 2 (any leaving-water measurement, legacy-121 fallback): water(l) && !reject(l)
 //   select := first Tier-1 index, else first Tier-2 index, else -1 (blank — better than wrong)
 //
 // Why Tier 1 keys on the "(r1t)" tag rather than a keyword: the pre-BUH sensor wears four unrelated
@@ -56,7 +56,7 @@ inline bool lwt_is_water(const char* l) {
 inline bool lwt_is_reject(const char* l) {
     return lwt_ci_contains(l, "setpoint") || lwt_ci_contains(l, "mixed") ||
            lwt_ci_contains(l, "r2t") || lwt_ci_contains(l, "after buh") ||
-           lwt_ci_contains(l, "after buffer");
+           lwt_ci_contains(l, "after buffer") || lwt_ci_contains(l, "raw data");
 }
 
 // Tier 1: the pre-BUH heat-exchanger outlet (R1T), under any of its label forms.

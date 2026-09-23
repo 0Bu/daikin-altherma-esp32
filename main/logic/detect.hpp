@@ -13,7 +13,17 @@
 #include <cstring>
 #include <string>
 
+#include "crc.hpp"
+
 namespace daik {
+
+// True when a reply failure is due to actual frame corruption or transport error rather than
+// an unpopulated/unsupported register (timeout/NoReply or affirmative NAK/Rejected).
+inline constexpr bool is_transport_error(HpReplyKind kind) {
+    return kind == HpReplyKind::ShortReply || kind == HpReplyKind::BadCrc ||
+           kind == HpReplyKind::UnexpectedReply || kind == HpReplyKind::InvalidLength;
+}
+
 
 // A register page maps to one bit of a 32-bit page mask. Only pages that a value profile can
 // reference participate — 0x11 (O/U EEPROM) is probed for its digits but deliberately NOT in the
@@ -66,6 +76,18 @@ inline uint32_t page_mask_bit(uint8_t reg) {
     const int b = page_bit(reg);
     return b < 0 ? 0u : (1u << b);
 }
+
+// Model profile selection for Protocol S. Returns "protocol_s" if any Protocol S page answered,
+// or nullptr if no Protocol S page matched.
+inline const char* detect_profile_for_protocol_s(uint32_t page_mask) {
+    const uint32_t s_pages = page_mask_bit(0x50) | page_mask_bit(0x53) | page_mask_bit(0x54) |
+                             page_mask_bit(0x55) | page_mask_bit(0x56);
+    if ((page_mask & s_pages) != 0) {
+        return "protocol_s";
+    }
+    return nullptr;
+}
+
 
 // The unit facts gathered from the bus (filled by hp_detect.cpp).
 struct Fingerprint {
@@ -353,10 +375,10 @@ inline constexpr bool detect_commit_no_match(int consecutive_no_match) {
 }
 
 // ── Incomplete sweeps: when a page dropped due to transport errors, do not jump models
-// ───────────── When a page fails to answer due to timeouts or CRC errors (rather than an
-// affirmative NAK), the reduced fingerprint can match a smaller/different profile family (e.g.
-// Monobloc -> Geo3). An incomplete sweep must be corroborated across consecutive passes before
-// committing.
+// ───────────── When a page fails to answer due to transport errors such as CRC errors or
+// frame corruption (rather than an absent register / timeout or affirmative NAK), the reduced
+// fingerprint can match a smaller/different profile family (e.g. Monobloc -> Geo3). An incomplete
+// sweep must be corroborated across consecutive passes before committing.
 inline constexpr int DETECT_INCOMPLETE_CONFIRMATIONS = 2;
 
 inline constexpr bool detect_commit_incomplete(int consecutive_incomplete) {

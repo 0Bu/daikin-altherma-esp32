@@ -86,7 +86,7 @@ git -C "$hook_tmp" remote add origin https://github.com/0Bu/daikin-altherma-esp3
 # The hook failing closed is only half of it: the PR TEMPLATE has to teach a stamp the hook can
 # actually read. It shipped the sha wrapped in backticks, which the `@[[:space:]]*[0-9a-f]{7,40}`
 # matcher sees as no stamp at all, so a body filled in literally from the template was refused —
-# three times (PR #99, #343, #381) before anyone fixed the template rather than remembering. Fill
+# three times (PR legacy-99, legacy-343, legacy-381) before anyone fixed the template rather than remembering. Fill
 # the real template's own line with a real sha and require the gate to accept it.
 # THIS hook's own line, selected by name — not merely the first "merge gate @" in the file. The
 # template teaches one stamp per gate and their order is nobody's contract: when a later change made

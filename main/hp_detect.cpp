@@ -19,14 +19,17 @@ static const uint8_t PROBE_PAGES_I[] = {0x00, 0x10, 0x11, 0x20, 0x21, 0x30, 0x60
 static const uint8_t PROBE_PAGES_S[] = {0x50, 0x53, 0x54, 0x55, 0x56};
 
 // Query one register; on a valid reply copy its payload into out[0..outmax) and return the payload
-// length, else -1. (hp_query already strips framing/CRC and returns <0 on timeout/NAK/bad CRC.)
-static int read_page(uint8_t reg, Protocol proto, uint8_t* out, int outmax) {
-    uint8_t   buf[64];
-    const int n = hp_query(reg, proto, buf, sizeof(buf), HpQueryLogPolicy::IntegrityOnly);
-    if (n < 0) return n;
-    if (n == 0) return -1;
+// length, else -1 (or -2 for NAK). (hp_query_detailed retains the exact kind for transport error accounting.)
+static int read_page(uint8_t reg, Protocol proto, uint8_t* out, int outmax,
+                     HpReplyKind* out_kind = nullptr) {
+    uint8_t             buf[64];
+    const HpQueryResult res =
+        hp_query_detailed(reg, proto, buf, sizeof(buf), HpQueryLogPolicy::IntegrityOnly);
+    if (out_kind) *out_kind = res.kind;
+    if (res.kind == HpReplyKind::Rejected) return -2;
+    if (res.kind != HpReplyKind::Ok) return -1;
     const int poff   = payload_offset(proto);
-    int       paylen = n - poff - 1; // minus header, minus CRC byte
+    int       paylen = res.received - poff - 1; // minus header, minus CRC byte
     if (paylen < 0) paylen = 0;
     const int copy = paylen < outmax ? paylen : outmax;
     for (int i = 0; i < copy; i++) out[i] = buf[poff + i];
@@ -63,10 +66,14 @@ static constexpr int DETECT_PAGE_TRIES = 3;
 // the retry caught — which is the number worth watching, since that is the failure #214 is about. A
 // page that never answered needs no counter: its bit is already absent from the page mask on the
 // same line.
-static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& recovered) {
+static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& recovered,
+                           HpReplyKind& final_kind) {
     int last_err = -1;
+    final_kind   = HpReplyKind::NoReply;
     for (int attempt = 0; attempt < DETECT_PAGE_TRIES; attempt++) {
-        const int n = read_page(reg, proto, out, outmax);
+        HpReplyKind kind = HpReplyKind::NoReply;
+        const int   n    = read_page(reg, proto, out, outmax, &kind);
+        final_kind       = kind;
         if (n >= 0) {
             recovered += attempt; // 0 on a first-try answer
             return n;
@@ -76,6 +83,7 @@ static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax
     }
     return last_err;
 }
+
 
 DetectResult hp_detect_run() {
     const Config& c = config();
@@ -183,11 +191,12 @@ DetectResult hp_detect_run() {
                                      : (sizeof(PROBE_PAGES_I) / sizeof(PROBE_PAGES_I[0]));
     for (size_t pi = 0; pi < num_pages; ++pi) {
         const uint8_t reg = probe_pages[pi];
-        uint8_t       pay[32];
-        const int     paylen =
-            read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries);
+        uint8_t     pay[32];
+        HpReplyKind kind = HpReplyKind::Ok;
+        const int   paylen =
+            read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries, kind);
         if (paylen < 0) {
-            if (paylen == -3 && reg != 0x11 && reg != 0x56) probe_transport_errors++;
+            if (is_transport_error(kind) && reg != 0x11 && reg != 0x56) probe_transport_errors++;
             continue;
         }
         if (reg == 0x11) {
@@ -264,7 +273,8 @@ DetectResult hp_detect_run() {
     //    variable-length; a smaller unit returns a short 0x00 that omits offset 12, leaving
     //    kw_tenths at -1 (docs/X10A_PROTOCOL.md §7). Fall back to the I/U capacity code (page 0x60
     //    offset 6, conv 219, same kW×10 units) so detect_best can still class the model (a byte 0 =
-    //    not reported). The fallback only RANKS the representative, never excludes a candidate.
+    //    not reported). The fallback only narrows when O/U capacity was absent, and detect_best
+    //    prefers it.
     char ee[32] = {0};
     if (r.proto == Protocol::I) {
         if (len00 > 12) fp.kw_tenths = page00[12];
@@ -286,9 +296,9 @@ DetectResult hp_detect_run() {
 
     // 5. Narrow to the best-fitting candidate profiles.
     if (r.proto == Protocol::S) {
-        if (fp.page_mask != 0) {
-            r.candidates.emplace_back("protocol_s");
-            r.best = "protocol_s";
+        if (const char* b = detect_profile_for_protocol_s(fp.page_mask)) {
+            r.candidates.emplace_back(b);
+            r.best = b;
         }
     } else {
         int              nsig = 0;
