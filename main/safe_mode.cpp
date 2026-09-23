@@ -12,8 +12,9 @@
 
 namespace daik {
 
-// Persisted in the daik_cfg namespace (nvs_storage.hpp) so it survives OTA and a future factory reset
-// (nvs_erase_all of daik_cfg) wipes it along with the rest of the config — issue legacy-6 / legacy-9.
+// Persisted in the daik_cfg namespace (nvs_storage.hpp) so it survives OTA and a future factory
+// reset (nvs_erase_all of daik_cfg) wipes it along with the rest of the config — issue
+// legacy-6 / legacy-9.
 static const char* BOOT_FAILS_KEY = "boot_fails";
 
 static bool s_safe_mode = false;

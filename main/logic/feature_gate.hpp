@@ -53,8 +53,8 @@ namespace daik::logic {
 // held over). One rule, two languages, same tokens.
 inline bool fg_is_run_state(const char* l) { return lwt_ci_contains(l, "inv frequency"); }
 
-// "Expansion valve N (pls)" — the EEV positions (legacy-69's UC1/UC2 feature list). Present only on the
-// profiles that carry page 0x30.
+// "Expansion valve N (pls)" — the EEV positions (legacy-69's UC1/UC2 feature list). Present only
+// on the profiles that carry page 0x30.
 inline bool fg_is_expansion_valve(const char* l) { return lwt_ci_contains(l, "expansion valve"); }
 
 // Structural refrigerant-pressure identity, over the resolved VIEW.  A plain dataType-2 check is
@@ -105,8 +105,8 @@ inline FeatureCoverage feature_coverage(const ProfileView& v) {
     return c;
 }
 
-// UC5 — "silent protection retries" early warning (legacy-69's walking skeleton). Needs the counters and a
-// compressor run-state to interpret them against; nothing else.
+// UC5 — "silent protection retries" early warning (legacy-69's walking skeleton). Needs the
+// counters and a compressor run-state to interpret them against; nothing else.
 inline bool uc5_supported(const FeatureCoverage& c) {
     return c.retry_counters && c.run_state;
 }

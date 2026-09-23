@@ -1211,7 +1211,8 @@ static void test_config_model() {
         CHECK(set_hp_profile_compatible("altherma3_r_ech2o", Protocol::I, true));
         CHECK(!set_hp_profile_compatible("altherma3_r_ech2o", Protocol::S, true));
         CHECK(set_hp_profile_compatible("auto", Protocol::S, true));
-        CHECK(set_hp_profile_compatible("protocol_s", Protocol::I, false)); // allowed when fp_valid is false
+        // Allowed when fp_valid is false:
+        CHECK(set_hp_profile_compatible("protocol_s", Protocol::I, false));
     }
 
     // The atomic service blob and the self-healing link cache have different success contracts.
@@ -5928,7 +5929,7 @@ static void test_modbus_profile() {
     CHECK(dec.link_ok);
     CHECK(dec.count_failure);
 
-    // Transport failure on extended register probe: retry 1 stays Auto, closes socket without counting error
+    // Transport failure on extended probe: retry 1 stays Auto, closes socket without error
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 79, 0, 1);
     CHECK(dec.next_profile == ModbusProfile::Auto);
     CHECK(!dec.link_ok);
@@ -5976,7 +5977,7 @@ static void test_modbus_profile() {
     CHECK(!dec.link_ok);
     CHECK(dec.count_failure);
 
-    // Exception on locked profile preserves profile and link_ok is true (exception does not break link)
+    // Exception on locked profile preserves profile; link_ok is true (does not break link)
     dec = evaluate_probe_result(ModbusProfile::HomeHub, MbFailureType::Exception, 0x02, 79, 0);
     CHECK(dec.next_profile == ModbusProfile::HomeHub);
     CHECK(dec.link_ok);
