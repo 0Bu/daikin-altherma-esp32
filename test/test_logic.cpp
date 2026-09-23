@@ -247,7 +247,6 @@ static void test_crc() {
         CHECK(is_valid_preamble(Protocol::S, 0x50));
         CHECK(is_valid_preamble(Protocol::S, 0x00));
 
-
         // Additional reply classify & crc edge cases
         uint8_t diff_b[6] = {0x40, 0x60, 0x02, 0x01, 0x02, 0x00};
         CHECK(!is_error_reply(diff_b, 1));
@@ -275,7 +274,6 @@ static void test_crc() {
         CHECK(hp_reply_classify(0x60, Protocol::I, diff_b, 1, 6) == HpReplyKind::ShortReply);
         HpFrameReceiver rx_neg(Protocol::I, diff_b, -1, 64, 12);
         HpFrameReceiver rx_huge(Protocol::I, diff_b, 10, 64, 12);
-
 
         // Test 1: Clean Protocol I frame without echo
         {
@@ -333,7 +331,7 @@ static void test_crc() {
         {
             HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
             uint8_t         buf[64]{};
-            int             len = 0;
+            int             len      = 0;
             const uint8_t   stream[] = {0x40, 0x60, 0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
             for (uint8_t b : stream) rx.feed_byte(b, buf, len);
             CHECK(len == 6);
@@ -5816,12 +5814,13 @@ static void test_modbus_profile() {
     CHECK(!is_valid_altherma4_probe_value(79, MB_WAIT));
     CHECK(!is_valid_altherma4_probe_value(79, MB_UNAVAILABLE));
     CHECK(!is_valid_altherma4_probe_value(79, MB_UNSUPPORTED));
-    // Offset 79 (Water pressure in bar * 100): valid range is 0 < raw <= 600
-    CHECK(!is_valid_altherma4_probe_value(79, 0));       // 0 bar is not plausible for live running water pressure
-    CHECK(is_valid_altherma4_probe_value(79, 50));       // 0.5 bar
-    CHECK(is_valid_altherma4_probe_value(79, 150));      // 1.5 bar
-    CHECK(is_valid_altherma4_probe_value(79, 600));      // 6.0 bar
-    CHECK(!is_valid_altherma4_probe_value(79, 601));     // > 6.0 bar rejected
+    // Offset 79 (Water pressure in bar * 100): valid range is 0 < raw <= 600.
+    // 0 bar is not plausible for live running water pressure.
+    CHECK(!is_valid_altherma4_probe_value(79, 0));
+    CHECK(is_valid_altherma4_probe_value(79, 50));   // 0.5 bar
+    CHECK(is_valid_altherma4_probe_value(79, 150));  // 1.5 bar
+    CHECK(is_valid_altherma4_probe_value(79, 600));  // 6.0 bar
+    CHECK(!is_valid_altherma4_probe_value(79, 601)); // > 6.0 bar rejected
     CHECK(!is_valid_altherma4_probe_value(79, 1000));
     // Non-probe register returns true unless special
     CHECK(is_valid_altherma4_probe_value(43, 450));
@@ -5873,7 +5872,8 @@ static void test_modbus_profile() {
     CHECK(dec.link_ok);
     CHECK(dec.count_failure);
 
-    // Transport failure on extended register probe falls back to HomeHub, closes socket without counting error
+    // Transport failure on extended register probe falls back to HomeHub, closes socket without
+    // counting error
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 79, 0);
     CHECK(dec.next_profile == ModbusProfile::HomeHub);
     CHECK(!dec.link_ok);
@@ -5912,7 +5912,6 @@ static void test_modbus_profile() {
     CHECK(!dec.link_ok);
     CHECK(dec.count_failure);
 }
-
 
 static void test_bootlog() {
     // ── Build identity: emitted on EVERY boot, clean or not — it is what ties a log stream to a
@@ -6102,9 +6101,7 @@ static const ProbeDecode* probe_find(const ProbeDecode* d, int n, int conv) {
         if (d[i].conv == conv) return &d[i];
     return nullptr;
 }
-static bool probe_has_alias(const ProbeDecode& d, int conv) {
-    return d.has_alias(conv);
-}
+static bool probe_has_alias(const ProbeDecode& d, int conv) { return d.has_alias(conv); }
 static const ProbeDecode* probe_find_or_alias(const ProbeDecode* d, int n, int conv) {
     for (int i = 0; i < n; i++)
         if (d[i].conv == conv || probe_has_alias(d[i], conv)) return &d[i];

@@ -823,7 +823,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     const bool reset_checkup =
         set_hp_resets_checkup(profile_sent, old_rx, old_tx, c.rx_pin, c.tx_pin);
     if (reset_checkup) c.x10a_identity_fp = 0;  // replaced below only for a committed manual model
-    // The HomeHub Modbus stack (issue legacy-32). All optional — an omitted key keeps its stored value, so
+    // The HomeHub Modbus stack (issue #32). All optional — an omitted key keeps its stored value, so
     // a wiring-only patch (rx/tx) leaves the HomeHub untouched and the pin picker's
     // {profile:"auto",rx,tx} POST cannot switch anything on. This is a SECOND source, not an
     // alternative to X10A: enabling it starts a separate task, it does not stop the X10A poll.

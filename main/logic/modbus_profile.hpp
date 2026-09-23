@@ -23,8 +23,8 @@ enum class MbFailureType {
 
 struct MbFailure {
     MbFailureType type   = MbFailureType::None;
-    int           detail = -1;    // errno, Modbus exception code, or MbParse ordinal
-    uint16_t      reg    = 0;     // 1-based HomeHub data-model offset
+    int           detail = -1; // errno, Modbus exception code, or MbParse ordinal
+    uint16_t      reg    = 0;  // 1-based HomeHub data-model offset
 };
 
 // Maximum offset in the base HomeHub catalog.
@@ -51,17 +51,13 @@ inline bool is_valid_altherma4_probe_value(uint16_t reg, uint16_t raw) {
 
 struct ModbusProfileDecision {
     ModbusProfile next_profile;
-    bool link_ok;       // whether the connection / session should be kept alive
-    bool count_failure; // whether this outcome counts as an rx_fail error
+    bool          link_ok;       // whether the connection / session should be kept alive
+    bool          count_failure; // whether this outcome counts as an rx_fail error
 };
 
-inline ModbusProfileDecision evaluate_probe_result(
-    ModbusProfile current_profile,
-    MbFailureType failure_type,
-    int failure_detail,
-    uint16_t reg,
-    uint16_t raw_value = 0)
-{
+inline ModbusProfileDecision evaluate_probe_result(ModbusProfile current_profile,
+                                                   MbFailureType failure_type, int failure_detail,
+                                                   uint16_t reg, uint16_t raw_value = 0) {
     if (current_profile != ModbusProfile::Auto) {
         bool ok = (failure_type == MbFailureType::None);
         return {current_profile, ok || failure_type == MbFailureType::Exception, !ok};

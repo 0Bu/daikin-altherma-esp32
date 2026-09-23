@@ -24,7 +24,6 @@ inline constexpr bool is_transport_error(HpReplyKind kind) {
            kind == HpReplyKind::UnexpectedReply || kind == HpReplyKind::InvalidLength;
 }
 
-
 // A register page maps to one bit of a 32-bit page mask. Only pages that a value profile can
 // reference participate — 0x11 (O/U EEPROM) is probed for its digits but deliberately NOT in the
 // mask, since no profile decodes it and its presence would break exact page matching. Returns -1
@@ -87,7 +86,6 @@ inline const char* detect_profile_for_protocol_s(uint32_t page_mask) {
     }
     return nullptr;
 }
-
 
 // The unit facts gathered from the bus (filled by hp_detect.cpp).
 struct Fingerprint {

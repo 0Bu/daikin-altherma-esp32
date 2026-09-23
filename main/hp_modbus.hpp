@@ -1,6 +1,6 @@
 #pragma once
 // THE HOMEHUB MODBUS STACK — a second, INDEPENDENT source of readings beside the X10A one
-// (issue legacy-32). Its own task, its own cache, its own link state; it shares nothing with hp_poll.cpp
+// (issue #32). Its own task, its own cache, its own link state; it shares nothing with hp_poll.cpp
 // but the heat pump it describes.
 //
 // That independence is the whole design (docs/MODBUS_PROTOCOL.md). The two links fail for entirely
@@ -13,8 +13,8 @@
 // traffic. The user may still run a manual search from the HomeHub dialog.
 //
 // The stack is READ-ONLY, and that is now a property of the code rather than of a guard: the
-// register-54 actuator built for legacy-300 was REMOVED with the retirement of dynamic LWT actuation
-// (legacy-294 — SHADOW is the terminal state of that epic). No Modbus write function code is issued
+// register-54 actuator built for #300 was REMOVED with the retirement of dynamic LWT actuation
+// (#294 — SHADOW is the terminal state of that epic). No Modbus write function code is issued
 // anywhere in this firmware, there is no intent API, and there is no HTTP/MQTT/MCP write route.
 // The observation-only pieces kept from that work are the two PLANT GATES below: ordinary FC04
 // reads that prove normal space operation and distinguish heating from cooling.

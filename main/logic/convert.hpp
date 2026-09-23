@@ -379,11 +379,11 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 0) 
 
 // ── The published TYPE of a row, decided by its DEFINITION ───────────────────────────────────────
 // A field's JSON type must come from the converter, never from sniffing the value that happens to
-// be in it this second. Issue legacy-209 measured what the second one costs: conv 211 (fan step) used to
+// be in it this second. Issue #209 measured what the second one costs: conv 211 (fan step) used to
 // emit the number 30 while the fan ran and the string "OFF" when it stopped, so the same MQTT key
 // changed JSON type during normal operation — Telegraf's numeric parser dropped the string, no zero
 // ever reached VictoriaMetrics, and the last running step stayed on the chart as if the fan were
-// still turning. (That converter is numeric since legacy-210; this predicate is what makes the property
+// still turning. (That converter is numeric since #210; this predicate is what makes the property
 // structural instead of a fact about the current implementation.)
 //
 // Two kinds only. Number covers every scaled/unsigned/counter/bit-flag converter — the bit flags
@@ -459,7 +459,8 @@ inline constexpr double TEMP_MAX_C = 200.0;
 // Water pressure row merely because both use dataType 2 (bar).
 inline bool is_refrigerant_pressure_structure(const ValueDef& def, bool has_saturation_twin) {
     if (def.type != 2) return false;
-    if (def.reg == 0x20 || def.reg == 0x21 || def.reg == 0x50 || def.reg == 0xA0 || def.reg == 0xA1) return true;
+    if (def.reg == 0x20 || def.reg == 0x21 || def.reg == 0x50 || def.reg == 0xA0 || def.reg == 0xA1)
+        return true;
     return has_saturation_twin;
 }
 

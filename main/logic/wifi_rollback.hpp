@@ -71,7 +71,7 @@ inline constexpr int WIFI_ROLLBACK_GRACE_S = 180;
 // credentials. Two, not one, for the reason link_watch.hpp acts on the second proven-silent probe
 // rather than the first: the reason slot is a SAMPLE, and one sample cannot tell "these credentials
 // are wrong" from "a transient SAE failure happened to be the last thing logged when we looked".
-// Sustained refusal across two checkpoints can. Still well inside issue legacy-47's "~1 boot cycle".
+// Sustained refusal across two checkpoints can. Still well inside issue #47's "~1 boot cycle".
 inline constexpr int WIFI_AUTH_TO_ROLLBACK = 2;
 
 enum class RollbackAction : uint8_t { Wait, RollBack };

@@ -133,7 +133,7 @@ struct HeartbeatFields {
     int32_t     last_ok_s      = -1;      // seconds since last cycle with any valid X10A reply
     uint32_t    rx_received    = 0;       // cumulative successful register reads (HpStats.rx_ok)
     uint32_t    rx_fails       = 0;       // cumulative failed reads (HpStats.rx_fail_total)
-    // SOURCE freshness, which is a different question from publish freshness (legacy-209 defect 5). The
+    // SOURCE freshness, which is a different question from publish freshness (#209 defect 5). The
     // outdoor unit refreshes its OWN pages only while it runs (logic/ou_stale.hpp); stopped, it keeps
     // answering with the last run's numbers. The bridge withholds those readings from the state
     // topic, so a consumer sees the field disappear — and this flag is what tells it WHY, without a
@@ -142,11 +142,11 @@ struct HeartbeatFields {
     // from a broken link on the consumer's side.
     bool        ou_held_over   = false;
 
-    // The HomeHub Modbus stack (issue legacy-32) — a SECOND, INDEPENDENT source, so these are its OWN
+    // The HomeHub Modbus stack (issue #32) — a SECOND, INDEPENDENT source, so these are its OWN
     // counters and say nothing about the X10A bus above (that is the point: the two fail separately).
     // All zero on a device without a HomeHub, which is a real fleet/config distinction rather than
     // the always-constant kind that got bus_tx_writes dropped. There are no write counters and no
-    // actuator fields: the link issues no Modbus write at all (legacy-294 retired the register-54 write
+    // actuator fields: the link issues no Modbus write at all (#294 retired the register-54 write
     // path), which is why nothing here mirrors bus_tx_writes' fate of reporting a constant zero.
     bool        modbus_enabled   = false;  // is the second stack running at all on this device?
     bool        modbus_connected = false;

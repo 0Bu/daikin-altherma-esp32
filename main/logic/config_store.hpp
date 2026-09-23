@@ -92,7 +92,7 @@ struct ConfigBlob {
     // decide" with no Kconfig fallback to consult.
     int32_t     ui_lang = 0;
     bool        has_lang = false;   // FALSE when the decoded blob predates v4 (no language byte)
-    // ── v5: the HomeHub Modbus stack (issue legacy-32) ─────────────────────────────────────────────────
+    // ── v5: the HomeHub Modbus stack (issue #32) ─────────────────────────────────────────────────
     // Here for the same reason as the board block, the channel and the language: exactly ONE writer
     // (the httpd task, POST /set_hp), so no self-healing per-key treatment is needed.
     //

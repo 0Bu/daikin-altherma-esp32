@@ -1,5 +1,5 @@
 #pragma once
-// Boot-loop safe-mode decision logic (issue legacy-6) — IDF-free, host-tested. A bad *config* (most
+// Boot-loop safe-mode decision logic (issue #6) — IDF-free, host-tested. A bad *config* (most
 // plausibly wrong RX/TX pins, but any setting that crashes a background task at start-up) can wedge
 // the device in a reboot loop whose only exit today is `esptool erase_flash` over USB — breaking the
 // project's "recover everything from the web UI" promise. This counts CRASH-only boots in NVS and,

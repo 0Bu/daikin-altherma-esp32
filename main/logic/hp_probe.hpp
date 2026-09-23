@@ -327,8 +327,8 @@ static_assert(PROBE_MAX_DECODES <= 32,
 // an identical decode, eliminating alias truncation without stack bloat.
 struct ProbeDecode {
     int      conv        = 0;
-    bool     ok          = false;   // convert() produced a numeric value
-    bool     is_text     = false;   // convert() produced a label instead
+    bool     ok          = false; // convert() produced a numeric value
+    bool     is_text     = false; // convert() produced a label instead
     double   value       = 0.0;
     char     text[24]    = {0};
     uint64_t alias_mask  = 0;
@@ -442,18 +442,19 @@ inline int probe_sweep(const uint8_t* payload, int payload_len, int offset, int 
             break;
         }
         if (merged) continue;
-        if (n >= max) break;   // bounded output; the table is ordered so the informative rows land first
+        if (n >= max)
+            break; // bounded output; the table is ordered so the informative rows land first
 
         ProbeDecode d;
-        d.conv        = PROBE_CANDIDATES[i].conv;
-        d.ok          = r.ok;
-        d.is_text     = r.text[0] != '\0';
-        d.value       = r.value;
+        d.conv    = PROBE_CANDIDATES[i].conv;
+        d.ok      = r.ok;
+        d.is_text = r.text[0] != '\0';
+        d.value   = r.value;
         for (int c = 0; c < static_cast<int>(sizeof(d.text)); c++) d.text[c] = r.text[c];
         d.text[sizeof(d.text) - 1] = '\0';
-        d.alias_mask  = 0;
-        d.alias_count = 0;
-        out[n++] = d;
+        d.alias_mask               = 0;
+        d.alias_count              = 0;
+        out[n++]                   = d;
     }
     return n;
 }

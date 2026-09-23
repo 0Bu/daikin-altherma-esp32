@@ -1,5 +1,5 @@
 #pragma once
-// Boot-loop safe mode (issue legacy-6) — device glue over the pure logic/boot_guard.hpp. Counts crash-only
+// Boot-loop safe mode (issue #6) — device glue over the pure logic/boot_guard.hpp. Counts crash-only
 // boots in the daik_cfg NVS namespace (so a factory reset / nvs_erase_all clears it too) and latches
 // a safe-mode flag once BOOT_FAIL_THRESHOLD crash boots accumulate. In safe mode, main.cpp brings the
 // device up minimally — WiFi + web UI + OTA only — and skips the X10A poll engine and MQTT bridge, so
@@ -21,7 +21,7 @@ bool safe_mode_active();
 //
 //   "crash_loop" — BOOT_FAIL_THRESHOLD crash boots accumulated. The configuration is the suspect,
 //                  and the RX/TX pins are the first thing to check.
-//   "heap"       — the heap watchdog exhausted its restart ladder (legacy-407). The configuration is
+//   "heap"       — the heap watchdog exhausted its restart ladder (#407). The configuration is
 //                  almost certainly fine; checking the pins would send the reader to fix something
 //                  that is already correct, which is exactly what a recovery banner must not do.
 const char* safe_mode_cause();

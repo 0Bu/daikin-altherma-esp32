@@ -10,8 +10,8 @@
 // independent circulation-pump power witness still cannot prove
 // refrigerant charge, sensor calibration, hydraulic cleanliness, air path or seasonal efficiency.
 //
-// Issue legacy-208 asked for it. This header is the half that can be decided; main/checkup.cpp is the
-// storage, and main/www/js/dashboard.js is the card. What legacy-208 asked for and this deliberately does NOT do is
+// Issue #208 asked for it. This header is the half that can be decided; main/checkup.cpp is the
+// storage, and main/www/js/dashboard.js is the card. What #208 asked for and this deliberately does NOT do is
 // listed at the bottom of this comment — each omission is a claim the bus cannot support.
 //
 // NOT logic/health_gate.hpp, which shares only the word: that one decides whether a freshly-OTA'd
@@ -626,7 +626,7 @@ struct DhwLossState {
 };
 
 constexpr uint32_t DHW_LOSS_WINDOW_S = 3600;             // R5T resolves only 0.1 K
-constexpr uint32_t DHW_LOSS_SETTLE_S = 45 * 60;          // issue legacy-349 method after a tank charge
+constexpr uint32_t DHW_LOSS_SETTLE_S = 45 * 60;          // issue #349 method after a tank charge
 constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
 // HOW LONG THE CHARGE WITNESS MUST STAND before it costs the 45-minute settle.
 //

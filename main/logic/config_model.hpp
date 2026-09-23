@@ -148,7 +148,7 @@ struct Config {
     // HTTP reconfiguration cannot publish its old link/model after the new settings landed.
     uint32_t    runtime_revision = 0;
 
-    // ── The HomeHub Modbus stack — PERSISTED (issue legacy-32) ─────────────────────────────────────────
+    // ── The HomeHub Modbus stack — PERSISTED (issue #32) ─────────────────────────────────────────
     // A SECOND, INDEPENDENT source, not an alternative to the X10A link above. The two share no
     // wire, no framing, no register model and no failure mode, so they run as separate tasks with
     // separate caches and separate link states (docs/MODBUS_PROTOCOL.md): X10A keeps working when
@@ -496,10 +496,8 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
 }
 
 // Validate WiFi credentials from POST /set_wifi. The SSID must be 1..32 bytes (the 802.11 limit);
-// the password is either empty (open network) or an ASCII WPA-passphrase of 8..63 bytes (raw 64-hex
-// PSKs are intentionally not accepted because ESP-IDF's sta.password buffer has capacity 64 and
-// requires a null terminator). Same bounds the web UI enforces client-side (main/www/js/settings.js)
-// — kept here so the authoritative check is host-tested.
+// the password is either empty (open network) or a WPA-PSK-length 8..63 bytes. Same bounds the web
+// UI enforces client-side (main/www/js/settings.js) — kept here so the authoritative check is host-tested.
 // Returns false + a reason on the first problem.
 inline bool wifi_credentials_valid(const std::string& ssid, const std::string& pass, std::string& reason) {
     if (ssid.empty() || ssid.size() > 32)                     { reason = "invalid ssid";     return false; }
@@ -508,7 +506,8 @@ inline bool wifi_credentials_valid(const std::string& ssid, const std::string& p
 }
 
 // Copy SSID / password strings into fixed-size ESP-IDF buffers (wc.sta.ssid has capacity 32,
-// wc.sta.password has capacity 64). An 802.11 SSID can be exactly 32 bytes without a null terminator.
+// wc.sta.password has capacity 64). An 802.11 SSID can be exactly 32 bytes without a null
+// terminator. Raw 64-hex PSKs are intentionally not accepted (sta.password requires null byte).
 inline void wifi_config_field_copy(uint8_t* dst, size_t cap, const char* src) {
     if (!dst || cap == 0) return;
     if (!src) {
@@ -542,7 +541,8 @@ inline Protocol parse_protocol(const std::string& s) {
 // - On Protocol::S, only "protocol_s" is allowed.
 // - On Protocol::I, "protocol_s" is disallowed (Protocol I units must not use the Protocol S
 // profile).
-inline bool set_hp_profile_compatible(const std::string& profile, Protocol proto, bool fp_valid = true) {
+inline bool set_hp_profile_compatible(const std::string& profile, Protocol proto,
+                                      bool fp_valid = true) {
     if (profile.empty() || profile == "auto") return true;
     if (!fp_valid) return true;
     if (proto == Protocol::S) return profile == "protocol_s";

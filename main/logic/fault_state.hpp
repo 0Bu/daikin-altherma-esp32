@@ -1,5 +1,5 @@
 #pragma once
-// A NUMERIC fault state beside the TEXTUAL Daikin diagnostic code — issue legacy-209 defect 4.
+// A NUMERIC fault state beside the TEXTUAL Daikin diagnostic code — issue #209 defect 4.
 //
 // Converters 203 (error class) and 204 (error code) are deliberately textual: "Normal"/"Error" and
 // "00"/"U4"/"7H" are what a human, the web UI and Home Assistant want, and mapping every Daikin code
@@ -12,7 +12,7 @@
 //   • so the last numeric value stays put, and an alert on `error_code != 0` never fires for
 //     exactly the alphanumeric faults it exists to catch.
 //
-// The fix is NOT to change the textual field's type (that is the mistake legacy-209 defect 3 documents,
+// The fix is NOT to change the textual field's type (that is the mistake #209 defect 3 documents,
 // from the other direction). It is to publish a small, permanently-numeric companion pair beside it
 // and leave the diagnostic code alone:
 //
