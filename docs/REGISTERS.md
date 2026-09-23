@@ -679,7 +679,12 @@ the I/U capacity code (`0x60` offset 6).
 | 0 | 2 | 105 |  | °C | [EKMIK] Bizone kit mixed leaving water temperature R1T |
 | 0 | 1 | 101 |  |  | [EKMIK] Bizone kit mix valve position M1S |
 
-#### Register `0x50`
+### Protocol S Registers (UNVERIFIED)
+
+> [!WARNING]
+> Protocol S registers (`0x50`, `0x53`, `0x54`, `0x55`) and profile `protocol_s` are derived from reverse-engineered community tables without verified hardware traces or official manufacturer documentation. All mappings and conversions remain unverified on physical hardware.
+
+#### Register `0x50` (UNVERIFIED)
 
 Protocol S refrigerant pressure sensors.
 
@@ -688,7 +693,7 @@ Protocol S refrigerant pressure sensors.
 | 0 | 2 | 103 |  | bar | HP Sensor(bar) |
 | 2 | 2 | 103 |  | bar | LP Sensor(bar) |
 
-#### Register `0x53`
+#### Register `0x53` (UNVERIFIED)
 
 Protocol S outdoor unit actuators and inverter states.
 
@@ -705,7 +710,7 @@ Protocol S outdoor unit actuators and inverter states.
 | 10 | 1 | 200 |  |  | Crankcase Heater |
 | 11 | 1 | 200 |  |  | Ener-Cut Output |
 
-#### Register `0x54`
+#### Register `0x54` (UNVERIFIED)
 
 Protocol S temperatures and setpoints.
 
@@ -720,7 +725,7 @@ Protocol S temperatures and setpoints.
 | 12 | 1 | 312 |  |  | Delta-Tr(deg) |
 | 13 | 1 | 200 |  |  | R/C Setpoint(C) |
 
-#### Register `0x55`
+#### Register `0x55` (UNVERIFIED)
 
 Protocol S operation mode and diagnostic fault codes.
 

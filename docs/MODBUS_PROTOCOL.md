@@ -271,14 +271,14 @@ The 43 registers of the Altherma 4 map collapse into **14 contiguous batches** (
 Detection is **100% automatic** at runtime without requiring any UI configuration:
 
 1. **Initial session state (`Auto`):** When connecting to a new target host, port, or unit ID (`status_socket_open`), the active profile begins in `Auto`.
-2. **Probing:** The firmware attempts to read batches using the 43-register `ALTHERMA4_REGS` catalog and `MB_PLAN_ALTHERMA4`.
-3. **Promotion to `Altherma4`:** If any extended register (offset > 58) successfully returns valid data (e.g. water pressure in offset 79 is plausibly 0..6.0 bar), `s_active_profile` transitions to `ModbusProfile::Altherma4`.
-4. **Graceful fallback to `HomeHub`:** When connected to an Altherma 3 / EKRHH unit, registers > 58 return Modbus Exception 02 (*Illegal Data Address*) or connection close/timeout. The firmware evaluates this failure via `logic::evaluate_probe_result()`:
-   - It transitions `s_active_profile` immediately to `ModbusProfile::HomeHub`.
+2. **Safe baseline polling & probing:** In `Auto`, the firmware reads the safe 32-register base HomeHub map (`MB_PLAN`) and performs a single probe request on register 79 (water pressure, `MODBUS_PROBE_REGISTER`) at the end of each full cycle.
+3. **Promotion to `Altherma4`:** If probe register 79 successfully returns valid data in the plausible hydronic range (0 < pressure <= 6.0 bar), `s_active_profile` transitions affirmatively to `ModbusProfile::Altherma4`, enabling the 43-register `MB_PLAN_ALTHERMA4` on subsequent cycles.
+4. **Graceful fallback to `HomeHub`:** When connected to an Altherma 3 / EKRHH unit, register 79 returns `32767` (`MB_UNSUPPORTED`, verified on hardware), `32766` (`MB_UNAVAILABLE`), or Modbus Exception 02 (*Illegal Data Address*). The firmware evaluates this affirmative response via `logic::evaluate_probe_result()`:
+   - It transitions `s_active_profile` immediately and definitively to `ModbusProfile::HomeHub`.
    - It does **not** call `note_failure()` or increment `rx_fail`, preserving `status_recovered()` and preventing false `status_error()` transitions.
-   - It resets `s_batch_split` and stops issuing remaining extended queries for the session.
+   - If a probe request encounters a transport error (timeout, connection closed), the socket is closed (`link_ok = false`) and the profile stays in `Auto` with bounded retries before defaulting to `HomeHub`.
    - The UI and `/status` remain green and healthy, reporting the 32 valid base registers.
-5. **Sticky profile across reconnects:** While connected to the same target endpoint (`host:port:unit_id`), the detected profile (`HomeHub` or `Altherma4`) is preserved across TCP reconnects to avoid repetitive probe exceptions on Altherma 3. Changing configuration or target address resets the profile to `Auto` to re-probe cleanly.
+5. **Sticky profile across reconnects:** While connected to the same target endpoint (`host:port:unit_id`), an affirmatively detected profile (`HomeHub` or `Altherma4`) is remembered in RAM across TCP reconnects to avoid repetitive probe churn. Changing configuration or target address resets the state to `Auto` to re-probe cleanly.
 
 ## How the two sources meet
 

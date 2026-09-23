@@ -68,13 +68,17 @@ static constexpr int DETECT_PAGE_TRIES = 3;
 // page that never answered needs no counter: its bit is already absent from the page mask on the
 // same line.
 static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& recovered,
-                           HpReplyKind& final_kind) {
+                           HpReplyKind& final_kind, bool& had_transport_error) {
     int last_err = -1;
     final_kind   = HpReplyKind::NoReply;
+    had_transport_error = false;
     for (int attempt = 0; attempt < DETECT_PAGE_TRIES; attempt++) {
         HpReplyKind kind = HpReplyKind::NoReply;
         const int   n    = read_page(reg, proto, out, outmax, &kind);
         final_kind       = kind;
+        if (is_transport_error(kind)) {
+            had_transport_error = true;
+        }
         if (n >= 0) {
             recovered += attempt; // 0 on a first-try answer
             return n;
@@ -192,11 +196,15 @@ DetectResult hp_detect_run() {
     for (size_t pi = 0; pi < num_pages; ++pi) {
         const uint8_t reg = probe_pages[pi];
         uint8_t       pay[32];
-        HpReplyKind   kind = HpReplyKind::Ok;
+        HpReplyKind   kind                = HpReplyKind::Ok;
+        bool          had_transport_error = false;
         const int     paylen =
-            read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries, kind);
+            read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries, kind,
+                            had_transport_error);
         if (paylen < 0) {
-            if (is_transport_error(kind) && reg != 0x11 && reg != 0x56) probe_transport_errors++;
+            if ((had_transport_error || is_transport_error(kind)) && reg != 0x11 &&
+                reg != 0x56)
+                probe_transport_errors++;
             continue;
         }
         if (reg == 0x11) {

@@ -416,7 +416,7 @@ static void poll_once() {
             const ValueDef def = logic::adjudicated(view[k]);
             CachedValue cv;
             cv.label = def.label;
-            cv.unit  = (def.conv == 312) ? "K" : unit_for_datatype(def.type);
+            cv.unit  = unit_for_row(def);
             cv.reg   = def.reg;
             cv.off   = def.offset;
             cv.conv  = def.conv;

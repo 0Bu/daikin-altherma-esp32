@@ -231,7 +231,7 @@ inline std::string discovery_config(const std::string& node, const std::string& 
                                     const std::string& avail_topic, const ValueDef& def) {
     const std::string obj   = object_id(def.label);
     const std::string group = group_for_page(def.reg);
-    const std::string unit  = (def.conv == 312) ? "K" : unit_for_datatype(def.type);
+    const std::string unit  = unit_for_row(def);
     const std::string dc    = device_class_for_datatype(def.type);
     std::string j = "{";
     // name/uniq_id are the ENTITY identity and carry the group (#221); `obj` below is the STATE key

@@ -56,7 +56,8 @@ inline bool lwt_is_water(const char* l) {
 inline bool lwt_is_reject(const char* l) {
     return lwt_ci_contains(l, "setpoint") || lwt_ci_contains(l, "mixed") ||
            lwt_ci_contains(l, "r2t") || lwt_ci_contains(l, "after buh") ||
-           lwt_ci_contains(l, "after buffer") || lwt_ci_contains(l, "raw data");
+           lwt_ci_contains(l, "after buffer") || lwt_ci_contains(l, "raw data") ||
+           lwt_ci_contains(l, "dlwb2") || lwt_ci_contains(l, "hydro split");
 }
 
 // Tier 1: the pre-BUH heat-exchanger outlet (R1T), under any of its label forms.

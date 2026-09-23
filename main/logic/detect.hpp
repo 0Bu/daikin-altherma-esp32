@@ -93,9 +93,8 @@ struct Fingerprint {
     int      kw_tenths = -1; // O/U capacity in 0.1 kW; -1 = unknown / not reported
     int iu_kw_tenths   = -1; // I/U capacity code (reg 0x60 off 6, same kW×10 units); -1 = unknown.
                              // FALLBACK capacity when the O/U 0x00 descriptor is too short to
-                             // carry offset 12 (a smaller unit) -> kw_tenths stays -1. Used only
-                             // to RANK the representative (detect_best), never to exclude a
-                             // candidate, since indoor≈outdoor capacity is an approximation.
+                             // carry offset 12 (a smaller unit) -> kw_tenths stays -1. Used via
+                             // detect_capacity() to filter candidates and rank the representative.
     uint8_t eeprom[6] = {0}; // O/U EEPROM digits (page 0x11 offsets 0..5)
     bool    eeprom_ok = false;
 };

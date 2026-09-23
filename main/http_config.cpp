@@ -812,8 +812,8 @@ static esp_err_t set_hp(httpd_req_t* req) {
             j.reset();
             return send_err(req, "400 Bad Request", "profile incompatible with detected protocol");
         }
-        if (c.profile == "protocol_s") {
-            c.proto = Protocol::S;
+        if (c.profile != "auto") {
+            c.proto = protocol_for_profile(c.profile, c.proto);
         }
     }
     if (set_hp_clears_fingerprint(profile_sent, c.profile)) c.fp_valid = false;

@@ -1,6 +1,7 @@
 #pragma once
 // Profile definition for Daikin Altherma 4 Modbus TCP telemetry.
-// Curated from field validation against Altherma 4 installations and documentation in docs/MODBUS_PROTOCOL.md.
+// UNVERIFIED — reconstructed from public reference definitions; no capture from a real unit in this repository.
+// Missing evidence: a vendor Modbus-map page or telemetry capture from a physical Altherma 4 unit.
 #include "homehub.hpp"
 
 namespace daik::def {

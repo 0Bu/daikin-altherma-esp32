@@ -150,7 +150,7 @@ Look at the finished GIF. Then ask:
 3. **Are the numbers physically coherent?** They are invented, but they are read as real: leaving
    water above the tank temperature during a charge, ΔT and flow consistent with the stated kW
    (`flow/60 × 4.186 × ΔT`), a DHW COP near 2.5–3 and a 38 °C heating COP near 4–5, the CT current
-   matching the electrical estimate. A COP of 8 in the README is the #35–#39 failure shape with a
+   matching the electrical estimate. A COP of 8 in the README is the legacy-35–legacy-39 failure shape with a
    marketing budget.
 4. **Do the labels come from the real catalog?** `tools/uigif/scenes.js` uses the exact rows of a
    real profile (`main/def/altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw.hpp`). A label invented

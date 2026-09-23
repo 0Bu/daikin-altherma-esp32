@@ -1,7 +1,8 @@
 #pragma once
 // Profile definition for Daikin Protocol S devices (legacy/older models).
 // Protocol S uses fixed-length responses and page queries 0x50, 0x53, 0x54, 0x55, 0x56.
-// Curated from field telemetry captures and service manual register documentation.
+// UNVERIFIED — reconstructed from public reference definitions; no capture from a real unit in this repository.
+// Missing evidence: one telemetry capture from a physical Protocol S unit.
 #include "../logic/value_def.hpp"
 
 namespace daik::def {

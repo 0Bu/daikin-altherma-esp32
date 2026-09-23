@@ -507,7 +507,7 @@ inline bool wifi_credentials_valid(const std::string& ssid, const std::string& p
 
 // Copy SSID / password strings into fixed-size ESP-IDF buffers (wc.sta.ssid has capacity 32,
 // wc.sta.password has capacity 64). An 802.11 SSID can be exactly 32 bytes without a null
-// terminator. Raw 64-hex PSKs are intentionally not accepted (sta.password requires null byte).
+// terminator. WPA2 passphrases are validated to 8..63 chars; raw 64-hex PSKs are intentionally not accepted by policy.
 inline void wifi_config_field_copy(uint8_t* dst, size_t cap, const char* src) {
     if (!dst || cap == 0) return;
     if (!src) {
@@ -533,6 +533,20 @@ inline void wifi_config_field_copy(uint8_t* dst, size_t cap, const std::string& 
 
 inline Protocol parse_protocol(const std::string& s) {
     return (!s.empty() && (s[0] == 'S' || s[0] == 's')) ? Protocol::S : Protocol::I;
+}
+
+// Derive the required protocol from a concrete profile name:
+// - "protocol_s" maps to Protocol::S.
+// - Any other concrete profile (non-empty and not "auto") maps to Protocol::I.
+// - "auto" or empty preserves the fallback (typically the detected protocol).
+inline Protocol protocol_for_profile(const char* profile, Protocol fallback = Protocol::I) {
+    if (!profile || !*profile || std::strcmp(profile, "auto") == 0) return fallback;
+    if (std::strcmp(profile, "protocol_s") == 0) return Protocol::S;
+    return Protocol::I;
+}
+
+inline Protocol protocol_for_profile(const std::string& profile, Protocol fallback = Protocol::I) {
+    return protocol_for_profile(profile.c_str(), fallback);
 }
 
 // Protocol and profile compatibility for /set_hp:

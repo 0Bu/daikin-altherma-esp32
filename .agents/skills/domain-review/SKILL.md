@@ -26,7 +26,7 @@ This review asks that. Nothing here is about style or structure.
 
 **It runs before every ordinary merge** — there is no "this PR doesn't need it". That is deliberate. Deciding
 in advance which files can change a value's meaning is a guess, and it is the same guess that let
-#35–#39 ship: a valve position reached Home Assistant as a 12800 °C temperature sensor through the
+legacy-35–legacy-39 ship: a valve position reached Home Assistant as a 12800 °C temperature sensor through the
 ordinary discovery path, not through anything that announced itself as risky. So "nothing here can
 change what a value means" is a **finding you state**, not an assumption made for you.
 
@@ -126,7 +126,7 @@ ranges too. The audit's envelopes catch the impossible; you catch the *implausib
 ## 4. Verify, don't assert
 
 `scripts/run-mock-tests.sh` must pass, and new decode/format logic needs a `CHECK` in
-`test/test_logic.cpp` — catalog-wide guards where a whole class can regress (the pattern issue #39
+`test/test_logic.cpp` — catalog-wide guards where a whole class can regress (the pattern issue legacy-39
 established, e.g. the water-pressure loop at `test/test_logic.cpp:209-220`). If the audit itself
 changed, `tools/domain/selftest.sh` must still catch all four historical bugs.
 

@@ -164,6 +164,19 @@ if (ui.vLwt && ui.vLwt() !== null) {
 }
 context.S._values = [];
 
+// Test that an absent R1T row does not fall back to hydro split DLWB2 row
+context.S._values = [
+  { label: "Outlet water heat exchanger temp (hydro split model) DLWB2", reg: 0x65, value: "35.0", unit: "°C" }
+];
+const pickedDlwb2Fallback = ui.lwtRow();
+if (pickedDlwb2Fallback !== null) {
+  bad("PICK_ABSENT_R1T", "dlwb2-fallback", "lwtRow must reject DLWB2 row and return null when R1T is absent", null, pickedDlwb2Fallback ? pickedDlwb2Fallback.label : "null");
+}
+if (ui.vLwt && ui.vLwt() !== null) {
+  bad("PICK_ABSENT_R1T", "dlwb2-fallback", "vLwt() must return null when R1T is absent and only DLWB2 is present", null, ui.vLwt());
+}
+context.S._values = [];
+
 // A vector file that produced no comparisons passes every assertion above. Refuse it: "no vectors
 // found" must never read as "the two copies agree", which is the one thing a parity gate exists to
 // establish.

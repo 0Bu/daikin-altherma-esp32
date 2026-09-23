@@ -1145,6 +1145,12 @@ static void test_convert() {
     CHECK(std::string(unit_for_datatype(3)) == "A");
     CHECK(std::string(unit_for_datatype(2)) == "bar");
     CHECK(std::string(unit_for_datatype(-1)).empty());
+
+    // unit_for_row: conv 312 (relative deviation / delta) suppresses the unit
+    ValueDef row_temp{0x54, 0, 103, 2, 1, "Temp"};
+    ValueDef row_delta{0x54, 12, 312, 1, 1, "Delta-Tr(deg)"};
+    CHECK(std::string(unit_for_row(row_temp)) == "°C");
+    CHECK(std::string(unit_for_row(row_delta)) == "K");
 }
 
 static void test_config_model() {
@@ -1153,6 +1159,12 @@ static void test_config_model() {
         uint8_t     ssid_buf[32];
         const char* full_32 = "12345678901234567890123456789012"; // exactly 32 bytes
         wifi_config_field_copy(ssid_buf, sizeof(ssid_buf), full_32);
+        CHECK(std::memcmp(ssid_buf, full_32, 32) == 0);
+
+        // std::string overload preserves full 32 bytes
+        std::string s_full_32 = "12345678901234567890123456789012";
+        std::memset(ssid_buf, 0xFF, sizeof(ssid_buf));
+        wifi_config_field_copy(ssid_buf, sizeof(ssid_buf), s_full_32);
         CHECK(std::memcmp(ssid_buf, full_32, 32) == 0);
 
         uint8_t     short_buf[32];
@@ -1184,6 +1196,22 @@ static void test_config_model() {
         }
         wifi_config_field_copy(nullptr, 32, "test");
         wifi_config_field_copy(short_buf, 0, "test");
+    }
+
+    // protocol_for_profile and set_hp_profile_compatible
+    {
+        CHECK(protocol_for_profile("protocol_s") == Protocol::S);
+        CHECK(protocol_for_profile("altherma3_r_ech2o") == Protocol::I);
+        CHECK(protocol_for_profile("auto", Protocol::S) == Protocol::S);
+        CHECK(protocol_for_profile("auto", Protocol::I) == Protocol::I);
+        CHECK(protocol_for_profile(nullptr, Protocol::S) == Protocol::S);
+
+        CHECK(set_hp_profile_compatible("protocol_s", Protocol::S, true));
+        CHECK(!set_hp_profile_compatible("protocol_s", Protocol::I, true));
+        CHECK(set_hp_profile_compatible("altherma3_r_ech2o", Protocol::I, true));
+        CHECK(!set_hp_profile_compatible("altherma3_r_ech2o", Protocol::S, true));
+        CHECK(set_hp_profile_compatible("auto", Protocol::S, true));
+        CHECK(set_hp_profile_compatible("protocol_s", Protocol::I, false)); // allowed when fp_valid is false
     }
 
     // The atomic service blob and the self-healing link cache have different success contracts.
@@ -1621,6 +1649,14 @@ static void test_ha_device() {
 }
 
 static void test_discovery() {
+    CHECK(!conv_publishable(0));
+    CHECK(conv_publishable(105));
+    CHECK(!conv_publishable(995));
+    CHECK(!conv_publishable(997));
+    CHECK(!conv_publishable(999));
+    CHECK(conv_publishable(994));
+    CHECK(conv_publishable(1000));
+
     CHECK(object_id("DHW Tank Temp (R5T)") == "dhw_tank_temp_r5t");
     CHECK(object_id("  A/B  ") == "a_b");
 
@@ -1681,6 +1717,10 @@ static void test_discovery() {
     CHECK(!retained_cleanup_candidate(legacy, legacy_child.data(),
                                       static_cast<int>(legacy_child.size()), true, 123, 0));
     CHECK(!retained_cleanup_candidate(legacy, nullptr, 0, true, 123, 0));
+    CHECK(!retained_cleanup_candidate(legacy, legacy.data(), -1, true, 123, 0));
+    const std::string same_len_different = "daikin-altherma-esp32/statX";
+    CHECK(!retained_cleanup_candidate(legacy, same_len_different.data(),
+                                      static_cast<int>(same_len_different.size()), true, 123, 0));
     CHECK(!retained_cleanup_candidate(retired_status, legacy.data(),
                                       static_cast<int>(legacy.size()), true, 123, 0));
     CHECK(availability_topic(base) == "daikin-altherma-esp32/status");
@@ -5842,11 +5882,18 @@ static void test_modbus_profile() {
     CHECK(dec.link_ok);
     CHECK(!dec.count_failure);
 
-    // Explicit unsupported sentinel on extended register confirms HomeHub
+    // Explicit unsupported or unavailable sentinels on extended register confirm HomeHub
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, MB_UNSUPPORTED);
     CHECK(dec.next_profile == ModbusProfile::HomeHub);
     CHECK(dec.link_ok);
     CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, MB_UNAVAILABLE);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
 
     // Successful read of standard (non-extended) register stays Auto
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 43, 500);
@@ -5859,12 +5906,21 @@ static void test_modbus_profile() {
     CHECK(dec.next_profile == ModbusProfile::HomeHub);
     CHECK(dec.link_ok);
     CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
 
-    // Transient Modbus Exception 0x06 (Server Busy) on probe keeps Auto and retries
-    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x06, 79, 0);
+    // Transient Modbus Exception 0x06 (Server Busy) on probe keeps Auto for initial retries
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x06, 79, 0, 1);
     CHECK(dec.next_profile == ModbusProfile::Auto);
     CHECK(dec.link_ok);
-    CHECK(dec.count_failure);
+    CHECK(!dec.count_failure);
+    CHECK(!dec.is_definitive);
+
+    // Transient Modbus Exception 0x06 falls back to HomeHub when retries are exhausted (3)
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x06, 79, 0, 3);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
 
     // Modbus Exception on standard register counts failure and stays Auto
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x02, 43, 0);
@@ -5872,17 +5928,25 @@ static void test_modbus_profile() {
     CHECK(dec.link_ok);
     CHECK(dec.count_failure);
 
-    // Transport failure on extended register probe falls back to HomeHub, closes socket without
-    // counting error
-    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 79, 0);
-    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    // Transport failure on extended register probe: retry 1 stays Auto, closes socket without counting error
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 79, 0, 1);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
     CHECK(!dec.link_ok);
     CHECK(!dec.count_failure);
+    CHECK(!dec.is_definitive);
 
-    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ConnectionClosed, 0, 79, 0);
+    // Transport failure on extended register probe: retry 3 falls back to HomeHub
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 79, 0, 3);
     CHECK(dec.next_profile == ModbusProfile::HomeHub);
     CHECK(!dec.link_ok);
     CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ConnectionClosed, 0, 79, 0, 3);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(!dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
 
     // Transport failure on standard register stays Auto, closes socket and counts failure
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 43, 0);
@@ -5911,6 +5975,26 @@ static void test_modbus_profile() {
     CHECK(dec.next_profile == ModbusProfile::Altherma4);
     CHECK(!dec.link_ok);
     CHECK(dec.count_failure);
+
+    // Exception on locked profile preserves profile and link_ok is true (exception does not break link)
+    dec = evaluate_probe_result(ModbusProfile::HomeHub, MbFailureType::Exception, 0x02, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(dec.count_failure);
+
+    // Negative failure detail on Exception confirms HomeHub
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, -1, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+
+    // Invalid raw value (0 bar) with 3 retries falls back to HomeHub
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, 0, 3);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
 }
 
 static void test_bootlog() {
@@ -9916,6 +10000,12 @@ static void test_lwt_select() {
             "Leaving water temp. before BUH (R1T)",
         };
         CHECK(lwt_select(dlwb2, 2) == 1);
+
+        // DLWB2 hydro-split outlet alone must be rejected (not picked as LWT)
+        const char* dlwb2_only[] = {
+            "Outlet water heat exchanger temp (hydro split model) DLWB2",
+        };
+        CHECK(lwt_select(dlwb2_only, 1) == -1);
 
         // A bare "heat exch" keyword would grab these refrigerant/outdoor rows — the picker must
         // not.
