@@ -5,7 +5,7 @@
     "source_sha": "c23d44d963bea40d63534899ea323eaaf6d1540e",
     "idf_version": "v6.1",
     "dependencies_lock_sha256": "fad0727c2be56158adeb3ab6347b538b6acd1a88aa5cd53bedf34371f249ec42",
-    "app_sha256": "76e98633f4b63d3b3c3f2e78775dc3eccb31cc255b234e6d8c1ea72ffe8259c6",
+    "app_sha256": "23160adcd2a79def53ee9d2463490bd57081f544512e762aeaaf8502e643d29f",
     "signing_key_sha256": "ef1101b50965230dfb90f1bc34c9e84ab8af40c5433a63c04f08ba916ec71757"
   },
   "new_install_prompt_erase": true,
