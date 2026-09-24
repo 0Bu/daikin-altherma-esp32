@@ -146,9 +146,14 @@ class MqttRecoveryTracker:
     def observe(
         self, *, now: float, mqtt_connected: bool, weather_fetching: bool,
         weather_successes: int, ota_expected: bool,
+        weather_deferred: bool = False,
     ) -> int:
         failures = 0
-        weather_evidence = weather_fetching or weather_successes > self.weather_successes_seen
+        weather_evidence = (
+            weather_fetching
+            or weather_successes > self.weather_successes_seen
+            or weather_deferred
+        )
         weather_was_expected = self.weather_expected
         pending_was_observed = self.pending_disconnects > 0
         # Later owner evidence may explain a still-bounded mixed snapshot, but it must not erase an
@@ -1443,6 +1448,9 @@ def stress_board(
                 weather = status.get("weather_forecast", {})
                 now = time.monotonic()
                 weather_successes = int(weather.get("successes", 0))
+                weather_deferred = (
+                    weather.get("state") == "waiting" and weather.get("reason") == "heap_headroom"
+                )
                 # Weather owns the same constrained network heap as OTA and deliberately stops
                 # esp-mqtt while its TLS client is live. `fetching` covers the owner interval; the
                 # success edge covers the short status-update -> asynchronous MQTT-resume gap. The
@@ -1457,6 +1465,7 @@ def stress_board(
                     # A request started inside the accepted OTA pause must not be reclassified if
                     # the main thread clears the event before this streamed snapshot is processed.
                     ota_expected=ota_expected_before or mqtt_recovery_expected.is_set(),
+                    weather_deferred=weather_deferred,
                 )
                 with lock:
                     samples["status"] += 1
@@ -3658,6 +3667,16 @@ def self_test() -> None:
         now=17.0, mqtt_connected=True, weather_fetching=False,
         weather_successes=0, ota_expected=False,
     ) == 1
+    deferred_headroom = MqttRecoveryTracker(weather_successes_seen=0)
+    assert deferred_headroom.observe(
+        now=1.0, mqtt_connected=False, weather_fetching=False,
+        weather_successes=0, ota_expected=False, weather_deferred=True,
+    ) == 0
+    assert deferred_headroom.observe(
+        now=2.0, mqtt_connected=True, weather_fetching=False,
+        weather_successes=0, ota_expected=False, weather_deferred=False,
+    ) == 0
+    assert deferred_headroom.finish() == 0
     late_weather_evidence = MqttRecoveryTracker(weather_successes_seen=0)
     assert late_weather_evidence.observe(
         now=1.0, mqtt_connected=False, weather_fetching=False,
