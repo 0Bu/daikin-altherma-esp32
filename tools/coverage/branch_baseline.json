@@ -585,8 +585,8 @@
         "taken": 61
       },
       "main/logic/modbus_profile.hpp": {
-        "outcomes": 40,
-        "taken": 40
+        "outcomes": 82,
+        "taken": 82
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 10,
@@ -951,8 +951,8 @@
         "taken": 61
       },
       "main/logic/modbus_profile.hpp": {
-        "outcomes": 40,
-        "taken": 40
+        "outcomes": 82,
+        "taken": 82
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 10,
@@ -1317,8 +1317,8 @@
         "taken": 61
       },
       "main/logic/modbus_profile.hpp": {
-        "outcomes": 40,
-        "taken": 40
+        "outcomes": 82,
+        "taken": 82
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 10,
