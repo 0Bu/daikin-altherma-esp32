@@ -1,1 +1,1 @@
-{"version":"1.0.6-dev.3","changelog":"v1.0.6-dev.0 — Maintenance and reliability improvements.\nv1.0.6-dev.1 — Improve clarity and technical precision of UI explanatory texts\nv1.0.6-dev.3 — Generalize and unify agentic setup under .agents"}
+{"version":"1.0.6-dev.4","changelog":"v1.0.6-dev.0 — Maintenance and reliability improvements.\nv1.0.6-dev.1 — Improve clarity and technical precision of UI explanatory texts\nv1.0.6-dev.3 — Generalize and unify agentic setup under .agents\nv1.0.6-dev.4 — Recognize deferred weather headroom in MqttRecoveryTracker"}
