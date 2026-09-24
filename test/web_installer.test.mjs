@@ -387,6 +387,6 @@ test("the published page keeps the monitor toggle in the connection tile and pin
   assert.doesNotMatch(html, /\.installer-monitor-output\s*\{[^}]*white-space:pre-wrap;/s);
   assert.match(html, /\.installer-monitor-line-warning\s*\{[^}]*color:#F2A444;/s);
   assert.match(html, /\.installer-monitor-line-error\s*\{[^}]*color:#FF6B6B;/s);
-  assert.match(html, /esptool-js@0\.6\.1\/\+esm/);
+  assert.match(html, /https:\/\/cdn\.jsdelivr\.net\/npm\/esptool-js@\d+\.\d+\.\d+\/\+esm/);
   assert.doesNotMatch(html, /esp-web-install-button/);
 });

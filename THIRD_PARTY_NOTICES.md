@@ -56,7 +56,7 @@ License:
 
 ## Web tooling
 
-- [`esptool-js`](https://github.com/espressif/esptool-js) 0.6.1 is loaded by the Web Serial
+- [`esptool-js`](https://github.com/espressif/esptool-js) 0.7.0 is loaded by the Web Serial
   installer and is licensed under Apache-2.0. Its published bundle contains pako 2.1.0, licensed
   under MIT and Zlib terms.
 - `rjsmin.py` 1.2.4 and `rcssmin.py` 1.2.1 are vendored build-only minifiers, Copyright 2011-2025
