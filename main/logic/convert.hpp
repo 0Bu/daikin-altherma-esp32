@@ -561,7 +561,8 @@ inline const char* unit_for_datatype(int dataType) {
     }
 }
 
-// Single authority for a row's display/telemetry unit, consolidating the conv-312 (Delta-Tr in K) special case.
+// Single authority for a row's display/telemetry unit, consolidating the conv-312 (Delta-Tr in K)
+// special case.
 inline const char* unit_for_row(const ValueDef& def) {
     if (def.conv == 312) return "K";
     return unit_for_datatype(def.type);

@@ -95,9 +95,9 @@ static bool s_batch_split[def::ALTHERMA4_REG_COUNT] = {false};
 // cycles.
 static std::atomic<ModbusProfile> s_active_profile{ModbusProfile::Auto};
 static std::string                s_last_resolved_host;
-static int                        s_last_resolved_port    = 0;
-static int                        s_last_resolved_unit    = 0;
-static ModbusProfile              s_last_resolved_profile = ModbusProfile::Auto;
+static int                        s_last_resolved_port         = 0;
+static int                        s_last_resolved_unit         = 0;
+static ModbusProfile              s_last_resolved_profile      = ModbusProfile::Auto;
 static int                        s_consecutive_probe_failures = 0;
 
 // ── The value cache — this stack's own, deliberately NOT hp_poll's ──────────────────────────────
@@ -786,12 +786,14 @@ constexpr auto MB_PLAN = mb_plan_make_from<def::HOMEHUB_REG_COUNT>(def::HOMEHUB_
 static_assert(MB_PLAN.ok, "HomeHub register table does not yield a usable read plan");
 static_assert(MB_PLAN.count * 3 <= def::HOMEHUB_REG_COUNT,
               "batching no longer collapses the HomeHub map — re-check the register offsets");
-static_assert([] {
-    for (const auto& reg : def::HOMEHUB_REGS) {
-        if (reg.offset > logic::MODBUS_BASE_MAX_OFFSET) return false;
-    }
-    return true;
-}(), "Base HomeHub max offset invariant");
+static_assert(
+    [] {
+        for (const auto& reg : def::HOMEHUB_REGS) {
+            if (reg.offset > logic::MODBUS_BASE_MAX_OFFSET) return false;
+        }
+        return true;
+    }(),
+    "Base HomeHub max offset invariant");
 
 constexpr auto MB_PLAN_ALTHERMA4 = mb_plan_make_from<def::ALTHERMA4_REG_COUNT>(def::ALTHERMA4_REGS);
 static_assert(MB_PLAN_ALTHERMA4.ok, "Altherma 4 register table does not yield a usable read plan");
@@ -1069,14 +1071,16 @@ static void mb_poll_once() {
                         s_last_resolved_unit    = s_unit;
                         s_last_resolved_profile = decision.next_profile;
                         if (decision.next_profile == ModbusProfile::Altherma4) {
-                            diag_printf("modbus: detected Altherma 4 profile via probe register %u\n",
-                                        static_cast<unsigned>(logic::MODBUS_PROBE_REGISTER));
+                            diag_printf(
+                                "modbus: detected Altherma 4 profile via probe register %u\n",
+                                static_cast<unsigned>(logic::MODBUS_PROBE_REGISTER));
                             if (const def::HomeHubReg* pr =
                                     def::altherma4_find(logic::MODBUS_PROBE_REGISTER)) {
                                 take_row(*pr, raw);
                             }
                         } else {
-                            diag_printf("modbus: probe register %u answered %u — selected HomeHub profile\n",
+                            diag_printf("modbus: probe register %u answered %u — selected HomeHub "
+                                        "profile\n",
                                         static_cast<unsigned>(logic::MODBUS_PROBE_REGISTER),
                                         static_cast<unsigned>(raw));
                         }
@@ -1097,7 +1101,8 @@ static void mb_poll_once() {
                     for (bool& split : s_batch_split) split = false;
                     diag_printf("modbus: probe register %u concluded %s (type %d / detail %d)\n",
                                 static_cast<unsigned>(logic::MODBUS_PROBE_REGISTER),
-                                decision.next_profile == ModbusProfile::HomeHub ? "HomeHub" : "Altherma4",
+                                decision.next_profile == ModbusProfile::HomeHub ? "HomeHub"
+                                                                                : "Altherma4",
                                 static_cast<int>(probe_failure.type), probe_failure.detail);
                 }
                 if (!decision.link_ok) {

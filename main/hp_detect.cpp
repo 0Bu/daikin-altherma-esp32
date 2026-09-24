@@ -70,7 +70,7 @@ static constexpr int DETECT_PAGE_TRIES = 3;
 static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& recovered,
                            HpReplyKind& final_kind, bool& had_transport_error) {
     int last_err = -1;
-    final_kind   = HpReplyKind::NoReply;
+    final_kind          = HpReplyKind::NoReply;
     had_transport_error = false;
     for (int attempt = 0; attempt < DETECT_PAGE_TRIES; attempt++) {
         HpReplyKind kind = HpReplyKind::NoReply;
@@ -198,12 +198,10 @@ DetectResult hp_detect_run() {
         uint8_t       pay[32];
         HpReplyKind   kind                = HpReplyKind::Ok;
         bool          had_transport_error = false;
-        const int     paylen =
-            read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries, kind,
-                            had_transport_error);
+        const int     paylen = read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)),
+                                               probe_retries, kind, had_transport_error);
         if (paylen < 0) {
-            if ((had_transport_error || is_transport_error(kind)) && reg != 0x11 &&
-                reg != 0x56)
+            if ((had_transport_error || is_transport_error(kind)) && reg != 0x11 && reg != 0x56)
                 probe_transport_errors++;
             continue;
         }

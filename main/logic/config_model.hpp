@@ -507,7 +507,8 @@ inline bool wifi_credentials_valid(const std::string& ssid, const std::string& p
 
 // Copy SSID / password strings into fixed-size ESP-IDF buffers (wc.sta.ssid has capacity 32,
 // wc.sta.password has capacity 64). An 802.11 SSID can be exactly 32 bytes without a null
-// terminator. WPA2 passphrases are validated to 8..63 chars; raw 64-hex PSKs are intentionally not accepted by policy.
+// terminator. WPA2 passphrases are validated to 8..63 chars; raw 64-hex PSKs are intentionally not
+// accepted by policy.
 inline void wifi_config_field_copy(uint8_t* dst, size_t cap, const char* src) {
     if (!dst || cap == 0) return;
     if (!src) {
