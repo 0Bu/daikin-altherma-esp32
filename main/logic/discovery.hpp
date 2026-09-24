@@ -247,7 +247,7 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     // and would leave every one of these entities stuck at `unknown`. No unit / device_class /
     // state_class: every 300-307 row is dataType -1, so unit and dc are empty here anyway, and a
     // meaningful HA device_class (running / problem / heat) is a per-LABEL domain judgement —
-    // exactly the kind of guess that produced legacy-35-legacy-39 — so it is deliberately left
+    // exactly the kind of guess that produced legacy-35–legacy-39 — so it is deliberately left
     // unset rather than inferred.
     if (conv_is_binary(def.conv)) { j += "\"pl_on\":\"1\",\"pl_off\":\"0\","; }
     if (!unit.empty()) { j += "\"unit_of_meas\":\""; j += unit; j += "\","; }

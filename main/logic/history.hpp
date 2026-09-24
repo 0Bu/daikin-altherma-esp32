@@ -26,7 +26,7 @@
 //     0xA0 is a different quantity on a second outdoor unit.
 //   * At 0x20/12 the SAME offset carries "High Pressure" (bar, conv 105) and "High Pressure(T)"
 //     (the saturation temperature, conv 405). A token match takes whichever sorts first, so half
-//     the catalog would draw °C into a chart whose axis says bar — the legacy-35-legacy-39 shape,
+//     the catalog would draw °C into a chart whose axis says bar — the legacy-35–legacy-39 shape,
 //     with a 24-hour history in front of it to make it look verified.
 //
 // The unit is the second half of the locator precisely because of that last case: (reg, offset)
@@ -406,7 +406,7 @@ constexpr int64_t history_t0(int64_t now_unix, uint32_t newest_age_s, size_t n, 
 // down. That pin must be anchored to the sample's WALL-CLOCK INSTANT, never to its index: the ring
 // shifts one slot every HISTORY_DT_S, so an index-anchored pin would go on pointing at slot 42
 // while slot 42 became a different measurement — a label silently re-pointed at another reading,
-// which is the legacy-35-legacy-39 shape with a timestamp attached to make it look verified.
+// which is the legacy-35–legacy-39 shape with a timestamp attached to make it look verified.
 //
 // Returns -1 when the pinned instant is no longer in the window: aged off the back as the day
 // rolled, or ahead of the newest sample. The caller then DROPS the pin rather than clamping it to

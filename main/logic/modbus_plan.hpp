@@ -16,7 +16,7 @@
 // SILENTLY rather than loudly:
 //   - a run built one register short simply stops refreshing the LAST row of every batch. The row
 //     still decodes, still publishes, still looks right — it is merely frozen. That is the
-//     legacy-35-legacy-39 shape wearing a timestamp, and no other gate here can see it.
+//     legacy-35–legacy-39 shape wearing a timestamp, and no other gate here can see it.
 //   - a cadence rule that never fires a full cycle leaves the entire cache at whatever the first
 //     cycle happened to read, which on a fresh session is nothing at all.
 // Neither is observable on a bench board in an afternoon; both are one CHECK here.

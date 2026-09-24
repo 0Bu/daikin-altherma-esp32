@@ -24,7 +24,7 @@
 //  1. BEFORE THE FIRST OBSERVATION IS UNKNOWN. A board up for ten minutes whose row read OFF
 //     throughout has established "OFF for at LEAST ten minutes" and nothing more. Reported as
 //     `exact = false`, which the UI must render as a lower bound. Stating a bare "OFF for 10 min"
-//     would be the legacy-35-legacy-39 shape: a true number presented as a stronger claim than it
+//     would be the legacy-35–legacy-39 shape: a true number presented as a stronger claim than it
 //     is.
 //
 //  2. BLIND TIME IS NOT UNCHANGED TIME. hp_poll replaces the whole cache each cycle

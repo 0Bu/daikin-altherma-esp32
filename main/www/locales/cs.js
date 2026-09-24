@@ -1,4 +1,4 @@
-// translation-source: 9725ef8c0270c09aea36f85393f68fc744c5f9139acbacf246e38ad9e06de159
+// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",

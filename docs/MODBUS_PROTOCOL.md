@@ -59,7 +59,7 @@ Source: *EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E*, §2.5,
 | `32767` | unsupported by this device |
 
 `mb_is_special()` catches all three before any scaling, so a sentinel can never leak out as a large
-number — the `legacy-35–39` failure shape this project exists to avoid.
+number — the `legacy-35–legacy-39` failure shape this project exists to avoid.
 
 **Compatibility is not unconditional.** The Modbus register set requires Unified MMI2 firmware
 ≥ 7.8.0 on the audited ERGA-EV / EHBH / X-E family, and individual registers can be inoperative per
@@ -278,10 +278,10 @@ Detection is **100% automatic** at runtime without requiring any UI configuratio
 3. **Promotion to `Altherma4`:** If probe register 79 successfully returns valid data in the plausible hydronic range (0 < pressure <= 6.0 bar), `s_probe_tracker` transitions affirmatively to `ModbusProfile::Altherma4`, enabling the 43-register `MB_PLAN_ALTHERMA4` on subsequent cycles.
 4. **Fallback behavior:**
    - **Affirmative `HomeHub` answer:** When connected to an Altherma 3 / EKRHH unit, register 79 returns `32767` (`MB_UNSUPPORTED`, verified on hardware), `32766` (`MB_UNAVAILABLE`), or Modbus Exception 02 (*Illegal Data Address*). The firmware evaluates this affirmative response via `logic::evaluate_probe_result()`, definitively setting `ModbusProfile::HomeHub` without incrementing `rx_fail` or dropping the link. The UI and `/status` remain green and healthy, reporting the 32 valid base registers.
-   - **Transport failure branch:** If a probe request encounters a transport error (timeout, connection closed), the connection is dropped (`link_ok = false`, socket closed) without incrementing `rx_fail`. The profile stays in `Auto` across reconnects until `MODBUS_PROBE_MAX_RETRIES` (3) consecutive probe failures are reached, after which it falls back definitively to `ModbusProfile::HomeHub`. During probe-cycle transport drops, `/values` remains unrefreshed for that cycle (`connected = false`).
-   - **Invalid value branch:** If probe register 79 returns an implausible value (`0` or `> 6.0 bar`), the connection remains open, but after 3 consecutive invalid readings it exhausts the probe retry budget and falls back definitively to `ModbusProfile::HomeHub`.
-   - **Hub syncing (`MB_WAIT`):** While register 79 returns `32765` (`MB_WAIT`, hub syncing/booting), the probe is skipped and does not consume the retry budget.
-5. **Sticky profile across reconnects:** While connected to the same target endpoint (`host:port:unit_id`), an affirmatively detected profile (`HomeHub` or `Altherma4`) is remembered in RAM across TCP reconnects to avoid repetitive probe churn. Non-affirmative exhaustion fallback defaults to `HomeHub` for the active connection to prevent reconnect churn, but is not sticky across target changes. Only changing the target host, port, or unit ID resets the probe tracker state to `Auto` to re-probe cleanly.
+   - **Transport failure branch:** If a probe request encounters a transport error (timeout, connection closed), the connection is dropped (`link_ok = false`, socket closed) without incrementing `rx_fail`. The profile stays in `Auto` across reconnects until `MODBUS_PROBE_MAX_RETRIES` (3) consecutive probe failures are reached, after which it falls back to `ModbusProfile::HomeHub` (`profile_basis: fallback`). During probe-cycle transport drops, `/values` remains unrefreshed for that cycle (`connected = false`).
+   - **Invalid value branch:** If probe register 79 returns an implausible value (`0` or `> 6.0 bar`), the connection remains open, but after 3 consecutive invalid readings it exhausts the probe retry budget and falls back to `ModbusProfile::HomeHub` (`profile_basis: fallback`).
+   - **Hub syncing (`MB_WAIT`):** While register 79 returns `32765` (`MB_WAIT`, hub syncing/booting), the probe continues to run on every full cycle, but does not consume the retry budget and leaves the profile in `Auto` without counting as a failure.
+5. **Sticky profile across reconnects & periodic back-off:** While connected to the same target endpoint (`host:port:unit_id`), an affirmatively detected profile (`HomeHub` or `Altherma4`, `profile_basis: affirmative`) is remembered in RAM across TCP reconnects to avoid repetitive probe churn. Non-affirmative exhaustion fallback defaults to `HomeHub` for safety, then periodically re-probes with exponential backoff (starting at 10 minutes, doubling up to a 4-hour cap) to accommodate transient startup conditions such as circuit filling or temporary network drops. Changing the target host, port, or unit ID resets all tracker state immediately.
 
 ## How the two sources meet
 

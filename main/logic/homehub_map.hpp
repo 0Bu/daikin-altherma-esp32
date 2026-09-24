@@ -233,7 +233,7 @@ constexpr bool homehub_histories_are_valid() {
 }
 // The two vocabularies share ONE namespace — the browser matches an X10A row to a Modbus row on the
 // concept string alone and cannot tell which table produced it. A state id that collided with a
-// trend id would pair a temperature with a flag: the legacy-35-legacy-39 substitution shape,
+// trend id would pair a temperature with a flag: the legacy-35–legacy-39 substitution shape,
 // arriving through a name rather than a register. Also proves the ids are unique among themselves.
 constexpr bool homehub_state_ids_are_distinct() {
     for (size_t i = 0; i < HOMEHUB_STATE_COUNT; i++) {

@@ -246,21 +246,24 @@ for (const file of publicMarkdown) {
     throw new Error(`${file} links to a numbered private-predecessor work item`);
   }
 }
-const auditedFiles = [
-  ...publicMarkdown,
-  ...execFileSync("git", ["ls-files", "-z", "--", ".agents", ".github/workflows", "main", "tools", "scripts", "test"])
-    .toString("utf8")
-    .split("\0")
-    .filter(Boolean)
-    .filter((file) => !file.startsWith("main/def/") && file !== "test/test_public_readiness_contract.mjs"),
-];
+const auditedFiles = execFileSync("git", ["ls-files", "-z"])
+  .toString("utf8")
+  .split("\0")
+  .filter(Boolean)
+  .filter((file) => !file.startsWith("main/def/") && file !== "test/test_public_readiness_contract.mjs");
+
 for (const file of auditedFiles) {
   if (!fs.existsSync(file)) continue;
   const raw = fs.readFileSync(file);
   if (raw.includes(0)) continue;
   const text = raw.toString("utf8");
-  if (/(?<!\]\()(?<!\w)(?<!&)#\d{1,3}\b/.test(text)) {
-    throw new Error(`${file} contains a bare predecessor #N reference that GitHub would mis-link`);
+  const lines = text.split(/\r?\n/);
+  for (let lineNo = 1; lineNo <= lines.length; lineNo++) {
+    const line = lines[lineNo - 1];
+    if (line.includes("audit-allow-issue-ref")) continue;
+    if (/(?<!\]\()(?<!\w)(?<!&)#\d{1,3}\b/.test(line)) {
+      throw new Error(`${file}:${lineNo} contains a bare predecessor #N reference that GitHub would mis-link`);
+    }
   }
 }
 if (!fs.readFileSync("CONTRIBUTING.md", "utf8").includes("legacy-209")) {

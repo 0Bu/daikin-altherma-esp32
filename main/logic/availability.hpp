@@ -109,7 +109,7 @@ enum class AvailabilityPolicy : uint8_t {
 //
 // The witness is the refrigerant pressure sensor's saturation temperature on the HYDRONIC page,
 // (0x62, 15, conv 405). Two facts about it decide everything below, and BOTH were measured rather
-// than assumed — getting either wrong is the legacy-35-legacy-39 shape with a second sensor in
+// than assumed — getting either wrong is the legacy-35–legacy-39 shape with a second sensor in
 // front of it:
 //
 //   (1) IT IS THE PHE SIDE. Over 1419 mixed-mode running samples its value tracks LEAVING WATER
@@ -254,7 +254,7 @@ inline constexpr PageAbsenceRule PAGE_ABSENCE_RULES[] = {
     // them an exact multiple of 12.8 °C — its raw low byte never leaves 0x00/0x80, which is not how
     // a
     // thermistor read at 0.1 °C resolution behaves. reading_plausible() cannot refuse those: 192 °C
-    // is inside its ±200 °C envelope. That is the legacy-35-legacy-39 shape, and it is what makes
+    // is inside its ±200 °C envelope. That is the legacy-35–legacy-39 shape, and it is what makes
     // this page a
     // defect rather than a tidiness question.
     //

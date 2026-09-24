@@ -4,7 +4,7 @@
 # A checker that has quietly stopped checking is worse than no checker — it converts "the audit is
 # clean" from evidence into a lie, and this gate exists precisely because plausible-but-wrong
 # passes unnoticed. So every defect this gate was built to catch — the four decode bugs that actually
-# shipped on main (issues legacy-35-legacy-38), the mislabelled fan step of legacy-230, and enum-table drift — is
+# shipped on main (issues legacy-35–legacy-38), the mislabelled fan step of legacy-230, and enum-table drift — is
 # re-introduced here, one at a time, into a THROWAWAY COPY. Each must be caught. The working tree is
 # never touched.
 #

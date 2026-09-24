@@ -3,7 +3,7 @@
 // ("pth = flow/60 * 4.186 * dt"), COP and the --flow-hot trend. Getting the wrong row here is not a
 // cosmetic display bug: a setpoint or the post-BUH (R2T) sensor substituted for the pre-BUH (R1T)
 // measurement makes all four derived numbers *plausibly* wrong (issue legacy-121, the failure shape
-// of legacy-35-legacy-39 — no numeric tell, just wrong).
+// of legacy-35–legacy-39 — no numeric tell, just wrong).
 //
 // This header is the host-testable twin of www/js/schematic.js's pickLwtRow(): the SELECTION
 // happens browser-side (there is no firmware caller), but the rule runs against the generated def/

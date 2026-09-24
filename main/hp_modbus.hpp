@@ -34,8 +34,9 @@ struct ModbusStatus {
     bool          enabled   = false; // task active (a configured address is being polled)
     bool          connected = false; // current socket has committed a full cycle and is still live
     bool          discovering = false; // compatibility field; explicit UI search is request-local
-    ModbusProfile profile     = ModbusProfile::Auto; // detected/active Modbus profile
-    std::string   host;                              // configured address ("" = disabled)
+    ModbusProfile      profile       = ModbusProfile::Auto; // detected/active Modbus profile
+    ModbusProfileBasis profile_basis = ModbusProfileBasis::Probing; // basis: probing, affirmative, fallback
+    std::string        host;                                        // configured address ("" = disabled)
     int         port    = 0;
     int         unit_id = 0;
     uint32_t    rx_ok   = 0;           // successful register reads since boot

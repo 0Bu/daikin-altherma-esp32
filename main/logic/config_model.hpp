@@ -46,6 +46,26 @@ inline const char* modbus_profile_name(ModbusProfile p) {
     return "unknown";
 }
 
+// How the active Modbus profile was concluded: in progress probing, affirmative answer,
+// or non-affirmative retry exhaustion fallback.
+enum class ModbusProfileBasis : uint8_t {
+    Probing     = 0,
+    Affirmative = 1,
+    Fallback    = 2,
+};
+
+inline const char* modbus_profile_basis_name(ModbusProfileBasis b) {
+    switch (b) {
+    case ModbusProfileBasis::Probing:
+        return "probing";
+    case ModbusProfileBasis::Affirmative:
+        return "affirmative";
+    case ModbusProfileBasis::Fallback:
+        return "fallback";
+    }
+    return "unknown";
+}
+
 // Fixed poll cadence: the heat pump is queried every second (near-real-time; the MQTT bridge
 // publishes only changes, so a fast poll is cheap). Not runtime-configurable.
 inline constexpr int POLL_INTERVAL_S = 1;

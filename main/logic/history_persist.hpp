@@ -6,7 +6,7 @@
 // not the same shape at all: recording is about one reading at a time, while a restore adopts ~30
 // KB of prior state in one act and every field in it is a claim about a moment that has already
 // passed. Get it wrong and the chart is not empty — it is confidently wrong, which is strictly
-// worse than the blank axis this firmware shipped with (the legacy-35-legacy-39 shape, drawn as a
+// worse than the blank axis this firmware shipped with (the legacy-35–legacy-39 shape, drawn as a
 // day of history).
 //
 // ── Two media, ONE question each ────────────────────────────────────────────────────────────────

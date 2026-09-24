@@ -54,7 +54,7 @@ inline FaultClass fault_class_from_text(const char* text) {
 // both "running, but the unit is complaining", and they are folded into one flag on purpose: a
 // consumer that needs the three-way distinction has the textual class right beside these, and
 // inventing a third boolean for a severity nobody on this install has yet observed would be the
-// kind of guess legacy-35-legacy-39 was made of.
+// kind of guess legacy-35–legacy-39 was made of.
 inline constexpr bool fault_error_active(FaultClass c)   { return c == FaultClass::Error; }
 inline constexpr bool fault_warning_active(FaultClass c) {
     return c == FaultClass::Warning || c == FaultClass::Caution;

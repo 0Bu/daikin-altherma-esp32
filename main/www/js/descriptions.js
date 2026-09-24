@@ -508,7 +508,7 @@ const DESCRIPTIONS = [
   // These 11 rows are the ONLY catalog labels that reached the UI with no explainer — and two of
   // them ("Fin Temp. Drop Control", "Fin Temp. Protection Retry Qty") had something worse: they fell
   // through to the "fin temp" heatsink-TEMPERATURE entry below, so a protection FLAG and a retry
-  // COUNT were both explained as a temperature reading. That is the legacy-35-legacy-39 shape in explainer copy —
+  // COUNT were both explained as a temperature reading. That is the legacy-35–legacy-39 shape in explainer copy —
   // well-formed, plausible, and false — so this section MUST stay ahead of the outdoor/refrigerant
   // and electrical sections that contain the entries it out-ranks (first match wins).
   // One entry per PROTECTION rather than per row: the flag and the counter for the same quantity are

@@ -19,7 +19,7 @@
 # S001 (a hit target that opens nothing) and E002 (a reading drawn on a branch its sensor does not
 # read) are REFUSED here — the audit exits 2 on either. They are the defects this gate exists for:
 # a dead tap target breaks the drawing's whole premise that it is explorable, and a pill on the
-# wrong branch is the legacy-35-legacy-39 wrong-attribution shape drawn in SVG. The fix is the drawing.
+# wrong branch is the legacy-35–legacy-39 wrong-attribution shape drawn in SVG. The fix is the drawing.
 
 # ── ADJUDICATION — the two refrigerant pressures carry no name ON PURPOSE ────────────────────────
 # DESIGN.md §5.3 states the rule this fires on ("a pill's name sub-label is required wherever its

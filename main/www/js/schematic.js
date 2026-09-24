@@ -30,7 +30,7 @@ const OU_HELD_PAGES = [0x20, 0x21];
 const rowHeldOver = (r, d) => !!(d && d.ouHeldOver && r && OU_HELD_PAGES.includes(r.reg));
 
 // Leaving-water MEASUREMENT for ΔT / heat output / COP — NOT a plain vNum, because a measurement
-// regex that can also match a setpoint row poisons all three (issue legacy-121, the legacy-35-39 failure
+// regex that can also match a setpoint row poisons all three (issue legacy-121, the legacy-35–legacy-39 failure
 // shape). Host-tested twin: main/logic/lwt_select.hpp + test/test_logic.cpp test_lwt_select() —
 // keep the token lists below byte-for-byte in sync (lowercase substring, no regex).
 //   Tier 1 = the pre-BUH heat-exchanger outlet (R1T) under any label form — "before BUH (R1T)",
@@ -321,7 +321,7 @@ function liveData() {
   // then stepped to 25.5 at the instant the compressor started, while the hydronic pages decayed
   // smoothly throughout. Those readings must therefore not be drawn as current — DESIGN.md's
   // dead-bus rule ("an idle plant with no readings, not a stale one"), applied to one sleeping unit.
-  // A held-over 19.0 °C is exactly the legacy-35-legacy-39 shape: well-formed, plausible, and false — and it is
+  // A held-over 19.0 °C is exactly the legacy-35–legacy-39 shape: well-formed, plausible, and false — and it is
   // what made an idle plant look like a running one next to a "not running" headline.
   // UNKNOWN rps (a profile with no such row) reads as CURRENT, never as held over: that is absence
   // of evidence, and blanking on a guess would cost a reading that may well be live.
@@ -374,7 +374,7 @@ function liveData() {
   // the catalog carries it, only about half carry CT clamps, and an idle plant reads ct == 0, so the
   // ungated fallback fired on the majority of installs almost all of the time. It drew last run's
   // amps as a live kW figure right beside the "not running" headline: plausible, well-formed, false
-  // — the legacy-35-legacy-39 shape, and the same reason d.circP already gates. Asserted against the whole
+  // — the legacy-35–legacy-39 shape, and the same reason d.circP already gates. Asserted against the whole
   // catalog by logic/ou_stale.hpp's test (which page each of these two rows lives on).
   const invLive = !d.ouHeldOver && inv != null;
   const ctLive  = ctComplete && ct > 0;
@@ -457,7 +457,7 @@ function liveData() {
     // measured consumption at input 51 and the two power-LIMIT setpoints at holding 57/58 — so a
     // first-match on the unit promoted a configured ceiling to the plant's measured draw the moment
     // 51 was unavailable or answered a sentinel. A limit is a number the installer typed; drawing it
-    // as a measurement is the legacy-35-legacy-39 shape wearing a plausible value, and the Modbus card would go
+    // as a measurement is the legacy-35–legacy-39 shape wearing a plausible value, and the Modbus card would go
     // on labelling it correctly one card below.
     const pw = mbPower();
     if (pw) { const n = parseFloat(pw.value);

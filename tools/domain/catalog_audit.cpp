@@ -634,7 +634,7 @@ void check_consensus(const std::vector<Row>& rows, std::vector<Finding>& out) {
 // NEIGHBOURING byte "Fan 2 (step)". Two fans on one outdoor unit are not measured in different
 // quantities by the same converter, so at most one spelling is true; the false one publishes
 // `actuators_fan_1_10_rpm`, where a reader takes a 30 for 300 rpm rather than step 30. That is the
-// legacy-35-legacy-39 shape (well-formed, spec-conformant byte layout, audit-clean, and false)
+// legacy-35–legacy-39 shape (well-formed, spec-conformant byte layout, audit-clean, and false)
 // carried by a label instead of a converter.
 //
 // No other check here can see it. SPEC-CONV matches BY label, so a divergent label simply misses

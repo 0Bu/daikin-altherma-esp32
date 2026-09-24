@@ -243,7 +243,7 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation) {
     // to 1 s and then restarting the clock from `now` discards that fraction on every cycle, and it
     // never comes back. Measured against a 1.3 s cadence that is 23% slow FOREVER — a state held
     // for three hours would have been published as "2 h 19 min", a wrong number with no tell on it
-    // and the exact shape (legacy-35-legacy-39) this feature's own honesty rules exist to prevent.
+    // and the exact shape (legacy-35–legacy-39) this feature's own honesty rules exist to prevent.
     // Quantising the absolute instants telescopes the remainder into the next cycle instead,
     // bounding the total error at under one second for the whole run rather than compounding it per
     // cycle.

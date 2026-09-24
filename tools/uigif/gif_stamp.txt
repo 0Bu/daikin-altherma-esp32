@@ -9,10 +9,10 @@
 # is to RE-RECORD (that is what the stamp is for), never to edit this file — and the writer
 # refuses a stamp whose ui moved while gif stayed identical, because that is what re-stamping an
 # old recording looks like from here.
-ui=bd6af39c47a73ad4157fc1176b590c20faf3bde6cdb29d79bc989152d33db847
+ui=5256bc836e8a62fcbfb72ecc8801555e01451e972dd94e0219b2e6ef3a71a55d
 part.schematic_markup=e5e877a0ae000eee38e37fcc29111e62830a3688cbccbbec2e8d07f15c220ae3
 part.schematic_css=307479fca3342bbd6f1c5a2199b6086181566b875a7f96e0b4f10870c38593af
-part.painting_code=57e4ab79da9e9d4717f88212df4edc384c3c2fd83cf4c9f340f48942eddc870a
+part.painting_code=1a26eb9d78e45c4377ce390bb4131df98d4aed642b2621d5824fccd6adbd64af
 part.drawing_strings=9426d060f37e1b83838020b51b38e6d581adafaf4947fb09fe7bfb78b66080a1
 part.scenes=94fcd04bc49aad9a85234fea94a44b5e3547fd1a20c5bad6270928de93fe275b
 part.framing=467960462503a34f0a64760f4d90b756a7130bf097ae659b045cf2b37598fec8

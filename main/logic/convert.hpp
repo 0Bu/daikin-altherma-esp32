@@ -489,7 +489,7 @@ inline bool is_refrigerant_pressure(const ValueDef& def, const ValueDef* profile
 // "High Pressure" and "Low Pressure" (0x20/12+14)
 // read exactly 0.0 bar both at rest AND with the compressor at 42 rps, while the always-live
 // 0x62/15 refrigerant sensor read a correct 15.3 bar. Publishing that 0.0 as a measurement is the
-// legacy-35-legacy-39 shape — a well-formed, plausible-looking, physically false value — and it
+// legacy-35–legacy-39 shape — a well-formed, plausible-looking, physically false value — and it
 // reached Home Assistant as a real pressure. Their conv-405 companions were dropped by case 405
 // (kgf/cm²G <= 0 leaves r.ok false; press2temp(0) ≈ -51 °C would pass the °C envelope), so this
 // makes pressure agree with the temperature the same row declines to publish. Water pressure is

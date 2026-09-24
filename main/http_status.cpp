@@ -1135,6 +1135,8 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ",\"searched\":";             j += c.mb_discovery_done ? "true" : "false";
     j += ",\"profile\":";
     j += jstr(modbus_profile_name(mb.profile));
+    j += ",\"profile_basis\":";
+    j += jstr(modbus_profile_basis_name(mb.profile_basis));
     // The ADDRESS comes from the CONFIG, the STATE from the live link.
     // Reading the address off the link status was wrong before the first connect ever succeeded:
     // ModbusStatus is zero-initialised, so a device that had never dialled reported port 0 and unit
@@ -2206,7 +2208,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += std::to_string(logic::HISTORY_DT_S);
     // The ROW's unit, never a hardcoded "°C": the trends mix °C, bar and unitless rows, and the
     // browser prints this string straight into the range readout and the crosshair. A bar row
-    // labelled °C is exactly the legacy-35-legacy-39 shape.
+    // labelled °C is exactly the legacy-35–legacy-39 shape.
     j += ",\"unit\":";
     j += jstr(unit);
     const TimeStatus ts = time_status();

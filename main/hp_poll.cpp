@@ -951,7 +951,7 @@ void hp_poll_start() {
 
 // The MAXIMUM number of rows THIS cache can hold, so /values and the MQTT bridge size their
 // snapshot buffers correctly. Under-sizing silently TRUNCATES rows out of a snapshot — the
-// legacy-35-legacy-39 absent-value shape. The HomeHub is a separate stack with its own
+// legacy-35–legacy-39 absent-value shape. The HomeHub is a separate stack with its own
 // mb_values_capacity().
 size_t hp_values_capacity(uint32_t* revision_out) {
     if (!s_mtx) {

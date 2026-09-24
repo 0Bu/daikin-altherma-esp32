@@ -41,13 +41,13 @@
 // not a rate. Three of the four contradict themselves inside their own table, calling the
 // neighbouring byte "Fan 2 (step)". So "(10 rpm)" asserts a rate for a field the spec defines as a
 // step, and actuators_fan_1_10_rpm invites a reader to take a 30 for 300 rpm rather than step 30 —
-// the legacy-35-legacy-39 shape (well-formed, spec-conformant byte layout, audit-clean under
+// the legacy-35–legacy-39 shape (well-formed, spec-conformant byte layout, audit-clean under
 // everything except the label) carried by an identifier. The fix belongs in gen_profiles.py; until
 // it lands there, this override makes every unit publish the spec-correct actuators_fan_1_step.
 //
 // WHY NOT A NEW LABEL — "Fan 1 (step)" is not invented here; it is the spec's own name and the one
 // the other 22 profiles already carry, so the four simply join them. The defect is the
-// legacy-35-legacy-39 shape exactly: a wrong identifier word on a right row.
+// legacy-35–legacy-39 shape exactly: a wrong identifier word on a right row.
 //
 // SCOPE — keyed on (reg, offset, conv) AND the wrong `from` label (like conv_override keys on the
 // `from` converter), so it corrects EXACTLY the four wrong rows and is a no-op on the 22 that are

@@ -829,7 +829,7 @@ static void test_convert() {
     // ambient at all.
     //
     // conv 114 itself is NOT touched: it is a correct ×0.1 converter and three other rows use it.
-    // This is the legacy-35-legacy-39 shape — a wrong converter ID on a right register — not a
+    // This is the legacy-35–legacy-39 shape — a wrong converter ID on a right register — not a
     // wrong converter.
     const uint8_t evap1996[] = {0xCC, 0x07}; // LE 0x07CC = 1996 -> 199.6 °C, MEASURED
     const uint8_t evap1459[] = {0xB3, 0x05}; // LE 0x05B3 = 1459 -> 145.9 °C, MEASURED (run min)
@@ -881,7 +881,7 @@ static void test_convert() {
     // path, not a reading. Measured on a live 4-8 kW unit,
     // High/Low Pressure (0x20/12+14) read exactly 0.0 bar both at rest and at 42 rps, while the
     // 0x62/15 refrigerant sensor read a correct 15.3 bar — so the 0.0 reached HA as a real pressure
-    // (legacy-35-legacy-39 shape). WATER pressure must keep publishing 0 bar: a drained system
+    // (legacy-35–legacy-39 shape). WATER pressure must keep publishing 0 bar: a drained system
     // genuinely reads it. The refrigerant/water split is taken from the CATALOG — a conv-405
     // saturation-temperature companion at the same (reg, offset) — never from the label, which an
     // alias could flip.
@@ -2040,7 +2040,7 @@ static void test_refrigerant_pressure_catalog() {
 // over three days, it was ON 128/119/91 minutes per day and NOT ONE of those minutes had the 3-way
 // valve pointing at space heating — every one was a DHW charge, drawn as a room demanding heat
 // while the room sat exactly on its setpoint. A physically true reading attributed to the wrong
-// component: the legacy-35-legacy-39 shape, which no converter, unit or spec check can catch
+// component: the legacy-35–legacy-39 shape, which no converter, unit or spec check can catch
 // because nothing about the VALUE is wrong. The branch's own request is "Space heating Operation
 // ON/OFF" (0x62/2 bit 3), and that is what the pill draws now.
 //
@@ -5389,7 +5389,7 @@ static void test_homehub() {
     CHECK(homehub_decode(*t, 3550, v) && approx(v.value, 35.5));
     CHECK(homehub_format(*t, 3550, buf, sizeof(buf)) && std::string(buf) == "35.5");
     // A negative temperature keeps its sign — the exact class of bug the X10A port shipped
-    // (legacy-35-legacy-39).
+    // (legacy-35–legacy-39).
     CHECK(homehub_format(*t, static_cast<uint16_t>(-500), buf, sizeof(buf)) &&
           std::string(buf) == "-5.0");
     // Flow is a plain Int16 carrying L/min x100, so the `scale` field divides the decode by 100.
@@ -6174,6 +6174,100 @@ static void test_modbus_profile() {
         CHECK(!d.is_affirmative);
         CHECK(d.next_profile == ModbusProfile::HomeHub);
         CHECK(tracker.on_socket_open("192.0.2.52", 502, 1) == ModbusProfile::HomeHub);
+        CHECK(tracker.profile_basis == ModbusProfileBasis::Fallback);
+
+        // ── N22: Exponential backoff & re-probing ──
+        ModbusProbeTracker bo_tracker;
+        uint32_t t_now = 1000;
+        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now) == ModbusProfile::Auto);
+        CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Probing);
+        CHECK(bo_tracker.should_probe(t_now));
+
+        // Exhaustion 1 (3 timeouts) at t=1000:
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        auto bo_d = bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_d.is_definitive);
+        CHECK(!bo_d.is_affirmative);
+        CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Fallback);
+        CHECK(bo_tracker.exhaustion_count == 1);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 600); // 10 minutes
+
+        // During backoff (t=1000 + 300s):
+        CHECK(!bo_tracker.should_probe(t_now + 300));
+        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now + 300) == ModbusProfile::HomeHub);
+        CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Fallback);
+
+        // When backoff elapses (t=1000 + 600s):
+        t_now += 600;
+        CHECK(bo_tracker.should_probe(t_now));
+        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now) == ModbusProfile::Auto);
+        CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Probing);
+
+        // Exhaustion 2: backoff doubles to 1200s (20 min)
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 2);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 1200);
+
+        // Advance to next window (1200s later)
+        t_now += 1200;
+        CHECK(bo_tracker.should_probe(t_now));
+
+        // Exhaustion 3 -> 2400s
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 3);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 2400);
+
+        // Exhaustion 4 -> 4800s
+        t_now += 2400;
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 4);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 4800);
+
+        // Exhaustion 5 -> 9600s
+        t_now += 4800;
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 5);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 9600);
+
+        // Exhaustion 6 -> 14400s (capped at 4 hours)
+        t_now += 9600;
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 6);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 14400);
+
+        // Exhaustion 7 -> still capped at 14400s
+        t_now += 14400;
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 7);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 14400);
+
+        // Successful re-probe during re-probing window upgrades to Altherma 4
+        t_now += 14400;
+        CHECK(bo_tracker.should_probe(t_now));
+        auto up_d = bo_tracker.evaluate_probe(MbFailureType::None, 0, 79, 185, t_now);
+        CHECK(up_d.is_definitive);
+        CHECK(up_d.is_affirmative);
+        CHECK(up_d.next_profile == ModbusProfile::Altherma4);
+        CHECK(bo_tracker.active_profile == ModbusProfile::Altherma4);
+        CHECK(bo_tracker.affirmative_profile == ModbusProfile::Altherma4);
+        CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Affirmative);
+        CHECK(bo_tracker.exhaustion_count == 0);
+        CHECK(!bo_tracker.should_probe(t_now + 100)); // once affirmative, should_probe is false
+        auto d_aff = bo_tracker.evaluate_probe(MbFailureType::None, 0, 79, 185, t_now);
+        CHECK(d_aff.next_profile == ModbusProfile::Altherma4);
     }
 }
 
@@ -7874,7 +7968,7 @@ static void test_redact() {
     // line per detect pass) and where a wrong value is PROVEN — issue legacy-194 is that argument
     // in full. A future rule with a loose marker ("detect: ", or a bare "0x") would clip those
     // bytes, and the only symptom would be a witness that quietly stopped being evidence: the
-    // legacy-35-legacy-39 shape aimed at the very tool built to catch it. So the privacy rule is
+    // legacy-35–legacy-39 shape aimed at the very tool built to catch it. So the privacy rule is
     // pinned against the diagnostic one.
     for (const char* w : {
              "[  123.456] detect: raw 0x10 32B 00 1E 32 00 07 CF 00 00 12 34 AB CD EF 01 02 03",
@@ -10389,7 +10483,7 @@ static void test_ou_stale() {
             // browser's d.pel used the INV row as an unconditional fallback whenever the CT sum
             // read 0 — which is exactly what an idle plant reads — so a stopped unit drew a
             // plausible kW figure out of its last run, beside a "not running" headline. Same shape
-            // as legacy-35-legacy-39, no numeric tell.
+            // as legacy-35–legacy-39, no numeric tell.
             if (logic::lwt_ci_contains(l, "inv primary current")) {
                 CHECK(ou_page_holds_over(reg)); // held over -> the browser must gate on ouHeldOver
                 inv_rows++;
@@ -10631,7 +10725,7 @@ static void test_history() {
     }
     // The second collision is INSIDE one byte window: 0x20/12 carries "High Pressure" (bar) and
     // "High Pressure(T)" (its saturation temperature, °C). Only the unit tells them apart, which is
-    // why it is half the locator — a bar chart drawing °C is the legacy-35-legacy-39 shape with a
+    // why it is half the locator — a bar chart drawing °C is the legacy-35–legacy-39 shape with a
     // history in front of it. (Neither 0x20 pressure is trended today; the rule is what is
     // asserted.)
     {
@@ -10869,7 +10963,7 @@ static void test_history() {
         // Must not collide with the absence sentinels, which sit at the very bottom of int16:
         // -32768 is NO_READING and -32767 is HELD_OVER, so -3276.6 is the first real reading below
         // them. (These are also the ±3276.x "no data" sentinels the X10A units themselves emit —
-        // issue legacy-35-legacy-39 — which reading_plausible() already refuses upstream; this is
+        // issue legacy-35–legacy-39 — which reading_plausible() already refuses upstream; this is
         // the belt.)
         CHECK(!history_parse_tenths("-3276.8", v)); // == HISTORY_NO_READING
         CHECK(!history_parse_tenths("-3276.7", v)); // == HISTORY_HELD_OVER
@@ -14034,7 +14128,7 @@ static void test_profile_view() {
     // def/overlay.hpp is deleted. Neither is an error anywhere downstream, which is the whole
     // problem: the old series simply stops receiving samples and a new one starts at zero, and a
     // counter that resets to zero is exactly what UC5 is watching for. A rename would therefore not
-    // read as a rename — it would read as the plant going quiet. The legacy-35-legacy-39 shape, one
+    // read as a rename — it would read as the plant going quiet. The legacy-35–legacy-39 shape, one
     // layer out from the device.
     //
     // The expected strings are TRANSCRIBED FROM THE LIVE STORE, never recomputed from the labels:

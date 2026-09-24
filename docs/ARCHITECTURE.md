@@ -519,7 +519,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   announces one HA discovery config per row, and both `http_status` and `mqtt_ha` size their snapshot
   buffer from the row **count**. Grow the cache without growing the count and the extra values are
   silently truncated out of `/values` and MQTT: an absent-value bug with no error anywhere, the
-  legacy-35–39 shape. Hence one view, not four merges. It carries the **overlay rule** (every page a
+  legacy-35–legacy-39 shape. Hence one view, not four merges. It carries the **overlay rule** (every page a
   supplement block uses must already exist in the generated base), which keeps a hand-written block from
   doing what hand-editing a generated table would do — move detection — or adding a per-cycle bus
   round-trip that, on a model which does not answer the page, reads on `/diag` exactly like a wiring
@@ -678,7 +678,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   measurement?" and answers by withholding, this one asks "is it decoded right?" and answers by
   asserting a **different** value. That is the stronger claim, so the bar is higher: a rule needs
   evidence that is *structural* (a property of the wire integers themselves), never a range that
-  merely looks more plausible, because fitting a scale to make a number look right is how legacy-35–39
+  merely looks more plausible, because fitting a scale to make a number look right is how legacy-35–legacy-39
   shipped. One entry: `Target Evap. Temp.` (`0x10/6`) conv `114` → `109` (`÷128`). All 54 distinct
   integers the row has been observed to carry satisfy `raw == floor(128 × T)` on an exact 0.1 K grid
   — p ≈ 1.6e-60 against any other scale — and the reading becomes 10.4–15.6 °C running / 17.2–19.0 °C
@@ -751,7 +751,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
      the extra field is load-bearing. `3way valve`, `2way valve`, `BSH`, `BUH Step1`, `BUH Step2` and
      `Water pump operation` all sit in **one** dimensionless byte (`0x60/12`) and differ only in which
      bit their converter masks, so a (page, offset, unit) locator would resolve "backup-heater
-     minutes" onto the 3-way valve's position — the legacy-35–39 shape with a day's statistics in front of
+     minutes" onto the 3-way valve's position — the legacy-35–legacy-39 shape with a day's statistics in front of
      it. The catalog test asserts uniqueness **and** identity (the resolved row's label) per locator
      across every shipped profile. Fault classes are matched by converter 203 so both the outdoor and
      hydronic rows participate. Retry counters are **not** matched by converter alone: converter 311
@@ -3341,11 +3341,11 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   or {min,mean,max} in the unit named by its key}], omitted until this boot has
                   detected an X10A profile and evaluated the current profile's signal coverage,
                   plus
-                  modbus{enabled,connected,discovering,searched,profile,host,port,unit_id,rx,fails,
+                  modbus{enabled,connected,discovering,searched,profile,profile_basis,host,port,unit_id,rx,fails,
                   values,task_stack_min_free_bytes,plant_gate_known,plant_gate_active
                   [,error,error_code,error_detail,error_register]}
                   — the HomeHub / Altherma 4 Modbus link diagnostics (profile is "auto", "homehub" or
-                  "altherma4"). READ-ONLY: there is no actuator object and no
+                  "altherma4"; profile_basis is "probing", "affirmative", or "fallback"). READ-ONLY: there is no actuator object and no
                   actuation flag — the link is read-only. task_stack_min_free_bytes comes from the
                   one sampler all five watched stacks report through (main/stack_watch.hpp), not
                   from ModbusStatus, so this surface and the MQTT heartbeat cannot answer the same
@@ -3475,7 +3475,7 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   plus `dwell_blind_s` when part of the run went unread. THREE keys rather than one
                   number, because the number alone is not the claim: a consumer that prints `dwell_s`
                   and ignores the other two states something stronger than the device knows, which is
-                  the legacy-35–39 shape drawn as a duration. Neutral P2 overlay flags carry the
+                  the legacy-35–legacy-39 shape drawn as a duration. Neutral P2 overlay flags carry the
                   same raw-bit age without asserting their proprietary semantics; measurements are
                   excluded as before. All three fields are omitted
                   where they do not apply, and an ABSENT `dwell_s` is a
@@ -3523,7 +3523,7 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   from the cached value — never a hardcoded "°C": the default-source trends mix °C,
                   bar, KiB
                   and unitless rows, and the browser prints this string into the range readout and the
-                  crosshair, so a bar row labelled °C would be the legacy-35–39 shape. A catalog test pins
+                  crosshair, so a bar row labelled °C would be the legacy-35–legacy-39 shape. A catalog test pins
                   that each trend resolves to EXACTLY ONE row per profile, of one type code and one
                   width (which is what makes the tenths exact), across all profiles. Ids — the
                   authoritative list is logic/history.hpp's TRENDS, which is what a request takes:

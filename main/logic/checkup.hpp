@@ -42,7 +42,7 @@
 // dimensionless. They differ only in which bit their converter masks (307/306/305/304/303/301/300).
 // A (reg, offset, unit) locator resolves to whichever of the seven sorts first, so the "backup
 // heater ran 40 minutes" figure would in fact be the 2-way valve's position. That is the
-// legacy-35-legacy-39 shape with a day's statistics in front of it.
+// legacy-35–legacy-39 shape with a day's statistics in front of it.
 //
 // The converter is therefore half the locator — the same structural key logic/availability.hpp and
 // logic/conv_override.hpp already use, and for the same reason. The catalog test asserts that each

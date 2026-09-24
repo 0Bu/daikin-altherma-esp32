@@ -120,19 +120,26 @@ inline ModbusProfileDecision evaluate_probe_result(ModbusProfile current_profile
     return {current_profile, false, true, false, false};
 }
 
+inline constexpr uint32_t MODBUS_PROBE_INITIAL_BACKOFF_S = 600;    // 10 minutes
+inline constexpr uint32_t MODBUS_PROBE_MAX_BACKOFF_S     = 14400;  // 4 hours
+
 // Pure state tracker for Modbus probe attempts across sessions and reconnects.
-// Bookkeeps target endpoint, consecutive probe failures, active profile and affirmative resolution.
+// Bookkeeps target endpoint, consecutive probe failures, active profile, affirmative resolution,
+// and exponential back-off re-probing after retry exhaustion.
 struct ModbusProbeTracker {
-    std::string   target_host;
-    int           target_port          = 0;
-    int           target_unit          = 0;
-    ModbusProfile active_profile       = ModbusProfile::Auto;
-    ModbusProfile affirmative_profile  = ModbusProfile::Auto;
-    int           consecutive_failures = 0;
+    std::string        target_host;
+    int                target_port          = 0;
+    int                target_unit          = 0;
+    ModbusProfile      active_profile       = ModbusProfile::Auto;
+    ModbusProfile      affirmative_profile  = ModbusProfile::Auto;
+    ModbusProfileBasis profile_basis        = ModbusProfileBasis::Probing;
+    int                consecutive_failures = 0;
+    int                exhaustion_count     = 0;
+    uint32_t           next_reprobe_time_s  = 0;
 
     // Called when a socket opens to (host, port, unit).
-    // Returns the profile to activate for this session.
-    ModbusProfile on_socket_open(const std::string& host, int port, int unit) {
+    // now_s: monotonic seconds since boot.
+    ModbusProfile on_socket_open(const std::string& host, int port, int unit, uint32_t now_s = 0) {
         if (host != target_host || port != target_port || unit != target_unit) {
             // Target changed: reset all probe state.
             target_host          = host;
@@ -140,27 +147,50 @@ struct ModbusProbeTracker {
             target_unit          = unit;
             active_profile       = ModbusProfile::Auto;
             affirmative_profile  = ModbusProfile::Auto;
+            profile_basis        = ModbusProfileBasis::Probing;
             consecutive_failures = 0;
+            exhaustion_count     = 0;
+            next_reprobe_time_s  = 0;
             return ModbusProfile::Auto;
         }
-        // Same target: if we have an affirmative resolution, use it.
+        // Same target: if we have an affirmative resolution, use it permanently.
         if (affirmative_profile != ModbusProfile::Auto) {
             active_profile = affirmative_profile;
+            profile_basis  = ModbusProfileBasis::Affirmative;
             return affirmative_profile;
         }
-        // If retries were exhausted on this target, stay on HomeHub fallback
-        // so we don't reconnect-loop, but affirmative_profile remains Auto.
-        if (consecutive_failures >= MODBUS_PROBE_MAX_RETRIES) {
-            active_profile = ModbusProfile::HomeHub;
-            return ModbusProfile::HomeHub;
+        // If in backoff period after retry exhaustion:
+        if (next_reprobe_time_s > 0) {
+            if (now_s < next_reprobe_time_s) {
+                active_profile = ModbusProfile::HomeHub;
+                profile_basis  = ModbusProfileBasis::Fallback;
+                return ModbusProfile::HomeHub;
+            }
+            // Backoff elapsed: probe again.
+            next_reprobe_time_s  = 0;
+            consecutive_failures = 0;
         }
         active_profile = ModbusProfile::Auto;
+        profile_basis  = ModbusProfileBasis::Probing;
         return ModbusProfile::Auto;
     }
 
+    // Whether the caller should perform an extended register probe during the cycle.
+    bool should_probe(uint32_t now_s = 0) const {
+        if (affirmative_profile != ModbusProfile::Auto) {
+            return false;
+        }
+        if (next_reprobe_time_s > 0 && now_s < next_reprobe_time_s) {
+            return false;
+        }
+        return true;
+    }
+
     // Evaluate a probe attempt and update tracker state.
+    // now_s: monotonic seconds since boot (used to calculate backoff if exhausted).
     ModbusProfileDecision evaluate_probe(MbFailureType failure_type, int failure_detail,
-                                         uint16_t reg, uint16_t raw_value = 0) {
+                                         uint16_t reg, uint16_t raw_value = 0,
+                                         uint32_t now_s = 0) {
         int failures_for_eval = consecutive_failures;
         if (failure_type == MbFailureType::None && raw_value == MB_WAIT) {
             // Hub is syncing: do not count against retry budget.
@@ -179,15 +209,32 @@ struct ModbusProbeTracker {
             }
         }
 
+        const ModbusProfile eval_profile =
+            (affirmative_profile == ModbusProfile::Auto) ? ModbusProfile::Auto : active_profile;
         ModbusProfileDecision dec = evaluate_probe_result(
-            active_profile, failure_type, failure_detail, reg, raw_value, failures_for_eval);
+            eval_profile, failure_type, failure_detail, reg, raw_value, failures_for_eval);
 
         if (dec.is_definitive) {
             active_profile = dec.next_profile;
             if (dec.is_affirmative) {
                 affirmative_profile  = dec.next_profile;
+                profile_basis        = ModbusProfileBasis::Affirmative;
+                consecutive_failures = 0;
+                exhaustion_count     = 0;
+                next_reprobe_time_s  = 0;
+            } else {
+                profile_basis = ModbusProfileBasis::Fallback;
+                const uint32_t shift = std::min(exhaustion_count, 6);
+                uint32_t delay_s = MODBUS_PROBE_INITIAL_BACKOFF_S << shift;
+                if (delay_s > MODBUS_PROBE_MAX_BACKOFF_S) {
+                    delay_s = MODBUS_PROBE_MAX_BACKOFF_S;
+                }
+                next_reprobe_time_s  = now_s + delay_s;
+                exhaustion_count++;
                 consecutive_failures = 0;
             }
+        } else {
+            profile_basis = ModbusProfileBasis::Probing;
         }
         return dec;
     }

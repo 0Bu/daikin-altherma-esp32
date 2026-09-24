@@ -166,7 +166,7 @@ void history_service_flash_restore();
 
 // The row's OWN unit ("°C", "bar", "A", … — whatever `unit_for_row` gave the cached value), or
 // empty when the profile carries no such row. Reported rather than assumed: the trends mix °C, bar
-// and unitless rows, and a pressure charted as °C is the legacy-35-legacy-39 failure shape — a
+// and unitless rows, and a pressure charted as °C is the legacy-35–legacy-39 failure shape — a
 // plausible, well-formed, wrongly-labelled value.
 size_t history_unit(size_t t, char* out, size_t max);
 

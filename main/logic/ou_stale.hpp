@@ -10,7 +10,7 @@
 // 53.4 → 52.2 → 51.2 → 50.1 → 49.2 °C, refrigerant pressure resampling every cycle — so this is the
 // outdoor unit going quiet, not the poll engine stalling.
 //
-// It is the legacy-35-legacy-39 failure shape with no numeric tell: 19.0 °C IS a plausible outdoor
+// It is the legacy-35–legacy-39 failure shape with no numeric tell: 19.0 °C IS a plausible outdoor
 // temperature, so hp_convert.cpp's reading_plausible() cannot see it, and neither can the domain
 // audit. Only the PAGE a reading came from, plus the compressor state, can. DESIGN.md already
 // decides what to do with a held-over reading in the dead-bus case — "an idle plant with no

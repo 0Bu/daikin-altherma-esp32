@@ -219,8 +219,8 @@
         "taken": 53
       },
       "main/logic/modbus_profile.hpp": {
-        "outcomes": 74,
-        "taken": 74
+        "outcomes": 86,
+        "taken": 86
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 8,

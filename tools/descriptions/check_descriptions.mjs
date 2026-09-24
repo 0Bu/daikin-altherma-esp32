@@ -10,7 +10,7 @@
 // That is how the page-0x10 protection block shipped: `def/overlay.hpp` added 11 rows and 9 of them
 // reached the UI with no explainer at all, while the other two matched the "fin temp" HEATSINK-
 // TEMPERATURE entry and were confidently explained as a temperature reading — a protection flag and
-// a retry counter described as °C. The legacy-35-legacy-39 shape, one layer up: well-formed, plausible, false.
+// a retry counter described as °C. The legacy-35–legacy-39 shape, one layer up: well-formed, plausible, false.
 //
 // The catalog is machine-generated and grows without touching this repo's JS, so the gap re-opens
 // every time the generator emits a label the copy has never seen. This audit closes the loop by

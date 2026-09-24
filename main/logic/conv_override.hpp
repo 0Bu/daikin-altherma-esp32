@@ -20,7 +20,7 @@
 // value, it asserts a different one — so the evidentiary bar is correspondingly higher: a rule
 // needs evidence that is STRUCTURAL (a property of the wire integers themselves), not merely a
 // physical range that looks nicer. Fitting a scale to make a number plausible is exactly how
-// legacy-35-legacy-39 shipped.
+// legacy-35–legacy-39 shipped.
 //
 // ── The one entry: Target Evap. Temp. (0x10/6), conv 114 -> conv 109 ─────────────────────────────
 //
@@ -64,7 +64,7 @@
 // WHY conv 109 AND NOT A NEW CONVERTER — 109 already exists in logic/convert.hpp as
 // `read_s16(LE) / 256.0 * 2.0`, i.e. exactly /128, and display_decimals() already gives it one
 // decimal. Nothing in the decode path is invented here; this row was simply pointed at 114. The
-// defect is therefore the legacy-35-legacy-39 shape exactly — a wrong converter ID on a right
+// defect is therefore the legacy-35–legacy-39 shape exactly — a wrong converter ID on a right
 // register — and not, as legacy-194 feared it might be, a wrong converter IMPLEMENTATION whose
 // correction would move every conv-114 row in the catalog. conv 114 keeps its x0.1 semantics
 // untouched.

@@ -242,17 +242,19 @@ static bool status_socket_open(std::string host, int port, int unit,
     // implement) is a property of the peer we may have just stopped talking to.
     s_cycle_tick = 0;
     for (bool& split : s_batch_split) split = false;
-    const ModbusProfile prof = s_probe_tracker.on_socket_open(host, port, unit);
+    const uint32_t now_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
+    const ModbusProfile prof = s_probe_tracker.on_socket_open(host, port, unit, now_s);
     s_active_profile.store(prof, std::memory_order_release);
     Lock lk(s_mtx);
     if (s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
         return false;
     s_status.host.swap(host);
-    s_status.port        = port;
-    s_status.unit_id     = unit;
-    s_status.connected   = false;
-    s_status.discovering = false;
-    s_status.profile     = prof;
+    s_status.port          = port;
+    s_status.unit_id       = unit;
+    s_status.connected     = false;
+    s_status.discovering   = false;
+    s_status.profile       = prof;
+    s_status.profile_basis = s_probe_tracker.profile_basis;
     if (++s_link_generation == 0) ++s_link_generation;  // zero stays the "no session" sentinel
     return true;
 }
@@ -1038,9 +1040,11 @@ static void mb_poll_once() {
         }
     }
 
-    // Extended capability probe: when running in Auto, probe a single extended register
-    // (MODBUS_PROBE_REGISTER = 79, Water pressure) at the end of each full cycle.
-    if (full && cur_prof == ModbusProfile::Auto && !link_broken && s_sock >= 0) {
+    // Extended capability probe: when running in Auto or when periodic backoff has elapsed,
+    // probe a single extended register (MODBUS_PROBE_REGISTER = 79, Water pressure) at the end of each full cycle.
+    const uint32_t now_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
+    const bool can_probe = (cur_prof == ModbusProfile::Auto) || s_probe_tracker.should_probe(now_s);
+    if (full && can_probe && !link_broken && s_sock >= 0) {
         uint16_t probe_pdu = 0;
         if (mb_pdu_address(logic::MODBUS_PROBE_REGISTER, probe_pdu)) {
             MbFailure probe_failure;
@@ -1048,7 +1052,7 @@ static void mb_poll_once() {
                 uint16_t raw = 0;
                 if (mb_reg_at(io.resp, 0, raw)) {
                     auto decision = s_probe_tracker.evaluate_probe(
-                        logic::MbFailureType::None, 0, logic::MODBUS_PROBE_REGISTER, raw);
+                        logic::MbFailureType::None, 0, logic::MODBUS_PROBE_REGISTER, raw, now_s);
                     if (decision.is_definitive) {
                         s_active_profile.store(decision.next_profile, std::memory_order_release);
                         if (decision.next_profile == ModbusProfile::Altherma4) {
@@ -1071,7 +1075,7 @@ static void mb_poll_once() {
             } else {
                 probe_failure.reg = logic::MODBUS_PROBE_REGISTER;
                 auto decision     = s_probe_tracker.evaluate_probe(
-                    probe_failure.type, probe_failure.detail, logic::MODBUS_PROBE_REGISTER, 0);
+                    probe_failure.type, probe_failure.detail, logic::MODBUS_PROBE_REGISTER, 0, now_s);
                 if (decision.is_definitive) {
                     s_active_profile.store(decision.next_profile, std::memory_order_release);
                     for (bool& split : s_batch_split) split = false;
@@ -1137,6 +1141,7 @@ static void mb_poll_once() {
             if (!final_current_session) s_status.values = 0;
             s_status.connected = final_current_session;
             s_status.profile             = s_active_profile.load(std::memory_order_relaxed);
+            s_status.profile_basis       = s_probe_tracker.profile_basis;
             s_status.plant_gate_known = final_current_session && plant_gate_known;
             s_status.plant_gate_active = final_current_session && plant_gate_active;
             s_status.heating_mode_known = final_current_session && heating_mode_known;
@@ -1198,6 +1203,7 @@ static void mb_poll_once() {
         s_status.values = final_current_session ? committed : 0;
         s_status.connected = final_current_session;
         s_status.profile             = s_active_profile.load(std::memory_order_relaxed);
+        s_status.profile_basis       = s_probe_tracker.profile_basis;
         s_status.plant_gate_known = final_current_session && plant_gate_known;
         s_status.plant_gate_active = final_current_session && plant_gate_active;
         s_status.heating_mode_known = final_current_session && heating_mode_known;

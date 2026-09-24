@@ -124,6 +124,14 @@ try {
     assert.match(`${seeded.stdout}\n${seeded.stderr}`, expected,
       `public-readiness audit rejected ${name} for the wrong reason`);
   }
+  // An explicit per-line audit-allow-issue-ref marker exempts intentional fixtures:
+  fs.writeFileSync(codeFile, `// Test fixture (#123) # audit-allow-issue-ref\n${originalCode}`);
+  const allowResult = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
+    cwd: seededRoot,
+    env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
+    encoding: "utf8",
+  });
+  assert.equal(allowResult.status, 0, `public-readiness audit must accept lines with audit-allow-issue-ref marker\n${allowResult.stdout}\n${allowResult.stderr}`);
   fs.writeFileSync(codeFile, originalCode);
 
   // Canonical project hooks are public repository input and executable after project trust. Keep
