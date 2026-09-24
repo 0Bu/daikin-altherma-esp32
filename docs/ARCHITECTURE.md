@@ -2574,12 +2574,12 @@ Structure:
   heap to pass. Every path now also proves that no pressure worker remains alive after the bounded
   request-completion grace following the shared deadline. The
   headroom path then waits passively for at most 420 seconds until two consecutive status samples show
-  MQTT connected, Weather idle, and 56 KiB aggregate plus 20 KiB contiguous host-visible heap. A natural firmware retry
+  MQTT connected, Weather idle, and 48 KiB aggregate plus 20 KiB contiguous host-visible heap. A natural firmware retry
   may change ordinary Weather state during that wait, but it cannot alter or satisfy the exact failed
   HIL token. Only then does the host issue exactly one different, non-persistent token under a separate
   120-second deadline. That token must complete and commit successfully, MQTT and live X10A must be
   present again, and uptime/counter/heap invariants are checked again; a second headroom refusal or any
-  other failure is terminal. The firmware's aggregate admission floor remains 56 KiB, while its
+  other failure is terminal. The firmware's aggregate admission floor is calibrated to 48 KiB, while its
   contiguous floor is 20 KiB as justified below. This explicitly separates fail-closed behavior under
   artificial host pressure from successful Weather TLS after that pressure has drained. The exact
   token-acceptance path for a refresh that succeeds during pressure remains unchanged. This token-bound
@@ -2720,7 +2720,7 @@ Structure:
   acknowledgements, fixed 8 KiB response and 32-byte error reservation, and URL construction, at
   the last point before `esp_http_client`
   creates TLS state. HTTP and cJSON owners are unwind-safe, so a later parser allocation failure
-  releases the C resources before retry. Below **56 KiB total free / 20 KiB largest
+  releases the C resources before retry. Below **48 KiB total free / 20 KiB largest
   contiguous internal block** it logs the sample, sets `state=waiting, reason=heap_headroom` and
   retries after five minutes — the previous valid forecast stays available. A separate 60-second
   monotonic budget is armed as a socket watchdog after successful open and interrupts both the
@@ -2730,8 +2730,8 @@ Structure:
   floor rejects the measured 15.9 KiB trough while admitting production's repeatable 22 KiB block
   after MQTT quiescence. The previous 24 KiB floor permanently refused a fully populated 129-value
   plant even when 60–61 KiB aggregate heap was free; a provisional 40 KiB floor would be stricter
-  still. The unchanged 56 KiB aggregate floor leaves about 16 KiB outside the measured ~40 KiB
-  transient claim.
+  still. The 48 KiB aggregate floor leaves about 8-12 KiB outside the measured ~35-40 KiB
+  transient claim while accommodating the resting footprint with Modbus TCP and syslog connected.
 - **The X10A publish cycle uses one cache and at most one exact payload allocation** (live-10; the last unbounded
   full-string builder after the MCP streaming fix). The old per-second chain built a fresh ~6 KB
   cache, a fresh ~13 KB grouped snapshot, the JSON string with its doubling realloc ladder and a

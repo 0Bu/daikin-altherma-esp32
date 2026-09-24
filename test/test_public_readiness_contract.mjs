@@ -129,33 +129,32 @@ try {
   // Canonical project hooks are public repository input and executable after project trust. Keep
   // them exact and consolidated: a guard cannot disappear, an arbitrary command cannot replace a
   // reviewed core, and one per-policy hook cannot turn the aggregate gate back into N dispatches.
-  const hooksFile = path.join(seededRoot, ".codex/hooks.json");
+  const hooksFile = path.join(seededRoot, ".agents/hooks.json");
   const originalHooksText = fs.readFileSync(hooksFile, "utf8");
   const hookSeeds = [
     [
       "missing secret and partition guard",
-      (hooks) => { hooks.hooks.PreToolUse.shift(); },
-      /PreToolUse Codex hook dispatch count drifted/,
+      (hooks) => { hooks["safety-guards"].PreToolUse.shift(); },
+      /PreToolUse hook dispatch count drifted/,
     ],
     [
       "unapproved inline hook command",
-      (hooks) => { hooks.hooks.PreToolUse[0].hooks[0].command = "bash -c 'env'"; },
-      /unapproved canonical Codex hook definition/,
+      (hooks) => { hooks["safety-guards"].PreToolUse[0].hooks[0].command = "bash -c 'env'"; },
+      /unapproved canonical hook definition/,
     ],
     [
       "duplicate policy dispatch",
       (hooks) => {
-        hooks.hooks.PreToolUse.push({
-          matcher: "^(?:Bash|exec_command)$",
+        hooks["safety-guards"].PreToolUse.push({
+          matcher: "run_command|Bash",
           hooks: [{
             type: "command",
             command: 'bash "$(git rev-parse --show-toplevel)/tools/agent-hooks/require-pr-gates.sh"',
-            statusMessage: "Duplicate policy evaluation",
             timeout: 600,
           }],
         });
       },
-      /PreToolUse Codex hook dispatch count drifted/,
+      /PreToolUse hook dispatch count drifted/,
     ],
   ];
   for (const [name, mutate, expected] of hookSeeds) {
@@ -173,27 +172,28 @@ try {
   }
   fs.writeFileSync(hooksFile, originalHooksText);
 
-  const configFile = path.join(seededRoot, ".codex/config.toml");
-  const originalConfig = fs.readFileSync(configFile, "utf8");
-  const configSeeds = [
-    ["disabled multi-agent mode", originalConfig.replace("enabled = true", "enabled = false"),
-      /canonical multi-agent settings drifted/],
+  const mcpFile = path.join(seededRoot, ".mcp.json");
+  const originalMcp = fs.readFileSync(mcpFile, "utf8");
+  const mcpSeeds = [
     ["floating canonical MCP dependency",
-      originalConfig.replace("@upstash/context7-mcp@4.0.2", "@upstash/context7-mcp@latest"),
-      /canonical Context7 settings drifted/],
+      originalMcp.replace("@upstash/context7-mcp@4.0.2", "@upstash/context7-mcp@latest"),
+      /floating @latest dependency in \.mcp\.json/],
+    ["unpinned canonical MCP version",
+      originalMcp.replace("@upstash/context7-mcp@4.0.2", "@upstash/context7-mcp"),
+      /context7 must be pinned to one exact npm version/],
   ];
-  for (const [name, text, expected] of configSeeds) {
-    fs.writeFileSync(configFile, text);
+  for (const [name, text, expected] of mcpSeeds) {
+    fs.writeFileSync(mcpFile, text);
     const seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
       cwd: seededRoot,
       env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
       encoding: "utf8",
     });
-    assert.notEqual(seeded.status, 0, `public-readiness audit accepted config mutation: ${name}`);
+    assert.notEqual(seeded.status, 0, `public-readiness audit accepted MCP mutation: ${name}`);
     assert.match(`${seeded.stdout}\n${seeded.stderr}`, expected,
       `public-readiness audit rejected ${name} for the wrong reason`);
   }
-  fs.writeFileSync(configFile, originalConfig);
+  fs.writeFileSync(mcpFile, originalMcp);
 
   const architectureFile = path.join(seededRoot, "docs/ARCHITECTURE.md");
   const originalArchitecture = fs.readFileSync(architectureFile, "utf8");

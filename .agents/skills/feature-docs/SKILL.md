@@ -18,7 +18,7 @@ component inventory, diagnostics, WiFi resilience). It is a project-specific rec
 other projects. It rots silently: a new component gets linked, a `CONFIG_*` gets flipped, a `🔭` stub
 becomes real — and the catalog still describes the old world. This skill closes that gap. It is the
 feature-level companion to [`project-review`](../project-review/SKILL.md) (broad pre-merge drift) and
-[`doc_drift_checker`](../../../.codex/agents/doc-drift-checker.toml) (AGENTS.md ↔ deep-dive docs).
+[`doc_drift_checker`](../../agents/doc-drift-checker.toml) (AGENTS.md ↔ deep-dive docs).
 
 [`docs/ESP_IDF_MATRIX.md`](../../../docs/ESP_IDF_MATRIX.md) is the detailed source-linked ESP-IDF
 inventory. Its mechanical gate covers explicit components, managed dependencies, active defaults,

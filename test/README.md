@@ -300,13 +300,13 @@ contract also pins the post-claim OTA race: only the local Weather attempt is de
 outstanding causal token must be reclaimed after OTA instead of being failed or replaced. A separate
 host-only path retains only an exact completed `waiting/heap_headroom` refusal through the full
 pressure window. It proves every worker stopped and all stress evidence passed before revalidating the
-failed token. It then waits passively for at most 420 seconds for two stable host-visible 56 KiB / 20
+failed token. It then waits passively for at most 420 seconds for two stable host-visible 48 KiB / 20
 KiB samples before issuing exactly one different non-persistent token with a new success baseline and
 a separate 120-second deadline. A natural retry may change ordinary Weather state but not the failed
 HIL token. A second refusal, reused or foreign token, deadline reset, a worker still alive after the
 bounded request-completion grace, missing MQTT/X10A recovery, changed counter or uptime regression
 remains terminal. The
-firmware logic test separately pins the measured 56 KiB aggregate / 20 KiB contiguous admission floor.
+firmware logic test separately pins the measured 48 KiB aggregate / 20 KiB contiguous admission floor.
 Its paired
 `tools/production_ota/selftest.mjs` requires every bench-delivery, release-HIL and
 production-promotion stage-removal mutation to turn that same contract red.
@@ -562,6 +562,6 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 2. Add a `CHECK(...)` in `test_logic.cpp` asserting against a known-good reference (for converters,
    a known-good reference output for the same raw bytes; for CRC, a real captured frame).
 3. `scripts/run-mock-tests.sh` — must pass; run it explicitly before handoff, and CI enforces it.
-   The Codex Stop lifecycle hook repeats it through the same runner-neutral core.
+   The Stop lifecycle hook repeats it through the same runner-neutral core.
 
 See the `$add-logic-test` skill (`.agents/skills/add-logic-test/`).
