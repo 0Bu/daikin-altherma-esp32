@@ -26,30 +26,30 @@ struct CachedValue {
                          // row's IDENTITY — how logic/history.hpp addresses a trended row, since
                          // the catalog's labels neither name one quantity consistently nor name
                          // different quantities differently (see that header). Never displayed.
-    bool        held = false;   // the source PAGE was not refreshed this cycle: the outdoor unit is
-                                // resting and is answering with its last run's numbers
-                                // (logic/ou_stale.hpp). The value is kept — the trend ring needs to
-                                // tell "held over" from "no reading" — but it is not a measurement,
-                                // so the MQTT bridge withholds it (#209 defect 5).
-                                //
-                                // ORDER MATTERS HERE, which is why the one-byte fields are grouped:
-                                // `conv` is 4-byte aligned, so putting it between `off` and `held`
-                                // pads twice and costs 4 bytes MORE per row than putting it last.
-                                // Two snapshot buffers hold one resolved profile as a CONTIGUOUS block
-                                // each (build_values_array on the httpd task, current_x10a_values on the
-                                // publish task), and the binding limit on this board is the largest
-                                // contiguous block — so a field-ordering slip is a real ~460 B of
-                                // extra peak, not a style point.
-    int         conv = 0;       // the row's converter id — the one piece of metadata every consumer
-                                // needs, and the reason none of the DERIVED facts are cached beside
-                                // it: `conv_is_binary(conv)` says whether /values should mark the
-                                // row as a 1/0 flag for the browser, `published_kind(conv)` says
-                                // what JSON type the MQTT bridge must give it, and conv 203 is what
-                                // earns a derived numeric fault companion (logic/fault_state.hpp).
-                                // Re-deriving any of those from the formatted TEXT instead is how a
-                                // field ends up changing type between states (#209 defect 3), and
-                                // caching each as its own flag would grow the struct once per
-                                // question asked.
+    bool held = false; // the source PAGE was not refreshed this cycle: the outdoor unit is
+                       // resting and is answering with its last run's numbers
+                       // (logic/ou_stale.hpp). The value is kept — the trend ring needs to
+                       // tell "held over" from "no reading" — but it is not a measurement,
+                       // so the MQTT bridge withholds it (legacy-209 defect 5).
+                       //
+                       // ORDER MATTERS HERE, which is why the one-byte fields are grouped:
+                       // `conv` is 4-byte aligned, so putting it between `off` and `held`
+                       // pads twice and costs 4 bytes MORE per row than putting it last.
+                       // Two snapshot buffers hold one resolved profile as a CONTIGUOUS block
+                       // each (build_values_array on the httpd task, current_x10a_values on the
+                       // publish task), and the binding limit on this board is the largest
+                       // contiguous block — so a field-ordering slip is a real ~460 B of
+                       // extra peak, not a style point.
+    int conv = 0;      // the row's converter id — the one piece of metadata every consumer
+                       // needs, and the reason none of the DERIVED facts are cached beside
+                       // it: `conv_is_binary(conv)` says whether /values should mark the
+                       // row as a 1/0 flag for the browser, `published_kind(conv)` says
+                       // what JSON type the MQTT bridge must give it, and conv 203 is what
+                       // earns a derived numeric fault companion (logic/fault_state.hpp).
+                       // Re-deriving any of those from the formatted TEXT instead is how a
+                       // field ends up changing type between states (legacy-209 defect 3), and
+                       // caching each as its own flag would grow the struct once per
+                       // question asked.
 };
 
 // Health/status counters for /status.hp.
@@ -124,11 +124,11 @@ logic::RefrigerantServiceSnapshot refrigerant_service_status();
 bool hp_link_connected();
 
 // Poll cycles the task guard DROPPED — a sweep that threw (std::bad_alloc under OTA/TLS heap
-// pressure) and never reached the bus (#380). Deliberately NOT a field of HpStats: every counter in
-// there describes a cycle that RAN, is committed by poll_once() under the stats mutex, and is read
-// by callers asking "how is the bus doing?". These cycles never got that far — folding them in would
-// have the sweep's own commit path report the cycles where no commit happened. Lock-free and
-// allocation-free, because the increment happens inside the OOM catch handler.
+// pressure) and never reached the bus (legacy-380). Deliberately NOT a field of HpStats: every
+// counter in there describes a cycle that RAN, is committed by poll_once() under the stats mutex,
+// and is read by callers asking "how is the bus doing?". These cycles never got that far — folding
+// them in would have the sweep's own commit path report the cycles where no commit happened.
+// Lock-free and allocation-free, because the increment happens inside the OOM catch handler.
 uint32_t hp_skipped_cycles();
 
 // Has the running X10A task observed either OTA or weather's lock-free network-heap quiesce request

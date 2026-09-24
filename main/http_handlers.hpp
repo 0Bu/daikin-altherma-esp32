@@ -48,7 +48,7 @@ void http_register_captive(httpd_handle_t s);  // http_status.cpp — MUST be re
 
 // There is deliberately NO live-push surface here. The dashboard polls /status and /values; the
 // /events WebSocket and its broadcast registry were removed — see docs/ARCHITECTURE.md
-// "Push vs. poll" for the measured case (#238 wedged a stream silently, #241 put the /status
-// builder on the task that owns the X10A UART).
+// "Push vs. poll" for the measured case (legacy-238 wedged a stream silently, legacy-241 put the
+// /status builder on the task that owns the X10A UART).
 
 } // namespace daik

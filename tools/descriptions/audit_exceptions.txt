@@ -20,6 +20,6 @@
 # FORWARD-ARMED — docs/REGISTERS.md §5 register 0x64 offsets 14/15 document "Target delta T
 # heating" / "… cooling" (conv 152, °C), but no generated profile carries either row: `grep -in
 # delta main/def/*.hpp` is empty across all 43 tables. That is the SAME generator narrowness that
-# left the page-0x10 protection words undecoded until def/overlay.hpp supplied them (issue #110) —
+# left the page-0x10 protection words undecoded until def/overlay.hpp supplied them (issue legacy-110) —
 # not stale copy. The explainer was written for the documented rows and stays ready for them.
 D002 /target delta t/i

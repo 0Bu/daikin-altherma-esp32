@@ -3,9 +3,10 @@
 //
 // OTA and Open-Meteo HTTPS are known, bounded, self-inflicted memory events: TLS plus the operation
 // buffer claim the largest contiguous block on a heap whose binding limit IS that block. Measured
-// on the wired board (#380), the MQTT publish task then threw `std::bad_alloc` on its next cycle,
-// the guard caught it and the reading was gone. The first weather fetch also starved the poll
-// snapshot on a cold boot. Nothing crashed; the guards did their job, but data was lost silently.
+// on the wired board (legacy-380), the MQTT publish task then threw `std::bad_alloc` on its next
+// cycle, the guard caught it and the reading was gone. The first weather fetch also starved the
+// poll snapshot on a cold boot. Nothing crashed; the guards did their job, but data was lost
+// silently.
 //
 // So the publisher stands aside while either operation runs. That trades a gap-with-a-`bad_alloc`
 // for a gap-with-a-reason — the same missing second of data, now deliberate, countable (heartbeat
@@ -16,7 +17,7 @@
 // operation and cleared by that operation's completion paths; if it stalls behind a dead TCP
 // connection, a wedged TLS read or a bug that misses a clear, an unbounded rule would silence the
 // heat-pump bridge for as long as the board stays up — no publishes, no heartbeat, and no
-// `bad_alloc` either, so the one symptom that made #380 visible at all would be gone too. A
+// `bad_alloc` either, so the one symptom that made legacy-380 visible at all would be gone too. A
 // firmware that goes quiet forever because a fetch did not finish is strictly worse than one that
 // drops a second of data per second. After the cap the publisher resumes and takes its chances with
 // the OOM guard, which is exactly the behaviour that shipped before this file existed.

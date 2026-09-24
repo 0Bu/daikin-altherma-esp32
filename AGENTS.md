@@ -200,7 +200,8 @@ scripts/idf-docker.sh idf.py build
 - Generated per-model profile tables under `main/def/` are machine output from the offline catalog
   pipeline. Do not hand-edit those generated tables; put deliberate corrections in the supported
   override/adjudication layer and test stable identifiers and labels. `overlay.hpp` is the explicit
-  hand-written overlay, while `homehub.hpp` is the curated HomeHub definition source.
+  hand-written overlay, while `homehub.hpp` and `altherma4.hpp` are curated Modbus definition sources,
+  and `protocol_s.hpp` is the curated Protocol S table.
 - Do not add separate always-on CI jobs casually. Fast deterministic checks are steps of the shared
   `mechanical_gates` job in `build.yml`; the required `gates` job lives in the deliberately separate
   protected-base `pr-policy.yml` workflow. GitHub Actions bills per job. Preserve required-check

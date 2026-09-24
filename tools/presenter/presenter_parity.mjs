@@ -43,7 +43,7 @@ try {
   vm.runInContext(
     SOURCE +
       "\nthis.__api = { lwtIsPreBuh, lwtIsMeasurement, rwtIsR4t, rwtIsMeasurement, isPostBuhRow, copPlan, OU_HELD_PAGES," +
-      " lwtRow, rwtRow, postBuhRow };",
+      " lwtRow, rwtRow, postBuhRow, vLwt, vRwt };",
     context, { filename: "main/www/app.sources" });
 } catch (e) {
   // A renamed or inlined-away rule lands here as a bare ReferenceError. Say what it means instead of
@@ -51,14 +51,14 @@ try {
   // disagreeing, and it must not be reported as one.
   console.error(`presenter_parity: cannot reach the browser presenter rules — ${e.message}\n` +
                 "Each of lwtIsPreBuh / lwtIsMeasurement / rwtIsR4t / rwtIsMeasurement / isPostBuhRow / copPlan / lwtRow / " +
-                "rwtRow / postBuhRow / OU_HELD_PAGES must stay a named binding in main/www/js/schematic.js: " +
+                "rwtRow / postBuhRow / vLwt / vRwt / OU_HELD_PAGES must stay a named binding in main/www/js/schematic.js: " +
                 "a rule folded back into its caller is one this gate can no longer compare.");
   process.exit(2);
 }
 const ui = context.__api;
 
 for (const name of ["lwtIsPreBuh", "lwtIsMeasurement", "rwtIsR4t", "rwtIsMeasurement",
-                    "isPostBuhRow", "copPlan", "lwtRow", "rwtRow", "postBuhRow"]) {
+                    "isPostBuhRow", "copPlan", "lwtRow", "rwtRow", "postBuhRow", "vLwt", "vRwt"]) {
   if (typeof ui[name] !== "function") {
     // Exit 2, not a diff: a rule that has been renamed or inlined away is not "in parity", it is
     // unreachable — and a gate that silently compares nothing is worse than no gate.
@@ -149,6 +149,33 @@ for (const raw of lines) {
       process.exit(2);
   }
 }
+
+// Test that a Tier-1 LWT row with value: null does not trigger fallback to Tier-2
+context.S._values = [
+  { label: "Leaving water temp. before BUH (R1T)", reg: 0x62, value: null, unit: "°C" },
+  { label: "Leaving water temperature", reg: 0x62, value: "45.0", unit: "°C" }
+];
+const pickedTier1WithNull = ui.lwtRow();
+if (!pickedTier1WithNull || pickedTier1WithNull.label !== "Leaving water temp. before BUH (R1T)") {
+  bad("PICK_NULL", "tier1-null", "lwtRow must pick Tier-1 row even if value is null", "Leaving water temp. before BUH (R1T)", pickedTier1WithNull ? pickedTier1WithNull.label : "null");
+}
+if (ui.vLwt && ui.vLwt() !== null) {
+  bad("PICK_NULL", "tier1-null", "vLwt() must return null when Tier-1 row has null value", null, ui.vLwt());
+}
+context.S._values = [];
+
+// Test that an absent R1T row does not fall back to hydro split DLWB2 row
+context.S._values = [
+  { label: "Outlet water heat exchanger temp (hydro split model) DLWB2", reg: 0x65, value: "35.0", unit: "°C" }
+];
+const pickedDlwb2Fallback = ui.lwtRow();
+if (pickedDlwb2Fallback !== null) {
+  bad("PICK_ABSENT_R1T", "dlwb2-fallback", "lwtRow must reject DLWB2 row and return null when R1T is absent", null, pickedDlwb2Fallback ? pickedDlwb2Fallback.label : "null");
+}
+if (ui.vLwt && ui.vLwt() !== null) {
+  bad("PICK_ABSENT_R1T", "dlwb2-fallback", "vLwt() must return null when R1T is absent and only DLWB2 is present", null, ui.vLwt());
+}
+context.S._values = [];
 
 // A vector file that produced no comparisons passes every assertion above. Refuse it: "no vectors
 // found" must never read as "the two copies agree", which is the one thing a parity gate exists to

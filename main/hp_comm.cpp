@@ -76,7 +76,7 @@ HpQueryResult hp_query_detailed(uint8_t reg, Protocol proto, uint8_t* buf, size_
     // rather than while parsing it: there is no point putting a query on the bus whose answer we
     // would have to abandon, and the answer is knowable here.
     //
-    // This cannot fire today — reply_len() maxes at 18 and both call sites pass 64 bytes — and that
+    // This cannot fire today — reply_len() maxes at 18 and all call sites pass 64 bytes — and that
     // is exactly why it is worth stating. It was an invariant held across three files by agreement,
     // and the loop below is not self-protecting the way it looks: the write is guarded per byte,
     // but `len` counts every byte RECEIVED whether or not it was stored, so a replyLen past buflen

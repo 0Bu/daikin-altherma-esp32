@@ -46,6 +46,26 @@ inline const char* modbus_profile_name(ModbusProfile p) {
     return "unknown";
 }
 
+// How the active Modbus profile was concluded: in progress probing, affirmative answer,
+// or non-affirmative retry exhaustion fallback.
+enum class ModbusProfileBasis : uint8_t {
+    Probing     = 0,
+    Affirmative = 1,
+    Fallback    = 2,
+};
+
+inline const char* modbus_profile_basis_name(ModbusProfileBasis b) {
+    switch (b) {
+    case ModbusProfileBasis::Probing:
+        return "probing";
+    case ModbusProfileBasis::Affirmative:
+        return "affirmative";
+    case ModbusProfileBasis::Fallback:
+        return "fallback";
+    }
+    return "unknown";
+}
+
 // Fixed poll cadence: the heat pump is queried every second (near-real-time; the MQTT bridge
 // publishes only changes, so a fast poll is cheap). Not runtime-configurable.
 inline constexpr int POLL_INTERVAL_S = 1;
@@ -60,7 +80,7 @@ struct Config {
     // default, which is what every device carried before the field existed (logic/mqtt_base.hpp).
     // Runtime because CI publishes ONE esp32s3 image while the base topic is a PER-INSTALLATION
     // fact: two boards sharing it share their retained topics, their metrics series and their Home
-    // Assistant device — silently, since every individual value stays plausible (#215).
+    // Assistant device — silently, since every individual value stays plausible (legacy-215).
     std::string mqtt_base;
     // One logical living-room sample assembled from exact MQTT value mappings. Temperature, target
     // and source time may live on different topics; a target may instead be a fixed value in 0.1 C.
@@ -148,13 +168,14 @@ struct Config {
     // HTTP reconfiguration cannot publish its old link/model after the new settings landed.
     uint32_t    runtime_revision = 0;
 
-    // ── The HomeHub Modbus stack — PERSISTED (issue #32) ─────────────────────────────────────────
-    // A SECOND, INDEPENDENT source, not an alternative to the X10A link above. The two share no
-    // wire, no framing, no register model and no failure mode, so they run as separate tasks with
-    // separate caches and separate link states (docs/MODBUS_PROTOCOL.md): X10A keeps working when
-    // the LAN is down, and the HomeHub keeps reporting when the service cable is out. There is
-    // deliberately NO "which transport" selector — that would model an exclusivity the hardware
-    // does not have, and it is what an earlier revision of this got wrong.
+    // ── The HomeHub Modbus stack — PERSISTED (issue legacy-32)
+    // ───────────────────────────────────────── A SECOND, INDEPENDENT source, not an alternative to
+    // the X10A link above. The two share no wire, no framing, no register model and no failure
+    // mode, so they run as separate tasks with separate caches and separate link states
+    // (docs/MODBUS_PROTOCOL.md): X10A keeps working when the LAN is down, and the HomeHub keeps
+    // reporting when the service cable is out. There is deliberately NO "which transport" selector
+    // — that would model an exclusivity the hardware does not have, and it is what an earlier
+    // revision of this got wrong.
     //
     // The configured HomeHub address. A fresh device starts with discovery_done=false and performs
     // one bounded automatic search on its first networked boot. The result is then persistent even
@@ -427,11 +448,12 @@ inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 
 }
 
 // ── What POST /set_board actually has to DO ─────────────────────────────────────────────────────
-// TWO independent facts can move, and conflating them is what produced #257. The five HARDWARE
-// values decide whether a REBOOT is needed (both are claimed once at task start — the WS2812 opens
-// an RMT channel, the button installs a pull). The explicitly selected preset id decides which board
-// the firmware may name and which vendor-gated accessories it may enable; changing identity without
-// changing hardware needs a SAVE but no reboot. Pure so the combinations are asserted here.
+// TWO independent facts can move, and conflating them is what produced legacy-257. The five
+// HARDWARE values decide whether a REBOOT is needed (both are claimed once at task start — the
+// WS2812 opens an RMT channel, the button installs a pull). The explicitly selected preset id
+// decides which board the firmware may name and which vendor-gated accessories it may enable;
+// changing identity without changing hardware needs a SAVE but no reboot. Pure so the combinations
+// are asserted here.
 //
 // The case that matters is `values same, not yet stated`: a XIAO owner picking "Seeed XIAO" on a
 // device still carrying the Kconfig defaults changes no value, so the old route answered
@@ -505,17 +527,61 @@ inline bool wifi_credentials_valid(const std::string& ssid, const std::string& p
     return true;
 }
 
+// Copy SSID / password strings into fixed-size ESP-IDF buffers (wc.sta.ssid has capacity 32,
+// wc.sta.password has capacity 64). An 802.11 SSID can be exactly 32 bytes without a null
+// terminator. WPA2 passphrases are validated to 8..63 chars; raw 64-hex PSKs are intentionally not
+// accepted by policy.
+inline void wifi_config_field_copy(uint8_t* dst, size_t cap, const char* src) {
+    if (!dst || cap == 0) return;
+    if (!src) {
+        std::memset(dst, 0, cap);
+        return;
+    }
+    const size_t len = std::strlen(src);
+    const size_t n   = std::min(len, cap);
+    std::memcpy(dst, src, n);
+    if (n < cap) {
+        std::memset(dst + n, 0, cap - n);
+    }
+}
+
+inline void wifi_config_field_copy(uint8_t* dst, size_t cap, const std::string& src) {
+    if (!dst || cap == 0) return;
+    const size_t n = std::min(src.size(), cap);
+    std::memcpy(dst, src.data(), n);
+    if (n < cap) {
+        std::memset(dst + n, 0, cap - n);
+    }
+}
+
 inline Protocol parse_protocol(const std::string& s) {
     return (!s.empty() && (s[0] == 'S' || s[0] == 's')) ? Protocol::S : Protocol::I;
 }
 
+// Derive the required protocol from a concrete profile name:
+// - "protocol_s" maps to Protocol::S.
+// - Any other concrete profile (non-empty and not "auto") maps to Protocol::I.
+// - "auto" or empty preserves the fallback (typically the detected protocol).
+inline Protocol protocol_for_profile(const char* profile, Protocol fallback = Protocol::I) {
+    if (!profile || !*profile || std::strcmp(profile, "auto") == 0) return fallback;
+    if (std::strcmp(profile, "protocol_s") == 0) return Protocol::S;
+    return Protocol::I;
+}
+
+inline Protocol protocol_for_profile(const std::string& profile, Protocol fallback = Protocol::I) {
+    return protocol_for_profile(profile.c_str(), fallback);
+}
+
 // Protocol and profile compatibility for /set_hp:
 // - "auto" is always compatible.
+// - If fp_valid is false, detection has not settled yet; allow manual pinning to any valid profile.
 // - On Protocol::S, only "protocol_s" is allowed.
 // - On Protocol::I, "protocol_s" is disallowed (Protocol I units must not use the Protocol S
 // profile).
-inline bool set_hp_profile_compatible(const std::string& profile, Protocol proto) {
+inline bool set_hp_profile_compatible(const std::string& profile, Protocol proto,
+                                      bool fp_valid = true) {
     if (profile.empty() || profile == "auto") return true;
+    if (!fp_valid) return true;
     if (proto == Protocol::S) return profile == "protocol_s";
     return profile != "protocol_s";
 }

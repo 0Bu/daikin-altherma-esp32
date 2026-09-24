@@ -679,6 +679,64 @@ the I/U capacity code (`0x60` offset 6).
 | 0 | 2 | 105 |  | °C | [EKMIK] Bizone kit mixed leaving water temperature R1T |
 | 0 | 1 | 101 |  |  | [EKMIK] Bizone kit mix valve position M1S |
 
+### Protocol S Registers (UNVERIFIED)
+
+> [!WARNING]
+> Protocol S registers (`0x50`, `0x53`, `0x54`, `0x55`) and profile `protocol_s` are derived from reverse-engineered community tables without verified hardware traces or official manufacturer documentation. All mappings and conversions remain unverified on physical hardware.
+
+#### Register `0x50` (UNVERIFIED)
+
+Protocol S refrigerant pressure sensors.
+
+| Off | Len | Conv | Bit | Type | Value |
+|----:|----:|:----:|:---:|:----:|-------|
+| 0 | 2 | 103 |  | bar | HP Sensor(bar) |
+| 2 | 2 | 103 |  | bar | LP Sensor(bar) |
+
+#### Register `0x53` (UNVERIFIED)
+
+Protocol S outdoor unit actuators and inverter states.
+
+| Off | Len | Conv | Bit | Type | Value |
+|----:|----:|:----:|:---:|:----:|-------|
+| 0 | 2 | 152 |  |  | EV (pls) |
+| 2 | 1 | 164 |  |  | Outdoor Fan (Upper)(rps) |
+| 3 | 1 | 164 |  |  | Outdoor Fan (Lower)(rps) |
+| 4 | 1 | 200 |  |  | INV Comp. Frequency(Hz) |
+| 5 | 1 | 200 |  |  | Comp. Preheat |
+| 6 | 1 | 200 |  |  | 52C Output |
+| 7 | 1 | 200 |  |  | 20S (4-way) Output |
+| 8 | 1 | 200 |  |  | 20R (SV) Output |
+| 10 | 1 | 200 |  |  | Crankcase Heater |
+| 11 | 1 | 200 |  |  | Ener-Cut Output |
+
+#### Register `0x54` (UNVERIFIED)
+
+Protocol S temperatures and setpoints.
+
+| Off | Len | Conv | Bit | Type | Value |
+|----:|----:|:----:|:---:|:----:|-------|
+| 0 | 2 | 103 |  | °C | Indoor Suction Air Temp.(C) |
+| 2 | 2 | 103 |  | °C | Indoor Heat Exchanger Temp.(C) |
+| 4 | 2 | 103 |  | °C | Outdoor air temp.(C) |
+| 6 | 2 | 103 |  | °C | Outdoor heat exchanger temp.(C) |
+| 8 | 2 | 109 |  | °C | Discharge pipe temp.(C) |
+| 10 | 2 | 103 |  | °C | Fin Temp.(C) |
+| 12 | 1 | 312 |  |  | Delta-Tr(deg) |
+| 13 | 1 | 200 |  |  | R/C Setpoint(C) |
+
+#### Register `0x55` (UNVERIFIED)
+
+Protocol S operation mode and diagnostic fault codes.
+
+| Off | Len | Conv | Bit | Type | Value |
+|----:|----:|:----:|:---:|:----:|-------|
+| 0 | 1 | 201 |  |  | Operation Mode |
+| 1 | 1 | 204 |  |  | Error Code |
+| 2 | 1 | 204 |  |  | Thermo Off Error |
+| 3 | 1 | 204 |  |  | Warning Code |
+| 4 | 1 | 204 |  |  | Caution Code |
+
 ---
 
 ## 6. Home Assistant mapping

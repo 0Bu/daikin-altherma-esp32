@@ -18,7 +18,7 @@ const task = modbus.slice(taskStart, taskEnd);
 assert.doesNotMatch(task, /discover_homehub\s*\(|mdns_query_(?:ptr|a)\s*\(|config_modbus_should_search/,
   "the steady-state poll task must never perform HomeHub discovery");
 // Clearing the address retires the task outright. There is no restore step any more: the write path
-// was removed with dynamic LWT actuation (#294), so the stack owns nothing on the hub to put back.
+// was removed with dynamic LWT actuation (legacy-294), so the stack owns nothing on the hub to put back.
 const disabledIntent = task.indexOf("if (!s_target_enabled.load(std::memory_order_acquire)) break;");
 const tlsDelay = task.indexOf("if (ota_download_active() || weather_fetch_active())");
 assert.ok(disabledIntent >= 0 && tlsDelay > disabledIntent,

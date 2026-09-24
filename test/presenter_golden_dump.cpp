@@ -8,10 +8,10 @@
 // — and the JavaScript one is the copy that ships to the user. docs/FEATURES.md records why this
 // cross-language parity corpus exists. The gap is not hypothetical: a looser
 // second copy of the leaving-water pattern once matched the bizone kit's MIXED leaving-water row,
-// which is the #35-#39 shape (a correct number attributed to the wrong sensor) reaching ΔT, heat
-// output and COP at once. docs/FEATURES.md explains why a looser second copy is not a test, and
-// scripts/check-presenter-parity.sh names the resulting coverage gap. This closes it: the two
-// copies are now compared, not merely both present.
+// which is the legacy-35–legacy-39 shape (a correct number attributed to the wrong sensor) reaching
+// ΔT, heat output and COP at once. docs/FEATURES.md explains why a looser second copy is not a
+// test, and scripts/check-presenter-parity.sh names the resulting coverage gap. This closes it: the
+// two copies are now compared, not merely both present.
 //
 // The corpus is the REAL catalOg, not a sample. Every distinct (label, register) pair the shipped
 // profiles produce is emitted, because that is exactly the input space the rules run on and exactly

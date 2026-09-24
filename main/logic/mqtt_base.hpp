@@ -1,6 +1,6 @@
 #pragma once
-// WHICH MQTT BASE TOPIC THIS INSTALLATION PUBLISHES UNDER — the runtime half of what was, until now,
-// a compile-time-only fact.
+// WHICH MQTT BASE TOPIC THIS INSTALLATION PUBLISHES UNDER — the runtime half of what was, until
+// now, a compile-time-only fact.
 //
 // The base topic is the INSTALLATION identity: every message topic sits directly under it
 // (`<base>/x10a`, `<base>/heartbeat`, `<base>/crash`, …) and `device_node_id(base)`
@@ -17,18 +17,18 @@
 //   * a metrics consumer sees ONE series per field (the labels are identical), so two interleaved
 //     uptime counters read as a sawtooth — measured on this project's own store, that inflated
 //     `resets(daikin_heartbeat_uptime_s[7d])` from ~50 real reboots to 16272, and the day it was
-//     worst the sample count doubled from 8500/day to 17138/day (#215);
+//     worst the sample count doubled from 8500/day to 17138/day (legacy-215);
 //   * `device_node_id` is the same for both, so Home Assistant merges them into ONE device whose
 //     entities flip between two units.
 // None of that announces itself. Every number stays plausible, which is why it survived a week of
 // reboot analysis before the sample count gave it away.
 //
-// This is the same rule board_presets.hpp already applies to the status LED and the recovery button:
-// a fact that differs PER INSTALLATION cannot live in Kconfig when CI ships one binary. Compiling it
-// in would fork the artifact, the manifest and the OTA feed per board.
+// This is the same rule board_presets.hpp already applies to the status LED and the recovery
+// button: a fact that differs PER INSTALLATION cannot live in Kconfig when CI ships one binary.
+// Compiling it in would fork the artifact, the manifest and the OTA feed per board.
 //
-// Pure + IDF-free so the rules are asserted host-side (test/test_logic.cpp) rather than discovered on
-// a broker, where a bad base topic does not fail loudly — it publishes to the wrong place.
+// Pure + IDF-free so the rules are asserted host-side (test/test_logic.cpp) rather than discovered
+// on a broker, where a bad base topic does not fail loudly — it publishes to the wrong place.
 #include <string>
 
 #include "ha_device.hpp"   // ha_slug — the node id must survive this, or two boards collide again

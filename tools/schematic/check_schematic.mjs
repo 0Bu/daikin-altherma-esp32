@@ -7,7 +7,7 @@
 // builds, the host logic tests pass, the domain audit sees a physically correct value, the
 // description audit finds copy for it — and the picture still says something false, because a pill
 // is drawn 40 px from the pipe it belongs to, sits on the wrong side of a junction, or is struck
-// through by a riser. Those are not rendering bugs; they are the #35-#39 failure shape drawn in
+// through by a riser. Those are not rendering bugs; they are the legacy-35–legacy-39 failure shape drawn in
 // SVG: well-formed, plausible, and attributing a real reading to the wrong thing.
 //
 // Seven real defects from this drawing's history are the corpus (tools/schematic/selftest.sh):
@@ -721,7 +721,7 @@ function loadExceptions(file) {
     //   S001 — a hit target that opens nothing: the drawing's whole premise is that it is
     //          explorable (DESIGN.md §5.3 item 2), and a dead target fails silently.
     //   E002 — a reading drawn on a branch its sensor does not read: the wrong-attribution error
-    //          the pills exist to prevent, and the #35-#39 shape drawn in SVG.
+    //          the pills exist to prevent, and the legacy-35–legacy-39 shape drawn in SVG.
     for (const code of ['S001', 'E002']) {
       if (line.startsWith(code + ' ')) {
         die(2, `${file}:${n + 1}: ${code} cannot be adjudicated — fix the drawing ` +

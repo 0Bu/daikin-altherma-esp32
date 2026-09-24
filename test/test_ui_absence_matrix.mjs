@@ -288,7 +288,7 @@ const REMOVE = {
   safeMode(s) {
     // safe_mode_cause is part of the shape http_status.cpp emits: this scenario is the CRASH-LOOP
     // route (reset_reason task_wdt), so the recovery banner must give configuration advice. The
-    // heap route reaches the same sys.safe_mode with cause "heap" and opposite advice (#407).
+    // heap route reaches the same sys.safe_mode with cause "heap" and opposite advice (legacy-407).
     s.sys = { ...s.sys, safe_mode: true, safe_mode_cause: "crash_loop", reset_reason: "task_wdt" };
     s.hp = { ...s.hp, connected: false, last_ok_s: -1, values: 0 };
     s.detect = { ...s.detect, valid: false, capacity_kw: null, capacity_kw_iu: null, ou_eeprom: "",

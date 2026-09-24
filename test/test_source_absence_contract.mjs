@@ -175,7 +175,7 @@ for (const f of ["main/history.cpp", "main/checkup.cpp", "main/state_dwell.cpp"]
 // the device could never fill and the Diagnostics card drew "no readings yet" under a row reading
 // "not configured". Its two siblings were already gated; this is that rule for the third.
 // The window is bounded rather than "the very next line": the branch also carries the persistence
-// seal's dirty bookkeeping (#391), and pinning adjacency would make this fail for a change that
+// seal's dirty bookkeeping (legacy-391), and pinning adjacency would make this fail for a change that
 // cannot affect what it asserts. What it still asserts is the thing that matters — inside the
 // not-configured branch, the label is cleared.
 assert.match(history,
@@ -821,7 +821,7 @@ console.log("source absence: board trends own their producer, absent sources sta
             "armed-but-inactive is named, state ages expire rather than freeze, " +
             "redaction invents nothing, TLS pressure is coordinated");
 
-// #407 — the END of the restart ladder. The boot that inherited the full count must come up MINIMAL,
+// legacy-407 — the END of the restart ladder. The boot that inherited the full count must come up MINIMAL,
 // and that decision has to be made in heap_guard_begin(), which main.cpp runs BEFORE its
 // `if (!safe_mode_active())` gate. Made anywhere later it would arrive after the poll engine and the
 // MQTT bridge had already started and taken the heap the minimal boot exists to leave free.

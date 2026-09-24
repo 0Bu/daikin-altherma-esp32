@@ -45,7 +45,7 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 p
 The authority is `.github/renovate.json`, not this table: the combined
 `matchManagers: ["github-actions"]` + `matchDepNames: ["renovatebot/github-action"]` rule is the
 sole positive automerge rule, while the negative `matchDepNames` rule keeps the tracked firmware
-dependencies manual. This intentionally includes semantic runner version upgrades such as #45, not only Renovate's
+dependencies manual. This intentionally includes semantic runner version upgrades such as PR 45, not only Renovate's
 `digest` update type; safety comes from the exact pin-line patch classifier. Read the file if either
 set changes.
 

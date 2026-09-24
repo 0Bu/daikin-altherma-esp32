@@ -124,18 +124,18 @@ is the single validity test for a received frame. Implemented as `daik::crc()` i
   echo
 ```
 
-- Protocol `S` replies begin directly with `<reg>` echoing the requested page, followed by the value payload and a checksum byte (`0xFF - sum`).
-- Unlike Protocol `I`, Protocol `S` has **no length byte** — wire length is fixed per register (`hp_expected_reply_len()` in [`logic/crc.hpp`](../main/logic/crc.hpp)). Known fixed lengths: register `0x50` → 6 bytes, `0x56` → 4 bytes, others (`0x51`–`0x55`, etc.) → 18 bytes.
+- Protocol `S` replies begin with byte 0 matching the requested page according to the reverse-engineered specification, followed by the value payload and a checksum byte (`0xFF - sum`). Because Protocol S behavior is unverified on physical hardware, `hp_reply_classify` does not enforce a page-echo match for Protocol S (unlike Protocol I where `40 <reg>` is verified).
+- Unlike Protocol `I`, Protocol `S` has **no length byte** — wire length is fixed per register (`reply_len()` in [`logic/crc.hpp`](../main/logic/crc.hpp)). Known fixed lengths: register `0x50` → 6 bytes, `0x56` → 4 bytes, others (`0x51`–`0x55`, etc.) → 18 bytes.
 - The **value payload** starts at byte offset **1** (immediately after `<reg>`, `payload_offset(S) = 1`).
 
 ### Frame receiver, TX echo suppression & resynchronization (`HpFrameReceiver`)
 
-Bidirectional level-shifter transceivers (such as TXS0108E or simple transistor circuits) can reflect transmitted request bytes back onto the RX line. Additionally, line noise or framing slips can inject leading garbage bytes.
+Bidirectional level-shifter transceivers (or incorrect wiring) can reflect transmitted request bytes back onto the RX line. Note: TXS0108E automatic bi-directional level shifters are strongly discouraged for X10A due to unreliable edge acceleration and false triggering; a simple passive resistor divider (e.g. 10 kΩ / 20 kΩ) on **HP-TX → ESP-RX** is the recommended safe option (see [`README.md`](README.md)). Additionally, line noise or framing slips can inject leading garbage bytes.
 
-The pure, host-tested `HpFrameReceiver` state machine ([`logic/crc.hpp`](../main/logic/crc.hpp)) handles this robustly on both protocol variants:
-1. **TX-echo suppression**: If the RX stream mirrors the transmitted request frame (`03 40 <reg> <cksum>` for Protocol `I` or `02 <reg> <cksum>` for Protocol `S`), `HpFrameReceiver` recognizes the echo pattern and drops it without interpreting it as an invalid reply.
-2. **Preamble resynchronization**: When arbitrary bytes precede a frame or a truncated echo occurs, the receiver scans forward for valid preamble signatures (`0x40` for `I`, `<reg>` for `S`) instead of aborting the cycle with `invalid_length`.
-3. **NAK handling**: `15 EA` error replies are recognized promptly, terminating reception without waiting for a full-frame timeout.
+The pure, host-tested `HpFrameReceiver` state machine ([`logic/crc.hpp`](../main/logic/crc.hpp)) handles stream parsing:
+1. **TX-echo suppression**: If the RX stream mirrors the transmitted request frame, `HpFrameReceiver` recognizes the echo pattern byte-by-byte and drops it without interpreting it as an invalid reply. This suppression applies to both Protocol `I` and Protocol `S`.
+2. **Preamble resynchronization**: For Protocol `I`, when arbitrary bytes precede a frame or a truncated echo occurs, the receiver scans forward for valid preamble signatures (`0x40` or `0x15`) instead of aborting the cycle with `invalid_length`. Protocol `S` uses fixed-length frames and does not perform preamble resynchronization.
+3. **NAK handling**: `15 EA` error replies are recognized promptly on both protocols, terminating reception without waiting for a full-frame timeout.
 
 ---
 
@@ -184,6 +184,16 @@ The Altherma `I` set:
 `0x60`–`0x65` are the hydronic (water-side) pages most relevant to a heating installation; `0x00`–
 `0x30` are the refrigerant/outdoor side. Not every model populates every page — probe and skip on
 `15 EA`.
+
+The Protocol `S` set:
+
+| Page | Contents |
+|------|----------|
+| `0x50` | Refrigerant pressure sensors (high pressure / low pressure) |
+| `0x53` | Actuators & outputs — expansion valve, fan speeds, compressor frequency, heaters, valves |
+| `0x54` | Temperatures — indoor/outdoor suction, heat exchanger, discharge pipe, fin temp, setpoint |
+| `0x55` | Operation mode & fault diagnostics — operation mode, error/warning/caution codes |
+| `0x56` | Reserved / unverified (length 4) |
 
 ---
 

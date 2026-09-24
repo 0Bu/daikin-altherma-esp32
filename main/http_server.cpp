@@ -36,23 +36,25 @@ void http_start() {
     cfg.max_uri_handlers = 39;
     cfg.lru_purge_enable = true;
     // 16 KB, not the 8 KB this ran on through v1.0.12 — MEASURED, not padded. v1.0.12 panicked and
-    // the core dump's task table read `httpd 7728/460`: the task had been 7732 bytes deep at its last
-    // context switch, 460 bytes off its floor. Since a switch happens at an arbitrary point, the true
-    // peak is at least that and unbounded above it; it went past the floor and wrote 0x4 over the
-    // TCB's pvThreadLocalStoragePointers[0], which sits just below `pxStack`. The task then died ~44 s
-    // later in lwip (`pthread_getspecific` → LoadProhibited on 0x4) with a backtrace pointing at a
-    // WebSocket send (a transport that no longer exists) — nowhere near the code that actually
-    // corrupted it. Every other task in that dump had >= 1.8 KB free; httpd was the sole outlier,
-    // because append_status_json() runs here and is by far the largest thing this task does.
-    // 460 bytes of margin was the bug and #163's extra JSON was only the straw. The peak is
-    // separately cut in http_status.cpp. This is now the ONLY task that builds /status (#241).
+    // the core dump's task table read `httpd 7728/460`: the task had been 7732 bytes deep at its
+    // last context switch, 460 bytes off its floor. Since a switch happens at an arbitrary point,
+    // the true peak is at least that and unbounded above it; it went past the floor and wrote 0x4
+    // over the TCB's pvThreadLocalStoragePointers[0], which sits just below `pxStack`. The task
+    // then died ~44 s later in lwip (`pthread_getspecific` → LoadProhibited on 0x4) with a
+    // backtrace pointing at a WebSocket send (a transport that no longer exists) — nowhere near the
+    // code that actually corrupted it. Every other task in that dump had >= 1.8 KB free; httpd was
+    // the sole outlier, because append_status_json() runs here and is by far the largest thing this
+    // task does. 460 bytes of margin was the bug and legacy-163's extra JSON was only the straw.
+    // The peak is separately cut in http_status.cpp. This is now the ONLY task that builds /status
+    // (legacy-241).
     //
     // 12 KB became insufficient again when ENV III extended that builder. The exact signed CI ELFs
-    // show its fixed frame growing from 0x2630 (9776) bytes in dev.295 to 0x2950 (10576) in dev.296:
-    // only 1712 bytes remained for config()'s nested Config/std::string copy, HTTPD itself and
-    // interrupts. The dev.296 live OTA then double-faulted in config() with the current task's TCB
-    // overwritten and rolled back. 16 KB leaves 5808 bytes above the fixed frame; keep the number
-    // tied to the decoded dump + ELF evidence rather than shrinking it from an idle heap reading.
+    // show its fixed frame growing from 0x2630 (9776) bytes in dev.295 to 0x2950 (10576) in
+    // dev.296: only 1712 bytes remained for config()'s nested Config/std::string copy, HTTPD itself
+    // and interrupts. The dev.296 live OTA then double-faulted in config() with the current task's
+    // TCB overwritten and rolled back. 16 KB leaves 5808 bytes above the fixed frame; keep the
+    // number tied to the decoded dump + ELF evidence rather than shrinking it from an idle heap
+    // reading.
     cfg.stack_size       = 16384;
     if (httpd_start(&s_server, &cfg) != ESP_OK) {
         ESP_LOGE("http", "server start failed");

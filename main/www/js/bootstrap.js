@@ -823,9 +823,9 @@ function wireRestOfApp() {
 // This used to be a /events WebSocket. It was removed, and the reasoning is worth having here
 // because the pull to "make it live again" will come back (docs/ARCHITECTURE.md "Push vs. poll"):
 // a push fails SILENTLY and GLOBALLY — one queue message dropped by IDF froze the status stream
-// until the next reboot with nothing logged and values still flowing (#238), and running the push
+// until the next reboot with nothing logged and values still flowing (legacy-238), and running the push
 // from the poll task put the ~3.5 kB /status builder on the task that owns the X10A UART, which
-// overflowed its stack (#241). A poll fails LOUDLY and LOCALLY: one request, one visible error,
+// overflowed its stack (legacy-241). A poll fails LOUDLY and LOCALLY: one request, one visible error,
 // retried on the next tick. Nothing about the dashboard needed the socket.
 //
 // Two cadences, ONE chain. /values (model-dependent) every 2 s feeds the drawing and the value rows; /status

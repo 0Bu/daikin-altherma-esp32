@@ -5,7 +5,7 @@
 // dump whose app ELF sha does not match the RUNNING build is an ORPHAN (it survived an OTA, or a
 // panic that could not write its own dump left the previous one behind) — it is erased here and,
 // even if that best-effort erase fails, suppressed for this boot so `coredump` never advertises a
-// download espcoredump would reject on a version mismatch (#215).
+// download espcoredump would reject on a version mismatch (legacy-215).
 // The reason + summary are boot-time FACTS and stay cached — the summary is never re-parsed from
 // flash on a request path (append_status_json is a request-path builder, and re-parsing a
 // core-dump image per /status poll would put a flash read and an allocation on it).

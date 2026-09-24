@@ -61,7 +61,7 @@ const GROUPS = [
                      "floor loop shut off"]],
   // Bare "pressure" is safe HERE and only here: the two water-pressure spellings are claimed by the
   // group above, so what is left ("Pressure", "Pressure sensor(T)", …) is refrigerant — the same
-  // generically-named rows logic/hp_convert.cpp documents as its known is_refrigerant_pressure gap.
+  // generically-named rows logic/convert.hpp documents as its known is_refrigerant_pressure gap.
   ["Refrigerant / outdoor", ["outdoor", "heat-exchanger", "heat exchanger", "o/u heat exch",
                              "pressure", "refrigerant", "refrig.", "compressor", "fan",
                              "expansion valve", "discharge", "suction", "liquid", "deicer",
@@ -998,7 +998,7 @@ function dynamicControlCardHtml() {
   rows += dynamicInfoRow("strategy", t("dyn.strategy"), t("dyn.shadow_strategy"), "",
     `<div class="vdesc-p">${esc(t("dyn.strategy_help"))}</div>`);
   // No "Safety & output → read-only" row. It was a hardcoded constant that could never say anything
-  // else, and since the write path was deleted (#294) it can never BECOME anything else either —
+  // else, and since the write path was deleted (legacy-294) it can never BECOME anything else either —
   // the same reason bus_tx_writes was dropped from the heartbeat. The card's own copy carries it.
   if (r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
   if (w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
@@ -1038,7 +1038,7 @@ const uptimeRow = (s) => vrow(t("card.uptime"), fmtUptime(s), { cls: "mono num" 
 const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 
 // The board's own memory: free heap and the largest CONTIGUOUS free block. These two are back on the
-// card after #186 dropped them, and the reason they are worth their space now is the reason they
+// card after legacy-186 dropped them, and the reason they are worth their space now is the reason they
 // were not then: each carries a 24-HOUR TREND. As spot numbers they were a diagnosis nobody could
 // make — "148 KiB" says nothing without the last day of it — and a diagnosis is what the /status
 // endpoint and the MQTT heartbeat are for. As curves they answer the one memory question this
@@ -1179,7 +1179,7 @@ function statusCardsHtml() {
   return hp.connected ? vcard(t("card.model"), model) : "";
 }
 
-// ── The diagnosis card — "is anything worth reporting?" (logic/checkup.hpp, #208/#349) ─────────
+// ── The diagnosis card — "is anything worth reporting?" (logic/checkup.hpp, legacy-208/legacy-349) ─────────
 // The dashboard already answers what the plant is doing NOW (the schematic) and what one reading did
 // today (a value row's trend). This is the third question, and the only one that needs counting
 // rather than reading: how often the compressor started, what share of runtime went into defrosting,

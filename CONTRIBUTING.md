@@ -9,7 +9,8 @@ By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 The project was developed in a private predecessor repository before its public launch. References
 such as `legacy-209` identify work items from that private tracker; the discussions themselves were
 not copied because they can contain installation data. Likewise, `(#N)` suffixes in the immutable,
-signed commit history refer to predecessor pull requests, not to issue numbers in this repository.
+signed commit history prior to the public repository launch refer to predecessor pull requests,
+whereas subsequent PR numbers correspond to pull requests in this repository.
 The current source and documentation are authoritative; open a new public issue when old context is
 needed for a present problem.
 

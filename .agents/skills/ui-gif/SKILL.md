@@ -150,7 +150,7 @@ Look at the finished GIF. Then ask:
 3. **Are the numbers physically coherent?** They are invented, but they are read as real: leaving
    water above the tank temperature during a charge, ΔT and flow consistent with the stated kW
    (`flow/60 × 4.186 × ΔT`), a DHW COP near 2.5–3 and a 38 °C heating COP near 4–5, the CT current
-   matching the electrical estimate. A COP of 8 in the README is the #35–#39 failure shape with a
+   matching the electrical estimate. A COP of 8 in the README is the legacy-35–legacy-39 failure shape with a
    marketing budget.
 4. **Do the labels come from the real catalog?** `tools/uigif/scenes.js` uses the exact rows of a
    real profile (`main/def/altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw.hpp`). A label invented
@@ -163,7 +163,7 @@ Look at the finished GIF. Then ask:
    wrong from the next release onwards with nothing able to see it. A UI change that alters the
    card's height leaves it clipped, or leaves a sliver of the header or the next card in frame —
    adjust `CROP` in the recorder rather than living with it. This is the checklist item that has
-   actually fired: #462 raised `#schem` by 6 px and shortened it by 6, and the crop it left behind
+   actually fired: legacy-462 raised `#schem` by 6 px and shortened it by 6, and the crop it left behind
    sat 17 px under the card, catching the top edge of the next one in every frame. Nothing
    mechanical can see that — the stamp only proves the recording is of these sources, and a GIF
    with a stray sliver renders exactly as well as one without. **Measure, don't guess**, and don't

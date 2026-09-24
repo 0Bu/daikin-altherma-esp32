@@ -85,7 +85,7 @@ assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.state"\)[\
 assert.doesNotMatch(app, /dynamicSourceRow\("env3"/,
   "the board-bound outdoor sensor must not remain as a separate dynamic-control setting");
 // The card must NOT restate the Firmware toggle as a second mode row, and must not carry a
-// constant "read-only" row: with the write path deleted (#294) neither can ever say anything else,
+// constant "read-only" row: with the write path deleted (legacy-294) neither can ever say anything else,
 // and a line that cannot vary is one more thing a reader has to rule out.
 assert.doesNotMatch(app, /t\("dyn\.mode"\)|t\("dyn\.safety"\)|t\("dyn\.read_only"\)|t\("dyn\.observe"\)/,
   "the diagnosis card must carry neither a duplicate mode row nor a constant read-only row");

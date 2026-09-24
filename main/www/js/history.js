@@ -742,7 +742,7 @@ function dwellDuration(seconds, bound = false) {
 //   dwell_s        seconds the current state has stood, as far as the board could tell
 //   dwell_min      the transition was never witnessed, so the true age is at LEAST that. Rendered
 //                  as "at least", never dropped: a run this board joined in progress is a weaker
-//                  claim than one it watched arrive, and printing them identically is the #35-#39
+//                  claim than one it watched arrive, and printing them identically is the legacy-35–legacy-39
 //                  shape — a true number carrying more authority than its evidence.
 //   dwell_blind_s  how much of the run the bus did not answer for. A flag can pulse and return
 //                  inside a gap, so a run spanning one is not a run that was watched.
@@ -1904,7 +1904,7 @@ function vDescRow(v) {
 //
 // The Model card's rows are the ones that most need explaining and were the last with no explainer:
 // they answer questions the reader did not ask ("possible models" — why more than one? "outdoor unit
-// ID" — for what?) in vocabulary taken from the bus. #184 added the two rows precisely so an
+// ID" — for what?) in vocabulary taken from the bus. legacy-184 added the two rows precisely so an
 // ambiguous detection reads as a detection that succeeded as far as the wire permits — but the card
 // states the FACT and never the reason, so it still reads as a failure to anyone who does not
 // already know why a heat pump cannot name itself.
@@ -1996,7 +1996,7 @@ const MODEL_DESCRIPTIONS = {
   // "the candidate set spans DIFFERENT kW classes, so it is NOT register-identical and the
   // representative choice does affect the values". Asserting the reassuring version in both states
   // would put a false claim on screen in exactly the state that produces this row most often (a
-  // short 0x00 descriptor), which is the #35-#39 shape in copy rather than in a converter.
+  // short 0x00 descriptor), which is the legacy-35–legacy-39 shape in copy rather than in a converter.
   candidates: {
     what: "Several Daikin model families expose the same registers and values on the service interface, so the exact marketing name cannot be distinguished there. The heading deliberately stays \"Daikin Altherma\" instead of guessing a model.",
     normal: "the readings are unaffected: the outdoor unit reported its rated capacity, and all remaining candidates use the same capacity class and register layout. To identify the exact model, compare the outdoor-unit ID below with the nameplate.",

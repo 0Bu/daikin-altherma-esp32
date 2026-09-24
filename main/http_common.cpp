@@ -26,7 +26,7 @@ namespace daik {
 // threw. A destructor rather than three call sites: it also covers a future early return, and this
 // task carries the deepest call chain in the firmware
 // (mcp_post -> http_send_status_json -> append_status_json), which
-// overflowed twice (v1.0.12, #318) and was diagnosed both times from a core dump. Costs one
+// overflowed twice (v1.0.12, legacy-318) and was diagnosed both times from a core dump. Costs one
 // FreeRTOS read per request; the number leaves the board on the MQTT heartbeat (stack_watch.hpp).
 namespace {
 struct SampleHttpdStackOnExit {

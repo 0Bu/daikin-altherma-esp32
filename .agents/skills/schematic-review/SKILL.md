@@ -21,7 +21,7 @@ puts that correct reading on the wrong pipe.
 That is not hypothetical. This drawing has shipped a fan spinning around a point beside its own
 axle, a leaving-water pill floating 40 px above the run it names, the return temperature drawn on
 the heating-only section (claiming a branch no sensor there reads), and "HEIZUNG" struck through by
-the heating riser so it rendered as "HEIZUNC". Each is the #35–#39 failure shape drawn in SVG:
+the heating riser so it rendered as "HEIZUNC". Each is the legacy-35–legacy-39 failure shape drawn in SVG:
 well-formed, plausible, and attributing a real number to the wrong thing.
 
 **This review unlike `$domain-review` is conditional** — it is for changes that reach the drawing:
@@ -156,7 +156,7 @@ review asks means putting the new questions to the current drawing before it lan
 filter is defined by the runner-neutral gate. This page deliberately does not repeat the filter.
 
 That filter is defensible here in a way it deliberately is **not** for `$domain-review`, and the
-difference is the point: a value's meaning can change from almost anywhere — #35–#39 reached Home
+difference is the point: a value's meaning can change from almost anywhere — legacy-35–legacy-39 reached Home
 Assistant through the ordinary discovery path — while the drawing is one inline SVG, one stylesheet
 and one binding table. If that ever stops being true, the regex must grow with it, or it will quietly
 opt exactly the risky PRs out.

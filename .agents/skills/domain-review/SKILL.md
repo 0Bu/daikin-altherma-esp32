@@ -19,14 +19,14 @@ a value that is **physically false**.
 That is this project's characteristic failure. A wrong converter id compiles, passes every host
 test, drifts no doc, and publishes `-971.5 °C` to Home Assistant as a mixed-water temperature. It
 shipped on eight profiles at once. A bizone valve *position* shipped as a 12800 °C temperature
-sensor; a "no data" sentinel shipped as a real `-3276.8 °C` reading (issues #35–#39). Every one was
+sensor; a "no data" sentinel shipped as a real `-3276.8 °C` reading (issues legacy-35–legacy-39). Every one was
 found by a slow manual review — none by a gate, because no gate was asking "**is this true?**".
 
 This review asks that. Nothing here is about style or structure.
 
 **It runs before every ordinary merge** — there is no "this PR doesn't need it". That is deliberate. Deciding
 in advance which files can change a value's meaning is a guess, and it is the same guess that let
-#35–#39 ship: a valve position reached Home Assistant as a 12800 °C temperature sensor through the
+legacy-35–legacy-39 ship: a valve position reached Home Assistant as a 12800 °C temperature sensor through the
 ordinary discovery path, not through anything that announced itself as risky. So "nothing here can
 change what a value means" is a **finding you state**, not an assumption made for you.
 
@@ -71,7 +71,7 @@ what the value *should* read, and what this row makes of it.
 | `SPEC-CONV` | The spec names this value; this row decodes it differently. |
 | `SPEC-LAYOUT` | On a shared outdoor page, the spec says a different field lives at this offset. |
 | `CONSENSUS` | The rest of the catalog decodes this same value differently. |
-| `LABEL-UNIT` | One wire field, two different physical units in its label across the catalog — the label is the HA entity id and the VictoriaMetrics series suffix, so a false unit word publishes a false quantity (#230). Judged on the **published** (adjudicated) label, so a `logic/label_override.hpp` correction clears it — #230 A's fan step is fixed there and no longer fires. Compared on the UNIT alone: per-family *naming* differences are expected and never reported. |
+| `LABEL-UNIT` | One wire field, two different physical units in its label across the catalog — the label is the HA entity id and the VictoriaMetrics series suffix, so a false unit word publishes a false quantity (legacy-230). Judged on the **published** (adjudicated) label, so a `logic/label_override.hpp` correction clears it — legacy-230 A's fan step is fixed there and no longer fires. Compared on the UNIT alone: per-family *naming* differences are expected and never reported. |
 | `SEMANTICS` | A non-temperature (valve position, step, pulse count) is typed °C — HA gets a phantom temperature entity. |
 | `OVERLAP` | Two rows straddle each other's bytes: one value is fabricated, the other lost. |
 
@@ -126,7 +126,7 @@ ranges too. The audit's envelopes catch the impossible; you catch the *implausib
 ## 4. Verify, don't assert
 
 `scripts/run-mock-tests.sh` must pass, and new decode/format logic needs a `CHECK` in
-`test/test_logic.cpp` — catalog-wide guards where a whole class can regress (the pattern issue #39
+`test/test_logic.cpp` — catalog-wide guards where a whole class can regress (the pattern issue legacy-39
 established, e.g. the water-pressure loop at `test/test_logic.cpp:209-220`). If the audit itself
 changed, `tools/domain/selftest.sh` must still catch all four historical bugs.
 

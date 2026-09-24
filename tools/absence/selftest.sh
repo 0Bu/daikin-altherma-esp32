@@ -34,7 +34,7 @@
 #    11. the end-of-ladder minimal boot decided AFTER main.cpp's safe-mode gate, so the poll engine
 #        and the MQTT bridge start anyway and take the heap the minimal boot exists to leave free
 #    12. that latch deleted outright, which ends the restart ladder back in the unreachable
-#        degraded state #407 was filed about
+#        degraded state legacy-407 was filed about
 #    13. the per-row state ages left unfed on the paths that read NOTHING, so a silent bus freezes
 #        every duration at the instant it went quiet and goes on presenting them as current — seed
 #        1's shape a third time, and the reason the feature has three call sites rather than one
@@ -357,7 +357,7 @@ PY
 expect_red "the board trends made conditional in place" run_contract
 restore
 
-# 11. #407's end-of-ladder: the minimal boot decided AFTER main.cpp's safe-mode gate. It would then
+# 11. legacy-407's end-of-ladder: the minimal boot decided AFTER main.cpp's safe-mode gate. It would then
 #     arrive once the poll engine and the MQTT bridge had already started and taken the heap the
 #     minimal boot exists to leave free — the state reads "safe mode" while nothing was actually
 #     kept out of it.
@@ -375,7 +375,7 @@ expect_red "the end-of-ladder minimal boot decided after the safe-mode gate" run
 restore
 
 # 12. ...and the latch removed altogether, so the ladder ends back in the unreachable degraded state
-#     #407 was filed about.
+#     legacy-407 was filed about.
 python3 - "$TMP/main/heap_guard.cpp" <<'PY2'
 import sys, re
 p = sys.argv[1]

@@ -11,7 +11,7 @@
 #   2. `return_water_temp_before_phe_r4t`    — a real label, but only on def/altherma3_r_erga.hpp,
 #                                              the host-test fixture is_detection_model() refuses
 #   3. a plain typo in an otherwise-correct id
-# Both 1 and 2 shipped in the heat-meter recipe from #206 until 2026-07-29. Case 2 is the one that
+# Both 1 and 2 shipped in the heat-meter recipe from legacy-206 until 2026-07-29. Case 2 is the one that
 # matters most: it is the reason the audit resolves against DETECTABLE profiles only, and a version
 # that scanned the whole registry would call it clean.
 #

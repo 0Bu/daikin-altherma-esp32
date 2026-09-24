@@ -6,12 +6,12 @@
 // reset-reason allowlist, and a named verdict for every way the answer can be no.
 //
 // ── Why this exists at all ──────────────────────────────────────────────────────────────────────
-// The checkup was RAM-only "for history.hpp's reason" — hourly buckets in NVS would be write traffic
-// in the partition holding the WiFi credentials, for a convenience. That argument was never about
-// RAM; it was about FLASH, and #391 answered it for the trends by moving them into .noinit, where a
-// reset that keeps power costs nothing to survive. The checkup simply never got the same treatment,
-// and its own header went on justifying the gap with "it is not persisted, so a reboot starts it
-// over regardless" — circular the moment somebody can change it.
+// The checkup was RAM-only "for history.hpp's reason" — hourly buckets in NVS would be write
+// traffic in the partition holding the WiFi credentials, for a convenience. That argument was never
+// about RAM; it was about FLASH, and legacy-391 answered it for the trends by moving them into
+// .noinit, where a reset that keeps power costs nothing to survive. The checkup simply never got
+// the same treatment, and its own header went on justifying the gap with "it is not persisted, so a
+// reboot starts it over regardless" — circular the moment somebody can change it.
 //
 // The gap matters MORE here than it does for the trends. A trend that loses an hour has a shorter
 // chart; a checkup that loses its window loses the VERDICT, because the window is 24 h and the
@@ -23,27 +23,29 @@
 // ── Two media, one meaning ──────────────────────────────────────────────────────────────────────
 // .noinit DRAM remains the zero-write fast path for a reset that keeps power.  The same completed
 // hourly buckets are also appended to the existing `history` flash journal once wall time is known.
-// That second path covers power loss and section movement across OTA; only the open hour can be lost.
+// That second path covers power loss and section movement across OTA; only the open hour can be
+// lost.
 //
 // A diagnostic bucket is not reconstructed from the five-minute trends: those rings deliberately
 // discard the short events this check counts.  Instead the exact CheckupBucket + DhwLossBucket pair
 // rides as the fourth journal source.  Its header carries checkup_journal_fingerprint(), and every
-// payload carries the detected model fingerprint and exact interval end.  A firmware meaning change,
-// a different unit, an invalid clock anchor or a torn flash write therefore fails closed rather than
-// turning old anonymous counters into a current verdict.
+// payload carries the detected model fingerprint and exact interval end.  A firmware meaning
+// change, a different unit, an invalid clock anchor or a torn flash write therefore fails closed
+// rather than turning old anonymous counters into a current verdict.
 //
 // One measurement is worth keeping from before the diagnostic journal existed, because it is what
-// the RAM seal is for: this same board DID keep its rings across a real OTA through .noinit alone. The new image's
-// sections can move, and then the bytes are not where the new build looks — but they need not, and
-// on an ordinary incremental build they did not. So .noinit is not a power-cycle-only path; it is
-// the path that fails closed when the layout moves, which is what the seal below makes safe.
+// the RAM seal is for: this same board DID keep its rings across a real OTA through .noinit alone.
+// The new image's sections can move, and then the bytes are not where the new build looks — but
+// they need not, and on an ordinary incremental build they did not. So .noinit is not a
+// power-cycle-only path; it is the path that fails closed when the layout moves, which is what the
+// seal below makes safe.
 //
 // ── Why the restore needs no clock ──────────────────────────────────────────────────────────────
 // history_persist.hpp's argument, and it transfers exactly: if the bytes are still there, power was
 // never lost, so the gap is a reset — about a second, or the reboot at the end of an OTA install.
 // The buckets are adopted in place with no re-anchoring. What CANNOT be adopted in place is the
-// lifecycle anchor: first/latest_sample_us are monotonic and restart at zero, so the previous boot's
-// observed span is carried as a DURATION (CheckupRing::carried_span_us) instead.
+// lifecycle anchor: first/latest_sample_us are monotonic and restart at zero, so the previous
+// boot's observed span is carried as a DURATION (CheckupRing::carried_span_us) instead.
 //
 // The in-flight CheckupState is deliberately NOT restored. It holds edge witnesses either side of
 // the reboot, and carrying those would book a compressor start that may never have happened.  The
@@ -52,8 +54,8 @@
 // and carries any fully measured DHW window that is still waiting in the open hourly bucket.
 //
 // ── Why a layout fingerprint, not just a CRC ────────────────────────────────────────────────────
-// A bucket is a pile of anonymous counters. Nothing in `buh_s` says which row it was read from, so a
-// firmware update that moved a locator, changed the bucket struct or moved a threshold would hand
+// A bucket is a pile of anonymous counters. Nothing in `buh_s` says which row it was read from, so
+// a firmware update that moved a locator, changed the bucket struct or moved a threshold would hand
 // the previous build's numbers to a check that now means something else by them — a valid CRC over
 // bytes that have quietly changed meaning. The fingerprint covers the geometry, every row locator
 // and the constants that decide what a counter COUNTS, so any such edit invalidates the record

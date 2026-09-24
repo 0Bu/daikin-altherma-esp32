@@ -6,8 +6,8 @@
 // round-trips a second, ~2.8 million requests a day, against a hub that also serves the Onecta app,
 // the unit's MMI, evcc and whatever else on the LAN speaks to it. Nothing about the map required
 // that. The EKRHH offsets fall into ten contiguous runs. Two facts are time-critical gates — plant
-// operation and current mode — and input 44 is time-critical event context that #441 requires from
-// the same poll cycle. Everything else is a water temperature, a flow rate or a setpoint
+// operation and current mode — and input 44 is time-critical event context that legacy-441 requires
+// from the same poll cycle. Everything else is a water temperature, a flow rate or a setpoint
 // read-back, none of which moves meaningfully inside five seconds, and all of which folds into a
 // five-MINUTE history bucket. So: batch the runs, read the whole map on a slower cadence, and keep
 // only gates plus the named outdoor context at 1 Hz.
@@ -15,18 +15,18 @@
 // WHY PURE. Both halves are the off-by-one a .cpp hides until it is in the field, and both fail
 // SILENTLY rather than loudly:
 //   - a run built one register short simply stops refreshing the LAST row of every batch. The row
-//     still decodes, still publishes, still looks right — it is merely frozen. That is the #35-#39
-//     shape wearing a timestamp, and no other gate here can see it.
+//     still decodes, still publishes, still looks right — it is merely frozen. That is the
+//     legacy-35–legacy-39 shape wearing a timestamp, and no other gate here can see it.
 //   - a cadence rule that never fires a full cycle leaves the entire cache at whatever the first
 //     cycle happened to read, which on a fresh session is nothing at all.
 // Neither is observable on a bench board in an afternoon; both are one CHECK here.
 //
 // It takes PLAIN ARRAYS rather than def::HomeHubReg, for the reason logic/ takes no def/ dependency
-// anywhere: def/homehub.hpp already includes logic/modbus.hpp, so the reverse edge would be a cycle.
-// The caller passes the two columns the plan is actually a function of — and because everything here
-// is constexpr, that caller can build its plan at COMPILE TIME and keep it in flash rather than
-// paying RAM for a table that never changes (hp_modbus.cpp does exactly that, and static_asserts the
-// result where it is built).
+// anywhere: def/homehub.hpp already includes logic/modbus.hpp, so the reverse edge would be a
+// cycle. The caller passes the two columns the plan is actually a function of — and because
+// everything here is constexpr, that caller can build its plan at COMPILE TIME and keep it in flash
+// rather than paying RAM for a table that never changes (hp_modbus.cpp does exactly that, and
+// static_asserts the result where it is built).
 #include <cstddef>
 #include <cstdint>
 

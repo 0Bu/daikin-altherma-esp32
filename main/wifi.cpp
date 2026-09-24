@@ -6,6 +6,7 @@
 #include "wifi.hpp"
 #include "config.hpp"
 #include "diag_log.hpp"
+#include "logic/config_model.hpp"
 #include "logic/link_watch.hpp"
 #include "logic/wifi_rollback.hpp"
 #include "sdkconfig.h"
@@ -305,8 +306,8 @@ bool wifi_start_sta() {
 
     wifi_config_t wc = {};
     const Config& c  = config();
-    strncpy(reinterpret_cast<char*>(wc.sta.ssid), c.wifi_ssid.c_str(), sizeof(wc.sta.ssid) - 1);
-    strncpy(reinterpret_cast<char*>(wc.sta.password), c.wifi_pass.c_str(), sizeof(wc.sta.password) - 1);
+    wifi_config_field_copy(wc.sta.ssid, sizeof(wc.sta.ssid), c.wifi_ssid);
+    wifi_config_field_copy(wc.sta.password, sizeof(wc.sta.password), c.wifi_pass);
 
     // Is this boot the trial run for freshly-changed credentials? Latched BEFORE esp_wifi_start()
     // below, because the very first STA_DISCONNECTED can arrive before this function reaches its

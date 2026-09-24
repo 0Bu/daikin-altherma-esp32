@@ -349,7 +349,7 @@ assert.equal(
   "13 starts · space 0 · hot water 0 · 9 unclassified",
 );
 
-// THE FALLBACK (#443 live review): the valve row exists in the catalog but was too sparse to judge
+// THE FALLBACK (legacy-443 live review): the valve row exists in the catalog but was too sparse to judge
 // with. The pooled mean is what decided, so it stays on the line, the class figures ride along as
 // observation, and the copy says which one carried the verdict.
 const cyclingPooled = {
