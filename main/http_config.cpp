@@ -823,7 +823,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     const bool reset_checkup =
         set_hp_resets_checkup(profile_sent, old_rx, old_tx, c.rx_pin, c.tx_pin);
     if (reset_checkup) c.x10a_identity_fp = 0;  // replaced below only for a committed manual model
-    // The HomeHub Modbus stack (issue #32). All optional — an omitted key keeps its stored value, so
+    // The HomeHub Modbus stack (issue legacy-32). All optional — an omitted key keeps its stored value, so
     // a wiring-only patch (rx/tx) leaves the HomeHub untouched and the pin picker's
     // {profile:"auto",rx,tx} POST cannot switch anything on. This is a SECOND source, not an
     // alternative to X10A: enabling it starts a separate task, it does not stop the X10A poll.
@@ -847,7 +847,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     }
     c.mb_port           = ji(j, "mb_port", c.mb_port);
     c.mb_unit_id        = ji(j, "mb_unit_id", c.mb_unit_id);
-    // `actuation_enabled` is deliberately NOT accepted: the register-54 write path is retired (#294)
+    // `actuation_enabled` is deliberately NOT accepted: the register-54 write path is retired (legacy-294)
     // and an accepted-but-inert field would read like a capability that still exists.
     const bool reset_mb_history = homehub_history_identity_changed(
         old_mb_host, old_mb_port, old_mb_unit, c.mb_host, c.mb_port, c.mb_unit_id);
@@ -1126,7 +1126,7 @@ static esp_err_t set_board(httpd_req_t* req) {
     if (!env_allowed) return env_result;
 
     // Two independent questions, and answering them with ONE comparison is what made a XIAO owner's
-    // save vanish (#257): picking the preset your device already carries moves no VALUE, but it is
+    // save vanish (legacy-257): picking the preset your device already carries moves no VALUE, but it is
     // still the first time anyone stated what this board is. board_save_needed/board_reboot_needed
     // (logic/config_model.hpp, host-tested) keep them apart — persist the statement, but claim no
     // reboot for it, since no driver's pin changed.

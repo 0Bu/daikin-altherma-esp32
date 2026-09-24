@@ -75,7 +75,7 @@ inline constexpr size_t HEAP_CRITICAL_BYTES = 4096;
 // made a heap hovering AT the threshold end its run every second or two, reset the 300 s clock, and
 // never restart at all.
 //
-// Measured on the bench board (#399), at exactly that heap level, while the run kept resetting:
+// Measured on the bench board (legacy-399), at exactly that heap level, while the run kept resetting:
 //     /status  503     /values  503     /diag  200
 // which is verbatim the wedge the top of this header exists to escape — "answering 503 to every
 // request, republishing nothing, indefinitely, reporting no fault". The device was IN it and the
@@ -153,7 +153,7 @@ inline constexpr bool heap_may_restart(uint8_t consecutive) {
 // Must a boot that INHERITED this many consecutive restarts come up MINIMAL — safe mode, with the
 // poll engine and the MQTT bridge never started?
 //
-// This is what the ladder ends in, and it replaces "stay up, degraded" (#407). That answer was
+// This is what the ladder ends in, and it replaces "stay up, degraded" (legacy-407). That answer was
 // measured on hardware and it did not do what it claimed: the cap's stated reason for stopping is
 // that staying up "keeps the web UI and OTA reachable so a newer build can be installed", and at the
 // heap level which produces the cap it does not. HTTP survived about seven minutes and then decayed

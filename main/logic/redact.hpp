@@ -54,9 +54,9 @@ inline constexpr const char* REDACTED = "<redacted>";
 //   circulation_source.timestamp_path
 //   weather_forecast.latitude  weather_forecast.longitude
 //   syslog.host  ntp.server  modbus.host
-// modbus.host joined the set with the HomeHub transport (#32): it is a LAN address, whether typed
+// modbus.host joined the set with the HomeHub transport (legacy-32): it is a LAN address, whether typed
 // manually or filled by the explicit discovery button. The room source's name and topic joined with
-// #62 — a topic is a path through the reporter's own broker and often carries a room or a device
+// legacy-62 — a topic is a path through the reporter's own broker and often carries a room or a device
 // name, and the name field is one the user typed. The circulation source follows the same privacy
 // boundary: its Shelly topic normally embeds a device id. mqtt.base joined when the base topic
 // became runtime-settable: it is a word the user typed AND it becomes the installation's Home

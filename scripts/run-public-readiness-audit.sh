@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 
 node <<'JS'
 const fs = require("node:fs");
+const { execFileSync } = require("node:child_process");
 const { createHash } = require("node:crypto");
 
 const mcp = JSON.parse(fs.readFileSync(".mcp.json", "utf8"));
@@ -249,10 +250,10 @@ for (const file of ["docs/REPORTING.md", ".github/ISSUE_TEMPLATE/bug_report.yml"
   }
 }
 
-// Public documentation must not send readers to numbered work items in the private predecessor
-// repository, nor let bare `#N` prose silently auto-link to unrelated issues in this fresh public
-// tracker. Section anchors are deliberately exempt: their `#` is immediately preceded by `](` or
-// by a word character in `file.md#anchor`.
+// Public documentation and tracked repository files must not send readers to numbered work items
+// in the private predecessor repository, nor let bare `#N` prose silently auto-link to unrelated
+// issues in this fresh public tracker. Section anchors are deliberately exempt: their `#` is
+// immediately preceded by `](` or by a word character in `file.md#anchor`.
 const publicMarkdown = [
   "README.md",
   "CONTRIBUTING.md",
@@ -264,7 +265,21 @@ for (const file of publicMarkdown) {
   if (/https:\/\/github\.com\/0Bu\/daikin-altherma-esp32\/(?:issues|pull)\/\d+/.test(text)) {
     throw new Error(`${file} links to a numbered private-predecessor work item`);
   }
-  if (/(?<!\]\()(?<!\w)#\d{1,3}\b/.test(text)) {
+}
+const auditedFiles = [
+  ...publicMarkdown,
+  ...execFileSync("git", ["ls-files", "-z", "--", ".agents", ".github/workflows", "main", "tools", "scripts", "test"])
+    .toString("utf8")
+    .split("\0")
+    .filter(Boolean)
+    .filter((file) => !file.startsWith("main/def/") && file !== "test/test_public_readiness_contract.mjs"),
+];
+for (const file of auditedFiles) {
+  if (!fs.existsSync(file)) continue;
+  const raw = fs.readFileSync(file);
+  if (raw.includes(0)) continue;
+  const text = raw.toString("utf8");
+  if (/(?<!\]\()(?<!\w)(?<!&)#\d{1,3}\b/.test(text)) {
     throw new Error(`${file} contains a bare predecessor #N reference that GitHub would mis-link`);
   }
 }

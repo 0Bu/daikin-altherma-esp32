@@ -45,7 +45,7 @@ inline std::string scoped_object_id(const std::string& group, const std::string&
     return o;
 }
 
-// A catalog row's HA entity id. The label alone is NOT enough (#221): it is unique only within its
+// A catalog row's HA entity id. The label alone is NOT enough (legacy-221): it is unique only within its
 // register page, while `uniq_id` and the discovery TOPIC are both flat namespaces. The catalog
 // carries "Error Code" on the outdoor page AND on the hydronic one, and before this the second
 // discovery config landed on the first one's topic under the first one's id — so the broker kept one
@@ -54,12 +54,12 @@ inline std::string scoped_object_id(const std::string& group, const std::string&
 //
 // The state payload never had this problem (it nests by group), which is exactly why the defect was
 // invisible outside Home Assistant — and why object_id() above must NOT change with this: it is the
-// state key and the VictoriaMetrics series suffix, and forking those is #217's whole subject.
+// state key and the VictoriaMetrics series suffix, and forking those is legacy-217's whole subject.
 //
 // Structural — every row, not just the ones that happen to collide today. A rule that scoped only
 // the collisions would make an entity's identity depend on which OTHER rows the detected profile
 // carries, so a re-detect onto a neighbouring model could rename a live entity and strand its
-// history: the #217 series fork, moved into HA.
+// history: the legacy-217 series fork, moved into HA.
 inline std::string row_object_id(const ValueDef& def) {
     return scoped_object_id(group_for_page(def.reg), object_id(def.label));
 }
@@ -109,7 +109,7 @@ inline std::string discovery_topic(const std::string& prefix, const std::string&
     return prefix + "/" + ha_component(def) + "/" + node + "/" + row_object_id(def) + "/config";
 }
 
-// The topic shapes a value's discovery config was published on by builds BEFORE #221, when the
+// The topic shapes a value's discovery config was published on by builds BEFORE legacy-221, when the
 // object segment was the bare label slug with no register group. TWO exist per row: every build ever
 // wrote the `sensor` form, and builds after the binary_sensor split wrote the `binary_sensor` form
 // for a bit-flag row. Both are RETAINED, so both outlive an upgrade as permanently-unavailable
@@ -234,8 +234,8 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     const std::string unit  = unit_for_row(def);
     const std::string dc    = device_class_for_datatype(def.type);
     std::string j = "{";
-    // name/uniq_id are the ENTITY identity and carry the group (#221); `obj` below is the STATE key
-    // and must not — it is what mqtt_group.hpp nests and what VictoriaMetrics is keyed on (#217).
+    // name/uniq_id are the ENTITY identity and carry the group (legacy-221); `obj` below is the STATE key
+    // and must not — it is what mqtt_group.hpp nests and what VictoriaMetrics is keyed on (legacy-217).
     j += "\"name\":\"";       j += entity_name(def); j += "\",";
     j += "\"uniq_id\":\"";    j += node; j += "_"; j += row_object_id(def); j += "\",";
     j += "\"stat_t\":\"";     j += state_topic; j += "\",";
@@ -246,7 +246,7 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     // and would leave every one of these entities stuck at `unknown`. No unit / device_class /
     // state_class: every 300-307 row is dataType -1, so unit and dc are empty here anyway, and a
     // meaningful HA device_class (running / problem / heat) is a per-LABEL domain judgement — exactly
-    // the kind of guess that produced #35-#39 — so it is deliberately left unset rather than inferred.
+    // the kind of guess that produced legacy-35-legacy-39 — so it is deliberately left unset rather than inferred.
     if (conv_is_binary(def.conv)) { j += "\"pl_on\":\"1\",\"pl_off\":\"0\","; }
     if (!unit.empty()) { j += "\"unit_of_meas\":\""; j += unit; j += "\","; }
     if (!dc.empty())   { j += "\"dev_cla\":\"";      j += dc;   j += "\","; j += "\"stat_cla\":\"measurement\","; }
@@ -310,7 +310,7 @@ inline std::string retired_modbus_discovery_topic(const std::string&           p
 // ── DERIVED companion entities ───────────────────────────────────────────────────────────────────
 // A companion is a field the bridge PUBLISHES but the catalog does not contain: today, the numeric
 // error_active/warning_active pair beside a textual conv-203 error class (logic/fault_state.hpp,
-// #209 defect 4). It lives in the same group object as the row it is derived from, so its JSON key
+// legacy-209 defect 4). It lives in the same group object as the row it is derived from, so its JSON key
 // needs no prefix — but HA entity ids share one flat namespace across groups, and a profile carries
 // an error class on BOTH the outdoor and the hydronic page, so the entity id and name are scoped by
 // the group. `<group>_<key>` and "<Group> <Name>": outdoor_state_error_active, "Outdoor State Error

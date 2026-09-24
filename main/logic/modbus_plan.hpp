@@ -6,7 +6,7 @@
 // round-trips a second, ~2.8 million requests a day, against a hub that also serves the Onecta app,
 // the unit's MMI, evcc and whatever else on the LAN speaks to it. Nothing about the map required
 // that. The EKRHH offsets fall into ten contiguous runs. Two facts are time-critical gates — plant
-// operation and current mode — and input 44 is time-critical event context that #441 requires from
+// operation and current mode — and input 44 is time-critical event context that legacy-441 requires from
 // the same poll cycle. Everything else is a water temperature, a flow rate or a setpoint
 // read-back, none of which moves meaningfully inside five seconds, and all of which folds into a
 // five-MINUTE history bucket. So: batch the runs, read the whole map on a slower cadence, and keep
@@ -15,7 +15,7 @@
 // WHY PURE. Both halves are the off-by-one a .cpp hides until it is in the field, and both fail
 // SILENTLY rather than loudly:
 //   - a run built one register short simply stops refreshing the LAST row of every batch. The row
-//     still decodes, still publishes, still looks right — it is merely frozen. That is the #35-#39
+//     still decodes, still publishes, still looks right — it is merely frozen. That is the legacy-35-legacy-39
 //     shape wearing a timestamp, and no other gate here can see it.
 //   - a cadence rule that never fires a full cycle leaves the entire cache at whatever the first
 //     cycle happened to read, which on a fresh session is nothing at all.

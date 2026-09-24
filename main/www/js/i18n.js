@@ -682,7 +682,7 @@ const I18N = {
     "syslog.hint": "Enter the Syslog server as hostname or IP address plus port. Leave the field empty to disable Syslog.",
     "ntp.title": "NTP server", "ntp.server": "Server",
     "ntp.hint": "Enter the hostname or IP address of the time server. Leave the field empty to use the firmware default.",
-    // HomeHub transport dialog (issue #32). It exposes no actuator control; the link is read-only,
+    // HomeHub transport dialog (issue legacy-32). It exposes no actuator control; the link is read-only,
     // because the Modbus link is read-only (docs/MODBUS_PROTOCOL.md).
     "homehub.title": "Modbus", "homehub.host": "Host · IP or .local name",
     "homehub.port": "Port", "homehub.unit": "Unit id",

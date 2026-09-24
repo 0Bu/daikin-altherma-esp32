@@ -4,10 +4,10 @@
 // Everything under "Memory constraints" about the heap is reported: /status.sys carries free /
 // min-free / largest-block, two trend rings chart them, and heap_guard.cpp restarts the board when
 // the largest contiguous block stays unusable. The STACK had none of that. Three overflows shipped
-// (v1.0.12 on httpd, #241 on hp_poll, #318 on httpd again through OTA) and each was diagnosed the
+// (v1.0.12 on httpd, legacy-241 on hp_poll, legacy-318 on httpd again through OTA) and each was diagnosed the
 // same way afterwards: by reading the USED/FREE column of a core dump's task table, which exists
 // only once the board has already died. Between those crashes the headroom was invisible — an idle
-// board looks identical at every stack size, so the frame growth that ate 1200 bytes across #318
+// board looks identical at every stack size, so the frame growth that ate 1200 bytes across legacy-318
 // announced itself nowhere until the fleet updated onto it.
 //
 // This closes that half. `uxTaskGetStackHighWaterMark` already answers the question per task; what
@@ -43,7 +43,7 @@ enum class StackWatch : uint8_t {
     // that has never been exercised. Null says "not measured"; a number here always means a request
     // was served to get it.
     Httpd = 0,
-    Poll,    // hp_poll — #241 died here, 8192
+    Poll,    // hp_poll — legacy-241 died here, 8192
     Mqtt,    // the publish task, whose cycle builds every payload
     Modbus,  // the HomeHub link; retires and is recreated after configuration changes
     Weather, // Open-Meteo TLS + HTTP + JSON task; release HIL requires its post-fetch evidence

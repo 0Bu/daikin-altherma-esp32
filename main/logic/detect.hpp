@@ -172,7 +172,7 @@ inline bool signature_consistent(const Signature& sig, const Fingerprint& fp) {
 // The capacity the detect_* rules narrow and rank by: the O/U figure when the unit reported it,
 // else the I/U capacity code as an approximate fallback. ONE accessor because detect_candidates
 // (which set) and detect_best (which representative) must answer from the same number — they did
-// not, and that is #225: the fallback ranked the pick while the SET ignored it, so /status reported
+// not, and that is legacy-225: the fallback ranked the pick while the SET ignored it, so /status reported
 // 8 candidates across 4 families — including 14-16 kW models — on an 8 kW unit whose representative
 // had long since been constrained to the 4-8 kW class. Narrowed, that live set is 5 across 3.
 inline int detect_capacity(const Fingerprint& fp) {
@@ -193,7 +193,7 @@ inline bool signature_kw_contains(const Signature& sig, int cap) {
 // that merely happen to be a subset of a feature-rich unit. Fills out[] with up to `max` candidate
 // ids (in signature order) and returns the total candidate count (which may exceed `max`).
 //
-// Then a THIRD filter, for the case this function used to answer too broadly (#225): when the O/U
+// Then a THIRD filter, for the case this function used to answer too broadly (legacy-225): when the O/U
 // capacity is unknown, signature_consistent applies no kW filter at all, so the set spans kW
 // classes — and the header's own contract ("register-equivalent only when the capacity is known")
 // is voided exactly there. The I/U capacity code is available in that state and detect_best already
@@ -260,12 +260,12 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 // tightest kW class that still contains the capacity (a narrow rated class beats a broad one, and a
 // classed profile beats a class-less one); (3) the LOWEST PROFILE ID, lexicographically.
 //
-// WHY THE LAST ONE IS AN ID AND NOT "FIRST IN SIGNATURE ORDER" (#230 B). Signature order is
+// WHY THE LAST ONE IS AN ID AND NOT "FIRST IN SIGNATURE ORDER" (legacy-230 B). Signature order is
 // registry order, which is the order the tables happen to sit in def/registry.hpp — an incidental
 // fact about a file, not a fact about heat pumps. A label is an identifier (ha_slug -> the HA
 // entity id + the VictoriaMetrics series suffix, logic/discovery.hpp), so when the tie-break moves,
 // a live series STOPS and a new one starts at zero — read downstream as the plant going quiet
-// rather than as a rename (#180/#217). Keying that on file order means adding, removing or
+// rather than as a rename (legacy-180/legacy-217). Keying that on file order means adding, removing or
 // REORDERING a profile — none of them a suspicious act — silently reassigns identifiers. Measured
 // over the 39 detectable profiles across every (page mask x capacity x capacity-source) fingerprint
 // a real unit can present: permuting the registry moves the published identity on 11275 of 200x336
@@ -277,7 +277,7 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 //
 // This is deliberately NOT a better GUESS. Which of two bus-identical models a unit really is
 // cannot be known from bus data, and preferring (say) the majority spelling would assert a model on
-// no evidence — the mistake #230 names by name. It only makes the arbitrary choice STABLE. Two
+// no evidence — the mistake legacy-230 names by name. It only makes the arbitrary choice STABLE. Two
 // rules that were measured and rejected: preferring the profile that publishes FEWEST identifiers
 // moves 13 identifiers on 8 fingerprints (it switches product families for no evidentiary gain),
 // and preferring an EXACT page-mask match changes nothing at all on any of the 336 (an inert rule
@@ -302,7 +302,7 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 // and criterion (2) is a no-op; the fallback only ever moves the pick for units that don't report
 // O/U capacity.
 //
-// detect_candidates now applies that SAME fallback as a filter (#225), through the same two helpers
+// detect_candidates now applies that SAME fallback as a filter (legacy-225), through the same two helpers
 // rather than a second copy of the arithmetic — so the reported set and this pick are constrained
 // by one rule, and this function's answer is unchanged by that filter (see its comment).
 inline const char* detect_best(const Signature* sigs, int nsig, const Fingerprint& fp) {
@@ -351,7 +351,7 @@ inline void eeprom_render(const uint8_t* b, int n, char* out, int outsz) {
 // single page bit missing from the fingerprint can make EVERY profile inconsistent — and the caller
 // then reads with `generic`, which carries 53 rows instead of ~99 and has no leaving-water
 // measurement, no compressor speed and no pressures at all. Measured against the shipped
-// signatures, that is the outcome for 8 of the 12 fingerprint pages (#214).
+// signatures, that is the outcome for 8 of the 12 fingerprint pages (legacy-214).
 //
 // The page probe already retries, so a page that is genuinely there almost never goes missing. What
 // this rule adds is the second line: an empty candidate set is not acted on until a SEPARATE sweep

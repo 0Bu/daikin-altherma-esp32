@@ -17,7 +17,7 @@
 //   * a metrics consumer sees ONE series per field (the labels are identical), so two interleaved
 //     uptime counters read as a sawtooth — measured on this project's own store, that inflated
 //     `resets(daikin_heartbeat_uptime_s[7d])` from ~50 real reboots to 16272, and the day it was
-//     worst the sample count doubled from 8500/day to 17138/day (#215);
+//     worst the sample count doubled from 8500/day to 17138/day (legacy-215);
 //   * `device_node_id` is the same for both, so Home Assistant merges them into ONE device whose
 //     entities flip between two units.
 // None of that announces itself. Every number stays plausible, which is why it survived a week of

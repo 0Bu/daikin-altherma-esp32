@@ -25,11 +25,11 @@
 # ── Historical note ───────────────────────────────────────────────────────────────────────────
 # The four defects this ledger opened with (R6T reading a byte early, BUH capacity publishing a
 # whole byte, Low Pressure(T) missing its °C type, and lt_da_pair_bml's 1-byte water temps) are
-# FIXED in PR #82, so their entries are gone with them — a KNOWN-DEFECT that outlives its fix
+# FIXED in PR legacy-82, so their entries are gone with them — a KNOWN-DEFECT that outlives its fix
 # silences the guard against the fix regressing. Each is now pinned by a catalog CHECK in
 # test/test_logic.cpp instead.
 #
-# The four #230 A LABEL-UNIT entries (page 0x30/1 conv 211 spelled "Fan 1 (10 rpm)" on
+# The four legacy-230 A LABEL-UNIT entries (page 0x30/1 conv 211 spelled "Fan 1 (10 rpm)" on
 # altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw, altherma_hpsu6_ultra,
 # altherma_lt_11_16kw_hydrosplit_hydro_unit, altherma_lt_da_pair_bml) are likewise gone: they are
 # FIXED by logic/label_override.hpp, which republishes the row as the spec-correct "Fan 1 (step)"

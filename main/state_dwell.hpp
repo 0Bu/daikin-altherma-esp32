@@ -18,7 +18,7 @@
 //
 // An explicit X10A re-detection onto a DIFFERENT unit empties the table: the slots are addressed by
 // (register page, byte offset, converter), and the same coordinates on another model are another
-// flag — continuing a run across that would be the #35-#39 substitution with a duration in front
+// flag — continuing a run across that would be the legacy-35-legacy-39 substitution with a duration in front
 // of it.
 #include "hp_poll.hpp"          // CachedValue
 #include "logic/state_dwell.hpp"

@@ -474,7 +474,7 @@ const DESCRIPTIONS = [
   // same status byte as the I/U operation mode and it says the hydro module wants the compressor,
   // whichever load that is for. Measured over three days on a live unit, every single ON minute was
   // a DHW charge and none had the 3-way valve on space heating — so copy that promised "the room is
-  // calling for heat" described the wrong thing entirely (#199).
+  // calling for heat" described the wrong thing entirely (legacy-199).
   { exact: true, re: /^room thermostat control (heating|cooling) setpoint main$/i,
     what: "The target room temperature for the main zone in Heating or Cooling mode. This is a temperature setpoint, not the unit's ON/OFF thermo-demand signal.",
     normal: "Use the configured comfort target for the selected mode. Whether the unit starts also depends on the measured room temperature and controller logic.",
@@ -508,7 +508,7 @@ const DESCRIPTIONS = [
   // These 11 rows are the ONLY catalog labels that reached the UI with no explainer — and two of
   // them ("Fin Temp. Drop Control", "Fin Temp. Protection Retry Qty") had something worse: they fell
   // through to the "fin temp" heatsink-TEMPERATURE entry below, so a protection FLAG and a retry
-  // COUNT were both explained as a temperature reading. That is the #35-#39 shape in explainer copy —
+  // COUNT were both explained as a temperature reading. That is the legacy-35-legacy-39 shape in explainer copy —
   // well-formed, plausible, and false — so this section MUST stay ahead of the outdoor/refrigerant
   // and electrical sections that contain the entries it out-ranks (first match wins).
   // One entry per PROTECTION rather than per row: the flag and the counter for the same quantity are
@@ -888,7 +888,7 @@ const mbFallbackFor = (cid) => (x10aDown() && mbLive() ? mbByConcept(cid) : null
 // perfectly plausible temperature can be hours old (logic/ou_stale.hpp).
 //
 // The DEVICE's own marker is preferred: /values carries `held` precisely so a consumer need not
-// re-derive the page rule (#209 defect 5), and it travels WITH the row instead of being recomputed
+// re-derive the page rule (legacy-209 defect 5), and it travels WITH the row instead of being recomputed
 // against a snapshot taken elsewhere. rowHeldOver stays as the fallback for a board on an older
 // build that does not send the marker yet — the same rule either way, never a looser second copy.
 const rowNotMeasuring = (v) => !!v && (v.held === true || rowHeldOver(v, S.live));
@@ -897,7 +897,7 @@ const rowNotMeasuring = (v) => !!v && (v.held === true || rowHeldOver(v, S.live)
 // current reading: the link is silent, or the unit is no longer refreshing it. From a reader's side
 // those are one fact — the number under that label is not being measured now — and one answer
 // follows: an independent sensor that IS still measuring may stand in, and nothing else may. The
-// schematic and the inspector have refused a held reading since #209; this is what lets the value
+// schematic and the inspector have refused a held reading since legacy-209; this is what lets the value
 // tables refuse it the same way instead of printing it as an ordinary current row.
 const mbStandInFor = (v) =>
   v && (x10aDown() || rowNotMeasuring(v)) && mbLive() ? mbByConcept(v.concept) : null;

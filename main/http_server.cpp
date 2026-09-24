@@ -44,8 +44,8 @@ void http_start() {
     // WebSocket send (a transport that no longer exists) — nowhere near the code that actually
     // corrupted it. Every other task in that dump had >= 1.8 KB free; httpd was the sole outlier,
     // because append_status_json() runs here and is by far the largest thing this task does.
-    // 460 bytes of margin was the bug and #163's extra JSON was only the straw. The peak is
-    // separately cut in http_status.cpp. This is now the ONLY task that builds /status (#241).
+    // 460 bytes of margin was the bug and legacy-163's extra JSON was only the straw. The peak is
+    // separately cut in http_status.cpp. This is now the ONLY task that builds /status (legacy-241).
     //
     // 12 KB became insufficient again when ENV III extended that builder. The exact signed CI ELFs
     // show its fixed frame growing from 0x2630 (9776) bytes in dev.295 to 0x2950 (10576) in dev.296:

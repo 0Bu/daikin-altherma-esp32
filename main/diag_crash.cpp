@@ -83,7 +83,7 @@ void diag_crash_capture() {
     // panic that fails to write its own dump (a stack overflow can overrun the writer) leaves the
     // PREVIOUS build's dump in place. Such an orphan still passes esp_core_dump_image_check() — it is
     // a valid image, just of another binary — so `coredump` reads true, /status offers a download,
-    // and only espcoredump three steps later rejects it on a SHA-256 mismatch (#215). Detect it by
+    // and only espcoredump three steps later rejects it on a SHA-256 mismatch (legacy-215). Detect it by
     // comparing the dump's own app-ELF sha (from the summary) against the RUNNING build's, and erase
     // the orphan when they disagree: then `coredump` means "a dump for THIS firmware is downloadable"
     // and the next real panic writes to a clean partition. The summary fields go with it — they

@@ -1,4 +1,4 @@
-// translation-source: ec7a981bca24dffbb8b1dba654c7fc8449c6e5613d9d019cb3ff71140429b621
+// translation-source: 9725ef8c0270c09aea36f85393f68fc744c5f9139acbacf246e38ad9e06de159
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one

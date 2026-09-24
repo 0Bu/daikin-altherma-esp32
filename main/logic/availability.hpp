@@ -1,7 +1,7 @@
 #pragma once
 // AVAILABILITY — is this row's decoded number a MEASUREMENT, or is the firmware merely able to
 // decode something from those bytes? The two are not the same question, and every defect in issue
-// #209 that is not a type problem is this one.
+// legacy-209 that is not a type problem is this one.
 //
 // The gates that already exist answer narrower questions and cannot answer this one:
 //
@@ -14,7 +14,7 @@
 //     model (the 0x64 hybrid page on a non-hybrid unit). It lives in the generated table, so it can
 //     only carry what the generator knew.
 //
-// What is left over is exactly the residue #209 measured on a live ERGA/EHB unit against a
+// What is left over is exactly the residue legacy-209 measured on a live ERGA/EHB unit against a
 // manufacturer-documented HomeHub reference: a field that decodes to an ordinary-looking number
 // which is not a measurement of anything. The non-default ROW policies below all
 // require evidence — never a global rule:
@@ -41,7 +41,7 @@
 //
 // PAGE_ABSENCE_RULES is a separate page-level verdict. When the reply to a whole
 // REGISTER PAGE carries the signature of hardware that is not fitted, the finding is about the page,
-// so it is keyed on the page and reaches every row on it. #297 first shipped this as one row-level
+// so it is keyed on the page and reaches every row on it. legacy-297 first shipped this as one row-level
 // entry per coordinate (the four 0xA1 rows), which restates one fact four times and leaves two gaps
 // the 0xA0 page then walked into: a row that already carries a VALUE rule cannot also carry the page
 // fact, and a row a future generator run adds to the page is covered by nothing at all.
@@ -108,7 +108,7 @@ enum class AvailabilityPolicy : uint8_t {
 //
 // The witness is the refrigerant pressure sensor's saturation temperature on the HYDRONIC page,
 // (0x62, 15, conv 405). Two facts about it decide everything below, and BOTH were measured rather
-// than assumed — getting either wrong is the #35-#39 shape with a second sensor in front of it:
+// than assumed — getting either wrong is the legacy-35-legacy-39 shape with a second sensor in front of it:
 //
 //   (1) IT IS THE PHE SIDE. Over 1419 mixed-mode running samples its value tracks LEAVING WATER
 //       across a 55 K span (3.2-64.1 °C against LWT 9.5-64.8 °C; paired mean difference -0.9 K)
@@ -124,7 +124,7 @@ enum class AvailabilityPolicy : uint8_t {
 // outdoor coil (the EVAPORATOR in heating) at 0 °C while the refrigerant condenses at 49 °C is not
 // a contradiction, it is a January afternoon — and so is a suction pipe at 0 °C. Keying either of
 // those to this witness would withhold a real reading in exactly the season it matters, which is
-// the failure direction #224 says a wrong adjudication must never take. The LIQUID LINE is
+// the failure direction legacy-224 says a wrong adjudication must never take. The LIQUID LINE is
 // downstream of the condenser, so it IS the high side: liquid temperature = condensing temperature
 // - subcooling, and that is a relation this witness can refute.
 inline constexpr uint8_t SAT_WITNESS_REG    = 0x62;
@@ -177,7 +177,7 @@ struct AvailabilityRule {
     int                conv;
     // OPTIONAL fourth key component: the generated label this rule is about, or nullptr for "every
     // spelling at this coordinate". It exists because (reg, offset, conv) is NOT always one
-    // quantity — see the #224 block below, where 0x21/6 conv 105 is a fan-inverter heatsink on 19
+    // quantity — see the legacy-224 block below, where 0x21/6 conv 105 is a fan-inverter heatsink on 19
     // profiles and a GEOTHERMAL BRINE INLET on two. This is not the label MATCHING lwt_select.hpp
     // warns about (a pattern hunting for a quantity, which goes wrong the moment the catalog
     // re-spells it); it is an exact discriminator among the spellings the catalog actually carries,
@@ -224,14 +224,14 @@ inline constexpr size_t A0_FLAGS_OFFSET   = 12;  // two bytes
 
 inline constexpr PageAbsenceRule PAGE_ABSENCE_RULES[] = {
     // 0xA1 — the second-outdoor-unit water-HX page, not four independent primary-unit thermistors.
-    // On the #209 reference installation the complete reply is 16 zero bytes, including the
+    // On the legacy-209 reference installation the complete reply is 16 zero bytes, including the
     // unit-family setting flags at byte 9, through a real DHW compressor cycle. That complete-page
     // signature means no second outdoor unit is populated; publishing four 0 °C measurements from it
     // invents hardware. Deliberately NOT a per-row zero rule: an inlet, outlet or target may
     // legitimately cross 0 °C on a populated page, and every row here publishes again as soon as ANY
-    // byte in the same reply proves the page live. #224 / #297.
+    // byte in the same reply proves the page live. legacy-224 / legacy-297.
     {0xA1, PageAbsence::AllBytesZero, A1_PRESENCE_BYTES,
-     "#224: whole 0xA1 reply is zero, including the unit-family flags (second O/U absent)"},
+     "legacy-224: whole 0xA1 reply is zero, including the unit-family flags (second O/U absent)"},
 
     // 0xA0 — the same absent second outdoor unit, one page earlier, and it needed a different
     // witness because this reply is NOT all-zero: on the reference installation it reads
@@ -246,16 +246,16 @@ inline constexpr PageAbsenceRule PAGE_ABSENCE_RULES[] = {
     // zero: 0xA0/2 published 89.6-192.0 °C, seven distinct values in seven days and every one of
     // them an exact multiple of 12.8 °C — its raw low byte never leaves 0x00/0x80, which is not how a
     // thermistor read at 0.1 °C resolution behaves. reading_plausible() cannot refuse those: 192 °C
-    // is inside its ±200 °C envelope. That is the #35-#39 shape, and it is what makes this page a
+    // is inside its ±200 °C envelope. That is the legacy-35-legacy-39 shape, and it is what makes this page a
     // defect rather than a tidiness question.
     //
     // BOTH conditions are required, and the redundancy is the point: the id alone is the argument,
     // the silent flag words are the corroboration, and demanding both means anything ambiguous
     // publishes. The absence is read off THIS page's own bytes on every cycle — no claim is made
-    // about which models fit a second outdoor unit, which is the claim #224 says nobody may make
+    // about which models fit a second outdoor unit, which is the claim legacy-224 says nobody may make
     // from one installation.
     {0xA0, PageAbsence::UnidentifiedUnit, A0_PRESENCE_BYTES,
-     "#224: 0xA0 reports no O/U MPU id (0xFFFF) and asserts no output — second O/U absent"},
+     "legacy-224: 0xA0 reports no O/U MPU id (0xFFFF) and asserts no output — second O/U absent"},
 };
 
 inline constexpr size_t PAGE_ABSENCE_RULE_COUNT =
@@ -304,24 +304,24 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // satisfy raw == floor(128 × T) on an exact 0.1 K grid. The verdict therefore moved to
     // logic/conv_override.hpp, which carries the evidence — a quarantine and a mis-decode are
     // different findings and must not be recorded as the same one, or the fix looks like a
-    // suppression that was quietly lifted. #194.
+    // suppression that was quietly lifted. legacy-194.
     //
     // Target Cond. Temp. — raw 0x0000 all day: exactly one distinct value across a full audit
     // window
-    // while the inverter reached 32 rps and the discharge pipe passed 100 °C (#209), and "reads 0.0
+    // while the inverter reached 32 rps and the discharge pipe passed 100 °C (legacy-209), and "reads 0.0
     // even mid-run", which is why logic/ou_stale.hpp already records it as a useless witness. A
     // condensing TARGET of exactly 0 °C during a heat-up is not a target; the field is unpopulated.
     // The 0x8000 sentinel cannot see this, and it is the one row where an exact zero is adjudicated
-    // absent. NOTE the evidence is ONE unit: #209's audit and #194's both ran against the same
+    // absent. NOTE the evidence is ONE unit: legacy-209's audit and legacy-194's both ran against the same
     // board, which detection has always resolved to altherma_ebla_edla_d_series_4_8kw_monobloc (the
-    // syslog detect line says so at every boot on record) — #213's "two unit families" read the
-    // hardware identification in #209's scope section as if it were the running profile. The
+    // syslog detect line says so at every boot on record) — legacy-213's "two unit families" read the
+    // hardware identification in legacy-209's scope section as if it were the running profile. The
     // verdict
     // stands on the raw 0x0000 through full cycles; the second family does not exist yet.
     {0x10, 8, 114, nullptr, AvailabilityPolicy::ZeroMeansAbsent, 0.0,
-     "#209: raw 0x0000 through a full compressor cycle (one unit, two audits)"},
+     "legacy-209: raw 0x0000 through a full compressor cycle (one unit, two audits)"},
 
-    // ── Page 0x21 inverter rows that are not populated on this unit (#224) ───────────────────────
+    // ── Page 0x21 inverter rows that are not populated on this unit (legacy-224) ───────────────────────
     // MEASURED over 60 days of the reference unit's published series, and the measurement is
     // stronger than "it reads zero" because of WHICH samples it is made of. Page 0x21 stops being
     // refreshed while the outdoor unit rests (logic/ou_stale.hpp), so those rows are already
@@ -356,15 +356,15 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // the outcome of trying to close them and is deliberately kept beside the rules it did not
     // become.
     {0x21, 6, 105, "Fan1 Fin temp.", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
-     "#224: exactly 0.0 in 1140/1140 running samples while INV fin read 16.5-55.5 and ambient "
+     "legacy-224: exactly 0.0 in 1140/1140 running samples while INV fin read 16.5-55.5 and ambient "
      ">=17.5"},
     {0x21, 8, 105, "Fan2 Fin temp.", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
-     "#224: same, and a 4-8 kW monobloc has one fan — there is no second fan inverter to measure"},
+     "legacy-224: same, and a 4-8 kW monobloc has one fan — there is no second fan inverter to measure"},
     {0x21, 10, 105, "Compressor outlet temperature", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
-     "#224: exactly 0.0 in 1140/1140 running samples while the discharge pipe it feeds read 101 "
+     "legacy-224: exactly 0.0 in 1140/1140 running samples while the discharge pipe it feeds read 101 "
      "°C"},
 
-    // ── Page 0x20: the liquid line is adjudicated, the coil and suction pipe are REFUSED (#224) ──
+    // ── Page 0x20: the liquid line is adjudicated, the coil and suction pipe are REFUSED (legacy-224) ──
     // All three read exactly 0.0 in 1419/1419 running samples over 7 days (min == max == 0.0 on
     // each, selected on INV frequency > 0), while the same page's Heat exchanger mid-temp. — same
     // page, same converter — never drops below 3.0 °C in those samples. So the page is live and the
@@ -386,7 +386,7 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // For the first two, a high-side witness proves nothing whatever: a coil or a suction pipe at
     // 0 °C while the refrigerant condenses at 49 °C is not a contradiction, it is an ordinary
     // January afternoon. Keying them to this witness would withhold a REAL reading in exactly the
-    // season the reading matters, which is the failure direction #224 exists to refuse — so they
+    // season the reading matters, which is the failure direction legacy-224 exists to refuse — so they
     // stay published, and a visible zero someone can question stays better than an invisible
     // withheld reading nobody can. THE ROW'S SIDE OF THE CIRCUIT IS PART OF THE ADJUDICATION; a
     // future witness on the low side would settle those two and this one says nothing about them.
@@ -394,7 +394,7 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // The liquid line is the high side, so the relation is liquid temperature = condensing
     // temperature - subcooling, and 0.00 °C against a condensing 49 °C claims ~49 K of subcooling.
     // That is impossible rather than unlikely — the Target Cond. Temp. bar, reached against a
-    // SIMULTANEOUSLY MEASURED quantity instead of against a second installation, which is what #224
+    // SIMULTANEOUSLY MEASURED quantity instead of against a second installation, which is what legacy-224
     // asked for and what one unit could not otherwise supply.
     //
     // WHAT THE ON-PAGE WITNESS WOULD HAVE BEEN, and why it is not used: page 0x20 carries its own
@@ -429,14 +429,14 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // why this trade is cheaper than the flat rule's, not merely the same one again.
     {0x20, 10, 105, "Liquid pipe temp.(R6T)", AvailabilityPolicy::ZeroAbsentAboveSaturation,
      LIQUID_LINE_SAT_CEILING,
-     "#224: exactly 0.0 in 1419/1419 running samples; 1231 of them with the refrigerant condensing "
+     "legacy-224: exactly 0.0 in 1419/1419 running samples; 1231 of them with the refrigerant condensing "
      "above 30 °C, which would be ~30 K of subcooling"},
     {0x20, 10, 105, "Liquid temperature(R3T)", AvailabilityPolicy::ZeroAbsentAboveSaturation,
      LIQUID_LINE_SAT_CEILING,
-     "#224: same row, second of three air-source spellings the catalog carries at this coordinate"},
+     "legacy-224: same row, second of three air-source spellings the catalog carries at this coordinate"},
     {0x20, 10, 105, "Liquid pipe temp.", AvailabilityPolicy::ZeroAbsentAboveSaturation,
      LIQUID_LINE_SAT_CEILING,
-     "#224: same row, third of three air-source spellings the catalog carries at this coordinate"},
+     "legacy-224: same row, third of three air-source spellings the catalog carries at this coordinate"},
 
     // CT-L3 and HP Forced FG share the one-byte field 0x63/16 in docs/REGISTERS.md. conv 161 is an
     // intrinsic whole-byte ×0.5-A decode, so bit 7 alone becomes 64 A even though the register map

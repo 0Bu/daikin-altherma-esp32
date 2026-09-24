@@ -26,7 +26,7 @@
 //     0xA0 is a different quantity on a second outdoor unit.
 //   * At 0x20/12 the SAME offset carries "High Pressure" (bar, conv 105) and "High Pressure(T)"
 //     (the saturation temperature, conv 405). A token match takes whichever sorts first, so half
-//     the catalog would draw °C into a chart whose axis says bar — the #35-#39 shape, with a
+//     the catalog would draw °C into a chart whose axis says bar — the legacy-35-legacy-39 shape, with a
 //     24-hour history in front of it to make it look verified.
 //
 // The unit is the second half of the locator precisely because of that last case: (reg, offset)
@@ -132,7 +132,7 @@ enum class TrendKind : uint8_t {
 // `reg`/`off`/`unit` are the LOCATOR for an ordinary Row (see the header note). BinaryState and
 // BinaryEvent also carry `conv`, because the 3-way valve and BSH share their dimensionless byte with
 // five unrelated state bits. `unit` is
-// the string the poll cache carries for the row — convert.hpp's unit_for_datatype(): "°C", "bar",
+// the string the poll cache carries for the row — convert.hpp's unit_for_row(): "°C", "bar",
 // "A", or "" for a row
 // whose unit lives in its label ("Flow sensor (l/min)"). It is spelled out here rather than taken as
 // a type code so this header stays free of convert.hpp; the catalog test checks the two agree.
@@ -244,7 +244,7 @@ inline constexpr TrendDef TRENDS[] = {
     // The BOARD's own memory. Not a plant reading, and here for the reason the single numbers on
     // /status could never answer: whether the heap is DRIFTING. A leak or a creeping fragmentation
     // shows as a slope over hours and is invisible in any one sample, which is why the spot figures
-    // were dropped from the UI once (#186) — a diagnosis nobody could make from what was shown.
+    // were dropped from the UI once (legacy-186) — a diagnosis nobody could make from what was shown.
     // Both are in KiB: bytes would overflow the int16 ring at 32.8 kB of heap.
     {"free_heap", TrendKind::FreeHeap, 0, 0, "KiB", "Free heap"},
     {"max_alloc", TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block"},
@@ -405,7 +405,7 @@ constexpr int64_t history_t0(int64_t now_unix, uint32_t newest_age_s, size_t n, 
 // That pin must be anchored to the sample's WALL-CLOCK INSTANT, never to its index: the ring shifts
 // one slot every HISTORY_DT_S, so an index-anchored pin would go on pointing at slot 42 while slot 42
 // became a different measurement — a label silently re-pointed at another reading, which is the
-// #35-#39 shape with a timestamp attached to make it look verified.
+// legacy-35-legacy-39 shape with a timestamp attached to make it look verified.
 //
 // Returns -1 when the pinned instant is no longer in the window: aged off the back as the day rolled,
 // or ahead of the newest sample. The caller then DROPS the pin rather than clamping it to the nearest

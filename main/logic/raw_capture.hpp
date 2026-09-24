@@ -4,9 +4,9 @@
 // hexdump.hpp names its original limitation: the raw dump fires only on a DETECT pass (boot, or
 // POST /detect), and a detect pass essentially never coincides with a compressor run. Target Evap.
 // Temp. was only wrong WHILE the compressor ran — at rest it decoded to 240.6 °C and the ±200 °C
-// envelope already dropped it — so the first #194 diagnosis had to be back-derived from a number
-// already rounded to one decimal. The runtime capture requested in #209 supplied the missing wire
-// evidence and #194 is now resolved through logic/conv_override.hpp; this cadence remains useful for
+// envelope already dropped it — so the first legacy-194 diagnosis had to be back-derived from a number
+// already rounded to one decimal. The runtime capture requested in legacy-209 supplied the missing wire
+// evidence and legacy-194 is now resolved through logic/conv_override.hpp; this cadence remains useful for
 // the next converter or layout mismatch.
 //
 // The cadence is the whole design. A dump every poll cycle would be 1 line/second into a 6 KB diag
@@ -16,7 +16,7 @@
 //   • nothing while the compressor is stopped — the detect-pass dump already covers that state, and
 //     it is the state where the value is NOT wrong;
 //   • one dump on the stopped → running EDGE, which is the sample that matters most (it is the
-//     transition where #194 measured the row stepping into the impossible range);
+//     transition where legacy-194 measured the row stepping into the impossible range);
 //   • then one every RAW_CAPTURE_PERIOD_S while it keeps running, so a long run yields a short
 //     series rather than a single point — two candidate scales that both fit one sample may not fit
 //     a curve;

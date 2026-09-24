@@ -6,7 +6,7 @@
 # builds, the logic tests pass, the domain audit sees a physically correct value, the description
 # audit finds copy for it — and the picture still claims the wrong branch, floats a reading 40 px
 # from the pipe it names, or strikes a label through with a riser ("HEIZUNG" rendered as
-# "HEIZUNC"). That is the #35-#39 failure shape drawn in SVG: well-formed, plausible, and
+# "HEIZUNC"). That is the legacy-35-legacy-39 failure shape drawn in SVG: well-formed, plausible, and
 # attributing a real number to the wrong thing.
 #
 # Three layers, all decided against the REAL markup (the SVG is parsed, the INSPECT/I18N/

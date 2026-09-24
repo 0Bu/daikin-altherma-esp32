@@ -25,10 +25,10 @@ void stack_watch_sample(StackWatch which) noexcept {
     // headroom in the one metric that exists to warn about running out. Measured on the reference
     // board: hp_modbus is created with a 6144-byte stack (xTaskCreate's depth argument is bytes
     // here too, the same deviation) and reports 2660; as words that would be 10640 bytes free on a
-    // 6144-byte stack. The #241 core dump agrees from the other side — `hp_poll 7664/520` on an
+    // 6144-byte stack. The legacy-241 core dump agrees from the other side — `hp_poll 7664/520` on an
     // 8192 stack sums to 8184. Keep the unit in every identifier this value reaches: it becomes
     // the VictoriaMetrics series suffix, where a wrong unit word is a published false quantity
-    // (the #230 LABEL-UNIT rule, applied to a board metric).
+    // (the legacy-230 LABEL-UNIT rule, applied to a board metric).
     const uint32_t free_bytes = static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
     const uint32_t prev = s_min_free_bytes[i].load(std::memory_order_relaxed);
     // `prev == 0` is the never-sampled sentinel, so the first sample always wins — otherwise a slot

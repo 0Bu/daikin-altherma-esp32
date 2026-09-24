@@ -13,7 +13,7 @@
 // row, and BOTH http_status (`/values`) and mqtt_ha (the grouped X10A topic) size
 // their snapshot buffer from the row COUNT, which is the exact upper bound on cached values. Grow
 // the cache without growing the count and the extra values are silently TRUNCATED out of `/values`
-// and out of MQTT — an absent-value bug with no error anywhere, the #35-#39 shape. So the view is
+// and out of MQTT — an absent-value bug with no error anywhere, the legacy-35-legacy-39 shape. So the view is
 // the single thing all four read; a supplement cannot reach one of them and miss another.
 #include <cstddef>
 #include <cstdint>

@@ -30,7 +30,7 @@ struct CachedValue {
                                 // resting and is answering with its last run's numbers
                                 // (logic/ou_stale.hpp). The value is kept — the trend ring needs to
                                 // tell "held over" from "no reading" — but it is not a measurement,
-                                // so the MQTT bridge withholds it (#209 defect 5).
+                                // so the MQTT bridge withholds it (legacy-209 defect 5).
                                 //
                                 // ORDER MATTERS HERE, which is why the one-byte fields are grouped:
                                 // `conv` is 4-byte aligned, so putting it between `off` and `held`
@@ -47,7 +47,7 @@ struct CachedValue {
                                 // what JSON type the MQTT bridge must give it, and conv 203 is what
                                 // earns a derived numeric fault companion (logic/fault_state.hpp).
                                 // Re-deriving any of those from the formatted TEXT instead is how a
-                                // field ends up changing type between states (#209 defect 3), and
+                                // field ends up changing type between states (legacy-209 defect 3), and
                                 // caching each as its own flag would grow the struct once per
                                 // question asked.
 };
@@ -124,7 +124,7 @@ logic::RefrigerantServiceSnapshot refrigerant_service_status();
 bool hp_link_connected();
 
 // Poll cycles the task guard DROPPED — a sweep that threw (std::bad_alloc under OTA/TLS heap
-// pressure) and never reached the bus (#380). Deliberately NOT a field of HpStats: every counter in
+// pressure) and never reached the bus (legacy-380). Deliberately NOT a field of HpStats: every counter in
 // there describes a cycle that RAN, is committed by poll_once() under the stats mutex, and is read
 // by callers asking "how is the bus doing?". These cycles never got that far — folding them in would
 // have the sweep's own commit path report the cycles where no commit happened. Lock-free and

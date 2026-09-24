@@ -12,7 +12,7 @@
 // forever, and the sensor sits at `unavailable`. The reader concludes their heat pump does not
 // support the feature. Nothing anywhere says "that id was never real".
 //
-// Found on the first run (2026-07-29), in the heat-meter recipe that had shipped since #206:
+// Found on the first run (2026-07-29), in the heat-meter recipe that had shipped since legacy-206:
 //   sensor.daikin_altherma_flow_rate_lmin              — no profile, and not even a valid slug of
 //                                                        the label it was derived from ("l/min"
 //                                                        slugs to `l_min`, not `lmin`)

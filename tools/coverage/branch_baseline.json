@@ -219,8 +219,8 @@
         "taken": 53
       },
       "main/logic/modbus_profile.hpp": {
-        "outcomes": 36,
-        "taken": 36
+        "outcomes": 74,
+        "taken": 74
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 8,
@@ -417,8 +417,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 228,
-        "taken": 188
+        "outcomes": 252,
+        "taken": 208
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
@@ -429,8 +429,8 @@
         "taken": 8
       },
       "main/logic/convert.hpp": {
-        "outcomes": 162,
-        "taken": 153
+        "outcomes": 166,
+        "taken": 157
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -441,12 +441,12 @@
         "taken": 149
       },
       "main/logic/crc.hpp": {
-        "outcomes": 123,
-        "taken": 116
+        "outcomes": 113,
+        "taken": 108
       },
       "main/logic/detect.hpp": {
-        "outcomes": 165,
-        "taken": 148
+        "outcomes": 175,
+        "taken": 158
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -458,7 +458,7 @@
       },
       "main/logic/discovery.hpp": {
         "outcomes": 332,
-        "taken": 177
+        "taken": 183
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -517,12 +517,12 @@
         "taken": 261
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 42,
-        "taken": 42
+        "outcomes": 36,
+        "taken": 36
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 136,
-        "taken": 123
+        "outcomes": 140,
+        "taken": 127
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -569,8 +569,8 @@
         "taken": 13
       },
       "main/logic/lwt_select.hpp": {
-        "outcomes": 64,
-        "taken": 57
+        "outcomes": 70,
+        "taken": 69
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
@@ -585,8 +585,8 @@
         "taken": 61
       },
       "main/logic/modbus_profile.hpp": {
-        "outcomes": 32,
-        "taken": 30
+        "outcomes": 40,
+        "taken": 40
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 10,

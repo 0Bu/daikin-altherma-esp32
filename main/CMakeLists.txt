@@ -126,7 +126,7 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
 
 # THE STACK CONTRACT for the /status builder — the one file in this component whose OPTIMISATION
 # LEVEL is a correctness setting rather than a taste. The status serializer has overflowed a
-# task stack twice (v1.0.12 on httpd, #318 on httpd again through an OTA that double-faulted and
+# task stack twice (v1.0.12 on httpd, legacy-318 on httpd again through an OTA that double-faulted and
 # rolled back a fleet), and both times the fix was to raise a stack against a frame nobody had
 # questioned. Measured on 2026-08-07 (main @ 7524b4c), the frame was 0x2e00 = 11776 bytes while the
 # NAMED LOCALS in that function sum to ~2.2 KB. The other ~9 KB was not live data: the project then

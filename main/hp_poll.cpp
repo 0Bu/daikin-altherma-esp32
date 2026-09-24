@@ -103,7 +103,7 @@ static std::atomic<uint32_t>  s_probe_ticket{0};         // last ticket handed o
 static std::atomic<uint32_t>  s_probe_reply_ticket{0};   // whose answer s_probe_reply holds
 static HpProbeReply           s_probe_reply;
 
-// Poll cycles the OOM guard below dropped (#380, hp_poll.hpp → hp_skipped_cycles). Written from the
+// Poll cycles the OOM guard below dropped (legacy-380, hp_poll.hpp → hp_skipped_cycles). Written from the
 // catch handler and read from the MQTT publish task, so it is atomic; relaxed is enough because
 // nothing is ordered against it and a reader one cycle behind is reading a counter that moves once
 // a second at worst. Not in s_stats: that mutex must not be taken on the path out of an OOM.
@@ -115,14 +115,14 @@ static std::atomic<bool>     s_network_quiesced{false};
 
 // Consecutive bus-answering sweeps that matched no profile. Poll-task-owned, RAM only, like the
 // backoff above. Falling back to `generic` costs ~46 rows including every derived figure, so it
-// waits for corroboration rather than acting on one sweep (detect_commit_no_match, #214).
+// waits for corroboration rather than acting on one sweep (detect_commit_no_match, legacy-214).
 static int                   s_no_match = 0;
 static int                   s_incomplete_detect = 0;
 static std::string           s_incomplete_profile;
 
 // Raw page-dump budget for the RUNNING compressor (logic/raw_capture.hpp) — poll-task-owned, RAM
 // only, never refilled within a boot. The detect-pass dump in hp_detect.cpp captures the same pages
-// at REST; this one supplied #194's decisive running-state evidence and remains available for the
+// at REST; this one supplied legacy-194's decisive running-state evidence and remains available for the
 // next converter/layout mismatch.
 static logic::RawCaptureState s_raw_capture;
 
@@ -436,7 +436,7 @@ static void poll_once() {
     // The outdoor unit refreshes its OWN pages (0x20 sensors, 0x21 inverter) only while it RUNS;
     // stopped, it answers with the last run's numbers (logic/ou_stale.hpp, measured). The web UI has
     // applied that rule since v1.0.13 — the FIRMWARE had not, so the MQTT state topic kept
-    // republishing the last run's outdoor air in a freshly-timestamped payload, and #209 measured the
+    // republishing the last run's outdoor air in a freshly-timestamped payload, and legacy-209 measured the
     // consequence against a HomeHub reference: exact agreement at every point while the compressor
     // ran, a mean 1.19 K (max 2.0 K) error over the 195 points while it rested.
     //
@@ -464,8 +464,8 @@ static void poll_once() {
     refrigerant_service_sample(fresh.data(), fresh.size(), rps_known, rps_running,
                                service_coverage, s_refrigerant_service_cycle_sample);
 
-    // ── RAW page bytes WHILE THE COMPRESSOR RUNS (#194 evidence, added by #209) ───────────────────
-    // This supplied the wire evidence that separated #194's wrong converter scale from a wrong
+    // ── RAW page bytes WHILE THE COMPRESSOR RUNS (legacy-194 evidence, added by legacy-209) ───────────────────
+    // This supplied the wire evidence that separated legacy-194's wrong converter scale from a wrong
     // offset; hp_detect.cpp alone had covered only rest-state frames. Keep the bounded running-state
     // sampler for future converter/layout mismatches without flooding the 6 KB diag ring.
     if (hp_poll_generation_matches(cycle_generation) &&
@@ -569,7 +569,7 @@ static bool poll_detect() {                         // false only when an attemp
     // be saving credentials, and a whole-struct save would carry this snapshot's stale wifi/mqtt
     // fields over a /set_wifi that landed during the sweep — silently reverting it after the user
     // already got {"ok":true}. logic/config_model.hpp holds the ownership rule.
-    // Read with the best-fit representative. The ranking is deterministic and — since #230 B —
+    // Read with the best-fit representative. The ranking is deterministic and — since legacy-230 B —
     // independent of the order the registry is written in (the last tie-break is the lowest profile
     // id), so a reordered table cannot move the entity ids and series this unit publishes. Where the
     // ranking genuinely ties, the survivors are NOT guaranteed to decode alike: that tie is on the
@@ -752,7 +752,7 @@ static void poll_probe_service() {
 //
 // This task no longer PUBLISHES to the browser at all. It used to end each cycle in
 // ws_broadcast_values() and every fourth in ws_broadcast_status(), which is how the /status builder
-// came to run here (#241) — the dashboard now polls /status and /values on the httpd task instead
+// came to run here (legacy-241) — the dashboard now polls /status and /values on the httpd task instead
 // (docs/ARCHITECTURE.md "Push vs. poll"). What this task does is read the bus and commit the cache.
 static void poll_task(void*) {
     s_poll_task_running.store(true, std::memory_order_release);
@@ -762,7 +762,7 @@ static void poll_task(void*) {
     bool network_quiesce_cap_logged = false;
     for (;;) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
-        // This task's own stack headroom — the budget that killed it in #241 and that nothing
+        // This task's own stack headroom — the budget that killed it in legacy-241 and that nothing
         // reported while the board was alive. The mark is RETROSPECTIVE (FreeRTOS keeps the lowest
         // free stack ever), so the top of the loop records the deepest frame of the PREVIOUS cycle
         // and no branch below can skip it. Outside the try: it allocates nothing and must still be
@@ -869,7 +869,7 @@ static void poll_task(void*) {
             // COUNT FIRST, then log. diag_printf allocates, so on the heap that caused this it can
             // throw again — and a second throw inside the handler is std::terminate, i.e. the reboot
             // this guard exists to avoid. An atomic increment cannot fail, so the counter records the
-            // cycle even when the log line describing it never makes it into the ring (#380: the ring
+            // cycle even when the log line describing it never makes it into the ring (legacy-380: the ring
             // was the ONLY evidence, and a chatty boot overwrites it).
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             refrigerant_service_record_poll_gap(hp_poll_generation());
@@ -923,7 +923,7 @@ void hp_poll_start() {
     // stacks moved that call chain to hp_modbus.cpp's own task, which exists only when a HomeHub is
     // configured. The devices that do not have one pay nothing.
     //
-    // What remains on this task is what it ran on for months: poll_once + hp_detect_run. #241's
+    // What remains on this task is what it ran on for months: poll_once + hp_detect_run. legacy-241's
     // overflow was http_append_status_json() reached from the WebSocket broadcaster that used to
     // live here, and that is gone (docs/ARCHITECTURE.md "Push vs. poll"):
     //
@@ -944,7 +944,7 @@ void hp_poll_start() {
 }
 
 // The MAXIMUM number of rows THIS cache can hold, so /values and the MQTT bridge size their snapshot
-// buffers correctly. Under-sizing silently TRUNCATES rows out of a snapshot — the #35-#39
+// buffers correctly. Under-sizing silently TRUNCATES rows out of a snapshot — the legacy-35-legacy-39
 // absent-value shape. The HomeHub is a separate stack with its own mb_values_capacity().
 size_t hp_values_capacity(uint32_t* revision_out) {
     if (!s_mtx) {

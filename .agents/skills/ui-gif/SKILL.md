@@ -163,7 +163,7 @@ Look at the finished GIF. Then ask:
    wrong from the next release onwards with nothing able to see it. A UI change that alters the
    card's height leaves it clipped, or leaves a sliver of the header or the next card in frame —
    adjust `CROP` in the recorder rather than living with it. This is the checklist item that has
-   actually fired: #462 raised `#schem` by 6 px and shortened it by 6, and the crop it left behind
+   actually fired: legacy-462 raised `#schem` by 6 px and shortened it by 6, and the crop it left behind
    sat 17 px under the card, catching the top edge of the next one in every frame. Nothing
    mechanical can see that — the stamp only proves the recording is of these sources, and a GIF
    with a stray sliver renders exactly as well as one without. **Measure, don't guess**, and don't

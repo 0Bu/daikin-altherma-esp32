@@ -20,7 +20,7 @@
 //
 // A label is not cosmetic. ha_slug() turns it into the HA entity id AND the VictoriaMetrics series
 // suffix (logic/discovery.hpp row_object_id/object_id), so the word inside it is a PUBLISHED CLAIM
-// about the quantity — test_metric_identity() (#217) and test_tie_break_identity() (#230 B) both
+// about the quantity — test_metric_identity() (legacy-217) and test_tie_break_identity() (legacy-230 B) both
 // gate on it. That is also why a rename is a MIGRATION, not a free edit: it retires the old series
 // and starts the new one at zero (mqtt_ha.cpp's retract_relabeled_values deletes the stale HA
 // entity on upgrade; a VictoriaMetrics series cannot be carried across a rename by any firmware
@@ -33,7 +33,7 @@
 //
 // ── The one entry: Fan 1 step (0x30/1, conv 211), "Fan 1 (10 rpm)" -> "Fan 1 (step)" ─────────────
 //
-// #230 A: page 0x30 offset 1 (conv 211) reads "Fan 1 (10 rpm)" on four profiles
+// legacy-230 A: page 0x30 offset 1 (conv 211) reads "Fan 1 (10 rpm)" on four profiles
 // (altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw, altherma_hpsu6_ultra,
 // altherma_lt_11_16kw_hydrosplit_hydro_unit, altherma_lt_da_pair_bml) and "Fan 1 (step)" on the
 // other 22 — same converter, same width, same type code. docs/REGISTERS.md §5 (page 0x30) names it
@@ -41,12 +41,12 @@
 // not a rate. Three of the four contradict themselves inside their own table, calling the
 // neighbouring byte "Fan 2 (step)". So "(10 rpm)" asserts a rate for a field the spec defines as a
 // step, and actuators_fan_1_10_rpm invites a reader to take a 30 for 300 rpm rather than step 30 —
-// the #35-#39 shape (well-formed, spec-conformant byte layout, audit-clean under everything except
+// the legacy-35-legacy-39 shape (well-formed, spec-conformant byte layout, audit-clean under everything except
 // the label) carried by an identifier. The fix belongs in gen_profiles.py; until it lands there,
 // this override makes every unit publish the spec-correct actuators_fan_1_step.
 //
 // WHY NOT A NEW LABEL — "Fan 1 (step)" is not invented here; it is the spec's own name and the one
-// the other 22 profiles already carry, so the four simply join them. The defect is the #35-#39
+// the other 22 profiles already carry, so the four simply join them. The defect is the legacy-35-legacy-39
 // shape exactly: a wrong identifier word on a right row.
 //
 // SCOPE — keyed on (reg, offset, conv) AND the wrong `from` label (like conv_override keys on the

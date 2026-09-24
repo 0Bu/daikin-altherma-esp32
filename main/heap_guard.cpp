@@ -33,7 +33,7 @@ uint32_t     s_watch_minutes = 0; // countdown lines already emitted for the cur
 // Transition (Armed/Recovered) narration budget. The Watching line below has always been throttled,
 // for a reason stated there — the diag ring is 6 KB, and a line a second evicts the episode's own
 // evidence before the restart it is meant to explain. The transitions next to it were not, and on
-// the bench board that is exactly what happened (#399): 78 Armed against 4 Watching, and /diag was
+// the bench board that is exactly what happened (legacy-399): 78 Armed against 4 Watching, and /diag was
 // 89% heap: narration with the boot line already gone.
 //
 // HEAP_RECOVERY_BYTES is the real fix — a transition now needs a swing across the whole band rather
@@ -88,7 +88,7 @@ void heap_guard_begin() {
     s_restarts = heap_restart_count_sane(nvs_get_i32(HEAP_RESTARTS_KEY, 0));
     if (s_restarts == 0) return;   // the ordinary case writes nothing at all
 
-    // THE END OF THE LADDER (#407). A boot that inherited the full count is the one the cap used to
+    // THE END OF THE LADDER (legacy-407). A boot that inherited the full count is the one the cap used to
     // let come up with everything running and then sit there, wedged and unreachable, five minutes
     // later. It now comes up MINIMAL instead — and this is the right place for that decision rather
     // than the sample site, because here the poll engine and the MQTT bridge have not started yet:

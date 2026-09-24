@@ -10,7 +10,7 @@
 // 53.4 → 52.2 → 51.2 → 50.1 → 49.2 °C, refrigerant pressure resampling every cycle — so this is the
 // outdoor unit going quiet, not the poll engine stalling.
 //
-// It is the #35-#39 failure shape with no numeric tell: 19.0 °C IS a plausible outdoor temperature,
+// It is the legacy-35-legacy-39 failure shape with no numeric tell: 19.0 °C IS a plausible outdoor temperature,
 // so hp_convert.cpp's reading_plausible() cannot see it, and neither can the domain audit. Only the
 // PAGE a reading came from, plus the compressor state, can. DESIGN.md already decides what to do
 // with a held-over reading in the dead-bus case — "an idle plant with no readings, not a stale one
@@ -65,7 +65,7 @@ constexpr bool ou_reading_held_over(unsigned reg, bool rps_known, bool rps_runni
 // A per-row predicate rather than a search, because there are now TWO callers with different row
 // containers — the poll engine's cache (main/hp_poll.cpp, which blanks the held-over readings before
 // they reach MQTT) and the trend ring's parallel arrays (history.hpp's trend_rps_row below it). One
-// predicate, two loops; a second copy of the pattern is what would re-open #209 defect 5.
+// predicate, two loops; a second copy of the pattern is what would re-open legacy-209 defect 5.
 inline bool ou_is_rps_witness(const char* label, unsigned reg) {
     return label && lwt_ci_contains(label, "inv frequency") && !ou_page_holds_over(reg);
 }

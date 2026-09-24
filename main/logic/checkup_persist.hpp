@@ -8,7 +8,7 @@
 // ── Why this exists at all ──────────────────────────────────────────────────────────────────────
 // The checkup was RAM-only "for history.hpp's reason" — hourly buckets in NVS would be write traffic
 // in the partition holding the WiFi credentials, for a convenience. That argument was never about
-// RAM; it was about FLASH, and #391 answered it for the trends by moving them into .noinit, where a
+// RAM; it was about FLASH, and legacy-391 answered it for the trends by moving them into .noinit, where a
 // reset that keeps power costs nothing to survive. The checkup simply never got the same treatment,
 // and its own header went on justifying the gap with "it is not persisted, so a reboot starts it
 // over regardless" — circular the moment somebody can change it.

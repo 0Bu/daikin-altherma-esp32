@@ -303,7 +303,7 @@ using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 // No count here on purpose: this file IS the set (every jstr_r below is one member), and stating
 // how many would be the sixth restatement of a number that had already drifted in four places.
 //
-// broadcaster), and that second runner is what overflowed hp_poll's stack (#241). GET /status now
+// broadcaster), and that second runner is what overflowed hp_poll's stack (legacy-241). GET /status now
 // instantiates this serializer with a 1 KiB bounded sink: the live payload is already ~8.7 KiB and a
 // growing whole-body std::string needed a ~15 KiB contiguous reallocation under OTA/weather TLS,
 // making the shared OOM guard return 503. MCP get_status now streams its small JSON-RPC prefix and
@@ -538,7 +538,7 @@ static void append_status_json(JsonOut& j, bool redact) {
              // Sticky until the next POST /set_wifi, because a rollback leaves no other trace: the
              // reboot it takes wipes the diag ring and the card just shows the old SSID again. The
              // dashboard does not render this yet (a banner lands with the web-UI write-feedback
-             // work, PR #65) — for now it is the API's answer to "did my save actually stick?".
+             // work, PR legacy-65) — for now it is the API's answer to "did my save actually stick?".
              ",\"rolled_back\":" + std::string(c.wifi_rolled_back ? "true" : "false") + "},";
         // WHICH TRANSPORT carries the device, and what the optional wire is doing. A separate block
         // from "wifi" rather than a widening of it, because the two describe different hardware and
@@ -1124,7 +1124,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task exists;
     // `host` is the active target; empty after `searched:true` means persistently disabled. Manual
     // discovery is request-local and never appears here as a runtime mode. The link is READ-ONLY:
-    // there is no actuator object and no actuation flag, because the write path was removed (#294).
+    // there is no actuator object and no actuation flag, because the write path was removed (legacy-294).
     // Successive += with bare literals — the httpd-stack rule the rest of this builder follows.
     const ModbusStatus mb = mb_status();
     j += "\"modbus\":{\"enabled\":";  j += mb.enabled ? "true" : "false";
@@ -1528,7 +1528,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // block exists to prevent. 0 on any ordinary boot. Small numbers + a short slug appended to the
     // existing builder — no large contiguous allocation, and nothing here is a `+` chain.
     //
-    // Beside them, what that headroom already COST while the board DID survive (#380): cycles the
+    // Beside them, what that headroom already COST while the board DID survive (legacy-380): cycles the
     // two 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches — a
     // reading dropped, or (poll) never read at all; mqtt_quiesced is the publisher standing aside
     // on purpose while an OTA/weather TLS operation owns the heap (logic/ota_quiesce.hpp), the same
@@ -1708,11 +1708,11 @@ static void append_status_json(JsonOut& j, bool redact) {
                 fp.page_mask = c.fp_pages;
                 fp.kw_tenths = c.fp_kw_tenths;
                 // Carried so this recomputed fingerprint stays a faithful copy of the one detection
-                // used — and since #225 it is LOAD-BEARING here, not merely faithful:
+                // used — and since legacy-225 it is LOAD-BEARING here, not merely faithful:
                 // detect_candidates narrows by the I/U capacity when the O/U figure is absent, so
                 // omitting this field would make /status report a set the device never considered
                 // (the live unit: 8 candidates across 4 families instead of 3 across 2, which is
-                // the over-broad reading that put a wrong family into #213).
+                // the over-broad reading that put a wrong family into legacy-213).
                 fp.iu_kw_tenths       = c.fp_iu_kw_tenths;
                 int              nsig = 0;
                 const Signature* sigs = def::signatures(nsig);
@@ -1899,7 +1899,7 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
                 { j += ",\"binary_semantic\":"; json_append_quoted(j, sid); }
         }
         // The DEVICE's own answer to "is this reading still current?" — logic/ou_stale.hpp applied on
-        // the poll task (#209 defect 5), emitted only when true so the many live rows cost no bytes.
+        // the poll task (legacy-209 defect 5), emitted only when true so the many live rows cost no bytes.
         // The browser still derives the same fact from `reg` + the compressor row, and the catalog
         // test gates both against every profile; this is here so a non-browser consumer of /values
         // (a script, the MCP surface) gets the answer without reimplementing the rule, and so the
@@ -2203,7 +2203,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += std::to_string(logic::HISTORY_DT_S);
     // The ROW's unit, never a hardcoded "°C": the trends mix °C, bar and unitless rows, and the
     // browser prints this string straight into the range readout and the crosshair. A bar row
-    // labelled °C is exactly the #35-#39 shape.
+    // labelled °C is exactly the legacy-35-legacy-39 shape.
     j += ",\"unit\":";
     j += jstr(unit);
     const TimeStatus ts = time_status();

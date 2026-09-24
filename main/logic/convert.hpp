@@ -67,7 +67,7 @@ inline double press2temp(double d, int rtype = 0) {
 }
 
 // ── Enum / flag label tables (recovered from the X10A value definitions) ──────────────────────
-// OP_MODE index 0 is "Stop", not the split-air-conditioner vocabulary's "Fan Only" (#216). A
+// OP_MODE index 0 is "Stop", not the split-air-conditioner vocabulary's "Fan Only" (legacy-216). A
 // hydronic Altherma has no fan-only mode, and index 0 is the value an idle outdoor unit reports —
 // so the one entry every user sees most of the day was the one that was false. MEASURED on a live
 // Altherma 3 R W (1.0.0-dev.211) via logic/raw_capture.hpp, which dumps page 0x10 across the
@@ -379,11 +379,11 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 0) 
 
 // ── The published TYPE of a row, decided by its DEFINITION ───────────────────────────────────────
 // A field's JSON type must come from the converter, never from sniffing the value that happens to
-// be in it this second. Issue #209 measured what the second one costs: conv 211 (fan step) used to
+// be in it this second. Issue legacy-209 measured what the second one costs: conv 211 (fan step) used to
 // emit the number 30 while the fan ran and the string "OFF" when it stopped, so the same MQTT key
 // changed JSON type during normal operation — Telegraf's numeric parser dropped the string, no zero
 // ever reached VictoriaMetrics, and the last running step stayed on the chart as if the fan were
-// still turning. (That converter is numeric since #210; this predicate is what makes the property
+// still turning. (That converter is numeric since legacy-210; this predicate is what makes the property
 // structural instead of a fact about the current implementation.)
 //
 // Two kinds only. Number covers every scaled/unsigned/counter/bit-flag converter — the bit flags
@@ -489,7 +489,7 @@ inline bool is_refrigerant_pressure(const ValueDef& def, const ValueDef* profile
 // "High Pressure" and "Low Pressure" (0x20/12+14)
 // read exactly 0.0 bar both at rest AND with the compressor at 42 rps, while the always-live
 // 0x62/15 refrigerant sensor read a correct 15.3 bar. Publishing that 0.0 as a measurement is the
-// #35-#39 shape — a well-formed, plausible-looking, physically false value — and it reached Home
+// legacy-35-legacy-39 shape — a well-formed, plausible-looking, physically false value — and it reached Home
 // Assistant as a real pressure. Their conv-405 companions were dropped by case 405 (kgf/cm²G <= 0
 // leaves r.ok false; press2temp(0) ≈ -51 °C would pass the °C envelope), so this makes pressure
 // agree with the temperature the same row declines to publish. Water pressure is deliberately NOT
@@ -498,9 +498,9 @@ inline bool is_refrigerant_pressure(const ValueDef& def, const ValueDef* profile
 // Deliberately SEPARATE from convert() and applied by hp_format at publish time, not folded into
 // the converter: convert() must keep its INTRINSIC per-converter semantics so the catalog audit's
 // converters_equivalent() can still tell conv 105 (no sentinel guard) from conv 114 (drops raw
-// 0x8000 as "no data") — the exact distinction behind the #38 no-data-sentinel bug. Folding the
+// 0x8000 as "no data") — the exact distinction behind the legacy-38 no-data-sentinel bug. Folding the
 // envelope into convert() makes 105 and 114 decode identically on °C rows, which silently blinds
-// that gate (tools/domain/selftest.sh #38). This is a backstop, never a licence to use the wrong
+// that gate (tools/domain/selftest.sh legacy-38). This is a backstop, never a licence to use the wrong
 // converter.
 //
 // `profile`/`count` are the active model's whole ValueDef table, needed only for the refrigerant

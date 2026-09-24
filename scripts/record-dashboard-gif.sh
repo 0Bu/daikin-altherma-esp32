@@ -52,7 +52,7 @@ SCALE=2                    # device pixel ratio; the crop below is in DEVICE pix
 # device height is rounded up to an even 940 rather than 939.4.
 #
 # RE-MEASURE whenever the drawing's height moves; this is the one framing number a source change can
-# invalidate silently. #462 raised the card 6 px and shortened it by 6, and the previous
+# invalidate silently. legacy-462 raised the card 6 px and shortened it by 6, and the previous
 # y 88…564 then sat 17 px under it — far enough to catch the top edge of the NEXT card in frame.
 # Nothing mechanical can see that: the stamp only proves the recording is of these sources, and a
 # GIF with a stray sliver in it renders exactly as well as one without. Get the numbers from the

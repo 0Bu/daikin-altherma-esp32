@@ -94,7 +94,7 @@ inline constexpr size_t ELF_SHA_MIN_COMPARE = 8;
 // build `run_sha`? The coredump partition survives an OTA, and a panic that fails to write its own
 // dump (a stack overflow can overrun the writer) leaves the PREVIOUS build's dump in place — a valid
 // image that still passes esp_core_dump_image_check() but describes another binary, so a download of
-// it fails espcoredump with a SHA-256 mismatch (#215). This answers true ONLY on proof — both shas
+// it fails espcoredump with a SHA-256 mismatch (legacy-215). This answers true ONLY on proof — both shas
 // present, a meaningful common prefix, and a mismatch within it — because the caller ERASES on true
 // and erasing a dump that really IS ours (a false positive) destroys the one artifact a panic left.
 // A missing sha (a dump with no parsable summary, a build that could not report its own) is NOT proof

@@ -1,5 +1,5 @@
 #pragma once
-// A NUMERIC fault state beside the TEXTUAL Daikin diagnostic code — issue #209 defect 4.
+// A NUMERIC fault state beside the TEXTUAL Daikin diagnostic code — issue legacy-209 defect 4.
 //
 // Converters 203 (error class) and 204 (error code) are deliberately textual: "Normal"/"Error" and
 // "00"/"U4"/"7H" are what a human, the web UI and Home Assistant want, and mapping every Daikin code
@@ -12,7 +12,7 @@
 //   • so the last numeric value stays put, and an alert on `error_code != 0` never fires for
 //     exactly the alphanumeric faults it exists to catch.
 //
-// The fix is NOT to change the textual field's type (that is the mistake #209 defect 3 documents,
+// The fix is NOT to change the textual field's type (that is the mistake legacy-209 defect 3 documents,
 // from the other direction). It is to publish a small, permanently-numeric companion pair beside it
 // and leave the diagnostic code alone:
 //
@@ -53,7 +53,7 @@ inline FaultClass fault_class_from_text(const char* text) {
 // both "running, but the unit is complaining", and they are folded into one flag on purpose: a
 // consumer that needs the three-way distinction has the textual class right beside these, and
 // inventing a third boolean for a severity nobody on this install has yet observed would be the
-// kind of guess #35-#39 was made of.
+// kind of guess legacy-35-legacy-39 was made of.
 inline constexpr bool fault_error_active(FaultClass c)   { return c == FaultClass::Error; }
 inline constexpr bool fault_warning_active(FaultClass c) {
     return c == FaultClass::Warning || c == FaultClass::Caution;

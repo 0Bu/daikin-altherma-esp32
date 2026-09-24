@@ -16,11 +16,11 @@
 //     greyed variant was reverted for exactly this). The drawing has ONE vocabulary for "no reading
 //     right now". A reduced feature set is that rejected second register, wearing a new name.
 //
-//  2. A REDUCED MODEL IS A DIFFERENT MODEL. UC5's thresholds — and anything trained in legacy-69
-//  Phase 2 —
-//     are fit on a feature vector. Dropping columns at decision time does not degrade gracefully;
-//     it produces confident output from a distribution nothing was ever fit on. That is "pretending
-//     full features" with extra steps, which is the one outcome legacy-69 rules out by name.
+//  2. A REDUCED MODEL IS A DIFFERENT MODEL. UC5's thresholds — and anything trained in
+//     legacy-69 Phase 2 — are fit on a feature vector. Dropping columns at decision time does
+//     not degrade gracefully; it produces confident output from a distribution nothing was ever
+//     fit on. That is "pretending full features" with extra steps, which is the one outcome
+//     legacy-69 rules out by name.
 //
 //  3. THE MISSING SIGNAL IS USUALLY THE RUN-STATE ONE, which is what makes every other reading
 //     interpretable. Retry counters without a compressor run-state cannot separate "retries while

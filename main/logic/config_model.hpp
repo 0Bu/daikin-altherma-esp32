@@ -60,7 +60,7 @@ struct Config {
     // default, which is what every device carried before the field existed (logic/mqtt_base.hpp).
     // Runtime because CI publishes ONE esp32s3 image while the base topic is a PER-INSTALLATION
     // fact: two boards sharing it share their retained topics, their metrics series and their Home
-    // Assistant device — silently, since every individual value stays plausible (#215).
+    // Assistant device — silently, since every individual value stays plausible (legacy-215).
     std::string mqtt_base;
     // One logical living-room sample assembled from exact MQTT value mappings. Temperature, target
     // and source time may live on different topics; a target may instead be a fixed value in 0.1 C.
@@ -148,7 +148,7 @@ struct Config {
     // HTTP reconfiguration cannot publish its old link/model after the new settings landed.
     uint32_t    runtime_revision = 0;
 
-    // ── The HomeHub Modbus stack — PERSISTED (issue #32) ─────────────────────────────────────────
+    // ── The HomeHub Modbus stack — PERSISTED (issue legacy-32) ─────────────────────────────────────────
     // A SECOND, INDEPENDENT source, not an alternative to the X10A link above. The two share no
     // wire, no framing, no register model and no failure mode, so they run as separate tasks with
     // separate caches and separate link states (docs/MODBUS_PROTOCOL.md): X10A keeps working when
@@ -427,7 +427,7 @@ inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 
 }
 
 // ── What POST /set_board actually has to DO ─────────────────────────────────────────────────────
-// TWO independent facts can move, and conflating them is what produced #257. The five HARDWARE
+// TWO independent facts can move, and conflating them is what produced legacy-257. The five HARDWARE
 // values decide whether a REBOOT is needed (both are claimed once at task start — the WS2812 opens
 // an RMT channel, the button installs a pull). The explicitly selected preset id decides which board
 // the firmware may name and which vendor-gated accessories it may enable; changing identity without

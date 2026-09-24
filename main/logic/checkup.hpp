@@ -10,8 +10,8 @@
 // independent circulation-pump power witness still cannot prove
 // refrigerant charge, sensor calibration, hydraulic cleanliness, air path or seasonal efficiency.
 //
-// Issue #208 asked for it. This header is the half that can be decided; main/checkup.cpp is the
-// storage, and main/www/js/dashboard.js is the card. What #208 asked for and this deliberately does NOT do is
+// Issue legacy-208 asked for it. This header is the half that can be decided; main/checkup.cpp is the
+// storage, and main/www/js/dashboard.js is the card. What legacy-208 asked for and this deliberately does NOT do is
 // listed at the bottom of this comment — each omission is a claim the bus cannot support.
 //
 // NOT logic/health_gate.hpp, which shares only the word: that one decides whether a freshly-OTA'd
@@ -40,7 +40,7 @@
 // `Solar pump operation` all sit in the SAME byte — 0x60 offset 12 — and all SEVEN are
 // dimensionless. They differ only in which bit their converter masks (307/306/305/304/303/301/300).
 // A (reg, offset, unit) locator resolves to whichever of the seven sorts first, so the "backup
-// heater ran 40 minutes" figure would in fact be the 2-way valve's position. That is the #35-#39
+// heater ran 40 minutes" figure would in fact be the 2-way valve's position. That is the legacy-35-legacy-39
 // shape with a day's statistics in front of it.
 //
 // The converter is therefore half the locator — the same structural key logic/availability.hpp and
@@ -251,7 +251,7 @@ constexpr uint8_t CHECKUP_F_LOW_BAR = 1u << 3;   // <=1.0 bar persisted for the 
 // 23 completed buckets plus the pending one: the full rolling window's actual storage cost.
 //
 // The bound was RAISED from 1104 to 1536 (46 -> 64 bytes per bucket) for two distinct eight-byte
-// outdoor contexts. The old #441 estimate assumed one shared context; pairing Cycling only with
+// outdoor contexts. The old legacy-441 estimate assumed one shared context; pairing Cycling only with
 // completed space-heating runs and Defrost only with its known-state compressor denominator makes
 // that unsafe. Exact, order-independent sums cost 16 B per bucket plus 2 B alignment: 18 x 24 =
 // 432 B of .noinit DRAM. No heap or flash is used.
@@ -626,7 +626,7 @@ struct DhwLossState {
 };
 
 constexpr uint32_t DHW_LOSS_WINDOW_S = 3600;             // R5T resolves only 0.1 K
-constexpr uint32_t DHW_LOSS_SETTLE_S = 45 * 60;          // issue #349 method after a tank charge
+constexpr uint32_t DHW_LOSS_SETTLE_S = 45 * 60;          // issue legacy-349 method after a tank charge
 constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
 // HOW LONG THE CHARGE WITNESS MUST STAND before it costs the 45-minute settle.
 //
@@ -1444,7 +1444,7 @@ inline void checkup_cover_row(CheckupCoverage& c, unsigned reg, unsigned off, in
 // can be `Ok` once their value is eligible, then remain outside assessable/evaluated/overall below.
 //
 //   Unavailable  this profile cannot supply the inputs. The check is OFF, not degraded — the rule
-//                logic/feature_gate.hpp states and #121 / ou_stale / cop_scope each paid for.
+//                logic/feature_gate.hpp states and legacy-121 / ou_stale / cop_scope each paid for.
 //   Collecting   the inputs exist, the window does not hold enough of them yet. A device that has
 //                been up ten minutes has NOT established absence of a pattern, and saying "Ok"
 //                there would be a result bought with no evidence — the exact failure a fresh
@@ -1940,7 +1940,7 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
         set(CheckupCheck::Fault, CheckupVerdict::Ok, 0, 0, 0);
     }
 
-    // ── Protection retries: UC5's core signal (#69 / #110) ──────────────────────────────────────
+    // ── Protection retries: UC5's core signal (legacy-69 / PR 110) ──────────────────────────────────────
     // Needs BOTH the counters and a compressor witness, which is exactly feature_gate.hpp's
     // uc5_supported(): without that witness, comparable counter endpoints cannot be tied to an
     // observed X10A operating interval rather than a page frozen outside a known plant state.

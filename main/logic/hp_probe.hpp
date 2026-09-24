@@ -14,7 +14,7 @@
 //     user whose unit detects as `generic` previously had no way to find out what its pages carry
 //     without editing def/*.hpp, building and flashing; an arbitrary probe can now capture them.
 //   • "Is this row's CONVERTER right?" — logic/conv_override.hpp exists precisely because the
-//     generator's id has been demonstrably wrong on some rows. #194's resolved Target Evap. Temp.
+//     generator's id has been demonstrably wrong on some rows. legacy-194's resolved Target Evap. Temp.
 //     case (page 0x10 offset 6) is the witness: deciding the corrected scale needed the same bytes
 //     compared through several converters, which the normal publish path does not expose.
 //   • "Are these bytes even where the catalog thinks they are?" — an offset/layout mismatch and a

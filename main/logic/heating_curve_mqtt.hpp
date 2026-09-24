@@ -16,7 +16,7 @@ namespace daik {
 inline constexpr uint8_t HEATING_CURVE_MQTT_SCHEMA_VERSION = 3;
 
 struct HeatingCurveMqttFields {
-    // Canonical single-room input (#288). Unavailable numbers render null; numeric validity flags
+    // Canonical single-room input (legacy-288). Unavailable numbers render null; numeric validity flags
     // and a stable reason code let metrics consumers distinguish absence from a real zero.
     bool        room_temperature_valid = false;
     bool        room_setpoint_valid = false;
