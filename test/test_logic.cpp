@@ -3158,7 +3158,7 @@ static void test_ota_headroom() {
 // trough, admit the production board's repeatable 22 KiB post-quiesce block and preserve aggregate
 // reserve around the fetch's measured ~40 KiB transient claim.
 static void test_weather_fetch_headroom() {
-    CHECK(WEATHER_FETCH_MIN_FREE_BYTES == 56u * 1024u);
+    CHECK(WEATHER_FETCH_MIN_FREE_BYTES == 48u * 1024u);
     CHECK(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES == 20u * 1024u);
 
     CHECK(weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES,

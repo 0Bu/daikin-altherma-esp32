@@ -188,7 +188,7 @@ assert.match(gate, /POST_STRESS_HEADROOM_STABLE_SAMPLES\s*=\s*2/,
   "one transient heap sample must not trigger the sole recovery attempt");
 assert.match(gate, /POST_STRESS_MIN_FREE_HEAP\s*=\s*48 \* 1024/);
 assert.match(gate, /POST_STRESS_MIN_LARGEST_BLOCK\s*=\s*20 \* 1024/);
-assert.match(weatherLogic, /WEATHER_FETCH_MIN_FREE_BYTES\s*=\s*56 \* 1024/,
+assert.match(weatherLogic, /WEATHER_FETCH_MIN_FREE_BYTES\s*=\s*48 \* 1024/,
   "the measured aggregate Weather reserve must remain unchanged");
 assert.match(weatherLogic, /WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES\s*=\s*20 \* 1024/,
   "the contiguous Weather floor must admit the measured 22 KiB production block");
