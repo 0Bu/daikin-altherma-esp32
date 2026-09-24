@@ -1348,6 +1348,44 @@ def x10a_timeout_delta_exceeded(
     return require_x10a and final["timeout_err"] - baseline["timeout_err"] > MAX_X10A_TIMEOUT_DELTA
 
 
+def wait_for_post_stress_mqtt_recovery(
+    endpoint: ResolvedHttpEndpoint, initial: dict[str, Any], *, host: str, mac: str,
+    version: str, elf: str, uptimes: list[int],
+) -> dict[str, Any]:
+    """Allow bounded recovery if MQTT was paused for TLS at the pressure window boundary."""
+    if initial.get("mqtt", {}).get("connected") is True:
+        return initial
+    deadline = time.monotonic() + MQTT_RECOVERY_TIMEOUT_S
+    last_error = "still disconnected"
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            recovered = request_status_deadline(
+                endpoint, timeout=min(remaining, HTTP_TIMEOUT_S),
+            )
+        except HTTPError as error:
+            if error.code != 503:
+                raise
+            last_error = str(error)
+            time.sleep(0.1)
+            continue
+        except (CompactTransportError, OSError, TimeoutError) as error:
+            last_error = str(error)
+            time.sleep(0.1)
+            continue
+        validate_identity(recovered, host=host, mac=mac, version=version, elf=elf)
+        uptimes.append(required_uptime(recovered, f"{host} post-stress MQTT status"))
+        if recovered.get("mqtt", {}).get("connected") is True:
+            return recovered
+        time.sleep(0.1)
+    fail(
+        f"{host} MQTT did not recover after the pressure window within "
+        f"{MQTT_RECOVERY_TIMEOUT_S}s: {last_error}"
+    )
+
+
 def stress_board(
     *, host: str, mac: str, version: str, elf: str, require_x10a: bool,
     require_weather: bool, expected_app_sha256: str, expected_channel: str,
@@ -1643,8 +1681,10 @@ def stress_board(
         channel=expected_channel, manifest_url=hil_manifest_url,
         firmware_base_url=hil_firmware_base_url,
     )
-    if not finished.get("mqtt", {}).get("connected"):
-        fail(f"{host} MQTT was not connected after the pressure window")
+    finished = wait_for_post_stress_mqtt_recovery(
+        pinned_endpoint, finished, host=host, mac=mac, version=version, elf=elf,
+        uptimes=uptimes,
+    )
     final = board_counters(finished)
     if errors:
         fail(f"{host} live stress had errors: {'; '.join(errors)}")
@@ -3605,6 +3645,56 @@ def self_test() -> None:
         globals()["PROMOTION_READY_SAMPLE_INTERVAL_S"] = original_sample_interval
         time.monotonic = original_monotonic
         time.sleep = original_sleep
+
+    immediate_connected = wait_for_post_stress_mqtt_recovery(
+        promotion_endpoint, {**promotion_ready_initial, "mqtt": {"connected": True}},
+        host="bench.invalid", mac=fixture_mac, version="x", elf="e", uptimes=[10],
+    )
+    assert immediate_connected.get("mqtt", {}).get("connected") is True
+
+    original_status_request = globals()["request_status_deadline"]
+    original_recovery_timeout = globals()["MQTT_RECOVERY_TIMEOUT_S"]
+    try:
+        disconnected_initial = {**promotion_ready_initial, "mqtt": {"connected": False}, "uptime_s": 10}
+        connected_status = {**promotion_ready_initial, "mqtt": {"connected": True}, "uptime_s": 11}
+        post_stress_requests = [0]
+
+        def seeded_post_stress_status(
+            _endpoint: ResolvedHttpEndpoint, *, timeout: float,
+        ) -> dict[str, Any]:
+            post_stress_requests[0] += 1
+            return connected_status
+
+        globals()["request_status_deadline"] = seeded_post_stress_status
+        uptimes_test = [10]
+        recovered = wait_for_post_stress_mqtt_recovery(
+            promotion_endpoint, disconnected_initial,
+            host="bench.invalid", mac=fixture_mac, version="x", elf="e", uptimes=uptimes_test,
+        )
+        assert recovered.get("mqtt", {}).get("connected") is True
+        assert uptimes_test == [10, 11]
+        assert post_stress_requests[0] == 1
+
+        def permanent_disconnect(
+            _endpoint: ResolvedHttpEndpoint, *, timeout: float,
+        ) -> dict[str, Any]:
+            return disconnected_initial
+
+        globals()["request_status_deadline"] = permanent_disconnect
+        globals()["MQTT_RECOVERY_TIMEOUT_S"] = 0.05
+        try:
+            wait_for_post_stress_mqtt_recovery(
+                promotion_endpoint, disconnected_initial,
+                host="bench.invalid", mac=fixture_mac, version="x", elf="e", uptimes=[10],
+            )
+        except GateError:
+            pass
+        else:
+            raise AssertionError("post-stress MQTT recovery accepted permanent disconnect")
+    finally:
+        globals()["request_status_deadline"] = original_status_request
+        globals()["MQTT_RECOVERY_TIMEOUT_S"] = original_recovery_timeout
+
     assert board_counters({
         "sys": {"heap_restarts": 0, "mqtt_skipped": 0, "poll_skipped": 0},
         "hp": {"crc_err": 1, "timeout_err": 2},
