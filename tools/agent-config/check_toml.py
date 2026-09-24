@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Parse and validate the project-local Codex TOML contract."""
+"""Parse and validate the project-local canonical agent TOML and MCP contract."""
 
 from __future__ import annotations
 
@@ -42,26 +42,6 @@ def contains_model_key(value: Any) -> bool:
     return False
 
 
-config = load_toml(".codex/config.toml")
-if set(config) != {"agents", "mcp_servers"}:
-    fail(".codex/config.toml top-level tables drifted; hooks must not be disabled through features.hooks")
-agents = config.get("agents")
-if not isinstance(agents, dict):
-    fail(".codex/config.toml needs an [agents] table")
-if agents.get("enabled") is not True:
-    fail(".codex/config.toml must set agents.enabled = true")
-if agents.get("max_concurrent_threads_per_session") != 3:
-    fail(".codex/config.toml must cap max_concurrent_threads_per_session at 3")
-
-mcp_servers = config.get("mcp_servers")
-if not isinstance(mcp_servers, dict) or set(mcp_servers) != {"context7"}:
-    fail(".codex/config.toml must configure only the project Context7 MCP server")
-context7 = mcp_servers["context7"]
-if not isinstance(context7, dict) or context7.get("command") != "npx":
-    fail("Context7 MCP must use npx")
-if context7.get("args") != ["-y", "@upstash/context7-mcp@4.0.2"]:
-    fail("Context7 MCP must stay pinned to @upstash/context7-mcp@4.0.2")
-
 mcp_path = root / ".mcp.json"
 try:
     compatible_mcp = json.loads(mcp_path.read_text(encoding="utf-8"))
@@ -74,21 +54,24 @@ if not isinstance(compatible_mcp, dict) or set(compatible_mcp) != {"mcpServers"}
 compatible_servers = compatible_mcp["mcpServers"]
 if not isinstance(compatible_servers, dict) or set(compatible_servers) != {"context7"}:
     fail(".mcp.json must configure only Context7")
-if compatible_servers["context7"] != context7:
-    fail(".mcp.json Context7 command and pin must exactly match .codex/config.toml")
+context7 = compatible_servers["context7"]
+if not isinstance(context7, dict) or context7.get("command") != "npx":
+    fail("Context7 MCP must use npx")
+if context7.get("args") != ["-y", "@upstash/context7-mcp@4.0.2"]:
+    fail("Context7 MCP must stay pinned to @upstash/context7-mcp@4.0.2")
 
-agent_root = root / ".codex" / "agents"
+agent_root = root / ".agents" / "agents"
 try:
     agent_files = sorted(agent_root.glob("*.toml"))
 except OSError as exc:
-    fail(f"cannot enumerate .codex/agents: {exc}", 2)
+    fail(f"cannot enumerate .agents/agents: {exc}", 2)
 expected_files = {
     "doc-drift-checker.toml",
     "heap-safety-reviewer.toml",
     "x10a-decode-reviewer.toml",
 }
 if {path.name for path in agent_files} != expected_files:
-    fail(".codex/agents must contain exactly the three mapped project reviewers")
+    fail(".agents/agents must contain exactly the three mapped project reviewers")
 
 names: set[str] = set()
 required_keys = {"name", "description", "sandbox_mode", "developer_instructions"}

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Canonical Codex agent-configuration contract.
+// Canonical agent configuration contract.
 //
-// The Phase 7 cutover is intentionally fail-closed: AGENTS.md, .agents/, and .codex/ are the only
-// supported agent surfaces. Any tracked or filesystem .claude path is a configuration regression.
+// AGENTS.md and .agents/ are the canonical agent surfaces.
+// Any tracked or filesystem .claude path is a configuration regression.
 // Missing inputs are configuration errors (exit 2); budget or contract drift exits 1.
 import fs from "node:fs";
 import path from "node:path";
@@ -159,66 +159,6 @@ for (const name of expectedSkills) {
   if (!skill.body) die(1, `canonical skill ${name} has an empty instruction body`);
 }
 
-function metadataFiles(relativeRoot) {
-  const found = [];
-  function walk(relative) {
-    let entries;
-    try { entries = fs.readdirSync(repoPath(relative), { withFileTypes: true }); }
-    catch { die(1, `cannot enumerate canonical skill metadata under ${relative}`); }
-    for (const entry of entries) {
-      const child = `${relative}/${entry.name}`;
-      if (entry.isDirectory()) walk(child);
-      else if (entry.isFile() && entry.name === "openai.yaml") found.push(child);
-    }
-  }
-  walk(relativeRoot);
-  return found.sort();
-}
-
-function openAiMetadata(relative, skillName) {
-  const lines = readText(relative, "OpenAI skill metadata").split(/\r?\n/);
-  while (lines.at(-1) === "") lines.pop();
-  if (lines[0] !== "interface:") {
-    die(1, `OpenAI metadata needs one interface mapping: ${relative}`);
-  }
-  const values = new Map();
-  for (const line of lines.slice(1)) {
-    if (line.trim() === "") continue;
-    const match = line.match(/^  ([a-z_]+):\s*(.+)$/);
-    if (!match) die(1, `OpenAI metadata has invalid restricted YAML: ${relative}`);
-    if (values.has(match[1])) die(1, `OpenAI metadata duplicates ${match[1]}: ${relative}`);
-    let value;
-    try { value = JSON.parse(match[2]); }
-    catch { die(1, `OpenAI metadata ${match[1]} must be a quoted YAML string: ${relative}`); }
-    if (typeof value !== "string" || !value.trim()) {
-      die(1, `OpenAI metadata ${match[1]} must be a non-empty string: ${relative}`);
-    }
-    values.set(match[1], value);
-  }
-  const expectedKeys = ["default_prompt", "display_name", "short_description"];
-  const keys = [...values.keys()].sort();
-  if (keys.join("\0") !== expectedKeys.join("\0")) {
-    die(1, `OpenAI metadata interface keys must be exactly ${expectedKeys.join(", ")}: ${relative}`);
-  }
-  if (!values.get("default_prompt").includes(`$${skillName}`)) {
-    die(1, `OpenAI metadata default_prompt must invoke $${skillName}: ${relative}`);
-  }
-}
-
-const expectedMetadata = [
-  ".agents/skills/diagnostic-evidence-review/agents/openai.yaml",
-  ".agents/skills/ui-use-case-review/agents/openai.yaml",
-  ".agents/skills/user-docs-review/agents/openai.yaml",
-].sort();
-const canonicalMetadata = metadataFiles(".agents/skills");
-if (canonicalMetadata.join("\0") !== expectedMetadata.join("\0")) {
-  die(1, `canonical skills must contain exactly the three reviewed openai.yaml files (expected ${expectedMetadata.join(", ")}; got ${canonicalMetadata.join(", ")})`);
-}
-for (const relative of expectedMetadata) {
-  const skillName = relative.split("/")[2];
-  openAiMetadata(relative, skillName);
-}
-
 executableFile("scripts/gh-with-git-credentials.sh", "canonical GitHub credential wrapper");
 const credentialWrapper = readText(
   "scripts/gh-with-git-credentials.sh",
@@ -350,5 +290,5 @@ for (let index = 0; index < safety.invariants.length; index++) {
   }
 }
 
-console.log(`agent-instructions: ${expectedSkills.length} canonical skills, ${expectedMetadata.length} OpenAI metadata files, one credential-safe gh wrapper and ${safety.invariants.length} AGENTS.md safety invariants clean`);
+console.log(`agent-instructions: ${expectedSkills.length} canonical skills, one credential-safe gh wrapper and ${safety.invariants.length} AGENTS.md safety invariants clean`);
 console.log(`agent-instructions: canonical budget ${canonicalSize}/${canonicalBudget} bytes`);

@@ -20,7 +20,7 @@ const ROOT_DOCS = [
 const DOC_TREES = [
   { path: "docs", extensions: [".md"] },
   { path: ".agents/skills", extensions: [".md", ".yaml", ".yml"] },
-  { path: ".codex", extensions: [".md", ".toml"] },
+  { path: ".agents/agents", extensions: [".md", ".toml"] },
 ];
 
 // Shared with tools/pr_hygiene/, which applies the same shape to PR titles/descriptions and commit
