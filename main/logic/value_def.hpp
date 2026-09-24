@@ -3,6 +3,8 @@
 //   {registryID, offset, convId, dataSize, dataType, label}
 // These rows are generated into main/def/*.hpp from Daikin's decoded value catalog by the offline
 // generator (gen_profiles.py, maintained outside this repo). IDF-free so the host tests can use it.
+// Curated manual profiles include def/overlay.hpp (page 0x10 supplement) and def/protocol_s.hpp
+// (legacy Protocol S catalog); Modbus definitions live in def/homehub.hpp and def/altherma4.hpp.
 #include <cstdint>
 
 namespace daik {

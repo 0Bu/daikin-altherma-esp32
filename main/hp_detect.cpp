@@ -19,14 +19,18 @@ static const uint8_t PROBE_PAGES_I[] = {0x00, 0x10, 0x11, 0x20, 0x21, 0x30, 0x60
 static const uint8_t PROBE_PAGES_S[] = {0x50, 0x53, 0x54, 0x55, 0x56};
 
 // Query one register; on a valid reply copy its payload into out[0..outmax) and return the payload
-// length, else -1. (hp_query already strips framing/CRC and returns <0 on timeout/NAK/bad CRC.)
-static int read_page(uint8_t reg, Protocol proto, uint8_t* out, int outmax) {
-    uint8_t   buf[64];
-    const int n = hp_query(reg, proto, buf, sizeof(buf), HpQueryLogPolicy::IntegrityOnly);
-    if (n < 0) return n;
-    if (n == 0) return -1;
+// length, else -1 (or -2 for NAK). (hp_query_detailed retains the exact kind for transport error
+// accounting.)
+static int read_page(uint8_t reg, Protocol proto, uint8_t* out, int outmax,
+                     HpReplyKind* out_kind = nullptr) {
+    uint8_t             buf[64];
+    const HpQueryResult res =
+        hp_query_detailed(reg, proto, buf, sizeof(buf), HpQueryLogPolicy::IntegrityOnly);
+    if (out_kind) *out_kind = res.kind;
+    if (res.kind == HpReplyKind::Rejected) return -2;
+    if (res.kind != HpReplyKind::Ok) return -1;
     const int poff   = payload_offset(proto);
-    int       paylen = n - poff - 1; // minus header, minus CRC byte
+    int       paylen = res.received - poff - 1; // minus header, minus CRC byte
     if (paylen < 0) paylen = 0;
     const int copy = paylen < outmax ? paylen : outmax;
     for (int i = 0; i < copy; i++) out[i] = buf[poff + i];
@@ -46,8 +50,8 @@ static bool proto_answers(Protocol p) {
 // the unit's IDENTITY. One dropped frame clears one page bit for the whole boot, and because
 // signature_consistent() matches on page SUBSET, clearing a bit that every profile references makes
 // them all inconsistent — the unit is then read with `generic` (53 rows, no leaving water, no
-// compressor speed, no pressures). Measured: that is what 8 of the 12 fingerprint pages do (#214).
-// The board this was found on reboots often enough to roll those dice weekly.
+// compressor speed, no pressures). Measured: that is what 8 of the 12 fingerprint pages do
+// (legacy-214). The board this was found on reboots often enough to roll those dice weekly.
 //
 // Cost is bounded and paid only on failure: a page that answers costs one query as before, and the
 // bus was already proven to answer before this loop is reached. Worst case is
@@ -60,19 +64,30 @@ static constexpr int DETECT_PAGE_TRIES = 3;
 // counting them made `retries=` read 3 on a perfectly healthy boot and an operator reading it would
 // reasonably conclude the bus was dropping frames. A diagnostic whose healthy baseline is non-zero
 // trains its reader to ignore it. Now 0 is healthy and any non-zero is a real dropped reply that
-// the retry caught — which is the number worth watching, since that is the failure #214 is about. A
-// page that never answered needs no counter: its bit is already absent from the page mask on the
-// same line.
-static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& recovered) {
+// the retry caught — which is the number worth watching, since that is the failure legacy-214 is
+// about. A page that never answered needs no counter: its bit is already absent from the page mask
+// on the same line.
+static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& recovered,
+                           HpReplyKind& final_kind, bool& had_transport_error) {
     int last_err = -1;
+    final_kind          = HpReplyKind::NoReply;
+    had_transport_error = false;
     for (int attempt = 0; attempt < DETECT_PAGE_TRIES; attempt++) {
-        const int n = read_page(reg, proto, out, outmax);
+        HpReplyKind kind = HpReplyKind::NoReply;
+        const int   n    = read_page(reg, proto, out, outmax, &kind);
+        final_kind       = kind;
+        if (is_transport_error(kind)) {
+            had_transport_error = true;
+        }
         if (n >= 0) {
             recovered += attempt; // 0 on a first-try answer
             return n;
         }
         last_err = n;
-        if (n == -2) return -2; // NAK: unsupported page, no retry needed
+        if (n == -2) {
+            had_transport_error = false;
+            return -2; // NAK: unsupported page, no retry needed
+        }
     }
     return last_err;
 }
@@ -178,16 +193,18 @@ DetectResult hp_detect_run() {
     int            probe_retries          = 0; // dropped replies the retry RECOVERED (0 = healthy)
     int            probe_transport_errors = 0;
     const uint8_t* probe_pages = (r.proto == Protocol::S) ? PROBE_PAGES_S : PROBE_PAGES_I;
-    const size_t   num_pages   = (r.proto == Protocol::S)
-                                     ? (sizeof(PROBE_PAGES_S) / sizeof(PROBE_PAGES_S[0]))
-                                     : (sizeof(PROBE_PAGES_I) / sizeof(PROBE_PAGES_I[0]));
+    const size_t   num_pages              = (r.proto == Protocol::S)
+                                                ? (sizeof(PROBE_PAGES_S) / sizeof(PROBE_PAGES_S[0]))
+                                                : (sizeof(PROBE_PAGES_I) / sizeof(PROBE_PAGES_I[0]));
     for (size_t pi = 0; pi < num_pages; ++pi) {
         const uint8_t reg = probe_pages[pi];
         uint8_t       pay[32];
-        const int     paylen =
-            read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries);
+        HpReplyKind   kind                = HpReplyKind::Ok;
+        bool          had_transport_error = false;
+        const int     paylen = read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)),
+                                               probe_retries, kind, had_transport_error);
         if (paylen < 0) {
-            if (paylen == -3 && reg != 0x11 && reg != 0x56) probe_transport_errors++;
+            if (had_transport_error && reg != 0x11 && reg != 0x56) probe_transport_errors++;
             continue;
         }
         if (reg == 0x11) {
@@ -264,7 +281,8 @@ DetectResult hp_detect_run() {
     //    variable-length; a smaller unit returns a short 0x00 that omits offset 12, leaving
     //    kw_tenths at -1 (docs/X10A_PROTOCOL.md §7). Fall back to the I/U capacity code (page 0x60
     //    offset 6, conv 219, same kW×10 units) so detect_best can still class the model (a byte 0 =
-    //    not reported). The fallback only RANKS the representative, never excludes a candidate.
+    //    not reported). The fallback only narrows when O/U capacity was absent, and detect_best
+    //    prefers it.
     char ee[32] = {0};
     if (r.proto == Protocol::I) {
         if (len00 > 12) fp.kw_tenths = page00[12];
@@ -286,9 +304,9 @@ DetectResult hp_detect_run() {
 
     // 5. Narrow to the best-fitting candidate profiles.
     if (r.proto == Protocol::S) {
-        if (fp.page_mask != 0) {
-            r.candidates.emplace_back("protocol_s");
-            r.best = "protocol_s";
+        if (const char* b = detect_profile_for_protocol_s(fp.page_mask)) {
+            r.candidates.emplace_back(b);
+            r.best = b;
         }
     } else {
         int              nsig = 0;
@@ -300,22 +318,23 @@ DetectResult hp_detect_run() {
             r.candidates.emplace_back(out[i]);
         // Best-fit representative to actually read with. Deterministic AND order-independent: the
         // final tie-break is the lowest profile id, not the order the tables sit in the registry,
-        // so a reorder cannot silently reassign the entity ids / series this unit publishes (#230
-        // B, measured — see logic/detect.hpp). It does NOT follow that the choice is free where the
-        // ranking ties: the tie is on the page count and the kW-class span, both coarser than the
-        // row tables, so tied candidates need not decode identically (98 of 152 measured ties do
-        // not). When the O/U capacity is absent (short 0x00) the set can still span classes, so
-        // detect_best leans on the I/U capacity fallback to pick the right-class reading profile.
-        // Since #225 detect_candidates narrows by that same fallback, so `out` above no longer
-        // reports models the ranking had already excluded — but the profile READ is still this
-        // line's alone: the set above is a display list, and nothing consumes it to choose a table.
+        // so a reorder cannot silently reassign the entity ids / series this unit publishes
+        // (legacy-230 B, measured — see logic/detect.hpp). It does NOT follow that the choice is
+        // free where the ranking ties: the tie is on the page count and the kW-class span, both
+        // coarser than the row tables, so tied candidates need not decode identically (98 of 152
+        // measured ties do not). When the O/U capacity is absent (short 0x00) the set can still
+        // span classes, so detect_best leans on the I/U capacity fallback to pick the right-class
+        // reading profile. Since legacy-225 detect_candidates narrows by that same fallback, so
+        // `out` above no longer reports models the ranking had already excluded — but the profile
+        // READ is still this line's alone: the set above is a display list, and nothing consumes it
+        // to choose a table.
         if (const char* b = detect_best(sigs, nsig, fp)) r.best = b;
     }
 
     // `retries` is on this line rather than its own: a rising count is the early warning that the
     // page probe is working harder to hold the fingerprint together, which is the condition that
-    // used to change the model silently (#214). It counts only retries that RECOVERED a page, so 0
-    // is the healthy reading and any non-zero is a reply that was actually dropped.
+    // used to change the model silently (legacy-214). It counts only retries that RECOVERED a page,
+    // so 0 is the healthy reading and any non-zero is a reply that was actually dropped.
     diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d iu_kw=%d eeprom=[%s] retries=%d "
                 "transport_err=%d -> %d candidate(s), best=%s\n",
                 static_cast<char>(r.proto), r.rx, r.tx, static_cast<unsigned>(fp.page_mask),

@@ -58,7 +58,7 @@ LEDGER = Path(__file__).with_name("audit_exceptions.txt")
 # that says nothing about what it holds. `found` and `\w*backup\w*` below are two such shapes that
 # already bit; http_config.cpp's `in.topic` is a third, uncaught today because it only chooses
 # between two fixed strings and adding a token for it would buy one adjudicated false positive
-# rather than coverage. `board_id`/`s_board` are kept though #340 deleted the one line they matched:
+# rather than coverage. `board_id`/`s_board` are kept though legacy-340 deleted the one line they matched:
 # board identity is still a leakable value and the next line to print it should not have to
 # rediscover that.
 SENSITIVE = re.compile(

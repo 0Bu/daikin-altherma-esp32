@@ -30,7 +30,7 @@ const OU_HELD_PAGES = [0x20, 0x21];
 const rowHeldOver = (r, d) => !!(d && d.ouHeldOver && r && OU_HELD_PAGES.includes(r.reg));
 
 // Leaving-water MEASUREMENT for ΔT / heat output / COP — NOT a plain vNum, because a measurement
-// regex that can also match a setpoint row poisons all three (issue #121, the #35-#39 failure
+// regex that can also match a setpoint row poisons all three (issue legacy-121, the legacy-35–legacy-39 failure
 // shape). Host-tested twin: main/logic/lwt_select.hpp + test/test_logic.cpp test_lwt_select() —
 // keep the token lists below byte-for-byte in sync (lowercase substring, no regex).
 //   Tier 1 = the pre-BUH heat-exchanger outlet (R1T) under any label form — "before BUH (R1T)",
@@ -39,7 +39,7 @@ const rowHeldOver = (r, d) => !!(d && d.ouHeldOver && r && OU_HELD_PAGES.include
 //     lights up the alias-labelled profiles that "leaving water.*before" alone missed.
 //   Tier 2 = any leaving/outlet-water measurement that is NOT a setpoint / mixed-zone / post-BUH.
 const lwtWater = (l) => l.includes("leaving water") || l.includes("outlet water") || l.includes("water heat exchanger outlet") || l.includes("inflow");
-const lwtReject = (l) => l.includes("setpoint") || l.includes("mixed") || l.includes("r2t") || l.includes("after buh") || l.includes("after buffer");
+const lwtReject = (l) => l.includes("setpoint") || l.includes("mixed") || l.includes("r2t") || l.includes("after buh") || l.includes("after buffer") || l.includes("raw data") || l.includes("dlwb2") || l.includes("hydro split");
 // The two tiers as NAMED predicates over a raw label, one per C++ twin (lwt_is_pre_buh /
 // lwt_is_measurement). Named rather than inlined into the find() callbacks below because
 // scripts/check-presenter-parity.sh calls them directly with the whole def/ catalog's labels and
@@ -48,7 +48,7 @@ const lwtReject = (l) => l.includes("setpoint") || l.includes("mixed") || l.incl
 const lwtIsPreBuh = (l) => lwtWater(l) && !lwtReject(l) && l.includes("r1t");
 const lwtIsMeasurement = (l) => lwtWater(l) && !lwtReject(l);
 const lwtRow = () => {
-  const vals = (S._values || []).filter((x) => x.value != null);
+  const vals = S._values || [];
   const low = (x) => (x.label || "").toLowerCase();
   let r = vals.find((x) => lwtIsPreBuh(low(x)));
   if (!r) r = vals.find((x) => lwtIsMeasurement(low(x)));
@@ -56,7 +56,7 @@ const lwtRow = () => {
 };
 const vLwt = () => {
   const r = lwtRow();
-  if (!r) return null;
+  if (!r || r.value == null) return null;
   const n = parseFloat(r.value);
   return Number.isFinite(n) ? n : null;
 };
@@ -71,7 +71,7 @@ const rwtReject = (l) => l.includes("raw data") || l.includes("o/u") || l.includ
 const rwtIsR4t = (l) => rwtWater(l) && !rwtReject(l) && l.includes("r4t");
 const rwtIsMeasurement = (l) => rwtWater(l) && !rwtReject(l);
 const rwtRow = () => {
-  const vals = (S._values || []).filter((x) => x.value != null);
+  const vals = S._values || [];
   const low = (x) => (x.label || "").toLowerCase();
   let r = vals.find((x) => rwtIsR4t(low(x)));
   if (!r) r = vals.find((x) => rwtIsMeasurement(low(x)));
@@ -79,7 +79,7 @@ const rwtRow = () => {
 };
 const vRwt = () => {
   const r = rwtRow();
-  if (!r) return null;
+  if (!r || r.value == null) return null;
   const n = parseFloat(r.value);
   return Number.isFinite(n) ? n : null;
 };
@@ -98,7 +98,7 @@ const isPostBuhRow = (l, reg) =>
   !OU_HELD_PAGES.includes(reg) && l.includes("r2t") &&
   !l.includes("setpoint") && !l.includes("mixed") && lwtWater(l);
 const postBuhRow = () => {
-  const vals = (S._values || []).filter((x) => x.value != null);
+  const vals = S._values || [];
   return vals.find((x) => isPostBuhRow((x.label || "").toLowerCase(), x.reg)) || null;
 };
 // WHICH COP a quotient would be, and when it is none — the addressable twin of
@@ -321,7 +321,7 @@ function liveData() {
   // then stepped to 25.5 at the instant the compressor started, while the hydronic pages decayed
   // smoothly throughout. Those readings must therefore not be drawn as current — DESIGN.md's
   // dead-bus rule ("an idle plant with no readings, not a stale one"), applied to one sleeping unit.
-  // A held-over 19.0 °C is exactly the #35-#39 shape: well-formed, plausible, and false — and it is
+  // A held-over 19.0 °C is exactly the legacy-35–legacy-39 shape: well-formed, plausible, and false — and it is
   // what made an idle plant look like a running one next to a "not running" headline.
   // UNKNOWN rps (a profile with no such row) reads as CURRENT, never as held over: that is absence
   // of evidence, and blanking on a guess would cost a reading that may well be live.
@@ -374,7 +374,7 @@ function liveData() {
   // the catalog carries it, only about half carry CT clamps, and an idle plant reads ct == 0, so the
   // ungated fallback fired on the majority of installs almost all of the time. It drew last run's
   // amps as a live kW figure right beside the "not running" headline: plausible, well-formed, false
-  // — the #35-#39 shape, and the same reason d.circP already gates. Asserted against the whole
+  // — the legacy-35–legacy-39 shape, and the same reason d.circP already gates. Asserted against the whole
   // catalog by logic/ou_stale.hpp's test (which page each of these two rows lives on).
   const invLive = !d.ouHeldOver && inv != null;
   const ctLive  = ctComplete && ct > 0;
@@ -457,7 +457,7 @@ function liveData() {
     // measured consumption at input 51 and the two power-LIMIT setpoints at holding 57/58 — so a
     // first-match on the unit promoted a configured ceiling to the plant's measured draw the moment
     // 51 was unavailable or answered a sentinel. A limit is a number the installer typed; drawing it
-    // as a measurement is the #35-#39 shape wearing a plausible value, and the Modbus card would go
+    // as a measurement is the legacy-35–legacy-39 shape wearing a plausible value, and the Modbus card would go
     // on labelling it correctly one card below.
     const pw = mbPower();
     if (pw) { const n = parseFloat(pw.value);
@@ -1434,7 +1434,7 @@ const inspFieldText = (e, field, d) => {
 
 // A row selector is either a label pattern or a PICKER FUNCTION. Quantities whose selection is a
 // judgement rather than a match — leaving water, where a setpoint / mixed-zone / post-BUH row must
-// never be substituted for the measurement (issue #121) — name their picker, so the rule lives in
+// never be substituted for the measurement (issue legacy-121) — name their picker, so the rule lives in
 // exactly one place and stays the one CI gates through logic/lwt_select.hpp.
 const pickRow = (sel) => (typeof sel === "function" ? sel() : vRow(sel));
 const inspRow = (e) => (e.pick ? e.pick() : e.re ? vRow(e.re) : null);

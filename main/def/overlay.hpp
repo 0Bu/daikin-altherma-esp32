@@ -8,8 +8,8 @@
 // docs/REGISTERS.md §5 documents TWENTY-FIVE. The omission is uniform — all 43 generated tables agree
 // row-for-row — so it is not a per-model absence but the offline generator's page-0x10 input being
 // narrower than the in-repo spec. Among the missing rows are the protection-retry counters, which are
-// the input signal for the "silent protection retries" early warning (issue #69 UC5, spun off as
-// #110). Converter 310 has been implemented and host-tested since PR #111, but no profile carries a
+// the input signal for the "silent protection retries" early warning (issue legacy-69 UC5, spun off as
+// legacy-110). Converter 310 has been implemented and host-tested since PR legacy-111, but no profile carries a
 // row that uses it, so it decodes nothing in the field: conv 310 appears ZERO times across all 3694
 // generated rows.
 //
@@ -44,7 +44,7 @@ inline constexpr uint8_t OVERLAY_PAGE = 0x10;
 // FOUR fields: a drop-control flag at bit 7 (conv 307), a 3-bit protection-retry counter at bits 4-6
 // (conv 310), a second drop flag at bit 3 (conv 303) and a second 3-bit counter at bits 0-2
 // (conv 311). All four converters mask their own window, so the four rows share one byte without
-// interfering — that masking is what PR #111 added for conv 310 and is pinned byte-for-byte in
+// interfering — that masking is what PR legacy-111 added for conv 310 and is pinned byte-for-byte in
 // test/test_logic.cpp (0x95 -> 1 retry, not 149).
 //
 // IN BOUNDS ON THE WIRE: the captured page-0x10 reply in docs/X10A_PROTOCOL.md §8 announces

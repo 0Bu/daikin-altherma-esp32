@@ -29,7 +29,9 @@ branch-bearing header's aggregated gcov `taken/total` branch-edge counts with th
 silently. These totals do not identify individual edges, so equal counts are not proof that the same
 branches ran. It intentionally excludes this test driver, generated profiles and system headers:
 none of those can prove that another production branch ran. GCC uses `gcov`; Clang uses `llvm-cov
-gcov` (via `xcrun` on macOS). Local profiles use compiler family and major; authoritative GitHub
+gcov` (via `xcrun` on macOS). Local profiles use compiler family and major (maintained profiles:
+`clang-17-darwin` on macOS with Apple Clang 17, `gcc-13-linux-ubuntu24` on Ubuntu 24.04 with GCC 13,
+and `gcc-15-linux-ubuntu26` / `gcc-15-github-linux-ubuntu26` on Ubuntu 26 / GitHub Actions); authoritative GitHub
 coverage additionally binds the hosted runner OS and image name because its packaged toolchain can
 instrument different outcome counts from a container with the same upstream compiler release. An
 unknown runner image has no fallback profile and therefore fails closed pending review.
@@ -381,7 +383,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/lwt_select.hpp` — the web UI's leaving-water MEASUREMENT picker (twin of `www/js/schematic.js`
   `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable
-  profile resolves a real measurement and never a setpoint (issue legacy-121, the legacy-35–39 failure shape).
+  profile resolves a real measurement and never a setpoint (issue legacy-121, the legacy-35–legacy-39 failure shape).
 - `logic/mqtt_publish_gate.hpp` — an unwired board may connect/subscribe without an installation
   LWT but cannot publish; the first X10A proof promotes it, a one-cycle dropout is absorbed using the
   monotonic last-good age, and an active board publishes one offline transition only after 15 seconds

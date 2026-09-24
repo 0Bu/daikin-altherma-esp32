@@ -102,10 +102,10 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
 # WebSockets support: OFF, and stated explicitly rather than left to the Kconfig default, because
 # this firmware DELIBERATELY has no live-push surface. The web UI polls /status and /values; the
-# /events WebSocket was removed after a lost queue message wedged a stream silently (#238) and its
-# broadcaster put the /status builder on the task that owns the X10A UART (#241). See
+# /events WebSocket was removed after a lost queue message wedged a stream silently (legacy-238) and its
+# broadcaster put the /status builder on the task that owns the X10A UART (legacy-241). See
 # docs/ARCHITECTURE.md "Push vs. poll". Nothing calls httpd_queue_work() any more either, so
-# CONFIG_HTTPD_QUEUE_WORK_BLOCKING (added as the #238 backstop) is gone with it — an inert setting
+# CONFIG_HTTPD_QUEUE_WORK_BLOCKING (added as the legacy-238 backstop) is gone with it — an inert setting
 # reads as a live safeguard.
 CONFIG_HTTPD_WS_SUPPORT=n
 

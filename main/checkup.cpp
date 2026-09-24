@@ -135,9 +135,9 @@ bool tenths(const CachedValue& cv, int& out) {
     return logic::history_parse_tenths(cv.value.c_str(), out);
 }
 
-// A BIT-FLAG row's state. Since #210 every flag reaches the cache as the numeric "1"/"0", so this is
-// a plain parse — and a legacy textual "ON"/"OFF" is refused by the parse and reads as UNKNOWN,
-// which is the safe direction: logic/checkup.hpp never folds unknown into off.
+// A BIT-FLAG row's state. Since legacy-210 every flag reaches the cache as the numeric "1"/"0", so
+// this is a plain parse — and a legacy textual "ON"/"OFF" is refused by the parse and reads as
+// UNKNOWN, which is the safe direction: logic/checkup.hpp never folds unknown into off.
 void flag_state(const CachedValue* v, size_t n, const logic::CheckupLocator& l,
                 bool& known, bool& on) {
     known = false;

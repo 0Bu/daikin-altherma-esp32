@@ -1,27 +1,28 @@
 #pragma once
-// A NUMERIC fault state beside the TEXTUAL Daikin diagnostic code — issue #209 defect 4.
+// A NUMERIC fault state beside the TEXTUAL Daikin diagnostic code — issue legacy-209 defect 4.
 //
 // Converters 203 (error class) and 204 (error code) are deliberately textual: "Normal"/"Error" and
-// "00"/"U4"/"7H" are what a human, the web UI and Home Assistant want, and mapping every Daikin code
-// onto an invented numeric enum would be a guess with no authority behind it. But the grouped state
-// topic is ALSO consumed as metrics JSON (Telegraf → VictoriaMetrics on this install), and a metrics
-// parser drops a string:
+// "00"/"U4"/"7H" are what a human, the web UI and Home Assistant want, and mapping every Daikin
+// code onto an invented numeric enum would be a guess with no authority behind it. But the grouped
+// state topic is ALSO consumed as metrics JSON (Telegraf → VictoriaMetrics on this install), and a
+// metrics parser drops a string:
 //
 //   • "00" (no fault) can be read as the number 0 and become a series;
 //   • "U4" cannot become a sample at all — it is simply dropped;
 //   • so the last numeric value stays put, and an alert on `error_code != 0` never fires for
 //     exactly the alphanumeric faults it exists to catch.
 //
-// The fix is NOT to change the textual field's type (that is the mistake #209 defect 3 documents,
-// from the other direction). It is to publish a small, permanently-numeric companion pair beside it
-// and leave the diagnostic code alone:
+// The fix is NOT to change the textual field's type (that is the mistake legacy-209 defect 3
+// documents, from the other direction). It is to publish a small, permanently-numeric companion
+// pair beside it and leave the diagnostic code alone:
 //
 //   { "error_type": "Error", "error_code": "U4", "error_active": 1, "warning_active": 0 }
 //
 // The companions are DERIVED from the error-CLASS row rather than from the code, because the class
 // is what Daikin itself uses to say how bad it is, and it is a 4-value enum rather than an open
 // alphanumeric space. They are derived from the class INDEX via the same ERR_TYPE table conv 203
-// decodes through — the inverse of that one lookup, not a second opinion about what the labels mean.
+// decodes through — the inverse of that one lookup, not a second opinion about what the labels
+// mean.
 #include <cstddef>
 
 #include "convert.hpp"   // ERR_TYPE — the one table conv 203 decodes through
@@ -53,7 +54,7 @@ inline FaultClass fault_class_from_text(const char* text) {
 // both "running, but the unit is complaining", and they are folded into one flag on purpose: a
 // consumer that needs the three-way distinction has the textual class right beside these, and
 // inventing a third boolean for a severity nobody on this install has yet observed would be the
-// kind of guess #35-#39 was made of.
+// kind of guess legacy-35–legacy-39 was made of.
 inline constexpr bool fault_error_active(FaultClass c)   { return c == FaultClass::Error; }
 inline constexpr bool fault_warning_active(FaultClass c) {
     return c == FaultClass::Warning || c == FaultClass::Caution;

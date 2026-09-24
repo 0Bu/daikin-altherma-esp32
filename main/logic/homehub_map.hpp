@@ -174,15 +174,6 @@ inline constexpr HomeHubConcept ALTHERMA4_CONCEPTS[] = {
 inline constexpr size_t ALTHERMA4_CONCEPT_COUNT =
     sizeof(ALTHERMA4_CONCEPTS) / sizeof(ALTHERMA4_CONCEPTS[0]);
 
-// Format pressure in bar with 2 decimal places (%.2f bar).
-inline bool homehub_format_pressure(double bar, char* buf, size_t buflen,
-                                    bool include_unit = true) {
-    if (buf == nullptr || buflen == 0) return false;
-    const size_t needed = include_unit
-                              ? static_cast<size_t>(std::snprintf(buf, buflen, "%.2f bar", bar))
-                              : static_cast<size_t>(std::snprintf(buf, buflen, "%.2f", bar));
-    return needed < buflen;
-}
 
 // The concept a HomeHub register carries, or nullptr when it has no X10A counterpart.
 inline const char* homehub_concept_for(uint16_t offset) {
@@ -242,8 +233,8 @@ constexpr bool homehub_histories_are_valid() {
 }
 // The two vocabularies share ONE namespace — the browser matches an X10A row to a Modbus row on the
 // concept string alone and cannot tell which table produced it. A state id that collided with a
-// trend id would pair a temperature with a flag: the #35-#39 substitution shape, arriving through a
-// name rather than a register. Also proves the ids are unique among themselves.
+// trend id would pair a temperature with a flag: the legacy-35–legacy-39 substitution shape,
+// arriving through a name rather than a register. Also proves the ids are unique among themselves.
 constexpr bool homehub_state_ids_are_distinct() {
     for (size_t i = 0; i < HOMEHUB_STATE_COUNT; i++) {
         for (const auto& d : TRENDS)

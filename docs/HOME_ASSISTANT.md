@@ -870,8 +870,8 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
 - **Daikin EKRHH "HomeHub" / local Modbus — different from the cloud, a peer of this firmware.** In
   its Modbus mode (commissioned as use-case UC3, Modbus TCP `:502`) the HomeHub *does* expose the
   water **flow rate** (input reg 49), **return** (reg 42) and **leaving** water temps (reg 40 PHE /
-  41 BUH), so you can build the **same virtual heat meter** — the community HA integrations
-  (`gerione/daikin-ha-ekrhh-modbus`, `joklee/ha_daikin_altherma4_modbus`) compute
+  41 BUH), so you can build the **same virtual heat meter** — community Home Assistant integrations
+  compute
   `thermal_W = flow × |LWT−RWT| × ~70` exactly this way, and evcc reads it to modulate PV-surplus
   power. It adds one thing this firmware lacks — an instantaneous **power** figure (reg 51, kW) — but
   that is Daikin's internal *estimate*, not a metered watt, and there is still **no accumulated kWh,

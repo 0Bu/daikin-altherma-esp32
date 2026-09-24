@@ -81,15 +81,15 @@ void diag_crash_capture() {
 
     // A dump can OUTLIVE the firmware that wrote it: the coredump partition survives an OTA, and a
     // panic that fails to write its own dump (a stack overflow can overrun the writer) leaves the
-    // PREVIOUS build's dump in place. Such an orphan still passes esp_core_dump_image_check() — it is
-    // a valid image, just of another binary — so `coredump` reads true, /status offers a download,
-    // and only espcoredump three steps later rejects it on a SHA-256 mismatch (#215). Detect it by
-    // comparing the dump's own app-ELF sha (from the summary) against the RUNNING build's, and erase
-    // the orphan when they disagree: then `coredump` means "a dump for THIS firmware is downloadable"
-    // and the next real panic writes to a clean partition. The summary fields go with it — they
-    // describe the foreign binary and would symbolize to garbage against the running .elf. The erase
-    // failing is logged but not fatal; coredump/summary are cleared regardless, since reporting a
-    // dump we KNOW is foreign is worse than reporting none.
+    // PREVIOUS build's dump in place. Such an orphan still passes esp_core_dump_image_check() — it
+    // is a valid image, just of another binary — so `coredump` reads true, /status offers a
+    // download, and only espcoredump three steps later rejects it on a SHA-256 mismatch
+    // (legacy-215). Detect it by comparing the dump's own app-ELF sha (from the summary) against
+    // the RUNNING build's, and erase the orphan when they disagree: then `coredump` means "a dump
+    // for THIS firmware is downloadable" and the next real panic writes to a clean partition. The
+    // summary fields go with it — they describe the foreign binary and would symbolize to garbage
+    // against the running .elf. The erase failing is logged but not fatal; coredump/summary are
+    // cleared regardless, since reporting a dump we KNOW is foreign is worse than reporting none.
     if (s_ci.have_summary) {
         char run_sha[65] = {0};
         esp_app_get_elf_sha256(run_sha, sizeof(run_sha));

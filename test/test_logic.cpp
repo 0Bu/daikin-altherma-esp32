@@ -62,6 +62,7 @@
 #include "logic/ota_transport.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/hp_query_log.hpp"
+#include "logic/modbus_profile.hpp"
 #include "logic/http_body.hpp"
 #include "logic/http_cache.hpp"
 #include "logic/http_deadline.hpp"
@@ -246,15 +247,8 @@ static void test_crc() {
         CHECK(is_valid_preamble(Protocol::S, 0x50));
         CHECK(is_valid_preamble(Protocol::S, 0x00));
 
-        // Test starts_with_request_echo edge cases
-        CHECK(starts_with_request_echo(req_i, 1, req_i, qlen_i));
-        CHECK(starts_with_request_echo(req_i, 4, req_i, qlen_i));
-        CHECK(!starts_with_request_echo(req_i, 0, req_i, qlen_i));
-        CHECK(!starts_with_request_echo(req_i, 4, req_i, 0));
-        uint8_t diff_b[4] = {0x99, 0x99, 0x99, 0x99};
-        CHECK(!starts_with_request_echo(diff_b, 1, req_i, qlen_i));
-
         // Additional reply classify & crc edge cases
+        uint8_t diff_b[6] = {0x40, 0x60, 0x02, 0x01, 0x02, 0x00};
         CHECK(!is_error_reply(diff_b, 1));
         CHECK(!crc_ok(diff_b, 0));
         CHECK(hp_reply_classify(0x60, Protocol::I, diff_b, 0, 6) == HpReplyKind::NoReply);
@@ -267,12 +261,19 @@ static void test_crc() {
         s_valid[5]         = crc(s_valid, 5);
         CHECK(hp_reply_classify(0x50, Protocol::S, s_valid, 6, 6) == HpReplyKind::Ok);
 
-        // Test resync helper on Protocol S
+        // Test resync helper on Protocol S and boundary conditions
         uint8_t s_sync_buf[4] = {0x11, 0x22, 0x33, 0x44};
         int     s_sync_len    = 4;
         hp_resync_buffer(Protocol::S, s_sync_buf, s_sync_len);
         CHECK(s_sync_len == 3);
         CHECK(s_sync_buf[0] == 0x22);
+
+        int empty_resync_len = 0;
+        hp_resync_buffer(Protocol::I, diff_b, empty_resync_len);
+        CHECK(empty_resync_len == 0);
+        CHECK(hp_reply_classify(0x60, Protocol::I, diff_b, 1, 6) == HpReplyKind::ShortReply);
+        HpFrameReceiver rx_neg(Protocol::I, diff_b, -1, 64, 12);
+        HpFrameReceiver rx_huge(Protocol::I, diff_b, 10, 64, 12);
 
         // Test 1: Clean Protocol I frame without echo
         {
@@ -320,6 +321,18 @@ static void test_crc() {
             // 0x40, 0xFF, 0xFE -> dynamic len 0xFE + 2 = 256 (>64, invalid!), followed by valid
             // frame
             const uint8_t stream[] = {0x40, 0xFF, 0xFE, 0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
+            for (uint8_t b : stream) rx.feed_byte(b, buf, len);
+            CHECK(len == 6);
+            CHECK(rx.reply_len() == 6);
+            CHECK(buf[0] == 0x40 && buf[1] == 0x60);
+        }
+
+        // Test 4b: Protocol I false preamble where buf[2] == 0x40 (echo/noise)
+        {
+            HpFrameReceiver rx(Protocol::I, req_i, qlen_i, 64, 12);
+            uint8_t         buf[64]{};
+            int             len      = 0;
+            const uint8_t   stream[] = {0x40, 0x60, 0x40, 0x60, 0x04, 0xAA, 0xBB, 0};
             for (uint8_t b : stream) rx.feed_byte(b, buf, len);
             CHECK(len == 6);
             CHECK(rx.reply_len() == 6);
@@ -601,9 +614,9 @@ static void test_convert() {
     CHECK(std::string(convert(om, m255).text) == "?");
 
     // Index 0 is the IDLE state and reads "Stop" — NOT the split-air-conditioner table's "Fan
-    // Only", a mode a hydronic Altherma does not have (#216). Pinned as a PAIR against the wire
-    // bytes logic/raw_capture.hpp took across one stopped->running edge on a live Altherma 3 R W,
-    // because a single sample cannot tell a wrong LABEL from a table shifted by one: index 0 was
+    // Only", a mode a hydronic Altherma does not have (legacy-216). Pinned as a PAIR against the
+    // wire bytes logic/raw_capture.hpp took across one stopped->running edge on a live Altherma 3 R
+    // W, because a single sample cannot tell a wrong LABEL from a table shifted by one: index 0 was
     // observed only at rest and index 1 only during the run, and index 1 was already correct.
     // Nothing else can catch this — reading_plausible() returns early on text (no enum value is
     // ever bounded), the domain audit judges converter ids and byte layout rather than whether a
@@ -722,9 +735,9 @@ static void test_convert() {
 
     // reading_plausible: the publish-time °C envelope (TEMP_MIN_C/TEMP_MAX_C), applied by hp_format
     // — NOT inside convert(), which keeps its intrinsic per-converter semantics so the catalog
-    // audit can still tell conv 105 from conv 114 (see convert.hpp / tools/domain/selftest.sh #38).
-    // This is what stops an idle OU's 576 °C outdoor-HX or a 231.6 °C target-evap reaching Home
-    // Assistant.
+    // audit can still tell conv 105 from conv 114 (see convert.hpp / tools/domain/selftest.sh
+    // legacy-38). This is what stops an idle OU's 576 °C outdoor-HX or a 231.6 °C target-evap
+    // reaching Home Assistant.
     ValueDef      ot{0x20, 2, 105, 2, 1, "outdoor HX"};
     const uint8_t hot576[] = {0x80, 0x16}; // LE 0x1680 = 5760 -> 576.0 °C, impossible
     CHECK(convert(ot, hot576).ok);         // convert() still decodes it (intrinsic, unchanged)
@@ -735,7 +748,7 @@ static void test_convert() {
     const uint8_t warm[] = {0xF4, 0x01}; // LE 500 -> 50.0 °C, a real reading
     CHECK(reading_plausible(ot, convert(ot, warm)) && approx(convert(ot, warm).value, 50.0));
     // A ±3276.x no-data sentinel on conv 105 (which has NO intrinsic guard) is also caught here —
-    // the general backstop that #35–#39 never had for conv 105.
+    // the general backstop that legacy-35–legacy-39 never had for conv 105.
     const uint8_t nd105[] = {0x00, 0x80}; // 0x8000 -> -3276.8 °C on conv 105
     CHECK(convert(ot, nd105).ok && !reading_plausible(ot, convert(ot, nd105)));
     // Keyed on the °C dataType, never the converter id: conv 105 also carries kW / COP rows at
@@ -782,7 +795,7 @@ static void test_convert() {
     CHECK(!reading_plausible(ot, r_inf));
     CHECK(!reading_plausible(cop, r_inf));
 
-    // ── KNOWN DEFECT WITNESS — Target Evap. Temp. on page 0x10/6 (issue #194)
+    // ── KNOWN DEFECT WITNESS — Target Evap. Temp. on page 0x10/6 (issue legacy-194)
     // ───────────────────── The envelope above has a measured hole, and this pins it so neither
     // side can drift silently.
     //
@@ -795,27 +808,29 @@ static void test_convert() {
     //
     // The decode is NOT the drift: the catalog row is conv 114 / size 2 / type 1 at 0x10 offset 6
     // in 44 of 45 profiles, docs/REGISTERS.md §5 says exactly that, and conv 114 is implemented
-    // exactly as §3.1 specifies. Offset shift, endianness and width are all ruled out in #194 (a
-    // one-byte shift yields 2611.2 °C or 0.9 °C at rest). What is left is a SCALE mismatch — ×0.1
-    // is 10x too coarse for this row on this family. Under ×0.01 the same raw bytes read 24.06 °C
-    // at rest (ambient measured 22.5-23.0 °C, i.e. an idle coil at air temperature) and 14.59 °C
+    // exactly as §3.1 specifies. Offset shift, endianness and width are all ruled out in legacy-194
+    // (a one-byte shift yields 2611.2 °C or 0.9 °C at rest). What is left is a SCALE mismatch —
+    // ×0.1 is 10x too coarse for this row on this family. Under ×0.01 the same raw bytes read 24.06
+    // °C at rest (ambient measured 22.5-23.0 °C, i.e. an idle coil at air temperature) and 14.59 °C
     // running, 6-8 K below ambient: a textbook air-source evaporator approach.
     //
-    // RESOLVED in #194 — the scale is ÷128, i.e. the row is encoded with conv 109 and the generated
-    // tables point it at conv 114. See logic/conv_override.hpp for the full argument; the decisive
-    // evidence is STRUCTURAL rather than physical, which is what makes it safe to act on where a
-    // range that merely "looks nicer" would not be. conv 114 publishes raw × 0.1 at one decimal, so
-    // every value this row has ever published carries its 16-bit register exactly — and all 54
-    // distinct integers ever observed (46 run-time from the stored series, 8 at rest from the
-    // boot-time page dumps) satisfy raw == floor(128 × T) for T on an exact 0.1 K grid. The set
+    // RESOLVED in legacy-194 — the scale is ÷128, i.e. the row is encoded with conv 109 and the
+    // generated tables point it at conv 114. See logic/conv_override.hpp for the full argument; the
+    // decisive evidence is STRUCTURAL rather than physical, which is what makes it safe to act on
+    // where a range that merely "looks nicer" would not be. conv 114 publishes raw × 0.1 at one
+    // decimal, so every value this row has ever published carries its 16-bit register exactly — and
+    // all 54 distinct integers ever observed (46 run-time from the stored series, 8 at rest from
+    // the boot-time page dumps) satisfy raw == floor(128 × T) for T on an exact 0.1 K grid. The set
     // {floor(12.8k)} has density 1/12.8 among the integers, so that is p ~ 1.6e-60 against any
-    // other scale. ×0.01 — #194's own preferred candidate, picked because 24.06 °C at rest "looked
-    // like ambient" — has no such grid, and its ambient cross-check was against the X10A outdoor
-    // reading, which #209 later proved is HELD OVER at rest (logic/ou_stale.hpp): it was comparing
-    // a stale number. Against the independent HomeHub sensor the row does not track ambient at all.
+    // other scale. ×0.01 — legacy-194's own preferred candidate, picked because 24.06 °C at rest
+    // "looked like ambient" — has no such grid, and its ambient cross-check was against the X10A
+    // outdoor reading, which legacy-209 later proved is HELD OVER at rest (logic/ou_stale.hpp): it
+    // was comparing a stale number. Against the independent HomeHub sensor the row does not track
+    // ambient at all.
     //
     // conv 114 itself is NOT touched: it is a correct ×0.1 converter and three other rows use it.
-    // This is the #35-#39 shape — a wrong converter ID on a right register — not a wrong converter.
+    // This is the legacy-35–legacy-39 shape — a wrong converter ID on a right register — not a
+    // wrong converter.
     const uint8_t evap1996[] = {0xCC, 0x07}; // LE 0x07CC = 1996 -> 199.6 °C, MEASURED
     const uint8_t evap1459[] = {0xB3, 0x05}; // LE 0x05B3 = 1459 -> 145.9 °C, MEASURED (run min)
     const uint8_t evap2406[] = {0x66, 0x09}; // LE 0x0966 = 2406 -> 240.6 °C, MEASURED (at rest)
@@ -850,14 +865,15 @@ static void test_convert() {
     // is the whole evidence base.
     CHECK(display_decimals(109) == 1);
     // Its neighbour is NOT quarantined — the row publishes, and only its unpopulated raw 0x0000 is
-    // withheld (#209 defect 2). Two rows, two different verdicts, one ledger.
+    // withheld (legacy-209 defect 2). Two rows, two different verdicts, one ledger.
     const ValueDef cond{0x10, 8, 114, 2, 1, "Target Cond. Temp."};
     CHECK(row_publishable(cond));
     const uint8_t cond_zero[] = {0x00, 0x00};
     CHECK(convert(cond, cond_zero).ok && approx(convert(cond, cond_zero).value, 0.0));
     CHECK(!value_available(cond, true, convert(cond, cond_zero).value));
-    // The scale hypothesis, recorded as arithmetic so #194's candidates stay concrete: the same raw
-    // bytes under x0.01 are ordinary temperatures either side of the measured 22.5-23.0 °C ambient.
+    // The scale hypothesis, recorded as arithmetic so legacy-194's candidates stay concrete: the
+    // same raw bytes under x0.01 are ordinary temperatures either side of the measured 22.5-23.0 °C
+    // ambient.
     CHECK(approx(convert(evap, evap2406).value * 0.1, 24.06)); // at rest  ~= ambient
     CHECK(approx(convert(evap, evap1459).value * 0.1, 14.59)); // running  ~= 8 K below ambient
 
@@ -865,9 +881,10 @@ static void test_convert() {
     // path, not a reading. Measured on a live 4-8 kW unit,
     // High/Low Pressure (0x20/12+14) read exactly 0.0 bar both at rest and at 42 rps, while the
     // 0x62/15 refrigerant sensor read a correct 15.3 bar — so the 0.0 reached HA as a real pressure
-    // (#35-#39 shape). WATER pressure must keep publishing 0 bar: a drained system genuinely reads
-    // it. The refrigerant/water split is taken from the CATALOG — a conv-405 saturation-temperature
-    // companion at the same (reg, offset) — never from the label, which an alias could flip.
+    // (legacy-35–legacy-39 shape). WATER pressure must keep publishing 0 bar: a drained system
+    // genuinely reads it. The refrigerant/water split is taken from the CATALOG — a conv-405
+    // saturation-temperature companion at the same (reg, offset) — never from the label, which an
+    // alias could flip.
     const ValueDef pprof[] = {
         {0x20, 12, 105, 2, 2, "High Pressure"},
         {0x20, 12, 405, 2, 1, "High Pressure(T)"},
@@ -910,6 +927,16 @@ static void test_convert() {
     CHECK(
         !reading_plausible(pprof[3], convert(pprof[3], p0bar), pprof, pn)); // ...but caught with it
     CHECK(reading_plausible(pprof[0], Reading{false, false, 0.0}));         // !r.ok passes through
+
+    // Protocol S refrigerant pressures on page 0x50 must also drop 0.0 bar:
+    const ValueDef s_hp{0x50, 0, 103, 2, 2, "HP Sensor(bar)"};
+    const ValueDef s_lp{0x50, 2, 103, 2, 2, "LP Sensor(bar)"};
+    CHECK(is_refrigerant_pressure(s_hp, nullptr, 0));
+    CHECK(is_refrigerant_pressure(s_lp, nullptr, 0));
+    CHECK(!reading_plausible(s_hp, convert(s_hp, p0bar)));
+    CHECK(!reading_plausible(s_lp, convert(s_lp, p0bar)));
+    const uint8_t s_pos[] = {0x64, 0x00}; // 10.0 bar
+    CHECK(reading_plausible(s_hp, convert(s_hp, s_pos)));
 
     // profile_refrigerant: pick the 801-805 row's id, else fail closed as unknown.
     const ValueDef prof801[]   = {{0x00, 0, 801, 0, -1, "*Refrigerant type"},
@@ -964,8 +991,8 @@ static void test_convert() {
             }
     CHECK(wp_checked >= 40); // every model carries this row; all publish as bar after normalization
 
-    // Catalog guard (#35): "Mixed water temp." at reg 0x64 offset 10 is signed BE ×0.01 (conv 118)
-    // in EVERY profile — never conv 105 (signed LE ×0.1), which decodes 0D DA as -971.5 °C.
+    // Catalog guard (legacy-35): "Mixed water temp." at reg 0x64 offset 10 is signed BE ×0.01 (conv
+    // 118) in EVERY profile — never conv 105 (signed LE ×0.1), which decodes 0D DA as -971.5 °C.
     int mw_checked = 0;
     for (const auto& p : def::profiles)
         for (size_t i = 0; i < p.count; i++)
@@ -975,9 +1002,10 @@ static void test_convert() {
             }
     CHECK(mw_checked >= 36); // 36 profiles carry this row; all must be conv 118
 
-    // Catalog guard (#36): a reg 0x65 offset-0 row that is NOT a temperature (e.g. the [EKMIK]
-    // mix-valve position M1S) must be a raw signed byte — size 1, non-°C (type != 1) — never the
-    // size-2/type-1 (°C) shape that published the valve position as a phantom 12800 °C sensor.
+    // Catalog guard (legacy-36): a reg 0x65 offset-0 row that is NOT a temperature (e.g. the
+    // [EKMIK] mix-valve position M1S) must be a raw signed byte — size 1, non-°C (type != 1) —
+    // never the size-2/type-1 (°C) shape that published the valve position as a phantom 12800 °C
+    // sensor.
     auto label_has_temp = [](const char* s) {
         std::string t(s);
         for (char& ch : t) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
@@ -993,9 +1021,9 @@ static void test_convert() {
             }
     CHECK(m1s_checked >= 4); // the 4 EPRA M1S valve-position rows
 
-    // Catalog guard (#38): "Target Evap./Cond. Temp." at reg 0x10 offsets 6 and 8 uses conv 114
-    // (signed LE ×0.1 with the 0x8000 no-data sentinel) in EVERY profile — never conv 105, which
-    // publishes the 0x8000 idle marker as a real -3276.8 °C reading.
+    // Catalog guard (legacy-38): "Target Evap./Cond. Temp." at reg 0x10 offsets 6 and 8 uses conv
+    // 114 (signed LE ×0.1 with the 0x8000 no-data sentinel) in EVERY profile — never conv 105,
+    // which publishes the 0x8000 idle marker as a real -3276.8 °C reading.
     int tgt_checked = 0;
     for (const auto& p : def::profiles)
         for (size_t i = 0; i < p.count; i++)
@@ -1005,9 +1033,9 @@ static void test_convert() {
             }
     CHECK(tgt_checked >= 80); // both offsets across ~44 profiles
 
-    // Catalog guard (#37): reg 0x30 offset 2 is "Fan 2 (step)" (conv 211, size 1) where present —
-    // never a size-2 field. A size-2 read there swallows the Fan 2 byte into the expansion-valve
-    // count (Fan 2 dropped, valve fabricated). Expansion valve 1 lives at offset 3.
+    // Catalog guard (legacy-37): reg 0x30 offset 2 is "Fan 2 (step)" (conv 211, size 1) where
+    // present — never a size-2 field. A size-2 read there swallows the Fan 2 byte into the
+    // expansion-valve count (Fan 2 dropped, valve fabricated). Expansion valve 1 lives at offset 3.
     for (const auto& p : def::profiles)
         for (size_t i = 0; i < p.count; i++)
             if (p.values[i].reg == 0x30 && p.values[i].offset == 2) CHECK(p.values[i].size == 1);
@@ -1015,7 +1043,8 @@ static void test_convert() {
     // conv 310 = protection-retry counter, bits 4-6 ONLY (docs/REGISTERS.md §3.3). Page 0x10 bytes
     // 10-12 pack a drop-control flag (bit 7, conv 307), this counter (bits 4-6), a second drop flag
     // (bit 3, conv 303) and a second counter (bits 0-2, conv 311) into ONE byte, so an unmasked
-    // read would publish a retry count of 1 as 149. This is UC5's core signal (issue #69 step 0.2).
+    // read would publish a retry count of 1 as 149. This is UC5's core signal (issue legacy-69 step
+    // 0.2).
     ValueDef      retry{0x10, 10, 310, 1, -1, "Discharge Temp. Protection Retry Qty"};
     const uint8_t rt95[] = {0x95}; // 1001 0101: drop set, retry 1, low counter 5
     CHECK(convert(retry, rt95).ok && approx(convert(retry, rt95).value, 1.0));
@@ -1031,14 +1060,14 @@ static void test_convert() {
     CHECK(display_decimals(310) == 0);
 
     // Catalog guard for page 0x10 offsets 10-12, the four-fields-per-byte protection words. Armed
-    // ahead of the rows in PR #111, when it was vacuous by construction; it is LIVE now that
-    // def/overlay.hpp supplies them (#110 Part B), and it runs over the RESOLVED view so it covers
-    // the supplement exactly as it would cover the generator's output when that finally lands.
-    // The failures it guards against: a size-2 read straddling two protection words, a plain byte
-    // converter publishing 149 where the spec says 1, and — the #36 failure mode — a dimensionless
-    // retry COUNT typed as °C, which reaches Home Assistant as a phantom temperature entity that
-    // looks entirely plausible. None of the four fields packed into these bytes is a temperature:
-    // two are drop-control flags, two are counters. type 1 (°C) is always wrong here.
+    // ahead of the rows in PR 111, when it was vacuous by construction; it is LIVE now that
+    // def/overlay.hpp supplies them (PR 110 Part B), and it runs over the RESOLVED view so it
+    // covers the supplement exactly as it would cover the generator's output when that finally
+    // lands. The failures it guards against: a size-2 read straddling two protection words, a plain
+    // byte converter publishing 149 where the spec says 1, and — the legacy-36 failure mode — a
+    // dimensionless retry COUNT typed as °C, which reaches Home Assistant as a phantom temperature
+    // entity that looks entirely plausible. None of the four fields packed into these bytes is a
+    // temperature: two are drop-control flags, two are counters. type 1 (°C) is always wrong here.
     int prot_checked = 0;
     for (const auto& p : def::profiles) {
         const auto v = def::resolved(p);
@@ -1047,7 +1076,7 @@ static void test_convert() {
                 CHECK(v[i].size == 1);
                 const int c = v[i].conv;
                 CHECK(c == 303 || c == 307 || c == 310 || c == 311);
-                CHECK(v[i].type != 1); // never °C — see #36
+                CHECK(v[i].type != 1); // never °C — see legacy-36
                 prot_checked++;
             }
     }
@@ -1099,11 +1128,22 @@ static void test_convert() {
             }
     CHECK(t405_checked >= 40);
 
-    // Catalog guard (generalises #37): within one register, no two rows may STRADDLE each other's
-    // bytes. Sharing a field on purpose is an idiom here (raw pressure + its saturation temp; the
-    // per-accessory 0x65 variants) and those windows start at the SAME offset. Two windows starting
-    // at DIFFERENT offsets and overlapping have no legitimate reading: one value is assembled from
-    // two unrelated fields and its neighbour's is lost.
+    // Catalog guard: conv 312 represents relative temperature deviation (Delta-Tr in K).
+    // It must have type -1 so HA device_class is not set to absolute temperature.
+    int t312_checked = 0;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].conv == 312) {
+                CHECK(p.values[i].type == -1);
+                t312_checked++;
+            }
+    CHECK(t312_checked >= 1);
+
+    // Catalog guard (generalises legacy-37): within one register, no two rows may STRADDLE each
+    // other's bytes. Sharing a field on purpose is an idiom here (raw pressure + its saturation
+    // temp; the per-accessory 0x65 variants) and those windows start at the SAME offset. Two
+    // windows starting at DIFFERENT offsets and overlapping have no legitimate reading: one value
+    // is assembled from two unrelated fields and its neighbour's is lost.
     for (const auto& p : def::profiles)
         for (size_t i = 0; i < p.count; i++)
             for (size_t j = i + 1; j < p.count; j++) {
@@ -1122,9 +1162,79 @@ static void test_convert() {
     CHECK(std::string(unit_for_datatype(3)) == "A");
     CHECK(std::string(unit_for_datatype(2)) == "bar");
     CHECK(std::string(unit_for_datatype(-1)).empty());
+
+    // unit_for_row: conv 312 (relative deviation / delta) maps to "K" regardless of whether
+    // row has type 1 or type -1
+    ValueDef row_temp{0x54, 0, 103, 2, 1, "Temp"};
+    ValueDef row_delta_typed{0x54, 12, 312, 1, 1, "Delta-Tr(deg)"};
+    ValueDef row_delta_untyped{0x54, 12, 312, 1, -1, "Delta-Tr(deg)"};
+    CHECK(std::string(unit_for_row(row_temp)) == "°C");
+    CHECK(std::string(unit_for_row(row_delta_typed)) == "K");
+    CHECK(std::string(unit_for_row(row_delta_untyped)) == "K");
 }
 
 static void test_config_model() {
+    // wifi_config_field_copy: 32-byte SSID must not be truncated, short strings zero-padded
+    {
+        uint8_t     ssid_buf[32];
+        const char* full_32 = "12345678901234567890123456789012"; // exactly 32 bytes
+        wifi_config_field_copy(ssid_buf, sizeof(ssid_buf), full_32);
+        CHECK(std::memcmp(ssid_buf, full_32, 32) == 0);
+
+        // std::string overload preserves full 32 bytes
+        std::string s_full_32 = "12345678901234567890123456789012";
+        std::memset(ssid_buf, 0xFF, sizeof(ssid_buf));
+        wifi_config_field_copy(ssid_buf, sizeof(ssid_buf), s_full_32);
+        CHECK(std::memcmp(ssid_buf, full_32, 32) == 0);
+
+        uint8_t     short_buf[32];
+        const char* short_str = "MyWiFi";
+        wifi_config_field_copy(short_buf, sizeof(short_buf), short_str);
+        CHECK(std::memcmp(short_buf, "MyWiFi", 6) == 0);
+        for (size_t i = 6; i < sizeof(short_buf); i++) {
+            CHECK(short_buf[i] == 0);
+        }
+
+        uint8_t pass_buf[64];
+        char    pass_63[64];
+        std::memset(pass_63, 'A', 63);
+        pass_63[63] = '\0';
+        wifi_config_field_copy(pass_buf, sizeof(pass_buf), pass_63);
+        CHECK(std::memcmp(pass_buf, pass_63, 63) == 0);
+        CHECK(pass_buf[63] == 0);
+
+        char pass_64[65];
+        std::memset(pass_64, 'B', 64);
+        pass_64[64] = '\0';
+        wifi_config_field_copy(pass_buf, sizeof(pass_buf), pass_64);
+        CHECK(std::memcmp(pass_buf, pass_64, 64) == 0);
+
+        // Null / empty / edge handling
+        wifi_config_field_copy(short_buf, sizeof(short_buf), nullptr);
+        for (size_t i = 0; i < sizeof(short_buf); i++) {
+            CHECK(short_buf[i] == 0);
+        }
+        wifi_config_field_copy(nullptr, 32, "test");
+        wifi_config_field_copy(short_buf, 0, "test");
+    }
+
+    // protocol_for_profile and set_hp_profile_compatible
+    {
+        CHECK(protocol_for_profile("protocol_s") == Protocol::S);
+        CHECK(protocol_for_profile("altherma3_r_ech2o") == Protocol::I);
+        CHECK(protocol_for_profile("auto", Protocol::S) == Protocol::S);
+        CHECK(protocol_for_profile("auto", Protocol::I) == Protocol::I);
+        CHECK(protocol_for_profile(nullptr, Protocol::S) == Protocol::S);
+
+        CHECK(set_hp_profile_compatible("protocol_s", Protocol::S, true));
+        CHECK(!set_hp_profile_compatible("protocol_s", Protocol::I, true));
+        CHECK(set_hp_profile_compatible("altherma3_r_ech2o", Protocol::I, true));
+        CHECK(!set_hp_profile_compatible("altherma3_r_ech2o", Protocol::S, true));
+        CHECK(set_hp_profile_compatible("auto", Protocol::S, true));
+        // Allowed when fp_valid is false:
+        CHECK(set_hp_profile_compatible("protocol_s", Protocol::I, false));
+    }
+
     // The atomic service blob and the self-healing link cache have different success contracts.
     // Ordinary service routes own only blob fields, so a cache-maintenance hiccup after that commit
     // must not report a false 500; /set_hp owns the cache and therefore does require it.
@@ -1194,9 +1304,9 @@ static void test_config_model() {
     CHECK(validate(c, why));
     c.syslog_host = ""; // reset to default
 
-    // The HomeHub Modbus stack (issue #32). Checked unconditionally, so the defaults must still
-    // pass on a device with no HomeHub and only a bad value trips. mb_host is free text — empty is
-    // valid (that IS the disabled case).
+    // The HomeHub Modbus stack (issue legacy-32). Checked unconditionally, so the defaults must
+    // still pass on a device with no HomeHub and only a bad value trips. mb_host is free text —
+    // empty is valid (that IS the disabled case).
     CHECK(c.mb_port == 502 && c.mb_unit_id == 1); // the defaults from MODBUS_TCP_PORT/UNIT
     CHECK(validate(c, why));                      // default (no address at all) is valid
     c.mb_host = "";
@@ -1262,7 +1372,7 @@ static void test_config_model() {
     c.tx_pin = 43;
     CHECK(validate(c, why) && link_pins_valid(c.rx_pin, c.tx_pin));
 
-    // Chip-reserved-pin rule (#103): a range-valid, DISTINCT pair is still an illegal link if
+    // Chip-reserved-pin rule (legacy-103): a range-valid, DISTINCT pair is still an illegal link if
     // either pin is a pad this chip/build reserves — the hole that let a curl POST to /set_hp route
     // the X10A UART onto the SPI-flash pins and crash-loop the board. board_pin_offerable is the
     // membership test; link_pins_safe and validate both defer to it.
@@ -1368,11 +1478,12 @@ static void test_config_model() {
     none.tx_pin = 43;
     CHECK(validate(none, why, 48, false, config_reserved_pins(none))); // 35 is fine on a Quad build
 
-    // ── What POST /set_board owes a request (#257) ──────────────────────────────────────────────
-    // Two facts move independently, so all four combinations are asserted. The one that shipped
-    // broken is `values same, statement new`: it is a SAVE with NO reboot, and collapsing it into
-    // "nothing changed" dropped the statement — the modal then re-opened on "Custom" and the user
-    // re-picked their own board forever, each time getting no reboot and one grey toast.
+    // ── What POST /set_board owes a request (legacy-257)
+    // ────────────────────────────────────────────── Two facts move independently, so all four
+    // combinations are asserted. The one that shipped broken is `values same, statement new`: it is
+    // a SAVE with NO reboot, and collapsing it into "nothing changed" dropped the statement — the
+    // modal then re-opened on "Custom" and the user re-picked their own board forever, each time
+    // getting no reboot and one grey toast.
     Config stored; // a device still carrying the build defaults
     stored.led_gpio       = 21;
     stored.led_type       = static_cast<int>(LedType::Gpio);
@@ -1487,7 +1598,7 @@ static void test_config_model() {
 
     apply_link(live, 16, 17, Protocol::S); // detection found the wire swapped
     CHECK(live.rx_pin == 16 && live.tx_pin == 17 && live.proto == Protocol::S);
-    CHECK(live.wifi_ssid == "new-net"); // #49: the credentials must survive the commit
+    CHECK(live.wifi_ssid == "new-net"); // legacy-49: the credentials must survive the commit
     CHECK(live.wifi_pass == "new-secret");
     CHECK(live.mqtt_uri == "mqtts://broker.lan");
     CHECK(live.syslog_host == "logs.lan");
@@ -1560,6 +1671,14 @@ static void test_ha_device() {
 }
 
 static void test_discovery() {
+    CHECK(!conv_publishable(0));
+    CHECK(conv_publishable(105));
+    CHECK(!conv_publishable(995));
+    CHECK(!conv_publishable(997));
+    CHECK(!conv_publishable(999));
+    CHECK(conv_publishable(994));
+    CHECK(conv_publishable(1000));
+
     CHECK(object_id("DHW Tank Temp (R5T)") == "dhw_tank_temp_r5t");
     CHECK(object_id("  A/B  ") == "a_b");
 
@@ -1620,6 +1739,10 @@ static void test_discovery() {
     CHECK(!retained_cleanup_candidate(legacy, legacy_child.data(),
                                       static_cast<int>(legacy_child.size()), true, 123, 0));
     CHECK(!retained_cleanup_candidate(legacy, nullptr, 0, true, 123, 0));
+    CHECK(!retained_cleanup_candidate(legacy, legacy.data(), -1, true, 123, 0));
+    const std::string same_len_different = "daikin-altherma-esp32/statX";
+    CHECK(!retained_cleanup_candidate(legacy, same_len_different.data(),
+                                      static_cast<int>(same_len_different.size()), true, 123, 0));
     CHECK(!retained_cleanup_candidate(retired_status, legacy.data(),
                                       static_cast<int>(legacy.size()), true, 123, 0));
     CHECK(availability_topic(base) == "daikin-altherma-esp32/status");
@@ -1636,8 +1759,9 @@ static void test_discovery() {
     // the BASE-TOPIC id, so a replacement board publishes the same unique_ids and HA keeps the
     // entities (and their statistics) instead of starting a second device from scratch.
     //
-    // The entity id also carries the row's register GROUP (#221) — unlike the val_tpl KEY above,
-    // which must not change (it is the state contract and the VictoriaMetrics series suffix, #217).
+    // The entity id also carries the row's register GROUP (legacy-221) — unlike the val_tpl KEY
+    // above, which must not change (it is the state contract and the VictoriaMetrics series suffix,
+    // legacy-217).
     CHECK(cfg.find("\"uniq_id\":\"daikin_altherma_esp32_hydronic_temps_dhw_tank_temp_r5t\"") !=
           std::string::npos);
     CHECK(cfg.find("\"uniq_id\":\"daikin_abc123") == std::string::npos);
@@ -1677,24 +1801,24 @@ static void test_discovery() {
     CHECK(wc.find("\"unit_of_meas\"") == std::string::npos);
     CHECK(wc.find("\"dev_cla\"") == std::string::npos);
     CHECK(wc.find("\"stat_cla\"") == std::string::npos);
-    // The two PRE-#221 shapes the bridge deletes on the first announce after an upgrade: the bare
-    // label slug, no register group, under each component. Frozen literals — a delete built from
-    // today's helpers would target today's topic and remove nothing.
+    // The two PRE-legacy-221 shapes the bridge deletes on the first announce after an upgrade: the
+    // bare label slug, no register group, under each component. Frozen literals — a delete built
+    // from today's helpers would target today's topic and remove nothing.
     CHECK(ungrouped_discovery_topic("homeassistant", node, "sensor", way) ==
           "homeassistant/sensor/daikin_altherma_esp32/2way_valve_on_heat_off_cool/config");
     CHECK(ungrouped_discovery_topic("homeassistant", node, "binary_sensor", way) ==
           "homeassistant/binary_sensor/daikin_altherma_esp32/2way_valve_on_heat_off_cool/config");
-    // …and now a NON-binary row has a stale shape to retract too. Before #221 it did not — the
-    // "old" topic WAS the current one, which is precisely why the two Error Code rows shared it.
-    // This one line is the fix.
+    // …and now a NON-binary row has a stale shape to retract too. Before legacy-221 it did not —
+    // the "old" topic WAS the current one, which is precisely why the two Error Code rows shared
+    // it. This one line is the fix.
     CHECK(ungrouped_discovery_topic("homeassistant", node, "sensor", def) !=
           discovery_topic("homeassistant", node, def));
 
-    // --- #221: two rows, one label, two register pages -> two entities, not one ------------------
-    // The real colliding pair, on the profile the live unit detects as. Before the fix these were
-    // announced under ONE uniq_id on ONE topic, so HA created a single "Error Code" entity and a
-    // unit reporting both an outdoor and a hydronic fault showed one of them — with no error
-    // anywhere, since the state payload was correct throughout.
+    // --- legacy-221: two rows, one label, two register pages -> two entities, not one
+    // ------------------ The real colliding pair, on the profile the live unit detects as. Before
+    // the fix these were announced under ONE uniq_id on ONE topic, so HA created a single "Error
+    // Code" entity and a unit reporting both an outdoor and a hydronic fault showed one of them —
+    // with no error anywhere, since the state payload was correct throughout.
     ValueDef ou_err{0x10, 5, 204, 1, -1, "Error Code"};
     ValueDef hy_err{0x60, 3, 204, 1, -1, "Error Code"};
     CHECK(object_id(ou_err.label) == object_id(hy_err.label)); // the labels DO collide...
@@ -1711,7 +1835,7 @@ static void test_discovery() {
     // reason.
     CHECK(oc.find("\"name\":\"Outdoor State Error Code\"") != std::string::npos);
     CHECK(hc.find("\"name\":\"Hydronic Error Code\"") != std::string::npos);
-    // The STATE contract is untouched: same key, each already in its own group object (#217).
+    // The STATE contract is untouched: same key, each already in its own group object (legacy-217).
     CHECK(oc.find("value_json['outdoor_state']['error_code']") != std::string::npos);
     CHECK(hc.find("value_json['hydronic']['error_code']") != std::string::npos);
 
@@ -1908,17 +2032,17 @@ static void test_refrigerant_pressure_catalog() {
 // The two DEMAND flags, and the one property the web UI's row selection rests on: each of the two
 // labels resolves to exactly ONE register page across the whole shipped catalog.
 //
-// This exists because of a defect the other gates could not see (#199). The dashboard's heating
-// riser drew a pill from "Thermostat ON/OFF" and called it the room thermostat — placement, title
-// and explainer all said "the room is calling for heat". But that row is 0x60/2 bit 3, a bit in the
-// INDOOR UNIT's status byte, beside I/U operation mode and freeze protection: it is Daikin's
+// This exists because of a defect the other gates could not see (legacy-199). The dashboard's
+// heating riser drew a pill from "Thermostat ON/OFF" and called it the room thermostat — placement,
+// title and explainer all said "the room is calling for heat". But that row is 0x60/2 bit 3, a bit
+// in the INDOOR UNIT's status byte, beside I/U operation mode and freeze protection: it is Daikin's
 // thermo-ON, ON for a hot-water charge exactly as readily as for the house. Measured on a live unit
 // over three days, it was ON 128/119/91 minutes per day and NOT ONE of those minutes had the 3-way
 // valve pointing at space heating — every one was a DHW charge, drawn as a room demanding heat
 // while the room sat exactly on its setpoint. A physically true reading attributed to the wrong
-// component: the #35-#39 shape, which no converter, unit or spec check can catch because nothing
-// about the VALUE is wrong. The branch's own request is "Space heating Operation ON/OFF" (0x62/2
-// bit 3), and that is what the pill draws now.
+// component: the legacy-35–legacy-39 shape, which no converter, unit or spec check can catch
+// because nothing about the VALUE is wrong. The branch's own request is "Space heating Operation
+// ON/OFF" (0x62/2 bit 3), and that is what the pill draws now.
 //
 // docs/REGISTERS.md §5 documents a SECOND "Thermostat ON/OFF" — page 0x10 offset 1 bit 7, the
 // outdoor unit's own — and the reference profile now publishes it. `/values` qualifies both reused
@@ -2145,13 +2269,14 @@ static void test_detect() {
     int         olo = -1, ohi = -1;
     CHECK(ou && parse_kw_class(ou, olo, ohi) && olo <= 160 && 160 <= ohi);
 
-    // ── #225: the candidate SET must narrow by the same I/U capacity the representative ranks by
-    // ── detect_best applied the fallback while detect_candidates ignored it, so on the live unit
-    // /status reported 8 candidates across 4 marketing families while the ranking had already been
-    // constrained to the 4-8 kW class. That is not cosmetic: the header's contract is that the set
-    // is register-equivalent ONLY when the capacity is known, and this is precisely the state where
-    // it is not — an over-broad set is a claim the code cannot back. It has already done damage on
-    // paper (#213 recorded one unit as two independent families, corrected in #219).
+    // ── legacy-225: the candidate SET must narrow by the same I/U capacity the representative
+    // ranks by ── detect_best applied the fallback while detect_candidates ignored it, so on the
+    // live unit /status reported 8 candidates across 4 marketing families while the ranking had
+    // already been constrained to the 4-8 kW class. That is not cosmetic: the header's contract is
+    // that the set is register-equivalent ONLY when the capacity is known, and this is precisely
+    // the state where it is not — an over-broad set is a claim the code cannot back. It has already
+    // done damage on paper (legacy-213 recorded one unit as two independent families, corrected in
+    // legacy-219).
     Fingerprint live{}; // the live board's fingerprint, verbatim
     live.page_mask =
         mask_of({0x00, 0x10, 0x20, 0x21, 0x30, 0x60, 0x61, 0x62, 0x63, 0x64, 0xA0, 0xA1});
@@ -2196,7 +2321,7 @@ static void test_detect() {
     Fingerprint odd  = live;
     odd.iu_kw_tenths = 999; // 99.9 kW: in no class in the catalog
     const int ocount = detect_candidates(sigs, nsig, odd, out, 64);
-    CHECK(ocount == 8); // unfiltered, exactly as before #225
+    CHECK(ocount == 8); // unfiltered, exactly as before legacy-225
     CHECK(has_candidate(out, ocount, "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"));
     CHECK(detect_best(sigs, nsig, odd) != nullptr);
     // And it is a strict no-op when there is no fallback to apply at all.
@@ -2240,14 +2365,14 @@ static void test_detect() {
     CHECK(def::lookup("generic").count > 40);
     CHECK(std::string(def::lookup("no_such_profile").id) == "generic");
 
-    // ── #214: what ONE lost page reply costs, and the rule that stops it being acted on ──
+    // ── legacy-214: what ONE lost page reply costs, and the rule that stops it being acted on ──
     // The page probe gathers the unit's IDENTITY, not its values, and signature_consistent()
     // matches on page SUBSET — so clearing a single bit can make every profile inconsistent at
     // once. Measured here against the real signatures rather than asserted in prose, because the
     // number is the whole argument for retrying the probe: on the live 0x1bff fingerprint, MOST
     // single-page losses leave no candidate at all, and the caller then reads with `generic`.
-    // Reuses the `live` fingerprint built for #225 above — one definition of what the real board
-    // put on the bus, so the two blocks cannot come to describe different units.
+    // Reuses the `live` fingerprint built for legacy-225 above — one definition of what the real
+    // board put on the bus, so the two blocks cannot come to describe different units.
     const char* live_best = detect_best(sigs, nsig, live);
     CHECK(live_best != nullptr);
     int collapses = 0, changes = 0;
@@ -2329,6 +2454,29 @@ static void test_detect() {
         CHECK(count == 1);
         CHECK(tracked == "monobloc");
     }
+
+    // ── Transport error classification (M4) ──
+    CHECK(is_transport_error(HpReplyKind::BadCrc));
+    CHECK(is_transport_error(HpReplyKind::ShortReply));
+    CHECK(is_transport_error(HpReplyKind::UnexpectedReply));
+    CHECK(is_transport_error(HpReplyKind::InvalidLength));
+    CHECK(!is_transport_error(HpReplyKind::Ok));
+    CHECK(!is_transport_error(HpReplyKind::NoReply));
+    CHECK(!is_transport_error(HpReplyKind::Rejected));
+
+    // ── Protocol S detection via page_mask (M5) ──
+    CHECK(detect_profile_for_protocol_s(0) == nullptr);
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x00)) == nullptr);
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x50)) != nullptr &&
+          std::string(detect_profile_for_protocol_s(page_mask_bit(0x50))) == "protocol_s");
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x53)) != nullptr &&
+          std::string(detect_profile_for_protocol_s(page_mask_bit(0x53))) == "protocol_s");
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x54)) != nullptr &&
+          std::string(detect_profile_for_protocol_s(page_mask_bit(0x54))) == "protocol_s");
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x55)) != nullptr &&
+          std::string(detect_profile_for_protocol_s(page_mask_bit(0x55))) == "protocol_s");
+    CHECK(detect_profile_for_protocol_s(page_mask_bit(0x56)) != nullptr &&
+          std::string(detect_profile_for_protocol_s(page_mask_bit(0x56))) == "protocol_s");
 
     // ── EEPROM render: raw hex pairs for display ──
     const uint8_t ee[] = {0x0B, 0x02, 0x00, 0x01, 0x03, 0x02};
@@ -2533,12 +2681,12 @@ static void test_mqtt_group() {
     CHECK(build_grouped_json({{"other", "raw", "a\nb", PublishedKind::Text}}) ==
           "{\"other\":{\"raw\":\"a\\nb\"}}");
 
-    // ── THE TYPE IS THE FIELD'S, NOT THE VALUE'S (#209 defect 3 / the telemetry-contract section)
-    // ── A Text field stays quoted even when its value LOOKS numeric, and a Number field stays
-    // unquoted even at zero. The measured failure was the other way round — one key alternating
-    // between the number 30 and the string "OFF" — and the reason it survived review is that both
-    // payloads are individually well-formed. Only asserting the SAME key across BOTH states catches
-    // it.
+    // ── THE TYPE IS THE FIELD'S, NOT THE VALUE'S (legacy-209 defect 3 / the telemetry-contract
+    // section) ── A Text field stays quoted even when its value LOOKS numeric, and a Number field
+    // stays unquoted even at zero. The measured failure was the other way round — one key
+    // alternating between the number 30 and the string "OFF" — and the reason it survived review is
+    // that both payloads are individually well-formed. Only asserting the SAME key across BOTH
+    // states catches it.
     CHECK(build_grouped_json({{"outdoor_state", "error_code", "00", PublishedKind::Text}}) ==
           "{\"outdoor_state\":{\"error_code\":\"00\"}}"); // "00" is not a number here
     CHECK(build_grouped_json({{"outdoor_state", "error_code", "U4", PublishedKind::Text}}) ==
@@ -2851,12 +2999,12 @@ static void test_x10a_snapshot_align() {
           layout[2].value == before[2]);
 }
 
-// ── The published JSON TYPE of every converter (#209 defect 3, the telemetry-contract section)
-// ──── The defect this closes is not "conv 211 is wrong today" (it was fixed in #210) but "nothing
-// stops the next converter doing it again". So this walks EVERY implemented converter id over a
-// sweep of raw input bytes and asserts that what convert() produces agrees with published_kind() in
-// EVERY state — a converter that returns text for one byte and a number for another fails here,
-// whichever way published_kind classifies it.
+// ── The published JSON TYPE of every converter (legacy-209 defect 3, the telemetry-contract
+// section) ──── The defect this closes is not "conv 211 is wrong today" (it was fixed in
+// legacy-210) but "nothing stops the next converter doing it again". So this walks EVERY
+// implemented converter id over a sweep of raw input bytes and asserts that what convert() produces
+// agrees with published_kind() in EVERY state — a converter that returns text for one byte and a
+// number for another fails here, whichever way published_kind classifies it.
 static void test_published_kind() {
     // The full set of ids convert() implements, taken from the switch rather than guessed: anything
     // else returns unimpl and never reaches a publish surface.
@@ -2892,7 +3040,7 @@ static void test_published_kind() {
 
     // Spot-check the classification itself, so a wholesale sign error in published_kind (everything
     // Text, say) cannot satisfy the loop above by making both halves vacuous.
-    CHECK(published_kind(211) == PublishedKind::Number); // fan step — the #209 defect-3 row
+    CHECK(published_kind(211) == PublishedKind::Number); // fan step — the legacy-209 defect-3 row
     CHECK(published_kind(105) == PublishedKind::Number);
     CHECK(published_kind(300) ==
           PublishedKind::Number); // bit flags are 1/0 NUMBERS, not a 3rd type
@@ -2912,7 +3060,7 @@ static void test_mqtt_base() {
     // WHICH base topic this installation publishes under (logic/mqtt_base.hpp). The setting exists
     // because two boards on one base become ONE thing to every consumer — one set of retained
     // topics, one metrics series per field, one HA device — silently, since each individual value
-    // stays plausible (#215).
+    // stays plausible (legacy-215).
     MqttBaseRefusal refusal;
 
     // Empty is VALID and means the compile-time default. This is the whole no-migration property:
@@ -3055,8 +3203,8 @@ static void test_mqtt_uri() {
           !tls);
 }
 
-// #380 — the publish task stands aside while a known TLS operation owns the heap, BOUNDED so one
-// that never finishes cannot silence the bridge for the rest of the boot.
+// legacy-380 — the publish task stands aside while a known TLS operation owns the heap, BOUNDED so
+// one that never finishes cannot silence the bridge for the rest of the boot.
 static void test_ota_quiesce() {
     OtaQuiesceState st;
 
@@ -3340,9 +3488,9 @@ static void test_heartbeat() {
     f.rx_received       = 763732;
     f.rx_fails          = 2;
     f.last_ok_s         = 1;
-    // #380 — the cycles that produced nothing. The two skip figures are the real 30-day counts off
-    // the wired board's syslog (337 publishes, 32 sweeps); mqtt_quiesced is the deliberate
-    // hold-off.
+    // legacy-380 — the cycles that produced nothing. The two skip figures are the real 30-day
+    // counts off the wired board's syslog (337 publishes, 32 sweeps); mqtt_quiesced is the
+    // deliberate hold-off.
     f.mqtt_skipped  = 337;
     f.mqtt_quiesced = 42;
     f.poll_skipped  = 32;
@@ -3350,8 +3498,8 @@ static void test_heartbeat() {
     // are the real ones off this project's crashes, and they are BYTES: 1872 is the httpd headroom
     // measured on
     // `main` behind the deepest call chain (mcp_post -> http_append_status_json) before -Os, and
-    // 520 is what hp_poll had left in the #241 core dump's task table. mqtt is left UNSAMPLED so
-    // the same payload pins the null rendering beside two real numbers.
+    // 520 is what hp_poll had left in the legacy-241 core dump's task table. mqtt is left UNSAMPLED
+    // so the same payload pins the null rendering beside two real numbers.
     f.heap_restarts              = 2;
     f.httpd_stack_min_free_bytes = 1872;
     f.poll_stack_min_free_bytes  = 520;
@@ -3378,7 +3526,7 @@ static void test_heartbeat() {
                "\"modbus_enabled\":0,\"modbus_connected\":0,\"modbus_rx\":0,\"modbus_fails\":0,"
                "\"modbus_stack_min_free_bytes\":null}");
 
-    // ── #215: the reset reason has to survive a NUMERIC-ONLY consumer ──
+    // ── legacy-215: the reset reason has to survive a NUMERIC-ONLY consumer ──
     // Telegraf's json parser keeps numeric fields and drops everything else, so the `reset_reason`
     // slug never became a VictoriaMetrics series — and a board restarting 55x in 7 days, 5 of them
     // panics, was unattributable in the store. The slug stays for humans; these two carry the same
@@ -3400,7 +3548,7 @@ static void test_heartbeat() {
         CHECK(rj.find(std::string("\"reset_fault\":") + (crash_reason_is_fault(code) ? "1" : "0") +
                       ",") != std::string::npos);
     }
-    // ── #380: the loss has to be COUNTABLE, not just loggable ──
+    // ── legacy-380: the loss has to be COUNTABLE, not just loggable ──
     // 337 dropped publishes and 32 dropped sweeps in 30 days existed only as `/diag` lines in a
     // ring a chatty boot overwrites. Same numeric-consumer rule as reset_reason_code above: quoted,
     // these would be dropped by Telegraf's json parser and the fix would look done while changing
@@ -3429,7 +3577,7 @@ static void test_heartbeat() {
     // /set_* save produces and reset_fault stays 0 — every other field in this payload agrees that
     // nothing went wrong. Without this count a board cycling its restart ladder every few minutes
     // is indistinguishable in a metrics store from one somebody keeps saving settings on, which is
-    // the "reboot nobody can attribute" #215 spent a week reconstructing from syslog.
+    // the "reboot nobody can attribute" legacy-215 spent a week reconstructing from syslog.
     CHECK(j.find("\"heap_restarts\":2,") != std::string::npos);
     CHECK(j.find("\"heap_restarts\":\"") == std::string::npos); // quoted, a metrics store drops it
     {
@@ -3447,10 +3595,11 @@ static void test_heartbeat() {
     }
 
     // ── The STACK is the second memory budget, and it fails silently ──
-    // Three overflows shipped (v1.0.12 httpd, #241 hp_poll, #318 httpd through OTA) and every one
-    // was diagnosed from a core dump's task table AFTER the board died. Nothing reported headroom
-    // while it was alive, so #318's 1200 bytes of frame growth accumulated across releases with no
-    // single change announcing it. These five fields are that missing reporting path.
+    // Three overflows shipped (v1.0.12 httpd, legacy-241 hp_poll, legacy-318 httpd through OTA) and
+    // every one was diagnosed from a core dump's task table AFTER the board died. Nothing reported
+    // headroom while it was alive, so legacy-318's 1200 bytes of frame growth accumulated across
+    // releases with no single change announcing it. These five fields are that missing reporting
+    // path.
     CHECK(j.find("\"httpd_stack_min_free_bytes\":1872,") != std::string::npos);
     CHECK(j.find("\"poll_stack_min_free_bytes\":520,") != std::string::npos);
     // NEVER SAMPLED IS NULL, NOT ZERO — the load-bearing half. A task that has not run is not a
@@ -3505,7 +3654,7 @@ static void test_heartbeat() {
     // THE UNIT IS PART OF THE IDENTIFIER, and it is BYTES. ESP-IDF's uxTaskGetStackHighWaterMark
     // answers in bytes where vanilla FreeRTOS answers in words, and this field name becomes the
     // VictoriaMetrics series suffix — so spelling it `_words` would publish a headroom four times
-    // larger than the truth in the one metric that exists to warn about running out (the #230
+    // larger than the truth in the one metric that exists to warn about running out (the legacy-230
     // LABEL-UNIT rule, applied to a board metric rather than a catalog row). It shipped that way
     // on `modbus_stack_min_free_words` until the arithmetic was checked: a 6144-byte task cannot
     // have 2660 words free. Pin the spelling in BOTH directions so neither can drift back.
@@ -3639,12 +3788,12 @@ static void test_heartbeat() {
     CHECK(mj.find("\"modbus_connected\":1,") != std::string::npos);
     CHECK(mj.find("\"modbus_rx\":12,") != std::string::npos);
     CHECK(mj.find("\"modbus_fails\":3,") != std::string::npos);
-    // Last field of the payload now that the actuator block is gone (#294) — hence the closing
-    // brace rather than a comma, which is itself the assertion that nothing follows it.
+    // Last field of the payload now that the actuator block is gone (legacy-294) — hence the
+    // closing brace rather than a comma, which is itself the assertion that nothing follows it.
     CHECK(mj.find("\"modbus_stack_min_free_bytes\":731}") != std::string::npos);
 
-    // SOURCE freshness is its own field, and it is independent of bus health (#209 defect 5): the
-    // link is up, the device is publishing, and the outdoor unit is simply not measuring. A
+    // SOURCE freshness is its own field, and it is independent of bus health (legacy-209 defect 5):
+    // the link is up, the device is publishing, and the outdoor unit is simply not measuring. A
     // consumer that only had bus_connected would read the vanished outdoor keys as a broken link.
     f.ou_held_over = true;
     CHECK(build_heartbeat_json(f).find("\"bus_connected\":1,") != std::string::npos);
@@ -3684,7 +3833,7 @@ static void test_heartbeat() {
     // value_template points at the heartbeat topic (not a heat-pump source topic).
     const std::string hb = heartbeat_topic(base);
     const std::string av = availability_topic(base);
-    // -2: device_time, wifi_quality (RETIRED_HEARTBEAT_SENSORS); +3 in #380: mqtt_skipped,
+    // -2: device_time, wifi_quality (RETIRED_HEARTBEAT_SENSORS); +3 in legacy-380: mqtt_skipped,
     // mqtt_quiesced, poll_skipped — the cycles that produced nothing; +1: heap_restarts, the only
     // field that can attribute the heap watchdog's "sw" reset. The five stack watermarks landed in
     // the same change and deliberately added NOTHING here — they are payload-only, so this pin
@@ -3730,9 +3879,9 @@ static void test_heartbeat() {
     CHECK(heartbeat_discovery_config(node, board, hb, av, *mc)
               .find("\"stat_cla\":\"total_increasing\"") != std::string::npos);
 
-    // The three device-health entities added alongside /status.sys (issue #5): reset_reason is a
-    // plain text sensor (no unit / device_class / state_class), min_free_heap + max_alloc are byte
-    // measurements. All diagnostic, all sourced from the heartbeat topic.
+    // The three device-health entities added alongside /status.sys (issue legacy-5): reset_reason
+    // is a plain text sensor (no unit / device_class / state_class), min_free_heap + max_alloc are
+    // byte measurements. All diagnostic, all sourced from the heartbeat topic.
     auto find_hb = [](const char* oid) -> const HeartbeatSensor* {
         for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
             if (std::string(HEARTBEAT_SENSORS[i].object_id) == oid) return &HEARTBEAT_SENSORS[i];
@@ -3814,8 +3963,8 @@ static void test_reset_reason() {
 }
 
 static void test_boot_guard() {
-    // Threshold rule (issue #6): safe mode on the Nth crash boot, no off-by-one (the counter is
-    // bumped BEFORE the check, so with threshold 4 the 4th crash makes fail_count == threshold).
+    // Threshold rule (issue legacy-6): safe mode on the Nth crash boot, no off-by-one (the counter
+    // is bumped BEFORE the check, so with threshold 4 the 4th crash makes fail_count == threshold).
     CHECK(!boot_should_enter_safe_mode(0, 4));
     CHECK(!boot_should_enter_safe_mode(3, 4));
     CHECK(boot_should_enter_safe_mode(4, 4));
@@ -3922,10 +4071,10 @@ static void test_heap_watchdog() {
     CHECK(heap_restart_in_ms(v.critical_ms) == HEAP_CRITICAL_HOLD_MS - 60000);
 
     // Merely TOUCHING the arm threshold does NOT end the run. This CHECK used to assert the
-    // opposite, and asserting the opposite is what #399 was: on hardware a heap hovering at exactly
-    // HEAP_CRITICAL_BYTES ended its run every second or two, reset the 300 s clock, and never
-    // restarted — while /status and /values were already answering 503, i.e. while the device was
-    // in the very wedge the watchdog exists to escape.
+    // opposite, and asserting the opposite is what legacy-399 was: on hardware a heap hovering at
+    // exactly HEAP_CRITICAL_BYTES ended its run every second or two, reset the 300 s clock, and
+    // never restarted — while /status and /values were already answering 503, i.e. while the device
+    // was in the very wedge the watchdog exists to escape.
     v = heap_watch(w, {HEAP_CRITICAL_BYTES, 90000, false});
     CHECK(v.action == HeapAction::Watching && w.critical);
 
@@ -3979,7 +4128,7 @@ static void test_heap_watchdog() {
     CHECK(v.action == HeapAction::Recovered && !v.ota_excused);
 
     // OSCILLATION across the threshold — the input class that had NO coverage here, and the one a
-    // real heap actually presents on its way down (#399). Every CHECK above feeds a monotonic
+    // real heap actually presents on its way down (legacy-399). Every CHECK above feeds a monotonic
     // scripted sequence; a heap hovering AT HEAP_CRITICAL_BYTES was found on hardware to end its
     // run every second or two, reset the 300 s clock and never restart, while /status and /values
     // were already answering 503. The run must SURVIVE the flicker.
@@ -4016,9 +4165,9 @@ static void test_heap_watchdog() {
 
     CHECK(HEAP_RECOVERY_BYTES > HEAP_CRITICAL_BYTES);
 
-    // THE END OF THE LADDER (#407): the boot that inherits the full count comes up MINIMAL, and
-    // every boot below it comes up normally. Composed from heap_may_restart rather than restated,
-    // so the ladder and its ending cannot disagree about where the cap is.
+    // THE END OF THE LADDER (legacy-407): the boot that inherits the full count comes up MINIMAL,
+    // and every boot below it comes up normally. Composed from heap_may_restart rather than
+    // restated, so the ladder and its ending cannot disagree about where the cap is.
     for (uint8_t n = 0; n < HEAP_MAX_CONSECUTIVE_RESTARTS; n++)
         CHECK(!heap_boot_must_be_minimal(n));
     CHECK(heap_boot_must_be_minimal(HEAP_MAX_CONSECUTIVE_RESTARTS));
@@ -4802,14 +4951,15 @@ static void test_crashinfo() {
     }
     CHECK(cnt == 1 /*pc*/ + 16 /*bt[16]*/);
 
-    // ORPHAN core dump (#215): a dump survives an OTA, and a panic that fails to write its own
-    // leaves the PREVIOUS build's dump in place — a valid image of another binary, which
+    // ORPHAN core dump (legacy-215): a dump survives an OTA, and a panic that fails to write its
+    // own leaves the PREVIOUS build's dump in place — a valid image of another binary, which
     // diag_crash_capture erases so `coredump` never offers a download espcoredump rejects on a
     // version mismatch. The rule (coredump_is_foreign) gates that ERASE, so it fires ONLY on proof:
     // two present shas, a meaningful common prefix, and a mismatch. The costly error is the false
     // positive — erasing a dump that really is ours — so every ambiguous case answers "not foreign"
     // and the dump is kept.
-    CHECK(coredump_is_foreign("ce0adc15a", "f8814d6d5")); // #215's exact case — different builds
+    CHECK(coredump_is_foreign("ce0adc15a",
+                              "f8814d6d5")); // legacy-215's exact case — different builds
     CHECK(coredump_is_foreign("deadbeef00", "deadbeef11")); // agree on a prefix, differ past it
     CHECK(!coredump_is_foreign("f8814d6d5", "f8814d6d5"));  // same build — keep the dump
     CHECK(!coredump_is_foreign("abc123", "abc123")); // same, shorter than the compare floor -> keep
@@ -4901,9 +5051,9 @@ static void test_modbus() {
           -1);
     CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::ReadInput, 1, 1000) == -1);
 
-    // The FC06/FC16 request builders, response vocabulary and value encoders are GONE (#294): this
-    // firmware cannot frame, confirm or prepare a Modbus write. Reintroducing a caller does not
-    // compile, which is stronger than a runtime assertion.
+    // The FC06/FC16 request builders, response vocabulary and value encoders are GONE (legacy-294):
+    // this firmware cannot frame, confirm or prepare a Modbus write. Reintroducing a caller does
+    // not compile, which is stronger than a runtime assertion.
 
     // ── Parse a well-formed FC03 read response: 3 registers ──
     MbResponse r;
@@ -5239,7 +5389,7 @@ static void test_homehub() {
     CHECK(homehub_decode(*t, 3550, v) && approx(v.value, 35.5));
     CHECK(homehub_format(*t, 3550, buf, sizeof(buf)) && std::string(buf) == "35.5");
     // A negative temperature keeps its sign — the exact class of bug the X10A port shipped
-    // (#35-#39).
+    // (legacy-35–legacy-39).
     CHECK(homehub_format(*t, static_cast<uint16_t>(-500), buf, sizeof(buf)) &&
           std::string(buf) == "-5.0");
     // Flow is a plain Int16 carrying L/min x100, so the `scale` field divides the decode by 100.
@@ -5628,21 +5778,6 @@ static void test_altherma4() {
     CHECK(homehub_format(*r79, 185, buf, sizeof(buf)) && std::string(buf) == "1.85");
     CHECK(homehub_format(*r79, 200, buf, sizeof(buf)) && std::string(buf) == "2.00");
     CHECK(homehub_format(*r79, 0, buf, sizeof(buf)) && std::string(buf) == "0.00");
-    CHECK(homehub_format_pressure(1.85, buf, sizeof(buf), true) && std::string(buf) == "1.85 bar");
-    CHECK(homehub_format_pressure(1.85, buf, sizeof(buf), false) && std::string(buf) == "1.85");
-    CHECK(!homehub_format_pressure(1.85, nullptr, sizeof(buf), true));
-    CHECK(!homehub_format_pressure(1.85, buf, 0, true));
-
-    // Pressure truncation & small buffer boundary tests: "1.85 bar" is 8 chars + null = 9 bytes
-    CHECK(!homehub_format_pressure(1.85, buf, 4, true));
-    CHECK(!homehub_format_pressure(1.85, buf, 8, true));
-    CHECK(homehub_format_pressure(1.85, buf, 9, true) && std::string(buf) == "1.85 bar");
-    // Without unit: "1.85" is 4 chars + null = 5 bytes
-    CHECK(!homehub_format_pressure(1.85, buf, 4, false));
-    CHECK(homehub_format_pressure(1.85, buf, 5, false) && std::string(buf) == "1.85");
-
-    // Negative pressure (signed int16)
-    CHECK(homehub_format_pressure(-0.5, buf, sizeof(buf), true) && std::string(buf) == "-0.50 bar");
     CHECK(homehub_decode(*r79, static_cast<uint16_t>(-50), val) && approx(val.value, -0.5));
     CHECK(homehub_format(*r79, static_cast<uint16_t>(-50), buf, sizeof(buf)) &&
           std::string(buf) == "-0.50");
@@ -5727,6 +5862,414 @@ static void test_altherma4() {
     CHECK(std::string(modbus_profile_name(ModbusProfile::HomeHub)) == "homehub");
     CHECK(std::string(modbus_profile_name(ModbusProfile::Altherma4)) == "altherma4");
     CHECK(std::string(modbus_profile_name(static_cast<ModbusProfile>(99))) == "unknown");
+}
+
+static void test_modbus_profile() {
+    using namespace daik::logic;
+    // ── MODBUS_BASE_MAX_OFFSET invariant and is_extended_register ──
+    CHECK(MODBUS_BASE_MAX_OFFSET == 58);
+    CHECK(!is_extended_register(0));
+    CHECK(!is_extended_register(1));
+    CHECK(!is_extended_register(58));
+    CHECK(is_extended_register(59));
+    CHECK(is_extended_register(79));
+    CHECK(is_extended_register(83));
+
+    // ── is_valid_altherma4_probe_value ──
+    // Special / sentinel values are rejected
+    CHECK(!is_valid_altherma4_probe_value(79, MB_WAIT));
+    CHECK(!is_valid_altherma4_probe_value(79, MB_UNAVAILABLE));
+    CHECK(!is_valid_altherma4_probe_value(79, MB_UNSUPPORTED));
+    // Offset 79 (Water pressure in bar * 100): valid range is 0 < raw <= 600.
+    // 0 bar is not plausible for live running water pressure.
+    CHECK(!is_valid_altherma4_probe_value(79, 0));
+    CHECK(is_valid_altherma4_probe_value(79, 50));   // 0.5 bar
+    CHECK(is_valid_altherma4_probe_value(79, 150));  // 1.5 bar
+    CHECK(is_valid_altherma4_probe_value(79, 600));  // 6.0 bar
+    CHECK(!is_valid_altherma4_probe_value(79, 601)); // > 6.0 bar rejected
+    CHECK(!is_valid_altherma4_probe_value(79, 1000));
+    // Non-probe register returns true unless special
+    CHECK(is_valid_altherma4_probe_value(43, 450));
+    CHECK(!is_valid_altherma4_probe_value(43, MB_WAIT));
+    CHECK(!is_valid_altherma4_probe_value(43, MB_UNAVAILABLE));
+    CHECK(!is_valid_altherma4_probe_value(43, MB_UNSUPPORTED));
+
+    // ── evaluate_probe_result state machine ──
+    // 1. Current profile is Auto:
+    // Successful probe with valid raw value detects Altherma4 affirmatively
+    auto dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, 180);
+    CHECK(dec.next_profile == ModbusProfile::Altherma4);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(dec.is_affirmative);
+
+    // Successful probe with invalid raw value stays Auto (does not falsely promote)
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(!dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    // MB_WAIT (32765): hub syncing, does not count against retry budget, stays in Auto
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, MB_WAIT);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(!dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    // Explicit unsupported or unavailable sentinels on extended register confirm HomeHub
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, MB_UNSUPPORTED);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(dec.is_affirmative);
+
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, MB_UNAVAILABLE);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(dec.is_affirmative);
+
+    // Successful read of standard (non-extended) register stays Auto
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 43, 500);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(!dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    // Modbus Exception 0x02 on extended register probe confirms HomeHub (Altherma 3 / EKRHH)
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x02, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(dec.is_affirmative);
+
+    // Transient Modbus Exception 0x06 (Server Busy) on probe keeps Auto for initial retries
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x06, 79, 0, 1);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(!dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    // Transient Modbus Exception 0x06 falls back to HomeHub when retries are exhausted (3)
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x06, 79, 0, 3);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    // Modbus Exception on standard register counts failure and stays Auto
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x02, 43, 0);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(dec.count_failure);
+    CHECK(!dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    // Transport failure on extended probe: retry 1 stays Auto, closes socket without error
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 79, 0, 1);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(!dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(!dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    // Transport failure on extended register probe: retry 3 falls back to HomeHub
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 79, 0, 3);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(!dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ConnectionClosed, 0, 79, 0, 3);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(!dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    // Transport failure on standard register stays Auto, closes socket and counts failure
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::ResponseTimeout, 0, 43, 0);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(!dec.link_ok);
+    CHECK(dec.count_failure);
+    CHECK(!dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    // 2. Current profile is locked (HomeHub or Altherma4):
+    // Preserves profile across reads and failures
+    dec = evaluate_probe_result(ModbusProfile::HomeHub, MbFailureType::None, 0, 43, 500);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(dec.is_affirmative);
+
+    dec = evaluate_probe_result(ModbusProfile::HomeHub, MbFailureType::ResponseTimeout, 0, 43, 0);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(!dec.link_ok);
+    CHECK(dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(dec.is_affirmative);
+
+    dec = evaluate_probe_result(ModbusProfile::Altherma4, MbFailureType::None, 0, 79, 180);
+    CHECK(dec.next_profile == ModbusProfile::Altherma4);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(dec.is_affirmative);
+
+    dec = evaluate_probe_result(ModbusProfile::Altherma4, MbFailureType::ResponseTimeout, 0, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::Altherma4);
+    CHECK(!dec.link_ok);
+    CHECK(dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(dec.is_affirmative);
+
+    // Exception on locked profile preserves profile; link_ok is true (does not break link)
+    dec = evaluate_probe_result(ModbusProfile::HomeHub, MbFailureType::Exception, 0x02, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(dec.is_affirmative);
+
+    // Negative failure detail on Exception confirms HomeHub
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, -1, 79, 0);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(dec.is_affirmative);
+
+    // Invalid raw value (0 bar) with 3 retries falls back to HomeHub
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, 0, 3);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    // ── ModbusProbeTracker state tracker across reconnects ──
+    {
+        ModbusProbeTracker tracker;
+        // Session 1 to 192.0.2.50
+        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.consecutive_failures == 0);
+
+        // MB_WAIT (32765) does not consume retry budget
+        auto d = tracker.evaluate_probe(MbFailureType::None, 0, 79, MB_WAIT);
+        CHECK(d.next_profile == ModbusProfile::Auto);
+        CHECK(!d.is_definitive);
+        CHECK(!d.is_affirmative);
+        CHECK(tracker.consecutive_failures == 0);
+
+        // Probe failure 1: Timeout -> drops link, consecutive_failures = 1
+        d = tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0);
+        CHECK(!d.link_ok);
+        CHECK(!d.is_definitive);
+        CHECK(!d.is_affirmative);
+        CHECK(tracker.consecutive_failures == 1);
+
+        // Reconnect to same target does NOT reset failure count (N14 fix)
+        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.consecutive_failures == 1);
+
+        // Probe failure 2: Connection closed -> drops link, consecutive_failures = 2
+        d = tracker.evaluate_probe(MbFailureType::ConnectionClosed, 0, 79, 0);
+        CHECK(!d.link_ok);
+        CHECK(!d.is_definitive);
+        CHECK(tracker.consecutive_failures == 2);
+
+        // Reconnect again to same target
+        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.consecutive_failures == 2);
+
+        // Probe failure 3: Timeout -> retries exhausted, concludes HomeHub fallback
+        d = tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0);
+        CHECK(!d.link_ok);
+        CHECK(d.is_definitive);
+        CHECK(!d.is_affirmative);
+        CHECK(d.next_profile == ModbusProfile::HomeHub);
+        CHECK(tracker.active_profile == ModbusProfile::HomeHub);
+        CHECK(tracker.affirmative_profile == ModbusProfile::Auto); // fallback is not affirmative
+
+        // Reconnect to same target: now opens in HomeHub profile, breaking infinite reconnect loop!
+        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1) == ModbusProfile::HomeHub);
+        CHECK(tracker.active_profile == ModbusProfile::HomeHub);
+
+        // Target change resets tracker back to Auto
+        CHECK(tracker.on_socket_open("192.0.2.51", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.consecutive_failures == 0);
+        CHECK(tracker.active_profile == ModbusProfile::Auto);
+
+        // Affirmative Altherma 4 detection is sticky
+        d = tracker.evaluate_probe(MbFailureType::None, 0, 79, 180);
+        CHECK(d.is_definitive);
+        CHECK(d.is_affirmative);
+        CHECK(d.next_profile == ModbusProfile::Altherma4);
+        CHECK(tracker.affirmative_profile == ModbusProfile::Altherma4);
+        CHECK(tracker.on_socket_open("192.0.2.51", 502, 1) == ModbusProfile::Altherma4);
+
+        // Switch to unit 2 on same IP resets target
+        CHECK(tracker.on_socket_open("192.0.2.51", 502, 2) == ModbusProfile::Auto);
+        CHECK(tracker.consecutive_failures == 0);
+
+        // Affirmative Exception 02 detection is sticky
+        d = tracker.evaluate_probe(MbFailureType::Exception, 0x02, 79, 0);
+        CHECK(d.is_definitive);
+        CHECK(d.is_affirmative);
+        CHECK(d.next_profile == ModbusProfile::HomeHub);
+        CHECK(tracker.affirmative_profile == ModbusProfile::HomeHub);
+        CHECK(tracker.on_socket_open("192.0.2.51", 502, 2) == ModbusProfile::HomeHub);
+
+        // Port change resets target
+        CHECK(tracker.on_socket_open("192.0.2.51", 503, 2) == ModbusProfile::Auto);
+
+        // Affirmative MB_UNSUPPORTED on tracker
+        d = tracker.evaluate_probe(MbFailureType::None, 0, 79, MB_UNSUPPORTED);
+        CHECK(d.is_definitive);
+        CHECK(d.is_affirmative);
+        CHECK(d.next_profile == ModbusProfile::HomeHub);
+
+        // Affirmative MB_UNAVAILABLE on tracker
+        CHECK(tracker.on_socket_open("192.0.2.53", 502, 1) == ModbusProfile::Auto);
+        d = tracker.evaluate_probe(MbFailureType::None, 0, 79, MB_UNAVAILABLE);
+        CHECK(d.is_definitive);
+        CHECK(d.is_affirmative);
+        CHECK(d.next_profile == ModbusProfile::HomeHub);
+
+        // Exception with failure_detail <= 0 confirms HomeHub
+        CHECK(tracker.on_socket_open("192.0.2.54", 502, 1) == ModbusProfile::Auto);
+        d = tracker.evaluate_probe(MbFailureType::Exception, -1, 79, 0);
+        CHECK(d.is_definitive);
+        CHECK(d.is_affirmative);
+        CHECK(d.next_profile == ModbusProfile::HomeHub);
+
+        // Transient exception (06 Server Busy) increments failures but stays Auto
+        CHECK(tracker.on_socket_open("192.0.2.55", 502, 1) == ModbusProfile::Auto);
+        d = tracker.evaluate_probe(MbFailureType::Exception, 0x06, 79, 0);
+        CHECK(!d.is_definitive);
+        CHECK(tracker.consecutive_failures == 1);
+
+        // 3 invalid values (e.g. 0 bar) exhaust to HomeHub fallback
+        CHECK(tracker.on_socket_open("192.0.2.52", 502, 1) == ModbusProfile::Auto);
+        d = tracker.evaluate_probe(MbFailureType::None, 0, 79, 0); // try 1
+        CHECK(!d.is_definitive);
+        CHECK(d.link_ok);
+        d = tracker.evaluate_probe(MbFailureType::None, 0, 79, 0); // try 2
+        CHECK(!d.is_definitive);
+        d = tracker.evaluate_probe(MbFailureType::None, 0, 79, 0); // try 3
+        CHECK(d.is_definitive);
+        CHECK(!d.is_affirmative);
+        CHECK(d.next_profile == ModbusProfile::HomeHub);
+        CHECK(tracker.on_socket_open("192.0.2.52", 502, 1) == ModbusProfile::HomeHub);
+        CHECK(tracker.profile_basis == ModbusProfileBasis::Fallback);
+
+        // ── N22: Exponential backoff & re-probing ──
+        ModbusProbeTracker bo_tracker;
+        uint32_t           t_now = 1000;
+        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now) == ModbusProfile::Auto);
+        CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Probing);
+        CHECK(bo_tracker.should_probe(t_now));
+
+        // Exhaustion 1 (3 timeouts) at t=1000:
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        auto bo_d = bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_d.is_definitive);
+        CHECK(!bo_d.is_affirmative);
+        CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Fallback);
+        CHECK(bo_tracker.exhaustion_count == 1);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 600); // 10 minutes
+
+        // During backoff (t=1000 + 300s):
+        CHECK(!bo_tracker.should_probe(t_now + 300));
+        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now + 300) ==
+              ModbusProfile::HomeHub);
+        CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Fallback);
+
+        // When backoff elapses (t=1000 + 600s):
+        t_now += 600;
+        CHECK(bo_tracker.should_probe(t_now));
+        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now) == ModbusProfile::Auto);
+        CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Probing);
+
+        // Exhaustion 2: backoff doubles to 1200s (20 min)
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 2);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 1200);
+
+        // Advance to next window (1200s later)
+        t_now += 1200;
+        CHECK(bo_tracker.should_probe(t_now));
+
+        // Exhaustion 3 -> 2400s
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 3);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 2400);
+
+        // Exhaustion 4 -> 4800s
+        t_now += 2400;
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 4);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 4800);
+
+        // Exhaustion 5 -> 9600s
+        t_now += 4800;
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 5);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 9600);
+
+        // Exhaustion 6 -> 14400s (capped at 4 hours)
+        t_now += 9600;
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 6);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 14400);
+
+        // Exhaustion 7 -> still capped at 14400s
+        t_now += 14400;
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        bo_tracker.evaluate_probe(MbFailureType::ResponseTimeout, 0, 79, 0, t_now);
+        CHECK(bo_tracker.exhaustion_count == 7);
+        CHECK(bo_tracker.next_reprobe_time_s == t_now + 14400);
+
+        // Successful re-probe during re-probing window upgrades to Altherma 4
+        t_now += 14400;
+        CHECK(bo_tracker.should_probe(t_now));
+        auto up_d = bo_tracker.evaluate_probe(MbFailureType::None, 0, 79, 185, t_now);
+        CHECK(up_d.is_definitive);
+        CHECK(up_d.is_affirmative);
+        CHECK(up_d.next_profile == ModbusProfile::Altherma4);
+        CHECK(bo_tracker.active_profile == ModbusProfile::Altherma4);
+        CHECK(bo_tracker.affirmative_profile == ModbusProfile::Altherma4);
+        CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Affirmative);
+        CHECK(bo_tracker.exhaustion_count == 0);
+        CHECK(!bo_tracker.should_probe(t_now + 100)); // once affirmative, should_probe is false
+        auto d_aff = bo_tracker.evaluate_probe(MbFailureType::None, 0, 79, 185, t_now);
+        CHECK(d_aff.next_profile == ModbusProfile::Altherma4);
+    }
 }
 
 static void test_bootlog() {
@@ -5917,11 +6460,7 @@ static const ProbeDecode* probe_find(const ProbeDecode* d, int n, int conv) {
         if (d[i].conv == conv) return &d[i];
     return nullptr;
 }
-static bool probe_has_alias(const ProbeDecode& d, int conv) {
-    for (int i = 0; i < d.alias_count; i++)
-        if (d.alias[i] == conv) return true;
-    return false;
-}
+static bool probe_has_alias(const ProbeDecode& d, int conv) { return d.has_alias(conv); }
 static const ProbeDecode* probe_find_or_alias(const ProbeDecode* d, int n, int conv) {
     for (int i = 0; i < n; i++)
         if (d[i].conv == conv || probe_has_alias(d[i], conv)) return &d[i];
@@ -6079,6 +6618,40 @@ static void test_hp_probe() {
     n                          = probe_sweep(zero, 2, 0, 2, d, PROBE_MAX_DECODES);
     const ProbeDecode* refused = probe_find(d, n, 405);
     CHECK(refused && !refused->ok && !refused->is_text);
+    CHECK(sizeof(ProbeDecode) == 56);
+    for (int i = 0; i < n; i++) {
+        CHECK(d[i].alias_count <= PROBE_CANDIDATE_COUNT);
+    }
+
+    // Probe candidate count conservation: sum of (1 + alias_count) across all decodes
+    // must equal probe_candidate_count_for(width) for both 0x00 and 0xFF inputs.
+    {
+        const uint8_t byte00[] = {0x00};
+        const uint8_t byteFF[] = {0xFF};
+        ProbeDecode   decs1[PROBE_MAX_DECODES];
+        int           n1_0   = probe_sweep(byte00, 1, 0, 1, decs1, PROBE_MAX_DECODES);
+        int           sum1_0 = 0;
+        for (int i = 0; i < n1_0; i++) sum1_0 += (1 + decs1[i].alias_count);
+        CHECK(sum1_0 == probe_candidate_count_for(1));
+
+        int n1_F   = probe_sweep(byteFF, 1, 0, 1, decs1, PROBE_MAX_DECODES);
+        int sum1_F = 0;
+        for (int i = 0; i < n1_F; i++) sum1_F += (1 + decs1[i].alias_count);
+        CHECK(sum1_F == probe_candidate_count_for(1));
+
+        const uint8_t word00[] = {0x00, 0x00};
+        const uint8_t wordFF[] = {0xFF, 0xFF};
+        ProbeDecode   decs2[PROBE_MAX_DECODES];
+        int           n2_0   = probe_sweep(word00, 2, 0, 2, decs2, PROBE_MAX_DECODES);
+        int           sum2_0 = 0;
+        for (int i = 0; i < n2_0; i++) sum2_0 += (1 + decs2[i].alias_count);
+        CHECK(sum2_0 == probe_candidate_count_for(2));
+
+        int n2_F   = probe_sweep(wordFF, 2, 0, 2, decs2, PROBE_MAX_DECODES);
+        int sum2_F = 0;
+        for (int i = 0; i < n2_F; i++) sum2_F += (1 + decs2[i].alias_count);
+        CHECK(sum2_F == probe_candidate_count_for(2));
+    }
 
     // ── A 1-byte field, 0x05: bits 0 and 2 set, and every enum table indexed by a byte the poll
     // path may never have handed it. OP_MODE[5] is "Auto Cool"; conv 203/316 have no entry for 5
@@ -6341,8 +6914,8 @@ static void test_wifi_rollback() {
 
     // Wrong password: the AP answers and keeps saying no. It must SUSTAIN that across checkpoints —
     // one sample cannot tell a wrong password from a transient SAE failure that merely happened to
-    // be the last thing logged when we looked — but two roll back, still within issue #47's "~1
-    // boot cycle".
+    // be the last thing logged when we looked — but two roll back, still within issue legacy-47's
+    // "~1 boot cycle".
     {
         RollbackWatch w;
         CHECK(rollback_step(w, DiscoClass::Auth, WIFI_BOOT_WINDOW_S) == RollbackAction::Wait);
@@ -6384,8 +6957,8 @@ static void test_wifi_rollback() {
         CHECK(rollback_step(w, k, WIFI_ROLLBACK_GRACE_S) == RollbackAction::RollBack);
     }
 
-    // The acceptance criterion from issue #47, as a check: valid new credentials with the router
-    // offline for 2 minutes must still be waiting, not rolled back.
+    // The acceptance criterion from issue legacy-47, as a check: valid new credentials with the
+    // router offline for 2 minutes must still be waiting, not rolled back.
     CHECK(WIFI_ROLLBACK_GRACE_S > 120);
     {
         RollbackWatch w;
@@ -7393,11 +7966,11 @@ static void test_redact() {
     CHECK(redact_diag_line("") == "");
 
     // THE DECODE WITNESS MUST SURVIVE. /diag is where the raw page bytes surface (hexdump.hpp, one
-    // line per detect pass) and where a wrong value is PROVEN — issue #194 is that argument in
-    // full. A future rule with a loose marker ("detect: ", or a bare "0x") would clip those bytes,
-    // and the only symptom would be a witness that quietly stopped being evidence: the #35-#39
-    // shape aimed at the very tool built to catch it. So the privacy rule is pinned against the
-    // diagnostic one.
+    // line per detect pass) and where a wrong value is PROVEN — issue legacy-194 is that argument
+    // in full. A future rule with a loose marker ("detect: ", or a bare "0x") would clip those
+    // bytes, and the only symptom would be a witness that quietly stopped being evidence: the
+    // legacy-35–legacy-39 shape aimed at the very tool built to catch it. So the privacy rule is
+    // pinned against the diagnostic one.
     for (const char* w : {
              "[  123.456] detect: raw 0x10 32B 00 1E 32 00 07 CF 00 00 12 34 AB CD EF 01 02 03",
              "[  123.456] detect: raw 0x20 32B FF FF 00 00 0C 80 00 00 00 00 00 00 00 00 00 00",
@@ -7812,12 +8385,12 @@ static void test_config_store() {
     mbb                = config_blob_serialize(mb);
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(!mrt.homehub_enabled);
-    // The RETIRED v9 actuation-consent bit (bit0 of the HomeHub flag byte, #294): a stored 1 must
-    // not survive into a decoded config, because the capability it consented to no longer exists.
-    // Set it by hand on a current-version blob and prove the decoder ignores it while the rest
-    // round-trips. Needs a NON-EMPTY host so the flag byte's bit1 (the host-derived compatibility
-    // mirror) is set, which is what pins the byte offset below: with an empty host every bit there
-    // is 0 and a wrong index would make these checks assert nothing at all.
+    // The RETIRED v9 actuation-consent bit (bit0 of the HomeHub flag byte, legacy-294): a stored 1
+    // must not survive into a decoded config, because the capability it consented to no longer
+    // exists. Set it by hand on a current-version blob and prove the decoder ignores it while the
+    // rest round-trips. Needs a NON-EMPTY host so the flag byte's bit1 (the host-derived
+    // compatibility mirror) is set, which is what pins the byte offset below: with an empty host
+    // every bit there is 0 and a wrong index would make these checks assert nothing at all.
     ConfigBlob consent_src         = mb;
     consent_src.mb_host            = "homehub-524288-example.local";
     std::vector<uint8_t> consent   = config_blob_serialize(consent_src);
@@ -9627,13 +10200,25 @@ static void test_http_request_policy() {
 }
 
 // logic/lwt_select.hpp — the leaving-water MEASUREMENT picker that feeds ΔT / heat output / COP.
-// Host-testable twin of www/js/schematic.js pickLwtRow(); guards issue #121 (a setpoint must never
-// be selected) and the post-BUH mis-credit (R2T must never win over R1T), across the real profile
-// catalog and the alias label forms plain "leaving water.*before" misses.
+// Host-testable twin of www/js/schematic.js pickLwtRow(); guards issue legacy-121 (a setpoint must
+// never be selected) and the post-BUH mis-credit (R2T must never win over R1T), across the real
+// profile catalog and the alias label forms plain "leaving water.*before" misses.
 static void test_lwt_select() {
     using logic::lwt_select;
 
-    // --- the #121 case: a "Leaving water" SETPOINT sorts before the R1T measurement (the fixture
+    CHECK(!logic::lwt_ci_contains(nullptr, "test"));
+    CHECK(!logic::lwt_ci_contains("test", nullptr));
+    CHECK(!logic::lwt_ci_contains("test", ""));
+    CHECK(logic::lwt_is_reject("leaving water after buffer"));
+    CHECK(logic::lwt_is_reject("leaving water after buh"));
+    CHECK(logic::lwt_is_reject("leaving water (raw data)"));
+    const char* with_null_tier1[] = {nullptr, "Leaving water temp. before BUH (R1T)"};
+    CHECK(lwt_select(with_null_tier1, 2) == 1);
+    const char* with_null_tier2[] = {nullptr, "Leaving water temperature"};
+    CHECK(lwt_select(with_null_tier2, 2) == 1);
+
+    // --- the legacy-121 case: a "Leaving water" SETPOINT sorts before the R1T measurement (the
+    // fixture
     //     layout). The old fallback `vNum(/leaving water/i)` picked index 0 — a 45 °C setpoint. ---
     {
         const char* rows[] = {
@@ -9692,6 +10277,12 @@ static void test_lwt_select() {
         };
         CHECK(lwt_select(dlwb2, 2) == 1);
 
+        // DLWB2 hydro-split outlet alone must be rejected (not picked as LWT)
+        const char* dlwb2_only[] = {
+            "Outlet water heat exchanger temp (hydro split model) DLWB2",
+        };
+        CHECK(lwt_select(dlwb2_only, 1) == -1);
+
         // A bare "heat exch" keyword would grab these refrigerant/outdoor rows — the picker must
         // not.
         const char* refr[] = {"O/U Heat Exch. Temp.(R4T)", "Outdoor heat exchanger temp."};
@@ -9703,13 +10294,13 @@ static void test_lwt_select() {
     {
         const char* generic[] = {"DHW setpoint", "Leaving water temperature"};
         CHECK(lwt_select(generic, 2) == 1);
-        // Monobloc Page 0xA1: "(Raw data)Water heat exchanger outlet temp." selected under Tier 2
+        // Monobloc Page 0xA1: "(Raw data)..." rows are rejected from LWT (M2)
         const char* monobloc[] = {
             "DHW setpoint",
             "(Raw data)Water heat exchanger outlet temp.",
             "(Raw data)Water heat exchanger inlet temp.",
         };
-        CHECK(lwt_select(monobloc, 3) == 1);
+        CHECK(lwt_select(monobloc, 3) == -1);
         // ...but if the ONLY leaving-water row is a setpoint, select nothing (blank beats wrong).
         const char* only_sp[] = {"Leaving Water Setpoint (main)", "DHW setpoint"};
         CHECK(lwt_select(only_sp, 2) == -1);
@@ -9736,8 +10327,9 @@ static void test_lwt_select() {
     }
     CHECK(detectable_checked >= 39); // the current detectable Altherma catalog
 
-    // The non-detection fixture reproduces the #121 layout (setpoint, then after-PHE R1T): assert
-    // the picker refuses its setpoint too, pinning the exact scenario the issue was filed on.
+    // The non-detection fixture reproduces the legacy-121 layout (setpoint, then after-PHE R1T):
+    // assert the picker refuses its setpoint too, pinning the exact scenario the issue was filed
+    // on.
     {
         const auto& fx = def::lookup("altherma3_r_erga");
         const char* labels[128];
@@ -9850,9 +10442,9 @@ static void test_ou_stale() {
     CHECK(!ou_reading_held_over(0x61, /*known=*/true, /*running=*/false));  // hydronic stays live
 
     // The compressor WITNESS, now a shared predicate: the poll engine marks its cache with it
-    // (main/hp_poll.cpp, so the MQTT bridge can withhold a held-over reading — #209 defect 5) and
-    // the trend ring's trend_rps_row() finds its row with it. Two callers, one rule; a second copy
-    // of the pattern is what would let one of them quietly stop covering a row.
+    // (main/hp_poll.cpp, so the MQTT bridge can withhold a held-over reading — legacy-209 defect 5)
+    // and the trend ring's trend_rps_row() finds its row with it. Two callers, one rule; a second
+    // copy of the pattern is what would let one of them quietly stop covering a row.
     CHECK(logic::ou_is_rps_witness("INV frequency (rps)", 0x30));
     CHECK(
         !logic::ou_is_rps_witness("INV frequency (rps)", 0x21)); // must sit on a page that is LIVE,
@@ -9892,7 +10484,7 @@ static void test_ou_stale() {
             // browser's d.pel used the INV row as an unconditional fallback whenever the CT sum
             // read 0 — which is exactly what an idle plant reads — so a stopped unit drew a
             // plausible kW figure out of its last run, beside a "not running" headline. Same shape
-            // as #35-#39, no numeric tell.
+            // as legacy-35–legacy-39, no numeric tell.
             if (logic::lwt_ci_contains(l, "inv primary current")) {
                 CHECK(ou_page_holds_over(reg)); // held over -> the browser must gate on ouHeldOver
                 inv_rows++;
@@ -9962,7 +10554,8 @@ static void test_cop_scope() {
     // purpose — a label that is not water-ish is refused one test earlier and would assert nothing.
     CHECK(!cop_is_post_buh("Leaving Water Setpoint after BUH (R2T)", 0x61));
     CHECK(!cop_is_post_buh("[EKMIK] Bizone kit mixed leaving water temp after BUH (R2T)", 0x61));
-    // The pre-BUH sensor must never satisfy the post-BUH picker — that swap is issue #121 inverted.
+    // The pre-BUH sensor must never satisfy the post-BUH picker — that swap is issue legacy-121
+    // inverted.
     CHECK(!cop_is_post_buh("Leaving water temp. before BUH (R1T)", 0x61));
     {
         const char* labels[] = {"Discharge pipe temp.(R2T)", "Leaving water temp. after BUH (R2T)"};
@@ -10133,8 +10726,9 @@ static void test_history() {
     }
     // The second collision is INSIDE one byte window: 0x20/12 carries "High Pressure" (bar) and
     // "High Pressure(T)" (its saturation temperature, °C). Only the unit tells them apart, which is
-    // why it is half the locator — a bar chart drawing °C is the #35-#39 shape with a history in
-    // front of it. (Neither 0x20 pressure is trended today; the rule is what is asserted.)
+    // why it is half the locator — a bar chart drawing °C is the legacy-35–legacy-39 shape with a
+    // history in front of it. (Neither 0x20 pressure is trended today; the rule is what is
+    // asserted.)
     {
         const TrendDef probe{"probe", TrendKind::Row, 0x20, 12, "bar", ""};
         const uint8_t  regs[]  = {0x20, 0x20};
@@ -10187,10 +10781,11 @@ static void test_history() {
         CHECK(trend_select(*valve, regs, offs, units, convs, 5) == 0);
     }
 
-    // --- a trend is a measurement, never a target (issue #121's rule) ---------------------------
-    // Now structural rather than checked per label: a setpoint lives at its own offset (the tank's
-    // is 0x60/7), so addressing the measurement's byte window cannot reach it. The catalog test
-    // below asserts the consequence over every profile — that no resolved label says "setpoint".
+    // --- a trend is a measurement, never a target (issue legacy-121's rule)
+    // --------------------------- Now structural rather than checked per label: a setpoint lives at
+    // its own offset (the tank's is 0x60/7), so addressing the measurement's byte window cannot
+    // reach it. The catalog test below asserts the consequence over every profile — that no
+    // resolved label says "setpoint".
     {
         const TrendDef* dhw = trend_by_id("dhw_tank");
         CHECK(dhw != nullptr);
@@ -10369,7 +10964,8 @@ static void test_history() {
         // Must not collide with the absence sentinels, which sit at the very bottom of int16:
         // -32768 is NO_READING and -32767 is HELD_OVER, so -3276.6 is the first real reading below
         // them. (These are also the ±3276.x "no data" sentinels the X10A units themselves emit —
-        // issue #35-#39 — which reading_plausible() already refuses upstream; this is the belt.)
+        // issue legacy-35–legacy-39 — which reading_plausible() already refuses upstream; this is
+        // the belt.)
         CHECK(!history_parse_tenths("-3276.8", v)); // == HISTORY_NO_READING
         CHECK(!history_parse_tenths("-3276.7", v)); // == HISTORY_HELD_OVER
         CHECK(history_parse_tenths("-3276.6", v) &&
@@ -10594,9 +11190,9 @@ static void test_history() {
             CHECK(trend_cstr_eq(d->unit, unit_for_datatype(kExpect[t].unit_type)));
             // One width per trend, so the tenths the ring stores are exact rather than rounded.
             CHECK(p.values[picked[t]].size == kExpect[t].size);
-            // The #121 rule, now a consequence of the locator rather than a filter: a target lives
-            // at its own offset, so no trend can reach one. Asserted over the whole catalog because
-            // a generated rename is exactly how it would come back.
+            // The legacy-121 rule, now a consequence of the locator rather than a filter: a target
+            // lives at its own offset, so no trend can reach one. Asserted over the whole catalog
+            // because a generated rename is exactly how it would come back.
             CHECK(!lwt_ci_contains(labels[picked[t]], "setpoint"));
             CHECK(!lwt_ci_contains(labels[picked[t]], "set point"));
             // A row on a frozen page is gated; one on a live page is not. Derived from the row's
@@ -10613,10 +11209,10 @@ static void test_history() {
                 CHECK(picked[a] < 0 || picked[b] < 0 || picked[a] != picked[b]);
 
         // The leaving-water trend must be the row lwt_select picks — not "a leaving-water row".
-        // #121 is what happens when a second, looser rule answers this question: a setpoint or a
-        // mixed-zone row substituted for the pre-BUH measurement. The locator is the tighter rule
-        // of the two, so binding them here is what keeps it from becoming an independent second
-        // one.
+        // legacy-121 is what happens when a second, looser rule answers this question: a setpoint
+        // or a mixed-zone row substituted for the pre-BUH measurement. The locator is the tighter
+        // rule of the two, so binding them here is what keeps it from becoming an independent
+        // second one.
         CHECK(picked[i_lwt] == lwt_select(labels, n));
         // …and the compressor trend is the very row the held-over gate reads as its witness.
         CHECK(picked[i_rps] == trend_rps_row(labels, regs, n));
@@ -10707,8 +11303,9 @@ static void test_history() {
     }
 }
 
-// ── The rolling X10A operating observation (logic/checkup.hpp, issue #208) ─────────────────────
-// Three things are worth testing here and one of them is worth most of the file:
+// ── The rolling X10A operating observation (logic/checkup.hpp, issue legacy-208)
+// ───────────────────── Three things are worth testing here and one of them is worth most of the
+// file:
 //
 //  (a) the LOCATOR. Six of the rows this reads live in ONE byte (0x60 offset 12) and are told apart
 //      only by which bit their converter masks. A locator that dropped the converter would resolve
@@ -11039,12 +11636,12 @@ static void test_checkup() {
         CHECK(b.space_runs == 1 && b.space_run_s == 600);
     }
     {
-        // ── THE REVIEWER'S REPRODUCER (#443): a valve switch is not a compressor cycle ──────────
-        // Twelve runs, each 25 minutes long and each handing over to the tank after five — ordinary
-        // DHW priority. Splitting SECONDS by the valve while the START stays where the run began
-        // reported a five-minute mean over twelve starts, i.e. short cycling on a plant whose every
-        // run lasted 25 minutes. Classified as runs, all twelve are MIXED: judged by neither side,
-        // counted so their absence from the verdict is visible.
+        // ── THE REVIEWER'S REPRODUCER (legacy-443): a valve switch is not a compressor cycle
+        // ────────── Twelve runs, each 25 minutes long and each handing over to the tank after five
+        // — ordinary DHW priority. Splitting SECONDS by the valve while the START stays where the
+        // run began reported a five-minute mean over twelve starts, i.e. short cycling on a plant
+        // whose every run lasted 25 minutes. Classified as runs, all twelve are MIXED: judged by
+        // neither side, counted so their absence from the verdict is visible.
         CheckupState  st;
         CheckupBucket b;
         CheckupSample s;
@@ -12523,11 +13120,12 @@ static void test_checkup() {
             CHECK(r[CheckupCheck::Cycling].e == 30 && r[CheckupCheck::Cycling].f == 120);
         }
 
-        // ── THE STALL (#443 live review): catalog capability is not evidence ────────────────────
-        // A profile that CARRIES the valve row on a plant whose valve page never answers. Before
-        // this rule the paired clock stayed pinned at 0, could never reach 90% of 24 h, and a check
-        // that had always worked from the compressor witness alone read `0 min of 21 h 36 min`
-        // forever — while the card printed `space 0` beside sixteen real starts.
+        // ── THE STALL (legacy-443 live review): catalog capability is not evidence
+        // ──────────────────── A profile that CARRIES the valve row on a plant whose valve page
+        // never answers. Before this rule the paired clock stayed pinned at 0, could never reach
+        // 90% of 24 h, and a check that had always worked from the compressor witness alone read `0
+        // min of 21 h 36 min` forever — while the card printed `space 0` beside sixteen real
+        // starts.
         CheckupWindow silent    = day();
         silent.class_observed_s = 0;
         silent.starts           = 16;
@@ -12608,14 +13206,14 @@ static void test_checkup() {
             CHECK(!r.cycling_split);
         }
 
-        // ── AN EMPTY JUDGED POPULATION IS NOT A CLEAN BILL (#443 second live round) ─────────────
-        // The clock and the judged population are DIFFERENT measurements, and gating the split on
-        // the clock alone was the same category error as gating it on catalog capability — the
-        // third place it hid. `class_observed_s` counts seconds in which both rows were READABLE;
-        // a valve that answers all day while moving mid-run yields a full clock and zero classified
-        // runs. The split then judged an empty set, `notable` needed >= MIN_STARTS to fire, and the
-        // day fell through to Ok: a green verdict resting on nothing, on exactly the DHW-priority
-        // pattern the censoring rule exists for.
+        // ── AN EMPTY JUDGED POPULATION IS NOT A CLEAN BILL (legacy-443 second live round)
+        // ───────────── The clock and the judged population are DIFFERENT measurements, and gating
+        // the split on the clock alone was the same category error as gating it on catalog
+        // capability — the third place it hid. `class_observed_s` counts seconds in which both rows
+        // were READABLE; a valve that answers all day while moving mid-run yields a full clock and
+        // zero classified runs. The split then judged an empty set, `notable` needed >= MIN_STARTS
+        // to fire, and the day fell through to Ok: a green verdict resting on nothing, on exactly
+        // the DHW-priority pattern the censoring rule exists for.
         //
         // The bar is therefore on the population the verdict is built from: unless enough runs were
         // classified AT ALL, the split has no picture of the day and the pooled figure decides —
@@ -12843,8 +13441,8 @@ static void test_checkup() {
     {
         // FLOW is OBSERVATION ONLY. The manufacturer's minimum is per model — this catalog spans
         // 3 kW to 18 kW — so one number laid across every profile would never fire on the large
-        // units and always fire on the small ones. #208 proposed exactly that number (10 l/min);
-        // this asserts it did not ship.
+        // units and always fire on the small ones. legacy-208 proposed exactly that number (10
+        // l/min); this asserts it did not ship.
         CheckupWindow w = day();
         for (int f : {5, 50, 120, 400}) {
             w.min_flow            = f;
@@ -13238,7 +13836,7 @@ static void test_no_publish() {
         if (m.values[i].reg != 0x64) CHECK(!m.values[i].no_publish);
 }
 
-// ── logic/profile_view.hpp + def/overlay.hpp — the page-0x10 protection-word supplement (#110 B)
+// ── logic/profile_view.hpp + def/overlay.hpp — the page-0x10 protection-word supplement (PR 110 B)
 // ──
 static void test_profile_view() {
     using namespace daik::logic;
@@ -13342,7 +13940,7 @@ static void test_profile_view() {
     CHECK(c311 == 2); // Comp. INV Current / LP retry counters ("Not in use" omitted)
     CHECK(c307 == 3 && c303 == 3); // the drop-control flags sharing those bytes
 
-    // The rows DECODE, end to end, through the real converter — the half PR #111 could not reach
+    // The rows DECODE, end to end, through the real converter — the half PR 111 could not reach
     // because no row used conv 310. 0x95 on offset 10 is 1 discharge retry with the drop flag set
     // and 5 INV-current retries, NOT 149.
     const uint8_t word[] = {0x95};
@@ -13391,11 +13989,12 @@ static void test_profile_view() {
     // silently never arrive — in the X10A topic AND in VictoriaMetrics, which is keyed on that
     // pair.
     //
-    // Scoped by group rather than global since #221. The old global form was an assertion about the
-    // DELTA only, because the catalog itself carried label collisions ("Error Code" on both 0x10/5
-    // and 0x60/3); those are no longer collisions at all — they are two rows in two groups, which
-    // is what they always were on the wire. The supplement is page-0x10-only, so in practice this
-    // reads "no supplement row may take a state key an outdoor_state row already holds".
+    // Scoped by group rather than global since legacy-221. The old global form was an assertion
+    // about the DELTA only, because the catalog itself carried label collisions ("Error Code" on
+    // both 0x10/5 and 0x60/3); those are no longer collisions at all — they are two rows in two
+    // groups, which is what they always were on the wire. The supplement is page-0x10-only, so in
+    // practice this reads "no supplement row may take a state key an outdoor_state row already
+    // holds".
     for (const auto& p : def::profiles) {
         for (size_t i = 0; i < def::RETRY_ROW_COUNT; i++) {
             const std::string key = row_object_id(def::retry_rows[i]);
@@ -13517,21 +14116,21 @@ static void test_profile_view() {
     shared_ct_page[15] = 0x80;
     CHECK(value_available(ct_l2, true, 64.0, shared_ct_page, sizeof(shared_ct_page)));
 
-    // ── The metric IDs these rows have already become in VictoriaMetrics (#180) ──────────────────
-    // Verified 2026-07-26: these 11 rows are INGESTED. Telegraf reads the grouped X10A topic and
-    // the store carries one series per row, named `daikin_altherma_<group>_<object_id>`. That
-    // promotes BOTH halves of that name from presentation to load-bearing identifier — the group
-    // key and each row's label-derived slug. #180's schema-coupling note asks whether an "ingest
-    // schema freeze" covers them; no such mechanism exists in this repo, so this block IS the
-    // freeze.
+    // ── The metric IDs these rows have already become in VictoriaMetrics (legacy-180)
+    // ────────────────── Verified 2026-07-26: these 11 rows are INGESTED. Telegraf reads the
+    // grouped X10A topic and the store carries one series per row, named
+    // `daikin_altherma_<group>_<object_id>`. That promotes BOTH halves of that name from
+    // presentation to load-bearing identifier — the group key and each row's label-derived slug.
+    // legacy-180's schema-coupling note asks whether an "ingest schema freeze" covers them; no such
+    // mechanism exists in this repo, so this block IS the freeze.
     //
     // Two edits break it silently and identically: renaming a label above, and — the one that note
     // singles out — gen_profiles.py emitting these rows with different label text on the day
     // def/overlay.hpp is deleted. Neither is an error anywhere downstream, which is the whole
     // problem: the old series simply stops receiving samples and a new one starts at zero, and a
     // counter that resets to zero is exactly what UC5 is watching for. A rename would therefore not
-    // read as a rename — it would read as the plant going quiet. The #35-#39 shape, one layer out
-    // from the device.
+    // read as a rename — it would read as the plant going quiet. The legacy-35–legacy-39 shape, one
+    // layer out from the device.
     //
     // The expected strings are TRANSCRIBED FROM THE LIVE STORE, never recomputed from the labels:
     // a slug derived from the same label it is checked against asserts ha_slug() against itself and
@@ -13582,14 +14181,14 @@ static void test_profile_view() {
     }
 }
 
-// ── Metric identity: a label is an IDENTIFIER, and a rename forks the series (#217) ─────────────
-// The block above freezes eleven metric ids that were verified in the live store (#180). This one
-// answers the question that leaves open: the OTHER ~150.
+// ── Metric identity: a label is an IDENTIFIER, and a rename forks the series (legacy-217)
+// ───────────── The block above freezes eleven metric ids that were verified in the live store
+// (legacy-180). This one answers the question that leaves open: the OTHER ~150.
 //
 // A published row reaches VictoriaMetrics as `daikin_altherma_<group>_<object_id>` and Home
 // Assistant as an entity keyed on the same slug. Both halves are derived from the row's LABEL, so
 // editing a label is not a cosmetic act — it retires one series and starts another at zero, with no
-// error anywhere. It has already happened: f1a5e69 (#139) renamed
+// error anywhere. It has already happened: f1a5e69 (legacy-139) renamed
 //   "Expansion valve 3 (pls)" -> "Expansion valve 3 (pls) [OU-II]"
 // across 19 profiles, and in the store `daikin_altherma_outdoor_aux_expansion_valve_3_pls` simply
 // stops 5.8 days before `..._expansion_valve_3_pls_ou_ii` begins. The rename was correct; going
@@ -13606,10 +14205,10 @@ static void test_profile_view() {
 // and if the row still exists under a new name, mqtt_ha.cpp's retraction machinery
 // (retract_legacy_*) is what keeps Home Assistant from stranding the old entity beside the new one.
 //
-// Unlike #180's eleven, these are computed from the catalog rather than transcribed from the store,
-// so they do not independently witness what VictoriaMetrics holds. What they do witness is CHANGE:
-// the strings below are frozen literals, so a rename, a dropped row or an edit to ha_slug() itself
-// all fail here — which is the property that was missing.
+// Unlike legacy-180's eleven, these are computed from the catalog rather than transcribed from the
+// store, so they do not independently witness what VictoriaMetrics holds. What they do witness is
+// CHANGE: the strings below are frozen literals, so a rename, a dropped row or an edit to ha_slug()
+// itself all fail here — which is the property that was missing.
 static void test_metric_identity() {
     // Every distinct <group>_<object_id> a published catalog row currently produces.
     static const char* const EXPECTED[] = {
@@ -13782,8 +14381,8 @@ static void test_metric_identity() {
         "split_actuators_inv_comp_frequency_hz",
         "split_actuators_outdoor_fan_lower_rps",
         "split_actuators_outdoor_fan_upper_rps",
-        "split_pressures_hp_sensor_kgcm2",
-        "split_pressures_lp_sensor_kgcm2",
+        "split_pressures_hp_sensor_bar",
+        "split_pressures_lp_sensor_bar",
         "split_sensors_delta_tr_deg",
         "split_sensors_discharge_pipe_temp_c",
         "split_sensors_fin_temp_c",
@@ -13810,8 +14409,8 @@ static void test_metric_identity() {
             const auto& v = p.values[i];
             if (v.no_publish) continue; // detect-only: never announced, never a series
             // Through adjudicated(): the store is keyed on what the bridge PUBLISHES, and a label
-            // override (logic/label_override.hpp, #230 A) changes that word — so a row's series
-            // suffix is its adjudicated label's slug, not the generator's.
+            // override (logic/label_override.hpp, legacy-230 A) changes that word — so a row's
+            // series suffix is its adjudicated label's slug, not the generator's.
             actual.insert(std::string(group_for_page(v.reg)) + "_" +
                           object_id(logic::adjudicated(v).label));
         }
@@ -13832,7 +14431,7 @@ static void test_metric_identity() {
     CHECK(object_id("Flow sensor (l/min)") == object_id("Flow Sensor (L/MIN)"));
     CHECK(object_id("Expansion valve 3 (pls)") != object_id("Expansion valve 3 (pls) [OU-II]"));
 
-    // ONE identifier, two surfaces (#221): a published row's HA ENTITY id is exactly its
+    // ONE identifier, two surfaces (legacy-221): a published row's HA ENTITY id is exactly its
     // VictoriaMetrics series suffix, so the frozen list above now gates both. A label edit moves
     // the HA entity and the series together or neither — they can no longer drift apart.
     for (const auto& p : def::profiles)
@@ -13842,11 +14441,12 @@ static void test_metric_identity() {
             CHECK(expected.count(row_object_id(logic::adjudicated(v))) == 1);
         }
 
-    // ── The ambiguity ledger: which labels the catalog places on more than one page (#221) ───────
-    // What stood here until #221 landed was the same computation pinned as a KNOWN DEFECT — the set
-    // of label slugs whose rows collapsed into a single HA entity. The entity id now carries the
-    // group, so a shared label no longer costs an entity; what it still costs is a NAME, since HA
-    // derives the default entity_id from that and two "Error Code"s land as `..._error_code` and
+    // ── The ambiguity ledger: which labels the catalog places on more than one page (legacy-221)
+    // ─────── What stood here until legacy-221 landed was the same computation pinned as a KNOWN
+    // DEFECT — the set of label slugs whose rows collapsed into a single HA entity. The entity id
+    // now carries the group, so a shared label no longer costs an entity; what it still costs is a
+    // NAME, since HA derives the default entity_id from that and two "Error Code"s land as
+    // `..._error_code` and
     // `..._error_code_2`. discovery.hpp's AMBIGUOUS_LABEL_SLUGS is the ledger of rows named by
     // their group for that reason, and it is hand-maintained on purpose (a name computed from the
     // detected profile's rows would differ per model, so a re-detect would rename a live entity).
@@ -13881,41 +14481,43 @@ static void test_metric_identity() {
     CHECK(reused == ledger);
 }
 
-// ── Which identifiers a TIE-BREAK decides (#230 B) ───────────────────────────────────────────────
-// test_metric_identity() above freezes the identifier set the WHOLE catalog produces. This asks the
-// question that leaves open, and it is the one a device owner has: does THIS unit still publish the
-// identifiers it published yesterday?
+// ── Which identifiers a TIE-BREAK decides (legacy-230 B)
+// ─────────────────────────────────────────────── test_metric_identity() above freezes the
+// identifier set the WHOLE catalog produces. This asks the question that leaves open, and it is the
+// one a device owner has: does THIS unit still publish the identifiers it published yesterday?
 //
 // Detection resolves a fingerprint to a candidate SET and then picks one representative
 // (detect_best: page overlap -> kW class -> tightest class -> the lowest profile id. That last
-// criterion was REGISTRY ORDER until #230 B, which is what made a mere reorder able to move a
+// criterion was REGISTRY ORDER until legacy-230 B, which is what made a mere reorder able to move a
 // published series; test_tie_break_order_independence() below now forbids that, but the tie itself
 // still decides an identifier and this test is what bounds WHICH.) On the live 8 kW unit three of
 // the five survivors are REGISTER-EQUIVALENT — byte-identical (reg, offset, conv, size, type) rows
 // — so which one wins changes not one decoded value. It changes the LABELS, and a label is the HA
-// entity id plus the VictoriaMetrics series suffix. This is exactly the shape of #230 A's fan step:
-// `altherma_ebla_edla_d_series_4_8kw_monobloc` and
+// entity id plus the VictoriaMetrics series suffix. This is exactly the shape of legacy-230 A's fan
+// step: `altherma_ebla_edla_d_series_4_8kw_monobloc` and
 // `altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw` were register-equivalent yet published
 // `actuators_fan_1_step` vs `actuators_fan_1_10_rpm` depending on nothing but registry order. Add,
 // remove or reorder a profile — none of which is a suspicious act — and the old series stops
-// receiving samples while a new one starts at zero: #217's silent fork, a counter resetting to zero
-// reading as the plant going quiet rather than as a rename. The fan case is now CLOSED —
+// receiving samples while a new one starts at zero: legacy-217's silent fork, a counter resetting
+// to zero reading as the plant going quiet rather than as a rename. The fan case is now CLOSED —
 // logic/label_override.hpp republishes every profile as `actuators_fan_1_step`, so that class is
 // identifier-equivalent and neither fan id is tie-break-decided any more (which is why they are
 // gone from the frozen set below) — but the mechanism is general and the remaining classes below
 // still have it.
 //
-// #217's gate cannot catch it BY CONSTRUCTION: both spellings are already in its frozen set, so a
-// tie-break flip introduces no new identifier and the suite stays green while the device's own
+// legacy-217's gate cannot catch it BY CONSTRUCTION: both spellings are already in its frozen set,
+// so a tie-break flip introduces no new identifier and the suite stays green while the device's own
 // series changes underneath it. It answers "does the catalog still produce this identifier set?",
 // never "can a tie-break move which identifier a unit publishes?".
 //
 // The property actually wanted is that register-equivalent profiles agree on what they publish —
 // then a tie-break can never move an identifier. Measured over the detectable catalog: TWELVE
-// equivalence classes exist and, since #230 A's fan step was closed by logic/label_override.hpp,
-// FIVE still violate it — so this is a class of hazard, not one instance. They are not all defects,
-// and the difference is a judgement rather than something a test can settle:
-//   • #230 A's fan step was the "simply false" kind — one spelling asserted a rate, the other a
+// equivalence classes exist and, since legacy-230 A's fan step was closed by
+// logic/label_override.hpp, FIVE still violate it — so this is a class of hazard, not one instance.
+// They are not all defects, and the difference is a judgement rather than something a test can
+// settle:
+//   • legacy-230 A's fan step was the "simply false" kind — one spelling asserted a rate, the other
+//   a
 //     step — now FIXED by logic/label_override.hpp, so it is no longer in the frozen set;
 //   • one sensor named by two product FAMILIES — the ECH2O tank models call leaving water
 //     "[HPSU] Tv inflow Temp  (R1T)", the standard ones "Leaving water temp. before BUH (R1T)".
@@ -13939,8 +14541,8 @@ static void test_tie_break_identity() {
     // happens to pick. Adding an entry means a new tie-break-decided series — say why in the commit
     // message. Removing one means the divergence is gone: a label override now makes the class
     // agree
-    // (#230 A — logic/label_override.hpp, and its audit ledger entries went with it), the generator
-    // itself agrees, or a profile left the class.
+    // (legacy-230 A — logic/label_override.hpp, and its audit ledger entries went with it), the
+    // generator itself agrees, or a profile left the class.
     static const char* const TIE_BREAK_DECIDED[] = {
         "hybrid_2nd_domestic_hot_water_temperature",
         "hybrid_be_cop",
@@ -14050,10 +14652,10 @@ static void test_tie_break_identity() {
     CHECK(divergent_classes < equiv_classes); // ...and most classes ARE safe today
 }
 
-// ── What the tie-break decides on a REAL fingerprint, and what cannot move it (#230 B) ───────────
-// test_tie_break_identity() above asks a CATALOG question: which identifiers do REGISTER-EQUIVALENT
-// profiles disagree about? The two tests below ask the two OPERATIONAL ones, and all three are kept
-// because none subsumes another — measured, not assumed:
+// ── What the tie-break decides on a REAL fingerprint, and what cannot move it (legacy-230 B)
+// ─────────── test_tie_break_identity() above asks a CATALOG question: which identifiers do
+// REGISTER-EQUIVALENT profiles disagree about? The two tests below ask the two OPERATIONAL ones,
+// and all three are kept because none subsumes another — measured, not assumed:
 //
 //   • the tie detect_best actually resolves is on the page COUNT and the kW-class SPAN, both
 //   coarser
@@ -14097,10 +14699,10 @@ static std::vector<Fingerprint> tie_break_sweep() {
 // i.e. the order the tables happen to sit in def/registry.hpp — an incidental fact about a FILE. A
 // label is an identifier (ha_slug -> HA entity id + VictoriaMetrics series suffix), so a moved
 // tie-break stops one series and starts another at zero, which reads downstream as the plant going
-// quiet rather than as a rename (#180/#217). Measured before the fix: permuting the registry moved
-// the published identity on 11275 of 200x336 trials over 90 distinct identifiers. Criterion (4) is
-// now the lowest profile id, which is intrinsic to the profile, so the same tie resolves the same
-// way in any order.
+// quiet rather than as a rename (legacy-180/legacy-217). Measured before the fix: permuting the
+// registry moved the published identity on 11275 of 200x336 trials over 90 distinct identifiers.
+// Criterion (4) is now the lowest profile id, which is intrinsic to the profile, so the same tie
+// resolves the same way in any order.
 //
 // Permutation is hand-rolled Fisher-Yates on an LCG, NOT std::shuffle: how std::shuffle consumes
 // its URBG is implementation-defined, so libstdc++ and libc++ would permute differently and a
@@ -14176,8 +14778,8 @@ static void test_tie_break_order_independence() {
         if (std::strcmp(base[i].id, perm[i].id) == 0) same_slot++;
     CHECK(same_slot < (int)base.size() / 2); // the shuffle really shuffles
 
-    // And the live reference unit is unmoved by the whole change — the reason this needed no #221
-    // migration: 0 of the 336 fingerprints re-label anything, this one included.
+    // And the live reference unit is unmoved by the whole change — the reason this needed no
+    // legacy-221 migration: 0 of the 336 fingerprints re-label anything, this one included.
     Fingerprint live;
     live.page_mask    = 0x1bff;
     live.iu_kw_tenths = 80;
@@ -14389,14 +14991,15 @@ static void test_tie_break_reach() {
     }
 }
 
-// ── Entity identity: no two announced entities may share a uniq_id (#221) ───────────────────────
-// Home Assistant keys its entity registry on `uniq_id` and its discovery on the retained config
-// TOPIC. Both are FLAT namespaces — while a catalog row's label is only unique within its register
-// page. The catalog carries "Error Code" on the outdoor page AND on the hydronic one, so before
-// #221 the two rows were announced under one id on one topic: the broker kept one payload, HA
-// created one entity, and the second sensor silently did not exist. Nothing errored — in HA it
-// reads as "my model doesn't have that sensor" — and the X10A topic was fine throughout (it nests
-// by group), which is why this was invisible everywhere except Home Assistant.
+// ── Entity identity: no two announced entities may share a uniq_id (legacy-221)
+// ─────────────────────── Home Assistant keys its entity registry on `uniq_id` and its discovery on
+// the retained config TOPIC. Both are FLAT namespaces — while a catalog row's label is only unique
+// within its register page. The catalog carries "Error Code" on the outdoor page AND on the
+// hydronic one, so before legacy-221 the two rows were announced under one id on one topic: the
+// broker kept one payload, HA created one entity, and the second sensor silently did not exist.
+// Nothing errored — in HA it reads as "my model doesn't have that sensor" — and the X10A topic was
+// fine throughout (it nests by group), which is why this was invisible everywhere except Home
+// Assistant.
 //
 // Measured before the fix: 44 of 45 profiles carried at least one collision, over five label slugs.
 // One of them was `error_code`, the row an automation alerts on.
@@ -14505,14 +15108,16 @@ static void test_entity_identity() {
     CHECK(colliding.empty());
 }
 
-// ── logic/feature_gate.hpp — what may honestly run on the detected profile (#110 Part C) ─────────
+// ── logic/feature_gate.hpp — what may honestly run on the detected profile (PR 110 Part C)
+// ─────────
 static void test_feature_gate() {
     using namespace daik::logic;
 
-    // `generic` is the case #69 names: detection failed, so the fallback carries the universal
-    // register core and nothing else. Measured, not assumed — it has no leaving-water MEASUREMENT
-    // (only "LW setpoint (main)", which the lwt_select rule correctly rejects), no INV frequency,
-    // no expansion valve and no pressure row. The decision is DISABLE, so both gates are false.
+    // `generic` is the case legacy-69 names: detection failed, so the fallback carries the
+    // universal register core and nothing else. Measured, not assumed — it has no leaving-water
+    // MEASUREMENT (only "LW setpoint (main)", which the lwt_select rule correctly rejects), no INV
+    // frequency, no expansion valve and no pressure row. The decision is DISABLE, so both gates are
+    // false.
     const auto gen = feature_coverage(def::lookup_view("generic"));
     CHECK(!gen.leaving_water);
     CHECK(!gen.run_state);
@@ -14540,7 +15145,7 @@ static void test_feature_gate() {
         detectable++;
         const auto c = feature_coverage(def::resolved(p));
         // Universal across the catalog: a leaving-water measurement (so lwt_select always resolves
-        // — the #121 guarantee) and, now, the retry counters.
+        // — the legacy-121 guarantee) and, now, the retry counters.
         CHECK(c.leaving_water);
         CHECK(c.retry_counters);
         if (!c.run_state) {
@@ -14567,7 +15172,7 @@ static void test_feature_gate() {
 
     // A detect-only placeholder is not coverage: the row exists to hold a page in the detection
     // signature, and the value is an absent feature. Counting it would be the "pretend full
-    // features" outcome #69 rules out by name.
+    // features" outcome legacy-69 rules out by name.
     ValueDef   ghost[]   = {{0x10, 10, 310, 1, -1, "Discharge Temp. Protection Retry Qty", true}};
     const auto ghost_cov = feature_coverage(profile_view(ghost, 1, nullptr, 0, 0x10));
     CHECK(!ghost_cov.retry_counters);
@@ -14802,11 +15407,11 @@ static void test_state_dwell() {
 
     // ── the state code ──────────────────────────────────────────────────────────────────────────
     // 0 is "no usable state" and must be produced for everything that is not a state, including the
-    // shapes that LOOK like one. A binary row is the numeric 1/0 boundary (#210); anything else is
-    // a contract break upstream and answering "state 0" for it would invent one.
+    // shapes that LOOK like one. A binary row is the numeric 1/0 boundary (legacy-210); anything
+    // else is a contract break upstream and answering "state 0" for it would invent one.
     CHECK(dwell_code(304, "0") == 1);
     CHECK(dwell_code(304, "1") == 2);
-    CHECK(dwell_code(304, "ON") == DWELL_CODE_NONE); // pre-#210 text must not decode
+    CHECK(dwell_code(304, "ON") == DWELL_CODE_NONE); // pre-legacy-210 text must not decode
     CHECK(dwell_code(304, "") == DWELL_CODE_NONE);
     CHECK(dwell_code(304, nullptr) == DWELL_CODE_NONE);
     CHECK(dwell_code(304, "10") == DWELL_CODE_NONE); // not a flag value
@@ -14910,7 +15515,7 @@ static void test_state_dwell() {
     // A page that does not answer removes its rows from the cache outright, and 47 such timeouts in
     // 8.2 h is what the reference installation actually produces. The wall clock does not stop, so
     // the run grows — but the OBSERVATION stopped, and `blind_s` is what stops the pair from being
-    // reported as an unbroken watched run. This is #413/#414 one row at a time.
+    // reported as an unbroken watched run. This is legacy-413/legacy-414 one row at a time.
     for (int i = 0; i < 4; i++) dwell_step(slots, DWELL_MAX_SLOTS, nullptr, 0, 1);
     r = dwell_lookup(slots, DWELL_MAX_SLOTS, 0x62, 2, 304);
     CHECK(r.known && r.exact && r.since_s == 9 && r.blind_s == 4);
@@ -15297,7 +15902,7 @@ static void test_history_persist() {
 
     // --- the verdict, and the ORDER it decides in -----------------------------------------------
     const uint32_t fp = history_catalog_fingerprint();
-    // PR #8's exact catalog: existing dev.6/dev.7 flash records must stay on the
+    // PR legacy-8's exact catalog: existing dev.6/dev.7 flash records must stay on the
     // direct fast path while manifests make future catalog edits migratable.
     CHECK(fp == 0xda95bbc0u);
     const uint32_t sw = static_cast<uint32_t>(CrashReason::SW);
@@ -15489,9 +16094,10 @@ static void test_history_persist() {
     manifest.value_count = HISTORY_MANIFEST_MAX_IDS + 1;
     CHECK(!history_journal_manifest_header_matches(manifest));
 
-    // Exact pre-#3 wire contract, measured by compiling that historical tree. Its dense vectors are
-    // the only pre-manifest generation promised a built-in adapter: every old series maps by its
-    // semantic id, while the two newly-added disinfection histories correctly have no predecessor.
+    // Exact pre-legacy-3 wire contract, measured by compiling that historical tree. Its dense
+    // vectors are the only pre-manifest generation promised a built-in adapter: every old series
+    // maps by its semantic id, while the two newly-added disinfection histories correctly have no
+    // predecessor.
     CHECK(history_legacy_disinfection_catalog_fingerprint() == 0x63ec0a62u);
     CHECK(history_legacy_disinfection_catalog_fingerprint() != fp);
     uint32_t legacy_x[HISTORY_MANIFEST_MAX_IDS]  = {};
@@ -15677,11 +16283,11 @@ static void test_history_persist() {
     CHECK(out[HISTORY_SAMPLES - 1] == 22);
 }
 
-// ── The converter adjudication (logic/conv_override.hpp) — #194 ──────────────────────────────────
-// The ledger asserts a DIFFERENT value, not merely a withheld one, so what is pinned here is the
-// evidence itself: the wire integers. If a future generator run, a REGISTERS.md edit or a converter
-// change ever makes the ÷128 reading stop reproducing them, this fails rather than quietly shipping
-// a second wrong scale.
+// ── The converter adjudication (logic/conv_override.hpp) — legacy-194
+// ────────────────────────────────── The ledger asserts a DIFFERENT value, not merely a withheld
+// one, so what is pinned here is the evidence itself: the wire integers. If a future generator run,
+// a REGISTERS.md edit or a converter change ever makes the ÷128 reading stop reproducing them, this
+// fails rather than quietly shipping a second wrong scale.
 static void test_conv_override() {
     // Identity for everything the ledger is silent about — which is all of the catalog but one row.
     CHECK(logic::effective_conv(0x10, 8, 114) ==
@@ -15737,7 +16343,7 @@ static void test_conv_override() {
     CHECK(display_decimals(row.conv) == 1);
 }
 
-// ── The label ledger (logic/label_override.hpp) — #230 A
+// ── The label ledger (logic/label_override.hpp) — legacy-230 A
 // ────────────────────────────────────────── The sibling of test_conv_override(): the same
 // "generated table is wrong, corrected in logic/, pinned against the real catalog" shape — but for
 // the row's LABEL, which is the HA entity id and the VictoriaMetrics series suffix
@@ -15756,9 +16362,9 @@ static void test_label_override() {
     CHECK(logic::label_str_eq(logic::effective_label(0x30, 1, 211, "Fan 1 (10 rpm)"),
                               "Fan 1 (step)")); // THE entry
 
-    // The corrected row publishes as actuators_fan_1_step — one identifier, two surfaces (#221):
-    // the group-scoped HA entity id AND the un-grouped state key / VictoriaMetrics series suffix
-    // both move.
+    // The corrected row publishes as actuators_fan_1_step — one identifier, two surfaces
+    // (legacy-221): the group-scoped HA entity id AND the un-grouped state key / VictoriaMetrics
+    // series suffix both move.
     const ValueDef row = logic::adjudicated(ValueDef{0x30, 1, 211, 1, -1, "Fan 1 (10 rpm)"});
     CHECK(logic::label_str_eq(row.label, "Fan 1 (step)"));
     CHECK(row_object_id(row) == "actuators_fan_1_step");
@@ -15780,7 +16386,7 @@ static void test_label_override() {
     CHECK(raw_wrong == 4);
 }
 
-// ── The availability ledger (logic/availability.hpp) — #209 defects 1, 2 and 6
+// ── The availability ledger (logic/availability.hpp) — legacy-209 defects 1, 2 and 6
 // ──────────────────── Two things are asserted, and the second is the one that matters. The first
 // is that each rule does what it says on a hand-built row. The second is what it does to the REAL
 // CATALOG: a rule keyed on (page, offset, converter) is a claim about every profile at once, so the
@@ -15788,9 +16394,9 @@ static void test_label_override() {
 // failure mode being a rule that silently starts suppressing a real hydronic reading on some other
 // model.
 static void test_availability() {
-    // Target Evap. Temp. is NO LONGER here — #194 identified it as a mis-assigned converter rather
-    // than an unmeasurable row, so its verdict lives in logic/conv_override.hpp. The ledger must be
-    // silent about it, or a reader would think the quarantine is still load-bearing.
+    // Target Evap. Temp. is NO LONGER here — legacy-194 identified it as a mis-assigned converter
+    // rather than an unmeasurable row, so its verdict lives in logic/conv_override.hpp. The ledger
+    // must be silent about it, or a reader would think the quarantine is still load-bearing.
     const ValueDef evap{0x10, 6, 114, 2, 1, "Target Evap. Temp."};
     CHECK(availability_policy(evap) == AvailabilityPolicy::Always);
     CHECK(row_publishable(evap));
@@ -15822,8 +16428,8 @@ static void test_availability() {
     CHECK(availability_policy(ct_l2) == AvailabilityPolicy::Always);
     CHECK(value_available(ct_l2, true, 64.0, page63, sizeof(page63)));
 
-    // ── The page-0x21 zero rows, and the label key that makes them safe (#224) ───────────────────
-    // The three air-source rows are withheld at exactly 0.0 …
+    // ── The page-0x21 zero rows, and the label key that makes them safe (legacy-224)
+    // ─────────────────── The three air-source rows are withheld at exactly 0.0 …
     const ValueDef fan1{0x21, 6, 105, 2, 1, "Fan1 Fin temp."};
     const ValueDef fan2{0x21, 8, 105, 2, 1, "Fan2 Fin temp."};
     const ValueDef cout{0x21, 10, 105, 2, 1, "Compressor outlet temperature"};
@@ -15850,13 +16456,13 @@ static void test_availability() {
         CHECK(value_available(*d, true, 0.0)); // 0 °C brine is a reading, not an absence
     }
 
-    // ── Page 0x20: the LOW-side rows stay published, the HIGH-side one is conditional (#224) ─────
-    // The outdoor coil (the evaporator in heating) and the suction pipe are on the LOW side, and
-    // the only witness the catalog carries is the HIGH side. A coil at 0 °C while the refrigerant
-    // condenses at 49 °C is an ordinary January afternoon, not a contradiction — so these two must
-    // stay Always, and must stay published EVEN WITH a strong witness present. That second
-    // assertion is the load-bearing one: it is what stops someone widening the liquid-line rule to
-    // "all three 0x20 zeros" and silently withholding a real winter reading.
+    // ── Page 0x20: the LOW-side rows stay published, the HIGH-side one is conditional (legacy-224)
+    // ───── The outdoor coil (the evaporator in heating) and the suction pipe are on the LOW side,
+    // and the only witness the catalog carries is the HIGH side. A coil at 0 °C while the
+    // refrigerant condenses at 49 °C is an ordinary January afternoon, not a contradiction — so
+    // these two must stay Always, and must stay published EVEN WITH a strong witness present. That
+    // second assertion is the load-bearing one: it is what stops someone widening the liquid-line
+    // rule to "all three 0x20 zeros" and silently withholding a real winter reading.
     const ValueDef          ou_hx{0x20, 2, 105, 2, 1, "O/U Heat Exch. Temp."};
     const ValueDef          suction{0x20, 6, 105, 2, 1, "Suction pipe temp."};
     const SaturationWitness hot{true, 49.0};
@@ -15989,8 +16595,8 @@ static void test_availability() {
 
     // ── Page-level absence: 0xA0, the unidentified unit ──────────────────────────────────────────
     // BYTE LEVEL, because the whole finding is which bytes the absent unit answers with. This is
-    // the reference installation's reply verbatim (#224): every field zero except the O/U MPU id,
-    // which reads 0xFFFF, and the 0x800C at offset 2 whose low byte never leaves 0x00/0x80 and
+    // the reference installation's reply verbatim (legacy-224): every field zero except the O/U MPU
+    // id, which reads 0xFFFF, and the 0x800C at offset 2 whose low byte never leaves 0x00/0x80 and
     // which is therefore not a ×0.1 temperature at all.
     const uint8_t absent_a0[16] = {0x00, 0x00, 0x80, 0x0C, 0x00, 0x00, 0x00, 0x00,
                                    0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
@@ -16049,8 +16655,9 @@ static void test_availability() {
     CHECK(value_available(a0_eev, true, 450.0, a0_live, sizeof(a0_live)));
     CHECK(!value_available(a0_eev, true, 65528.0, a0_live, sizeof(a0_live)));
 
-    // NO OTHER PAGE MAY ACQUIRE ONE. The hydronic pages carry every reading #209 found correct, and
-    // an absence signature on one of them would withhold a whole page of good measurements at once.
+    // NO OTHER PAGE MAY ACQUIRE ONE. The hydronic pages carry every reading legacy-209 found
+    // correct, and an absence signature on one of them would withhold a whole page of good
+    // measurements at once.
     for (int reg = 0; reg <= 0xFF; reg++) {
         const bool has = page_absence_rule(static_cast<uint8_t>(reg)) != nullptr;
         CHECK(has == (reg == 0xA0 || reg == 0xA1));
@@ -16130,8 +16737,8 @@ static void test_availability() {
                     CHECK(value_available(d, true, 0.0));
                 }
             }
-            // The 0x20 zero rows #224 lists, split by WHICH SIDE OF THE CIRCUIT they sit on — the
-            // fact that decides whether the one available witness can say anything about them.
+            // The 0x20 zero rows legacy-224 lists, split by WHICH SIDE OF THE CIRCUIT they sit on —
+            // the fact that decides whether the one available witness can say anything about them.
             // The outdoor coil (evaporator) and the suction pipe are LOW side and the witness is
             // HIGH side, so they stay unadjudicated: 0 °C is where they live for much of a heating
             // season and no high-side reading contradicts that.
@@ -16206,16 +16813,16 @@ static void test_availability() {
                 CHECK(!value_available(d, true, 0.0, absent_a0, sizeof(absent_a0)) ||
                       d.reg != 0xA0);
             }
-            // NO CORE HYDRONIC ROW MAY BE TOUCHED. The audit in #209 is explicit that the hydronic
-            // decode is excellent and must not be collaterally damaged: leaving/return water, tank,
-            // flow, pressure and the setpoints all live on 0x60-0x62, and not one of them may fall
-            // under a rule.
+            // NO CORE HYDRONIC ROW MAY BE TOUCHED. The audit in legacy-209 is explicit that the
+            // hydronic decode is excellent and must not be collaterally damaged: leaving/return
+            // water, tank, flow, pressure and the setpoints all live on 0x60-0x62, and not one of
+            // them may fall under a rule.
             if (d.reg >= 0x60 && d.reg <= 0x62) CHECK(pol == AvailabilityPolicy::Always);
             if (d.reg == 0x10 && row_publishable(d)) publishable_on_0x10++;
         }
         // Page 0x10 must still be QUERIED on every profile after the quarantine — the error class,
         // the error code and the protection words live there, and so does the raw dump that is
-        // meant to settle #194. A page whose rows are all unpublishable is not read at all
+        // meant to settle legacy-194. A page whose rows are all unpublishable is not read at all
         // (hp_poll).
         CHECK(publishable_on_0x10 > 0);
     }
@@ -16270,9 +16877,9 @@ static void test_availability() {
     // generator starts emitting a row on either page, and either is a reason to re-read the
     // adjudication rather than let it silently re-scope itself.
     CHECK(page_absence_rows == 194);
-    // The #224 zero verdicts, pinned per quantity so a moved count names WHICH one moved. 19/19/21
-    // are the air-source profiles carrying each row; 44 is Target Cond. Temp. as before, and the
-    // sum is every zero verdict in the catalog.
+    // The legacy-224 zero verdicts, pinned per quantity so a moved count names WHICH one moved.
+    // 19/19/21 are the air-source profiles carrying each row; 44 is Target Cond. Temp. as before,
+    // and the sum is every zero verdict in the catalog.
     CHECK(fan1_rows == 19 && fan2_rows == 19 && cout_rows == 21);
     CHECK(zero_rows == cond_rows + fan1_rows + fan2_rows + cout_rows);
     // And the direction that keeps a geothermal unit whole: 10 rows share those three coordinates
@@ -16282,7 +16889,8 @@ static void test_availability() {
     CHECK(geo_shared_rows == 10);
 }
 
-// ── Numeric fault state beside the textual code (logic/fault_state.hpp) — #209 defect 4 ──────────
+// ── Numeric fault state beside the textual code (logic/fault_state.hpp) — legacy-209 defect 4
+// ──────────
 static void test_fault_state() {
     // The inverse of conv 203, taken from the same ERR_TYPE table it renders from.
     CHECK(fault_class_from_text("Normal") == FaultClass::Normal);
@@ -16322,7 +16930,7 @@ static void test_fault_state() {
     CHECK(std::string(fault_companion_state(0, FaultClass::Normal)) == "0");
     CHECK(std::string(fault_companion_state(1, FaultClass::Caution)) == "1");
 
-    // ── The scenario #209 asks to be replayed: 00 -> U4 -> 00
+    // ── The scenario legacy-209 asks to be replayed: 00 -> U4 -> 00
     // ───────────────────────────────────── The textual code keeps its type through the whole
     // sequence (an alphanumeric code cannot become a number), and the numeric flag moves 0 -> 1 ->
     // 0 beside it, so an alert on the flag fires where an alert on the code could not.
@@ -16378,8 +16986,8 @@ static void test_fault_state() {
     }
 }
 
-// ── The run-time raw-page capture cadence (logic/raw_capture.hpp) — #194's decisive experiment
-// ────
+// ── The run-time raw-page capture cadence (logic/raw_capture.hpp) — legacy-194's decisive
+// experiment ────
 static void test_raw_capture() {
     logic::RawCaptureState s;
     const int64_t          sec = 1000000;
@@ -16818,6 +17426,7 @@ int main() {
     test_mqtt_base();
     test_mqtt_uri();
     test_modbus();
+    test_modbus_profile();
     test_modbus_plan();
     test_modbus_snapshot();
     test_homehub();

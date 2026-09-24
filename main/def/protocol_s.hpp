@@ -1,13 +1,15 @@
 #pragma once
 // Profile definition for Daikin Protocol S devices (legacy/older models).
-// S replies use fixed-length payloads per register rather than dynamic lengths.
+// Protocol S uses fixed-length responses and page queries 0x50, 0x53, 0x54, 0x55, 0x56.
+// UNVERIFIED — reconstructed from public reference definitions; no capture from a real unit in this repository.
+// Missing evidence: one telemetry capture from a physical Protocol S unit.
 #include "../logic/value_def.hpp"
 
 namespace daik::def {
 
 inline constexpr ValueDef protocol_s[] = {
-    {0x50, 0, 103, 2, 2, "HP Sensor(kgcm2)"},
-    {0x50, 2, 103, 2, 2, "LP Sensor(kgcm2)"},
+    {0x50, 0, 103, 2, 2, "HP Sensor(bar)"},
+    {0x50, 2, 103, 2, 2, "LP Sensor(bar)"},
     {0x53, 0, 152, 2, -1, "EV (pls)"},
     {0x53, 2, 164, 1, -1, "Outdoor Fan (Upper)(rps)"},
     {0x53, 3, 164, 1, -1, "Outdoor Fan (Lower)(rps)"},
@@ -24,8 +26,8 @@ inline constexpr ValueDef protocol_s[] = {
     {0x54, 6, 103, 2, 1, "Outdoor heat exchanger temp.(C)"},
     {0x54, 8, 109, 2, 1, "Discharge pipe temp.(C)"},
     {0x54, 10, 103, 2, 1, "Fin Temp.(C)"},
-    {0x54, 12, 312, 1, 1, "Delta-Tr(deg)"},
-    {0x54, 13, 211, 1, 1, "R/C Setpoint(C)"},
+    {0x54, 12, 312, 1, -1, "Delta-Tr(deg)"},
+    {0x54, 13, 200, 1, -1, "R/C Setpoint(C)"},
     {0x55, 0, 201, 1, -1, "Operation Mode"},
     {0x55, 1, 204, 1, -1, "Error Code"},
     {0x55, 2, 204, 1, -1, "Thermo Off Error"},

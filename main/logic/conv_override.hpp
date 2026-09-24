@@ -20,21 +20,23 @@
 // value, it asserts a different one — so the evidentiary bar is correspondingly higher: a rule
 // needs evidence that is STRUCTURAL (a property of the wire integers themselves), not merely a
 // physical range that looks nicer. Fitting a scale to make a number plausible is exactly how
-// #35-#39 shipped.
+// legacy-35–legacy-39 shipped.
 //
 // ── The one entry: Target Evap. Temp. (0x10/6), conv 114 -> conv 109 ─────────────────────────────
 //
-// #194 opened this as "conv 114 x0.1 publishes 145.9-199.6 °C mid-run — physically impossible, but
-// spec-conformant and audit-clean", ruled out every non-scale explanation (converter id vs
-// docs/REGISTERS.md §5, catalog drift, byte offset, endianness, width — see the issue's table), and
-// stopped at TWO surviving scale hypotheses it could not separate: x0.01 and /128. It called for
-// run-time wire bytes as the decisive experiment, and #213 built logic/raw_capture.hpp to get them.
+// legacy-194 opened this as "conv 114 x0.1 publishes 145.9-199.6 °C mid-run — physically
+// impossible, but spec-conformant and audit-clean", ruled out every non-scale explanation
+// (converter id vs docs/REGISTERS.md §5, catalog drift, byte offset, endianness, width — see the
+// issue's table), and stopped at TWO surviving scale hypotheses it could not separate: x0.01 and
+// /128. It called for run-time wire bytes as the decisive experiment, and legacy-213 built
+// logic/raw_capture.hpp to get them.
 //
 // The wire integers turned out to be recoverable WITHOUT that capture, which is why this can be
 // settled now: conv 114 publishes `raw * 0.1` and display_decimals(114) == 1, so the published
-// string carries the 16-bit register EXACTLY — `raw = published * 10`, no information lost. #194
-// assumed otherwise ("back-derived from a value already rounded to one decimal"); that assumption
-// is what kept the issue open. Every value this row has ever published is therefore a wire sample.
+// string carries the 16-bit register EXACTLY — `raw = published * 10`, no information lost.
+// legacy-194 assumed otherwise ("back-derived from a value already rounded to one decimal"); that
+// assumption is what kept the issue open. Every value this row has ever published is therefore a
+// wire sample.
 //
 // Combining the stored VictoriaMetrics series (run-time, 46 distinct integers) with the boot-time
 // page dumps replayed to syslog (at rest, 8 distinct integers) gives 54 distinct wire integers:
@@ -47,8 +49,8 @@
 // ALL 54 satisfy `raw == floor(128 * T)` for T on an exact 0.1 K grid. That is the decisive fact,
 // and it is structural rather than physical: the set {floor(12.8k)} has density 1/12.8 among the
 // integers, so a row whose scale is anything else hits it with probability ~0.078 per sample —
-// 54/54 is p ~ 1.6e-60. x0.01 (#194's preferred candidate, chosen because 24.06 °C at rest "looked
-// like ambient") has no such structure: it reads 22.01, 22.14, 22.40, 23.04 … — arbitrary
+// 54/54 is p ~ 1.6e-60. x0.01 (legacy-194's preferred candidate, chosen because 24.06 °C at rest
+// "looked like ambient") has no such structure: it reads 22.01, 22.14, 22.40, 23.04 … — arbitrary
 // two-decimal numbers with no underlying grid.
 //
 // The physical reading that falls out is a textbook evaporating temperature, and the run values
@@ -62,9 +64,10 @@
 // WHY conv 109 AND NOT A NEW CONVERTER — 109 already exists in logic/convert.hpp as
 // `read_s16(LE) / 256.0 * 2.0`, i.e. exactly /128, and display_decimals() already gives it one
 // decimal. Nothing in the decode path is invented here; this row was simply pointed at 114. The
-// defect is therefore the #35-#39 shape exactly — a wrong converter ID on a right register — and
-// not, as #194 feared it might be, a wrong converter IMPLEMENTATION whose correction would move
-// every conv-114 row in the catalog. conv 114 keeps its x0.1 semantics untouched.
+// defect is therefore the legacy-35–legacy-39 shape exactly — a wrong converter ID on a right
+// register — and not, as legacy-194 feared it might be, a wrong converter IMPLEMENTATION whose
+// correction would move every conv-114 row in the catalog. conv 114 keeps its x0.1 semantics
+// untouched.
 //
 // WHAT THIS DELIBERATELY DOES NOT TOUCH — the three other conv-114 "Target …" rows
 // (Target Cond. Temp. 0x10/8, Target Discharge Temp. 0xA1/5, Target port temperature 0xA1/7). It is
@@ -98,7 +101,8 @@ struct ConvOverride {
 
 inline constexpr ConvOverride CONV_OVERRIDES[] = {
     {0x10, 6, 114, 109,
-     "#194: 54/54 distinct wire integers satisfy raw==floor(128*T) on a 0.1 K grid (p~1.6e-60)"},
+     "legacy-194: 54/54 distinct wire integers satisfy raw==floor(128*T) on a 0.1 K grid "
+     "(p~1.6e-60)"},
 };
 
 inline constexpr size_t CONV_OVERRIDE_COUNT = sizeof(CONV_OVERRIDES) / sizeof(CONV_OVERRIDES[0]);

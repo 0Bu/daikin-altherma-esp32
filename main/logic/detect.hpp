@@ -13,7 +13,16 @@
 #include <cstring>
 #include <string>
 
+#include "crc.hpp"
+
 namespace daik {
+
+// True when a reply failure is due to actual frame corruption or transport error rather than
+// an unpopulated/unsupported register (timeout/NoReply or affirmative NAK/Rejected).
+inline constexpr bool is_transport_error(HpReplyKind kind) {
+    return kind == HpReplyKind::ShortReply || kind == HpReplyKind::BadCrc ||
+           kind == HpReplyKind::UnexpectedReply || kind == HpReplyKind::InvalidLength;
+}
 
 // A register page maps to one bit of a 32-bit page mask. Only pages that a value profile can
 // reference participate — 0x11 (O/U EEPROM) is probed for its digits but deliberately NOT in the
@@ -67,15 +76,25 @@ inline uint32_t page_mask_bit(uint8_t reg) {
     return b < 0 ? 0u : (1u << b);
 }
 
+// Model profile selection for Protocol S. Returns "protocol_s" if any Protocol S page answered,
+// or nullptr if no Protocol S page matched.
+inline const char* detect_profile_for_protocol_s(uint32_t page_mask) {
+    const uint32_t s_pages = page_mask_bit(0x50) | page_mask_bit(0x53) | page_mask_bit(0x54) |
+                             page_mask_bit(0x55) | page_mask_bit(0x56);
+    if ((page_mask & s_pages) != 0) {
+        return "protocol_s";
+    }
+    return nullptr;
+}
+
 // The unit facts gathered from the bus (filled by hp_detect.cpp).
 struct Fingerprint {
     uint32_t page_mask = 0;  // one bit per answering page (page_bit)
     int      kw_tenths = -1; // O/U capacity in 0.1 kW; -1 = unknown / not reported
     int iu_kw_tenths   = -1; // I/U capacity code (reg 0x60 off 6, same kW×10 units); -1 = unknown.
                              // FALLBACK capacity when the O/U 0x00 descriptor is too short to
-                             // carry offset 12 (a smaller unit) -> kw_tenths stays -1. Used only
-                             // to RANK the representative (detect_best), never to exclude a
-                             // candidate, since indoor≈outdoor capacity is an approximation.
+                             // carry offset 12 (a smaller unit) -> kw_tenths stays -1. Used via
+                             // detect_capacity() to filter candidates and rank the representative.
     uint8_t eeprom[6] = {0}; // O/U EEPROM digits (page 0x11 offsets 0..5)
     bool    eeprom_ok = false;
 };
@@ -153,9 +172,10 @@ inline bool signature_consistent(const Signature& sig, const Fingerprint& fp) {
 // The capacity the detect_* rules narrow and rank by: the O/U figure when the unit reported it,
 // else the I/U capacity code as an approximate fallback. ONE accessor because detect_candidates
 // (which set) and detect_best (which representative) must answer from the same number — they did
-// not, and that is #225: the fallback ranked the pick while the SET ignored it, so /status reported
-// 8 candidates across 4 families — including 14-16 kW models — on an 8 kW unit whose representative
-// had long since been constrained to the 4-8 kW class. Narrowed, that live set is 5 across 3.
+// not, and that is legacy-225: the fallback ranked the pick while the SET ignored it, so /status
+// reported 8 candidates across 4 families — including 14-16 kW models — on an 8 kW unit whose
+// representative had long since been constrained to the 4-8 kW class. Narrowed, that live set is 5
+// across 3.
 inline int detect_capacity(const Fingerprint& fp) {
     return (fp.kw_tenths >= 0) ? fp.kw_tenths : fp.iu_kw_tenths;
 }
@@ -174,8 +194,8 @@ inline bool signature_kw_contains(const Signature& sig, int cap) {
 // that merely happen to be a subset of a feature-rich unit. Fills out[] with up to `max` candidate
 // ids (in signature order) and returns the total candidate count (which may exceed `max`).
 //
-// Then a THIRD filter, for the case this function used to answer too broadly (#225): when the O/U
-// capacity is unknown, signature_consistent applies no kW filter at all, so the set spans kW
+// Then a THIRD filter, for the case this function used to answer too broadly (legacy-225): when the
+// O/U capacity is unknown, signature_consistent applies no kW filter at all, so the set spans kW
 // classes — and the header's own contract ("register-equivalent only when the capacity is known")
 // is voided exactly there. The I/U capacity code is available in that state and detect_best already
 // RANKS by it; here it EXCLUDES, under exactly the rule signature_consistent applies to the O/U
@@ -241,28 +261,28 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 // tightest kW class that still contains the capacity (a narrow rated class beats a broad one, and a
 // classed profile beats a class-less one); (3) the LOWEST PROFILE ID, lexicographically.
 //
-// WHY THE LAST ONE IS AN ID AND NOT "FIRST IN SIGNATURE ORDER" (#230 B). Signature order is
+// WHY THE LAST ONE IS AN ID AND NOT "FIRST IN SIGNATURE ORDER" (legacy-230 B). Signature order is
 // registry order, which is the order the tables happen to sit in def/registry.hpp — an incidental
 // fact about a file, not a fact about heat pumps. A label is an identifier (ha_slug -> the HA
 // entity id + the VictoriaMetrics series suffix, logic/discovery.hpp), so when the tie-break moves,
 // a live series STOPS and a new one starts at zero — read downstream as the plant going quiet
-// rather than as a rename (#180/#217). Keying that on file order means adding, removing or
-// REORDERING a profile — none of them a suspicious act — silently reassigns identifiers. Measured
-// over the 39 detectable profiles across every (page mask x capacity x capacity-source) fingerprint
-// a real unit can present: permuting the registry moves the published identity on 11275 of 200x336
-// trials, over 90 distinct identifiers. The id is intrinsic to the profile, so the same tie
-// resolves the same way whatever order the registry is written in — and the permutation test
+// rather than as a rename (legacy-180/legacy-217). Keying that on file order means adding, removing
+// or REORDERING a profile — none of them a suspicious act — silently reassigns identifiers.
+// Measured over the 39 detectable profiles across every (page mask x capacity x capacity-source)
+// fingerprint a real unit can present: permuting the registry moves the published identity on 11275
+// of 200x336 trials, over 90 distinct identifiers. The id is intrinsic to the profile, so the same
+// tie resolves the same way whatever order the registry is written in — and the permutation test
 // asserts exactly that (test_tie_break_order_independence). It also costs nothing to adopt: on all
 // 336 fingerprints the pick is UNCHANGED (0 identifiers move), so no installed device re-labels
 // anything.
 //
 // This is deliberately NOT a better GUESS. Which of two bus-identical models a unit really is
 // cannot be known from bus data, and preferring (say) the majority spelling would assert a model on
-// no evidence — the mistake #230 names by name. It only makes the arbitrary choice STABLE. Two
-// rules that were measured and rejected: preferring the profile that publishes FEWEST identifiers
-// moves 13 identifiers on 8 fingerprints (it switches product families for no evidentiary gain),
-// and preferring an EXACT page-mask match changes nothing at all on any of the 336 (an inert rule
-// that would read like a guarantee while doing nothing).
+// no evidence — the mistake legacy-230 names by name. It only makes the arbitrary choice STABLE.
+// Two rules that were measured and rejected: preferring the profile that publishes FEWEST
+// identifiers moves 13 identifiers on 8 fingerprints (it switches product families for no
+// evidentiary gain), and preferring an EXACT page-mask match changes nothing at all on any of the
+// 336 (an inert rule that would read like a guarantee while doing nothing).
 //
 // WHAT A TIE ACTUALLY MEANS — and this is NOT the "register-identical, so it cannot matter" that
 // stood here before. The tie is on the page COUNT and the class SPAN, both coarser than the row
@@ -283,9 +303,10 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 // and criterion (2) is a no-op; the fallback only ever moves the pick for units that don't report
 // O/U capacity.
 //
-// detect_candidates now applies that SAME fallback as a filter (#225), through the same two helpers
-// rather than a second copy of the arithmetic — so the reported set and this pick are constrained
-// by one rule, and this function's answer is unchanged by that filter (see its comment).
+// detect_candidates now applies that SAME fallback as a filter (legacy-225), through the same two
+// helpers rather than a second copy of the arithmetic — so the reported set and this pick are
+// constrained by one rule, and this function's answer is unchanged by that filter (see its
+// comment).
 inline const char* detect_best(const Signature* sigs, int nsig, const Fingerprint& fp) {
     const int   cap      = detect_capacity(fp);
     const char* best     = nullptr;
@@ -332,7 +353,7 @@ inline void eeprom_render(const uint8_t* b, int n, char* out, int outsz) {
 // single page bit missing from the fingerprint can make EVERY profile inconsistent — and the caller
 // then reads with `generic`, which carries 53 rows instead of ~99 and has no leaving-water
 // measurement, no compressor speed and no pressures at all. Measured against the shipped
-// signatures, that is the outcome for 8 of the 12 fingerprint pages (#214).
+// signatures, that is the outcome for 8 of the 12 fingerprint pages (legacy-214).
 //
 // The page probe already retries, so a page that is genuinely there almost never goes missing. What
 // this rule adds is the second line: an empty candidate set is not acted on until a SEPARATE sweep
@@ -353,10 +374,10 @@ inline constexpr bool detect_commit_no_match(int consecutive_no_match) {
 }
 
 // ── Incomplete sweeps: when a page dropped due to transport errors, do not jump models
-// ───────────── When a page fails to answer due to timeouts or CRC errors (rather than an
-// affirmative NAK), the reduced fingerprint can match a smaller/different profile family (e.g.
-// Monobloc -> Geo3). An incomplete sweep must be corroborated across consecutive passes before
-// committing.
+// ───────────── When a page fails to answer due to transport errors such as CRC errors or
+// frame corruption (rather than an absent register / timeout or affirmative NAK), the reduced
+// fingerprint can match a smaller/different profile family (e.g. Monobloc -> Geo3). An incomplete
+// sweep must be corroborated across consecutive passes before committing.
 inline constexpr int DETECT_INCOMPLETE_CONFIRMATIONS = 2;
 
 inline constexpr bool detect_commit_incomplete(int consecutive_incomplete) {

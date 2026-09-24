@@ -1,10 +1,10 @@
 #pragma once
-// Boot-loop safe-mode decision logic (issue #6) — IDF-free, host-tested. A bad *config* (most
+// Boot-loop safe-mode decision logic (issue legacy-6) — IDF-free, host-tested. A bad *config* (most
 // plausibly wrong RX/TX pins, but any setting that crashes a background task at start-up) can wedge
-// the device in a reboot loop whose only exit today is `esptool erase_flash` over USB — breaking the
-// project's "recover everything from the web UI" promise. This counts CRASH-only boots in NVS and,
-// once a threshold is crossed, lets the device come up MINIMALLY (network + web UI + OTA, no poll /
-// MQTT) so the offending config can be fixed remotely.
+// the device in a reboot loop whose only exit today is `esptool erase_flash` over USB — breaking
+// the project's "recover everything from the web UI" promise. This counts CRASH-only boots in NVS
+// and, once a threshold is crossed, lets the device come up MINIMALLY (network + web UI + OTA, no
+// poll / MQTT) so the offending config can be fixed remotely.
 //
 // This is a DIFFERENT failure class from the OTA rollback health-gate: that recovers a bad signed
 // *image* and only arms after an update; it can't help a config crash-loop because both OTA slots

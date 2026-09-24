@@ -380,7 +380,7 @@ jobs:
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
       # verify the logic they are handed; they cannot see a well-formed value that is simply
       # false — a wrong converter compiles, passes them all, and publishes -971.5 °C to Home
-      # Assistant (issues #35-#39). This runs the real converters over the real catalog against
+      # Assistant (issues legacy-35–legacy-39). This runs the real converters over the real catalog against
       # docs/REGISTERS.md. The human half of the gate is the $domain-review skill + its PR
       # checkbox; this is the mechanical half.
       - name: Audit the value catalog
@@ -454,7 +454,7 @@ jobs:
       # same quantity several ways across models. A wrong id errors NOWHERE: HA builds the template
       # sensor, its availability guard never becomes true, and it sits at `unavailable`, which reads
       # as "my heat pump doesn't support this" rather than as a typo in the docs. Shipped that way
-      # since #206 — the heat-meter recipe named one id that was never a valid slug and one that
+      # since legacy-206 — the heat-meter recipe named one id that was never a valid slug and one that
       # exists only on the host-test FIXTURE profile detection can never assign. C++ host compiler
       # only, seconds long.
       - name: Audit the entity ids quoted in the docs
@@ -479,7 +479,7 @@ jobs:
       #
       # What the old arrangement cost is measurable rather than theoretical: with the recording's
       # currency nobody's merge condition, the README went stale ONE merge after it was last made
-      # (#462 swapped the schematic's circuits on 2026-08-13, against a stamp written the same day),
+      # (legacy-462 swapped the schematic's circuits on 2026-08-13, against a stamp written the same day),
       # and no gate anywhere could say so. The judgement half — are the nine operating scenes still
       # true, are the readings still honest — remains the canonical $ui-gif skill's, now a merge
       # gate of its own.
@@ -896,7 +896,7 @@ jobs:
       # The cache key must change when the cached objects go stale — and NOT otherwise. It used to
       # be hashFiles('.github/workflows/build.yml', 'sdkconfig.defaults'), i.e. the hash of this
       # WHOLE FILE, so every edit to this workflow threw the cache away. Most edits to it change no
-      # build input at all: PR #189 deleted a two-line comment and paid a full cold compile (~3 of
+      # build input at all: legacy-189 deleted a two-line comment and paid a full cold compile (~3 of
       # the build job's ~5 minutes) for it, and this file is edited often.
       #
       # What actually invalidates the objects is the TOOLCHAIN (esp_idf_version, which decides the

@@ -56,8 +56,8 @@ struct Trend {
     char             label[kLabelMax] = {0};
     // The row's OWN unit, captured with the label — never assumed to be °C. The catalog mixes them
     // freely (bar for the two pressures, none at all for flow/rps/pump, where the unit lives in the
-    // label text), and a chart whose range readout and crosshair print "°C" over a bar series is the
-    // #35-#39 shape: well-formed, plausible, wrongly labelled.
+    // label text), and a chart whose range readout and crosshair print "°C" over a bar series is
+    // the legacy-35–legacy-39 shape: well-formed, plausible, wrongly labelled.
     char             unit[8] = {0};
 };
 
@@ -310,11 +310,12 @@ inline void advance_raster_locked(int64_t now_us, uint32_t bucket) {
         }
     } else if (bucket > s_bucket) {
         // `>`, not `!=`. Both callers read the clock and compute the bucket BEFORE taking s_mtx, so
-        // if the other task crosses a five-minute boundary inside that window the loser arrives with
-        // a bucket BEHIND the raster. history_skipped() correctly answers 0 there, but commit(0)
-        // still ran: every ring took a spurious NO_READING sample and s_bucket moved BACKWARDS,
-        // skewing the whole time axis by one slot and making history_newest_age_s() read from an
-        // older instant. Only reachable since #367 gave the raster a second, independent advancer.
+        // if the other task crosses a five-minute boundary inside that window the loser arrives
+        // with a bucket BEHIND the raster. history_skipped() correctly answers 0 there, but
+        // commit(0) still ran: every ring took a spurious NO_READING sample and s_bucket moved
+        // BACKWARDS, skewing the whole time axis by one slot and making history_newest_age_s() read
+        // from an older instant. Only reachable since legacy-367 gave the raster a second,
+        // independent advancer.
         const uint32_t skipped = logic::history_skipped(s_bucket, bucket);
         for (auto& tr : P().ring) tr.ring.commit(skipped);
         s_persist_dirty = true;

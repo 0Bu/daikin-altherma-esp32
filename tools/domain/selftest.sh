@@ -4,7 +4,7 @@
 # A checker that has quietly stopped checking is worse than no checker — it converts "the audit is
 # clean" from evidence into a lie, and this gate exists precisely because plausible-but-wrong
 # passes unnoticed. So every defect this gate was built to catch — the four decode bugs that actually
-# shipped on main (issues #35-#38), the mislabelled fan step of #230, and enum-table drift — is
+# shipped on main (issues legacy-35–legacy-38), the mislabelled fan step of legacy-230, and enum-table drift — is
 # re-introduced here, one at a time, into a THROWAWAY COPY. Each must be caught. The working tree is
 # never touched.
 #
@@ -140,9 +140,9 @@ run_logic_case() {
 
 echo "domain-audit selftest — re-introducing the defects this gate was built to catch"
 
-# #35 — "Mixed water temp." decoded signed-LE x0.1 (conv 105) instead of signed-BE x0.01 (118).
+# legacy-35 — "Mixed water temp." decoded signed-LE x0.1 (conv 105) instead of signed-BE x0.01 (118).
 #       Shipped in 8 profiles; published -971.5 °C for a real 35.46 °C.
-run_case "#35 mixed-water conv 105 (was 118)" "altherma_lt_da_04_08kw.hpp" \
+run_case "legacy-35 mixed-water conv 105 (was 118)" "altherma_lt_da_04_08kw.hpp" \
     "SPEC-CONV" "Mixed water temp." '
 import os
 p=os.environ["FILE"]; s=open(p).read()
@@ -151,9 +151,9 @@ assert old in s, "row not found"
 open(p,"w").write(s.replace(old,"{0x64, 10, 105, 2, 1, \"Mixed water temp.\"}"))
 '
 
-# #36 — bizone mix-valve POSITION read as a 2-byte unsigned BE and typed °C, so Home Assistant
+# legacy-36 — bizone mix-valve POSITION read as a 2-byte unsigned BE and typed °C, so Home Assistant
 #       got a phantom temperature sensor reading 12800 °C for a real 50 % valve position.
-run_case "#36 M1S valve as °C temperature" "altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw.hpp" \
+run_case "legacy-36 M1S valve as °C temperature" "altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw.hpp" \
     "SEMANTICS" "valve position M1S" '
 import os
 p=os.environ["FILE"]; s=open(p).read()
@@ -162,9 +162,9 @@ assert old in s, "row not found"
 open(p,"w").write(s.replace(old,"{0x65, 0, 152, 2, 1, \"[EKMIK] Bizone kit mix valve position M1S\"}"))
 '
 
-# #37 — expansion-valve row widened to size 2 at offset 2, swallowing the Fan 2 byte: Fan 2 lost,
+# legacy-37 — expansion-valve row widened to size 2 at offset 2, swallowing the Fan 2 byte: Fan 2 lost,
 #       valve count fabricated from two unrelated bytes (11267 pls for a real 300).
-run_case "#37 expansion valve swallows Fan 2" "altherma_lt_11_16kw_hydrosplit_hydro_unit.hpp" \
+run_case "legacy-37 expansion valve swallows Fan 2" "altherma_lt_11_16kw_hydrosplit_hydro_unit.hpp" \
     "SPEC-LAYOUT" "Expansion valve (pls)" '
 import os
 p=os.environ["FILE"]; s=open(p).read()
@@ -174,9 +174,9 @@ assert old in s, "rows not found"
 open(p,"w").write(s.replace(old,"""    {0x30, 2, 151, 2, -1, "Expansion valve (pls)"},  // default_on"""))
 '
 
-# #38 — target temps on conv 105 instead of 114: identical math, but 114 treats raw 0x8000 as
+# legacy-38 — target temps on conv 105 instead of 114: identical math, but 114 treats raw 0x8000 as
 #       "no data". On 105 an idle unit publishes -3276.8 °C as a real reading.
-run_case "#38 target temp ignores no-data sentinel" "altherma_lt_da_04_08kw.hpp" \
+run_case "legacy-38 target temp ignores no-data sentinel" "altherma_lt_da_04_08kw.hpp" \
     "SPEC-CONV" "Target Evap. Temp." '
 import os
 p=os.environ["FILE"]; s=open(p).read()
@@ -185,12 +185,12 @@ assert old in s, "row not found"
 open(p,"w").write(s.replace(old,"{0x10, 6, 105, 2, 1, \"Target Evap. Temp.\"}"))
 '
 
-# #230 — a fan STEP spelled as a RATE. The row decodes correctly and sits at the documented offset
+# legacy-230 — a fan STEP spelled as a RATE. The row decodes correctly and sits at the documented offset
 #        with the documented converter, so every other check is satisfied; what is false is the
 #        UNIT inside the label, which ha_slug() turns into the published identifier. Seeded on
 #        offset 2 (Fan 2) rather than the four live "Fan 1 (10 rpm)" rows, because those are on
 #        record in audit_exceptions.txt and a self-test must not depend on a suppressed finding.
-run_case "#230 fan step spelled as a rate" "altherma_ebla_edla_d_series_9_16kw_monobloc.hpp" \
+run_case "legacy-230 fan step spelled as a rate" "altherma_ebla_edla_d_series_9_16kw_monobloc.hpp" \
     "LABEL-UNIT" "Fan 2 (rps)" '
 import os
 p=os.environ["FILE"]; s=open(p).read()
