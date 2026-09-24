@@ -1413,6 +1413,7 @@ def stress_board(
     last_ready_uptime = initial_uptime
     while True:
         mqtt_connected = started.get("mqtt", {}).get("connected")
+        hp = started.get("hp", {})
         fetching: bool | None = False
         if require_weather:
             weather_state = started.get("weather_forecast")
@@ -1420,10 +1421,13 @@ def stress_board(
             if not isinstance(fetching, bool):
                 fail(f"{host} weather status has no boolean fetching state")
         if mqtt_connected is True and (not require_weather or fetching is False):
-            break
+            if not require_x10a or (hp.get("connected") is True and int(hp.get("values", 0)) > 0):
+                break
         if time.monotonic() >= ready_deadline:
             if mqtt_connected is not True:
                 fail(f"{host} MQTT did not connect before the pressure window")
+            if require_x10a and (not hp.get("connected") or int(hp.get("values", 0)) <= 0):
+                fail(f"{host} X10A did not connect or deliver values before the pressure window")
             fail(f"{host} weather did not become idle before its HIL refresh")
         time.sleep(0.1)
         try:
