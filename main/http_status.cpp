@@ -303,11 +303,11 @@ using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 // No count here on purpose: this file IS the set (every jstr_r below is one member), and stating
 // how many would be the sixth restatement of a number that had already drifted in four places.
 //
-// broadcaster), and that second runner is what overflowed hp_poll's stack (legacy-241). GET /status now
-// instantiates this serializer with a 1 KiB bounded sink: the live payload is already ~8.7 KiB and a
-// growing whole-body std::string needed a ~15 KiB contiguous reallocation under OTA/weather TLS,
-// making the shared OOM guard return 503. MCP get_status now streams its small JSON-RPC prefix and
-// suffix around the same bounded serializer too. This serializer still takes ordinary small
+// broadcaster), and that second runner is what overflowed hp_poll's stack (legacy-241). GET /status
+// now instantiates this serializer with a 1 KiB bounded sink: the live payload is already ~8.7 KiB
+// and a growing whole-body std::string needed a ~15 KiB contiguous reallocation under OTA/weather
+// TLS, making the shared OOM guard return 503. MCP get_status now streams its small JSON-RPC prefix
+// and suffix around the same bounded serializer too. This serializer still takes ordinary small
 // snapshots and formats temporary strings. If one of those allocations fails before the first
 // emission, the shared guard can return 503; once an emission is attempted
 // the bounded-stream helper returns ESP_FAIL so httpd closes a possibly-started response instead of
@@ -538,7 +538,8 @@ static void append_status_json(JsonOut& j, bool redact) {
              // Sticky until the next POST /set_wifi, because a rollback leaves no other trace: the
              // reboot it takes wipes the diag ring and the card just shows the old SSID again. The
              // dashboard does not render this yet (a banner lands with the web-UI write-feedback
-             // work, PR legacy-65) — for now it is the API's answer to "did my save actually stick?".
+             // work, PR legacy-65) — for now it is the API's answer to "did my save actually
+             // stick?".
              ",\"rolled_back\":" + std::string(c.wifi_rolled_back ? "true" : "false") + "},";
         // WHICH TRANSPORT carries the device, and what the optional wire is doing. A separate block
         // from "wifi" rather than a widening of it, because the two describe different hardware and
@@ -1120,12 +1121,13 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += jstr(c.profile);
     j += "},";
 
-    // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A link
-    // reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task exists;
-    // `host` is the active target; empty after `searched:true` means persistently disabled. Manual
-    // discovery is request-local and never appears here as a runtime mode. The link is READ-ONLY:
-    // there is no actuator object and no actuation flag, because the write path was removed (legacy-294).
-    // Successive += with bare literals — the httpd-stack rule the rest of this builder follows.
+    // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A
+    // link reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task
+    // exists; `host` is the active target; empty after `searched:true` means persistently disabled.
+    // Manual discovery is request-local and never appears here as a runtime mode. The link is
+    // READ-ONLY: there is no actuator object and no actuation flag, because the write path was
+    // removed (legacy-294). Successive += with bare literals — the httpd-stack rule the rest of
+    // this builder follows.
     const ModbusStatus mb = mb_status();
     j += "\"modbus\":{\"enabled\":";  j += mb.enabled ? "true" : "false";
     j += ",\"connected\":";            j += mb.connected ? "true" : "false";
@@ -1528,9 +1530,9 @@ static void append_status_json(JsonOut& j, bool redact) {
     // block exists to prevent. 0 on any ordinary boot. Small numbers + a short slug appended to the
     // existing builder — no large contiguous allocation, and nothing here is a `+` chain.
     //
-    // Beside them, what that headroom already COST while the board DID survive (legacy-380): cycles the
-    // two 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches — a
-    // reading dropped, or (poll) never read at all; mqtt_quiesced is the publisher standing aside
+    // Beside them, what that headroom already COST while the board DID survive (legacy-380): cycles
+    // the two 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches —
+    // a reading dropped, or (poll) never read at all; mqtt_quiesced is the publisher standing aside
     // on purpose while an OTA/weather TLS operation owns the heap (logic/ota_quiesce.hpp), the same
     // gap with a stated cause. The three of them complete the sequence the two figures above start:
     // min_free_heap says how close the board came, these say what it lost getting there, and
@@ -1898,12 +1900,13 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
             if (const char* sid = logic::binary_semantic_for(v[i].reg, v[i].off, v[i].conv))
                 { j += ",\"binary_semantic\":"; json_append_quoted(j, sid); }
         }
-        // The DEVICE's own answer to "is this reading still current?" — logic/ou_stale.hpp applied on
-        // the poll task (legacy-209 defect 5), emitted only when true so the many live rows cost no bytes.
-        // The browser still derives the same fact from `reg` + the compressor row, and the catalog
-        // test gates both against every profile; this is here so a non-browser consumer of /values
-        // (a script, the MCP surface) gets the answer without reimplementing the rule, and so the
-        // marker travels with the row rather than being recomputed from a snapshot taken elsewhere.
+        // The DEVICE's own answer to "is this reading still current?" — logic/ou_stale.hpp applied
+        // on the poll task (legacy-209 defect 5), emitted only when true so the many live rows cost
+        // no bytes. The browser still derives the same fact from `reg` + the compressor row, and
+        // the catalog test gates both against every profile; this is here so a non-browser consumer
+        // of /values (a script, the MCP surface) gets the answer without reimplementing the rule,
+        // and so the marker travels with the row rather than being recomputed from a snapshot taken
+        // elsewhere.
         if (v[i].held) j += ",\"held\":true";
         // HOW LONG THIS STATE HAS STOOD (logic/state_dwell.hpp). Emitted only for the switched rows
         // the table tracks, so the ~65 measurement rows cost no bytes — the same rule `binary`,

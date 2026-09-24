@@ -148,13 +148,14 @@ struct Config {
     // HTTP reconfiguration cannot publish its old link/model after the new settings landed.
     uint32_t    runtime_revision = 0;
 
-    // ── The HomeHub Modbus stack — PERSISTED (issue legacy-32) ─────────────────────────────────────────
-    // A SECOND, INDEPENDENT source, not an alternative to the X10A link above. The two share no
-    // wire, no framing, no register model and no failure mode, so they run as separate tasks with
-    // separate caches and separate link states (docs/MODBUS_PROTOCOL.md): X10A keeps working when
-    // the LAN is down, and the HomeHub keeps reporting when the service cable is out. There is
-    // deliberately NO "which transport" selector — that would model an exclusivity the hardware
-    // does not have, and it is what an earlier revision of this got wrong.
+    // ── The HomeHub Modbus stack — PERSISTED (issue legacy-32)
+    // ───────────────────────────────────────── A SECOND, INDEPENDENT source, not an alternative to
+    // the X10A link above. The two share no wire, no framing, no register model and no failure
+    // mode, so they run as separate tasks with separate caches and separate link states
+    // (docs/MODBUS_PROTOCOL.md): X10A keeps working when the LAN is down, and the HomeHub keeps
+    // reporting when the service cable is out. There is deliberately NO "which transport" selector
+    // — that would model an exclusivity the hardware does not have, and it is what an earlier
+    // revision of this got wrong.
     //
     // The configured HomeHub address. A fresh device starts with discovery_done=false and performs
     // one bounded automatic search on its first networked boot. The result is then persistent even
@@ -427,11 +428,12 @@ inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 
 }
 
 // ── What POST /set_board actually has to DO ─────────────────────────────────────────────────────
-// TWO independent facts can move, and conflating them is what produced legacy-257. The five HARDWARE
-// values decide whether a REBOOT is needed (both are claimed once at task start — the WS2812 opens
-// an RMT channel, the button installs a pull). The explicitly selected preset id decides which board
-// the firmware may name and which vendor-gated accessories it may enable; changing identity without
-// changing hardware needs a SAVE but no reboot. Pure so the combinations are asserted here.
+// TWO independent facts can move, and conflating them is what produced legacy-257. The five
+// HARDWARE values decide whether a REBOOT is needed (both are claimed once at task start — the
+// WS2812 opens an RMT channel, the button installs a pull). The explicitly selected preset id
+// decides which board the firmware may name and which vendor-gated accessories it may enable;
+// changing identity without changing hardware needs a SAVE but no reboot. Pure so the combinations
+// are asserted here.
 //
 // The case that matters is `values same, not yet stated`: a XIAO owner picking "Seeed XIAO" on a
 // device still carrying the Kconfig defaults changes no value, so the old route answered

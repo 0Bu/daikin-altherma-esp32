@@ -50,8 +50,8 @@ static bool proto_answers(Protocol p) {
 // the unit's IDENTITY. One dropped frame clears one page bit for the whole boot, and because
 // signature_consistent() matches on page SUBSET, clearing a bit that every profile references makes
 // them all inconsistent — the unit is then read with `generic` (53 rows, no leaving water, no
-// compressor speed, no pressures). Measured: that is what 8 of the 12 fingerprint pages do (legacy-214).
-// The board this was found on reboots often enough to roll those dice weekly.
+// compressor speed, no pressures). Measured: that is what 8 of the 12 fingerprint pages do
+// (legacy-214). The board this was found on reboots often enough to roll those dice weekly.
 //
 // Cost is bounded and paid only on failure: a page that answers costs one query as before, and the
 // bus was already proven to answer before this loop is reached. Worst case is
@@ -64,9 +64,9 @@ static constexpr int DETECT_PAGE_TRIES = 3;
 // counting them made `retries=` read 3 on a perfectly healthy boot and an operator reading it would
 // reasonably conclude the bus was dropping frames. A diagnostic whose healthy baseline is non-zero
 // trains its reader to ignore it. Now 0 is healthy and any non-zero is a real dropped reply that
-// the retry caught — which is the number worth watching, since that is the failure legacy-214 is about. A
-// page that never answered needs no counter: its bit is already absent from the page mask on the
-// same line.
+// the retry caught — which is the number worth watching, since that is the failure legacy-214 is
+// about. A page that never answered needs no counter: its bit is already absent from the page mask
+// on the same line.
 static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& recovered,
                            HpReplyKind& final_kind, bool& had_transport_error) {
     int last_err = -1;
@@ -204,8 +204,7 @@ DetectResult hp_detect_run() {
         const int     paylen = read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)),
                                                probe_retries, kind, had_transport_error);
         if (paylen < 0) {
-            if (had_transport_error && reg != 0x11 && reg != 0x56)
-                probe_transport_errors++;
+            if (had_transport_error && reg != 0x11 && reg != 0x56) probe_transport_errors++;
             continue;
         }
         if (reg == 0x11) {
@@ -319,22 +318,23 @@ DetectResult hp_detect_run() {
             r.candidates.emplace_back(out[i]);
         // Best-fit representative to actually read with. Deterministic AND order-independent: the
         // final tie-break is the lowest profile id, not the order the tables sit in the registry,
-        // so a reorder cannot silently reassign the entity ids / series this unit publishes (legacy-230
-        // B, measured — see logic/detect.hpp). It does NOT follow that the choice is free where the
-        // ranking ties: the tie is on the page count and the kW-class span, both coarser than the
-        // row tables, so tied candidates need not decode identically (98 of 152 measured ties do
-        // not). When the O/U capacity is absent (short 0x00) the set can still span classes, so
-        // detect_best leans on the I/U capacity fallback to pick the right-class reading profile.
-        // Since legacy-225 detect_candidates narrows by that same fallback, so `out` above no longer
-        // reports models the ranking had already excluded — but the profile READ is still this
-        // line's alone: the set above is a display list, and nothing consumes it to choose a table.
+        // so a reorder cannot silently reassign the entity ids / series this unit publishes
+        // (legacy-230 B, measured — see logic/detect.hpp). It does NOT follow that the choice is
+        // free where the ranking ties: the tie is on the page count and the kW-class span, both
+        // coarser than the row tables, so tied candidates need not decode identically (98 of 152
+        // measured ties do not). When the O/U capacity is absent (short 0x00) the set can still
+        // span classes, so detect_best leans on the I/U capacity fallback to pick the right-class
+        // reading profile. Since legacy-225 detect_candidates narrows by that same fallback, so
+        // `out` above no longer reports models the ranking had already excluded — but the profile
+        // READ is still this line's alone: the set above is a display list, and nothing consumes it
+        // to choose a table.
         if (const char* b = detect_best(sigs, nsig, fp)) r.best = b;
     }
 
     // `retries` is on this line rather than its own: a rising count is the early warning that the
     // page probe is working harder to hold the fingerprint together, which is the condition that
-    // used to change the model silently (legacy-214). It counts only retries that RECOVERED a page, so 0
-    // is the healthy reading and any non-zero is a reply that was actually dropped.
+    // used to change the model silently (legacy-214). It counts only retries that RECOVERED a page,
+    // so 0 is the healthy reading and any non-zero is a reply that was actually dropped.
     diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d iu_kw=%d eeprom=[%s] retries=%d "
                 "transport_err=%d -> %d candidate(s), best=%s\n",
                 static_cast<char>(r.proto), r.rx, r.tx, static_cast<unsigned>(fp.page_mask),

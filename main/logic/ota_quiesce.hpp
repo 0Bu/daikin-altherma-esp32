@@ -3,9 +3,10 @@
 //
 // OTA and Open-Meteo HTTPS are known, bounded, self-inflicted memory events: TLS plus the operation
 // buffer claim the largest contiguous block on a heap whose binding limit IS that block. Measured
-// on the wired board (legacy-380), the MQTT publish task then threw `std::bad_alloc` on its next cycle,
-// the guard caught it and the reading was gone. The first weather fetch also starved the poll
-// snapshot on a cold boot. Nothing crashed; the guards did their job, but data was lost silently.
+// on the wired board (legacy-380), the MQTT publish task then threw `std::bad_alloc` on its next
+// cycle, the guard caught it and the reading was gone. The first weather fetch also starved the
+// poll snapshot on a cold boot. Nothing crashed; the guards did their job, but data was lost
+// silently.
 //
 // So the publisher stands aside while either operation runs. That trades a gap-with-a-`bad_alloc`
 // for a gap-with-a-reason — the same missing second of data, now deliberate, countable (heartbeat

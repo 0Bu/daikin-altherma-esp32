@@ -54,20 +54,21 @@ inline constexpr const char* REDACTED = "<redacted>";
 //   circulation_source.timestamp_path
 //   weather_forecast.latitude  weather_forecast.longitude
 //   syslog.host  ntp.server  modbus.host
-// modbus.host joined the set with the HomeHub transport (legacy-32): it is a LAN address, whether typed
-// manually or filled by the explicit discovery button. The room source's name and topic joined with
-// legacy-62 — a topic is a path through the reporter's own broker and often carries a room or a device
-// name, and the name field is one the user typed. The circulation source follows the same privacy
-// boundary: its Shelly topic normally embeds a device id. mqtt.base joined when the base topic
-// became runtime-settable: it is a word the user typed AND it becomes the installation's Home
-// Assistant device id, so it carries whatever they chose to call their house. Its companion
-// `base_custom` is a bool and stays in the clear — "is this the default?" is diagnostic, the string
-// itself is not. The three net.* fields joined with the optional wired transport: an Ethernet lease
-// is a LAN address exactly like the station's, and the controller's MAC is the same kind of
-// board-identifying value wifi.mac already was — an OUI plus a unique tail. What deliberately stays
-// in the clear beside them is every BOOLEAN and the four SPI pin numbers: "is a cable negotiated",
-// "does this build carry the driver" and "which pads would it use" identify nobody, and they are
-// the first things a triage reader needs from a report filed by a wired board.
+// modbus.host joined the set with the HomeHub transport (legacy-32): it is a LAN address, whether
+// typed manually or filled by the explicit discovery button. The room source's name and topic
+// joined with legacy-62 — a topic is a path through the reporter's own broker and often carries a
+// room or a device name, and the name field is one the user typed. The circulation source follows
+// the same privacy boundary: its Shelly topic normally embeds a device id. mqtt.base joined when
+// the base topic became runtime-settable: it is a word the user typed AND it becomes the
+// installation's Home Assistant device id, so it carries whatever they chose to call their house.
+// Its companion `base_custom` is a bool and stays in the clear — "is this the default?" is
+// diagnostic, the string itself is not. The three net.* fields joined with the optional wired
+// transport: an Ethernet lease is a LAN address exactly like the station's, and the controller's
+// MAC is the same kind of board-identifying value wifi.mac already was — an OUI plus a unique tail.
+// What deliberately stays in the clear beside them is every BOOLEAN and the four SPI pin numbers:
+// "is a cable negotiated", "does this build carry the driver" and "which pads would it use"
+// identify nobody, and they are the first things a triage reader needs from a report filed by a
+// wired board.
 //
 // The COUNT is checked (tools/redact/check_diag_coverage.py derives it from the call sites), which
 // it was not until this comment and that constant had drifted two fields apart in silence. What is

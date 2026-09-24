@@ -238,7 +238,8 @@ inline WeatherValidation weather_validate(const WeatherForecastSample& s,
     if (s.fetched_unix_s < 0 || s.decision_unix_s < 0)
         return fail("missing_timestamp");
     // The features describe the two hours following a decision instant. An adapter may align that
-    // instant to the next hour (the legacy-288 example does), but may not relabel arbitrary later weather.
+    // instant to the next hour (the legacy-288 example does), but may not relabel arbitrary later
+    // weather.
     if (s.decision_unix_s < s.fetched_unix_s - WEATHER_FUTURE_TOLERANCE_S ||
         s.decision_unix_s > s.fetched_unix_s + 60 * 60)
         return fail("invalid_decision_time");

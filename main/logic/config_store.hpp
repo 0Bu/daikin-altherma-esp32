@@ -92,9 +92,10 @@ struct ConfigBlob {
     // decide" with no Kconfig fallback to consult.
     int32_t     ui_lang = 0;
     bool        has_lang = false;   // FALSE when the decoded blob predates v4 (no language byte)
-    // ── v5: the HomeHub Modbus stack (issue legacy-32) ─────────────────────────────────────────────────
-    // Here for the same reason as the board block, the channel and the language: exactly ONE writer
-    // (the httpd task, POST /set_hp), so no self-healing per-key treatment is needed.
+    // ── v5: the HomeHub Modbus stack (issue legacy-32)
+    // ───────────────────────────────────────────────── Here for the same reason as the board
+    // block, the channel and the language: exactly ONE writer (the httpd task, POST /set_hp), so no
+    // self-healing per-key treatment is needed.
     //
     // This is v5 and NOT v4 on purpose: this block and the UI-language byte were developed in
     // parallel and BOTH claimed v4. main's language byte landed first and is already on published
@@ -362,8 +363,9 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_str(v, c.mb_host);
     detail::blob_put_u32(v, static_cast<uint32_t>(c.mb_port));
     detail::blob_put_u32(v, static_cast<uint32_t>(c.mb_unit_id));
-    // Bit0 was the v9 actuation-consent flag. The write path is RETIRED (legacy-294), so it is written
-    // as 0 forever and ignored on decode; the byte itself stays so the blob layout is unchanged.
+    // Bit0 was the v9 actuation-consent flag. The write path is RETIRED (legacy-294), so it is
+    // written as 0 forever and ignored on decode; the byte itself stays so the blob layout is
+    // unchanged.
     v.push_back(static_cast<uint8_t>(!c.mb_host.empty() ? 2 : 0));
     detail::blob_put_str(v, c.ref_temp_name);
     detail::blob_put_str(v, c.ref_temp_topic);
@@ -480,8 +482,8 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         c.mb_port           = static_cast<int32_t>(mb_port);
         c.mb_unit_id        = static_cast<int32_t>(mb_unit_id);
         // Bit0 (v9 actuation consent) is deliberately DISCARDED: the write path it gated no longer
-        // exists (legacy-294). Reading it back would resurrect consent for a capability the firmware has
-        // dropped, so a stored 1 must not survive into any decoded config.
+        // exists (legacy-294). Reading it back would resurrect consent for a capability the
+        // firmware has dropped, so a stored 1 must not survive into any decoded config.
         (void)mb_flags;
         // Keep the legacy member coherent for round-trip diagnostics, but do not let either v5's
         // ambiguous bit or v6's short-lived Auto mode override the current empty-host rule.

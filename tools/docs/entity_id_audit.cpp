@@ -1,10 +1,10 @@
 // Doc entity-id audit — does every Home Assistant entity id the DOCS quote actually exist?
 //
-// The docs hand the reader copy-pasteable YAML: template sensors, automations, a virtual heat meter.
-// Every one of them names entity ids like `sensor.daikin_altherma_inlet_water_temp_r4t`. An id is
-// derived from a catalog LABEL (logic/ha_device.hpp ha_slug), so it is only as stable as the label —
-// and the catalog spells the same quantity several ways across models, which no reader of the doc
-// can see.
+// The docs hand the reader copy-pasteable YAML: template sensors, automations, a virtual heat
+// meter. Every one of them names entity ids like `sensor.daikin_altherma_inlet_water_temp_r4t`. An
+// id is derived from a catalog LABEL (logic/ha_device.hpp ha_slug), so it is only as stable as the
+// label — and the catalog spells the same quantity several ways across models, which no reader of
+// the doc can see.
 //
 // This rots in the worst possible way: SILENTLY, and looking like the user's fault. A recipe naming
 // an id that no profile publishes does not error. Home Assistant creates the template sensor, its
@@ -29,9 +29,9 @@
 // candidate; it is the fallback for a unit nothing matched, not a model to write a recipe against.
 //
 // Deliberately NOT a check that the id is right for EVERY profile. Requiring universal coverage
-// would fail the docs for stating a majority id and naming the alternatives beside it, which is what
-// they should do — the catalog genuinely disagrees across models. The question here is narrower and
-// decidable: does this id exist ANYWHERE a real device could produce it?
+// would fail the docs for stating a majority id and naming the alternatives beside it, which is
+// what they should do — the catalog genuinely disagrees across models. The question here is
+// narrower and decidable: does this id exist ANYWHERE a real device could produce it?
 //
 // Reads the ids out of the docs with a deliberately dumb scan (any `sensor.`/`binary_sensor.`
 // token carrying the device-name prefix) and resolves each through the REAL ha_slug over the REAL

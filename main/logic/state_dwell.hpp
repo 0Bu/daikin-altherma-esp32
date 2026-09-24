@@ -24,20 +24,21 @@
 //  1. BEFORE THE FIRST OBSERVATION IS UNKNOWN. A board up for ten minutes whose row read OFF
 //     throughout has established "OFF for at LEAST ten minutes" and nothing more. Reported as
 //     `exact = false`, which the UI must render as a lower bound. Stating a bare "OFF for 10 min"
-//     would be the legacy-35-legacy-39 shape: a true number presented as a stronger claim than it is.
+//     would be the legacy-35-legacy-39 shape: a true number presented as a stronger claim than it
+//     is.
 //
 //  2. BLIND TIME IS NOT UNCHANGED TIME. hp_poll replaces the whole cache each cycle
 //     (`s_cache = std::move(fresh)`), so a page that does not answer removes its rows outright —
 //     measured on the reference installation, 47 timeouts in 8.2 h. A flag can go ON and back OFF
 //     inside such a gap, and a counter that simply kept adding seconds would report an unbroken run
-//     straight through it. This is legacy-413/legacy-414's finding one row at a time: a sample the firmware
-//     could not READ is blind, not unchanged. Short gaps are absorbed and COUNTED (`blind_s`, so the
-//     caveat travels with the number); a gap past DWELL_MAX_GAP_S breaks continuity and the slot
-//     stops claiming anything until it is seen again.
+//     straight through it. This is legacy-413/legacy-414's finding one row at a time: a sample the
+//     firmware could not READ is blind, not unchanged. Short gaps are absorbed and COUNTED
+//     (`blind_s`, so the caveat travels with the number); a gap past DWELL_MAX_GAP_S breaks
+//     continuity and the slot stops claiming anything until it is seen again.
 //
 //  3. THE RASTER IS 1 Hz. A pulse entirely between two sweeps is invisible, exactly as
-//     docs/DESIGN.md already says of the state timelines ("sampled raster time, not exact runtime").
-//     Nothing here can fix that; the wording downstream must not overstate it.
+//     docs/DESIGN.md already says of the state timelines ("sampled raster time, not exact
+//     runtime"). Nothing here can fix that; the wording downstream must not overstate it.
 //
 //  4. A REBOOT IS NOT A CHANGE. RAM-only, the dwell would restart at zero on every OTA — on the
 //     `dev` channel, often. The slots are carried across a reset that kept power (see
@@ -104,8 +105,8 @@ inline constexpr uint32_t DWELL_MAX_GAP_S = 120;
 
 // ── The state code ──────────────────────────────────────────────────────────────────────────────
 // A small dense integer, because comparing FORMATTED TEXT is how a field comes to change type
-// between states (legacy-209 defect 3). 0 is reserved for "no usable state": the row answered, but with
-// something this header refuses to call a state — an empty value (the row was refused by
+// between states (legacy-209 defect 3). 0 is reserved for "no usable state": the row answered, but
+// with something this header refuses to call a state — an empty value (the row was refused by
 // reading_plausible/value_available upstream) or conv 203's "?" class, which must never read as
 // "no fault". A 0 code is treated exactly like a row that did not answer at all: blind, not
 // unchanged.

@@ -49,10 +49,10 @@ inline bool is_valid_altherma4_probe_value(uint16_t reg, uint16_t raw) {
 
 struct ModbusProfileDecision {
     ModbusProfile next_profile;
-    bool          link_ok;       // whether the connection / session should be kept alive
-    bool          count_failure; // whether this outcome counts as an rx_fail error
-    bool          is_definitive; // whether this decision concludes the profile
-    bool          is_affirmative;// whether this decision is affirmative (hardware-verified)
+    bool          link_ok;        // whether the connection / session should be kept alive
+    bool          count_failure;  // whether this outcome counts as an rx_fail error
+    bool          is_definitive;  // whether this decision concludes the profile
+    bool          is_affirmative; // whether this decision is affirmative (hardware-verified)
 };
 
 // Evaluate probe result. consecutive_failures counts repeated non-affirmative attempts.

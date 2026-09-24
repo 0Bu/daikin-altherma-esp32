@@ -33,15 +33,16 @@ struct PersistedDwell {
     logic::DwellSlot slots[logic::DWELL_MAX_SLOTS];
 };
 
-// UNINITIALISED STORAGE, and the UNION is what makes it that. This is the trap legacy-417 cost the checkup
-// and it is worth restating rather than assuming the next reader knows: DwellSlot carries non-static
-// data member initialisers, so a plain struct definition here would get an implicit default
-// constructor that RUNS at startup and re-initialises every slot — while `magic`, `version`,
-// `catalog_fp`, `model_fp` and `crc`, being bare scalars with no initialiser, survive untouched.
-// The result is the worst possible shape: the header passes the magic, version and catalog checks,
-// the slots do not, and the record is rejected as `bad_crc` — a memory-fault verdict for a compiler
-// doing exactly what it was told. A union with a user-provided empty constructor emits no
-// initialisation at all, which is the standard way to say "these bytes are whatever they were".
+// UNINITIALISED STORAGE, and the UNION is what makes it that. This is the trap legacy-417 cost the
+// checkup and it is worth restating rather than assuming the next reader knows: DwellSlot carries
+// non-static data member initialisers, so a plain struct definition here would get an implicit
+// default constructor that RUNS at startup and re-initialises every slot — while `magic`,
+// `version`, `catalog_fp`, `model_fp` and `crc`, being bare scalars with no initialiser, survive
+// untouched. The result is the worst possible shape: the header passes the magic, version and
+// catalog checks, the slots do not, and the record is rejected as `bad_crc` — a memory-fault
+// verdict for a compiler doing exactly what it was told. A union with a user-provided empty
+// constructor emits no initialisation at all, which is the standard way to say "these bytes are
+// whatever they were".
 union PersistStore {
     PersistedDwell v;
     PersistStore() {}      // deliberately leaves v untouched
@@ -240,11 +241,12 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation) {
     // because this file shipped exactly the defect that comment describes. The poll loop sleeps a
     // whole second AFTER a serial sweep, so the real cadence is ~1.2-1.3 s; flooring each interval
     // to 1 s and then restarting the clock from `now` discards that fraction on every cycle, and it
-    // never comes back. Measured against a 1.3 s cadence that is 23% slow FOREVER — a state held for
-    // three hours would have been published as "2 h 19 min", a wrong number with no tell on it and
-    // the exact shape (legacy-35-legacy-39) this feature's own honesty rules exist to prevent. Quantising the
-    // absolute instants telescopes the remainder into the next cycle instead, bounding the total
-    // error at under one second for the whole run rather than compounding it per cycle.
+    // never comes back. Measured against a 1.3 s cadence that is 23% slow FOREVER — a state held
+    // for three hours would have been published as "2 h 19 min", a wrong number with no tell on it
+    // and the exact shape (legacy-35-legacy-39) this feature's own honesty rules exist to prevent.
+    // Quantising the absolute instants telescopes the remainder into the next cycle instead,
+    // bounding the total error at under one second for the whole run rather than compounding it per
+    // cycle.
     const int64_t now_us = esp_timer_get_time();
     // dt_s == 0 is NOT a reason to skip the fold: two calls can land in one wall second, and the
     // observations still have to be applied — a state CHANGE in that cycle must be recorded even

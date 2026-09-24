@@ -5,14 +5,15 @@
 // reading do today" (logic/history.hpp's trends). Neither answers the question a user actually asks
 // once a month: *did the observed data contain anything worth following up?* That answer is a small
 // number of COUNTED EVENTS and WINDOW MINIMA — how often the compressor started, how much of its
-// runtime went into defrosting, how low the water pressure got — none of which any single reading can
-// express. It is deliberately NOT a certificate that the whole plant is healthy: X10A plus an
+// runtime went into defrosting, how low the water pressure got — none of which any single reading
+// can express. It is deliberately NOT a certificate that the whole plant is healthy: X10A plus an
 // independent circulation-pump power witness still cannot prove
 // refrigerant charge, sensor calibration, hydraulic cleanliness, air path or seasonal efficiency.
 //
-// Issue legacy-208 asked for it. This header is the half that can be decided; main/checkup.cpp is the
-// storage, and main/www/js/dashboard.js is the card. What legacy-208 asked for and this deliberately does NOT do is
-// listed at the bottom of this comment — each omission is a claim the bus cannot support.
+// Issue legacy-208 asked for it. This header is the half that can be decided; main/checkup.cpp is
+// the storage, and main/www/js/dashboard.js is the card. What legacy-208 asked for and this
+// deliberately does NOT do is listed at the bottom of this comment — each omission is a claim the
+// bus cannot support.
 //
 // NOT logic/health_gate.hpp, which shares only the word: that one decides whether a freshly-OTA'd
 // FIRMWARE image is healthy enough to keep (WiFi up, no crash loop) before the rollback window
@@ -28,10 +29,10 @@
 // pulse that starts and ends between two sweeps is outside what X10A established and can still be
 // missed; the card never upgrades that sampling limit into a claim of continuous event capture.
 //
-// So this keeps its own ring — 23 completed one-hour buckets plus the open hour in static RAM — beside the
-// trend rings. Keeping the open hour INSIDE the total is load-bearing: 24 completed buckets plus an
-// open one would silently make a "24 h" window almost 25 hours long. It is a different question at
-// a different rate, not a view of the same data.
+// So this keeps its own ring — 23 completed one-hour buckets plus the open hour in static RAM —
+// beside the trend rings. Keeping the open hour INSIDE the total is load-bearing: 24 completed
+// buckets plus an open one would silently make a "24 h" window almost 25 hours long. It is a
+// different question at a different rate, not a view of the same data.
 //
 // ── WHY A ROW IS ADDRESSED BY (reg, offset, CONVERTER) ──────────────────────────────────────────
 // logic/history.hpp argues at length why a trend addresses its row structurally and never by label,
@@ -40,8 +41,8 @@
 // `Solar pump operation` all sit in the SAME byte — 0x60 offset 12 — and all SEVEN are
 // dimensionless. They differ only in which bit their converter masks (307/306/305/304/303/301/300).
 // A (reg, offset, unit) locator resolves to whichever of the seven sorts first, so the "backup
-// heater ran 40 minutes" figure would in fact be the 2-way valve's position. That is the legacy-35-legacy-39
-// shape with a day's statistics in front of it.
+// heater ran 40 minutes" figure would in fact be the 2-way valve's position. That is the
+// legacy-35-legacy-39 shape with a day's statistics in front of it.
 //
 // The converter is therefore half the locator — the same structural key logic/availability.hpp and
 // logic/conv_override.hpp already use, and for the same reason. The catalog test asserts that each
@@ -60,10 +61,12 @@
 //     relabelled as a valve verdict: measured external circulation power can explain correlation or
 //     establish that high loss persisted with that pump off; it still cannot distinguish gravity
 //     circulation/check valve, a draw, insulation or a leaking diverter by itself.
-//   * AN ABSOLUTE MINIMUM-FLOW THRESHOLD. The manufacturer's minimum is per model (the catalog spans
-//     3 kW to 18 kW), and one number laid across 44 profiles would never fire on the large units and
-//     always fire on the small ones. The unit raises 7H itself when flow is genuinely insufficient,
-//     and that reaches the fault check below. The minimum is REPORTED; no verdict is attached to it.
+//   * AN ABSOLUTE MINIMUM-FLOW THRESHOLD. The manufacturer's minimum is per model (the catalog
+//   spans
+//     3 kW to 18 kW), and one number laid across 44 profiles would never fire on the large units
+//     and always fire on the small ones. The unit raises 7H itself when flow is genuinely
+//     insufficient, and that reaches the fault check below. The minimum is REPORTED; no verdict is
+//     attached to it.
 //   * A DAILY START-COUNT THRESHOLD. 24 starts on a cold day is one per hour and healthy; 24 starts
 //     in the shoulder season is cycling. A start count alone does not know the load. The MEAN RUN
 //     LENGTH does — see CHECKUP_CYCLING_SHORT_RUN_S.
@@ -251,10 +254,10 @@ constexpr uint8_t CHECKUP_F_LOW_BAR = 1u << 3;   // <=1.0 bar persisted for the 
 // 23 completed buckets plus the pending one: the full rolling window's actual storage cost.
 //
 // The bound was RAISED from 1104 to 1536 (46 -> 64 bytes per bucket) for two distinct eight-byte
-// outdoor contexts. The old legacy-441 estimate assumed one shared context; pairing Cycling only with
-// completed space-heating runs and Defrost only with its known-state compressor denominator makes
-// that unsafe. Exact, order-independent sums cost 16 B per bucket plus 2 B alignment: 18 x 24 =
-// 432 B of .noinit DRAM. No heap or flash is used.
+// outdoor contexts. The old legacy-441 estimate assumed one shared context; pairing Cycling only
+// with completed space-heating runs and Defrost only with its known-state compressor denominator
+// makes that unsafe. Exact, order-independent sums cost 16 B per bucket plus 2 B alignment: 18 x 24
+// = 432 B of .noinit DRAM. No heap or flash is used.
 constexpr size_t CHECKUP_BYTES = sizeof(CheckupBucket) * CHECKUP_BUCKETS;
 static_assert(CHECKUP_BYTES <= 1536, "the static checkup ring is too large for this heap-tight board");
 
@@ -626,7 +629,7 @@ struct DhwLossState {
 };
 
 constexpr uint32_t DHW_LOSS_WINDOW_S = 3600;             // R5T resolves only 0.1 K
-constexpr uint32_t DHW_LOSS_SETTLE_S = 45 * 60;          // issue legacy-349 method after a tank charge
+constexpr uint32_t DHW_LOSS_SETTLE_S      = 45 * 60; // issue legacy-349 method after a tank charge
 constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
 // HOW LONG THE CHARGE WITNESS MUST STAND before it costs the 45-minute settle.
 //
@@ -1440,8 +1443,9 @@ inline void checkup_cover_row(CheckupCoverage& c, unsigned reg, unsigned off, in
 }
 
 // ── Verdicts ────────────────────────────────────────────────────────────────────────────────────
-// Five wire-compatible row states. A verdict is not automatically a judgement: observation-only rows
-// can be `Ok` once their value is eligible, then remain outside assessable/evaluated/overall below.
+// Five wire-compatible row states. A verdict is not automatically a judgement: observation-only
+// rows can be `Ok` once their value is eligible, then remain outside assessable/evaluated/overall
+// below.
 //
 //   Unavailable  this profile cannot supply the inputs. The check is OFF, not degraded — the rule
 //                logic/feature_gate.hpp states and legacy-121 / ou_stale / cop_scope each paid for.
@@ -1940,10 +1944,11 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
         set(CheckupCheck::Fault, CheckupVerdict::Ok, 0, 0, 0);
     }
 
-    // ── Protection retries: UC5's core signal (legacy-69 / PR 110) ──────────────────────────────────────
-    // Needs BOTH the counters and a compressor witness, which is exactly feature_gate.hpp's
-    // uc5_supported(): without that witness, comparable counter endpoints cannot be tied to an
-    // observed X10A operating interval rather than a page frozen outside a known plant state.
+    // ── Protection retries: UC5's core signal (legacy-69 / PR 110)
+    // ────────────────────────────────────── Needs BOTH the counters and a compressor witness,
+    // which is exactly feature_gate.hpp's uc5_supported(): without that witness, comparable counter
+    // endpoints cannot be tied to an observed X10A operating interval rather than a page frozen
+    // outside a known plant state.
     if (!cov.retries || !cov.rps) {
         set(CheckupCheck::Retries, CheckupVerdict::Unavailable, 0, CHECKUP_REQUIRED_S);
     } else if (w.flags & CHECKUP_F_RETRY) {

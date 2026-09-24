@@ -112,9 +112,9 @@ inline bool is_json_number(std::string_view s) {
 // `kind` is the field's JSON TYPE and it comes from the row's converter (logic/convert.hpp
 // published_kind), NOT from inspecting `value`. That is the whole point of carrying it: formatting
 // collapses a typed decode into a string, and a publisher that then re-infers the type from the
-// string lets ONE logical field change JSON type between states — measured in legacy-209, where fan step
-// alternated between the number 30 and the string "OFF" and the metrics consumer silently kept the
-// stale 30. Type is a property of the field; the value is not allowed a vote.
+// string lets ONE logical field change JSON type between states — measured in legacy-209, where fan
+// step alternated between the number 30 and the string "OFF" and the metrics consumer silently kept
+// the stale 30. Type is a property of the field; the value is not allowed a vote.
 struct GroupedValue {
     std::string   group;   // group_for_page(reg)
     std::string   key;     // object_id(label)

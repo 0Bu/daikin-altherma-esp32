@@ -14,12 +14,12 @@
 // still reach the dashboard through /status.wifi.ssid (the associated AP names itself) and /scan,
 // where one unparseable field takes down the ENTIRE response, not just that field.
 //
-// This sits BENEATH the DOM escaping of any SSID that is rendered (issue legacy-52, fixed in legacy-65 — the
-// dashboard's esc()). The two are orthogonal and neither subsumes the other: legacy-65 stops a hostile
-// SSID from being interpolated as MARKUP, while this encoder only guarantees the bytes PARSE as
-// JSON — an SSID of `"><script>` is already valid JSON here, and conversely a body that fails
-// JSON.parse never reaches those DOM nodes at all. Do not read a fix on either layer as covering
-// the other.
+// This sits BENEATH the DOM escaping of any SSID that is rendered (issue legacy-52, fixed in
+// legacy-65 — the dashboard's esc()). The two are orthogonal and neither subsumes the other:
+// legacy-65 stops a hostile SSID from being interpolated as MARKUP, while this encoder only
+// guarantees the bytes PARSE as JSON — an SSID of `"><script>` is already valid JSON here, and
+// conversely a body that fails JSON.parse never reaches those DOM nodes at all. Do not read a fix
+// on either layer as covering the other.
 #include <string>
 #include <string_view>
 

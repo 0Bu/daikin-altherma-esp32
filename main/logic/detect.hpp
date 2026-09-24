@@ -172,9 +172,10 @@ inline bool signature_consistent(const Signature& sig, const Fingerprint& fp) {
 // The capacity the detect_* rules narrow and rank by: the O/U figure when the unit reported it,
 // else the I/U capacity code as an approximate fallback. ONE accessor because detect_candidates
 // (which set) and detect_best (which representative) must answer from the same number — they did
-// not, and that is legacy-225: the fallback ranked the pick while the SET ignored it, so /status reported
-// 8 candidates across 4 families — including 14-16 kW models — on an 8 kW unit whose representative
-// had long since been constrained to the 4-8 kW class. Narrowed, that live set is 5 across 3.
+// not, and that is legacy-225: the fallback ranked the pick while the SET ignored it, so /status
+// reported 8 candidates across 4 families — including 14-16 kW models — on an 8 kW unit whose
+// representative had long since been constrained to the 4-8 kW class. Narrowed, that live set is 5
+// across 3.
 inline int detect_capacity(const Fingerprint& fp) {
     return (fp.kw_tenths >= 0) ? fp.kw_tenths : fp.iu_kw_tenths;
 }
@@ -193,8 +194,8 @@ inline bool signature_kw_contains(const Signature& sig, int cap) {
 // that merely happen to be a subset of a feature-rich unit. Fills out[] with up to `max` candidate
 // ids (in signature order) and returns the total candidate count (which may exceed `max`).
 //
-// Then a THIRD filter, for the case this function used to answer too broadly (legacy-225): when the O/U
-// capacity is unknown, signature_consistent applies no kW filter at all, so the set spans kW
+// Then a THIRD filter, for the case this function used to answer too broadly (legacy-225): when the
+// O/U capacity is unknown, signature_consistent applies no kW filter at all, so the set spans kW
 // classes — and the header's own contract ("register-equivalent only when the capacity is known")
 // is voided exactly there. The I/U capacity code is available in that state and detect_best already
 // RANKS by it; here it EXCLUDES, under exactly the rule signature_consistent applies to the O/U
@@ -265,23 +266,23 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 // fact about a file, not a fact about heat pumps. A label is an identifier (ha_slug -> the HA
 // entity id + the VictoriaMetrics series suffix, logic/discovery.hpp), so when the tie-break moves,
 // a live series STOPS and a new one starts at zero — read downstream as the plant going quiet
-// rather than as a rename (legacy-180/legacy-217). Keying that on file order means adding, removing or
-// REORDERING a profile — none of them a suspicious act — silently reassigns identifiers. Measured
-// over the 39 detectable profiles across every (page mask x capacity x capacity-source) fingerprint
-// a real unit can present: permuting the registry moves the published identity on 11275 of 200x336
-// trials, over 90 distinct identifiers. The id is intrinsic to the profile, so the same tie
-// resolves the same way whatever order the registry is written in — and the permutation test
+// rather than as a rename (legacy-180/legacy-217). Keying that on file order means adding, removing
+// or REORDERING a profile — none of them a suspicious act — silently reassigns identifiers.
+// Measured over the 39 detectable profiles across every (page mask x capacity x capacity-source)
+// fingerprint a real unit can present: permuting the registry moves the published identity on 11275
+// of 200x336 trials, over 90 distinct identifiers. The id is intrinsic to the profile, so the same
+// tie resolves the same way whatever order the registry is written in — and the permutation test
 // asserts exactly that (test_tie_break_order_independence). It also costs nothing to adopt: on all
 // 336 fingerprints the pick is UNCHANGED (0 identifiers move), so no installed device re-labels
 // anything.
 //
 // This is deliberately NOT a better GUESS. Which of two bus-identical models a unit really is
 // cannot be known from bus data, and preferring (say) the majority spelling would assert a model on
-// no evidence — the mistake legacy-230 names by name. It only makes the arbitrary choice STABLE. Two
-// rules that were measured and rejected: preferring the profile that publishes FEWEST identifiers
-// moves 13 identifiers on 8 fingerprints (it switches product families for no evidentiary gain),
-// and preferring an EXACT page-mask match changes nothing at all on any of the 336 (an inert rule
-// that would read like a guarantee while doing nothing).
+// no evidence — the mistake legacy-230 names by name. It only makes the arbitrary choice STABLE.
+// Two rules that were measured and rejected: preferring the profile that publishes FEWEST
+// identifiers moves 13 identifiers on 8 fingerprints (it switches product families for no
+// evidentiary gain), and preferring an EXACT page-mask match changes nothing at all on any of the
+// 336 (an inert rule that would read like a guarantee while doing nothing).
 //
 // WHAT A TIE ACTUALLY MEANS — and this is NOT the "register-identical, so it cannot matter" that
 // stood here before. The tie is on the page COUNT and the class SPAN, both coarser than the row
@@ -302,9 +303,10 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 // and criterion (2) is a no-op; the fallback only ever moves the pick for units that don't report
 // O/U capacity.
 //
-// detect_candidates now applies that SAME fallback as a filter (legacy-225), through the same two helpers
-// rather than a second copy of the arithmetic — so the reported set and this pick are constrained
-// by one rule, and this function's answer is unchanged by that filter (see its comment).
+// detect_candidates now applies that SAME fallback as a filter (legacy-225), through the same two
+// helpers rather than a second copy of the arithmetic — so the reported set and this pick are
+// constrained by one rule, and this function's answer is unchanged by that filter (see its
+// comment).
 inline const char* detect_best(const Signature* sigs, int nsig, const Fingerprint& fp) {
     const int   cap      = detect_capacity(fp);
     const char* best     = nullptr;

@@ -247,7 +247,8 @@ inline int board_preset_i2c_pins_offerable(const BoardPreset* preset, int* out, 
 //
 //   `octal_spi`  the firmware's own build config. GPIO35 (the AtomS3 Lite's WS2812) is free on this
 //                project's Quad-flash/no-PSRAM build and carries SPIIO4 on an Octal one.
-//   `link`       the X10A link's live rx/tx (config_link_pins). board_hw_valid() refuses a local pin
+//   `link`       the X10A link's live rx/tx (config_link_pins). board_hw_valid() refuses a local
+//   pin
 //                that equals either, so a preset colliding with the user's current wiring is a
 //                dropdown entry whose only outcome is a 400. Runtime, hence a parameter: the same
 //                build serves a user who has moved the link onto the pad a preset wants.
@@ -255,8 +256,9 @@ inline int board_preset_i2c_pins_offerable(const BoardPreset* preset, int* out, 
 // Writes borrowed pointers into a CALLER-owned buffer (size it with BOARD_PRESETS_MAX) and returns
 // the count, like board_pins_offerable() and for the same reason: the filter is per-request, so a
 // shared static would be a data race between any two callers that disagree about it (it was one
-// while http_append_status_json() also ran on the poll task's WS broadcaster, removed in legacy-241). The
-// pointed-to table is immutable and has static storage duration, so the pointers stay valid.
+// while http_append_status_json() also ran on the poll task's WS broadcaster, removed in
+// legacy-241). The pointed-to table is immutable and has static storage duration, so the pointers
+// stay valid.
 inline int board_presets_offerable(const BoardPreset** out, int cap, bool octal_spi,
                                    ReservedPins link = {}) {
     int all_n = 0;

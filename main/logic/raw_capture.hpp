@@ -1,13 +1,14 @@
 #pragma once
-// WHEN to put raw X10A page bytes on /diag from the POLL path — the missing half of logic/hexdump.hpp.
+// WHEN to put raw X10A page bytes on /diag from the POLL path — the missing half of
+// logic/hexdump.hpp.
 //
 // hexdump.hpp names its original limitation: the raw dump fires only on a DETECT pass (boot, or
 // POST /detect), and a detect pass essentially never coincides with a compressor run. Target Evap.
 // Temp. was only wrong WHILE the compressor ran — at rest it decoded to 240.6 °C and the ±200 °C
-// envelope already dropped it — so the first legacy-194 diagnosis had to be back-derived from a number
-// already rounded to one decimal. The runtime capture requested in legacy-209 supplied the missing wire
-// evidence and legacy-194 is now resolved through logic/conv_override.hpp; this cadence remains useful for
-// the next converter or layout mismatch.
+// envelope already dropped it — so the first legacy-194 diagnosis had to be back-derived from a
+// number already rounded to one decimal. The runtime capture requested in legacy-209 supplied the
+// missing wire evidence and legacy-194 is now resolved through logic/conv_override.hpp; this
+// cadence remains useful for the next converter or layout mismatch.
 //
 // The cadence is the whole design. A dump every poll cycle would be 1 line/second into a 6 KB diag
 // ring and out to syslog — it would evict the rest of the boot's evidence within a minute, which is

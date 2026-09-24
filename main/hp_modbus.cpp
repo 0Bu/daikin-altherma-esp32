@@ -1,7 +1,8 @@
 // THE HOMEHUB MODBUS STACK: transport + poll task + cache, a second INDEPENDENT source beside the
 // X10A one (hp_modbus.hpp, docs/MODBUS_PROTOCOL.md). READ-ONLY: this file issues no Modbus write
-// function code at all. The register-54 actuator that legacy-300 built here was removed when dynamic LWT
-// actuation was retired (legacy-294), so "no write" is a property of the code, not of a guard around it.
+// function code at all. The register-54 actuator that legacy-300 built here was removed when
+// dynamic LWT actuation was retired (legacy-294), so "no write" is a property of the code, not of a
+// guard around it.
 //
 // Everything here is owned by ONE task (mb_task, below) exactly as hp_poll owns the X10A UART, and
 // other tasks see only the mutex-guarded snapshots. The socket is opened once and reused; any read

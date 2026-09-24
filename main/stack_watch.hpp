@@ -4,11 +4,11 @@
 // Everything under "Memory constraints" about the heap is reported: /status.sys carries free /
 // min-free / largest-block, two trend rings chart them, and heap_guard.cpp restarts the board when
 // the largest contiguous block stays unusable. The STACK had none of that. Three overflows shipped
-// (v1.0.12 on httpd, legacy-241 on hp_poll, legacy-318 on httpd again through OTA) and each was diagnosed the
-// same way afterwards: by reading the USED/FREE column of a core dump's task table, which exists
-// only once the board has already died. Between those crashes the headroom was invisible — an idle
-// board looks identical at every stack size, so the frame growth that ate 1200 bytes across legacy-318
-// announced itself nowhere until the fleet updated onto it.
+// (v1.0.12 on httpd, legacy-241 on hp_poll, legacy-318 on httpd again through OTA) and each was
+// diagnosed the same way afterwards: by reading the USED/FREE column of a core dump's task table,
+// which exists only once the board has already died. Between those crashes the headroom was
+// invisible — an idle board looks identical at every stack size, so the frame growth that ate 1200
+// bytes across legacy-318 announced itself nowhere until the fleet updated onto it.
 //
 // This closes that half. `uxTaskGetStackHighWaterMark` already answers the question per task; what
 // was missing was a REPORTING path, so the number reaches a metrics store while the board is alive

@@ -46,8 +46,8 @@
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "logic/convert.hpp"
-#include "logic/discovery.hpp"        // object_id / group_for_page — a label IS an identifier (legacy-217)
-#include "logic/label_override.hpp"   // the PUBLISHED label, when the generator's is wrong (legacy-230 A)
+#include "logic/discovery.hpp" // object_id / group_for_page — a label IS an identifier (legacy-217)
+#include "logic/label_override.hpp" // the PUBLISHED label, when the generator's is wrong (legacy-230 A)
 
 using namespace daik;
 
@@ -634,13 +634,13 @@ void check_consensus(const std::vector<Row>& rows, std::vector<Finding>& out) {
 // NEIGHBOURING byte "Fan 2 (step)". Two fans on one outdoor unit are not measured in different
 // quantities by the same converter, so at most one spelling is true; the false one publishes
 // `actuators_fan_1_10_rpm`, where a reader takes a 30 for 300 rpm rather than step 30. That is the
-// legacy-35-legacy-39 shape (well-formed, spec-conformant byte layout, audit-clean, and false) carried by a
-// label instead of a converter.
+// legacy-35-legacy-39 shape (well-formed, spec-conformant byte layout, audit-clean, and false)
+// carried by a label instead of a converter.
 //
-// No other check here can see it. SPEC-CONV matches BY label, so a divergent label simply misses the
-// spec entry and stays silent; SPEC-LAYOUT is satisfied (conv + width do match the spec at that
-// offset); CONSENSUS groups BY label, so the two spellings never meet. legacy-217's identity gate freezes
-// the identifier SET, and both spellings are already in it.
+// No other check here can see it. SPEC-CONV matches BY label, so a divergent label simply misses
+// the spec entry and stays silent; SPEC-LAYOUT is satisfied (conv + width do match the spec at that
+// offset); CONSENSUS groups BY label, so the two spellings never meet. legacy-217's identity gate
+// freezes the identifier SET, and both spellings are already in it.
 //
 // Decided on the UNIT alone, never on the rest of the label. The catalog legitimately spells one
 // quantity several ways per family (docs/REGISTERS.md:196-200) — "[HPSU] Tv inflow Temp  (R1T)" and
@@ -721,7 +721,8 @@ void check_label_unit(const std::vector<Row>& rows, const std::vector<SpecRow>& 
                 f.detail.push_back("expected: unit \"" + want + "\"   — " + why);
                 f.detail.push_back("one field cannot be two quantities: same converter, same width,");
                 f.detail.push_back("same type code, so at most one of these spellings is true.");
-                // The consequence, spelled out — the label IS the identifier (legacy-217/legacy-221).
+                // The consequence, spelled out — the label IS the identifier
+                // (legacy-217/legacy-221).
                 f.detail.push_back("publishes: " + std::string(group_for_page(r->def.reg)) + "_" +
                                    object_id(r->def.label) + "   (HA entity id + VictoriaMetrics" +
                                    " series suffix)");
@@ -850,10 +851,11 @@ int main(int argc, char** argv) {
 
     // The RESOLVED row set, not the raw generated tables: def/overlay.hpp supplies all applicable
     // hand-written blocks, including the page-0x10 protection words the offline generator does not
-    // emit yet (PR 110 Part B). An overlay that the domain gate cannot see would be exactly the un-audited second source of
-    // truth this tool exists to prevent. Resolving here audits those rows against docs/REGISTERS.md
-    // §5 on every profile, identically to a generated row — and it is what makes DELETING the
-    // supplement, once the generator emits the rows, a no-op for this file.
+    // emit yet (PR 110 Part B). An overlay that the domain gate cannot see would be exactly the
+    // un-audited second source of truth this tool exists to prevent. Resolving here audits those
+    // rows against docs/REGISTERS.md §5 on every profile, identically to a generated row — and it
+    // is what makes DELETING the supplement, once the generator emits the rows, a no-op for this
+    // file.
     std::vector<Row> rows;
     for (const auto& p : def::profiles) {
         // The BASE table picks the conv-405 curve — the overlays carry no pressure row (pinned by

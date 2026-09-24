@@ -23,15 +23,15 @@ struct HeartbeatFields {
     uint32_t    free_heap     = 0;   // esp_get_free_heap_size()
     uint32_t    min_free_heap = 0;   // esp_get_minimum_free_heap_size() — worst-case low-water mark
     uint32_t    max_alloc     = 0;   // heap_caps_get_largest_free_block() — the binding OOM limit
-    // HOW MANY CONSECUTIVE HEAP-WATCHDOG RESTARTS preceded this boot (heap_guard_restarts(); 0 on an
-    // ordinary one). Already on /status.sys, and it belongs here for the reason reset_reason_code
-    // does: without it a self-restarting board is INDISTINGUISHABLE in a metrics store from a
-    // healthy one somebody keeps saving settings on. The restart heap_guard.cpp makes is an
-    // esp_restart(), so it reports the same "sw" reset reason a /set_* save produces and
+    // HOW MANY CONSECUTIVE HEAP-WATCHDOG RESTARTS preceded this boot (heap_guard_restarts(); 0 on
+    // an ordinary one). Already on /status.sys, and it belongs here for the reason
+    // reset_reason_code does: without it a self-restarting board is INDISTINGUISHABLE in a metrics
+    // store from a healthy one somebody keeps saving settings on. The restart heap_guard.cpp makes
+    // is an esp_restart(), so it reports the same "sw" reset reason a /set_* save produces and
     // `reset_fault` stays 0 — every other field in this payload agrees that nothing went wrong. A
     // board cycling through its restart ladder every five minutes would show as a sawtooth in
-    // uptime_s and nothing else, which is the same "reboot nobody can attribute" that legacy-215 spent a
-    // week reconstructing from syslog.
+    // uptime_s and nothing else, which is the same "reboot nobody can attribute" that legacy-215
+    // spent a week reconstructing from syslog.
     //
     // NOT `total_increasing`: this is a per-boot CONSTANT, not a counter. It reports the count the
     // boot inherited and heap_guard_begin() clears the breadcrumb, so it reads 2 for the whole life
@@ -46,25 +46,25 @@ struct HeartbeatFields {
     // developer/fleet diagnostic whose value is the TREND across firmware versions, and five more
     // diagnostic entities in HA would be five more things a reader has to rule out. The trend is
     // what nothing could see before — every one of the three shipped overflows was read off a core
-    // dump's task table AFTER the board died, and legacy-318's 1200 bytes of frame growth accumulated
-    // across releases with no single change announcing it.
+    // dump's task table AFTER the board died, and legacy-318's 1200 bytes of frame growth
+    // accumulated across releases with no single change announcing it.
     uint32_t    httpd_stack_min_free_bytes  = 0;
     uint32_t    poll_stack_min_free_bytes   = 0;
     uint32_t    mqtt_stack_min_free_bytes   = 0;
     uint32_t    weather_stack_min_free_bytes = 0;
     std::string reset_reason;         // reset_reason_name() slug — why the device last booted
     // The SAME answer as a NUMBER. The slug above is the readable one and stays, but a metrics
-    // consumer never sees it: Telegraf's json parser takes numeric fields only, so `reset_reason` is
-    // dropped on the way to VictoriaMetrics exactly like a bool is (the reason the three connectivity
-    // flags below are 1/0). Measured on this install: a board restarting 55x in 7 days, 5 of them
-    // panics, and not one restart was attributable in the store — the distribution had to be
-    // reconstructed from syslog (legacy-215). `reset_reason_code` is the raw CrashReason value, the same
-    // number /status.last_crash already publishes as `reason_code`, so there is one vocabulary and no
-    // second table; `reset_fault` is crash_reason_is_fault() as 1/0, because "was the last boot a
-    // FAULT" is the question an alert actually asks and it must not require the consumer to carry a
-    // copy of the code list. Deliberately NOT a new HA entity: the "Reset Reason" text sensor already
-    // says this to a human, and a numeric twin beside it is the duplicate that got the crash topic's
-    // "Last Reset Reason" retired.
+    // consumer never sees it: Telegraf's json parser takes numeric fields only, so `reset_reason`
+    // is dropped on the way to VictoriaMetrics exactly like a bool is (the reason the three
+    // connectivity flags below are 1/0). Measured on this install: a board restarting 55x in 7
+    // days, 5 of them panics, and not one restart was attributable in the store — the distribution
+    // had to be reconstructed from syslog (legacy-215). `reset_reason_code` is the raw CrashReason
+    // value, the same number /status.last_crash already publishes as `reason_code`, so there is one
+    // vocabulary and no second table; `reset_fault` is crash_reason_is_fault() as 1/0, because "was
+    // the last boot a FAULT" is the question an alert actually asks and it must not require the
+    // consumer to carry a copy of the code list. Deliberately NOT a new HA entity: the "Reset
+    // Reason" text sensor already says this to a human, and a numeric twin beside it is the
+    // duplicate that got the crash topic's "Last Reset Reason" retired.
     uint32_t    reset_reason_code = 0;
     bool        reset_fault       = false;
 
@@ -99,22 +99,23 @@ struct HeartbeatFields {
     uint32_t    mqtt_count      = 0;   // successful publishes (state+heartbeat+heating_curve+discovery)
     uint32_t    mqtt_fails      = 0;   // cumulative failed esp_mqtt_client_publish() calls
     uint32_t    mqtt_reconnects = 0;   // cumulative RE-connects (excludes the first-ever connect)
-    // WHAT NEVER GOT PUBLISHED, and why — the counters legacy-380 was opened for. `mqtt_fails` above counts
-    // a failed publish CALL; neither of these ever reached one, so until now the loss was invisible
-    // outside a `/diag` ring that the next chatty boot overwrites. Both count cycles of the 1 s
-    // publish task, so either against uptime_s reads directly as "fraction of seconds this board had
-    // nothing to say".
+    // WHAT NEVER GOT PUBLISHED, and why — the counters legacy-380 was opened for. `mqtt_fails`
+    // above counts a failed publish CALL; neither of these ever reached one, so until now the loss
+    // was invisible outside a `/diag` ring that the next chatty boot overwrites. Both count cycles
+    // of the 1 s publish task, so either against uptime_s reads directly as "fraction of seconds
+    // this board had nothing to say".
     //
     // mqtt_skipped  — the cycle THREW (std::bad_alloc; the task guard caught it) and the reading is
-    //                 gone. The wired board logged 337 of these in 30 days, 125 in the last of them,
-    //                 every one immediately before an OTA reboot.
+    //                 gone. The wired board logged 337 of these in 30 days, 125 in the last of
+    //                 them, every one immediately before an OTA reboot.
     // mqtt_quiesced — the cycle stood aside DELIBERATELY because an OTA/weather TLS operation
     //                 owned the heap
     //                 (logic/ota_quiesce.hpp). Same missing second, stated reason.
     //
     // Kept as two counters rather than one "cycles lost" precisely so the fix is legible in the
-    // store: the intended shape after legacy-380 is `quiesced` stepping once per install while `skipped`
-    // stops rising at all, and a combined counter could not tell that from no change whatsoever.
+    // store: the intended shape after legacy-380 is `quiesced` stepping once per install while
+    // `skipped` stops rising at all, and a combined counter could not tell that from no change
+    // whatsoever.
     uint32_t    mqtt_skipped    = 0;
     uint32_t    mqtt_quiesced   = 0;
 
@@ -133,21 +134,22 @@ struct HeartbeatFields {
     int32_t     last_ok_s      = -1;      // seconds since last cycle with any valid X10A reply
     uint32_t    rx_received    = 0;       // cumulative successful register reads (HpStats.rx_ok)
     uint32_t    rx_fails       = 0;       // cumulative failed reads (HpStats.rx_fail_total)
-    // SOURCE freshness, which is a different question from publish freshness (legacy-209 defect 5). The
-    // outdoor unit refreshes its OWN pages only while it runs (logic/ou_stale.hpp); stopped, it keeps
-    // answering with the last run's numbers. The bridge withholds those readings from the state
-    // topic, so a consumer sees the field disappear — and this flag is what tells it WHY, without a
-    // per-field timestamp in a payload published every second. "The device is publishing, the bus is
-    // healthy, and the outdoor unit is simply not measuring right now" is otherwise indistinguishable
-    // from a broken link on the consumer's side.
+    // SOURCE freshness, which is a different question from publish freshness (legacy-209 defect 5).
+    // The outdoor unit refreshes its OWN pages only while it runs (logic/ou_stale.hpp); stopped, it
+    // keeps answering with the last run's numbers. The bridge withholds those readings from the
+    // state topic, so a consumer sees the field disappear — and this flag is what tells it WHY,
+    // without a per-field timestamp in a payload published every second. "The device is publishing,
+    // the bus is healthy, and the outdoor unit is simply not measuring right now" is otherwise
+    // indistinguishable from a broken link on the consumer's side.
     bool        ou_held_over   = false;
 
-    // The HomeHub Modbus stack (issue legacy-32) — a SECOND, INDEPENDENT source, so these are its OWN
-    // counters and say nothing about the X10A bus above (that is the point: the two fail separately).
-    // All zero on a device without a HomeHub, which is a real fleet/config distinction rather than
-    // the always-constant kind that got bus_tx_writes dropped. There are no write counters and no
-    // actuator fields: the link issues no Modbus write at all (legacy-294 retired the register-54 write
-    // path), which is why nothing here mirrors bus_tx_writes' fate of reporting a constant zero.
+    // The HomeHub Modbus stack (issue legacy-32) — a SECOND, INDEPENDENT source, so these are its
+    // OWN counters and say nothing about the X10A bus above (that is the point: the two fail
+    // separately). All zero on a device without a HomeHub, which is a real fleet/config distinction
+    // rather than the always-constant kind that got bus_tx_writes dropped. There are no write
+    // counters and no actuator fields: the link issues no Modbus write at all (legacy-294 retired
+    // the register-54 write path), which is why nothing here mirrors bus_tx_writes' fate of
+    // reporting a constant zero.
     bool        modbus_enabled   = false;  // is the second stack running at all on this device?
     bool        modbus_connected = false;
     uint32_t    modbus_rx        = 0;   // successful HomeHub register reads since boot
@@ -257,7 +259,8 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"mqtt_count\":"; j += std::to_string(f.mqtt_count);
     j += ",\"mqtt_fails\":"; j += std::to_string(f.mqtt_fails);
     j += ",\"mqtt_reconnects\":"; j += std::to_string(f.mqtt_reconnects);
-    // Cycles that produced nothing — an OOM skip and a deliberate OTA/weather TLS hold-off (legacy-380).
+    // Cycles that produced nothing — an OOM skip and a deliberate OTA/weather TLS hold-off
+    // (legacy-380).
     j += ",\"mqtt_skipped\":"; j += std::to_string(f.mqtt_skipped);
     j += ",\"mqtt_quiesced\":"; j += std::to_string(f.mqtt_quiesced);
     // poll_* — the X10A sweep that never ran, so nothing below was even attempted.
@@ -278,8 +281,9 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // protocol has no write command (docs/ARCHITECTURE.md → the MQTT bridge is read-only), so both
     // were hardcoded 0 and could never become anything else. They were carried for parity with the
     // field set of another ESP32 HA bridge, which is not a reason this project keeps a field — a
-    // metric that cannot vary is a line on a dashboard that always reads zero and an entity a reader
-    // has to rule out. Dropped in legacy-215; neither was ever an HA entity, so nothing is orphaned.
+    // metric that cannot vary is a line on a dashboard that always reads zero and an entity a
+    // reader has to rule out. Dropped in legacy-215; neither was ever an HA entity, so nothing is
+    // orphaned.
     j += ",\"bus_tx_reads\":"; j += std::to_string(f.rx_received + f.rx_fails);
     // Modbus TCP (HomeHub) link — payload-only (no HA entity; see HeartbeatFields). The connectivity
     // flag rides as a 1/0 NUMBER like the others, for the same metrics-consumer reason.
@@ -348,11 +352,11 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     {"sensor", "mqtt_count", "MQTT Publishes", "mqtt_count", "", "", "total_increasing"},
     {"sensor", "mqtt_fails", "MQTT Publish Fails", "mqtt_fails", "", "", "total_increasing"},
     {"sensor", "mqtt_reconnects", "MQTT Reconnects", "mqtt_reconnects", "", "", "total_increasing"},
-    // The three legacy-380 loss counters. Entities, not payload-only like the modbus_* block, because the
-    // whole point of the issue is that this loss had no consumer: it is the thing to ALERT on, and
-    // a number nobody can put on a dashboard is how it stayed invisible for 337 dropped publishes.
-    // `total_increasing` so HA's long-term statistics read a reboot as a counter reset rather than
-    // a cliff — and a reboot is exactly what ends every episode these count.
+    // The three legacy-380 loss counters. Entities, not payload-only like the modbus_* block,
+    // because the whole point of the issue is that this loss had no consumer: it is the thing to
+    // ALERT on, and a number nobody can put on a dashboard is how it stayed invisible for 337
+    // dropped publishes. `total_increasing` so HA's long-term statistics read a reboot as a counter
+    // reset rather than a cliff — and a reboot is exactly what ends every episode these count.
     {"sensor", "mqtt_skipped", "MQTT Cycles Skipped", "mqtt_skipped", "", "", "total_increasing"},
     {"sensor", "mqtt_quiesced", "MQTT Cycles Held (TLS)", "mqtt_quiesced", "", "",
      "total_increasing"},

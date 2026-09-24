@@ -2,8 +2,8 @@
 // Leaving-water MEASUREMENT selection — the row the web UI feeds into ΔT, the derived heat output
 // ("pth = flow/60 * 4.186 * dt"), COP and the --flow-hot trend. Getting the wrong row here is not a
 // cosmetic display bug: a setpoint or the post-BUH (R2T) sensor substituted for the pre-BUH (R1T)
-// measurement makes all four derived numbers *plausibly* wrong (issue legacy-121, the failure shape of
-// legacy-35-legacy-39 — no numeric tell, just wrong).
+// measurement makes all four derived numbers *plausibly* wrong (issue legacy-121, the failure shape
+// of legacy-35-legacy-39 — no numeric tell, just wrong).
 //
 // This header is the host-testable twin of www/js/schematic.js's pickLwtRow(): the SELECTION
 // happens browser-side (there is no firmware caller), but the rule runs against the generated def/
@@ -65,7 +65,8 @@ inline bool lwt_is_pre_buh(const char* l) {
     return lwt_is_water(l) && !lwt_is_reject(l) && lwt_ci_contains(l, "r1t");
 }
 
-// Tier 2 (legacy-121 fallback): any leaving-water measurement that is not a setpoint / mixed / post-BUH.
+// Tier 2 (legacy-121 fallback): any leaving-water measurement that is not a setpoint / mixed /
+// post-BUH.
 inline bool lwt_is_measurement(const char* l) { return lwt_is_water(l) && !lwt_is_reject(l); }
 
 // Index of the label to use as leaving-water, or -1 if none qualifies (UI then shows "—" for

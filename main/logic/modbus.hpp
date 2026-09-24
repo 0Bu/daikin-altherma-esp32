@@ -3,16 +3,16 @@
 // on the host; the device wrapper (hp_modbus.cpp, a later phase) only adds the lwIP socket around
 // these. This is the transport core for the firmware-EXCLUSIVE Modbus TCP link to a Daikin HomeHub
 // (EKRHH) — READ-ONLY. It frames and parses only the reads this firmware issues: input registers
-// (read-only by the Modbus spec itself) and holding-register readback, including Smart Grid / power-limit /
-// setpoint ones (EKRHH guide §9.2.1 regs 56-58) — not just an internal decision-engine subset (see
-// issue legacy-32 / docs/SECURITY.md for how that surface is exposed).
+// (read-only by the Modbus spec itself) and holding-register readback, including Smart Grid /
+// power-limit / setpoint ones (EKRHH guide §9.2.1 regs 56-58) — not just an internal
+// decision-engine subset (see issue legacy-32 / docs/SECURITY.md for how that surface is exposed).
 //
 // Compatibility is NOT unconditional (EKRHH guide 4P744838-1E): the Modbus register set requires
-// Unified MMI2 firmware >= 7.8.0 on the audited ERGA-EV / EHBH / X-E family, and individual registers
-// can be inoperative per model — e.g. holding registers 59 and 61 are not operational on Micon
-// 20002203 (a read returns the 32766 "unavailable" sentinel, mb_is_special() below). Treat "every
-// register" as the ceiling of the data model, gated by the hub's
-// firmware version and per-model availability, not a guarantee every offset is live on a given unit.
+// Unified MMI2 firmware >= 7.8.0 on the audited ERGA-EV / EHBH / X-E family, and individual
+// registers can be inoperative per model — e.g. holding registers 59 and 61 are not operational on
+// Micon 20002203 (a read returns the 32766 "unavailable" sentinel, mb_is_special() below). Treat
+// "every register" as the ceiling of the data model, gated by the hub's firmware version and
+// per-model availability, not a guarantee every offset is live on a given unit.
 //
 // Wire facts (EKRHH Installer reference guide 4P744838-1E, §9): Modbus TCP on port 502 (no
 // encryption). Modbus is big-endian on the wire. Frame = MBAP header [txn(2), proto=0(2), len(2),
@@ -20,9 +20,9 @@
 // Data-model register offsets in the HomeHub tables are 1-based; the wire PDU address is 0-based
 // (offset N -> PDU address N-1). This client speaks only FC03 read-holding and FC04 read-input.
 // Register value formats: Temp16 (signed
-// /100 -> °C), Pow16 (signed /100 -> kW), Int16 (signed, as-is), Text16 (2 ASCII chars = hi/lo byte,
-// e.g. 0x5538 -> "U8"). Special return values 32765/32766/32767 mean wait/unavailable/unsupported —
-// never real data.
+// /100 -> °C), Pow16 (signed /100 -> kW), Int16 (signed, as-is), Text16 (2 ASCII chars = hi/lo
+// byte, e.g. 0x5538 -> "U8"). Special return values 32765/32766/32767 mean
+// wait/unavailable/unsupported — never real data.
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>

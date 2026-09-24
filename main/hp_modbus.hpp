@@ -1,23 +1,23 @@
 #pragma once
 // THE HOMEHUB MODBUS STACK — a second, INDEPENDENT source of readings beside the X10A one
-// (issue legacy-32). Its own task, its own cache, its own link state; it shares nothing with hp_poll.cpp
-// but the heat pump it describes.
+// (issue legacy-32). Its own task, its own cache, its own link state; it shares nothing with
+// hp_poll.cpp but the heat pump it describes.
 //
 // That independence is the whole design (docs/MODBUS_PROTOCOL.md). The two links fail for entirely
-// unrelated reasons — X10A at the cable, the pin or the framing; Modbus at the LAN, mDNS or the hub —
-// so coupling them would let either failure mask the other. Pulled service cable: the HomeHub keeps
-// reporting. LAN down: X10A keeps polling. Neither notices the other.
+// unrelated reasons — X10A at the cable, the pin or the framing; Modbus at the LAN, mDNS or the hub
+// — so coupling them would let either failure mask the other. Pulled service cable: the HomeHub
+// keeps reporting. LAN down: X10A keeps polling. Neither notices the other.
 //
 // It has no STEADY-STATE cost when absent: a fresh device performs one bounded automatic discovery
 // before HTTP starts, persists that decision, and an empty address thereafter creates no task or
 // traffic. The user may still run a manual search from the HomeHub dialog.
 //
 // The stack is READ-ONLY, and that is now a property of the code rather than of a guard: the
-// register-54 actuator built for legacy-300 was REMOVED with the retirement of dynamic LWT actuation
-// (legacy-294 — SHADOW is the terminal state of that epic). No Modbus write function code is issued
-// anywhere in this firmware, there is no intent API, and there is no HTTP/MQTT/MCP write route.
-// The observation-only pieces kept from that work are the two PLANT GATES below: ordinary FC04
-// reads that prove normal space operation and distinguish heating from cooling.
+// register-54 actuator built for legacy-300 was REMOVED with the retirement of dynamic LWT
+// actuation (legacy-294 — SHADOW is the terminal state of that epic). No Modbus write function code
+// is issued anywhere in this firmware, there is no intent API, and there is no HTTP/MQTT/MCP write
+// route. The observation-only pieces kept from that work are the two PLANT GATES below: ordinary
+// FC04 reads that prove normal space operation and distinguish heating from cooling.
 #include <cstddef>
 #include <cstdint>
 #include <string>
