@@ -6,12 +6,10 @@ tmp="$(mktemp -d)"
 hook_tmp=""
 trap 'rm -rf "$tmp"; [ -z "${hook_tmp:-}" ] || rm -rf "$hook_tmp"' EXIT
 
-# Assert the canonical skill and Codex wiring are present and route through the neutral gate core.
+# Assert the canonical skill and agent wiring are present and route through the neutral gate core.
 for required in \
   ".agents/skills/ui-use-case-review/SKILL.md" \
-  ".agents/skills/ui-use-case-review/agents/openai.yaml" \
-  ".codex/config.toml" \
-  ".codex/hooks.json" \
+  ".agents/hooks.json" \
   "tools/agent-hooks/require-pr-gates.sh"; do
   [ -f "$proj/$required" ] || { echo "ui selftest: missing agent UI-review surface $required" >&2; exit 1; }
 done
@@ -21,19 +19,19 @@ if grep -q '^model:' "$proj/.agents/skills/ui-use-case-review/SKILL.md"; then
   echo "ui selftest: canonical UI skill contains runner-specific model routing" >&2
   exit 1
 fi
-node - "$proj/.codex/hooks.json" <<'NODE'
+node - "$proj/.agents/hooks.json" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 let hooks;
 try { hooks = JSON.parse(fs.readFileSync(file, "utf8")); }
 catch (error) { console.error(`ui selftest: ${file} is not valid JSON: ${error.message}`); process.exit(1); }
 const wiring = JSON.stringify(hooks);
-if (!wiring.includes("tools/agent-hooks/require-pr-gates.sh")) {
-  console.error("ui selftest: Codex merge hooks do not route through the runner-neutral PR gate");
+if (!wiring.includes("tools/agent-hooks/agent_hook.py") || !wiring.includes("pr-gates")) {
+  console.error("ui selftest: merge hooks do not route through the runner-neutral PR gate");
   process.exit(1);
 }
 NODE
-echo "ui selftest: canonical .agents/.codex UI-review wiring exists"
+echo "ui selftest: canonical .agents UI-review wiring exists"
 
 mkdir -p "$tmp/main" "$tmp/test" "$tmp/tools"
 cp -R "$proj/main/www" "$tmp/main/www"

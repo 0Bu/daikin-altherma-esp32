@@ -15,12 +15,11 @@ mkdir -p "$TEMPLATE"
 {
   printf '%s\n' \
     ".mcp.json" \
-    ".codex/config.toml" \
-    ".codex/hooks.json" \
+    ".agents/hooks.json" \
     "AGENTS.md" \
     "scripts/gh-with-git-credentials.sh" \
     "tools/agent-config/safety-invariants.json"
-  find "$ROOT/.codex/agents" "$ROOT/.agents/skills" -type f -print \
+  find "$ROOT/.agents/agents" "$ROOT/.agents/skills" -type f -print \
     | sed "s#^$ROOT/##"
 } | sort -u > "$WORK/__template_files.txt"
 while IFS= read -r relative; do
@@ -276,27 +275,22 @@ sed -i.bak 's/unset BASH_ENV ENV LD_AUDIT LD_PRELOAD LD_LIBRARY_PATH DYLD_INSERT
 rm "$fixture/scripts/gh-with-git-credentials.sh.bak"
 expect_failure "credential wrapper bootstrap isolation drift" "$fixture" "credential wrapper contract drifted"
 
-echo "== parsed Codex configuration =="
-fixture="$WORK/invalid-config-toml"
-make_fixture "$fixture"
-printf '%s\n' '[broken' >> "$fixture/.codex/config.toml"
-expect_failure "invalid canonical config TOML" "$fixture" "not valid TOML"
-
+echo "== parsed canonical agent configuration =="
 fixture="$WORK/invalid-agent-toml"
 make_fixture "$fixture"
-subagent="$(find "$fixture/.codex/agents" -maxdepth 1 -name '*.toml' | sort | head -n1)"
+subagent="$(find "$fixture/.agents/agents" -maxdepth 1 -name '*.toml' | sort | head -n1)"
 printf '%s\n' '[broken' >> "$subagent"
 expect_failure "invalid canonical subagent TOML" "$fixture" "not valid TOML"
 
 fixture="$WORK/subagent-model-pin"
 make_fixture "$fixture"
-subagent="$(find "$fixture/.codex/agents" -maxdepth 1 -name '*.toml' | sort | head -n1)"
+subagent="$(find "$fixture/.agents/agents" -maxdepth 1 -name '*.toml' | sort | head -n1)"
 printf '%s\n' 'model = "canary"' >> "$subagent"
 expect_failure "canonical subagent model pin" "$fixture" "must not pin a model"
 
 fixture="$WORK/subagent-identity"
 make_fixture "$fixture"
-subagent="$(find "$fixture/.codex/agents" -maxdepth 1 -name '*.toml' | sort | head -n1)"
+subagent="$(find "$fixture/.agents/agents" -maxdepth 1 -name '*.toml' | sort | head -n1)"
 node - "$subagent" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
@@ -306,32 +300,23 @@ expect_failure "canonical subagent identity drift" "$fixture" "name must be"
 
 fixture="$WORK/subagent-set-missing"
 make_fixture "$fixture"
-mv "$fixture/.codex/agents/doc-drift-checker.toml" "$fixture/removed-reviewer.toml"
+mv "$fixture/.agents/agents/doc-drift-checker.toml" "$fixture/removed-reviewer.toml"
 expect_failure "missing canonical reviewer" "$fixture" "exactly the three mapped project reviewers"
 
 fixture="$WORK/subagent-set-extra"
 make_fixture "$fixture"
-cp "$fixture/.codex/agents/doc-drift-checker.toml" "$fixture/.codex/agents/extra-reviewer.toml"
+cp "$fixture/.agents/agents/doc-drift-checker.toml" "$fixture/.agents/agents/extra-reviewer.toml"
 expect_failure "extra canonical reviewer" "$fixture" "exactly the three mapped project reviewers"
 
 fixture="$WORK/subagent-sandbox"
 make_fixture "$fixture"
-subagent="$fixture/.codex/agents/doc-drift-checker.toml"
+subagent="$fixture/.agents/agents/doc-drift-checker.toml"
 node - "$subagent" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace('sandbox_mode = "read-only"', 'sandbox_mode = "workspace-write"'));
 NODE
 expect_failure "canonical reviewer write access" "$fixture" "sandbox_mode must be read-only"
-
-fixture="$WORK/context7-pin"
-make_fixture "$fixture"
-node - "$fixture/.codex/config.toml" <<'NODE'
-const fs = require("node:fs");
-const file = process.argv[2];
-fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("@upstash/context7-mcp@4.0.2", "@upstash/context7-mcp@latest"));
-NODE
-expect_failure "unpinned Context7 MCP" "$fixture" "must stay pinned"
 
 fixture="$WORK/invalid-compatible-mcp"
 make_fixture "$fixture"
@@ -347,92 +332,76 @@ const config = JSON.parse(fs.readFileSync(file, "utf8"));
 config.mcpServers.context7.args[1] = "@upstash/context7-mcp@latest";
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
 NODE
-expect_failure "compatible Context7 pin drift" "$fixture" "must exactly match"
-
-fixture="$WORK/hooks-disabled"
-make_fixture "$fixture"
-printf '%s\n' '[features]' 'hooks = false' >> "$fixture/.codex/config.toml"
-expect_failure "disabled Codex hooks" "$fixture" "hooks must not be disabled"
+expect_failure "compatible Context7 pin drift" "$fixture" "must stay pinned"
 
 echo "== canonical hook dispatch =="
-fixture="$WORK/codex-guard-dispatch"
+fixture="$WORK/guard-dispatch"
 make_fixture "$fixture"
-node - "$fixture/.codex/hooks.json" <<'NODE'
+node - "$fixture/.agents/hooks.json" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 const config = JSON.parse(fs.readFileSync(file, "utf8"));
-config.hooks.PreToolUse[0].matcher = "Read";
+config["safety-guards"].PreToolUse[0].matcher = "Read";
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
 NODE
-expect_failure "Codex guard dispatch drift" "$fixture" "hook matcher drifted"
+expect_failure "guard dispatch drift" "$fixture" "hook matcher drifted"
 
-fixture="$WORK/codex-guard-command"
+fixture="$WORK/guard-command"
 make_fixture "$fixture"
-node - "$fixture/.codex/hooks.json" <<'NODE'
+node - "$fixture/.agents/hooks.json" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 const config = JSON.parse(fs.readFileSync(file, "utf8"));
-config.hooks.PreToolUse[0].hooks[0].command += " --runner codex";
+config["safety-guards"].PreToolUse[0].hooks[0].command += " --extra";
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
 NODE
-expect_failure "Codex guard command drift" "$fixture" "hook command drifted"
+expect_failure "guard command drift" "$fixture" "hook command drifted"
 
-fixture="$WORK/codex-guard-async"
+fixture="$WORK/guard-async"
 make_fixture "$fixture"
-node - "$fixture/.codex/hooks.json" <<'NODE'
+node - "$fixture/.agents/hooks.json" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 const config = JSON.parse(fs.readFileSync(file, "utf8"));
-config.hooks.PreToolUse[0].hooks[0].async = true;
+config["safety-guards"].PreToolUse[0].hooks[0].async = true;
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
 NODE
-expect_failure "asynchronous Codex guard" "$fixture" "must not be async"
+expect_failure "asynchronous guard" "$fixture" "must not be async"
 
-fixture="$WORK/codex-pr-timeout"
+fixture="$WORK/pr-timeout"
 make_fixture "$fixture"
-node - "$fixture/.codex/hooks.json" <<'NODE'
+node - "$fixture/.agents/hooks.json" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 const config = JSON.parse(fs.readFileSync(file, "utf8"));
-config.hooks.PreToolUse[1].hooks[0].timeout = 60;
+config["safety-guards"].PreToolUse[1].hooks[0].timeout = 60;
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
 NODE
-expect_failure "Codex merge-hook timeout drift" "$fixture" "hook timeout drifted"
+expect_failure "merge-hook timeout drift" "$fixture" "hook timeout drifted"
 
-fixture="$WORK/codex-pr-matcher-unanchored"
+fixture="$WORK/lifecycle-dispatch"
 make_fixture "$fixture"
-node - "$fixture/.codex/hooks.json" <<'NODE'
+node - "$fixture/.agents/hooks.json" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 const config = JSON.parse(fs.readFileSync(file, "utf8"));
-config.hooks.PreToolUse[1].matcher = config.hooks.PreToolUse[1].matcher.replace(/\$$/, "");
+delete config["safety-guards"].Stop;
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
 NODE
-expect_failure "unanchored Codex aggregate matcher" "$fixture" "hook matcher drifted"
+expect_failure "hook lifecycle dispatch drift" "$fixture" "event set drifted"
 
-fixture="$WORK/codex-lifecycle-dispatch"
+fixture="$WORK/stop-timeout"
 make_fixture "$fixture"
-node - "$fixture/.codex/hooks.json" <<'NODE'
+node - "$fixture/.agents/hooks.json" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 const config = JSON.parse(fs.readFileSync(file, "utf8"));
-delete config.hooks.Stop;
+config["safety-guards"].Stop[0].timeout = 540;
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
 NODE
-expect_failure "Codex lifecycle dispatch drift" "$fixture" "event set drifted"
+expect_failure "Stop-hook timeout drift" "$fixture" "hook timeout drifted"
 
-fixture="$WORK/codex-stop-timeout"
-make_fixture "$fixture"
-node - "$fixture/.codex/hooks.json" <<'NODE'
-const fs = require("node:fs");
-const file = process.argv[2];
-const config = JSON.parse(fs.readFileSync(file, "utf8"));
-config.hooks.Stop[0].hooks[0].timeout = 540;
-fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
-NODE
-expect_failure "Codex Stop-hook timeout drift" "$fixture" "hook timeout drifted"
-
-echo "== canonical skills and metadata =="
+echo "== canonical skills =="
 fixture="$WORK/skill-set-missing"
 make_fixture "$fixture"
 mv "$fixture/.agents/skills/absence-review" "$fixture/removed-skill"
@@ -484,38 +453,6 @@ const end = source.indexOf("\n---", 4);
 fs.writeFileSync(file, source.slice(0, end + 4) + "\n");
 NODE
 expect_failure "canonical skill empty body" "$fixture" "empty instruction body"
-
-fixture="$WORK/openai-metadata-missing"
-make_fixture "$fixture"
-mv "$fixture/.agents/skills/diagnostic-evidence-review/agents/openai.yaml" "$fixture/removed-openai.yaml"
-expect_failure "missing OpenAI metadata" "$fixture" "exactly the three reviewed openai.yaml files"
-
-fixture="$WORK/openai-metadata-extra"
-make_fixture "$fixture"
-mkdir -p "$fixture/.agents/skills/absence-review/agents"
-cp "$fixture/.agents/skills/ui-use-case-review/agents/openai.yaml" \
-  "$fixture/.agents/skills/absence-review/agents/openai.yaml"
-expect_failure "extra OpenAI metadata" "$fixture" "exactly the three reviewed openai.yaml files"
-
-fixture="$WORK/openai-metadata-contract"
-make_fixture "$fixture"
-metadata="$fixture/.agents/skills/ui-use-case-review/agents/openai.yaml"
-node - "$metadata" <<'NODE'
-const fs = require("node:fs");
-const file = process.argv[2];
-fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/^  short_description:.*\n/m, ""));
-NODE
-expect_failure "invalid OpenAI metadata contract" "$fixture" "interface keys must be exactly"
-
-fixture="$WORK/openai-metadata-prompt"
-make_fixture "$fixture"
-metadata="$fixture/.agents/skills/ui-use-case-review/agents/openai.yaml"
-node - "$metadata" <<'NODE'
-const fs = require("node:fs");
-const file = process.argv[2];
-fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("$ui-use-case-review", "$wrong-canary"));
-NODE
-expect_failure "OpenAI metadata skill invocation drift" "$fixture" "default_prompt must invoke"
 
 echo "== AGENTS.md safety invariants =="
 fixture="$WORK/safety-count"

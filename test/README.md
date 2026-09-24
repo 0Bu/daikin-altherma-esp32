@@ -560,6 +560,6 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 2. Add a `CHECK(...)` in `test_logic.cpp` asserting against a known-good reference (for converters,
    a known-good reference output for the same raw bytes; for CRC, a real captured frame).
 3. `scripts/run-mock-tests.sh` — must pass; run it explicitly before handoff, and CI enforces it.
-   The Codex Stop lifecycle hook repeats it through the same runner-neutral core.
+   The Stop lifecycle hook repeats it through the same runner-neutral core.
 
 See the `$add-logic-test` skill (`.agents/skills/add-logic-test/`).

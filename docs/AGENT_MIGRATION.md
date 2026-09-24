@@ -10,9 +10,8 @@ retired; Git history preserves the migration record and the last known-good pre-
 |---|---|
 | Always-loaded project policy | `AGENTS.md` |
 | Reusable workflows | `.agents/skills/<name>/` |
-| Focused reviewers | `.codex/agents/*.toml` |
-| Agent settings | `.codex/config.toml` |
-| Project-hook registration | `.codex/hooks.json` |
+| Focused reviewers | `.agents/agents/*.toml` |
+| Project-hook registration | `.agents/hooks.json` |
 | Runner-neutral hook and merge policy | `tools/agent-hooks/` |
 | Shared MCP client configuration | `.mcp.json` |
 
@@ -32,13 +31,13 @@ fails closed on both missing and extra project skills.
 - Review, audit, and triage requests are read-only. A review may recommend a patch, but it must not
   edit files or mutate GitHub, hardware, deployments, evidence, or live systems unless the user
   explicitly requested that action.
-- Focused reviewers under `.codex/agents/` run with a read-only sandbox and no model pin. The root
+- Focused reviewers under `.agents/agents/` run with a read-only sandbox and no model pin. The root
   agent retains integration, mutation, and final-verification ownership.
 - Project concurrency is capped at three concurrent subagent threads, plus the primary/root thread.
   Assign disjoint paths and serialize writes, hardware access, GitHub mutation, and shared build
   directories.
-- Context7 is the only project MCP configured globally. GitHub and device capabilities are not
-  granted by `.codex/config.toml`; they remain explicit, task-scoped actions.
+- Context7 is the only project MCP configured globally via `.mcp.json`. GitHub and device capabilities
+  remain explicit, task-scoped actions.
 - Merge policy comes from the runner-neutral aggregate gate under `tools/agent-hooks/`; it is the
   single policy definition.
 - The supported local merge form is exactly this synchronous, repository-bound REST CAS action:
@@ -133,12 +132,12 @@ fails closed on both missing and extra project skills.
   `$diagnostic-evidence-review` and `$user-docs-review` records; their applicability is part of the
   same fail-closed changed-file policy rather than an optional template convention.
 
-Upstream behavior is pinned to the official Codex documentation for
+Upstream behavior is aligned with the open agentic specification for
 [`AGENTS.md`](https://learn.chatgpt.com/docs/agent-configuration/agents-md),
 [skills](https://learn.chatgpt.com/docs/build-skills),
 [subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents), and
 [project hooks](https://developers.openai.com/codex/hooks). Recheck those contracts when upgrading
-the project Codex baseline.
+agent configurations or hook harnesses.
 
 ## Configuration checks
 
@@ -150,18 +149,13 @@ Run these checks after changing agent instructions, skills, reviewers, configura
    and non-empty bodies. When the Skill Creator runtime and PyYAML are available, also run its
    `quick_validate.py` as an upstream compatibility check; do not install an unpinned dependency
    merely to duplicate the binding repository gate.
-3. Parse `.codex/config.toml` and all three `.codex/agents/*.toml` files. Reviewer TOMLs must keep
+3. Parse `.mcp.json` and all three `.agents/agents/*.toml` files. Reviewer TOMLs must keep
    `sandbox_mode = "read-only"` and contain no `model` key.
-4. Parse `.codex/hooks.json` and require every registered lifecycle event to dispatch to the
+4. Parse `.agents/hooks.json` and require registered lifecycle events to dispatch to the
    runner-neutral core under `tools/agent-hooks/`.
 5. Run `scripts/run-agent-instructions-budget.sh`, `tools/agent-config/selftest.sh`, and
    `tools/agent-hooks/selftest.sh`, then the repository gate set relevant to the changed surface.
-6. Start a fresh Codex task from the repository root and open `/hooks`. Review each command,
-   matcher, timeout, and source loaded from `.codex/hooks.json`; trust only the exact definition hash
-   shown for that reviewed hook. A hook-definition change produces a new hash, so after every such
-   change start another fresh task, repeat `/hooks`, and review and trust the new exact hash. Never
-   bypass hook trust permanently or carry an approval forward to a different hash.
-7. Push the exact reviewed head through a pull request and require the remote `gates` check and every
+6. Push the exact reviewed head through a pull request and require the remote `gates` check and every
    applicable build check to finish green. A local run, an older CI run, or a review stamp for an
    earlier head does not complete the cutover acceptance.
 
@@ -171,7 +165,7 @@ The cutover is complete when the canonical configuration passes locally and in e
 reviewed repository skill inventory is discoverable, all three focused reviewers remain read-only,
 the project hooks are reviewed at their current hashes, and no required workflow depends on a
 retired adapter. The final
-local check uses a fresh Codex task and `/hooks`; an older trusted hash is not evidence for a changed
+local check verifies dispatch in a fresh agent task and hook inspection; an older trusted hash is not evidence for a changed
 hook.
 
 Existing clones may retain ignored local files below `.claude/` after the tracked tree is removed.

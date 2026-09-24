@@ -36,10 +36,10 @@ measurements, incident history, and field-by-field reference material in the lin
 - Subagents must not commit, push, open or edit PRs/issues, merge, release, flash, deploy, or change a
   live device unless the user explicitly requested that action and the root agent delegated that
   exact step.
-- Keep concurrent subagent work within the project limit in `.codex/config.toml`. Parallelize
+- Keep concurrent subagent work within the project limit of three concurrent subagents. Parallelize
   independent reads; serialize hardware access, GitHub mutations, shared build trees, and writes.
 - Available focused project reviewers are `doc_drift_checker`, `heap_safety_reviewer`, and
-  `x10a_decode_reviewer` under `.codex/agents/`. They are read-only evidence gatherers, not fixers.
+  `x10a_decode_reviewer` under `.agents/agents/`. They are read-only evidence gatherers, not fixers.
 
 ## Canonical skills
 
@@ -81,10 +81,10 @@ conditional workflows and are not necessarily PR checkbox gates.
 - `$deploy-test`: use for test-bench updates — builds via Docker, signs, updates/flashes test bench, verifies health, and runs automated diagnostic/fix loop on findings.
 - `$deploy-prod`: use for production delivery — verifies gates, merges PR, waits for CI dev build, runs canonical bench delivery and production promotion gates via `production-ota-gate.py`, and runs automated diagnostic/fix loop on findings.
 
-Phase 7 of the agent migration is complete. `AGENTS.md`, `.agents/skills/`, `.agents/hooks.json`,
-`.codex/agents/`, `.codex/config.toml`, `.codex/hooks.json`, and `tools/agent-hooks/` are the canonical
-project surfaces; operating and rollback notes are in `docs/AGENT_MIGRATION.md`. Do not introduce
-runner-specific copies of project policy, skills, reviewers, or gates.
+The canonical agentic setup uses `AGENTS.md`, `.agents/skills/`, `.agents/agents/`, `.agents/hooks.json`,
+`tools/agent-hooks/`, and `.mcp.json` as the canonical project surfaces; operating notes are in
+`docs/AGENT_MIGRATION.md`. Do not introduce runner-specific copies of project policy, skills, reviewers,
+or gates.
 
 ## Sources of truth
 

@@ -778,7 +778,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
   that cannot build firmware or USB-flash.
 - **The rule** — new decode/config/discovery logic goes in `main/logic/` with a `CHECK`, never buried
   in a device-only `.cpp`. The [`add-logic-test`](../.agents/skills/add-logic-test/SKILL.md) skill
-  and the [`x10a-decode-reviewer`](../.codex/agents/x10a-decode-reviewer.toml) agent enforce it.
+  and the [`x10a-decode-reviewer`](../.agents/agents/x10a-decode-reviewer.toml) agent enforce it.
 - **The hostile-input loop** — [`run-sanitizer-fuzz-tests.sh`](../scripts/run-sanitizer-fuzz-tests.sh)
   drives deterministic malformed frames, strings, URLs and numerical boundaries through production
   logic. The runner probes ASan+UBSan as a capability; CI fails unless both compile and run, while a

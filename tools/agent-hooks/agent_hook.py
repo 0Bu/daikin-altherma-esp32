@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Canonical project hooks for Codex.
+"""Canonical project hooks for agentic AI.
 
 Hook payloads are read from stdin. Payload-sensitive guards inspect `cwd`,
 `tool_name`, and `tool_input`; repository-scoped lifecycle, context, and
