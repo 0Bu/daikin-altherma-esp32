@@ -120,8 +120,8 @@ inline ModbusProfileDecision evaluate_probe_result(ModbusProfile current_profile
     return {current_profile, false, true, false, false};
 }
 
-inline constexpr uint32_t MODBUS_PROBE_INITIAL_BACKOFF_S = 600;    // 10 minutes
-inline constexpr uint32_t MODBUS_PROBE_MAX_BACKOFF_S     = 14400;  // 4 hours
+inline constexpr uint32_t MODBUS_PROBE_INITIAL_BACKOFF_S = 600;   // 10 minutes
+inline constexpr uint32_t MODBUS_PROBE_MAX_BACKOFF_S     = 14400; // 4 hours
 
 // Pure state tracker for Modbus probe attempts across sessions and reconnects.
 // Bookkeeps target endpoint, consecutive probe failures, active profile, affirmative resolution,
@@ -189,8 +189,7 @@ struct ModbusProbeTracker {
     // Evaluate a probe attempt and update tracker state.
     // now_s: monotonic seconds since boot (used to calculate backoff if exhausted).
     ModbusProfileDecision evaluate_probe(MbFailureType failure_type, int failure_detail,
-                                         uint16_t reg, uint16_t raw_value = 0,
-                                         uint32_t now_s = 0) {
+                                         uint16_t reg, uint16_t raw_value = 0, uint32_t now_s = 0) {
         int failures_for_eval = consecutive_failures;
         if (failure_type == MbFailureType::None && raw_value == MB_WAIT) {
             // Hub is syncing: do not count against retry budget.
@@ -223,13 +222,13 @@ struct ModbusProbeTracker {
                 exhaustion_count     = 0;
                 next_reprobe_time_s  = 0;
             } else {
-                profile_basis = ModbusProfileBasis::Fallback;
-                const uint32_t shift = std::min(exhaustion_count, 6);
-                uint32_t delay_s = MODBUS_PROBE_INITIAL_BACKOFF_S << shift;
+                profile_basis          = ModbusProfileBasis::Fallback;
+                const uint32_t shift   = std::min(exhaustion_count, 6);
+                uint32_t       delay_s = MODBUS_PROBE_INITIAL_BACKOFF_S << shift;
                 if (delay_s > MODBUS_PROBE_MAX_BACKOFF_S) {
                     delay_s = MODBUS_PROBE_MAX_BACKOFF_S;
                 }
-                next_reprobe_time_s  = now_s + delay_s;
+                next_reprobe_time_s = now_s + delay_s;
                 exhaustion_count++;
                 consecutive_failures = 0;
             }

@@ -6178,7 +6178,7 @@ static void test_modbus_profile() {
 
         // ── N22: Exponential backoff & re-probing ──
         ModbusProbeTracker bo_tracker;
-        uint32_t t_now = 1000;
+        uint32_t           t_now = 1000;
         CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now) == ModbusProfile::Auto);
         CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Probing);
         CHECK(bo_tracker.should_probe(t_now));
@@ -6195,7 +6195,8 @@ static void test_modbus_profile() {
 
         // During backoff (t=1000 + 300s):
         CHECK(!bo_tracker.should_probe(t_now + 300));
-        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now + 300) == ModbusProfile::HomeHub);
+        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now + 300) ==
+              ModbusProfile::HomeHub);
         CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Fallback);
 
         // When backoff elapses (t=1000 + 600s):
