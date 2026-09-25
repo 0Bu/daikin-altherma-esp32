@@ -86,13 +86,13 @@ namespace daik {
 
 // What the firmware is willing to claim about a row.
 enum class AvailabilityPolicy : uint8_t {
-    Always,             // the default for every row in the catalog: publish whatever decoded
-    ZeroMeansAbsent,    // an exact decoded zero is an unpopulated field on THIS row, not a reading
-    Unproven,           // the decode itself is not trusted here — publish nothing, keep the evidence
-    AboveRangeIsAbsent, // a decoded value above this row's physical ceiling is not a reading
-    ZeroAbsentAboveSaturation,  // an exact zero REFUTED by a simultaneously-measured saturation
-                                // temperature — conditional, and silent without that witness
-    Bit7MeansAbsent,    // current page shows a documented overlaid bit, so the number is not usable
+    Always,          // the default for every row in the catalog: publish whatever decoded
+    ZeroMeansAbsent, // an exact decoded zero is an unpopulated field on THIS row, not a reading
+    Unproven,        // the decode itself is not trusted here — publish nothing, keep the evidence
+    AboveRangeIsAbsent,        // a decoded value above this row's physical ceiling is not a reading
+    ZeroAbsentAboveSaturation, // an exact zero REFUTED by a saturation temperature read at most
+                               // one poll cycle earlier — conditional, and silent without it
+    Bit7MeansAbsent, // current page shows a documented overlaid bit, so the number is not usable
 };
 
 // ── THE CROSS-PAGE SATURATION WITNESS
@@ -102,10 +102,13 @@ enum class AvailabilityPolicy : uint8_t {
 // A flat ZeroMeansAbsent cannot be used on the outdoor unit's own thermistors: unlike a fan
 // heatsink, 0 °C is where those sensors LIVE for much of a heating season, so an unconditional rule
 // would withhold a real reading far more often than it removes a false one. The way past that is
-// not a better threshold but a SECOND SOURCE — a quantity measured at the same instant that makes
-// the zero impossible rather than merely unlikely — and the same move that let PAGE_ABSENCE_RULES
-// be safe across 46 unmeasured profiles applies here: the witness is re-read from the LIVE reply,
-// so an installation where the zero is genuine answers differently and the row publishes untouched.
+// not a better threshold but a SECOND SOURCE — a quantity measured alongside it that makes the zero
+// impossible rather than merely unlikely — and the same move that let PAGE_ABSENCE_RULES be safe
+// across 46 unmeasured profiles applies here: the witness is re-read from the LIVE reply, so an
+// installation where the zero is genuine answers differently and the row publishes untouched.
+// "Alongside" is one poll cycle, not the same instant: the witness page is read AFTER the page it
+// judges, so the caller supplies the PREVIOUS sweep's value (hp_poll.cpp, s_sat_witness, states why
+// that one-cycle lag is accepted and why it expires instead of persisting).
 //
 // The witness is the refrigerant pressure sensor's saturation temperature on the HYDRONIC page,
 // (0x62, 15, conv 405). Two facts about it decide everything below, and BOTH were measured rather
@@ -444,9 +447,9 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // nothing.
     //
     // RESIDUAL COST: on an air-source model that DOES populate this row, a genuine liquid-line
-    // reading of exactly 0.00 °C is withheld while the refrigerant is simultaneously condensing
-    // above 30 °C. That state is not a rare transit, it is thermodynamically unreachable — which is
-    // why this trade is cheaper than the flat rule's, not merely the same one again.
+    // reading of exactly 0.00 °C is withheld while the refrigerant was condensing above 30 °C one
+    // poll cycle earlier. That state is not a rare transit, it is thermodynamically unreachable —
+    // which is why this trade is cheaper than the flat rule's, not merely the same one again.
     {0x20, 10, 105, "Liquid pipe temp.(R6T)", AvailabilityPolicy::ZeroAbsentAboveSaturation,
      LIQUID_LINE_SAT_CEILING,
      "legacy-224: exactly 0.0 in 1419/1419 running samples; 1231 of them with the refrigerant "

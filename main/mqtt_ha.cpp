@@ -2857,15 +2857,27 @@ void mqtt_ha_start() {
     const Config& c = config();
     s_x10a_publish_required.store(!c.mqtt_uri.empty(), std::memory_order_release);
     s_mtx = xSemaphoreCreateMutex();
-    if (!s_mtx) diag_printf("mqtt: status mutex alloc failed — status reads run unsynchronized\n");
-    s_status.configured = !c.mqtt_uri.empty();
-    s_status.broker     = c.mqtt_uri;
-    s_ref_status.configured = !c.ref_temp_topic.empty();
-    s_circulation_status.configured = !c.circulation_topic.empty();
-    s_circulation_runtime_max_age_s = c.circulation_max_age_s;
-    // The circulation test shares std::strings with the HTTP task, so it is safe only when both
-    // synchronization objects exist.
-    s_circulation_probe_sem = s_mtx ? xSemaphoreCreateBinary() : nullptr;
+    if (!s_mtx) {
+        // HTTP is already serving /status, and the bridge writes std::strings (broker, the
+        // reference error text) that it copies. Without the mutex every such write would race a
+        // reader, so the bridge stays off this boot rather than running unsynchronized; the
+        // statuses keep their defaults, which no one writes.
+        diag_printf("mqtt: status mutex alloc failed — MQTT bridge disabled this boot\n");
+        return;
+    }
+    {
+        // Under the lock even at startup: mqtt_status() and friends start locking the moment s_mtx
+        // exists, and httpd was started before this bridge.
+        Lock lk(s_mtx);
+        s_status.configured             = !c.mqtt_uri.empty();
+        s_status.broker                 = c.mqtt_uri;
+        s_ref_status.configured         = !c.ref_temp_topic.empty();
+        s_circulation_status.configured = !c.circulation_topic.empty();
+        s_circulation_runtime_max_age_s = c.circulation_max_age_s;
+    }
+    // The circulation test shares std::strings with the HTTP task, so it also needs its own
+    // hand-off semaphore; s_mtx is guaranteed above.
+    s_circulation_probe_sem = xSemaphoreCreateBinary();
     if (!s_circulation_probe_sem)
         diag_printf("mqtt: circulation-source test semaphore alloc failed\n");
     if (!s_status.configured) return;

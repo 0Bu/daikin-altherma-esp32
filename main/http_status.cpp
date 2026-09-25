@@ -1764,21 +1764,37 @@ esp_err_t http_send_status_json(httpd_req_t* req, std::string_view prefix,
     }) ? ESP_OK : ESP_FAIL;
 }
 
+// Copies the request's query into `q` ("" when there is none). False when it did not fit: the
+// caller must refuse (414), never parse the truncated query as absent — otherwise ?redact=1 plus
+// padding fails OPEN and ships the unscrubbed body under a URL that asked for the scrubbed one.
+template <size_t N> static bool read_query(httpd_req_t* req, char (&q)[N]) {
+    const esp_err_t err = httpd_req_get_url_query_str(req, q, N);
+    if (err == ESP_ERR_HTTPD_RESULT_TRUNC) return false;
+    if (err != ESP_OK) q[0] = '\0';
+    return true;
+}
+
+static esp_err_t query_too_long(httpd_req_t* req) {
+    return httpd_resp_send_err(req, HTTPD_414_URI_TOO_LONG, "query too long");
+}
+
+// Same flag policy as ?clear / ?verbose / ?downgrade: fires on exactly "1" (logic/query_flag.hpp).
+static bool query_flag(const char* q, const char* key) {
+    char v[4];
+    return httpd_query_key_value(q, key, v, sizeof(v)) == ESP_OK && query_flag_on(v);
+}
+
 static esp_err_t h_status(httpd_req_t* req) {
     // The browser deliberately switches to the compact /ota/status surface once installation is
     // accepted. Refuse before Config/status snapshots or JSON temporaries are created: admitting
     // this large poll after the transfer headroom sample recreated the exact X509-fragmentation
     // race the admission gate is meant to prevent.
     if (ota_download_active()) return network_tls_busy(req);
-    // ?redact=1 -> the bug-report form of this payload (logic/redact.hpp). Same flag policy as
-    // ?clear / ?verbose / ?downgrade: fires on exactly "1", so ?redact=0 is not a near-miss that
-    // silently ships the unscrubbed body under a name that promised otherwise.
-    bool redact = false;
+    // ?redact=1 -> the bug-report form of this payload (logic/redact.hpp); ?redact=0 is not a
+    // near-miss that silently ships the unscrubbed body under a name that promised otherwise.
     char q[48];
-    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
-        char v[4];
-        if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
-    }
+    if (!read_query(req, q)) return query_too_long(req);
+    const bool redact = query_flag(q, "redact");
     return http_send_status_json(req, {}, {}, redact);
 }
 
@@ -2265,15 +2281,15 @@ static esp_err_t h_history(httpd_req_t* req) {
 }
 
 static esp_err_t h_diag(httpd_req_t* req) {
-    bool redact = false;
     char q[64];
-    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
-        char v[4];
-        // GET is read-only. Destructive clearing is POST /diag/clear, so a link, prefetch or image
-        // request can never erase the evidence it was trying to retrieve.
-        if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK) diag_set_verbose(query_flag_on(v));
-        if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
-    }
+    if (!read_query(req, q)) return query_too_long(req); // never downgrade a requested redaction
+    // GET is read-only. Destructive clearing is POST /diag/clear, so a link, prefetch or image
+    // request can never erase the evidence it was trying to retrieve. ?verbose only changes the
+    // setting when present.
+    char v[4];
+    if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK)
+        diag_set_verbose(query_flag_on(v));
+    const bool redact = query_flag(q, "redact");
     // Plain /diag copies into static storage and is useful while OTA is in flight. Redaction owns
     // per-line strings and a 1280-byte growable chunk, so only that allocation-rich variant waits.
     if (redact && ota_download_active()) return network_tls_busy(req);
