@@ -961,8 +961,11 @@ size_t hp_values_capacity(uint32_t* revision_out) {
     Lock lk(s_mtx);
     if (revision_out) *revision_out = s_cache_revision;
     const size_t n = s_cache.size();
-    const char*  prof =
-        (s_cache_profile && *s_cache_profile) ? s_cache_profile : config_profile().c_str();
+    // Named, not a temporary: `config_profile().c_str()` inside the conditional would dangle once
+    // the full-expression ends, and the empty-cache case (boot, after a profile reset) takes it.
+    const bool        cached     = s_cache_profile && *s_cache_profile;
+    const std::string configured = cached ? std::string{} : config_profile();
+    const char*       prof       = cached ? s_cache_profile : configured.c_str();
     const size_t prof_cap = def::lookup_view(prof).count();
     return n > prof_cap ? n : prof_cap;
 }

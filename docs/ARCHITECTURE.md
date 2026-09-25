@@ -139,7 +139,9 @@ state_dwell.cpp/.hpp → HOW LONG EACH ELIGIBLE SWITCHED ROW HAS READ WHAT IT RE
                       number: dwell_s, dwell_min (the transition was never witnessed, so the age is a
                       lower bound) and dwell_blind_s (how much of the run the bus did not answer for)
 def/{altherma*,minichiller*}.hpp → offline-generated per-model ValueDef profiles, except the
-                       hand-written altherma3_r_erga.hpp host-test fixture
+                       hand-written altherma3_r_erga.hpp host-test fixture and altherma4.hpp (a
+                       curated, UNVERIFIED HomeHub Modbus profile built on homehub.hpp — not X10A)
+def/protocol_s.hpp  → curated, UNVERIFIED Protocol S profile (no wire capture in this repository)
 def/registry.hpp     → hand-written registry/lookup over generated profiles plus generic/test fixtures
 def/models_catalog.hpp → generator-assembled legacy metadata for the read-only /models endpoint
 def/signatures.hpp   → detection signatures lazily derived once at runtime from registry profiles
@@ -3587,6 +3589,8 @@ GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. Streams in 1 KiB chunk
                   it replaces, so the redacted text can GROW past the static dump buffer, and the alternatives are a second
                   ~8 KB .bss buffer or a ~6 KB contiguous heap allocation. Plain /diag keeps serving its
                   static ring during OTA (dump volume clamped to 512 B to avoid multi-pbuf lwIP heap fragmentation); redact=1 returns the early busy-503 before its string chunk
+                  A query too long for the handler's buffer answers 414 rather than being read as absent, so
+                  a padded ?redact=1 can never fall back to the unscrubbed log (same rule on /status).
 POST /diag/clear  clear the in-memory diagnostic ring. Destructive actions are POST-only, so a link,
                   prefetch or crawler cannot erase evidence.
 GET  /status?redact=1   the bug-report form of /status: all 27 reporter-identifying values read
@@ -3876,8 +3880,9 @@ POST /set_board   {preset_id,led_gpio,led_type,led_inverted,btn_gpio,btn_active_
                   set by exactly the dedicated-JTAG pads 39-42, since a board's button legitimately
                   sits there (AtomS3 Lite: GPIO41) — plus the collision rules, in BOTH directions: no
                   pin may be claimed by the indicator, the button and the X10A link at once, whichever
-                  endpoint is called second
-   (every /set_*) a failed route-owned NVS write answers 500
+                  endpoint is called second — and none may take a pin the Ethernet PHY reserves. A
+                  violation answers 400 with the rule's reason text.
+                  On every /set_* route, a failed route-owned NVS write answers 500
                   {ok:false,error:"config write failed"} and does NOT reboot/apply; unrelated
                   self-healing link-cache maintenance failures are logged without rejecting a
                   committed service blob, while an X10A /set_hp requires the atomic `link` blob (its

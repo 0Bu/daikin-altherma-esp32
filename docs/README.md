@@ -492,6 +492,8 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
                                    #   first eligible commit, flash cannot restore RAM-only samples. The
                                    #   factory reset erases both media. During OTA this route returns the
                                    #   same early 503 as /values; retry the complete request later.
+                                   #   A query too long to parse completely answers 414 (also /diag),
+                                   #   never an unredacted body.
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
 GET  /diag[?verbose=0|1][?redact=1]
                                    # plain-text in-memory diag log (raw RX frames when verbose).
