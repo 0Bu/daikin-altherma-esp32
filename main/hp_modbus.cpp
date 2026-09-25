@@ -1313,12 +1313,16 @@ static void mb_task(void*) {
     }
     diag_printf("modbus: HomeHub disabled by empty configuration — stack stopped\n");
     esp_task_wdt_delete(NULL);
+    // Retire this task's flags BEFORE a successor can exist. The successor sets s_mb_task_running
+    // once, on entry — possibly on the other core before this task resumes — so clearing it after
+    // the restart would leave hp_modbus_ota_quiesced() reporting a stopped stack for the
+    // successor's whole life, and OTA admission would stop waiting for a live Modbus socket.
+    s_ota_quiesced.store(false, std::memory_order_release);
+    s_mb_task_running.store(false, std::memory_order_release);
     // /set_hp may have saved a new address after this task decided to retire but before it
     // cleared s_task. Its mb_reconfigure() correctly saw a task still alive and did not duplicate it;
     // now re-check the latest intent so that request is not lost in the teardown window.
     mb_task_start_if_enabled();
-    s_ota_quiesced.store(false, std::memory_order_release);
-    s_mb_task_running.store(false, std::memory_order_release);
     vTaskDelete(nullptr);
 }
 
