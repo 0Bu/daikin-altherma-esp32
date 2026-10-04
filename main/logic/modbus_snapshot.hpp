@@ -7,11 +7,15 @@
 
 namespace daik::logic {
 
+inline constexpr uint32_t MODBUS_CACHE_MAX_AGE_DEFAULT_S = 4;
+
 inline bool modbus_cache_is_live(bool connected, uint32_t link_generation,
                                  uint32_t cache_generation, uint32_t target_generation,
-                                 uint32_t cache_target_generation) {
+                                 uint32_t cache_target_generation, uint32_t cache_age_s = 0,
+                                 uint32_t max_age_s = MODBUS_CACHE_MAX_AGE_DEFAULT_S) {
     return connected && link_generation != 0 && target_generation != 0 &&
-           cache_generation == link_generation && cache_target_generation == target_generation;
+           cache_generation == link_generation && cache_target_generation == target_generation &&
+           cache_age_s <= max_age_s;
 }
 
 }  // namespace daik::logic

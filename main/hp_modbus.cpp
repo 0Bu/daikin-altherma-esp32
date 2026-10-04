@@ -105,6 +105,7 @@ static std::vector<CachedValue> s_cache;
 static uint32_t s_cache_generation = 0; // guarded by s_cache_mtx; session that committed s_cache
 static uint32_t s_cache_target_generation =
     0; // guarded by s_cache_mtx; configured HomeHub identity
+static int64_t s_cache_commit_ms = 0; // guarded by s_cache_mtx; timestamp of last successful commit
 
 // Task handle + the connect backoff. s_task is read/written under s_mtx so a /set_hp that lands
 // while the old task is retiring cannot race it into starting two tasks. Discovery is never part of
@@ -840,6 +841,7 @@ static void mb_poll_once() {
             s_cache.clear();
             s_cache_generation = 0;
             s_cache_target_generation = 0;
+            s_cache_commit_ms         = 0;
             s_mb_cache_revision.fetch_add(1, std::memory_order_release);
         }
         { Lock lk(s_mtx); s_status.values = 0; }
@@ -1175,11 +1177,13 @@ static void mb_poll_once() {
             s_cache = std::move(fresh);            // move-assign: steals the buffer, cannot throw
             s_cache_generation = cycle_generation;
             s_cache_target_generation = cycle_target_generation;
+            s_cache_commit_ms         = esp_timer_get_time() / 1000;
             s_mb_cache_revision.fetch_add(1, std::memory_order_release);
         } else {
             s_cache.clear();
             s_cache_generation = 0;
             s_cache_target_generation = 0;
+            s_cache_commit_ms         = 0;
             s_mb_cache_revision.fetch_add(1, std::memory_order_release);
         }
     }
@@ -1298,6 +1302,8 @@ static void mb_task(void*) {
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
     }
     mb_disconnect();
+    s_mb_task_running.store(false, std::memory_order_release);
+    s_ota_quiesced.store(false, std::memory_order_release);
     {
         Lock lk(s_mtx);
         s_status.enabled = false;
@@ -1309,6 +1315,7 @@ static void mb_task(void*) {
         s_cache.clear();
         s_cache_generation = 0;
         s_cache_target_generation = 0;
+        s_cache_commit_ms         = 0;
         s_mb_cache_revision.fetch_add(1, std::memory_order_release);
     }
     diag_printf("modbus: HomeHub disabled by empty configuration — stack stopped\n");
@@ -1408,6 +1415,7 @@ void mb_reconfigure(bool enabled) noexcept {
         s_cache.clear();
         s_cache_generation        = 0;
         s_cache_target_generation = 0;
+        s_cache_commit_ms         = 0;
         s_mb_cache_revision.fetch_add(1, std::memory_order_release);
     }
     mb_task_start_if_enabled();
@@ -1426,12 +1434,17 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
     size_t   n                       = 0;
     uint32_t cache_generation        = 0;
     uint32_t cache_target_generation = 0;
+    uint32_t cache_age_s             = 0;
     {
         Lock lk(s_cache_mtx);
         n = s_cache.size() < max ? s_cache.size() : max;
         for (size_t i = 0; i < n; i++) out[i] = s_cache[i];
         cache_generation        = s_cache_generation;
         cache_target_generation = s_cache_target_generation;
+        const int64_t now_ms    = esp_timer_get_time() / 1000;
+        cache_age_s             = (s_cache_commit_ms > 0 && now_ms >= s_cache_commit_ms)
+                                      ? static_cast<uint32_t>((now_ms - s_cache_commit_ms) / 1000)
+                                      : UINT32_MAX;
     }
     // The link is re-read AFTER the copy, and that order is what makes the payload invariant TRUE
     // rather than merely intended. The cache and the link state sit behind two different mutexes,
@@ -1447,9 +1460,8 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
         Lock lk(s_mtx);
         const uint32_t target_generation =
             s_target_generation.load(std::memory_order_acquire);
-        live = logic::modbus_cache_is_live(s_status.connected, s_link_generation,
-                                           cache_generation, target_generation,
-                                           cache_target_generation);
+        live = logic::modbus_cache_is_live(s_status.connected, s_link_generation, cache_generation,
+                                           target_generation, cache_target_generation, cache_age_s);
     }
     // Seqlock-style retry boundary: a target change overlapping the two-lock snapshot is never live.
     if (live && cache_target_generation !=

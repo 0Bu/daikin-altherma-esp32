@@ -3336,6 +3336,20 @@ static void test_weather_fetch_headroom() {
     CHECK(json_suffix_is_whitespace(" \t\r\n"));
     CHECK(!json_suffix_is_whitespace(" trailing"));
     CHECK(!json_suffix_is_whitespace(std::string_view("\0", 1)));
+    CHECK(json_payload_depth_ok("{}"));
+    CHECK(json_payload_depth_ok("}"));
+    CHECK(json_payload_depth_ok("]"));
+    CHECK(json_payload_depth_ok("{\"a\": [1, 2, {\"b\": 3}]}"));
+    CHECK(json_payload_depth_ok("{\"depth\": 1}", 1));
+    CHECK(!json_payload_depth_ok("{\"depth\": {\"nested\": 2}}", 1));
+    CHECK(json_payload_depth_ok("{\"depth\": {\"nested\": 2}}", 2));
+    CHECK(json_payload_depth_ok("{\"str\": \"{\\\"escaped\\\": {{{{}}}}\"}", 1));
+    std::string deep(17, '{');
+    deep += std::string(17, '}');
+    CHECK(!json_payload_depth_ok(deep, MQTT_JSON_MAX_DEPTH));
+    std::string ok_depth(16, '{');
+    ok_depth += std::string(16, '}');
+    CHECK(json_payload_depth_ok(ok_depth, MQTT_JSON_MAX_DEPTH));
 }
 
 // /values waits boundedly behind the short Weather TLS allocator, but a newly active OTA owner must
@@ -5362,6 +5376,11 @@ static void test_modbus_snapshot() {
     // Generation zero is the pre-first-commit sentinel, not a coincidentally matching session.
     CHECK(!modbus_cache_is_live(true, 0, 0, 3, 3));
     CHECK(!modbus_cache_is_live(true, 8, 8, 0, 0));
+    // Freshness check: cache older than max_age_s (default 4s) is not live.
+    CHECK(modbus_cache_is_live(true, 8, 8, 3, 3, 4, 4));
+    CHECK(!modbus_cache_is_live(true, 8, 8, 3, 3, 5, 4));
+    CHECK(modbus_cache_is_live(true, 8, 8, 3, 3, 0));
+    CHECK(!modbus_cache_is_live(true, 8, 8, 3, 3, 5));
 }
 
 // The HomeHub Modbus register profile (def/homehub.hpp) — the DECODE MECHANICS (scaling, special
@@ -7043,20 +7062,28 @@ static void test_http_body() {
     }
 
     // A timeout is "nothing arrived yet", not "give up" — and progress clears the idle count, so a
-    // body that keeps trickling in is never abandoned however long it takes overall.
+    // body that keeps trickling in is tolerated up to BODY_MAX_TOTAL_IDLE cumulative timeouts.
     {
-        const std::string body    = "0123456789";
-        char              buf[32] = {};
-        size_t            sent    = 0;
-        int               n       = 0;
-        const int         r =
-            http_body_read(buf, sizeof(buf), body.size(), [&](char* dst, size_t) -> BodyChunk {
-                if (n++ % 3 != 2) return {BodyRecv::Timeout, 0}; // 2 stalls, then a byte, forever
-                dst[0] = body[sent++];
-                return {BodyRecv::Data, 1};
-            });
+        std::string body    = "0123456789";
+        char        buf[32] = {};
+        size_t      sent    = 0;
+        int         n       = 0;
+        auto        trickle = [&](char* dst, size_t) -> BodyChunk {
+            if (n++ % 3 != 2) return {BodyRecv::Timeout, 0}; // 2 stalls, then a byte
+            dst[0] = body[sent++];
+            return {BodyRecv::Data, 1};
+        };
+        const int r = http_body_read(buf, sizeof(buf), body.size(), trickle);
         CHECK(r == static_cast<int>(body.size()));
         CHECK(std::string(buf) == body);
+
+        // Exceeding BODY_MAX_TOTAL_IDLE cumulative timeouts across progress aborts the read.
+        body = "01234567890"; // 11 bytes * 2 stalls = 22 stalls > 20
+        sent = 0;
+        n    = 0;
+        std::memset(buf, 0, sizeof(buf));
+        const int r_exceeded = http_body_read(buf, sizeof(buf), body.size(), trickle);
+        CHECK(r_exceeded == -1);
     }
 
     // A peer that announces a body and then goes silent must lose, and must lose BOUNDED: retrying
@@ -7075,6 +7102,25 @@ static void test_http_body() {
         // timeout (CONFIG_HTTPD_REQ_RECV_TMO, 5 s), so it must stay small enough that one silent
         // client cannot hold the httpd task for minutes, yet leave room to ride out a slow segment.
         CHECK(BODY_MAX_IDLE >= 1 && BODY_MAX_IDLE <= 4);
+    }
+
+    // A deadline aborts the read immediately.
+    {
+        char buf[32] = {};
+        int  calls   = 0;
+        auto recv    = [&](char* dst, size_t) -> BodyChunk {
+            calls++;
+            dst[0] = 'a';
+            return {BodyRecv::Data, 1};
+        };
+        auto      dl = [&]() -> bool { return calls >= 3; };
+        const int r  = http_body_read(buf, sizeof(buf), 10, recv, dl);
+        CHECK(r == -1);
+        CHECK(calls == 3);
+
+        calls = 0;
+        std::memset(buf, 0, sizeof(buf));
+        CHECK(http_body_read(buf, sizeof(buf), 2, recv, dl) == 2);
     }
 
     // A peer that closes mid-body fails the read: half a JSON document must never reach a handler
@@ -7100,6 +7146,7 @@ static void test_http_body() {
         CHECK(http_body_read(buf, sizeof(buf), sizeof(buf) + 1, never) == -1);
         CHECK(http_body_read(buf, sizeof(buf), 0, never) == -1); // no body at all
         CHECK(http_body_read(nullptr, sizeof(buf), 4, never) == -1);
+        CHECK(http_body_read(buf, sizeof(buf), 1, never) == -1);
     }
 
     // `bytes` bounds a write into the caller's buffer, so a recv that reports more than it was
@@ -17229,6 +17276,8 @@ static void test_mqtt_publish_gate() {
     CHECK(mqtt_x10a_available(true, -1));
     CHECK(mqtt_x10a_available(false, MQTT_X10A_OFFLINE_GRACE_S - 1));
     CHECK(!mqtt_x10a_available(false, MQTT_X10A_OFFLINE_GRACE_S));
+    CHECK(!mqtt_x10a_available(true, MQTT_X10A_OFFLINE_GRACE_S));
+    CHECK(!mqtt_x10a_available(true, MQTT_X10A_OFFLINE_GRACE_S + 5));
 }
 
 static void test_http_deadline() {

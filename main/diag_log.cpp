@@ -20,12 +20,11 @@ static char             s_buf[RING];
 static size_t           s_len = 0;          // bytes used (grows then wraps)
 static bool             s_wrapped = false;
 static std::atomic<bool> s_verbose{false};
+static StaticSemaphore_t s_mtx_buf;
 static SemaphoreHandle_t s_mtx = nullptr;
 
 void diag_log_init() {
-    s_mtx = xSemaphoreCreateMutex();
-    // Every append/dump/clear already null-guards s_mtx, so a failure degrades to an unsynchronized
-    // ring rather than a crash — but say so on the console (diag_printf itself still works).
+    s_mtx = xSemaphoreCreateMutexStatic(&s_mtx_buf);
     if (!s_mtx) ESP_LOGE("diag", "diag mutex alloc failed — /diag ring runs unsynchronized");
 }
 

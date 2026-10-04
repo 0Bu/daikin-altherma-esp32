@@ -65,8 +65,10 @@ status_json=""
 reachable=0
 
 while [ "$(date +%s)" -le "$deadline" ]; do
-    raw_status=$(curl -sS --max-time 3 "http://$IP/status" 2>/dev/null || true)
-    if [ -n "$raw_status" ] && printf '%s' "$raw_status" | jq -e '.version' >/dev/null 2>&1; then
+    raw_res=$(curl -sS --max-time 3 -w "\n%{http_code}" "http://$IP/status" 2>/dev/null || true)
+    http_code=$(printf '%s' "$raw_res" | tail -n 1)
+    raw_status=$(printf '%s' "$raw_res" | sed '$d')
+    if [ "$http_code" = "200" ] && [ -n "$raw_status" ] && printf '%s' "$raw_status" | jq -e '.version' >/dev/null 2>&1; then
         status_json="$raw_status"
         reachable=1
         if printf '%s' "$status_json" | jq -e '.mqtt.configured == true and .mqtt.connected == false' >/dev/null 2>&1; then
@@ -146,16 +148,21 @@ else
 fi
 
 # 5. MQTT Broker
-mqtt_configured=$(printf '%s' "$status_json" | jq -r '.mqtt.configured // false')
-if [ "$mqtt_configured" = "true" ]; then
-    if ! printf '%s' "$status_json" | jq -e '.mqtt.connected == true' >/dev/null 2>&1; then
-        err "MQTT broker not connected (.mqtt.connected != true)"
-        failures=$((failures + 1))
-    else
-        log "✓ MQTT: connected to broker"
-    fi
+if ! printf '%s' "$status_json" | jq -e 'has("mqtt") and (.mqtt | type == "object")' >/dev/null 2>&1; then
+    err "Mandatory object 'mqtt' missing from status"
+    failures=$((failures + 1))
 else
-    log "✓ MQTT: disabled (not configured)"
+    mqtt_configured=$(printf '%s' "$status_json" | jq -r '.mqtt.configured // false')
+    if [ "$mqtt_configured" = "true" ]; then
+        if ! printf '%s' "$status_json" | jq -e '.mqtt.connected == true' >/dev/null 2>&1; then
+            err "MQTT broker not connected (.mqtt.connected != true)"
+            failures=$((failures + 1))
+        else
+            log "✓ MQTT: connected to broker"
+        fi
+    else
+        log "✓ MQTT: disabled (not configured)"
+    fi
 fi
 
 # 6. Crash & Fault analysis
@@ -238,16 +245,27 @@ if [ "$REQUIRE_HP" -eq 1 ]; then
     else
         log "✓ X10A bus: connected (last_ok_s: ${hp_last_ok:-0}s)"
         # Check /values endpoint
-        raw_values=$(curl -sS --max-time 3 "http://$IP/values" 2>/dev/null || true)
-        values_count=0
-        if [ -n "$raw_values" ]; then
-            values_count=$(printf '%s' "$raw_values" | jq -r 'if type=="object" and .values then (.values | length) elif type=="array" then length else 0 end' 2>/dev/null || echo 0)
-        fi
-        if [ "$values_count" -le 0 ]; then
-            err "/values returned no metrics (values_count: $values_count)"
+        raw_val_res=$(curl -sS --max-time 3 -w "\n%{http_code}" "http://$IP/values" 2>/dev/null || true)
+        val_http_code=$(printf '%s' "$raw_val_res" | tail -n 1)
+        raw_values=$(printf '%s' "$raw_val_res" | sed '$d')
+        if [ "$val_http_code" != "200" ]; then
+            err "/values returned HTTP $val_http_code (expected 200)"
+            failures=$((failures + 1))
+        elif ! printf '%s' "$raw_values" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            err "/values is not a JSON array"
             failures=$((failures + 1))
         else
-            log "✓ /values: valid payload ($values_count metrics received)"
+            values_count=$(printf '%s' "$raw_values" | jq -r 'length' 2>/dev/null || echo 0)
+            usable_count=$(printf '%s' "$raw_values" | jq -r '[.[] | select(.value != null and (.value | tostring | length > 0))] | length' 2>/dev/null || echo 0)
+            if [ "$values_count" -le 0 ]; then
+                err "/values returned an empty array"
+                failures=$((failures + 1))
+            elif [ "$usable_count" -le 0 ]; then
+                err "/values returned no usable non-null metric values"
+                failures=$((failures + 1))
+            else
+                log "✓ /values: valid payload ($values_count metrics received, $usable_count usable)"
+            fi
         fi
     fi
 else

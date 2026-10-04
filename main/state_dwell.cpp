@@ -260,7 +260,12 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation) {
     if (s_last_us >= 0 && now_us >= s_last_us)
         dt_s = static_cast<uint32_t>(now_us / 1000000 - s_last_us / 1000000);
     s_last_us = now_us;
-    logic::dwell_step(P().slots, logic::DWELL_MAX_SLOTS, obs, obs_n, dt_s);
+    if (dt_s > 2) {
+        logic::dwell_step(P().slots, logic::DWELL_MAX_SLOTS, nullptr, 0, dt_s - 1);
+        logic::dwell_step(P().slots, logic::DWELL_MAX_SLOTS, obs, obs_n, 1);
+    } else {
+        logic::dwell_step(P().slots, logic::DWELL_MAX_SLOTS, obs, obs_n, dt_s);
+    }
     persist_seal();
 }
 

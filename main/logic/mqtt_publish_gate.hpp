@@ -46,8 +46,8 @@ inline constexpr RetainedSourceAction retained_source_action(bool target_enabled
 inline constexpr int32_t MQTT_X10A_OFFLINE_GRACE_S = 15;
 
 inline constexpr bool mqtt_x10a_available(bool x10a_connected, int32_t last_ok_s) {
-    return x10a_connected ||
-           (last_ok_s >= 0 && last_ok_s < MQTT_X10A_OFFLINE_GRACE_S);
+    if (last_ok_s >= MQTT_X10A_OFFLINE_GRACE_S) return false;
+    return x10a_connected || last_ok_s >= 0;
 }
 
 struct MqttPublishGateDecision {

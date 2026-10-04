@@ -89,7 +89,7 @@ function fillRefTemp() {
     ? (Number.isFinite(r.fixed_setpoint_c)
       ? String(r.fixed_setpoint_c)
       : formatRefSource(r.setpoint_topic || r.topic, r.setpoint_path)) : "";
-  $("rtTimestampSource").value = configured
+  $("rtTimestampSource").value = configured && (r.timestamp_topic || r.timestamp_path)
     ? formatRefSource(r.timestamp_topic || r.topic, r.timestamp_path) : "";
   $("rtMaxAge").value = configured && Number.isInteger(r.max_age_s) ? r.max_age_s : 600;
   $("rtDeleteBtn").disabled = !configured;
@@ -108,17 +108,33 @@ const validRefTopic = (v) => !v || (v.length <= 192 && v[0] !== "/" && !v.endsWi
 // does not call this helper: its path is runtime-validated by the durable MQTT subscriber.
 const validRefPath = (v) => v.length <= 128 && v.split(".").every((key) =>
   key.length > 0 && key.length <= 64 && !/[\s\x00-\x1f\x7f]/.test(key));
-const formatRefSource = (topic, path) => topic ? (path ? `${topic}$${path}` : topic) : "";
-// Split at the LAST dollar: MQTT reserves dollar-prefixed topics such as $SYS/..., and those must
-// remain configurable. Path content is deliberately not validated before save: the next real MQTT
-// frame is the source of truth and exposes an unreadable/non-numeric path through runtime status.
+const escapeRef = (s) => String(s || "").replace(/\\/g, "\\\\").replace(/\$/g, "\\$");
+const unescapeRef = (s) => String(s || "").replace(/\\([\\$])/g, "$1");
+const formatRefSource = (topic, path) =>
+  topic ? (path ? `${escapeRef(topic)}$${escapeRef(path)}` : escapeRef(topic)) : "";
+// Split at the LAST unescaped dollar: MQTT reserves dollar-prefixed topics such as $SYS/..., and those must
+// remain configurable. Backslash escapes backslash and dollar to preserve dollar signs within topic or path.
 const parseRefSource = (value) => {
   const text = String(value || "").trim();
-  const split = text.lastIndexOf("$");
   if (!text) return null;
+  let split = text.lastIndexOf("$");
+  if (text.includes("\\$") || text.includes("\\\\")) {
+    split = -1;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === "\\") {
+        i++;
+        continue;
+      }
+      if (text[i] === "$") {
+        split = i;
+      }
+    }
+  }
   const hasDelimiter = split > 0;
-  const topic = (hasDelimiter ? text.slice(0, split) : text).trim();
-  const path = hasDelimiter ? text.slice(split + 1).trim() : "";
+  const rawTopic = hasDelimiter ? text.slice(0, split) : text;
+  const rawPath = hasDelimiter ? text.slice(split + 1) : "";
+  const topic = unescapeRef(rawTopic).trim();
+  const path = unescapeRef(rawPath).trim();
   return validRefTopic(topic) && path.length <= 128 ? { topic, path } : null;
 };
 const parseRefFixedTarget = (value) => {

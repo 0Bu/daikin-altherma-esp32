@@ -116,7 +116,7 @@ and the OTA-signing / key lifecycle.
   mDNS hostname or current IP (never merely because it matches `Host`), closing the Streamable-HTTP
   DNS-rebinding path. Never publish the endpoint outside the trusted LAN.
 - **MQTT credentials are never sent in cleartext.** If an MQTT username/password is configured, the
-  bridge requires an `mqtts://` broker URI and verifies the broker against ESP-IDF's common-root
+  bridge requires an `mqtts://` or `wss://` broker URI and verifies the broker against ESP-IDF's common-root
   mbedTLS certificate bundle; a non-TLS URI with credentials is **refused** (the reason shows in
   `/status.mqtt`) rather than falling back to plaintext. ESP-IDF documents approximately 99% public
   root coverage for this size-bounded subset; a broker chained only to a rarer excluded root is

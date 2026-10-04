@@ -877,11 +877,17 @@ static void poll_task(void*) {
             // records the cycle even when the log line describing it never makes it into the ring
             // (legacy-380: the ring was the ONLY evidence, and a chatty boot overwrites it).
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
-            refrigerant_service_record_poll_gap(hp_poll_generation());
+            const uint32_t generation = hp_poll_generation();
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            dwell_record(nullptr, 0, generation);
+            refrigerant_service_record_poll_gap(generation);
             diag_printf("poll: cycle skipped (%s)\n", e.what());
         } catch (...) {
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
-            refrigerant_service_record_poll_gap(hp_poll_generation());
+            const uint32_t generation = hp_poll_generation();
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            dwell_record(nullptr, 0, generation);
+            refrigerant_service_record_poll_gap(generation);
             diag_printf("poll: cycle skipped (oom?)\n");
         }
         // Serve at most one free probe after the sweep. Its Config access is POD-only and normally

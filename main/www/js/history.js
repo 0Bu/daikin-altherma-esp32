@@ -177,8 +177,17 @@ function histHeld(h, i) {
 // per-poll refetch would send ~300 identical responses per new data point — and each response is a
 // ~1 KB contiguous string on the single httpd task (AGENTS.md → Memory, concurrency, and HTTP
 // safety).
-const histCacheKey = (id, source) => source === "modbus" ? `modbus:${id}`
-  : source === "env3" ? `env3:${id}` : id;
+const modbusEndpointId = () => {
+  const mb = S.status?.modbus || {};
+  return mb.host ? `${mb.host}:${mb.port || 502}:${mb.unit_id || 1}` : "";
+};
+const histCacheKey = (id, source) => {
+  if (source === "modbus") {
+    const ep = modbusEndpointId();
+    return ep ? `modbus:${ep}:${id}` : `modbus:${id}`;
+  }
+  return source === "env3" ? `env3:${id}` : id;
+};
 async function ensureHist(id, source = "x10a", paint = true, signal = null) {
   const key = histCacheKey(id, source);
   const offered = source === "modbus" ? hasModbusHist(id)
@@ -205,7 +214,8 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
     // A few legacy X10A rows carry their unit only in the catalog label. Normalise that at the
     // visual boundary too, otherwise the live row can say "22.8 L/min" while its own trend and
     // crosshair still say just "22.8". The API remains byte-for-byte compatible.
-    const device = { at: Date.now(), gen, source, dt: +j.dt || 300, unit: displayUnit(j),
+    const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
+    const device = { at: Date.now(), gen, source, sourceId, dt: +j.dt || 300, unit: displayUnit(j),
                      label: typeof j.label === "string" ? j.label : "",
                      t0: typeof j.t0 === "number" ? j.t0 : null,
                      b0: Number.isInteger(j.b0) ? j.b0 : null,
@@ -213,7 +223,8 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
                      v: Array.isArray(j.v) ? j.v : [] };
     S.hist.set(key, device);
   } catch (e) {
-    S.hist.set(key, { at: Date.now(), source, err: true, v: [] });
+    const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
+    S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
   } finally {
     S.histBusy.delete(key);
     if (paint) renderApp();

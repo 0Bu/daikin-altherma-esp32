@@ -1854,7 +1854,7 @@ The Home Assistant bridge:
   mapping independently requires `POST /test_circulation` proof before
   `POST /set_circulation`; its threshold state is derived from mapped watts, never relay `output`.
   Neither link can write: X10A has no write command by protocol, and no source file can
-  build or issue a Modbus frame for the HomeHub (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
+  build or issue a Modbus write frame for the HomeHub (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
 - **One HA installation device.** Its id is the slugified MQTT base topic
   (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), which is a **runtime**
   setting (`POST /set_mqtt` field `base`, `logic/mqtt_base.hpp`) precisely because it names the

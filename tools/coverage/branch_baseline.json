@@ -163,8 +163,8 @@
         "taken": 4
       },
       "main/logic/http_body.hpp": {
-        "outcomes": 126,
-        "taken": 58
+        "outcomes": 176,
+        "taken": 83
       },
       "main/logic/http_cache.hpp": {
         "outcomes": 46,
@@ -223,8 +223,8 @@
         "taken": 86
       },
       "main/logic/modbus_snapshot.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 10,
+        "taken": 10
       },
       "main/logic/mqtt_base.hpp": {
         "outcomes": 34,
@@ -291,8 +291,8 @@
         "taken": 15
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 14,
-        "taken": 14
+        "outcomes": 38,
+        "taken": 38
       },
       "main/logic/profile_view.hpp": {
         "outcomes": 26,
