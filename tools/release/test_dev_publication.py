@@ -302,17 +302,19 @@ class PublicationTests(unittest.TestCase):
 
     def test_actual_workflow_classification(self):
         workflow = (PROJECT / '.github/workflows/build.yml').read_text()
-        tail = workflow.split('      - name: Detect build-relevant changes\n', 1)[1]
-        tail = tail.split('        run: |\n', 1)[1]
-        lines = []
-        for line in tail.splitlines():
-            if line and not line.startswith('          '):
-                break
-            lines.append(line)
-        shell = textwrap.dedent('\n'.join(lines))
+        def step_shell(name):
+            tail = workflow.split(f'      - name: {name}\n', 1)[1]
+            tail = tail.split('        run: |\n', 1)[1]
+            lines = []
+            for line in tail.splitlines():
+                if line and not line.startswith('          '):
+                    break
+                lines.append(line)
+            return textwrap.dedent('\n'.join(lines))
+        resolver = step_shell('Resolve completed dev publication')
+        shell = step_shell('Detect build-relevant changes')
         # CI jobs have isolated /tmp directories; give this offline fixture the same isolation.
         shell = shell.replace('/tmp/changed-files.txt', str(self.root / 'changed-files.txt'))
-        shell = shell.replace('/tmp/dev-source.log', str(self.root / 'dev-source.log'))
         helper = self.root / 'scripts/check-dev-manifest-source.sh'
         output = self.root / 'outputs'
         def classify(rc, baseline):
@@ -321,12 +323,29 @@ class PublicationTests(unittest.TestCase):
             target = self.git('rev-parse', 'HEAD').decode().strip()
             code = shell.replace('${{ github.event_name }}', 'push').replace('${{ github.ref }}', 'refs/heads/main').replace('${{ github.sha }}', target)
             output.write_text('')
+            env = {**os.environ, 'GITHUB_OUTPUT': str(output)}
+            result = subprocess.run(['bash', '-e', '-c', resolver], cwd=self.root,
+                                    capture_output=True, env=env, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+            env.update(DEV_STATE=values['state'], DEV_SOURCE=values['source'])
+            output.write_text('')
             result = subprocess.run(['bash', '-c', code], cwd=self.root, capture_output=True,
-                                    env={**os.environ, 'GITHUB_OUTPUT': str(output)}, timeout=10)
+                                    env=env, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             return output.read_text().strip()
         self.assertEqual(classify(1, ''), 'firmware=no')
         self.assertEqual(classify(2, ''), 'firmware=yes')
+        self.assertEqual(classify(0, 'invalid'), 'firmware=yes')
+        self.assertEqual(classify(42, self.source), 'firmware=yes')
+        code = shell.replace('${{ github.event_name }}', 'push').replace('${{ github.ref }}', 'refs/heads/main')
+        for state, source in (('', ''), ('unexpected', self.source), ('ancestor', 'invalid')):
+            output.write_text('')
+            result = subprocess.run(['bash', '-c', code], cwd=self.root, capture_output=True,
+                                    env={**os.environ, 'GITHUB_OUTPUT': str(output),
+                                         'DEV_STATE': state, 'DEV_SOURCE': source}, timeout=10)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(output.read_text().strip(), 'firmware=yes')
         (self.root / 'main/hp_poll.cpp').write_text('changed firmware\n')
         self.commit('fixture: firmware B', 'main/hp_poll.cpp')
         (self.root / 'README.md').write_text('docs C\n')

@@ -568,11 +568,35 @@ jobs:
       #
       # A push to main additionally decides the DEV PUBLISH with this flag (see the build job): a
       # docs-only merge must not move the version and hand every dev device a byte-identical image.
+      - name: Resolve completed dev publication
+        id: dev_publication
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == '0Bu/daikin-altherma-esp32'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          set +e
+          dev_source="$(./scripts/check-dev-manifest-source.sh origin)"
+          rc=$?
+          set -e
+          # Only finite helper states and an exact source SHA can influence build selection.
+          if [ "$rc" -eq 0 ] && [[ "$dev_source" =~ ^[0-9a-f]{40}$ ]]; then
+            state=ancestor
+          elif [ "$rc" -eq 1 ]; then
+            state=same
+            dev_source=""
+          else
+            state=unknown
+            dev_source=""
+          fi
+          printf 'state=%s\nsource=%s\n' "$state" "$dev_source" >> "$GITHUB_OUTPUT"
+
       - name: Detect build-relevant changes
         id: changes
         env:
           BEFORE: ${{ github.event.before }}
-          GH_TOKEN: ${{ github.token }}
+          DEV_STATE: ${{ steps.dev_publication.outputs.state }}
+          DEV_SOURCE: ${{ steps.dev_publication.outputs.source }}
         run: |
           set -euo pipefail
           # tools/web_asset/ is a BUILD/PUBLICATION INPUT, not tooling: main/CMakeLists.txt runs its
@@ -591,16 +615,12 @@ jobs:
                 # Compare against a valid dev feed bound to a completed publisher/readback proof.
                 # If an earlier run was superseded, cancelled or failed, firmware changes remain
                 # visible until actually built and published to the dev feed.
-                set +e
-                dev_source="$(./scripts/check-dev-manifest-source.sh origin 2>/tmp/dev-source.log)"
-                rc=$?
-                set -e
-                if [ "$rc" -eq 0 ]; then
-                  range="$dev_source ${{ github.sha }}"
-                elif [ "$rc" -eq 1 ]; then
+                if [ "$DEV_STATE" = ancestor ] && [[ "$DEV_SOURCE" =~ ^[0-9a-f]{40}$ ]]; then
+                  range="$DEV_SOURCE ${{ github.sha }}"
+                elif [ "$DEV_STATE" = same ]; then
                   range="same_source"
                 else
-                  echo "dev manifest source unresolvable: $(cat /tmp/dev-source.log 2>/dev/null || true)"
+                  echo 'dev publication evidence unproven: build conservatively'
                   range=""
                 fi
               elif [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
